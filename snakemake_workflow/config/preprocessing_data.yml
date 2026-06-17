@@ -1,0 +1,106 @@
+coast_rp:
+  data_type: GeoDataset
+  driver: netcdf
+  path: D:\GFM\inputs\COAST-RP_dataset\COAST-RP.nc
+  crs: 4326
+  filesystem: local
+  rename:
+    stations: index
+    station_x_coordinate: lon
+    station_y_coordinate: lat
+  meta:
+    category: ocean
+    description: >
+      COAST-RP (COastal dAtaset of Storm Tide Return Periods) — a global dataset
+      of extreme total water levels (storm surge + tide) at discrete GTSM coastal
+      output stations. Extratropical surges are simulated with Deltares D-Flow FM
+      (GTSMv3) forced by ERA5 reanalysis (1979–2018); tropical cyclone surges are
+      from the STORM synthetic-track dataset (10 000 years, present climate).
+      The two are probabilistically combined with tidal levels and return periods
+      are computed empirically, giving storm-tide levels for return periods of
+      1, 2, 5, 10, 25, 50, 100, 250, 500 and 1000 years at ~23 000 coastal
+      stations globally. Water levels are referenced to local mean sea level (MSL).
+      After preprocessing, Antarctic stations (lat < −60°) are removed, leaving
+      ~22 670 stations. Used as the base storm-tide forcing in
+      prepare_boundary_conditions.py before MDT and SLR corrections are applied.
+    paper_doi: 10.1038/s43247-021-00204-9
+    paper_ref: >
+      Dullaart et al. (2021), Accounting for tropical cyclones more than doubles
+      the global population exposed to low-probability coastal flooding,
+      Commun. Earth Environ. 2, 135.
+    source_author: Job C.M. Dullaart, IVM – Vrije Universiteit Amsterdam
+    source_license: CC-BY-4.0
+    source_url: https://doi.org/10.4121/uuid:210b66a1-9c82-4e0b-9f4a-8eb15deebb44
+    source_version: "1.0"
+    model_version: "Deltares D-Flow FM v1.2.63.64757"
+    vertical_reference: Local mean sea level (MSL); apply MDT correction to reference to geoid
+
+mdt_hybrid_cnes_cls22_cmems2020:
+  data_type: GeoDataset
+  driver: netcdf
+  path: D:\GFM\inputs\Aviso\mdt_hybrid_cnes_cls22_cmems2020.nc
+  crs: 4326
+  filesystem: local
+  meta:
+    category: ocean
+    description: >
+      Hybrid Mean Dynamic Topography (MDT) MDT-HYBRID-CNES-CLS22-CMEMS2020.
+      Combines MDT-CNES-CLS22 for global coverage with the CMEMS 2020 regional
+      MDTs for the Black Sea (MDT-CMEMS2020-BLK) and the Mediterranean Sea
+      (MDT-CMEMS2020-MED). Gives the time-mean sea surface height above the
+      geoid, averaged over 1993–2012 at 1/8° (~14 km) resolution globally.
+      Used in prepare_boundary_conditions.py to convert COAST-RP storm-tide
+      levels (referenced to local MSL) to geoid-referenced elevations, making
+      them consistent with the DeltaDTM terrain model (EGM2008).
+    paper_doi: 10.22541/essoar.170158328.85804859/v1
+    paper_ref: Jousset et al. (2023), MDT-CNES-CLS22
+    source_author: CNES-CLS / E.U. Copernicus Marine Service
+    source_license: https://www.aviso.altimetry.fr/fileadmin/documents/data/License_Aviso_ini.pdf
+    source_url: https://doi.org/10.24400/527896/a01-2024.010
+    source_version: MDT-HYBRID-CNES-CLS22-CMEMS2020
+    pixel_size_deg: 0.125
+    time_coverage: 1993–2012 mean
+
+ipcc_ar6_slr_projections:
+  data_type: GeoDataset
+  driver: netcdf
+  path: D:\GFM\inputs\SLR\ar6-regional-confidence\regional\confidence_output_files
+  crs: 4326
+  filesystem: local
+  meta:
+    category: ocean
+    description: >
+      IPCC Sixth Assessment Report (AR6) regional sea-level projections produced
+      with the Framework for Assessment of Changes To Sea-level (FACTS).
+      The catalog path points to the confidence_output_files root directory;
+      the actual NetCDF files are organised as
+      {confidence}_confidence/{scenario}/total_{scenario}_{confidence}_confidence_values.nc
+      and are loaded by combining the scenario and confidence-level choices.
+      Each file contains median, 5th- and 95th-percentile sea-level change
+      (in mm) relative to 1995–2014 baseline at tide-gauge locations and a
+      global 1°×1° grid, for all SSP scenarios and decades up to 2150.
+      Used in prepare_boundary_conditions.py to derive spatially-varying SLR
+      fingerprints that are added to COAST-RP storm-tide levels.
+    paper_doi: 10.5281/zenodo.5914709
+    paper_ref: Garner et al. (2021), IPCC AR6 Sea Level Projections, v20210809
+    source_author: G. G. Garner et al. / IPCC AR6 WG1; FACTS model
+    source_license: CC-BY-4.0
+    source_url: https://zenodo.org/records/5914710
+    source_version: "20210809"
+    citation_required: >
+      Cite (1) Fox-Kemper et al. (2021), IPCC AR6 WG1 Ch. 9; (2) Garner et al.
+      (in prep.), FACTS, Geosci. Model Dev.; and (3) the dataset itself
+      (Garner et al. 2021, v20210809, https://doi.org/10.5281/zenodo.5914709).
+
+five_deg_grid:
+  data_type: GeoDataFrame
+  driver: vector
+  path: D:\GFM\inputs\mask\five_deg_grid_filtered.gpkg
+  crs: 4326
+  filesystem: local
+  meta:
+    category: geography
+    description: >
+      Global 5×5° tile grid derived from the DiluviumDEM tile index, filtered to
+      areas relevant to the study region. May be used as an alternative spatial
+      partitioning for preprocessing tasks that operate tile by tile.

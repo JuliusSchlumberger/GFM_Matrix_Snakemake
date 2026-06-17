@@ -1,0 +1,20 @@
+# pixi environments
+.pixi
+.vscode
+
+# boundary data
+**/Boundary_conditions_waterlevels/data_GTSM/
+**/Boundary_conditions_waterlevels/data_MDT/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+__pycache__/
+
+build/aqueduct
+build/cli/target
+*.tif
+*.gpkg
+*.nc
+.ipynb_checkpoints
+snakemake_workflow/.snakemake/ 

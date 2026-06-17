@@ -1,0 +1,115 @@
+deltadtm:
+  data_type: RasterDataset
+  driver: raster
+  path: D:\GCFM_UU\raw_data\DeltaDTM\deltadtm.vrt
+  crs: 4326
+  filesystem: local
+  meta:
+    category: topography
+    description: >
+      DeltaDTM — a global coastal digital terrain model derived by fusing
+      ICESat-2 lidar altimetry with TanDEM-X and SRTM to correct for
+      vegetation- and building-induced height bias in low-lying coastal and
+      deltaic terrain. Covers global coastlines at ~1 arc-second (~30 m)
+      resolution. Distributed as a VRT mosaic of per-tile GeoTIFF files.
+    paper_doi: 10.5194/essd-16-2343-2024
+    paper_ref: Pronk et al. (2024), Earth Syst. Sci. Data 16, 2343–2360
+    source_author: Deltares / TU Delft
+    source_license: CC-BY-4.0
+    source_url: https://doi.org/10.5281/zenodo.7296982
+    source_version: v1.0
+    vertical_datum: EGM2008 geoid (metres above geoid)
+    pixel_size_arcsec: 1
+    nodata_value: -9999
+
+deltadtm_mask:
+  data_type: RasterDataset
+  driver: raster
+  path: D:\GFM\inputs\DeltaDTM_masks\deltadtm_mask.vrt
+  crs: 4326
+  filesystem: local
+  meta:
+    category: topography
+    description: >
+      Binary validity mask for DeltaDTM, co-registered to the DeltaDTM pixel
+      grid. A pixel value of 1 indicates that a reliable ICESat-2-corrected
+      DeltaDTM elevation exists at that location; 0 indicates no-data or an
+      area outside DeltaDTM coverage (e.g. open ocean, ice sheets, or inland
+      areas far from the coast). Used during preprocessing to restrict each
+      tile's flood-model domain to cells with valid DEM data.
+    paper_doi: 10.5194/essd-16-2343-2024
+    paper_ref: Pronk et al. (2024), Earth Syst. Sci. Data 16, 2343–2360
+    source_author: Deltares / TU Delft
+    source_url: https://doi.org/10.5281/zenodo.7296982
+    pixel_size_arcsec: 1
+    nodata_value: 255
+
+land_polygons:
+  data_type: GeoDataFrame
+  driver: vector
+  path: D:\GFM\inputs\OSM_Coastlines\land_polygons.gpkg
+  crs: 4326
+  filesystem: local
+  meta:
+    category: geography
+    description: >
+      OpenStreetMap land polygons — a global vector dataset of land masses
+      derived from the OpenStreetMap coastline. Used as a land mask in flood-
+      depth and merged-result plots (whitesmoke land background) and to restrict
+      DEM extraction to cells that are plausibly on land.
+    source_author: OpenStreetMap contributors
+    source_license: ODbL 1.0 (https://opendatacommons.org/licenses/odbl/)
+    source_url: https://osmdata.openstreetmap.de/data/land-polygons.html
+    source_version: "2020-01-09"
+
+land_use:
+  data_type: RasterDataset
+  driver: raster
+  path: D:\GCFM_UU\raw_data\Copernicus\Copernicus_LandUse.tif
+  crs: 4326
+  filesystem: local
+  meta:
+    category: land_use
+    description: >
+      Copernicus Global Land Service — Land Cover 100 m, Collection 3,
+      Epoch 2019 (reference year). Discrete classification layer with 23
+      land-cover classes, derived from PROBA-V observations (2017-04 to
+      2020-03). Used to assign Manning's n roughness coefficients to each
+      model cell via the lu_to_roughness_lookup table.
+    paper_doi: 10.3390/rs12061044
+    paper_ref: Buchhorn et al. (2020), Remote Sensing 12(6), 1044
+    source_author: Dr. Marcel Buchhorn, VITO NV
+    source_license: Copernicus Service information 2020
+    source_url: https://land.copernicus.eu/global/products/lc
+    source_version: v3.0.1
+    pixel_size_m: 100
+    nodata_value: 255
+
+lu_to_roughness_lookup:
+  data_type: DataFrame
+  driver: csv
+  path: D:\GCFM_UU\raw_data\Copernicus\lu_to_roughness_lookup.csv
+  filesystem: local
+  encoding: UTF-8
+  meta:
+    category: lookup_table
+    description: >
+      Lookup table mapping Copernicus Land Cover 100 m class codes
+      (copernicus_worldcover) to Manning's n roughness coefficients for
+      use in hydrodynamic modelling. Values are taken from published
+      guidance (HEC-RAS documentation) and adjusted for the GFM use case.
+      One row per Copernicus class (23 classes, codes 0–200).
+    source_url: >
+      https://www.hec.usace.army.mil/confluence/rasdocs/r2dum/latest/
+      developing-a-terrain-model-and-geospatial-layers/
+      creating-land-cover-mannings-n-values-and-impervious-layers
+    fields:
+      - name: copernicus_worldcover
+        type: Integer
+        description: Copernicus Land Cover class code (e.g. 0, 20, 30, …, 200).
+      - name: lu_name
+        type: String
+        description: Human-readable land cover class name.
+      - name: manning_n
+        type: Real
+        description: Manning's n roughness coefficient for hydrodynamic flow resistance.
