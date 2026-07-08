@@ -1,6 +1,14 @@
+# Machine-local config override (copy from config_local.yml.example)
+snakemake_workflow/config/config_local.yml
+
 # pixi environments
 .pixi
 .vscode
+.snakemake/
+.idea/
+.claude/
+Boundary_conditions_waterlevels/
+old_code_Gundula/
 
 # boundary data
 **/Boundary_conditions_waterlevels/data_GTSM/
@@ -8,11 +16,13 @@
 
 # Jupyter Notebook
 .ipynb_checkpoints
+*.ipynb
 
 __pycache__/
 
-build/aqueduct
-build/cli/target
+build/
+python/
+core/
 *.tif
 *.gpkg
 *.nc

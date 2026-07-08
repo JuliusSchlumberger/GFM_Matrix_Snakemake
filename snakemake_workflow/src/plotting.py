@@ -46,62 +46,96 @@ def compute_flood_area_km2(raster_path: str | Path, threshold_m: float) -> float
     return total_km2
 
 
-def plot_overlap_correlation(
-    overlap_pairs: dict[tuple[str, str], tuple[np.ndarray, np.ndarray]],
+def plot_overlap_continent_diagnostics(
+    mins: np.ndarray,
+    maxs: np.ndarray,
+    threshold_m: float,
     output_path: str | Path,
+    continent_name: str,
     waterlevel_name: str,
+    n_chunks: int,
+    dpi: int = 130,
 ) -> None:
-    """2-D heatmap of paired flood depths from overlapping tiles with Pearson r.
+    """Two-subplot per-continent overlap-agreement diagnostic.
 
-    All tile pairs are pooled into a single hexbin density plot so the colour
-    encodes the number of co-occurring flood cells rather than individual points
-    (avoids over-plotting for the large number of cells in overlap zones).
-    The y = x diagonal marks perfect inter-tile agreement.
+    Left: hexbin density of (min depth, max depth) across all tiles
+    overlapping each cell, pooled from every chunk in this continent, with
+    Pearson r and a y = x "perfect agreement" line.
+    Right: pie chart classifying every sampled cell as confirmed-flood
+    (min >= threshold), confirmed-no-flood (max < threshold), or ambiguous
+    (min < threshold <= max, i.e. tiles disagree on flood status) —
+    mutually exclusive and exhaustive over the sampled cells.
 
     Args:
-        overlap_pairs: Mapping ``(tile_i_name, tile_j_name)`` → ``(xi, xj)``
-            as returned by :func:`merge_tile_rasters`.
+        mins, maxs: Per-cell min/max depth across overlapping tiles, pooled
+            across all of this continent's chunks (see
+            merge_tile_rasters_chunk / plot_overlap_continent_diagnostics.py).
+        threshold_m: Minimum depth (m) counted as "flooded"
+            (postprocessing.flood_area_threshold_m).
         output_path: Where to save the PNG.
+        continent_name: Continent label used in the plot title.
         waterlevel_name: Scenario label used in the plot title.
+        n_chunks: Number of chunks pooled into this continent's sample, for
+            the title annotation.
     """
-    if not overlap_pairs:
-        fig, ax = plt.subplots(figsize=(6, 4))
-        ax.text(0.5, 0.5, "No overlapping flood cells found.",
-                ha="center", va="center", transform=ax.transAxes, fontsize=11)
-        ax.set_axis_off()
-        fig.savefig(output_path, dpi=100, bbox_inches="tight")
+    fig, (ax_hex, ax_pie) = plt.subplots(1, 2, figsize=(13, 6.5), dpi=dpi)
+
+    if len(mins) == 0:
+        for ax in (ax_hex, ax_pie):
+            ax.text(0.5, 0.5, "No overlapping flood cells found.",
+                    ha="center", va="center", transform=ax.transAxes, fontsize=11)
+            ax.set_axis_off()
+        fig.suptitle(f"{continent_name} — overlap diagnostics ({waterlevel_name})")
+        fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
         plt.close(fig)
         return
 
-    all_xi = np.concatenate([xi for xi, _ in overlap_pairs.values()])
-    all_xj = np.concatenate([xj for _, xj in overlap_pairs.values()])
-    n_total = len(all_xi)
-    n_pairs = len(overlap_pairs)
+    n_total = len(mins)
+    r = float(np.corrcoef(mins, maxs)[0, 1]) if n_total > 1 else float("nan")
 
-    r = float(np.corrcoef(all_xi, all_xj)[0, 1])
+    # ── Left: min/max hexbin ────────────────────────────────────────────────
+    vmax = float(max(mins.max(), maxs.max()))
+    hb = ax_hex.hexbin(mins, maxs, gridsize=60, cmap="YlOrRd", mincnt=1,
+                       extent=(0, vmax, 0, vmax))
+    fig.colorbar(hb, ax=ax_hex, label="Number of cells", shrink=0.75)
+    ax_hex.plot([0, vmax], [0, vmax], "k--", lw=1.5, label="y = x  (perfect agreement)")
+    ax_hex.legend(fontsize=8, loc="upper left")
+    ax_hex.set_xlim(0, vmax)
+    ax_hex.set_ylim(0, vmax)
+    ax_hex.set_aspect("equal", adjustable="box")
+    ax_hex.set_xlabel("Min depth across overlapping tiles (m)")
+    ax_hex.set_ylabel("Max depth across overlapping tiles (m)")
+    ax_hex.set_title(f"Pearson r = {r:.4f}   (n = {n_total:,})", fontsize=10)
 
-    fig, ax = plt.subplots(figsize=(7, 7))
-
-    vmax = float(max(all_xi.max(), all_xj.max()))
-    hb = ax.hexbin(all_xi, all_xj, gridsize=60, cmap="YlOrRd", mincnt=1,
-                   extent=(0, vmax, 0, vmax))
-    fig.colorbar(hb, ax=ax, label="Number of cells", shrink=0.75)
-
-    ax.plot([0, vmax], [0, vmax], "k--", lw=1.5, label="y = x  (perfect agreement)")
-    ax.legend(fontsize=8, loc="upper left")
-
-    ax.set_xlim(0, vmax)
-    ax.set_ylim(0, vmax)
-    ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel("Flood depth — tile A (m)")
-    ax.set_ylabel("Flood depth — tile B (m)")
-    ax.set_title(
-        f"Cross-tile flood depth correlation ({waterlevel_name})\n"
-        f"Pearson r = {r:.4f},   r² = {r ** 2:.4f},   "
-        f"n = {n_total:,}  ({n_pairs} tile pair{'s' if n_pairs != 1 else ''})"
+    # ── Right: flood-agreement pie chart ────────────────────────────────────
+    confirmed_flood = int((mins >= threshold_m).sum())
+    confirmed_no_flood = int((maxs < threshold_m).sum())
+    ambiguous = int(((mins < threshold_m) & (maxs >= threshold_m)).sum())
+    counts = [confirmed_flood, confirmed_no_flood, ambiguous]
+    labels = [
+        f"Confirmed flood\n({confirmed_flood:,})",
+        f"Confirmed no-flood\n({confirmed_no_flood:,})",
+        f"Ambiguous\n({ambiguous:,})",
+    ]
+    colors = ["#d62728", "#1f77b4", "#7f7f7f"]
+    nonzero = [(c, l, col) for c, l, col in zip(counts, labels, colors) if c > 0]
+    ax_pie.pie(
+        [c for c, _, _ in nonzero],
+        labels=[l for _, l, _ in nonzero],
+        colors=[col for _, _, col in nonzero],
+        autopct="%1.1f%%",
+        startangle=90,
+        textprops={"fontsize": 8},
     )
+    ax_pie.set_title(f"Flood-status agreement (threshold = {threshold_m:.2f} m)", fontsize=10)
 
-    fig.savefig(output_path, dpi=130, bbox_inches="tight")
+    fig.suptitle(
+        f"{continent_name} — overlap diagnostics ({waterlevel_name})\n"
+        f"pooled from {n_chunks} chunk{'s' if n_chunks != 1 else ''}",
+        fontsize=11,
+    )
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -116,6 +150,7 @@ def plot_raster_with_coastlines(
     mask_value: float | None = None,
     oom_tiles: gpd.GeoDataFrame | None = None,
     annotation: str | None = None,
+    dpi: int = 130,
 ) -> None:
     """Plot a raster with land polygons for context and save it as an image.
 
@@ -177,5 +212,5 @@ def plot_raster_with_coastlines(
                 bbox=dict(boxstyle="round,pad=0.4", facecolor="white", alpha=0.8, edgecolor="lightgrey"))
 
     fig.colorbar(image, ax=ax, label=label, shrink=0.7)
-    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)

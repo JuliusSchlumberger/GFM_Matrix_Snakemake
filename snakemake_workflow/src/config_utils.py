@@ -1,45 +1,38 @@
-"""Shared helpers for accessing the HydroMT data catalogs used by the workflow."""
+"""Shared config-parsing and data-catalog helpers used across the workflow."""
 
 from pathlib import Path
 
 import hydromt
 from hydromt.log import setuplog
 
-_CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 
-# Catalog for the main Snakemake workflow (DEM, land use, coastlines, …)
-_CATALOG = _CONFIG_DIR / "data_catalog_gfm.yml"
+def get_data_catalog(catalog_path: str | Path, logger_name: str = "snakemake_workflow") -> hydromt.DataCatalog:
+    """Return a HydroMT DataCatalog loaded from `catalog_path`.
 
-# Catalog for standalone preprocessing scripts (MDT, SLR, COAST-RP, …)
-# Loaded on top of _CATALOG so that deltadtm / land_use etc. are also available
-# in select_tiles.py, merge_tiles.py and prepare_boundary_conditions.py without
-# duplicating entries across both files.
-_PREPROCESSING_CATALOG = _CONFIG_DIR / "preprocessing_data.yml"
-
-
-def get_data_catalog(logger_name: str = "snakemake_workflow") -> hydromt.DataCatalog:
-    """Return a HydroMT DataCatalog loaded from config/data_catalog_gfm.yml.
-
-    Used by the Snakemake preprocessing rules (extract_dem, compute_friction, …).
-    The catalog path is resolved relative to this file so the function works
-    regardless of where Snakemake is invoked from.
+    `catalog_path` comes from the caller — a rule's `params.data_catalog`
+    (sourced from `config["paths"]["hydromt_data_catalog"]`) for
+    Snakemake-driven scripts, or a path read directly from config.yml by a
+    standalone script. Nothing is hardcoded here.
     """
     logger = setuplog(logger_name, log_level=10)
-    return hydromt.DataCatalog(data_libs=str(_CATALOG), logger=logger)
+    return hydromt.DataCatalog(data_libs=str(catalog_path), logger=logger)
 
 
-def get_preprocessing_catalog(logger_name: str = "snakemake_workflow") -> hydromt.DataCatalog:
-    """Return a HydroMT DataCatalog combining both catalog files.
+def merged_slr_scenarios(bc_cfg: dict, adapt_cfg: dict) -> list[str]:
+    """Union of boundary_conditions.slr_scenarios and adaptation.slr_intensities.
 
-    Loads data_catalog_gfm.yml first, then preprocessing_data.yml on top,
-    giving access to all datasets needed by the standalone preprocessing
-    scripts (select_tiles.py, merge_tiles.py, prepare_boundary_conditions.py):
-      - deltadtm, land_use, … from data_catalog_gfm.yml
-      - coast_rp, mdt_hybrid_cnes_cls22_cmems2020,
-        ipcc_ar6_slr_projections, … from preprocessing_data.yml
+    Deduplicated and sorted by numeric SLR value (ascending) — e.g.
+    ``["SLR_0", "SLR_200", "SLR_250", "SLR_400", "SLR_500", ...]``.
+
+    The sort matters beyond cosmetics: several callers pass the parallel mm
+    values positionally into ``np.interp``/``pchip_interpolate`` to
+    interpolate EAI across SLR levels, and both require a strictly
+    increasing x-sequence — ``np.interp`` silently returns nonsense (per its
+    own docs) and ``pchip_interpolate`` raises on unsorted input. A plain
+    ``list(dict.fromkeys(slr_scenarios + slr_intensities))`` does not sort,
+    since ``adaptation.slr_intensities`` (e.g. SLR_250, SLR_500) are declared
+    separately from ``boundary_conditions.slr_scenarios`` and get appended
+    after it.
     """
-    logger = setuplog(logger_name, log_level=10)
-    return hydromt.DataCatalog(
-        data_libs=[str(_CATALOG), str(_PREPROCESSING_CATALOG)],
-        logger=logger,
-    )
+    names = list(dict.fromkeys(bc_cfg["slr_scenarios"] + adapt_cfg.get("slr_intensities", [])))
+    return sorted(names, key=lambda s: int(s.split("_")[1]))

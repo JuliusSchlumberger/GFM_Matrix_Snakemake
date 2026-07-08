@@ -12,12 +12,12 @@ from rasters import extract_dem, save_raster  # noqa: E402
 with open(snakemake.input.model_bbox) as f:  # noqa: F821
     bbox = json.load(f)
 
-data_catalog = get_data_catalog()
+data_catalog = get_data_catalog(snakemake.params.data_catalog)  # noqa: F821
 dem = extract_dem(
     data_catalog,
     "deltadtm",
     bbox,
-    "land_polygons",
+    mask_source="deltadtm_mask",
 )
 
-save_raster(dem, snakemake.output.dem, snakemake.config["simulation"]["input_raster"])  # noqa: F821
+save_raster(dem, snakemake.output.dem, snakemake.params.raster_config)  # noqa: F821

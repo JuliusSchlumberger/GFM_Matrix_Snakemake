@@ -36,10 +36,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import get_data_catalog  # noqa: E402
 from merge import AQUEDUCT_NODATA, _bounds_intersect  # noqa: E402
 
-pp_cfg = snakemake.config["postprocessing"]  # noqa: F821
+pp_cfg = snakemake.params.pp_cfg  # noqa: F821
+plot_cfg = pp_cfg["plots"]
+return_period = snakemake.wildcards.return_period  # noqa: F821
 waterlevel_name = snakemake.wildcards.waterlevel_name  # noqa: F821
+scenario_label = f"{return_period}, {waterlevel_name}"
 
-_RESOLUTION_DEG = pp_cfg["plots"]["overlap_diag_resolution_arcsec"] / 3600.0
+_RESOLUTION_DEG = plot_cfg["overlap_diag_resolution_arcsec"] / 3600.0
+_N_PANELS = plot_cfg["n_overlap_locations"]
+_DPI = plot_cfg["dpi"]
 
 
 def _output_shape(minx: float, miny: float, maxx: float, maxy: float) -> tuple[int, int]:
@@ -52,12 +57,11 @@ def _output_shape(minx: float, miny: float, maxx: float, maxy: float) -> tuple[i
 tile_rasters = list(snakemake.input.waterdepth_tiles)  # noqa: F821
 output_dir = Path(snakemake.output.diagnostics)  # noqa: F821
 
-N_PANELS = 6
 TILE_PALETTE = plt.get_cmap("tab10")
 
 output_dir.mkdir(parents=True, exist_ok=True)
 
-data_catalog = get_data_catalog()
+data_catalog = get_data_catalog(snakemake.params.data_catalog)  # noqa: F821
 coastlines_path = data_catalog.get_source("land_polygons").path
 
 
@@ -114,7 +118,7 @@ for path in tile_rasters:
     if neighbours:
         all_groups.append((path, [path] + neighbours))
 
-# ── select up to N_PANELS focal tiles ────────────────────────────────────────
+# ── select up to _N_PANELS focal tiles ────────────────────────────────────────
 # Conditions: (1) domain bbox overlap exists, (2) actual flood overlap exists.
 # Cache (combined_bounds, out_h, out_w) to avoid re-deriving in the plot loop.
 Selection = tuple[str, list[str], tuple[float, float, float, float], int, int]
@@ -122,7 +126,7 @@ selected: list[Selection] = []
 used: set[str] = set()
 
 for focal, all_paths in all_groups:
-    if focal in used or len(selected) >= N_PANELS:
+    if focal in used or len(selected) >= _N_PANELS:
         continue
 
     blist = [domain_bboxes[p] for p in all_paths]
@@ -148,7 +152,7 @@ if not selected:
     ax.text(0.5, 0.5, "No overlapping tiles with flood data found.",
             ha="center", va="center", transform=ax.transAxes, fontsize=11)
     ax.set_axis_off()
-    fig.savefig(output_dir / "no_overlap.png", dpi=100, bbox_inches="tight")
+    fig.savefig(output_dir / "no_overlap.png", dpi=_DPI, bbox_inches="tight")
     plt.close(fig)
     raise SystemExit(0)
 
@@ -210,7 +214,7 @@ for panel_idx, (focal, all_paths, combined_bounds, out_h, out_w) in enumerate(se
     ax.set_xlabel("Longitude")
     ax.set_ylabel("Latitude")
     ax.set_title(
-        f"Tile overlap diagnostic — focal tile {_tile_id(focal)} — {waterlevel_name}\n"
+        f"Tile overlap diagnostic — focal tile {_tile_id(focal)} — {scenario_label}\n"
         "Grey: unique flood extent  |  Red: max depth difference in overlap zone",
         fontsize=9,
     )
@@ -234,5 +238,5 @@ for panel_idx, (focal, all_paths, combined_bounds, out_h, out_w) in enumerate(se
         fig.colorbar(sm, ax=ax, label="Max depth difference (m)", shrink=0.55, pad=0.02)
 
     out_path = output_dir / f"{panel_idx + 1:02d}_tile_{_tile_id(focal)}.png"
-    fig.savefig(out_path, dpi=120, bbox_inches="tight")
+    fig.savefig(out_path, dpi=_DPI, bbox_inches="tight")
     plt.close(fig)

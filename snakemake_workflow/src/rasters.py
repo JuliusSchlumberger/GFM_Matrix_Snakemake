@@ -1,6 +1,6 @@
 """Raster extraction and processing functions for a single tile.
 
-Tiles in the overlapping tile grid (see `python/tile_mask_creation.py`) are
+Tiles in the overlapping tile grid (see `tile_mask_creation.py`) are
 exact rectangles, so a tile's bounding box is identical to its geometry.
 This means raster datasets can simply be clipped with `bbox=...` - no
 additional `geometry_mask` step is required.
@@ -14,7 +14,6 @@ import hydromt
 import numpy as np
 import rasterio
 import xarray as xr
-from rasterio.features import geometry_mask
 from shapely.geometry import box as shapely_box
 
 from merge import AQUEDUCT_NODATA
@@ -26,32 +25,6 @@ def load_raster(path: str | Path) -> xr.DataArray:
     """Load a single-band GeoTIFF as an xarray DataArray with hydromt raster accessor."""
     import rioxarray  # noqa: F401 - registers the rasterio xarray backend and spatial metadata
     return xr.open_dataarray(path, engine="rasterio").squeeze("band", drop=True)
-
-
-def _land_raster(
-    data_catalog: hydromt.DataCatalog,
-    land_polygons_source: str,
-    bbox: list[float],
-    dem: xr.DataArray,
-) -> np.ndarray:
-    """Return a (height, width) bool array: True where land polygons cover a cell.
-
-    Uses gpd.read_file with a bbox filter and the 'land_polygons' layer (the
-    GeoPackage also contains a 'marine_buffer' layer which is the default and
-    does not cover inland areas).
-    """
-    path = data_catalog.get_source(land_polygons_source).path
-    land_gdf = gpd.read_file(path, layer="land_polygons", bbox=tuple(bbox))
-    height, width = dem.raster.height, dem.raster.width
-    if land_gdf.empty:
-        return np.zeros((height, width), dtype=bool)
-    # invert=True → True inside land polygons
-    return geometry_mask(
-        land_gdf.geometry,
-        out_shape=(height, width),
-        transform=dem.raster.transform,
-        invert=True,
-    )
 
 
 def get_tile_bbox(tile: gpd.GeoDataFrame) -> list[float]:
@@ -121,31 +94,50 @@ def extract_dem(
     data_catalog: hydromt.DataCatalog,
     dem_source: str,
     bbox: list[float],
-    land_polygons_source: str,
+    mask_source: str,
 ) -> xr.DataArray:
     """Clip the DEM to the model domain bbox and fill all missing cells.
 
-    Every cell in the output has a real value — no nodata cells remain:
+    Every cell in the output has a real value — no nodata cells remain. The
+    fill value is decided entirely from `mask_source` (the DeltaDTM validity
+    mask), reprojected onto the DEM's own grid — not from any separately
+    sourced land polygon dataset, which can misalign with DeltaDTM's own
+    coastline:
     - Cells with valid DeltaDTM elevation: kept as-is.
-    - Missing cells inside the land polygon: set to `_DEM_LAND_FILL` (9999 m)
-      so Julia reads them as real, very high elevation and never floods them.
-    - Missing cells outside the land polygon (ocean): set to 0.0 (Julia
-      overwrites these anyway via ``dem[.!landmask] .= 0.0``).
+    - Missing cells where the mask says land (0), OR where the mask itself
+      has no coverage at all (nodata): set to `_DEM_LAND_FILL` (9999 m) so
+      Julia reads them as real, very high elevation and never floods them.
+      Areas outside the mask's own coverage are treated the same as known
+      land — irrelevant, definitely-dry terrain — rather than an unknown
+      that some other dataset gets to arbitrate.
+    - Missing cells where the mask says ocean (1), lake (2), or river (3):
+      set to 0.0. Julia re-zeros ocean cells anyway
+      (``dem[.!landmask] .= 0.0``); lake/river cells are permanent inland
+      water bodies where DeltaDTM has no terrain elevation, and filling with
+      0 lets the flood model propagate through them rather than blocking it
+      with an artificially high land elevation.
 
     Args:
-        data_catalog: HydroMT data catalog containing `dem_source`.
+        data_catalog: HydroMT data catalog containing `dem_source` and `mask_source`.
         dem_source: Name of the DEM RasterDataset in `data_catalog`.
         bbox: Model domain bounding box as ``[minx, miny, maxx, maxy]``.
-        land_polygons_source: Name of the land-polygon GeoDataFrame in
-            `data_catalog` used to distinguish missing-but-land cells from
-            missing-ocean cells.
+        mask_source: Name of the DeltaDTM validity mask RasterDataset in
+            `data_catalog`, used to decide the fill value for missing DEM cells.
 
     Returns:
         The DEM clipped to `bbox` with all missing cells filled.
     """
     da = data_catalog.get_rasterdataset(dem_source, bbox=bbox)
-    is_land = _land_raster(data_catalog, land_polygons_source, bbox, da)
+
+    da_mask = data_catalog.get_rasterdataset(mask_source, bbox=bbox)
+    da_mask.raster.set_nodata(255)  # uint8 nodata; mirrors extract_dem_mask
+    mask_vals = da_mask.raster.reproject_like(da, method="nearest").values.squeeze()
+
+    # Land (0) or no mask coverage at all (255) -> irrelevant dry land.
+    # Ocean (1), lake (2), river (3) -> flood-passable, fill with 0.
+    is_land = (mask_vals == 0) | (mask_vals == 255)
     fill = np.where(is_land, _DEM_LAND_FILL, 0.0).reshape(da.shape).astype(np.float32)
+
     return da.where(da != da.raster.nodata, da.copy(data=fill))
 
 
@@ -155,13 +147,17 @@ def extract_dem_mask(
     bbox: list[float],
     dem: xr.DataArray,
     nodata_sentinel: int = 255,
-    land_polygons_source: str | None = None,
 ) -> xr.DataArray:
     """Clip the DEM-validity mask and reproject it onto the DEM's grid.
 
     The mask source raster has a different native grid/resolution than the
     DEM, so it is reprojected (nearest-neighbour) onto the DEM's grid to
-    ensure matching dimensions, as required by the flood model.
+    ensure matching dimensions, as required by the flood model. Cells with no
+    mask coverage at all (value == `nodata_sentinel`) are set to land (0) —
+    consistent with `extract_dem`'s own fill rule: areas outside DeltaDTM's
+    own coverage are irrelevant, definitely-dry terrain, not an unknown for a
+    separately sourced land polygon dataset to arbitrate. Valid DeltaTM
+    values (0 = land, 1 = ocean, 2 = lake, 3 = river) are kept unchanged.
 
     Args:
         data_catalog: HydroMT data catalog containing `mask_source`.
@@ -170,13 +166,6 @@ def extract_dem_mask(
         dem: The tile's DEM, as returned by `extract_dem`, used as the
             reprojection target grid.
         nodata_sentinel: Value used by `mask_source` to indicate no data.
-        land_polygons_source: Name of the land-polygon GeoDataFrame in
-            `data_catalog`. Cells where `mask_source` has no data
-            (value == `nodata_sentinel`) are filled using land polygon coverage:
-            inside the polygon → ``0`` (land), outside → ``1`` (ocean).
-            Valid DeltaDTM values (0 = land, 1 = ocean, 2 = lake, 3 = river)
-            are kept unchanged, preserving river and lake channels that drive
-            inland flood propagation.
 
     Returns:
         The DEM-validity mask reprojected onto `dem`'s grid with no nodata cells.
@@ -184,17 +173,6 @@ def extract_dem_mask(
     da_mask = data_catalog.get_rasterdataset(mask_source, bbox=bbox)
     da_mask.raster.set_nodata(nodata_sentinel)
     da_mask_repr = da_mask.raster.reproject_like(dem, method="nearest")
-    if land_polygons_source is not None:
-        is_land = _land_raster(data_catalog, land_polygons_source, bbox, dem)
-        arr = da_mask_repr.values.squeeze().copy()
-        is_land_2d = is_land.reshape(arr.shape)
-        # Cells with generic land/ocean/nodata classification: use land polygon as
-        # authoritative source. Lake (2) and river (3) cells are kept unchanged since
-        # they represent water channels that propagate flooding inland.
-        generic = (arr == 0) | (arr == 1) | (arr == nodata_sentinel)
-        arr[generic & is_land_2d] = 0
-        arr[generic & ~is_land_2d] = 1
-        return da_mask_repr.copy(data=arr.reshape(da_mask_repr.shape))
     return da_mask_repr.where(da_mask_repr != nodata_sentinel, 0)
 
 
@@ -261,6 +239,11 @@ def save_raster(
 ) -> None:
     """Save a DataArray as a raster file using the workflow's raster output settings.
 
+    Tiled explicitly (512x512 blocks) regardless of `raster_config["driver"]`, since
+    plain GTiff (unlike COG) defaults to striped layout - tiling matters here because
+    downstream code (merge.py's per-block reads, tile_split.py's windowed land-pixel
+    count) reads small rectangular windows, not full scanlines.
+
     Args:
         da: The data array to save. Must have `da.raster.crs`, `da.raster.transform`,
             `da.raster.width` and `da.raster.height` accessors (provided by rioxarray
@@ -283,6 +266,9 @@ def save_raster(
         predictor=raster_config["predictor"],
         width=da.raster.width,
         height=da.raster.height,
+        tiled=True,
+        blockxsize=512,
+        blockysize=512,
     ) as dst:
         dst.write(da.values, indexes=1)
 
@@ -294,7 +280,7 @@ def save_nodata_raster(reference_path: str | Path, output_path: str | Path, rast
     instead of being run through Aqueduct (see
     `aqueduct_runner.log_skipped_tile`). Filled with `merge.AQUEDUCT_NODATA`,
     the same sentinel the Aqueduct model itself writes for cells outside the
-    area it computed, so `merge.merge_tile_rasters` ignores this tile
+    area it computed, so `merge.merge_tile_rasters_chunk` ignores this tile
     entirely when merging results.
 
     Args:

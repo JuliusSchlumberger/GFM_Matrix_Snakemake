@@ -11,14 +11,14 @@ from rasters import compute_friction, load_raster, save_raster  # noqa: E402
 dem = load_raster(snakemake.input.dem)  # noqa: F821
 bbox = list(dem.raster.bounds)  # model domain bbox encoded in the saved DEM
 
-data_catalog = get_data_catalog()
+data_catalog = get_data_catalog(snakemake.params.data_catalog)  # noqa: F821
 friction = compute_friction(
     data_catalog,
     "land_use",
     "lu_to_roughness_lookup",
     bbox,
     dem,
-    snakemake.config["simulation"]["flooding"]["default_friction"],  # noqa: F821
+    snakemake.params.default_friction,  # noqa: F821
 )
 
-save_raster(friction, snakemake.output.friction, snakemake.config["simulation"]["input_raster"])  # noqa: F821
+save_raster(friction, snakemake.output.friction, snakemake.params.raster_config)  # noqa: F821

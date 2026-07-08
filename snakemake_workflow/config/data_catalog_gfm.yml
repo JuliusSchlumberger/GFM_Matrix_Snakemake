@@ -1,3 +1,133 @@
+# ── Root path ─────────────────────────────────────────────────────────────────
+# HydroMT prepends `root` to every relative `path:` entry.  Change this one
+# value when the project is moved to a machine with a different storage layout.
+# Paths that are already absolute (e.g. entries under GCFM_UU\raw_data below)
+# are left untouched by HydroMT regardless of this setting.
+#
+# To avoid editing this file at all, you can also load a machine-local catalog
+# override on top of this one — see the `configfile` / `--configfile` option.
+root: "D:/GFM"
+
+# ──────────────────────────────────────────────────────────────────────────────
+
+coast_rp:
+  data_type: GeoDataset
+  driver: netcdf
+  path: inputs/COAST-RP_dataset/COAST-RP.nc
+  crs: 4326
+  filesystem: local
+  rename:
+    stations: index
+    station_x_coordinate: lon
+    station_y_coordinate: lat
+  meta:
+    category: ocean
+    description: >
+      COAST-RP (COastal dAtaset of Storm Tide Return Periods) — a global dataset
+      of extreme total water levels (storm surge + tide) at discrete GTSM coastal
+      output stations. Extratropical surges are simulated with Deltares D-Flow FM
+      (GTSMv3) forced by ERA5 reanalysis (1979–2018); tropical cyclone surges are
+      from the STORM synthetic-track dataset (10 000 years, present climate).
+      The two are probabilistically combined with tidal levels and return periods
+      are computed empirically, giving storm-tide levels for return periods of
+      1, 2, 5, 10, 25, 50, 100, 250, 500 and 1000 years at ~23 000 coastal
+      stations globally. Water levels are referenced to local mean sea level (MSL).
+      After preprocessing, Antarctic stations (lat < −60°) are removed, leaving
+      ~22 670 stations. Used as the base storm-tide forcing in
+      prepare_boundary_conditions.py, with SLR fingerprints (see
+      ipcc_ar6_slr_projections) added on top. No MDT correction is applied:
+      COAST-RP's MSL reference already matches the DeltaDTM v1.1 DEM in use
+      (see `deltadtm` below) directly.
+    paper_doi: 10.1038/s43247-021-00204-9
+    paper_ref: >
+      Dullaart et al. (2021), Accounting for tropical cyclones more than doubles
+      the global population exposed to low-probability coastal flooding,
+      Commun. Earth Environ. 2, 135.
+    source_author: Job C.M. Dullaart, IVM – Vrije Universiteit Amsterdam
+    source_license: CC-BY-4.0
+    source_url: https://doi.org/10.4121/uuid:210b66a1-9c82-4e0b-9f4a-8eb15deebb44
+    source_version: "1.0"
+    model_version: "Deltares D-Flow FM v1.2.63.64757"
+    vertical_reference: Local mean sea level (MSL) — matches the MSL-referenced
+      DeltaDTM v1.1 DEM (see `deltadtm`) directly; no MDT correction applied
+      in prepare_boundary_conditions.py.
+
+mdt_hybrid_cnes_cls22_cmems2020:
+  data_type: GeoDataset
+  driver: netcdf
+  path: inputs/Aviso/mdt_hybrid_cnes_cls22_cmems2020.nc
+  crs: 4326
+  filesystem: local
+  meta:
+    category: ocean
+    description: >
+      Hybrid Mean Dynamic Topography (MDT) MDT-HYBRID-CNES-CLS22-CMEMS2020.
+      Combines MDT-CNES-CLS22 for global coverage with the CMEMS 2020 regional
+      MDTs for the Black Sea (MDT-CMEMS2020-BLK) and the Mediterranean Sea
+      (MDT-CMEMS2020-MED). Gives the time-mean sea surface height above the
+      geoid, averaged over 1993–2012 at 1/8° (~14 km) resolution globally.
+      NOT used by prepare_boundary_conditions.py: the DeltaDTM tiles in use
+      (see `deltadtm`) are the v1.1 MSL-referenced release, which already
+      has this same MDT subtracted (among other corrections), and COAST-RP
+      storm-tide levels are also MSL-referenced — the two datasets already
+      share a vertical reference, so no additional MDT shift is applied.
+      Kept in the catalog as an available dataset for other diagnostic uses.
+    paper_doi: 10.22541/essoar.170158328.85804859/v1
+    paper_ref: Jousset et al. (2023), MDT-CNES-CLS22
+    source_author: CNES-CLS / E.U. Copernicus Marine Service
+    source_license: https://www.aviso.altimetry.fr/fileadmin/documents/data/License_Aviso_ini.pdf
+    source_url: https://doi.org/10.24400/527896/a01-2024.010
+    source_version: MDT-HYBRID-CNES-CLS22-CMEMS2020
+    pixel_size_deg: 0.125
+    time_coverage: 1993–2012 mean
+
+ipcc_ar6_slr_projections:
+  data_type: GeoDataset
+  driver: netcdf
+  path: inputs/SLR/ar6-regional-confidence/regional/confidence_output_files
+  crs: 4326
+  filesystem: local
+  meta:
+    category: ocean
+    description: >
+      IPCC Sixth Assessment Report (AR6) regional sea-level projections produced
+      with the Framework for Assessment of Changes To Sea-level (FACTS).
+      The catalog path points to the confidence_output_files root directory;
+      the actual NetCDF files are organised as
+      {confidence}_confidence/{scenario}/total_{scenario}_{confidence}_confidence_values.nc
+      and are loaded by combining the scenario and confidence-level choices.
+      Each file contains median, 5th- and 95th-percentile sea-level change
+      (in mm) relative to 1995–2014 baseline at tide-gauge locations and a
+      global 1°×1° grid, for all SSP scenarios and decades up to 2150.
+      Used in prepare_boundary_conditions.py to derive spatially-varying SLR
+      fingerprints that are added to COAST-RP storm-tide levels.
+    paper_doi: 10.5281/zenodo.5914709
+    paper_ref: Garner et al. (2021), IPCC AR6 Sea Level Projections, v20210809
+    source_author: G. G. Garner et al. / IPCC AR6 WG1; FACTS model
+    source_license: CC-BY-4.0
+    source_url: https://zenodo.org/records/5914710
+    source_version: "20210809"
+    citation_required: >
+      Cite (1) Fox-Kemper et al. (2021), IPCC AR6 WG1 Ch. 9; (2) Garner et al.
+      (in prep.), FACTS, Geosci. Model Dev.; and (3) the dataset itself
+      (Garner et al. 2021, v20210809, https://doi.org/10.5281/zenodo.5914709).
+
+five_deg_grid:
+  data_type: GeoDataFrame
+  driver: vector
+  path: inputs/mask/five_deg_grid_filtered.gpkg
+  crs: 4326
+  filesystem: local
+  meta:
+    category: geography
+    description: >
+      Global 5×5° tile grid derived from the DiluviumDEM tile index, filtered to
+      areas relevant to the study region. May be used as an alternative spatial
+      partitioning for preprocessing tasks that operate tile by tile.
+
+# These three datasets live under a separate shared-data root (GCFM_UU) that
+# is not the same as `root` above.  Update the absolute paths below on each
+# machine, or override them in a machine-local catalog file.
 deltadtm:
   data_type: RasterDataset
   driver: raster
@@ -12,22 +142,33 @@ deltadtm:
       vegetation- and building-induced height bias in low-lying coastal and
       deltaic terrain. Covers global coastlines at ~1 arc-second (~30 m)
       resolution. Distributed as a VRT mosaic of per-tile GeoTIFF files.
-    paper_doi: 10.5194/essd-16-2343-2024
-    paper_ref: Pronk et al. (2024), Earth Syst. Sci. Data 16, 2343–2360
-    source_author: Deltares / TU Delft
+      The tiles in use (filenames ending `_GOCO06s_MDT`, hosted on the WUR
+      YODA "sea-level-referenced-coastal-elevation" vault) are the v1.1
+      release, re-referenced from the original EGM2008 geoid to local mean
+      sea level: geoid converted to GOCO06s, then MDT (mean dynamic
+      topography) subtracted. This already matches the MSL reference of the
+      coast_rp storm-tide forcing directly.
+    paper_doi: 10.5194/essd-16-2343-2024  # original DeltaDTM v1.0 (Pronk et al. 2024)
+    paper_ref: >
+      Pronk et al. (2024), Earth Syst. Sci. Data 16, 2343–2360 (base DEM,
+      v1.0). The MSL-referencing update in use here (v1.1, GOCO06s + MDT
+      correction) is attributed to Seeger & Minderhoud (2025) — confirm the
+      exact publication/DOI for that update before citing it externally.
+    source_author: Deltares / TU Delft (base DEM); Wageningen University & Research (v1.1 MSL update)
     source_license: CC-BY-4.0
-    source_url: https://doi.org/10.5281/zenodo.7296982
-    source_version: v1.0
-    vertical_datum: EGM2008 geoid (metres above geoid)
+    source_url: https://data.yoda.wur.nl:9443/vault-sea-level-referenced-coastal-elevation/
+    source_version: v1.1 (MSL-referenced, GOCO06s geoid + MDT correction)
+    vertical_datum: Local mean sea level (MSL) — NOT EGM2008 geoid; see description
     pixel_size_arcsec: 1
     nodata_value: -9999
 
 deltadtm_mask:
   data_type: RasterDataset
   driver: raster
-  path: D:\GFM\inputs\DeltaDTM_masks\deltadtm_mask.vrt
+  path: inputs/DeltaDTM_masks/deltadtm_mask.vrt
   crs: 4326
   filesystem: local
+  nodata: 255
   meta:
     category: topography
     description: >
@@ -47,7 +188,7 @@ deltadtm_mask:
 land_polygons:
   data_type: GeoDataFrame
   driver: vector
-  path: D:\GFM\inputs\OSM_Coastlines\land_polygons.gpkg
+  path: inputs/OSM_Coastlines/land_polygons.gpkg
   crs: 4326
   filesystem: local
   meta:
@@ -84,6 +225,113 @@ land_use:
     source_version: v3.0.1
     pixel_size_m: 100
     nodata_value: 255
+
+geogunit_protection_units:
+  data_type: RasterDataset
+  driver: netcdf
+  # (global, ~30 arcsec / ~1 km resolution, EPSG:4326, variable "Geogunits",
+  # _FillValue -9999).
+  path: inputs/WRI/geogunit_107_all.nc
+  crs: 4326
+  filesystem: local
+  meta:
+    category: socioeconomic
+    description: >
+      WRI/Aqueduct geographic unit IDs ("geogunit_107") - a sub-national
+      regional zoning at ~30 arc-second (~1 km) global resolution. Used to
+      assign each pixel a FLOPROS coastal flood protection standard via
+      `flopros_protection_standards`.
+    source_author: WRI Aqueduct Global Flood Analyzer (floods.wri.org)
+    source_url: http://floods.wri.org/
+
+geogunit_country_units:
+  data_type: RasterDataset
+  driver: netcdf
+  # Country-level WRI geogunit raster ("geogunit_109"), same resolution as
+  # geogunit_107 but with 109 country aggregates instead of sub-national units.
+  # Used for country-level visualisation (world choropleth maps).
+  path: inputs/WRI/geogunit_109_all.nc
+  crs: 4326
+  filesystem: local
+  meta:
+    category: socioeconomic
+    description: >
+      WRI/Aqueduct country-level geographic unit IDs ("geogunit_109") at ~30
+      arc-second global resolution.  Used to aggregate sub-national exposure
+      statistics to country level for world-map visualisations.
+    source_author: WRI Aqueduct Global Flood Analyzer (floods.wri.org)
+    source_url: http://floods.wri.org/
+
+geogunit_country_list:
+  data_type: DataFrame
+  driver: xlsx
+  driver_kwargs:
+    index_col: 0
+    header: 0
+  # Lookup table: geogunit_109 ID → country name / ISO / region metadata.
+  path: inputs/WRI/geogunit_109_all_list.xlsx
+  filesystem: local
+  meta:
+    category: socioeconomic
+    description: >
+      Attribute table for the geogunit_109 country raster — links each
+      geogunit_109 ID to its country name, ISO-3 code, and WRI region.
+
+flopros_protection_standards:
+  data_type: DataFrame
+  driver: xlsx
+  driver_kwargs:
+    index_col: 0
+    header: 0
+  # (index "FID_Aque" = geogunit_107 ID, columns "ISO", "Riverine", "Coastal" -
+  # design protection return periods in years; only "Coastal" is used here).
+  path: inputs/protection_levels/FLOPROS_NL_geogunit_107.xlsx
+  filesystem: local
+  meta:
+    category: socioeconomic
+    description: >
+      FLOPROS (FLOod PROtection Standards) flood defense standards per
+      geogunit_107 region, expressed as design return periods (years).
+    paper_ref: >
+      Tiggeloven, T., de Moel, H., Winsemius, H. C., Eilander, D., Erkens, G., Gebremedhin, E., Diaz Loaiza, A., Kuzma, S., Luo, T., Iceland, C., Bouwman, A., van Huijstee, J., Ligtvoet, W., and Ward, P. J.: Global-scale benefit–cost analysis of coastal flood adaptation to different flood risk drivers using structural measures, Nat. Hazards Earth Syst. Sci., 20, 1025–1044 
+    source_url: https://doi.org/10.5194/nhess-20-1025-2020
+
+ssp_population_growth_factors:
+  data_type: DataFrame
+  driver: xlsx
+  driver_kwargs:
+    sheet_name: "growth_factors"
+    header: 0
+  # Long-format table: columns 'scenario' (SSP), 'region' (country name),
+  # plus one column per year (2020, 2025, …, 2100).  Values are cumulative
+  # growth factors relative to 2020 (2020 always = 1.0).
+  path: inputs/SSPs/getting_SSP_population_growth_factors.xlsx
+  filesystem: local
+  meta:
+    category: socioeconomic
+    description: >
+      SSP-scenario population growth factors per country, relative to the
+      2020 baseline.  Based on the UN SSP population projections (5-year
+      grid, 2020–2100, 201 countries, SSP1–SSP5).
+
+population:
+  data_type: RasterDataset
+  driver: raster
+  # (global, ~30 arcsec / ~1 km resolution, EPSG:4326, lat -72..84, nodata
+  # -3.4028235e+38). A count per cell, not a density - downstream code must
+  # not nearest/bilinear-resample this onto a finer grid without inflating
+  # totals; see src/exposure.py module docstring.
+  path: inputs/exposure/ppp_2020_1km_Aggregated.tif
+  crs: 4326
+  filesystem: local
+  meta:
+    category: socioeconomic
+    description: >
+      WorldPop global population count, ~1 km resolution, year 2020. Used to
+      estimate population exposed to coastal flooding beyond the baseline
+      protection height (src/exposure.py).
+    source_author: WorldPop (www.worldpop.org)
+    source_url: https://www.worldpop.org/
 
 lu_to_roughness_lookup:
   data_type: DataFrame

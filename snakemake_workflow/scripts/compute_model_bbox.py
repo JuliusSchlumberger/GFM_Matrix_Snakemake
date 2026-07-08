@@ -14,12 +14,12 @@ from rasters import compute_model_bbox, get_tile_bbox  # noqa: E402
 tile = gpd.read_file(snakemake.input.tile_geometry)  # noqa: F821
 tile_bbox = get_tile_bbox(tile)
 
-data_catalog = get_data_catalog()
+data_catalog = get_data_catalog(snakemake.params.data_catalog)  # noqa: F821
 model_bbox = compute_model_bbox(
     data_catalog,
     "deltadtm",
     tile_bbox,
-    buffer_arcsec=snakemake.config["simulation"]["model_bbox_buffer_arcsec"],  # noqa: F821
+    buffer_arcsec=snakemake.params.buffer_arcsec,  # noqa: F821
 )
 
 with open(snakemake.output.model_bbox, "w") as f:  # noqa: F821

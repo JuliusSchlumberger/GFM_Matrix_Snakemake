@@ -1,0 +1,27 @@
+name: gfm_v1_download
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - rasterio
+  - matplotlib
+  - jupyterlab
+  - pyproj
+  - xarray>=2024.5.0,<2024.6
+  - rioxarray
+  - cartopy
+  - pandas
+  - ipywidgets
+  - ipympl
+  - zarr
+  - contextily
+  - planetary-computer
+  - shapely
+  - dask
+  - distributed
+  - pip:
+      - netcdf4
+      - jupyterlab_myst
+      - pystac-client
+      - cdsapi

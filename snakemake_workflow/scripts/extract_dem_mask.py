@@ -11,13 +11,12 @@ from rasters import extract_dem_mask, load_raster, save_raster  # noqa: E402
 dem = load_raster(snakemake.input.dem)  # noqa: F821
 bbox = list(dem.raster.bounds)  # model domain bbox encoded in the saved DEM
 
-data_catalog = get_data_catalog()
+data_catalog = get_data_catalog(snakemake.params.data_catalog)  # noqa: F821
 mask = extract_dem_mask(
     data_catalog,
     "deltadtm_mask",
     bbox,
     dem,
-    land_polygons_source="land_polygons",
 )
 
-save_raster(mask, snakemake.output.mask, snakemake.config["simulation"]["input_raster"])  # noqa: F821
+save_raster(mask, snakemake.output.mask, snakemake.params.raster_config)  # noqa: F821

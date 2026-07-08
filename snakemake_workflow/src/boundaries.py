@@ -37,19 +37,34 @@ def load_waterlevel_stations(nc_path: str | Path, variable: str, x_var: str, y_v
     return stations[stations[column_name].notna()].reset_index(drop=True)
 
 
-def select_stations_for_tile(stations: gpd.GeoDataFrame, tile: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    """Select water level stations within a tile's bounding box.
+def select_stations_for_tile(
+    stations: gpd.GeoDataFrame,
+    tile: gpd.GeoDataFrame,
+    buffer_deg: float = 0.0,
+) -> gpd.GeoDataFrame:
+    """Select water level stations within a tile's bounding box (+ buffer).
 
     Args:
         stations: GeoDataFrame of water level stations, as returned by
             `load_waterlevel_stations`.
         tile: Single-row GeoDataFrame of the tile geometry, as returned by
             `tiles.get_tile_geometry`.
+        buffer_deg: Degrees added to each side of the tile's bbox before
+            selecting candidate stations (plain lon/lat expansion in
+            EPSG:4326, not latitude-corrected - same convention already used
+            by tile_mask_creation.py's `filter_grid_by_coastrp` buffer_deg).
+            Should be `boundary_conditions.station_search_buffer_deg`. Needed
+            because tile_grid.trim_buffer_arcsec tightens tile bboxes to
+            their coastal content, which would otherwise shrink the
+            candidate pool available to Aqueduct's k-nearest-neighbour IDW
+            interpolation (simulation.flooding.knn).
 
     Returns:
-        A GeoDataFrame of the water level stations within the tile's bounds.
+        A GeoDataFrame of the water level stations within the tile's
+        buffered bounds.
     """
-    search_area = box(*tile.total_bounds)
+    minx, miny, maxx, maxy = tile.total_bounds
+    search_area = box(minx - buffer_deg, miny - buffer_deg, maxx + buffer_deg, maxy + buffer_deg)
     return stations[stations.intersects(search_area)].reset_index(drop=True)
 
 

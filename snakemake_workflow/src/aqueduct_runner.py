@@ -43,9 +43,9 @@ def is_oom_error(error: subprocess.CalledProcessError) -> bool:
     """Return True if a failed Aqueduct run's captured output indicates an OutOfMemoryError.
 
     The memory cost of `component_indices` (`core/src/core.jl`) is dominated
-    by the tile's total pixel count, not by the SLR water level, so a tile
-    that runs out of memory for one `waterlevel_name` will do so for
-    (nearly) every `waterlevel_name`.
+    by the tile's total pixel count, not by the return period or SLR water
+    level, so a tile that runs out of memory for one (return_period,
+    waterlevel_name) combination will do so for (nearly) every combination.
     """
     return OOM_SIGNATURE in (error.stdout or "") or OOM_SIGNATURE in (error.stderr or "")
 
@@ -63,9 +63,9 @@ def tile_marked_oom(log_dir: str | Path, tile_id: str) -> bool:
 def mark_tile_oom(log_dir: str | Path, tile_id: str, reason: str) -> None:
     """Record that `tile_id` ran out of memory in Aqueduct.
 
-    Once marked, other `waterlevel_name` scenarios for this `tile_id` skip
-    Aqueduct entirely (see `tile_marked_oom`), since they would run out of
-    memory for the same reason (tile size).
+    Once marked, other (return_period, waterlevel_name) scenarios for this
+    `tile_id` skip Aqueduct entirely (see `tile_marked_oom`), since they
+    would run out of memory for the same reason (tile size).
 
     Args:
         log_dir: Directory to write the marker file to. Created if missing.
@@ -77,11 +77,11 @@ def mark_tile_oom(log_dir: str | Path, tile_id: str, reason: str) -> None:
     oom_marker_path(log_dir, tile_id).write_text(reason)
 
 
-def log_skipped_tile(log_dir: str | Path, tile_id: str, waterlevel_name: str, reason: str) -> None:
+def log_skipped_tile(log_dir: str | Path, tile_id: str, scenario_name: str, reason: str) -> None:
     """Record that a tile/scenario was skipped instead of being run through Aqueduct.
 
-    Writes one marker file per (tile_id, waterlevel_name) to `log_dir`, named
-    `{tile_id}_{waterlevel_name}.txt`, so that skipped tiles can later be
+    Writes one marker file per (tile_id, scenario_name) to `log_dir`, named
+    `{tile_id}_{scenario_name}.txt`, so that skipped tiles can later be
     looked up by `tile_id` (e.g. to plot a map of skipped tiles against the
     tile grid). Writing one file per job avoids concurrent-write issues
     between parallel Snakemake jobs.
@@ -89,9 +89,9 @@ def log_skipped_tile(log_dir: str | Path, tile_id: str, waterlevel_name: str, re
     Args:
         log_dir: Directory to write the marker file to. Created if missing.
         tile_id: The tile's `tile_id`.
-        waterlevel_name: The SLR scenario name.
+        scenario_name: The `{return_period}_{waterlevel_name}` scenario identifier.
         reason: Short human-readable reason the tile/scenario was skipped.
     """
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
-    (log_dir / f"{tile_id}_{waterlevel_name}.txt").write_text(reason)
+    (log_dir / f"{tile_id}_{scenario_name}.txt").write_text(reason)

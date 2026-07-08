@@ -9,9 +9,15 @@ The merge strategy is:
     `merge.chunk_size_deg` in config).  Each chunk is merged independently.
   - For each chunk, tile files are kept open but data is read block by block
     inside the write loop — only the current block's data is ever in RAM.
-  - Overlap zones (cells where ≥2 tiles both report depth ≥ threshold) are
-    collected with reservoir-style sub-sampling during the block loop and
-    returned for correlation analysis.
+  - Overlap zones (cells where ≥2 tiles' footprints cover the cell) have
+    their per-cell min/max depth across all contributing tiles collected with
+    reservoir-style sub-sampling during the block loop and returned for
+    continent-level correlation/agreement diagnostics (see
+    plot_overlap_continent_diagnostics.py). A tile that covers a cell but
+    never computed it (AQUEDUCT_NODATA) contributes an assumed 0.0 ("no
+    flooding") to this min/max collection — this is a diagnostic-only
+    assumption and does not affect the merged waterdepth/flood_count rasters
+    below, which still treat AQUEDUCT_NODATA as strictly excluded.
 
 AQUEDUCT_NODATA (`np.finfo(np.float32).max`) is the sentinel written by the
 Aqueduct model for cells it did not compute.  `0.0` means "computed, no
@@ -58,13 +64,19 @@ class _TileMeta:
 
 
 class _PairSamples:
-    """Accumulates (xi, xj) depth pairs with bounded memory.
+    """Accumulates aligned (xi, xj) value pairs with bounded memory.
 
-    Periodically sub-samples to ``max_samples * _OVERFLOW_FACTOR`` once the
-    buffer grows beyond that, so peak memory per pair is always bounded.
+    Generic over what xi/xj represent — merge_tile_rasters_chunk uses one
+    instance per chunk to reservoir-sample (cell_min, cell_max) pairs across
+    all overlapping tiles.
+
+    Sub-samples down to ``max_samples`` as soon as the buffer exceeds it
+    (``_OVERFLOW_FACTOR = 1``), rather than letting it grow to a multiple of
+    ``max_samples`` first, so peak buffered memory never exceeds roughly one
+    incoming batch beyond ``max_samples``.
     """
 
-    _OVERFLOW_FACTOR = 10
+    _OVERFLOW_FACTOR = 1
 
     def __init__(self, max_samples: int, rng: np.random.Generator) -> None:
         self.max_samples = max_samples
@@ -182,7 +194,7 @@ def merge_tile_rasters_chunk(
     waterdepth_output_path: str | Path,
     block_size: int,
     raster_config: dict[str, Any],
-) -> dict[tuple[str, str], tuple[np.ndarray, np.ndarray]]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Merge per-tile water depth rasters within one spatial chunk.
 
     Tile files are opened once (for GDAL cache reuse) but data is read one
@@ -190,10 +202,18 @@ def merge_tile_rasters_chunk(
     in RAM simultaneously.  This keeps peak memory proportional to
     ``block_size² × tiles_per_block`` rather than to the full intersection area.
 
-    Cross-tile overlap pairs (cells where ≥2 tiles both report depth ≥
-    ``raster_config["flood_area_threshold_m"]``) are collected with bounded
-    reservoir-style sampling during the block loop and returned for correlation
-    plots.
+    For every cell where ≥2 tiles' footprints cover the cell, the min and max
+    depth across ALL contributing tiles at that cell are collected (not just
+    the first two, and regardless of whether either exceeds the flood
+    threshold — deliberately including cells where tiles disagree about
+    flood/no-flood, since that disagreement is exactly what the
+    continent-level "ambiguous" diagnostic category needs) with bounded
+    reservoir-style sampling across the whole chunk. A tile that covers a
+    cell but reports AQUEDUCT_NODATA there (never computed, e.g. an
+    OOM/skipped tile) contributes an assumed depth of 0.0 ("no flooding") to
+    this min/max collection rather than being excluded — this assumption
+    only applies to this diagnostic sampling, not to the merged waterdepth/
+    flood_count rasters written below, which are unaffected.
 
     Args:
         tile_rasters: Paths to the per-tile waterdepth rasters for the chunk.
@@ -205,9 +225,10 @@ def merge_tile_rasters_chunk(
             nodata, flood_area_threshold_m, overlap_corr_max_samples).
 
     Returns:
-        ``overlap_pairs``: mapping ``(tile_i_name, tile_j_name)`` →
-        ``(depths_i, depths_j)`` — float32 arrays, sub-sampled to at most
-        ``raster_config.get("overlap_corr_max_samples", 50_000)`` per pair.
+        ``(mins, maxs)`` — float32 arrays of per-cell min/max depth across
+        overlapping tiles, sub-sampled to at most
+        ``raster_config.get("overlap_corr_max_samples", 50_000)`` for the
+        whole chunk.
     """
     if not tile_rasters:
         raise ValueError("tile_rasters must not be empty")
@@ -219,11 +240,9 @@ def merge_tile_rasters_chunk(
     out_transform, out_w, out_h = _make_chunk_transform(chunk_bounds, ref_transform)
     tile_metas = _open_overlapping_tiles(tile_rasters, out_transform, out_w, out_h)
 
-    corr_threshold = float(raster_config.get("flood_area_threshold_m", 0.05))
-    max_samples = int(raster_config.get("overlap_corr_max_samples", 50_000))
+    max_samples = int(raster_config["overlap_corr_max_samples"])
     rng = np.random.default_rng(42)
-
-    pair_samplers: dict[tuple[str, str], _PairSamples] = {}
+    minmax_sampler = _PairSamples(max_samples, rng)
 
     common = {
         "crs": crs,
@@ -292,50 +311,42 @@ def merge_tile_rasters_chunk(
                         )
                         block_patches.append((patch, br0, br1, bc0, bc1, tm.path))
 
-                    # Correlation: assign each cell to exactly one pair —
-                    # the two lowest-indexed tiles (by tile_metas order) that
-                    # both flood it.  This ensures each geographic location
-                    # contributes at most one (xi, xj) point to the pooled plot
-                    # even when three or more tiles overlap the same area.
+                    # Collect per-cell min/max depth across ALL tiles whose
+                    # footprint covers this cell (>=2 such tiles), regardless
+                    # of flood status. A tile that geographically covers a
+                    # cell but never computed it (AQUEDUCT_NODATA - e.g. an
+                    # OOM/skipped tile) is treated as reporting "no flooding"
+                    # (0.0) here rather than being excluded, since silence
+                    # within a tile's own domain is assumed dry; a tile whose
+                    # footprint simply doesn't reach this cell at all still
+                    # contributes nothing (NaN). This also deliberately
+                    # includes cells where tiles disagree (one above, one
+                    # below the flood threshold), so the continent-level
+                    # diagnostic can classify them as "ambiguous" instead of
+                    # discarding them. Kept separate from valid_count/
+                    # depth_sum above, which must stay strictly
+                    # non-NODATA-only for the merged waterdepth raster itself.
                     if len(block_patches) >= 2:
                         N = len(block_patches)
-                        # Expand patches into a unified (N, H, W) depth array.
+                        # NaN wherever a tile's footprint doesn't cover a
+                        # cell at all; 0.0 (not NaN) wherever it covers the
+                        # cell but never computed a value there.
                         tile_depths = np.full(
                             (N, block_h, block_w), np.nan, dtype=np.float32
                         )
+                        footprint_count = np.zeros((block_h, block_w), dtype="float64")
                         for ti, (patch, br0, br1, bc0, bc1, _) in enumerate(block_patches):
-                            tile_depths[ti, br0:br1, bc0:bc1] = patch
+                            valid_patch = patch < AQUEDUCT_NODATA
+                            tile_depths[ti, br0:br1, bc0:bc1] = np.where(
+                                valid_patch, patch, 0.0
+                            )
+                            footprint_count[br0:br1, bc0:bc1] += 1.0
 
-                        floods = (
-                            (tile_depths >= corr_threshold)
-                            & (tile_depths < AQUEDUCT_NODATA)
-                            & ~np.isnan(tile_depths)
-                        )
-
-                        # For each cell find the index of its first and second
-                        # flooded tile.  The canonical pair is (first, second).
-                        first_idx = np.full((block_h, block_w), -1, dtype=np.int32)
-                        second_idx = np.full((block_h, block_w), -1, dtype=np.int32)
-                        for ti in range(N):
-                            f = floods[ti]
-                            first_idx[(first_idx == -1) & f] = ti
-                            already_has_first = (first_idx != -1) & (first_idx != ti)
-                            second_idx[already_has_first & (second_idx == -1) & f] = ti
-
-                        for ti in range(N):
-                            for tj in range(ti + 1, N):
-                                pair_mask = (first_idx == ti) & (second_idx == tj)
-                                if not pair_mask.any():
-                                    continue
-                                di = tile_depths[ti][pair_mask]
-                                dj = tile_depths[tj][pair_mask]
-                                key = (
-                                    Path(block_patches[ti][-1]).parts[-3],
-                                    Path(block_patches[tj][-1]).parts[-3],
-                                )
-                                if key not in pair_samplers:
-                                    pair_samplers[key] = _PairSamples(max_samples, rng)
-                                pair_samplers[key].add(di, dj)
+                        overlap_mask = footprint_count >= 2
+                        if overlap_mask.any():
+                            cell_min = np.nanmin(tile_depths, axis=0)
+                            cell_max = np.nanmax(tile_depths, axis=0)
+                            minmax_sampler.add(cell_min[overlap_mask], cell_max[overlap_mask])
 
                     merged = np.where(
                         valid_count > 0,
@@ -349,9 +360,4 @@ def merge_tile_rasters_chunk(
         for tm in tile_metas:
             tm.src.close()
 
-    overlap_pairs: dict[tuple[str, str], tuple[np.ndarray, np.ndarray]] = {}
-    for key, sampler in pair_samplers.items():
-        xi, xj = sampler.get()
-        if len(xi) > 0:
-            overlap_pairs[key] = (xi, xj)
-    return overlap_pairs
+    return minmax_sampler.get()

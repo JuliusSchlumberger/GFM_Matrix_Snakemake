@@ -1,0 +1,430 @@
+Total run: 37.533214 seconds (1.93 M allocations: 6.945 GiB, 6.99% gc time, 11.70% compilation time)
+
+Total run: 36.149169 seconds (1.93 M allocations: 6.946 GiB, 5.87% gc time, 12.71% compilation time)
+
+Total run: 35.523215 seconds (1.93 M allocations: 6.960 GiB, 6.62% gc time, 11.26% compilation time)
+
+Total run: 41.673548 seconds (1.93 M allocations: 6.937 GiB, 6.34% gc time, 11.72% compilation time)
+
+Total run: 49.274927 seconds (1.93 M allocations: 6.943 GiB, 6.49% gc time, 11.89% compilation time)
+
+Total run: 37.193719 seconds (1.93 M allocations: 6.954 GiB, 6.96% gc time, 10.72% compilation time)
+
+Total run: 34.993867 seconds (1.93 M allocations: 6.941 GiB, 6.76% gc time, 10.41% compilation time)
+
+Total run: 36.201321 seconds (1.93 M allocations: 6.953 GiB, 6.72% gc time, 10.55% compilation time)
+
+Total run: 40.457397 seconds (1.93 M allocations: 6.936 GiB, 5.95% gc time, 11.07% compilation time)
+
+Total run: 37.347929 seconds (1.94 M allocations: 6.934 GiB, 6.35% gc time, 12.42% compilation time)
+
+Total run: 38.529402 seconds (1.93 M allocations: 6.940 GiB, 6.82% gc time, 11.80% compilation time)
+
+Total run: 36.949670 seconds (1.93 M allocations: 6.951 GiB, 6.46% gc time, 12.19% compilation time)
+
+Total run: 35.661872 seconds (1.93 M allocations: 6.934 GiB, 6.63% gc time, 11.35% compilation time)
+
+Total run: 37.113565 seconds (1.94 M allocations: 7.293 GiB, 6.43% gc time, 11.29% compilation time)
+
+Total run: 35.991521 seconds (1.94 M allocations: 7.291 GiB, 6.70% gc time, 10.97% compilation time)
+
+Total run: 36.455326 seconds (1.94 M allocations: 7.287 GiB, 6.51% gc time, 12.03% compilation time)
+
+Total run: 36.361660 seconds (2.00 M allocations: 6.748 GiB, 6.46% gc time, 10.60% compilation time)
+
+Total run: 35.292134 seconds (2.00 M allocations: 6.761 GiB, 6.25% gc time, 11.18% compilation time)
+
+Total run: 37.139302 seconds (2.00 M allocations: 6.732 GiB, 6.10% gc time, 15.33% compilation time)
+
+Total run: 35.077653 seconds (2.00 M allocations: 6.748 GiB, 6.48% gc time, 10.62% compilation time)
+
+Total run: 35.988412 seconds (1.92 M allocations: 6.728 GiB, 6.95% gc time, 11.12% compilation time)
+
+Total run: 34.060292 seconds (1.92 M allocations: 6.730 GiB, 6.45% gc time, 11.43% compilation time)
+
+Total run: 33.082846 seconds (1.91 M allocations: 6.731 GiB, 6.28% gc time, 12.76% compilation time)
+
+Total run: 33.028263 seconds (1.92 M allocations: 6.727 GiB, 6.40% gc time, 10.82% compilation time)
+
+Total run: 30.866964 seconds (1.92 M allocations: 6.729 GiB, 6.64% gc time, 11.24% compilation time)
+
+Total run: 31.475303 seconds (1.91 M allocations: 6.731 GiB, 6.61% gc time, 10.21% compilation time)
+
+Total run: 32.470375 seconds (1.92 M allocations: 6.704 GiB, 6.70% gc time, 10.90% compilation time)
+
+Total run: 32.473290 seconds (1.87 M allocations: 6.016 GiB, 4.99% gc time, 11.90% compilation time)
+
+Total run: 32.658771 seconds (1.88 M allocations: 6.017 GiB, 4.49% gc time, 10.43% compilation time)
+
+Total run: 32.577325 seconds (1.88 M allocations: 6.024 GiB, 4.90% gc time, 11.62% compilation time)
+
+Total run: 31.104154 seconds (1.88 M allocations: 6.016 GiB, 5.12% gc time, 12.63% compilation time)
+
+Total run: 31.314442 seconds (1.88 M allocations: 6.023 GiB, 5.05% gc time, 11.58% compilation time)
+
+Total run: 30.635237 seconds (1.87 M allocations: 6.014 GiB, 5.13% gc time, 11.03% compilation time)
+
+Total run: 31.279030 seconds (1.87 M allocations: 6.008 GiB, 5.32% gc time, 12.08% compilation time)
+
+Total run: 31.065050 seconds (1.94 M allocations: 6.384 GiB, 5.24% gc time, 10.36% compilation time)
+
+Total run: 31.141930 seconds (1.94 M allocations: 6.391 GiB, 5.22% gc time, 11.42% compilation time)
+
+Total run: 29.935057 seconds (1.94 M allocations: 6.403 GiB, 5.24% gc time, 9.67% compilation time)
+
+Total run: 28.096583 seconds (1.94 M allocations: 6.384 GiB, 5.76% gc time, 11.24% compilation time)
+
+Total run: 29.215994 seconds (1.94 M allocations: 6.390 GiB, 5.29% gc time, 11.38% compilation time)
+
+Total run: 31.698346 seconds (1.94 M allocations: 6.403 GiB, 6.29% gc time, 9.69% compilation time)
+
+Total run: 27.990579 seconds (1.94 M allocations: 6.375 GiB, 5.28% gc time, 12.24% compilation time)
+
+Total run: 28.806616 seconds (1.96 M allocations: 6.163 GiB, 5.03% gc time, 14.58% compilation time)
+
+Total run: 25.623619 seconds (1.96 M allocations: 6.164 GiB, 5.18% gc time, 11.15% compilation time)
+
+Total run: 26.008553 seconds (1.96 M allocations: 6.173 GiB, 5.27% gc time, 10.38% compilation time)
+
+Total run: 26.937489 seconds (1.96 M allocations: 6.163 GiB, 5.74% gc time, 13.16% compilation time)
+
+Total run: 25.983761 seconds (1.96 M allocations: 6.164 GiB, 5.39% gc time, 10.56% compilation time)
+
+Total run: 23.955757 seconds (1.96 M allocations: 6.173 GiB, 5.73% gc time, 10.67% compilation time)
+
+Total run: 24.242626 seconds (1.96 M allocations: 6.163 GiB, 5.66% gc time, 11.40% compilation time)
+
+Total run: 23.258440 seconds (1.96 M allocations: 6.164 GiB, 5.51% gc time, 11.77% compilation time)
+
+Total run: 26.235509 seconds (1.96 M allocations: 6.173 GiB, 5.40% gc time, 9.64% compilation time)
+
+Total run: 24.904798 seconds (1.96 M allocations: 6.164 GiB, 5.43% gc time, 12.03% compilation time)
+
+Total run: 23.535038 seconds (1.96 M allocations: 6.173 GiB, 5.82% gc time, 11.54% compilation time)
+
+Total run: 25.063232 seconds (1.96 M allocations: 6.163 GiB, 5.50% gc time, 11.38% compilation time)
+
+Total run: 24.918573 seconds (1.96 M allocations: 6.160 GiB, 5.17% gc time, 11.37% compilation time)
+
+Total run: 22.522529 seconds (1.96 M allocations: 6.159 GiB, 5.79% gc time, 10.31% compilation time)
+
+Total run: 22.513620 seconds (1.96 M allocations: 6.159 GiB, 5.57% gc time, 11.80% compilation time)
+
+Total run: 23.291003 seconds (1.96 M allocations: 6.159 GiB, 6.04% gc time, 12.87% compilation time)
+
+Total run: 14.563909 seconds (1.86 M allocations: 3.486 GiB, 10.25% gc time, 16.31% compilation time)
+
+Total run: 13.915255 seconds (1.86 M allocations: 3.488 GiB, 9.86% gc time, 19.62% compilation time)
+
+Total run: 14.797567 seconds (1.85 M allocations: 3.526 GiB, 9.90% gc time, 23.56% compilation time)
+
+Total run: 12.929014 seconds (1.86 M allocations: 3.485 GiB, 9.63% gc time, 19.89% compilation time)
+
+Total run: 12.290982 seconds (1.86 M allocations: 3.488 GiB, 9.96% gc time, 20.14% compilation time)
+
+Total run: 12.589883 seconds (1.86 M allocations: 3.525 GiB, 9.85% gc time, 17.91% compilation time)
+
+Total run: 12.396931 seconds (1.86 M allocations: 3.478 GiB, 9.60% gc time, 20.27% compilation time)
+
+Total run: 16.005450 seconds (1.90 M allocations: 3.490 GiB, 8.30% gc time, 24.86% compilation time)
+
+Total run: 11.782900 seconds (1.90 M allocations: 3.496 GiB, 10.01% gc time, 18.07% compilation time)
+
+Total run: 12.118533 seconds (1.90 M allocations: 3.499 GiB, 9.27% gc time, 19.37% compilation time)
+
+Total run: 11.999748 seconds (1.90 M allocations: 3.490 GiB, 9.66% gc time, 19.10% compilation time)
+
+Total run: 12.424816 seconds (1.90 M allocations: 3.496 GiB, 9.46% gc time, 20.48% compilation time)
+
+Total run: 12.168932 seconds (1.90 M allocations: 3.499 GiB, 9.68% gc time, 20.57% compilation time)
+
+Total run: 12.738439 seconds (1.90 M allocations: 3.490 GiB, 9.12% gc time, 19.33% compilation time)
+
+Total run: 13.635409 seconds (1.90 M allocations: 3.496 GiB, 9.16% gc time, 19.89% compilation time)
+
+Total run: 13.337799 seconds (1.90 M allocations: 3.499 GiB, 9.63% gc time, 17.46% compilation time)
+
+Total run: 12.668130 seconds (1.90 M allocations: 3.490 GiB, 9.01% gc time, 17.07% compilation time)
+
+Total run: 12.425307 seconds (1.90 M allocations: 3.495 GiB, 8.98% gc time, 20.25% compilation time)
+
+Total run: 13.794670 seconds (1.90 M allocations: 3.499 GiB, 9.28% gc time, 19.83% compilation time)
+
+Total run: 13.469577 seconds (1.90 M allocations: 3.489 GiB, 9.64% gc time, 16.77% compilation time)
+
+Total run: 12.667132 seconds (1.90 M allocations: 3.488 GiB, 9.51% gc time, 19.86% compilation time)
+
+Total run: 12.347259 seconds (1.90 M allocations: 3.488 GiB, 9.43% gc time, 19.87% compilation time)
+
+Total run: 12.857958 seconds (1.90 M allocations: 3.488 GiB, 9.44% gc time, 21.58% compilation time)
+
+Total run: 22.021608 seconds (1.94 M allocations: 6.448 GiB, 7.38% gc time, 10.48% compilation time)
+
+Total run: 21.641861 seconds (1.94 M allocations: 6.455 GiB, 7.71% gc time, 11.09% compilation time)
+
+Total run: 19.305753 seconds (1.94 M allocations: 6.447 GiB, 8.05% gc time, 12.38% compilation time)
+
+Total run: 19.215566 seconds (1.94 M allocations: 6.453 GiB, 7.84% gc time, 12.31% compilation time)
+
+Total run: 20.161271 seconds (1.94 M allocations: 6.464 GiB, 9.08% gc time, 12.58% compilation time)
+
+Total run: 20.973852 seconds (1.94 M allocations: 6.445 GiB, 8.40% gc time, 10.18% compilation time)
+
+Total run: 19.364438 seconds (1.94 M allocations: 6.445 GiB, 8.26% gc time, 11.67% compilation time)
+
+Total run: 17.115466 seconds (1.92 M allocations: 5.119 GiB, 6.16% gc time, 13.45% compilation time)
+
+Total run: 15.732310 seconds (1.92 M allocations: 5.124 GiB, 6.67% gc time, 13.52% compilation time)
+
+Total run: 15.738755 seconds (1.92 M allocations: 5.127 GiB, 7.76% gc time, 13.96% compilation time)
+
+Total run: 15.428097 seconds (1.92 M allocations: 5.119 GiB, 6.99% gc time, 14.61% compilation time)
+
+Total run: 15.785032 seconds (1.92 M allocations: 5.124 GiB, 7.10% gc time, 15.38% compilation time)
+
+Total run: 15.877829 seconds (1.92 M allocations: 5.127 GiB, 6.51% gc time, 13.73% compilation time)
+
+Total run: 16.173962 seconds (1.92 M allocations: 5.124 GiB, 6.73% gc time, 14.10% compilation time)
+
+Total run: 16.100664 seconds (1.92 M allocations: 5.127 GiB, 7.03% gc time, 14.27% compilation time)
+
+Total run: 15.362953 seconds (1.92 M allocations: 5.119 GiB, 7.41% gc time, 13.59% compilation time)
+
+Total run: 15.890646 seconds (1.92 M allocations: 5.119 GiB, 7.12% gc time, 13.78% compilation time)
+
+Total run: 15.355825 seconds (1.92 M allocations: 5.124 GiB, 7.07% gc time, 15.07% compilation time)
+
+Total run: 16.030799 seconds (1.92 M allocations: 5.127 GiB, 7.50% gc time, 13.51% compilation time)
+
+Total run: 15.922947 seconds (1.92 M allocations: 5.117 GiB, 7.68% gc time, 13.78% compilation time)
+
+Total run: 16.596307 seconds (1.92 M allocations: 5.117 GiB, 6.78% gc time, 15.88% compilation time)
+
+Total run: 15.784335 seconds (1.92 M allocations: 5.117 GiB, 7.65% gc time, 13.89% compilation time)
+
+Total run: 24.566174 seconds (1.90 M allocations: 6.450 GiB, 5.28% gc time, 9.69% compilation time)
+
+Total run: 18.567134 seconds (1.91 M allocations: 5.504 GiB, 6.08% gc time, 14.66% compilation time)
+
+Total run: 17.229471 seconds (1.91 M allocations: 5.508 GiB, 6.27% gc time, 14.22% compilation time)
+
+Total run: 16.526039 seconds (1.91 M allocations: 5.513 GiB, 6.52% gc time, 14.24% compilation time)
+
+Total run: 16.543561 seconds (1.91 M allocations: 5.507 GiB, 6.96% gc time, 13.72% compilation time)
+
+Total run: 16.159116 seconds (1.91 M allocations: 5.512 GiB, 7.11% gc time, 13.43% compilation time)
+
+Total run: 15.861460 seconds (1.91 M allocations: 5.503 GiB, 6.66% gc time, 13.42% compilation time)
+
+Total run: 16.278883 seconds (1.91 M allocations: 5.501 GiB, 6.69% gc time, 13.53% compilation time)
+
+Total run: 10.709325 seconds (1.87 M allocations: 2.669 GiB, 9.02% gc time, 24.02% compilation time)
+
+Total run: 9.365329 seconds (1.87 M allocations: 2.670 GiB, 9.71% gc time, 22.92% compilation time)
+
+Total run: 9.771198 seconds (1.87 M allocations: 2.675 GiB, 9.32% gc time, 27.25% compilation time)
+
+Total run: 9.598645 seconds (1.87 M allocations: 2.667 GiB, 10.57% gc time, 28.98% compilation time)
+
+Total run: 8.670512 seconds (1.87 M allocations: 2.668 GiB, 10.01% gc time, 24.61% compilation time)
+
+Total run: 9.567277 seconds (1.87 M allocations: 2.673 GiB, 9.88% gc time, 26.55% compilation time)
+
+Total run: 10.330739 seconds (1.87 M allocations: 2.667 GiB, 9.61% gc time, 25.70% compilation time)
+
+Total run: 9.377621 seconds (1.87 M allocations: 2.668 GiB, 9.84% gc time, 27.39% compilation time)
+
+Total run: 9.881034 seconds (1.87 M allocations: 2.672 GiB, 10.83% gc time, 26.76% compilation time)
+
+Total run: 9.440191 seconds (1.87 M allocations: 2.666 GiB, 10.00% gc time, 27.43% compilation time)
+
+Total run: 9.647345 seconds (1.87 M allocations: 2.668 GiB, 9.62% gc time, 28.27% compilation time)
+
+Total run: 8.660273 seconds (1.87 M allocations: 2.672 GiB, 10.02% gc time, 23.81% compilation time)
+
+Total run: 9.414306 seconds (1.87 M allocations: 2.666 GiB, 9.77% gc time, 27.10% compilation time)
+
+Total run: 10.084520 seconds (1.87 M allocations: 2.664 GiB, 9.32% gc time, 28.71% compilation time)
+
+Total run: 9.448395 seconds (1.87 M allocations: 2.664 GiB, 9.80% gc time, 26.99% compilation time)
+
+Total run: 35.421250 seconds (1.95 M allocations: 10.371 GiB, 8.20% gc time, 6.72% compilation time)
+
+Total run: 35.726102 seconds (1.95 M allocations: 10.376 GiB, 8.45% gc time, 6.41% compilation time)
+
+Total run: 36.842397 seconds (1.95 M allocations: 10.383 GiB, 8.19% gc time, 7.56% compilation time)
+
+Total run: 35.751538 seconds (1.95 M allocations: 10.371 GiB, 8.29% gc time, 7.28% compilation time)
+
+Total run: 34.849784 seconds (1.95 M allocations: 10.376 GiB, 8.45% gc time, 8.61% compilation time)
+
+Total run: 33.819119 seconds (1.95 M allocations: 10.383 GiB, 8.59% gc time, 6.84% compilation time)
+
+Total run: 31.367051 seconds (1.95 M allocations: 10.382 GiB, 8.88% gc time, 6.58% compilation time)
+
+Total run: 33.483857 seconds (1.95 M allocations: 10.371 GiB, 9.08% gc time, 6.13% compilation time)
+
+Total run: 34.756086 seconds (1.95 M allocations: 10.375 GiB, 8.68% gc time, 7.01% compilation time)
+
+Total run: 33.654633 seconds (1.95 M allocations: 10.371 GiB, 8.97% gc time, 7.22% compilation time)
+
+Total run: 34.336442 seconds (1.95 M allocations: 10.375 GiB, 8.90% gc time, 7.59% compilation time)
+
+Total run: 32.031846 seconds (1.95 M allocations: 10.382 GiB, 8.80% gc time, 6.54% compilation time)
+
+Total run: 35.505147 seconds (1.95 M allocations: 10.366 GiB, 8.58% gc time, 7.45% compilation time)
+
+Total run: 35.943306 seconds (1.95 M allocations: 10.366 GiB, 8.79% gc time, 7.26% compilation time)
+
+Total run: 36.716599 seconds (1.95 M allocations: 10.366 GiB, 8.48% gc time, 6.61% compilation time)
+
+Total run: 34.678765 seconds (1.95 M allocations: 10.366 GiB, 8.67% gc time, 7.75% compilation time)
+
+Total run: 29.650815 seconds (1.95 M allocations: 9.067 GiB, 8.58% gc time, 7.83% compilation time)
+
+Total run: 26.579344 seconds (1.95 M allocations: 9.051 GiB, 8.62% gc time, 9.27% compilation time)
+
+Total run: 26.754727 seconds (1.95 M allocations: 9.054 GiB, 8.95% gc time, 7.59% compilation time)
+
+Total run: 26.892180 seconds (1.95 M allocations: 9.053 GiB, 8.30% gc time, 7.86% compilation time)
+
+Total run: 27.013914 seconds (1.95 M allocations: 9.067 GiB, 9.10% gc time, 7.81% compilation time)
+
+Total run: 26.432572 seconds (1.95 M allocations: 9.051 GiB, 8.66% gc time, 8.08% compilation time)
+
+Total run: 27.091193 seconds (1.95 M allocations: 9.043 GiB, 8.95% gc time, 8.85% compilation time)
+
+Total run: 27.190921 seconds (1.95 M allocations: 9.043 GiB, 9.02% gc time, 8.19% compilation time)
+
+Total run: 11.130948 seconds (1.95 M allocations: 2.845 GiB, 8.72% gc time, 23.27% compilation time)
+
+Total run: 10.180480 seconds (1.95 M allocations: 2.847 GiB, 10.02% gc time, 25.28% compilation time)
+
+Total run: 9.926192 seconds (1.95 M allocations: 2.846 GiB, 9.52% gc time, 26.91% compilation time)
+
+Total run: 10.059250 seconds (1.95 M allocations: 2.887 GiB, 9.94% gc time, 26.49% compilation time)
+
+Total run: 10.147894 seconds (1.95 M allocations: 2.844 GiB, 9.92% gc time, 25.32% compilation time)
+
+Total run: 9.878092 seconds (1.95 M allocations: 2.840 GiB, 10.22% gc time, 26.93% compilation time)
+
+Total run: 11.035137 seconds (1.95 M allocations: 2.840 GiB, 10.67% gc time, 22.84% compilation time)
+
+Total run: 11.658687 seconds (1.90 M allocations: 3.534 GiB, 8.75% gc time, 19.68% compilation time)
+
+Total run: 11.099022 seconds (1.90 M allocations: 3.541 GiB, 8.67% gc time, 24.87% compilation time)
+
+Total run: 10.754613 seconds (1.90 M allocations: 3.528 GiB, 9.04% gc time, 23.24% compilation time)
+
+Total run: 13.100641 seconds (1.90 M allocations: 3.527 GiB, 8.37% gc time, 26.46% compilation time)
+
+Total run: 11.901283 seconds (1.90 M allocations: 3.533 GiB, 8.70% gc time, 23.25% compilation time)
+
+Total run: 10.802333 seconds (1.90 M allocations: 3.541 GiB, 8.99% gc time, 24.52% compilation time)
+
+Total run: 10.466856 seconds (1.90 M allocations: 3.541 GiB, 8.92% gc time, 19.68% compilation time)
+
+Total run: 11.195384 seconds (1.90 M allocations: 3.527 GiB, 8.55% gc time, 24.18% compilation time)
+
+Total run: 10.957187 seconds (1.90 M allocations: 3.533 GiB, 9.70% gc time, 24.38% compilation time)
+
+Total run: 11.449519 seconds (1.90 M allocations: 3.533 GiB, 9.66% gc time, 22.34% compilation time)
+
+Total run: 10.924704 seconds (1.90 M allocations: 3.539 GiB, 9.27% gc time, 23.54% compilation time)
+
+Total run: 11.974424 seconds (1.90 M allocations: 3.527 GiB, 8.70% gc time, 24.59% compilation time)
+
+Total run: 10.382988 seconds (1.90 M allocations: 3.529 GiB, 9.41% gc time, 20.87% compilation time)
+
+Total run: 11.240319 seconds (1.90 M allocations: 3.529 GiB, 8.65% gc time, 25.30% compilation time)
+
+Total run: 10.987014 seconds (1.90 M allocations: 3.528 GiB, 8.86% gc time, 24.31% compilation time)
+
+Total run: 9.072304 seconds (1.95 M allocations: 2.437 GiB, 10.34% gc time, 25.79% compilation time)
+
+Total run: 8.619069 seconds (1.95 M allocations: 2.395 GiB, 12.08% gc time, 28.78% compilation time)
+
+Total run: 8.374981 seconds (1.95 M allocations: 2.397 GiB, 11.19% gc time, 30.23% compilation time)
+
+Total run: 8.438452 seconds (1.95 M allocations: 2.396 GiB, 11.74% gc time, 29.39% compilation time)
+
+Total run: 8.623708 seconds (1.95 M allocations: 2.437 GiB, 11.25% gc time, 27.22% compilation time)
+
+Total run: 8.545757 seconds (1.95 M allocations: 2.394 GiB, 11.42% gc time, 31.42% compilation time)
+
+Total run: 9.174278 seconds (1.95 M allocations: 2.390 GiB, 11.01% gc time, 29.86% compilation time)
+
+Total run: 7.447019 seconds (1.89 M allocations: 1.725 GiB, 12.74% gc time, 29.84% compilation time)
+
+Total run: 7.543452 seconds (1.89 M allocations: 1.726 GiB, 14.19% gc time, 33.46% compilation time)
+
+Total run: 7.172540 seconds (1.89 M allocations: 1.724 GiB, 14.50% gc time, 33.04% compilation time)
+
+Total run: 15.834666 seconds (1.92 M allocations: 5.031 GiB, 7.09% gc time, 15.85% compilation time)
+
+Total run: 14.632113 seconds (1.92 M allocations: 5.030 GiB, 7.21% gc time, 17.63% compilation time)
+
+Total run: 15.132761 seconds (1.92 M allocations: 5.024 GiB, 6.92% gc time, 15.96% compilation time)
+
+Total run: 9.573644 seconds (1.89 M allocations: 2.371 GiB, 10.13% gc time, 27.59% compilation time)
+
+Total run: 8.483058 seconds (1.89 M allocations: 2.371 GiB, 12.44% gc time, 25.04% compilation time)
+
+Total run: 8.425713 seconds (1.89 M allocations: 2.372 GiB, 11.33% gc time, 29.00% compilation time)
+
+Total run: 7.867805 seconds (1.89 M allocations: 2.372 GiB, 11.89% gc time, 25.39% compilation time)
+
+Total run: 8.750532 seconds (1.89 M allocations: 2.371 GiB, 11.41% gc time, 28.49% compilation time)
+
+Total run: 8.418486 seconds (1.89 M allocations: 2.371 GiB, 11.57% gc time, 28.24% compilation time)
+
+Total run: 8.291196 seconds (1.89 M allocations: 2.371 GiB, 11.40% gc time, 28.81% compilation time)
+
+Total run: 10.635707 seconds (1.89 M allocations: 2.372 GiB, 11.30% gc time, 29.60% compilation time)
+
+Total run: 8.507245 seconds (1.89 M allocations: 2.371 GiB, 11.43% gc time, 27.87% compilation time)
+
+Total run: 8.592968 seconds (1.89 M allocations: 2.372 GiB, 11.05% gc time, 30.35% compilation time)
+
+Total run: 8.102915 seconds (1.89 M allocations: 2.371 GiB, 11.36% gc time, 30.10% compilation time)
+
+Total run: 8.648096 seconds (1.89 M allocations: 2.371 GiB, 10.91% gc time, 31.47% compilation time)
+
+Total run: 8.473870 seconds (1.89 M allocations: 2.370 GiB, 11.16% gc time, 30.34% compilation time)
+
+Total run: 8.392146 seconds (1.89 M allocations: 2.370 GiB, 11.63% gc time, 29.45% compilation time)
+
+Total run: 7.958034 seconds (1.89 M allocations: 2.370 GiB, 11.47% gc time, 28.22% compilation time)
+
+Total run: 37.002766 seconds (1.88 M allocations: 11.169 GiB, 8.70% gc time, 6.57% compilation time)
+
+Total run: 33.206304 seconds (1.88 M allocations: 11.167 GiB, 8.42% gc time, 7.74% compilation time)
+
+Total run: 34.083891 seconds (1.88 M allocations: 11.169 GiB, 8.60% gc time, 7.49% compilation time)
+
+Total run: 35.518645 seconds (1.88 M allocations: 11.166 GiB, 8.21% gc time, 7.28% compilation time)
+
+Total run: 33.082707 seconds (1.88 M allocations: 11.168 GiB, 8.56% gc time, 7.59% compilation time)
+
+Total run: 35.020695 seconds (1.88 M allocations: 11.168 GiB, 9.40% gc time, 7.52% compilation time)
+
+Total run: 35.614316 seconds (1.89 M allocations: 11.143 GiB, 8.41% gc time, 7.94% compilation time)
+
+Total run: 30.972964 seconds (1.89 M allocations: 11.144 GiB, 8.11% gc time, 8.98% compilation time)
+
+Total run: 31.265036 seconds (1.93 M allocations: 10.247 GiB, 9.18% gc time, 7.10% compilation time)
+
+Total run: 6.714797 seconds (1.87 M allocations: 1.290 GiB, 15.57% gc time, 40.48% compilation time)
+
+Total run: 7.213895 seconds (1.87 M allocations: 1.289 GiB, 15.76% gc time, 33.82% compilation time)
+
+Total run: 5.132128 seconds (1.87 M allocations: 1.288 GiB, 18.40% gc time, 31.41% compilation time)
+
+Total run: 6.172574 seconds (1.87 M allocations: 1.290 GiB, 16.66% gc time, 36.28% compilation time)
+
+Total run: 6.121401 seconds (1.87 M allocations: 1.288 GiB, 17.27% gc time, 36.98% compilation time)
+
+Total run: 5.890799 seconds (1.87 M allocations: 1.289 GiB, 16.66% gc time, 39.08% compilation time)
+
+Total run: 5.353003 seconds (1.87 M allocations: 1.287 GiB, 16.78% gc time, 36.68% compilation time)
+

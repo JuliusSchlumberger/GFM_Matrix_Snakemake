@@ -1,4 +1,4 @@
-"""Extract water level boundary points for a single tile and SLR scenario."""
+"""Extract water level boundary points for a single tile, return period and SLR scenario."""
 
 import sys
 from pathlib import Path
@@ -9,14 +9,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from boundaries import load_waterlevel_stations, save_boundary_points, select_stations_for_tile  # noqa: E402
 
-bc_cfg = snakemake.config["boundary_conditions"]  # noqa: F821
+bc_cfg = snakemake.params.bc_cfg  # noqa: F821
+return_period = snakemake.wildcards.return_period  # noqa: F821
 waterlevel_name = snakemake.wildcards.waterlevel_name  # noqa: F821
 
 nc_filename = bc_cfg["nc_filename_template"].format(
-    return_period=bc_cfg["return_period"], waterlevel_name=waterlevel_name
+    return_period=return_period, waterlevel_name=waterlevel_name
 )
 variable = bc_cfg["nc_variable_template"].format(
-    return_period=bc_cfg["return_period"], waterlevel_name=waterlevel_name
+    return_period=return_period, waterlevel_name=waterlevel_name
 )
 nc_path = Path(bc_cfg["waterlevel_nc_dir"]) / nc_filename
 
@@ -29,6 +30,6 @@ stations = load_waterlevel_stations(
     y_var=bc_cfg["station_y_var"],
     column_name=waterlevel_name,
 )
-selected = select_stations_for_tile(stations, tile)  # noqa: F821
+selected = select_stations_for_tile(stations, tile, buffer_deg=bc_cfg["station_search_buffer_deg"])  # noqa: F821
 
 save_boundary_points(selected, snakemake.output.boundaries)  # noqa: F821

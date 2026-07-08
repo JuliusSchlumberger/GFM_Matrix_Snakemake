@@ -1,15 +1,17 @@
 """GFM Aqueduct preprocessing & simulation workflow.
 
-For every tile in the overlapping tile grid (`paths.tile_grid`, see
-`python/tile_mask_creation.py` and `select_tiles.py`), this workflow
-preprocesses the DEM, DEM-validity mask, friction and water level boundary
-inputs for each sea level rise (SLR) scenario, and runs the Aqueduct flood
-model for each (tile, scenario) combination.
+For every tile in the overlapping tile grid (`paths.tile_grid`, built by
+`snakemake_workflow/preparation/run_preparation.py` — see that directory's
+tile_mask_creation.py, select_tiles.py and merge_tiles.py for how it's
+derived from DeltaDTM + COAST-RP coverage), this workflow preprocesses the
+DEM, DEM-validity mask, friction and water level boundary inputs for each
+(return period, sea level rise scenario) combination, and runs the Aqueduct
+flood model for every (tile, return_period, waterlevel_name) combination.
 
 All fixed parameters are defined in `config/config.yml`.  `TILE_IDS` is the
 static list of `tile_id` values read from `paths.tile_grid` at parse time —
-run `select_tiles.py` beforehand to filter the tile grid down to tiles with
-DEM coverage.
+run `snakemake_workflow/preparation/run_preparation.py` beforehand to build
+and filter the tile grid down to tiles with DEM coverage.
 
 The postprocessing stage partitions the study area into spatial chunks of size
 `merge.chunk_size_deg` degrees.  Each chunk is merged independently so only
@@ -38,12 +40,54 @@ min_version("7.0")
 
 configfile: "snakemake_workflow/config/config.yml"
 
+# Machine-local overrides (git-ignored, optional).  Create
+# snakemake_workflow/config/config_local.yml to override any key without
+# touching the committed config.yml — most commonly `paths.root` and
+# `paths.code_root` for machines with different storage layouts.
+_LOCAL_CFG = "snakemake_workflow/config/config_local.yml"
+if os.path.exists(_LOCAL_CFG):
+    configfile: _LOCAL_CFG
+
+
+def _expand_paths(obj, substitutions: dict) -> object:
+    """Recursively substitute {key} placeholders in all string config values."""
+    if isinstance(obj, str):
+        for key, val in substitutions.items():
+            obj = obj.replace(f"{{{key}}}", val)
+        return obj
+    if isinstance(obj, dict):
+        return {k: _expand_paths(v, substitutions) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_expand_paths(v, substitutions) for v in obj]
+    return obj
+
+
+# Expand {root} / {code_root} throughout the whole config so every rule and
+# script receives absolute paths without knowing about the substitution scheme.
+_PATH_SUBS = {
+    "root": config["paths"].get("root", ""),
+    "code_root": config["paths"].get("code_root", config["paths"].get("root", "")),
+}
+config = _expand_paths(config, _PATH_SUBS)
+
 
 # ── Tile list (read once; also used to build the chunk grid below) ───────────
 _tile_gdf = gpd.read_file(config["tile_grid"]["path"])
 _tile_gdf["tile_id"] = _tile_gdf["tile_id"].astype(str)
 TILE_IDS = sorted(_tile_gdf["tile_id"].astype(int).tolist())
-WATERLEVEL_NAMES = config["boundary_conditions"]["slr_scenarios"]
+RETURN_PERIODS = [f"RP{rp}" for rp in config["boundary_conditions"]["return_periods"]]
+
+# Adaptation design intensities: the SLR scenarios used as the protection
+# standard for the adaptation measures.
+ADAPTATION_SLR_INTENSITIES = config["adaptation"]["slr_intensities"]
+
+# Full set of SLR scenarios to simulate: union of the base scenario list and
+# the adaptation intensities. Using an ordered-set pattern (dict.fromkeys) to
+# deduplicate while preserving declaration order (base list first, then any
+# extra intensities not already listed).
+WATERLEVEL_NAMES = list(dict.fromkeys(
+    config["boundary_conditions"]["slr_scenarios"] + ADAPTATION_SLR_INTENSITIES
+))
 
 
 # ── Chunk grid (derived from tile_grid extent + chunk_size_deg) ──────────────
@@ -94,16 +138,30 @@ _chunk_tile_lookup = {
 
 
 def waterdepth_tiles_for_chunk(wildcards):
-    """Return the waterdepth tile paths for a given chunk_id + waterlevel_name."""
+    """Return the waterdepth tile paths for a given chunk_id + return_period + waterlevel_name.
+
+    Built with explicit "/"-joins, NOT os.path.join: this is the one place in
+    the whole Snakefile where a rule's input is a plain list of path STRINGS
+    (from a data-dependent lookup, not a `rules.X.output.Y` reference), which
+    forces Snakemake to resolve the producing rule via regex matching against
+    every rule's output pattern instead of a direct object reference. On
+    Windows, os.path.join produces backslash-joined paths that do not
+    textually match run_aqueduct's (forward-slash, `{root}`-substituted)
+    declared output pattern for that regex match - every OTHER cross-rule
+    dependency in this Snakefile uses `rules.X.output.Y` (no regex matching
+    ever needed) so never hits this. Confirmed by dry-run: this caused a
+    MissingInputException for every chunk, not just tile-grid edge cases.
+    """
     tile_ids = _chunk_tile_lookup[wildcards.chunk_id]
+    model_outputs = config["simulation"]["model_outputs"]
     return [
-        os.path.join(
-            config["simulation"]["model_outputs"],
-            tid, "results",
-            f"waterdepth_{wildcards.waterlevel_name}.tif",
-        )
+        f"{model_outputs}/{tid}/results/waterdepth_{wildcards.return_period}_{wildcards.waterlevel_name}.tif"
         for tid in tile_ids
     ]
+
+
+_PROTECTION_BASELINE_SLR = config["protection"]["baseline_waterlevel_name"]
+
 
 
 include: "snakemake_workflow/rules/common.smk"
@@ -116,36 +174,44 @@ _PREPROCESS_OUTPUTS = (
     expand(rules.extract_dem.output.dem, tile_id=TILE_IDS)
     + expand(rules.extract_dem_mask.output.mask, tile_id=TILE_IDS)
     + expand(rules.compute_friction.output.friction, tile_id=TILE_IDS)
-    + expand(rules.extract_boundaries.output.boundaries, tile_id=TILE_IDS, waterlevel_name=WATERLEVEL_NAMES)
-    + expand(rules.write_aqueduct_config.output.toml, tile_id=TILE_IDS, waterlevel_name=WATERLEVEL_NAMES)
+    + expand(
+        rules.extract_boundaries.output.boundaries,
+        tile_id=TILE_IDS, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES,
+    )
+    + expand(
+        rules.write_aqueduct_config.output.toml,
+        tile_id=TILE_IDS, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES,
+    )
 )
 
 _SIMULATION_OUTPUTS = expand(
-    rules.run_aqueduct.output.waterdepth, tile_id=TILE_IDS, waterlevel_name=WATERLEVEL_NAMES
+    rules.run_aqueduct.output.waterdepth,
+    tile_id=TILE_IDS, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES,
 )
 
 _plot_cfg = config["postprocessing"]["plots"]
 _plotting_enabled = _plot_cfg["enabled"]
-_corr_scenario = _plot_cfg["correlation_scenario"]  # None / null → no correlation plots
 
-# VRT mosaics are always produced — they are the primary merged outputs even
-# when plotting is disabled.
-_POSTPROCESS_OUTPUTS = (
-    expand(rules.build_mosaic_vrt.output.flood_count_vrt, waterlevel_name=WATERLEVEL_NAMES)
-    + expand(rules.build_mosaic_vrt.output.waterdepth_vrt, waterlevel_name=WATERLEVEL_NAMES)
+# Primary postprocessing outputs:
+#   - per-chunk coarse flood-fraction rasters (all RP × SLR × chunks)
+#     → consumed by standalone compute_exposure_analysis.py
+#   - VRT mosaics and plots (optional, for diagnostics)
+# Fine-resolution waterdepth and flood-count rasters are marked temp() in
+# merge_chunk and auto-deleted once compute_flood_fraction_chunk completes.
+# The old compute_protection_height_chunk / compute_exposure_chunk /
+# aggregate_exposure_statistics chain is replaced by the coarse-first approach.
+_POSTPROCESS_OUTPUTS = expand(
+    rules.compute_flood_fraction_chunk.output.flood_fraction,
+    chunk_id=CHUNK_IDS, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES,
 )
 
 if _plotting_enabled:
     _POSTPROCESS_OUTPUTS += (
-        expand(rules.plot_merged_results.output.flood_count_plot, waterlevel_name=WATERLEVEL_NAMES)
-        + expand(rules.plot_merged_results.output.waterdepth_plot, waterlevel_name=WATERLEVEL_NAMES)
-        + expand(rules.plot_overlap_diagnostics.output.diagnostics, waterlevel_name=WATERLEVEL_NAMES)
+        expand(rules.plot_merged_results.output.flood_count_plot, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES)
+        + expand(rules.plot_merged_results.output.waterdepth_plot, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES)
+        + expand(rules.plot_overlap_diagnostics.output.diagnostics, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES)
+        + expand(rules.plot_overlap_continent_diagnostics.output.diagnostics, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES)
     )
-    if _corr_scenario is not None:
-        _POSTPROCESS_OUTPUTS += expand(
-            rules.merge_chunk.output.overlap_correlation_plot,
-            chunk_id=CHUNK_IDS, waterlevel_name=[_corr_scenario],
-        )
 
 
 rule preprocess:
@@ -155,18 +221,18 @@ rule preprocess:
 
 
 rule simulate:
-    """Run the Aqueduct flood model for all tiles and SLR scenarios."""
+    """Run the Aqueduct flood model for all tiles, return periods and SLR scenarios."""
     input:
         _SIMULATION_OUTPUTS,
 
 
 rule postprocess:
-    """Merge per-tile results into combined, multi-tile rasters and plot them, for all SLR scenarios."""
+    """Merge per-tile results into combined, multi-tile rasters and plot them, for all return periods and SLR scenarios."""
     input:
         _POSTPROCESS_OUTPUTS,
 
 
 rule all:
-    """Run the full workflow: preprocessing, simulation and postprocessing for all tiles and SLR scenarios."""
+    """Run the full workflow: preprocessing, simulation and postprocessing for all tiles, return periods and SLR scenarios."""
     input:
         _PREPROCESS_OUTPUTS + _SIMULATION_OUTPUTS + _POSTPROCESS_OUTPUTS,

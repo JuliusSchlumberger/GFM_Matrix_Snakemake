@@ -10,6 +10,8 @@ rule extract_tile_geometry:
     """Extract a single tile's geometry from the overlapping tile grid."""
     output:
         tile_geometry=os.path.join(config["simulation"]["model_outputs"], "{tile_id}", "inputs", "tile_geometry.gpkg"),
+    params:
+        tile_grid_path=config["tile_grid"]["path"],
     script:
         "../scripts/extract_tile_geometry.py"
 
@@ -20,6 +22,9 @@ rule compute_model_bbox:
         tile_geometry=rules.extract_tile_geometry.output.tile_geometry,
     output:
         model_bbox=os.path.join(config["simulation"]["model_outputs"], "{tile_id}", "inputs", "model_bbox.json"),
+    params:
+        data_catalog=config["paths"]["hydromt_data_catalog"],
+        buffer_arcsec=config["simulation"]["model_bbox_buffer_arcsec"],
     script:
         "../scripts/compute_model_bbox.py"
 
@@ -30,6 +35,9 @@ rule extract_dem:
         model_bbox=rules.compute_model_bbox.output.model_bbox,
     output:
         dem=os.path.join(config["simulation"]["model_outputs"], "{tile_id}", "inputs", "dem.tif"),
+    params:
+        data_catalog=config["paths"]["hydromt_data_catalog"],
+        raster_config=config["simulation"]["input_raster"],
     script:
         "../scripts/extract_dem.py"
 
@@ -40,6 +48,9 @@ rule extract_dem_mask:
         dem=rules.extract_dem.output.dem,
     output:
         mask=os.path.join(config["simulation"]["model_outputs"], "{tile_id}", "inputs", "mask.tif"),
+    params:
+        data_catalog=config["paths"]["hydromt_data_catalog"],
+        raster_config=config["simulation"]["input_raster"],
     script:
         "../scripts/extract_dem_mask.py"
 
@@ -50,30 +61,42 @@ rule compute_friction:
         dem=rules.extract_dem.output.dem,
     output:
         friction=os.path.join(config["simulation"]["model_outputs"], "{tile_id}", "inputs", "friction.tif"),
+    params:
+        data_catalog=config["paths"]["hydromt_data_catalog"],
+        default_friction=config["simulation"]["flooding"]["default_friction"],
+        raster_config=config["simulation"]["input_raster"],
     script:
         "../scripts/compute_friction.py"
 
 
 rule extract_boundaries:
-    """Extract water level boundary points for a single tile and SLR scenario."""
+    """Extract water level boundary points for a single tile, return period and SLR scenario."""
     input:
         tile_geometry=rules.extract_tile_geometry.output.tile_geometry,
     output:
         boundaries=os.path.join(
-            config["simulation"]["model_outputs"], "{tile_id}", "inputs", "boundaries_{waterlevel_name}.gpkg"
+            config["simulation"]["model_outputs"], "{tile_id}", "inputs",
+            "boundaries_{return_period}_{waterlevel_name}.gpkg",
         ),
+    params:
+        bc_cfg=config["boundary_conditions"],
     script:
         "../scripts/extract_boundaries.py"
 
 
 rule write_aqueduct_config:
-    """Write the Aqueduct TOML configuration for a single tile and SLR scenario."""
+    """Write the Aqueduct TOML configuration for a single tile, return period and SLR scenario."""
     input:
         dem=rules.extract_dem.output.dem,
         mask=rules.extract_dem_mask.output.mask,
         friction=rules.compute_friction.output.friction,
         boundaries=rules.extract_boundaries.output.boundaries,
     output:
-        toml=os.path.join(config["simulation"]["model_outputs"], "{tile_id}", "inputs", "aqueduct_{waterlevel_name}.toml"),
+        toml=os.path.join(
+            config["simulation"]["model_outputs"], "{tile_id}", "inputs",
+            "aqueduct_{return_period}_{waterlevel_name}.toml",
+        ),
+    params:
+        flooding_config=config["simulation"]["flooding"],
     script:
         "../scripts/write_aqueduct_config.py"

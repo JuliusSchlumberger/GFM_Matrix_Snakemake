@@ -1,4 +1,4 @@
-"""Write the Aqueduct TOML configuration for a single tile and SLR scenario."""
+"""Write the Aqueduct TOML configuration for a single tile, return period and SLR scenario."""
 
 import sys
 from pathlib import Path
@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from aqueduct_config import build_aqueduct_config, write_aqueduct_config  # noqa: E402
 
+return_period = snakemake.wildcards.return_period  # noqa: F821
 waterlevel_name = snakemake.wildcards.waterlevel_name  # noqa: F821
 
 config = build_aqueduct_config(
@@ -14,9 +15,9 @@ config = build_aqueduct_config(
     mask_filename=Path(snakemake.input.mask).name,  # noqa: F821
     friction_filename=Path(snakemake.input.friction).name,  # noqa: F821
     boundaries_filename=Path(snakemake.input.boundaries).name,  # noqa: F821
-    waterdepth_filename=f"waterdepth_{waterlevel_name}.tif",
+    waterdepth_filename=f"waterdepth_{return_period}_{waterlevel_name}.tif",
     waterlevel_name=waterlevel_name,
-    flooding_config=snakemake.config["simulation"]["flooding"],  # noqa: F821
+    flooding_config=snakemake.params.flooding_config,  # noqa: F821
 )
 
 write_aqueduct_config(config, snakemake.output.toml)  # noqa: F821
