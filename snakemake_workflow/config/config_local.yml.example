@@ -18,8 +18,14 @@ paths:
   # to this value.
   root: "E:/Projects/GFM"         # ← change to your local path
 
-  # Root of the repository / build tree (where aqueduct.exe lives).
+  # Root of the repository clone.
   code_root: "C:/Users/YourName/GFM"   # ← change to your local path
+
+  # Root of the Aqueduct build tree (where aqueduct.exe lives). Only set this
+  # if the Aqueduct build lives somewhere other than code_root on this
+  # machine (e.g. a separate build directory or drive) - it defaults to
+  # code_root if omitted.
+  # aqueduct_root: "D:/AqueductBuild"   # ← uncomment and change if needed
 
 # Override tile_grid if the study area is configured differently per machine:
 # tile_grid:

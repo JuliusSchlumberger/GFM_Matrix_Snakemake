@@ -7,7 +7,7 @@ One-off script (run manually, not part of the Snakemake DAG): for each tile in
      overlaps the tile's bounding box contains land (0), lake (2), or river
      (3) pixels.  Tiles with only ocean (1) or nodata (255) are discarded.
   2. Population exposure: of the tiles surviving check 1, checks whether
-     `exposure.population_source` (WorldPop population count) has any
+     the `population` catalog source (WorldPop population count) has any
      positive population within the tile's bounding box.  Tiles with zero
      population everywhere are discarded - nobody there for a flood to expose.
 
@@ -17,15 +17,12 @@ Outputs:
   tiles_without_exposure.gpkg — tiles discarded by check 2, alongside <output>
   Both discard files retain full tile geometry, for visual confirmation (e.g. in QGIS).
 
-Usage (from `snakemake_workflow/preparation/`):
-    python select_tiles.py [--config PATH]
+Not a standalone entry point - exposes `run(config)`, called from
+run_preparation.py (`python run_preparation.py select_tiles`).
 """
 
-import argparse
 import sys
 from pathlib import Path
-
-import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
@@ -33,29 +30,9 @@ from config_utils import get_data_catalog  # noqa: E402
 from tiles import filter_tiles_by_dem_mask, filter_tiles_by_exposure, load_tile_grid  # noqa: E402
 
 
-def _expand(s: str, root: str) -> str:
-    """Substitute the `{root}` placeholder used throughout config.yml paths."""
-    return str(s).replace("{root}", root)
-
-
-_DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "config.yml"
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--config",
-        default=str(_DEFAULT_CONFIG),
-        help=f"Path to config.yml (default: {_DEFAULT_CONFIG}).",
-    )
-    args = parser.parse_args()
-
-    with open(args.config) as f:
-        config = yaml.safe_load(f)
-
-    root = config["paths"]["root"]
-    input_path = Path(_expand(config['one_off_edits']['smaller_tiles'], root))
-    output_path = Path(_expand(config['one_off_edits']['smaller_tiles_clean'], root))
+def run(config: dict) -> None:
+    input_path = Path(config['one_off_edits']['smaller_tiles'])
+    output_path = Path(config['one_off_edits']['smaller_tiles_clean'])
 
     tiles_without_dem_path = output_path.parent / "tiles_without_dem.gpkg"
     tiles_without_exposure_path = output_path.parent / "tiles_without_exposure.gpkg"
@@ -82,7 +59,7 @@ def main() -> None:
     filtered = filter_tiles_by_exposure(
         after_dem,
         data_catalog=catalog,
-        population_source=config["exposure"]["population_source"],
+        population_source="population",  # catalog key (data_catalog_gfm.yml)
         discarded_tiles_path=tiles_without_exposure_path,
     )
     n_dropped_exposure = len(after_dem) - len(filtered)
@@ -97,4 +74,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(
+        "select_tiles.py is no longer a standalone entry point.\n"
+        "Run it via: python run_preparation.py select_tiles\n"
+        "See run_preparation.py --help for the full list of steps."
+    )

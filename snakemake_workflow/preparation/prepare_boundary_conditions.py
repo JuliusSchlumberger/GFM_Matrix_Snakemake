@@ -6,35 +6,46 @@ runnable script.  Processing steps:
 
   1. Preprocess COAST-RP: drop Antarctic stations (station_y_coordinate <
      boundary_conditions.coastrp_min_lat in config.yml, -60° by default).
-  2. Compute spatially-varying SLR fingerprints from IPCC AR6 regional
+  2. Optionally (boundary_conditions.mdt_correction.enabled): look up the
+     AVISO MDT (mdt_cnes_cls22) at each station (nearest
+     valid grid cell, falling back to a +/-fallback_search_deg window search
+     for stations whose nearest cell is NaN) and record it for step 4 to
+     subtract. Disabled by default - see the config comment for when to
+     enable it.
+  3. Compute spatially-varying SLR fingerprints from IPCC AR6 regional
      sea level projections (SSP2-4.5, year 2100, median quantile,
      DOI: 10.5281/zenodo.5914710).  Each target global-mean SLR level
      is scaled from the base fingerprint map.  Stations with no valid SLR
      data within ±1° fall back to the target global-mean value (i.e. spatially
      uniform SLR) so no NaN propagates.
-  3. Combine: total_wl = storm_tide(RP) + SLR_fingerprint(target_slr)
+  4. Combine: total_wl = storm_tide(RP) [- MDT] + SLR_fingerprint(target_slr)
      One NetCDF is written per (return_period, SLR_target) combination,
      named/keyed from boundary_conditions.nc_filename_template/
      nc_variable_template in config.yml (the same templates
      extract_boundaries.py reads with).
 
-No MDT (mean dynamic topography) correction is applied to the storm-tide
-levels: COAST-RP is referenced to local mean sea level (MSL), and so is the
-DeltaDTM v1.1 DEM in use (GOCO06s geoid + MDT already subtracted, per Seeger
-& Minderhoud 2025 — see the `deltadtm` catalog entry) — the two already share
-a vertical reference, so no additional shift is needed. See
+MDT (mean dynamic topography) correction is OFF by default: COAST-RP is
+referenced to local mean sea level (MSL), and so is the DeltaDTM v1.1 DEM
+currently in use (GOCO06s geoid + MDT already subtracted upstream, per
+Seeger & Minderhoud 2025 - see the `deltadtm` catalog entry) - the two
+already share a vertical reference, so no additional shift is needed. Enable
+boundary_conditions.mdt_correction.enabled ONLY once the DEM has also
+switched to the pure-geoid GOCO06s reference (see vertical_datum_correction
+in config.yml / preparation/merge_tiles.py) - enabling only one side would
+leave the forcing and the terrain on different vertical references. When
+enabled, MDT is SUBTRACTED (storm_tide - MDT), matching the sign convention
+used to re-reference GEBCO/COAST-RP to GOCO06s elsewhere in this project
+(GCFM_UU/workflow/src/surge.apply_mdt_correction). See
 snakemake_workflow/config/data_catalog_gfm.yml (`coast_rp`, `deltadtm`,
-`mdt_hybrid_cnes_cls22_cmems2020`) for the full reasoning.
+`mdt_cnes_cls22`) for the full reasoning.
 
-Intermediate files (COAST-RP_preprocessed.nc, SLR_base_ssp245_2100.nc,
-SLR_fingerprints_all.nc) are written to boundary_conditions.processed_inputs_dir
-and reused on subsequent runs unless --force is given.
+Intermediate files (COAST-RP_preprocessed.nc, MDT_mapped_on_coastal_points.nc,
+SLR_base_ssp245_2100.nc, SLR_fingerprints_all.nc) are written to
+boundary_conditions.processed_inputs_dir and reused on subsequent runs
+unless force=True is passed to `run()`.
 
-Usage (from `snakemake_workflow/preparation/`):
-    python prepare_boundary_conditions.py [--config PATH] [--force]
-
-    --config  Path to config.yml (default: snakemake_workflow/config/config.yml)
-    --force   Recompute and overwrite all intermediate and output files
+Not a standalone entry point - exposes `run(config, force=False)`, called
+from run_preparation.py (`python run_preparation.py boundary_conditions`).
 
 Original notebooks authored by Natalia Aleksandrova (n-aleksandrova), Deltares.
 Translated to a standalone script by Julius Schlumberger, 2026-06-17.
@@ -42,27 +53,19 @@ Translated to a standalone script by Julius Schlumberger, 2026-06-17.
 
 from __future__ import annotations
 
-import argparse
 import logging
 import sys
 from pathlib import Path
 
 import numpy as np
 import xarray as xr
-import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import get_data_catalog, merged_slr_scenarios  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-# The single workflow config (paths, choices, scenario names, return periods).
-_DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "config.yml"
-
-
-def _expand(s: str, root: str) -> str:
-    """Substitute the `{root}` placeholder used throughout config.yml paths."""
-    return str(s).replace("{root}", root)
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def _slr_names_to_metres(names: list[str]) -> list[float]:
@@ -120,7 +123,122 @@ def preprocess_coastrp(raw_path: Path, out_path: Path, min_lat: float) -> xr.Dat
 
 
 # ---------------------------------------------------------------------------
-# Step 2: Compute SLR fingerprints
+# Step 2: MDT correction (local MSL -> GOCO06s geoid), optional
+# ---------------------------------------------------------------------------
+
+def _load_mdt(mdt_path: Path, mdt_variable: str = "mdt") -> xr.DataArray:
+    """Load the AVISO MDT as a 2-D lat/lon DataArray, ascending coordinates.
+
+    Drops any extra dimensions (e.g. 'time') by selecting their first index,
+    and remaps longitudes from 0..360 to -180..180 if needed. Ported from
+    GCFM_UU/workflow/src/surge.load_mdt.
+    """
+    with xr.open_dataset(mdt_path) as ds:
+        da = ds[mdt_variable].load()
+
+    lat_dim = next(d for d in da.dims if "lat" in d.lower())
+    lon_dim = next(d for d in da.dims if "lon" in d.lower())
+    for extra in [d for d in da.dims if d not in (lat_dim, lon_dim)]:
+        da = da.isel({extra: 0})
+
+    if float(da[lon_dim].max()) > 180:
+        da = da.assign_coords(
+            {lon_dim: xr.where(da[lon_dim] > 180, da[lon_dim] - 360, da[lon_dim])}
+        )
+    return da.sortby([lat_dim, lon_dim])
+
+
+def _nearest_valid_grid(
+    da: xr.DataArray, lon_dim: str, lon: float, lat_dim: str, lat: float, fallback_deg: float,
+) -> float:
+    """Value of a 2-D lat/lon grid nearest (lon, lat), NaN-safe.
+
+    Falls back to the nearest non-NaN cell within +/-fallback_deg if the
+    nearest cell itself is NaN. Ports the `find_nearest_valid` helper from
+    Boundary_conditions_waterlevels/01_retrieve_MDT_correction.ipynb
+    (credited there to https://github.com/pydata/xarray/issues/644) via
+    GCFM_UU/workflow/src/surge._nearest_valid_grid. `da` must have ascending
+    lat/lon coordinates (see `_load_mdt`).
+    """
+    val = float(da.sel({lon_dim: lon, lat_dim: lat}, method="nearest").values)
+    if not np.isnan(val):
+        return val
+
+    window = da.sel({
+        lon_dim: slice(lon - fallback_deg, lon + fallback_deg),
+        lat_dim: slice(lat - fallback_deg, lat + fallback_deg),
+    })
+    if window.size == 0:
+        return np.nan
+
+    values = window.values
+    valid = ~np.isnan(values)
+    if not valid.any():
+        return np.nan
+
+    lons2d, lats2d = np.meshgrid(window[lon_dim].values, window[lat_dim].values)
+    dist2 = (lons2d - lon) ** 2 + (lats2d - lat) ** 2
+    dist2 = np.where(valid, dist2, np.inf)
+    idx = np.unravel_index(np.argmin(dist2), dist2.shape)
+    return float(values[idx])
+
+
+def compute_mdt_correction(
+    ds_coastrp: xr.Dataset, mdt_path: Path, mdt_variable: str, fallback_deg: float, out_path: Path,
+) -> xr.Dataset:
+    """Look up the AVISO MDT nearest each COAST-RP station.
+
+    Returns (and caches to `out_path`) a Dataset with the same station
+    coordinates as `ds_coastrp` and one data variable, `MDT` (m; NaN only
+    for stations with no valid MDT cell within +/-fallback_deg of an
+    enclosed sea/bay/fjord - see
+    Boundary_conditions_waterlevels/01_retrieve_MDT_correction.ipynb's own
+    TODO note on this same gap, left unchanged here).
+    """
+    if out_path.exists():
+        logger.info("MDT-mapped station file already exists — loading.")
+        return xr.open_dataset(out_path)
+
+    n_stations = int(ds_coastrp.dims["stations"])
+    logger.info("Step 2: Looking up MDT for %d stations…", n_stations)
+
+    mdt_da = _load_mdt(mdt_path, mdt_variable)
+    lat_dim = next(d for d in mdt_da.dims if "lat" in d.lower())
+    lon_dim = next(d for d in mdt_da.dims if "lon" in d.lower())
+
+    mdt_values: list[float] = []
+    for ii in range(n_stations):
+        p_lon = float(ds_coastrp.station_x_coordinate.values[ii])
+        p_lat = float(ds_coastrp.station_y_coordinate.values[ii])
+        mdt_values.append(
+            _nearest_valid_grid(mdt_da, lon_dim, p_lon, lat_dim, p_lat, fallback_deg)
+        )
+        if ii % 2000 == 0:
+            logger.info("  MDT lookup: %d / %d stations processed", ii, n_stations)
+
+    n_nan = int(np.isnan(mdt_values).sum())
+    if n_nan:
+        logger.warning(
+            "%d/%d stations have no valid MDT within ±%.1f° — MDT correction "
+            "will be skipped (i.e. 0) for these stations.",
+            n_nan, n_stations, fallback_deg,
+        )
+
+    ds_mdt = xr.Dataset(
+        {"MDT": (["stations"], np.array(mdt_values, dtype=np.float64))},
+        coords={
+            "station_x_coordinate": ds_coastrp.station_x_coordinate,
+            "station_y_coordinate": ds_coastrp.station_y_coordinate,
+        },
+        attrs={"title": "MDT values at COAST-RP station locations (local MSL -> GOCO06s)"},
+    )
+    ds_mdt.to_netcdf(out_path)
+    logger.info("  MDT-mapped station file saved → %s", out_path)
+    return ds_mdt
+
+
+# ---------------------------------------------------------------------------
+# Step 3: Compute SLR fingerprints
 # ---------------------------------------------------------------------------
 
 def compute_slr_fingerprints(
@@ -158,7 +276,7 @@ def compute_slr_fingerprints(
         )
 
     n_stations = int(ds_coastrp.dims["stations"])
-    logger.info("Step 2: Computing SLR fingerprints for %d stations…", n_stations)
+    logger.info("Step 3: Computing SLR fingerprints for %d stations…", n_stations)
 
     from shapely.geometry import Point  # used for degree-space proximity
 
@@ -251,7 +369,7 @@ def compute_slr_fingerprints(
 
 
 # ---------------------------------------------------------------------------
-# Step 3: Combine into per-scenario water level files
+# Step 4: Combine into per-scenario water level files
 # ---------------------------------------------------------------------------
 
 def combine_scenarios(
@@ -262,22 +380,29 @@ def combine_scenarios(
     target_slr_m: list[float],
     nc_filename_template: str,
     nc_variable_template: str,
+    mdt_arr: np.ndarray | None = None,
 ) -> None:
     """Write one scenario NetCDF per (RP, SLR) pair, named/keyed from
     `nc_filename_template`/`nc_variable_template` (boundary_conditions.* in
     config.yml) - the same templates extract_boundaries.py reads with, so
     changing either config value keeps both sides in sync.
 
-    total_wl = storm_tide(RP) + SLR_fingerprint(target_slr)
+    total_wl = storm_tide(RP) [- MDT] + SLR_fingerprint(target_slr)
 
-    No MDT term: COAST-RP and the DeltaDTM v1.1 DEM in use are both
-    referenced to local mean sea level already (see module docstring), so
-    storm_tide is used directly.
+    `mdt_arr` (aligned to ds_coastrp's station order, NaN treated as 0 - no
+    correction for that station) is only non-None when
+    boundary_conditions.mdt_correction.enabled is true; see module docstring
+    for when that should be turned on. When None, storm_tide is used
+    directly (no MDT correction applied).
 
     Because the SLR fallback ensures no NaN values enter the calculation,
-    all output files are guaranteed to be NaN-free.
+    all output files are guaranteed to be NaN-free (MDT NaNs, if any, are
+    replaced with 0 before use for the same reason).
     """
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    if mdt_arr is not None:
+        mdt_arr = np.nan_to_num(mdt_arr.astype(np.float64), nan=0.0)
 
     # Template with station coordinates only (no data variables)
     coord_template = {
@@ -302,7 +427,10 @@ def combine_scenarios(
 
             rp_key = f"storm_tide_rp_{int(rp):04d}"
             storm_tide = ds_coastrp[rp_key].values.astype(np.float64)
-            total_wl = storm_tide + slr_arr
+            if mdt_arr is not None:
+                total_wl = (storm_tide - mdt_arr) + slr_arr
+            else:
+                total_wl = storm_tide + slr_arr
 
             ds_scen = xr.Dataset(
                 {variable: (["stations"], total_wl)},
@@ -312,39 +440,19 @@ def combine_scenarios(
             n_written += 1
             logger.info("  Written %s", filename)
 
-    logger.info("Step 3 complete: %d new scenario files written to %s", n_written, out_dir)
+    logger.info("Step 4 complete: %d new scenario files written to %s", n_written, out_dir)
 
 
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
-def main() -> None:
-    ap = argparse.ArgumentParser(
-        description="Prepare COAST-RP boundary conditions with IPCC AR6 SLR fingerprint scenarios."
-    )
-    ap.add_argument(
-        "--config",
-        default=str(_DEFAULT_CONFIG),
-        help=f"Path to config.yml (default: {_DEFAULT_CONFIG}).",
-    )
-    ap.add_argument(
-        "--force",
-        action="store_true",
-        help="Delete and recompute all intermediate files and scenario outputs.",
-    )
-    args = ap.parse_args()
+def run(config: dict, force: bool = False) -> None:
+    """Run the full boundary-conditions pipeline (steps 1-4, see module docstring).
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s  %(levelname)-8s  %(message)s",
-        datefmt="%H:%M:%S",
-    )
-
-    with open(args.config) as fh:
-        config = yaml.safe_load(fh)
-
-    root = config["paths"]["root"]
+    `force`: delete and recompute all intermediate files and scenario
+    outputs (otherwise cached files from a previous run are reused).
+    """
     wl_cfg = config["boundary_conditions"]
     adapt_cfg = config.get("adaptation", {})
     # Union of base SLR scenarios and adaptation intensities — must match
@@ -354,8 +462,7 @@ def main() -> None:
     return_periods  = wl_cfg["return_periods"]
     coastrp_min_lat = wl_cfg["coastrp_min_lat"]
 
-    repo_root = Path(args.config).resolve().parent.parent.parent
-    catalog = get_data_catalog(repo_root / config["paths"]["hydromt_data_catalog"])
+    catalog = get_data_catalog(_REPO_ROOT / config["paths"]["hydromt_data_catalog"])
     coastrp_raw  = Path(catalog.get_source("coast_rp").path)
 
     slr_scenario = wl_cfg.get("slr_scenario", "ssp245")
@@ -364,16 +471,16 @@ def main() -> None:
     # confidence sub-directory so _load_slr_dataset can append {scenario}/...
     slr_dir      = Path(catalog.get_source("ipcc_ar6_slr_projections").path) / f"{confidence}_confidence"
 
-    proc_dir     = Path(_expand(wl_cfg["processed_inputs_dir"], root))
-    out_dir      = Path(_expand(wl_cfg["waterlevel_nc_dir"], root))
+    proc_dir     = Path(wl_cfg["processed_inputs_dir"])
+    out_dir      = Path(wl_cfg["waterlevel_nc_dir"])
 
     proc_dir.mkdir(parents=True, exist_ok=True)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     def _maybe_delete(path: Path) -> None:
-        if args.force and path.exists():
+        if force and path.exists():
             path.unlink()
-            logger.info("  Deleted %s (--force)", path.name)
+            logger.info("  Deleted %s (force=True)", path.name)
 
     # ------------------------------------------------------------------
     # Step 1: Preprocess COAST-RP (remove Antarctica)
@@ -382,7 +489,23 @@ def main() -> None:
     ds_coastrp = preprocess_coastrp(coastrp_raw, preprocessed_path, coastrp_min_lat)
 
     # ------------------------------------------------------------------
-    # Step 2: SLR fingerprints
+    # Step 2: MDT correction (optional - see module docstring)
+    mdt_cfg = wl_cfg.get("mdt_correction", {})
+    mdt_arr = None
+    if mdt_cfg.get("enabled", False):
+        mdt_path = Path(catalog.get_source("mdt_cnes_cls22").path)
+        mdt_mapped_path = proc_dir / "MDT_mapped_on_coastal_points.nc"
+        _maybe_delete(mdt_mapped_path)
+        ds_mdt = compute_mdt_correction(
+            ds_coastrp, mdt_path, mdt_cfg.get("mdt_variable", "mdt"),
+            float(mdt_cfg.get("fallback_search_deg", 3.0)), mdt_mapped_path,
+        )
+        mdt_arr = ds_mdt["MDT"].values
+    else:
+        logger.info("Step 2: MDT correction disabled (boundary_conditions.mdt_correction.enabled=false).")
+
+    # ------------------------------------------------------------------
+    # Step 3: SLR fingerprints
     # Cache filenames bake in scenario/confidence so switching either in
     # config.yml naturally invalidates the cache (new filename -> cache
     # miss -> recompute) instead of silently reusing a stale scenario's
@@ -397,21 +520,25 @@ def main() -> None:
     )
 
     # ------------------------------------------------------------------
-    # Step 3: Combine into scenario files
+    # Step 4: Combine into scenario files
     nc_filename_template = wl_cfg["nc_filename_template"]
     nc_variable_template = wl_cfg["nc_variable_template"]
-    if args.force:
+    if force:
         glob_pattern = nc_filename_template.format(return_period="*", waterlevel_name="*")
         for f in out_dir.glob(glob_pattern):
             f.unlink()
-            logger.info("  Deleted %s (--force)", f.name)
+            logger.info("  Deleted %s (force=True)", f.name)
     combine_scenarios(
         ds_coastrp, ds_slr, out_dir, return_periods, target_slr_m,
-        nc_filename_template, nc_variable_template,
+        nc_filename_template, nc_variable_template, mdt_arr=mdt_arr,
     )
 
     logger.info("All done. Run the Snakemake workflow next.")
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(
+        "prepare_boundary_conditions.py is no longer a standalone entry point.\n"
+        "Run it via: python run_preparation.py boundary_conditions\n"
+        "See run_preparation.py --help for the full list of steps."
+    )

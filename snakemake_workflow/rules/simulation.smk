@@ -47,7 +47,7 @@ rule run_aqueduct:
     params:
         model_outputs=config["simulation"]["model_outputs"],
         aqueduct_executable=config["simulation"]["aqueduct_executable"],
-        raster_config=config["simulation"]["input_raster"],
+        raster_config=config["raster_format"],
     resources:
         aqueduct_runs=1,
     script:

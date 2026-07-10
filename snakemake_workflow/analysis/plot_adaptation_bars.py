@@ -20,15 +20,10 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
-import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from config_utils import merged_slr_scenarios  # noqa: E402
+from config_utils import load_config, merged_slr_scenarios  # noqa: E402
 from visualization import plot_adaptation_bars  # noqa: E402
-
-
-def _expand(s, root, code_root=""):
-    return str(s).replace("{root}", root).replace("{code_root}", code_root or root)
 
 
 def main() -> None:
@@ -38,12 +33,7 @@ def main() -> None:
     parser.add_argument("--outdir", default=None)
     args = parser.parse_args()
 
-    with open(args.config) as fh:
-        cfg = yaml.safe_load(fh)
-
-    root = cfg.get("paths", {}).get("root", "")
-    code_root = cfg.get("paths", {}).get("code_root", root)
-    ex = lambda s: _expand(s, root, code_root)
+    cfg = load_config(args.config)
 
     viz = cfg.get("visualization", {})
     bc = cfg["boundary_conditions"]
@@ -53,10 +43,10 @@ def main() -> None:
     slr_mm = [float(s.split("_")[1]) for s in slr_scenarios]
     slr_intensities = adapt_cfg.get("slr_intensities", [])
 
-    exp_dir = Path(ex(args.expdir))
-    out_dir = Path(ex(args.outdir or str(
-        Path(ex(viz.get("output_dir", "{root}/figures"))) / "adaptation_bars"
-    )))
+    exp_dir = Path(args.expdir)
+    out_dir = Path(args.outdir or str(
+        Path(viz.get("output_dir", f"{cfg['paths']['root']}/figures")) / "adaptation_bars"
+    ))
     out_dir.mkdir(parents=True, exist_ok=True)
 
     dpi = int(viz.get("dpi", 200))
@@ -81,6 +71,7 @@ def main() -> None:
             entity_label=label,
             measure_colors=viz.get("measure_colors"),
             dpi=dpi,
+            figsize=tuple(viz.get("adaptation_bars_figsize", (9, 5))),
         )
         fig.savefig(fname, bbox_inches="tight")
         plt.close(fig)

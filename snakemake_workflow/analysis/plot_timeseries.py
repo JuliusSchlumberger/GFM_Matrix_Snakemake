@@ -19,23 +19,10 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
-import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from config_utils import load_config  # noqa: E402
 from visualization import ssp_rcp_label  # noqa: E402
-
-
-def _expand(s, root, code_root=""):
-    return str(s).replace("{root}", root).replace("{code_root}", code_root or root)
-
-
-# Linestyle is assigned by RANK within adaptation.slr_intensities (its
-# position in that config list), never by the literal SLR value string - so
-# which numeric intensity counts as "protection level 1/2/3" can change in
-# config without touching this code. Extend if more than 3 levels are ever
-# configured; baseline (no intensity variant) always gets _BASELINE_LINESTYLE.
-_LEVEL_LINESTYLES = ["--", ":", "-."]
-_BASELINE_LINESTYLE = "-"
 
 
 def _timeseries_figure(
@@ -50,6 +37,8 @@ def _timeseries_figure(
     dpi: int,
     ssp_rcp_codes: dict[str, int] | None = None,
     y_max: float = 2_000_000.0,
+    level_linestyles: list[str] = ("--", ":", "-."),
+    baseline_linestyle: str = "-",
 ) -> plt.Figure:
     """One figure: one sub-panel per SSP, one line + intensity envelope per measure.
 
@@ -57,10 +46,14 @@ def _timeseries_figure(
     via measure_colors) - one fixed color per measure. Linestyle encodes
     protection level: each measure's intensity variants (e.g.
     protect_SLR_250/500/1000) are ranked by their position in
-    `slr_intensities` and assigned one of `_LEVEL_LINESTYLES` in that order
-    (see module docstring above). Besides the individual lines, a shaded
-    min-to-max envelope spans each measure's variants at each year.
-    baseline has no intensity variant, so it's a single solid line.
+    `slr_intensities` (never by the literal SLR value string, so which
+    numeric intensity counts as "protection level 1/2/3" can change in
+    config without touching this code) and assigned one of
+    `level_linestyles` in that order, cycling if more levels are configured
+    than styles listed (visualization.level_linestyles). Besides the
+    individual lines, a shaded min-to-max envelope spans each measure's
+    variants at each year. baseline has no intensity variant, so it's a
+    single solid line (visualization.baseline_linestyle).
     """
     level_rank = {level: i for i, level in enumerate(slr_intensities)}
 
@@ -102,7 +95,7 @@ def _timeseries_figure(
             for label in labels:
                 intensity = label[len(measure) + 1:]  # "" for baseline (no suffix)
                 rank = level_rank.get(intensity)
-                ls = _LEVEL_LINESTYLES[rank % len(_LEVEL_LINESTYLES)] if rank is not None else _BASELINE_LINESTYLE
+                ls = level_linestyles[rank % len(level_linestyles)] if rank is not None else baseline_linestyle
                 s = series_by_label[label]
                 # Marker at every actual data point - population_growth.output_years
                 # is not evenly spaced (5-year steps until 2050, then 2060/2075/2100),
@@ -123,9 +116,9 @@ def _timeseries_figure(
     handles, labels = axes[0].get_legend_handles_labels()
     if handles:
         # Below the panels, not the top-left corner: with a fixed y_max the
-        # real data often only fills the bottom fraction of each panel,
-        # leaving the old top-left legend position overlapping the y-axis
-        # tick labels and the first panel's title.
+        # real data often only fills the bottom fraction of each panel, so a
+        # top-left legend would overlap the y-axis tick labels and the first
+        # panel's title.
         fig.legend(handles, labels, loc="upper center", fontsize=8,
                    bbox_to_anchor=(0.5, 0.02), ncol=5)
     fig.suptitle(entity_label, fontsize=13, y=1.02)
@@ -140,12 +133,7 @@ def main() -> None:
     parser.add_argument("--outdir", default=None)
     args = parser.parse_args()
 
-    with open(args.config) as fh:
-        cfg = yaml.safe_load(fh)
-
-    root = cfg.get("paths", {}).get("root", "")
-    code_root = cfg.get("paths", {}).get("code_root", root)
-    ex = lambda s: _expand(s, root, code_root)
+    cfg = load_config(args.config)
 
     viz = cfg.get("visualization", {})
     pg_cfg = cfg.get("population_growth", {})
@@ -155,16 +143,19 @@ def main() -> None:
     years = [int(y) for y in pg_cfg.get("output_years", list(range(2025, 2105, 5)))]
     slr_intensities = adapt_cfg.get("slr_intensities", [])
 
-    exp_dir = Path(ex(args.expdir))
-    out_dir = Path(ex(args.outdir or str(
-        Path(ex(viz.get("output_dir", "{root}/figures"))) / "timeseries"
-    )))
+    exp_dir = Path(args.expdir)
+    out_dir = Path(args.outdir or str(
+        Path(viz.get("output_dir", f"{cfg['paths']['root']}/figures")) / "timeseries"
+    ))
     out_dir.mkdir(parents=True, exist_ok=True)
 
     dpi = int(viz.get("dpi", 200))
     m_colors = viz.get("measure_colors", {})
     s_colors = viz.get("ssp_colors", {})
     ssp_rcp_codes = viz.get("ssp_rcp_codes", {})
+    y_max = float(viz.get("country_eai_vmax", 2_000_000.0))
+    level_linestyles = viz.get("level_linestyles", ["--", ":", "-."])
+    baseline_linestyle = viz.get("baseline_linestyle", "-")
 
     eai_by_label: dict[str, pd.DataFrame] = {}
     for csv_path in sorted(exp_dir.glob("exposure_*_ssp.csv")):
@@ -180,7 +171,9 @@ def main() -> None:
     def _save(isos, label, fname):
         fig = _timeseries_figure(eai_by_label, ssps, years, isos, label,
                                   m_colors, s_colors, slr_intensities, dpi,
-                                  ssp_rcp_codes=ssp_rcp_codes)
+                                  ssp_rcp_codes=ssp_rcp_codes, y_max=y_max,
+                                  level_linestyles=level_linestyles,
+                                  baseline_linestyle=baseline_linestyle)
         fig.savefig(fname, bbox_inches="tight")
         plt.close(fig)
 

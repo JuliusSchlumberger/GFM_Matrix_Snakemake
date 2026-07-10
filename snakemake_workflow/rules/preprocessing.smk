@@ -6,6 +6,26 @@ scenario definitions) are read from `config/config.yml`.
 """
 
 
+rule compute_geoid_offset_raster:
+    """One-time computation of the global EGM2008 -> GOCO06s geoid-offset
+    field (pyshtools spherical-harmonic synthesis, ~12s), cached to a small
+    GeoTIFF. NOT tile_id-wildcarded: the offset field is smooth and global,
+    so it only needs to be computed once regardless of how many tiles exist
+    - every per-tile `extract_dem` job (below) reads a tiny reprojected
+    window of this cached raster instead of resynthesizing the harmonics
+    itself (see src/vertical_datum.py). Only pulled into the DAG when
+    vertical_datum_correction.enabled is true (off by default) - extract_dem
+    only depends on this rule's output in that case (see below).
+    """
+    input:
+        egm2008_gfc=_data_catalog.get_source("egm2008_geoid").path,
+        goco06s_gfc=_data_catalog.get_source("goco06s").path,
+    output:
+        offset_raster=_vc_cfg["offset_raster_path"],
+    script:
+        "../scripts/compute_geoid_offset_raster.py"
+
+
 rule extract_tile_geometry:
     """Extract a single tile's geometry from the overlapping tile grid."""
     output:
@@ -30,14 +50,26 @@ rule compute_model_bbox:
 
 
 rule extract_dem:
-    """Clip the DEM to the model domain bbox."""
+    """Clip the DEM to the model domain bbox.
+
+    Optionally geoid-corrects the clipped elevation (EGM2008 -> GOCO06s) via
+    the cached offset raster from compute_geoid_offset_raster above, when
+    vertical_datum_correction.enabled is true (off by default) - see
+    src/vertical_datum.py and rasters.extract_dem.
+    """
     input:
         model_bbox=rules.compute_model_bbox.output.model_bbox,
+        geoid_offset_raster=(
+            rules.compute_geoid_offset_raster.output.offset_raster
+            if _vertical_datum_correction_enabled else []
+        ),
     output:
         dem=os.path.join(config["simulation"]["model_outputs"], "{tile_id}", "inputs", "dem.tif"),
     params:
         data_catalog=config["paths"]["hydromt_data_catalog"],
-        raster_config=config["simulation"]["input_raster"],
+        raster_config=config["raster_format"],
+        vertical_datum_correction_enabled=_vertical_datum_correction_enabled,
+        dem_gap_fill_cfg=config["simulation"]["dem_gap_fill"],
     script:
         "../scripts/extract_dem.py"
 
@@ -50,7 +82,7 @@ rule extract_dem_mask:
         mask=os.path.join(config["simulation"]["model_outputs"], "{tile_id}", "inputs", "mask.tif"),
     params:
         data_catalog=config["paths"]["hydromt_data_catalog"],
-        raster_config=config["simulation"]["input_raster"],
+        raster_config=config["raster_format"],
     script:
         "../scripts/extract_dem_mask.py"
 
@@ -64,7 +96,7 @@ rule compute_friction:
     params:
         data_catalog=config["paths"]["hydromt_data_catalog"],
         default_friction=config["simulation"]["flooding"]["default_friction"],
-        raster_config=config["simulation"]["input_raster"],
+        raster_config=config["raster_format"],
     script:
         "../scripts/compute_friction.py"
 

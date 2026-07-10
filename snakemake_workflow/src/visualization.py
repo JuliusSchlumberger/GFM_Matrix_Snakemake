@@ -59,8 +59,7 @@ def ssp_rcp_label(ssp: str, ssp_rcp_codes: dict[str, int] | None) -> str:
     """'SSP2' -> 'SSP2-RCP4.5' using the CMIP6 code's last two digits as the
     RCP value (naming convention: ssp245 = SSP2 + RCP4.5, ssp585 = SSP5 +
     RCP8.5). Falls back to the bare SSP label if no code is configured.
-    Shared by plot_timeseries.py's panel titles and plot_burning_ember's
-    per-SSP uncertainty subplot labels."""
+    Used by plot_timeseries.py's panel titles."""
     code = (ssp_rcp_codes or {}).get(ssp)
     if code is None:
         return ssp
@@ -236,17 +235,25 @@ def plot_burning_ember(
     figsize: tuple[float, float] = (8, 6),
     unit_label: str = "EAI (people)",
     ssp_colors: dict[str, str] | None = None,
-    ssp_rcp_codes: dict[str, int] | None = None,
+    n_contours: int = 6,
 ) -> plt.Figure:
     """Burning-ember impact matrix: EAI as a function of SLR × population growth.
 
-    Stacked subplots sharing the SLR (x) axis:
+    Two stacked subplots sharing the SLR (x) axis:
       1. The impact-matrix heatmap + contours + SSP trajectory overlays.
-      2+. One subplot per SSP with slr_uncertainty data, showing that SSP's
-          P17-P83 SLR range at each highlight year (y-axis label = SSP-RCP,
-          e.g. "SSP1-RCP2.6"; y-tick labels = the highlight years).
+      2. A single uncertainty subplot, one y-tick per highlight year (not
+         per SSP): each year's row shows every SSP's P17-P83 SLR error bar
+         side by side, offset slightly around that year's tick position so
+         they don't overlap. Colour (matching subplot 1's legend), not a
+         per-row label, identifies which SSP each error bar belongs to.
+         Only the left spine remains (top/bottom/right hidden) and the
+         x-axis has no tick marks or labels of its own (just the vertical
+         gridlines, read against the heatmap's x-axis above) - it reads as
+         one continuous panel, not a separately boxed one. The
+         "Uncertainty in SLR projections" annotation (rotated to read
+         upward) is this subplot's y-axis label directly.
 
-    All subplots live in a single GridSpec column so their plot areas are
+    Both subplots live in the same GridSpec column so their plot areas are
     IDENTICAL widths regardless of the heatmap's colorbar (which occupies
     its own dedicated GridSpec column, row 0 only) — attaching a colorbar
     via the simpler `fig.colorbar(im, ax=ax)` shrinks only ax's width,
@@ -260,17 +267,17 @@ def plot_burning_ember(
         slr_trajectories:   Per-SSP global-mean (median) SLR in mm (index=year, cols=SSP*).
         ssp_growth:         {SSP: pd.Series(index=year, values=fraction growth rate)}.
         slr_uncertainty:    {SSP: pd.DataFrame(index=year, columns=[p17,p50,p83] in mm)} —
-                             one subplot is created per key present here.
+                             the uncertainty subplot is created only if this is non-empty,
+                             with one error bar per key present here at each highlight year.
         highlight_years:    Years to mark on SSP trajectories (e.g. [2050, 2100]).
         cmap:               Matplotlib colormap name.
         vmax:               Colour scale maximum (auto if None).
         dpi:                Figure resolution.
         figsize:            Size (inches) of the heatmap row; total figure height
-                             grows with the number of per-SSP uncertainty subplots.
+                             grows with the number of highlight_years.
         unit_label:         Colourbar label.
         ssp_colors:         Per-SSP colour overrides.
-        ssp_rcp_codes:      {SSP: CMIP6 code} (e.g. {"SSP1": 126}) for the
-                             "SSP1-RCP2.6"-style uncertainty-subplot labels.
+        n_contours:         Number of labelled EAI contour lines drawn on the heatmap.
     """
     colors_ = ssp_colors or _DEFAULT_SLR_COLORS
     if highlight_years is None:
@@ -280,17 +287,21 @@ def plot_burning_ember(
 
     ssp_list = [ssp for ssp in colors_ if slr_uncertainty and ssp in slr_uncertainty]
     n_unc = len(ssp_list)
+    n_years = len(highlight_years)
 
-    fig = plt.figure(figsize=(figsize[0], figsize[1] + 1.3 * n_unc), dpi=dpi)
+    fig = plt.figure(figsize=(figsize[0], figsize[1] + 0.7 * n_years), dpi=dpi)
+    outer_rows = 2 if n_unc > 0 else 1
+    outer_height_ratios = [3, max(0.5, 0.6 * n_years)] if n_unc > 0 else [3]
+
     gs = fig.add_gridspec(
-        1 + n_unc, 2,
-        height_ratios=[3] + [1] * n_unc,
+        outer_rows, 2,
+        height_ratios=outer_height_ratios,
         width_ratios=[30, 1],
-        hspace=0.15, wspace=0.05,
+        hspace=0.2, wspace=0.05,
     )
     ax = fig.add_subplot(gs[0, 0])
     cax = fig.add_subplot(gs[0, 1])
-    unc_axes = [fig.add_subplot(gs[1 + i, 0], sharex=ax) for i in range(n_unc)]
+    unc_ax = fig.add_subplot(gs[1, 0], sharex=ax) if n_unc > 0 else None
 
     slr_x = slr_interp_mm / 1000.0  # mm → m for axis label
     gr_y = growth_rates * 100.0      # fraction → percent
@@ -305,7 +316,6 @@ def plot_burning_ember(
     fig.colorbar(im, cax=cax, label=unit_label)
 
     # Contour lines, labelled with their EAI value
-    n_contours = 6
     if vmax is None:
         vmax_c = float(np.nanmax(matrix)) if np.any(matrix > 0) else 1.0
     else:
@@ -343,37 +353,44 @@ def plot_burning_ember(
     ax.set_title(title, fontsize=11)
     ax.axhline(0, color="k", linewidth=0.8, linestyle="--", alpha=0.5)
 
-    # ── One subplot per SSP: SLR uncertainty (P17-P83) at each highlight year ──
-    for ax_u, ssp in zip(unc_axes, ssp_list):
-        color = colors_[ssp]
-        unc = slr_uncertainty[ssp]
-        year_labels: list[str] = []
-        y = 0
-        for yr in highlight_years:
-            if yr not in unc.index:
-                continue
-            p17 = float(unc.loc[yr, "p17"]) / 1000.0
-            p50 = float(unc.loc[yr, "p50"]) / 1000.0
-            p83 = float(unc.loc[yr, "p83"]) / 1000.0
-            ax_u.errorbar(
-                p50, y, xerr=[[p50 - p17], [p83 - p50]],
-                fmt="o", color=color, markersize=5, capsize=3, linewidth=1.5,
-            )
-            year_labels.append(str(yr))
-            y += 1
-        ax_u.set_yticks(range(len(year_labels)))
-        ax_u.set_yticklabels(year_labels, fontsize=7)
-        ax_u.set_ylim(-0.5, max(len(year_labels), 1) - 0.5)
-        ax_u.invert_yaxis()
-        ax_u.grid(axis="x", alpha=0.3)
-        ax_u.set_ylabel(ssp_rcp_label(ssp, ssp_rcp_codes), fontsize=8, color=color)
+    # ── One shared subplot: SLR uncertainty (P17-P83), one row per highlight
+    # year, every SSP's error bar plotted side by side within that row ──
+    if unc_ax is not None:
+        # Evenly spaced offsets within each year's unit-height row so each
+        # SSP's error bar sits at its own y position instead of overlapping;
+        # a lone SSP sits exactly on the tick (offset 0).
+        offsets = np.linspace(-0.3, 0.3, n_unc) if n_unc > 1 else np.array([0.0])
+        for yi, yr in enumerate(highlight_years):
+            for ssp, offset in zip(ssp_list, offsets):
+                unc = slr_uncertainty[ssp]
+                if yr not in unc.index:
+                    continue
+                color = colors_[ssp]
+                p17 = float(unc.loc[yr, "p17"]) / 1000.0
+                p50 = float(unc.loc[yr, "p50"]) / 1000.0
+                p83 = float(unc.loc[yr, "p83"]) / 1000.0
+                unc_ax.errorbar(
+                    p50, yi + offset, xerr=[[p50 - p17], [p83 - p50]],
+                    fmt="o", color=color, markersize=5, capsize=3, linewidth=1.5,
+                )
+        unc_ax.set_yticks(range(n_years))
+        unc_ax.set_yticklabels([str(yr) for yr in highlight_years], fontsize=7)
+        unc_ax.set_ylim(-0.5, max(n_years, 1) - 0.5)
+        unc_ax.invert_yaxis()
+        unc_ax.grid(axis="x", alpha=0.3)
+        # Only the left spine remains (anchors the year tick labels) -
+        # colour (matching subplot 1's legend) identifies which SSP each
+        # error bar belongs to, not a per-row label.
+        unc_ax.spines["top"].set_visible(False)
+        unc_ax.spines["bottom"].set_visible(False)
+        unc_ax.spines["right"].set_visible(False)
+        # No x tick marks or labels at all (not just labels) - the vertical
+        # gridlines above are enough to read each error bar's SLR position
+        # against the heatmap's x-axis.
+        unc_ax.tick_params(axis="x", which="both", bottom=False, top=False, labelbottom=False)
+        unc_ax.set_ylabel("Uncertainty in SLR projections", fontsize=10)  # matches subplot 1's ylabel fontsize
 
-    # sharex auto-hides tick labels on all but the bottom-most axes - force
-    # the opposite here (heatmap keeps labels, every uncertainty subplot
-    # below it loses them) per the user's explicit request.
     ax.tick_params(axis="x", labelbottom=True)
-    for ax_u in unc_axes:
-        ax_u.tick_params(axis="x", labelbottom=False)
     ax.set_xlabel("Global mean SLR (m)", fontsize=10)
     return fig
 

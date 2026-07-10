@@ -22,16 +22,14 @@ Outputs:
   <output>.gpkg            — merged tile grid
   <output>_fractions.csv   — ocean/land/mask/nodata fractions for all input tiles
 
-Usage (from `snakemake_workflow/preparation/`):
-    python merge_tiles.py [--config PATH] [--input PATH] [--output PATH]
+Not a standalone entry point - exposes `run(config)`, called from
+run_preparation.py (`python run_preparation.py merge_tiles`).
 """
 
-import argparse
 import sys
 from pathlib import Path
 
 import pandas as pd
-import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
@@ -45,37 +43,9 @@ from tiles import (  # noqa: E402
 )
 
 
-def _expand(s: str, root: str) -> str:
-    """Substitute the `{root}` placeholder used throughout config.yml paths."""
-    return str(s).replace("{root}", root)
-
-
-_DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "config.yml"
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--config",
-        default=str(_DEFAULT_CONFIG),
-        help=f"Path to config.yml (default: {_DEFAULT_CONFIG}).",
-    )
-    parser.add_argument(
-        "--input",
-        help="Tile grid to merge (default: one_off_edits.smaller_tiles_clean from config)",
-    )
-    parser.add_argument(
-        "--output",
-        help="Output path for the merged tile grid (default: tile_grid.path from config)",
-    )
-    args = parser.parse_args()
-
-    with open(args.config) as f:
-        config = yaml.safe_load(f)
-
-    root = config["paths"]["root"]
-    input_path  = Path(args.input  or _expand(config["one_off_edits"]["smaller_tiles_clean"], root))
-    output_path = Path(args.output or _expand(config["tile_grid"]["path"], root))
+def run(config: dict) -> None:
+    input_path  = Path(config["one_off_edits"]["smaller_tiles_clean"])
+    output_path = Path(config["tile_grid"]["path"])
     fractions_csv = output_path.with_stem(output_path.stem + "_fractions").with_suffix(".csv")
 
     repo_root = Path(__file__).resolve().parent.parent.parent
@@ -120,6 +90,7 @@ def main() -> None:
         tile_grid,
         min_coast_fraction=tg_cfg["min_coast_fraction"],
         max_merge_count=tg_cfg["max_merge_count"],
+        cardinal_neighbor_overlap_threshold=tg_cfg["cardinal_neighbor_overlap_threshold"],
     )
 
     # Re-tighten any diagonal slack left by bbox-union merges.
@@ -146,4 +117,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(
+        "merge_tiles.py is no longer a standalone entry point.\n"
+        "Run it via: python run_preparation.py merge_tiles\n"
+        "See run_preparation.py --help for the full list of steps."
+    )

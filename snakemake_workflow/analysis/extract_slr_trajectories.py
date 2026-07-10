@@ -1,11 +1,12 @@
 """Extract global-mean SLR trajectories from pre-computed per-SSP CSV files.
 
-Reads the SLR_{code}_wg1.csv files in `visualization.slr_csv_dir`, normalises
-each series so the 2020 value is zero, and writes a combined CSV with one
-column per SSP (median p50) plus optional uncertainty bands (p17, p83).
+Reads the SLR_{code}_wg1.csv files in the `ipcc_ar6_slr_wg1_csv` catalog
+source's directory, normalises each series so the 2020 value is zero, and
+writes a combined CSV with one column per SSP (median p50) plus optional
+uncertainty bands (p17, p83).
 
-The SSP→RCP-code mapping is read from `visualization.ssp_rcp_codes` in
-config.yml (e.g. SSP1→126, SSP2→245, SSP5→585).
+The SSP->RCP-code mapping is read from `visualization.ssp_rcp_codes` in
+config.yml (e.g. SSP1->126, SSP2->245, SSP5->585).
 
 Output CSV columns:
   year        — integer year
@@ -25,11 +26,11 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from config_utils import get_data_catalog, load_config  # noqa: E402
 
-def _expand(s: str, root: str, code_root: str = "") -> str:
-    return str(s).replace("{root}", root).replace("{code_root}", code_root or root)
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def load_slr_csv(csv_path: Path) -> pd.DataFrame:
@@ -70,7 +71,7 @@ def load_slr_csv(csv_path: Path) -> pd.DataFrame:
         # Use the first available year as baseline
         df = df - df.iloc[0]
 
-    # Convert metres → millimetres if the values look like metres
+    # Convert metres -> millimetres if the values look like metres
     if df["p50"].abs().max() < 10:
         df = df * 1000.0
 
@@ -87,24 +88,20 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    with open(args.config) as fh:
-        cfg = yaml.safe_load(fh)
-
-    root = cfg.get("paths", {}).get("root", "")
-    code_root = cfg.get("paths", {}).get("code_root", root)
-    ex = lambda s: _expand(s, root, code_root)
+    cfg = load_config(args.config)
 
     viz = cfg.get("visualization", {})
 
     if args.output is None:
-        args.output = ex(viz.get(
+        args.output = viz.get(
             "slr_trajectories_csv",
-            "{root}/processed_inputs/slr_trajectories_global_median.csv",
-        ))
+            f"{cfg['paths']['root']}/processed_inputs/slr_trajectories_global_median.csv",
+        )
     ssp_rcp_codes: dict[str, int] = viz.get("ssp_rcp_codes", {
         "SSP1": 126, "SSP2": 245, "SSP5": 585,
     })
-    slr_csv_dir = Path(ex(viz.get("slr_csv_dir", "{root}/inputs/SLR")))
+    catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"])
+    slr_csv_dir = Path(catalog.get_source("ipcc_ar6_slr_wg1_csv").path)  # catalog key (data_catalog_gfm.yml)
 
     if not slr_csv_dir.exists():
         print(f"ERROR: SLR CSV directory not found: {slr_csv_dir}")
@@ -116,7 +113,7 @@ def main() -> None:
         if not csv_path.exists():
             print(f"  WARNING: {csv_path.name} not found — skipping {ssp}.")
             continue
-        print(f"  Reading {csv_path.name} → {ssp}…")
+        print(f"  Reading {csv_path.name} -> {ssp}...")
         df_ssp = load_slr_csv(csv_path)
         # Prefix each column with SSP label
         df_ssp.columns = [f"{ssp}_{col}" for col in df_ssp.columns]
@@ -130,7 +127,7 @@ def main() -> None:
     result.index.name = "year"
     result = result.sort_index()
 
-    out_path = Path(ex(args.output))
+    out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     result.to_csv(out_path)
     print(f"\nWritten: {out_path}")

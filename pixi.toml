@@ -54,6 +54,8 @@ python = ">=3.11"
 rioxarray = ">=0.15.0"
 juliaup = "*"
 #rasterio = ">=1.3.0"
+pyshtools = "*"
+boule = "*"
 
 [pypi-dependencies]
 #pystac_client = "*"

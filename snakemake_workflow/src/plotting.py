@@ -54,7 +54,10 @@ def plot_overlap_continent_diagnostics(
     continent_name: str,
     waterlevel_name: str,
     n_chunks: int,
-    dpi: int = 130,
+    total_overlap_cells: int = 0,
+    pie_colors: dict[str, str] | None = None,
+    figsize: tuple[float, float] = (13, 6.5),
+    dpi: int = 200,
 ) -> None:
     """Two-subplot per-continent overlap-agreement diagnostic.
 
@@ -70,15 +73,27 @@ def plot_overlap_continent_diagnostics(
         mins, maxs: Per-cell min/max depth across overlapping tiles, pooled
             across all of this continent's chunks (see
             merge_tile_rasters_chunk / plot_overlap_continent_diagnostics.py).
+            Each chunk's contribution is reservoir-sub-sampled to at most
+            postprocessing.overlap_corr_max_samples cells, so len(mins) may
+            be smaller than the true overlap-cell population.
         threshold_m: Minimum depth (m) counted as "flooded"
-            (postprocessing.flood_area_threshold_m).
+            (exposure.exceedance_threshold_m).
         output_path: Where to save the PNG.
         continent_name: Continent label used in the plot title.
         waterlevel_name: Scenario label used in the plot title.
         n_chunks: Number of chunks pooled into this continent's sample, for
             the title annotation.
+        total_overlap_cells: True number of overlap cells across those
+            chunks before any reservoir sub-sampling was applied (>=
+            len(mins)); shown alongside the sampled count so the title makes
+            clear what fraction of the real overlap population the Pearson r
+            / pie chart are actually based on.
+        pie_colors: {"flood": ..., "no_flood": ..., "ambiguous": ...} hex
+            colours for the pie wedges (postprocessing.plots.overlap_pie_colors).
+            Falls back to a fixed default triple if not given.
+        figsize: Figure size in inches (postprocessing.plots.overlap_continent_figsize).
     """
-    fig, (ax_hex, ax_pie) = plt.subplots(1, 2, figsize=(13, 6.5), dpi=dpi)
+    fig, (ax_hex, ax_pie) = plt.subplots(1, 2, figsize=figsize, dpi=dpi)
 
     if len(mins) == 0:
         for ax in (ax_hex, ax_pie):
@@ -105,7 +120,11 @@ def plot_overlap_continent_diagnostics(
     ax_hex.set_aspect("equal", adjustable="box")
     ax_hex.set_xlabel("Min depth across overlapping tiles (m)")
     ax_hex.set_ylabel("Max depth across overlapping tiles (m)")
-    ax_hex.set_title(f"Pearson r = {r:.4f}   (n = {n_total:,})", fontsize=10)
+    if total_overlap_cells > n_total:
+        n_label = f"n = {n_total:,} sampled of {total_overlap_cells:,} total"
+    else:
+        n_label = f"n = {n_total:,}"
+    ax_hex.set_title(f"Pearson r = {r:.4f}   ({n_label})", fontsize=10)
 
     # ── Right: flood-agreement pie chart ────────────────────────────────────
     confirmed_flood = int((mins >= threshold_m).sum())
@@ -117,7 +136,10 @@ def plot_overlap_continent_diagnostics(
         f"Confirmed no-flood\n({confirmed_no_flood:,})",
         f"Ambiguous\n({ambiguous:,})",
     ]
-    colors = ["#d62728", "#1f77b4", "#7f7f7f"]
+    colors = (
+        [pie_colors["flood"], pie_colors["no_flood"], pie_colors["ambiguous"]]
+        if pie_colors else ["#d62728", "#1f77b4", "#7f7f7f"]
+    )
     nonzero = [(c, l, col) for c, l, col in zip(counts, labels, colors) if c > 0]
     ax_pie.pie(
         [c for c, _, _ in nonzero],
@@ -150,7 +172,9 @@ def plot_raster_with_coastlines(
     mask_value: float | None = None,
     oom_tiles: gpd.GeoDataFrame | None = None,
     annotation: str | None = None,
-    dpi: int = 130,
+    vmax_m: float = 10.0,
+    figsize: tuple[float, float] = (10, 10),
+    dpi: int = 200,
 ) -> None:
     """Plot a raster with land polygons for context and save it as an image.
 
@@ -177,6 +201,9 @@ def plot_raster_with_coastlines(
             them.
         oom_tiles: If given, tile polygons that were skipped due to
             OutOfMemoryError are drawn as a semi-transparent grey overlay.
+        vmax_m: Colour-scale cap (m); depths above this clip to the same top
+            colour (postprocessing.plots.waterdepth_vmax_m).
+        figsize: Figure size in inches (postprocessing.plots.merged_map_figsize).
     """
     with rasterio.open(raster_path) as src:
         native_deg = src.transform.a          # native pixel width in degrees
@@ -193,11 +220,11 @@ def plot_raster_with_coastlines(
     if mask_value is not None:
         masked = np.ma.masked_equal(masked, mask_value)
 
-    fig, ax = plt.subplots(figsize=(10, 10))
+    fig, ax = plt.subplots(figsize=figsize)
     coastlines.plot(ax=ax, color="whitesmoke", edgecolor="whitesmoke", linewidth=0.5, zorder=0)
 
     extent = (bounds.left, bounds.right, bounds.bottom, bounds.top)
-    image = ax.imshow(masked, extent=extent, cmap=cmap, origin="upper", zorder=1, vmin=0, vmax=min(float(masked.max()), 10))
+    image = ax.imshow(masked, extent=extent, cmap=cmap, origin="upper", zorder=1, vmin=0, vmax=min(float(masked.max()), vmax_m))
 
     ax.set_xlim(bounds.left, bounds.right)
     ax.set_ylim(bounds.bottom, bounds.top)

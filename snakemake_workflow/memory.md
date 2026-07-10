@@ -98,14 +98,22 @@ part of a stage MUST be added there.
 
 Machine-local overrides: create `snakemake_workflow/config/config_local.yml`
 (git-ignored, see `config_local.yml.example`) to override `paths.root`/
-`paths.code_root` (or `tile_grid.path`) without touching the committed
-`config.yml`. Loaded automatically by the Snakefile if present.
+`paths.code_root`/`paths.aqueduct_root` (or `tile_grid.path`) without
+touching the committed `config.yml`. Loaded automatically by the Snakefile
+if present, and by every standalone script via `config_utils.load_config()`.
 
 RULE SUMMARY (per tile_id unless noted):
+  compute_geoid_offset_raster (NOT per tile_id — one-time, only in the DAG
+                               when vertical_datum_correction.enabled)
+                               — pyshtools EGM2008/GOCO06s spherical-harmonic
+                               synthesis → cached geoid-offset GeoTIFF; see
+                               section 8's VERTICAL DATUM CORRECTION
   extract_tile_geometry     — clip a single tile from `tile_grid.path` → tile_geometry.gpkg
   compute_model_bbox        — tight model-domain bbox = DeltaDTM valid-cell
                                extent (in tile) + `model_bbox_buffer_arcsec` → model_bbox.json
-  extract_dem                — clip/fill DEM to bbox → dem.tif
+  extract_dem                — clip/fill DEM to bbox → dem.tif (optionally
+                               geoid-corrected per tile, see
+                               compute_geoid_offset_raster above)
   extract_dem_mask           — clip/reproject DEM-validity mask onto DEM grid → mask.tif
   compute_friction            — Copernicus LULC → Manning's-n friction raster → friction.tif
   extract_boundaries       (per return_period × waterlevel_name)
@@ -170,38 +178,113 @@ Orchestrated by run_preparation.py, mirroring analysis/run_analysis.py:
 
   run_preparation.py           — single entry point; runs sync_deltadtm →
                                 tile_mask_creation → select_tiles →
-                                merge_tiles → prepare_boundary_conditions.py
-                                in sequence as subprocesses (each step gated
-                                by a `preparation.*` config.yml switch,
-                                overridable via `--only-tile-grid`/
-                                `--only-boundary-conditions`/
-                                `--skip-sync-deltadtm`; `--force` forwards to
-                                prepare_boundary_conditions.py only — the
-                                tile-grid steps have no cache to bypass).
-                                `--fail-fast` aborts on first failure,
-                                otherwise later steps still run (though the
-                                tile-grid chain is a real dependency chain —
-                                each step reads the previous one's output
-                                file, so a failure there will cascade into a
-                                clear "file not found" in the next step
-                                rather than being silently skipped). Every
-                                step accepts `--config`; run_preparation.py
-                                forwards its own `--config` to all five (only
-                                prepare_boundary_conditions.py received it
-                                before 2026-07 — fixed so a machine-local
-                                config_local.yml-style override actually
-                                reaches every step, not just the last one).
-  sync_deltadtm.py             — syncs/verifies DeltaDTM tiles from a local
-                                source dir against a manifest CSV. Must run
-                                before tile_mask_creation.py (which reads the
-                                deltadtm_mask catalog VRT). Config-driven as
-                                of 2026-07 (`sync_deltadtm.source`/`target` in
-                                config.yml — previously hardcoded absolute
-                                paths in the script itself); `target` is
-                                deliberately NOT expressed via `{root}` since
-                                the manifest-driven tile cache doesn't
-                                necessarily live under `paths.root`.
-  tile_mask_creation.py       — step 1 of tile-grid prep, three sub-steps:
+                                merge_tiles → boundary_conditions in
+                                sequence. REDESIGNED 2026-07 (in-process, not
+                                subprocess): config.yml is loaded ONCE
+                                (config_utils.load_config) and passed as an
+                                already-loaded dict directly to each step
+                                module's `run(config, ...)` function - the 5
+                                step modules (sync_deltadtm.py,
+                                tile_mask_creation.py, select_tiles.py,
+                                merge_tiles.py, prepare_boundary_conditions.py)
+                                are no longer standalone entry points; each
+                                lost its own `argparse`/`load_config()`/
+                                `if __name__ == "__main__":` block and gained
+                                a plain `if __name__ == "__main__": sys.exit(
+                                "...no longer a standalone entry point...")`
+                                guard instead, so running one directly fails
+                                loudly (exit 1, clear message) rather than
+                                silently doing nothing (a real risk: with no
+                                argparse left at all, `python select_tiles.py
+                                --config X` would otherwise just import the
+                                module, execute no top-level code, and exit
+                                0 having done nothing). Old subprocess-based
+                                isolation (crash in one step doesn't kill the
+                                others) is now done via try/except per step
+                                in `_run_step()` instead of a subprocess
+                                return code - same UX (banner, timing,
+                                [OK]/[FAIL] icon - NOT ✓/✗, see cp1252 note
+                                below), same `--fail-fast` semantics.
+                                Step selection: positional STEP arguments
+                                (`python run_preparation.py select_tiles
+                                merge_tiles`) replace the old `--only-tile-
+                                grid`/`--only-boundary-conditions`/
+                                `--skip-sync-deltadtm` flags entirely - name
+                                the step(s) you want (from ALL_STEPS =
+                                sync_deltadtm/tile_mask_creation/
+                                select_tiles/merge_tiles/
+                                boundary_conditions, matching config.yml's
+                                `preparation.*` keys exactly), or give none
+                                to fall back to `preparation.*` in
+                                config.yml (today's real default: only
+                                sync_deltadtm is false, the other 4 run).
+                                Validated manually (not via argparse
+                                `choices=`) because `choices=` combined with
+                                `nargs="*"` on a positional has a real
+                                argparse bug: with zero STEP args given, it
+                                incorrectly validates the empty-list default
+                                itself against `choices`, raising a spurious
+                                "invalid choice: []" - confirmed by test,
+                                worked around by validating `args.steps`
+                                against `ALL_STEPS` by hand and calling
+                                `parser.error(...)` for real. `--force`
+                                still forwards to boundary_conditions only
+                                (`run(config, force=True)`) - the tile-grid
+                                steps have no cache to bypass.
+                                CP1252 CONSOLE CRASH FIXED 2026-07 (found
+                                while testing this redesign): the banner/icon
+                                print()s used `═` (U+2550) and `✓`/`✗`
+                                (U+2713/2717) - NOT in cp1252's printable
+                                range (unlike em-dash, which is) - so
+                                run_preparation.py would crash outright on a
+                                plain Windows console the moment any step
+                                actually ran (not just at --help time, like
+                                the same class of bug found earlier this
+                                session in docstrings). This was a PRE-
+                                EXISTING bug carried over verbatim from the
+                                old subprocess-based `_run()`'s own banner
+                                style, never actually triggered before.
+                                Replaced with plain `=`/`[OK]`/`[FAIL]`.
+                                Verified via a stubbed-function test harness
+                                (monkeypatches each step module's `run` to a
+                                no-op/failing stub before calling `main()`,
+                                so the orchestration logic - step selection,
+                                config-loading-once, --force forwarding,
+                                --fail-fast abort-before-next-step - is
+                                exercised without touching real project
+                                files or running the actual (slow,
+                                side-effecting) pipeline logic): explicit
+                                positional steps, config-default fallback,
+                                `--force` reaching only boundary_conditions,
+                                and `--fail-fast` correctly aborting before
+                                the next step runs, all confirmed passing.
+  sync_deltadtm.py             — no longer a standalone entry point as of
+                                2026-07 (exposes `run(config)`, see
+                                run_preparation.py above for the full
+                                redesign). REWRITTEN 2026-07: downloads
+                                DeltaDTM v1.1
+                                DEM (per-continent zips) + mask_tiles.zip
+                                directly from 4TU.ResearchData (hardcoded
+                                DEM_ZIP_URLS/MASK_ZIP_URL dict at the top of
+                                the script — one-time copy-paste from the
+                                4TU dataset page, see script docstring) and
+                                extracts their .tif files straight into the
+                                data catalog's `deltadtm`/`deltadtm_mask`
+                                source directories (the parent dir of each
+                                source's `path:` in data_catalog_gfm.yml) via
+                                get_data_catalog() — NOT a separate
+                                `sync_deltadtm.source`/`target` pair (that
+                                older manifest-CSV-sync design is gone).
+                                `sync_deltadtm.zip_download_dir` (config.yml)
+                                is only a temp staging dir for the .zip
+                                downloads before extraction; download/extract
+                                are both idempotent (skips a file already
+                                fully downloaded/extracted), safe to re-run.
+                                Must run before tile_mask_creation.py (which
+                                reads the deltadtm_mask catalog VRT).
+  tile_mask_creation.py       — no longer a standalone entry point as of
+                                2026-07 (exposes `run(config)`, see
+                                run_preparation.py above). step 1 of tile-grid prep, three sub-steps:
                                 (a) build_five_deg_grid_from_deltadtm bins
                                 every 1°×1° tile referenced by the
                                 `deltadtm_mask` VRT into its enclosing 5°
@@ -245,14 +328,15 @@ Orchestrated by run_preparation.py, mirroring analysis/run_analysis.py:
                                 (tile_id = parent_id*10 + quadrant_id — see
                                 section 8's TILE ID SCHEME for why the
                                 quadrant digit 0-3 matters beyond naming).
-  select_tiles.py             — step 2, TWO sequential filters (both new
-                                2026-07 in their current form):
+  select_tiles.py             — exposes `run(config)`, called from
+                                run_preparation.py (see above). step 2, TWO
+                                sequential filters:
                                 (1) filter_tiles_by_dem_mask — keeps tiles
                                 with any land/lake/river DeltaDTM mask
-                                coverage, as before.
+                                coverage.
                                 (2) filter_tiles_by_exposure — of the
                                 survivors, keeps tiles with any positive
-                                population (`exposure.population_source`,
+                                population (`"population"` catalog source,
                                 same WorldPop raster prepare_exposure_grid_
                                 chunk.py uses) within the tile bbox; a tile
                                 with zero population anywhere (or entirely
@@ -268,9 +352,20 @@ Orchestrated by run_preparation.py, mirroring analysis/run_analysis.py:
                                 before, specifically so they can be opened
                                 directly in QGIS to visually confirm the
                                 filters are excluding the right tiles.
-  merge_tiles.py               — step 3, REDESIGNED 2026-07 (see section 8's
+  merge_tiles.py               — no longer a standalone entry point as of
+                                2026-07 (exposes `run(config)`, dropped its
+                                old `--input`/`--output` override flags in
+                                the process - unused by run_preparation.py,
+                                see run_preparation.py above). step 3, REDESIGNED 2026-07 (see section 8's
                                 TILE TRIMMING AND MERGE REDESIGN for the full
-                                reasoning/history). Five stages, in order:
+                                reasoning/history). Also runs, FIRST and
+                                unconditionally checked (disabled by default -
+                                see section 8's VERTICAL DATUM CORRECTION),
+                                an optional EGM2008 -> GOCO06s DEM datum
+                                correction (`vertical_datum_correction` in
+                                config.yml, src/vertical_datum.py) - a no-op
+                                until raw EGM2008-referenced DeltaDTM tiles
+                                actually exist. Five further stages, in order:
                                 (1) compute_tile_fractions — ocean_fraction/
                                 land_fraction/mask_fraction/nodata_fraction
                                 per tile, from DeltaDTM mask files, on each
@@ -317,15 +412,30 @@ Orchestrated by run_preparation.py, mirroring analysis/run_analysis.py:
                                 Output is what `tile_grid.path` should point
                                 at. `--config` supported (previously only
                                 `--input`/`--output`).
-  prepare_boundary_conditions.py — generates the per-(RP, SLR) water-level
+  prepare_boundary_conditions.py — no longer a standalone entry point as of
+                                2026-07 (exposes `run(config, force=False)`,
+                                `logging.basicConfig()` moved out to
+                                run_preparation.py's own `main()` since
+                                calling it more than once in-process is a
+                                silent no-op past the first call - see
+                                run_preparation.py above). generates the per-(RP, SLR) water-level
                                 NetCDFs consumed by extract_boundaries.py:
-                                drops Antarctic COAST-RP stations, computes
+                                drops Antarctic COAST-RP stations, OPTIONALLY
+                                (`boundary_conditions.mdt_correction.enabled`,
+                                default false — see section 8's VERTICAL DATUM
+                                CORRECTION) subtracts the AVISO MDT at each
+                                station to re-reference from local MSL to
+                                GOCO06s (compute_mdt_correction — nearest valid
+                                grid cell + `fallback_search_deg` window
+                                search, cached to
+                                MDT_mapped_on_coastal_points.nc), computes
                                 per-station IPCC AR6 SLR fingerprints scaled to
                                 each target global-mean SLR, and combines them:
-                                total_wl = storm_tide(RP) + SLR_fingerprint.
-                                No MDT correction (see section 8 — COAST-RP and
-                                the DeltaDTM v1.1 DEM in use are both already
-                                MSL-referenced). Reads its RP/SLR lists straight
+                                total_wl = storm_tide(RP) [- MDT] +
+                                SLR_fingerprint. MDT correction OFF by default
+                                (see section 8 — COAST-RP and the DeltaDTM
+                                v1.1 DEM currently in use are both already
+                                MSL-referenced in that configuration). Reads its RP/SLR lists straight
                                 from config.yml so it always matches the
                                 Snakemake wildcard domain. Its `--config` default
                                 and run_preparation.py both point at
@@ -452,11 +562,11 @@ config_utils.py       — get_data_catalog(): thin wrapper around hydromt.DataCa
 tiles.py               — tile-grid IO (load/get/save tile geometry);
                          filter_tiles_by_dem_mask (select_tiles.py check 1:
                          land/lake/river DeltaDTM mask coverage);
-                         filter_tiles_by_exposure (select_tiles.py check 2,
-                         added 2026-07: any positive population within the
-                         tile bbox, via the same `exposure.population_source`
-                         raster prepare_exposure_grid_chunk.py uses — a
-                         lookup failure, e.g. bbox entirely outside WorldPop's
+                         filter_tiles_by_exposure (select_tiles.py check 2:
+                         any positive population within the tile bbox, via
+                         the same `"population"` catalog raster
+                         prepare_exposure_grid_chunk.py uses — a lookup
+                         failure, e.g. bbox entirely outside WorldPop's
                          coverage, is treated the same as zero exposure);
                          compute_tile_fractions (ocean_fraction/land_fraction/
                          mask_fraction/nodata_fraction per tile from DeltaDTM
@@ -539,10 +649,11 @@ aqueduct_runner.py      — run_aqueduct (subprocess wrapper); is_oom_error /
                          (OOM/skip bookkeeping, see section 9).
 merge.py                — AQUEDUCT_NODATA = np.finfo(np.float32).max;
                          merge_tile_rasters_chunk: block-wise, CHUNK-SCOPED
-                         merge → flood_count (uint8) + simple valid-count-
-                         weighted mean waterdepth, plus a bounded reservoir-
-                         sampled per-cell (min, max) depth across ALL
-                         overlapping tiles (>=2 valid, any flood status —
+                         merge → simple valid-count-weighted mean waterdepth
+                         (flood_count output REMOVED 2026-07 — no plot
+                         consumed it, see section 8), plus a bounded
+                         reservoir-sampled per-cell (min, max) depth across
+                         ALL overlapping tiles (>=2 valid, any flood status —
                          deliberately includes disagreeing/"ambiguous" cells,
                          unlike the old first-two-flooding-tiles pairing) for
                          plot_overlap_continent_diagnostics.py.
@@ -550,7 +661,7 @@ plotting.py             — compute_flood_area_km2 (latitude-corrected pixel
                          area); plot_overlap_continent_diagnostics (per-
                          continent hexbin of min/max depth w/ Pearson r + pie
                          chart of confirmed-flood/confirmed-no-flood/ambiguous
-                         cell counts, split on flood_area_threshold_m);
+                         cell counts, split on exposure.exceedance_threshold_m);
                          plot_raster_with_coastlines (downsampled raster + OSM
                          land background + optional OOM-tile overlay).
 protection.py           — load_geogunit_ids: nearest-neighbour reprojection
@@ -652,152 +763,252 @@ visualization.py         — plotting layer for analysis/: load_growth_matrix_cs
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 config.yml — every value used by a rule or script lives here; nothing is
-hardcoded in rules/ or scripts/. Rules read config into a `params:` block;
-scripts read `snakemake.params.*` (not `snakemake.config` directly) so each
-rule's config dependency is explicit. Dataset identifiers (DEM, land use,
-…) are catalog keys from data_catalog_gfm.yml — no separate alias layer.
-All `{root}` / `{code_root}` placeholders are expanded once at Snakefile
-parse time (`_expand_paths`) so every rule/script gets absolute paths.
+hardcoded in rules/ or scripts/, EXCEPT data-catalog key names (e.g.
+`"deltadtm"`, `"population"`, `"geogunit_protection_units"`,
+`"flopros_protection_standards"`, `"ssp_population_growth_factors"`), which
+are literal strings at each call site rather than threaded through
+config.yml — data_catalog_gfm.yml is the single place dataset identifiers
+live, config.yml holds only pipeline parameters. Rules read config into a
+`params:` block; scripts read `snakemake.params.*` (not `snakemake.config`
+directly) so each rule's config dependency is explicit. All `{root}` /
+`{code_root}` / `{aqueduct_root}` / `{processed_inputs_dir}` placeholders
+are expanded once at Snakefile parse time (`_expand_paths`) so every
+rule/script gets absolute paths (`processed_inputs_dir` needs a second
+expansion pass since it's itself declared as `"{root}/processed_inputs"`).
+Every standalone (non-Snakemake) script does the same via
+`config_utils.load_config()`, which also honors a git-ignored
+`config_local.yml` sibling for machine-local path overrides.
 
-Key sections (active values as of 2026-07-08):
-  paths.root / code_root:            D:/GFM / C:/Users/Schlu005/GFM
-  sync_deltadtm.source / target:     {root}/inputs/DeltaDTM /
-                                       D:/GCFM_UU/raw_data/DeltaDTM  (added
-                                       2026-07 — sync_deltadtm.py was
-                                       previously hardcoded, see section 4a)
+Key sections:
+  paths.root / code_root / aqueduct_root: machine-specific; aqueduct_root
+                                       defaults to code_root if unset.
+    processed_inputs_dir: {root}/processed_inputs (prepare_boundary_
+                                       conditions.py's intermediate NetCDFs;
+                                       also the base for
+                                       boundary_conditions.waterlevel_nc_dir
+                                       and visualization.slr_trajectories_csv)
+    hydromt_data_catalog: snakemake_workflow/config/data_catalog_gfm.yml
+  sync_deltadtm.zip_download_dir:    {root}/inputs/DeltaDTM/_zips (temp .zip
+                                       staging; final DEM/mask tile dirs come
+                                       from data_catalog_gfm.yml's
+                                       deltadtm/deltadtm_mask sources).
+                                       delete_zips_after_extract defaults
+                                       false. sync_deltadtm.py also
+                                       downloads and patches 4TU's pre-built
+                                       global DEM VRT mosaic
+                                       (DEM_VRT_URL constant,
+                                       download_and_patch_vrt) — rewrites
+                                       every <SourceFilename> to this
+                                       machine's absolute tile paths so the
+                                       VRT works regardless of which
+                                       continents were downloaded.
   preparation.*:                     sync_deltadtm/tile_mask_creation/
                                        select_tiles/merge_tiles/
-                                       boundary_conditions = true (all steps
-                                       of preparation/run_preparation.py)
+                                       boundary_conditions switches for
+                                       preparation/run_preparation.py
+  vertical_datum_correction.enabled: DEM EGM2008 -> GOCO06s geoid
+                                       correction, applied PER TILE inside
+                                       rule extract_dem (preprocessing.smk).
+                                       .gfc paths come from
+                                       data_catalog_gfm.yml's
+                                       `egm2008_geoid`/`goco06s` entries, not
+                                       config. offset_raster_path is the
+                                       cache for the ONE-TIME global geoid-
+                                       offset raster (rule
+                                       compute_geoid_offset_raster) — a
+                                       pipeline-generated file, not a data-
+                                       catalog candidate.
+  raster_format:                     driver/compression/predictor/nodata
+                                       shared by every GTiff the pipeline
+                                       writes (preprocessing inputs,
+                                       run_aqueduct's nodata placeholder,
+                                       merge_chunk's output) - one format
+                                       throughout instead of separate
+                                       simulation.input_raster/
+                                       postprocessing.output_raster copies.
   tile_grid.path:                    whatever regional/global tile grid is
                                        currently under test — see PROJECT
                                        OVERVIEW, changes often
-    min_coast_fraction:               0.05  (merge_tiles.py's water-
-                                       deficient/land-deficient threshold —
-                                       `min_mask_fraction` REMOVED 2026-07,
-                                       mask_fraction is diagnostic-only now)
-    max_merge_count:                  4  (cap shared across both merge
-                                       phases, was per-phase implicitly before)
-    trim_buffer_arcsec:               600  (~1/6°, ~18.5km at the equator —
-                                       coastal margin kept by compute_trimmed_
-                                       bbox beyond a tile's land extent; added
-                                       2026-07)
-    dedup_iou_threshold:              0.8  (deduplicate_overlapping_tiles —
-                                       added 2026-07; confirmed on a regional
-                                       test grid that the one genuine
-                                       duplicate pair found had IoU=1.000
-                                       while the next-highest legitimate
-                                       neighbour pair topped out at 0.645, a
-                                       wide margin below this default)
-  tile_split.fraction / max_depth / max_retries: 0.667 / 2 / 5  (run_pipeline.py's
-                                       OOM-recovery retry loop — SIMPLIFIED
-                                       2026-07, poll_interval_seconds/
-                                       oom_settle_seconds/
-                                       graceful_stop_grace_seconds REMOVED
-                                       along with the live-watching mechanism
-                                       that used them, see section 8)
-  boundary_conditions.waterlevel_nc_dir: {root}/processed_inputs/WL_scenarios
-    processed_inputs_dir: {root}/processed_inputs  (prepare_boundary_conditions.py's
-                            intermediate COAST-RP_preprocessed.nc / SLR_base_*.nc /
-                            SLR_fingerprints_all.nc, reused across runs unless --force —
-                            cache filenames now bake in slr_scenario/confidence_level,
-                            see section 4a)
-    slr_scenario / confidence_level: ssp245 / medium  (IPCC AR6 regional SLR
-                            projection choice for prepare_boundary_conditions.py)
-    return_periods:  1,2,5,10,25,50,100,250,500,1000
-    slr_scenarios:   SLR_0 … SLR_1400 (200 mm steps, 8 values)
-    coastrp_min_lat: -60  (Antarctic COAST-RP station cutoff — practical
-                            round-number choice, not a cited threshold;
-                            read by both prepare_boundary_conditions.py and
-                            tile_mask_creation.py — see section 8)
-    station_search_buffer_deg: 1.0  (added 2026-07 — extract_boundaries.py's
-                            select_stations_for_tile buffer around a tile's
-                            bbox when picking candidate COAST-RP stations;
-                            needed once tile_grid.trim_buffer_arcsec started
-                            shrinking tiles, so the candidate pool for
-                            Aqueduct's knn=15 IDW interpolation doesn't
-                            shrink along with them. Was an unbuffered plain
-                            bbox intersect before.)
+    min_coast_fraction:               merge_tiles.py's water-deficient/
+                                       land-deficient threshold
+    max_merge_count:                  cap shared across both merge phases
+    trim_buffer_arcsec:               coastal margin compute_trimmed_bbox
+                                       keeps beyond a tile's land extent;
+                                       must stay comfortably above
+                                       simulation.model_bbox_buffer_arcsec
+                                       (which needs real slack to add its
+                                       own buffer without being clamped back
+                                       to the tile bbox) and, at the coarsest
+                                       DeltaDTM x-resolution found near the
+                                       poles (~5"/px around 80-83N), several
+                                       times that resolution to survive
+                                       pixel-rounding.
+    dedup_iou_threshold:              deduplicate_overlapping_tiles's
+                                       minimum IoU to consolidate two tiles
+                                       covering the same physical feature —
+                                       0.8 sits with a wide margin between a
+                                       confirmed duplicate pair (IoU=1.000)
+                                       and the next-highest legitimate
+                                       neighbour pair (IoU=0.645) on a
+                                       regional test grid.
+    cardinal_neighbor_overlap_threshold: minimum bbox-overlap fraction (of
+                                       the smaller tile's width/height) for
+                                       merge_undersized_tiles to treat two
+                                       tiles as cardinal (not diagonal)
+                                       neighbours.
+  tile_split.fraction / max_depth / max_retries: run_pipeline.py's OOM-
+                                       recovery retry loop around
+                                       `snakemake` (each invocation runs to
+                                       completion; OOM'd tiles are split and
+                                       the DAG re-run from a fresh, mostly-
+                                       cached state, up to max_retries times).
+  boundary_conditions.waterlevel_nc_dir: {processed_inputs_dir}/WL_scenarios
+    slr_scenario / confidence_level: IPCC AR6 regional SLR projection choice
+                            for prepare_boundary_conditions.py
+    return_periods / slr_scenarios: RP and SLR wildcard domains
+    coastrp_min_lat: Antarctic COAST-RP station cutoff (practical round
+                            number, not a cited threshold) — read by both
+                            prepare_boundary_conditions.py and
+                            tile_mask_creation.py
+    mdt_correction.enabled: COAST-RP local-MSL -> GOCO06s MDT subtraction;
+                            must be enabled together with
+                            vertical_datum_correction.enabled so COAST-RP
+                            and the DEM share one vertical reference
+    station_search_buffer_deg: extract_boundaries.py's buffer around a
+                            tile's bbox when picking candidate COAST-RP
+                            stations, so tile_grid.trim_buffer_arcsec
+                            shrinking tiles doesn't also shrink the
+                            candidate pool for Aqueduct's knn IDW
+                            interpolation
   simulation.model_outputs:          {root}/model_outputs
-    aqueduct_executable:             {code_root}/build/aqueduct/aqueduct.exe
-    model_bbox_buffer_arcsec:        3   (~1 DeltaDTM pixel of coastal buffer)
-    flooding: resolution=30 m, knn=15 (nearest water-level stations), default_friction=0.001
-    input_raster: GTiff (NOT COG - see section 8) / zstd / predictor=3, nodata=-9999
+    aqueduct_executable:             {aqueduct_root}/build/aqueduct/aqueduct.exe
+    model_bbox_buffer_arcsec:        buffer (arcsec) added around the DEM's
+                                       own valid-cell extent, clamped to the
+                                       tile bbox, for the flood model's
+                                       coastal entry point - continuous
+                                       degree-space, not pixel-quantized.
+    dem_gap_fill:                    min_hard_fill_component_size (connected-
+                                       component size above which a missing-
+                                       land DEM gap hard-fills to
+                                       land_fill_value_m instead of IDW-
+                                       interpolating), interp_max_search_
+                                       distance, interp_smoothing_iterations,
+                                       land_fill_value_m
+    flooding: resolution/knn/debug/default_friction for each tile's Aqueduct TOML config
   postprocessing.merged_outputs:     {root}/merged_results
-    chunk_size_deg:                  5  (also bounds peak memory of the
-                                          per-chunk geogunit lookup, which
-                                          scales with chunk_size_deg²)
-    block_size:                      2048
-    flood_area_threshold_m:          0.05
-    plots.enabled:                   false  (VRTs + GeoTIFFs always written;
-                                               PNGs/diagnostics are opt-in)
-    overlap_corr_max_samples:        50000  (per chunk, for the per-continent
-                                               overlap correlation/agreement diagnostics)
-  protection.baseline_waterlevel_name: SLR_0   (fixed reference scenario for
+    chunk_size_deg:                  also bounds peak memory of the
+                                       per-chunk geogunit lookup, which
+                                       scales with chunk_size_deg²
+    block_size:                      write-block side length (pixels) for
+                                       merge_chunk/compute_flood_fraction_
+                                       chunk's block-by-block I/O loops -
+                                       memory tiling only, no resampling
+    overlap_corr_max_samples / overlap_corr_seed: reservoir-sampling cap and
+                                       RNG seed for the per-continent overlap
+                                       correlation/agreement diagnostics
+                                       (src/merge.py's _PairSamples)
+    plots.*:                         enabled/debug switches, dpi, and per-
+                                       plot figsize/colormap/vmax/threshold
+                                       values for plot_merged_results.py,
+                                       plot_overlap_diagnostics.py,
+                                       plot_overlap_continent_diagnostics.py
+  protection.baseline_waterlevel_name: fixed reference scenario for
                                        prepare_exposure_grid_chunk's chunk
                                        grid metadata; also read into
-                                       compute_exposure_analysis.py)
-    geogunit_source / flopros_source:  geogunit_protection_units / flopros_protection_standards
-    default_rp:                        5  (fallback when FLOPROS has no
-                                             Coastal or Riverine standard)
-  exposure.population_source:        population (WorldPop 2020, ~1 km, count)
-    exceedance_threshold_m:          0.10
-  adaptation.slr_intensities:        SLR_250, SLR_500, SLR_1000 (design
-                                       intensities for protect/retreat; union'd
-                                       into WATERLEVEL_NAMES by the Snakefile)
-  population_growth:                 SSP1/2/3/5 growth factors, output years
-                                       2025–2100, from an Excel workbook
+                                       compute_exposure_analysis.py
+    default_rp:                        fallback when FLOPROS has no Coastal
+                                       or Riverine standard
+  exposure.exceedance_threshold_m:   the SINGLE flooded-depth threshold used
+                                       throughout (compute_flood_fraction_
+                                       chunk, plot_merged_results' flood-area
+                                       annotation, plot_overlap_continent_
+                                       diagnostics' pie chart) - passed
+                                       explicitly as a threshold_m rule param
+                                       everywhere it's needed.
+  adaptation.slr_intensities:        design intensities for protect/retreat;
+                                       union'd into WATERLEVEL_NAMES by the
+                                       Snakefile
+  population_growth:                 ssps/output_years switches; the growth-
+                                       factors Excel path/sheet come from the
+                                       ssp_population_growth_factors catalog
+                                       entry, not config
   analysis.*:                        compute_exposure/plot_burning_ember/
-                                       plot_adaptation_bars/plot_timeseries = true;
-                                       plot_world_maps = false (slow)
-    avoid_worker_memory_budget_gb:    8  (caps AVOID's ProcessPoolExecutor
-                                       worker count by shared-payload size —
-                                       see section 8)
+                                       plot_adaptation_bars/plot_timeseries/
+                                       plot_world_maps switches
+    avoid_worker_memory_budget_gb:    caps AVOID's ProcessPoolExecutor
+                                       worker count by shared-payload size
   visualization.*:                   growth_rates (scenario-neutral ember
                                        y-axis, also the File 2 growth-matrix
                                        axis), slr_interp (File 2's dense SLR
-                                       grid, min/max/n_points — linearly
-                                       interpolated, not PCHIP), SSP↔RCP code
-                                       mapping (126/245/585 — used for both
-                                       plot_timeseries.py's panel titles and
-                                       extract_slr_trajectories.py), colour
-                                       palettes
+                                       grid — linearly interpolated, not
+                                       PCHIP), highlight_years, country_eai_
+                                       vmax (shared fixed cap for per-country
+                                       ember/timeseries plots), n_ember_
+                                       contours, per-plot figsize keys,
+                                       world_map_lat_range/downsample,
+                                       geo109_subsample (lookup-table build,
+                                       distinct from world_map_downsample's
+                                       display-render subsampling), SSP↔RCP
+                                       code mapping (used by plot_timeseries.
+                                       py's panel titles and extract_slr_
+                                       trajectories.py), colour palettes,
+                                       level_linestyles/baseline_linestyle
+                                       (plot_timeseries.py's per-intensity
+                                       linestyle encoding)
 
 config_local.yml.example — template for a git-ignored, machine-local
-`config_local.yml` overriding `paths.root`/`paths.code_root` (and optionally
-`tile_grid.path`); loaded by the Snakefile after config.yml if present.
+`config_local.yml` overriding `paths.root`/`paths.code_root`/
+`paths.aqueduct_root` (and optionally `tile_grid.path`); loaded by the
+Snakefile after config.yml if present, and by every standalone script via
+`config_utils.load_config()`.
 
 data_catalog_gfm.yml — HydroMT DataCatalog, `root: "D:/GFM"`. Key entries:
   coast_rp                — COAST-RP storm-tide NetCDF (~22,670 stations
                              after Antarctic removal); boundary-condition source.
                              MSL-referenced — see section 8.
-  mdt_hybrid_cnes_cls22_cmems2020 — AVISO MDT. NOT used by
-                             prepare_boundary_conditions.py (see section 8);
-                             kept in the catalog for other diagnostic uses.
-  ipcc_ar6_slr_projections — AR6 regional SLR fingerprints.
+  mdt_cnes_cls22            — AVISO MDT-HYBRID-CNES-CLS22-CMEMS2020. Used by
+                             prepare_boundary_conditions.py's
+                             compute_mdt_correction ONLY when
+                             boundary_conditions.mdt_correction.enabled is
+                             true (off by default — see section 8). Sole MDT
+                             entry.
+  ipcc_ar6_slr_projections — AR6 regional SLR fingerprints (NetCDF, directory-
+                             root path completed at read time by scenario/
+                             confidence choice) — prepare_boundary_conditions.py.
+  ipcc_ar6_slr_wg1_csv      — Global-mean SLR percentile CSVs, one per SSP/RCP
+                             code (SLR_{code}_wg1.csv, directory-root path
+                             completed by visualization.ssp_rcp_codes) —
+                             extract_slr_trajectories.py. Provenance/citation
+                             not yet confirmed, unlike the regional entry above.
+  egm2008_geoid / goco06s   — ICGEM spherical-harmonic .gfc coefficient files,
+                             read directly by pyshtools (src/vertical_datum.py),
+                             not through HydroMT's typed readers. Used to
+                             compute the EGM2008 -> GOCO06s geoid-offset
+                             raster when vertical_datum_correction.enabled.
   five_deg_grid             — DiluviumDEM-derived 5° tile index; NOT used by
-                             tile_mask_creation.py anymore (superseded by a
-                             DeltaDTM-mask-derived 5° grid built inline —
-                             see the tile_mask_creation.py entry above).
-  deltadtm / deltadtm_mask  — DeltaDTM v1.1 (MSL-referenced, GOCO06s geoid +
-                             MDT correction — see section 8) 1-arcsec DEM +
-                             validity mask (VRTs).
+                             tile_mask_creation.py (superseded by a DeltaDTM-
+                             mask-derived 5° grid built inline).
+  deltadtm / deltadtm_mask  — DeltaDTM v1.1 1-arcsec DEM + validity mask
+                             (VRTs) — see section 8 for vertical datum.
   land_polygons             — OSM land polygons; layer **must** be specified
                              as `land_polygons` (not the default `marine_buffer`).
-                             As of 2026-07 used ONLY for plotting coastline
-                             reference lines (plot_merged_results.py,
-                             plot_overlap_diagnostics.py) — extract_dem/
-                             extract_dem_mask no longer use it at all (see
-                             section 8's DEM/MASK NODATA FILL entry); don't
-                             assume it still feeds DEM-fill decisions.
+                             Used ONLY for plotting coastline reference lines
+                             (plot_merged_results.py, plot_overlap_diagnostics.py)
+                             — extract_dem/extract_dem_mask don't use it.
   land_use                  — Copernicus 100 m LULC.
   geogunit_protection_units / geogunit_country_units / geogunit_country_list
                              — WRI geogunit-107 (sub-national) / geogunit-109
                              (country) rasters + lookup table.
   flopros_protection_standards — FLOPROS coastal/riverine design RPs by geogunit-107.
-  ssp_population_growth_factors — Excel workbook of per-country SSP growth factors.
+  ssp_population_growth_factors — Excel workbook of per-country SSP growth
+                             factors, read via catalog.get_source(...).path
+                             (not a config.yml path/sheet pair).
   population                — WorldPop 2020, ~1 km, population COUNT (not density).
   lu_to_roughness_lookup     — Manning's-n lookup by Copernicus LULC class.
+
+All dataset identifiers are literal catalog-key strings at their call sites
+(e.g. `catalog.get_dataframe("flopros_protection_standards")`) — config.yml
+holds pipeline parameters only, never a dataset's catalog key name.
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -806,8 +1017,11 @@ data_catalog_gfm.yml — HydroMT DataCatalog, `root: "D:/GFM"`. Key entries:
 
 Stage 0 — Preparation (manual, one-off, NOT in the Snakemake DAG; all in
   snakemake_workflow/preparation/, run via `python preparation/
-  run_preparation.py` or individually — see section 4a for full detail on
-  every step below):
+  run_preparation.py [STEP ...]` — as of 2026-07 the individual step
+  scripts below are no longer standalone entry points, only callable
+  through run_preparation.py (positionally naming one or more steps, or
+  omitting STEP entirely to use config.yml's preparation.* switches) — see
+  section 4a for full detail on every step below):
   Tile grid prep: sync_deltadtm.py (ensure DeltaDTM tiles are present)
     → tile_mask_creation.py (DeltaDTM+COAST-RP-derived 5° grid → 3.75°
       overlapping tiles)
@@ -959,11 +1173,11 @@ Stage 4 — Exposure/adaptation analysis (`analysis/`, standalone — run
 
 PROTECTION / FLOPROS — BASELINE IS "PROTECT AT SLR_0":
   src/protection.py resolves geogunit IDs (nearest-neighbour reprojection)
-  onto the population grid; `default_rp`/`geogunit_source`/`flopros_source`
-  are read in analysis/compute_exposure_analysis.py, which snaps each
-  geogunit's FLOPROS "Coastal" RP (falling back to "Riverine", then
-  `protection.default_rp`=5) to the nearest simulated return period ≥ that
-  standard.
+  onto the population grid using the `"geogunit_protection_units"` catalog
+  raster. analysis/compute_exposure_analysis.py reads the `"flopros_
+  protection_standards"` catalog table and snaps each geogunit's FLOPROS
+  "Coastal" RP (falling back to "Riverine", then `protection.default_rp`)
+  to the nearest simulated return period ≥ that standard.
   Baseline and protect share the EXACT SAME mechanism
   (`exposure_analysis.protect_exposure_grid`, binary: cells with
   `ff <= adapt_prot_frac` are fully protected -> 0; cells with
@@ -1142,43 +1356,46 @@ TILE TRIMMING AND MERGE REDESIGN (2026-07, preparation/merge_tiles.py, src/tiles
   algorithm) now correctly merges into a combined tile with ocean_fraction
   ≈0.16 under the new water-deficient phase.
 
-DEM/MASK NODATA FILL (2026-07, src/rasters.extract_dem / extract_dem_mask):
-  REMOVED the OSM `land_polygons` dataset from both functions entirely — the
-  fill decision for a missing DEM/mask cell now comes purely from the
-  DeltaDTM mask itself (reprojected onto the DEM's own grid), not a
-  separately-sourced, independently-aligned dataset. Two things drove this,
-  investigated in order:
-  (1) User's original concern: land_polygons isn't well aligned with
-  DeltaDTM's own coastline, so using it to decide "is this missing-DEM cell
-  land or ocean" is unreliable at the boundary.
-  (2) A DIFFERENT, larger issue found while verifying that concern
-  empirically (real crosstab, DeltaDTM's own mask vs. its own DEM raster,
-  10 test tiles): the overwhelming majority of DEM nodata is over LAND, not
-  ocean (65-98% per tile) — the OPPOSITE of what was initially assumed. This
-  is not a data error: DeltaDTM is a coastal-STRIP elevation product, not a
-  global DEM, and these nominal 2.5-3.75° tiles extend well inland beyond its
-  real measured coverage — most of a tile's inland interior is legitimately
-  "land the DEM never measured," not "ocean/gap." (Separately verified: the
-  existing lake/river override already worked correctly on real data — every
-  lake/river nodata pixel checked got the intended 0.0m fill, not 9999 — so
-  that specific mechanism had no bug, contrary to an initial worry that
-  rivers/lakes, critical paths for inland flood propagation, might be
-  getting wrongly blocked.)
-  NEW RULE (both functions, single source of truth): missing DEM cell where
-  the DeltaDTM mask says land (0) OR has no coverage at all (255, nodata) →
-  `_DEM_LAND_FILL` (9999m, so Julia never floods it); mask says ocean (1),
-  lake (2), or river (3) → 0.0m. `extract_dem_mask` applies the matching
-  rule to the mask output itself: no-coverage (255) → land (0), valid
-  0/1/2/3 kept unchanged. `_land_raster` (the old land_polygons geometry-mask
-  helper) is now dead code, removed. `land_polygons` itself is NOT removed
-  from the data catalog — it's still used for plotting coastline reference
-  lines (plot_merged_results.py, plot_overlap_diagnostics.py), just no
-  longer for this.
-  Verified empirically on all 10 real test tiles after the change: zero
-  leftover nodata in either output, land/ocean/lake/river/no-coverage cells
-  all filled exactly as intended (100% match against the expected rule on
-  every category, including the "not covered by mask at all" case that
-  motivated the fix).
+DEM/MASK NODATA FILL (src/rasters.extract_dem / extract_dem_mask):
+  The fill decision for a missing DEM/mask cell comes purely from the
+  DeltaDTM mask itself (reprojected onto the DEM's own grid) — the OSM
+  `land_polygons` dataset is not used here, since it isn't well aligned with
+  DeltaDTM's own coastline. `land_polygons` is still used elsewhere, for
+  plotting coastline reference lines (plot_merged_results.py,
+  plot_overlap_diagnostics.py).
+
+  DeltaDTM is a coastal-STRIP elevation product, not a global DEM, and the
+  tile grid's nominal footprints extend well inland beyond its measured
+  coverage — most of a tile's inland interior is legitimately "land the DEM
+  never measured," so most DEM nodata is over land, not ocean.
+
+  Rule (both functions, single source of truth): missing DEM cell where the
+  DeltaDTM mask says land (0) OR has no coverage at all (255, nodata) →
+  `land_fill_value_m` (default 9999m, so Julia never floods it); mask says
+  ocean (1), lake (2), or river (3) → 0.0m. `extract_dem_mask` applies the
+  matching rule to the mask output itself: no-coverage (255) → land (0),
+  valid 0/1/2/3 kept unchanged.
+
+  GAP-SIZE-DEPENDENT LAND FILL refines the flat-fill rule above: a lone
+  nodata pixel surrounded by real elevation is more likely a measurement
+  gap than genuinely unmeasured terrain, so `rasters.extract_dem` splits
+  missing-LAND cells (missing-WATER cells are unaffected, always 0.0
+  regardless of gap size) by the size of their connected (4-connectivity,
+  `scipy.ndimage.label`) group of missing-land cells:
+    - group size < `simulation.dem_gap_fill.min_hard_fill_component_size`
+      → INTERPOLATED from surrounding valid DeltaDTM elevation via
+      `rasterio.fill.fillnodata` (IDW; `interp_max_search_distance`/
+      `interp_smoothing_iterations`, both config.yml-driven).
+    - group size >= threshold → flat `land_fill_value_m` fill.
+  `fillnodata` runs ONCE over the whole tile using only originally-valid
+  DeltaDTM cells as interpolation anchors, producing a candidate value for
+  every originally-missing cell (land AND water); only the small-gap-land
+  subset of those candidates is actually used - large-gap-land and all
+  water cells get their fixed value regardless of what the interpolation
+  computed there. Connectivity is computed on missing-LAND cells only
+  (ocean/lake/river nodata cells never participate in a land gap's
+  component, don't inflate its size, and don't themselves become
+  interpolation targets).
 
 FRICTION:
   src/rasters.compute_friction clips/reprojects Copernicus LULC (mode
@@ -1204,30 +1421,148 @@ BOUNDARY CONDITIONS:
   cell). No MDT correction is applied — see VERTICAL DATUM below.
 
 VERTICAL DATUM (DEM ↔ SURGE FORCING):
-  DEM (deltadtm catalog entry) and COAST-RP storm-tide forcing are BOTH
-  referenced to local mean sea level (MSL) — verified directly against the
-  files in use, not just catalog metadata:
+  DEFAULT STATE (both new switches below OFF): DEM (deltadtm catalog entry)
+  and COAST-RP storm-tide forcing are BOTH referenced to local mean sea
+  level (MSL) — verified directly against the files in use, not just catalog
+  metadata:
     - DeltaDTM: the tiles actually loaded (`D:\GCFM_UU\raw_data\DeltaDTM\
       deltadtm.vrt`) are named `DeltaDTM_v1_1_..._GOCO06s_MDT.tif` and are
       sourced from the WUR YODA "sea-level-referenced-coastal-elevation"
       vault — the v1.1 MSL-referenced release (Seeger & Minderhoud, 2025),
       re-referenced from the original EGM2008 geoid: geoid converted to
-      GOCO06s, then MDT subtracted.
+      GOCO06s, then MDT subtracted (over land, via extrapolation — this
+      extrapolation step is exactly what the 2026-07 change below avoids).
     - COAST-RP: documented as MSL-referenced by its own source paper
       (Dullaart et al. 2021).
-  Because both already share the same reference, prepare_boundary_conditions.py
-  does NOT apply an MDT correction to COAST-RP — `total_wl = storm_tide(RP)
-  + SLR_fingerprint(target_slr)`, no `+ MDT` term. src/rasters.extract_dem
-  also does no vertical adjustment of its own; it passes the DeltaDTM v1.1
+  With both switches off, prepare_boundary_conditions.py does NOT apply an
+  MDT correction to COAST-RP — `total_wl = storm_tide(RP) +
+  SLR_fingerprint(target_slr)`, no `- MDT` term — and src/rasters.extract_dem
+  does no vertical adjustment of its own; it passes the DeltaDTM v1.1
   elevations through unchanged (only horizontal clip/fill).
   HISTORY: an earlier version of prepare_boundary_conditions.py added
-  `+ MDT` to COAST-RP, based on data_catalog_gfm.yml metadata (now corrected)
-  that mislabeled the DEM as EGM2008-geoid-referenced (the DOI/version fields
-  were stale, copied from the original DeltaDTM v1.0 — Pronk et al. 2024 —
-  rather than the v1.1 MSL release actually in use). That would have shifted
-  the boundary water levels away from the DEM's frame by the local MDT
-  magnitude (up to ~1-2 m in places, spatially varying) instead of aligning
-  them. Removed 2026-07-02 after confirming the DEM's actual provenance.
+  `+ MDT` to COAST-RP (wrong sign for this direction of conversion, and
+  gated on stale/mislabeled DEM metadata) — removed 2026-07-02 after
+  confirming the DEM's actual (MSL-referenced) provenance. That removal is
+  what left both switches below off by default.
+
+  VERTICAL DATUM CORRECTION (2026-07, config-gated, OFF by default): a
+  DELIBERATE, correctly-signed reintroduction of a datum correction, this
+  time avoiding the WUR-YODA release's MDT-over-land extrapolation entirely.
+  Two independent switches, meant to be toggled TOGETHER (enabling only one
+  leaves DEM and forcing on different vertical references):
+    - `vertical_datum_correction.enabled` (config.yml) — rules
+      compute_geoid_offset_raster / extract_dem in preprocessing.smk,
+      src/vertical_datum.py, rasters.extract_dem. REDESIGNED 2026-07 (twice
+      — see history below) into its final form: applied PER MODEL TILE,
+      folded directly into extract_dem's own per-tile_id clip step, NOT a
+      separate preparation/*.py pass over the whole raw DeltaDTM release.
+      The expensive part (spherical-harmonic geoid synthesis via pyshtools +
+      boule from the data catalog's `egm2008_geoid`/`goco06s` .gfc sources,
+      ~12-38s including the cache write) runs exactly ONCE, in the new
+      non-tile_id-wildcarded rule `compute_geoid_offset_raster`, cached to a
+      small (~2.7 MB) GeoTIFF at `vertical_datum_correction.
+      offset_raster_path` (default `{root}/inputs/ICGM/
+      geoid_offset_egm2008_goco06s.tif`). Every per-tile `extract_dem` job
+      then just reprojects a tiny window of that cached raster onto its own
+      DEM grid (`sample_geoid_offset`, ~0.05s) and ADDS it to every DEM cell
+      with valid DeltaDTM elevation ONLY — nodata cells are left untouched
+      (still nodata, so extract_dem's existing 9999/0 fill logic downstream
+      is unaffected by the correction). NO MDT term is ever applied to the
+      DEM (mirrors GCFM_UU/workflow/scripts/05a_get_elevation.py's own DEM
+      correction exactly - MDT is only ever meaningful at sea). Because
+      `extract_dem` now has a REAL Snakemake dependency edge on
+      `compute_geoid_offset_raster.output.offset_raster` (via `input:`, not
+      just `params:`), enabling the switch requires zero manual
+      `_PREPROCESS_OUTPUTS` wiring in the Snakefile — Snakemake pulls the
+      one-time rule in automatically, exactly once (verified via dry-run:
+      count=1 for compute_geoid_offset_raster, extract_dem's own count
+      unchanged from the disabled state). Still: the `deltadtm` catalog
+      `path` must ALREADY point at the ORIGINAL EGM2008-referenced release
+      before this switch is turned on (applying it to the already-MSL-
+      referenced WUR-YODA `_GOCO06s_MDT` release would double-correct) -
+      that catalog repoint is still the user's own manual step, not done by
+      this pipeline. `deltadtm.path` was separately relocated 2026-07 from
+      the absolute `D:\GCFM_UU\raw_data\DeltaDTM\deltadtm.vrt` to
+      `{root}/inputs/DeltaDTM/deltadtm.vrt` (same 7553 `_GOCO06s_MDT` tiles,
+      just moved under the GFM project root) - verified consistent (not a
+      dangling/broken reference).
+      DESIGN HISTORY (two iterations before this final one, same 2026-07
+      session): (1) originally a step bolted onto preparation/merge_tiles.py
+      (a standalone, non-Snakemake script) per an early literal instruction
+      to "add it to merge_tiles" - corrected whole raw 1x1deg DeltaDTM
+      source tiles up front, writing `_GOCO06s`-suffixed copies of all
+      ~7500+ tiles. (2) then pulled into an actual Snakemake `checkpoint
+      correct_deltadtm_datum` rule (preprocessing.smk) for real dependency
+      tracking, still whole-raw-tile-granularity, gated into
+      `_PREPROCESS_OUTPUTS` manually since nothing consumed its output via a
+      real file dependency. (3) THIS final version: per-model-tile,
+      cached-offset-raster design above - triggered by the user clarifying
+      "I wanted the correction to happen per tile" and confirming (over
+      compute_dem_tile_dir's whole-file-glob approach) that folding it into
+      extract_dem was the intended granularity. `src/vertical_datum.py`'s
+      old `correct_dem_tile`/`correct_deltadtm_tiles_dir` (whole-raw-tile
+      functions) and `scripts/correct_deltadtm_datum.py` were deleted;
+      `compute_geoid_offset_grid` was kept (still the core pyshtools call)
+      and `write_geoid_offset_raster`/`sample_geoid_offset` added.
+      Verified end-to-end: `write_geoid_offset_raster` against the real
+      .gfc files (~38s incl. write, physically plausible field);
+      `sample_geoid_offset` (~0.05s per tile-sized window); the full
+      extract_dem correction logic against a synthetic HydroMT-accessor
+      DataArray (valid cell correctly shifted by the sampled offset, nodata
+      cell provably untouched); Snakefile dry-run in both states (disabled:
+      no compute_geoid_offset_raster job, extract_dem count unchanged;
+      enabled: compute_geoid_offset_raster count=1, extract_dem count=44
+      unchanged from disabled).
+      CATALOG SCHEMA BUG FOUND + FIXED 2026-07 (still applies): when `egm2008_geoid`/
+      `goco06s` were first added to data_catalog_gfm.yml they used
+      `file_path:`/`file_format:`/top-level `description:`/`attributes:`
+      (a schema HydroMT does NOT recognize — it requires `path:` +
+      `data_type:` at minimum) - this broke `get_data_catalog()` for the
+      ENTIRE pipeline (every script that loads the catalog), not just this
+      feature. Fixed by converting both to the standard
+      `data_type: DataFrame` / `driver: csv` / `path:` / `meta:` schema
+      already used throughout this file (data_type/driver are inert here —
+      both files are read directly by pyshtools, never through HydroMT's own
+      DataFrame reader; they exist only so the catalog parses and `.path`
+      resolves). A third, similarly-broken `mdt_cnes_cls22` entry was found
+      alongside them and fixed the same way (also fixed: `mdt_cnes_cls22`
+      initially appeared to duplicate a pre-existing
+      `mdt_hybrid_cnes_cls22_cmems2020` entry at a different path — the user
+      subsequently REMOVED that older duplicate entry and confirmed
+      `mdt_cnes_cls22` is the canonical one, so all script references
+      (prepare_boundary_conditions.py's compute_mdt_correction call,
+      src/vertical_datum.py's docstring, data_catalog_gfm.yml's `coast_rp`
+      cross-reference) were updated to `mdt_cnes_cls22` — verified it
+      resolves to a real file on disk, `D:/GFM/inputs/AVISO/
+      mdt_hybrid_cnes_cls22_cmems2020_global.nc`, and the old key correctly
+      raises KeyError now).
+    - `boundary_conditions.mdt_correction.enabled` (config.yml) —
+      preparation/prepare_boundary_conditions.py's compute_mdt_correction.
+      SUBTRACTS (not adds) the AVISO MDT (`mdt_cnes_cls22`,
+      already in the data catalog) at each COAST-RP station (nearest valid
+      grid cell, falling back to a `fallback_search_deg` window search for
+      NaN cells - ~27/22670 stations still end up NaN even with the
+      fallback, same known gap as the legacy notebook, left unchanged;
+      treated as 0 correction for those stations) to bring COAST-RP from
+      local MSL to GOCO06s — the sign convention is ported from
+      GCFM_UU/workflow/src/surge.apply_mdt_correction
+      (`rp_level = rp_level_raw - mdt`), NOT the `+ MDT` addition previously
+      used in Boundary_conditions_waterlevels/03_combine_wl_data_scenarios.
+      ipynb (`total_wl = storm_tide + MDT + SLR`), which was the wrong sign
+      for this direction of the conversion. Cached to
+      `MDT_mapped_on_coastal_points.nc` in `processed_inputs_dir`.
+  `_nearest_valid_grid`/`compute_mdt_correction` and
+  `compute_geoid_offset_grid`/`correct_dem_tile` were both verified against
+  real inputs this session: the geoid offset (real .gfc files) produced a
+  physically plausible global field (-4.9 to +4.0 m, smooth 0.3° grid,
+  ~12s); the MDT nearest-valid+fallback logic was verified against synthetic
+  data with a deliberate NaN band, matching expected values exactly
+  (direct hit, polar edge, and NaN-gap fallback all correct); the raw/
+  corrected/WUR-YODA filename filtering in correct_deltadtm_tiles_dir was
+  verified against a synthetic tile directory (correctly skips WUR-YODA
+  `_GOCO06s_MDT` tiles and already-corrected tiles, only processes genuinely
+  raw ones). Not yet verified end-to-end on real DeltaDTM/MDT data, since
+  neither the raw EGM2008 tiles nor the local MDT NetCDF are downloaded yet.
 
 SLR SCENARIO ORDERING (must be sorted for interpolation):
   `list(dict.fromkeys(boundary_conditions.slr_scenarios +
@@ -1303,24 +1638,40 @@ THREE-FILE OUTPUT ARCHITECTURE (compute_exposure_analysis.py):
       avoid has no File 1 to call that function on).
     Both worker types run in the SAME ProcessPoolExecutor session, sharing
     the same worker-memory-budget-capped pool and _AVOID_CTX payload.
+  File 3's SSP task list (`ssp_tasks`) is built only from SSPs actually
+  present in the SLR-trajectory CSV's columns (`available_ssps`), not the
+  full configured `population_growth.ssps` list: a configured SSP with no
+  trajectory data always returns `None` from `_avoid_ssp_worker_task`, and
+  `_maybe_write_avoid`'s completion check (`len(ssp_results) >=
+  expected_ssp`) would otherwise wait forever for a result that never
+  arrives - stalling the CSV write for every slr_intensity, not just the
+  one missing SSP, even though every other task completed.
   Downstream scripts glob file suffixes precisely (`exposure_*_base.csv`,
   `exposure_*_growth_matrix.csv`, `exposure_*_ssp.csv`) — a plain
   `exposure_*.csv` glob would pick up ALL THREE per scenario with
   incompatible schemas.
 
-  Country-level ember plots use a fixed vmax=2,000,000 colorbar (comparable
-  across countries); global ember plots keep a dynamic per-figure vmax
-  (different order of magnitude). plot_burning_ember.py's SSP trajectory
-  overlay lines are independent of File 1/2/3 — built directly from real SSP
-  growth factors (population_growth.interpolate_growth_factor) and
-  slr_trajectories_csv, same as before.
+  Country-level ember/timeseries plots use a fixed `visualization.
+  country_eai_vmax` colorbar/y-axis cap (comparable across countries);
+  global ember plots keep a dynamic per-figure vmax. The burning-ember
+  figure has two stacked subplots sharing the SLR x-axis: the impact-matrix
+  heatmap, and (when slr_uncertainty data exists) a single uncertainty
+  subplot with one y-tick per highlight year - each year's row shows every
+  SSP's P17-P83 error bar side by side (small offsets), coloured to match
+  the heatmap's SSP legend, with only the left spine and no x tick marks
+  (see src/visualization.plot_burning_ember's docstring for the full
+  layout). plot_burning_ember.py's SSP trajectory overlay lines are
+  independent of File 1/2/3 — built directly from real SSP growth factors
+  (population_growth.interpolate_growth_factor) and slr_trajectories_csv.
 
 MERGE:
   src/merge.merge_tile_rasters_chunk is CHUNK-SCOPED (not a single global
   merge) — block-wise reads keep memory bounded, produces a simple
-  valid-count-weighted mean waterdepth (not distance-weighted IDW) plus a
-  flood_count raster (both still strictly excluding AQUEDUCT_NODATA cells —
-  unaffected by the diagnostic-only assumption below), and separately
+  valid-count-weighted mean waterdepth (not distance-weighted IDW, strictly
+  excluding AQUEDUCT_NODATA cells — unaffected by the diagnostic-only
+  assumption below). The flood_count (uint8 tile-overlap-count) raster and
+  its VRT/plot were REMOVED 2026-07 — unused by any downstream step, the
+  plot was purely diagnostic and the user didn't need it. Separately
   harvests a bounded-size (`overlap_corr_max_samples`=50000 per chunk)
   reservoir sample of per-cell (min, max) depth across ALL tiles whose
   FOOTPRINT covers the cell (>=2 covering tiles, regardless of flood status)
@@ -1394,23 +1745,18 @@ OOM / SKIP HANDLING (src/aqueduct_runner.py, scripts/run_aqueduct.py):
   ceiling. If this ever moves to a machine with substantially more RAM,
   redo this calculation before assuming bigger tiles would help.
 
-  RASTER FORMAT FIX (`simulation.input_raster.driver`): was `"COG"`, changed
-  to `"GTiff"` (same zstd/predictor=3/nodata=-9999) — COG's embedded
-  overview/pyramid generation is pure overhead for files read exactly once
-  by Aqueduct and never served as web map tiles. Verified concretely:
-  re-encoding tile 15013's real friction.tif (identical CRS/transform/
-  compression/predictor, only driver changed) as GTiff gives 10.76MB vs the
-  original COG file's 42.51MB (~4x smaller), pixel-values identical. Real
-  disk/IO win (matters for wall-clock — I/O time is part of every one of the
-  ~90 (RP×SLR) Aqueduct invocations per tile); does NOT raise Aqueduct's
-  memory ceiling (overviews aren't loaded into the in-memory array Aqueduct
-  computes with). `src/rasters.py::save_raster` now explicitly sets
-  `tiled=True, blockxsize=512, blockysize=512` (COG implied this
-  automatically; plain GTiff defaults to striped layout otherwise, which
-  would hurt the small-windowed-read access patterns merge.py/tile_split.py
-  rely on) — `save_nodata_raster` needs no separate fix since it copies
-  `ref.profile` from the (now-fixed) reference DEM, inheriting the same
-  tiling settings.
+  RASTER FORMAT (`raster_format` in config.yml, shared by preprocessing
+  inputs, run_aqueduct's nodata placeholder, and merge_chunk's output):
+  plain `"GTiff"`, not `"COG"` - COG's embedded overview/pyramid generation
+  is pure overhead for files read exactly once by Aqueduct and never served
+  as web map tiles, and inflates file size ~4x for no benefit (does not
+  raise Aqueduct's own memory ceiling, since overviews aren't loaded into
+  the in-memory array Aqueduct computes with). `src/rasters.py::save_raster`
+  explicitly sets `tiled=True, blockxsize=512, blockysize=512` (plain GTiff
+  defaults to striped layout otherwise, which would hurt the small-
+  windowed-read access patterns merge.py/tile_split.py rely on) —
+  `save_nodata_raster` needs no separate handling since it copies
+  `ref.profile` from the reference DEM, inheriting the same tiling settings.
 
 AUTOMATIC TILE SPLITTING ON OOM (run_pipeline.py, src/tile_split.py):
   Since OOM is tile-size-driven, `run_pipeline.py` is a retry-loop
@@ -1548,12 +1894,11 @@ D:/GFM/model_outputs/oom_tiles/{tile_id}.txt                  ← OOM marker
 
 D:/GFM/merged_results/
 ├── chunks/
-│   ├── flood_count_{chunk}_{rp}_{slr}.tif        (temp)
 │   ├── waterdepth_{chunk}_{rp}_{slr}.tif         (temp)
 │   ├── flood_fraction/flood_fraction_{chunk}_{rp}_{slr}.tif   ← kept; feeds analysis/
 │   ├── exposure_population_grid_{chunk}.tif
 │   └── exposure_geogunit_grid_{chunk}.tif
-├── flood_count_{rp}_{slr}.vrt / waterdepth_{rp}_{slr}.vrt      (if plots.enabled)
+├── waterdepth_{rp}_{slr}.vrt      (if plots.enabled; flood_count_*.vrt REMOVED 2026-07)
 ├── exposure/                                    ← written by analysis/compute_exposure_analysis.py
 │   ├── exposure_baseline_base.csv               ← File 1: discrete SLR_{mm} cols, no growth
 │   ├── exposure_baseline_growth_matrix.csv      ← File 2: dense SLR x growth-rate grid (ember bg)
@@ -1562,7 +1907,7 @@ D:/GFM/merged_results/
 │   ├── exposure_retreat_{slr}_base.csv / _growth_matrix.csv / _ssp.csv
 │   └── exposure_avoid_{slr}_growth_matrix.csv / _ssp.csv   ← no _base.csv, see KEY DOMAIN LOGIC NOTES
 └── plots/                                        (if plots.enabled)
-    ├── flood_count_{rp}_{slr}.png / waterdepth_{rp}_{slr}.png
+    ├── waterdepth_{rp}_{slr}.png                 (flood_count_*.png REMOVED 2026-07)
     ├── overlap_diagnostics_{rp}_{slr}/
     └── correlation/overlap_correlation_{chunk}_{rp}_{slr}.png
 
@@ -1620,8 +1965,8 @@ extract_dem/extract_dem_mask no longer touch it at all, see section 8's
 DEM/MASK NODATA FILL entry. Don't assume a `land_polygons` reference
 anywhere still means DEM-fill logic.
 
-`postprocessing.chunk_size_deg` was lowered 10° → 5° after repeated OOM
-crashes in the geogunit lookup inside `prepare_exposure_grid_chunk`/
-`protection.load_geogunit_ids`, which resolves the WRI geogunit raster onto
-the FULL chunk extent at once (not block-wise) — that step's memory scales
-with chunk_size_deg².
+`postprocessing.chunk_size_deg` bounds peak memory of the geogunit lookup
+inside `prepare_exposure_grid_chunk`/`protection.load_geogunit_ids`, which
+resolves the WRI geogunit raster onto the FULL chunk extent at once (not
+block-wise) — that step's memory scales with chunk_size_deg², so raising
+this value risks OOM there.

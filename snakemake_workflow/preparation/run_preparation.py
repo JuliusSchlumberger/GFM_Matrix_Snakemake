@@ -1,69 +1,90 @@
 """Single entry point for the pre-processing preparation pipeline.
 
-Runs the one-off scripts that must complete before the Snakemake DAG's
-`preprocess` target can run: syncing/verifying DeltaDTM tiles, building the
+Runs the one-off steps that must complete before the Snakemake DAG's
+`preprocess` target can run: downloading DeltaDTM DEM/mask tiles, building the
 DeltaDTM+COAST-RP-derived tile grid (three sequential steps — each consumes
 the previous step's output file), and generating the COAST-RP + SLR
-fingerprint boundary-condition NetCDFs. Each step runs in its own Python
-subprocess so modules are properly isolated and crashes in one step do not
-abort subsequent steps (unless --fail-fast is set).
+fingerprint boundary-condition NetCDFs. Config is loaded once and passed to
+every step's `run()` function in-process; a failure in one step is caught
+and reported, and the rest continue unless --fail-fast is set.
 
-Preparation switches in config.yml:
-  preparation.sync_deltadtm       — sync/verify DeltaDTM tiles from the local source dir
-  preparation.tile_mask_creation  — build the 5deg -> 3.75deg overlapping tile grid
-  preparation.select_tiles        — filter to tiles with DeltaDTM mask coverage
-  preparation.merge_tiles         — merge/drop undersized tiles -> tile_grid.path
-  preparation.boundary_conditions — COAST-RP + SLR fingerprint scenario NetCDFs
+Steps (in order) — also the names used to select them on the command line
+and the keys read from config.yml's preparation.* switches:
+  sync_deltadtm       — download DeltaDTM DEM/mask tiles into the
+                         data catalog's deltadtm/deltadtm_mask dirs
+  tile_mask_creation  — build the 5deg -> 3.75deg overlapping tile grid
+  select_tiles        — filter to tiles with DeltaDTM mask coverage
+  merge_tiles         — merge/drop undersized tiles -> tile_grid.path
+  boundary_conditions — COAST-RP + SLR fingerprint scenario NetCDFs
+
+The individual step modules (sync_deltadtm.py, tile_mask_creation.py,
+select_tiles.py, merge_tiles.py, prepare_boundary_conditions.py) are no
+longer standalone entry points — each exposes a `run(config, ...)` function
+and is only ever invoked from here, not via `python <script>.py` directly.
 
 Usage:
     python snakemake_workflow/preparation/run_preparation.py \\
-        [--config  snakemake_workflow/config/config.yml] \\
-        [--force] \\
-        [--fail-fast]
+        [STEP ...] [--config  snakemake_workflow/config/config.yml] \\
+        [--force] [--fail-fast]
 
-Override switches without editing config.yml by passing --skip-* / --only-*:
-    --only-tile-grid            run only sync_deltadtm + tile_mask_creation +
-                                 select_tiles + merge_tiles
-    --only-boundary-conditions  run only prepare_boundary_conditions.py
-    --skip-sync-deltadtm        skip syncing/downloading DeltaDTM tiles
-                                 (e.g. if already synced — this step can be slow)
+    With no STEP given, runs whichever steps are enabled in config.yml's
+    preparation.* block (the default: all of them). Name one or more STEPs
+    to run exactly those instead, ignoring preparation.* entirely:
+
+        python run_preparation.py boundary_conditions
+        python run_preparation.py tile_mask_creation select_tiles merge_tiles
 """
 
 import argparse
-import subprocess
+import logging
 import sys
 import time
+import traceback
 from pathlib import Path
 
-import yaml
-
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from config_utils import load_config  # noqa: E402
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
-PYTHON = sys.executable
+sys.path.insert(0, str(SCRIPTS_DIR))
+
+import merge_tiles  # noqa: E402
+import prepare_boundary_conditions  # noqa: E402
+import select_tiles  # noqa: E402
+import sync_deltadtm  # noqa: E402
+import tile_mask_creation  # noqa: E402
+
+ALL_STEPS = [
+    "sync_deltadtm",
+    "tile_mask_creation",
+    "select_tiles",
+    "merge_tiles",
+    "boundary_conditions",
+]
 
 
-def _run(
-    script: Path,
-    extra_args: list[str],
-    label: str,
-    fail_fast: bool,
-) -> bool:
-    """Run `script` in a subprocess; return True on success."""
-    cmd = [PYTHON, str(script)] + extra_args
-    print(f"\n{'═' * 60}")
+def _run_step(fn, label: str, fail_fast: bool, **kwargs) -> bool:
+    """Call `fn(**kwargs)`; return True on success, catching/reporting exceptions.
+
+    Prints a banner, timing, and [OK]/[FAIL] status, aborting on exception if
+    `fail_fast` is set. Steps run in-process, so failures are caught as
+    Python exceptions rather than via a subprocess return code.
+    """
+    print(f"\n{'=' * 60}")
     print(f"  {label}")
-    print(f"  {' '.join(cmd)}")
-    print(f"{'═' * 60}")
+    print(f"{'=' * 60}")
     t0 = time.time()
-    result = subprocess.run(cmd)
-    elapsed = time.time() - t0
-    if result.returncode != 0:
-        print(f"\n  ✗ FAILED (exit {result.returncode}) after {elapsed:.0f}s — {label}")
+    try:
+        fn(**kwargs)
+    except Exception:
+        elapsed = time.time() - t0
+        print(f"\n  [FAIL] FAILED after {elapsed:.0f}s - {label}")
+        traceback.print_exc()
         if fail_fast:
             print("  Aborting (--fail-fast).")
-            sys.exit(result.returncode)
+            sys.exit(1)
         return False
-    print(f"\n  ✓ Done in {elapsed:.0f}s — {label}")
+    print(f"\n  [OK] Done in {time.time() - t0:.0f}s - {label}")
     return True
 
 
@@ -71,118 +92,104 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     _default_cfg = str(SCRIPTS_DIR.parent / "config" / "config.yml")
+    parser.add_argument(
+        "steps", nargs="*", metavar="STEP",
+        help=f"Step(s) to run, from: {', '.join(ALL_STEPS)}. "
+             "Omit to use preparation.* in config.yml instead.",
+    )
     parser.add_argument("--config", default=_default_cfg,
                         help=f"path to config.yml (default: {_default_cfg})")
     parser.add_argument("--force", action="store_true",
-                        help="forwarded to prepare_boundary_conditions.py --force "
+                        help="forwarded to the boundary_conditions step's cache "
                              "(recompute/overwrite cached intermediate files); "
                              "the tile-grid steps have no equivalent cache to bypass")
     parser.add_argument("--fail-fast", action="store_true",
                         help="abort on first failed step")
-    # Convenience overrides
-    parser.add_argument("--only-tile-grid",           action="store_true")
-    parser.add_argument("--only-boundary-conditions", action="store_true")
-    parser.add_argument("--skip-sync-deltadtm",       action="store_true")
     args = parser.parse_args()
 
+    # Validated manually rather than via argparse's `choices=` on this
+    # positional: `choices` combined with `nargs="*"` incorrectly validates
+    # the empty-list default against `choices` when zero STEP args are
+    # given (a long-standing argparse quirk), raising a spurious
+    # "invalid choice: []" error on the otherwise-valid no-args case.
+    invalid = [s for s in args.steps if s not in ALL_STEPS]
+    if invalid:
+        parser.error(
+            f"invalid STEP(s): {', '.join(invalid)} (choose from: {', '.join(ALL_STEPS)})"
+        )
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s  %(levelname)-8s  %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
     config_path = Path(args.config).resolve()
-    with open(config_path) as fh:
-        cfg = yaml.safe_load(fh)
+    cfg = load_config(config_path)
 
-    # Forwarded to every step below so a custom --config (e.g. a machine-local
-    # override) is actually honored everywhere, not just by
-    # prepare_boundary_conditions.py.
-    config_args = ["--config", str(config_path)]
-
-    # ── Resolve which steps to run from config + CLI overrides ────────────────
-    sw = cfg.get("preparation", {})
-
-    do_sync       = sw.get("sync_deltadtm",      True)
-    do_grid       = sw.get("tile_mask_creation",  True)
-    do_select     = sw.get("select_tiles",        True)
-    do_merge      = sw.get("merge_tiles",         True)
-    do_boundaries = sw.get("boundary_conditions", True)
-
-    if args.only_tile_grid:
-        do_boundaries = False
-    if args.only_boundary_conditions:
-        do_sync = do_grid = do_select = do_merge = False
-    if args.skip_sync_deltadtm:
-        do_sync = False
+    if args.steps:
+        selected = set(args.steps)
+    else:
+        sw = cfg.get("preparation", {})
+        selected = {name for name in ALL_STEPS if sw.get(name, True)}
 
     results: dict[str, bool] = {}
     t_start = time.time()
 
-    # ── Step 1: Sync/verify DeltaDTM tiles ─────────────────────────────────────
-    if do_sync:
-        success = _run(
-            SCRIPTS_DIR / "sync_deltadtm.py",
-            config_args,
-            "Sync/verify DeltaDTM tiles",
-            args.fail_fast,
+    # ── Step 1: Download DeltaDTM DEM/mask tiles ───────────────────────────────
+    if "sync_deltadtm" in selected:
+        results["sync_deltadtm"] = _run_step(
+            sync_deltadtm.run, "Download DeltaDTM DEM/mask tiles",
+            args.fail_fast, config=cfg,
         )
-        results["sync_deltadtm"] = success
     else:
-        print("\n  [ SKIP ] Sync DeltaDTM tiles (preparation.sync_deltadtm = false)")
+        print("\n  [ SKIP ] Download DeltaDTM tiles")
 
     # ── Step 2: Build the 5deg -> 3.75deg overlapping tile grid ────────────────
-    if do_grid:
-        success = _run(
-            SCRIPTS_DIR / "tile_mask_creation.py",
-            config_args,
-            "Build overlapping tile grid (DeltaDTM + COAST-RP coverage)",
-            args.fail_fast,
+    if "tile_mask_creation" in selected:
+        results["tile_mask_creation"] = _run_step(
+            tile_mask_creation.run, "Build overlapping tile grid (DeltaDTM + COAST-RP coverage)",
+            args.fail_fast, config=cfg,
         )
-        results["tile_mask_creation"] = success
     else:
-        print("\n  [ SKIP ] Tile mask creation (preparation.tile_mask_creation = false)")
+        print("\n  [ SKIP ] Tile mask creation")
 
     # ── Step 3: Filter to tiles with DeltaDTM mask coverage ────────────────────
-    if do_select:
-        success = _run(
-            SCRIPTS_DIR / "select_tiles.py",
-            config_args,
-            "Filter tiles to DeltaDTM mask coverage",
-            args.fail_fast,
+    if "select_tiles" in selected:
+        results["select_tiles"] = _run_step(
+            select_tiles.run, "Filter tiles to DeltaDTM mask coverage",
+            args.fail_fast, config=cfg,
         )
-        results["select_tiles"] = success
     else:
-        print("\n  [ SKIP ] Select tiles (preparation.select_tiles = false)")
+        print("\n  [ SKIP ] Select tiles")
 
     # ── Step 4: Merge/drop undersized tiles ─────────────────────────────────────
-    if do_merge:
-        success = _run(
-            SCRIPTS_DIR / "merge_tiles.py",
-            config_args,
-            "Merge/drop undersized tiles",
-            args.fail_fast,
+    if "merge_tiles" in selected:
+        results["merge_tiles"] = _run_step(
+            merge_tiles.run, "Merge/drop undersized tiles",
+            args.fail_fast, config=cfg,
         )
-        results["merge_tiles"] = success
     else:
-        print("\n  [ SKIP ] Merge tiles (preparation.merge_tiles = false)")
+        print("\n  [ SKIP ] Merge tiles")
 
     # ── Step 5: Boundary condition NetCDFs ──────────────────────────────────────
-    if do_boundaries:
-        bc_args = config_args + (["--force"] if args.force else [])
-        success = _run(
-            SCRIPTS_DIR / "prepare_boundary_conditions.py",
-            bc_args,
-            "Boundary conditions (COAST-RP + SLR fingerprints)",
-            args.fail_fast,
+    if "boundary_conditions" in selected:
+        results["boundary_conditions"] = _run_step(
+            prepare_boundary_conditions.run, "Boundary conditions (COAST-RP + SLR fingerprints)",
+            args.fail_fast, config=cfg, force=args.force,
         )
-        results["boundary_conditions"] = success
     else:
-        print("\n  [ SKIP ] Boundary conditions (preparation.boundary_conditions = false)")
+        print("\n  [ SKIP ] Boundary conditions")
 
     # ── Summary ───────────────────────────────────────────────────────────────
     total = time.time() - t_start
-    print(f"\n{'═' * 60}")
+    print(f"\n{'=' * 60}")
     print(f"  Preparation pipeline complete  ({total / 60:.1f} min)")
-    print(f"{'═' * 60}")
+    print(f"{'=' * 60}")
     for step, ok in results.items():
-        icon = "✓" if ok else "✗"
+        icon = "[OK]" if ok else "[FAIL]"
         print(f"  {icon}  {step}")
-    if not all(results.values()):
+    if results and not all(results.values()):
         print("\n  Some steps failed — check output above.")
         sys.exit(1)
 

@@ -1,64 +1,35 @@
 # Configuration for the GFM Aqueduct preprocessing & simulation workflow.
-#
-# Parameters are grouped by pipeline stage. Every value used by a rule or
-# script lives here; nothing is hardcoded in rules/ or scripts/ files. Rules
-# read the values they need from this dict into a `params:` block, and
-# scripts read `snakemake.params.*` rather than reaching into
-# `snakemake.config` themselves — this keeps each rule's config dependencies
-# explicit and scripts decoupled from the full config structure.
-# Dataset identifiers (DEM, land use, …) are catalog keys from
-# config/data_catalog_gfm.yml — there is no separate data_sources alias layer.
+# Parameters are grouped by pipeline stage. 
+
 
 # ── DATA CATALOGS ─────────────────────────────────────────────────────────────
-# Path is relative to the repository root (where `snakemake` and the
-# one-off preprocessing scripts are run from).
 paths:
   # Machine-specific root directory for all project data and model outputs.
-  # Every absolute path elsewhere in this file is expressed as "{root}/..."
-  # so that changing this one value is sufficient when moving the project to
-  # a different machine or storage location.
-  #
-  # Override per-machine without editing this file: create
-  # snakemake_workflow/config/config_local.yml (git-ignored) containing:
-  #   paths:
-  #     root: "/path/to/project/data"
-  # That file is loaded after this one and its values take precedence.
-  root: "D:/GFM"
+  # Using config_local.yml (git-ignored) is the preferred way to override this per-machine, so that the repository clone can be shared across multiple machines without editing this file.
+  root: "D:/GFM"  # storage of outputs and input data
+  code_root: "C:/Users/Schlu005/GFM" # Root of the code
+  aqueduct_root: "C:/Users/Schlu005/GFM" # Root directory containing the compiled Aqueduct flood model build
 
-  # Root of the code / build directory (where the Aqueduct executable lives).
-  # Usually the repository clone root; change this if the build is elsewhere.
-  code_root: "C:/Users/Schlu005/GFM"
+  hydromt_data_catalog: "snakemake_workflow/config/data_catalog_gfm.yml" # relative to the code root
 
-  # Path to the HydroMT data catalog (relative to the repository root so
-  # it works regardless of which directory snakemake is invoked from).
-  hydromt_data_catalog: "snakemake_workflow/config/data_catalog_gfm.yml"
-
-
+  processed_inputs_dir: "{root}/processed_inputs" # # Directory for prepare_boundary_conditions.py's intermediate files
 # ── SYNC DELTADTM ──────────────────────────────────────────────────────────────
-# Used by: preparation/sync_deltadtm.py.
-sync_deltadtm:
-  # Local directory holding a manually-obtained copy of DeltaDTM tiles to
-  # sync into `target` (step 1 - plain file copy).
-  source: "{root}/inputs/DeltaDTM"
-  # Directory containing the DeltaDTM tile manifest CSV; synced into from
-  # `source`, then verified/re-downloaded from the manifest's URLs (step 2).
-  # Not necessarily under `paths.root` - this is wherever the manifest-driven
-  # DeltaDTM tile cache actually lives on this machine.
-  target: "D:/GCFM_UU/raw_data/DeltaDTM"
+sync_deltadtm:  # Used by: preparation/sync_deltadtm.py.
+  zip_download_dir: "{root}/inputs/DeltaDTM/_zips" # Temp directory for the downloaded .zip archives
+  delete_zips_after_extract: true
 
+# ── VERTICAL DATUM CORRECTION (DEM) ─────────────────────────────────────────────
+vertical_datum_correction: # Used by: rules compute_geoid_offset_raster / extract_dem
+  enabled: true
+  offset_raster_path: "{root}/inputs/ICGM/geoid_offset_egm2008_goco06s.tif"
 
 # ── PREPARATION PIPELINE SWITCHES ─────────────────────────────────────────────
-# Used by: preparation/run_preparation.py — the single entry point that runs
-# the one-off scripts that must complete before the Snakemake DAG's
-# `preprocess` target can run (tile grid + boundary condition NetCDFs).
-# Set any switch to false to skip that step when running run_preparation.py.
-preparation:
-  sync_deltadtm:       false   # sync/verify DeltaDTM tiles from the local source dir
+preparation: # Used by: preparation/run_preparation.py
+  sync_deltadtm:       false   # download DeltaDTM DEM/mask tiles from 4TU.ResearchData
   tile_mask_creation:  true   # build the 5deg (DeltaDTM+COAST-RP) -> 3.75deg overlapping tile grid
   select_tiles:        true   # filter to tiles with DeltaDTM mask coverage
   merge_tiles:         true   # merge/drop undersized tiles -> tile_grid.path
   boundary_conditions: true   # COAST-RP + SLR fingerprint scenario NetCDFs
-
 
 one_off_edits:
   scale_factor: 1.5 # factor by which to scale the tile grid for the preprocessing mask creation step.
@@ -66,139 +37,45 @@ one_off_edits:
   smaller_tiles: "{root}/inputs/mask/tiles_2_5deg_with_overlap.gpkg" # output path for the tile mask created by tile_mask_creation.py
   smaller_tiles_clean: "{root}/inputs/mask/tiles_2_5deg_with_overlap_clean.gpkg"
 
-
-
-
 # ── TILE GRID ─────────────────────────────────────────────────────────────────
 tile_grid:
-  path: "{root}/inputs/mask/domain_tiles_WesternEurope.gpkg" # "{root}/inputs/mask/domain_tiles.gpkg"
-
-  # merge_tiles.py: minimum required fraction (0–1) of a tile's DeltaDTM-covered
-  # area that must be ocean (mask=1) or land/lake/river (mask=0/2/3), evaluated
-  # against each tile's ORIGINAL (untrimmed) footprint. Tiles below the ocean
-  # side are "water-deficient"; below the land side, "land-deficient" - see
-  # src/tiles.merge_undersized_tiles for how each is resolved.
-  min_coast_fraction: 0.05
-
-  # merge_tiles.py: maximum number of original tiles that may be combined into
-  # a single merged tile, enforced across both the water-deficient and
-  # land-deficient merge phases together. Not a hard memory limit any more -
-  # the tile_split.* OOM-recovery mechanism below can still split an
-  # oversized merged tile later if Aqueduct runs out of memory on it - this
-  # just bounds how many hops a single merge chain may take.
-  max_merge_count: 4
-
-  # Pre- and post-merge tile trimming (src/tiles.compute_trimmed_bbox, called
-  # from merge_tiles.py): mosaics each tile's overlapping DeltaDTM mask tiles
-  # and shaves pure-ocean/nodata edge rows and columns inward until the first
-  # row/column containing land/lake/river is hit, then keeps this many extra
-  # arcsec of pure-ocean/nodata margin beyond that edge (never expands past
-  # the tile's own bbox - the shave operates strictly within it). Applied
-  # once before merging (this becomes every tile's real working geometry from
-  # then on - fixes "island effect" tiles that would otherwise never shrink)
-  # and once after (re-tightens diagonal slack left by bbox-union merges).
-  # Never affects the ocean/land fraction merge-worthiness columns, always
-  # computed on original nominal footprints. 600 arcsec (~1/6 deg, ~18.5km at
-  # the equator) is a generous coastal margin, well beyond
-  # simulation.model_bbox_buffer_arcsec's ~1px per-scenario buffer.
-  trim_buffer_arcsec: 600
-
-  # merge_tiles.py's final pass (src/tiles.deduplicate_overlapping_tiles):
-  # minimum intersection-over-union between two (already-trimmed) tiles'
-  # geometries to consider them duplicates covering the same physical
-  # feature and consolidate them. Uses IoU rather than a one-sided overlap
-  # ratio because the overlapping-tile-grid design deliberately gives many
-  # legitimately-distinct neighbouring tiles high one-sided overlap.
-  # Confirmed on a regional test grid: the one genuine duplicate pair found
-  # had IoU=1.000, while the next-highest legitimate neighbour pair topped
-  # out at IoU=0.645 - 0.8 sits with a wide margin in between.
-  dedup_iou_threshold: 0.8
+  path: "{root}/inputs/mask/domain_tiles_WesternEurope.gpkg" # Note this is both target of the preparation pipeline and starting point for simulation run
+  min_coast_fraction: 0.05 # merge_tiles.py: minimum required fraction of a tile that must have either land or ocean
+  max_merge_count: 4 # merge_tiles.py: maximum number of original tiles that may be combined
+  trim_buffer_arcsec: 20 # merge_tiles.py: coastal margin after shaving off pure-ocean/nodata rows/columns, needs to be >= model_bbox_buffer_arcsec
+  dedup_iou_threshold: 0.8 # merge_tiles.py: minimum intersection-over-union between two (already-trimmed) tiles'
+  # geometries to consider them duplicates
+  cardinal_neighbor_overlap_threshold: 0.5 # merge_undersized_tiles: minimum
+  # fraction of the smaller tile's width (N/S relationship) or height (E/W
+  # relationship) to count as immediate cardinal neighbors.
 
 
 # ── TILE SPLITTING (OOM RECOVERY) ───────────────────────────────────────────────
-# Used by: run_pipeline.py / src/tile_split.py. Aqueduct's memory cost is
-# dominated by tile pixel count, so a tile that OOMs is unlikely to ever
-# succeed at its current size. run_pipeline.py runs snakemake to normal
-# completion, then scans model_outputs/oom_tiles/*.txt for tiles that OOM'd
-# (Aqueduct's OOM handling never fails the Snakemake rule itself - see
-# src/aqueduct_runner.py - so `snakemake` always exits 0 for this reason),
-# splits each one into two smaller, overlapping sub-tiles (child tile_id =
-# parent_tile_id*10+8 / *10+9 — see src/tile_split.py), and re-runs
-# Snakemake so the full preprocessing + simulation chain regenerates for the
-# new tiles. Repeats up to max_retries times. Split children skip
-# tile_grid.min_coast_fraction validation (merge_tiles.py is one-shot/
-# pre-DAG only and never re-invoked here) — the land-coverage-balance
-# constraint in choose_split already prevents a degenerate (all-ocean) half.
-tile_split:
-  # Each half spans this fraction of the parent tile's extent along the
-  # chosen split axis, so the two halves overlap by (2*fraction - 1) of that
-  # axis's extent (0.667 -> ~33% overlap).
-  fraction: 0.667
-  # Maximum number of times a single original tile may be recursively split
-  # (a tile split once has depth 1; splitting a depth-1 child gives a
-  # depth-2 grandchild). A tile still OOM-ing at max_depth is left with
-  # today's give-up/nodata-placeholder behaviour and a warning is printed.
-  max_depth: 2
-  # Safety cap on how many times run_pipeline.py will re-invoke `snakemake`
-  # in one run, in case tiles keep OOM-ing indefinitely.
-  max_retries: 5
+tile_split: # Used by: run_pipeline.py to split OOM tiles and re-run Snakemake.
+  fraction: 0.667 # Each half spans this fraction of the parent tile's extent
+  max_depth: 2 # Maximum number of times a single original tile may be recursively split
+  max_retries: 5 # Maximum number of times a single original tile may be recursively split
 
 
 # ── BOUNDARY CONDITIONS ───────────────────────────────────────────────────────
 # Used by: prepare_boundary_conditions.py (generates scenario files),
 #          extract_boundaries.py (loads per-tile stations from those files),
 #          tile_mask_creation.py (load_coastrp_stations, for tile-grid filtering).
-#
-# prepare_boundary_conditions.py reads slr_scenarios and return_periods
-# directly from this section — adding or removing a scenario here is the
-# single change needed; no script modifications required. Both lists are also
-# the Snakemake wildcard domains for `waterlevel_name`/`return_period`: the
-# workflow simulates the full cross-product (every return period x every SLR
-# scenario, formatted as "RP{n}") for every tile.
-
 boundary_conditions:
-  # Directory containing the COAST-RP_EWL_*.nc water level scenario files
-  # produced by prepare_boundary_conditions.py.
-  waterlevel_nc_dir: "{root}/processed_inputs/WL_scenarios"
-
-  # Directory for prepare_boundary_conditions.py's intermediate files
-  # (COAST-RP_preprocessed.nc, SLR_base_ssp245_2100.nc,
-  # SLR_fingerprints_all.nc) - reused across runs unless --force is given.
-  processed_inputs_dir: "{root}/processed_inputs"
+  waterlevel_nc_dir: "{processed_inputs_dir}/WL_scenarios" # Directory for water level scenario files
 
   # IPCC AR6 regional SLR projection scenario/confidence level used to build
-  # the SLR fingerprints (options: slr_scenario ssp126/ssp245/ssp585;
-  # confidence_level low/medium).
-  slr_scenario: "ssp245"
-  confidence_level: "medium"
+  # the SLR fingerprints
+  slr_scenario: "ssp245" # options: slr_scenario ssp126/ssp245/ssp585
+  confidence_level: "medium" # options: low/medium
+  coastrp_min_lat: -60  # exclude antarctic stations (no exposure)
 
-  # COAST-RP stations south of this latitude are dropped entirely (never
-  # reach extract_boundaries.py, and are excluded up front by
-  # tile_mask_creation.py's DeltaDTM/COAST-RP tile filter). This is a
-  # practical, round-number cutoff rather than a value derived/cited from a
-  # specific study — COAST-RP's own raw station coverage is near-global
-  # (down to about -84.7 deg). The rough justification: global tide/surge
-  # models like GTSM don't represent sea ice, which heavily damps tides and
-  # surge in the Southern Ocean seasonally; validation data (real tide
-  # gauges) is extremely sparse that far south; and GFM assesses population
-  # exposure, which is not meaningful in Antarctica (no permanent
-  # population) regardless of model skill there. Adjust if you have a
-  # better-justified threshold.
-  coastrp_min_lat: -60
+  mdt_correction: # Vertical-reference correction for COAST-RP storm-tide levels
+    enabled: false
+    mdt_variable: "mdt"
+    fallback_search_deg: 3.0
 
-  # extract_boundaries.py: buffer (degrees) added around a tile's bbox before
-  # selecting candidate COAST-RP stations for Aqueduct's k-nearest-neighbour
-  # IDW interpolation (simulation.flooding.knn). Needed because
-  # tile_grid.trim_buffer_arcsec now shrinks tiles to their coastal content,
-  # which would otherwise shrink the candidate station pool. 1.0 deg
-  # (~111km at the equator) is generous enough to reliably clear knn=15 even
-  # along sparse-gauge coastlines.
-  station_search_buffer_deg: 1.0
-
-  # All return periods simulated by the flood model, and for which scenario
-  # files are generated by prepare_boundary_conditions.py (full set available
-  # in COAST-RP). Formatted as "RP{n}" to build the `return_period` wildcard.
-  return_periods:
+  return_periods: # Coast-RP return periods (wildcards) to simulate flood exposure fore
     # - 1
     # - 2
     - 5
@@ -210,68 +87,47 @@ boundary_conditions:
     - 500
     - 1000
 
-  # SLR scenario names used as wildcards throughout the workflow.
-  # The numeric suffix encodes the target global-mean SLR in millimetres;
-  # prepare_boundary_conditions.py parses it to derive the SLR level in metres.
-  # Base set of SLR scenarios for simulation. The Snakemake workflow adds
-  # adaptation.slr_intensities to this to form the full simulation list, so
-  # SLR_250 and SLR_500 (needed as adaptation design intensities) are
-  # declared there rather than here to avoid duplication.
-  slr_scenarios:
+  slr_scenarios: # SLR scenario names used as wildcards
     - "SLR_0"
     - "SLR_500"
     - "SLR_1000"
     - "SLR_1500"
     - "SLR_2000"
 
-
-  # Filename / variable name templates for the scenario NetCDF files.
-  # {return_period} and {waterlevel_name} are substituted at runtime.
+  station_search_buffer_deg: 1.0 # extract_boundaries.py: buffer (degrees) around a tile's bbox to search for Coast-RP stations
   nc_filename_template: "COAST-RP_EWL_{return_period}_{waterlevel_name}.nc"
   nc_variable_template: "COAST-RP_EWL_{return_period}_{waterlevel_name}"
   station_x_var: "station_x_coordinate"
   station_y_var: "station_y_coordinate"
 
+# ── RASTER FORMAT ──────────────────────────────────────────────────────────────
+raster_format:
+  driver: "GTiff"
+  compression: "zstd"
+  predictor: 3
+  nodata: -9999
+
 
 # ── FLOOD SIMULATION ──────────────────────────────────────────────────────────
-# Used by: preprocessing rules (extract_dem, extract_dem_mask, compute_friction,
-#          extract_boundaries, write_aqueduct_config) and run_aqueduct.
-
-simulation:
-  # Root directory under which per-tile "{tile_id}/inputs" and
-  # "{tile_id}/results" directories are created.
-  model_outputs: "{root}/model_outputs"
+simulation: # Used by: preprocessing rules
+  model_outputs: "{root}/model_outputs"  # directory where per-tile "{tile_id}/inputs" and
+  # "{tile_id}/results" are created
 
   # Compiled Aqueduct flood model executable.
-  aqueduct_executable: "{code_root}/build/aqueduct/aqueduct.exe"
+  aqueduct_executable: "{aqueduct_root}/build/aqueduct/aqueduct.exe"
+  model_bbox_buffer_arcsec: 3 # Buffer added to tile's previously shaved bbox to ensure thin strip of ocean.
+  dem_gap_fill: # land-nodata gap handling: large connected (4-connectivity) group get Nodata value, other IDW-interpolation
+    min_hard_fill_component_size: 15 # a missing-land DEM cell is only hard-filled to 9999m for patches larger than that
+    interp_max_search_distance: 100
+    interp_smoothing_iterations: 0
+    land_fill_value_m: 9999 # Elevation (m) written for large missing-land DEM gaps
 
-  # Buffer (arc-seconds) added to all four sides of the DEM's valid-cell
-  # bounding box to form the model domain.  This ensures a thin strip of ocean
-  # cells is included so flood water can enter from the coast.  DeltaDTM covers
-  # right to the shoreline, so 1" (~30 m, ~1 DeltaDTM pixel) is usually
-  # sufficient; increase if coastal tiles show missing flood entry.
-  model_bbox_buffer_arcsec: 3
-
-  # Aqueduct flood model parameters written into each tile's TOML config.
-  flooding:
+  flooding: # Aqueduct flood model parameters written into each tile's TOML config.
     resolution: 30       # output raster resolution in metres
     knn: 15              # number of nearest water level stations used
     debug: false
     # Default Manning's n roughness (÷ 100) for cells with no land use class.
     default_friction: 0.001
-
-  # Raster format for per-tile input files written during preprocessing
-  # (DEM, DEM-validity mask, friction).  Plain tiled GTiff, not COG: these
-  # files are read exactly once by Aqueduct and never served as web map
-  # tiles, so COG's embedded overview/pyramid generation is pure overhead -
-  # confirmed empirically to inflate friction.tif ~4x (42.5MB -> 10.8MB for
-  # the same tile, re-encoded with identical compression/predictor, driver
-  # changed only) for no benefit in this pipeline.
-  input_raster:
-    driver: "GTiff"
-    compression: "zstd"
-    predictor: 3
-    nodata: -9999
 
 
 # ── POSTPROCESSING ────────────────────────────────────────────────────────────
@@ -281,152 +137,63 @@ simulation:
 postprocessing:
   # Root directory for combined (multi-tile) rasters, VRTs and plots.
   merged_outputs: "{root}/merged_results"
-
-  # Spatial chunk size (degrees) used to partition the study area for merging.
-  # Each chunk is merged independently so only the handful of overlapping tiles
-  # are in memory at once; chunks are assembled into a VRT mosaic afterwards.
-  # Also bounds the peak memory of prepare_exposure_grid_chunk's geogunit
-  # lookup (src/protection.py's load_geogunit_ids), which resolves the WRI
-  # geogunit raster onto the full chunk extent at once (not block-wise like
-  # the water-depth interpolation loop) - that step's memory scales with
-  # chunk_size_deg^2, so halving this roughly quarters it.
-  chunk_size_deg: 5
-
-  # Side length (pixels) of the write blocks used inside each chunk.
-  block_size: 2048
-
-  # Minimum water depth (m) counted as "flooded" for the overlap-agreement
-  # pie chart (confirmed-flood / confirmed-no-flood / ambiguous) and the
-  # flood-area annotation on plots.
-  flood_area_threshold_m: 0.05
-
-  # Maximum (min, max)-depth-pair samples kept per chunk for the per-continent
-  # overlap correlation/agreement diagnostics.  Sub-sampled with a fixed
-  # random seed for reproducibility.
-  overlap_corr_max_samples: 50000
-
-  # Raster format for the merged flood-count and water-depth output files.
-  output_raster:
-    driver: "GTiff"
-    compression: "zstd"
-    predictor: 3
-    nodata: -9999
+  chunk_size_deg: 5 # Spatial chunk size (degrees) used to partition the study area for merging.
+  block_size: 2048 # Side length (pixels) of the write blocks used inside each chunk.
+  overlap_corr_max_samples: 50000 # Maximum (min, max)-depth-pair random samples per chunk for
+  # correlation/agreement diagnostics
+  overlap_corr_seed: 42  # Fixed random seed to reproduce identical samples.
 
   # Visualisation parameters for all postprocessing plots.
   plots:
-    # Set to false to skip all plot generation (merged maps, overlap diagnostics,
-    # per-continent overlap correlation/agreement plots).  The VRT mosaics and
-    # merged GeoTIFFs are always written.
-    enabled: true
+    enabled: true # to plot merged maps, per-continent overlap correlation/agreement plots
+    debug: false # to plot plot_overlap_diagnostics
 
     # Output resolution (DPI) for all saved plot images.
-    dpi: 200
-
-    # Target pixel size for the merged flood-count and water-depth maps.
-    # 30" ≈ 900 m at the equator; increase for faster rendering of large areas.
-    merged_resolution_arcsec: 120
-    count_cmap: "viridis"
+    dpi: 300
+    merged_resolution_arcsec: 120  # 30" ≈ 900 m at the equator;
     waterdepth_cmap: "Blues"
+    waterdepth_vmax_m: 10
+    merged_map_figsize: [10, 10] # for plot_merged_results
 
-    # Maximum number of focal tiles shown in the overlap diagnostic figure.
-    n_overlap_locations: 10
-    # Target pixel size for the overlap diagnostic figures.
-    # Native DeltaDTM is ~1.6"/px (~50 m); use a much coarser value so
-    # individual flood cells are visible on screen.
-    overlap_diag_resolution_arcsec: 240
+    overlap_pie_colors: # Wedge colours for the per-continent overlap-agreement pie chart
+      flood: "#d62728"
+      no_flood: "#1f77b4"
+      ambiguous: "#7f7f7f"
+    overlap_continent_figsize: [13, 6.5] # for the per-continent overlap diagnostic
+
+    n_overlap_locations: 10 # focal tiles shown in the overlap diagnostic figure
+    overlap_diag_resolution_arcsec: 240 # Target pixel size for the overlap diagnostic figures
+    overlap_diag_figsize: [10, 8] # for each per-tile overlap diagnostic panel
+    overlap_tile_cmap: "tab10" # per-tile domain-bbox outline colours
+    overlap_diff_cmap: "Reds" # for the overlap-zone max-depth-difference shading
 
 
 # ── COASTAL PROTECTION BASELINE ────────────────────────────────────────────────
-# Used by: analysis/compute_exposure_analysis.py (src/exposure_analysis.py
-# for the flood-fraction math, src/protection.py for the geogunit-ID lookup).
-# Each WRI geogunit's FLOPROS design standard is snapped to the nearest
-# simulated return_period; baseline exposure then compares each scenario's
-# return period against that snapped standard directly (see section 8 in
-# memory.md for the full baseline-vs-adaptation comparison logic).
-protection:
-  # SLR scenario used as the fixed (return_period, waterlevel_name) reference
-  # in the Snakefile's prepare_exposure_grid_chunk rule (any value works,
-  # since chunk extent depends only on chunk_id, not on this scenario).
-  baseline_waterlevel_name: "SLR_0"
-  # Catalog keys (config/data_catalog_gfm.yml) for the WRI geogunit raster and
-  # the FLOPROS protection-standards table.
-  geogunit_source: "geogunit_protection_units"
-  flopros_source: "flopros_protection_standards"
-  # Per-geogunit protection return period: use FLOPROS "Coastal" column first;
-  # if NaN, fall back to "Riverine"; if both NaN, use this default (years).
-  default_rp: 5
+protection: # Used by: analysis/compute_exposure_analysis.py
+  baseline_waterlevel_name: "SLR_0" # Reference SLR for which protection standard ensure protection
+  default_rp: 5 # minimum protection level assumed where no FLOPROS protection standards are available
 
-
-# ── EXPOSURE ────────────────────────────────────────────────────────────────
-# Used by: scripts/prepare_exposure_grid_chunk.py (src/exposure.py) to cache
-# the population raster per chunk, scripts/compute_flood_fraction_chunk.py to
-# decide which fine pixels count as flooded, and downstream by
-# analysis/compute_exposure_analysis.py (src/exposure_analysis.py), which
-# combines the cached population/geogunit rasters with the flood-fraction
-# rasters to compute baseline/protect/retreat/avoid exposure per WRI geogunit
-# region (protection.geogunit_source/flopros_source - reused, not duplicated
-# here).
-exposure:
-  # Catalog key (config/data_catalog_gfm.yml) for the population RasterDataset.
-  population_source: "population"
-
-  # Minimum flood depth (m) for a fine pixel to count as flooded when computing
-  # the coarse flood fraction. Must be a physically meaningful value: out-of-domain
-  # pixels count as 0 (not excluded), so ff = flooded / ALL fine pixels in the
-  # 1 km cell. A near-zero value would flag every in-domain pixel as flooded
-  # at all return periods, giving ff ≈ 1.0 everywhere and breaking the ff comparison.
-  exceedance_threshold_m: 0.10
+exposure: # Used by: scripts/prepare_exposure_grid_chunk.py
+  exceedance_threshold_m: 0.10 # Minimum flood depth (m) for a fine pixel to count as "flooded"
 
 
 # ── ADAPTATION MEASURES ────────────────────────────────────────────────────────
-# Used by: analysis/compute_exposure_analysis.py (src/exposure_analysis.py),
-# via the Snakefile's ADAPTATION_SLR_INTENSITIES.
-#
-# Each entry in slr_intensities is a "design intensity": for that SLR, each
-# WRI geogunit's own FLOPROS protection standard is snapped to the nearest
-# simulated return_period, and build_adapt_protection_fraction() builds a
-# design-event flood-fraction grid at (RP_applied, that SLR). protect/
-# retreat/avoid exposure is then computed for every simulated
-# (return_period, waterlevel_name) combination by comparing its flood
-# fraction against that design grid - one design grid per slr_intensities
-# entry, reused across all return periods and waterlevel_name scenarios.
-#
-# "avoid" models redirecting *future* population growth (via
-# population_growth.*) away from the floodplain, without protecting or
-# relocating anyone already there.
-adaptation:
-  # SLR scenarios used as design intensities for adaptation measures. These
-  # are specified separately from boundary_conditions.slr_scenarios so they
-  # can be set independently; the Snakemake workflow uses their UNION as the
-  # full set of SLR scenarios to simulate. Every entry here must therefore
-  # eventually appear in the merged waterlevel_name wildcard domain.
-  slr_intensities:
+adaptation: # Used by: analysis/compute_exposure_analysis.py
+  slr_intensities: # Protection against certain amount of SLR
     - "SLR_500"
     - "SLR_1000"
     - "SLR_1500"
 
-
-
-
 # ── POPULATION GROWTH (SSP SCENARIOS) ─────────────────────────────────────────
-# Used by: analysis/compute_exposure_analysis.py (src/population_growth.py).
-# Per-country, per-SSP growth factors relative to the 2020 baseline population
-# (2020 = 1.0; values > 1 = growth, < 1 = decline).  Loaded from the project
-# Excel file; country names are mapped to ISO-3 codes automatically.
-population_growth:
-  reference_year: 2020
-  # Path to the Excel file with per-country per-SSP growth factors.
-  factors_xlsx: "{root}/inputs/SSPs/getting_SSP_population_growth_factors.xlsx"
-  factors_sheet: "growth_factors"
-  # SSPs to include (must match 'scenario' column in the Excel file).
+population_growth: # Used by: analysis/compute_exposure_analysis.py
   ssps:
     - SSP1
-    # - SSP2
-    - SSP3
+    - SSP2
+    # - SSP3
     - SSP5
   # Years for which to produce output columns (5-year grid; intermediate
   # years are linearly interpolated from the 5-year data in the Excel file).
-  output_years:
+  output_years: # Years for which to produce output columns (intermediate years are linearly interpolated 
     - 2025
     - 2030
     - 2035
@@ -437,87 +204,72 @@ population_growth:
     - 2075
     - 2100
 
-
 # ── ANALYSIS PIPELINE SWITCHES ────────────────────────────────────────────────
-# Used by: analysis/run_analysis.py — the single entry point that orchestrates
-# the full post-simulation analysis pipeline.  Set any switch to false to skip
-# that step when running run_analysis.py.
-analysis:
+analysis: # Used by: analysis/run_analysis.py
   compute_exposure:      true   # baseline / protect / retreat / avoid EAI CSVs
   plot_burning_ember:    true   # impact-matrix (SLR × growth) figures
   plot_adaptation_bars:  false   # grouped bar charts per adaptation strategy
   plot_timeseries:       true   # EAI along SSP SLR trajectories over time
   plot_world_maps:       false  # world choropleth maps (slow for global runs)
 
-  # compute_exposure_analysis.py's AVOID step runs one process per
-  # (slr_intensity, SSP, year) combination, but each worker process gets its
-  # OWN COPY of the flood_fraction/population/geogunit study-area grids
-  # (sent once via the pool initializer, not once per task) - so the worker
-  # count is capped by this memory budget divided by that per-worker payload
-  # size, not just by CPU core count. Raise this if you have more RAM to
-  # spare and want more parallelism; lower it (or accept 1 worker, which
-  # runs in-process with zero extra copies) if you hit MemoryError.
-  avoid_worker_memory_budget_gb: 8
+  avoid_worker_memory_budget_gb: 4 # number of feasible parallelization stream
 
 
 # ── VISUALISATION ─────────────────────────────────────────────────────────────
-# Used by: analysis/plot_burning_ember.py, plot_adaptation_bars.py,
-#          plot_timeseries.py, plot_world_map.py (standalone post-processing).
 visualization:
-  # Output directory for all generated figures.
-  output_dir: "{root}/figures"
+  output_dir: "{root}/figures" # Output directory for all generated figures.
 
-  # ── Burning-ember growth-rate axis ────────────────────────────────────────
-  # The burning-ember chart shows EAI as a function of SLR × population growth.
-  # growth_rates defines the grid of multipliers (fraction relative to 2020
-  # baseline) along the y-axis.  E.g. -0.5 = 50 % decline, 1.5 = 150 % growth.
-  growth_rates:
+  # ── Burning-ember ────────────────────────────────────────
+  growth_rates: # relative to baseline year (2020)
     min: -0.5
     max:  1.5
     step:  0.1
 
-  # ── SLR axis interpolation ────────────────────────────────────────────────
-  # The discrete SLR scenarios are interpolated to a smooth curve for charts.
-  # Values in millimetres; n_points is the number of interpolation points.
-  slr_interp:
+  slr_interp: # interpolated based on run scenarios used for smoothing the curve.
     min_mm:   0
     max_mm: 1500
     n_points: 100
 
+  highlight_years: [2050, 2100]
+
+  country_eai_vmax: 1000000 # Fixed y-axis / colour-scale cap (EAI, people)
+
   # ── SSP SLR trajectory CSV ────────────────────────────────────────────────
-  # Path to a CSV file with global-mean SLR projections per SSP, as generated
-  # by analysis/extract_slr_trajectories.py from the IPCC AR6 dataset.
-  # Columns: year, SSP1, SSP2, SSP3, SSP5 (median global SLR in mm).
-  slr_trajectories_csv: "{root}/processed_inputs/slr_trajectories_global_median.csv"
+  slr_trajectories_csv: "{processed_inputs_dir}/slr_trajectories_global_median.csv"
 
   # ── Chart aesthetics ──────────────────────────────────────────────────────
   dpi: 200
-
-  # Colourmap for the burning-ember heatmap (perceptually uniform & print-safe).
   cmap_ember: "YlOrRd"
+  n_ember_contours: 6 # Number of labelled EAI contour lines drawn on the burning-ember heatmap.
+
+  # ── Figure sizes (inches) ─────────────────────────────────────────────────
+  ember_figsize: [8, 7]
+  adaptation_bars_figsize: [9, 5]
+  world_map_figsize: [14, 7]
+
+  # ── World map ──────────────────────────────────────────────────────────────
+  # (min_lat, max_lat) displayed on world choropleth maps.
+  world_map_lat_range: [-60, 85]
+  world_map_downsample: 4 # Read every Nth geogunit_109 pixel row/col to reduce memory and draw time.
+  geo109_subsample: 10 # Read every Nth pixel when building the geogunit_109 -> ISO lookup table (one-time).
 
   # ── SSP–RCP pairings ─────────────────────────────────────────────────────
-  # Each SSP is paired with a compatible RCP for sea-level-rise projections.
-  # The integer code (e.g. 245 = SSP2 × RCP4.5) maps to the filename
-  # inputs/SLR/SLR_{code}_wg1.csv.  Only the listed SSPs appear on charts.
   ssp_rcp_codes:
     SSP1: 126
     SSP2: 245
     SSP5: 585
 
-  # Directory containing the per-SSP SLR CSV files (relative to {root}).
-  slr_csv_dir: "{root}/inputs/SLR"
-
-  # Per-SSP line colours (must be matplotlib colour specs).
   ssp_colors:
     SSP1: "#1f77b4"   # blue
     SSP2: "#2ca02c"   # green
-    SSP3: "#ff7f0e"   # orange
+    # SSP3: "#ff7f0e"   # orange
     SSP5: "#d62728"   # red
 
-  # Adaptation-measure colours for bar / time-series charts.
   measure_colors:
     baseline: "#7f7f7f"
     protect:  "#1f77b4"
     retreat:  "#9467bd"
     avoid:    "#2ca02c"
+
+  level_linestyles: ["--", ":", "-."] # plot_timeseries.py:
+  baseline_linestyle: "-" # plot_timeseries.py:

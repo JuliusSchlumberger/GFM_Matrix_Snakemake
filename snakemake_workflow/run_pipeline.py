@@ -33,8 +33,8 @@ the documented manual invocation.
 Usage:
     python snakemake_workflow/run_pipeline.py \\
         [--config snakemake_workflow/config/config.yml] \\
-        [--cores 4] \\
-        [--target all]
+        [--cores 1] \\
+        [--target simulate]
 """
 
 import argparse
@@ -42,15 +42,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-import yaml
-
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+from config_utils import load_config  # noqa: E402
 from tiles import load_tile_grid  # noqa: E402
 from tile_split import split_depth, split_tile  # noqa: E402
-
-
-def _expand(s: str, root: str, code_root: str = "") -> str:
-    return str(s).replace("{root}", root).replace("{code_root}", code_root or root)
 
 
 def _discover_oom_tiles(model_outputs_dir: Path, current_tile_ids: set[int]) -> list[int]:
@@ -82,25 +77,20 @@ def main() -> None:
     _default_cfg = str(Path(__file__).resolve().parent / "config" / "config.yml")
     parser.add_argument("--config", default=_default_cfg,
                         help=f"path to config.yml (default: {_default_cfg})")
-    parser.add_argument("--cores", type=int, default=4)
-    parser.add_argument("--target", default="all")
+    parser.add_argument("--cores", type=int, default=1)
+    parser.add_argument("--target", default="simulate")
     args = parser.parse_args()
 
     config_path = Path(args.config).resolve()
-    with open(config_path) as fh:
-        cfg = yaml.safe_load(fh)
-
-    root = cfg["paths"]["root"]
-    code_root = cfg["paths"].get("code_root", root)
-    ex = lambda s: _expand(s, root, code_root)
+    cfg = load_config(config_path)
 
     ts_cfg = cfg.get("tile_split", {})
     fraction = float(ts_cfg.get("fraction", 2 / 3))
     max_depth = int(ts_cfg.get("max_depth", 2))
     max_retries = int(ts_cfg.get("max_retries", 5))
 
-    tile_grid_path = Path(ex(cfg["tile_grid"]["path"]))
-    model_outputs_dir = Path(ex(cfg["simulation"]["model_outputs"]))
+    tile_grid_path = Path(cfg["tile_grid"]["path"])
+    model_outputs_dir = Path(cfg["simulation"]["model_outputs"])
 
     for attempt in range(1, max_retries + 1):
         cmd = [
@@ -108,11 +98,23 @@ def main() -> None:
             "--cores", str(args.cores),
             "--resources", "aqueduct_runs=1",
             "--configfile", str(config_path),
+            # Restrict rerun-triggering to file-timestamp staleness only
+            # (Snakemake's classic Make-like behaviour), NOT rule code/params/
+            # input-signature changes too (Snakemake's default since 7.8).
+            # Without this, any edit to a rule's params:/input:/script body -
+            # even one that's a no-op for tiles where the new behaviour is
+            # config-disabled, e.g. vertical_datum_correction.enabled=false -
+            # marks every tile that ever used that rule as stale, cascading
+            # into re-running already-completed (expensive) Aqueduct
+            # simulations for every downstream job. Trade-off: a genuine
+            # rule-logic change now needs its outputs manually deleted/
+            # touched to force a rerun - it's no longer auto-detected.
+            "--rerun-triggers", "mtime",
         ]
-        print(f"\n{'═' * 60}")
+        print(f"\n{'=' * 60}")
         print(f"  Running Snakemake (attempt {attempt}/{max_retries})")
         print(f"  {' '.join(cmd)}")
-        print(f"{'═' * 60}")
+        print(f"{'=' * 60}")
         result = subprocess.run(cmd)
 
         current_ids = set(load_tile_grid(tile_grid_path)["tile_id"].astype(int).tolist())

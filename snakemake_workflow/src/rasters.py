@@ -14,11 +14,11 @@ import hydromt
 import numpy as np
 import rasterio
 import xarray as xr
+from rasterio.fill import fillnodata
+from scipy import ndimage
 from shapely.geometry import box as shapely_box
 
 from merge import AQUEDUCT_NODATA
-
-_DEM_LAND_FILL = 9999.0  # elevation written for land cells without DEM coverage
 
 
 def load_raster(path: str | Path) -> xr.DataArray:
@@ -95,6 +95,11 @@ def extract_dem(
     dem_source: str,
     bbox: list[float],
     mask_source: str,
+    geoid_offset_raster: str | Path | None = None,
+    min_hard_fill_component_size: int = 10,
+    interp_max_search_distance: float = 100.0,
+    interp_smoothing_iterations: int = 0,
+    land_fill_value_m: float = 9999.0,
 ) -> xr.DataArray:
     """Clip the DEM to the model domain bbox and fill all missing cells.
 
@@ -103,15 +108,28 @@ def extract_dem(
     mask), reprojected onto the DEM's own grid — not from any separately
     sourced land polygon dataset, which can misalign with DeltaDTM's own
     coastline:
-    - Cells with valid DeltaDTM elevation: kept as-is.
+    - Cells with valid DeltaDTM elevation: kept as-is (optionally geoid-
+      corrected first, see `geoid_offset_raster` below).
     - Missing cells where the mask says land (0), OR where the mask itself
-      has no coverage at all (nodata): set to `_DEM_LAND_FILL` (9999 m) so
-      Julia reads them as real, very high elevation and never floods them.
+      has no coverage at all (nodata): split by the size of the connected
+      (4-connectivity) group of missing-land cells they belong to.
+        - SMALL group (< `min_hard_fill_component_size` cells, e.g. an
+          isolated pixel or a small cluster): treated as a plausible
+          measurement/sensor gap and INTERPOLATED from the surrounding
+          valid DeltaDTM elevation (`rasterio.fill.fillnodata`, inverse-
+          distance weighted), rather than hard-filled - a lone nodata pixel
+          surrounded by real elevation is very unlikely to be exactly
+          9999 m in reality.
+        - LARGE group (>= `min_hard_fill_component_size` cells): set to
+          `land_fill_value_m` (9999 m) so Julia reads it as real, very high
+          elevation and never floods it - genuinely unmeasured terrain (the
+          common case for land nodata), not a small gap worth interpolating
+          over.
       Areas outside the mask's own coverage are treated the same as known
-      land — irrelevant, definitely-dry terrain — rather than an unknown
-      that some other dataset gets to arbitrate.
+      land throughout this split - irrelevant, definitely-dry terrain if
+      the gap is large, an interpolation candidate if it's small.
     - Missing cells where the mask says ocean (1), lake (2), or river (3):
-      set to 0.0. Julia re-zeros ocean cells anyway
+      set to 0.0, regardless of gap size. Julia re-zeros ocean cells anyway
       (``dem[.!landmask] .= 0.0``); lake/river cells are permanent inland
       water bodies where DeltaDTM has no terrain elevation, and filling with
       0 lets the flood model propagate through them rather than blocking it
@@ -123,11 +141,40 @@ def extract_dem(
         bbox: Model domain bounding box as ``[minx, miny, maxx, maxy]``.
         mask_source: Name of the DeltaDTM validity mask RasterDataset in
             `data_catalog`, used to decide the fill value for missing DEM cells.
+        geoid_offset_raster: Path to the cached global EGM2008 -> GOCO06s
+            geoid-offset raster (see vertical_datum.write_geoid_offset_raster
+            / rule compute_geoid_offset_raster), or None to skip the
+            correction entirely (vertical_datum_correction.enabled=false,
+            the default). When given, the offset is resampled onto this
+            tile's own DEM grid and ADDED to every cell with valid DeltaDTM
+            elevation - never to the fill cells above, which are not real
+            elevations. See src/vertical_datum.py for the full reasoning.
+        min_hard_fill_component_size: Connected-component size (in cells,
+            4-connectivity) at/above which a missing-land gap is hard-filled
+            to `land_fill_value_m` rather than interpolated. Default 10 (i.e. a
+            cell connected to at least 9 other missing-land cells).
+        interp_max_search_distance: `rasterio.fill.fillnodata`'s search
+            radius (pixels) for small-gap interpolation.
+        interp_smoothing_iterations: `rasterio.fill.fillnodata`'s post-fill
+            smoothing pass count for small-gap interpolation.
+        land_fill_value_m: Elevation (m) written for large missing-land gaps
+            (simulation.dem_gap_fill.land_fill_value_m).
 
     Returns:
         The DEM clipped to `bbox` with all missing cells filled.
     """
     da = data_catalog.get_rasterdataset(dem_source, bbox=bbox)
+
+    if geoid_offset_raster is not None:
+        from vertical_datum import sample_geoid_offset
+
+        valid_dem = (da.values != da.raster.nodata)
+        offset = sample_geoid_offset(
+            geoid_offset_raster, da.raster.transform, da.raster.crs,
+            da.raster.height, da.raster.width,
+        ).reshape(da.shape)
+        corrected = np.where(valid_dem, da.values + offset, da.values).astype(da.dtype)
+        da = da.copy(data=corrected)
 
     da_mask = data_catalog.get_rasterdataset(mask_source, bbox=bbox)
     da_mask.raster.set_nodata(255)  # uint8 nodata; mirrors extract_dem_mask
@@ -136,9 +183,46 @@ def extract_dem(
     # Land (0) or no mask coverage at all (255) -> irrelevant dry land.
     # Ocean (1), lake (2), river (3) -> flood-passable, fill with 0.
     is_land = (mask_vals == 0) | (mask_vals == 255)
-    fill = np.where(is_land, _DEM_LAND_FILL, 0.0).reshape(da.shape).astype(np.float32)
 
-    return da.where(da != da.raster.nodata, da.copy(data=fill))
+    dem_vals = da.values.reshape(mask_vals.shape)
+    missing = dem_vals == da.raster.nodata
+    missing_land = missing & is_land
+
+    # Connected components of missing-land cells only (4-connectivity) -
+    # ocean/lake/river nodata cells never participate here and always get
+    # 0.0 regardless of gap size.
+    structure = ndimage.generate_binary_structure(2, 1)  # 4-connectivity
+    labels, _ = ndimage.label(missing_land, structure=structure)
+    component_sizes = np.bincount(labels.ravel())
+    cell_component_size = component_sizes[labels]
+    small_gap = missing_land & (cell_component_size < min_hard_fill_component_size)
+
+    if small_gap.any():
+        # Interpolates a candidate value for every originally-missing cell
+        # (land and water alike) from real valid DeltaDTM cells only - only
+        # the small_gap subset of these candidates is actually used below;
+        # large land gaps and water cells get their own fixed fill value
+        # regardless of what this computes for them.
+        interpolated = fillnodata(
+            dem_vals.astype(np.float32).copy(),
+            mask=(~missing).astype(np.uint8),
+            max_search_distance=interp_max_search_distance,
+            smoothing_iterations=interp_smoothing_iterations,
+        )
+    else:
+        interpolated = dem_vals  # never read below (small_gap is all-False)
+
+    fill = np.where(
+        is_land,
+        np.where(small_gap, interpolated, land_fill_value_m),
+        0.0,
+    ).reshape(da.shape).astype(np.float32)
+
+    result = da.where(da != da.raster.nodata, da.copy(data=fill))
+    # Rounding to cm precision (well within DeltaDTM's own vertical accuracy)
+    # roughly halves the compressed file size - elevation varies continuously
+    # almost everywhere, so most of a float32 mantissa is incompressible noise.
+    return result.round(2)
 
 
 def extract_dem_mask(
@@ -249,8 +333,8 @@ def save_raster(
             `da.raster.width` and `da.raster.height` accessors (provided by rioxarray
             via HydroMT's raster accessor).
         output_path: Destination file path.
-        raster_config: The workflow's `raster` configuration section, with keys
-            `driver`, `compression`, `predictor` and `nodata`.
+        raster_config: The workflow's `raster_format` configuration section,
+            with keys `driver`, `compression`, `predictor` and `nodata`.
         dtype: Output data type.
     """
     with rasterio.open(
@@ -287,8 +371,8 @@ def save_nodata_raster(reference_path: str | Path, output_path: str | Path, rast
         reference_path: Path to a raster (e.g. the tile's DEM) whose grid
             (transform, CRS, width, height) the output should match.
         output_path: Destination file path.
-        raster_config: The workflow's `raster` configuration section, with
-            keys `driver`, `compression` and `predictor`.
+        raster_config: The workflow's `raster_format` configuration section,
+            with keys `driver`, `compression` and `predictor`.
     """
     with rasterio.open(reference_path) as ref:
         profile = ref.profile

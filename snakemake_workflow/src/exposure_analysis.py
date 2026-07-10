@@ -53,17 +53,14 @@ def _safe(arr: np.ndarray, fill: float = 0.0) -> np.ndarray:
     """Replace nodata / NaN with `fill`.
 
     Zero-copy fast path: if `arr` is already float64 and already fully
-    valid (no nodata/NaN), there is nothing to clean, so the array is
-    returned UNCHANGED instead of allocating a fresh copy. This is safe
-    because every caller of _safe() in this module only reads the result
-    (comparisons, multiplication) — none ever mutates it in place. This
-    matters a lot in practice: _safe() runs on the same ~46 MB
-    flood-fraction/design-threshold grids thousands of times over a full
-    run (once per (RP, SLR) pair, per avoid worker task - ~14,000+ calls on
-    a real run), and that many real allocate/free cycles fragments the
-    Windows heap badly enough that a later, much smaller allocation can
-    fail with numpy.core._exceptions._ArrayMemoryError despite plenty of
-    total free memory. Pre-cleaning flood_fractions / design grids ONCE
+    valid (no nodata/NaN), it is returned UNCHANGED instead of allocating a
+    fresh copy. Safe because every caller of _safe() in this module only
+    reads the result (comparisons, multiplication) — none mutates it in
+    place. This matters because _safe() runs on the same large flood-
+    fraction/design-threshold grids thousands of times over a full run, and
+    that many allocate/free cycles can fragment the Windows heap badly
+    enough that a later, much smaller allocation fails despite plenty of
+    total free memory. Pre-cleaning flood_fractions / design grids once
     right after they're built (see compute_exposure_analysis.py) means
     almost every subsequent _safe() call on them hits this fast path.
     """
@@ -232,8 +229,7 @@ def _agg_by_country(
 # identical to summing over one global array); apply_country_shares then only
 # needs the finished per-ISO share table (not the summed amounts) to produce
 # each cell's redistributed value. _redistribute_by_country composes both in
-# one call, for callers that already have a full array in memory (unchanged
-# behavior/signature - existing call sites are untouched).
+# one call, for callers that already have a full array in memory.
 
 def country_sums(
     per_cell_amount: np.ndarray,
@@ -282,7 +278,7 @@ def apply_country_shares(
 
     A country with no entry in `share_by_iso` (e.g. zero total capacity, or
     simply never seen) gets 0 everywhere - same "no redistribution" outcome
-    as `_redistribute_by_country`'s original zero-capacity handling.
+    as `_redistribute_by_country`'s zero-capacity handling.
     """
     iso_list, iso_idx, cell_idx = (
         iso_index if iso_index is not None else _build_iso_index(geo_ids, iso_lookup)
@@ -339,18 +335,14 @@ def protect_exposure_grid(
     and is treated as fully breached beyond it).
 
     Baseline reuses this SAME function: it is exactly "protect" with its
-    design threshold calibrated at SLR_0 instead of an adaptation.
+    design threshold calibrated at SLR_0 instead of an adaptation
     slr_intensities entry (see compute_exposure_analysis.py, which builds
     baseline's adapt_prot_frac via build_protection_fraction(..., "SLR_0",
-    ...) - the same build_protection_fraction that build_adapt_protection_
-    fraction already delegates to). This replaces an earlier RP-only
-    baseline threshold that never adjusted for SLR at all (baseline
-    exposure grew only through ff itself rising at already-exposed return
-    periods, never through new return periods becoming exposed) - using the
-    same ff-vs-design-ff mechanism as every adaptation measure makes
-    baseline's threshold SLR-aware and guarantees protect_SLR_x can never
-    show *more* exposure than baseline, since its design ff (calibrated at
-    a higher SLR) is always >= baseline's (calibrated at SLR_0).
+    ...)). Using the same ff-vs-design-ff mechanism for baseline as for
+    every adaptation measure makes baseline's threshold SLR-aware and
+    guarantees protect_SLR_x can never show *more* exposure than baseline,
+    since its design ff (calibrated at a higher SLR) is always >= baseline's
+    (calibrated at SLR_0).
     """
     ff_s = _safe(ff)
     exposed_mask = ff_s > _safe(adapt_prot_frac)
@@ -618,9 +610,7 @@ def resolve_ssp_scenario_eai(
     modelled trajectory years), linearly interpolate `eai_df`'s discrete
     SLR-EAI curve to that SLR, then scale by that country's SSP/year
     population growth factor. Both interpolation steps happen here, at
-    file-creation time, rather than being left to plotting code (the
-    earlier design kept a full SLR-indexed grid per SSP/year and resolved
-    to the real trajectory SLR only at plot time).
+    file-creation time, rather than being left to plotting code.
 
     `slr_traj`: DataFrame indexed by year, one column per SSP, global-mean
     SLR in mm (see visualization.load_slr_trajectories).

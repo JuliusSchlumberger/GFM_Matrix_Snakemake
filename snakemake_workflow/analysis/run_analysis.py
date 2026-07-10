@@ -31,15 +31,12 @@ import sys
 import time
 from pathlib import Path
 
-import yaml
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from config_utils import load_config  # noqa: E402
 
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 PYTHON = sys.executable
-
-
-def _expand(s: str, root: str, code_root: str = "") -> str:
-    return str(s).replace("{root}", root).replace("{code_root}", code_root or root)
 
 
 def _run(
@@ -87,18 +84,13 @@ def main() -> None:
     args = parser.parse_args()
 
     config_path = Path(args.config).resolve()
-    with open(config_path) as fh:
-        cfg = yaml.safe_load(fh)
-
-    root      = cfg.get("paths", {}).get("root", "")
-    code_root = cfg.get("paths", {}).get("code_root", root)
-    ex = lambda s: _expand(s, root, code_root)
+    cfg = load_config(config_path)
 
     viz        = cfg.get("visualization", {})
-    merged_out = ex(cfg["postprocessing"]["merged_outputs"])
+    merged_out = cfg["postprocessing"]["merged_outputs"]
 
     exp_dir = Path(args.expdir or f"{merged_out}/exposure")
-    fig_dir = Path(args.figdir or ex(viz.get("output_dir", "{root}/figures")))
+    fig_dir = Path(args.figdir or viz.get("output_dir", f"{cfg['paths']['root']}/figures"))
 
     # ── Resolve which steps to run from config + CLI overrides ────────────────
     sw = cfg.get("analysis", {})

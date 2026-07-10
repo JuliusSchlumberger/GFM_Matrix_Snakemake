@@ -1,250 +1,278 @@
 """
-sync_deltadtm.py — Sync DeltaDTM tiles from a local source and verify/download
-any tiles listed in the manifest CSV that are missing or corrupted.
+Download DeltaDTM v1.1 tiles from 4TU.ResearchData and sort them into the
+DEM/mask tile directories the rest of the pipeline expects — the parent
+directories of the `deltadtm` / `deltadtm_mask` sources in
+data_catalog_gfm.yml (e.g. merge_tiles.py, select_tiles.py and
+extract_dem.py all read individual tile files from those same directories,
+next to the `deltadtm.vrt` / `deltadtm_mask.vrt` mosaics).
 
-Two independent steps, both run by default:
+Also downloads 4TU's own pre-built global DEM VRT mosaic and rewrites it to
+point at this machine's local tile directory (see download_and_patch_vrt),
+and builds a mask VRT mosaic locally from the extracted mask tiles (see
+build_mask_vrt - no pre-built mask VRT exists from 4TU, unlike the DEM).
+Both are saved directly to the exact paths `deltadtm.path`/`deltadtm_mask.
+path` (data_catalog_gfm.yml) already expect, so nothing downstream needs to
+know this script ran.
 
-  1. sync        — copy tiles from SOURCE to TARGET if not already present.
-  2. verify      — read the manifest CSV in TARGET, check every listed tile
-                   exists and is a readable GeoTIFF; download any that are
-                   absent or corrupt.
+HOW TO GET THE URLS:
+Go to https://data.4tu.nl/datasets/1da2e70f-6c4d-4b03-86bd-b53e789cc629
+For each file below, right-click its download button/link -> "Copy Link Address"
+and paste it into the dicts below. They look like:
+https://data.4tu.nl/file/1da2e70f-6c4d-4b03-86bd-b53e789cc629/<file-uuid>
 
-Usage:
-    python sync_deltadtm.py [--config PATH] [--dry-run] [--no-sync] [--no-verify]
+Only fill in the continents you actually need -- leave others as None
+and they'll be skipped. Same for DEM_VRT_URL: leave it as None to skip
+downloading/patching the VRT mosaic (deltadtm.path must then already exist
+some other way - e.g. hand-built with gdalbuildvrt - before the rest of the
+pipeline can read the `deltadtm` catalog source).
+
+Not a standalone entry point - exposes `run(config)`, called from
+run_preparation.py (`python run_preparation.py sync_deltadtm`).
 """
 
-from __future__ import annotations
-
-import argparse
-import csv
-import shutil
+import sys
+import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
-from urllib.parse import urlparse
-from urllib.request import urlopen, Request
 
-import yaml
+import requests
+from osgeo import gdal
 
-_CHUNK = 1 << 20  # 1 MiB download chunk size
-_DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "config.yml"
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from config_utils import get_data_catalog  # noqa: E402
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-def _expand(s: str, root: str) -> str:
-    """Substitute the `{root}` placeholder used throughout config.yml paths."""
-    return str(s).replace("{root}", root)
+# ---------------------------------------------------------------------------
+# 1) FILL IN YOUR COPIED LINKS HERE
+# ---------------------------------------------------------------------------
 
+DEM_ZIP_URLS = {
+    "Africa": "https://data.4tu.nl/file/1da2e70f-6c4d-4b03-86bd-b53e789cc629/22ffa027-184b-4f67-9979-c182f3dfb1ab",
+    "Antarctica": "https://data.4tu.nl/file/1da2e70f-6c4d-4b03-86bd-b53e789cc629/ca957a40-34fa-41eb-b101-e45d1ccbd890",
+    "Asia": "https://data.4tu.nl/file/1da2e70f-6c4d-4b03-86bd-b53e789cc629/672eba4c-1334-44c6-8119-8879ded25912",
+    "Europe": "https://data.4tu.nl/file/1da2e70f-6c4d-4b03-86bd-b53e789cc629/cb0b8ee3-b018-4828-a74e-2fb05020b1b6",
+    "North_America": "https://data.4tu.nl/file/1da2e70f-6c4d-4b03-86bd-b53e789cc629/037664c6-1494-4889-9689-a56570728320",
+    "Oceania": "https://data.4tu.nl/file/1da2e70f-6c4d-4b03-86bd-b53e789cc629/de972de1-26bd-4303-afdf-21a90a232cff",
+    "South_America": "https://data.4tu.nl/file/1da2e70f-6c4d-4b03-86bd-b53e789cc629/db980f00-63cd-4a07-a4df-55ab06510594",
+    "Seven_seas_(open_ocean)": "https://data.4tu.nl/file/1da2e70f-6c4d-4b03-86bd-b53e789cc629/fe986ba6-3db9-40e2-8a49-0fcdb341244a",
+}
 
-# ── Step 1: local sync ────────────────────────────────────────────────────────
+MASK_ZIP_URL = "https://data.4tu.nl/file/1da2e70f-6c4d-4b03-86bd-b53e789cc629/bfe0fbc1-fdf3-40d0-a62c-adc58bfd9478"  # mask_tiles.zip
 
+# 4TU's own pre-built global VRT mosaic over every DEM tile (all continents).
+# Its <SourceFilename> entries are bare filenames (e.g. "DeltaDTM_v1_1_
+# N00E006.tif") - download_and_patch_vrt rewrites these to this machine's
+# actual local tile paths, so it does not matter which continents (if any)
+# were already extracted below.
+DEM_VRT_URL = "https://data.4tu.nl/file/1da2e70f-6c4d-4b03-86bd-b53e789cc629/1892b825-3e68-4337-9b8c-03fcffe4588b"
 
-def sync(source: Path, target: Path, dry_run: bool = False) -> None:
-    if not source.exists():
-        raise FileNotFoundError(f"Source directory not found: {source}")
-
-    all_files = [p for p in source.rglob("*") if p.is_file()]
-    missing = [p for p in all_files if not (target / p.relative_to(source)).exists()]
-    already_ok = len(all_files) - len(missing)
-
-    print(f"Source : {source}")
-    print(f"Target : {target}")
-    print(f"Total files in source : {len(all_files)}")
-    print(f"Already in target     : {already_ok}")
-    print(f"To copy               : {len(missing)}")
-    if dry_run:
-        print("(dry-run — nothing will be written)\n")
-
-    for i, src_file in enumerate(missing, 1):
-        dst_file = target / src_file.relative_to(source)
-        rel = src_file.relative_to(source)
-        print(f"[{i}/{len(missing)}] {rel}")
-        if not dry_run:
-            dst_file.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src_file, dst_file)
-
-    if not dry_run:
-        print(f"\nDone. {len(missing)} file(s) copied.")
-    else:
-        print(f"\nDry-run complete. {len(missing)} file(s) would be copied.")
+# ---------------------------------------------------------------------------
+# 2) CORE FUNCTIONS -- shouldn't need to touch below this line
+# ---------------------------------------------------------------------------
 
 
-# ── Step 2: manifest verify + download ───────────────────────────────────────
+def download_file(url: str, dest_path: Path, chunk_size: int = 1024 * 1024) -> None:
+    """Stream a large file to disk with progress reporting, resuming if partially present."""
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Skip if already fully downloaded (best-effort check via Content-Length)
+    head = requests.head(url, allow_redirects=True, timeout=30)
+    expected_size = int(head.headers.get("Content-Length", 0))
+    if dest_path.exists() and expected_size and dest_path.stat().st_size == expected_size:
+        print(f"  Already downloaded: {dest_path.name} ({expected_size / 1e9:.2f} GB)")
+        return
 
-def _find_manifest(target: Path) -> Path:
-    """Return the first CSV file found in *target*, or raise."""
-    csvs = sorted(target.glob("*.csv"))
-    if not csvs:
-        raise FileNotFoundError(f"No manifest CSV found in {target}")
-    if len(csvs) > 1:
-        print(f"  Warning: multiple CSVs found; using {csvs[0].name}")
-    return csvs[0]
-
-
-def _parse_manifest(csv_path: Path) -> list[tuple[str, str]]:
-    """
-    Read the manifest CSV and return [(url, filename), ...].
-    The first column of every non-header row is treated as the URL; the
-    tile filename is extracted as the last path component of the URL.
-    Rows where the first column is empty or does not end with '.tif' are skipped.
-    """
-    entries: list[tuple[str, str]] = []
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        for row in reader:
-            if not row:
-                continue
-            url = row[0].strip()
-            if not url or not url.lower().endswith(".tif"):
-                continue
-            fname = Path(urlparse(url).path).name
-            if fname:
-                entries.append((url, fname))
-    return entries
-
-
-def _is_valid_tif(path: Path) -> bool:
-    """Return True if *path* is a readable GeoTIFF (header + dimensions OK)."""
-    try:
-        import rasterio
-
-        with rasterio.open(path) as src:
-            _ = src.width, src.height, src.crs
-        return True
-    except Exception:
-        return False
-
-
-def _download(url: str, dst: Path) -> None:
-    """
-    Stream-download *url* to *dst*, writing via a sibling temp file so the
-    destination is never left in a partial state.
-    """
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dst.with_suffix(".tmp")
-    try:
-        req = Request(url, headers={"User-Agent": "sync_deltadtm/1.0"})
-        with urlopen(req) as resp, open(tmp, "wb") as f:
-            total = int(resp.headers.get("Content-Length", 0))
-            downloaded = 0
-            while chunk := resp.read(_CHUNK):
-                f.write(chunk)
-                downloaded += len(chunk)
-                if total:
-                    pct = 100 * downloaded / total
-                    print(
-                        f"\r    {downloaded / 1e6:.1f} / {total / 1e6:.1f} MB  ({pct:.0f}%)",
-                        end="",
-                        flush=True,
-                    )
+    print(f"  Downloading {dest_path.name} ...")
+    with requests.get(url, stream=True, timeout=60) as r:
+        r.raise_for_status()
+        total = int(r.headers.get("Content-Length", 0))
+        downloaded = 0
+        with open(dest_path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=chunk_size):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total:
+                        pct = downloaded / total * 100
+                        print(f"\r    {downloaded / 1e9:.2f} / {total / 1e9:.2f} GB ({pct:.1f}%)", end="")
         print()  # newline after progress
-        tmp.replace(dst)
-    except Exception:
-        tmp.unlink(missing_ok=True)
-        raise
 
 
-def verify_and_download(target: Path, dry_run: bool = False) -> None:
-    """
-    Check every tile listed in the manifest CSV against the target directory.
-    Tiles that are absent or fail the GeoTIFF validity check are downloaded
-    (unless dry_run is True).
-    """
-    manifest = _find_manifest(target)
-    print(f"\nManifest : {manifest.name}")
-    entries = _parse_manifest(manifest)
-    print(f"Tiles in manifest : {len(entries)}")
+def extract_tifs(zip_path: Path, out_dir: Path) -> int:
+    """Extract every .tif file inside a zip (ignoring subfolder structure) into out_dir."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    count = 0
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for member in zf.namelist():
+            if not member.lower().endswith(".tif"):
+                continue
+            filename = Path(member).name  # flatten any subfolder structure
+            target = out_dir / filename
+            if target.exists():
+                continue  # skip if already extracted (e.g. re-running the script)
+            with zf.open(member) as src, open(target, "wb") as dst:
+                dst.write(src.read())
+            count += 1
+    return count
 
-    missing: list[tuple[str, str]] = []
-    corrupted: list[tuple[str, str]] = []
 
-    for url, fname in entries:
-        dst = target / fname
-        if not dst.exists():
-            missing.append((url, fname))
-        elif not _is_valid_tif(dst):
-            corrupted.append((url, fname))
-
-    present_ok = len(entries) - len(missing) - len(corrupted)
-    print(f"  Present and valid : {present_ok}")
-    print(f"  Missing           : {len(missing)}")
-    print(f"  Corrupted         : {len(corrupted)}")
-
-    to_fetch = missing + corrupted
-    if not to_fetch:
-        print("All manifest tiles are present and valid.")
+def process_zip(
+    name: str, url: str, zip_download_dir: Path, out_dir: Path, delete_zip_after_extract: bool,
+) -> None:
+    if not url:
+        print(f"Skipping {name} (no URL provided)")
         return
 
-    if dry_run:
-        print(f"\n(dry-run) Would download {len(to_fetch)} tile(s):")
-        for _, fname in to_fetch:
-            tag = "MISSING" if any(f == fname for _, f in missing) else "CORRUPT"
-            print(f"  [{tag}] {fname}")
+    zip_path = zip_download_dir / f"{name}.zip"
+    print(f"\n=== {name} ===")
+    download_file(url, zip_path)
+
+    print(f"  Extracting .tif files to {out_dir} ...")
+    n = extract_tifs(zip_path, out_dir)
+    print(f"  Extracted {n} file(s).")
+
+    if delete_zip_after_extract:
+        zip_path.unlink()
+        print(f"  Deleted {zip_path.name} to save space.")
+
+
+def download_and_patch_vrt(url: str, dest_path: Path, tile_dir: Path, zip_download_dir: Path) -> None:
+    """Download 4TU's pre-built global DEM VRT mosaic and rewrite it for this machine.
+
+    The downloaded VRT's <SourceFilename> entries are bare filenames (e.g.
+    "DeltaDTM_v1_1_N00E006.tif", relativeToVRT="1") with no path information
+    of their own. Every one is rewritten here to the tile's actual absolute
+    path in `tile_dir` (relativeToVRT="0"), so the VRT resolves correctly
+    regardless of where the .vrt file itself is saved - independent of
+    relative-path resolution, and independent of which continents (if any)
+    were actually extracted into `tile_dir`: GDAL only opens a given
+    <SimpleSource> lazily when a read window actually touches its extent, so
+    a reference to a tile you never downloaded is harmless until something
+    actually queries that region.
+
+    Args:
+        url: Download link for the raw VRT (DEM_VRT_URL). Skipped (not
+            failed) if empty/None, matching DEM_ZIP_URLS' per-continent
+            skip behaviour.
+        dest_path: Final path for the patched VRT - the exact path
+            `deltadtm.path` already points at in data_catalog_gfm.yml, so
+            every other script keeps reading from the same place.
+        tile_dir: Directory the DEM .tif tiles are (or will be) extracted
+            into (dem_out_dir) - the absolute paths are built against this.
+        zip_download_dir: Scratch directory for the raw, unpatched download.
+    """
+    if not url:
+        print("Skipping DEM VRT (no URL provided)")
         return
 
-    print(f"\nDownloading {len(to_fetch)} tile(s)…")
-    failed: list[tuple[str, Exception]] = []
-    for i, (url, fname) in enumerate(to_fetch, 1):
-        dst = target / fname
-        tag = "MISSING" if any(f == fname for _, f in missing) else "CORRUPT"
-        print(f"[{i}/{len(to_fetch)}] [{tag}] {fname}")
-        try:
-            _download(url, dst)
-            if not _is_valid_tif(dst):
-                dst.unlink(missing_ok=True)
-                raise ValueError("Downloaded file failed GeoTIFF validation")
-        except Exception as exc:
-            print(f"  ERROR: {exc}")
-            failed.append((fname, exc))
+    if dest_path.exists():
+        print(f"DEM VRT already exists at {dest_path}, skipping (delete it to re-download/re-patch)")
+        return
 
-    n_ok = len(to_fetch) - len(failed)
-    print(f"\nDownload complete: {n_ok} succeeded, {len(failed)} failed.")
-    if failed:
-        print("Failed tiles:")
-        for fname, exc in failed:
-            print(f"  {fname}: {exc}")
+    raw_path = zip_download_dir / "deltadtm_raw.vrt"
+    print("\n=== DeltaDTM VRT mosaic ===")
+    download_file(url, raw_path)
+
+    tree = ET.parse(raw_path)
+    root = tree.getroot()
+
+    n_total = 0
+    n_missing = 0
+    for src_fn in root.iter("SourceFilename"):
+        n_total += 1
+        filename = Path(src_fn.text.strip()).name  # drop whatever path the source VRT itself carries
+        local_path = tile_dir / filename
+        src_fn.text = str(local_path)
+        src_fn.set("relativeToVRT", "0")
+        if not local_path.exists():
+            n_missing += 1
+
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    tree.write(dest_path, encoding="utf-8", xml_declaration=True)
+    print(f"  Patched {n_total} tile reference(s) to absolute paths under {tile_dir}")
+    if n_missing:
+        print(
+            f"  NOTE: {n_missing} referenced tile(s) not found locally yet (e.g. a continent "
+            "you haven't downloaded) - harmless unless a later read touches that region."
+        )
+    print(f"  Wrote {dest_path}")
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+def build_mask_vrt(tile_dir: Path, dest_path: Path) -> None:
+    """Build a VRT mosaic over the extracted DeltaDTM mask tiles.
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    parser.add_argument(
-        "--config",
-        default=str(_DEFAULT_CONFIG),
-        help=f"Path to config.yml (default: {_DEFAULT_CONFIG}).",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Report what would be done without writing anything.",
-    )
-    parser.add_argument(
-        "--no-sync", action="store_true", help="Skip the local SOURCE->TARGET copy step."
-    )
-    parser.add_argument(
-        "--no-verify",
-        action="store_true",
-        help="Skip the manifest verify + download step.",
-    )
-    args = parser.parse_args()
+    Unlike the DEM, 4TU doesn't host a pre-built mask VRT, so this builds
+    one locally with GDAL's BuildVRT over whatever mask .tif tiles are
+    present in `tile_dir` - handles the same per-latitude-band native
+    resolution variation as the DEM VRT automatically (mosaics at the
+    finest resolution found among the inputs). Values are categorical
+    (0=land, 1=ocean, 2=lake, 3=river, 255=nodata), so resampling is
+    nearest-neighbour.
 
-    with open(args.config) as f:
-        config = yaml.safe_load(f)
+    Args:
+        tile_dir: Directory containing the extracted mask .tif tiles
+            (mask_out_dir).
+        dest_path: Final path for the VRT - the exact path
+            `deltadtm_mask.path` already points at in data_catalog_gfm.yml.
+    """
+    if dest_path.exists():
+        print(f"Mask VRT already exists at {dest_path}, skipping (delete it to rebuild)")
+        return
 
-    root = config["paths"]["root"]
+    tif_paths = sorted(str(p) for p in tile_dir.glob("*.tif"))
+    if not tif_paths:
+        print(f"No mask tiles found in {tile_dir} - skipping mask VRT build")
+        return
+
+    print("\n=== DeltaDTM mask VRT mosaic ===")
+    print(f"  Building VRT from {len(tif_paths)} mask tile(s)...")
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    vrt_options = gdal.BuildVRTOptions(VRTNodata=255, resampleAlg="nearest")
+    ds = gdal.BuildVRT(str(dest_path), tif_paths, options=vrt_options)
+    if ds is None:
+        raise RuntimeError(f"gdal.BuildVRT failed for {dest_path}")
+    ds.FlushCache()
+    ds = None
+    print(f"  Wrote {dest_path}")
+
+
+def run(config: dict) -> None:
     sync_cfg = config["sync_deltadtm"]
-    source = Path(_expand(sync_cfg["source"], root))
-    target = Path(_expand(sync_cfg["target"], root))
 
-    if not args.no_sync:
-        print("═" * 60)
-        print("Step 1 — local sync")
-        print("═" * 60)
-        sync(source, target, dry_run=args.dry_run)
+    # DEM/mask tiles land next to the `deltadtm`/`deltadtm_mask` VRT mosaics
+    # in data_catalog_gfm.yml — the same directories merge_tiles.py,
+    # select_tiles.py and tile_mask_creation.py already read individual tile
+    # files from, so nothing downstream needs to know this script ran.
+    catalog = get_data_catalog(_REPO_ROOT / config["paths"]["hydromt_data_catalog"])
+    dem_vrt_path = Path(catalog.get_source("deltadtm").path)
+    dem_out_dir = dem_vrt_path.parent
+    mask_vrt_path = Path(catalog.get_source("deltadtm_mask").path)
+    mask_out_dir = mask_vrt_path.parent
 
-    if not args.no_verify:
-        print("\n" + "═" * 60)
-        print("Step 2 — manifest verify + download")
-        print("═" * 60)
-        verify_and_download(target, dry_run=args.dry_run)
+    zip_download_dir = Path(sync_cfg["zip_download_dir"])
+    delete_zips = bool(sync_cfg.get("delete_zips_after_extract", False))
+
+    dem_out_dir.mkdir(parents=True, exist_ok=True)
+    mask_out_dir.mkdir(parents=True, exist_ok=True)
+    zip_download_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"DEM tiles will be extracted to:  {dem_out_dir}")
+    print(f"Mask tiles will be extracted to: {mask_out_dir}")
+
+    print("\nDownloading DEM tiles (per continent) ...")
+    for continent, url in DEM_ZIP_URLS.items():
+        process_zip(continent, url, zip_download_dir, dem_out_dir, delete_zips)
+
+    download_and_patch_vrt(DEM_VRT_URL, dem_vrt_path, dem_out_dir, zip_download_dir)
+
+    print("\nDownloading mask tiles ...")
+    process_zip("mask_tiles", MASK_ZIP_URL, zip_download_dir, mask_out_dir, delete_zips)
+
+    build_mask_vrt(mask_out_dir, mask_vrt_path)
+
+    print("\nDone.")
+    print(f"DEM tiles:  {dem_out_dir.resolve()}")
+    print(f"DEM VRT:    {dem_vrt_path.resolve() if dem_vrt_path.exists() else '(not downloaded)'}")
+    print(f"Mask tiles: {mask_out_dir.resolve()}")
+    print(f"Mask VRT:   {mask_vrt_path.resolve() if mask_vrt_path.exists() else '(not built)'}")

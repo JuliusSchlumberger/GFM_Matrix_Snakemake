@@ -156,12 +156,11 @@ def filter_tiles_by_exposure(
     """Filter a tile grid to tiles with at least some population exposure.
 
     For each tile, clips `population_source` (WorldPop population count,
-    ~1km resolution - see config.yml's exposure.population_source) to the
-    tile's bounding box. A tile is **kept** if the clipped area has any
-    positive population; **discarded** if every valid (non-nodata) pixel is
-    zero, or the tile's bbox has no coverage in the population raster at
-    all (e.g. far outside WorldPop's own latitude range) - either way,
-    there is nobody there for a flood to expose.
+    ~1km resolution) to the tile's bounding box. A tile is **kept** if the
+    clipped area has any positive population; **discarded** if every valid
+    (non-nodata) pixel is zero, or the tile's bbox has no coverage in the
+    population raster at all (e.g. far outside WorldPop's own latitude
+    range) - either way, there is nobody there for a flood to expose.
 
     Args:
         tile_grid: Tile grid, as returned by `filter_tiles_by_dem_mask`.
@@ -267,24 +266,19 @@ def _mosaic_mask_for_trim(
     """Mosaic all 1°×1° DeltaDTM mask tiles overlapping ``bbox`` into one array.
 
     Used only by `compute_trimmed_bbox` — kept separate from
-    `_compute_fractions_from_tiles` (which stays on its original per-file-loop
-    implementation, unchanged) because pre-rounding each source window to
-    place it into a shared array shifts pixel content by fractions of a
+    `_compute_fractions_from_tiles` because pre-rounding each source window
+    to place it into a shared array shifts pixel content by fractions of a
     pixel relative to the unrounded fractional-window reads
-    `_compute_fractions_from_tiles` relies on (confirmed empirically: the two
-    approaches differ by ~1e-4 in the resulting fractions - small, but a real,
-    unexplained bias not worth introducing into an already-relied-upon
+    `_compute_fractions_from_tiles` relies on (differs by ~1e-4 in the
+    resulting fractions - small, but not worth introducing into a
     computation that drives real merge/drop decisions). The shave algorithm
     below only needs "is this row/column pure ocean" booleans, so the ~1
     pixel-scale imprecision from rounding is inconsequential, especially
     against the generous buffer_arcsec margin kept beyond the land edge.
 
     Safe at single-tile scale (a handful of source files, ~180M pixels worst
-    case for the largest nominal tile) — unlike the *global*-mosaic approach
-    abandoned elsewhere in this codebase (see
-    analysis/compute_exposure_analysis.py's docstring: merging 100 scenarios
-    x 750M pixels each needed hundreds of GB and was replaced by chunk
-    streaming).
+    case for the largest nominal tile) — mosaicking DeltaDTM's full global
+    extent this way would need hundreds of GB and is not attempted here.
 
     Returns ``(band, transform)`` for the single mask band, or ``None`` if no
     mask file overlaps ``bbox`` at all. Areas inside ``bbox`` not covered by
@@ -292,14 +286,14 @@ def _mosaic_mask_for_trim(
 
     DeltaDTM mask tiles do NOT all share one native resolution: y-resolution
     is a constant 1 arcsec, but x-resolution coarsens at higher latitudes to
-    compensate for longitude convergence near the poles (confirmed
-    empirically, e.g. 3 arcsec at 76-77N vs 5 arcsec at 80-81N). A bbox
-    spanning such a boundary would place mismatched array shapes if source
-    windows were read at each file's own resolution. To handle this, the
-    combined array uses the FINEST resolution found among the overlapping
-    files, and every source window is read with `out_shape`/nearest-neighbour
-    resampling to exactly match its destination slot - safe for this
-    categorical mask (values 0/1/2/3/255), unlike averaging resamplers.
+    compensate for longitude convergence near the poles (e.g. 3 arcsec at
+    76-77N vs 5 arcsec at 80-81N). A bbox spanning such a boundary would
+    produce mismatched array shapes if source windows were read at each
+    file's own resolution. To handle this, the combined array uses the
+    FINEST resolution found among the overlapping files, and every source
+    window is read with `out_shape`/nearest-neighbour resampling to exactly
+    match its destination slot - safe for this categorical mask (values
+    0/1/2/3/255), unlike averaging resamplers.
     """
     minx, miny, maxx, maxy = bbox
     windows = []  # (path, ix0, iy0, ix1, iy1)
@@ -512,6 +506,7 @@ def merge_undersized_tiles(
     tile_grid: gpd.GeoDataFrame,
     min_coast_fraction: float,
     max_merge_count: int = 4,
+    cardinal_neighbor_overlap_threshold: float = 0.5,
 ) -> gpd.GeoDataFrame:
     """Merge tiles with too little ocean or land into a neighbour, in two phases.
 
@@ -556,6 +551,8 @@ def merge_undersized_tiles(
         max_merge_count: Maximum number of original tiles that may be combined
             into a single output tile (default: 4), enforced across both
             phases together.
+        cardinal_neighbor_overlap_threshold: Passed to `_is_cardinal_neighbor`
+            (tile_grid.cardinal_neighbor_overlap_threshold).
 
     Returns:
         ``tile_grid`` with deficient tiles merged or dropped and the
@@ -588,7 +585,7 @@ def merge_undersized_tiles(
                 if tile_count[tile_id] + tile_count[other_id] > max_merge_count:
                     continue
                 other_geom = grid.loc[other_id, "geometry"]
-                if not _is_cardinal_neighbor(own_geom, other_geom):
+                if not _is_cardinal_neighbor(own_geom, other_geom, cardinal_neighbor_overlap_threshold):
                     continue
                 candidates.append((other_id, grid.loc[other_id, rank_column]))
 
@@ -638,10 +635,11 @@ def deduplicate_overlapping_tiles(
     (e.g. a small trimmed tile fully contained in a much larger neighbour's
     trimmed box without covering the same feature), which a one-sided ratio
     would falsely flag. IoU only approaches 1.0 when both tiles are close to
-    identical in extent, which correctly isolates true duplicates - confirmed
-    empirically on a regional test grid: the one genuine duplicate pair had
-    IoU=1.000, while the next-highest (legitimate, distinct) neighbouring
-    pair topped out at IoU=0.645, a wide margin below the 0.8 default.
+    identical in extent, which correctly isolates true duplicates from
+    legitimately-distinct neighbours (on a regional test grid, the one
+    genuine duplicate pair reached IoU=1.000, while the highest-overlap
+    distinct neighbouring pair topped out at IoU=0.645, well below the 0.8
+    default).
 
     Args:
         tile_grid: Tile grid to deduplicate (operates on whatever

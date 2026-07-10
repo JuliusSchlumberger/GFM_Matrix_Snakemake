@@ -13,10 +13,12 @@ Two data sources feed each figure:
                                           of the per-scenario CSVs.
 
 X-axis: global mean SLR (m). Y-axis: population growth rate relative to 2020 (%),
-−50 % → +150 %. Colour: EAI (Expected Annual Impact, people exposed beyond
+-50 % to +150 %. Colour: EAI (Expected Annual Impact, people exposed beyond
 protection). SSP overlays: coloured lines tracing each SSP's real growth/SLR
 trajectory through the scenario-neutral matrix, stopping at the last highlight
-year. Second subplot: P17-P83 SLR uncertainty per SSP at each highlight year.
+year. Second subplot: a single consolidated P17-P83 SLR-uncertainty panel, one
+y-tick per highlight year, with SSPs clustered per year via small offsets and
+identified by colour only.
 
 Usage:
     python snakemake_workflow/analysis/plot_burning_ember.py \\
@@ -32,9 +34,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from config_utils import get_data_catalog, load_config  # noqa: E402
 from visualization import (  # noqa: E402
     load_growth_matrix_csv,
     build_growth_matrix_from_grid,
@@ -47,9 +49,7 @@ from population_growth import (  # noqa: E402
     _build_name_to_iso,
 )
 
-
-def _expand(s, root, code_root=""):
-    return str(s).replace("{root}", root).replace("{code_root}", code_root or root)
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _ssp_growth_for_isos(growth_df, iso_codes: list[str], ssp: str, year: int) -> float:
@@ -94,8 +94,9 @@ def _make_ember(
         slr_trajectories=slr_traj, ssp_growth=ssp_growth_series,
         slr_uncertainty=slr_uncertainty,
         cmap=viz.get("cmap_ember", "YlOrRd"), vmax=vmax, dpi=dpi,
+        figsize=tuple(viz.get("ember_figsize", (8, 6))),
         ssp_colors=viz.get("ssp_colors"), highlight_years=highlight_years,
-        ssp_rcp_codes=viz.get("ssp_rcp_codes"),
+        n_contours=int(viz.get("n_ember_contours", 6)),
     )
     fig.savefig(outpath, bbox_inches="tight")
     plt.close(fig)
@@ -108,12 +109,7 @@ def main() -> None:
     parser.add_argument("--outdir", default=None)
     args = parser.parse_args()
 
-    with open(args.config) as fh:
-        cfg = yaml.safe_load(fh)
-
-    root = cfg.get("paths", {}).get("root", "")
-    code_root = cfg.get("paths", {}).get("code_root", root)
-    ex = lambda s: _expand(s, root, code_root)
+    cfg = load_config(args.config)
 
     viz = cfg.get("visualization", {})
     adapt_cfg = cfg.get("adaptation", {})
@@ -121,16 +117,16 @@ def main() -> None:
 
     slr_intensities = adapt_cfg.get("slr_intensities", [])
     ssps = pg_cfg.get("ssps", ["SSP1", "SSP2", "SSP3", "SSP5"])
-    highlight_years = [2050, 2100]
+    highlight_years = viz.get("highlight_years", [2050, 2100])
 
-    exp_dir = Path(ex(args.expdir))
-    out_dir = Path(ex(args.outdir or str(
-        Path(ex(viz.get("output_dir", "{root}/figures"))) / "burning_ember"
-    )))
+    exp_dir = Path(args.expdir)
+    out_dir = Path(args.outdir or str(
+        Path(viz.get("output_dir", f"{cfg['paths']['root']}/figures")) / "burning_ember"
+    ))
 
     # SSP SLR trajectories: median (p50) drives the overlay line; full
     # p17/p50/p83 (at the highlight years only) drives the uncertainty subplot.
-    traj_path = ex(viz.get("slr_trajectories_csv", ""))
+    traj_path = viz.get("slr_trajectories_csv", "")
     slr_traj = None
     slr_uncertainty: dict[str, pd.DataFrame] = {}
     if traj_path and Path(traj_path).exists():
@@ -145,7 +141,8 @@ def main() -> None:
 
     # SSP growth factors for the trajectory overlay only (the heatmap
     # background comes entirely from the growth_matrix CSV — see below).
-    xlsx_path = Path(ex(pg_cfg.get("factors_xlsx", "{root}/inputs/SSPs/getting_SSP_population_growth_factors.xlsx")))
+    catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"])
+    xlsx_path = Path(catalog.get_source("ssp_population_growth_factors").path)  # catalog key (data_catalog_gfm.yml)
     growth_df = load_ssp_growth_factors(xlsx_path) if xlsx_path.exists() else None
 
     dpi = int(viz.get("dpi", 200))
@@ -164,6 +161,8 @@ def main() -> None:
             p = exp_dir / f"exposure_{meas}_{slr_int}_growth_matrix.csv"
             if p.exists():
                 scenario_files[f"{meas}_{slr_int}"] = p
+
+    country_vmax = float(viz.get("country_eai_vmax", 2_000_000.0))
 
     for scenario_label, growth_matrix_path in scenario_files.items():
         if not growth_matrix_path.exists():
@@ -196,7 +195,7 @@ def main() -> None:
             title = f"{iso_to_name.get(iso, iso)} — {scenario_label}"
             _make_ember(matrix_c, slr_mm_grid, growth_rates, title,
                         slr_traj, ssp_growth_c, slr_uncertainty, highlight_years, viz, dpi,
-                        2_000_000.0,
+                        country_vmax,
                         country_dir / f"burning_ember_{iso}_{scenario_label}.png")
 
         print(f"  {scenario_label}: done")

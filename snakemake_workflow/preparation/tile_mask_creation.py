@@ -3,9 +3,8 @@
 Step 1: build a 5x5 degree grid from the `deltadtm_mask` VRT's constituent
 1x1 degree tiles (build_five_deg_grid_from_deltadtm). A 5-degree cell is
 kept if at least one DeltaDTM tile falls inside it. DeltaDTM's mask tiles
-cover roughly -69 to 84 degrees latitude, well beyond the +-60 degree
-extent of the DiluviumDEM-derived `five_deg_grid` catalog source this
-replaces.
+cover roughly -69 to 84 degrees latitude, far beyond the +-60 degree extent
+of the DiluviumDEM-derived `five_deg_grid` catalog source.
 
 Step 2: filter that grid to cells that also have COAST-RP storm-tide
 station coverage nearby (filter_grid_by_coastrp), so tiles are never
@@ -24,9 +23,11 @@ degree quadrants. Each quadrant is then scaled by a factor of 1.5 around
 its centre point, producing 3.75x3.75 degree tiles that overlap
 neighbouring tiles by 0.625 degrees on each side. Each output tile receives
 a unique tile_id.
+
+Not a standalone entry point - exposes `run(config)`, called from
+run_preparation.py (`python run_preparation.py tile_mask_creation`).
 """
 
-import argparse
 import pathlib
 import re
 import sys
@@ -34,7 +35,6 @@ import sys
 import geopandas as gpd
 import rasterio
 import xarray as xr
-import yaml
 from shapely.affinity import scale
 from shapely.geometry import box
 
@@ -43,16 +43,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 from config_utils import get_data_catalog  # noqa: E402
 
 repo_root = pathlib.Path(__file__).resolve().parent.parent.parent
-_DEFAULT_CONFIG = pathlib.Path(__file__).resolve().parent.parent / "config" / "config.yml"
 
 # Matches the SW-corner tile naming convention shared by DeltaDTM and
 # DiluviumDEM, e.g. "DeltaDTM_v1_1_N51W176.tif" -> lat_south=51, lon_west=-176.
 _TILE_NAME_RE = re.compile(r"([NS])(\d{2})([EW])(\d{3})")
-
-
-def _expand(s: str, root: str) -> str:
-    """Substitute the `{root}` placeholder used throughout config.yml paths."""
-    return str(s).replace("{root}", root)
 
 
 def _tile_sw_corner(filename: str) -> tuple[int, int] | None:
@@ -174,22 +168,10 @@ def split_into_quadrants(row):
     }
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--config",
-        default=str(_DEFAULT_CONFIG),
-        help=f"Path to config.yml (default: {_DEFAULT_CONFIG}).",
-    )
-    args = parser.parse_args()
-
-    with open(args.config) as f:
-        config = yaml.safe_load(f)
-
+def run(config: dict) -> None:
     data_catalog = get_data_catalog(
         repo_root / config["paths"]["hydromt_data_catalog"], logger_name="Prepare tile masks"
     )
-    root = config["paths"]["root"]
 
     mask_vrt_path = pathlib.Path(data_catalog.get_source("deltadtm_mask").path)
     grid = build_five_deg_grid_from_deltadtm(mask_vrt_path)
@@ -203,7 +185,7 @@ def main():
     buffer_deg = (config["one_off_edits"]["scale_factor"] - 1) * quadrant_size_deg / 2
     grid = filter_grid_by_coastrp(grid, stations, buffer_deg)
 
-    five_deg_grid_path = pathlib.Path(_expand(config["one_off_edits"]["five_deg_grid_deltadtm"], root))
+    five_deg_grid_path = pathlib.Path(config["one_off_edits"]["five_deg_grid_deltadtm"])
     five_deg_grid_path.parent.mkdir(parents=True, exist_ok=True)
     n_tiles_1deg = sum(len(t) for t in grid["tiles_1deg"])
     # GPKG/fiona has no list field type - serialize for the write only,
@@ -231,10 +213,14 @@ def main():
             )
 
     tiles_gdf = gpd.GeoDataFrame(tiles, crs=grid.crs)
-    smaller_tiles_path = _expand(config["one_off_edits"]["smaller_tiles"], root)
+    smaller_tiles_path = config["one_off_edits"]["smaller_tiles"]
     tiles_gdf.to_file(smaller_tiles_path, driver="GPKG")
     print(f"Saved {len(tiles_gdf)} tiles to {smaller_tiles_path}")
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(
+        "tile_mask_creation.py is no longer a standalone entry point.\n"
+        "Run it via: python run_preparation.py tile_mask_creation\n"
+        "See run_preparation.py --help for the full list of steps."
+    )

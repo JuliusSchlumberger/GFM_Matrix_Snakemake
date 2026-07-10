@@ -2,8 +2,8 @@
 
 Reads the per-country, per-SSP, per-year growth factors from the project
 Excel file (`inputs/SSPs/getting_SSP_population_growth_factors.xlsx`,
-sheet `growth_factors`) and exposes them in a tidy DataFrame indexed by
-(SSP, ISO-3, year).
+sheet `growth_factors` by default) and exposes them in a tidy DataFrame
+indexed by (SSP, ISO-3, year).
 
 Growth factors are cumulative and relative to the 2020 baseline
 (2020 value = 1.0 everywhere).  A value of 1.15 means 15 % population
@@ -91,11 +91,14 @@ def _build_name_to_iso() -> dict[str, str]:
     return ne_map
 
 
-def load_ssp_growth_factors(xlsx_path: str | Path) -> pd.DataFrame:
+def load_ssp_growth_factors(xlsx_path: str | Path, sheet_name: str = "growth_factors") -> pd.DataFrame:
     """Load SSP population growth factors and return a tidy per-(SSP, ISO, year) DataFrame.
 
     Args:
-        xlsx_path: Path to the SSP growth-factors Excel file.
+        xlsx_path: Path to the SSP growth-factors Excel file (catalog key
+            ssp_population_growth_factors in data_catalog_gfm.yml).
+        sheet_name: Sheet name within the Excel file - defaults to the
+            catalog entry's own driver_kwargs.sheet_name value.
 
     Returns:
         DataFrame with MultiIndex (scenario, ISO) and columns = integer years.
@@ -109,7 +112,7 @@ def load_ssp_growth_factors(xlsx_path: str | Path) -> pd.DataFrame:
         factor_2050 = df.loc[("SSP2", "BGD"), 2050]   # Bangladesh under SSP2
     """
     xlsx_path = Path(xlsx_path)
-    raw = pd.read_excel(xlsx_path, sheet_name="growth_factors")
+    raw = pd.read_excel(xlsx_path, sheet_name=sheet_name)
 
     # Year columns are integer (or may come in as int/float)
     year_cols = [c for c in raw.columns if isinstance(c, (int, float)) and c >= 2000]

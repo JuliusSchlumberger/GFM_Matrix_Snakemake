@@ -57,7 +57,7 @@ def _output_shape(minx: float, miny: float, maxx: float, maxy: float) -> tuple[i
 tile_rasters = list(snakemake.input.waterdepth_tiles)  # noqa: F821
 output_dir = Path(snakemake.output.diagnostics)  # noqa: F821
 
-TILE_PALETTE = plt.get_cmap("tab10")
+TILE_PALETTE = plt.get_cmap(plot_cfg["overlap_tile_cmap"])
 
 output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -180,12 +180,12 @@ for panel_idx, (focal, all_paths, combined_bounds, out_h, out_w) in enumerate(se
         diff = np.where(overlap, np.nanmax(vals, axis=0) - np.nanmin(vals, axis=0), np.nan)
         diff_max = float(np.nanmax(diff))
         norm = np.where(overlap, diff / diff_max if diff_max > 0 else 0.0, 0.0)
-        reds = plt.get_cmap("Reds")
+        reds = plt.get_cmap(plot_cfg["overlap_diff_cmap"])
         red_rgba = reds(np.clip(0.25 + 0.75 * norm, 0, 1))
         img[overlap] = red_rgba[overlap]
 
     # ── figure ───────────────────────────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(10, 8))
+    fig, ax = plt.subplots(figsize=tuple(plot_cfg["overlap_diag_figsize"]))
 
     # Land polygon background
     coastlines = gpd.read_file(coastlines_path, layer="land_polygons",

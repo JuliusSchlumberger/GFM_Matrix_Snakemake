@@ -35,9 +35,12 @@ coast_rp:
       After preprocessing, Antarctic stations (lat < −60°) are removed, leaving
       ~22 670 stations. Used as the base storm-tide forcing in
       prepare_boundary_conditions.py, with SLR fingerprints (see
-      ipcc_ar6_slr_projections) added on top. No MDT correction is applied:
-      COAST-RP's MSL reference already matches the DeltaDTM v1.1 DEM in use
-      (see `deltadtm` below) directly.
+      ipcc_ar6_slr_projections) added on top. MDT correction (local MSL ->
+      GOCO06s, via `mdt_cnes_cls22` below) is OFF by
+      default - see boundary_conditions.mdt_correction in config.yml for
+      when to enable it (only once the DEM has also switched to a pure-
+      geoid GOCO06s reference; see `deltadtm` below and
+      vertical_datum_correction in config.yml).
     paper_doi: 10.1038/s43247-021-00204-9
     paper_ref: >
       Dullaart et al. (2021), Accounting for tropical cyclones more than doubles
@@ -49,37 +52,9 @@ coast_rp:
     source_version: "1.0"
     model_version: "Deltares D-Flow FM v1.2.63.64757"
     vertical_reference: Local mean sea level (MSL) — matches the MSL-referenced
-      DeltaDTM v1.1 DEM (see `deltadtm`) directly; no MDT correction applied
-      in prepare_boundary_conditions.py.
-
-mdt_hybrid_cnes_cls22_cmems2020:
-  data_type: GeoDataset
-  driver: netcdf
-  path: inputs/Aviso/mdt_hybrid_cnes_cls22_cmems2020.nc
-  crs: 4326
-  filesystem: local
-  meta:
-    category: ocean
-    description: >
-      Hybrid Mean Dynamic Topography (MDT) MDT-HYBRID-CNES-CLS22-CMEMS2020.
-      Combines MDT-CNES-CLS22 for global coverage with the CMEMS 2020 regional
-      MDTs for the Black Sea (MDT-CMEMS2020-BLK) and the Mediterranean Sea
-      (MDT-CMEMS2020-MED). Gives the time-mean sea surface height above the
-      geoid, averaged over 1993–2012 at 1/8° (~14 km) resolution globally.
-      NOT used by prepare_boundary_conditions.py: the DeltaDTM tiles in use
-      (see `deltadtm`) are the v1.1 MSL-referenced release, which already
-      has this same MDT subtracted (among other corrections), and COAST-RP
-      storm-tide levels are also MSL-referenced — the two datasets already
-      share a vertical reference, so no additional MDT shift is applied.
-      Kept in the catalog as an available dataset for other diagnostic uses.
-    paper_doi: 10.22541/essoar.170158328.85804859/v1
-    paper_ref: Jousset et al. (2023), MDT-CNES-CLS22
-    source_author: CNES-CLS / E.U. Copernicus Marine Service
-    source_license: https://www.aviso.altimetry.fr/fileadmin/documents/data/License_Aviso_ini.pdf
-    source_url: https://doi.org/10.24400/527896/a01-2024.010
-    source_version: MDT-HYBRID-CNES-CLS22-CMEMS2020
-    pixel_size_deg: 0.125
-    time_coverage: 1993–2012 mean
+      DeltaDTM v1.1 DEM currently in use (see `deltadtm`) directly, as long as
+      boundary_conditions.mdt_correction stays disabled (the default; see
+      description above).
 
 ipcc_ar6_slr_projections:
   data_type: GeoDataset
@@ -112,26 +87,35 @@ ipcc_ar6_slr_projections:
       (in prep.), FACTS, Geosci. Model Dev.; and (3) the dataset itself
       (Garner et al. 2021, v20210809, https://doi.org/10.5281/zenodo.5914709).
 
-five_deg_grid:
-  data_type: GeoDataFrame
-  driver: vector
-  path: inputs/mask/five_deg_grid_filtered.gpkg
-  crs: 4326
+ipcc_ar6_slr_wg1_csv:
+  data_type: DataFrame
+  driver: csv
+  # Directory root, not a single file - analysis/extract_slr_trajectories.py
+  # reads inputs/SLR/SLR_{code}_wg1.csv per SSP/RCP code (code from
+  # visualization.ssp_rcp_codes, e.g. SLR_126_wg1.csv for SSP1-RCP2.6)
+  # directly with pandas, not through HydroMT's own DataFrame reader - same
+  # directory-root pattern as ipcc_ar6_slr_projections above (see that
+  # entry's `.gfc` sibling comment near the bottom of this file for why
+  # data_type/driver exist here only so the catalog parser accepts the entry).
+  path: inputs/SLR
   filesystem: local
   meta:
-    category: geography
+    category: ocean
     description: >
-      Global 5×5° tile grid derived from the DiluviumDEM tile index, filtered to
-      areas relevant to the study region. May be used as an alternative spatial
-      partitioning for preprocessing tasks that operate tile by tile.
+      Global-mean sea-level-rise percentile trajectories, one CSV per
+      SSP/RCP scenario code (SLR_{code}_wg1.csv), each year-indexed with
+      p17/p50/p83 percentile columns (metres, likely IPCC AR6 WG1 global-mean
+      SLR projections - confirm exact source/citation before citing
+      externally, unlike the regional ipcc_ar6_slr_projections entry above
+      whose provenance is already verified). Used by
+      analysis/extract_slr_trajectories.py to build the combined trajectory
+      CSV consumed by the burning-ember/timeseries plots
+      (visualization.slr_trajectories_csv).
 
-# These three datasets live under a separate shared-data root (GCFM_UU) that
-# is not the same as `root` above.  Update the absolute paths below on each
-# machine, or override them in a machine-local catalog file.
 deltadtm:
   data_type: RasterDataset
   driver: raster
-  path: D:\GCFM_UU\raw_data\DeltaDTM\deltadtm.vrt
+  path: inputs\DeltaDTM\deltadtm.vrt
   crs: 4326
   filesystem: local
   meta:
@@ -147,7 +131,16 @@ deltadtm:
       release, re-referenced from the original EGM2008 geoid to local mean
       sea level: geoid converted to GOCO06s, then MDT (mean dynamic
       topography) subtracted. This already matches the MSL reference of the
-      coast_rp storm-tide forcing directly.
+      coast_rp storm-tide forcing directly (as long as
+      boundary_conditions.mdt_correction stays disabled - the default).
+      PLANNED CHANGE: this `path` will be repointed at a VRT over the
+      original, EGM2008-referenced 4TU.ResearchData release (downloaded by
+      sync_deltadtm.py) once corrected to GOCO06s by
+      preparation/merge_tiles.py (vertical_datum_correction in config.yml,
+      src/vertical_datum.py) - avoids the MDT-over-land extrapolation the
+      `_GOCO06s_MDT` release above requires. Once switched,
+      boundary_conditions.mdt_correction must also be enabled so COAST-RP
+      and the DEM keep sharing a vertical reference (see that entry above).
     paper_doi: 10.5194/essd-16-2343-2024  # original DeltaDTM v1.0 (Pronk et al. 2024)
     paper_ref: >
       Pronk et al. (2024), Earth Syst. Sci. Data 16, 2343–2360 (base DEM,
@@ -206,7 +199,7 @@ land_polygons:
 land_use:
   data_type: RasterDataset
   driver: raster
-  path: D:\GCFM_UU\raw_data\Copernicus\Copernicus_LandUse.tif
+  path: inputs\Copernicus\Copernicus_LandUse.tif
   crs: 4326
   filesystem: local
   meta:
@@ -336,7 +329,7 @@ population:
 lu_to_roughness_lookup:
   data_type: DataFrame
   driver: csv
-  path: D:\GCFM_UU\raw_data\Copernicus\lu_to_roughness_lookup.csv
+  path: inputs\Copernicus\lu_to_roughness_lookup.csv
   filesystem: local
   encoding: UTF-8
   meta:
@@ -361,3 +354,72 @@ lu_to_roughness_lookup:
       - name: manning_n
         type: Real
         description: Manning's n roughness coefficient for hydrodynamic flow resistance.
+
+# .gfc (ICGEM spherical-harmonic coefficient) files are read directly by
+# pyshtools in src/vertical_datum.compute_geoid_offset_grid, never through
+# HydroMT's own typed readers - data_type/driver below exist only so the
+# catalog parser accepts the entry (HydroMT requires both, plus `path` not
+# `file_path`) and so `catalog.get_source(...).path` resolves correctly;
+# they are not indicative of how the file is actually read.
+goco06s:
+  data_type: DataFrame
+  driver: csv
+  path: inputs/ICGM/GOCO06s.gfc
+  filesystem: local
+  meta:
+    category: geodesy
+    description: >
+      GOCO06s combined gravity field model (satellite-only, degree/order 300).
+      Used to compute the GOCO06s geoid undulation N_GOCO06s - the common
+      vertical datum this project converts DeltaDTM (from EGM2008) and
+      COAST-RP (from local MSL, via MDT) onto, when
+      vertical_datum_correction.enabled / boundary_conditions.mdt_correction.
+      enabled are turned on (see config.yml).
+      Download from the ICGEM Table of Models: http://icgem.gfz-potsdam.de/home
+    paper_ref: >
+      Kvas et al. (2021), GOCO06s — A satellite-only gravity field model,
+      Earth Syst. Sci. Data 13(1), 99–118.
+    max_degree: 300
+
+egm2008_geoid:
+  data_type: DataFrame
+  driver: csv
+  path: inputs/ICGM/EGM2008.gfc
+  filesystem: local
+  meta:
+    category: geodesy
+    description: >
+      EGM2008 Earth Gravitational Model (degree/order 2190). Used to compute
+      the N_EGM2008 geoid undulation for the EGM2008 -> GOCO06s DEM datum
+      correction (src/vertical_datum.py, applied by
+      preparation/merge_tiles.py) to the original, EGM2008-referenced
+      DeltaDTM release (see `deltadtm` below).
+      Download from the ICGEM Table of Models: http://icgem.gfz-potsdam.de/home
+    paper_ref: >
+      Pavlis et al. (2012), The development and evaluation of the Earth
+      Gravitational Model 2008 (EGM2008), J. Geophys. Res. 117, B04406.
+
+# compute_mdt_correction, only when boundary_conditions.mdt_correction.
+# enabled is true (off by default).
+mdt_cnes_cls22:
+  data_type: GeoDataset
+  driver: netcdf
+  path: inputs/AVISO/mdt_hybrid_cnes_cls22_cmems2020_global.nc
+  crs: 4326
+  filesystem: local
+  meta:
+    category: ocean
+    description: >
+      Mean Dynamic Topography CNES-CLS22 from AVISO (HYBRID-CNES-CLS2022).
+      Gives the time-mean sea-surface height above the GOCO06s geoid [m].
+      Subtracting MDT from a GOCO06s-referenced DEM converts it to
+      orthometric heights above local Mean Sea Level (MSL):
+      H_MSL = H_GOCO06s - MDT. MDT is defined over ocean only.
+      Download from AVISO+ (https://www.aviso.altimetry.fr) - requires a
+      free account.
+    paper_ref: >
+      CNES-CLS22 MDT, AVISO+ altimetry data centre,
+      https://doi.org/10.24400/527896/a01-2021.001
+    variable_mdt_units: m
+    variable_mdt_sign_convention: positive upward (sea surface above geoid)
+

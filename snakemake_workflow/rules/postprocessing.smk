@@ -15,26 +15,37 @@ wildcard_constraints:
     waterlevel_name = r"SLR_\d+",
     return_period   = r"RP\d+",
 
+# Checked directly here (not via the root Snakefile's own _plotting_enabled,
+# which is only defined AFTER this file's `include:` line) since
+# merge_chunk's own temp() marking below depends on it - see that rule's
+# docstring for why.
+_keep_merged_chunk_waterdepth = config["postprocessing"]["plots"]["enabled"]
+
+_merge_chunk_waterdepth_path = os.path.join(
+    config["postprocessing"]["merged_outputs"], "chunks",
+    "waterdepth_{chunk_id}_{return_period}_{waterlevel_name}.tif",
+)
+
 
 rule merge_chunk:
     """Merge per-tile water depths within one spatial chunk for one return period and SLR scenario.
 
-    The fine-resolution waterdepth output is marked temp() so Snakemake deletes
-    it automatically once compute_flood_fraction_chunk has consumed it.  Only
-    the coarse flood-fraction raster (produced by compute_flood_fraction_chunk)
-    is retained for the exposure analysis.
+    The fine-resolution waterdepth output is marked temp() - auto-deleted by
+    Snakemake once its declared consumers have run - ONLY when
+    postprocessing.plots.enabled is false. When plots ARE enabled (the
+    default), it must stay on disk: build_mosaic_vrt's output VRT is a
+    lightweight XML reference to chunk file paths, not a data copy, so
+    plot_merged_results (which reads real pixel data through that VRT - e.g.
+    compute_flood_area_km2's windowed reads) needs the underlying chunk file
+    to still exist when it runs.
     """
     input:
         waterdepth_tiles=waterdepth_tiles_for_chunk,
     output:
-        flood_count=temp(os.path.join(
-            config["postprocessing"]["merged_outputs"], "chunks",
-            "flood_count_{chunk_id}_{return_period}_{waterlevel_name}.tif",
-        )),
-        waterdepth=temp(os.path.join(
-            config["postprocessing"]["merged_outputs"], "chunks",
-            "waterdepth_{chunk_id}_{return_period}_{waterlevel_name}.tif",
-        )),
+        waterdepth=(
+            _merge_chunk_waterdepth_path if _keep_merged_chunk_waterdepth
+            else temp(_merge_chunk_waterdepth_path)
+        ),
         overlap_minmax=os.path.join(
             config["postprocessing"]["merged_outputs"], "chunks", "overlap_samples",
             "overlap_minmax_{chunk_id}_{return_period}_{waterlevel_name}.npz",
@@ -42,6 +53,7 @@ rule merge_chunk:
     params:
         chunk_bounds=lambda wildcards: _chunk_bounds_dict[wildcards.chunk_id],
         pp_cfg=config["postprocessing"],
+        raster_config=config["raster_format"],
     script:
         "../scripts/merge_chunk.py"
 
@@ -54,8 +66,11 @@ rule compute_flood_fraction_chunk:
     raster's native ~1 km resolution.
 
     Output: a tiny coarse raster (values 0–1) that replaces the large fine
-    waterdepth for all downstream exposure analysis.  The fine waterdepth is
-    deleted by Snakemake (temp() above) once this rule completes.
+    waterdepth for all downstream exposure analysis. The fine waterdepth is
+    only deleted by Snakemake once this rule completes when
+    postprocessing.plots.enabled is false (see merge_chunk's own docstring
+    above) - otherwise it stays on disk for build_mosaic_vrt/
+    plot_merged_results to read later.
     """
     input:
         waterdepth=rules.merge_chunk.output.waterdepth,
@@ -82,18 +97,11 @@ rule build_mosaic_vrt:
     (plot_merged_results) open it with rasterio exactly like a regular raster.
     """
     input:
-        flood_count=expand(
-            rules.merge_chunk.output.flood_count,
-            chunk_id=CHUNK_IDS, allow_missing=True,
-        ),
         waterdepth=expand(
             rules.merge_chunk.output.waterdepth,
             chunk_id=CHUNK_IDS, allow_missing=True,
         ),
     output:
-        flood_count_vrt=os.path.join(
-            config["postprocessing"]["merged_outputs"], "flood_count_{return_period}_{waterlevel_name}.vrt",
-        ),
         waterdepth_vrt=os.path.join(
             config["postprocessing"]["merged_outputs"], "waterdepth_{return_period}_{waterlevel_name}.vrt",
         ),
@@ -102,21 +110,17 @@ rule build_mosaic_vrt:
 
 
 rule plot_merged_results:
-    """Plot the VRT-mosaicked flood-count and water-depth for one return period and SLR scenario."""
+    """Plot the VRT-mosaicked water-depth for one return period and SLR scenario."""
     input:
-        flood_count=rules.build_mosaic_vrt.output.flood_count_vrt,
         waterdepth=rules.build_mosaic_vrt.output.waterdepth_vrt,
     output:
-        flood_count_plot=os.path.join(
-            config["postprocessing"]["merged_outputs"], "plots",
-            "flood_count_{return_period}_{waterlevel_name}.png",
-        ),
         waterdepth_plot=os.path.join(
             config["postprocessing"]["merged_outputs"], "plots",
             "waterdepth_{return_period}_{waterlevel_name}.png",
         ),
     params:
         pp_cfg=config["postprocessing"],
+        threshold_m=config["exposure"]["exceedance_threshold_m"],
         data_catalog=config["paths"]["hydromt_data_catalog"],
         model_outputs=config["simulation"]["model_outputs"],
         tile_grid_path=config["tile_grid"]["path"],
@@ -154,8 +158,10 @@ rule prepare_exposure_grid_chunk:
         ),
     params:
         data_catalog=config["paths"]["hydromt_data_catalog"],
-        population_source=config["exposure"]["population_source"],
-        geogunit_source=config["protection"]["geogunit_source"],
+        # Catalog keys, not config values - data_catalog_gfm.yml is the
+        # single place dataset identifiers live (see config.yml's header).
+        population_source="population",
+        geogunit_source="geogunit_protection_units",
     script:
         "../scripts/prepare_exposure_grid_chunk.py"
 
@@ -210,5 +216,6 @@ rule plot_overlap_continent_diagnostics:
         )),
     params:
         pp_cfg=config["postprocessing"],
+        threshold_m=config["exposure"]["exceedance_threshold_m"],
     script:
         "../scripts/plot_overlap_continent_diagnostics.py"

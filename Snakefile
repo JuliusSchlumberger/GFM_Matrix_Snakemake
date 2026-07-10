@@ -14,9 +14,9 @@ run `snakemake_workflow/preparation/run_preparation.py` beforehand to build
 and filter the tile grid down to tiles with DEM coverage.
 
 The postprocessing stage partitions the study area into spatial chunks of size
-`merge.chunk_size_deg` degrees.  Each chunk is merged independently so only
-the handful of tiles that overlap a chunk are ever read together.  All chunks
-are mosaicked into a GDAL VRT for plotting.
+`postprocessing.chunk_size_deg` degrees.  Each chunk is merged independently
+so only the handful of tiles that overlap a chunk are ever read together.
+All chunks are mosaicked into a GDAL VRT for plotting.
 
 Targets:
     preprocess:  generate all per-tile, per-scenario model inputs.
@@ -30,6 +30,7 @@ a time while preprocessing rules use the remaining cores.
 """
 
 import os
+import sys
 
 import geopandas as gpd
 import numpy as np
@@ -38,36 +39,38 @@ from snakemake.utils import min_version
 
 min_version("7.0")
 
+sys.path.insert(0, os.path.join(workflow.basedir, "snakemake_workflow", "src"))
+from config_utils import _expand_paths, get_data_catalog  # noqa: E402
+
 configfile: "snakemake_workflow/config/config.yml"
 
 # Machine-local overrides (git-ignored, optional).  Create
 # snakemake_workflow/config/config_local.yml to override any key without
-# touching the committed config.yml — most commonly `paths.root` and
-# `paths.code_root` for machines with different storage layouts.
+# touching the committed config.yml — most commonly `paths.root`,
+# `paths.code_root`, and `paths.aqueduct_root` for machines with different
+# storage layouts. Every standalone (non-Snakemake) entry-point script
+# honors this same file via config_utils.load_config(), which mirrors this
+# exact merge-then-expand sequence - keep the two in sync if this ever changes.
 _LOCAL_CFG = "snakemake_workflow/config/config_local.yml"
 if os.path.exists(_LOCAL_CFG):
     configfile: _LOCAL_CFG
 
 
-def _expand_paths(obj, substitutions: dict) -> object:
-    """Recursively substitute {key} placeholders in all string config values."""
-    if isinstance(obj, str):
-        for key, val in substitutions.items():
-            obj = obj.replace(f"{{{key}}}", val)
-        return obj
-    if isinstance(obj, dict):
-        return {k: _expand_paths(v, substitutions) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_expand_paths(v, substitutions) for v in obj]
-    return obj
-
-
-# Expand {root} / {code_root} throughout the whole config so every rule and
-# script receives absolute paths without knowing about the substitution scheme.
+# Expand {root} / {code_root} / {aqueduct_root} throughout the whole config so
+# every rule and script receives absolute paths without knowing about the
+# substitution scheme. aqueduct_root defaults to code_root, so it only needs
+# to be set explicitly when the Aqueduct build lives somewhere else.
 _PATH_SUBS = {
     "root": config["paths"].get("root", ""),
     "code_root": config["paths"].get("code_root", config["paths"].get("root", "")),
+    "aqueduct_root": config["paths"].get("aqueduct_root", config["paths"].get("code_root", config["paths"].get("root", ""))),
 }
+# processed_inputs_dir itself needs root/code_root/aqueduct_root expanded
+# first (it's declared as "{root}/processed_inputs"), so it's added as a
+# second substitution pass rather than the single dict above - any config
+# value using "{processed_inputs_dir}" (e.g. boundary_conditions.
+# waterlevel_nc_dir) needs this to resolve to a real path at all.
+_PATH_SUBS["processed_inputs_dir"] = _expand_paths(config["paths"]["processed_inputs_dir"], _PATH_SUBS)
 config = _expand_paths(config, _PATH_SUBS)
 
 
@@ -149,8 +152,7 @@ def waterdepth_tiles_for_chunk(wildcards):
     textually match run_aqueduct's (forward-slash, `{root}`-substituted)
     declared output pattern for that regex match - every OTHER cross-rule
     dependency in this Snakefile uses `rules.X.output.Y` (no regex matching
-    ever needed) so never hits this. Confirmed by dry-run: this caused a
-    MissingInputException for every chunk, not just tile-grid edge cases.
+    ever needed) so never hits this.
     """
     tile_ids = _chunk_tile_lookup[wildcards.chunk_id]
     model_outputs = config["simulation"]["model_outputs"]
@@ -162,6 +164,15 @@ def waterdepth_tiles_for_chunk(wildcards):
 
 _PROTECTION_BASELINE_SLR = config["protection"]["baseline_waterlevel_name"]
 
+
+# ── DeltaDTM vertical datum correction (rules compute_geoid_offset_raster /
+#    extract_dem in preprocessing.smk) ── the data catalog is resolved once
+#    at parse time, same as _tile_gdf above, so those rules' input:/output:
+#    can reference concrete .gfc paths rather than re-querying the catalog
+#    per invocation.
+_data_catalog = get_data_catalog(os.path.join(workflow.basedir, config["paths"]["hydromt_data_catalog"]))
+_vc_cfg = config.get("vertical_datum_correction", {})
+_vertical_datum_correction_enabled = _vc_cfg.get("enabled", False)
 
 
 include: "snakemake_workflow/rules/common.smk"
@@ -191,15 +202,16 @@ _SIMULATION_OUTPUTS = expand(
 
 _plot_cfg = config["postprocessing"]["plots"]
 _plotting_enabled = _plot_cfg["enabled"]
+_plot_debug_enabled = _plot_cfg.get("debug", False)
 
 # Primary postprocessing outputs:
 #   - per-chunk coarse flood-fraction rasters (all RP × SLR × chunks)
 #     → consumed by standalone compute_exposure_analysis.py
-#   - VRT mosaics and plots (optional, for diagnostics)
-# Fine-resolution waterdepth and flood-count rasters are marked temp() in
-# merge_chunk and auto-deleted once compute_flood_fraction_chunk completes.
-# The old compute_protection_height_chunk / compute_exposure_chunk /
-# aggregate_exposure_statistics chain is replaced by the coarse-first approach.
+#   - VRT mosaic and plot (optional, for diagnostics)
+# The fine-resolution waterdepth raster is marked temp() in merge_chunk (and
+# auto-deleted once compute_flood_fraction_chunk completes) ONLY when
+# postprocessing.plots.enabled is false - see merge_chunk's own docstring in
+# postprocessing.smk for why it must persist when plots are on.
 _POSTPROCESS_OUTPUTS = expand(
     rules.compute_flood_fraction_chunk.output.flood_fraction,
     chunk_id=CHUNK_IDS, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES,
@@ -207,11 +219,17 @@ _POSTPROCESS_OUTPUTS = expand(
 
 if _plotting_enabled:
     _POSTPROCESS_OUTPUTS += (
-        expand(rules.plot_merged_results.output.flood_count_plot, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES)
-        + expand(rules.plot_merged_results.output.waterdepth_plot, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES)
-        + expand(rules.plot_overlap_diagnostics.output.diagnostics, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES)
+        expand(rules.plot_merged_results.output.waterdepth_plot, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES)
         + expand(rules.plot_overlap_continent_diagnostics.output.diagnostics, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES)
     )
+    # Per-tile overlap diagnostic maps are a debugging aid (see
+    # postprocessing.plots.debug in config.yml) - not requested by default,
+    # unlike the per-continent correlation/agreement plot above.
+    if _plot_debug_enabled:
+        _POSTPROCESS_OUTPUTS += expand(
+            rules.plot_overlap_diagnostics.output.diagnostics,
+            return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES,
+        )
 
 
 rule preprocess:

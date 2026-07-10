@@ -16,8 +16,8 @@ The merge strategy is:
     plot_overlap_continent_diagnostics.py). A tile that covers a cell but
     never computed it (AQUEDUCT_NODATA) contributes an assumed 0.0 ("no
     flooding") to this min/max collection — this is a diagnostic-only
-    assumption and does not affect the merged waterdepth/flood_count rasters
-    below, which still treat AQUEDUCT_NODATA as strictly excluded.
+    assumption and does not affect the merged waterdepth raster below, which
+    still treats AQUEDUCT_NODATA as strictly excluded.
 
 AQUEDUCT_NODATA (`np.finfo(np.float32).max`) is the sentinel written by the
 Aqueduct model for cells it did not compute.  `0.0` means "computed, no
@@ -108,6 +108,11 @@ class _PairSamples:
             xi, xj = xi[idx], xj[idx]
         return xi, xj
 
+    @property
+    def total(self) -> int:
+        """True number of pairs ever added, before reservoir sub-sampling."""
+        return self._total
+
 
 def _make_chunk_transform(
     chunk_bounds: tuple[float, float, float, float],
@@ -190,7 +195,6 @@ def _open_overlapping_tiles(
 def merge_tile_rasters_chunk(
     tile_rasters: list[str | Path],
     chunk_bounds: tuple[float, float, float, float],
-    count_output_path: str | Path,
     waterdepth_output_path: str | Path,
     block_size: int,
     raster_config: dict[str, Any],
@@ -212,23 +216,24 @@ def merge_tile_rasters_chunk(
     cell but reports AQUEDUCT_NODATA there (never computed, e.g. an
     OOM/skipped tile) contributes an assumed depth of 0.0 ("no flooding") to
     this min/max collection rather than being excluded — this assumption
-    only applies to this diagnostic sampling, not to the merged waterdepth/
-    flood_count rasters written below, which are unaffected.
+    only applies to this diagnostic sampling, not to the merged waterdepth
+    raster written below, which is unaffected.
 
     Args:
         tile_rasters: Paths to the per-tile waterdepth rasters for the chunk.
         chunk_bounds: (minx, miny, maxx, maxy) of the chunk in the tile CRS.
-        count_output_path: Path for the flood-count output raster.
         waterdepth_output_path: Path for the averaged water-depth output raster.
         block_size: Side-length in pixels of each write block.
         raster_config: Merge config dict (driver, compression, predictor,
-            nodata, flood_area_threshold_m, overlap_corr_max_samples).
+            nodata, overlap_corr_max_samples, overlap_corr_seed).
 
     Returns:
-        ``(mins, maxs)`` — float32 arrays of per-cell min/max depth across
-        overlapping tiles, sub-sampled to at most
+        ``(mins, maxs, total_overlap_cells)`` — float32 arrays of per-cell
+        min/max depth across overlapping tiles, sub-sampled to at most
         ``raster_config.get("overlap_corr_max_samples", 50_000)`` for the
-        whole chunk.
+        whole chunk, plus the true number of overlap cells seen before that
+        sub-sampling was applied (``0`` if the chunk had no overlap cells at
+        all).
     """
     if not tile_rasters:
         raise ValueError("tile_rasters must not be empty")
@@ -241,7 +246,7 @@ def merge_tile_rasters_chunk(
     tile_metas = _open_overlapping_tiles(tile_rasters, out_transform, out_w, out_h)
 
     max_samples = int(raster_config["overlap_corr_max_samples"])
-    rng = np.random.default_rng(42)
+    rng = np.random.default_rng(int(raster_config.get("overlap_corr_seed", 42)))
     minmax_sampler = _PairSamples(max_samples, rng)
 
     common = {
@@ -255,7 +260,6 @@ def merge_tile_rasters_chunk(
         "tiled": True,
         "bigtiff": "YES",
     }
-    count_profile = {**common, "dtype": "uint8", "nodata": 0, "predictor": 2}
     wd_profile = {
         **common,
         "dtype": "float32",
@@ -264,16 +268,12 @@ def merge_tile_rasters_chunk(
     }
 
     try:
-        with (
-            rasterio.open(count_output_path, "w", **count_profile) as count_dst,
-            rasterio.open(waterdepth_output_path, "w", **wd_profile) as wd_dst,
-        ):
+        with rasterio.open(waterdepth_output_path, "w", **wd_profile) as wd_dst:
             for row_off in range(0, out_h, block_size):
                 block_h = min(block_size, out_h - row_off)
                 for col_off in range(0, out_w, block_size):
                     block_w = min(block_size, out_w - col_off)
 
-                    count_block = np.zeros((block_h, block_w), dtype="uint8")
                     valid_count = np.zeros((block_h, block_w), dtype="float64")
                     depth_sum = np.zeros((block_h, block_w), dtype="float64")
 
@@ -304,7 +304,6 @@ def merge_tile_rasters_chunk(
                         bc1 = out_c1 - col_off
 
                         valid = patch < AQUEDUCT_NODATA
-                        count_block[br0:br1, bc0:bc1] += (valid & (patch > 0)).astype("uint8")
                         valid_count[br0:br1, bc0:bc1] += valid.astype("float64")
                         depth_sum[br0:br1, bc0:bc1] += np.where(
                             valid, patch.astype("float64"), 0.0
@@ -353,11 +352,14 @@ def merge_tile_rasters_chunk(
                         depth_sum / np.where(valid_count > 0, valid_count, 1.0),
                         raster_config["nodata"],
                     ).astype("float32")
+                    # cm-precision rounding shrinks the compressed file some
+                    # (nodata sentinel is an integer value, unaffected).
+                    merged = np.round(merged, 2)
                     window = Window(col_off, row_off, block_w, block_h)
-                    count_dst.write(count_block, 1, window=window)
                     wd_dst.write(merged, 1, window=window)
     finally:
         for tm in tile_metas:
             tm.src.close()
 
-    return minmax_sampler.get()
+    mins, maxs = minmax_sampler.get()
+    return mins, maxs, minmax_sampler.total

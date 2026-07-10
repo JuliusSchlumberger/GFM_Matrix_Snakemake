@@ -1,4 +1,4 @@
-"""Plot the merged flood-count and water-depth rasters for a single return period and SLR scenario."""
+"""Plot the merged water-depth raster for a single return period and SLR scenario."""
 
 import os
 import sys
@@ -37,20 +37,7 @@ if os.path.isdir(oom_dir):
 else:
     oom_tiles = None
 
-plot_raster_with_coastlines(
-    raster_path=snakemake.input.flood_count,  # noqa: F821
-    coastlines=coastlines,
-    output_path=snakemake.output.flood_count_plot,  # noqa: F821
-    title=f"Number of overlapping tiles reporting flooding ({scenario_label})",
-    label="Number of tiles",
-    cmap=plot_cfg["count_cmap"],
-    resolution_arcsec=plot_cfg["merged_resolution_arcsec"],
-    mask_value=0,
-    oom_tiles=oom_tiles,
-    dpi=plot_cfg["dpi"],
-)
-
-threshold_m = pp_cfg["flood_area_threshold_m"]
+threshold_m = snakemake.params.threshold_m  # noqa: F821
 flood_area_km2 = compute_flood_area_km2(snakemake.input.waterdepth, threshold_m)  # noqa: F821
 flood_annotation = (
     f"Flooded area ≥ {threshold_m * 100:.0f} cm:  {flood_area_km2:,.0f} km²"
@@ -67,5 +54,7 @@ plot_raster_with_coastlines(
     mask_value=0,
     oom_tiles=oom_tiles,
     annotation=flood_annotation,
+    vmax_m=plot_cfg["waterdepth_vmax_m"],
+    figsize=tuple(plot_cfg["merged_map_figsize"]),
     dpi=plot_cfg["dpi"],
 )
