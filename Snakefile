@@ -200,6 +200,10 @@ _SIMULATION_OUTPUTS = expand(
     tile_id=TILE_IDS, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES,
 )
 
+# generate_aqueduct_jobs (HPC dispatch) needs _PREPROCESS_OUTPUTS, so this
+# include comes after it's defined above, unlike the other rule files.
+include: "snakemake_workflow/rules/hpc_dispatch.smk"
+
 _plot_cfg = config["postprocessing"]["plots"]
 _plotting_enabled = _plot_cfg["enabled"]
 _plot_debug_enabled = _plot_cfg.get("debug", False)

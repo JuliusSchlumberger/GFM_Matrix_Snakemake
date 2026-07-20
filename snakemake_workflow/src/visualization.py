@@ -236,6 +236,10 @@ def plot_burning_ember(
     unit_label: str = "EAI (people)",
     ssp_colors: dict[str, str] | None = None,
     n_contours: int = 6,
+    fontsize: float = 10,
+    diverging_center: float | None = None,
+    diverging_vmin: float | None = None,
+    contour_vmax: float | None = None,
 ) -> plt.Figure:
     """Burning-ember impact matrix: EAI as a function of SLR × population growth.
 
@@ -278,6 +282,30 @@ def plot_burning_ember(
         unit_label:         Colourbar label.
         ssp_colors:         Per-SSP colour overrides.
         n_contours:         Number of labelled EAI contour lines drawn on the heatmap.
+        fontsize:           Base font size (points); axis/tick labels use this directly,
+                             the title and colourbar label scale up from it, contour
+                             labels and legend scale down from it.
+        diverging_center:   If given, colour the heatmap on a diverging scale (RdBu_r,
+                             blue=below/red=above) centred on this EAI value instead of
+                             the default sequential scale (cmap, vmin=0). Useful for a
+                             growth-only panel where population decline can pull EAI
+                             below its growth=0% value - pass that value here to make
+                             the reduction read as a distinct colour, not just a lighter
+                             shade of the same ramp.
+        diverging_vmin:     Lower bound for the diverging norm (only used when
+                             diverging_center is set). Defaults to this panel's own
+                             matrix minimum (auto). Pass a fixed value shared across
+                             several plot_burning_ember() calls to give them all an
+                             identical colour-to-value mapping instead of each panel
+                             auto-scaling its own low end.
+        contour_vmax:       Upper bound for contour LEVEL placement, independent of the
+                             colour scale's vmax. Pass this when several panels share one
+                             fixed vmax for cross-panel colour comparability but have very
+                             different value ranges themselves - without it, a low-range
+                             panel's contour levels are spaced across the shared (much
+                             larger) vmax and mostly fall outside its own data, leaving
+                             few or no contour lines to show its internal shape. Defaults
+                             to the colour scale's own vmax (current behaviour).
     """
     colors_ = ssp_colors or _DEFAULT_SLR_COLORS
     if highlight_years is None:
@@ -307,22 +335,43 @@ def plot_burning_ember(
     gr_y = growth_rates * 100.0      # fraction → percent
 
     extent = [slr_x[0], slr_x[-1], gr_y[0], gr_y[-1]]
-    im = ax.imshow(
-        matrix, origin="lower", aspect="auto",
-        extent=extent,
-        cmap=cmap, vmin=0, vmax=vmax,
-        interpolation="bilinear",
-    )
-    fig.colorbar(im, cax=cax, label=unit_label)
-
-    # Contour lines, labelled with their EAI value
     if vmax is None:
         vmax_c = float(np.nanmax(matrix)) if np.any(matrix > 0) else 1.0
     else:
         vmax_c = vmax
-    levels = np.linspace(0, vmax_c, n_contours + 1)[1:]
-    cs = ax.contour(slr_x, gr_y, matrix, levels=levels, colors="k", linewidths=0.5, alpha=0.4)
-    ax.clabel(cs, inline=True, fontsize=6, fmt=lambda v: f"{v:,.0f}")
+
+    if diverging_center is not None:
+        vmin_c = diverging_vmin if diverging_vmin is not None else float(np.nanmin(matrix))
+        vmin_c = min(vmin_c, diverging_center - 1e-9)
+        vmax_c = max(vmax_c, diverging_center + 1e-9)
+        norm = mcolors.TwoSlopeNorm(vmin=vmin_c, vcenter=diverging_center, vmax=vmax_c)
+        im = ax.imshow(
+            matrix, origin="lower", aspect="auto",
+            extent=extent, cmap="RdBu_r", norm=norm,
+            interpolation="bilinear",
+        )
+    else:
+        im = ax.imshow(
+            matrix, origin="lower", aspect="auto",
+            extent=extent,
+            cmap=cmap, vmin=0, vmax=vmax,
+            interpolation="bilinear",
+        )
+    cb = fig.colorbar(im, cax=cax, label=unit_label)
+    cb.ax.tick_params(labelsize=max(6, fontsize - 2))
+    cb.set_label(unit_label, fontsize=fontsize)
+
+    # Contour lines, labelled with their EAI value. Level placement can be
+    # decoupled from the colour scale's vmax via contour_vmax (see docstring)
+    # so a shared cross-panel colour scale doesn't starve a lower-range
+    # panel of its own meaningful contour lines.
+    contour_lo = diverging_center if diverging_center is not None else 0.0
+    contour_hi = contour_vmax if contour_vmax is not None else vmax_c
+    levels = np.linspace(contour_lo, contour_hi, n_contours + 1)[1:]
+    cs = ax.contour(slr_x, gr_y, matrix, levels=levels, colors="k", linewidths=1.1, alpha=0.75)
+    clabels = ax.clabel(cs, inline=True, fontsize=max(7, fontsize - 1), fmt=lambda v: f"{v:,.0f}")
+    for lbl in clabels:
+        lbl.set_bbox(dict(facecolor="white", edgecolor="none", alpha=0.7, pad=1))
 
     # SSP trajectory overlays — line stops at the last highlight year (e.g. 2100),
     # even if the underlying trajectory/growth data extends further.
@@ -346,11 +395,12 @@ def plot_burning_ember(
                     yi = (float(gr_traj[yr]) - 1.0) * 100.0
                     ax.plot(xi, yi, "o", color=color, markersize=7, zorder=6)
                     ax.annotate(str(yr), (xi, yi), textcoords="offset points",
-                                xytext=(4, 4), fontsize=7, color=color)
-        ax.legend(loc="upper left", fontsize=8, title="SSP")
+                                xytext=(4, 4), fontsize=max(6, fontsize - 3), color=color)
+        ax.legend(loc="upper left", fontsize=max(6, fontsize - 2), title="SSP")
 
-    ax.set_ylabel("Population growth relative to 2020 (%)", fontsize=10)
-    ax.set_title(title, fontsize=11)
+    ax.set_ylabel("Population growth relative to 2020 (%)", fontsize=fontsize)
+    ax.set_title(title, fontsize=fontsize + 2)
+    ax.tick_params(axis="both", labelsize=max(6, fontsize - 1))
     ax.axhline(0, color="k", linewidth=0.8, linestyle="--", alpha=0.5)
 
     # ── One shared subplot: SLR uncertainty (P17-P83), one row per highlight
@@ -374,7 +424,7 @@ def plot_burning_ember(
                     fmt="o", color=color, markersize=5, capsize=3, linewidth=1.5,
                 )
         unc_ax.set_yticks(range(n_years))
-        unc_ax.set_yticklabels([str(yr) for yr in highlight_years], fontsize=7)
+        unc_ax.set_yticklabels([str(yr) for yr in highlight_years], fontsize=max(6, fontsize - 3))
         unc_ax.set_ylim(-0.5, max(n_years, 1) - 0.5)
         unc_ax.invert_yaxis()
         unc_ax.grid(axis="x", alpha=0.3)
@@ -388,10 +438,10 @@ def plot_burning_ember(
         # gridlines above are enough to read each error bar's SLR position
         # against the heatmap's x-axis.
         unc_ax.tick_params(axis="x", which="both", bottom=False, top=False, labelbottom=False)
-        unc_ax.set_ylabel("Uncertainty in SLR projections", fontsize=10)  # matches subplot 1's ylabel fontsize
+        unc_ax.set_ylabel("Uncertainty in SLR projections", fontsize=fontsize)  # matches subplot 1's ylabel fontsize
 
     ax.tick_params(axis="x", labelbottom=True)
-    ax.set_xlabel("Global mean SLR (m)", fontsize=10)
+    ax.set_xlabel("Global mean SLR (m)", fontsize=fontsize)
     return fig
 
 

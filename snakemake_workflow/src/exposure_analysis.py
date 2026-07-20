@@ -453,33 +453,41 @@ def compute_avoid(
 ) -> np.ndarray:
     """Per-cell avoid exposure for one (RP, SLR) scenario.
 
-    `population` is E0, the UNSCALED 2020 population (avoid never grows the
-    original population directly - only growth is redistributed/exposed via
-    the other two terms below). `redirected` is the precomputed
-    redistributed-growth grid from compute_avoid_redirected() for this
-    scenario's (adapt_prot_frac, growth_factor). `growth_factor` is the same
-    per-country (SSP, year) or scenario-neutral scalar/grid passed to
-    compute_avoid_redirected() for this scenario.
+    `population` is E0, the UNSCALED 2020 population. `redirected` is the
+    precomputed redistributed-growth grid from compute_avoid_redirected()
+    for this scenario's (adapt_prot_frac, growth_factor). `growth_factor` is
+    the same per-country (SSP, year) or scenario-neutral scalar/grid passed
+    to compute_avoid_redirected() for this scenario.
 
     For cells where ff > adapt_prot_frac:
-        exposure = E0 × ff                                            [original-population term]
-                 + (ff − ff_prot)/(1 − ff_prot) × E0×(1−ff_prot)×g     [organic-growth term]
-                 + (ff − ff_prot)/(1 − ff_prot) × redirected           [redirected-growth term]
+        exposure = E0 × ff × min(1,g)                                         [original-population term]
+                 + (ff − ff_prot)/(1 − ff_prot) × E0×(1−ff_prot)×max(0,g−1)    [organic-growth term]
+                 + (ff − ff_prot)/(1 − ff_prot) × redirected                   [redirected-growth term]
     Cells where ff ≤ adapt_prot_frac: exposure = 0.
 
-    The first term is exactly protect_exposure_grid's binary formula applied
-    to E0 (avoid provides no MORE protection to the existing population than
-    a plain protect measure would). The second and third terms both use
-    retreat's /(1 - adapt_prot_frac)-normalized marginal exceedance: the
-    second applies it to the population that already lived outside the
-    design floodplain, scaled by its own growth (that population was never
-    displaced, so it keeps growing in place and remains exposed to the
-    marginal risk of the safe area it lives in); the third applies it to the
-    redirected-growth population instead. Omitting the second term would
-    silently treat everyone outside the (usually small) design floodplain as
-    permanently safe from any exceedance beyond the design standard, even as
-    they keep growing - understating avoid's exposure, increasingly so at
-    higher growth/longer horizons.
+    The first term is protect_exposure_grid's binary formula applied to E0,
+    scaled by min(1,g) so it shrinks under population decline exactly like
+    apply_growth_rates_to_eai scales protect/baseline (both are E0×ff×g for
+    g<=1) - without this cap, avoid's original-population term would stay
+    pinned at its full g=1 value even as growth_factor fell toward 0,
+    eventually exceeding baseline/protect at strongly negative growth. Above
+    g=1 the cap saturates at 1, leaving this term at exactly E0×ff (all
+    further growth is handled by the other two terms instead, which is why
+    avoid == protect - for any growth_factor <= 1, since both the
+    organic-growth and redirected-growth terms vanish at max(0,g-1) == 0,
+    leaving only this now-matching first term). The second and third
+    terms both use retreat's /(1 - adapt_prot_frac)-normalized marginal
+    exceedance, applied to the GROWTH INCREMENT (max(0, growth_factor - 1),
+    same convention as compute_avoid_redirected) of the population that
+    already lived outside the design floodplain: the second applies it to
+    the increment that stayed in place (never displaced, so it grows in
+    place and is exposed to the marginal risk of the safe area it lives
+    in); the third applies it to the increment that was redirected out of
+    the floodplain instead. Omitting the second term would silently treat
+    the in-place growth increment outside the (usually small) design
+    floodplain as permanently safe from any exceedance beyond the design
+    standard - understating avoid's exposure, increasingly so at higher
+    growth/longer horizons.
     """
     ff_s = _safe(ff)
     apf = _safe(adapt_prot_frac)
@@ -489,16 +497,21 @@ def compute_avoid(
     exceeds = ff_s > apf
     avoid_exp = np.zeros_like(population)
 
-    # Original (2020) population term: same binary form as protect_exposure_grid
-    avoid_exp[exceeds] = ff_s[exceeds] * population[exceeds]
+    # Original (2020) population term: same binary form as protect_exposure_grid,
+    # scaled by min(1,g) so it shrinks under decline like protect/baseline do
+    # (see docstring) instead of staying pinned at its g=1 value.
+    term1_scale = np.minimum(g, 1.0)
+    avoid_exp[exceeds] = ff_s[exceeds] * population[exceeds] * term1_scale[exceeds]
 
     # Marginal exceedance fraction, same /(1-apf) normalization as compute_retreat
     safe_frac = np.maximum(1e-10, 1.0 - apf)
     marginal_frac = np.minimum(1.0, (ff_s - apf) / safe_frac)
 
-    # Organic-growth term: population already outside the design floodplain,
-    # grown in place by `growth_factor`, exposed to the marginal risk.
-    organic_grown = population * np.maximum(0.0, 1.0 - apf) * g
+    # Organic-growth term: the GROWTH INCREMENT (max(0, g-1), matching
+    # compute_avoid_redirected's own convention so this term also vanishes
+    # at growth_factor <= 1) of population already outside the design
+    # floodplain, exposed to the marginal risk.
+    organic_grown = population * np.maximum(0.0, 1.0 - apf) * np.maximum(0.0, g - 1.0)
     avoid_exp[exceeds] += marginal_frac[exceeds] * organic_grown[exceeds]
 
     # Redirected-growth term (growth that would have occurred in the

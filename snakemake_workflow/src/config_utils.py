@@ -45,7 +45,7 @@ def _expand_paths(obj: Any, substitutions: dict[str, str]) -> Any:
     return obj
 
 
-def load_config(config_path: str | Path) -> dict:
+def load_config(config_path: str | Path, extra_override: str | Path | None = None) -> dict:
     """Load config.yml the same way the root Snakefile does, for standalone
     (non-Snakemake) scripts.
 
@@ -69,6 +69,11 @@ def load_config(config_path: str | Path) -> dict:
 
     Args:
         config_path: Path to the base config.yml.
+        extra_override: Optional path to a second git-ignored override file,
+            merged on top of config_local.yml (if any) before expansion -
+            e.g. `config_hpc.yml`, which points `paths.root`/`aqueduct_root`
+            at a Linux HPC mount instead of the local machine's paths.
+            Ignored if it doesn't exist.
 
     Returns:
         The merged, fully path-expanded config dict.
@@ -82,6 +87,11 @@ def load_config(config_path: str | Path) -> dict:
         with open(local_path, encoding="utf-8") as f:
             local_config = yaml.safe_load(f) or {}
         config = _deep_merge(config, local_config)
+
+    if extra_override is not None and Path(extra_override).exists():
+        with open(extra_override, encoding="utf-8") as f:
+            override_config = yaml.safe_load(f) or {}
+        config = _deep_merge(config, override_config)
 
     root = config["paths"].get("root", "")
     code_root = config["paths"].get("code_root", root)

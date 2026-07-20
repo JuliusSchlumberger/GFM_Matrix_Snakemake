@@ -129,6 +129,28 @@ simulation: # Used by: preprocessing rules
     # Default Manning's n roughness (÷ 100) for cells with no land use class.
     default_friction: 0.001
 
+# ── HPC DISPATCH ────────────────────────────────────────────────────────────────
+# Used by: rule generate_aqueduct_jobs (rules/hpc_dispatch.smk) /
+# scripts/generate_aqueduct_jobs.py. Aqueduct can only run one instance at a
+# time PER MACHINE (see simulation.smk's run_aqueduct docstring) - not a
+# global constraint - so separate HPC nodes can each run their own serial
+# stream of Aqueduct invocations concurrently. This rule generates one sbatch
+# script per node once preprocessing is done; the user submits them to SLURM
+# manually and later runs postprocessing manually once results land.
+# Requires a git-ignored snakemake_workflow/config/config_hpc.yml (copy from
+# config_hpc.yml.example) pointing paths.root/aqueduct_root at the Linux HPC
+# mount of this same shared storage.
+hpc:
+  n_nodes: 20                                        # PLACEHOLDER: how many sbatch scripts (node batches) to generate
+  jobs_dir: "{root}/model_outputs/hpc_jobs"           # generated sbatch scripts, resolved_config.yml, submit_all.sh, logs/
+  sbatch:
+    partition: "PLACEHOLDER_PARTITION"
+    account: "PLACEHOLDER_ACCOUNT"
+    time: "PLACEHOLDER_WALLTIME"                      # e.g. "24:00:00"
+    mem: "PLACEHOLDER_MEM"                            # e.g. "32G"
+    cpus_per_task: 1
+    env_activate_cmd: "PLACEHOLDER_ENV_ACTIVATE_CMD"  # e.g. "module load python/3.11", "source activate gfm"
+
 
 # ── POSTPROCESSING ────────────────────────────────────────────────────────────
 # Used by: merge_chunk.py, build_mosaic_vrt.py, plot_merged_results.py,
