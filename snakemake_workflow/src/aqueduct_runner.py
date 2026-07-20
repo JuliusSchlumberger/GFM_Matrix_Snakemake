@@ -1,7 +1,11 @@
 """Functions for running the compiled Aqueduct flood model executable."""
 
+import math
 import subprocess
 from pathlib import Path
+from typing import Any
+
+import rasterio
 
 # Substring Aqueduct's Julia runtime prints (to stdout/stderr) on an
 # unhandled out-of-memory crash, e.g. in `component_indices` during the
@@ -37,6 +41,32 @@ def run_aqueduct(executable_path: str | Path, config_path: str | Path) -> None:
         print(e.stdout)
         print(e.stderr)
         raise
+
+
+def estimate_aqueduct_mem_mb(dem_path: str | Path, mem_estimate_cfg: dict[str, Any]) -> int:
+    """Conservative peak-memory estimate (MB) for running Aqueduct on one tile.
+
+    Calibrated from 7 real tiles spanning 2.2M-140M DEM pixels (peak working
+    set 800-7500MB). Pixel count alone isn't an exact predictor - two tiles
+    with near-identical pixel counts differed by ~900MB in practice, likely
+    flood-extent/connected-component complexity - so this is deliberately
+    generous, not a tight fit. Used as run_aqueduct's `resources: mem_mb` so
+    Snakemake's own scheduler throttles concurrent Aqueduct jobs to fit
+    within a `--resources mem_mb=N` budget (see that rule's docstring).
+
+    Args:
+        dem_path: Path to the tile's DEM raster (read for width/height only -
+            a metadata-only open, not a full raster load).
+        mem_estimate_cfg: `simulation.aqueduct_mem_estimate` config section,
+            with keys `base_mb` and `bytes_per_pixel`.
+
+    Returns:
+        Estimated peak memory in MB, rounded up to the nearest 100.
+    """
+    with rasterio.open(dem_path) as ds:
+        pixels = ds.width * ds.height
+    raw_mb = mem_estimate_cfg["base_mb"] + mem_estimate_cfg["bytes_per_pixel"] * pixels / 1e6
+    return int(math.ceil(raw_mb / 100.0) * 100)
 
 
 def is_oom_error(error: subprocess.CalledProcessError) -> bool:

@@ -80,11 +80,15 @@ Named aggregate targets (defined at the bottom of the root `Snakefile`):
   - `postprocess` → per-chunk flood-fraction rasters (+ optional VRT/plots)
   - `all`         → preprocess + simulate + postprocess (the **default** target)
 
-Run with: `snakemake all --cores 4 --resources aqueduct_runs=1`
-The `aqueduct_runs=1` resource is REQUIRED — Aqueduct's Julia LLVM JIT
-crashes (`OutOfMemoryError` / "Unable to allocate section memory!") if more
-than one instance runs concurrently; the resource pool caps that rule at 1
-concurrent job while preprocessing rules still use the remaining `--cores`.
+Run with: `snakemake all --cores 4 --resources mem_mb=8000`
+Aqueduct instances run fine concurrently on one machine — a controlled test
+(2, 6, then 5 simultaneous instances up to 140M pixels) never reproduced the
+previously-assumed `LLVM ERROR: Unable to allocate section memory!` JIT
+crash. The real local constraint is ordinary system memory: `run_aqueduct`'s
+`mem_mb` resource (`aqueduct_runner.estimate_aqueduct_mem_mb`, calibrated
+from real tiles) lets Snakemake run many small tiles concurrently while
+throttling around large ones, bounded by `--resources mem_mb=<N>` (leave
+headroom below total system RAM for the OS/other processes).
 Prefer `python snakemake_workflow/run_pipeline.py` over calling `snakemake`
 directly — it wraps the exact same invocation in a retry loop that
 auto-splits any tile Aqueduct runs out of memory on (see KEY DOMAIN LOGIC
@@ -121,7 +125,7 @@ RULE SUMMARY (per tile_id unless noted):
   write_aqueduct_config    (per return_period × waterlevel_name)
                                — build per-tile/scenario Aqueduct TOML → aqueduct_{rp}_{slr}.toml
   run_aqueduct              (per tile_id × return_period × waterlevel_name; simulation.smk)
-                               — invoke `aqueduct.exe`; resource `aqueduct_runs=1` → waterdepth_{rp}_{slr}.tif
+                               — invoke `aqueduct.exe`; resource `mem_mb` (estimated per tile) → waterdepth_{rp}_{slr}.tif
   merge_chunk                (per chunk_id × return_period × waterlevel_name; postprocessing.smk)
                                — merge per-tile waterdepth within one 5°×5° chunk (temp() outputs)
   compute_flood_fraction_chunk (per chunk_id × rp × slr)
@@ -1705,14 +1709,14 @@ FLOOD FRACTION:
   threshold approach would make ff ≈ 1.0 everywhere).
 
 OOM / SKIP HANDLING (src/aqueduct_runner.py, scripts/run_aqueduct.py):
-  Distinguishes the tile-size-driven `OutOfMemoryError` (persistent — the
-  memory cost of `component_indices` in core/src/core.jl scales with the
-  tile's pixel count, not RP/SLR, so it's effectively a per-tile_id failure;
-  marks `model_outputs/oom_tiles/{tile_id}.txt`, all future (RP, SLR) combos
-  for that tile then skip Aqueduct immediately) from the transient
-  concurrency error "LLVM ERROR: Unable to allocate section memory!"
-  (handled instead by the `aqueduct_runs=1` resource constraint, not treated
-  as OOM). Empty-boundaries tiles and OOM-marked tiles both get an
+  `OutOfMemoryError` (the memory cost of `component_indices` in
+  core/src/core.jl scales with the tile's pixel count, not RP/SLR, so it's
+  effectively a per-tile_id failure regardless of whether it's caused by the
+  tile's own size or by `mem_mb` under-estimating concurrent memory
+  pressure — see `run_aqueduct`'s docstring in simulation.smk) marks
+  `model_outputs/oom_tiles/{tile_id}.txt`; all future (RP, SLR) combos for
+  that tile then skip Aqueduct immediately. Empty-boundaries tiles and
+  OOM-marked tiles both get an
   all-`AQUEDUCT_NODATA` placeholder written for `waterdepth` (so merge_chunk
   ignores them) and are logged to `model_outputs/skipped_tiles/`. Crucially,
   none of this fails the Snakemake rule — `snakemake` always exits 0 for an
@@ -1771,9 +1775,10 @@ AUTOMATIC TILE SPLITTING ON OOM (run_pipeline.py, src/tile_split.py):
   `model_outputs/oom_tiles/*.txt` every `poll_interval_seconds` while it ran,
   and interrupted it early (`CTRL_BREAK_EVENT`/SIGINT, hard-`kill()` fallback
   after `graceful_stop_grace_seconds`) as soon as a new OOM marker appeared,
-  rather than waiting for the whole DAG to finish — since Aqueduct is fully
-  serialized (`aqueduct_runs=1`), an OOM discovered early in a run would
-  otherwise sit idle with its nodata placeholder for the rest of that run.
+  rather than waiting for the whole DAG to finish — under the (since-revised,
+  see "Run with" above) assumption that Aqueduct was fully serialized
+  (`aqueduct_runs=1`), an OOM discovered early in a run would otherwise sit
+  idle with its nodata placeholder for the rest of that run.
   Verified working (fake long-sleeping subprocess, ~2s detection-to-interrupt
   latency) but judged too complex for the value: replaced with a plain
   blocking `subprocess.run()` that lets each `snakemake` invocation finish
@@ -1949,9 +1954,10 @@ over Code_memory.md where they conflict.
 DIFFERENT files with the same name — root one is legacy (`python/` scripts
 only), the workflow one is authoritative.
 
-`aqueduct_runs=1` resource: forgetting `--resources aqueduct_runs=1` on the
-snakemake command line lets multiple Aqueduct/Julia instances race for JIT
-memory allocation and crash — always include it for `simulate`/`all` runs.
+`mem_mb` resource: forgetting `--resources mem_mb=<N>` on the snakemake
+command line for `simulate`/`all` runs leaves Aqueduct's memory-budgeted
+concurrency unbounded, risking real OOM crashes under heavy concurrent load
+(no per-instance JIT crash risk — that was disproven, see "Run with" above).
 
 `analysis/` is NOT wired into the Snakemake DAG — after `snakemake all`
 completes, `run_analysis.py` must be run manually as a separate step.

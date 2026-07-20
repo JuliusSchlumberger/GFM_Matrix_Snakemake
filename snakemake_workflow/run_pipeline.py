@@ -27,13 +27,14 @@ same reason a fresh invocation is cheap (Snakemake skips everything already
 built) and avoids the complexity of managing a live subprocess.
 
 This does not replace `snakemake` for other targets/flags - it always runs
-the `all` target (or --target) with `--resources aqueduct_runs=1`, matching
+the `all` target (or --target) with `--resources mem_mb=<mem_mb>`, matching
 the documented manual invocation.
 
 Usage:
     python snakemake_workflow/run_pipeline.py \\
         [--config snakemake_workflow/config/config.yml] \\
         [--cores 1] \\
+        [--mem-mb 8000] \\
         [--target simulate]
 """
 
@@ -78,6 +79,9 @@ def main() -> None:
     parser.add_argument("--config", default=_default_cfg,
                         help=f"path to config.yml (default: {_default_cfg})")
     parser.add_argument("--cores", type=int, default=1)
+    parser.add_argument("--mem-mb", type=int, default=8000,
+                        help="--resources mem_mb budget passed to snakemake (default: 8000); "
+                             "leave headroom below total system RAM for the OS and other processes")
     parser.add_argument("--target", default="simulate")
     args = parser.parse_args()
 
@@ -96,7 +100,7 @@ def main() -> None:
         cmd = [
             "snakemake", args.target,
             "--cores", str(args.cores),
-            "--resources", "aqueduct_runs=1",
+            "--resources", f"mem_mb={args.mem_mb}",
             "--configfile", str(config_path),
             # Restrict rerun-triggering to file-timestamp staleness only
             # (Snakemake's classic Make-like behaviour), NOT rule code/params/

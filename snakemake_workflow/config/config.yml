@@ -129,6 +129,15 @@ simulation: # Used by: preprocessing rules
     # Default Manning's n roughness (÷ 100) for cells with no land use class.
     default_friction: 0.001
 
+  # Peak-memory estimate for run_aqueduct's `resources: mem_mb` (replaces the
+  # old aqueduct_runs=1 serialization - see aqueduct_runner.
+  # estimate_aqueduct_mem_mb). Calibrated from 7 real tiles; deliberately
+  # generous given real per-tile variance beyond pixel count alone. Retune
+  # from production telemetry if jobs are consistently over/under-budgeted.
+  aqueduct_mem_estimate:
+    base_mb: 1000
+    bytes_per_pixel: 80
+
 # ── HPC DISPATCH ────────────────────────────────────────────────────────────────
 # Used by: rule generate_aqueduct_jobs (rules/hpc_dispatch.smk) /
 # scripts/generate_aqueduct_jobs.py. Aqueduct can only run one instance at a

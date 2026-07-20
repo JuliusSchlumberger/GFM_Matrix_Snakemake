@@ -86,11 +86,14 @@ DAG: `extract_tile_geometry → compute_model_bbox → extract_dem → {extract_
 |---|---|---|---|
 | `run_aqueduct` *(per waterlevel_name)* | `waterdepth_{waterlevel_name}.tif` | `run_aqueduct.py` | `aqueduct_runner.run_aqueduct` (subprocess → `aqueduct.exe <toml>`) |
 
-`run_aqueduct` declares `resources: aqueduct_runs=1` — **the Julia LLVM JIT
-cannot reliably run multiple `aqueduct.exe` instances concurrently** (crashes
-with `OutOfMemoryError` / `LLVM ERROR: Unable to allocate section memory!`).
-Always pass `--resources aqueduct_runs=1`; preprocessing rules still use the
-remaining `--cores`.
+`run_aqueduct` declares `resources: mem_mb=<estimated per tile>` — Aqueduct
+instances run fine concurrently (a controlled test up to 5 simultaneous
+140M-pixel instances never reproduced the previously-assumed
+`LLVM ERROR: Unable to allocate section memory!` JIT crash); the real local
+constraint is ordinary system memory, so `mem_mb` lets Snakemake run many
+small tiles concurrently while throttling around large ones. Always pass
+`--resources mem_mb=<N>`, leaving headroom below total system RAM for the
+OS/other processes.
 
 **Skipped tiles (2026-06-12)**: `run_aqueduct.py` reads `boundaries`
 (`boundaries_{waterlevel_name}.gpkg`) first; if it has **zero stations**
@@ -112,9 +115,9 @@ will OOM for (nearly) all of them. To avoid repeatedly burning ~3-4min per
 scenario on tiles that can never succeed:
 - `run_aqueduct.py` catches `CalledProcessError` and checks
   `aqueduct_runner.is_oom_error` (searches captured stdout/stderr for
-  `"OutOfMemoryError"`, distinct from the transient/concurrency
-  `LLVM ERROR: Unable to allocate section memory!` crash covered by
-  `aqueduct_runs=1`).
+  `"OutOfMemoryError"` - can now come from either genuine tile-size cost or
+  `mem_mb` under-estimating concurrent memory pressure; handled identically
+  either way).
 - On a real OOM, `aqueduct_runner.mark_tile_oom` writes
   `{model_outputs}/oom_tiles/{tile_id}.txt`, and the job falls back to the
   same `save_nodata_raster` + `log_skipped_tile` placeholder as the
@@ -150,7 +153,7 @@ scenario on tiles that can never succeed:
 **Aggregate targets** (in `Snakefile`): `preprocess`, `simulate`,
 `postprocess`, `all` (= preprocess + simulate + postprocess, the default).
 
-**Run**: `snakemake all --cores 4 --resources aqueduct_runs=1`
+**Run**: `snakemake all --cores 4 --resources mem_mb=8000`
 
 ## 3. Key Data Sources (HydroMT catalogs)
 
@@ -595,9 +598,10 @@ in `scripts/` beyond wiring.
 - **Land-use full-resolution reads**: `_fraction_for_window` reads
   `Copernicus_LandUse.tif` at full resolution per tile (not downsampled) —
   confirmed cheap (~0.1s/tile) and simpler than a windowed/overview approach.
-- **Julia JIT concurrency**: `aqueduct.exe`'s LLVM JIT cannot run multiple
-  instances concurrently (`resources: aqueduct_runs=1` in
-  `rules/simulation.smk`).
+- **Concurrency is memory-bound, not JIT-bound**: `aqueduct.exe` instances
+  run fine concurrently (disproved the previously-assumed JIT crash via a
+  controlled test); the real constraint is system RAM, handled by
+  `resources: mem_mb=<estimated per tile>` in `rules/simulation.smk`.
 - **Stale data (unresolved, low priority)**: tiles processed before the
   `rasters.py` fixes (land polygon layer, DEM fill, mask override) have
   incorrect `dem.tif`, `mask.tif`, and `model_bbox.json`. Since Snakemake

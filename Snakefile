@@ -24,9 +24,11 @@ Targets:
     postprocess: merge per-tile results into combined rasters and plots.
     all:         preprocess + simulate + postprocess (the default target).
 
-Run with e.g. `snakemake all --cores 4 --resources aqueduct_runs=1` — the
-`aqueduct_runs=1` resource limits the Aqueduct flood model to one instance at
-a time while preprocessing rules use the remaining cores.
+Run with e.g. `snakemake all --cores 4 --resources mem_mb=8000` — the
+`mem_mb` resource lets Snakemake run several Aqueduct instances concurrently
+while staying within a memory budget (see `run_aqueduct`'s docstring in
+simulation.smk); set `<mem_mb>` to leave headroom below total system RAM for
+the OS and other processes, e.g. ~80% of physical RAM.
 """
 
 import os
@@ -40,6 +42,7 @@ from snakemake.utils import min_version
 min_version("7.0")
 
 sys.path.insert(0, os.path.join(workflow.basedir, "snakemake_workflow", "src"))
+from aqueduct_runner import estimate_aqueduct_mem_mb  # noqa: E402
 from config_utils import _expand_paths, get_data_catalog  # noqa: E402
 
 configfile: "snakemake_workflow/config/config.yml"

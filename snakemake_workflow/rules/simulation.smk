@@ -8,13 +8,19 @@ rule run_aqueduct:
     clearly linked to the return period and sea level rise scenario used to
     produce it.
 
-    The Aqueduct executable is a Julia binary whose LLVM JIT cannot reliably
-    allocate memory when multiple instances run at the same time (it crashes
-    with `OutOfMemoryError`/`LLVM ERROR: Unable to allocate section memory!`).
-    This rule therefore claims the whole `aqueduct_runs` resource pool, so
-    pass `--resources aqueduct_runs=1` on the command line to run at most one
-    Aqueduct instance at a time while preprocessing rules still use the
-    remaining `--cores`.
+    Aqueduct instances can run fully concurrently on one machine - a
+    controlled test (2, 6, then 5 simultaneous instances, up to 140M-pixel
+    tiles) never reproduced the `LLVM ERROR: Unable to allocate section
+    memory!` JIT crash this rule used to serialize against. The real local
+    constraint is ordinary system memory: running several large tiles at
+    once can exhaust available RAM (one 140M-pixel tile that succeeded
+    cleanly alone failed with a genuine Julia `OutOfMemoryError` only when
+    4 other large tiles were running alongside it). This rule's `mem_mb`
+    resource (see `aqueduct_runner.estimate_aqueduct_mem_mb`) lets
+    Snakemake's own scheduler run many small tiles concurrently while
+    throttling around large ones, bounded by `--resources mem_mb=<N>` on
+    the command line (`<N>` should leave headroom below total system RAM
+    for the OS and other processes, e.g. ~80% of physical RAM).
 
     If `boundaries` has no stations (the tile has no water level boundary
     points within it - see `boundaries.select_stations_for_tile`), Aqueduct
@@ -23,10 +29,11 @@ rule run_aqueduct:
     logged to `model_outputs/skipped_tiles/{tile_id}_{return_period}_{waterlevel_name}.txt`
     for later mapping.
 
-    If Aqueduct crashes with `OutOfMemoryError` (the memory cost of
-    `component_indices` in `core/src/core.jl` scales with the tile's pixel
-    count, not the return period or SLR scenario, so this is effectively a
-    per-`tile_id` failure), the tile is marked in
+    If Aqueduct crashes with `OutOfMemoryError` - whether from the tile's
+    own size (the memory cost of `component_indices` in `core/src/core.jl`
+    scales with pixel count, not the return period or SLR scenario, so this
+    is effectively a per-`tile_id` failure) or from `mem_mb` under-
+    estimating concurrent memory pressure - the tile is marked in
     `model_outputs/oom_tiles/{tile_id}.txt` and this job's output falls back
     to the same all-`AQUEDUCT_NODATA` placeholder (logged to `skipped_tiles/`
     as above) instead of failing. Once marked, all other
@@ -49,6 +56,8 @@ rule run_aqueduct:
         aqueduct_executable=config["simulation"]["aqueduct_executable"],
         raster_config=config["raster_format"],
     resources:
-        aqueduct_runs=1,
+        mem_mb=lambda wildcards, input: estimate_aqueduct_mem_mb(
+            input.dem, config["simulation"]["aqueduct_mem_estimate"]
+        ),
     script:
         "../scripts/run_aqueduct.py"
