@@ -29,11 +29,9 @@ run_preparation.py (`python run_preparation.py merge_tiles`).
 import sys
 from pathlib import Path
 
-import pandas as pd
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from config_utils import get_data_catalog  # noqa: E402
+from config_utils import get_data_catalog, retry_transient_io  # noqa: E402
 from tiles import (  # noqa: E402
     compute_tile_fractions,
     compute_trimmed_geometries,
@@ -49,7 +47,9 @@ def run(config: dict) -> None:
     fractions_csv = output_path.with_stem(output_path.stem + "_fractions").with_suffix(".csv")
 
     repo_root = Path(__file__).resolve().parent.parent.parent
-    catalog = get_data_catalog(repo_root / config["paths"]["hydromt_data_catalog"])
+    catalog = get_data_catalog(
+        repo_root / config["paths"]["hydromt_data_catalog"], root=config["paths"]["root"]
+    )
     # The catalog entry points to the VRT; individual 1°×1° tile files live
     # in the same directory and are read directly to avoid VRT gap ambiguity.
     mask_dir = Path(catalog["deltadtm_mask"].path).parent
@@ -58,23 +58,13 @@ def run(config: dict) -> None:
 
     tile_grid = load_tile_grid(input_path)
 
-    if fractions_csv.exists():
-        print(f"Found existing fractions CSV at {fractions_csv}, reusing it (skipping fraction computation)")
-        fractions = pd.read_csv(fractions_csv)
-        tile_grid = tile_grid.merge(fractions, on="tile_id", how="left")
-        missing = tile_grid["mask_fraction"].isna().sum()
-        if missing:
-            raise ValueError(
-                f"{missing} tile(s) in {input_path} are missing from {fractions_csv}; "
-                "delete the CSV to recompute fractions"
-            )
-    else:
-        tile_grid = compute_tile_fractions(tile_grid, mask_dir)
-        # Save fractions for all input tiles before any merging
-        tile_grid[["tile_id", "ocean_fraction", "land_fraction", "mask_fraction", "nodata_fraction"]].to_csv(
-            fractions_csv, index=False
-        )
-        print(f"Wrote tile fractions to {fractions_csv}")
+    # fractions_csv doubles as both the incremental checkpoint (resumed from
+    # if a run is interrupted partway) and the long-lived complete cache (so
+    # a later clean re-run with different merge thresholds, same tile
+    # grid/masks, can skip fraction computation entirely) - see
+    # compute_tile_fractions' checkpoint_path docstring.
+    tile_grid = compute_tile_fractions(tile_grid, mask_dir, checkpoint_path=fractions_csv)
+    print(f"Tile fractions ready at {fractions_csv}")
 
     trim_buffer_arcsec = tg_cfg["trim_buffer_arcsec"]
 
@@ -84,7 +74,18 @@ def run(config: dict) -> None:
     # footprint) are what drive merge_undersized_tiles' decisions; trimming
     # first would trivially inflate a tile's own fraction and defeat the
     # thresholds' purpose.
-    tile_grid["geometry"] = compute_trimmed_geometries(tile_grid, mask_dir, trim_buffer_arcsec)
+    #
+    # This is the one call against the FULL (pre-merge) tile count - the only
+    # one of the three compute_trimmed_geometries calls in this file long
+    # enough to be worth checkpointing (the post-merge/post-dedup re-tighten
+    # passes below run over far fewer, already-merged tiles). checkpoint_path
+    # persists per-tile results as they're computed so an interrupted run
+    # (network drop, Ctrl-C) resumes from here instead of tile 0 - see that
+    # parameter's docstring in tiles.py.
+    trim_checkpoint = output_path.with_stem(output_path.stem + "_trim_checkpoint").with_suffix(".csv")
+    tile_grid["geometry"] = compute_trimmed_geometries(
+        tile_grid, mask_dir, trim_buffer_arcsec, checkpoint_path=trim_checkpoint
+    )
 
     merged = merge_undersized_tiles(
         tile_grid,
@@ -109,7 +110,7 @@ def run(config: dict) -> None:
     )
     merged["geometry"] = compute_trimmed_geometries(merged, mask_dir, trim_buffer_arcsec)
 
-    merged.to_file(output_path, driver="GPKG")
+    retry_transient_io(merged.to_file, output_path, driver="GPKG")
     print(
         f"Wrote {len(merged)}/{len(tile_grid)} tiles "
         f"(after merging undersized tiles) to {output_path}"

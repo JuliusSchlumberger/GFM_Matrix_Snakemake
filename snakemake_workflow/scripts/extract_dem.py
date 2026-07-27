@@ -12,7 +12,7 @@ from rasters import extract_dem, save_raster  # noqa: E402
 with open(snakemake.input.model_bbox) as f:  # noqa: F821
     bbox = json.load(f)
 
-data_catalog = get_data_catalog(snakemake.params.data_catalog)  # noqa: F821
+data_catalog = get_data_catalog(snakemake.params.data_catalog, root=snakemake.params.data_catalog_root)  # noqa: F821
 
 # Only defined in input: when vertical_datum_correction.enabled (see
 # preprocessing.smk) - the params flag mirrors that same condition, so

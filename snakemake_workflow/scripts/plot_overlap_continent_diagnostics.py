@@ -23,6 +23,7 @@ from shapely.geometry import Point
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from config_utils import retry_transient_io  # noqa: E402
 from plotting import plot_overlap_continent_diagnostics  # noqa: E402
 
 pp_cfg = snakemake.params.pp_cfg  # noqa: F821
@@ -33,7 +34,7 @@ waterlevel_name = snakemake.wildcards.waterlevel_name  # noqa: F821
 scenario_label = f"{return_period}_{waterlevel_name}"
 
 output_dir = Path(snakemake.output.diagnostics)  # noqa: F821
-output_dir.mkdir(parents=True, exist_ok=True)
+retry_transient_io(output_dir.mkdir, parents=True, exist_ok=True)
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")

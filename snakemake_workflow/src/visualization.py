@@ -37,6 +37,8 @@ import pandas as pd
 import rasterio
 from scipy.interpolate import pchip_interpolate
 
+from config_utils import retry_transient_io
+
 
 # ── Constants / defaults ──────────────────────────────────────────────────────
 
@@ -631,8 +633,8 @@ def build_geo109_to_iso_lookup(
         if pd.notna(iso):
             geo107_to_iso[int(gid)] = str(iso)
 
-    with rasterio.open(f"netcdf:{geo109_nc_path}:Geogunits") as src109, \
-         rasterio.open(f"netcdf:{geo107_nc_path}:Geogunits") as src107:
+    with retry_transient_io(rasterio.open, f"netcdf:{geo109_nc_path}:Geogunits") as src109, \
+         retry_transient_io(rasterio.open, f"netcdf:{geo107_nc_path}:Geogunits") as src107:
 
         height = src109.height
         width = src109.width
@@ -694,7 +696,7 @@ def plot_world_map(
     # Build ISO→EAI lookup
     iso_to_eai = eai_by_iso.to_dict()
 
-    with rasterio.open(f"netcdf:{geo109_nc_path}:Geogunits") as src:
+    with retry_transient_io(rasterio.open, f"netcdf:{geo109_nc_path}:Geogunits") as src:
         transform = src.transform
         height, width = src.height, src.width
 
@@ -777,7 +779,7 @@ def save_per_country_figures(
         dpi:             Figure resolution.
     """
     output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    retry_transient_io(output_dir.mkdir, parents=True, exist_ok=True)
 
     cmap = (cfg or {}).get("cmap_ember", "YlOrRd")
     ssp_colors = (cfg or {}).get("ssp_colors", _DEFAULT_SLR_COLORS)
@@ -835,7 +837,7 @@ def save_per_continent_figures(
 ) -> None:
     """Generate one chart per continent, saving PNGs to output_dir."""
     output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    retry_transient_io(output_dir.mkdir, parents=True, exist_ok=True)
 
     if region_col not in df.columns:
         print(f"No '{region_col}' column in statistics — skipping continent figures.")

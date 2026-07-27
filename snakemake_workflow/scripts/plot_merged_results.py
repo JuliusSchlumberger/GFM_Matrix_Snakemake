@@ -9,7 +9,7 @@ import rasterio
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from config_utils import get_data_catalog  # noqa: E402
+from config_utils import get_data_catalog, retry_transient_io  # noqa: E402
 from plotting import compute_flood_area_km2, plot_raster_with_coastlines  # noqa: E402
 
 pp_cfg = snakemake.params.pp_cfg  # noqa: F821
@@ -18,20 +18,20 @@ return_period = snakemake.wildcards.return_period  # noqa: F821
 waterlevel_name = snakemake.wildcards.waterlevel_name  # noqa: F821
 scenario_label = f"{return_period}, {waterlevel_name}"
 
-with rasterio.open(snakemake.input.waterdepth) as src:  # noqa: F821
+with retry_transient_io(rasterio.open, snakemake.input.waterdepth) as src:  # noqa: F821
     bounds = src.bounds
 
-data_catalog = get_data_catalog(snakemake.params.data_catalog)  # noqa: F821
+data_catalog = get_data_catalog(snakemake.params.data_catalog, root=snakemake.params.data_catalog_root)  # noqa: F821
 coastlines_path = data_catalog.get_source("land_polygons").path
 # Read directly with a bbox filter (uses the GeoPackage's spatial index) -
 # data_catalog.get_geodataframe(..., bbox=...) reads the whole global dataset
 # first, which takes minutes for this source.
-coastlines = gpd.read_file(coastlines_path, layer="land_polygons", bbox=tuple(bounds))
+coastlines = retry_transient_io(gpd.read_file, coastlines_path, layer="land_polygons", bbox=tuple(bounds))
 
 oom_dir = os.path.join(snakemake.params.model_outputs, "oom_tiles")  # noqa: F821
 if os.path.isdir(oom_dir):
     oom_tile_ids = {os.path.splitext(f)[0] for f in os.listdir(oom_dir) if f.endswith(".txt")}
-    tile_grid = gpd.read_file(snakemake.params.tile_grid_path)  # noqa: F821
+    tile_grid = retry_transient_io(gpd.read_file, snakemake.params.tile_grid_path)  # noqa: F821
     tile_grid["tile_id"] = tile_grid["tile_id"].astype(str)
     oom_tiles = tile_grid[tile_grid["tile_id"].isin(oom_tile_ids)]
 else:

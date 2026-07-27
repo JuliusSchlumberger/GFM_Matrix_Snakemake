@@ -36,7 +36,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from config_utils import get_data_catalog, load_config  # noqa: E402
+from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from visualization import (  # noqa: E402
     load_growth_matrix_csv,
     build_growth_matrix_from_grid,
@@ -141,7 +141,7 @@ def main() -> None:
 
     # SSP growth factors for the trajectory overlay only (the heatmap
     # background comes entirely from the growth_matrix CSV — see below).
-    catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"])
+    catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
     xlsx_path = Path(catalog.get_source("ssp_population_growth_factors").path)  # catalog key (data_catalog_gfm.yml)
     growth_df = load_ssp_growth_factors(xlsx_path) if xlsx_path.exists() else None
 
@@ -173,7 +173,7 @@ def main() -> None:
         growth_rates = np.array(growth_fracs)
 
         # ── Global aggregate ──────────────────────────────────────────────────
-        (out_dir / "global").mkdir(parents=True, exist_ok=True)
+        retry_transient_io((out_dir / "global").mkdir, parents=True, exist_ok=True)
         all_isos = eai_grid.index.tolist()
         ssp_growth_global = _build_ssp_growth(growth_df, slr_traj, ssps, all_isos, mean=True)
 
@@ -185,7 +185,7 @@ def main() -> None:
 
         # ── Per country ───────────────────────────────────────────────────────
         country_dir = out_dir / "country"
-        country_dir.mkdir(exist_ok=True)
+        retry_transient_io(country_dir.mkdir, exist_ok=True)
         for iso in eai_grid.index:
             row_grid = eai_grid.loc[[iso]]
             matrix_c = build_growth_matrix_from_grid(row_grid, slr_mm_grid, growth_fracs)

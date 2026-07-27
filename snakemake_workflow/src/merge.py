@@ -33,6 +33,8 @@ from typing import Any
 import numpy as np
 import rasterio
 from affine import Affine
+
+from config_utils import retry_transient_io
 from rasterio.windows import Window, from_bounds
 
 AQUEDUCT_NODATA = np.finfo(np.float32).max
@@ -165,7 +167,7 @@ def _open_overlapping_tiles(
 
     metas: list[_TileMeta] = []
     for path in tile_rasters:
-        src = rasterio.open(path)
+        src = retry_transient_io(rasterio.open, path)
         ix0 = max(chunk_minx, src.bounds.left)
         ix1 = min(chunk_maxx, src.bounds.right)
         iy0 = max(chunk_miny, src.bounds.bottom)
@@ -238,7 +240,7 @@ def merge_tile_rasters_chunk(
     if not tile_rasters:
         raise ValueError("tile_rasters must not be empty")
 
-    with rasterio.open(tile_rasters[0]) as ref:
+    with retry_transient_io(rasterio.open, tile_rasters[0]) as ref:
         ref_transform = ref.transform
         crs = ref.crs
 
@@ -268,7 +270,7 @@ def merge_tile_rasters_chunk(
     }
 
     try:
-        with rasterio.open(waterdepth_output_path, "w", **wd_profile) as wd_dst:
+        with retry_transient_io(rasterio.open, waterdepth_output_path, "w", **wd_profile) as wd_dst:
             for row_off in range(0, out_h, block_size):
                 block_h = min(block_size, out_h - row_off)
                 for col_off in range(0, out_w, block_size):

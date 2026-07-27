@@ -23,6 +23,7 @@ from rasterio.warp import reproject, Resampling
 from rasterio.windows import Window
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from config_utils import retry_transient_io  # noqa: E402
 from rasters import load_raster  # noqa: E402
 
 _NODATA_FINE = -1.0
@@ -64,7 +65,7 @@ def compute_flood_fraction(
         dom_path = Path(tmpdir) / "dom.tif"   # domain mask (0/1, no nodata)
 
         # Step 1: write exceedance and domain mask simultaneously (single read pass)
-        with rasterio.open(waterdepth_path) as wd:
+        with retry_transient_io(rasterio.open, waterdepth_path) as wd:
             exc_profile = wd.profile.copy()
             exc_profile.update(dtype="float32", count=1, nodata=_NODATA_FINE,
                                compress="lzw", tiled=True, bigtiff="YES")
@@ -131,7 +132,7 @@ def compute_flood_fraction(
         "count": 1, "dtype": "float32", "nodata": _NODATA_COARSE,
         "compress": "lzw",
     }
-    with rasterio.open(output_path, "w", **coarse_profile) as dst:
+    with retry_transient_io(rasterio.open, output_path, "w", **coarse_profile) as dst:
         dst.write(out_frac, 1)
 
 

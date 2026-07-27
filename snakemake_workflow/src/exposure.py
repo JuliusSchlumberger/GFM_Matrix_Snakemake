@@ -13,6 +13,7 @@ import numpy as np
 import rasterio
 import xarray as xr
 
+from config_utils import retry_transient_io
 from protection import GEOGUNIT_INVALID, load_geogunit_ids
 from rasters import load_raster
 
@@ -44,11 +45,11 @@ def prepare_exposure_grid_chunk(
         pop_da = None
 
     if pop_da is None or pop_da.size == 0:
-        Path(population_output_path).touch()
-        Path(geogunit_output_path).touch()
+        retry_transient_io(Path(population_output_path).touch)
+        retry_transient_io(Path(geogunit_output_path).touch)
         return
 
-    pop_da.raster.to_raster(population_output_path, driver="GTiff")
+    retry_transient_io(pop_da.raster.to_raster, population_output_path, driver="GTiff")
 
     geo_ids = load_geogunit_ids(data_catalog, geogunit_source, pop_da)
     profile = {
@@ -57,5 +58,5 @@ def prepare_exposure_grid_chunk(
         "width": pop_da.raster.width, "height": pop_da.raster.height,
         "count": 1, "dtype": "int32", "nodata": GEOGUNIT_INVALID, "compress": "lzw",
     }
-    with rasterio.open(geogunit_output_path, "w", **profile) as dst:
+    with retry_transient_io(rasterio.open, geogunit_output_path, "w", **profile) as dst:
         dst.write(geo_ids.astype("int32"), 1)

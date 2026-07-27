@@ -25,6 +25,7 @@ import rasterio
 from rasterio.windows import from_bounds
 from shapely.geometry import Polygon, box
 
+from config_utils import retry_transient_io
 from tiles import load_tile_grid
 
 # Split children's tile_ids always end in one of these digits (never used by
@@ -72,7 +73,7 @@ def count_land_pixels(mask_path: str | Path, bounds: tuple[float, float, float, 
     of the per-tile mask.tif produced by extract_dem_mask. Out-of-raster
     reads are treated as ocean (non-land), the conservative default."""
     minx, miny, maxx, maxy = bounds
-    with rasterio.open(mask_path) as src:
+    with retry_transient_io(rasterio.open, mask_path) as src:
         window = from_bounds(minx, miny, maxx, maxy, src.transform)
         data = src.read(1, window=window, boundless=True, fill_value=1)
     return int(np.isin(data, [0, 2, 3]).sum())
@@ -150,7 +151,7 @@ def split_tile(
     updated = pd.concat(
         [tile_grid[tile_grid["tile_id"] != tile_id], new_rows], ignore_index=True,
     )
-    gpd.GeoDataFrame(updated, crs=tile_grid.crs).to_file(tile_grid_path, driver="GPKG")
+    retry_transient_io(gpd.GeoDataFrame(updated, crs=tile_grid.crs).to_file, tile_grid_path, driver="GPKG")
 
     # Remove the failed tile's stale outputs so nothing downstream references it.
     shutil.rmtree(model_outputs_dir / str(tile_id), ignore_errors=True)

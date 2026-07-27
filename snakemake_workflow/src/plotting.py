@@ -8,6 +8,8 @@ import numpy as np
 import rasterio
 from rasterio.enums import Resampling
 
+from config_utils import retry_transient_io
+
 
 def compute_flood_area_km2(raster_path: str | Path, threshold_m: float) -> float:
     """Return the total area (km²) of cells with flood depth >= threshold_m.
@@ -26,7 +28,7 @@ def compute_flood_area_km2(raster_path: str | Path, threshold_m: float) -> float
     """
     _KM_PER_DEG = 111.32
     total_km2 = 0.0
-    with rasterio.open(raster_path) as src:
+    with retry_transient_io(rasterio.open, raster_path) as src:
         t = src.transform
         nodata = src.nodata
         pixel_height_km = abs(t.e) * _KM_PER_DEG
@@ -205,7 +207,7 @@ def plot_raster_with_coastlines(
             colour (postprocessing.plots.waterdepth_vmax_m).
         figsize: Figure size in inches (postprocessing.plots.merged_map_figsize).
     """
-    with rasterio.open(raster_path) as src:
+    with retry_transient_io(rasterio.open, raster_path) as src:
         native_deg = src.transform.a          # native pixel width in degrees
         target_deg = resolution_arcsec / 3600.0
         scale = max(1.0, target_deg / native_deg)

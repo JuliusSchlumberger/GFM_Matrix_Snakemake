@@ -33,7 +33,7 @@ from rasterio.warp import reproject
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from config_utils import get_data_catalog  # noqa: E402
+from config_utils import get_data_catalog, retry_transient_io  # noqa: E402
 from merge import AQUEDUCT_NODATA, _bounds_intersect  # noqa: E402
 
 pp_cfg = snakemake.params.pp_cfg  # noqa: F821
@@ -59,9 +59,9 @@ output_dir = Path(snakemake.output.diagnostics)  # noqa: F821
 
 TILE_PALETTE = plt.get_cmap(plot_cfg["overlap_tile_cmap"])
 
-output_dir.mkdir(parents=True, exist_ok=True)
+retry_transient_io(output_dir.mkdir, parents=True, exist_ok=True)
 
-data_catalog = get_data_catalog(snakemake.params.data_catalog)  # noqa: F821
+data_catalog = get_data_catalog(snakemake.params.data_catalog, root=snakemake.params.data_catalog_root)  # noqa: F821
 coastlines_path = data_catalog.get_source("land_polygons").path
 
 
@@ -75,7 +75,7 @@ def _load_domain_bbox(path: str) -> list[float]:
     if bbox_file.exists():
         with open(bbox_file) as f:
             return json.load(f)
-    with rasterio.open(path) as src:
+    with retry_transient_io(rasterio.open, path) as src:
         return list(src.bounds)
 
 
@@ -91,7 +91,7 @@ def _read_into_grid(path: str, bounds: tuple, out_h: int, out_w: int) -> np.ndar
     minx, miny, maxx, maxy = bounds
     dst_transform = transform_from_bounds(minx, miny, maxx, maxy, out_w, out_h)
     dst = np.zeros((out_h, out_w), dtype=np.float32)
-    with rasterio.open(path) as src:
+    with retry_transient_io(rasterio.open, path) as src:
         reproject(
             source=rasterio.band(src, 1),
             destination=dst,
@@ -188,7 +188,7 @@ for panel_idx, (focal, all_paths, combined_bounds, out_h, out_w) in enumerate(se
     fig, ax = plt.subplots(figsize=tuple(plot_cfg["overlap_diag_figsize"]))
 
     # Land polygon background
-    coastlines = gpd.read_file(coastlines_path, layer="land_polygons",
+    coastlines = retry_transient_io(gpd.read_file, coastlines_path, layer="land_polygons",
                                bbox=(minx, miny, maxx, maxy))
     if not coastlines.empty:
         coastlines.plot(ax=ax, color="whitesmoke", edgecolor="whitesmoke",

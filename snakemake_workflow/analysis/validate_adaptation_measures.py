@@ -59,6 +59,7 @@ from PIL import Image
 from scipy import ndimage
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from config_utils import retry_transient_io  # noqa: E402
 from exposure_analysis import (  # noqa: E402
     compute_avoid,
     compute_avoid_redirected,
@@ -195,7 +196,7 @@ def main() -> None:
     args = parser.parse_args()
 
     out_dir = Path(args.outdir) if args.outdir else Path(__file__).resolve().parents[2] / "validation_output"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
     rng = np.random.default_rng(SEED)
     population = generate_population(rng)

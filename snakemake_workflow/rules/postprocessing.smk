@@ -122,6 +122,7 @@ rule plot_merged_results:
         pp_cfg=config["postprocessing"],
         threshold_m=config["exposure"]["exceedance_threshold_m"],
         data_catalog=config["paths"]["hydromt_data_catalog"],
+        data_catalog_root=config["paths"]["root"],
         model_outputs=config["simulation"]["model_outputs"],
         tile_grid_path=config["tile_grid"]["path"],
     script:
@@ -158,6 +159,7 @@ rule prepare_exposure_grid_chunk:
         ),
     params:
         data_catalog=config["paths"]["hydromt_data_catalog"],
+        data_catalog_root=config["paths"]["root"],
         # Catalog keys, not config values - data_catalog_gfm.yml is the
         # single place dataset identifiers live (see config.yml's header).
         population_source="population",
@@ -191,6 +193,7 @@ rule plot_overlap_diagnostics:
     params:
         pp_cfg=config["postprocessing"],
         data_catalog=config["paths"]["hydromt_data_catalog"],
+        data_catalog_root=config["paths"]["root"],
     script:
         "../scripts/plot_overlap_diagnostics.py"
 

@@ -7,6 +7,8 @@ from typing import Any
 
 import rasterio
 
+from config_utils import retry_transient_io
+
 # Substring Aqueduct's Julia runtime prints (to stdout/stderr) on an
 # unhandled out-of-memory crash, e.g. in `component_indices` during the
 # flood-extent connected-component filter (see `core/src/core.jl`). This is
@@ -63,7 +65,7 @@ def estimate_aqueduct_mem_mb(dem_path: str | Path, mem_estimate_cfg: dict[str, A
     Returns:
         Estimated peak memory in MB, rounded up to the nearest 100.
     """
-    with rasterio.open(dem_path) as ds:
+    with retry_transient_io(rasterio.open, dem_path) as ds:
         pixels = ds.width * ds.height
     raw_mb = mem_estimate_cfg["base_mb"] + mem_estimate_cfg["bytes_per_pixel"] * pixels / 1e6
     return int(math.ceil(raw_mb / 100.0) * 100)
@@ -103,7 +105,7 @@ def mark_tile_oom(log_dir: str | Path, tile_id: str, reason: str) -> None:
         reason: Short human-readable reason the tile was marked.
     """
     log_dir = Path(log_dir)
-    log_dir.mkdir(parents=True, exist_ok=True)
+    retry_transient_io(log_dir.mkdir, parents=True, exist_ok=True)
     oom_marker_path(log_dir, tile_id).write_text(reason)
 
 
@@ -123,5 +125,70 @@ def log_skipped_tile(log_dir: str | Path, tile_id: str, scenario_name: str, reas
         reason: Short human-readable reason the tile/scenario was skipped.
     """
     log_dir = Path(log_dir)
-    log_dir.mkdir(parents=True, exist_ok=True)
+    retry_transient_io(log_dir.mkdir, parents=True, exist_ok=True)
     (log_dir / f"{tile_id}_{scenario_name}.txt").write_text(reason)
+
+
+# Substring written into a skipped_tiles/ marker by run_aqueduct.py's
+# `boundaries.empty` branch - distinguishes a tile with no water level
+# boundary stations (never eligible to run, not a failure) from an
+# OOM-driven skip when scanning skipped_tiles/ after the fact.
+NO_STATIONS_REASON = "no water level boundary stations within tile"
+
+
+def tile_output_complete(model_outputs_dir: str | Path, tile_id: int | str, n_scenarios_per_tile: int) -> bool:
+    """Return True once every (return_period, waterlevel_name) output for `tile_id` has been written.
+
+    Counts `waterdepth_*.tif` files in the tile's results dir (written for
+    every branch in run_aqueduct.py - genuine run, OOM fallback, or
+    no-stations skip - so this is agnostic to *how* each scenario finished).
+    """
+    results_dir = Path(model_outputs_dir) / str(tile_id) / "results"
+    if not results_dir.exists():
+        return False
+    return sum(1 for _ in results_dir.glob("waterdepth_*.tif")) >= n_scenarios_per_tile
+
+
+def tile_had_no_stations(skipped_dir: str | Path, tile_id: int | str) -> bool:
+    """Return True if `tile_id` was skipped for having no boundary stations.
+
+    A tile's boundary-station selection depends only on its bbox, not on
+    return_period/waterlevel_name, so if one scenario was skipped for this
+    reason every scenario for this tile_id was - checking one marker suffices.
+    """
+    for marker in Path(skipped_dir).glob(f"{tile_id}_*.txt"):
+        if NO_STATIONS_REASON in marker.read_text():
+            return True
+    return False
+
+
+def print_simulation_progress(
+    model_outputs_dir: str | Path,
+    oom_dir: str | Path,
+    skipped_dir: str | Path,
+    tile_ids: list[int],
+    n_scenarios_per_tile: int,
+) -> None:
+    """Print a running tally of tile outcomes across the whole tile grid.
+
+    Only meaningful once called for a tile that just finished all its
+    scenarios (see run_aqueduct.py) - cheap per-call (one glob per tile_id
+    plus a couple of marker-file checks), but still O(n_tiles), so callers
+    should only trigger it on that per-tile milestone, not on every job.
+    """
+    n_simulated = n_oom = n_no_stations = n_incomplete = 0
+    for tile_id in tile_ids:
+        if not tile_output_complete(model_outputs_dir, tile_id, n_scenarios_per_tile):
+            n_incomplete += 1
+        elif tile_marked_oom(oom_dir, tile_id):
+            n_oom += 1
+        elif tile_had_no_stations(skipped_dir, tile_id):
+            n_no_stations += 1
+        else:
+            n_simulated += 1
+    print(
+        f"[tile progress] {n_simulated} simulated, {n_oom} OOM'd, "
+        f"{n_no_stations} no-stations, {n_incomplete} still running "
+        f"(of {len(tile_ids)} total tiles)",
+        flush=True,
+    )

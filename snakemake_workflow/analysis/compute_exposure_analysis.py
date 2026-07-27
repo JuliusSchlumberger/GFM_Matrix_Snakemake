@@ -58,7 +58,7 @@ import pandas as pd
 import rasterio
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from config_utils import get_data_catalog, load_config, merged_slr_scenarios  # noqa: E402
+from config_utils import get_data_catalog, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
 from population_growth import load_ssp_growth_factors, interpolate_growth_factor  # noqa: E402
 from visualization import load_slr_trajectories  # noqa: E402
 from exposure_analysis import (                                 # noqa: E402
@@ -112,7 +112,7 @@ def _read_band(path: Path, dtype: str, fill) -> np.ndarray:
     `masked=True` must be used to replace it explicitly, or it corrupts
     every downstream computation for any chunk containing it.
     """
-    with rasterio.open(path) as src:
+    with retry_transient_io(rasterio.open, path) as src:
         arr = src.read(1, masked=True)
         return arr.filled(fill).astype(dtype)
 
@@ -440,7 +440,7 @@ def main() -> None:
     flood_frac_dir = merged_dir / "chunks" / "flood_fraction"
     chunks_dir = merged_dir / "chunks"
     out_dir = Path(args.outdir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
     # ── Discover chunks and restrict to those with valid population data ─────
     all_chunk_ids = sorted(set(
@@ -469,7 +469,7 @@ def main() -> None:
 
     # ── FLOPROS: per-geogunit RP_applied and ISO lookup (tiny, geogunit-indexed) ──
     print("Loading FLOPROS protection standards…")
-    catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"])
+    catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
     flopros = catalog.get_dataframe("flopros_protection_standards")  # catalog key (data_catalog_gfm.yml)
     coastal_rp = flopros["Coastal"].fillna(flopros["Riverine"]).fillna(default_rp)
 

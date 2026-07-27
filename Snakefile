@@ -33,6 +33,7 @@ the OS and other processes, e.g. ~80% of physical RAM.
 
 import os
 import sys
+import time
 
 import geopandas as gpd
 import numpy as np
@@ -41,9 +42,49 @@ from snakemake.utils import min_version
 
 min_version("7.0")
 
+# Monkey-patch os.makedirs to retry on a transient FileNotFoundError before
+# any job runs. Snakemake's own io.py calls os.makedirs(dir, exist_ok=True)
+# directly (not through pathlib) to prepare each job's output directory
+# before running it - with model_outputs living on the P:\ network share, a
+# momentary SMB drop (idle-session timeout, brief network blip) makes the
+# whole drive briefly vanish from Windows' perspective, surfacing as
+# `FileNotFoundError: [WinError 3] ... 'P:/'` even though the path is fine
+# moments later. Snakemake doesn't retry this itself, so one blip anywhere
+# in a multi-hour run previously aborted the whole invocation. Patching the
+# shared os module here (rather than editing Snakemake's installed package,
+# which would be wiped out by any env rebuild or Snakemake upgrade) makes
+# every os.makedirs call in the process retry-safe, including Snakemake's
+# own internals - `os.makedirs`'s own leaf-level `mkdir(name, mode)` call
+# resolves against `os`'s module globals at call time, so this is visible
+# to every caller already holding a reference to the `os` module (anything
+# using `Path.mkdir()` instead has its own separate code path and is NOT
+# covered by this patch).
+_ORIGINAL_MAKEDIRS = os.makedirs
+
+
+def _retrying_makedirs(name, mode=0o777, exist_ok=False, _retries=5, _delay_s=15.0):
+    last_err = None
+    for attempt in range(1, _retries + 1):
+        try:
+            return _ORIGINAL_MAKEDIRS(name, mode, exist_ok)
+        except FileNotFoundError as e:
+            last_err = e
+            if attempt < _retries:
+                print(
+                    f"[retry {attempt}/{_retries - 1}] os.makedirs({name!r}) failed: {e} "
+                    f"- retrying in {_delay_s:.0f}s",
+                    flush=True,
+                )
+                time.sleep(_delay_s)
+    raise last_err
+
+
+os.makedirs = _retrying_makedirs
+
 sys.path.insert(0, os.path.join(workflow.basedir, "snakemake_workflow", "src"))
 from aqueduct_runner import estimate_aqueduct_mem_mb  # noqa: E402
 from config_utils import _expand_paths, get_data_catalog  # noqa: E402
+from regions import assign_regions  # noqa: E402
 
 configfile: "snakemake_workflow/config/config.yml"
 
@@ -173,7 +214,9 @@ _PROTECTION_BASELINE_SLR = config["protection"]["baseline_waterlevel_name"]
 #    at parse time, same as _tile_gdf above, so those rules' input:/output:
 #    can reference concrete .gfc paths rather than re-querying the catalog
 #    per invocation.
-_data_catalog = get_data_catalog(os.path.join(workflow.basedir, config["paths"]["hydromt_data_catalog"]))
+_data_catalog = get_data_catalog(
+    os.path.join(workflow.basedir, config["paths"]["hydromt_data_catalog"]), root=config["paths"]["root"]
+)
 _vc_cfg = config.get("vertical_datum_correction", {})
 _vertical_datum_correction_enabled = _vc_cfg.get("enabled", False)
 
@@ -202,6 +245,23 @@ _SIMULATION_OUTPUTS = expand(
     rules.run_aqueduct.output.waterdepth,
     tile_id=TILE_IDS, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES,
 )
+
+# Geographic grouping of `simulate`'s targets (see src/regions.py and rule
+# simulate_region below) - orchestration only, so a real-world area's worth
+# of tiles can be requested and become analyzable together, instead of an
+# arbitrary index range. Has no bearing on _SIMULATION_OUTPUTS above (still
+# used by `simulate`/`all` exactly as before) or on where any output lands.
+_TILE_REGIONS = assign_regions(_tile_gdf, len(RETURN_PERIODS) * len(WATERLEVEL_NAMES))
+REGION_TILE_IDS: dict[str, list[int]] = {}
+for _tile_id, _region_name in _TILE_REGIONS.items():
+    REGION_TILE_IDS.setdefault(_region_name, []).append(_tile_id)
+REGION_SIMULATION_OUTPUTS = {
+    _region_name: expand(
+        rules.run_aqueduct.output.waterdepth,
+        tile_id=_tile_ids, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES,
+    )
+    for _region_name, _tile_ids in REGION_TILE_IDS.items()
+}
 
 # generate_aqueduct_jobs (HPC dispatch) needs _PREPROCESS_OUTPUTS, so this
 # include comes after it's defined above, unlike the other rule files.
@@ -249,6 +309,40 @@ rule simulate:
     """Run the Aqueduct flood model for all tiles, return periods and SLR scenarios."""
     input:
         _SIMULATION_OUTPUTS,
+
+
+rule simulate_region:
+    """Run the Aqueduct flood model for one geographic region's tiles only
+    (see src/regions.py) - a real, analyzable slice of global coverage
+    (a continent, or half of an oversized one), for requesting/tracking via
+    run_simulate_regions.sh instead of an arbitrary index range.
+
+    Orchestration only: {region} selects WHICH of simulate's own targets get
+    requested in this invocation, nothing else. Every output still lands at
+    exactly the same model_outputs/{tile_id}/results/waterdepth_....tif path
+    `simulate` itself would produce - postprocessing (merge_chunk, plots,
+    exposure analysis) reads those same paths with no awareness this
+    grouping exists, and the actual per-country/per-continent exposure
+    results downstream (analysis/compute_exposure_analysis.py) are computed
+    from the population/geogunit rasters at global-grid resolution, entirely
+    independent of - and unaffected by - which region built a given tile.
+
+    The output is a small marker file (not a data product) purely so this
+    wildcarded rule can be targeted by a concrete path on the command line;
+    it lives under model_outputs/_region_done/ alongside this codebase's
+    other bookkeeping-only subfolders (oom_tiles/, skipped_tiles/), not
+    mixed in with any tile's actual per-tile data.
+    """
+    input:
+        lambda wildcards: REGION_SIMULATION_OUTPUTS[wildcards.region],
+    output:
+        # Deliberately NOT os.path.join: on Windows it would backslash-join
+        # the "_region_done"/"{region}.done" segments, which then would not
+        # textually match a forward-slash path built independently by
+        # list_regions.py (used to pass this exact target on the command
+        # line) - same documented pitfall as waterdepth_tiles_for_chunk
+        # above, which needs the same workaround for the same reason.
+        touch(config["simulation"]["model_outputs"] + "/_region_done/{region}.done"),
 
 
 rule postprocess:

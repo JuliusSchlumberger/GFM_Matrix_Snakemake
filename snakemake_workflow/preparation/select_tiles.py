@@ -26,7 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from config_utils import get_data_catalog  # noqa: E402
+from config_utils import get_data_catalog, retry_transient_io  # noqa: E402
 from tiles import filter_tiles_by_dem_mask, filter_tiles_by_exposure, load_tile_grid  # noqa: E402
 
 
@@ -40,7 +40,9 @@ def run(config: dict) -> None:
     # The catalog entry for deltadtm_mask points to a VRT; the individual
     # 1°×1° tile files live in the same directory.
     repo_root = Path(__file__).resolve().parent.parent.parent
-    catalog = get_data_catalog(repo_root / config["paths"]["hydromt_data_catalog"])
+    catalog = get_data_catalog(
+        repo_root / config["paths"]["hydromt_data_catalog"], root=config["paths"]["root"]
+    )
     mask_vrt_path = Path(catalog["deltadtm_mask"].path)
     mask_dir = mask_vrt_path.parent
 
@@ -64,7 +66,7 @@ def run(config: dict) -> None:
     )
     n_dropped_exposure = len(after_dem) - len(filtered)
 
-    filtered.to_file(output_path, driver="GPKG")
+    retry_transient_io(filtered.to_file, output_path, driver="GPKG")
     print(
         f"\nWrote {len(filtered)}/{n_total} tiles to {output_path}\n"
         f"  {n_dropped_dem}/{n_total} excluded: no DeltaDTM coverage\n"

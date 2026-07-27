@@ -28,7 +28,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from config_utils import get_data_catalog, load_config  # noqa: E402
+from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -100,7 +100,7 @@ def main() -> None:
     ssp_rcp_codes: dict[str, int] = viz.get("ssp_rcp_codes", {
         "SSP1": 126, "SSP2": 245, "SSP5": 585,
     })
-    catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"])
+    catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
     slr_csv_dir = Path(catalog.get_source("ipcc_ar6_slr_wg1_csv").path)  # catalog key (data_catalog_gfm.yml)
 
     if not slr_csv_dir.exists():
@@ -128,7 +128,7 @@ def main() -> None:
     result = result.sort_index()
 
     out_path = Path(args.output)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    retry_transient_io(out_path.parent.mkdir, parents=True, exist_ok=True)
     result.to_csv(out_path)
     print(f"\nWritten: {out_path}")
 

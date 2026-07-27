@@ -2,6 +2,8 @@
 tiles for which the DEM has data coverage.
 """
 
+import csv
+import time
 from pathlib import Path
 
 import geopandas as gpd
@@ -15,10 +17,43 @@ from rasterio.windows import bounds as window_bounds
 from shapely.geometry import box
 from shapely.ops import unary_union
 
+from config_utils import retry_transient_io
+
+_RASTER_OPEN_RETRIES = 4
+_RASTER_OPEN_RETRY_DELAY_S = 5.0
+
+
+def _open_mask_tile(path: Path):
+    """`rasterio.open(path)`, retrying briefly on I/O errors before giving up.
+
+    merge_tiles.py's per-tile loops (compute_tile_fractions,
+    compute_trimmed_geometries) can run for hours over thousands of mask
+    tiles on the P:\\ network share - a single transient SMB hiccup surfaces
+    as `rasterio.errors.RasterioIOError` ("No such file or directory") on a
+    file that both exists and is reachable moments later, and previously
+    took the whole multi-hour run down with it. A genuinely missing or
+    corrupted file fails the same way every attempt and still raises after
+    the retries are exhausted - this only adds a few seconds of delay to
+    that case, in exchange for shrugging off a momentary drop in the far
+    more common case.
+    """
+    last_err = None
+    for attempt in range(1, _RASTER_OPEN_RETRIES + 1):
+        try:
+            return rasterio.open(path)
+        except rasterio.errors.RasterioIOError as e:
+            last_err = e
+            if attempt < _RASTER_OPEN_RETRIES:
+                print(f"    [retry {attempt}/{_RASTER_OPEN_RETRIES - 1}] "
+                      f"failed to open {path}: {e} - retrying in {_RASTER_OPEN_RETRY_DELAY_S:.0f}s",
+                      flush=True)
+                time.sleep(_RASTER_OPEN_RETRY_DELAY_S)
+    raise last_err
+
 
 def load_tile_grid(tile_grid_path: str | Path) -> gpd.GeoDataFrame:
     """Load the overlapping tile grid produced by `tile_mask_creation.py`."""
-    return gpd.read_file(tile_grid_path)
+    return retry_transient_io(gpd.read_file, tile_grid_path)
 
 
 def get_tile_geometry(tile_grid: gpd.GeoDataFrame, tile_id: int) -> gpd.GeoDataFrame:
@@ -42,7 +77,7 @@ def get_tile_geometry(tile_grid: gpd.GeoDataFrame, tile_id: int) -> gpd.GeoDataF
 
 def save_tile_geometry(tile: gpd.GeoDataFrame, output_path: str | Path) -> None:
     """Save a single tile geometry to a GeoPackage file."""
-    tile.to_file(output_path, driver="GPKG")
+    retry_transient_io(tile.to_file, output_path, driver="GPKG")
 
 
 def _coord_str(lat: int, lon: int) -> str:
@@ -84,7 +119,7 @@ def _mask_tile_has_land(path: Path) -> bool:
     A tile is considered to have DEM coverage when at least one pixel has a
     value other than 1 (ocean) or 255 (nodata).
     """
-    with rasterio.open(path) as src:
+    with _open_mask_tile(path) as src:
         data = src.read(1)
     return bool(np.any((data != 1) & (data != 255)))
 
@@ -141,7 +176,7 @@ def filter_tiles_by_dem_mask(
 
     discarded_gdf = tile_grid[[not k for k in keep]]
     if len(discarded_gdf) and discarded_tiles_path is not None:
-        discarded_gdf.to_file(discarded_tiles_path, driver="GPKG")
+        retry_transient_io(discarded_gdf.to_file, discarded_tiles_path, driver="GPKG")
         print(f"Wrote {len(discarded_gdf)} discarded tiles to {discarded_tiles_path}")
 
     return tile_grid[keep].reset_index(drop=True)
@@ -194,7 +229,7 @@ def filter_tiles_by_exposure(
 
     discarded_gdf = tile_grid[[not k for k in keep]]
     if len(discarded_gdf) and discarded_tiles_path is not None:
-        discarded_gdf.to_file(discarded_tiles_path, driver="GPKG")
+        retry_transient_io(discarded_gdf.to_file, discarded_tiles_path, driver="GPKG")
         print(f"Wrote {len(discarded_gdf)} discarded tiles to {discarded_tiles_path}")
 
     return tile_grid[keep].reset_index(drop=True)
@@ -242,7 +277,7 @@ def _compute_fractions_from_tiles(
         if ix0 >= ix1 or iy0 >= iy1:
             continue
 
-        with rasterio.open(path) as src:
+        with _open_mask_tile(path) as src:
             # fill_value=255 guards against the rare sub-pixel floating-point
             # overshoot at tile boundaries; 255 is not a valid mask value.
             window = from_bounds(ix0, iy0, ix1, iy1, src.transform)
@@ -310,7 +345,7 @@ def _mosaic_mask_for_trim(
         if ix0 >= ix1 or iy0 >= iy1:
             continue
         windows.append((path, ix0, iy0, ix1, iy1))
-        with rasterio.open(path) as src:
+        with _open_mask_tile(path) as src:
             resolutions.append((abs(src.transform.a), abs(src.transform.e)))
 
     if not windows:
@@ -332,7 +367,7 @@ def _mosaic_mask_for_trim(
         h, w = int(dst_window.height), int(dst_window.width)
         if h <= 0 or w <= 0:
             continue
-        with rasterio.open(path) as src:
+        with _open_mask_tile(path) as src:
             src_window = from_bounds(ix0, iy0, ix1, iy1, src.transform)
             data = src.read(
                 1, window=src_window, boundless=True, fill_value=255,
@@ -395,6 +430,7 @@ def compute_trimmed_geometries(
     tile_grid: gpd.GeoDataFrame,
     mask_dir: str | Path,
     buffer_arcsec: float,
+    checkpoint_path: str | Path | None = None,
 ) -> gpd.GeoSeries:
     """Compute a trimmed bbox (as a shapely box) for every row of ``tile_grid``.
 
@@ -402,22 +438,66 @@ def compute_trimmed_geometries(
     Returns a GeoSeries aligned to ``tile_grid``'s index and CRS. Called
     before merging (trimming becomes every tile's real working geometry from
     then on) and again after (to re-tighten any slack left by bbox unions).
+
+    If ``checkpoint_path`` is given, each tile's result is appended to it
+    (one CSV row: ``tile_id,minx,miny,maxx,maxy``) as soon as it's computed,
+    and any rows already there on entry are reused instead of recomputed -
+    a run interrupted partway through (e.g. by a transient network drop -
+    see `_open_mask_tile` - or just Ctrl-C) resumes from the same file
+    instead of starting over from tile 0. The file is deleted once this
+    function returns, so a *stale* checkpoint (e.g. left over from an
+    aborted run against a different tile_grid/buffer_arcsec) is never
+    silently reused across separate successful runs - but note that within
+    one resume, tile_id is trusted blindly, same as this codebase's other
+    "delete this file to force a recompute" caches (e.g. merge_tiles.py's
+    fractions_csv): if you change buffer_arcsec or the input tile_grid
+    between attempts, delete the leftover checkpoint file first.
     """
     mask_index = _scan_mask_dir(Path(mask_dir))
-    trimmed = []
     n = len(tile_grid)
+
+    done: dict[int, tuple[float, float, float, float]] = {}
+    ckpt = Path(checkpoint_path) if checkpoint_path is not None else None
+    if ckpt is not None and ckpt.exists():
+        with open(ckpt, newline="") as f:
+            for tid, minx, miny, maxx, maxy in csv.reader(f):
+                done[int(tid)] = (float(minx), float(miny), float(maxx), float(maxy))
+        print(f"Resuming from checkpoint: {len(done)}/{n} tiles already computed ({ckpt})", flush=True)
+
     print(f"Computing trimmed bboxes for {n} tiles...", flush=True)
-    for i, (_, row) in enumerate(tile_grid.iterrows()):
-        trimmed_bbox = compute_trimmed_bbox(row.geometry.bounds, mask_index, buffer_arcsec)
-        trimmed.append(box(*trimmed_bbox))
-        if (i + 1) % 100 == 0 or i + 1 == n:
-            print(f"  {i + 1}/{n} tiles", flush=True)
+    trimmed = []
+    ckpt_file = open(ckpt, "a", newline="") if ckpt is not None else None
+    ckpt_writer = csv.writer(ckpt_file) if ckpt_file is not None else None
+    try:
+        for i, (_, row) in enumerate(tile_grid.iterrows()):
+            tile_id = int(row.tile_id)
+            if tile_id in done:
+                trimmed_bbox = done[tile_id]
+            else:
+                trimmed_bbox = compute_trimmed_bbox(row.geometry.bounds, mask_index, buffer_arcsec)
+                if ckpt_writer is not None:
+                    ckpt_writer.writerow([tile_id, *trimmed_bbox])
+                    ckpt_file.flush()
+            trimmed.append(box(*trimmed_bbox))
+            if (i + 1) % 100 == 0 or i + 1 == n:
+                print(f"  {i + 1}/{n} tiles", flush=True)
+    finally:
+        if ckpt_file is not None:
+            ckpt_file.close()
+
+    if ckpt is not None:
+        ckpt.unlink(missing_ok=True)
+
     return gpd.GeoSeries(trimmed, index=tile_grid.index, crs=tile_grid.crs)
+
+
+_FRACTION_CSV_FIELDS = ["tile_id", "ocean_fraction", "land_fraction", "mask_fraction"]
 
 
 def compute_tile_fractions(
     tile_grid: gpd.GeoDataFrame,
     mask_dir: str | Path,
+    checkpoint_path: str | Path | None = None,
 ) -> gpd.GeoDataFrame:
     """Compute ocean, land, and DeltaDTM coverage fractions for each tile.
 
@@ -438,30 +518,72 @@ def compute_tile_fractions(
       by `merge_undersized_tiles`'s merge decisions - a tile's ocean/land
       split among its *covered* pixels is what drives those).
 
+    If ``checkpoint_path`` is given, each tile's fractions are appended to it
+    (header row `tile_id,ocean_fraction,land_fraction,mask_fraction`) as soon
+    as they're computed, and any rows already there on entry are reused
+    instead of recomputed - same resume-on-crash behaviour as
+    `compute_trimmed_geometries`'s checkpoint. Unlike that one, this file is
+    intentionally NOT deleted once every tile is done: merge_tiles.py passes
+    its own long-lived `_fractions.csv` cache here, so a later *clean*
+    re-run (different merge thresholds, same tile grid/masks) can still skip
+    fraction computation entirely by pointing back at the same file - this
+    just means an interrupted run resumes from whatever's already in it
+    instead of requiring the file to be complete or manually deleted first.
+
     Args:
         tile_grid: Tile grid, as returned by `load_tile_grid`.
         mask_dir: Directory containing the 1°×1° DeltaDTM mask GeoTIFF tiles.
+        checkpoint_path: Optional path to persist/resume per-tile results.
 
     Returns:
         ``tile_grid`` with added ``ocean_fraction``, ``land_fraction``,
         ``mask_fraction`` and ``nodata_fraction`` columns.
     """
     mask_index = _scan_mask_dir(Path(mask_dir))
+    n = len(tile_grid)
+
+    done: dict[int, tuple[float, float, float]] = {}
+    ckpt = Path(checkpoint_path) if checkpoint_path is not None else None
+    ckpt_needs_header = ckpt is not None and (not ckpt.exists() or ckpt.stat().st_size == 0)
+    if ckpt is not None and ckpt.exists() and not ckpt_needs_header:
+        with open(ckpt, newline="") as f:
+            for row in csv.DictReader(f):
+                done[int(row["tile_id"])] = (
+                    float(row["ocean_fraction"]), float(row["land_fraction"]), float(row["mask_fraction"]),
+                )
+        print(f"Resuming fractions from checkpoint: {len(done)}/{n} tiles already computed ({ckpt})", flush=True)
+
     ocean_fractions: list[float] = []
     land_fractions:  list[float] = []
     mask_fractions:  list[float] = []
 
-    n = len(tile_grid)
     print(f"Computing fractions for {n} tiles...", flush=True)
-    for i, (_, row) in enumerate(tile_grid.iterrows()):
-        ocean_f, land_f, mask_f = _compute_fractions_from_tiles(
-            row.geometry.bounds, mask_index
-        )
-        ocean_fractions.append(ocean_f)
-        land_fractions.append(land_f)
-        mask_fractions.append(mask_f)
-        if (i + 1) % 100 == 0 or i + 1 == n:
-            print(f"  {i + 1}/{n} tiles", flush=True)
+    ckpt_file = open(ckpt, "a", newline="") if ckpt is not None else None
+    ckpt_writer = csv.DictWriter(ckpt_file, fieldnames=_FRACTION_CSV_FIELDS) if ckpt_file is not None else None
+    if ckpt_writer is not None and ckpt_needs_header:
+        ckpt_writer.writeheader()
+        ckpt_file.flush()
+    try:
+        for i, (_, row) in enumerate(tile_grid.iterrows()):
+            tile_id = int(row.tile_id)
+            if tile_id in done:
+                ocean_f, land_f, mask_f = done[tile_id]
+            else:
+                ocean_f, land_f, mask_f = _compute_fractions_from_tiles(row.geometry.bounds, mask_index)
+                if ckpt_writer is not None:
+                    ckpt_writer.writerow({
+                        "tile_id": tile_id, "ocean_fraction": ocean_f,
+                        "land_fraction": land_f, "mask_fraction": mask_f,
+                    })
+                    ckpt_file.flush()
+            ocean_fractions.append(ocean_f)
+            land_fractions.append(land_f)
+            mask_fractions.append(mask_f)
+            if (i + 1) % 100 == 0 or i + 1 == n:
+                print(f"  {i + 1}/{n} tiles", flush=True)
+    finally:
+        if ckpt_file is not None:
+            ckpt_file.close()
 
     tile_grid = tile_grid.copy()
     tile_grid["ocean_fraction"]  = ocean_fractions

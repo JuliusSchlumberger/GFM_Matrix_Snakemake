@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from config_utils import load_config, merged_slr_scenarios  # noqa: E402
+from config_utils import load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
 from visualization import plot_adaptation_bars  # noqa: E402
 
 
@@ -47,7 +47,7 @@ def main() -> None:
     out_dir = Path(args.outdir or str(
         Path(viz.get("output_dir", f"{cfg['paths']['root']}/figures")) / "adaptation_bars"
     ))
-    out_dir.mkdir(parents=True, exist_ok=True)
+    retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
     dpi = int(viz.get("dpi", 200))
 
@@ -83,7 +83,7 @@ def main() -> None:
     # Per country
     all_isos = next(iter(eai_dict.values())).index.tolist()
     country_dir = out_dir / "country"
-    country_dir.mkdir(exist_ok=True)
+    retry_transient_io(country_dir.mkdir, exist_ok=True)
     for iso in sorted(all_isos):
         sub = {k: v.loc[[iso]] for k, v in eai_dict.items() if iso in v.index}
         if not sub:

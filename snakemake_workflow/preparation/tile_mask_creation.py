@@ -40,7 +40,7 @@ from shapely.geometry import box
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
-from config_utils import get_data_catalog  # noqa: E402
+from config_utils import get_data_catalog, retry_transient_io  # noqa: E402
 
 repo_root = pathlib.Path(__file__).resolve().parent.parent.parent
 
@@ -74,7 +74,7 @@ def build_five_deg_grid_from_deltadtm(mask_vrt_path: pathlib.Path) -> gpd.GeoDat
     blocks — see inputs/mask/readme.txt), just against DeltaDTM's tile
     index instead, which reaches much higher/lower latitudes.
     """
-    with rasterio.open(mask_vrt_path) as src:
+    with retry_transient_io(rasterio.open, mask_vrt_path) as src:
         tile_paths = [f for f in src.files if f.lower().endswith((".tif", ".tiff"))]
 
     cells: dict[tuple[int, int], list[str]] = {}
@@ -124,7 +124,7 @@ def load_coastrp_stations(
     prepare_boundary_conditions.py and extract_boundaries.py use.
     """
     coastrp_path = data_catalog.get_source("coast_rp").path
-    ds = xr.open_dataset(coastrp_path)
+    ds = retry_transient_io(xr.open_dataset, coastrp_path)
     lon = ds[x_var].values
     lat = ds[y_var].values
     ds.close()
@@ -170,7 +170,9 @@ def split_into_quadrants(row):
 
 def run(config: dict) -> None:
     data_catalog = get_data_catalog(
-        repo_root / config["paths"]["hydromt_data_catalog"], logger_name="Prepare tile masks"
+        repo_root / config["paths"]["hydromt_data_catalog"],
+        logger_name="Prepare tile masks",
+        root=config["paths"]["root"],
     )
 
     mask_vrt_path = pathlib.Path(data_catalog.get_source("deltadtm_mask").path)
@@ -186,12 +188,12 @@ def run(config: dict) -> None:
     grid = filter_grid_by_coastrp(grid, stations, buffer_deg)
 
     five_deg_grid_path = pathlib.Path(config["one_off_edits"]["five_deg_grid_deltadtm"])
-    five_deg_grid_path.parent.mkdir(parents=True, exist_ok=True)
+    retry_transient_io(five_deg_grid_path.parent.mkdir, parents=True, exist_ok=True)
     n_tiles_1deg = sum(len(t) for t in grid["tiles_1deg"])
     # GPKG/fiona has no list field type - serialize for the write only,
     # keeping the in-memory `grid` (used above/below) as real lists.
     grid_to_write = grid.assign(tiles_1deg=grid["tiles_1deg"].apply(",".join))
-    grid_to_write.to_file(five_deg_grid_path, driver="GPKG")
+    retry_transient_io(grid_to_write.to_file, five_deg_grid_path, driver="GPKG")
     print(
         f"DeltaDTM coverage: {n_deltadtm_only} five-degree cells. "
         f"After requiring COAST-RP coverage too ({len(stations)} non-Antarctic "
@@ -214,7 +216,7 @@ def run(config: dict) -> None:
 
     tiles_gdf = gpd.GeoDataFrame(tiles, crs=grid.crs)
     smaller_tiles_path = config["one_off_edits"]["smaller_tiles"]
-    tiles_gdf.to_file(smaller_tiles_path, driver="GPKG")
+    retry_transient_io(tiles_gdf.to_file, smaller_tiles_path, driver="GPKG")
     print(f"Saved {len(tiles_gdf)} tiles to {smaller_tiles_path}")
 
 

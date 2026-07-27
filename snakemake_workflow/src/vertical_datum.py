@@ -40,6 +40,8 @@ from affine import Affine
 from rasterio.enums import Resampling
 from rasterio.warp import reproject
 
+from config_utils import retry_transient_io
+
 
 def compute_geoid_offset_grid(
     goco06s_gfc: str | Path, egm2008_gfc: str | Path,
@@ -75,14 +77,26 @@ def compute_geoid_offset_grid(
         )
     from rasterio.transform import from_origin as _from_origin
 
-    goco = pysh.SHGravCoeffs.from_file(str(goco06s_gfc), format="icgem")
-    egm = pysh.SHGravCoeffs.from_file(str(egm2008_gfc), format="icgem")
+    goco = retry_transient_io(pysh.SHGravCoeffs.from_file, str(goco06s_gfc), format="icgem")
+    egm = retry_transient_io(pysh.SHGravCoeffs.from_file, str(egm2008_gfc), format="icgem")
     lmax = goco.lmax
     egm_trunc = egm.pad(lmax)
 
+    # pyshtools>=4.14's SHGravCoeffs.geoid() accepts a convenience
+    # `ellipsoid=` kwarg that unpacks a boule.Ellipsoid itself; the
+    # installed 4.12.2 predates that and still takes the four normal-
+    # gravity-field parameters individually (potref/a/f/omega), so they're
+    # pulled off `wgs84` explicitly here instead - same values either way.
     wgs84 = _boule.WGS84
-    grid_goco = goco.geoid(ellipsoid=wgs84, lmax=lmax)
-    grid_egm = egm_trunc.geoid(ellipsoid=wgs84, lmax=lmax)
+    geoid_kwargs = dict(
+        potref=wgs84.reference_normal_gravity_potential,
+        a=wgs84.semimajor_axis,
+        f=wgs84.flattening,
+        omega=wgs84.angular_velocity,
+        lmax=lmax,
+    )
+    grid_goco = goco.geoid(**geoid_kwargs)
+    grid_egm = egm_trunc.geoid(**geoid_kwargs)
 
     da_goco = grid_goco.to_xarray()
     da_egm = grid_egm.to_xarray()
@@ -119,8 +133,9 @@ def write_geoid_offset_raster(
     """
     offset_arr, transform, crs = compute_geoid_offset_grid(goco06s_gfc, egm2008_gfc)
 
-    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    with rasterio.open(
+    retry_transient_io(Path(out_path).parent.mkdir, parents=True, exist_ok=True)
+    with retry_transient_io(
+        rasterio.open,
         out_path, "w",
         driver="GTiff", dtype="float32",
         width=offset_arr.shape[1], height=offset_arr.shape[0],
@@ -144,7 +159,7 @@ def sample_geoid_offset(
 
     Returns a float32 array of shape (dst_height, dst_width), in metres.
     """
-    with rasterio.open(offset_raster_path) as src:
+    with retry_transient_io(rasterio.open, offset_raster_path) as src:
         offset_on_dst = np.empty((dst_height, dst_width), dtype=np.float32)
         reproject(
             source=rasterio.band(src, 1),

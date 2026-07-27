@@ -6,6 +6,8 @@ import geopandas as gpd
 import xarray as xr
 from shapely.geometry import box
 
+from config_utils import retry_transient_io
+
 
 def load_waterlevel_stations(nc_path: str | Path, variable: str, x_var: str, y_var: str, column_name: str) -> gpd.GeoDataFrame:
     """Load water level stations from a COAST-RP_EWL NetCDF file as a GeoDataFrame.
@@ -24,7 +26,7 @@ def load_waterlevel_stations(nc_path: str | Path, variable: str, x_var: str, y_v
         Stations with a NaN water level value are dropped, since the Aqueduct
         flood model cannot handle missing values in its boundary points.
     """
-    with xr.open_dataset(nc_path) as ds:
+    with retry_transient_io(xr.open_dataset, nc_path) as ds:
         waterlevel = ds[variable].values
         lon = ds[x_var].values
         lat = ds[y_var].values
@@ -70,4 +72,4 @@ def select_stations_for_tile(
 
 def save_boundary_points(stations: gpd.GeoDataFrame, output_path: str | Path) -> None:
     """Save selected water level stations to a GeoPackage."""
-    stations.to_file(output_path, driver="GPKG")
+    retry_transient_io(stations.to_file, output_path, driver="GPKG")

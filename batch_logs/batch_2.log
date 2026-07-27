@@ -1,0 +1,8 @@
+2026-07-23 11:35:30,695 - snakemake_workflow - log - INFO - HydroMT version: 0.9.3
+2026-07-23 11:35:30,695 - snakemake_workflow - data_catalog - INFO - Parsing data catalog from C:\Users\schlumbe\GFM_Matrix_Snakemake\snakemake_workflow/config/data_catalog_gfm.yml
+Building DAG of jobs...
+Considering only batch 2/20 (rule preprocess) for DAG computation.
+All jobs beyond the batching rule are omitted until the final batch.
+Don't forget to run the other batches too.
+Nothing to be done (all requested files are present and up to date).
+Complete log: .snakemake\log\2026-07-23T113526.476722.snakemake.log

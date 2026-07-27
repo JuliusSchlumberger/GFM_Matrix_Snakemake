@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import get_data_catalog  # noqa: E402
 from exposure import prepare_exposure_grid_chunk  # noqa: E402
 
-data_catalog = get_data_catalog(snakemake.params.data_catalog)  # noqa: F821
+data_catalog = get_data_catalog(snakemake.params.data_catalog, root=snakemake.params.data_catalog_root)  # noqa: F821
 
 prepare_exposure_grid_chunk(
     reference_path=snakemake.input.reference,  # noqa: F821

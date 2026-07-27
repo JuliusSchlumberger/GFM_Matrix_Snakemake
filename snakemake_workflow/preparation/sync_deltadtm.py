@@ -31,6 +31,7 @@ run_preparation.py (`python run_preparation.py sync_deltadtm`).
 """
 
 import sys
+import time
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
@@ -39,7 +40,7 @@ import requests
 from osgeo import gdal
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from config_utils import get_data_catalog  # noqa: E402
+from config_utils import get_data_catalog, retry_transient_io  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -74,7 +75,7 @@ DEM_VRT_URL = "https://data.4tu.nl/file/1da2e70f-6c4d-4b03-86bd-b53e789cc629/189
 
 def download_file(url: str, dest_path: Path, chunk_size: int = 1024 * 1024) -> None:
     """Stream a large file to disk with progress reporting, resuming if partially present."""
-    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    retry_transient_io(dest_path.parent.mkdir, parents=True, exist_ok=True)
 
     # Skip if already fully downloaded (best-effort check via Content-Length)
     head = requests.head(url, allow_redirects=True, timeout=30)
@@ -101,7 +102,7 @@ def download_file(url: str, dest_path: Path, chunk_size: int = 1024 * 1024) -> N
 
 def extract_tifs(zip_path: Path, out_dir: Path) -> int:
     """Extract every .tif file inside a zip (ignoring subfolder structure) into out_dir."""
-    out_dir.mkdir(parents=True, exist_ok=True)
+    retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
     count = 0
     with zipfile.ZipFile(zip_path, "r") as zf:
         for member in zf.namelist():
@@ -117,6 +118,41 @@ def extract_tifs(zip_path: Path, out_dir: Path) -> int:
     return count
 
 
+def extraction_marker_path(out_dir: Path, name: str) -> Path:
+    """Path to the "already extracted" marker for zip `name` in `out_dir`.
+
+    Needed because `download_file`'s own already-downloaded check compares
+    against the local .zip, which no longer exists once
+    delete_zip_after_extract has removed it - without a separate marker,
+    every re-run would re-download a continent's multi-GB zip purely to
+    re-extract .tif files that are already all there (extract_tifs already
+    skips per-file, but that doesn't avoid the download itself).
+    """
+    return out_dir / f"{name}.extracted"
+
+
+def _try_delete(path: Path, attempts: int = 5, delay_s: float = 2.0) -> bool:
+    """Best-effort delete, retrying briefly on PermissionError.
+
+    Windows can transiently hold a lock on a just-closed file (e.g. Defender/
+    endpoint AV real-time-scanning a freshly downloaded/extracted zip) for a
+    second or two after the `zipfile.ZipFile` context manager has released
+    it. Returns False (rather than raising) once attempts are exhausted, so
+    a lock that outlasts the retries costs disk space, not the whole
+    preparation run - extraction has already succeeded and the `.extracted`
+    marker is already written by the time this is called.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            path.unlink()
+            return True
+        except PermissionError:
+            if attempt == attempts:
+                return False
+            time.sleep(delay_s)
+    return False
+
+
 def process_zip(
     name: str, url: str, zip_download_dir: Path, out_dir: Path, delete_zip_after_extract: bool,
 ) -> None:
@@ -124,17 +160,27 @@ def process_zip(
         print(f"Skipping {name} (no URL provided)")
         return
 
-    zip_path = zip_download_dir / f"{name}.zip"
     print(f"\n=== {name} ===")
+    marker = extraction_marker_path(out_dir, name)
+    if marker.exists():
+        print(f"  Already extracted ({marker.name} found) - skipping download "
+              f"(delete {marker} to re-download/re-extract)")
+        return
+
+    zip_path = zip_download_dir / f"{name}.zip"
     download_file(url, zip_path)
 
     print(f"  Extracting .tif files to {out_dir} ...")
     n = extract_tifs(zip_path, out_dir)
     print(f"  Extracted {n} file(s).")
+    marker.write_text(f"{n} file(s) extracted to {out_dir}")
 
     if delete_zip_after_extract:
-        zip_path.unlink()
-        print(f"  Deleted {zip_path.name} to save space.")
+        if _try_delete(zip_path):
+            print(f"  Deleted {zip_path.name} to save space.")
+        else:
+            print(f"  WARNING: {zip_path} is still locked by another process (e.g. antivirus) "
+                  "- left on disk, safe to delete manually later.")
 
 
 def download_and_patch_vrt(url: str, dest_path: Path, tile_dir: Path, zip_download_dir: Path) -> None:
@@ -188,7 +234,7 @@ def download_and_patch_vrt(url: str, dest_path: Path, tile_dir: Path, zip_downlo
         if not local_path.exists():
             n_missing += 1
 
-    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    retry_transient_io(dest_path.parent.mkdir, parents=True, exist_ok=True)
     tree.write(dest_path, encoding="utf-8", xml_declaration=True)
     print(f"  Patched {n_total} tile reference(s) to absolute paths under {tile_dir}")
     if n_missing:
@@ -227,7 +273,7 @@ def build_mask_vrt(tile_dir: Path, dest_path: Path) -> None:
 
     print("\n=== DeltaDTM mask VRT mosaic ===")
     print(f"  Building VRT from {len(tif_paths)} mask tile(s)...")
-    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    retry_transient_io(dest_path.parent.mkdir, parents=True, exist_ok=True)
     vrt_options = gdal.BuildVRTOptions(VRTNodata=255, resampleAlg="nearest")
     ds = gdal.BuildVRT(str(dest_path), tif_paths, options=vrt_options)
     if ds is None:
@@ -244,7 +290,9 @@ def run(config: dict) -> None:
     # in data_catalog_gfm.yml — the same directories merge_tiles.py,
     # select_tiles.py and tile_mask_creation.py already read individual tile
     # files from, so nothing downstream needs to know this script ran.
-    catalog = get_data_catalog(_REPO_ROOT / config["paths"]["hydromt_data_catalog"])
+    catalog = get_data_catalog(
+        _REPO_ROOT / config["paths"]["hydromt_data_catalog"], root=config["paths"]["root"]
+    )
     dem_vrt_path = Path(catalog.get_source("deltadtm").path)
     dem_out_dir = dem_vrt_path.parent
     mask_vrt_path = Path(catalog.get_source("deltadtm_mask").path)
@@ -253,9 +301,9 @@ def run(config: dict) -> None:
     zip_download_dir = Path(sync_cfg["zip_download_dir"])
     delete_zips = bool(sync_cfg.get("delete_zips_after_extract", False))
 
-    dem_out_dir.mkdir(parents=True, exist_ok=True)
-    mask_out_dir.mkdir(parents=True, exist_ok=True)
-    zip_download_dir.mkdir(parents=True, exist_ok=True)
+    retry_transient_io(dem_out_dir.mkdir, parents=True, exist_ok=True)
+    retry_transient_io(mask_out_dir.mkdir, parents=True, exist_ok=True)
+    retry_transient_io(zip_download_dir.mkdir, parents=True, exist_ok=True)
 
     print(f"DEM tiles will be extracted to:  {dem_out_dir}")
     print(f"Mask tiles will be extracted to: {mask_out_dir}")

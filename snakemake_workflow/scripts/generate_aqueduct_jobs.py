@@ -27,7 +27,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from config_utils import load_config  # noqa: E402
+from config_utils import load_config, retry_transient_io  # noqa: E402
 from rasters import save_nodata_raster  # noqa: E402
 
 model_outputs = snakemake.params.model_outputs  # noqa: F821
@@ -50,10 +50,10 @@ for tile_id in tile_ids:
         for slr in waterlevel_names:
             scenario_name = f"{rp}_{slr}"
             boundaries_path = os.path.join(tile_dir, "inputs", f"boundaries_{scenario_name}.gpkg")
-            boundaries = gpd.read_file(boundaries_path)
+            boundaries = retry_transient_io(gpd.read_file, boundaries_path)
             if boundaries.empty:
                 output_path = os.path.join(tile_dir, "results", f"waterdepth_{scenario_name}.tif")
-                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                retry_transient_io(os.makedirs, os.path.dirname(output_path), exist_ok=True)
                 save_nodata_raster(dem_path, output_path, raster_config)
                 n_excluded += 1
             else:
@@ -68,8 +68,8 @@ linux_jobs_dir = linux_config["hpc"]["jobs_dir"]
 linux_resolved_config = f"{linux_jobs_dir}/resolved_config.yml"
 
 local_jobs_dir = Path(hpc_cfg["jobs_dir"])
-local_jobs_dir.mkdir(parents=True, exist_ok=True)
-(local_jobs_dir / "logs").mkdir(parents=True, exist_ok=True)
+retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
+retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
 
 with open(snakemake.output.resolved_config, "w", encoding="utf-8") as f:  # noqa: F821
     yaml.safe_dump(linux_config, f)

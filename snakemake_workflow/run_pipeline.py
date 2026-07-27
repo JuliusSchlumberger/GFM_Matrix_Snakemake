@@ -83,6 +83,24 @@ def main() -> None:
                         help="--resources mem_mb budget passed to snakemake (default: 8000); "
                              "leave headroom below total system RAM for the OS and other processes")
     parser.add_argument("--target", default="simulate")
+    parser.add_argument("--batch", default=None,
+                        help="forwarded as --batch <target>=<this value> to every snakemake "
+                             "invocation below, e.g. --batch 3/20 (see snakemake --help for the "
+                             "underlying <i>/<n> format) - splits the DAG into a smaller slice per "
+                             "invocation the same way as the standalone preprocess batch runner, "
+                             "for the same reason (faster DAG builds on P:\\). Split-child tile_ids "
+                             "(parent_id*10+8/9) are always numerically larger than any original "
+                             "tile_id, so they sort to the end of the (tile_id-ordered) job list and "
+                             "land in the last batch or close to it, regardless of which batch their "
+                             "parent was in - a single forward sweep through batches 1..N still "
+                             "converges, it just means the LAST batch(es) may pick up extra work "
+                             "created by earlier ones.")
+    parser.add_argument("--latency-wait", type=int, default=60,
+                        help="forwarded to snakemake's own --latency-wait (default: 60s, vs "
+                             "Snakemake's own default of 5s). On P:\\ a job can finish writing its "
+                             "output and that file still not be visible to Snakemake's process "
+                             "within 5s, raising a MissingOutputException for an output that IS "
+                             "there and correct - not a real failure, just needs more patience.")
     args = parser.parse_args()
 
     config_path = Path(args.config).resolve()
@@ -101,7 +119,20 @@ def main() -> None:
             "snakemake", args.target,
             "--cores", str(args.cores),
             "--resources", f"mem_mb={args.mem_mb}",
-            "--configfile", str(config_path),
+            # Deliberately NOT --configfile: the Snakefile already loads
+            # config.yml, then config_local.yml if present, via its own
+            # internal `configfile:` directives (in that order, so
+            # config_local.yml's overrides - e.g. paths.root - correctly win).
+            # Passing --configfile config.yml here too does NOT just
+            # confirm/no-op that - Snakemake treats a CLI-supplied configfile
+            # as additional config layered on AFTER the Snakefile's own
+            # directives, so it re-applies config.yml's base values (e.g.
+            # paths.root: D:/GFM) on top of config_local.yml's override,
+            # silently reverting it for the whole run. Confirmed directly:
+            # the same DAG build fails with a D:/GFM DriverError when
+            # --configfile is passed and succeeds without it. args.config is
+            # still used above for this script's OWN reading of tile_split/
+            # model_outputs settings - it just isn't forwarded to snakemake.
             # Restrict rerun-triggering to file-timestamp staleness only
             # (Snakemake's classic Make-like behaviour), NOT rule code/params/
             # input-signature changes too (Snakemake's default since 7.8).
@@ -114,7 +145,10 @@ def main() -> None:
             # rule-logic change now needs its outputs manually deleted/
             # touched to force a rerun - it's no longer auto-detected.
             "--rerun-triggers", "mtime",
+            "--latency-wait", str(args.latency_wait),
         ]
+        if args.batch:
+            cmd += ["--batch", f"{args.target}={args.batch}"]
         print(f"\n{'=' * 60}")
         print(f"  Running Snakemake (attempt {attempt}/{max_retries})")
         print(f"  {' '.join(cmd)}")

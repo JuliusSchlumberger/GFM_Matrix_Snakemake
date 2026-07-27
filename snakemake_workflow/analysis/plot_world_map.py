@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from config_utils import load_config  # noqa: E402
+from config_utils import load_config, retry_transient_io  # noqa: E402
 from visualization import (  # noqa: E402
     build_geo109_to_iso_lookup,
     plot_world_map,
@@ -50,7 +50,7 @@ def main() -> None:
     out_dir = Path(args.outdir or str(
         Path(viz.get("output_dir", f"{cfg['paths']['root']}/figures")) / "world_maps"
     ))
-    out_dir.mkdir(parents=True, exist_ok=True)
+    retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
     dpi = int(viz.get("dpi", 200))
     cmap = viz.get("cmap_ember", "YlOrRd")

@@ -8,6 +8,7 @@ import geopandas as gpd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from boundaries import load_waterlevel_stations, save_boundary_points, select_stations_for_tile  # noqa: E402
+from config_utils import retry_transient_io  # noqa: E402
 
 bc_cfg = snakemake.params.bc_cfg  # noqa: F821
 return_period = snakemake.wildcards.return_period  # noqa: F821
@@ -21,7 +22,7 @@ variable = bc_cfg["nc_variable_template"].format(
 )
 nc_path = Path(bc_cfg["waterlevel_nc_dir"]) / nc_filename
 
-tile = gpd.read_file(snakemake.input.tile_geometry)  # noqa: F821
+tile = retry_transient_io(gpd.read_file, snakemake.input.tile_geometry)  # noqa: F821
 
 stations = load_waterlevel_stations(
     nc_path,

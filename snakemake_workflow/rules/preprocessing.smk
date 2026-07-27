@@ -44,6 +44,7 @@ rule compute_model_bbox:
         model_bbox=os.path.join(config["simulation"]["model_outputs"], "{tile_id}", "inputs", "model_bbox.json"),
     params:
         data_catalog=config["paths"]["hydromt_data_catalog"],
+        data_catalog_root=config["paths"]["root"],
         buffer_arcsec=config["simulation"]["model_bbox_buffer_arcsec"],
     script:
         "../scripts/compute_model_bbox.py"
@@ -67,6 +68,7 @@ rule extract_dem:
         dem=os.path.join(config["simulation"]["model_outputs"], "{tile_id}", "inputs", "dem.tif"),
     params:
         data_catalog=config["paths"]["hydromt_data_catalog"],
+        data_catalog_root=config["paths"]["root"],
         raster_config=config["raster_format"],
         vertical_datum_correction_enabled=_vertical_datum_correction_enabled,
         dem_gap_fill_cfg=config["simulation"]["dem_gap_fill"],
@@ -82,6 +84,7 @@ rule extract_dem_mask:
         mask=os.path.join(config["simulation"]["model_outputs"], "{tile_id}", "inputs", "mask.tif"),
     params:
         data_catalog=config["paths"]["hydromt_data_catalog"],
+        data_catalog_root=config["paths"]["root"],
         raster_config=config["raster_format"],
     script:
         "../scripts/extract_dem_mask.py"
@@ -95,6 +98,7 @@ rule compute_friction:
         friction=os.path.join(config["simulation"]["model_outputs"], "{tile_id}", "inputs", "friction.tif"),
     params:
         data_catalog=config["paths"]["hydromt_data_catalog"],
+        data_catalog_root=config["paths"]["root"],
         default_friction=config["simulation"]["flooding"]["default_friction"],
         raster_config=config["raster_format"],
     script:

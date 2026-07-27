@@ -61,7 +61,7 @@ import numpy as np
 import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from config_utils import get_data_catalog, merged_slr_scenarios  # noqa: E402
+from config_utils import get_data_catalog, merged_slr_scenarios, retry_transient_io  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ def _load_slr_dataset(
     Locations with index < 1e9 are tide-gauge locations; >= 1e9 are gridded.
     """
     path = slr_dir / scenario / f"total_{scenario}_{confidence}_confidence_values.nc"
-    ds = xr.open_dataset(path)
+    ds = retry_transient_io(xr.open_dataset, path)
     gauge = ds.sel(locations=ds.locations[ds.locations < 1e9])
     grid  = ds.sel(locations=ds.locations[ds.locations >= 1e9])
     return gauge, grid
@@ -110,16 +110,16 @@ def preprocess_coastrp(raw_path: Path, out_path: Path, min_lat: float) -> xr.Dat
     """
     if out_path.exists():
         logger.info("COAST-RP_preprocessed.nc already exists — loading.")
-        return xr.open_dataset(out_path)
+        return retry_transient_io(xr.open_dataset, out_path)
 
     logger.info("Step 1: Preprocessing COAST-RP (removing Antarctic stations).")
-    ds = xr.open_dataset(raw_path)
+    ds = retry_transient_io(xr.open_dataset, raw_path)
     n_raw = int(ds.dims["stations"])
     ds = ds.where(ds.station_y_coordinate > min_lat, drop=True)
     logger.info("  %d → %d stations (dropped %d Antarctic points) → %s",
                 n_raw, int(ds.dims["stations"]), n_raw - int(ds.dims["stations"]), out_path)
-    ds.to_netcdf(out_path)
-    return xr.open_dataset(out_path)
+    retry_transient_io(ds.to_netcdf, out_path)
+    return retry_transient_io(xr.open_dataset, out_path)
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +133,7 @@ def _load_mdt(mdt_path: Path, mdt_variable: str = "mdt") -> xr.DataArray:
     and remaps longitudes from 0..360 to -180..180 if needed. Ported from
     GCFM_UU/workflow/src/surge.load_mdt.
     """
-    with xr.open_dataset(mdt_path) as ds:
+    with retry_transient_io(xr.open_dataset, mdt_path) as ds:
         da = ds[mdt_variable].load()
 
     lat_dim = next(d for d in da.dims if "lat" in d.lower())
@@ -197,7 +197,7 @@ def compute_mdt_correction(
     """
     if out_path.exists():
         logger.info("MDT-mapped station file already exists — loading.")
-        return xr.open_dataset(out_path)
+        return retry_transient_io(xr.open_dataset, out_path)
 
     n_stations = int(ds_coastrp.dims["stations"])
     logger.info("Step 2: Looking up MDT for %d stations…", n_stations)
@@ -232,7 +232,7 @@ def compute_mdt_correction(
         },
         attrs={"title": "MDT values at COAST-RP station locations (local MSL -> GOCO06s)"},
     )
-    ds_mdt.to_netcdf(out_path)
+    retry_transient_io(ds_mdt.to_netcdf, out_path)
     logger.info("  MDT-mapped station file saved → %s", out_path)
     return ds_mdt
 
@@ -265,7 +265,7 @@ def compute_slr_fingerprints(
     """
     #NOTE: check if the ration between station SLR and global mean changes significantly if using different timehorizons or SSP secnarios?
     if fingerprints_path.exists():
-        cached = xr.open_dataset(fingerprints_path)
+        cached = retry_transient_io(xr.open_dataset, fingerprints_path)
         required_keys = {f"SLR_{int(t * 1000)}mm" for t in target_slr_m}
         if required_keys.issubset(set(cached.data_vars)):
             logger.info("SLR fingerprints already exist — loading.")
@@ -341,7 +341,7 @@ def compute_slr_fingerprints(
             "station_y_coordinate": ds_coastrp.station_y_coordinate,
         },
     )
-    ds_base.to_netcdf(slr_base_path)
+    retry_transient_io(ds_base.to_netcdf, slr_base_path)
     logger.info("  Base SLR per station saved → %s", slr_base_path)
 
     # Scale to each target global-mean SLR
@@ -363,7 +363,7 @@ def compute_slr_fingerprints(
         },
         attrs=ds_base.attrs,
     )
-    ds_fp.to_netcdf(fingerprints_path)
+    retry_transient_io(ds_fp.to_netcdf, fingerprints_path)
     logger.info("  SLR fingerprints saved → %s", fingerprints_path)
     return ds_fp
 
@@ -399,7 +399,7 @@ def combine_scenarios(
     all output files are guaranteed to be NaN-free (MDT NaNs, if any, are
     replaced with 0 before use for the same reason).
     """
-    out_dir.mkdir(parents=True, exist_ok=True)
+    retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
     if mdt_arr is not None:
         mdt_arr = np.nan_to_num(mdt_arr.astype(np.float64), nan=0.0)
@@ -436,7 +436,7 @@ def combine_scenarios(
                 {variable: (["stations"], total_wl)},
                 coords=coord_template,
             )
-            ds_scen.to_netcdf(out_path)
+            retry_transient_io(ds_scen.to_netcdf, out_path)
             n_written += 1
             logger.info("  Written %s", filename)
 
@@ -462,7 +462,9 @@ def run(config: dict, force: bool = False) -> None:
     return_periods  = wl_cfg["return_periods"]
     coastrp_min_lat = wl_cfg["coastrp_min_lat"]
 
-    catalog = get_data_catalog(_REPO_ROOT / config["paths"]["hydromt_data_catalog"])
+    catalog = get_data_catalog(
+        _REPO_ROOT / config["paths"]["hydromt_data_catalog"], root=config["paths"]["root"]
+    )
     coastrp_raw  = Path(catalog.get_source("coast_rp").path)
 
     slr_scenario = wl_cfg.get("slr_scenario", "ssp245")
@@ -471,11 +473,11 @@ def run(config: dict, force: bool = False) -> None:
     # confidence sub-directory so _load_slr_dataset can append {scenario}/...
     slr_dir      = Path(catalog.get_source("ipcc_ar6_slr_projections").path) / f"{confidence}_confidence"
 
-    proc_dir     = Path(wl_cfg["processed_inputs_dir"])
+    proc_dir     = Path(config["paths"]["processed_inputs_dir"])
     out_dir      = Path(wl_cfg["waterlevel_nc_dir"])
 
-    proc_dir.mkdir(parents=True, exist_ok=True)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    retry_transient_io(proc_dir.mkdir, parents=True, exist_ok=True)
+    retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
     def _maybe_delete(path: Path) -> None:
         if force and path.exists():

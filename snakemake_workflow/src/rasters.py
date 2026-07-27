@@ -18,13 +18,15 @@ from rasterio.fill import fillnodata
 from scipy import ndimage
 from shapely.geometry import box as shapely_box
 
+from config_utils import retry_transient_io
+
 from merge import AQUEDUCT_NODATA
 
 
 def load_raster(path: str | Path) -> xr.DataArray:
     """Load a single-band GeoTIFF as an xarray DataArray with hydromt raster accessor."""
     import rioxarray  # noqa: F401 - registers the rasterio xarray backend and spatial metadata
-    return xr.open_dataarray(path, engine="rasterio").squeeze("band", drop=True)
+    return retry_transient_io(xr.open_dataarray, path, engine="rasterio").squeeze("band", drop=True)
 
 
 def get_tile_bbox(tile: gpd.GeoDataFrame) -> list[float]:
@@ -82,11 +84,21 @@ def compute_model_bbox(
     maxx = float(x_coords[cols.max()]) + dx / 2 + buf
     maxy = float(y_coords[rows.min()]) + dy / 2 + buf   # rows.min() = northernmost
 
+    # Final clamp to the valid global coordinate range, independent of
+    # tile_bbox: a tile whose own bbox already overshoots -180/180 (e.g. an
+    # antimeridian-adjacent tile, however slightly, from upstream trim/
+    # buffer arithmetic in tiles.py) would otherwise pass that overshoot
+    # straight through - `max(minx, tile_bbox[0])` doesn't help when
+    # tile_bbox[0] is ITSELF already invalid. A bbox even a fraction of a
+    # degree past +/-180 can make downstream hydromt/rioxarray reprojection
+    # windows wrap around almost the entire globe instead of clipping
+    # cleanly, blowing up into a hundreds-of-GB allocation for what should
+    # be a single small tile (see extract_dem's da_mask.raster.reproject_like).
     return [
-        max(minx, tile_bbox[0]),
-        max(miny, tile_bbox[1]),
-        min(maxx, tile_bbox[2]),
-        min(maxy, tile_bbox[3]),
+        max(max(minx, tile_bbox[0]), -180.0),
+        max(max(miny, tile_bbox[1]), -90.0),
+        min(min(maxx, tile_bbox[2]), 180.0),
+        min(min(maxy, tile_bbox[3]), 90.0),
     ]
 
 
@@ -294,6 +306,21 @@ def compute_friction(
     _MISSING = np.float32(-9999.0)  # internal sentinel for unclassified cells
 
     da_lulc = data_catalog.get_rasterdataset(lulc_source, bbox=bbox)
+
+    # Copernicus land-use coverage doesn't reach the poles (cuts off around
+    # 80N) - a tile whose bbox extends beyond that has NO real land-use data
+    # at all, and the clipped da_lulc ends up with fewer than 2 cells in one
+    # spatial dim. reproject_like needs >=2 cells in each dim to compute a
+    # valid affine transform (HydroMT raises "Invalid raster: less than 2
+    # cells in y_dim ..." otherwise, crashing the whole preprocessing job) -
+    # treat this the same as "no valid land use classification anywhere in
+    # this tile" (the same fallback every individual unclassified cell
+    # already gets below), using `dem` itself as the coordinate/CRS
+    # template since it's already on the exact target grid.
+    if da_lulc.raster.height < 2 or da_lulc.raster.width < 2:
+        friction = np.full((dem.raster.height, dem.raster.width), default_friction, dtype=np.float32)
+        return dem.copy(data=friction)
+
     da_lulc_repr = da_lulc.raster.reproject_like(dem, method="mode")
     da_lulc_repr = da_lulc_repr.where(da_lulc_repr != da_lulc_repr.attrs["_FillValue"], _MISSING)
 
@@ -337,7 +364,8 @@ def save_raster(
             with keys `driver`, `compression`, `predictor` and `nodata`.
         dtype: Output data type.
     """
-    with rasterio.open(
+    with retry_transient_io(
+        rasterio.open,
         output_path,
         "w",
         driver=raster_config["driver"],
@@ -374,7 +402,7 @@ def save_nodata_raster(reference_path: str | Path, output_path: str | Path, rast
         raster_config: The workflow's `raster_format` configuration section,
             with keys `driver`, `compression` and `predictor`.
     """
-    with rasterio.open(reference_path) as ref:
+    with retry_transient_io(rasterio.open, reference_path) as ref:
         profile = ref.profile
 
     profile.update(
@@ -386,5 +414,5 @@ def save_nodata_raster(reference_path: str | Path, output_path: str | Path, rast
         nodata=AQUEDUCT_NODATA,
     )
     data = np.full((profile["height"], profile["width"]), AQUEDUCT_NODATA, dtype="float32")
-    with rasterio.open(output_path, "w", **profile) as dst:
+    with retry_transient_io(rasterio.open, output_path, "w", **profile) as dst:
         dst.write(data, indexes=1)

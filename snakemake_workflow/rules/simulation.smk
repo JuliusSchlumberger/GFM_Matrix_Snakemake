@@ -39,6 +39,13 @@ rule run_aqueduct:
     as above) instead of failing. Once marked, all other
     `(return_period, waterlevel_name)` combinations for this `tile_id` skip
     Aqueduct entirely and do the same, instead of also running out of memory.
+
+    Each job also checks whether its own tile_id's output count just reached
+    `n_scenarios_per_tile` (i.e. this was the last scenario for that tile);
+    if so it scans model_outputs/ once and prints a running tally of tiles
+    simulated/OOM'd/no-stations/still-running across the whole tile grid
+    (see aqueduct_runner.print_simulation_progress) - a milestone per tile,
+    not per job, to keep the O(n_tiles) scan infrequent.
     """
     input:
         toml=rules.write_aqueduct_config.output.toml,
@@ -55,6 +62,8 @@ rule run_aqueduct:
         model_outputs=config["simulation"]["model_outputs"],
         aqueduct_executable=config["simulation"]["aqueduct_executable"],
         raster_config=config["raster_format"],
+        tile_grid_path=config["tile_grid"]["path"],
+        n_scenarios_per_tile=len(RETURN_PERIODS) * len(WATERLEVEL_NAMES),
     resources:
         mem_mb=lambda wildcards, input: estimate_aqueduct_mem_mb(
             input.dem, config["simulation"]["aqueduct_mem_estimate"]
