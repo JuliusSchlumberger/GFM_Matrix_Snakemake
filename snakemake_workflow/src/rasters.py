@@ -416,3 +416,49 @@ def save_nodata_raster(reference_path: str | Path, output_path: str | Path, rast
     data = np.full((profile["height"], profile["width"]), AQUEDUCT_NODATA, dtype="float32")
     with retry_transient_io(rasterio.open, output_path, "w", **profile) as dst:
         dst.write(data, indexes=1)
+
+
+def save_waterdepth_raster(
+    reference_path: str | Path, waterdepth: np.ndarray, output_path: str | Path,
+) -> None:
+    """Write a genuinely-computed `waterdepth` raster from `flood_model.flood_depth_dense`.
+
+    Matches real `aqueduct.exe` output's OWN on-disk convention exactly
+    (confirmed by inspecting a real production file: `driver=GTiff,
+    dtype=float32, nodata=0.0, compress=zstd, predictor=None, tiled=True,
+    blockxsize=blockysize=512`) - deliberately NOT the pipeline's generic
+    `raster_format` config (`predictor=3, nodata=-9999`), which Julia's own
+    writer never receives and does not use. `merge.merge_tile_rasters_chunk`
+    doesn't actually read this file's `nodata` tag (it compares pixel values
+    directly against `merge.AQUEDUCT_NODATA`), but matching Julia's real
+    convention keeps every waterdepth file - regardless of which engine
+    produced it - self-consistent for any other tool (QGIS, gdalinfo, ...)
+    that does read the tag.
+
+    Args:
+        reference_path: Path to a raster (e.g. the tile's DEM) whose grid
+            (transform, CRS, width, height) the output should match.
+        waterdepth: The computed water depth array, same shape as the
+            reference raster, `0.0` where not flooded.
+        output_path: Destination file path.
+    """
+    with retry_transient_io(rasterio.open, reference_path) as ref:
+        transform, crs = ref.transform, ref.crs
+        height, width = ref.height, ref.width
+
+    profile = {
+        "driver": "GTiff",
+        "dtype": "float32",
+        "count": 1,
+        "nodata": 0.0,
+        "compress": "zstd",
+        "tiled": True,
+        "blockxsize": 512,
+        "blockysize": 512,
+        "crs": crs,
+        "transform": transform,
+        "width": width,
+        "height": height,
+    }
+    with retry_transient_io(rasterio.open, output_path, "w", **profile) as dst:
+        dst.write(waterdepth.astype("float32"), indexes=1)

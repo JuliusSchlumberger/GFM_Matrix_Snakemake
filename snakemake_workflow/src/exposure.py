@@ -11,11 +11,9 @@ from pathlib import Path
 import hydromt
 import numpy as np
 import rasterio
-import xarray as xr
 
 from config_utils import retry_transient_io
 from protection import GEOGUNIT_INVALID, load_geogunit_ids
-from rasters import load_raster
 
 
 def prepare_exposure_grid_chunk(
@@ -36,8 +34,13 @@ def prepare_exposure_grid_chunk(
     Writes empty (zero-byte) placeholder files when the chunk has no
     population coverage (outside the raster's extent).
     """
-    ref = load_raster(reference_path)
-    bbox = list(ref.raster.bounds)
+    # Only the bounds are needed here - a plain rasterio open avoids the
+    # xarray/rioxarray backend-plugin-discovery overhead `load_raster`
+    # carries (profiling on real data showed ~4s of pure import/reflection
+    # cost per process, unrelated to this raster's size), which otherwise
+    # gets paid once per chunk for no benefit here.
+    with retry_transient_io(rasterio.open, reference_path) as ref:
+        bbox = list(ref.bounds)
 
     try:
         pop_da = data_catalog.get_rasterdataset(population_source, bbox=bbox).squeeze(drop=True)

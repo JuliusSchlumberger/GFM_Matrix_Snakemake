@@ -1,0 +1,308 @@
+<!doctype html>
+<title>Julia vs Python: full-pipeline wall-clock time vs tile size</title>
+<meta charset="utf-8">
+<style>
+  .viz-root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --page:           #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --series-julia:   #2a78d6;
+    --series-python:  #eb6834;
+    --warn-bg:        #fdf3ea;
+    --warn-border:    #eda100;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --page:           #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --gridline:       #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255,255,255,0.10);
+      --series-julia:   #3987e5;
+      --series-python:  #d95926;
+      --warn-bg:        #2a2214;
+      --warn-border:    #c98500;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --page:           #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --gridline:       #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255,255,255,0.10);
+    --series-julia:   #3987e5;
+    --series-python:  #d95926;
+    --warn-bg:        #2a2214;
+    --warn-border:    #c98500;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--text-primary);
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 32px 20px 48px; }
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px 32px 20px;
+  }
+  h1 { font-size: 20px; font-weight: 650; margin: 0 0 4px; }
+  .subtitle { font-size: 13.5px; color: var(--text-secondary); margin: 0 0 16px; max-width: 780px; line-height: 1.5; }
+  .warn {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.55;
+    margin-bottom: 20px;
+  }
+  .warn strong { color: var(--text-primary); }
+  .legend { display: flex; gap: 20px; margin-bottom: 4px; font-size: 13px; color: var(--text-secondary); flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 7px; }
+  .swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .swatch.ring { box-shadow: 0 0 0 2px var(--text-muted); }
+  svg { overflow: visible; }
+  .axis-label { fill: var(--text-muted); font-size: 11px; }
+  .axis-title { fill: var(--text-secondary); font-size: 12.5px; }
+  .grid line { stroke: var(--gridline); stroke-width: 1; }
+  .baseline { stroke: var(--baseline); stroke-width: 1; }
+  .pt { cursor: pointer; }
+  .pt:hover { stroke: var(--surface-1); stroke-width: 2px; }
+  .tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 11px;
+    font-size: 12.5px;
+    color: var(--text-primary);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.16);
+    opacity: 0;
+    transition: opacity 0.08s ease;
+    white-space: nowrap;
+    z-index: 10;
+  }
+  .tooltip .row { display: flex; justify-content: space-between; gap: 14px; }
+  .tooltip .k { color: var(--text-muted); }
+  .footnote { font-size: 12px; color: var(--text-muted); margin-top: 14px; line-height: 1.7; }
+  table.overlap { border-collapse: collapse; font-size: 12.5px; margin-top: 14px; width: 100%; }
+  table.overlap th, table.overlap td { text-align: right; padding: 5px 10px; border-bottom: 1px solid var(--gridline); font-variant-numeric: tabular-nums; }
+  table.overlap th:first-child, table.overlap td:first-child { text-align: left; }
+  table.overlap th { color: var(--text-muted); font-weight: 600; }
+</style>
+
+<div class="wrap">
+  <div class="viz-root card">
+    <h1>Aqueduct (Julia) vs. Python port: FULL-PIPELINE wall-clock time by tile size</h1>
+    <p class="subtitle">
+      Corrected from an earlier version of this chart, which compared Python's
+      sweep-only time against Julia's whole-pipeline time. Both series here
+      cover the same pipeline scope: read inputs → DEM/mask prep → coastline
+      mask → boundary KNN+IDW → eikonal sweep → connected-component pruning
+      (excluding final raster write on both sides). Julia: 405 runs
+      across 9 tiles, all scenarios (<code>Europe_West.log</code>). Python:
+      20 runs, RP100/SLR0 only (this machine, dense
+      solver, exactly 3 sweeps).
+    </p>
+    <div class="warn">
+      <strong>Read with caution:</strong> Julia and Python were measured on
+      <strong>different physical machines</strong>, so absolute time
+      differences — especially in I/O-bound stages — may partly reflect
+      hardware, not language or algorithm. On the 5 tiles
+      present in both datasets (same tile, same scenario), the result is
+      genuinely mixed: Python is faster on 4 of 5, but by very different
+      margins (1.6×–4.3×), and slower on the 5th (1.16×) — see the table
+      below the chart. A separate, single-machine-pair stage breakdown on
+      tile 2660 found the opposite overall direction (Julia ~1.3× faster).
+      Treat any single "Nx speedup" headline from this chart as unreliable;
+      the per-stage pattern (Julia faster at the sweep itself, Python faster
+      at connected-component pruning) is the more defensible finding.
+    </div>
+    <div class="legend">
+      <span class="legend-item"><span class="swatch" style="background:var(--series-julia)"></span>Julia (aqueduct.exe), all scenarios</span>
+      <span class="legend-item"><span class="swatch" style="background:var(--series-python)"></span>Python (full pipeline), RP100_SLR_0</span>
+      <span class="legend-item"><span class="swatch ring" style="background:var(--text-muted)"></span>tile present in both datasets</span>
+    </div>
+    <svg id="chart" width="900" height="520"></svg>
+    <div class="footnote" id="footnote"></div>
+    <table class="overlap" id="overlapTable"></table>
+  </div>
+</div>
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+const DATA = {"julia": [{"tile": 2653, "n_cells": 71014329.0, "t": 85.464646, "scenario": "RP1000_SLR_1000"}, {"tile": 2653, "n_cells": 71014329.0, "t": 87.049661, "scenario": "RP1000_SLR_1500"}, {"tile": 2653, "n_cells": 71014329.0, "t": 81.375094, "scenario": "RP1000_SLR_2000"}, {"tile": 2653, "n_cells": 71014329.0, "t": 82.629097, "scenario": "RP250_SLR_1500"}, {"tile": 2653, "n_cells": 71014329.0, "t": 82.59008, "scenario": "RP250_SLR_2000"}, {"tile": 2653, "n_cells": 71014329.0, "t": 85.565221, "scenario": "RP500_SLR_1000"}, {"tile": 2653, "n_cells": 71014329.0, "t": 80.734989, "scenario": "RP500_SLR_1500"}, {"tile": 2653, "n_cells": 71014329.0, "t": 84.395316, "scenario": "RP500_SLR_2000"}, {"tile": 2653, "n_cells": 71014329.0, "t": 80.849459, "scenario": "RP100_SLR_1000"}, {"tile": 2653, "n_cells": 71014329.0, "t": 84.313885, "scenario": "RP100_SLR_1500"}, {"tile": 2653, "n_cells": 71014329.0, "t": 82.712759, "scenario": "RP100_SLR_2000"}, {"tile": 2653, "n_cells": 71014329.0, "t": 79.318376, "scenario": "RP250_SLR_1000"}, {"tile": 2653, "n_cells": 71014329.0, "t": 80.040571, "scenario": "RP1000_SLR_500"}, {"tile": 2653, "n_cells": 71014329.0, "t": 78.716855, "scenario": "RP10_SLR_1000"}, {"tile": 2653, "n_cells": 71014329.0, "t": 79.006064, "scenario": "RP10_SLR_1500"}, {"tile": 2653, "n_cells": 71014329.0, "t": 82.490726, "scenario": "RP10_SLR_2000"}, {"tile": 2653, "n_cells": 71014329.0, "t": 80.499188, "scenario": "RP25_SLR_1000"}, {"tile": 2653, "n_cells": 71014329.0, "t": 86.893744, "scenario": "RP25_SLR_1500"}, {"tile": 2653, "n_cells": 71014329.0, "t": 82.298343, "scenario": "RP25_SLR_2000"}, {"tile": 2653, "n_cells": 71014329.0, "t": 80.781357, "scenario": "RP50_SLR_1000"}, {"tile": 2653, "n_cells": 71014329.0, "t": 79.272604, "scenario": "RP50_SLR_1500"}, {"tile": 2653, "n_cells": 71014329.0, "t": 80.645875, "scenario": "RP50_SLR_2000"}, {"tile": 2653, "n_cells": 71014329.0, "t": 79.232514, "scenario": "RP500_SLR_500"}, {"tile": 2653, "n_cells": 71014329.0, "t": 78.803629, "scenario": "RP100_SLR_500"}, {"tile": 2653, "n_cells": 71014329.0, "t": 77.764424, "scenario": "RP250_SLR_500"}, {"tile": 2653, "n_cells": 71014329.0, "t": 78.595157, "scenario": "RP2_SLR_1000"}, {"tile": 2653, "n_cells": 71014329.0, "t": 78.338272, "scenario": "RP2_SLR_1500"}, {"tile": 2653, "n_cells": 71014329.0, "t": 86.348463, "scenario": "RP2_SLR_2000"}, {"tile": 2653, "n_cells": 71014329.0, "t": 78.469029, "scenario": "RP5_SLR_1000"}, {"tile": 2653, "n_cells": 71014329.0, "t": 79.731488, "scenario": "RP5_SLR_1500"}, {"tile": 2653, "n_cells": 71014329.0, "t": 79.863957, "scenario": "RP5_SLR_2000"}, {"tile": 2653, "n_cells": 71014329.0, "t": 79.286684, "scenario": "RP10_SLR_500"}, {"tile": 2653, "n_cells": 71014329.0, "t": 76.940548, "scenario": "RP25_SLR_500"}, {"tile": 2653, "n_cells": 71014329.0, "t": 80.236441, "scenario": "RP50_SLR_500"}, {"tile": 2653, "n_cells": 71014329.0, "t": 77.199709, "scenario": "RP1000_SLR_0"}, {"tile": 2653, "n_cells": 71014329.0, "t": 78.550646, "scenario": "RP2_SLR_500"}, {"tile": 2653, "n_cells": 71014329.0, "t": 78.561082, "scenario": "RP5_SLR_500"}, {"tile": 2653, "n_cells": 71014329.0, "t": 79.948976, "scenario": "RP500_SLR_0"}, {"tile": 2653, "n_cells": 71014329.0, "t": 79.137655, "scenario": "RP100_SLR_0"}, {"tile": 2653, "n_cells": 71014329.0, "t": 77.423996, "scenario": "RP250_SLR_0"}, {"tile": 2653, "n_cells": 71014329.0, "t": 78.895708, "scenario": "RP10_SLR_0"}, {"tile": 2653, "n_cells": 71014329.0, "t": 77.583003, "scenario": "RP25_SLR_0"}, {"tile": 2653, "n_cells": 71014329.0, "t": 78.188072, "scenario": "RP50_SLR_0"}, {"tile": 2653, "n_cells": 71014329.0, "t": 77.281041, "scenario": "RP2_SLR_0"}, {"tile": 2653, "n_cells": 71014329.0, "t": 77.288139, "scenario": "RP5_SLR_0"}, {"tile": 2650, "n_cells": 70559271.0, "t": 55.585638, "scenario": "RP1000_SLR_1000"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.002584, "scenario": "RP1000_SLR_1500"}, {"tile": 2650, "n_cells": 70559271.0, "t": 53.963387, "scenario": "RP1000_SLR_2000"}, {"tile": 2650, "n_cells": 70559271.0, "t": 53.812066, "scenario": "RP250_SLR_1500"}, {"tile": 2650, "n_cells": 70559271.0, "t": 53.974147, "scenario": "RP250_SLR_2000"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.151212, "scenario": "RP500_SLR_1000"}, {"tile": 2650, "n_cells": 70559271.0, "t": 53.896446, "scenario": "RP500_SLR_1500"}, {"tile": 2650, "n_cells": 70559271.0, "t": 53.971451, "scenario": "RP500_SLR_2000"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.055612, "scenario": "RP100_SLR_1000"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.475281, "scenario": "RP100_SLR_1500"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.237149, "scenario": "RP100_SLR_2000"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.063082, "scenario": "RP250_SLR_1000"}, {"tile": 2650, "n_cells": 70559271.0, "t": 53.719387, "scenario": "RP1000_SLR_500"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.313712, "scenario": "RP10_SLR_1000"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.20107, "scenario": "RP10_SLR_1500"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.766469, "scenario": "RP10_SLR_2000"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.233322, "scenario": "RP25_SLR_1000"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.201036, "scenario": "RP25_SLR_1500"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.276144, "scenario": "RP25_SLR_2000"}, {"tile": 2650, "n_cells": 70559271.0, "t": 53.97054, "scenario": "RP50_SLR_1000"}, {"tile": 2650, "n_cells": 70559271.0, "t": 53.94886, "scenario": "RP50_SLR_1500"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.048788, "scenario": "RP50_SLR_2000"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.125939, "scenario": "RP500_SLR_500"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.054673, "scenario": "RP100_SLR_500"}, {"tile": 2650, "n_cells": 70559271.0, "t": 53.920208, "scenario": "RP250_SLR_500"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.167206, "scenario": "RP2_SLR_1000"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.857749, "scenario": "RP2_SLR_1500"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.658243, "scenario": "RP2_SLR_2000"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.123907, "scenario": "RP5_SLR_1000"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.040939, "scenario": "RP5_SLR_1500"}, {"tile": 2650, "n_cells": 70559271.0, "t": 53.9681, "scenario": "RP5_SLR_2000"}, {"tile": 2650, "n_cells": 70559271.0, "t": 53.814545, "scenario": "RP10_SLR_500"}, {"tile": 2650, "n_cells": 70559271.0, "t": 53.803732, "scenario": "RP25_SLR_500"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.548171, "scenario": "RP50_SLR_500"}, {"tile": 2650, "n_cells": 70559271.0, "t": 53.352606, "scenario": "RP1000_SLR_0"}, {"tile": 2650, "n_cells": 70559271.0, "t": 53.272945, "scenario": "RP2_SLR_500"}, {"tile": 2650, "n_cells": 70559271.0, "t": 53.393674, "scenario": "RP5_SLR_500"}, {"tile": 2650, "n_cells": 70559271.0, "t": 52.996226, "scenario": "RP500_SLR_0"}, {"tile": 2650, "n_cells": 70559271.0, "t": 53.542651, "scenario": "RP100_SLR_0"}, {"tile": 2650, "n_cells": 70559271.0, "t": 53.66627, "scenario": "RP250_SLR_0"}, {"tile": 2650, "n_cells": 70559271.0, "t": 53.882984, "scenario": "RP10_SLR_0"}, {"tile": 2650, "n_cells": 70559271.0, "t": 53.834994, "scenario": "RP25_SLR_0"}, {"tile": 2650, "n_cells": 70559271.0, "t": 53.594717, "scenario": "RP50_SLR_0"}, {"tile": 2650, "n_cells": 70559271.0, "t": 53.857643, "scenario": "RP2_SLR_0"}, {"tile": 2650, "n_cells": 70559271.0, "t": 54.162581, "scenario": "RP5_SLR_0"}, {"tile": 2663, "n_cells": 13300160.0, "t": 33.244659, "scenario": "RP1000_SLR_1000"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.039193, "scenario": "RP1000_SLR_1500"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.094466, "scenario": "RP1000_SLR_2000"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.040982, "scenario": "RP100_SLR_1000"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.216523, "scenario": "RP100_SLR_1500"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.122811, "scenario": "RP100_SLR_2000"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.19615, "scenario": "RP250_SLR_1000"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.08239, "scenario": "RP250_SLR_1500"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.25011, "scenario": "RP250_SLR_2000"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.25267, "scenario": "RP500_SLR_1000"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.166038, "scenario": "RP500_SLR_1500"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.130711, "scenario": "RP500_SLR_2000"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.087309, "scenario": "RP1000_SLR_500"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.114845, "scenario": "RP10_SLR_1000"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.067717, "scenario": "RP10_SLR_1500"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.150555, "scenario": "RP10_SLR_2000"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.039199, "scenario": "RP25_SLR_1000"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.152363, "scenario": "RP25_SLR_1500"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.065844, "scenario": "RP25_SLR_2000"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.309114, "scenario": "RP50_SLR_1000"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.106494, "scenario": "RP50_SLR_1500"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.271073, "scenario": "RP50_SLR_2000"}, {"tile": 2663, "n_cells": 13300160.0, "t": 31.989557, "scenario": "RP100_SLR_500"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.178775, "scenario": "RP250_SLR_500"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.239183, "scenario": "RP500_SLR_500"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.057906, "scenario": "RP2_SLR_1000"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.208772, "scenario": "RP2_SLR_1500"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.147946, "scenario": "RP2_SLR_2000"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.217302, "scenario": "RP5_SLR_1000"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.153607, "scenario": "RP5_SLR_1500"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.061491, "scenario": "RP5_SLR_2000"}, {"tile": 2663, "n_cells": 13300160.0, "t": 31.989565, "scenario": "RP10_SLR_500"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.013093, "scenario": "RP25_SLR_500"}, {"tile": 2663, "n_cells": 13300160.0, "t": 31.997915, "scenario": "RP50_SLR_500"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.040661, "scenario": "RP1000_SLR_0"}, {"tile": 2663, "n_cells": 13300160.0, "t": 31.63503, "scenario": "RP2_SLR_500"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.019881, "scenario": "RP5_SLR_500"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.338844, "scenario": "RP100_SLR_0"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.273437, "scenario": "RP250_SLR_0"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.093622, "scenario": "RP500_SLR_0"}, {"tile": 2663, "n_cells": 13300160.0, "t": 31.892941, "scenario": "RP10_SLR_0"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.155763, "scenario": "RP25_SLR_0"}, {"tile": 2663, "n_cells": 13300160.0, "t": 32.12836, "scenario": "RP50_SLR_0"}, {"tile": 2663, "n_cells": 13300160.0, "t": 31.810111, "scenario": "RP5_SLR_0"}, {"tile": 2663, "n_cells": 13300160.0, "t": 31.756857, "scenario": "RP2_SLR_0"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.223397, "scenario": "RP1000_SLR_1000"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.059741, "scenario": "RP1000_SLR_1500"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.029241, "scenario": "RP1000_SLR_2000"}, {"tile": 2863, "n_cells": 29240810.0, "t": 55.880307, "scenario": "RP100_SLR_1000"}, {"tile": 2863, "n_cells": 29240810.0, "t": 55.736676, "scenario": "RP100_SLR_1500"}, {"tile": 2863, "n_cells": 29240810.0, "t": 55.808085, "scenario": "RP100_SLR_2000"}, {"tile": 2863, "n_cells": 29240810.0, "t": 57.539399, "scenario": "RP250_SLR_1000"}, {"tile": 2863, "n_cells": 29240810.0, "t": 55.952885, "scenario": "RP250_SLR_1500"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.005702, "scenario": "RP250_SLR_2000"}, {"tile": 2863, "n_cells": 29240810.0, "t": 55.891036, "scenario": "RP500_SLR_1000"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.091835, "scenario": "RP500_SLR_1500"}, {"tile": 2863, "n_cells": 29240810.0, "t": 55.94435, "scenario": "RP500_SLR_2000"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.149371, "scenario": "RP1000_SLR_500"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.453323, "scenario": "RP10_SLR_1000"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.799163, "scenario": "RP10_SLR_1500"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.063013, "scenario": "RP10_SLR_2000"}, {"tile": 2863, "n_cells": 29240810.0, "t": 55.808291, "scenario": "RP25_SLR_1000"}, {"tile": 2863, "n_cells": 29240810.0, "t": 55.898128, "scenario": "RP25_SLR_1500"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.123464, "scenario": "RP25_SLR_2000"}, {"tile": 2863, "n_cells": 29240810.0, "t": 55.811815, "scenario": "RP50_SLR_1000"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.45673, "scenario": "RP50_SLR_1500"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.260241, "scenario": "RP50_SLR_2000"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.073827, "scenario": "RP100_SLR_500"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.39727, "scenario": "RP250_SLR_500"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.163751, "scenario": "RP500_SLR_500"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.206539, "scenario": "RP2_SLR_1000"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.028372, "scenario": "RP2_SLR_1500"}, {"tile": 2863, "n_cells": 29240810.0, "t": 55.950995, "scenario": "RP2_SLR_2000"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.176429, "scenario": "RP5_SLR_1000"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.487466, "scenario": "RP5_SLR_1500"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.24044, "scenario": "RP5_SLR_2000"}, {"tile": 2863, "n_cells": 29240810.0, "t": 55.882778, "scenario": "RP10_SLR_500"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.032295, "scenario": "RP25_SLR_500"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.145069, "scenario": "RP50_SLR_500"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.161952, "scenario": "RP1000_SLR_0"}, {"tile": 2863, "n_cells": 29240810.0, "t": 55.910512, "scenario": "RP2_SLR_500"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.16281, "scenario": "RP5_SLR_500"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.114346, "scenario": "RP100_SLR_0"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.206781, "scenario": "RP250_SLR_0"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.177151, "scenario": "RP500_SLR_0"}, {"tile": 2863, "n_cells": 29240810.0, "t": 55.983365, "scenario": "RP10_SLR_0"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.080556, "scenario": "RP25_SLR_0"}, {"tile": 2863, "n_cells": 29240810.0, "t": 55.836362, "scenario": "RP50_SLR_0"}, {"tile": 2863, "n_cells": 29240810.0, "t": 56.388244, "scenario": "RP5_SLR_0"}, {"tile": 2863, "n_cells": 29240810.0, "t": 55.977943, "scenario": "RP2_SLR_0"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.59957, "scenario": "RP1000_SLR_1000"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.304788, "scenario": "RP1000_SLR_1500"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.357442, "scenario": "RP1000_SLR_2000"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.266761, "scenario": "RP100_SLR_1000"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.37362, "scenario": "RP100_SLR_1500"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.338671, "scenario": "RP100_SLR_2000"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.344776, "scenario": "RP250_SLR_1000"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.472986, "scenario": "RP250_SLR_1500"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.430267, "scenario": "RP250_SLR_2000"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.303726, "scenario": "RP500_SLR_1000"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.329728, "scenario": "RP500_SLR_1500"}, {"tile": 2651, "n_cells": 71005902.0, "t": 30.485486, "scenario": "RP500_SLR_2000"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.28081, "scenario": "RP1000_SLR_500"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.330954, "scenario": "RP10_SLR_1000"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.381074, "scenario": "RP10_SLR_1500"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.322479, "scenario": "RP10_SLR_2000"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.394413, "scenario": "RP25_SLR_1000"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.600531, "scenario": "RP25_SLR_1500"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.416511, "scenario": "RP25_SLR_2000"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.392899, "scenario": "RP50_SLR_1000"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.409024, "scenario": "RP50_SLR_1500"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.459299, "scenario": "RP50_SLR_2000"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.432651, "scenario": "RP100_SLR_500"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.323305, "scenario": "RP250_SLR_500"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.288037, "scenario": "RP500_SLR_500"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.232972, "scenario": "RP2_SLR_1000"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.352178, "scenario": "RP2_SLR_1500"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.304361, "scenario": "RP2_SLR_2000"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.239668, "scenario": "RP5_SLR_1000"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.311382, "scenario": "RP5_SLR_1500"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.388479, "scenario": "RP5_SLR_2000"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.389489, "scenario": "RP10_SLR_500"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.162423, "scenario": "RP25_SLR_500"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.393629, "scenario": "RP50_SLR_500"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.295215, "scenario": "RP2_SLR_500"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.353807, "scenario": "RP5_SLR_500"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.253002, "scenario": "RP1000_SLR_0"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.284138, "scenario": "RP100_SLR_0"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.296908, "scenario": "RP250_SLR_0"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.245966, "scenario": "RP500_SLR_0"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.224184, "scenario": "RP10_SLR_0"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.283913, "scenario": "RP25_SLR_0"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.229267, "scenario": "RP50_SLR_0"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.098713, "scenario": "RP2_SLR_0"}, {"tile": 2651, "n_cells": 71005902.0, "t": 27.259352, "scenario": "RP5_SLR_0"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.992045, "scenario": "RP1000_SLR_1000"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.719055, "scenario": "RP1000_SLR_1500"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.786778, "scenario": "RP1000_SLR_2000"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.837685, "scenario": "RP100_SLR_1000"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.86808, "scenario": "RP100_SLR_1500"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.891825, "scenario": "RP100_SLR_2000"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.831209, "scenario": "RP250_SLR_1000"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.874284, "scenario": "RP250_SLR_1500"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.849734, "scenario": "RP250_SLR_2000"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.756872, "scenario": "RP500_SLR_1000"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.729597, "scenario": "RP500_SLR_1500"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.804998, "scenario": "RP500_SLR_2000"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.6459, "scenario": "RP1000_SLR_500"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.582051, "scenario": "RP10_SLR_1000"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.685099, "scenario": "RP10_SLR_1500"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.751437, "scenario": "RP10_SLR_2000"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.634668, "scenario": "RP25_SLR_1000"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.780438, "scenario": "RP25_SLR_1500"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.710694, "scenario": "RP25_SLR_2000"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.667646, "scenario": "RP50_SLR_1000"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.720746, "scenario": "RP50_SLR_1500"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.850652, "scenario": "RP50_SLR_2000"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.646122, "scenario": "RP100_SLR_500"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.646637, "scenario": "RP250_SLR_500"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.648409, "scenario": "RP500_SLR_500"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.606901, "scenario": "RP2_SLR_1000"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.62087, "scenario": "RP2_SLR_1500"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.607857, "scenario": "RP2_SLR_2000"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.687869, "scenario": "RP5_SLR_1000"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.712262, "scenario": "RP5_SLR_1500"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.677274, "scenario": "RP5_SLR_2000"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.573288, "scenario": "RP10_SLR_500"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.609074, "scenario": "RP25_SLR_500"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.622509, "scenario": "RP50_SLR_500"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.601574, "scenario": "RP2_SLR_500"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.648683, "scenario": "RP5_SLR_500"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.75494, "scenario": "RP1000_SLR_0"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.779438, "scenario": "RP100_SLR_0"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.864724, "scenario": "RP250_SLR_0"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.681174, "scenario": "RP500_SLR_0"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.643623, "scenario": "RP10_SLR_0"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.726376, "scenario": "RP25_SLR_0"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.735423, "scenario": "RP50_SLR_0"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.668137, "scenario": "RP2_SLR_0"}, {"tile": 2662, "n_cells": 31596565.0, "t": 21.619667, "scenario": "RP5_SLR_0"}, {"tile": 3072, "n_cells": 38250153.0, "t": 29.053392, "scenario": "RP1000_SLR_1000"}, {"tile": 3072, "n_cells": 38250153.0, "t": 29.038945, "scenario": "RP1000_SLR_1500"}, {"tile": 3072, "n_cells": 38250153.0, "t": 29.284827, "scenario": "RP1000_SLR_2000"}, {"tile": 3072, "n_cells": 38250153.0, "t": 28.495797, "scenario": "RP100_SLR_1000"}, {"tile": 3072, "n_cells": 38250153.0, "t": 28.987382, "scenario": "RP100_SLR_1500"}, {"tile": 3072, "n_cells": 38250153.0, "t": 29.557532, "scenario": "RP100_SLR_2000"}, {"tile": 3072, "n_cells": 38250153.0, "t": 28.570243, "scenario": "RP250_SLR_1000"}, {"tile": 3072, "n_cells": 38250153.0, "t": 29.27639, "scenario": "RP250_SLR_1500"}, {"tile": 3072, "n_cells": 38250153.0, "t": 29.577063, "scenario": "RP250_SLR_2000"}, {"tile": 3072, "n_cells": 38250153.0, "t": 28.781389, "scenario": "RP500_SLR_1000"}, {"tile": 3072, "n_cells": 38250153.0, "t": 29.24346, "scenario": "RP500_SLR_1500"}, {"tile": 3072, "n_cells": 38250153.0, "t": 29.791753, "scenario": "RP500_SLR_2000"}, {"tile": 3072, "n_cells": 38250153.0, "t": 27.945538, "scenario": "RP1000_SLR_500"}, {"tile": 3072, "n_cells": 38250153.0, "t": 28.508748, "scenario": "RP10_SLR_1000"}, {"tile": 3072, "n_cells": 38250153.0, "t": 28.981486, "scenario": "RP10_SLR_1500"}, {"tile": 3072, "n_cells": 38250153.0, "t": 29.248593, "scenario": "RP10_SLR_2000"}, {"tile": 3072, "n_cells": 38250153.0, "t": 28.317192, "scenario": "RP25_SLR_1000"}, {"tile": 3072, "n_cells": 38250153.0, "t": 29.152582, "scenario": "RP25_SLR_1500"}, {"tile": 3072, "n_cells": 38250153.0, "t": 29.49927, "scenario": "RP25_SLR_2000"}, {"tile": 3072, "n_cells": 38250153.0, "t": 28.847732, "scenario": "RP50_SLR_1000"}, {"tile": 3072, "n_cells": 38250153.0, "t": 28.977281, "scenario": "RP50_SLR_1500"}, {"tile": 3072, "n_cells": 38250153.0, "t": 29.389102, "scenario": "RP50_SLR_2000"}, {"tile": 3072, "n_cells": 38250153.0, "t": 28.10129, "scenario": "RP250_SLR_500"}, {"tile": 3072, "n_cells": 38250153.0, "t": 27.938418, "scenario": "RP500_SLR_500"}, {"tile": 3072, "n_cells": 38250153.0, "t": 27.809149, "scenario": "RP100_SLR_500"}, {"tile": 3072, "n_cells": 38250153.0, "t": 28.222708, "scenario": "RP2_SLR_1000"}, {"tile": 3072, "n_cells": 38250153.0, "t": 29.097202, "scenario": "RP2_SLR_1500"}, {"tile": 3072, "n_cells": 38250153.0, "t": 29.387168, "scenario": "RP2_SLR_2000"}, {"tile": 3072, "n_cells": 38250153.0, "t": 28.608092, "scenario": "RP5_SLR_1000"}, {"tile": 3072, "n_cells": 38250153.0, "t": 28.836572, "scenario": "RP5_SLR_1500"}, {"tile": 3072, "n_cells": 38250153.0, "t": 29.192133, "scenario": "RP5_SLR_2000"}, {"tile": 3072, "n_cells": 38250153.0, "t": 27.66657, "scenario": "RP10_SLR_500"}, {"tile": 3072, "n_cells": 38250153.0, "t": 27.70339, "scenario": "RP25_SLR_500"}, {"tile": 3072, "n_cells": 38250153.0, "t": 27.865685, "scenario": "RP50_SLR_500"}, {"tile": 3072, "n_cells": 38250153.0, "t": 27.412836, "scenario": "RP1000_SLR_0"}, {"tile": 3072, "n_cells": 38250153.0, "t": 27.451503, "scenario": "RP2_SLR_500"}, {"tile": 3072, "n_cells": 38250153.0, "t": 27.504651, "scenario": "RP5_SLR_500"}, {"tile": 3072, "n_cells": 38250153.0, "t": 27.298969, "scenario": "RP250_SLR_0"}, {"tile": 3072, "n_cells": 38250153.0, "t": 27.389428, "scenario": "RP500_SLR_0"}, {"tile": 3072, "n_cells": 38250153.0, "t": 27.422014, "scenario": "RP100_SLR_0"}, {"tile": 3072, "n_cells": 38250153.0, "t": 27.2865, "scenario": "RP10_SLR_0"}, {"tile": 3072, "n_cells": 38250153.0, "t": 27.305826, "scenario": "RP25_SLR_0"}, {"tile": 3072, "n_cells": 38250153.0, "t": 27.473336, "scenario": "RP50_SLR_0"}, {"tile": 3072, "n_cells": 38250153.0, "t": 27.1859, "scenario": "RP2_SLR_0"}, {"tile": 3072, "n_cells": 38250153.0, "t": 27.239294, "scenario": "RP5_SLR_0"}, {"tile": 2643, "n_cells": 71005902.0, "t": 30.033137, "scenario": "RP1000_SLR_1000"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.767925, "scenario": "RP1000_SLR_1500"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.92864, "scenario": "RP1000_SLR_2000"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.711773, "scenario": "RP100_SLR_1000"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.996632, "scenario": "RP100_SLR_1500"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.911368, "scenario": "RP100_SLR_2000"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.736888, "scenario": "RP250_SLR_1000"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.827944, "scenario": "RP250_SLR_1500"}, {"tile": 2643, "n_cells": 71005902.0, "t": 30.054483, "scenario": "RP250_SLR_2000"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.827093, "scenario": "RP500_SLR_1000"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.81371, "scenario": "RP500_SLR_1500"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.866851, "scenario": "RP500_SLR_2000"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.840745, "scenario": "RP1000_SLR_500"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.700403, "scenario": "RP10_SLR_1000"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.785219, "scenario": "RP10_SLR_1500"}, {"tile": 2643, "n_cells": 71005902.0, "t": 30.035626, "scenario": "RP10_SLR_2000"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.729368, "scenario": "RP25_SLR_1000"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.816829, "scenario": "RP25_SLR_1500"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.930772, "scenario": "RP25_SLR_2000"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.69709, "scenario": "RP50_SLR_1000"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.83463, "scenario": "RP50_SLR_1500"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.84071, "scenario": "RP50_SLR_2000"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.622042, "scenario": "RP100_SLR_500"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.604169, "scenario": "RP250_SLR_500"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.947761, "scenario": "RP500_SLR_500"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.624343, "scenario": "RP2_SLR_1000"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.791389, "scenario": "RP2_SLR_1500"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.808614, "scenario": "RP2_SLR_2000"}, {"tile": 2643, "n_cells": 71005902.0, "t": 30.319805, "scenario": "RP5_SLR_1000"}, {"tile": 2643, "n_cells": 71005902.0, "t": 30.951827, "scenario": "RP5_SLR_1500"}, {"tile": 2643, "n_cells": 71005902.0, "t": 31.071569, "scenario": "RP5_SLR_2000"}, {"tile": 2643, "n_cells": 71005902.0, "t": 30.455813, "scenario": "RP10_SLR_500"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.895456, "scenario": "RP25_SLR_500"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.729033, "scenario": "RP50_SLR_500"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.77276, "scenario": "RP1000_SLR_0"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.708548, "scenario": "RP2_SLR_500"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.669242, "scenario": "RP5_SLR_500"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.747321, "scenario": "RP100_SLR_0"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.569517, "scenario": "RP250_SLR_0"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.627272, "scenario": "RP500_SLR_0"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.588836, "scenario": "RP10_SLR_0"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.523184, "scenario": "RP25_SLR_0"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.678676, "scenario": "RP50_SLR_0"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.478841, "scenario": "RP5_SLR_0"}, {"tile": 2643, "n_cells": 71005902.0, "t": 29.512555, "scenario": "RP2_SLR_0"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.988686, "scenario": "RP1000_SLR_1000"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.83706, "scenario": "RP1000_SLR_1500"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.888928, "scenario": "RP1000_SLR_2000"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.806283, "scenario": "RP250_SLR_1500"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.801908, "scenario": "RP250_SLR_2000"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.864383, "scenario": "RP500_SLR_1000"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.820108, "scenario": "RP500_SLR_1500"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.848355, "scenario": "RP500_SLR_2000"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.753072, "scenario": "RP100_SLR_1000"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.766133, "scenario": "RP100_SLR_1500"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.894319, "scenario": "RP100_SLR_2000"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.818595, "scenario": "RP250_SLR_1000"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.790818, "scenario": "RP1000_SLR_500"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.965522, "scenario": "RP10_SLR_1000"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.963488, "scenario": "RP10_SLR_1500"}, {"tile": 2641, "n_cells": 61771006.0, "t": 30.07105, "scenario": "RP10_SLR_2000"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.87708, "scenario": "RP25_SLR_1000"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.829598, "scenario": "RP25_SLR_1500"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.837183, "scenario": "RP25_SLR_2000"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.888791, "scenario": "RP50_SLR_1000"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.899372, "scenario": "RP50_SLR_1500"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.798236, "scenario": "RP50_SLR_2000"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.698604, "scenario": "RP500_SLR_500"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.721801, "scenario": "RP100_SLR_500"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.768197, "scenario": "RP250_SLR_500"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.893078, "scenario": "RP2_SLR_1000"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.782953, "scenario": "RP2_SLR_1500"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.793501, "scenario": "RP2_SLR_2000"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.960776, "scenario": "RP5_SLR_1000"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.891968, "scenario": "RP5_SLR_1500"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.84083, "scenario": "RP5_SLR_2000"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.807302, "scenario": "RP10_SLR_500"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.968903, "scenario": "RP25_SLR_500"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.90176, "scenario": "RP50_SLR_500"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.853502, "scenario": "RP1000_SLR_0"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.89907, "scenario": "RP2_SLR_500"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.81077, "scenario": "RP5_SLR_500"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.80916, "scenario": "RP500_SLR_0"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.800482, "scenario": "RP100_SLR_0"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.95239, "scenario": "RP250_SLR_0"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.86017, "scenario": "RP10_SLR_0"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.880698, "scenario": "RP25_SLR_0"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.86561, "scenario": "RP50_SLR_0"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.769471, "scenario": "RP2_SLR_0"}, {"tile": 2641, "n_cells": 61771006.0, "t": 29.903557, "scenario": "RP5_SLR_0"}], "python": [{"tile": 1992, "n_cells": 27584550.0, "t": 23.339, "scenario": "RP100_SLR_0", "t_read": 7.217, "t_sweep": 4.531, "t_prune": 1.731}, {"tile": 2330, "n_cells": 37205205.0, "t": 20.426, "scenario": "RP100_SLR_0", "t_read": 5.217, "t_sweep": 5.777, "t_prune": 2.287}, {"tile": 2331, "n_cells": 71005902.0, "t": 46.058, "scenario": "RP100_SLR_0", "t_read": 9.694, "t_sweep": 12.531, "t_prune": 5.039}, {"tile": 2341, "n_cells": 44977450.0, "t": 20.825, "scenario": "RP100_SLR_0", "t_read": 6.548, "t_sweep": 7.519, "t_prune": 2.844}, {"tile": 2342, "n_cells": 62191260.0, "t": 34.343, "scenario": "RP100_SLR_0", "t_read": 11.0, "t_sweep": 10.342, "t_prune": 3.845}, {"tile": 2343, "n_cells": 45466696.0, "t": 23.606, "scenario": "RP100_SLR_0", "t_read": 6.216, "t_sweep": 7.989, "t_prune": 3.194}, {"tile": 2353, "n_cells": 8942160.0, "t": 9.959, "scenario": "RP100_SLR_0", "t_read": 1.57, "t_sweep": 1.399, "t_prune": 0.535}, {"tile": 2640, "n_cells": 32867163.0, "t": 15.998, "scenario": "RP100_SLR_0", "t_read": 4.33, "t_sweep": 4.915, "t_prune": 2.184}, {"tile": 2643, "n_cells": 71005902.0, "t": 34.379, "scenario": "RP100_SLR_0", "t_read": 9.33, "t_sweep": 11.815, "t_prune": 4.615}, {"tile": 2650, "n_cells": 70559271.0, "t": 33.763, "scenario": "RP100_SLR_0", "t_read": 9.653, "t_sweep": 12.105, "t_prune": 4.931}, {"tile": 2652, "n_cells": 71014329.0, "t": 32.679, "scenario": "RP100_SLR_0", "t_read": 9.713, "t_sweep": 11.982, "t_prune": 4.576}, {"tile": 2661, "n_cells": 71005902.0, "t": 32.113, "scenario": "RP100_SLR_0", "t_read": 9.76, "t_sweep": 12.781, "t_prune": 4.844}, {"tile": 2662, "n_cells": 31596565.0, "t": 13.666, "scenario": "RP100_SLR_0", "t_read": 4.662, "t_sweep": 4.84, "t_prune": 2.078}, {"tile": 2670, "n_cells": 59191248.0, "t": 26.12, "scenario": "RP100_SLR_0", "t_read": 8.35, "t_sweep": 10.307, "t_prune": 4.01}, {"tile": 2863, "n_cells": 29240810.0, "t": 13.016, "scenario": "RP100_SLR_0", "t_read": 3.821, "t_sweep": 4.158, "t_prune": 1.745}, {"tile": 2870, "n_cells": 22680112.0, "t": 10.522, "scenario": "RP100_SLR_0", "t_read": 3.431, "t_sweep": 3.134, "t_prune": 1.228}, {"tile": 2872, "n_cells": 71005902.0, "t": 35.276, "scenario": "RP100_SLR_0", "t_read": 9.353, "t_sweep": 11.916, "t_prune": 4.635}, {"tile": 2873, "n_cells": 135440336.0, "t": 65.792, "scenario": "RP100_SLR_0", "t_read": 18.535, "t_sweep": 26.913, "t_prune": 9.63}, {"tile": 2882, "n_cells": 70997476.0, "t": 29.737, "scenario": "RP100_SLR_0", "t_read": 10.129, "t_sweep": 12.073, "t_prune": 4.695}, {"tile": 3072, "n_cells": 38250153.0, "t": 15.357, "scenario": "RP100_SLR_0", "t_read": 5.442, "t_sweep": 5.341, "t_prune": 1.988}]};
+const COMMON_TILES = new Set([2643, 2650, 2662, 2863, 3072]);
+
+const margin = {top: 20, right: 24, bottom: 50, left: 64};
+const width = 900 - margin.left - margin.right;
+const height = 520 - margin.top - margin.bottom;
+
+const allPts = DATA.julia.concat(DATA.python);
+const xMin = Math.min(...allPts.map(d => d.n_cells)) * 0.85;
+const xMax = Math.max(...allPts.map(d => d.n_cells)) * 1.15;
+const yMin = Math.min(...allPts.map(d => d.t)) * 0.8;
+const yMax = Math.max(...allPts.map(d => d.t)) * 1.25;
+
+const logX = v => Math.log10(v);
+const logY = v => Math.log10(v);
+
+function xScale(v) {
+  return margin.left + (logX(v) - logX(xMin)) / (logX(xMax) - logX(xMin)) * width;
+}
+function yScale(v) {
+  return margin.top + height - (logY(v) - logY(yMin)) / (logY(yMax) - logY(yMin)) * height;
+}
+
+const svg = document.getElementById("chart");
+const NS = "http://www.w3.org/2000/svg";
+
+function el(tag, attrs) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+
+function niceLogTicks(min, max) {
+  const ticks = [];
+  const lo = Math.floor(Math.log10(min));
+  const hi = Math.ceil(Math.log10(max));
+  for (let e = lo; e <= hi; e++) {
+    for (const m of [1, 2, 5]) {
+      const v = m * Math.pow(10, e);
+      if (v >= min && v <= max) ticks.push(v);
+    }
+  }
+  return ticks;
+}
+
+const xTicks = niceLogTicks(xMin, xMax);
+const yTicks = niceLogTicks(yMin, yMax);
+
+const gGrid = el("g", {class: "grid"});
+svg.appendChild(gGrid);
+
+xTicks.forEach(v => {
+  const x = xScale(v);
+  gGrid.appendChild(el("line", {x1: x, x2: x, y1: margin.top, y2: margin.top + height}));
+  const t = el("text", {x: x, y: margin.top + height + 20, class: "axis-label", "text-anchor": "middle"});
+  t.textContent = v >= 1e6 ? (v/1e6).toFixed(v % 1e6 === 0 ? 0 : 1) + "M" : v.toLocaleString();
+  svg.appendChild(t);
+});
+yTicks.forEach(v => {
+  const y = yScale(v);
+  gGrid.appendChild(el("line", {x1: margin.left, x2: margin.left + width, y1: y, y2: y}));
+  const t = el("text", {x: margin.left - 10, y: y + 4, class: "axis-label", "text-anchor": "end"});
+  t.textContent = v >= 1 ? Math.round(v) : v;
+  svg.appendChild(t);
+});
+
+svg.appendChild(el("line", {class: "baseline", x1: margin.left, x2: margin.left, y1: margin.top, y2: margin.top + height}));
+svg.appendChild(el("line", {class: "baseline", x1: margin.left, x2: margin.left + width, y1: margin.top + height, y2: margin.top + height}));
+
+const xTitle = el("text", {class: "axis-title", x: margin.left + width/2, y: margin.top + height + 40, "text-anchor": "middle"});
+xTitle.textContent = "Tile size (grid cells, log scale)";
+svg.appendChild(xTitle);
+
+const yTitle = el("text", {class: "axis-title", x: -(margin.top + height/2), y: 18, "text-anchor": "middle", transform: "rotate(-90)"});
+yTitle.textContent = "Wall-clock time (s, log scale) — full pipeline";
+svg.appendChild(yTitle);
+
+const tooltip = document.getElementById("tooltip");
+
+function drawSeries(points, color, label, radius) {
+  points.forEach(p => {
+    const isCommon = COMMON_TILES.has(p.tile);
+    const c = el("circle", {
+      class: "pt", cx: xScale(p.n_cells), cy: yScale(p.t), r: isCommon ? radius + 2 : radius,
+      fill: color, "fill-opacity": isCommon ? 0.9 : 0.55,
+      stroke: isCommon ? "var(--text-muted)".replace("var(--text-muted)", "#898781") : "none",
+      "stroke-width": isCommon ? 1.5 : 0,
+    });
+    c.addEventListener("mousemove", (ev) => {
+      let extra = "";
+      if (p.t_sweep !== undefined) {
+        extra = `
+        <div class="row"><span class="k">— sweep</span><span>${p.t_sweep.toFixed(2)}s</span></div>
+        <div class="row"><span class="k">— read</span><span>${p.t_read.toFixed(2)}s</span></div>
+        <div class="row"><span class="k">— prune</span><span>${p.t_prune.toFixed(2)}s</span></div>`;
+      }
+      tooltip.innerHTML = `
+        <div class="row"><span class="k">Source</span><strong>${label}${isCommon ? " (paired tile)" : ""}</strong></div>
+        <div class="row"><span class="k">Tile</span><strong>${p.tile}</strong></div>
+        <div class="row"><span class="k">Scenario</span><strong>${p.scenario}</strong></div>
+        <div class="row"><span class="k">Cells</span><strong>${Math.round(p.n_cells).toLocaleString()}</strong></div>
+        <div class="row"><span class="k">Total</span><strong>${p.t.toFixed(2)} s</strong></div>
+        ${extra}
+      `;
+      tooltip.style.opacity = 1;
+      tooltip.style.left = (ev.pageX + 14) + "px";
+      tooltip.style.top = (ev.pageY - 10) + "px";
+    });
+    c.addEventListener("mouseleave", () => { tooltip.style.opacity = 0; });
+    svg.appendChild(c);
+  });
+}
+
+drawSeries(DATA.julia, getComputedStyle(document.querySelector(".viz-root")).getPropertyValue("--series-julia").trim(), "Julia", 5);
+drawSeries(DATA.python, getComputedStyle(document.querySelector(".viz-root")).getPropertyValue("--series-python").trim(), "Python", 6.5);
+
+const juliaMean = DATA.julia.reduce((s,d)=>s+d.t,0) / DATA.julia.length;
+const pythonMean = DATA.python.reduce((s,d)=>s+d.t,0) / DATA.python.length;
+document.getElementById("footnote").innerHTML =
+  `Mean full-pipeline time — Julia: ${juliaMean.toFixed(1)}s (n=${DATA.julia.length}, all scenarios) &nbsp;·&nbsp; ` +
+  `Python: ${pythonMean.toFixed(1)}s (n=${DATA.python.length}, RP100_SLR_0) &nbsp;·&nbsp; ` +
+  `aggregate ratio ≈ ${(juliaMean/pythonMean).toFixed(2)}× — but see the paired-tile table below before trusting this ratio.`;
+
+// paired-tile table
+const juliaByTile = {};
+DATA.julia.forEach(p => {
+  if (p.scenario === "RP100_SLR_0") juliaByTile[p.tile] = p;
+});
+const rows = DATA.python
+  .filter(p => COMMON_TILES.has(p.tile))
+  .map(p => {
+    const jl = juliaByTile[p.tile];
+    const ratio = jl.t / p.t;
+    return {tile: p.tile, cells: p.n_cells, julia: jl.t, python: p.t, ratio};
+  })
+  .sort((a,b) => b.cells - a.cells);
+
+const table = document.getElementById("overlapTable");
+table.innerHTML = `
+  <caption style="text-align:left; caption-side:top; color:var(--text-secondary); font-size:13px; margin-bottom:8px;">
+    Paired tiles present in both datasets (same tile, RP100_SLR_0)
+  </caption>
+  <tr><th>Tile</th><th>Cells</th><th>Julia (s)</th><th>Python (s)</th><th>Ratio (Julia/Python)</th><th>Faster</th></tr>
+  ${rows.map(r => `
+    <tr>
+      <td>${r.tile}</td>
+      <td>${Math.round(r.cells).toLocaleString()}</td>
+      <td>${r.julia.toFixed(1)}</td>
+      <td>${r.python.toFixed(1)}</td>
+      <td>${r.ratio.toFixed(2)}×</td>
+      <td>${r.ratio > 1 ? "Python" : "Julia"}</td>
+    </tr>`).join("")}
+`;
+</script>

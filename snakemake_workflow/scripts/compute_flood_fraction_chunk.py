@@ -24,7 +24,6 @@ from rasterio.windows import Window
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import retry_transient_io  # noqa: E402
-from rasters import load_raster  # noqa: E402
 
 _NODATA_FINE = -1.0
 _NODATA_COARSE = -1.0
@@ -59,6 +58,19 @@ def compute_flood_fraction(
 
     Coarse cells inside the tile but entirely outside the domain give
     A = NaN, B = 0 → ff = NaN → nodata.
+
+    NOTE: an earlier version of this function tried combining A/B into two
+    bands of one file and warping both in a single `reproject()` call, to
+    avoid paying GDAL's warp-context setup cost twice (profiling showed
+    ~5.6s combined for the two-call version on one real chunk/scenario).
+    That changed results (verified against real production data: ~360,000
+    coarse cells differed, each by exactly 1.0) - `reproject()` evidently
+    shares one validity mask across bands under AVERAGE resampling rather
+    than applying `src_nodata` fully independently per band, so wherever
+    band A (exceedance) was nodata (which includes "in-domain but dry", not
+    just "outside the domain"), band B's (domain mask) own average was
+    silently corrupted too, even though band B itself never contains the
+    nodata value. Reverted - correctness over this specific speedup.
     """
     with TemporaryDirectory() as tmpdir:
         exc_path = Path(tmpdir) / "exc.tif"   # binary exceedance, nodata preserved
@@ -93,11 +105,21 @@ def compute_flood_fraction(
                         exc_dst.write(exc, 1, window=window)
                         dom_dst.write(dom, 1, window=window)
 
-        # Step 2: reproject both rasters to the coarse population grid
-        pop_da = load_raster(population_path)
-        out_h, out_w = pop_da.raster.height, pop_da.raster.width
+        # Step 2: reproject both rasters to the coarse population grid.
+        # Population grid metadata read directly via rasterio (no
+        # xarray/rioxarray) since only height/width/transform/crs are
+        # needed; profiling showed the xarray-backend-plugin-discovery
+        # machinery (`load_raster`'s `xr.open_dataarray`, even with
+        # `engine=` given explicitly) costs ~4s of pure import/reflection
+        # overhead per process, unrelated to this raster's actual (tiny)
+        # size - a real cost repeated on every one of this rule's many
+        # fresh-process invocations. This part IS verified safe (metadata
+        # only, no resampling/masking logic touched).
+        with rasterio.open(population_path) as pop_src:
+            out_h, out_w = pop_src.height, pop_src.width
+            dst_transform, dst_crs = pop_src.transform, pop_src.crs
         dst_kwargs = dict(
-            dst_transform=pop_da.raster.transform, dst_crs=pop_da.raster.crs,
+            dst_transform=dst_transform, dst_crs=dst_crs,
             dst_nodata=np.nan, resampling=Resampling.average,
         )
 
@@ -126,8 +148,8 @@ def compute_flood_fraction(
     # Step 3: write coarse output
     out_frac = np.where(np.isnan(frac), _NODATA_COARSE, frac).astype("float32")
     coarse_profile = {
-        "driver": "GTiff", "crs": pop_da.raster.crs,
-        "transform": pop_da.raster.transform,
+        "driver": "GTiff", "crs": dst_crs,
+        "transform": dst_transform,
         "width": out_w, "height": out_h,
         "count": 1, "dtype": "float32", "nodata": _NODATA_COARSE,
         "compress": "lzw",

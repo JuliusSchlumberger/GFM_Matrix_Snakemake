@@ -120,12 +120,77 @@ rule extract_boundaries:
         "../scripts/extract_boundaries.py"
 
 
-rule write_aqueduct_config:
-    """Write the Aqueduct TOML configuration for a single tile, return period and SLR scenario."""
+rule compute_tile_max_waterlevel:
+    """Compute the highest boundary water level across every return period and
+    SLR scenario this tile will ever be run for.
+
+    Used by crop_flood_extent to size ONE shared crop window that remains
+    valid for every (return_period, waterlevel_name) combination of this
+    tile - see src/flood_extent.py: the propagated water level at any cell
+    can never exceed the highest boundary value used to seed it anywhere in
+    the tile, regardless of which scenario is running, so a single shared
+    maximum is exact, not an approximation, for all of them.
+    """
+    input:
+        boundaries=expand(
+            rules.extract_boundaries.output.boundaries,
+            tile_id="{tile_id}", return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES,
+        ),
+    output:
+        max_waterlevel=os.path.join(
+            config["simulation"]["model_outputs"], "{tile_id}", "inputs", "max_waterlevel.json",
+        ),
+    params:
+        # Parallel to `input.boundaries` above (identical expand() kwargs,
+        # same iteration order) - gives the boundary value column name for
+        # each corresponding file in the script.
+        waterlevel_names=expand(
+            "{waterlevel_name}", return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES,
+        ),
+    script:
+        "../scripts/compute_tile_max_waterlevel.py"
+
+
+rule crop_flood_extent:
+    """Crop DEM/mask/friction to the region that could possibly flood.
+
+    See src/flood_extent.py for the safety argument: a cell can only flood
+    if its elevation is below the highest boundary water level anywhere in
+    the tile (friction can only ever attenuate the propagated level
+    further, never raise it above the seed value) - so cropping to this
+    bound is exact, not an approximation, for every downstream
+    (return_period, waterlevel_name) combination. Runs against the CURRENT
+    compiled aqueduct.exe unchanged - this is a preprocessing optimization,
+    not a model change.
+
+    Controlled by simulation.flood_extent_crop.enabled - when false, this
+    rule just copies dem/mask/friction through unchanged (still produces
+    crop_info.json, recording an uncropped full-tile window), so the rest
+    of the DAG never has to branch on the flag.
+    """
     input:
         dem=rules.extract_dem.output.dem,
         mask=rules.extract_dem_mask.output.mask,
         friction=rules.compute_friction.output.friction,
+        max_waterlevel=rules.compute_tile_max_waterlevel.output.max_waterlevel,
+    output:
+        dem=os.path.join(config["simulation"]["model_outputs"], "{tile_id}", "inputs", "dem_cropped.tif"),
+        mask=os.path.join(config["simulation"]["model_outputs"], "{tile_id}", "inputs", "mask_cropped.tif"),
+        friction=os.path.join(config["simulation"]["model_outputs"], "{tile_id}", "inputs", "friction_cropped.tif"),
+        crop_info=os.path.join(config["simulation"]["model_outputs"], "{tile_id}", "inputs", "crop_info.json"),
+    params:
+        raster_config=config["raster_format"],
+        crop_cfg=config["simulation"]["flood_extent_crop"],
+    script:
+        "../scripts/crop_flood_extent.py"
+
+
+rule write_aqueduct_config:
+    """Write the Aqueduct TOML configuration for a single tile, return period and SLR scenario."""
+    input:
+        dem=rules.crop_flood_extent.output.dem,
+        mask=rules.crop_flood_extent.output.mask,
+        friction=rules.crop_flood_extent.output.friction,
         boundaries=rules.extract_boundaries.output.boundaries,
     output:
         toml=os.path.join(

@@ -1,13 +1,24 @@
-"""Functions for running the compiled Aqueduct flood model executable."""
+"""Functions for running the flood model - either engine.
 
+`run_aqueduct` (subprocess) and `run_aqueduct_python` (in-process) are the
+two engines `simulation.engine` (config.yml) can select between - see
+`scripts/run_aqueduct.py` and `scripts/run_aqueduct_cli.py`, which both
+branch on that config value and share the helpers here so the two entry
+points (Snakemake rule vs. HPC sbatch CLI) can't drift apart.
+"""
+
+import json
 import math
 import subprocess
 from pathlib import Path
 from typing import Any
 
+import geopandas as gpd
 import rasterio
 
 from config_utils import retry_transient_io
+from flood_model import flood_depth_dense
+from rasters import save_waterdepth_raster
 
 # Substring Aqueduct's Julia runtime prints (to stdout/stderr) on an
 # unhandled out-of-memory crash, e.g. in `component_indices` during the
@@ -43,6 +54,47 @@ def run_aqueduct(executable_path: str | Path, config_path: str | Path) -> None:
         print(e.stdout)
         print(e.stderr)
         raise
+
+
+def run_aqueduct_python(
+    dem_path: str | Path,
+    mask_path: str | Path,
+    friction_path: str | Path,
+    boundaries_path: str | Path,
+    output_path: str | Path,
+    resolution: float,
+    k: int,
+    variable: str,
+) -> None:
+    """Run `flood_model.flood_depth_dense` in-process and write its output.
+
+    The "python" engine's counterpart to `run_aqueduct` (Julia subprocess) -
+    same inputs/output contract, no TOML/executable involved since this
+    calls the validated Python port directly.
+
+    Raises:
+        MemoryError: if the solve exhausts available memory - the Python
+            dense solver's counterpart to Julia's `OutOfMemoryError` (see
+            `is_oom_error`), so callers can apply the same
+            oom_tiles/skipped_tiles marking regardless of engine. In
+            practice far less likely than Julia's failure mode (a
+            358M-cell tile that OOM'd Julia ran fine here, ~5GB peak RSS) -
+            this is a dormant safety net, not an expected code path.
+    """
+    with retry_transient_io(rasterio.open, dem_path) as src:
+        dem = src.read(1)
+        transform = src.transform
+    with retry_transient_io(rasterio.open, mask_path) as src:
+        mask = src.read(1)
+    with retry_transient_io(rasterio.open, friction_path) as src:
+        friction = src.read(1)
+    boundaries = retry_transient_io(gpd.read_file, boundaries_path)
+
+    waterdepth = flood_depth_dense(
+        dem, mask, friction, boundaries, transform,
+        resolution=resolution, k=k, variable=variable,
+    )
+    save_waterdepth_raster(dem_path, waterdepth, output_path)
 
 
 def estimate_aqueduct_mem_mb(dem_path: str | Path, mem_estimate_cfg: dict[str, Any]) -> int:
@@ -160,6 +212,59 @@ def tile_had_no_stations(skipped_dir: str | Path, tile_id: int | str) -> bool:
         if NO_STATIONS_REASON in marker.read_text():
             return True
     return False
+
+
+def log_run_timing(
+    log_dir: str | Path,
+    tile_id: str,
+    return_period: str,
+    waterlevel_name: str,
+    elapsed_s: float,
+    cropped_pixels: int,
+    original_pixels: int,
+    crop_enabled: bool,
+) -> None:
+    """Record one successful Aqueduct invocation's wall-clock time and pixel counts.
+
+    Written one file per (tile_id, return_period, waterlevel_name) - same
+    reasoning as `log_skipped_tile`: avoids concurrent-write corruption
+    between parallel Snakemake jobs. Only called for genuine `aqueduct.exe`
+    runs (not the no-stations/no-candidate/OOM skip branches in
+    run_aqueduct.py), since those don't reflect solver run time at all.
+
+    Aggregate with `analysis/summarize_run_timings.py` to evaluate
+    `simulation.flood_extent_crop`'s actual speedup - compare two runs (flag
+    on vs. off) by pointing it at each run's own `run_timings/` directory.
+
+    Args:
+        log_dir: Directory to write the marker file to. Created if missing.
+        tile_id: The tile's `tile_id`.
+        return_period: The run's `return_period` wildcard value.
+        waterlevel_name: The run's `waterlevel_name` wildcard value.
+        elapsed_s: Wall-clock seconds spent inside `run_aqueduct` (the
+            subprocess call to `aqueduct.exe`), excluding this script's own
+            setup/skip-check overhead.
+        cropped_pixels: Pixel count of the DEM actually passed to
+            `aqueduct.exe` (from `crop_info.json` - equal to
+            `original_pixels` when `flood_extent_crop.enabled` is false).
+        original_pixels: Pixel count of the tile's full (pre-crop) DEM, for
+            computing the achieved reduction ratio.
+        crop_enabled: Whether `simulation.flood_extent_crop.enabled` was
+            true for this run.
+    """
+    log_dir = Path(log_dir)
+    retry_transient_io(log_dir.mkdir, parents=True, exist_ok=True)
+    record = {
+        "tile_id": tile_id,
+        "return_period": return_period,
+        "waterlevel_name": waterlevel_name,
+        "elapsed_s": elapsed_s,
+        "cropped_pixels": cropped_pixels,
+        "original_pixels": original_pixels,
+        "crop_enabled": crop_enabled,
+    }
+    path = log_dir / f"{tile_id}_{return_period}_{waterlevel_name}.json"
+    path.write_text(json.dumps(record))
 
 
 def print_simulation_progress(

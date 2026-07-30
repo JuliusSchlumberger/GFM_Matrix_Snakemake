@@ -32,14 +32,14 @@ preparation: # Used by: preparation/run_preparation.py
   boundary_conditions: true   # COAST-RP + SLR fingerprint scenario NetCDFs
 
 one_off_edits:
-  scale_factor: 1.3 # factor by which to scale the tile grid for the preprocessing mask creation step.
+  scale_factor: 1.5 # factor by which to scale the tile grid for the preprocessing mask creation step.
   five_deg_grid_deltadtm: "{root}/inputs/mask/five_deg_grid_deltadtm.gpkg" # 5-degree grid built from DeltaDTM mask tile coverage by tile_mask_creation.py
   smaller_tiles: "{root}/inputs/mask/tiles_2_5deg_with_overlap.gpkg" # output path for the tile mask created by tile_mask_creation.py
   smaller_tiles_clean: "{root}/inputs/mask/tiles_2_5deg_with_overlap_clean.gpkg"
 
 # ── TILE GRID ─────────────────────────────────────────────────────────────────
 tile_grid:
-  path: "{root}/inputs/mask/domain_tiles_globally.gpkg" # Note this is both target of the preparation pipeline and starting point for simulation run
+  path: "{root}/inputs/mask/domain_tiles_WesternEurope.gpkg" # Note this is both target of the preparation pipeline and starting point for simulation run
   min_coast_fraction: 0.10 # merge_tiles.py: minimum required fraction of a tile that must have either land or ocean
   max_merge_count: 4 # merge_tiles.py: maximum number of original tiles that may be combined
   trim_buffer_arcsec: 20 # merge_tiles.py: coastal margin after shaving off pure-ocean/nodata rows/columns, needs to be >= model_bbox_buffer_arcsec
@@ -77,7 +77,7 @@ boundary_conditions:
 
   return_periods: # Coast-RP return periods (wildcards) to simulate flood exposure fore
     # - 1
-    - 2
+    # - 2
     - 5
     - 10
     - 25
@@ -113,7 +113,19 @@ simulation: # Used by: preprocessing rules
   model_outputs: "{root}/model_outputs"  # directory where per-tile "{tile_id}/inputs" and
   # "{tile_id}/results" are created
 
-  # Compiled Aqueduct flood model executable.
+  # Which flood model implementation actually computes waterdepth:
+  #   "python" - src/flood_model.py's flood_depth_dense (dense domain,
+  #     exactly 3 sweeps). Validated bit-for-bit identical to real Aqueduct
+  #     output across 26 real tiles spanning ~9M-135M cells each (100.000%
+  #     Jaccard, 0.0m RMSE/mean-error/max-diff on every one) - see
+  #     docs/python_vs_julia_qa.md. Faster to invoke (no fresh-process JIT
+  #     tax) and runs on the HPC, where the Julia toolchain cannot be
+  #     installed.
+  #   "julia" - the original compiled aqueduct_executable below, kept as a
+  #     fallback/comparison option.
+  engine: "python"
+
+  # Compiled Aqueduct flood model executable - only used when engine: "julia".
   aqueduct_executable: "{aqueduct_root}/build/aqueduct/aqueduct.exe"
   model_bbox_buffer_arcsec: 3 # Buffer added to tile's previously shaved bbox to ensure thin strip of ocean.
   dem_gap_fill: # land-nodata gap handling: large connected (4-connectivity) group get Nodata value, other IDW-interpolation
@@ -137,6 +149,21 @@ simulation: # Used by: preprocessing rules
   aqueduct_mem_estimate:
     base_mb: 1000
     bytes_per_pixel: 80
+
+  # Pre-crop DEM/mask/friction to the region that could possibly flood,
+  # before ever invoking aqueduct.exe (see src/flood_extent.py for the
+  # safety argument: a cell can only flood if its elevation is below the
+  # highest boundary water level anywhere in the tile, since friction can
+  # only attenuate the propagated level further, never raise it - this
+  # holds regardless of return_period/waterlevel_name, so ONE crop per tile
+  # is valid for every scenario). Runs against the existing, unmodified
+  # aqueduct.exe - this is a preprocessing optimization, not a model change.
+  # Disabled by default until validated against uncropped output on real
+  # tiles (see analysis/summarize_run_timings.py to measure the speedup).
+  flood_extent_crop:
+    enabled: false
+    margin_px: 10   # buffer around the candidate bbox; must exceed the coastlinemask dilation radius (1px)
+    ocean_code: 1   # mask value for ocean (see extract_dem_mask: 0=land, 1=ocean, 2=lake, 3=river)
 
 # ── HPC DISPATCH ────────────────────────────────────────────────────────────────
 # Used by: rule generate_aqueduct_jobs (rules/hpc_dispatch.smk) /

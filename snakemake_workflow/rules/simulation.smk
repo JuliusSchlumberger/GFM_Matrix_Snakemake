@@ -2,11 +2,20 @@
 
 
 rule run_aqueduct:
-    """Run the Aqueduct flood model for a single tile, return period and SLR scenario.
+    """Run the flood model for a single tile, return period and SLR scenario.
 
     The output filename includes `{return_period}_{waterlevel_name}` so it is
     clearly linked to the return period and sea level rise scenario used to
     produce it.
+
+    Which implementation actually runs is `simulation.engine` in config.yml
+    ("python" - `flood_model.flood_depth_dense`, validated bit-for-bit
+    identical to real Aqueduct output across 26 real tiles, see
+    docs/python_vs_julia_qa.md - or "julia" - the original compiled
+    `aqueduct_executable`, kept as a fallback/comparison option). The
+    skip/OOM-handling and per-tile-progress logic below applies to either
+    engine (see `run_aqueduct.py`); notes specific to Aqueduct/Julia's own
+    failure mode are labelled as such.
 
     Aqueduct instances can run fully concurrently on one machine - a
     controlled test (2, 6, then 5 simultaneous instances, up to 140M-pixel
@@ -46,13 +55,23 @@ rule run_aqueduct:
     simulated/OOM'd/no-stations/still-running across the whole tile grid
     (see aqueduct_runner.print_simulation_progress) - a milestone per tile,
     not per job, to keep the O(n_tiles) scan infrequent.
+
+    `dem`/`mask`/`friction` come from crop_flood_extent, not directly from
+    extract_dem/extract_dem_mask/compute_friction - when
+    simulation.flood_extent_crop.enabled is true this is a strictly smaller
+    raster than the tile's full model_bbox extent (see src/flood_extent.py),
+    which also makes `resources: mem_mb` below (computed from `input.dem`)
+    automatically shrink along with it. `crop_info` records whether this
+    tile has ANY cell that could possibly flood for ANY scenario - if not,
+    Aqueduct is skipped the same way as the zero-boundary-stations case.
     """
     input:
         toml=rules.write_aqueduct_config.output.toml,
-        dem=rules.extract_dem.output.dem,
-        mask=rules.extract_dem_mask.output.mask,
-        friction=rules.compute_friction.output.friction,
+        dem=rules.crop_flood_extent.output.dem,
+        mask=rules.crop_flood_extent.output.mask,
+        friction=rules.crop_flood_extent.output.friction,
         boundaries=rules.extract_boundaries.output.boundaries,
+        crop_info=rules.crop_flood_extent.output.crop_info,
     output:
         waterdepth=os.path.join(
             config["simulation"]["model_outputs"], "{tile_id}", "results",
@@ -64,7 +83,20 @@ rule run_aqueduct:
         raster_config=config["raster_format"],
         tile_grid_path=config["tile_grid"]["path"],
         n_scenarios_per_tile=len(RETURN_PERIODS) * len(WATERLEVEL_NAMES),
+        # "python" (flood_model.flood_depth_dense, validated bit-exact - see
+        # docs/python_vs_julia_qa.md) or "julia" (aqueduct_executable above,
+        # kept as a fallback/comparison option) - see run_aqueduct.py.
+        engine=config["simulation"].get("engine", "python"),
+        flooding_config=config["simulation"]["flooding"],
     resources:
+        # Calibrated from real Aqueduct (Julia) memory behaviour - a
+        # deliberately generous upper bound that also covers the "python"
+        # engine, whose dense solver's actual footprint is lower and more
+        # predictable (no equivalent of Julia's component_indices memory
+        # scaling issue) - left as-is (not retuned for Python) since it's a
+        # concurrency-throttling estimate, not a correctness concern; only
+        # effect of over-estimating is somewhat fewer concurrent jobs than
+        # strictly necessary.
         mem_mb=lambda wildcards, input: estimate_aqueduct_mem_mb(
             input.dem, config["simulation"]["aqueduct_mem_estimate"]
         ),
