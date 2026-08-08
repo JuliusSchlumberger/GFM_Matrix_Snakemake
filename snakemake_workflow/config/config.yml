@@ -345,6 +345,19 @@ simulation: # Used by: preprocessing rules
     # function's own `sweep_budget` parameter, just no longer the default.
     max_rounds: 12
 
+    # Round-level early-exit convergence threshold (metres) for the
+    # round-based solve above - a round stops the solve early once its max
+    # per-cell waterlevel change drops to/below this. Used by BOTH the
+    # non-coupling single solve and each outer iteration's inner solve when
+    # obstacle_coupling is enabled (below) - same top-level-not-nested
+    # reasoning as max_rounds. 0.03m sits well below the 0.1m
+    # decision-relevant flood/no-flood depth threshold, so tightening/
+    # loosening this trades convergence precision against sweep count
+    # directly - see src/flood_model.py's WATERLEVEL_EPSILON_M comment for
+    # the full reasoning (this value used to be that hardcoded constant
+    # only; now config-driven, 2026-08).
+    waterlevel_epsilon_m: 0.03
+
     # Mitigates a structural weakness Fast Sweeping shares with cost-distance
     # flood models (Kasmalkar et al. 2024's "Flow-Tub" critique): a
     # friction-cheap shortcut through terrain higher than the
@@ -386,50 +399,37 @@ simulation: # Used by: preprocessing rules
 # (copy from config_hpc.yml.example) pointing paths.root/code_root at the
 # Linux HPC mount of this same shared storage.
 #
-# Within each wave, tiles are ALSO split by estimated size (2026-08):
-# Hydrax's regular partitions all scale RAM at a fixed 8GB/vCPU (1vcpu=8GB,
-# 4vcpu=32GB, 16vcpu=128GB, ...), so a tile whose estimated peak memory
-# (aqueduct_mem_estimate, above) would leave little/no headroom on `sbatch`'s
-# partition is routed to `sbatch_large` (a bigger partition) instead -
-# large_tile_pixel_threshold controls the cutoff.
+# Within each wave (simulation) / on its own (preprocessing), tiles are
+# ALSO split by estimated size (2026-08): Hydrax's regular partitions all
+# scale RAM at a fixed 8GB/vCPU (1vcpu=8GB, 4vcpu=32GB, 16vcpu=128GB, ...),
+# so a tile whose estimated peak memory (aqueduct_mem_estimate, above)
+# would leave little/no headroom on `sbatch`'s partition is routed to
+# `sbatch_large` (a bigger partition) instead - large_tile_pixel_threshold
+# controls the cutoff. `sbatch`/`sbatch_large` are shared by BOTH
+# simulation batching (hpc_dispatch.smk) AND preprocessing batching
+# (generate_hpc_preprocess_job.py) - there is no separate preprocessing-only
+# config; a preprocessing batch's `cpus_per_task` (passed to `snakemake
+# --cores`) determines its actual Snakemake-level parallelism, not just its
+# SLURM allocation size, so a `cpus_per_task: 1` partition means preprocessing
+# on that batch's tiles runs fully serial, not just one simulation tile at a time.
 hpc:
   n_nodes: 20                                        # PLACEHOLDER: max sbatch scripts (node batches) to generate PER WAVE, PER SIZE CLASS
   jobs_dir: "{root}/model_outputs/hpc_jobs"           # generated sbatch scripts, resolved_config.yml, submit_waves.sh, logs/
-  # Tiles at/above this pixel count go to sbatch_large instead of sbatch.
-  # Default 70,000,000 is chosen against aqueduct_mem_estimate
-  # (base_mb=1000, bytes_per_pixel=80): 1000 + 80*70e6/1e6 = 6600MB,
-  # leaving ~1.4GB headroom below a 1vcpu node's 8GB before even accounting
-  # for the estimate being deliberately generous. Pixel count itself is
-  # estimated from tile bbox area (see hpc_dispatch.smk), not the real DEM,
+  # Tiles at/above this pixel count go to sbatch_large instead of sbatch,
+  # for BOTH preprocessing and simulation batching. Default 70,000,000 is
+  # chosen against aqueduct_mem_estimate (base_mb=1000, bytes_per_pixel=80):
+  # 1000 + 80*70e6/1e6 = 6600MB, leaving ~1.4GB headroom below a 1vcpu
+  # node's 8GB before even accounting for the estimate being deliberately
+  # generous. Pixel count itself is estimated from tile bbox area (see
+  # hpc_dispatch.smk / generate_hpc_preprocess_job.py), not the real DEM,
   # so this is necessarily approximate - the margin below 8GB is deliberate.
   large_tile_pixel_threshold: 70000000
-  # Optional: scripts/generate_hpc_preprocess_job.py writes hpc.n_nodes
-  # PARALLEL preprocessing sbatch scripts (tiles split evenly across them,
-  # same as simulation batching - preprocessing has no wave/hop_distance
-  # ordering constraint, every tile is independent) plus one more job that
-  # runs `snakemake generate_aqueduct_jobs` (wave sbatch generation) and
-  # submits submit_waves.sh once every preprocessing batch has finished
-  # (SLURM `--dependency=afterany:<every batch job id>`) - so the whole run
-  # (preprocessing AND simulation) can be launched from Hydrax with one
-  # driver script, preprocessing itself spread across nodes exactly like
-  # simulation is. mem/time apply to EACH per-node batch (~2500 tiles /
-  # n_nodes tiles each), not the whole preprocessing run.
-  preprocess_sbatch:
-    partition: 4vcpu
-    account: ""
-    # No empirical per-tile preprocessing timing exists yet in this repo -
-    # start conservative and let a re-submit pick up where it left off
-    # (Snakemake skips already-built outputs) rather than guessing tight.
-    time: "1-00:00:00"
-    mem: "24G"                                        # 4vcpu = 32GB total; leaves headroom for OS/Snakemake's own controller process
-    cpus_per_task: 4                                 # passed to `snakemake --cores`
-    env_activate_cmd: 'module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm'
   sbatch:
     # Deltares Hydrax partitions: 1vcpu/4vcpu/16vcpu/24vcpu/60vcpu (regular),
     # 44vcpu, gpu, test (30 min cap, quick smoke-test before a real run).
     # Responsible-use ceiling is ~240 cores across the vcpu partitions AT
     # ONCE - n_nodes x cpus_per_task, per wave, should stay under that.
-    partition: 1vcpu 
+    partition: 1vcpu
     account: ""                                       # optional - Hydrax jobs don't require one; leave "" to omit #SBATCH --account
     # days-hours:minutes:seconds, e.g. "1-00:00:00". MANDATORY - an unset
     # Hydrax job silently gets a 1-MINUTE default and is killed at that
@@ -437,6 +437,13 @@ hpc:
     # killed at this limit, finished or not) but not wastefully high.
     time: "1-00:00:00"
     mem: "8G"                           # e.g. "32G"
+    # For simulation batches: irrelevant beyond the SLURM allocation size
+    # (each node runs one tile at a time regardless). For preprocessing
+    # batches (generate_hpc_preprocess_job.py): this IS the real
+    # `snakemake --cores N` parallelism for that batch - 1 means fully
+    # serial preprocessing on "small" tiles, which is most of the domain.
+    # Bump this up if preprocessing throughput matters more than minimal
+    # per-node footprint.
     cpus_per_task: 1
     # Hydrax uses Environment Modules (Lmod) + conda, not a single module
     # for this custom env - e.g.:
@@ -444,14 +451,15 @@ hpc:
     env_activate_cmd: 'module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm'
   # Same shape as sbatch: above, for tiles at/above large_tile_pixel_threshold
   # - a bigger partition (e.g. 16vcpu=128GB) so the largest tiles in the
-  # domain don't OOM on sbatch:'s (e.g. 1vcpu=8GB) node RAM. Expect very few
-  # batches here - most tiles stay on sbatch:.
+  # domain don't OOM on sbatch:'s (e.g. 1vcpu=8GB) node RAM, for BOTH
+  # preprocessing and simulation. Expect very few batches here - most tiles
+  # stay on sbatch:.
   sbatch_large:
     partition: 4vcpu               # e.g. "16vcpu" - see large_tile_pixel_threshold's comment above
     account: ""
     time: "1-00:00:00"
     mem: "24G"                            # e.g. "96G" - well under the partition's per-node RAM, generous margin over the estimate
-    cpus_per_task: 4                                  # still one tile at a time per node - only the partition's RAM changes, not the concurrency model
+    cpus_per_task: 4                                  # simulation: one tile at a time regardless; preprocessing: real `snakemake --cores` parallelism for "large" batches
     env_activate_cmd: 'module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm'
 
 

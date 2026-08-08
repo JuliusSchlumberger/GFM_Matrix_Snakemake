@@ -115,7 +115,7 @@ ipcc_ar6_slr_wg1_csv:
 deltadtm:
   data_type: RasterDataset
   driver: raster
-  path: inputs\DeltaDTM\deltadtm.vrt
+  path: inputs/DeltaDTM/deltadtm.vrt
   crs: 4326
   filesystem: local
   nodata: -9999
@@ -192,7 +192,7 @@ land_polygons:
 land_use:
   data_type: RasterDataset
   driver: raster
-  path: inputs\Copernicus\Copernicus_LandUse.tif
+  path: inputs/Copernicus/Copernicus_LandUse.tif
   crs: 4326
   filesystem: local
   meta:
@@ -322,7 +322,7 @@ population:
 lu_to_roughness_lookup:
   data_type: DataFrame
   driver: csv
-  path: inputs\Copernicus\lu_to_roughness_lookup.csv
+  path: inputs/Copernicus/lu_to_roughness_lookup.csv
   filesystem: local
   encoding: UTF-8
   meta:

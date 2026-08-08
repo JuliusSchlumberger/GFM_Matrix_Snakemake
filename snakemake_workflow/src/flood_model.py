@@ -43,14 +43,18 @@ _STRUCTURE_8 = np.ones((3, 3), dtype=bool)
 # rasters.py's int16 encodings) - see conversation 2026-08-01.
 MIN_FLOOD_DEPTH_CM = 10
 
-# Convergence threshold for the eikonal solve's round-based mode (used by
-# the default max_rounds-capped path, every obstacle_coupling inner solve,
-# and ignored entirely only when an explicit fixed `sweep_budget` is passed
-# instead - see solve_eikonal_dense). 0.1m is the decision-relevant
-# flood/no-flood threshold - depth precision beyond that isn't used - so
-# epsilon is set well below it (not the previous friction/resolution-derived
-# formula, which chased ~1e-6 to 1e-7m, far finer than anything physically
-# meaningful) - see conversation 2026-07-31.
+# Default convergence threshold for the eikonal solve's round-based mode
+# (used by the default max_rounds-capped path, every obstacle_coupling
+# inner solve, and ignored entirely only when an explicit fixed
+# `sweep_budget` is passed instead - see solve_eikonal_dense). 0.1m is the
+# decision-relevant flood/no-flood threshold - depth precision beyond that
+# isn't used - so epsilon is set well below it (not the previous
+# friction/resolution-derived formula, which chased ~1e-6 to 1e-7m, far
+# finer than anything physically meaningful) - see conversation 2026-07-31.
+# Overridable via flood_depth_dense's own `waterlevel_epsilon_m` parameter
+# (2026-08 - config-driven via simulation.flooding.waterlevel_epsilon_m in
+# config.yml, not just this hardcoded default) - this constant remains the
+# fallback for direct calls (tests, calibration scripts) that don't pass one.
 WATERLEVEL_EPSILON_M = 0.03
 
 # Friction assigned to cells the obstacle-coupling machinery has determined
@@ -251,6 +255,7 @@ def flood_depth_dense(
     max_outer_iterations: int = 5,
     max_rounds: int = 12,
     outer_convergence_pct: float = 0.01,
+    waterlevel_epsilon_m: float = WATERLEVEL_EPSILON_M,
 ) -> tuple[np.ndarray, dict]:
     """Production flood-depth solve: dense domain, round-based by default
     (2026-08 - see `sweep_budget`/`max_rounds` below).
@@ -391,6 +396,12 @@ def flood_depth_dense(
             outer loop; `outer_convergence_pct` is the tolerant early-stop
             threshold (percent of the tile's cells newly blocked this outer
             iteration).
+        waterlevel_epsilon_m: round-level early-exit convergence threshold
+            for the round-based solve (metres - see module docstring's
+            `WATERLEVEL_EPSILON_M` note on why 0.03m). Defaults to the
+            module constant; exposed as a parameter (2026-08) so it can be
+            set from `simulation.flooding.waterlevel_epsilon_m` in
+            `config.yml` rather than only ever the hardcoded default.
 
     Returns:
         `(waterdepth, diagnostics)`. `waterdepth` has the same shape as
@@ -440,7 +451,7 @@ def flood_depth_dense(
 
     if not obstacle_coupling:
         t = solve_eikonal_dense(
-            friction, coastline_rows, coastline_cols, -initial, WATERLEVEL_EPSILON_M,
+            friction, coastline_rows, coastline_cols, -initial, waterlevel_epsilon_m,
             max_rounds=max_rounds, sweep_budget=sweep_budget,
         )
         waterlevel = -t[1:, 1:]
@@ -460,7 +471,7 @@ def flood_depth_dense(
         for outer in range(max_outer_iterations):
             n_outer = outer + 1
             t, inner_diag = solve_eikonal_dense(
-                friction_b, coastline_rows, coastline_cols, -initial, WATERLEVEL_EPSILON_M,
+                friction_b, coastline_rows, coastline_cols, -initial, waterlevel_epsilon_m,
                 max_rounds=max_rounds, return_diagnostics=True,
             )
             waterlevel_b = -t[1:, 1:]

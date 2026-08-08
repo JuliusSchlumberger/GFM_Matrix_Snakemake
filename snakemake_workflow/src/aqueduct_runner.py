@@ -16,7 +16,7 @@ import numpy as np
 import rasterio
 
 from config_utils import retry_transient_io
-from flood_model import flood_depth_dense
+from flood_model import WATERLEVEL_EPSILON_M, flood_depth_dense
 from rasters import (
     decode_dem_cm,
     decode_friction_int16,
@@ -44,6 +44,7 @@ def run_aqueduct_python(
     max_outer_iterations: int = 5,
     max_rounds: int = 12,
     outer_convergence_pct: float = 0.01,
+    waterlevel_epsilon_m: float = WATERLEVEL_EPSILON_M,
 ) -> dict:
     """Run `flood_model.flood_depth_dense` in-process and write its output.
 
@@ -55,12 +56,13 @@ def run_aqueduct_python(
     the actual validation.
 
     `ocean_code`/`river_code`: only used on the `boundaries_path` path (see
-    `flood_model.coastline_mask`). `max_rounds` is forwarded regardless of
-    `obstacle_coupling` (used by the default round-based solve either way -
-    see `flood_depth_dense`'s own docstring, 2026-08); `obstacle_coupling`/
-    `max_outer_iterations`/`outer_convergence_pct` are obstacle-coupling-
-    specific. Defaults match `simulation.flooding` in config.yml
-    (`max_rounds` top-level, the rest under `.obstacle_coupling`).
+    `flood_model.coastline_mask`). `max_rounds`/`waterlevel_epsilon_m` are
+    forwarded regardless of `obstacle_coupling` (used by the default
+    round-based solve either way - see `flood_depth_dense`'s own docstring,
+    2026-08); `obstacle_coupling`/`max_outer_iterations`/
+    `outer_convergence_pct` are obstacle-coupling-specific. Defaults match
+    `simulation.flooding` in config.yml (`max_rounds`/`waterlevel_epsilon_m`
+    top-level, the rest under `.obstacle_coupling`).
 
     Returns:
         The `diagnostics` dict from `flood_depth_dense` - see its docstring.
@@ -101,6 +103,7 @@ def run_aqueduct_python(
         max_outer_iterations=max_outer_iterations,
         max_rounds=max_rounds,
         outer_convergence_pct=outer_convergence_pct,
+        waterlevel_epsilon_m=waterlevel_epsilon_m,
     )
     save_waterdepth_raster(dem_path, waterdepth, output_path)
     return diagnostics

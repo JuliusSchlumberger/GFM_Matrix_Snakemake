@@ -32,6 +32,14 @@ channels:
   - nodefaults
 dependencies:
   - python=3.10.13
+  # snakemake.utils.min_version("7.0") (Snakefile's own version guard) uses
+  # pkg_resources internally, which comes from setuptools - not guaranteed
+  # bundled by default with every python=3.10 conda-forge solve, and
+  # nothing else in this list pulls it in as a dependency. Capped below the
+  # setuptools versions that started deprecating/dropping pkg_resources -
+  # confirmed missing entirely (ModuleNotFoundError at that exact Snakefile
+  # line) on a fresh Hydrax env build, 2026-08.
+  - setuptools<70
   - libblas=*=*openblas          # forces OpenBLAS over MKL - see note above
   - hydromt=0.9.3
   - numpy=1.26.2
@@ -63,6 +71,15 @@ dependencies:
       # against this codebase; snakemake 8's plugin architecture is a real
       # breaking change from 7.x, not just a version bump).
       - snakemake==7.32.4
+      # snakemake==7.32.4's own get_argument_parser() calls
+      # pulp.list_solvers(onlyAvailable=True) - a function only present in
+      # pulp<=2.7. snakemake's own dependency spec is "pulp>=2.0" (no upper
+      # bound), so an unpinned solve installs the latest pulp (3.x, which
+      # renamed this to listSolvers) and every single snakemake invocation
+      # crashes immediately with AttributeError, before touching any files -
+      # confirmed 2026-08 on Hydrax (every generated preprocessing sbatch
+      # job died in 1-5s at CLI-parser construction, not real work).
+      - pulp==2.7.0
 
 # Optional dev tools (lint/type-check, not needed to run the pipeline):
 #   mamba install -n gfm ruff mypy

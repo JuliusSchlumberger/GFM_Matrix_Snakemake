@@ -40,13 +40,12 @@ preprocessing + dispatch into one Hydrax job" below.
 2. Fill in the placeholders under `hpc:` in `config.yml`:
    `n_nodes` (max sbatch scripts to generate PER WAVE, PER SIZE CLASS — a
    group with fewer tiles than `n_nodes` gets one script per tile instead,
-   never an empty one), `sbatch.partition` / `account` / `time` / `mem` /
-   `cpus_per_task` / `env_activate_cmd` (the per-tile simulation jobs for
-   most tiles), `sbatch_large.*` (same keys, a bigger-RAM partition for
-   tiles at/above `large_tile_pixel_threshold` — see "Tile-size routing"
-   below), and `preprocess_sbatch.*` (same keys again, for the optional
-   bundled preprocessing job below — typically a bigger partition, since
-   preprocessing parallelises via plain Snakemake `--cores` on one node).
+   never an empty one), and `sbatch.partition` / `account` / `time` / `mem` /
+   `cpus_per_task` / `env_activate_cmd` + `sbatch_large.*` (same keys, a
+   bigger-RAM partition for tiles at/above `large_tile_pixel_threshold` —
+   see "Tile-size routing" below). `sbatch`/`sbatch_large` are shared by
+   BOTH simulation batching AND preprocessing batching — there is no
+   separate preprocessing-only sbatch config.
 
 ### Tile-size routing
 
@@ -55,14 +54,26 @@ Hydrax's regular partitions all scale RAM at a fixed 8GB/vCPU (`1vcpu`=8GB,
 `hpc.sbatch` is meant for the common case (e.g. `1vcpu` — by far the
 most-provisioned partition); `hpc.large_tile_pixel_threshold` (default
 70,000,000) routes any tile at/above that estimated pixel count to
-`hpc.sbatch_large` (e.g. `16vcpu`) instead, so the largest tiles in the
-domain don't OOM on a small node's RAM. Pixel count is estimated from each
-tile's own bounding box (`area_deg2 * 3600**2`, DeltaDTM's ~1 arcsec native
-resolution — see `hpc_dispatch.smk`), not by reading the real DEM, so it's
-computable before any preprocessing has run; treat it as an approximation
-and keep the threshold's implied memory estimate a comfortable margin below
-`sbatch`'s partition RAM (see the comment in `config.yml`). Expect very few
-`*_large_*` batches — most tiles stay on `sbatch`.
+`hpc.sbatch_large` (e.g. `4vcpu`/`16vcpu`) instead, so the largest tiles in
+the domain don't OOM on a small node's RAM — for BOTH preprocessing and
+simulation batching. Pixel count is estimated from each tile's own bounding
+box (`area_deg2 * 3600**2`, DeltaDTM's ~1 arcsec native resolution — see
+`hpc_dispatch.smk` / `generate_hpc_preprocess_job.py`), not by reading the
+real DEM, so it's computable before any preprocessing has run; treat it as
+an approximation and keep the threshold's implied memory estimate a
+comfortable margin below `sbatch`'s partition RAM (see the comment in
+`config.yml`). On the real production tile grid this split is NOT a small
+tail — confirmed ~15% of tiles (389 of 2,578) land in `large`, not "very
+few" as the pixel-count intuition might suggest.
+
+For preprocessing specifically, `cpus_per_task` is not just a SLURM
+allocation size — it's passed straight to `snakemake --cores N` for that
+batch, so it's the real degree of Snakemake-level parallelism across that
+batch's tiles. A `cpus_per_task: 1` `sbatch` partition means "small"
+preprocessing batches (most of the domain) run fully serial; bump it up if
+preprocessing throughput matters more than a minimal per-node footprint.
+Simulation batches don't have this consideration — each node runs one tile
+at a time regardless of `cpus_per_task`.
 
 ## 1. Preprocess + generate jobs
 
@@ -97,31 +108,39 @@ result (see step 2).
 ### Bundling preprocessing + dispatch into Hydrax jobs
 
 Instead of running step 1 locally, generate sbatch scripts that run
-preprocessing directly on Hydrax — spread across `hpc.n_nodes` PARALLEL
-nodes, same as simulation batching, since preprocessing has no
-wave/hop_distance ordering constraint (every tile's DEM/mask/friction/
-boundaries are independent of every other tile) — then, once every node's
-batch has finished, one more job generates the wave sbatch scripts and
-submits `submit_waves.sh` itself:
+preprocessing directly on Hydrax — tiles split by size class FIRST (same
+`hpc.large_tile_pixel_threshold` routing as simulation — see "Tile-size
+routing" above), then `hpc.n_nodes` PARALLEL nodes split PROPORTIONALLY
+between the two classes by their share of tiles (e.g. ~15% large / ~85%
+small on the real production grid → ~3 nodes large, ~17 nodes small out of
+20 — NOT `n_nodes` each independently, which would let preprocessing use up
+to 2x the node budget), since preprocessing has no wave/hop_distance
+ordering constraint (every tile's DEM/mask/friction/boundaries are
+independent of every other tile) — then, once every node's batch has
+finished, one more job generates the wave sbatch scripts and submits
+`submit_waves.sh` itself:
 
 ```
 python snakemake_workflow/scripts/generate_hpc_preprocess_job.py
 bash {jobs_dir}/submit_preprocess_and_dispatch.sh
 ```
 
-This writes, per node batch, `{jobs_dir}/preprocess_batch_{id}.sbatch`
-(runs `snakemake --cores N <that batch's explicit target file list>`,
-using `hpc.preprocess_sbatch.*` from `config.yml`) plus a
-`preprocess_batch_{id}_targets.txt` (the tile's dem/mask/friction +
-every `(return_period, waterlevel_name)` boundaries file for that batch's
-tiles — read at runtime via `$(cat ...)` rather than inlined, since a
-batch's target list can run into the thousands of paths). It also writes
-`{jobs_dir}/generate_jobs_and_dispatch.sbatch` (runs `snakemake
+This writes, per (size class, node batch),
+`{jobs_dir}/preprocess_{small|large}_batch_{id}.sbatch` (runs `snakemake
+--cores N <that batch's explicit target file list>`, using `hpc.sbatch` or
+`hpc.sbatch_large` from `config.yml` depending on size class — same
+partitions simulation batching uses, no separate preprocessing-only
+config) plus a `preprocess_{small|large}_batch_{id}_targets.txt` (the
+tile's dem/mask/friction + every `(return_period, waterlevel_name)`
+boundaries file for that batch's tiles — read at runtime via `$(cat ...)`
+rather than inlined, since a batch's target list can run into the
+thousands of paths). It also writes `{jobs_dir}/generate_jobs_and_dispatch.
+sbatch` (uses `hpc.sbatch` — lightweight, just runs `snakemake
 generate_aqueduct_jobs` — fast, since every preprocessing output already
 exists by then — then `submit_waves.sh`), and
 `{jobs_dir}/submit_preprocess_and_dispatch.sh`, which submits every
-preprocessing batch with NO dependency between them (fully parallel), then
-submits `generate_jobs_and_dispatch.sbatch` with
+preprocessing batch (both size classes) with NO dependency between them
+(fully parallel), then submits `generate_jobs_and_dispatch.sbatch` with
 `--dependency=afterany:<every batch job id>` — the same afterany-join
 pattern `submit_waves.sh` already uses between simulation waves, just one
 more phase in front of wave 0.

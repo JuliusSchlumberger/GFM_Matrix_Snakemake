@@ -473,7 +473,9 @@ at its consumer(s). Key sections:
   raster_format    — GTiff/zstd output settings shared by every raster write.
   simulation       — `model_outputs` dir; `flooding.*` (resolution, knn,
                      default_friction, `max_rounds` — the eikonal solve's
-                     round cap, currently 12, see section 8; `obstacle_
+                     round cap, currently 12, `waterlevel_epsilon_m` — the
+                     round-level convergence threshold, currently 0.03m,
+                     both see section 8; `obstacle_
                      coupling.*` — currently `enabled: true`, see section 8's
                      EIKONAL SOLVE entry for what this does); `dem_gap_fill.*`
                      (DEM nodata handling, see section 8); `aqueduct_mem_estimate`
@@ -545,7 +547,11 @@ domain (land, ocean, lake — every cell, no candidate-set restriction) via
 Fast Sweeping (`eikonal.solve_eikonal_dense`): friction-weighted geodesic
 propagation from the seeds, `round_max_change <= epsilon` (4 sweeps/round)
 as the convergence check, capped at `flooding.max_rounds` (currently 12,
-i.e. up to 48 sweeps). A cell no seed's influence ever reaches keeps the
+i.e. up to 48 sweeps). `epsilon` is `simulation.flooding.
+waterlevel_epsilon_m` (currently 0.03m - config-driven since 2026-08;
+`flood_model.WATERLEVEL_EPSILON_M` is now just that parameter's fallback
+default for direct calls that don't pass one, e.g. calibration scripts).
+A cell no seed's influence ever reaches keeps the
 solver's default: `t = +99` (waterlevel = `-t` = `-99m`) — comfortably below
 any real elevation, deliberately in the OPPOSITE direction from `rasters.
 DEM_NODATA_M`/`land_fill_value_m` (`+99m`, "definitely dry") — so an
@@ -836,23 +842,38 @@ Both open gaps from the pre-2026-08 flat-dispatch design are now closed:
    real results, not failures).
 
 6. **Bundled preprocessing + dispatch (`scripts/generate_hpc_preprocess_job.py`,
-   new, rewritten to be node-parallel 2026-08).** Stage 1 (preprocessing +
-   `generate_aqueduct_jobs`) doesn't have to run on the local Windows
-   machine, and doesn't have to run on a single node either — preprocessing
-   has no wave/hop_distance ordering constraint (every tile is
-   independent), so this script splits all tiles' target files
-   (dem/mask/friction + every (return_period, waterlevel_name) boundaries
-   file - real scale: 2,578 tiles x 48 targets/tile = 123,744 total, at
-   this repo's current RP/SLR config) evenly across `hpc.n_nodes` (same
-   even-split as simulation batching) and writes one
-   `preprocess_batch_{id}.sbatch` per node (`snakemake --cores N $(cat
-   ...targets.txt)`, using new `hpc.preprocess_sbatch.*` config) plus a
-   `preprocess_batch_{id}_targets.txt` per batch (target lists run into
-   the thousands of paths - read at runtime via `$(cat ...)`, not
-   inlined). `submit_preprocess_and_dispatch.sh` submits every batch with
-   NO dependency between them (fully parallel - unlike simulation waves),
-   then submits one more `generate_jobs_and_dispatch.sbatch`
-   (`generate_aqueduct_jobs` + `submit_waves.sh`) with
+   new, rewritten to be node-parallel AND size-routed 2026-08).** Stage 1
+   (preprocessing + `generate_aqueduct_jobs`) doesn't have to run on the
+   local Windows machine, and doesn't have to run on a single node either —
+   preprocessing has no wave/hop_distance ordering constraint (every tile
+   is independent), so this script classifies tiles by the SAME bbox-area
+   pixel-count proxy and `hpc.large_tile_pixel_threshold` used for
+   simulation batching (item 7 below), splits each size class's target
+   files (dem/mask/friction + every (return_period, waterlevel_name)
+   boundaries file - real scale: 2,578 tiles, ~15% (389) classified
+   "large") evenly across a PROPORTIONAL share of `hpc.n_nodes` (e.g. ~15%
+   large / ~85% small of the total node budget, not `n_nodes` independently
+   per class - the latter would let preprocessing use up to 2x n_nodes
+   total; each class still gets a minimum of 1 node), and writes one
+   `preprocess_{small|large}_batch_{id}.sbatch` per batch (`snakemake
+   --cores N $(cat ...targets.txt)`, using `hpc.sbatch`/`hpc.sbatch_large` -
+   NO separate preprocessing-only sbatch config; user-requested change from
+   an earlier dedicated `hpc.preprocess_sbatch` block, since reusing the
+   same `sbatch`/`sbatch_large` config the simulation waves already use
+   keeps partition/mem choices in exactly one place) plus a
+   `preprocess_{small|large}_batch_{id}_targets.txt` per batch (target
+   lists run into the thousands of paths - read at runtime via `$(cat
+   ...)`, not inlined). For preprocessing specifically,
+   `sbatch.cpus_per_task` is not just a SLURM allocation size - it's the
+   real `snakemake --cores N` parallelism for that batch, so a
+   `cpus_per_task: 1` `sbatch` partition means "small" preprocessing
+   batches (most of the domain) run fully serial - a real, known,
+   deliberately-accepted trade-off of unifying the configs, flagged to and
+   confirmed by the user. `submit_preprocess_and_dispatch.sh` submits every
+   batch (both size classes) with NO dependency between them (fully
+   parallel - unlike simulation waves), then submits one more
+   `generate_jobs_and_dispatch.sbatch` (uses `hpc.sbatch` - lightweight,
+   just `generate_aqueduct_jobs` + `submit_waves.sh`) with
    `--dependency=afterany:<every batch job id>` - the same afterany-join
    pattern already used between simulation waves, just one more phase in
    front of wave 0. Uses `set -euo pipefail` throughout (unlike the
@@ -884,6 +905,59 @@ Both open gaps from the pre-2026-08 flat-dispatch design are now closed:
    sbatch`; `submit_waves.sh` still only barriers on WAVE, submitting both
    size classes of a wave together (size only picks a batch's partition,
    never its ordering).
+
+8. **`pulp`/`snakemake` incompatibility (found live on Hydrax, 2026-08).**
+   `snakemake==7.32.4`'s own `get_argument_parser()` calls
+   `pulp.list_solvers(onlyAvailable=True)` - a function only present in
+   `pulp<=2.7`. Snakemake's own dependency spec is `pulp>=2.0` (no upper
+   bound), so an unpinned solve installs the latest `pulp` (3.x, which
+   renamed this to `listSolvers`), and EVERY `snakemake` invocation crashes
+   immediately with `AttributeError`, before touching any files - on
+   Hydrax this looked like every generated preprocessing sbatch job dying
+   in 1-5s (fast enough to initially suspect `module load` failing inside
+   the non-interactive sbatch shell, which turned out to be a red herring -
+   `sacct`/the `.err` log were needed to see the real traceback). `pulp`
+   isn't a direct `environment.yml` dependency - it's pulled in
+   transitively by pip installing `snakemake`, so nothing in this repo's
+   own dependency list hinted at the version drift. Fixed by adding an
+   explicit `pulp==2.7.0` pin right after `snakemake==7.32.4` in
+   `environment.yml`'s `pip:` section. Same fix needed on any existing env
+   built before this pin existed: `pip install "pulp==2.7.0"` inside the
+   activated env (no full rebuild needed - `pulp` is pip-managed, not
+   conda-managed, in this environment.yml).
+
+9. **Missing `setuptools`/`pkg_resources` (found live on Hydrax, 2026-08,
+   same env-build session as the `pulp` issue above).** The Snakefile's own
+   `min_version("7.0")` guard (`snakemake.utils.min_version`) uses
+   `pkg_resources` internally, which comes from `setuptools` - not
+   guaranteed bundled by default with every `python=3.10` conda-forge
+   solve, and nothing else in `environment.yml`'s dependency list pulls it
+   in transitively. Surfaced as `ModuleNotFoundError: No module named
+   'pkg_resources'` pointing at the Snakefile's own `min_version(...)`
+   line - looks like a bug in this repo's code at first glance, but it's
+   purely an environment gap. Fixed by adding `setuptools<70` to
+   `environment.yml` (capped below the setuptools versions that started
+   deprecating/dropping `pkg_resources`, to avoid reintroducing the same
+   gap on a future solve). Same immediate fix on an existing env built
+   before this pin existed: `pip install "setuptools<70"` inside the
+   activated env.
+
+10. **Windows-style backslash paths in `data_catalog_gfm.yml` (found live on
+    Hydrax, 2026-08, first real preprocessing run after fixing items 8-9
+    above).** Three `path:` entries (`deltadtm`, `Copernicus_LandUse`,
+    `lu_to_roughness_lookup`) used backslashes (`inputs\DeltaDTM\
+    deltadtm.vrt`) instead of forward slashes - works by accident on
+    Windows (where `\` is the path separator) but on Linux hydromt/GDAL
+    just look for a literal file named with embedded backslash characters
+    in the name, which never exists (`FileNotFoundError: No such file
+    found: .../inputs\DeltaDTM\deltadtm.vrt`, mixed real `/` from the
+    resolved root + literal `\` from the catalog entry). Silent on Windows
+    the whole time this project has run there, only surfaced once real
+    preprocessing actually ran on Hydrax. Fixed by switching all three to
+    forward slashes (`deltadtm_mask`'s entry already correctly used
+    forward slashes, which is what made the inconsistency easy to spot).
+    Worth a periodic `grep` of `data_catalog_gfm.yml` for `\\` if new
+    entries get added by hand on a Windows machine.
 
 Real Deltares Hydrax specifics (confirmed via `henrique/General attention
 points for Hydrax users.docx`, 2026-08): partitions are `1vcpu`/`4vcpu`/

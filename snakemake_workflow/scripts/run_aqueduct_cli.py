@@ -131,6 +131,7 @@ def main() -> None:
             max_outer_iterations=oc_config.get("max_outer_iterations", 5),
             max_rounds=flooding_config["max_rounds"],
             outer_convergence_pct=oc_config.get("outer_convergence_pct", 0.01),
+            waterlevel_epsilon_m=flooding_config["waterlevel_epsilon_m"],
         )
     except MemoryError:
         mark_tile_oom(oom_dir, tile_id, reason="MemoryError in flood_depth_dense - tile too large")
