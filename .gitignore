@@ -1,9 +1,6 @@
 # Machine-local config override (copy from config_local.yml.example)
 snakemake_workflow/config/config_local.yml
 
-# HPC (Linux) path override (copy from config_hpc.yml.example)
-snakemake_workflow/config/config_hpc.yml
-
 # pixi environments
 .pixi
 .vscode

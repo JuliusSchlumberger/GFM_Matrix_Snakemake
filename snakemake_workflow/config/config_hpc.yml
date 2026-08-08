@@ -1,0 +1,38 @@
+# HPC (Linux) path overrides for GFM's generate_aqueduct_jobs rule.
+#
+# Copy this file to config_hpc.yml (git-ignored) and fill in the values for
+# your HPC cluster. Only include the keys you need to override - everything
+# else is inherited from config.yml (+ config_local.yml, if present).
+#
+# Unlike config_local.yml (loaded automatically by every entry point), this
+# file is only loaded on request, by scripts/generate_aqueduct_jobs.py via
+# config_utils.load_config(..., extra_override="config_hpc.yml") - it exists
+# so that ONE machine (the Windows box that runs Snakemake preprocessing) can
+# resolve paths BOTH ways: locally (as usual) AND as the Linux HPC compute
+# nodes will see them, at the same time, without the two configs conflicting.
+#
+# The flood solver is pure Python (src/flood_model.py + src/eikonal.py, a
+# Numba JIT - no compiled executable, no per-machine single-instance
+# constraint), so unlike an earlier Julia-based version of this pipeline,
+# no separate build/executable path is needed here - just where the repo
+# and shared storage live on the HPC side.
+#
+# Usage:
+#   cp snakemake_workflow/config/config_hpc.yml.example \
+#      snakemake_workflow/config/config_hpc.yml
+#   # then edit config_hpc.yml
+
+paths:
+  # Linux mount of the SAME shared storage as paths.root (e.g. D:/GFM) on the
+  # Windows preprocessing machine - same underlying files, different mount
+  # prefix. Every {root}-based path in config.yml (model_outputs, etc.)
+  # resolves relative to this on the HPC side.
+  root: "/p/11212688-004-global-floodmaps"                     # ← change to your HPC's mount path
+
+  # Linux path to this repository checkout (used to locate
+  # scripts/run_aqueduct_cli.py from the generated sbatch scripts) - must be
+  # overridden here even though config.yml already sets code_root, since
+  # that value is the Windows preprocessing machine's own repo path.
+  code_root: "/u/schlumbe/gfm_code"           # ← must be an absolute path: this gets embedded as `cd "{code_root}"` in
+  # generated sbatch scripts, and bash does NOT expand `~` inside double quotes - a `~`-based path here would silently
+  # fail every generated preprocessing/dispatch job
