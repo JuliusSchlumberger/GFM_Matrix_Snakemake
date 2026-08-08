@@ -436,7 +436,11 @@ hpc:
     # point regardless of progress. Estimate conservatively (a job is hard-
     # killed at this limit, finished or not) but not wastefully high.
     time: "1-00:00:00"
-    mem: "8G"                           # e.g. "32G"
+    # 1vcpu nodes report 7950MB usable (`sinfo -N -o "%N %P %m %c"`), NOT
+    # the nominal 8192MB (8GB) - requesting the full nominal amount fails
+    # with "Memory specification can not be satisfied". Stay safely under
+    # the real ceiling, not the marketing number.
+    mem: "7G"
     # For simulation batches: irrelevant beyond the SLURM allocation size
     # (each node runs one tile at a time regardless). For preprocessing
     # batches (generate_hpc_preprocess_job.py): this IS the real
@@ -458,7 +462,7 @@ hpc:
     partition: 4vcpu               # e.g. "16vcpu" - see large_tile_pixel_threshold's comment above
     account: ""
     time: "1-00:00:00"
-    mem: "24G"                            # e.g. "96G" - well under the partition's per-node RAM, generous margin over the estimate
+    mem: "30G"                            # e.g. "96G" - well under the partition's per-node RAM, generous margin over the estimate
     cpus_per_task: 4                                  # simulation: one tile at a time regardless; preprocessing: real `snakemake --cores` parallelism for "large" batches
     env_activate_cmd: 'module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm'
 
