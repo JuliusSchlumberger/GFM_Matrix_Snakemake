@@ -1,0 +1,35 @@
+ WARN Encountered 1 warning while parsing the manifest:
+  ⚠ The `project` field is deprecated. Use `workspace` instead.
+    ╭─[C:\Users\Schlu005\GFM\pixi.toml:1:1]
+  1 │ ╭─▶ [project]
+  2 │ │   name = "GFM"
+  3 │ │   version = "0.1.0"
+  4 │ │   description = "Add a short description here"
+  5 │ │   authors = ["Maarten Pronk <git@evetion.nl>"]
+  6 │ │   channels = ["conda-forge"]
+  7 │ │   platforms = ["osx-arm64", "win-64", "linux-64"]
+  8 │ │   readme = "README.md"
+  9 │ │   license = "MIT"
+ 10 │ │   license-file = "LICENSE"
+ 11 │ │   homepage = "https://github.com/Deltares-research/GFM/"
+ 12 │ │   documentation = "https://github.com/Deltares-research/GFM/"
+ 13 │ ├─▶ repository = "https://github.com/Deltares-research/GFM/"
+    · ╰──── replace this with 'workspace'
+ 14 │     
+    ╰────
+
+=== Part A: regression test ===
+PASS: all 19 known real river-mouth tiles still flagged is_river_mouth=True
+PASS: all 5 synthetic non-river-mouth edge cases correctly flagged False
+PASS: clean synthetic positive case (both fractions comfortably above threshold) correctly flagged True
+
+=== Part B: zoomed plots for every currently-detected river-mouth tile ===
+79 tiles to plot -> C:\Users\Schlu005\GFM\tests\river_mouth_tile_validation\plots
+  10/79 plotted
+  20/79 plotted
+  30/79 plotted
+  40/79 plotted
+  50/79 plotted
+  60/79 plotted
+  70/79 plotted
+Done: 79 plots written to C:\Users\Schlu005\GFM\tests\river_mouth_tile_validation\plots

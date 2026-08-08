@@ -1,0 +1,133 @@
+ WARN Encountered 1 warning while parsing the manifest:
+  ⚠ The `project` field is deprecated. Use `workspace` instead.
+    ╭─[C:\Users\Schlu005\GFM\pixi.toml:1:1]
+  1 │ ╭─▶ [project]
+  2 │ │   name = "GFM"
+  3 │ │   version = "0.1.0"
+  4 │ │   description = "Add a short description here"
+  5 │ │   authors = ["Maarten Pronk <git@evetion.nl>"]
+  6 │ │   channels = ["conda-forge"]
+  7 │ │   platforms = ["osx-arm64", "win-64", "linux-64"]
+  8 │ │   readme = "README.md"
+  9 │ │   license = "MIT"
+ 10 │ │   license-file = "LICENSE"
+ 11 │ │   homepage = "https://github.com/Deltares-research/GFM/"
+ 12 │ │   documentation = "https://github.com/Deltares-research/GFM/"
+ 13 │ ├─▶ repository = "https://github.com/Deltares-research/GFM/"
+    · ╰──── replace this with 'workspace'
+ 14 │     
+    ╰────
+
+
+  [ SKIP ] Download DeltaDTM tiles
+
+  [ SKIP ] Tile generation
+
+============================================================
+  Build along-water forcing distance index
+============================================================
+2026-08-04 14:47:06,451 - snakemake_workflow - log - INFO - HydroMT version: 0.9.4
+14:47:06  INFO      HydroMT version: 0.9.4
+2026-08-04 14:47:06,451 - snakemake_workflow - data_catalog - INFO - Parsing data catalog from C:\Users\Schlu005\GFM\snakemake_workflow\config\data_catalog_gfm.yml
+14:47:06  INFO      Parsing data catalog from C:\Users\Schlu005\GFM\snakemake_workflow\config\data_catalog_gfm.yml
+Stage 1: load real simulation chunks (tile_grid.path)
+  2434 chunks
+
+Stage 2: load COAST-RP station locations
+14:47:07  INFO      COAST-RP_preprocessed.nc already exists � loading.
+  22670 stations
+
+Stage 3: build_connectivity_distance_index (chunk-scoped Dijkstra)
+  build_connectivity_distance_index: chunk 20/2434 (387s elapsed, 5295461 cells so far)
+  build_connectivity_distance_index: chunk 40/2434 (387s elapsed, 7535579 cells so far)
+  build_connectivity_distance_index: chunk 60/2434 (405s elapsed, 10835106 cells so far)
+  build_connectivity_distance_index: chunk 80/2434 (422s elapsed, 12747292 cells so far)
+  build_connectivity_distance_index: chunk 100/2434 (920s elapsed, 18088652 cells so far)
+  build_connectivity_distance_index: chunk 120/2434 (1089s elapsed, 22855054 cells so far)
+  build_connectivity_distance_index: chunk 140/2434 (3249s elapsed, 27540266 cells so far)
+  build_connectivity_distance_index: chunk 160/2434 (3249s elapsed, 30723108 cells so far)
+  build_connectivity_distance_index: chunk 180/2434 (3249s elapsed, 32846117 cells so far)
+  build_connectivity_distance_index: chunk 200/2434 (3249s elapsed, 36445842 cells so far)
+  build_connectivity_distance_index: chunk 220/2434 (3249s elapsed, 40791618 cells so far)
+  build_connectivity_distance_index: chunk 240/2434 (3249s elapsed, 44753550 cells so far)
+  build_connectivity_distance_index: chunk 260/2434 (3249s elapsed, 47114378 cells so far)
+  build_connectivity_distance_index: chunk 280/2434 (3249s elapsed, 51508405 cells so far)
+  build_connectivity_distance_index: chunk 300/2434 (3249s elapsed, 54831553 cells so far)
+  build_connectivity_distance_index: chunk 320/2434 (3249s elapsed, 58013329 cells so far)
+  build_connectivity_distance_index: chunk 340/2434 (3249s elapsed, 61965379 cells so far)
+  build_connectivity_distance_index: chunk 360/2434 (3249s elapsed, 64505537 cells so far)
+  build_connectivity_distance_index: chunk 380/2434 (3249s elapsed, 66486212 cells so far)
+  build_connectivity_distance_index: chunk 400/2434 (3249s elapsed, 69132499 cells so far)
+  build_connectivity_distance_index: chunk 420/2434 (3282s elapsed, 72372743 cells so far)
+  build_connectivity_distance_index: chunk 440/2434 (3581s elapsed, 76141274 cells so far)
+  build_connectivity_distance_index: chunk 460/2434 (3581s elapsed, 77601917 cells so far)
+  build_connectivity_distance_index: chunk 480/2434 (3619s elapsed, 79799524 cells so far)
+  build_connectivity_distance_index: chunk 500/2434 (3638s elapsed, 81844807 cells so far)
+  build_connectivity_distance_index: chunk 520/2434 (3644s elapsed, 83669581 cells so far)
+  build_connectivity_distance_index: chunk 540/2434 (3691s elapsed, 85625654 cells so far)
+  build_connectivity_distance_index: chunk 560/2434 (3700s elapsed, 86852951 cells so far)
+  build_connectivity_distance_index: chunk 580/2434 (3796s elapsed, 89127357 cells so far)
+concurrent.futures.process._RemoteTraceback: 
+"""
+Traceback (most recent call last):
+  File "C:\Users\Schlu005\GFM\.pixi\envs\default\Lib\concurrent\futures\process.py", line 261, in _process_worker
+    r = call_item.fn(*call_item.args, **call_item.kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Schlu005\GFM\.pixi\envs\default\Lib\concurrent\futures\process.py", line 210, in _process_chunk
+    return [fn(*args) for args in chunk]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Schlu005\GFM\.pixi\envs\default\Lib\concurrent\futures\process.py", line 210, in <listcomp>
+    return [fn(*args) for args in chunk]
+            ^^^^^^^^^
+  File "C:\Users\Schlu005\GFM\snakemake_workflow\src\connectivity_forcing.py", line 321, in _distance_index_one
+    nearest_idx, nearest_dist = _dijkstra_topk(
+                                ^^^^^^^^^^^^^^^
+  File "C:\Users\Schlu005\GFM\snakemake_workflow\src\connectivity_forcing.py", line 221, in _dijkstra_topk
+    _merge_topk(nearest_idx, nearest_dist, batch_orig_idx, batch_dist, k)
+  File "C:\Users\Schlu005\GFM\snakemake_workflow\src\connectivity_forcing.py", line 186, in _merge_topk
+    part = np.argpartition(cand_dist, k_eff - 1, axis=1)[:, :k_eff]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Schlu005\GFM\.pixi\envs\default\Lib\site-packages\numpy\core\fromnumeric.py", line 858, in argpartition
+    return _wrapfunc(a, 'argpartition', kth, axis=axis, kind=kind, order=order)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Schlu005\GFM\.pixi\envs\default\Lib\site-packages\numpy\core\fromnumeric.py", line 59, in _wrapfunc
+    return bound(*args, **kwds)
+           ^^^^^^^^^^^^^^^^^^^^
+numpy.core._exceptions._ArrayMemoryError: Unable to allocate 129. MiB for an array with shape (233928, 72) and data type int64
+"""
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\Schlu005\GFM\snakemake_workflow\preparation\run_preparation.py", line 97, in _run_step
+    fn(**kwargs)
+  File "C:\Users\Schlu005\GFM\snakemake_workflow\preparation\build_connectivity_map.py", line 94, in run
+    distance_index = build_connectivity_distance_index(
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Schlu005\GFM\snakemake_workflow\src\connectivity_forcing.py", line 431, in build_connectivity_distance_index
+    for batch_i, result in enumerate(ex.map(_distance_index_one, chunk_bboxes, chunksize=4), 1):
+  File "C:\Users\Schlu005\GFM\.pixi\envs\default\Lib\concurrent\futures\process.py", line 620, in _chain_from_iterable_of_lists
+    for element in iterable:
+  File "C:\Users\Schlu005\GFM\.pixi\envs\default\Lib\concurrent\futures\_base.py", line 619, in result_iterator
+    yield _result_or_cancel(fs.pop())
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Schlu005\GFM\.pixi\envs\default\Lib\concurrent\futures\_base.py", line 317, in _result_or_cancel
+    return fut.result(timeout)
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Schlu005\GFM\.pixi\envs\default\Lib\concurrent\futures\_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Schlu005\GFM\.pixi\envs\default\Lib\concurrent\futures\_base.py", line 401, in __get_result
+    raise self._exception
+numpy.core._exceptions._ArrayMemoryError: Unable to allocate 129. MiB for an array with shape (233928, 72) and data type int64
+
+  [FAIL] FAILED after 4128s - Build along-water forcing distance index
+
+  [ SKIP ] Boundary conditions
+
+============================================================
+  Preparation pipeline complete  (68.8 min)
+============================================================
+  [FAIL]  connectivity_map
+
+  Some steps failed � check output above.

@@ -18,8 +18,10 @@ data_catalog = get_data_catalog(snakemake.params.data_catalog, root=snakemake.pa
 model_bbox = compute_model_bbox(
     data_catalog,
     "deltadtm",
+    "deltadtm_mask",
     tile_bbox,
     buffer_arcsec=snakemake.params.buffer_arcsec,  # noqa: F821
+    elevation_threshold_m=snakemake.params.elevation_threshold_m,  # noqa: F821
 )
 
 with open(snakemake.output.model_bbox, "w") as f:  # noqa: F821

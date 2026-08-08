@@ -34,7 +34,7 @@ from rasterio.warp import reproject
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from config_utils import get_data_catalog, retry_transient_io  # noqa: E402
-from merge import AQUEDUCT_NODATA, _bounds_intersect  # noqa: E402
+from merge import AQUEDUCT_NODATA, _bounds_intersect, decode_waterdepth_array  # noqa: E402
 
 pp_cfg = snakemake.params.pp_cfg  # noqa: F821
 plot_cfg = pp_cfg["plots"]
@@ -92,8 +92,13 @@ def _read_into_grid(path: str, bounds: tuple, out_h: int, out_w: int) -> np.ndar
     dst_transform = transform_from_bounds(minx, miny, maxx, maxy, out_w, out_h)
     dst = np.zeros((out_h, out_w), dtype=np.float32)
     with retry_transient_io(rasterio.open, path) as src:
+        # Decode to float32 metres BEFORE reprojecting (not via
+        # rasterio.band(src, 1), which would warp the raw on-disk values
+        # unchanged) - the int16-centimetre tiles need the /100 +
+        # nodata-sentinel translation applied first, same as merge.py.
+        decoded = decode_waterdepth_array(src.read(1))
         reproject(
-            source=rasterio.band(src, 1),
+            source=decoded,
             destination=dst,
             src_transform=src.transform,
             src_crs=src.crs,

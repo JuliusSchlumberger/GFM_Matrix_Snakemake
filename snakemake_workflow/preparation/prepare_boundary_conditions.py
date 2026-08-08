@@ -6,36 +6,29 @@ runnable script.  Processing steps:
 
   1. Preprocess COAST-RP: drop Antarctic stations (station_y_coordinate <
      boundary_conditions.coastrp_min_lat in config.yml, -60° by default).
-  2. Optionally (boundary_conditions.mdt_correction.enabled): look up the
-     AVISO MDT (mdt_cnes_cls22) at each station (nearest
+  2. Look up the AVISO MDT (mdt_cnes_cls22) at each station (nearest
      valid grid cell, falling back to a +/-fallback_search_deg window search
      for stations whose nearest cell is NaN) and record it for step 4 to
-     subtract. Disabled by default - see the config comment for when to
-     enable it.
+     subtract.
   3. Compute spatially-varying SLR fingerprints from IPCC AR6 regional
      sea level projections (SSP2-4.5, year 2100, median quantile,
      DOI: 10.5281/zenodo.5914710).  Each target global-mean SLR level
      is scaled from the base fingerprint map.  Stations with no valid SLR
      data within ±1° fall back to the target global-mean value (i.e. spatially
      uniform SLR) so no NaN propagates.
-  4. Combine: total_wl = storm_tide(RP) [- MDT] + SLR_fingerprint(target_slr)
+  4. Combine: total_wl = storm_tide(RP) - MDT + SLR_fingerprint(target_slr)
      One NetCDF is written per (return_period, SLR_target) combination,
      named/keyed from boundary_conditions.nc_filename_template/
      nc_variable_template in config.yml (the same templates
      extract_boundaries.py reads with).
 
-MDT (mean dynamic topography) correction is OFF by default: COAST-RP is
-referenced to local mean sea level (MSL), and so is the DeltaDTM v1.1 DEM
-currently in use (GOCO06s geoid + MDT already subtracted upstream, per
-Seeger & Minderhoud 2025 - see the `deltadtm` catalog entry) - the two
-already share a vertical reference, so no additional shift is needed. Enable
-boundary_conditions.mdt_correction.enabled ONLY once the DEM has also
-switched to the pure-geoid GOCO06s reference (see vertical_datum_correction
-in config.yml / preparation/merge_tiles.py) - enabling only one side would
-leave the forcing and the terrain on different vertical references. When
-enabled, MDT is SUBTRACTED (storm_tide - MDT), matching the sign convention
-used to re-reference GEBCO/COAST-RP to GOCO06s elsewhere in this project
-(GCFM_UU/workflow/src/surge.apply_mdt_correction). See
+MDT (mean dynamic topography) correction re-references COAST-RP from local
+mean sea level (MSL) to the GOCO06s geoid, matching the DEM's own EGM2008 ->
+GOCO06s geoid correction (vertical_datum_correction in config.yml /
+scripts/extract_dem.py) - DEM and forcing always share one vertical
+reference. MDT is SUBTRACTED (storm_tide - MDT), matching the sign
+convention used to re-reference GEBCO/COAST-RP to GOCO06s elsewhere in this
+project (GCFM_UU/workflow/src/surge.apply_mdt_correction). See
 snakemake_workflow/config/data_catalog_gfm.yml (`coast_rp`, `deltadtm`,
 `mdt_cnes_cls22`) for the full reasoning.
 
@@ -380,20 +373,19 @@ def combine_scenarios(
     target_slr_m: list[float],
     nc_filename_template: str,
     nc_variable_template: str,
-    mdt_arr: np.ndarray | None = None,
+    mdt_arr: np.ndarray,
 ) -> None:
     """Write one scenario NetCDF per (RP, SLR) pair, named/keyed from
     `nc_filename_template`/`nc_variable_template` (boundary_conditions.* in
     config.yml) - the same templates extract_boundaries.py reads with, so
     changing either config value keeps both sides in sync.
 
-    total_wl = storm_tide(RP) [- MDT] + SLR_fingerprint(target_slr)
+    total_wl = storm_tide(RP) - MDT + SLR_fingerprint(target_slr)
 
     `mdt_arr` (aligned to ds_coastrp's station order, NaN treated as 0 - no
-    correction for that station) is only non-None when
-    boundary_conditions.mdt_correction.enabled is true; see module docstring
-    for when that should be turned on. When None, storm_tide is used
-    directly (no MDT correction applied).
+    correction for that station) re-references storm_tide from local MSL to
+    the GOCO06s geoid, matching the DEM's own geoid correction - see module
+    docstring.
 
     Because the SLR fallback ensures no NaN values enter the calculation,
     all output files are guaranteed to be NaN-free (MDT NaNs, if any, are
@@ -401,8 +393,7 @@ def combine_scenarios(
     """
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
-    if mdt_arr is not None:
-        mdt_arr = np.nan_to_num(mdt_arr.astype(np.float64), nan=0.0)
+    mdt_arr = np.nan_to_num(mdt_arr.astype(np.float64), nan=0.0)
 
     # Template with station coordinates only (no data variables)
     coord_template = {
@@ -421,16 +412,14 @@ def combine_scenarios(
             filename = nc_filename_template.format(return_period=return_period, waterlevel_name=waterlevel_name)
             variable = nc_variable_template.format(return_period=return_period, waterlevel_name=waterlevel_name)
             out_path = out_dir / filename
+
             if out_path.exists():
                 logger.debug("  %s already exists — skipping.", filename)
                 continue
 
             rp_key = f"storm_tide_rp_{int(rp):04d}"
             storm_tide = ds_coastrp[rp_key].values.astype(np.float64)
-            if mdt_arr is not None:
-                total_wl = (storm_tide - mdt_arr) + slr_arr
-            else:
-                total_wl = storm_tide + slr_arr
+            total_wl = (storm_tide - mdt_arr) + slr_arr
 
             ds_scen = xr.Dataset(
                 {variable: (["stations"], total_wl)},
@@ -491,20 +480,16 @@ def run(config: dict, force: bool = False) -> None:
     ds_coastrp = preprocess_coastrp(coastrp_raw, preprocessed_path, coastrp_min_lat)
 
     # ------------------------------------------------------------------
-    # Step 2: MDT correction (optional - see module docstring)
-    mdt_cfg = wl_cfg.get("mdt_correction", {})
-    mdt_arr = None
-    if mdt_cfg.get("enabled", False):
-        mdt_path = Path(catalog.get_source("mdt_cnes_cls22").path)
-        mdt_mapped_path = proc_dir / "MDT_mapped_on_coastal_points.nc"
-        _maybe_delete(mdt_mapped_path)
-        ds_mdt = compute_mdt_correction(
-            ds_coastrp, mdt_path, mdt_cfg.get("mdt_variable", "mdt"),
-            float(mdt_cfg.get("fallback_search_deg", 3.0)), mdt_mapped_path,
-        )
-        mdt_arr = ds_mdt["MDT"].values
-    else:
-        logger.info("Step 2: MDT correction disabled (boundary_conditions.mdt_correction.enabled=false).")
+    # Step 2: MDT correction (see module docstring)
+    mdt_cfg = wl_cfg["mdt_correction"]
+    mdt_path = Path(catalog.get_source("mdt_cnes_cls22").path)
+    mdt_mapped_path = proc_dir / "MDT_mapped_on_coastal_points.nc"
+    _maybe_delete(mdt_mapped_path)
+    ds_mdt = compute_mdt_correction(
+        ds_coastrp, mdt_path, mdt_cfg.get("mdt_variable", "mdt"),
+        float(mdt_cfg.get("fallback_search_deg", 3.0)), mdt_mapped_path,
+    )
+    mdt_arr = ds_mdt["MDT"].values
 
     # ------------------------------------------------------------------
     # Step 3: SLR fingerprints

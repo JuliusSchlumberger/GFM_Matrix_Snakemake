@@ -1,0 +1,6 @@
+tile,n_outer,n_cells,cum_time_s,iter_time_s,n_rounds_used,outer_stopped_early,pct_blocked_cumulative,pct_newly_blocked,last_max_change,epsilon,inner_converged,pct_cells_still_changing,mean_cell_change,min_cell_change,max_cell_change,max_depth_change_abs,n_newly_flooded,n_no_longer_flooded,n_inundated,depth_mean,depth_min,depth_max,depth_q20,depth_q80,status,pct_removed_by_static_filter_alone,pct_additional_removed_by_full_outer_loop,n_outer_iterations_to_convergence
+1755,0,45241814,23.015,23.015,6,False,0.0,0.0,0.00153305,6.666666498252501e-07,False,28.750291,5.215e-05,0.0,0.00160126,0.0,0,0,2123660,2.6901,0.0,11.3453,1.3453,3.7948,ok,,,
+1755,1,45241814,44.73,20.074,6,False,62.745621,62.745621,0.55712777,6.666666498252501e-07,False,3.005423,5.21e-06,0.0,0.55735779,1.6495,1,12754,2110907,2.6756,0.0,11.3456,1.3401,3.764,ok,,,
+1755,2,45241814,80.502,33.0,6,False,62.75757,0.011958,0.55712777,6.666666498252501e-07,False,2.988214,5.87e-06,0.0,0.55735779,1.575,4,606,2110305,2.6756,0.0,11.3455,1.3403,3.764,ok,,,
+1755,3,45241814,113.449,31.13,6,True,62.757859,0.000294,0.55712777,6.666666498252501e-07,False,2.988138,5.89e-06,0.0,0.55735779,1.4965,2,46,2110261,2.6756,0.0,11.3455,1.3403,3.764,ok,,,
+1755,,,,,,,,,,,,,,,,,,,,,,,,,summary,0.6005,0.0304,3

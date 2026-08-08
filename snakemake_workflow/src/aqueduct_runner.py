@@ -1,112 +1,121 @@
-"""Functions for running the flood model - either engine.
+"""Functions for running the flood model.
 
-`run_aqueduct` (subprocess) and `run_aqueduct_python` (in-process) are the
-two engines `simulation.engine` (config.yml) can select between - see
-`scripts/run_aqueduct.py` and `scripts/run_aqueduct_cli.py`, which both
-branch on that config value and share the helpers here so the two entry
-points (Snakemake rule vs. HPC sbatch CLI) can't drift apart.
+`run_aqueduct_python` (in-process, `flood_model.flood_depth_dense`) is
+called from both `scripts/run_aqueduct.py` (Snakemake rule) and
+`scripts/run_aqueduct_cli.py` (HPC sbatch CLI), which share the helpers here
+so the two entry points can't drift apart.
 """
 
 import json
 import math
-import subprocess
 from pathlib import Path
 from typing import Any
 
 import geopandas as gpd
+import numpy as np
 import rasterio
 
 from config_utils import retry_transient_io
 from flood_model import flood_depth_dense
-from rasters import save_waterdepth_raster
-
-# Substring Aqueduct's Julia runtime prints (to stdout/stderr) on an
-# unhandled out-of-memory crash, e.g. in `component_indices` during the
-# flood-extent connected-component filter (see `core/src/core.jl`). This is
-# distinct from the `LLVM ERROR: Unable to allocate section memory!` JIT
-# crash that can occur when multiple Aqueduct instances run concurrently
-# (see `resources: aqueduct_runs=1`) - that one is transient/concurrency
-# related, not tile-size related, so it is intentionally not matched here.
-OOM_SIGNATURE = "OutOfMemoryError"
-
-
-def run_aqueduct(executable_path: str | Path, config_path: str | Path) -> None:
-    """Run the Aqueduct flood model executable with a given TOML configuration.
-
-    Args:
-        executable_path: Path to the compiled Aqueduct executable.
-        config_path: Path to the TOML configuration file for this tile/scenario run.
-
-    Raises:
-        subprocess.CalledProcessError: If the Aqueduct executable exits with
-            a non-zero status code. The captured stdout/stderr are printed
-            before the error is re-raised.
-    """
-    try:
-        result = subprocess.run(
-            [str(executable_path), str(config_path)],
-            text=True,
-            capture_output=True,
-            check=True,
-        )
-        print(result.stdout)
-    except subprocess.CalledProcessError as e:
-        print(e.stdout)
-        print(e.stderr)
-        raise
+from rasters import (
+    decode_dem_cm,
+    decode_friction_int16,
+    decode_waterlevel_cm,
+    save_waterdepth_raster,
+)
 
 
 def run_aqueduct_python(
     dem_path: str | Path,
     mask_path: str | Path,
     friction_path: str | Path,
-    boundaries_path: str | Path,
     output_path: str | Path,
     resolution: float,
     k: int,
     variable: str,
-) -> None:
+    *,
+    boundaries_path: str | Path | None = None,
+    seed_rows: np.ndarray | None = None,
+    seed_cols: np.ndarray | None = None,
+    seed_values: np.ndarray | None = None,
+    ocean_code: int = 1,
+    river_code: int | None = None,
+    obstacle_coupling: bool = False,
+    max_outer_iterations: int = 5,
+    max_rounds: int = 12,
+    outer_convergence_pct: float = 0.01,
+) -> dict:
     """Run `flood_model.flood_depth_dense` in-process and write its output.
 
-    The "python" engine's counterpart to `run_aqueduct` (Julia subprocess) -
-    same inputs/output contract, no TOML/executable involved since this
-    calls the validated Python port directly.
+    Exactly one of `boundaries_path` (wave-0: real/virtual COAST-RP
+    stations, IDW-seeded onto this tile's own coastline) or the
+    `seed_rows`/`seed_cols`/`seed_values` triple (hop>=1 hinterland: direct
+    eikonal seeds, typically from `boundaries.collect_neighbor_wave_seeds`)
+    must be given - see `flood_depth_dense`'s own docstring, which performs
+    the actual validation.
+
+    `ocean_code`/`river_code`: only used on the `boundaries_path` path (see
+    `flood_model.coastline_mask`). `max_rounds` is forwarded regardless of
+    `obstacle_coupling` (used by the default round-based solve either way -
+    see `flood_depth_dense`'s own docstring, 2026-08); `obstacle_coupling`/
+    `max_outer_iterations`/`outer_convergence_pct` are obstacle-coupling-
+    specific. Defaults match `simulation.flooding` in config.yml
+    (`max_rounds` top-level, the rest under `.obstacle_coupling`).
+
+    Returns:
+        The `diagnostics` dict from `flood_depth_dense` - see its docstring.
 
     Raises:
-        MemoryError: if the solve exhausts available memory - the Python
-            dense solver's counterpart to Julia's `OutOfMemoryError` (see
-            `is_oom_error`), so callers can apply the same
-            oom_tiles/skipped_tiles marking regardless of engine. In
-            practice far less likely than Julia's failure mode (a
-            358M-cell tile that OOM'd Julia ran fine here, ~5GB peak RSS) -
-            this is a dormant safety net, not an expected code path.
+        MemoryError: if the solve exhausts available memory - callers apply
+            the oom_tiles/skipped_tiles marking on this (see
+            `mark_tile_oom`). In practice rare (a 358M-cell tile ran fine
+            here at ~5GB peak RSS) - this is a dormant safety net, not an
+            expected code path.
     """
+    # dem.tif/friction.tif/boundaries.gpkg's water-level column are all
+    # int16-encoded on disk (see rasters.py's encode_dem_cm/
+    # encode_friction_int16/encode_waterlevel_cm) - decode to float32
+    # immediately on read so flood_depth_dense (and everything downstream
+    # of it) sees the same float meters/friction values it always has.
     with retry_transient_io(rasterio.open, dem_path) as src:
-        dem = src.read(1)
+        dem = decode_dem_cm(src.read(1))
         transform = src.transform
     with retry_transient_io(rasterio.open, mask_path) as src:
         mask = src.read(1)
     with retry_transient_io(rasterio.open, friction_path) as src:
-        friction = src.read(1)
-    boundaries = retry_transient_io(gpd.read_file, boundaries_path)
+        friction = decode_friction_int16(src.read(1))
 
-    waterdepth = flood_depth_dense(
-        dem, mask, friction, boundaries, transform,
+    if boundaries_path is not None:
+        boundaries = retry_transient_io(gpd.read_file, boundaries_path)
+        boundaries[variable] = decode_waterlevel_cm(boundaries[variable].to_numpy())
+    else:
+        boundaries = None
+
+    waterdepth, diagnostics = flood_depth_dense(
+        dem, mask, friction, transform,
+        boundaries=boundaries,
+        seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
         resolution=resolution, k=k, variable=variable,
+        ocean_code=ocean_code, river_code=river_code,
+        obstacle_coupling=obstacle_coupling,
+        max_outer_iterations=max_outer_iterations,
+        max_rounds=max_rounds,
+        outer_convergence_pct=outer_convergence_pct,
     )
     save_waterdepth_raster(dem_path, waterdepth, output_path)
+    return diagnostics
 
 
 def estimate_aqueduct_mem_mb(dem_path: str | Path, mem_estimate_cfg: dict[str, Any]) -> int:
-    """Conservative peak-memory estimate (MB) for running Aqueduct on one tile.
+    """Conservative peak-memory estimate (MB) for running the flood solve on one tile.
 
     Calibrated from 7 real tiles spanning 2.2M-140M DEM pixels (peak working
     set 800-7500MB). Pixel count alone isn't an exact predictor - two tiles
     with near-identical pixel counts differed by ~900MB in practice, likely
     flood-extent/connected-component complexity - so this is deliberately
     generous, not a tight fit. Used as run_aqueduct's `resources: mem_mb` so
-    Snakemake's own scheduler throttles concurrent Aqueduct jobs to fit
-    within a `--resources mem_mb=N` budget (see that rule's docstring).
+    Snakemake's own scheduler throttles concurrent jobs to fit within a
+    `--resources mem_mb=N` budget (see that rule's docstring).
 
     Args:
         dem_path: Path to the tile's DEM raster (read for width/height only -
@@ -123,32 +132,21 @@ def estimate_aqueduct_mem_mb(dem_path: str | Path, mem_estimate_cfg: dict[str, A
     return int(math.ceil(raw_mb / 100.0) * 100)
 
 
-def is_oom_error(error: subprocess.CalledProcessError) -> bool:
-    """Return True if a failed Aqueduct run's captured output indicates an OutOfMemoryError.
-
-    The memory cost of `component_indices` (`core/src/core.jl`) is dominated
-    by the tile's total pixel count, not by the return period or SLR water
-    level, so a tile that runs out of memory for one (return_period,
-    waterlevel_name) combination will do so for (nearly) every combination.
-    """
-    return OOM_SIGNATURE in (error.stdout or "") or OOM_SIGNATURE in (error.stderr or "")
-
-
 def oom_marker_path(log_dir: str | Path, tile_id: str) -> Path:
     """Path to the OOM marker file for `tile_id` in `log_dir`."""
     return Path(log_dir) / f"{tile_id}.txt"
 
 
 def tile_marked_oom(log_dir: str | Path, tile_id: str) -> bool:
-    """Return True if `tile_id` was previously marked as too large for Aqueduct (see `mark_tile_oom`)."""
+    """Return True if `tile_id` was previously marked as too large for the flood solve (see `mark_tile_oom`)."""
     return oom_marker_path(log_dir, tile_id).exists()
 
 
 def mark_tile_oom(log_dir: str | Path, tile_id: str, reason: str) -> None:
-    """Record that `tile_id` ran out of memory in Aqueduct.
+    """Record that `tile_id` ran out of memory in the flood solve.
 
     Once marked, other (return_period, waterlevel_name) scenarios for this
-    `tile_id` skip Aqueduct entirely (see `tile_marked_oom`), since they
+    `tile_id` skip the solve entirely (see `tile_marked_oom`), since they
     would run out of memory for the same reason (tile size).
 
     Args:
@@ -187,13 +185,43 @@ def log_skipped_tile(log_dir: str | Path, tile_id: str, scenario_name: str, reas
 # OOM-driven skip when scanning skipped_tiles/ after the fact.
 NO_STATIONS_REASON = "no water level boundary stations within tile"
 
+# Substring written into a skipped_tiles/ marker by run_aqueduct.py's
+# hop_distance >= 1 branch when boundaries.collect_neighbor_wave_seeds
+# finds no seed cells at all (2026-08 - no overlapping earlier-wave
+# neighbour available yet, none overlap, or none have any flooding in the
+# overlap for this scenario). Same "never eligible to run, not a failure"
+# category as NO_STATIONS_REASON, just the hinterland-tile equivalent.
+NO_UPSTREAM_FLOODING_REASON = "no non-zero water level found in any available overlapping earlier-wave tile"
+
+
+def write_zero_waterdepth(dem_path: str | Path, output_path: str | Path) -> None:
+    """Write a real, genuinely-computed all-zero waterdepth raster.
+
+    For a tile confidently known to have no flooding (no boundary stations
+    at all for a wave-0 tile, or no non-zero water level in any available
+    overlapping earlier-wave tile for a hop>=1 one - see NO_STATIONS_REASON/
+    NO_UPSTREAM_FLOODING_REASON) - distinct from `rasters.save_nodata_raster`
+    (used for OOM/too-large skips), which writes the NODATA sentinel:
+    `merge.merge_tile_rasters_chunk` treats an all-nodata tile as "not
+    computed" and ignores it when merging, but "confidently zero" is a real
+    answer, not an unknown - writing it as nodata risks leaving a real gap
+    in merged output wherever this tile is the only one covering an area.
+    Reuses `rasters.save_waterdepth_raster` unchanged (a genuine computed
+    result that happens to be all zeros), rather than adding a parallel
+    writer.
+    """
+    with retry_transient_io(rasterio.open, dem_path) as src:
+        shape = (src.height, src.width)
+    save_waterdepth_raster(dem_path, np.zeros(shape, dtype=np.float32), output_path)
+
 
 def tile_output_complete(model_outputs_dir: str | Path, tile_id: int | str, n_scenarios_per_tile: int) -> bool:
     """Return True once every (return_period, waterlevel_name) output for `tile_id` has been written.
 
     Counts `waterdepth_*.tif` files in the tile's results dir (written for
-    every branch in run_aqueduct.py - genuine run, OOM fallback, or
-    no-stations skip - so this is agnostic to *how* each scenario finished).
+    every branch in run_aqueduct.py - genuine run, OOM fallback, no-stations
+    skip, or no-upstream-flooding skip - so this is agnostic to *how* each
+    scenario finished).
     """
     results_dir = Path(model_outputs_dir) / str(tile_id) / "results"
     if not results_dir.exists():
@@ -220,37 +248,28 @@ def log_run_timing(
     return_period: str,
     waterlevel_name: str,
     elapsed_s: float,
-    cropped_pixels: int,
-    original_pixels: int,
-    crop_enabled: bool,
+    obstacle_coupling_diagnostics: dict | None = None,
 ) -> None:
-    """Record one successful Aqueduct invocation's wall-clock time and pixel counts.
+    """Record one successful flood-solve invocation's wall-clock time.
 
     Written one file per (tile_id, return_period, waterlevel_name) - same
     reasoning as `log_skipped_tile`: avoids concurrent-write corruption
-    between parallel Snakemake jobs. Only called for genuine `aqueduct.exe`
-    runs (not the no-stations/no-candidate/OOM skip branches in
-    run_aqueduct.py), since those don't reflect solver run time at all.
-
-    Aggregate with `analysis/summarize_run_timings.py` to evaluate
-    `simulation.flood_extent_crop`'s actual speedup - compare two runs (flag
-    on vs. off) by pointing it at each run's own `run_timings/` directory.
+    between parallel Snakemake jobs. Only called for genuine solve runs (not
+    the no-stations/OOM skip branches in run_aqueduct.py), since those don't
+    reflect solver run time at all.
 
     Args:
         log_dir: Directory to write the marker file to. Created if missing.
         tile_id: The tile's `tile_id`.
         return_period: The run's `return_period` wildcard value.
         waterlevel_name: The run's `waterlevel_name` wildcard value.
-        elapsed_s: Wall-clock seconds spent inside `run_aqueduct` (the
-            subprocess call to `aqueduct.exe`), excluding this script's own
-            setup/skip-check overhead.
-        cropped_pixels: Pixel count of the DEM actually passed to
-            `aqueduct.exe` (from `crop_info.json` - equal to
-            `original_pixels` when `flood_extent_crop.enabled` is false).
-        original_pixels: Pixel count of the tile's full (pre-crop) DEM, for
-            computing the achieved reduction ratio.
-        crop_enabled: Whether `simulation.flood_extent_crop.enabled` was
-            true for this run.
+        elapsed_s: Wall-clock seconds spent inside `run_aqueduct_python`,
+            excluding this script's own setup/skip-check overhead.
+        obstacle_coupling_diagnostics: the dict returned by
+            `run_aqueduct_python`/`flood_depth_dense`. Merged directly into
+            the record so tiles that hit `max_outer_iterations` or
+            `max_rounds` without converging are visible in production, not
+            just in ad-hoc test scripts.
     """
     log_dir = Path(log_dir)
     retry_transient_io(log_dir.mkdir, parents=True, exist_ok=True)
@@ -259,9 +278,7 @@ def log_run_timing(
         "return_period": return_period,
         "waterlevel_name": waterlevel_name,
         "elapsed_s": elapsed_s,
-        "cropped_pixels": cropped_pixels,
-        "original_pixels": original_pixels,
-        "crop_enabled": crop_enabled,
+        **(obstacle_coupling_diagnostics or {}),
     }
     path = log_dir / f"{tile_id}_{return_period}_{waterlevel_name}.json"
     path.write_text(json.dumps(record))

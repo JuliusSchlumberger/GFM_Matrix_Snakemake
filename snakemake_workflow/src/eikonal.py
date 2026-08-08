@@ -7,7 +7,10 @@ Julia's own solve, via plain array-index arithmetic (no neighbor-index
 tables). Validated bit-for-bit identical to real Aqueduct output across 26
 real tiles spanning ~9M-135M cells each (100.000% Jaccard, 0.0m
 RMSE/mean-error/90th-percentile/max-diff on every one - see
-`docs/python_vs_julia_qa.md`).
+`docs/python_vs_julia_qa.md`) - EXCEPT for `solve_eikonal_dense`'s unseeded-
+cell default, deliberately changed from Julia's own t=0 to t=+99 (2026-08,
+see that function's own comment) to stop unreached cells from silently
+reading as "flooded at sea level."
 
 An earlier version of this module instead ran on a *compacted* domain
 (skipping non-candidate cells via a 1-D index of just the "relevant" ones,
@@ -195,7 +198,8 @@ def solve_eikonal_dense(
     max_rounds: int = 10_000,
     sweep_budget: int | None = None,
     verbose: bool = False,
-) -> np.ndarray:
+    return_diagnostics: bool = False,
+) -> np.ndarray | tuple[np.ndarray, dict]:
     """Solve the eikonal equation on the full dense grid via Fast Sweeping.
 
     Every cell participates, exactly like Eikonal.jl's own domain (no
@@ -206,6 +210,12 @@ def solve_eikonal_dense(
     takes far longer than the usual few rounds (e.g. tile 2660: >150x the
     3-sweep pass's runtime with no end in sight after 30 minutes), without
     waiting for the whole run to finish or hit `max_rounds`.
+
+    `return_diagnostics`: if true, also return a dict with `n_rounds_used`,
+    `max_change` (the last round's; `None` under `sweep_budget`, which
+    tracks no such thing) and `converged` (`max_change <= epsilon`; `None`
+    under `sweep_budget`) - used by `flood_model.py`'s obstacle-coupling
+    outer loop to log per-tile convergence behaviour.
 
     Args:
         friction: (m, n) friction values (the full, unmasked tile array).
@@ -234,11 +244,35 @@ def solve_eikonal_dense(
 
     Returns:
         `t`, shape `(m+1, n+1)` - read cell `(r, c)`'s result at vertex
-        `(r+1, c+1)`.
+        `(r+1, c+1)`. If `return_diagnostics`, `(t, diagnostics_dict)`
+        instead - see `return_diagnostics` above.
     """
     m, n = friction.shape
     dtype = friction.dtype
-    t = np.zeros((m + 1, n + 1), dtype=dtype)
+    # Unseeded default: t=+99 (waterlevel=-t=-99m) rather than Julia/Aqueduct's
+    # own t=0 (waterlevel=0m) default - a deliberate departure from the
+    # bit-for-bit Julia parity this module otherwise targets (see module
+    # docstring / docs/python_vs_julia_qa.md). Zero is a real, physically
+    # meaningful elevation (mean sea level), so any cell the relaxation below
+    # never actually reaches (no seeded station's influence propagates that
+    # far - e.g. a tile with no real boundary stations at all) would silently
+    # read as "flooded" for any DEM cell below 0m, regardless of whether real
+    # storm-surge forcing ever got there (found 2026-08 investigating two
+    # calibration tiles that showed flooding with zero real forcing).
+    # -99m is comfortably below DeltaDTM's own <=30m validity envelope in
+    # the other direction from `rasters.DEM_NODATA_M`/`land_fill_value_m`
+    # (=+99m, "definitely dry, never floods") - same magnitude, opposite
+    # sign, same "outside any physically real value" reasoning - and, unlike
+    # +/-inf, stays inside int16-centimetre range (+-327.67m) so nothing
+    # downstream that eventually encodes a water level needs special-case
+    # handling for an unbounded sentinel. The relaxation below only ever
+    # DECREASES t from its current value (Gauss-Seidel/Dijkstra-style), so
+    # starting at +99 everywhere still lets every real, friction-weighted
+    # candidate arriving from an actual seed correctly overwrite it (real
+    # candidates are always far below +99 in t-space); only cells no real
+    # seed's influence ever reaches keep the sentinel, correctly reading as
+    # "never flooded" instead of "flooded at exactly sea level."
+    t = np.full((m + 1, n + 1), 99.0, dtype=dtype)
     t[seed_rows, seed_cols] = seed_values
 
     neg_two = dtype.type(-2.0)
@@ -248,20 +282,27 @@ def solve_eikonal_dense(
     if sweep_budget is not None:
         for i in range(sweep_budget):
             _dense_sweep(t, friction, _ORTHANT_ORDER[i % 4], neg_two, eight, four)
+        if return_diagnostics:
+            return t, {"n_rounds_used": None, "max_change": None, "converged": None}
         return t
 
     if verbose:
         import time
         start = time.perf_counter()
 
+    n_rounds_used = 0
+    max_change = 0.0
     for round_idx in range(max_rounds):
         max_change = 0.0
         for orthant in _ORTHANT_ORDER:
             max_change = max(max_change, _dense_sweep(t, friction, orthant, neg_two, eight, four))
+        n_rounds_used = round_idx + 1
         if verbose:
             print(f"    round {round_idx + 1}: max_change={max_change:.6g}  "
                   f"epsilon={epsilon:.6g}  elapsed={time.perf_counter() - start:.1f}s",
                   flush=True)
         if max_change <= epsilon:
             break
+    if return_diagnostics:
+        return t, {"n_rounds_used": n_rounds_used, "max_change": max_change, "converged": max_change <= epsilon}
     return t

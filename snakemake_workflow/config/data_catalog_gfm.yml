@@ -36,11 +36,11 @@ coast_rp:
       ~22 670 stations. Used as the base storm-tide forcing in
       prepare_boundary_conditions.py, with SLR fingerprints (see
       ipcc_ar6_slr_projections) added on top. MDT correction (local MSL ->
-      GOCO06s, via `mdt_cnes_cls22` below) is OFF by
-      default - see boundary_conditions.mdt_correction in config.yml for
-      when to enable it (only once the DEM has also switched to a pure-
-      geoid GOCO06s reference; see `deltadtm` below and
-      vertical_datum_correction in config.yml).
+      GOCO06s, via `mdt_cnes_cls22` below) is always applied
+      (boundary_conditions.mdt_correction in config.yml), matching the DEM's
+      own EGM2008 -> GOCO06s geoid correction (see `deltadtm` below and
+      vertical_datum_correction in config.yml) so forcing and terrain share
+      one vertical reference.
     paper_doi: 10.1038/s43247-021-00204-9
     paper_ref: >
       Dullaart et al. (2021), Accounting for tropical cyclones more than doubles
@@ -51,10 +51,10 @@ coast_rp:
     source_url: https://doi.org/10.4121/uuid:210b66a1-9c82-4e0b-9f4a-8eb15deebb44
     source_version: "1.0"
     model_version: "Deltares D-Flow FM v1.2.63.64757"
-    vertical_reference: Local mean sea level (MSL) — matches the MSL-referenced
-      DeltaDTM v1.1 DEM currently in use (see `deltadtm`) directly, as long as
-      boundary_conditions.mdt_correction stays disabled (the default; see
-      description above).
+    vertical_reference: Local mean sea level (MSL) as measured, corrected to
+      the GOCO06s geoid via MDT subtraction (boundary_conditions.mdt_correction)
+      before use, to match the DEM's own GOCO06s-referenced elevations (see
+      `deltadtm`).
 
 ipcc_ar6_slr_projections:
   data_type: GeoDataset
@@ -118,6 +118,7 @@ deltadtm:
   path: inputs\DeltaDTM\deltadtm.vrt
   crs: 4326
   filesystem: local
+  nodata: -9999
   meta:
     category: topography
     description: >
@@ -126,32 +127,24 @@ deltadtm:
       vegetation- and building-induced height bias in low-lying coastal and
       deltaic terrain. Covers global coastlines at ~1 arc-second (~30 m)
       resolution. Distributed as a VRT mosaic of per-tile GeoTIFF files.
-      The tiles in use (filenames ending `_GOCO06s_MDT`, hosted on the WUR
-      YODA "sea-level-referenced-coastal-elevation" vault) are the v1.1
-      release, re-referenced from the original EGM2008 geoid to local mean
-      sea level: geoid converted to GOCO06s, then MDT (mean dynamic
-      topography) subtracted. This already matches the MSL reference of the
-      coast_rp storm-tide forcing directly (as long as
-      boundary_conditions.mdt_correction stays disabled - the default).
-      PLANNED CHANGE: this `path` will be repointed at a VRT over the
-      original, EGM2008-referenced 4TU.ResearchData release (downloaded by
-      sync_deltadtm.py) once corrected to GOCO06s by
-      preparation/merge_tiles.py (vertical_datum_correction in config.yml,
-      src/vertical_datum.py) - avoids the MDT-over-land extrapolation the
-      `_GOCO06s_MDT` release above requires. Once switched,
-      boundary_conditions.mdt_correction must also be enabled so COAST-RP
-      and the DEM keep sharing a vertical reference (see that entry above).
+      The tiles in use (`DeltaDTM_v1_1_*.tif`, downloaded from
+      4TU.ResearchData by sync_deltadtm.py) are the original v1.0/v1.1
+      release, referenced to the EGM2008 geoid. scripts/extract_dem.py
+      always applies the EGM2008 -> GOCO06s geoid correction on top (see
+      vertical_datum_correction in config.yml, src/vertical_datum.py),
+      re-referencing the DEM to the same GOCO06s geoid that COAST-RP's own
+      MDT correction (boundary_conditions.mdt_correction, see `coast_rp`
+      above) re-references the storm-tide forcing to - so DEM and forcing
+      always share one vertical reference.
     paper_doi: 10.5194/essd-16-2343-2024  # original DeltaDTM v1.0 (Pronk et al. 2024)
     paper_ref: >
-      Pronk et al. (2024), Earth Syst. Sci. Data 16, 2343–2360 (base DEM,
-      v1.0). The MSL-referencing update in use here (v1.1, GOCO06s + MDT
-      correction) is attributed to Seeger & Minderhoud (2025) — confirm the
-      exact publication/DOI for that update before citing it externally.
-    source_author: Deltares / TU Delft (base DEM); Wageningen University & Research (v1.1 MSL update)
+      Pronk et al. (2024), Earth Syst. Sci. Data 16, 2343–2360.
+    source_author: Deltares / TU Delft
     source_license: CC-BY-4.0
-    source_url: https://data.yoda.wur.nl:9443/vault-sea-level-referenced-coastal-elevation/
-    source_version: v1.1 (MSL-referenced, GOCO06s geoid + MDT correction)
-    vertical_datum: Local mean sea level (MSL) — NOT EGM2008 geoid; see description
+    source_url: https://data.4tu.nl/datasets/1da2e70f-6c4d-4b03-86bd-b53e789cc629
+    source_version: v1.1 (EGM2008-referenced)
+    vertical_datum: EGM2008 geoid at source; corrected to GOCO06s by
+      scripts/extract_dem.py before use - see description
     pixel_size_arcsec: 1
     nodata_value: -9999
 
@@ -371,10 +364,9 @@ goco06s:
     description: >
       GOCO06s combined gravity field model (satellite-only, degree/order 300).
       Used to compute the GOCO06s geoid undulation N_GOCO06s - the common
-      vertical datum this project converts DeltaDTM (from EGM2008) and
-      COAST-RP (from local MSL, via MDT) onto, when
-      vertical_datum_correction.enabled / boundary_conditions.mdt_correction.
-      enabled are turned on (see config.yml).
+      vertical datum this project always converts DeltaDTM (from EGM2008)
+      and COAST-RP (from local MSL, via MDT) onto (vertical_datum_correction
+      / boundary_conditions.mdt_correction in config.yml).
       Download from the ICGEM Table of Models: http://icgem.gfz-potsdam.de/home
     paper_ref: >
       Kvas et al. (2021), GOCO06s — A satellite-only gravity field model,
@@ -392,15 +384,15 @@ egm2008_geoid:
       EGM2008 Earth Gravitational Model (degree/order 2190). Used to compute
       the N_EGM2008 geoid undulation for the EGM2008 -> GOCO06s DEM datum
       correction (src/vertical_datum.py, applied by
-      preparation/merge_tiles.py) to the original, EGM2008-referenced
+      scripts/extract_dem.py) to the original, EGM2008-referenced
       DeltaDTM release (see `deltadtm` below).
       Download from the ICGEM Table of Models: http://icgem.gfz-potsdam.de/home
     paper_ref: >
       Pavlis et al. (2012), The development and evaluation of the Earth
       Gravitational Model 2008 (EGM2008), J. Geophys. Res. 117, B04406.
 
-# compute_mdt_correction, only when boundary_conditions.mdt_correction.
-# enabled is true (off by default).
+# Used by prepare_boundary_conditions.compute_mdt_correction (always applied
+# - see boundary_conditions.mdt_correction in config.yml).
 mdt_cnes_cls22:
   data_type: GeoDataset
   driver: netcdf

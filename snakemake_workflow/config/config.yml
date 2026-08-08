@@ -8,7 +8,6 @@ paths:
   # Using config_local.yml (git-ignored) is the preferred way to override this per-machine, so that the repository clone can be shared across multiple machines without editing this file.
   root: "D:/GFM"  # storage of outputs and input data
   code_root: "C:/Users/Schlu005/GFM" # Root of the code
-  aqueduct_root: "C:/Users/Schlu005/GFM" # Root directory containing the compiled Aqueduct flood model build
 
   hydromt_data_catalog: "snakemake_workflow/config/data_catalog_gfm.yml" # relative to the code root
 
@@ -19,35 +18,187 @@ sync_deltadtm:  # Used by: preparation/sync_deltadtm.py.
   delete_zips_after_extract: true
 
 # ── VERTICAL DATUM CORRECTION (DEM) ─────────────────────────────────────────────
+# DEM elevations are always geoid-corrected EGM2008 -> GOCO06s (see
+# src/vertical_datum.py), matching the MDT-corrected COAST-RP forcing below.
 vertical_datum_correction: # Used by: rules compute_geoid_offset_raster / extract_dem
-  enabled: true
   offset_raster_path: "{root}/inputs/ICGM/geoid_offset_egm2008_goco06s.tif"
 
 # ── PREPARATION PIPELINE SWITCHES ─────────────────────────────────────────────
 preparation: # Used by: preparation/run_preparation.py
   sync_deltadtm:       true   # download DeltaDTM DEM/mask tiles from 4TU.ResearchData
-  tile_mask_creation:  true   # build the 5deg (DeltaDTM+COAST-RP) -> 3.75deg overlapping tile grid
-  select_tiles:        true   # filter to tiles with DeltaDTM mask coverage
-  merge_tiles:         true   # merge/drop undersized tiles -> tile_grid.path
+  tile_generation:     true   # build the DeltaDTM-tile chunk manifest -> tile_grid.path
+  # (REPLACES tile_mask_creation/select_tiles/merge_tiles, and later the adaptive
+  # parent/child pipeline that replaced them - see src/tile_chunking.py)
   boundary_conditions: true   # COAST-RP + SLR fingerprint scenario NetCDFs
 
-one_off_edits:
-  scale_factor: 1.5 # factor by which to scale the tile grid for the preprocessing mask creation step.
-  five_deg_grid_deltadtm: "{root}/inputs/mask/five_deg_grid_deltadtm.gpkg" # 5-degree grid built from DeltaDTM mask tile coverage by tile_mask_creation.py
-  smaller_tiles: "{root}/inputs/mask/tiles_2_5deg_with_overlap.gpkg" # output path for the tile mask created by tile_mask_creation.py
-  smaller_tiles_clean: "{root}/inputs/mask/tiles_2_5deg_with_overlap_clean.gpkg"
+# ── TILE GENERATION (fixed-DeltaDTM-tile chunking, 2026-08 - REPLACES the
+# adaptive parent/child pipeline, itself gone now) ──
+# See src/tile_chunking.py for the actual algorithms and memory.md's
+# FIXED-TILE CHUNKING REDESIGN entry for the full design/reasoning. Frozen
+# geometry DAG: this whole section only depends on the mask, DEM and
+# elev_threshold_m - never on scenario (Coast-RP station VALUES, SLR, RP) -
+# so the tile manifest is computed once and frozen. No parent/child
+# distinction this time - each chunk gets its own boundary-condition
+# stations directly at simulation time (extract_boundaries.py), so nothing
+# here feeds a separate forcing-context computation the way the old
+# parent grid did.
+tile_generation:
+  elev_threshold_m: 30 # DeltaDTM's own <=30m real validity envelope. floodable =
+  # valid DEM AND elevation < this; land with NO valid DEM reading does NOT
+  # count as floodable. No plausible SLR+return-period combination approaches
+  # this value (consistent with the pre-existing land_fill_value_m=99m
+  # sentinel's own stated reasoning).
+  ocean_code: 1 # mask value treated as "ocean" - for wet-edge/coastline
+  # detection and river-mouth marking (with river_code below) - deliberately
+  # NOT lake(2)/river(3), matching flood_model._idw_seed_values' own
+  # ocean_code=1 convention.
+  river_code: 3 # mask value treated as "river" - used only for river-mouth
+  # marking (river_mouth_*_frac_min below), never for wet-edge/coastline
+  # detection (that's ocean_code only).
 
-# ── TILE GRID ─────────────────────────────────────────────────────────────────
+  coarse_resolution_m: 500 # standard working resolution for every coarse
+  # (non-native) read in this pipeline: the floodability + river-mouth check
+  # (filter_floodable_tiles), the shave step's output cell size
+  # (filter_and_shave_chunks/merge_dry_chunks), and the river-mouth
+  # split-cut check (split_oversized_chunks) - deliberately the SAME value
+  # everywhere rather than three near-duplicate parameters, since all three
+  # are conceptually "the standard coarse resolution for this pipeline".
+
+  max_extent_tiles: 4 # hard cap, in whole DeltaDTM tiles (1x1deg), on a
+  # chunk's size in EITHER direction - both the initial greedy covering
+  # (build_chunks) and the final split_oversized_chunks pass respect this,
+  # though split_oversized_chunks will leave a chunk oversized rather than
+  # strand a dry piece or cut through a river mouth (see below) - real runs
+  # have left ~1-2% of chunks over this cap for exactly that reason.
+
+  # --- River-mouth marking (filter_floodable_tiles) - "large share of
+  # ocean AND water cells": an ocean-river MIXING signature, not just
+  # ocean-adjacent or just riverine. Consumed by build_chunks (seeds chunk
+  # growth at delta mouths first, hugging the coastline - see
+  # tile_chunking._seed_river_mouth_chunk) and split_oversized_chunks
+  # (refuses to cut a split through one). River channels occupy a much
+  # smaller share of a coarse check area than open ocean does even at a
+  # wide delta, so river_frac_min is set much lower than ocean_frac_min -
+  # both first-pass estimates, not independently validated against a
+  # reference delta list. A real global run flagged 79 tiles, including
+  # most of the world's major deltas (Ganges-Brahmaputra, Mekong, Yangtze,
+  # Irrawaddy, Lena, Yukon-Kuskokwim, Orinoco, Amazon, Rhine-Scheldt) but
+  # NOT the Nile or Mississippi - likely because DeltaDTM's mask doesn't
+  # code their heavily-engineered/channelized distributaries as river with
+  # enough coarse-cell fraction; worth revisiting if those deltas matter. ---
+  river_mouth_ocean_frac_min: 0.10
+  river_mouth_river_frac_min: 0.02
+  river_mouth_check_band_cells: 1.0 # split_oversized_chunks: width (in
+  # coarse_resolution_m cells, each side) of the band checked around a
+  # candidate split cut for the river-mouth signature above.
+
+  river_mouth_speckle_buffer_deg: 2.0 # filter_floodable_tiles: width (in
+  # degrees, each side) of the window checked around a river-mouth
+  # CANDIDATE tile's own footprint when confirming its ocean connectivity -
+  # see river_mouth_min_coastal_component_cells below.
+  river_mouth_min_coastal_component_cells: 5000 # a river-mouth candidate's
+  # ocean cells must belong to a connected component of at least this many
+  # coarse_resolution_m cells within the speckle_buffer_deg window to be
+  # confirmed - otherwise the tile is un-flagged. DeltaDTM regularly
+  # miscodes inland water (Arctic thermokarst ponds, Chinese aquaculture
+  # ponds/paddies, inland lakes) as ocean_code, which can spuriously clear
+  # river_mouth_ocean_frac_min within a single isolated tile even hundreds
+  # of km from real open sea. Empirically validated (tests/
+  # river_mouth_tile_validation/validate_river_mouth_tiles.py, 2026-08):
+  # every real delta checked (Ganges, Mekong, Yangtze, Rhine-Scheldt,
+  # Irrawaddy, etc.) cleared >100k connected cells within this window even
+  # with a naturally fragmented mangrove/braided-channel coastline, vs
+  # <=1500 for 5 confirmed false positives (N30E114, N31E118, N31E120,
+  # N32E119, N68W135 - all isolated inland water, none within tens of km of
+  # the coast) - this threshold sits with wide margin between the two. A
+  # per-isolated-tile component-size filter (no buffer) was tried first and
+  # rejected: it also wrongly dropped Ganges/Yangtze, whose real coastal
+  # ocean is itself fragmented into many small tidal/braided-channel pieces
+  # at 500m resolution.
+
+  river_mouth_seeds_path: "{processed_inputs_dir}/mask/river_mouth_seeds.gpkg" # the
+  # is_river_mouth=True subset of filter_floodable_tiles' output, persisted
+  # as its own artifact (2026-08) - seeds build_chunks' coast-hugging growth
+  # and compute_run_order's river-mouth tie-break priority. Under
+  # processed_inputs (not inputs) since this is a COMPUTED tile-generation
+  # output, not raw synced source data (moved here 2026-08, alongside
+  # debug_gpkg_dir/tile_grid.path below - all three used to live under
+  # {root}/inputs/mask/, which was really a "tile-grid outputs" directory
+  # despite the "inputs" in its path).
+
+  write_debug_gpkg: true # write one GeoPackage PER PIPELINE STAGE (numbered
+  # to match this module's own docstring stage list, e.g. 03_chunks_built.gpkg,
+  # 07_dropped_no_exposure.gpkg) to debug_gpkg_dir below - lets every drop and
+  # every intermediate shape change along the pipeline be inspected in QGIS,
+  # not just the final tile_grid.path output. Cheap relative to the raster
+  # I/O-heavy stages themselves, so left on by default; set false to skip it
+  # for a routine run.
+  debug_gpkg_dir: "{processed_inputs_dir}/mask/tile_generation_debug" # directory for
+  # the per-stage GeoPackages above.
+
+  # --- Shave (filter_and_shave_chunks/merge_dry_chunks) - crops a chunk to
+  # its floodable-plus-1-coarse-cell-ocean-buffer footprint at coarse
+  # resolution only (never native - this is about trimming big irrelevant
+  # margins cheaply, not pixel-perfect edges). ---
+  shave_sample_resolution_m: 100 # intermediate sample grid (5x finer than
+  # coarse_resolution_m) used to estimate each coarse cell's unfloodable
+  # FRACTION - a direct read at coarse_resolution_m would give exactly 1
+  # sample per cell, no fraction possible, hence this two-stage sampling.
+  shave_unfloodable_fraction: 0.9 # a coarse cell is shaved away if >= this
+  # fraction of its samples are ocean/lake/river, nodata, or dem >= threshold.
+  min_split_gap_coarse_cells: 60 # 2026-08: filter_and_shave_chunks can now split
+  # off a disconnected interior feature (e.g. two islands sharing one bbox with
+  # open ocean between them) rather than only ever trimming the chunk's OUTER
+  # edges - ported from the retired pre-2026-08 pipeline's split_disconnected_tiles
+  # (see memory.md's FIXED-TILE CHUNKING REDESIGN entry), simplified to take the
+  # FIRST qualifying interior gap band found rather than the most balanced one.
+  # This is the minimum width (in coarse_resolution_m cells, ~30km at the
+  # default 500m) of a contiguous all-unfloodable interior row/column band
+  # before it counts as a genuine separate-feature gap worth splitting at,
+  # rather than an ordinary strait/river/complex-coastline gap between close
+  # features - tuned twice against real data: an initial 10-cell (~5km)
+  # estimate fired far too often (~2.8 pieces per input chunk), 200 cells
+  # (~100km) brought that down to a healthy ~0.95 ratio but was judged too
+  # wide by the user; settled on 60 cells (~30km) as the working value.
+  # Still a first-pass estimate, not exhaustively validated against real data.
+  # Only used at allow_split=True call sites (filter_and_shave_chunks's Stage A);
+  # merge_dry_chunks' re-shave of a freshly consolidated union always passes
+  # allow_split=False (never wants to re-fragment what it just merged), so this
+  # value is irrelevant there.
+
+  # --- Exposure filter (filter_and_shave_chunks) ---
+  population_source: "population" # hydromt data catalog key (WorldPop) -
+  # present-day, not scenario-varying, so this filter stays in the frozen
+  # geometry DAG. Drops any chunk with zero population anywhere in it.
+
+  # --- Redundant-chunk dedup (drop_redundant_chunks, runs twice: 1st pass
+  # before split_oversized_chunks, 2nd pass after - splitting can create
+  # NEW redundancy the 1st pass never saw) ---
+  dedup_min_coverage_fraction: 0.998 # a chunk is dropped if the UNION of
+  # every other overlapping chunk covers at least this fraction of its
+  # area - loosened from exact (100%) containment 2026-08 after real data
+  # showed the shave step can leave a neighbouring chunk's edge off by a
+  # sliver of a coarse cell's width (a few hundred metres), which exact
+  # containment - and even a single-chunk-only containment check - both
+  # missed even though the chunk was still genuinely redundant once every
+  # overlapping neighbour's territory is combined. First-pass estimate,
+  # not exhaustively validated against real data.
+
+  # --- Overlap-density cap (cap_overlap_density, final cleanup pass) ---
+  max_overlap_per_cell: 8 # wherever more chunks than this cover the same
+  # underlying tile cell, drop chunks that are safely redundant there
+  # (every cell they touch still covered by >=2 OTHER chunks afterwards).
+
+# ── TILE GRID (final manifest location - read by run_preparation.py's
+# tile_generation step AND everything downstream: Snakefile, extract_tile_geometry) ──
 tile_grid:
-  path: "{root}/inputs/mask/domain_tiles_WesternEurope.gpkg" # Note this is both target of the preparation pipeline and starting point for simulation run
-  min_coast_fraction: 0.10 # merge_tiles.py: minimum required fraction of a tile that must have either land or ocean
-  max_merge_count: 4 # merge_tiles.py: maximum number of original tiles that may be combined
-  trim_buffer_arcsec: 20 # merge_tiles.py: coastal margin after shaving off pure-ocean/nodata rows/columns, needs to be >= model_bbox_buffer_arcsec
-  dedup_iou_threshold: 0.8 # merge_tiles.py: minimum intersection-over-union between two (already-trimmed) tiles'
-  # geometries to consider them duplicates
-  cardinal_neighbor_overlap_threshold: 0.5 # merge_undersized_tiles: minimum
-  # fraction of the smaller tile's width (N/S relationship) or height (E/W
-  # relationship) to count as immediate cardinal neighbors.
+  path: "{processed_inputs_dir}/mask/domain_tiles_global.gpkg" # Note this is both target of the preparation pipeline and
+  # starting point for simulation run. Renamed from domain_tiles_WesternEurope.gpkg (2026-08, alongside the
+  # fixed-tile chunking redesign) - that file no longer exists on disk, and the underlying DeltaDTM mask/DEM data
+  # (and both old and new tile-generation algorithms) have never been region-restricted; "global" matches reality.
+  # Moved from {root}/inputs/mask/ to {processed_inputs_dir}/mask/ (2026-08) - this file (and its siblings,
+  # tile_generation.river_mouth_seeds_path/debug_gpkg_dir) is a COMPUTED tile-generation output, not raw
+  # synced source data, so it belongs under processed_inputs like every other derived preparation artifact.
 
 
 # ── TILE SPLITTING (OOM RECOVERY) ───────────────────────────────────────────────
@@ -59,8 +210,7 @@ tile_split: # Used by: run_pipeline.py to split OOM tiles and re-run Snakemake.
 
 # ── BOUNDARY CONDITIONS ───────────────────────────────────────────────────────
 # Used by: prepare_boundary_conditions.py (generates scenario files),
-#          extract_boundaries.py (loads per-tile stations from those files),
-#          tile_mask_creation.py (load_coastrp_stations, for tile-grid filtering).
+#          extract_boundaries.py (loads per-tile stations from those files).
 boundary_conditions:
   waterlevel_nc_dir: "{processed_inputs_dir}/WL_scenarios" # Directory for water level scenario files
 
@@ -70,14 +220,16 @@ boundary_conditions:
   confidence_level: "medium" # options: low/medium
   coastrp_min_lat: -60  # exclude antarctic stations (no exposure)
 
+  # MDT (mean dynamic topography) is always subtracted from COAST-RP storm-tide
+  # levels, re-referencing them from local MSL to the GOCO06s geoid - matching
+  # the DEM's own geoid correction above.
   mdt_correction: # Vertical-reference correction for COAST-RP storm-tide levels
-    enabled: false
     mdt_variable: "mdt"
     fallback_search_deg: 3.0
 
   return_periods: # Coast-RP return periods (wildcards) to simulate flood exposure fore
     # - 1
-    # - 2
+    - 2
     - 5
     - 10
     - 25
@@ -95,10 +247,45 @@ boundary_conditions:
     - "SLR_2000"
 
   station_search_buffer_deg: 1.0 # extract_boundaries.py: buffer (degrees) around a tile's bbox to search for Coast-RP stations
+  station_search_min_size_deg: 2.0 # extract_boundaries.py (boundaries.select_stations_for_tile): minimum
+  # search-box width/height (degrees), centred on the tile - the ACTUAL search box is whichever is larger
+  # per dimension, "bbox + station_search_buffer_deg" or this. Many chunks are now very small
+  # (post-2026-08 dedup/split - see tile_chunking.py), so this guarantees a station search always covers
+  # a reasonable area regardless of chunk size, rather than relying on station_search_buffer_deg alone
+  # (which happens to give >=2deg today only because it's 1.0 - a coincidence, not a guarantee, if that
+  # value is ever tuned down for large chunks). First-pass estimate, not validated against real data.
+  connectivity_resolution_m: 500 # extract_boundaries.py: coarse cell size (metres) for the
+  # ocean-connectivity station filter (filter_stations_by_ocean_connectivity) - deliberately
+  # much coarser than DeltaDTM's native ~30m so a multi-degree search window stays tractable.
+  connectivity_water_fraction_threshold: 0.5 # extract_boundaries.py: minimum fraction of a
+  # coarse cell's underlying native pixels that must be ocean (mask==1 only, not
+  # lake/river) for the cell to count as water for the connectivity filter above.
   nc_filename_template: "COAST-RP_EWL_{return_period}_{waterlevel_name}.nc"
   nc_variable_template: "COAST-RP_EWL_{return_period}_{waterlevel_name}"
   station_x_var: "station_x_coordinate"
   station_y_var: "station_y_coordinate"
+
+  # RETIRED (2026-08): connectivity_forcing (straight-line-IDW along-water
+  # boundary forcing) and the along-water Dijkstra-graph design before it -
+  # never validated beyond a regional subset, superseded by the frozen-
+  # geometry chunk-generation pipeline's own hop-distance/neighbour-forcing
+  # direction (src/tile_chunking.py's compute_run_order) as the intended
+  # way to give hinterland chunks non-ocean boundary forcing.
+
+  # NOT IMPLEMENTED (2026-08) - inter-chunk boundary propagation for
+  # hinterland (hop>=1) tiles: a hop>=1 chunk no longer needs its own ocean
+  # edge (see compute_run_order / the retired merge_dry_chunks entry in
+  # tile_chunking.py's module docstring), and COULD draw extra virtual
+  # stations from an already-simulated, strictly-earlier neighbour's own
+  # results - but picking WHICH points needs the neighbour's actual
+  # simulated output (only the very few genuinely wet cells within the
+  # overlap are useful), so it can only happen AFTER a wave-0 run, in a
+  # step that doesn't exist yet - see tile_chunking.py's own NOT
+  # IMPLEMENTED note (just above its "Output" section) and
+  # build_tile_manifest.py's equivalent note at the end of Stage 13 for
+  # why a tile-generation-time precompute was tried and rejected.
+  # boundaries.sample_waterlevel_at_points (the raster point-lookup
+  # primitive) already exists, ready for whenever this gets built.
 
 # ── RASTER FORMAT ──────────────────────────────────────────────────────────────
 raster_format:
@@ -113,33 +300,66 @@ simulation: # Used by: preprocessing rules
   model_outputs: "{root}/model_outputs"  # directory where per-tile "{tile_id}/inputs" and
   # "{tile_id}/results" are created
 
-  # Which flood model implementation actually computes waterdepth:
-  #   "python" - src/flood_model.py's flood_depth_dense (dense domain,
-  #     exactly 3 sweeps). Validated bit-for-bit identical to real Aqueduct
-  #     output across 26 real tiles spanning ~9M-135M cells each (100.000%
-  #     Jaccard, 0.0m RMSE/mean-error/max-diff on every one) - see
-  #     docs/python_vs_julia_qa.md. Faster to invoke (no fresh-process JIT
-  #     tax) and runs on the HPC, where the Julia toolchain cannot be
-  #     installed.
-  #   "julia" - the original compiled aqueduct_executable below, kept as a
-  #     fallback/comparison option.
-  engine: "python"
-
-  # Compiled Aqueduct flood model executable - only used when engine: "julia".
-  aqueduct_executable: "{aqueduct_root}/build/aqueduct/aqueduct.exe"
+  # Flood model implementation: src/flood_model.py's flood_depth_dense
+  # (dense domain, round-based solve capped at flooding.max_rounds below -
+  # 2026-08). Validated bit-for-bit identical to the original Aqueduct/Julia
+  # reference implementation across 26 real tiles spanning ~9M-135M cells
+  # each (100.000% Jaccard, 0.0m RMSE/mean-error/max-diff on every one) -
+  # see docs/python_vs_julia_qa.md. The old fixed 3-sweep configuration
+  # remains available on demand (flood_depth_dense's own `sweep_budget`
+  # param), just no longer the default (see flooding.max_rounds below for why).
   model_bbox_buffer_arcsec: 3 # Buffer added to tile's previously shaved bbox to ensure thin strip of ocean.
   dem_gap_fill: # land-nodata gap handling: large connected (4-connectivity) group get Nodata value, other IDW-interpolation
-    min_hard_fill_component_size: 15 # a missing-land DEM cell is only hard-filled to 9999m for patches larger than that
+    min_hard_fill_component_size: 15 # a missing-land DEM cell is only hard-filled to land_fill_value_m for patches larger than that
     interp_max_search_distance: 100
     interp_smoothing_iterations: 0
-    land_fill_value_m: 9999 # Elevation (m) written for large missing-land DEM gaps
+    # Elevation (m) written for large missing-land DEM gaps. 99m (not the
+    # historical 9999m) - comfortably above DeltaDTM's real <=30m validity
+    # envelope (so it still reads as implausibly-high, never-floods terrain)
+    # while fitting the int16-centimetre DEM encoding (src/rasters.py's
+    # DEM_NODATA_M/DEM_SCALE) - 9999m would overflow int16 at cm scale by ~30x.
+    land_fill_value_m: 99
 
-  flooding: # Aqueduct flood model parameters written into each tile's TOML config.
+  flooding: # Flood model parameters.
     resolution: 30       # output raster resolution in metres
     knn: 15              # number of nearest water level stations used
-    debug: false
     # Default Manning's n roughness (÷ 100) for cells with no land use class.
     default_friction: 0.001
+
+    # Caps the eikonal solve's round-based mode (4 individual directional
+    # sweeps per round, each round checked for early-exit convergence - see
+    # src/eikonal.py's solve_eikonal_dense and src/flood_model.py's
+    # flood_depth_dense). Used by BOTH the non-coupling single solve and
+    # each outer iteration's inner solve when obstacle_coupling is enabled
+    # (below) - not obstacle_coupling-specific, hence top-level here rather
+    # than nested under it. 12 rounds (up to 48 sweeps) -
+    # empirically calibrated 2026-08 across 7 real tiles spanning
+    # ~4K-207M cells (see snakemake_workflow/tests/sweep_budget_calibration.py
+    # and .../obstacle_coupling_calibration.py), replacing the old fixed
+    # sweep_budget=3 default - a 3-sweep fixed count was found to
+    # under-converge on larger/geometrically-complex tiles (e.g. a
+    # ~25M-cell tile's flooded-cell count was still ~1% below its
+    # sweep-64 value at sweep 3). The old fixed-sweep_budget=3 mode (real
+    # Aqueduct/Julia's own confirmed, bit-exact-validated behaviour - see
+    # flood_depth_dense's docstring) remains available on demand via that
+    # function's own `sweep_budget` parameter, just no longer the default.
+    max_rounds: 12
+
+    # Mitigates a structural weakness Fast Sweeping shares with cost-distance
+    # flood models (Kasmalkar et al. 2024's "Flow-Tub" critique): a
+    # friction-cheap shortcut through terrain higher than the
+    # locally-attenuated water level can produce an illegitimate high
+    # potential value beyond it. When enabled, blocks such cells
+    # (friction -> 9999) and re-solves in an outer loop instead of a single
+    # solve - see src/flood_model.py's flood_depth_dense docstring for the
+    # full algorithm and monotonicity/termination argument. Enabled by
+    # default (2026-08) - validated on both the wave-0 (real boundary
+    # stations) and hop>=1 (explicit seed cells) paths; see that docstring
+    # for the real-tile validation numbers.
+    obstacle_coupling:
+      enabled: true
+      max_outer_iterations: 5   # cap on the outer block-and-resolve loop
+      outer_convergence_pct: 0.01  # stop early once < this % of the tile's cells are newly blocked in an outer iteration
 
   # Peak-memory estimate for run_aqueduct's `resources: mem_mb` (replaces the
   # old aqueduct_runs=1 serialization - see aqueduct_runner.
@@ -150,42 +370,89 @@ simulation: # Used by: preprocessing rules
     base_mb: 1000
     bytes_per_pixel: 80
 
-  # Pre-crop DEM/mask/friction to the region that could possibly flood,
-  # before ever invoking aqueduct.exe (see src/flood_extent.py for the
-  # safety argument: a cell can only flood if its elevation is below the
-  # highest boundary water level anywhere in the tile, since friction can
-  # only attenuate the propagated level further, never raise it - this
-  # holds regardless of return_period/waterlevel_name, so ONE crop per tile
-  # is valid for every scenario). Runs against the existing, unmodified
-  # aqueduct.exe - this is a preprocessing optimization, not a model change.
-  # Disabled by default until validated against uncropped output on real
-  # tiles (see analysis/summarize_run_timings.py to measure the speedup).
-  flood_extent_crop:
-    enabled: false
-    margin_px: 10   # buffer around the candidate bbox; must exceed the coastlinemask dilation radius (1px)
-    ocean_code: 1   # mask value for ocean (see extract_dem_mask: 0=land, 1=ocean, 2=lake, 3=river)
-
 # ── HPC DISPATCH ────────────────────────────────────────────────────────────────
 # Used by: rule generate_aqueduct_jobs (rules/hpc_dispatch.smk) /
-# scripts/generate_aqueduct_jobs.py. Aqueduct can only run one instance at a
-# time PER MACHINE (see simulation.smk's run_aqueduct docstring) - not a
-# global constraint - so separate HPC nodes can each run their own serial
-# stream of Aqueduct invocations concurrently. This rule generates one sbatch
-# script per node once preprocessing is done; the user submits them to SLURM
-# manually and later runs postprocessing manually once results land.
-# Requires a git-ignored snakemake_workflow/config/config_hpc.yml (copy from
-# config_hpc.yml.example) pointing paths.root/aqueduct_root at the Linux HPC
-# mount of this same shared storage.
+# scripts/generate_aqueduct_jobs.py. Wave-based hinterland forcing
+# (src/tile_chunking.compute_run_order's hop_distance column) means a
+# hop_distance>=1 tile is seeded from a strictly-lower-hop_distance
+# neighbour's own output for the same scenario, so tiles are grouped by wave
+# FIRST and split into node batches within each wave - this rule generates
+# one sbatch script per (wave, node batch) once preprocessing is done, plus
+# a submit_waves.sh driver that submits wave 0, then each later wave with a
+# SLURM `--dependency=afterany:<every prior-wave job id>` barrier so a
+# hop>=1 job never starts before its neighbour's job has finished. The user
+# runs submit_waves.sh manually and later runs postprocessing manually once
+# results land. Requires a git-ignored snakemake_workflow/config/config_hpc.yml
+# (copy from config_hpc.yml.example) pointing paths.root/code_root at the
+# Linux HPC mount of this same shared storage.
+#
+# Within each wave, tiles are ALSO split by estimated size (2026-08):
+# Hydrax's regular partitions all scale RAM at a fixed 8GB/vCPU (1vcpu=8GB,
+# 4vcpu=32GB, 16vcpu=128GB, ...), so a tile whose estimated peak memory
+# (aqueduct_mem_estimate, above) would leave little/no headroom on `sbatch`'s
+# partition is routed to `sbatch_large` (a bigger partition) instead -
+# large_tile_pixel_threshold controls the cutoff.
 hpc:
-  n_nodes: 20                                        # PLACEHOLDER: how many sbatch scripts (node batches) to generate
-  jobs_dir: "{root}/model_outputs/hpc_jobs"           # generated sbatch scripts, resolved_config.yml, submit_all.sh, logs/
+  n_nodes: 20                                        # PLACEHOLDER: max sbatch scripts (node batches) to generate PER WAVE, PER SIZE CLASS
+  jobs_dir: "{root}/model_outputs/hpc_jobs"           # generated sbatch scripts, resolved_config.yml, submit_waves.sh, logs/
+  # Tiles at/above this pixel count go to sbatch_large instead of sbatch.
+  # Default 70,000,000 is chosen against aqueduct_mem_estimate
+  # (base_mb=1000, bytes_per_pixel=80): 1000 + 80*70e6/1e6 = 6600MB,
+  # leaving ~1.4GB headroom below a 1vcpu node's 8GB before even accounting
+  # for the estimate being deliberately generous. Pixel count itself is
+  # estimated from tile bbox area (see hpc_dispatch.smk), not the real DEM,
+  # so this is necessarily approximate - the margin below 8GB is deliberate.
+  large_tile_pixel_threshold: 70000000
+  # Optional: scripts/generate_hpc_preprocess_job.py writes hpc.n_nodes
+  # PARALLEL preprocessing sbatch scripts (tiles split evenly across them,
+  # same as simulation batching - preprocessing has no wave/hop_distance
+  # ordering constraint, every tile is independent) plus one more job that
+  # runs `snakemake generate_aqueduct_jobs` (wave sbatch generation) and
+  # submits submit_waves.sh once every preprocessing batch has finished
+  # (SLURM `--dependency=afterany:<every batch job id>`) - so the whole run
+  # (preprocessing AND simulation) can be launched from Hydrax with one
+  # driver script, preprocessing itself spread across nodes exactly like
+  # simulation is. mem/time apply to EACH per-node batch (~2500 tiles /
+  # n_nodes tiles each), not the whole preprocessing run.
+  preprocess_sbatch:
+    partition: 4vcpu
+    account: ""
+    # No empirical per-tile preprocessing timing exists yet in this repo -
+    # start conservative and let a re-submit pick up where it left off
+    # (Snakemake skips already-built outputs) rather than guessing tight.
+    time: "1-00:00:00"
+    mem: "24G"                                        # 4vcpu = 32GB total; leaves headroom for OS/Snakemake's own controller process
+    cpus_per_task: 4                                 # passed to `snakemake --cores`
+    env_activate_cmd: 'module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm'
   sbatch:
-    partition: "PLACEHOLDER_PARTITION"
-    account: "PLACEHOLDER_ACCOUNT"
-    time: "PLACEHOLDER_WALLTIME"                      # e.g. "24:00:00"
-    mem: "PLACEHOLDER_MEM"                            # e.g. "32G"
+    # Deltares Hydrax partitions: 1vcpu/4vcpu/16vcpu/24vcpu/60vcpu (regular),
+    # 44vcpu, gpu, test (30 min cap, quick smoke-test before a real run).
+    # Responsible-use ceiling is ~240 cores across the vcpu partitions AT
+    # ONCE - n_nodes x cpus_per_task, per wave, should stay under that.
+    partition: 1vcpu 
+    account: ""                                       # optional - Hydrax jobs don't require one; leave "" to omit #SBATCH --account
+    # days-hours:minutes:seconds, e.g. "1-00:00:00". MANDATORY - an unset
+    # Hydrax job silently gets a 1-MINUTE default and is killed at that
+    # point regardless of progress. Estimate conservatively (a job is hard-
+    # killed at this limit, finished or not) but not wastefully high.
+    time: "1-00:00:00"
+    mem: "8G"                           # e.g. "32G"
     cpus_per_task: 1
-    env_activate_cmd: "PLACEHOLDER_ENV_ACTIVATE_CMD"  # e.g. "module load python/3.11", "source activate gfm"
+    # Hydrax uses Environment Modules (Lmod) + conda, not a single module
+    # for this custom env - e.g.:
+    #   module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm
+    env_activate_cmd: 'module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm'
+  # Same shape as sbatch: above, for tiles at/above large_tile_pixel_threshold
+  # - a bigger partition (e.g. 16vcpu=128GB) so the largest tiles in the
+  # domain don't OOM on sbatch:'s (e.g. 1vcpu=8GB) node RAM. Expect very few
+  # batches here - most tiles stay on sbatch:.
+  sbatch_large:
+    partition: 4vcpu               # e.g. "16vcpu" - see large_tile_pixel_threshold's comment above
+    account: ""
+    time: "1-00:00:00"
+    mem: "24G"                            # e.g. "96G" - well under the partition's per-node RAM, generous margin over the estimate
+    cpus_per_task: 4                                  # still one tile at a time per node - only the partition's RAM changes, not the concurrency model
+    env_activate_cmd: 'module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm'
 
 
 # ── POSTPROCESSING ────────────────────────────────────────────────────────────

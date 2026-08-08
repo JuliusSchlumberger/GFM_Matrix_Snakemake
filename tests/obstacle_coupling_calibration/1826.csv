@@ -1,0 +1,5 @@
+tile,n_outer,n_cells,cum_time_s,iter_time_s,n_rounds_used,outer_stopped_early,pct_newly_blocked,last_max_change,epsilon,inner_converged,pct_cells_still_changing,mean_cell_change,min_cell_change,max_cell_change,n_inundated,depth_mean,depth_min,depth_max,depth_q20,depth_q80,status,pct_removed_by_static_filter_alone,pct_additional_removed_by_full_outer_loop,n_outer_iterations_to_convergence
+1826,0,4225,0.075,0.075,3,False,0.0,0.0,6.666666498252501e-07,True,0.0,0.0,0.0,0.0,0,0.0,0.0,0.0,0.0,0.0,ok,,,
+1826,1,4225,0.144,0.001,3,False,7.64497,0.0,6.666666498252501e-07,True,0.0,0.0,0.0,0.0,0,0.0,0.0,0.0,0.0,0.0,ok,,,
+1826,2,4225,0.21,0.001,3,True,0.0,0.0,6.666666498252501e-07,True,0.0,0.0,0.0,0.0,0,0.0,0.0,0.0,0.0,0.0,ok,,,
+1826,,,,,,,,,,,,,,,,,,,,,summary,0.0,0.0,2

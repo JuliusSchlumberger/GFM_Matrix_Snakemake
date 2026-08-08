@@ -1,9 +1,10 @@
 """GFM Aqueduct preprocessing & simulation workflow.
 
-For every tile in the overlapping tile grid (`paths.tile_grid`, built by
-`snakemake_workflow/preparation/run_preparation.py` — see that directory's
-tile_mask_creation.py, select_tiles.py and merge_tiles.py for how it's
-derived from DeltaDTM + COAST-RP coverage), this workflow preprocesses the
+For every tile in the fixed-DeltaDTM-tile chunk manifest (`tile_grid.path`,
+built by `snakemake_workflow/preparation/run_preparation.py` — see
+`snakemake_workflow/src/tile_chunking.py` and that directory's
+`build_tile_manifest.py` for how it's derived from DeltaDTM coverage,
+floodability and population exposure), this workflow preprocesses the
 DEM, DEM-validity mask, friction and water level boundary inputs for each
 (return period, sea level rise scenario) combination, and runs the Aqueduct
 flood model for every (tile, return_period, waterlevel_name) combination.
@@ -83,8 +84,7 @@ os.makedirs = _retrying_makedirs
 
 sys.path.insert(0, os.path.join(workflow.basedir, "snakemake_workflow", "src"))
 from aqueduct_runner import estimate_aqueduct_mem_mb  # noqa: E402
-from config_utils import _expand_paths, get_data_catalog  # noqa: E402
-from regions import assign_regions  # noqa: E402
+from config_utils import _expand_paths, get_data_catalog, merged_slr_scenarios  # noqa: E402
 
 configfile: "snakemake_workflow/config/config.yml"
 
@@ -124,17 +124,19 @@ _tile_gdf["tile_id"] = _tile_gdf["tile_id"].astype(str)
 TILE_IDS = sorted(_tile_gdf["tile_id"].astype(int).tolist())
 RETURN_PERIODS = [f"RP{rp}" for rp in config["boundary_conditions"]["return_periods"]]
 
-# Adaptation design intensities: the SLR scenarios used as the protection
-# standard for the adaptation measures.
-ADAPTATION_SLR_INTENSITIES = config["adaptation"]["slr_intensities"]
-
 # Full set of SLR scenarios to simulate: union of the base scenario list and
-# the adaptation intensities. Using an ordered-set pattern (dict.fromkeys) to
-# deduplicate while preserving declaration order (base list first, then any
-# extra intensities not already listed).
-WATERLEVEL_NAMES = list(dict.fromkeys(
-    config["boundary_conditions"]["slr_scenarios"] + ADAPTATION_SLR_INTENSITIES
-))
+# the adaptation design intensities (config["adaptation"]["slr_intensities"] -
+# the SLR levels used as the protection standard for adaptation measures),
+# deduplicated AND numerically sorted - see config_utils.merged_slr_scenarios
+# for why the sort isn't just cosmetic (exposure-analysis callers feed these
+# values positionally into np.interp/pchip_interpolate, which need a
+# strictly increasing sequence). This used to be reimplemented inline here
+# without the sort - harmless only because boundary_conditions.slr_scenarios
+# already happened to be both sorted and a superset of every adaptation
+# intensity; silently wrong the moment that stops being true. Now the same
+# shared function prepare_boundary_conditions.py already uses to generate
+# these scenarios' actual NetCDF files, so the two can no longer drift.
+WATERLEVEL_NAMES = merged_slr_scenarios(config["boundary_conditions"], config["adaptation"])
 
 
 # ── Chunk grid (derived from tile_grid extent + chunk_size_deg) ──────────────
@@ -213,12 +215,11 @@ _PROTECTION_BASELINE_SLR = config["protection"]["baseline_waterlevel_name"]
 #    extract_dem in preprocessing.smk) ── the data catalog is resolved once
 #    at parse time, same as _tile_gdf above, so those rules' input:/output:
 #    can reference concrete .gfc paths rather than re-querying the catalog
-#    per invocation.
+#    per invocation. Always applied (EGM2008 -> GOCO06s), no toggle.
 _data_catalog = get_data_catalog(
     os.path.join(workflow.basedir, config["paths"]["hydromt_data_catalog"]), root=config["paths"]["root"]
 )
-_vc_cfg = config.get("vertical_datum_correction", {})
-_vertical_datum_correction_enabled = _vc_cfg.get("enabled", False)
+_vc_cfg = config["vertical_datum_correction"]
 
 
 include: "snakemake_workflow/rules/common.smk"
@@ -235,33 +236,12 @@ _PREPROCESS_OUTPUTS = (
         rules.extract_boundaries.output.boundaries,
         tile_id=TILE_IDS, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES,
     )
-    + expand(
-        rules.write_aqueduct_config.output.toml,
-        tile_id=TILE_IDS, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES,
-    )
 )
 
 _SIMULATION_OUTPUTS = expand(
     rules.run_aqueduct.output.waterdepth,
     tile_id=TILE_IDS, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES,
 )
-
-# Geographic grouping of `simulate`'s targets (see src/regions.py and rule
-# simulate_region below) - orchestration only, so a real-world area's worth
-# of tiles can be requested and become analyzable together, instead of an
-# arbitrary index range. Has no bearing on _SIMULATION_OUTPUTS above (still
-# used by `simulate`/`all` exactly as before) or on where any output lands.
-_TILE_REGIONS = assign_regions(_tile_gdf, len(RETURN_PERIODS) * len(WATERLEVEL_NAMES))
-REGION_TILE_IDS: dict[str, list[int]] = {}
-for _tile_id, _region_name in _TILE_REGIONS.items():
-    REGION_TILE_IDS.setdefault(_region_name, []).append(_tile_id)
-REGION_SIMULATION_OUTPUTS = {
-    _region_name: expand(
-        rules.run_aqueduct.output.waterdepth,
-        tile_id=_tile_ids, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES,
-    )
-    for _region_name, _tile_ids in REGION_TILE_IDS.items()
-}
 
 # generate_aqueduct_jobs (HPC dispatch) needs _PREPROCESS_OUTPUTS, so this
 # include comes after it's defined above, unlike the other rule files.
@@ -309,40 +289,6 @@ rule simulate:
     """Run the Aqueduct flood model for all tiles, return periods and SLR scenarios."""
     input:
         _SIMULATION_OUTPUTS,
-
-
-rule simulate_region:
-    """Run the Aqueduct flood model for one geographic region's tiles only
-    (see src/regions.py) - a real, analyzable slice of global coverage
-    (a continent, or half of an oversized one), for requesting/tracking via
-    run_simulate_regions.sh instead of an arbitrary index range.
-
-    Orchestration only: {region} selects WHICH of simulate's own targets get
-    requested in this invocation, nothing else. Every output still lands at
-    exactly the same model_outputs/{tile_id}/results/waterdepth_....tif path
-    `simulate` itself would produce - postprocessing (merge_chunk, plots,
-    exposure analysis) reads those same paths with no awareness this
-    grouping exists, and the actual per-country/per-continent exposure
-    results downstream (analysis/compute_exposure_analysis.py) are computed
-    from the population/geogunit rasters at global-grid resolution, entirely
-    independent of - and unaffected by - which region built a given tile.
-
-    The output is a small marker file (not a data product) purely so this
-    wildcarded rule can be targeted by a concrete path on the command line;
-    it lives under model_outputs/_region_done/ alongside this codebase's
-    other bookkeeping-only subfolders (oom_tiles/, skipped_tiles/), not
-    mixed in with any tile's actual per-tile data.
-    """
-    input:
-        lambda wildcards: REGION_SIMULATION_OUTPUTS[wildcards.region],
-    output:
-        # Deliberately NOT os.path.join: on Windows it would backslash-join
-        # the "_region_done"/"{region}.done" segments, which then would not
-        # textually match a forward-slash path built independently by
-        # list_regions.py (used to pass this exact target on the command
-        # line) - same documented pitfall as waterdepth_tiles_for_chunk
-        # above, which needs the same workaround for the same reason.
-        touch(config["simulation"]["model_outputs"] + "/_region_done/{region}.done"),
 
 
 rule postprocess:

@@ -25,6 +25,10 @@ _merge_chunk_waterdepth_path = os.path.join(
     config["postprocessing"]["merged_outputs"], "chunks",
     "waterdepth_{chunk_id}_{return_period}_{waterlevel_name}.tif",
 )
+_merge_chunk_provenance_path = os.path.join(
+    config["postprocessing"]["merged_outputs"], "chunks",
+    "provenance_{chunk_id}_{return_period}_{waterlevel_name}.tif",
+)
 
 
 rule merge_chunk:
@@ -45,6 +49,15 @@ rule merge_chunk:
         waterdepth=(
             _merge_chunk_waterdepth_path if _keep_merged_chunk_waterdepth
             else temp(_merge_chunk_waterdepth_path)
+        ),
+        # Per-cell winning tile_id (int32) - the max-combine (2026-08,
+        # replacing the previous valid-count-weighted mean) has no "average"
+        # to inspect, so this is the practical debugging handle when a
+        # merged value looks wrong. Same temp()-or-not lifetime as
+        # waterdepth, since it's only useful alongside it.
+        provenance=(
+            _merge_chunk_provenance_path if _keep_merged_chunk_waterdepth
+            else temp(_merge_chunk_provenance_path)
         ),
         overlap_minmax=os.path.join(
             config["postprocessing"]["merged_outputs"], "chunks", "overlap_samples",

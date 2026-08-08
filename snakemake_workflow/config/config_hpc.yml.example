@@ -11,6 +11,12 @@
 # resolve paths BOTH ways: locally (as usual) AND as the Linux HPC compute
 # nodes will see them, at the same time, without the two configs conflicting.
 #
+# The flood solver is pure Python (src/flood_model.py + src/eikonal.py, a
+# Numba JIT - no compiled executable, no per-machine single-instance
+# constraint), so unlike an earlier Julia-based version of this pipeline,
+# no separate build/executable path is needed here - just where the repo
+# and shared storage live on the HPC side.
+#
 # Usage:
 #   cp snakemake_workflow/config/config_hpc.yml.example \
 #      snakemake_workflow/config/config_hpc.yml
@@ -28,13 +34,3 @@ paths:
   # overridden here even though config.yml already sets code_root, since
   # that value is the Windows preprocessing machine's own repo path.
   code_root: "/mnt/gfm_code"           # ← change to your HPC's repo checkout path
-
-  # Root of the Linux Aqueduct build tree. Only needed if it differs from
-  # code_root on the HPC (it defaults to code_root if omitted).
-  aqueduct_root: "/mnt/gfm_code"       # ← change to your HPC's path
-
-simulation:
-  # Compiled Linux Aqueduct executable (no .exe extension) - a separate
-  # build from the Windows aqueduct.exe used by config.yml's own
-  # simulation.aqueduct_executable.
-  aqueduct_executable: "{aqueduct_root}/build/aqueduct_linux/aqueduct"   # ← change to your HPC's build path

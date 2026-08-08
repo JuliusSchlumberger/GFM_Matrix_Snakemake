@@ -1,18 +1,32 @@
-"""Split an OOM'd Aqueduct tile into two smaller, overlapping sub-tiles.
+"""Split an OOM'd tile into two smaller, overlapping sub-tiles.
 
-Aqueduct's memory cost is dominated by tile pixel count (see
-aqueduct_runner.OOM_SIGNATURE docstring), so a tile that runs out of memory
-is unlikely to ever succeed at its current size. Splitting it into two
-overlapping halves and re-running the normal pipeline on those instead is
-cheaper than trying to make Aqueduct itself more memory-efficient.
+The flood solve's memory cost is dominated by tile pixel count, so a tile
+that runs out of memory is unlikely to ever succeed at its current size.
+Splitting it into two overlapping halves and re-running the normal pipeline
+on those instead is cheaper than trying to make the solve itself more
+memory-efficient.
 
-Tile ID scheme: existing tile_ids are `parent_5deg_id * 10 + quadrant_id`
-(tile_mask_creation.py), where quadrant_id is always 0-3 - no existing
-tile_id can end in a digit 4-9. A split child's id is `parent_tile_id * 10 +
-{8, 9}`, which is therefore collision-free by construction, keeps tile_id a
-plain int everywhere in the pipeline (no "a"/"b" string suffix needed), and
-encodes split depth in the digits themselves (see split_depth) - no separate
-tracking file required.
+Tile ID scheme (2026-08, fixed - see below): `tile_grid.path`'s tile_ids are
+plain sequential integers (src/tile_chunking.bboxes_to_geodataframe), not the
+retired `parent_5deg_id*10+quadrant_id` scheme this module originally
+assumed - a split child's id is now simply one more than the current global
+maximum tile_id (`max(tile_grid["tile_id"]) + 1`), which is trivially
+collision-free (every existing tile_id is smaller) and, since child ids are
+assigned in increasing order as splits happen, always sorts to the end of a
+tile_id-ordered job list - the same property run_pipeline.py's --batch
+handling relies on, just no longer expressed as a digit-encoding trick.
+Split depth is tracked in its own `split_depth` GeoDataFrame column (0 for
+an original tile) instead of being inferred from the id's digits, since
+sequential ids carry no such structure to exploit - see split_depth() below.
+
+FIXED 2026-08: this module's original digit-encoding/`parent_grid`-column
+design predated the fixed-DeltaDTM-tile-chunking tile-generation rewrite
+(src/tile_chunking.py) and was never updated for it, which would have
+crashed the first real OOM-split (`row["parent_grid"]` KeyError - that
+column doesn't exist in the current schema) and, even past that, silently
+produced colliding tile_ids (new sequential tile_ids can land anywhere,
+including on digits 4-9 the old scheme assumed were reserved for splits).
+Found via code review, not a real production incident.
 """
 
 import shutil
@@ -28,24 +42,21 @@ from shapely.geometry import Polygon, box
 from config_utils import retry_transient_io
 from tiles import load_tile_grid
 
-# Split children's tile_ids always end in one of these digits (never used by
-# an original quadrant tile_id, which only ever ends in 0-3).
-_SPLIT_DIGITS = (8, 9)
 
-
-def split_depth(tile_id: int) -> int:
-    """Number of times `tile_id` has already been split.
-
-    0 for an original tile (parent_5deg_id*10+quadrant_id, last digit 0-3).
-    Each split appends one more trailing digit from {8, 9}, so depth is just
-    the count of trailing digits in {8, 9} when peeling them off the right.
+def split_depth(tile_grid: gpd.GeoDataFrame, tile_id: int) -> int:
+    """Number of times `tile_id` has already been split - read from the
+    tile grid's own `split_depth` column (0 for an original, never-split
+    tile). Defaults to 0 if the column doesn't exist yet (a tile grid
+    written before any split ever happened, or before this column existed)
+    rather than requiring a fresh tile_generation run first.
     """
-    depth = 0
-    n = tile_id
-    while n % 10 in _SPLIT_DIGITS:
-        depth += 1
-        n //= 10
-    return depth
+    if "split_depth" not in tile_grid.columns:
+        return 0
+    row = tile_grid.loc[tile_grid["tile_id"] == tile_id]
+    if row.empty:
+        raise ValueError(f"tile_id {tile_id} not found in tile grid")
+    val = row.iloc[0]["split_depth"]
+    return 0 if pd.isna(val) else int(val)
 
 
 def build_split_candidates(
@@ -125,10 +136,13 @@ def split_tile(
     model_outputs_dir = Path(model_outputs_dir)
 
     tile_grid = load_tile_grid(tile_grid_path)
+    if "split_depth" not in tile_grid.columns:
+        tile_grid["split_depth"] = 0
     row = tile_grid.loc[tile_grid["tile_id"] == tile_id]
     if row.empty:
         raise ValueError(f"tile_id {tile_id} not found in {tile_grid_path}")
     row = row.iloc[0]
+    parent_depth = 0 if pd.isna(row["split_depth"]) else int(row["split_depth"])
 
     mask_path = model_outputs_dir / str(tile_id) / "inputs" / "mask.tif"
     if not mask_path.exists():
@@ -138,13 +152,13 @@ def split_tile(
         )
 
     _axis, half_a, half_b = choose_split(row.geometry, mask_path, fraction)
-    child_a_id = tile_id * 10 + _SPLIT_DIGITS[0]
-    child_b_id = tile_id * 10 + _SPLIT_DIGITS[1]
+    next_id = int(tile_grid["tile_id"].max()) + 1
+    child_a_id, child_b_id = next_id, next_id + 1
 
     new_rows = gpd.GeoDataFrame(
         [
-            {"tile_id": child_a_id, "parent_grid": row["parent_grid"], "geometry": half_a},
-            {"tile_id": child_b_id, "parent_grid": row["parent_grid"], "geometry": half_b},
+            {"tile_id": child_a_id, "split_depth": parent_depth + 1, "geometry": half_a},
+            {"tile_id": child_b_id, "split_depth": parent_depth + 1, "geometry": half_b},
         ],
         crs=tile_grid.crs,
     )

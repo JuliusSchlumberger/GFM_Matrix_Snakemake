@@ -1,5 +1,6 @@
 """Shared config-parsing and data-catalog helpers used across the workflow."""
 
+import os
 import time
 from functools import partial
 from pathlib import Path
@@ -66,6 +67,27 @@ def retry_transient_io(fn: Callable[..., _T], *args, retries: int = 4, delay_s: 
                 )
                 time.sleep(delay_s)
     raise last_err
+
+
+def path_ready(path: str | Path) -> bool:
+    """Check whether `path` exists, retrying transient I/O errors first.
+
+    `os.path.exists()` catches `OSError` internally and just returns
+    `False` - so a momentary P:\\ blip (see `retry_transient_io` above)
+    looks IDENTICAL to a genuinely missing file, and no retry is ever
+    triggered. Used to check whether a lower-hop neighbour tile's output
+    already exists before seeding a hinterland tile from it
+    (`run_aqueduct.py` / `run_aqueduct_cli.py`'s hop>=1 branch) - on a
+    flaky network mount, silently treating a transient blip as "no
+    neighbour output yet" would write a wrongly-confident real-zero result
+    instead of the correct flooded one. `os.stat` DOES raise, so it can go
+    through the same retry path as every other read in this pipeline.
+    """
+    try:
+        retry_transient_io(os.stat, path)
+        return True
+    except _TRANSIENT_IO_EXCEPTIONS:
+        return False
 
 
 def _deep_merge(base: dict, override: dict) -> dict:

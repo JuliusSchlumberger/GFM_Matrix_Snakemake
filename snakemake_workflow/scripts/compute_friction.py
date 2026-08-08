@@ -21,4 +21,4 @@ friction = compute_friction(
     snakemake.params.default_friction,  # noqa: F821
 )
 
-save_raster(friction, snakemake.output.friction, snakemake.params.raster_config)  # noqa: F821
+save_raster(friction, snakemake.output.friction, snakemake.params.raster_config, dtype="int16")  # noqa: F821

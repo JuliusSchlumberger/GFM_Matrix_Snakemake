@@ -39,6 +39,38 @@ from rasterio.windows import Window, from_bounds
 
 AQUEDUCT_NODATA = np.finfo(np.float32).max
 
+# int16 counterpart of AQUEDUCT_NODATA, for per-tile waterdepth rasters (see
+# rasters.encode_waterdepth_cm/WATERDEPTH_NODATA_INT16). Every read in this
+# module decodes int16 tiles to this module's existing float32+
+# AQUEDUCT_NODATA convention immediately, before any of the merge/overlap-
+# correction arithmetic below - none of that arithmetic needs to think in
+# int16-centimetres.
+WATERDEPTH_NODATA_INT16 = np.iinfo(np.int16).max
+WATERDEPTH_SCALE = 100  # cm per metre - must match rasters.WATERDEPTH_SCALE
+
+
+def decode_waterdepth_array(raw: np.ndarray) -> np.ndarray:
+    """Decode an already-read int16-centimetre waterdepth array to float32
+    metres, with AQUEDUCT_NODATA marking cells the tile didn't cover/compute.
+
+    Any waterdepth-reading code outside this module (e.g. diagnostic
+    scripts that reproject/warp a tile directly rather than doing a plain
+    windowed `.read()`) should decode through this function too, rather
+    than duplicating the scale/nodata conversion - see
+    plot_overlap_diagnostics.py.
+    """
+    patch = raw.astype(np.float32) / WATERDEPTH_SCALE
+    patch[raw == WATERDEPTH_NODATA_INT16] = AQUEDUCT_NODATA
+    return patch
+
+
+def _read_waterdepth_patch(src: rasterio.DatasetReader, window: Window) -> np.ndarray:
+    """Read one tile's waterdepth patch, decoded to float32 metres with
+    AQUEDUCT_NODATA marking cells the tile didn't cover/compute.
+    """
+    raw = src.read(1, window=window, boundless=True, fill_value=WATERDEPTH_NODATA_INT16)
+    return decode_waterdepth_array(raw)
+
 
 def _bounds_intersect(
     a: tuple[float, float, float, float],
@@ -194,14 +226,50 @@ def _open_overlapping_tiles(
     return metas
 
 
+PROVENANCE_NODATA = -1  # no tile covers this cell
+
+
+def _tile_id_from_path(path: str) -> int:
+    """Recover a tile_id from a per-tile waterdepth raster path, relying on
+    this pipeline's established `model_outputs/{tile_id}/results/...`
+    directory convention (see e.g. compute_model_bbox's own
+    `model_outputs/{tile_id}/inputs/...` sibling path). Fragile in the
+    sense that it depends on that convention rather than an explicit
+    tile_id passed alongside each path - acceptable here since every other
+    part of this pipeline already depends on the same convention.
+    """
+    return int(Path(path).parents[1].name)
+
+
 def merge_tile_rasters_chunk(
     tile_rasters: list[str | Path],
     chunk_bounds: tuple[float, float, float, float],
     waterdepth_output_path: str | Path,
+    provenance_output_path: str | Path,
     block_size: int,
     raster_config: dict[str, Any],
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Merge per-tile water depth rasters within one spatial chunk.
+    """Merge per-tile water depth rasters within one spatial chunk by
+    PER-CELL MAXIMUM (2026-08 - replaces the previous valid-count-weighted
+    mean). Rationale (tile-generation spec): if water reached a cell in one
+    tile, it reached it, regardless of what another tile says - this flips
+    the error asymmetry so under-resolution in one tile is recoverable by
+    any other tile that got it right, while over-estimation is the only
+    error a max-combine can no longer self-correct. Also writes a parallel
+    PROVENANCE raster (int32 tile_id per winning cell, `PROVENANCE_NODATA`
+    where no tile covers the cell at all) - under max-combine this is the
+    only practical debugging handle when a value looks wrong, since there's
+    no "average" to inspect the contributing tiles of.
+
+    Correctness gate this combine strategy leans on: because no tile can
+    ever pull a value back down, a station wrongly assigned across a thin
+    land barrier poisons the mosaic PERMANENTLY (unlike under the old mean,
+    where it was merely diluted). The native-resolution ocean-connectivity
+    fix in flood_model.py remains sole authority on per-cell boundary
+    assignment for exactly this reason - it should reject on ambiguity
+    rather than accept; the coarse long-range connectivity check
+    (boundaries.filter_stations_by_ocean_connectivity) only ever filters
+    the candidate station pool, never assigns a value itself.
 
     Tile files are opened once (for GDAL cache reuse) but data is read one
     block at a time — only the current block's worth of tile data is ever held
@@ -209,8 +277,9 @@ def merge_tile_rasters_chunk(
     ``block_size² × tiles_per_block`` rather than to the full intersection area.
 
     For every cell where ≥2 tiles' footprints cover the cell, the min and max
-    depth across ALL contributing tiles at that cell are collected (not just
-    the first two, and regardless of whether either exceeds the flood
+    depth across ALL contributing tiles at that cell are STILL collected
+    (diagnostic-only, unaffected by the combine-strategy change above) — not
+    just the first two, and regardless of whether either exceeds the flood
     threshold — deliberately including cells where tiles disagree about
     flood/no-flood, since that disagreement is exactly what the
     continent-level "ambiguous" diagnostic category needs) with bounded
@@ -224,7 +293,8 @@ def merge_tile_rasters_chunk(
     Args:
         tile_rasters: Paths to the per-tile waterdepth rasters for the chunk.
         chunk_bounds: (minx, miny, maxx, maxy) of the chunk in the tile CRS.
-        waterdepth_output_path: Path for the averaged water-depth output raster.
+        waterdepth_output_path: Path for the max-combined water-depth output raster.
+        provenance_output_path: Path for the parallel int32 winning-tile_id raster.
         block_size: Side-length in pixels of each write block.
         raster_config: Merge config dict (driver, compression, predictor,
             nodata, overlap_corr_max_samples, overlap_corr_seed).
@@ -246,6 +316,7 @@ def merge_tile_rasters_chunk(
 
     out_transform, out_w, out_h = _make_chunk_transform(chunk_bounds, ref_transform)
     tile_metas = _open_overlapping_tiles(tile_rasters, out_transform, out_w, out_h)
+    tile_ids = {tm.path: _tile_id_from_path(tm.path) for tm in tile_metas}
 
     max_samples = int(raster_config["overlap_corr_max_samples"])
     rng = np.random.default_rng(int(raster_config.get("overlap_corr_seed", 42)))
@@ -268,16 +339,28 @@ def merge_tile_rasters_chunk(
         "nodata": raster_config["nodata"],
         "predictor": raster_config["predictor"],
     }
+    prov_profile = {
+        **common,
+        "dtype": "int32",
+        "nodata": PROVENANCE_NODATA,
+        "predictor": 2,  # integer predictor - tile_ids are arbitrary integers, not a smooth field
+    }
 
     try:
-        with retry_transient_io(rasterio.open, waterdepth_output_path, "w", **wd_profile) as wd_dst:
+        with retry_transient_io(rasterio.open, waterdepth_output_path, "w", **wd_profile) as wd_dst, \
+             retry_transient_io(rasterio.open, provenance_output_path, "w", **prov_profile) as prov_dst:
             for row_off in range(0, out_h, block_size):
                 block_h = min(block_size, out_h - row_off)
                 for col_off in range(0, out_w, block_size):
                     block_w = min(block_size, out_w - col_off)
 
-                    valid_count = np.zeros((block_h, block_w), dtype="float64")
-                    depth_sum = np.zeros((block_h, block_w), dtype="float64")
+                    # Per-cell running maximum + which tile_id is currently
+                    # winning (PROVENANCE_NODATA/-inf where no tile has
+                    # covered the cell yet) - replaces the pre-2026-08
+                    # valid_count-weighted mean. See this function's own
+                    # docstring for why max, not mean.
+                    best_depth = np.full((block_h, block_w), -np.inf, dtype="float64")
+                    best_tile_id = np.full((block_h, block_w), PROVENANCE_NODATA, dtype="int32")
 
                     # Read one patch per tile that overlaps this block.
                     block_patches: list[tuple[np.ndarray, int, int, int, int, str]] = []
@@ -295,10 +378,7 @@ def merge_tile_rasters_chunk(
                         win_h = out_r1 - out_r0
                         win_w = out_c1 - out_c0
                         win = Window(s_c0, s_r0, win_w, win_h)
-                        patch = tm.src.read(
-                            1, window=win, boundless=True,
-                            fill_value=AQUEDUCT_NODATA,
-                        ).astype(np.float32)
+                        patch = _read_waterdepth_patch(tm.src, win)
 
                         br0 = out_r0 - row_off
                         br1 = out_r1 - row_off
@@ -306,10 +386,14 @@ def merge_tile_rasters_chunk(
                         bc1 = out_c1 - col_off
 
                         valid = patch < AQUEDUCT_NODATA
-                        valid_count[br0:br1, bc0:bc1] += valid.astype("float64")
-                        depth_sum[br0:br1, bc0:bc1] += np.where(
-                            valid, patch.astype("float64"), 0.0
-                        )
+                        sub_best = best_depth[br0:br1, bc0:bc1]
+                        sub_id = best_tile_id[br0:br1, bc0:bc1]
+                        depth64 = patch.astype("float64")
+                        wins = valid & (depth64 > sub_best)
+                        sub_best[wins] = depth64[wins]
+                        sub_id[wins] = tile_ids[tm.path]
+                        best_depth[br0:br1, bc0:bc1] = sub_best
+                        best_tile_id[br0:br1, bc0:bc1] = sub_id
                         block_patches.append((patch, br0, br1, bc0, bc1, tm.path))
 
                     # Collect per-cell min/max depth across ALL tiles whose
@@ -349,16 +433,14 @@ def merge_tile_rasters_chunk(
                             cell_max = np.nanmax(tile_depths, axis=0)
                             minmax_sampler.add(cell_min[overlap_mask], cell_max[overlap_mask])
 
-                    merged = np.where(
-                        valid_count > 0,
-                        depth_sum / np.where(valid_count > 0, valid_count, 1.0),
-                        raster_config["nodata"],
-                    ).astype("float32")
+                    covered = best_tile_id != PROVENANCE_NODATA
+                    merged = np.where(covered, best_depth, raster_config["nodata"]).astype("float32")
                     # cm-precision rounding shrinks the compressed file some
                     # (nodata sentinel is an integer value, unaffected).
                     merged = np.round(merged, 2)
                     window = Window(col_off, row_off, block_w, block_h)
                     wd_dst.write(merged, 1, window=window)
+                    prov_dst.write(best_tile_id, 1, window=window)
     finally:
         for tm in tile_metas:
             tm.src.close()

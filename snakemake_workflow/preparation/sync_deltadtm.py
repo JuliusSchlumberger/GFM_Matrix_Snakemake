@@ -2,9 +2,9 @@
 Download DeltaDTM v1.1 tiles from 4TU.ResearchData and sort them into the
 DEM/mask tile directories the rest of the pipeline expects — the parent
 directories of the `deltadtm` / `deltadtm_mask` sources in
-data_catalog_gfm.yml (e.g. merge_tiles.py, select_tiles.py and
-extract_dem.py all read individual tile files from those same directories,
-next to the `deltadtm.vrt` / `deltadtm_mask.vrt` mosaics).
+data_catalog_gfm.yml (e.g. src/tile_chunking.py and extract_dem.py both
+read individual tile files from those same directories, next to the
+`deltadtm.vrt` / `deltadtm_mask.vrt` mosaics).
 
 Also downloads 4TU's own pre-built global DEM VRT mosaic and rewrites it to
 point at this machine's local tile directory (see download_and_patch_vrt),
@@ -287,9 +287,9 @@ def run(config: dict) -> None:
     sync_cfg = config["sync_deltadtm"]
 
     # DEM/mask tiles land next to the `deltadtm`/`deltadtm_mask` VRT mosaics
-    # in data_catalog_gfm.yml — the same directories merge_tiles.py,
-    # select_tiles.py and tile_mask_creation.py already read individual tile
-    # files from, so nothing downstream needs to know this script ran.
+    # in data_catalog_gfm.yml — the same directories src/tile_chunking.py
+    # already reads individual tile files from, so nothing downstream needs
+    # to know this script ran.
     catalog = get_data_catalog(
         _REPO_ROOT / config["paths"]["hydromt_data_catalog"], root=config["paths"]["root"]
     )

@@ -1,0 +1,136 @@
+ WARN Encountered 1 warning while parsing the manifest:
+  ⚠ The `project` field is deprecated. Use `workspace` instead.
+    ╭─[C:\Users\Schlu005\GFM\pixi.toml:1:1]
+  1 │ ╭─▶ [project]
+  2 │ │   name = "GFM"
+  3 │ │   version = "0.1.0"
+  4 │ │   description = "Add a short description here"
+  5 │ │   authors = ["Maarten Pronk <git@evetion.nl>"]
+  6 │ │   channels = ["conda-forge"]
+  7 │ │   platforms = ["osx-arm64", "win-64", "linux-64"]
+  8 │ │   readme = "README.md"
+  9 │ │   license = "MIT"
+ 10 │ │   license-file = "LICENSE"
+ 11 │ │   homepage = "https://github.com/Deltares-research/GFM/"
+ 12 │ │   documentation = "https://github.com/Deltares-research/GFM/"
+ 13 │ ├─▶ repository = "https://github.com/Deltares-research/GFM/"
+    · ╰──── replace this with 'workspace'
+ 14 │     
+    ╰────
+
+
+  [ SKIP ] Download DeltaDTM tiles
+
+  [ SKIP ] Tile generation
+
+============================================================
+  Build along-water forcing distance index
+============================================================
+2026-08-04 13:00:34,416 - snakemake_workflow - log - INFO - HydroMT version: 0.9.4
+13:00:34  INFO      HydroMT version: 0.9.4
+2026-08-04 13:00:34,416 - snakemake_workflow - data_catalog - INFO - Parsing data catalog from C:\Users\Schlu005\GFM\snakemake_workflow\config\data_catalog_gfm.yml
+13:00:34  INFO      Parsing data catalog from C:\Users\Schlu005\GFM\snakemake_workflow\config\data_catalog_gfm.yml
+Stage 1: load real simulation chunks (tile_grid.path)
+  2434 chunks
+
+Stage 2: load COAST-RP station locations
+13:00:34  INFO      COAST-RP_preprocessed.nc already exists � loading.
+  22670 stations
+
+Stage 3: build_connectivity_distance_index (chunk-scoped Dijkstra)
+  build_connectivity_distance_index: chunk 1/2434 (0s elapsed, 0 cells so far)
+  build_connectivity_distance_index: chunk 2/2434 (22s elapsed, 309567 cells so far)
+  build_connectivity_distance_index: chunk 3/2434 (99s elapsed, 719735 cells so far)
+  build_connectivity_distance_index: chunk 4/2434 (133s elapsed, 902982 cells so far)
+  build_connectivity_distance_index: chunk 5/2434 (156s elapsed, 992866 cells so far)
+  build_connectivity_distance_index: chunk 6/2434 (224s elapsed, 1328971 cells so far)
+  build_connectivity_distance_index: chunk 7/2434 (293s elapsed, 1489969 cells so far)
+  build_connectivity_distance_index: chunk 8/2434 (363s elapsed, 1713409 cells so far)
+  build_connectivity_distance_index: chunk 9/2434 (463s elapsed, 2175680 cells so far)
+  build_connectivity_distance_index: chunk 10/2434 (496s elapsed, 2525357 cells so far)
+  build_connectivity_distance_index: chunk 11/2434 (516s elapsed, 2609581 cells so far)
+  build_connectivity_distance_index: chunk 12/2434 (589s elapsed, 3181659 cells so far)
+  build_connectivity_distance_index: chunk 13/2434 (618s elapsed, 3457961 cells so far)
+  build_connectivity_distance_index: chunk 14/2434 (630s elapsed, 3525530 cells so far)
+  build_connectivity_distance_index: chunk 15/2434 (659s elapsed, 3877170 cells so far)
+  build_connectivity_distance_index: chunk 16/2434 (673s elapsed, 3985933 cells so far)
+  build_connectivity_distance_index: chunk 17/2434 (697s elapsed, 4161019 cells so far)
+  build_connectivity_distance_index: chunk 18/2434 (725s elapsed, 4462696 cells so far)
+  build_connectivity_distance_index: chunk 19/2434 (772s elapsed, 4876368 cells so far)
+  build_connectivity_distance_index: chunk 20/2434 (800s elapsed, 5030113 cells so far)
+  build_connectivity_distance_index: chunk 21/2434 (839s elapsed, 5295461 cells so far)
+  build_connectivity_distance_index: chunk 22/2434 (855s elapsed, 5367697 cells so far)
+  build_connectivity_distance_index: chunk 23/2434 (866s elapsed, 5462549 cells so far)
+  build_connectivity_distance_index: chunk 24/2434 (892s elapsed, 5685872 cells so far)
+  build_connectivity_distance_index: chunk 25/2434 (912s elapsed, 5770144 cells so far)
+  build_connectivity_distance_index: chunk 26/2434 (923s elapsed, 5809622 cells so far)
+  build_connectivity_distance_index: chunk 27/2434 (955s elapsed, 6078782 cells so far)
+  build_connectivity_distance_index: chunk 28/2434 (985s elapsed, 6332794 cells so far)
+  build_connectivity_distance_index: chunk 29/2434 (995s elapsed, 6343967 cells so far)
+  build_connectivity_distance_index: chunk 30/2434 (1014s elapsed, 6382458 cells so far)
+  build_connectivity_distance_index: chunk 31/2434 (1037s elapsed, 6580580 cells so far)
+  build_connectivity_distance_index: chunk 32/2434 (1085s elapsed, 6815723 cells so far)
+  build_connectivity_distance_index: chunk 33/2434 (1108s elapsed, 6878405 cells so far)
+  build_connectivity_distance_index: chunk 34/2434 (1116s elapsed, 6895378 cells so far)
+  build_connectivity_distance_index: chunk 35/2434 (1130s elapsed, 6972038 cells so far)
+  build_connectivity_distance_index: chunk 36/2434 (1157s elapsed, 7188392 cells so far)
+  build_connectivity_distance_index: chunk 37/2434 (1168s elapsed, 7245405 cells so far)
+  build_connectivity_distance_index: chunk 38/2434 (1185s elapsed, 7321546 cells so far)
+  build_connectivity_distance_index: chunk 39/2434 (1208s elapsed, 7386831 cells so far)
+  build_connectivity_distance_index: chunk 40/2434 (1226s elapsed, 7439708 cells so far)
+  build_connectivity_distance_index: chunk 41/2434 (1246s elapsed, 7535579 cells so far)
+  build_connectivity_distance_index: chunk 42/2434 (1287s elapsed, 7808067 cells so far)
+  build_connectivity_distance_index: chunk 43/2434 (1327s elapsed, 8102468 cells so far)
+  build_connectivity_distance_index: chunk 44/2434 (1343s elapsed, 8180288 cells so far)
+  build_connectivity_distance_index: chunk 45/2434 (1361s elapsed, 8191002 cells so far)
+  build_connectivity_distance_index: chunk 46/2434 (1372s elapsed, 8229480 cells so far)
+  build_connectivity_distance_index: chunk 47/2434 (1386s elapsed, 8302671 cells so far)
+  build_connectivity_distance_index: chunk 48/2434 (1392s elapsed, 8324749 cells so far)
+  build_connectivity_distance_index: chunk 49/2434 (1425s elapsed, 8556231 cells so far)
+  build_connectivity_distance_index: chunk 50/2434 (1464s elapsed, 8837657 cells so far)
+  build_connectivity_distance_index: chunk 51/2434 (1524s elapsed, 9378451 cells so far)
+  build_connectivity_distance_index: chunk 52/2434 (1544s elapsed, 9641105 cells so far)
+  build_connectivity_distance_index: chunk 53/2434 (1557s elapsed, 9745692 cells so far)
+  build_connectivity_distance_index: chunk 54/2434 (1572s elapsed, 9825094 cells so far)
+  build_connectivity_distance_index: chunk 55/2434 (1578s elapsed, 9841474 cells so far)
+  build_connectivity_distance_index: chunk 56/2434 (1603s elapsed, 9995835 cells so far)
+  build_connectivity_distance_index: chunk 57/2434 (1637s elapsed, 10287961 cells so far)
+  build_connectivity_distance_index: chunk 58/2434 (1662s elapsed, 10385054 cells so far)
+  build_connectivity_distance_index: chunk 59/2434 (1694s elapsed, 10698528 cells so far)
+  build_connectivity_distance_index: chunk 60/2434 (1717s elapsed, 10795191 cells so far)
+  build_connectivity_distance_index: chunk 61/2434 (1726s elapsed, 10835106 cells so far)
+  build_connectivity_distance_index: chunk 62/2434 (1739s elapsed, 10955836 cells so far)
+  build_connectivity_distance_index: chunk 63/2434 (1760s elapsed, 11196817 cells so far)
+  build_connectivity_distance_index: chunk 64/2434 (1768s elapsed, 11235560 cells so far)
+  build_connectivity_distance_index: chunk 65/2434 (1780s elapsed, 11249756 cells so far)
+  build_connectivity_distance_index: chunk 66/2434 (1792s elapsed, 11339979 cells so far)
+  build_connectivity_distance_index: chunk 67/2434 (1806s elapsed, 11393306 cells so far)
+  build_connectivity_distance_index: chunk 68/2434 (1852s elapsed, 11794934 cells so far)
+  build_connectivity_distance_index: chunk 69/2434 (1872s elapsed, 11923176 cells so far)
+  build_connectivity_distance_index: chunk 70/2434 (1888s elapsed, 11949626 cells so far)
+  build_connectivity_distance_index: chunk 71/2434 (1903s elapsed, 12009839 cells so far)
+  build_connectivity_distance_index: chunk 72/2434 (1918s elapsed, 12085949 cells so far)
+  build_connectivity_distance_index: chunk 73/2434 (1923s elapsed, 12085949 cells so far)
+  build_connectivity_distance_index: chunk 74/2434 (1929s elapsed, 12092329 cells so far)
+  build_connectivity_distance_index: chunk 75/2434 (1946s elapsed, 12117104 cells so far)
+  build_connectivity_distance_index: chunk 76/2434 (1966s elapsed, 12353422 cells so far)
+  build_connectivity_distance_index: chunk 77/2434 (1989s elapsed, 12489761 cells so far)
+  build_connectivity_distance_index: chunk 78/2434 (1999s elapsed, 12501398 cells so far)
+  build_connectivity_distance_index: chunk 79/2434 (2005s elapsed, 12532062 cells so far)
+  build_connectivity_distance_index: chunk 80/2434 (2012s elapsed, 12536451 cells so far)
+  build_connectivity_distance_index: chunk 81/2434 (2032s elapsed, 12747292 cells so far)
+  build_connectivity_distance_index: chunk 82/2434 (2057s elapsed, 13087656 cells so far)
+  build_connectivity_distance_index: chunk 83/2434 (2068s elapsed, 13211209 cells so far)
+  build_connectivity_distance_index: chunk 84/2434 (2096s elapsed, 13491281 cells so far)
+  build_connectivity_distance_index: chunk 85/2434 (2117s elapsed, 13661958 cells so far)
+  build_connectivity_distance_index: chunk 86/2434 (2134s elapsed, 13786113 cells so far)
+  build_connectivity_distance_index: chunk 87/2434 (2155s elapsed, 14022195 cells so far)
+  build_connectivity_distance_index: chunk 88/2434 (2180s elapsed, 14272566 cells so far)
+  build_connectivity_distance_index: chunk 89/2434 (2275s elapsed, 14677303 cells so far)
+  build_connectivity_distance_index: chunk 90/2434 (2348s elapsed, 15027281 cells so far)
+  build_connectivity_distance_index: chunk 91/2434 (2389s elapsed, 15210252 cells so far)
+  build_connectivity_distance_index: chunk 92/2434 (2434s elapsed, 15474931 cells so far)
+  build_connectivity_distance_index: chunk 93/2434 (2528s elapsed, 15774997 cells so far)
+  build_connectivity_distance_index: chunk 94/2434 (2566s elapsed, 15881811 cells so far)
+  build_connectivity_distance_index: chunk 95/2434 (2651s elapsed, 16113681 cells so far)
+  build_connectivity_distance_index: chunk 96/2434 (2846s elapsed, 16607178 cells so far)

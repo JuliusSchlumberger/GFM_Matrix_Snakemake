@@ -89,12 +89,13 @@ def main() -> None:
                              "underlying <i>/<n> format) - splits the DAG into a smaller slice per "
                              "invocation the same way as the standalone preprocess batch runner, "
                              "for the same reason (faster DAG builds on P:\\). Split-child tile_ids "
-                             "(parent_id*10+8/9) are always numerically larger than any original "
-                             "tile_id, so they sort to the end of the (tile_id-ordered) job list and "
-                             "land in the last batch or close to it, regardless of which batch their "
-                             "parent was in - a single forward sweep through batches 1..N still "
-                             "converges, it just means the LAST batch(es) may pick up extra work "
-                             "created by earlier ones.")
+                             "(src/tile_split.py: always one more than the current global max "
+                             "tile_id) are always numerically larger than any original tile_id, so "
+                             "they sort to the end of the (tile_id-ordered) job list and land in the "
+                             "last batch or close to it, regardless of which batch their parent was "
+                             "in - a single forward sweep through batches 1..N still converges, it "
+                             "just means the LAST batch(es) may pick up extra work created by "
+                             "earlier ones.")
     parser.add_argument("--latency-wait", type=int, default=60,
                         help="forwarded to snakemake's own --latency-wait (default: 60s, vs "
                              "Snakemake's own default of 5s). On P:\\ a job can finish writing its "
@@ -137,8 +138,7 @@ def main() -> None:
             # (Snakemake's classic Make-like behaviour), NOT rule code/params/
             # input-signature changes too (Snakemake's default since 7.8).
             # Without this, any edit to a rule's params:/input:/script body -
-            # even one that's a no-op for tiles where the new behaviour is
-            # config-disabled, e.g. vertical_datum_correction.enabled=false -
+            # even a docstring/comment-only change with no behavioural effect -
             # marks every tile that ever used that rule as stale, cascading
             # into re-running already-completed (expensive) Aqueduct
             # simulations for every downstream job. Trade-off: a genuine
@@ -155,7 +155,8 @@ def main() -> None:
         print(f"{'=' * 60}")
         result = subprocess.run(cmd)
 
-        current_ids = set(load_tile_grid(tile_grid_path)["tile_id"].astype(int).tolist())
+        tile_grid = load_tile_grid(tile_grid_path)
+        current_ids = set(tile_grid["tile_id"].astype(int).tolist())
         oom_ids = _discover_oom_tiles(model_outputs_dir, current_ids)
 
         if not oom_ids:
@@ -173,7 +174,7 @@ def main() -> None:
                 "found below — there may be an UNRELATED failure needing separate attention."
             )
 
-        splittable = [t for t in oom_ids if split_depth(t) < max_depth]
+        splittable = [t for t in oom_ids if split_depth(tile_grid, t) < max_depth]
         exhausted = [t for t in oom_ids if t not in splittable]
         if exhausted:
             print(

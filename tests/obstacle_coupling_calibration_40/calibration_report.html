@@ -1,0 +1,597 @@
+<title>Eikonal Solver Calibration — Sweep Count &amp; Outer-Loop Study</title>
+<style>
+  :root {
+    --bg: #F5F6F3;
+    --surface: #FFFFFF;
+    --surface-2: #EEF1EC;
+    --ink: #1C2622;
+    --muted: #5B6B66;
+    --hairline: #D9DED7;
+    --accent-static: #A0701C;
+    --accent-outer: #1F6E82;
+    --critical: #A63B2E;
+    --critical-bg: #F6E4E0;
+    --warn: #8A6215;
+    --warn-bg: #F3E7CC;
+    --outer-flag-bg: #DCEAEC;
+    --code-bg: #EEF1EC;
+    --shadow: 0 1px 2px rgba(28,38,34,0.06), 0 4px 14px rgba(28,38,34,0.05);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10181A;
+      --surface: #17211F;
+      --surface-2: #1D2926;
+      --ink: #E7EEEA;
+      --muted: #93A69F;
+      --hairline: #2A3835;
+      --accent-static: #D7A94D;
+      --accent-outer: #63B7CB;
+      --critical: #E27C6D;
+      --critical-bg: #3A2320;
+      --warn: #D8BA75;
+      --warn-bg: #362D18;
+      --outer-flag-bg: #1B3438;
+      --code-bg: #1D2926;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #10181A; --surface: #17211F; --surface-2: #1D2926; --ink: #E7EEEA; --muted: #93A69F;
+    --hairline: #2A3835; --accent-static: #D7A94D; --accent-outer: #63B7CB; --critical: #E27C6D;
+    --critical-bg: #3A2320; --warn: #D8BA75; --warn-bg: #362D18; --outer-flag-bg: #1B3438; --code-bg: #1D2926;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+  }
+  :root[data-theme="light"] {
+    --bg: #F5F6F3; --surface: #FFFFFF; --surface-2: #EEF1EC; --ink: #1C2622; --muted: #5B6B66;
+    --hairline: #D9DED7; --accent-static: #A0701C; --accent-outer: #1F6E82; --critical: #A63B2E;
+    --critical-bg: #F6E4E0; --warn: #8A6215; --warn-bg: #F3E7CC; --outer-flag-bg: #DCEAEC; --code-bg: #EEF1EC;
+    --shadow: 0 1px 2px rgba(28,38,34,0.06), 0 4px 14px rgba(28,38,34,0.05);
+  }
+
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, "Segoe UI", "Seravek", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.55;
+    margin: 0;
+    padding: 0 20px 100px;
+  }
+  .page {
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  h1, h2, h3 {
+    font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+    font-weight: 600;
+    text-wrap: balance;
+    color: var(--ink);
+  }
+  .eyebrow {
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  header.hero {
+    padding: 56px 0 32px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  header.hero h1 {
+    font-size: 34px;
+    line-height: 1.15;
+    margin: 10px 0 12px;
+  }
+  header.hero .dek {
+    font-size: 17px;
+    color: var(--muted);
+    max-width: 62ch;
+    margin: 0;
+  }
+  .stat-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 1px;
+    background: var(--hairline);
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-top: 32px;
+  }
+  .stat {
+    background: var(--surface);
+    padding: 16px 18px;
+  }
+  .stat .n {
+    font-family: "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--ink);
+    display: block;
+  }
+  .stat .label {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  section { padding: 44px 0; border-bottom: 1px solid var(--hairline); }
+  section:last-of-type { border-bottom: none; }
+  section h2 {
+    font-size: 24px;
+    margin: 6px 0 6px;
+  }
+  section > .eyebrow { display: block; margin-bottom: 4px; }
+  section .lede {
+    font-size: 16.5px;
+    color: var(--ink);
+    max-width: 68ch;
+  }
+  section .lede.muted-note { color: var(--muted); font-size: 15px; }
+
+  p { max-width: 70ch; }
+  ul.findings { padding-left: 22px; max-width: 70ch; }
+  ul.findings li { margin-bottom: 10px; }
+
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin: 20px 0;
+    box-shadow: var(--shadow);
+    max-width: 70ch;
+  }
+  .callout .eyebrow { margin-bottom: 6px; }
+
+  .exec-list { list-style: none; padding: 0; margin: 24px 0 0; display: grid; gap: 14px; }
+  .exec-list li {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    padding: 16px 18px;
+    box-shadow: var(--shadow);
+    display: grid;
+    grid-template-columns: 34px 1fr;
+    gap: 14px;
+    align-items: start;
+  }
+  .exec-list .mark {
+    width: 34px; height: 34px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: "SF Mono", Consolas, monospace;
+    font-weight: 700;
+    font-size: 14px;
+  }
+  .mark.static { background: color-mix(in srgb, var(--accent-static) 18%, transparent); color: var(--accent-static); }
+  .mark.outer { background: color-mix(in srgb, var(--accent-outer) 18%, transparent); color: var(--accent-outer); }
+  .mark.crit { background: var(--critical-bg); color: var(--critical); }
+
+  .dist-row { display: flex; gap: 28px; flex-wrap: wrap; margin: 24px 0 8px; }
+  .dist-block { flex: 1 1 220px; }
+  .dist-block .dk { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
+  .hist { display: flex; align-items: flex-end; gap: 4px; height: 90px; }
+  .hist .bar { flex: 1; background: var(--accent-outer); border-radius: 3px 3px 0 0; position: relative; min-height: 3px; }
+  .hist .bar span { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .hist-labels { display: flex; gap: 4px; margin-top: 6px; }
+  .hist-labels span { flex: 1; text-align: center; font-size: 10.5px; color: var(--muted); }
+
+  .range-block { margin-top: 6px; }
+  .range-track { height: 8px; border-radius: 4px; background: var(--surface-2); position: relative; margin: 10px 0 6px; }
+  .range-track .fill { position: absolute; top: 0; bottom: 0; border-radius: 4px; }
+  .range-track .tick { position: absolute; top: -3px; width: 2px; height: 14px; background: var(--ink); }
+  .range-legend { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+    font-size: 13px;
+    background: var(--surface);
+  }
+  thead th {
+    position: sticky; top: 0;
+    background: var(--surface-2);
+    text-align: left;
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--hairline);
+    white-space: nowrap;
+  }
+  td { padding: 7px 12px; border-bottom: 1px solid var(--hairline); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.num { text-align: right; }
+  td.muted { color: var(--muted); }
+  tr.row-flag { background: color-mix(in srgb, var(--warn-bg) 55%, var(--surface)); }
+  .accent-static { color: var(--accent-static); font-weight: 600; }
+  .accent-outer { color: var(--accent-outer); font-weight: 600; }
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    margin-top: 18px;
+    max-height: 560px;
+    overflow-y: auto;
+  }
+  .table-note { font-size: 12.5px; color: var(--muted); margin-top: 10px; }
+
+  .flag {
+    display: inline-block;
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 2px 7px;
+    border-radius: 5px;
+    margin-right: 4px;
+    white-space: nowrap;
+  }
+  .flag-warn { background: var(--warn-bg); color: var(--warn); }
+  .flag-crit { background: var(--critical-bg); color: var(--critical); }
+  .flag-outer { background: var(--outer-flag-bg); color: var(--accent-outer); }
+
+  .bugs { display: grid; gap: 14px; margin-top: 22px; }
+  .bug {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-left: 3px solid var(--critical);
+    border-radius: 8px;
+    padding: 14px 18px;
+    box-shadow: var(--shadow);
+  }
+  .bug h3 { font-size: 15.5px; margin: 0 0 4px; font-family: -apple-system, "Segoe UI", system-ui, sans-serif; font-weight: 700; }
+  .bug p { margin: 0; font-size: 14px; color: var(--muted); max-width: 68ch; }
+  code {
+    font-family: "SF Mono", "Cascadia Mono", Consolas, monospace;
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 0.92em;
+  }
+
+  .recs { display: grid; gap: 14px; margin-top: 22px; }
+  .rec {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    padding: 16px 18px;
+    box-shadow: var(--shadow);
+  }
+  .rec .q { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
+  .rec .a { font-size: 14.5px; color: var(--muted); }
+
+  footer {
+    padding: 40px 0 10px;
+    color: var(--muted);
+    font-size: 12.5px;
+  }
+
+  @media (max-width: 640px) {
+    header.hero h1 { font-size: 27px; }
+    .dist-row { gap: 20px; }
+  }
+</style>
+
+<div class="page">
+
+  <header class="hero">
+    <span class="eyebrow">Calibration study — flood-model eikonal solver</span>
+    <h1>Sweep count &amp; outer-loop convergence, at scale</h1>
+    <p class="dek">40 representative wave-0 tiles (9K&ndash;52M cells), tighter bounds than the 7-tile pilot: 6 rounds
+      (24 sweeps) per solve, 3 outer iterations for obstacle-coupling. Run against the current production pipeline,
+      RP100/SLR_0.</p>
+    <div class="stat-strip">
+      <div class="stat"><span class="n">54&nbsp;→&nbsp;40</span><span class="label">candidates → wet tiles used</span></div>
+      <div class="stat"><span class="n">9K&ndash;52M</span><span class="label">cell range covered</span></div>
+      <div class="stat"><span class="n">24</span><span class="label">sweep ceiling this run</span></div>
+      <div class="stat"><span class="n">9/40</span><span class="label">tiles still drifting at the cap</span></div>
+      <div class="stat"><span class="n">7/38</span><span class="label">tiles hit the 3-iter outer cap</span></div>
+      <div class="stat"><span class="n">4</span><span class="label">real bugs found &amp; fixed en route</span></div>
+    </div>
+  </header>
+
+  <section id="summary">
+    <span class="eyebrow">Headline findings</span>
+    <h2>What the 40-tile sample changes about the pilot's story</h2>
+    <p class="lede">The 7-tile pilot suggested a fairly clean picture: most tiles converge quickly, a few large ones
+      need more sweeps, and the outer loop's value scales roughly with tile size. At 40 tiles the size correlation
+      mostly disappears &mdash; convergence behaviour turns out to depend more on a tile's coastline/terrain
+      complexity than its pixel count, and the caps tightened for this run (24 sweeps, 3 outer iterations) are
+      demonstrably too tight for a meaningful minority of tiles.</p>
+    <ul class="exec-list">
+      <li>
+        <span class="mark crit">!</span>
+        <div><strong>9 of 40 tiles (22%)</strong> never reach a sustained plateau within the 24-sweep ceiling used
+          for this run &mdash; residual change keeps trickling in, sometimes past sweep 20. Production's
+          <code>max_rounds=12</code> (48 sweeps) has real headroom over this, but this run can't directly confirm
+          those 9 settle by sweep 48 &mdash; it never ran them that far.</div>
+      </li>
+      <li>
+        <span class="mark crit">!</span>
+        <div><strong>15 of 40 tiles (38%)</strong> show a single-sweep jump over 5% in flooded-cell count somewhere
+          in the trace, well after an earlier, misleadingly quiet period &mdash; the pilot's "false plateau" finding
+          isn't a rare edge case, it's closer to a third of real tiles.</div>
+      </li>
+      <li>
+        <span class="mark outer">O</span>
+        <div>The outer loop's marginal value over the free static filter is <strong>not size-correlated</strong> at
+          this scale &mdash; it's scattered across small, medium, and large tiles alike. In <strong>9 of 38</strong>
+          tiles the outer loop actually contributes <em>more</em> than the static filter did.</div>
+      </li>
+      <li>
+        <span class="mark crit">!</span>
+        <div><strong>7 of 38 tiles hit the 3-outer-iteration cap</strong> used for this run without reaching their
+          own convergence criterion &mdash; a real signal that the tightened cap (vs. production's 5) is
+          under-provisioned for some tiles, not just a study-speed shortcut.</div>
+      </li>
+    </ul>
+  </section>
+
+  <section id="sweeps">
+    <span class="eyebrow">Part 1 — Sweep count</span>
+    <h2>When does the solve actually stop changing?</h2>
+    <p class="lede">For each tile: run continuously to 24 individual sweeps (6 rounds), recording the full depth
+      array at every sweep. "Settle sweep" is the first sweep after which cell-level change stays below 0.05% of
+      the tile for <em>every</em> remaining sweep &mdash; a strict, sustained-plateau definition, not just the
+      first quiet-looking checkpoint.</p>
+
+    <div class="dist-row">
+      <div class="dist-block" style="flex-basis: 320px;">
+        <div class="dk">Settle-sweep distribution (n=40)</div>
+        <div class="hist">
+          <div class="bar" style="height: 58%; background: var(--accent-outer);"><span>16</span></div>
+          <div class="bar" style="height: 22%; background: var(--accent-outer);"><span>6</span></div>
+          <div class="bar" style="height: 15%; background: var(--accent-outer);"><span>4</span></div>
+          <div class="bar" style="height: 7%; background: var(--accent-outer);"><span>2</span></div>
+          <div class="bar" style="height: 15%; background: var(--critical);"><span>4</span></div>
+          <div class="bar" style="height: 29%; background: var(--critical);"><span>8</span></div>
+        </div>
+        <div class="hist-labels">
+          <span>1&ndash;4</span><span>5&ndash;8</span><span>9&ndash;12</span><span>13&ndash;16</span><span>17&ndash;20</span><span>21&ndash;24</span>
+        </div>
+      </div>
+      <div class="dist-block">
+        <div class="dk">Median settle sweep</div>
+        <p style="margin: 0; font-size: 32px; font-family: 'Iowan Old Style', Georgia, serif; font-weight: 600;">5.5</p>
+        <p class="table-note" style="margin-top: 4px;">but the tail is long &mdash; p75 is sweep 23, essentially the
+          ceiling. The distribution is bimodal: most tiles are done in a handful of sweeps, but a sizeable second
+          cluster is still moving right up to the cap.</p>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Tile</th><th>Cells</th><th>Settle sweep</th><th>Max jump</th><th>Jump at</th><th>Final flooded cells</th><th>Flags</th>
+          </tr>
+        </thead>
+        <tbody>
+<tr><td>1973</td><td class="num">9,153</td><td class="num">2</td><td class="num">0.0%</td><td class="num muted">&mdash;</td><td class="num">81</td><td></td></tr>
+<tr><td>2351</td><td class="num">21,316</td><td class="num">1</td><td class="num">0.0%</td><td class="num muted">&mdash;</td><td class="num">4</td><td></td></tr>
+<tr><td>2365</td><td class="num">75,272</td><td class="num">1</td><td class="num">0.0%</td><td class="num muted">&mdash;</td><td class="num">23</td><td></td></tr>
+<tr><td>2316</td><td class="num">140,844</td><td class="num">6</td><td class="num">0.0%</td><td class="num muted">&mdash;</td><td class="num">32,487</td><td></td></tr>
+<tr><td>2412</td><td class="num">257,244</td><td class="num">1</td><td class="num">0.0%</td><td class="num muted">&mdash;</td><td class="num">62</td><td></td></tr>
+<tr><td>2324</td><td class="num">720,384</td><td class="num">5</td><td class="num">0.6%</td><td class="num muted">sw 2</td><td class="num">15,814</td><td></td></tr>
+<tr><td>1504</td><td class="num">1,380,736</td><td class="num">3</td><td class="num">0.0%</td><td class="num muted">&mdash;</td><td class="num">3,854</td><td></td></tr>
+<tr><td>1919</td><td class="num">2,349,887</td><td class="num">1</td><td class="num">0.4%</td><td class="num muted">sw 2</td><td class="num">1,126</td><td></td></tr>
+<tr><td>1997</td><td class="num">3,385,812</td><td class="num">1</td><td class="num">0.0%</td><td class="num muted">&mdash;</td><td class="num">605</td><td></td></tr>
+<tr><td>1579</td><td class="num">4,617,567</td><td class="num">1</td><td class="num">0.7%</td><td class="num muted">sw 2</td><td class="num">1,576</td><td></td></tr>
+<tr class="row-flag"><td>1351</td><td class="num">6,415,074</td><td class="num">24</td><td class="num">0.1%</td><td class="num muted">sw 8</td><td class="num">206,163</td><td><span class="flag flag-warn">never settled</span></td></tr>
+<tr class="row-flag"><td>1075</td><td class="num">8,370,066</td><td class="num">24</td><td class="num">2.1%</td><td class="num muted">sw 2</td><td class="num">144,320</td><td><span class="flag flag-warn">never settled</span></td></tr>
+<tr><td>2339</td><td class="num">9,701,514</td><td class="num">2</td><td class="num">0.6%</td><td class="num muted">sw 2</td><td class="num">6,294</td><td></td></tr>
+<tr><td>1751</td><td class="num">10,818,605</td><td class="num">5</td><td class="num">11.7%</td><td class="num muted">sw 2</td><td class="num">96,262</td><td></td></tr>
+<tr><td>1224</td><td class="num">12,227,427</td><td class="num">4</td><td class="num">4.5%</td><td class="num muted">sw 2</td><td class="num">167,668</td><td></td></tr>
+<tr><td>1655</td><td class="num">13,508,285</td><td class="num">3</td><td class="num">2.3%</td><td class="num muted">sw 2</td><td class="num">29,478</td><td></td></tr>
+<tr><td>2038</td><td class="num">14,678,040</td><td class="num">19</td><td class="num">2.2%</td><td class="num muted">sw 2</td><td class="num">958,394</td><td></td></tr>
+<tr><td>1892</td><td class="num">15,698,772</td><td class="num">2</td><td class="num">0.7%</td><td class="num muted">sw 2</td><td class="num">15,774</td><td></td></tr>
+<tr class="row-flag"><td>382</td><td class="num">17,019,205</td><td class="num">8</td><td class="num">63.0%</td><td class="num muted">sw 2</td><td class="num">55,308</td><td><span class="flag flag-crit">late jump</span></td></tr>
+<tr><td>1419</td><td class="num">18,360,265</td><td class="num">1</td><td class="num">0.6%</td><td class="num muted">sw 2</td><td class="num">1,471</td><td></td></tr>
+<tr class="row-flag"><td>772</td><td class="num">19,524,680</td><td class="num">1</td><td class="num">113.8%</td><td class="num muted">sw 2</td><td class="num">9,143</td><td><span class="flag flag-crit">late jump</span></td></tr>
+<tr class="row-flag"><td>1803</td><td class="num">20,991,221</td><td class="num">9</td><td class="num">35.3%</td><td class="num muted">sw 3</td><td class="num">119,668</td><td><span class="flag flag-crit">late jump</span></td></tr>
+<tr><td>1196</td><td class="num">22,790,810</td><td class="num">2</td><td class="num">0.0%</td><td class="num muted">sw 3</td><td class="num">34,761</td><td></td></tr>
+<tr><td>2017</td><td class="num">23,999,902</td><td class="num">2</td><td class="num">0.4%</td><td class="num muted">sw 2</td><td class="num">12,500</td><td></td></tr>
+<tr class="row-flag"><td>1722</td><td class="num">25,147,056</td><td class="num">24</td><td class="num">111.5%</td><td class="num muted">sw 2</td><td class="num">817,964</td><td><span class="flag flag-warn">never settled</span> <span class="flag flag-crit">late jump</span></td></tr>
+<tr class="row-flag"><td>1731</td><td class="num">26,002,866</td><td class="num">24</td><td class="num">37.9%</td><td class="num muted">sw 2</td><td class="num">1,938,770</td><td><span class="flag flag-warn">never settled</span> <span class="flag flag-crit">late jump</span></td></tr>
+<tr><td>1165</td><td class="num">27,171,210</td><td class="num">23</td><td class="num">3.7%</td><td class="num muted">sw 2</td><td class="num">310,717</td><td></td></tr>
+<tr class="row-flag"><td>658</td><td class="num">29,035,512</td><td class="num">24</td><td class="num">4.9%</td><td class="num muted">sw 2</td><td class="num">525,548</td><td><span class="flag flag-warn">never settled</span></td></tr>
+<tr><td>739</td><td class="num">30,403,172</td><td class="num">5</td><td class="num">7.7%</td><td class="num muted">sw 4</td><td class="num">22,405</td><td></td></tr>
+<tr><td>986</td><td class="num">32,591,028</td><td class="num">23</td><td class="num">2.6%</td><td class="num muted">sw 2</td><td class="num">174,061</td><td></td></tr>
+<tr class="row-flag"><td>466</td><td class="num">34,741,385</td><td class="num">24</td><td class="num">1316.0%</td><td class="num muted">sw 3</td><td class="num">240,594</td><td><span class="flag flag-warn">never settled</span> <span class="flag flag-crit">late jump</span></td></tr>
+<tr class="row-flag"><td>496</td><td class="num">36,732,834</td><td class="num">16</td><td class="num">335.3%</td><td class="num muted">sw 2</td><td class="num">187,086</td><td><span class="flag flag-crit">late jump</span></td></tr>
+<tr class="row-flag"><td>1493</td><td class="num">38,698,044</td><td class="num">24</td><td class="num">216.8%</td><td class="num muted">sw 2</td><td class="num">917,124</td><td><span class="flag flag-warn">never settled</span> <span class="flag flag-crit">late jump</span></td></tr>
+<tr><td>1062</td><td class="num">40,113,144</td><td class="num">2</td><td class="num">0.5%</td><td class="num muted">sw 2</td><td class="num">35,782</td><td></td></tr>
+<tr><td>1288</td><td class="num">42,674,698</td><td class="num">9</td><td class="num">5.3%</td><td class="num muted">sw 3</td><td class="num">44,933</td><td></td></tr>
+<tr><td>1755</td><td class="num">45,241,814</td><td class="num">23</td><td class="num">1.1%</td><td class="num muted">sw 2</td><td class="num">2,123,660</td><td></td></tr>
+<tr class="row-flag"><td>71</td><td class="num">47,231,388</td><td class="num">24</td><td class="num">33.2%</td><td class="num muted">sw 3</td><td class="num">5,065,379</td><td><span class="flag flag-warn">never settled</span> <span class="flag flag-crit">late jump</span></td></tr>
+<tr class="row-flag"><td>1383</td><td class="num">49,322,868</td><td class="num">24</td><td class="num">10.7%</td><td class="num muted">sw 3</td><td class="num">3,148,080</td><td><span class="flag flag-warn">never settled</span></td></tr>
+<tr class="row-flag"><td>1453</td><td class="num">51,029,594</td><td class="num">23</td><td class="num">67.6%</td><td class="num muted">sw 2</td><td class="num">283,855</td><td><span class="flag flag-crit">late jump</span></td></tr>
+<tr><td>946</td><td class="num">51,951,642</td><td class="num">23</td><td class="num">7.9%</td><td class="num muted">sw 2</td><td class="num">5,015,483</td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="table-note">Sorted small → large. <span class="flag flag-warn">never settled</span> = still changing
+      at sweep 24. <span class="flag flag-crit">late jump</span> = a &gt;20% single-sweep swing in flooded-cell
+      count after an earlier quiet period. Rows with either flag are highlighted.</p>
+
+    <div class="callout">
+      <span class="eyebrow">Caveat on sample coverage</span>
+      <p style="margin: 6px 0 0;">This 40-tile sample tops out at ~52M cells &mdash; the wet-tile search stopped
+        once 40 were found, so the largest candidates in the pool (up to ~207M cells, p90&ndash;p99.5) were never
+        run here. The pilot's own largest tile (497, ~207M cells, sweep 2→3 jump of 10.6%/15.0%) remains the only
+        real data point at that scale. Nothing here contradicts it, but nothing here re-confirms it either.</p>
+    </div>
+  </section>
+
+  <section id="outer">
+    <span class="eyebrow">Part 2 — Outer-loop (obstacle coupling)</span>
+    <h2>Static pre-filter vs. iterative re-blocking</h2>
+    <p class="lede">For each tile: the free static filter (<code>dem &gt; max_waterlevel</code>) vs. the additional
+      flooding removed by the full outer loop on top of it, both measured against a genuine "no blocking at all"
+      baseline. 2 of the 40 wet tiles (2351, 2365) have zero real COAST-RP stations &mdash; their "flooding" is
+      just below-sea-level land showing up against a zero water level, not a real storm-surge scenario, so they're
+      excluded from this half of the study (still valid for the sweep-count analysis above).</p>
+
+    <div class="dist-row">
+      <div class="dist-block">
+        <div class="dk">Static filter alone (% of baseline flooding removed)</div>
+        <div class="range-block">
+          <div class="range-track">
+            <div class="fill" style="left: 0%; width: 91.9%; background: color-mix(in srgb, var(--accent-static) 22%, transparent);"></div>
+            <div class="tick" style="left: 0.6%; background: var(--accent-static);" title="median 0.54%"></div>
+            <div class="tick" style="left: 21.2%; background: var(--accent-static);" title="p90 19.5%"></div>
+            <div class="tick" style="left: 91.9%; background: var(--accent-static);" title="max 91.9%"></div>
+          </div>
+          <div class="range-legend"><span>0%</span><span>median 0.54% · p90 19.5%</span><span>max 91.9%</span></div>
+        </div>
+      </div>
+      <div class="dist-block">
+        <div class="dk">Outer loop, additional (% of baseline flooding removed)</div>
+        <div class="range-block">
+          <div class="range-track">
+            <div class="fill" style="left: 0%; width: 6.9%; background: color-mix(in srgb, var(--accent-outer) 30%, transparent);"></div>
+            <div class="tick" style="left: 2.9%; background: var(--accent-outer);" title="median 0.20%"></div>
+            <div class="tick" style="left: 6.9%; background: var(--accent-outer);" title="max 6.9%"></div>
+          </div>
+          <div class="range-legend"><span>0%</span><span>median 0.20%</span><span>max 6.9%</span></div>
+        </div>
+        <p class="table-note">(scaled to the static filter's own 0&ndash;91.9% track above for visual comparison &mdash;
+          the outer loop's absolute ceiling is far lower, but it's not negligible: 9 tiles get more from it than
+          from the static filter.)</p>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Tile</th><th>Cells</th><th>Static filter</th><th>+ Outer loop</th><th>Iters to converge</th><th>Flags</th>
+          </tr>
+        </thead>
+        <tbody>
+<tr><td>1973</td><td class="num">9,153</td><td class="num accent-static">0.0%</td><td class="num accent-outer">0.0%</td><td class="num">2</td><td></td></tr>
+<tr><td>2316</td><td class="num">140,844</td><td class="num accent-static">0.0%</td><td class="num accent-outer">0.0%</td><td class="num">2</td><td></td></tr>
+<tr><td>2412</td><td class="num">257,244</td><td class="num accent-static">0.0%</td><td class="num accent-outer">0.0%</td><td class="num">2</td><td></td></tr>
+<tr><td>2324</td><td class="num">720,384</td><td class="num accent-static">0.019%</td><td class="num accent-outer">0.0%</td><td class="num">2</td><td></td></tr>
+<tr><td>1504</td><td class="num">1,380,736</td><td class="num accent-static">0.0%</td><td class="num accent-outer">0.0%</td><td class="num">2</td><td></td></tr>
+<tr><td>1919</td><td class="num">2,349,887</td><td class="num accent-static">0.0%</td><td class="num accent-outer">0.0%</td><td class="num">2</td><td></td></tr>
+<tr><td>1997</td><td class="num">3,385,812</td><td class="num accent-static">0.0%</td><td class="num accent-outer">0.0%</td><td class="num">2</td><td></td></tr>
+<tr><td>1579</td><td class="num">4,617,567</td><td class="num accent-static">0.064%</td><td class="num accent-outer">0.0%</td><td class="num">2</td><td></td></tr>
+<tr><td>1351</td><td class="num">6,415,074</td><td class="num accent-static">2.304%</td><td class="num accent-outer">0.287%</td><td class="num">3</td><td></td></tr>
+<tr><td>1075</td><td class="num">8,370,066</td><td class="num accent-static">0.138%</td><td class="num accent-outer">0.055%</td><td class="num">2</td><td></td></tr>
+<tr><td>2339</td><td class="num">9,701,514</td><td class="num accent-static">0.0%</td><td class="num accent-outer">0.0%</td><td class="num">2</td><td></td></tr>
+<tr><td>1751</td><td class="num">10,818,605</td><td class="num accent-static">0.017%</td><td class="num accent-outer">0.031%</td><td class="num">3</td><td></td></tr>
+<tr><td>1224</td><td class="num">12,227,427</td><td class="num accent-static">0.003%</td><td class="num accent-outer">0.0%</td><td class="num">2</td><td></td></tr>
+<tr><td>1655</td><td class="num">13,508,285</td><td class="num accent-static">0.495%</td><td class="num accent-outer">0.655%</td><td class="num">3</td><td><span class="flag flag-outer">outer-dominant</span></td></tr>
+<tr class="row-flag"><td>2038</td><td class="num">14,678,040</td><td class="num accent-static">14.704%</td><td class="num accent-outer">2.41%</td><td class="num">3</td><td><span class="flag flag-crit">hit 3-iter cap</span></td></tr>
+<tr><td>1892</td><td class="num">15,698,772</td><td class="num accent-static">0.938%</td><td class="num accent-outer">0.101%</td><td class="num">2</td><td></td></tr>
+<tr><td>382</td><td class="num">17,019,205</td><td class="num accent-static">1.55%</td><td class="num accent-outer">2.054%</td><td class="num">3</td><td><span class="flag flag-outer">outer-dominant</span></td></tr>
+<tr><td>1419</td><td class="num">18,360,265</td><td class="num accent-static">0.204%</td><td class="num accent-outer">0.136%</td><td class="num">2</td><td></td></tr>
+<tr><td>772</td><td class="num">19,524,680</td><td class="num accent-static">33.107%</td><td class="num accent-outer">0.263%</td><td class="num">2</td><td></td></tr>
+<tr><td>1803</td><td class="num">20,991,221</td><td class="num accent-static">0.987%</td><td class="num accent-outer">6.946%</td><td class="num">3</td><td><span class="flag flag-outer">outer-dominant</span></td></tr>
+<tr><td>1196</td><td class="num">22,790,810</td><td class="num accent-static">0.026%</td><td class="num accent-outer">0.055%</td><td class="num">2</td><td></td></tr>
+<tr><td>2017</td><td class="num">23,999,902</td><td class="num accent-static">0.176%</td><td class="num accent-outer">0.088%</td><td class="num">2</td><td></td></tr>
+<tr class="row-flag"><td>1722</td><td class="num">25,147,056</td><td class="num accent-static">3.078%</td><td class="num accent-outer">4.284%</td><td class="num">3</td><td><span class="flag flag-crit">hit 3-iter cap</span> <span class="flag flag-outer">outer-dominant</span></td></tr>
+<tr><td>1731</td><td class="num">26,002,866</td><td class="num accent-static">1.378%</td><td class="num accent-outer">0.36%</td><td class="num">3</td><td></td></tr>
+<tr class="row-flag"><td>1165</td><td class="num">27,171,210</td><td class="num accent-static">2.943%</td><td class="num accent-outer">5.723%</td><td class="num">3</td><td><span class="flag flag-crit">hit 3-iter cap</span> <span class="flag flag-outer">outer-dominant</span></td></tr>
+<tr class="row-flag"><td>658</td><td class="num">29,035,512</td><td class="num accent-static">0.684%</td><td class="num accent-outer">5.428%</td><td class="num">3</td><td><span class="flag flag-crit">hit 3-iter cap</span> <span class="flag flag-outer">outer-dominant</span></td></tr>
+<tr><td>739</td><td class="num">30,403,172</td><td class="num accent-static">19.451%</td><td class="num accent-outer">0.277%</td><td class="num">2</td><td></td></tr>
+<tr><td>986</td><td class="num">32,591,028</td><td class="num accent-static">3.242%</td><td class="num accent-outer">0.383%</td><td class="num">2</td><td></td></tr>
+<tr><td>466</td><td class="num">34,741,385</td><td class="num accent-static">91.949%</td><td class="num accent-outer">0.03%</td><td class="num">2</td><td></td></tr>
+<tr><td>496</td><td class="num">36,732,834</td><td class="num accent-static">7.208%</td><td class="num accent-outer">0.768%</td><td class="num">3</td><td></td></tr>
+<tr><td>1493</td><td class="num">38,698,044</td><td class="num accent-static">0.003%</td><td class="num accent-outer">0.014%</td><td class="num">3</td><td></td></tr>
+<tr><td>1062</td><td class="num">40,113,144</td><td class="num accent-static">0.316%</td><td class="num accent-outer">0.671%</td><td class="num">3</td><td><span class="flag flag-outer">outer-dominant</span></td></tr>
+<tr><td>1288</td><td class="num">42,674,698</td><td class="num accent-static">4.66%</td><td class="num accent-outer">1.972%</td><td class="num">3</td><td></td></tr>
+<tr><td>1755</td><td class="num">45,241,814</td><td class="num accent-static">0.601%</td><td class="num accent-outer">0.03%</td><td class="num">3</td><td></td></tr>
+<tr class="row-flag"><td>71</td><td class="num">47,231,388</td><td class="num accent-static">0.588%</td><td class="num accent-outer">1.663%</td><td class="num">3</td><td><span class="flag flag-crit">hit 3-iter cap</span> <span class="flag flag-outer">outer-dominant</span></td></tr>
+<tr class="row-flag"><td>1383</td><td class="num">49,322,868</td><td class="num accent-static">0.494%</td><td class="num accent-outer">0.659%</td><td class="num">3</td><td><span class="flag flag-crit">hit 3-iter cap</span> <span class="flag flag-outer">outer-dominant</span></td></tr>
+<tr><td>1453</td><td class="num">51,029,594</td><td class="num accent-static">16.178%</td><td class="num accent-outer">1.569%</td><td class="num">3</td><td></td></tr>
+<tr class="row-flag"><td>946</td><td class="num">51,951,642</td><td class="num accent-static">51.758%</td><td class="num accent-outer">0.789%</td><td class="num">3</td><td><span class="flag flag-crit">hit 3-iter cap</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="table-note">Sorted small → large. <span class="flag flag-crit">hit 3-iter cap</span> = the outer
+      loop was still re-blocking cells when this run's tightened cap cut it off &mdash; not necessarily wrong, but
+      unconfirmed whether it would have converged by production's <code>max_outer_iterations=5</code>.
+      <span class="flag flag-outer">outer-dominant</span> = this tile gets more flooding reduction from the
+      iterative loop than from the free static filter.</p>
+  </section>
+
+  <section id="bugs">
+    <span class="eyebrow">Found along the way</span>
+    <h2>Real bugs, not just calibration data</h2>
+    <p class="lede">Running this at 40-tile scale (vs. the pilot's 7) surfaced production issues the smaller sample
+      never touched.</p>
+    <div class="bugs">
+      <div class="bug">
+        <h3>Friction silently decoded to float64, not float32</h3>
+        <p>A numpy legacy-casting quirk (<code>float32_array / python_int(1_000_000)</code> upcasts) meant
+          <code>decode_friction_int16</code> returned float64 despite its own docstring. Since
+          <code>solve_eikonal_dense</code> derives its dominant array's dtype from friction, every production
+          flood solve &mdash; not just this study &mdash; was running at double the memory it needed. Fixed by
+          dividing by an explicit <code>np.float32</code> scale.</p>
+      </div>
+      <div class="bug">
+        <h3>Mask cast to int64 for no functional reason</h3>
+        <p>Every use of the mask array is a plain equality comparison &mdash; dtype-agnostic. <code>int64</code>
+          was 8x more memory than the handful of small codes it holds ever needed. Fixed to <code>int8</code>.</p>
+      </div>
+      <div class="bug">
+        <h3>DEM nodata leak on zero-coverage tiles</h3>
+        <p>When a tile's entire read window has no valid DeltaDTM elevation at all (rare, but real at small/edge
+          tiles), the small-gap interpolation step had nothing to interpolate from and silently left the raw
+          <code>&minus;9999</code> nodata sentinel in place instead of hard-filling it. Traced via a real crash on
+          a ~3K-pixel tile; fixed with a fallback to the existing 99m "never floods" sentinel.</p>
+      </div>
+      <div class="bug">
+        <h3>Calibration script crashed on zero-station tiles</h3>
+        <p>Not a production bug &mdash; this study's own script didn't handle the "no COAST-RP station found"
+          case the way production does, and crashed building a nearest-neighbour tree from zero points. Fixed to
+          match production's own empty-boundaries handling.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="recs">
+    <span class="eyebrow">Open questions</span>
+    <h2>What this data doesn't settle yet</h2>
+    <div class="recs">
+      <div class="rec">
+        <div class="q">Does production's max_rounds=12 (48 sweeps) actually cover the 9 tiles that didn't
+          settle by sweep 24 here?</div>
+        <div class="a">Likely, based on the pilot's own large tiles fully settling by sweep 48 &mdash; but this run
+          didn't go past 24, so it's inference from a different, smaller sample, not direct confirmation.</div>
+      </div>
+      <div class="rec">
+        <div class="q">Is max_outer_iterations=5 (production) enough for the 7 tiles that hit this run's 3-iteration cap?</div>
+        <div class="a">Unknown from this data &mdash; would need a follow-up run at the production cap specifically
+          on those 7 tiles to confirm they converge rather than just taking longer to hit the same wall.</div>
+      </div>
+      <div class="rec">
+        <div class="q">What actually drives the "late jump" and "outer-dominant" behaviour?</div>
+        <div class="a">Neither correlates cleanly with tile size in this sample. Coastline complexity / number of
+          distinct inlets is the leading hypothesis but untested here &mdash; would need geometry data per tile to
+          check.</div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    Generated from <code>test_sweep_budget_calibration.py</code> and
+    <code>test_obstacle_coupling_calibration.py</code> output, 40 tiles, RP100/SLR_0. Raw CSVs in
+    <code>tests/obstacle_coupling_calibration_40/</code>.
+  </footer>
+
+</div>

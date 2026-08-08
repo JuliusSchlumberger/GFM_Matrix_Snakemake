@@ -26,6 +26,7 @@ mins, maxs, total_overlap_cells = merge_tile_rasters_chunk(
     tile_rasters=list(snakemake.input.waterdepth_tiles),  # noqa: F821
     chunk_bounds=chunk_bounds,
     waterdepth_output_path=snakemake.output.waterdepth,  # noqa: F821
+    provenance_output_path=snakemake.output.provenance,  # noqa: F821
     block_size=pp_cfg["block_size"],
     raster_config=raster_config,
 )
