@@ -27,7 +27,7 @@ paths:
   # Windows preprocessing machine - same underlying files, different mount
   # prefix. Every {root}-based path in config.yml (model_outputs, etc.)
   # resolves relative to this on the HPC side.
-  root: "/p/11212688-004-global-floodmaps"                     # ← change to your HPC's mount path
+  root: "/p/11212688-004-global-floodmaps/modelling"                     # ← change to your HPC's mount path
 
   # Linux path to this repository checkout (used to locate
   # scripts/run_aqueduct_cli.py from the generated sbatch scripts) - must be
