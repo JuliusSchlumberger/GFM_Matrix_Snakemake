@@ -889,6 +889,35 @@ Both open gaps from the pre-2026-08 flat-dispatch design are now closed:
    same approach `generate_aqueduct_jobs.py`'s own local-view boundaries
    check already uses.
 
+   **Real bug found live on Hydrax, 2026-08**: Snakemake locks its own
+   working directory by default - N truly-concurrent `snakemake`
+   invocations from the same `code_root` (exactly what parallel
+   preprocessing batches are) fail immediately with `LockException`
+   the moment a second one starts. (A SEPARATE, related symptom: a
+   snakemake process killed abruptly - e.g. a SLURM job hitting the OOM/
+   `--mem` ceiling, see item below - leaves a STALE lock behind even for a
+   later SOLO run; `snakemake --unlock` clears that specific case.) Fixed
+   by adding `--nolock` to every `snakemake` call this pipeline generates
+   (batches AND the dispatch job) - but `--nolock` alone would be unsafe,
+   since the DAG has exactly ONE genuinely shared, tile-independent output
+   (`compute_geoid_offset_raster` - the only rule with count=1 regardless
+   of tile count; every other rule is per-tile) that concurrent unlocked
+   writers really could race on. Fixed properly with a new phase-0 job,
+   `build_shared_inputs.sbatch` (targets just that one file, `--nolock`,
+   submitted alone with no dependency), which every preprocessing batch
+   now depends on (`--dependency=afterany:$SHARED_JID`) before it's
+   allowed to start - by the time any batch runs, the one shared output
+   already exists, so `--nolock`'s removed protection is never actually
+   exercised.
+
+   **Also found in the same debugging session**: `hpc.sbatch.mem: 8G` on
+   the `1vcpu` partition failed with "Memory specification can not be
+   satisfied" - `sinfo -N -o "%N %P %m %c"` showed real usable memory is
+   7950MB, not the nominal 8192MB (8GB) advertised by the partition name.
+   Fixed by lowering to `7G`. General lesson: size `hpc.sbatch*.mem`
+   against `sinfo`'s real per-node number, never the nominal partition
+   size - some memory is always reserved for the OS/SLURM daemons.
+
 7. **Tile-size partition routing (2026-08).** Hydrax's regular partitions
    scale RAM at a fixed 8GB/vCPU (confirmed from the real partition table:
    `1vcpu`=8GB ... `60vcpu`=480GB). Since the pipeline's own

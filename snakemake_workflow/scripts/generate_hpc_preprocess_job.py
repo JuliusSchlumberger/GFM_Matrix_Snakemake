@@ -22,6 +22,19 @@ into submit_waves.sh. This is the exact same afterany-join-multiple-jobs
 pattern generate_aqueduct_jobs.py's own submit_waves.sh already uses between
 simulation waves - just one more phase in front of wave 0.
 
+Wave 0 of that phase-in-front is `build_shared_inputs.sbatch` - Snakemake
+locks its own working directory by default (one process at a time per
+directory), so N concurrent `snakemake` invocations from the same code_root
+would otherwise fail with LockException the instant a second one starts.
+Every `snakemake` call in this pipeline therefore passes `--nolock` - safe here
+ONLY because the DAG's one genuinely tile-independent, shared-across-every-
+batch output (`compute_geoid_offset_raster`'s single file, unlike every
+other rule which is per-tile) is built FIRST, alone, before any batch
+starts, eliminating the one real write-write race `--nolock` would
+otherwise leave unprotected. Without this pre-build step, two batches
+racing to build that one shared file concurrently with locking disabled
+could corrupt it.
+
 Target file paths are reconstructed directly (not via `rules.X.output.Y`
 references, since this is a standalone script, not a Snakemake `script:`)
 using the exact same path templates preprocessing.smk's rules declare -
@@ -83,6 +96,8 @@ def main() -> None:
 
     retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
+
+    linux_shared_target = linux_config["vertical_datum_correction"]["offset_raster_path"]
 
     tile_gdf = retry_transient_io(gpd.read_file, linux_config["tile_grid"]["path"])
     return_periods = [f"RP{rp}" for rp in linux_config["boundary_conditions"]["return_periods"]]
@@ -169,7 +184,10 @@ def main() -> None:
             "",
             f'cd "{linux_code_root}"',
             f'echo "=== Preprocessing batch {size_class}/{batch_id}: {len(batch_tiles)} tiles ==="',
-            f'snakemake --cores {sbatch_cfg["cpus_per_task"]} $(cat "{linux_jobs_dir}/{name}_targets.txt")',
+            (
+                f'snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
+                f'$(cat "{linux_jobs_dir}/{name}_targets.txt")'
+            ),
             "",
         ]
         script_path = local_jobs_dir / f"{name}.sbatch"
@@ -177,6 +195,35 @@ def main() -> None:
             f.write("\n".join(lines))
         batch_script_paths.append(f"{linux_jobs_dir}/{name}.sbatch")
         print(f"  wrote {script_path} ({size_class}, {len(batch_tiles)} tiles, {len(targets)} target files)")
+
+    # Phase 0: build the ONE genuinely shared, tile-independent output
+    # (compute_geoid_offset_raster) alone, before any batch starts - see
+    # module docstring for why this is what makes --nolock safe on every
+    # batch above. Lightweight, uses hpc.sbatch.
+    shared_cfg = hpc_cfg["sbatch"]
+    shared_lines = [
+        "#!/bin/bash",
+        "#SBATCH --job-name=gfm_build_shared_inputs",
+        f"#SBATCH --partition={shared_cfg['partition']}",
+        *_account_line(shared_cfg),
+        f"#SBATCH --time={shared_cfg['time']}",
+        f"#SBATCH --mem={shared_cfg['mem']}",
+        "#SBATCH --cpus-per-task=1",
+        f"#SBATCH --output={linux_jobs_dir}/logs/build_shared_inputs_%j.out",
+        f"#SBATCH --error={linux_jobs_dir}/logs/build_shared_inputs_%j.err",
+        "",
+        "set -euo pipefail",
+        shared_cfg["env_activate_cmd"],
+        "",
+        f'cd "{linux_code_root}"',
+        'echo "=== Building shared preprocessing inputs ==="',
+        f'snakemake --cores 1 --nolock "{linux_shared_target}"',
+        "",
+    ]
+    shared_script_path = local_jobs_dir / "build_shared_inputs.sbatch"
+    with open(shared_script_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(shared_lines))
+    print(f"  wrote {shared_script_path}")
 
     # Phase 2: once every preprocessing batch above has finished, generate
     # the wave sbatch scripts (fast - every input already exists) and
@@ -200,7 +247,7 @@ def main() -> None:
         "",
         f'cd "{linux_code_root}"',
         'echo "=== Generating wave sbatch scripts ==="',
-        "snakemake generate_aqueduct_jobs --cores 1",
+        "snakemake generate_aqueduct_jobs --cores 1 --nolock",
         "",
         'echo "=== Submitting simulation waves ==="',
         f'bash "{linux_jobs_dir}/submit_waves.sh"',
@@ -211,13 +258,22 @@ def main() -> None:
         f.write("\n".join(dispatch_lines))
     print(f"  wrote {dispatch_script_path}")
 
-    # Master driver: submit every preprocessing batch in PARALLEL (no
-    # dependency between them - tiles are fully independent at this stage),
-    # then the dispatch job depending on ALL of them via afterany.
-    submit_lines = ["#!/bin/bash", "set -euo pipefail", "", 'IDS=""']
+    # Master driver: submit build_shared_inputs.sbatch alone first (no
+    # dependency), then every preprocessing batch depending on IT
+    # (afterany) but NOT on each other (fully parallel amongst themselves),
+    # then the dispatch job depending on ALL batches via afterany.
+    submit_lines = [
+        "#!/bin/bash",
+        "set -euo pipefail",
+        "",
+        f'SHARED_JID=$(sbatch --parsable "{linux_jobs_dir}/build_shared_inputs.sbatch")',
+        f'echo "submitted {linux_jobs_dir}/build_shared_inputs.sbatch -> job $SHARED_JID"',
+        "",
+        'IDS=""',
+    ]
     for script in batch_script_paths:
         submit_lines += [
-            f'JID=$(sbatch --parsable "{script}")',
+            f'JID=$(sbatch --parsable --dependency=afterany:$SHARED_JID "{script}")',
             f'echo "submitted {script} -> job $JID"',
             'IDS="${IDS:+$IDS:}$JID"',
         ]
@@ -235,8 +291,8 @@ def main() -> None:
 
     node_summary = ", ".join(f"{size_class}={class_n_nodes[size_class]}" for size_class in present_classes)
     print(
-        f"\nDone. {len(batch_script_paths)} preprocessing batch(es) ({node_summary} nodes, "
-        f"{n_nodes} total budget) + 1 dispatch job written to {local_jobs_dir}"
+        f"\nDone. 1 shared-inputs job + {len(batch_script_paths)} preprocessing batch(es) "
+        f"({node_summary} nodes, {n_nodes} total budget) + 1 dispatch job written to {local_jobs_dir}"
     )
     print(f"Submit on Hydrax with: bash {linux_jobs_dir}/submit_preprocess_and_dispatch.sh")
 
