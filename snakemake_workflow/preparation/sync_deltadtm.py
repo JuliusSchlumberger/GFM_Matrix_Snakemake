@@ -6,25 +6,29 @@ data_catalog_gfm.yml (e.g. src/tile_chunking.py and extract_dem.py both
 read individual tile files from those same directories, next to the
 `deltadtm.vrt` / `deltadtm_mask.vrt` mosaics).
 
-Also downloads 4TU's own pre-built global DEM VRT mosaic and rewrites it to
-point at this machine's local tile directory (see download_and_patch_vrt),
-and builds a mask VRT mosaic locally from the extracted mask tiles (see
-build_mask_vrt - no pre-built mask VRT exists from 4TU, unlike the DEM).
-Both are saved directly to the exact paths `deltadtm.path`/`deltadtm_mask.
-path` (data_catalog_gfm.yml) already expect, so nothing downstream needs to
-know this script ran.
+Tiles only - this script does NOT build either VRT mosaic itself (that used
+to happen here; see build_deltadtm_vrt.py, a separate preparation step run
+after this one - `python run_preparation.py sync_deltadtm build_deltadtm_vrt`,
+or just run_preparation.py with no args, since both are enabled by default).
+Splitting it out lets the VRT step be re-run on its own, cheaply (seconds,
+no network) any time the mosaic needs rebuilding, without re-downloading
+tiles - and it's what actually fixed a real bug: this script used to
+download 4TU's own pre-built DEM VRT and patch its <SourceFilename> entries
+to this machine's LOCAL ABSOLUTE tile paths, which only resolves on the
+exact machine that patched it - it broke every DeltaDTM read on the Linux
+HPC side (confirmed directly: 27 of 31 HPC preprocessing jobs failed on
+2026-08-08 from exactly this). build_deltadtm_vrt.py builds both VRTs with
+portable RELATIVE source paths instead, the same way this script's own
+mask-VRT step always did (see that script's docstring for the full story).
 
 HOW TO GET THE URLS:
 Go to https://data.4tu.nl/datasets/1da2e70f-6c4d-4b03-86bd-b53e789cc629
 For each file below, right-click its download button/link -> "Copy Link Address"
-and paste it into the dicts below. They look like:
+and paste it into the dict below. They look like:
 https://data.4tu.nl/file/1da2e70f-6c4d-4b03-86bd-b53e789cc629/<file-uuid>
 
 Only fill in the continents you actually need -- leave others as None
-and they'll be skipped. Same for DEM_VRT_URL: leave it as None to skip
-downloading/patching the VRT mosaic (deltadtm.path must then already exist
-some other way - e.g. hand-built with gdalbuildvrt - before the rest of the
-pipeline can read the `deltadtm` catalog source).
+and they'll be skipped.
 
 Not a standalone entry point - exposes `run(config)`, called from
 run_preparation.py (`python run_preparation.py sync_deltadtm`).
@@ -32,12 +36,10 @@ run_preparation.py (`python run_preparation.py sync_deltadtm`).
 
 import sys
 import time
-import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
 import requests
-from osgeo import gdal
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import get_data_catalog, retry_transient_io  # noqa: E402
@@ -60,13 +62,6 @@ DEM_ZIP_URLS = {
 }
 
 MASK_ZIP_URL = "https://data.4tu.nl/file/1da2e70f-6c4d-4b03-86bd-b53e789cc629/bfe0fbc1-fdf3-40d0-a62c-adc58bfd9478"  # mask_tiles.zip
-
-# 4TU's own pre-built global VRT mosaic over every DEM tile (all continents).
-# Its <SourceFilename> entries are bare filenames (e.g. "DeltaDTM_v1_1_
-# N00E006.tif") - download_and_patch_vrt rewrites these to this machine's
-# actual local tile paths, so it does not matter which continents (if any)
-# were already extracted below.
-DEM_VRT_URL = "https://data.4tu.nl/file/1da2e70f-6c4d-4b03-86bd-b53e789cc629/1892b825-3e68-4337-9b8c-03fcffe4588b"
 
 # ---------------------------------------------------------------------------
 # 2) CORE FUNCTIONS -- shouldn't need to touch below this line
@@ -183,120 +178,20 @@ def process_zip(
                   "- left on disk, safe to delete manually later.")
 
 
-def download_and_patch_vrt(url: str, dest_path: Path, tile_dir: Path, zip_download_dir: Path) -> None:
-    """Download 4TU's pre-built global DEM VRT mosaic and rewrite it for this machine.
-
-    The downloaded VRT's <SourceFilename> entries are bare filenames (e.g.
-    "DeltaDTM_v1_1_N00E006.tif", relativeToVRT="1") with no path information
-    of their own. Every one is rewritten here to the tile's actual absolute
-    path in `tile_dir` (relativeToVRT="0"), so the VRT resolves correctly
-    regardless of where the .vrt file itself is saved - independent of
-    relative-path resolution, and independent of which continents (if any)
-    were actually extracted into `tile_dir`: GDAL only opens a given
-    <SimpleSource> lazily when a read window actually touches its extent, so
-    a reference to a tile you never downloaded is harmless until something
-    actually queries that region.
-
-    Args:
-        url: Download link for the raw VRT (DEM_VRT_URL). Skipped (not
-            failed) if empty/None, matching DEM_ZIP_URLS' per-continent
-            skip behaviour.
-        dest_path: Final path for the patched VRT - the exact path
-            `deltadtm.path` already points at in data_catalog_gfm.yml, so
-            every other script keeps reading from the same place.
-        tile_dir: Directory the DEM .tif tiles are (or will be) extracted
-            into (dem_out_dir) - the absolute paths are built against this.
-        zip_download_dir: Scratch directory for the raw, unpatched download.
-    """
-    if not url:
-        print("Skipping DEM VRT (no URL provided)")
-        return
-
-    if dest_path.exists():
-        print(f"DEM VRT already exists at {dest_path}, skipping (delete it to re-download/re-patch)")
-        return
-
-    raw_path = zip_download_dir / "deltadtm_raw.vrt"
-    print("\n=== DeltaDTM VRT mosaic ===")
-    download_file(url, raw_path)
-
-    tree = ET.parse(raw_path)
-    root = tree.getroot()
-
-    n_total = 0
-    n_missing = 0
-    for src_fn in root.iter("SourceFilename"):
-        n_total += 1
-        filename = Path(src_fn.text.strip()).name  # drop whatever path the source VRT itself carries
-        local_path = tile_dir / filename
-        src_fn.text = str(local_path)
-        src_fn.set("relativeToVRT", "0")
-        if not local_path.exists():
-            n_missing += 1
-
-    retry_transient_io(dest_path.parent.mkdir, parents=True, exist_ok=True)
-    tree.write(dest_path, encoding="utf-8", xml_declaration=True)
-    print(f"  Patched {n_total} tile reference(s) to absolute paths under {tile_dir}")
-    if n_missing:
-        print(
-            f"  NOTE: {n_missing} referenced tile(s) not found locally yet (e.g. a continent "
-            "you haven't downloaded) - harmless unless a later read touches that region."
-        )
-    print(f"  Wrote {dest_path}")
-
-
-def build_mask_vrt(tile_dir: Path, dest_path: Path) -> None:
-    """Build a VRT mosaic over the extracted DeltaDTM mask tiles.
-
-    Unlike the DEM, 4TU doesn't host a pre-built mask VRT, so this builds
-    one locally with GDAL's BuildVRT over whatever mask .tif tiles are
-    present in `tile_dir` - handles the same per-latitude-band native
-    resolution variation as the DEM VRT automatically (mosaics at the
-    finest resolution found among the inputs). Values are categorical
-    (0=land, 1=ocean, 2=lake, 3=river, 255=nodata), so resampling is
-    nearest-neighbour.
-
-    Args:
-        tile_dir: Directory containing the extracted mask .tif tiles
-            (mask_out_dir).
-        dest_path: Final path for the VRT - the exact path
-            `deltadtm_mask.path` already points at in data_catalog_gfm.yml.
-    """
-    if dest_path.exists():
-        print(f"Mask VRT already exists at {dest_path}, skipping (delete it to rebuild)")
-        return
-
-    tif_paths = sorted(str(p) for p in tile_dir.glob("*.tif"))
-    if not tif_paths:
-        print(f"No mask tiles found in {tile_dir} - skipping mask VRT build")
-        return
-
-    print("\n=== DeltaDTM mask VRT mosaic ===")
-    print(f"  Building VRT from {len(tif_paths)} mask tile(s)...")
-    retry_transient_io(dest_path.parent.mkdir, parents=True, exist_ok=True)
-    vrt_options = gdal.BuildVRTOptions(VRTNodata=255, resampleAlg="nearest")
-    ds = gdal.BuildVRT(str(dest_path), tif_paths, options=vrt_options)
-    if ds is None:
-        raise RuntimeError(f"gdal.BuildVRT failed for {dest_path}")
-    ds.FlushCache()
-    ds = None
-    print(f"  Wrote {dest_path}")
-
-
 def run(config: dict) -> None:
     sync_cfg = config["sync_deltadtm"]
 
     # DEM/mask tiles land next to the `deltadtm`/`deltadtm_mask` VRT mosaics
     # in data_catalog_gfm.yml — the same directories src/tile_chunking.py
     # already reads individual tile files from, so nothing downstream needs
-    # to know this script ran.
+    # to know this script ran. The VRT mosaics themselves are built
+    # separately, by build_deltadtm_vrt.py (run_preparation.py's next step)
+    # - see this module's own docstring for why that's a separate step now.
     catalog = get_data_catalog(
         _REPO_ROOT / config["paths"]["hydromt_data_catalog"], root=config["paths"]["root"]
     )
-    dem_vrt_path = Path(catalog.get_source("deltadtm").path)
-    dem_out_dir = dem_vrt_path.parent
-    mask_vrt_path = Path(catalog.get_source("deltadtm_mask").path)
-    mask_out_dir = mask_vrt_path.parent
+    dem_out_dir = Path(catalog.get_source("deltadtm").path).parent
+    mask_out_dir = Path(catalog.get_source("deltadtm_mask").path).parent
 
     zip_download_dir = Path(sync_cfg["zip_download_dir"])
     delete_zips = bool(sync_cfg.get("delete_zips_after_extract", False))
@@ -312,15 +207,10 @@ def run(config: dict) -> None:
     for continent, url in DEM_ZIP_URLS.items():
         process_zip(continent, url, zip_download_dir, dem_out_dir, delete_zips)
 
-    download_and_patch_vrt(DEM_VRT_URL, dem_vrt_path, dem_out_dir, zip_download_dir)
-
     print("\nDownloading mask tiles ...")
     process_zip("mask_tiles", MASK_ZIP_URL, zip_download_dir, mask_out_dir, delete_zips)
 
-    build_mask_vrt(mask_out_dir, mask_vrt_path)
-
     print("\nDone.")
     print(f"DEM tiles:  {dem_out_dir.resolve()}")
-    print(f"DEM VRT:    {dem_vrt_path.resolve() if dem_vrt_path.exists() else '(not downloaded)'}")
     print(f"Mask tiles: {mask_out_dir.resolve()}")
-    print(f"Mask VRT:   {mask_vrt_path.resolve() if mask_vrt_path.exists() else '(not built)'}")
+    print("Run build_deltadtm_vrt (or run_preparation.py with no args) next to build the VRT mosaics.")

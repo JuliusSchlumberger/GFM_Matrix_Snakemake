@@ -184,6 +184,31 @@ def main() -> None:
             "",
             f'cd "{linux_code_root}"',
             f'echo "=== Preprocessing batch {size_class}/{batch_id}: {len(batch_tiles)} tiles ==="',
+            "",
+            # Hard pre-flight check, not just a submission-order convention:
+            # --nolock (above) is only safe because build_shared_inputs.sbatch
+            # builds the one write-write race this DAG has
+            # (compute_geoid_offset_raster's single shared output) BEFORE any
+            # batch starts - see module docstring. That safety currently
+            # depends entirely on every batch actually being submitted via
+            # submit_preprocess_and_dispatch.sh's --dependency=afterany
+            # ordering; a batch launched by hand (or an old/stale sbatch
+            # script re-submitted directly) skips that ordering silently and
+            # could race the shared build with --nolock disabling Snakemake's
+            # own protection. This turns that into a loud, immediate,
+            # unambiguous failure instead of an intermittent LockException or
+            # (worse) silent corruption of the shared file - confirmed this is
+            # a real failure mode, not hypothetical: exactly this happened on
+            # 2026-08-08 (job 243423/243440 - LockException from a batch that
+            # started before build_shared_inputs had run).
+            f'if [ ! -f "{linux_shared_target}" ]; then',
+            f'    echo "ERROR: shared preprocessing input not found: {linux_shared_target}" >&2',
+            '    echo "This batch must not start before build_shared_inputs.sbatch completes." >&2',
+            '    echo "Submit via submit_preprocess_and_dispatch.sh (which orders this'
+            ' correctly) rather than running this .sbatch file directly/out of order." >&2',
+            "    exit 1",
+            "fi",
+            "",
             (
                 f'snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
                 f'$(cat "{linux_jobs_dir}/{name}_targets.txt")'

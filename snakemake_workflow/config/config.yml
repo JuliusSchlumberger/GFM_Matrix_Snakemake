@@ -26,6 +26,10 @@ vertical_datum_correction: # Used by: rules compute_geoid_offset_raster / extrac
 # ── PREPARATION PIPELINE SWITCHES ─────────────────────────────────────────────
 preparation: # Used by: preparation/run_preparation.py
   sync_deltadtm:       true   # download DeltaDTM DEM/mask tiles from 4TU.ResearchData
+  build_deltadtm_vrt:  true   # build deltadtm.vrt / deltadtm_mask.vrt from those tiles,
+  # with portable RELATIVE source paths (preparation/build_deltadtm_vrt.py) - separate
+  # from sync_deltadtm so the mosaics can be rebuilt on their own, cheaply, without
+  # re-downloading tiles
   tile_generation:     true   # build the DeltaDTM-tile chunk manifest -> tile_grid.path
   # (REPLACES tile_mask_creation/select_tiles/merge_tiles, and later the adaptive
   # parent/child pipeline that replaced them - see src/tile_chunking.py)

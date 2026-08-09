@@ -1,0 +1,28 @@
+# Machine-local configuration overrides for GFM.
+#
+# Copy this file to config_local.yml (git-ignored) and fill in the values
+# for your machine.  Only include the keys you need to override — everything
+# else is inherited from config.yml.
+#
+# The Snakefile loads this file automatically if it exists:
+#   snakemake_workflow/config/config_local.yml
+#
+# Usage:
+#   cp snakemake_workflow/config/config_local.yml.example \
+#      snakemake_workflow/config/config_local.yml
+#   # then edit config_local.yml
+
+paths:
+  # Linux mount of the SAME shared storage as paths.root (e.g. D:/GFM) on the
+  # Windows preprocessing machine - same underlying files, different mount
+  # prefix. Every {root}-based path in config.yml (model_outputs, etc.)
+  # resolves relative to this on the HPC side.
+  root: "/p/11212688-004-global-floodmaps/modelling"                     # ← change to your HPC's mount path
+
+  # Linux path to this repository checkout (used to locate
+  # scripts/run_aqueduct_cli.py from the generated sbatch scripts) - must be
+  # overridden here even though config.yml already sets code_root, since
+  # that value is the Windows preprocessing machine's own repo path.
+  code_root: "/u/schlumbe/gfm_code"           # ← must be an absolute path: this gets embedded as `cd "{code_root}"` in
+  # generated sbatch scripts, and bash does NOT expand `~` inside double quotes - a `~`-based path here would silently
+  # fail every generated preprocessing/dispatch job

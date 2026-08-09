@@ -1,12 +1,12 @@
 """Single entry point for the pre-processing preparation pipeline.
 
 Runs the one-off steps that must complete before the Snakemake DAG's
-`preprocess` target can run: downloading DeltaDTM DEM/mask tiles, building the
-fixed-DeltaDTM-tile chunk manifest (2026-08 - see src/tile_chunking.py), and
-generating the COAST-RP + SLR fingerprint boundary-condition NetCDFs. Config
-is loaded once and passed to every step's `run()` function in-process; a
-failure in one step is caught and reported, and the rest continue unless
---fail-fast is set.
+`preprocess` target can run: downloading DeltaDTM DEM/mask tiles, building
+their VRT mosaics, building the fixed-DeltaDTM-tile chunk manifest (2026-08
+- see src/tile_chunking.py), and generating the COAST-RP + SLR fingerprint
+boundary-condition NetCDFs. Config is loaded once and passed to every
+step's `run()` function in-process; a failure in one step is caught and
+reported, and the rest continue unless --fail-fast is set.
 
 tile_generation (this file's step, below) depends only on the
 mask/DEM/elev_threshold_m, never on scenario, so it's computed once and
@@ -15,9 +15,16 @@ frozen; boundary_conditions is independent of it in the other direction
 
 Steps (in order) — also the names used to select them on the command line
 and the keys read from config.yml's preparation.* switches:
-  sync_deltadtm    — download DeltaDTM DEM/mask tiles into the
+  sync_deltadtm      — download DeltaDTM DEM/mask tiles into the
                      data catalog's deltadtm/deltadtm_mask dirs
-  tile_generation  — build the DeltaDTM-tile-based chunk manifest ->
+  build_deltadtm_vrt — build the deltadtm.vrt / deltadtm_mask.vrt mosaics
+                     over those tiles, with portable RELATIVE source paths
+                     (preparation/build_deltadtm_vrt.py; separate from
+                     sync_deltadtm so the mosaics can be rebuilt on their
+                     own, cheaply, without re-downloading tiles - see that
+                     script's docstring for the cross-platform-path bug
+                     this split fixed)
+  tile_generation    — build the DeltaDTM-tile-based chunk manifest ->
                      tile_grid.path (preparation/build_tile_manifest.py;
                      REPLACES the pre-2026-08 tile_mask_creation/select_
                      tiles/merge_tiles chain AND the adaptive parent/child
@@ -25,10 +32,10 @@ and the keys read from config.yml's preparation.* switches:
   boundary_conditions — COAST-RP + SLR fingerprint scenario NetCDFs
                      (prepare_boundary_conditions.py)
 
-The individual step modules (sync_deltadtm.py, build_tile_manifest.py,
-prepare_boundary_conditions.py) are no longer standalone entry points —
-each exposes a `run(config, ...)` function and is only ever invoked from
-here, not via `python <script>.py` directly.
+The individual step modules (sync_deltadtm.py, build_deltadtm_vrt.py,
+build_tile_manifest.py, prepare_boundary_conditions.py) are no longer
+standalone entry points — each exposes a `run(config, ...)` function and is
+only ever invoked from here, not via `python <script>.py` directly.
 
 RETIRED (2026-08): connectivity_map / src/connectivity_forcing.py (the
 straight-line-IDW along-water boundary forcing feature it built an index
@@ -66,12 +73,14 @@ from config_utils import load_config  # noqa: E402
 SCRIPTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
+import build_deltadtm_vrt  # noqa: E402
 import build_tile_manifest  # noqa: E402
 import prepare_boundary_conditions  # noqa: E402
 import sync_deltadtm  # noqa: E402
 
 ALL_STEPS = [
     "sync_deltadtm",
+    "build_deltadtm_vrt",
     "tile_generation",
     "boundary_conditions",
 ]
@@ -178,6 +187,15 @@ def main() -> None:
         )
     else:
         print("\n  [ SKIP ] Download DeltaDTM tiles")
+
+    # ── Step 1b: Build the deltadtm/deltadtm_mask VRT mosaics ──────────────────
+    if "build_deltadtm_vrt" in selected:
+        results["build_deltadtm_vrt"] = _run_step(
+            build_deltadtm_vrt.run, "Build DeltaDTM VRT mosaics (relative source paths)",
+            args.fail_fast, config=cfg,
+        )
+    else:
+        print("\n  [ SKIP ] Build DeltaDTM VRT mosaics")
 
     # ── Step 2: Build the DeltaDTM-tile-based chunk manifest (2026-08) ─────────
     if "tile_generation" in selected:
