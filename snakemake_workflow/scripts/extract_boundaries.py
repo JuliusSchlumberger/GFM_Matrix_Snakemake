@@ -9,33 +9,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from boundaries import (  # noqa: E402
     filter_stations_by_ocean_connectivity,
-    load_waterlevel_stations,
     save_boundary_points,
     select_stations_for_tile,
 )
-from config_utils import get_data_catalog, retry_transient_io  # noqa: E402
+from config_utils import retry_transient_io  # noqa: E402
 
 bc_cfg = snakemake.params.bc_cfg  # noqa: F821
-return_period = snakemake.wildcards.return_period  # noqa: F821
 waterlevel_name = snakemake.wildcards.waterlevel_name  # noqa: F821
-
-nc_filename = bc_cfg["nc_filename_template"].format(
-    return_period=return_period, waterlevel_name=waterlevel_name
-)
-variable = bc_cfg["nc_variable_template"].format(
-    return_period=return_period, waterlevel_name=waterlevel_name
-)
-nc_path = Path(bc_cfg["waterlevel_nc_dir"]) / nc_filename
 
 tile = retry_transient_io(gpd.read_file, snakemake.input.tile_geometry)  # noqa: F821
 
-stations = load_waterlevel_stations(
-    nc_path,
-    variable=variable,
-    x_var=bc_cfg["station_x_var"],
-    y_var=bc_cfg["station_y_var"],
-    column_name=waterlevel_name,
-)
+# Pre-parsed once per (return_period, waterlevel_name) scenario by
+# cache_waterlevel_stations - NOT re-read from the raw NetCDF per tile here
+# anymore (that NetCDF has no tile dimension at all, so every tile was
+# redundantly re-parsing the exact same global station set - see that rule's
+# own docstring, conversation 2026-08-10).
+stations = retry_transient_io(gpd.read_file, snakemake.input.stations_cache)  # noqa: F821
 
 selected = select_stations_for_tile(
     stations, tile,
@@ -48,8 +37,13 @@ selected = select_stations_for_tile(
 # barrier from a genuinely nearby one; see filter_stations_by_ocean_connectivity's
 # own docstring for why this has to be a separate, coarser pass rather than
 # folded into the native-resolution IDW connectivity fix in flood_model.py.
-data_catalog = get_data_catalog(snakemake.params.data_catalog, root=snakemake.params.data_catalog_root)  # noqa: F821
-mask_dir = Path(data_catalog["deltadtm_mask"].path).parent
+# mask_dir is resolved once at Snakefile-parse time (preprocessing.smk's
+# _deltadtm_mask_dir), not rebuilt from a fresh HydroMT DataCatalog on every
+# one of the ~45 (return_period, waterlevel_name) jobs per tile this rule
+# runs - that per-job rebuild (~5s each, pure catalog-parsing overhead for a
+# path that never changes) was the dominant cost in a tile's whole
+# preprocessing time - see conversation 2026-08-10.
+mask_dir = Path(snakemake.params.mask_dir)  # noqa: F821
 selected = filter_stations_by_ocean_connectivity(
     selected,
     tile,

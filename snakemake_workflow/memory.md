@@ -1001,3 +1001,88 @@ optional (empty string omits the `#SBATCH --account` line entirely, see
 module load. The `gfm` conda env itself has so far only been validated on
 Windows (via miniforge) — it still needs building+validating fresh on
 Hydrax (Linux) directly, since conda environments don't transfer across OS.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+12. EXPOSURE ANALYSIS — CHUNK-PARTITIONED HPC PIPELINE (2026-08)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+`analysis/compute_exposure_analysis.py`'s single-machine `main()` (section 8's
+EXPOSURE/ADAPTATION MATH) is still the default path (`run_analysis.py`) and is
+UNTOUCHED by any of this - it stays correct for small/local runs. At real
+global scale it's slow: avoid alone is ~150+ (slr_intensity x SSP x year) /
+(slr_intensity x growth_rate) tasks, each independently `ProcessPoolExecutor`-
+parallelized but each ALSO independently re-streaming (reading from disk)
+EVERY chunk - ~150-180x redundant chunk reads across a full run - plus every
+task's `exposure_fn` recomputes `build_adapt_protection_fraction` (and, for
+avoid, `apply_country_shares`/`scatter_country_values`) once per (RP, SLR)
+key even though none of it depends on which key is current.
+
+Added alongside `main()` (not replacing it): a second, HPC-dispatchable
+pipeline that PARTITIONS CHUNKS (not tasks) across SLURM nodes, doing every
+task's contribution in one pass per chunk read instead of one read per task:
+
+  `compute_exposure_analysis.py` additions (same file, pure additions):
+    `discover_chunk_ids` / `load_analysis_context`  — chunk discovery +
+      config-derived setup (FLOPROS rp_applied/iso_lookup, SSP growth
+      factors, SLR trajectories), factored out of `main()`'s own inline
+      setup so every HPC batch job shares identical logic without a
+      main()-refactor risk.
+    `ExposureTask` / `build_exposure_tasks`  — enumerates the same task list
+      main() computes (baseline / protect_* / retreat_* / avoid_ssp_* /
+      avoid_growth_*) up front, given a FINAL (globally chunk-summed) share
+      table - retreat/avoid's `apply_country_shares` inherently needs the
+      global share before ANY chunk's contribution can be computed, so this
+      table must come from a completed, reduced pass 1, not a partial one.
+    `pass1_shares_all_intensities`  — generalises `pass1_shares` (which
+      streams chunks once PER slr_intensity) to every slr_intensity in one
+      chunk-streaming pass; returns raw (amount, capacity) sums, not yet
+      divided - the reduce step below sums these across batches first.
+    `pass2_all_tasks`  — generalises `_stream_eai` (one task per pass) to
+      every task in one chunk-streaming pass; hoists each distinct
+      `design_intensity`'s `apf` out of the per-(RP,SLR)-key loop (via a
+      per-chunk `apf_cache`) so it's computed once per (chunk,
+      design_intensity) instead of once per (task, RP, SLR) key - the fix
+      that matters most for avoid, by far the largest task count per
+      intensity.
+    `write_exposure_outputs`  — writes the same File 1/2/3 CSVs
+      `_write_base_scenario_files`/`_maybe_write_avoid` do, driven by the
+      task list's metadata instead of main()'s inline loops - no new
+      exposure math, pure reorganization of existing post-stream logic.
+
+  New standalone scripts (`scripts/`), each a thin CLI wrapper calling the
+  functions above:
+    `run_exposure_pass1.py`     — one batch's chunks -> raw share sums (JSON).
+    `reduce_exposure_shares.py` — sums every batch's raw sums (plain float
+      addition - associative), divides to the final share (JSON). Must
+      complete before any pass-2 batch starts.
+    `run_exposure_pass2.py`     — one batch's chunks + the reduced shares ->
+      every task's partial per-country EAI DataFrame (pickle).
+    `reduce_exposure_write.py`  — sums every batch's partial DataFrames
+      (`.add(fill_value=0.0)`, the same reduction `_stream_eai` already
+      relies on chunk-to-chunk, applied batch-to-batch here) and writes the
+      final CSVs via `write_exposure_outputs` - same output as `main()`.
+
+  `scripts/generate_exposure_jobs.py` — the HPC job generator, mirroring
+  `generate_hpc_preprocess_job.py`'s structure/conventions (same
+  local-view/Linux-view dual config resolution via `config_hpc.yml`, same
+  `hpc.n_nodes`/`hpc.sbatch` reuse rather than a new config block - these
+  jobs are I/O-bound chunk reads + small per-country arrays, not the
+  memory-heavy tile solves `sbatch_large` exists for). Splits the same
+  populated `chunk_ids` `main()` discovers into up to `hpc.n_nodes` batches
+  (reused for both passes - no need to repartition), writes
+  `exposure_pass1_batch_{id}.sbatch` (parallel, no dependency),
+  `exposure_reduce_shares.sbatch` (`afterany`: every pass1 batch),
+  `exposure_pass2_batch_{id}.sbatch` (`afterany`: reduce_shares),
+  `exposure_reduce_write.sbatch` (`afterany`: every pass2 batch), and
+  `submit_exposure_analysis.sh` (same `afterany`-join driver pattern as
+  `submit_preprocess_and_dispatch.sh`/`submit_waves.sh`). Writes generated
+  scripts/state under `hpc.jobs_dir/exposure/`.
+
+Verified 2026-08 with a synthetic 2-chunk/2-country correctness check (no
+real merged chunk outputs existed yet to test against - postprocessing
+hadn't produced any): pass1 shares, and baseline/retreat/avoid_growth EAI,
+computed via the new batch-then-reduce path (2 separate one-chunk batches,
+summed) matched the existing single-machine `pass1_shares`/`_stream_eai`
+path exactly (float equality within 1e-9). Not yet run against real
+production chunk data (none exists yet) or actually dispatched on Hydrax.

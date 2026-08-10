@@ -100,10 +100,61 @@ rule compute_friction:
         "../scripts/compute_friction.py"
 
 
+# Resolved ONCE here at Snakefile-parse time (mirrors _data_catalog's own
+# module-level construction in the root Snakefile), not per-job - unlike
+# extract_dem/extract_dem_mask/compute_friction/compute_model_bbox (which
+# genuinely need a live DataCatalog object for real raster reads via
+# get_rasterdataset), extract_boundaries.py only ever used its own per-job
+# get_data_catalog() call for ONE static path
+# (deltadtm_mask's directory, for filter_stations_by_ocean_connectivity) that
+# never varies across tiles/scenarios - rebuilding a whole HydroMT catalog
+# (~5s, confirmed via real HPC job logs 2026-08-10: consecutive
+# "Parsing data catalog" lines exactly 5s apart) JUST for that, ~45x per tile
+# (once per return_period x waterlevel_name boundaries file), was costing
+# ~3-4 minutes of pure overhead per tile - the dominant share of the ~5min/
+# tile preprocessing throughput observed live on Hydrax.
+_deltadtm_mask_dir = os.path.dirname(_data_catalog.get_source("deltadtm_mask").path)
+
+_stations_cache_dir = os.path.join(config["paths"]["processed_inputs_dir"], "WL_scenarios_cache")
+
+
+rule cache_waterlevel_stations:
+    """Cache one (return_period, waterlevel_name) scenario's global COAST-RP
+    water-level stations ONCE, as a small pre-parsed GeoPackage.
+
+    The source NetCDF (boundary_conditions.nc_filename_template) is wildcarded
+    ONLY by (return_period, waterlevel_name) - it has no tile dimension at
+    all, so its station set is 100% identical for every tile that needs this
+    scenario. Before this rule existed, every tile's own extract_boundaries
+    job re-opened and re-parsed that same NetCDF via xarray independently
+    (~5s each, confirmed against real tile 1013 data 2026-08-10) - up to
+    ~2578x redundant re-reads of the same ~45 files. Same "compute once
+    globally, read cheaply per tile" pattern as compute_geoid_offset_raster.
+
+    NOT temp() - reused across every future preprocessing batch/invocation
+    that needs this scenario, not just jobs within one Snakemake run. NOT
+    tile-wildcarded, so - like compute_geoid_offset_raster's output - this is
+    a shared, non-tile-specific output: on HPC, it must be built during the
+    same build_shared_inputs phase-0 step (see generate_hpc_preprocess_job.py)
+    BEFORE any --nolock batch starts, to avoid the exact concurrent-write
+    race compute_geoid_offset_raster's own phase-0 build already exists to
+    prevent (see that rule's/generate_hpc_preprocess_job.py's own docstrings).
+    """
+    output:
+        stations_cache=os.path.join(
+            _stations_cache_dir, "stations_{return_period}_{waterlevel_name}.gpkg",
+        ),
+    params:
+        bc_cfg=config["boundary_conditions"],
+    script:
+        "../scripts/cache_waterlevel_stations.py"
+
+
 rule extract_boundaries:
     """Extract water level boundary points for a single tile, return period and SLR scenario."""
     input:
         tile_geometry=rules.extract_tile_geometry.output.tile_geometry,
+        stations_cache=rules.cache_waterlevel_stations.output.stations_cache,
     output:
         boundaries=os.path.join(
             config["simulation"]["model_outputs"], "{tile_id}", "inputs",
@@ -111,7 +162,6 @@ rule extract_boundaries:
         ),
     params:
         bc_cfg=config["boundary_conditions"],
-        data_catalog=config["paths"]["hydromt_data_catalog"],
-        data_catalog_root=config["paths"]["root"],
+        mask_dir=_deltadtm_mask_dir,
     script:
         "../scripts/extract_boundaries.py"

@@ -27,13 +27,14 @@ locks its own working directory by default (one process at a time per
 directory), so N concurrent `snakemake` invocations from the same code_root
 would otherwise fail with LockException the instant a second one starts.
 Every `snakemake` call in this pipeline therefore passes `--nolock` - safe here
-ONLY because the DAG's one genuinely tile-independent, shared-across-every-
-batch output (`compute_geoid_offset_raster`'s single file, unlike every
-other rule which is per-tile) is built FIRST, alone, before any batch
-starts, eliminating the one real write-write race `--nolock` would
-otherwise leave unprotected. Without this pre-build step, two batches
-racing to build that one shared file concurrently with locking disabled
-could corrupt it.
+ONLY because every genuinely tile-independent, shared-across-every-batch
+output this DAG has (`compute_geoid_offset_raster`'s single file, PLUS
+`cache_waterlevel_stations`'s one cached GeoPackage per (return_period,
+waterlevel_name) scenario, 2026-08 - unlike every other rule, which is
+per-tile) is built FIRST, alone, before any batch starts, eliminating every
+real write-write race `--nolock` would otherwise leave unprotected. Without
+this pre-build step, two batches racing to build the same shared file
+concurrently with locking disabled could corrupt it.
 
 Target file paths are reconstructed directly (not via `rules.X.output.Y`
 references, since this is a standalone script, not a Snakemake `script:`)
@@ -97,11 +98,40 @@ def main() -> None:
     retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
 
-    linux_shared_target = linux_config["vertical_datum_correction"]["offset_raster_path"]
-
-    tile_gdf = retry_transient_io(gpd.read_file, linux_config["tile_grid"]["path"])
+    # Local view (this machine's own reachable mount), not linux_config's -
+    # a genuine pre-existing bug, found 2026-08-10 while testing the
+    # shared-targets change below: linux_config's path is a Linux-style
+    # string (e.g. /p/...) meant to be EMBEDDED into generated sbatch
+    # scripts, not actually opened by whichever machine happens to run this
+    # generator - reading it directly fails outright when generated from
+    # Windows (fiona.errors.DriverError, no such path on Windows). Local and
+    # Linux views point at the same underlying shared storage, so the DATA
+    # read is identical regardless of which config's path string opens it -
+    # only the STRING form embedded into sbatch scripts below needs to be
+    # the Linux one. Same fix already applied in generate_exposure_jobs.py's
+    # own chunk discovery for the identical reason.
+    tile_gdf = retry_transient_io(gpd.read_file, local_config["tile_grid"]["path"])
     return_periods = [f"RP{rp}" for rp in linux_config["boundary_conditions"]["return_periods"]]
     waterlevel_names = merged_slr_scenarios(linux_config["boundary_conditions"], linux_config["adaptation"])
+
+    # Every shared, non-tile-specific output this DAG has - the geoid-offset
+    # raster (one file total) PLUS one cached water-level-station GeoPackage
+    # per (return_period, waterlevel_name) scenario (cache_waterlevel_stations,
+    # 2026-08 - see that rule's own docstring in preprocessing.smk). Both
+    # classes need the SAME build-before-any-batch-starts treatment: a
+    # --nolock batch racing a concurrent WRITE to either would hit the same
+    # corruption risk compute_geoid_offset_raster's own phase-0 build already
+    # exists to prevent - see module docstring.
+    linux_shared_targets = [linux_config["vertical_datum_correction"]["offset_raster_path"]]
+    linux_stations_cache_dir = f"{linux_config['paths']['processed_inputs_dir']}/WL_scenarios_cache"
+    for rp in return_periods:
+        for slr in waterlevel_names:
+            linux_shared_targets.append(f"{linux_stations_cache_dir}/stations_{rp}_{slr}.gpkg")
+
+    shared_targets_path = local_jobs_dir / "shared_targets.txt"
+    with open(shared_targets_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(linux_shared_targets) + "\n")
+    linux_shared_targets_file = f"{linux_jobs_dir}/shared_targets.txt"
 
     # Same bbox-area pixel-count proxy hpc_dispatch.smk uses for simulation
     # batching (area_deg2 * 3600**2 - DeltaDTM's ~1 arcsec native
@@ -187,27 +217,30 @@ def main() -> None:
             "",
             # Hard pre-flight check, not just a submission-order convention:
             # --nolock (above) is only safe because build_shared_inputs.sbatch
-            # builds the one write-write race this DAG has
-            # (compute_geoid_offset_raster's single shared output) BEFORE any
-            # batch starts - see module docstring. That safety currently
-            # depends entirely on every batch actually being submitted via
+            # builds EVERY shared, non-tile-specific output this DAG has
+            # (geoid-offset raster + every cached water-level-station
+            # GeoPackage - see linux_shared_targets above) BEFORE any batch
+            # starts - see module docstring. That safety currently depends
+            # entirely on every batch actually being submitted via
             # submit_preprocess_and_dispatch.sh's --dependency=afterany
             # ordering; a batch launched by hand (or an old/stale sbatch
             # script re-submitted directly) skips that ordering silently and
-            # could race the shared build with --nolock disabling Snakemake's
+            # could race a shared build with --nolock disabling Snakemake's
             # own protection. This turns that into a loud, immediate,
             # unambiguous failure instead of an intermittent LockException or
-            # (worse) silent corruption of the shared file - confirmed this is
+            # (worse) silent corruption of a shared file - confirmed this is
             # a real failure mode, not hypothetical: exactly this happened on
             # 2026-08-08 (job 243423/243440 - LockException from a batch that
             # started before build_shared_inputs had run).
-            f'if [ ! -f "{linux_shared_target}" ]; then',
-            f'    echo "ERROR: shared preprocessing input not found: {linux_shared_target}" >&2',
-            '    echo "This batch must not start before build_shared_inputs.sbatch completes." >&2',
-            '    echo "Submit via submit_preprocess_and_dispatch.sh (which orders this'
+            f'while IFS= read -r shared_target; do',
+            f'    if [ ! -f "$shared_target" ]; then',
+            f'        echo "ERROR: shared preprocessing input not found: $shared_target" >&2',
+            '        echo "This batch must not start before build_shared_inputs.sbatch completes." >&2',
+            '        echo "Submit via submit_preprocess_and_dispatch.sh (which orders this'
             ' correctly) rather than running this .sbatch file directly/out of order." >&2',
-            "    exit 1",
-            "fi",
+            "        exit 1",
+            "    fi",
+            f'done < "{linux_shared_targets_file}"',
             "",
             (
                 f'snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
@@ -222,8 +255,9 @@ def main() -> None:
         batch_script_paths.append(f"{linux_jobs_dir}/{name}.sbatch")
         print(f"  wrote {script_path} ({size_class}, {len(batch_tiles)} tiles, {len(targets)} target files)")
 
-    # Phase 0: build the ONE genuinely shared, tile-independent output
-    # (compute_geoid_offset_raster) alone, before any batch starts - see
+    # Phase 0: build EVERY shared, tile-independent output this DAG has
+    # (geoid-offset raster + every cached water-level-station scenario file -
+    # see linux_shared_targets above) alone, before any batch starts - see
     # module docstring for why this is what makes --nolock safe on every
     # batch above. Lightweight, uses hpc.sbatch.
     shared_cfg = hpc_cfg["sbatch"]
@@ -243,7 +277,10 @@ def main() -> None:
         "",
         f'cd "{linux_code_root}"',
         'echo "=== Building shared preprocessing inputs ==="',
-        f'snakemake --cores 1 --nolock --rerun-triggers=mtime "{linux_shared_target}"',
+        (
+            f'snakemake --cores 1 --nolock --rerun-triggers=mtime '
+            f'$(cat "{linux_shared_targets_file}")'
+        ),
         "",
     ]
     shared_script_path = local_jobs_dir / "build_shared_inputs.sbatch"
