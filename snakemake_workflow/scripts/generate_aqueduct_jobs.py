@@ -19,21 +19,24 @@ by two entry points:
 
 Does two path resolutions side by side, since it runs on the local
 preprocessing machine but writes instructions meant for a Linux HPC:
-  - `model_outputs` (this machine's own, already-expanded view) is used to
-    pre-check wave-0 boundaries for emptiness and write nodata placeholders
-    locally, exactly like scripts/run_aqueduct.py's Snakemake-driven
-    equivalent does per-job.
+  - `model_outputs` (this machine's own, already-expanded view) - currently
+    only used to build sbatch script paths locally.
   - `config_utils.load_config(..., extra_override="config_hpc.yml")` is
     loaded separately to get the Linux-expanded view (model_outputs,
     code_root) embedded into the generated sbatch scripts and
     resolved_config.yml - see config_hpc.yml.example.
 
-Wave-0 (hop_distance == 0) tiles with no boundary stations are resolved
-immediately here (nodata placeholder written locally) and dropped from the
-sbatch scripts, same as before. Hop_distance >= 1 tiles are NEVER
-pre-excluded this way: whether a hinterland tile has any upstream flooding
-to seed from can only be known once its lower-hop neighbour has actually
-run (run_aqueduct_cli.py discovers "no seeds yet" live and writes its own
+Every (tile, rp, slr) combo - wave-0 and hop_distance>=1 alike - is included
+in the generated sbatch scripts unconditionally; NEITHER is pre-filtered at
+generation time (2026-08 - wave-0 empty-boundaries jobs used to be resolved
+here, reading every wave-0 tile's boundaries file to check `.empty` before
+writing the sbatch scripts; removed as a needless ~110,000-file-read,
+~90min pass on a real production grid - see run_aqueduct_cli.py's own
+docstring for where that check now lives instead, inline with the read it
+needs anyway). Hop_distance >= 1 tiles were NEVER pre-excludable this way to
+begin with: whether a hinterland tile has any upstream flooding to seed
+from can only be known once its lower-hop neighbour has actually run
+(run_aqueduct_cli.py discovers "no seeds yet" live and writes its own
 zero-waterdepth result) - pre-filtering them here on a same-run-as-wave-0
 basis would incorrectly exclude every hop>=1 tile, since a hinterland tile
 has no nearby boundary stations by definition. This is also why waves must
@@ -57,13 +60,11 @@ import os
 import sys
 from pathlib import Path
 
-import geopandas as gpd
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from config_utils import load_config, retry_transient_io  # noqa: E402
-from rasters import save_nodata_raster  # noqa: E402
 
 
 def generate_wave_dispatch(
@@ -87,29 +88,18 @@ def generate_wave_dispatch(
     and the standalone CLI build them from the same `batches` list, so the
     order always matches by construction.
     """
-    # ── Local view: resolve/exclude wave-0 boundaries-empty jobs on this machine
-    jobs_by_tile: dict[str, list[tuple[str, str]]] = {tid: [] for tid in map(str, tile_ids)}
-    n_excluded = 0
-
-    for tile_id in map(str, tile_ids):
-        tile_dir = os.path.join(model_outputs, tile_id)
-        dem_path = os.path.join(tile_dir, "inputs", "dem.tif")
-        is_wave0 = hop_by_tile[tile_id] == 0
-        for rp in return_periods:
-            for slr in waterlevel_names:
-                scenario_name = f"{rp}_{slr}"
-                if is_wave0:
-                    boundaries_path = os.path.join(tile_dir, "inputs", f"boundaries_{scenario_name}.gpkg")
-                    boundaries = retry_transient_io(gpd.read_file, boundaries_path)
-                    if boundaries.empty:
-                        output_path = os.path.join(tile_dir, "results", f"waterdepth_{scenario_name}.tif")
-                        retry_transient_io(os.makedirs, os.path.dirname(output_path), exist_ok=True)
-                        save_nodata_raster(dem_path, output_path, raster_config)
-                        n_excluded += 1
-                        continue
-                jobs_by_tile[tile_id].append((rp, slr))
-
-    print(f"Excluded {n_excluded} wave-0 job(s) with no boundary stations (nodata placeholder written locally).")
+    # Every (tile, rp, slr) combo is included unconditionally - wave-0 jobs
+    # whose boundaries turn out empty are no longer pre-filtered here (2026-08
+    # - this used to re-read every wave-0 tile's boundaries file at
+    # generation time just to check .empty, ~110,000 individual file reads
+    # on a real production grid, ~90min, for no benefit over letting
+    # run_aqueduct_cli.py check it inline as part of the read it needs
+    # anyway for a real, non-empty scenario - see that script's own
+    # docstring, and run_aqueduct.py, which already worked this way).
+    jobs_by_tile: dict[str, list[tuple[str, str]]] = {
+        str(tid): [(rp, slr) for rp in return_periods for slr in waterlevel_names]
+        for tid in tile_ids
+    }
 
     # ── Linux view: fully Linux-expanded config, for the sbatch scripts ─────────
     linux_config = load_config(base_config_path, extra_override=base_config_path.parent / "config_hpc.yml")
