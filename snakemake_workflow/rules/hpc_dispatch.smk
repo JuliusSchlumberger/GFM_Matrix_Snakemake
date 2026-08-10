@@ -49,21 +49,29 @@ for _tid in TILE_IDS:
     _HPC_WAVES.setdefault(_hop_by_tile[str(_tid)], []).append(str(_tid))
 
 # One or more node batches per (wave, size class), whole tiles per batch,
-# split as evenly as possible - but capped at that class's own tile count
-# within the wave, so a small group (e.g. 6 tiles at hop_distance=4, or a
-# handful of oversized tiles in an otherwise-small-tile wave) never
-# generates more batches than it has tiles to put in them. A (wave, class)
-# combination with zero tiles is skipped entirely (e.g. most waves will
-# have no 'large' tiles at all).
+# split as evenly as possible. hpc.n_nodes is a SHARED budget across both
+# size classes within a wave (split proportionally to each class's own
+# tile count via split_batches_proportionally - 2026-08 fix; previously
+# each class got its own independent min(n_nodes, len(class_tiles)),
+# letting a wave with both classes present claim up to 2x n_nodes at once -
+# found live, config.yml's own n_nodes=20 silently meaning up to 40 nodes
+# for wave 0). Never more batches than a class has tiles to put in them,
+# and a (wave, class) combination with zero tiles is skipped entirely
+# (e.g. most waves will have no 'large' tiles at all).
 _HPC_BATCHES = []  # [(wave, size_class, batch_id, [tile_id, ...]), ...] in generation order
 for _wave in sorted(_HPC_WAVES):
     _wave_tiles = _HPC_WAVES[_wave]
-    for _size_class in ("small", "large"):
-        _is_large = _size_class == "large"
-        _class_tiles = [t for t in _wave_tiles if (_approx_pixels_by_tile[t] >= _LARGE_TILE_PIXEL_THRESHOLD) == _is_large]
+    _tiles_by_class = {"small": [], "large": []}
+    for _t in _wave_tiles:
+        _is_large = _approx_pixels_by_tile[_t] >= _LARGE_TILE_PIXEL_THRESHOLD
+        _tiles_by_class["large" if _is_large else "small"].append(_t)
+    _class_n_nodes = split_batches_proportionally(
+        {c: len(ts) for c, ts in _tiles_by_class.items()}, config["hpc"]["n_nodes"],
+    )
+    for _size_class, _class_tiles in _tiles_by_class.items():
         if not _class_tiles:
             continue
-        _n_nodes = min(config["hpc"]["n_nodes"], len(_class_tiles))
+        _n_nodes = _class_n_nodes[_size_class]
         _k, _m = divmod(len(_class_tiles), _n_nodes)
         for _i in range(_n_nodes):
             _batch_tiles = _class_tiles[_i * _k + min(_i, _m): (_i + 1) * _k + min(_i + 1, _m)]

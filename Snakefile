@@ -84,7 +84,7 @@ os.makedirs = _retrying_makedirs
 
 sys.path.insert(0, os.path.join(workflow.basedir, "snakemake_workflow", "src"))
 from aqueduct_runner import estimate_aqueduct_mem_mb  # noqa: E402
-from config_utils import _expand_paths, get_data_catalog, merged_slr_scenarios  # noqa: E402
+from config_utils import _expand_paths, get_data_catalog, merged_slr_scenarios, split_batches_proportionally  # noqa: E402
 
 configfile: "snakemake_workflow/config/config.yml"
 

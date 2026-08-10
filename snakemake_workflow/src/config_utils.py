@@ -229,6 +229,44 @@ def get_data_catalog(
     return catalog
 
 
+def split_batches_proportionally(class_sizes: dict[str, int], n_nodes: int) -> dict[str, int]:
+    """Split a single, SHARED `n_nodes` node budget across classes
+    PROPORTIONALLY to each class's own item count.
+
+    Giving each class up to `n_nodes` independently (each class's own
+    `min(n_nodes, len(class_tiles))`) lets the total exceed `n_nodes` - e.g.
+    2x for two present classes ("small"/"large" tile-size routing, the only
+    current caller shape) - which is exactly the gap found 2026-08-10 in
+    `hpc_dispatch.smk`'s simulation-wave batching (a wave with both size
+    classes present could claim up to 40 nodes at once against an `n_nodes:
+    20` config). `generate_hpc_preprocess_job.py`'s own preprocessing
+    batching already did this proportional split inline; this factors that
+    same logic out so both dispatch paths share one implementation instead
+    of two copies drifting apart.
+
+    Each present class still gets a minimum of 1 batch, capped at its own
+    item count (never more batches than it has items to put in them), with
+    any rounding drift absorbed into whichever class has the most items.
+    Classes with zero items are omitted from the result entirely.
+    """
+    present = [c for c, n in class_sizes.items() if n > 0]
+    if not present:
+        return {}
+    if len(present) == 1:
+        only = present[0]
+        return {only: min(n_nodes, class_sizes[only])}
+
+    total = sum(class_sizes[c] for c in present)
+    result = {c: max(1, round(n_nodes * class_sizes[c] / total)) for c in present}
+    drift = n_nodes - sum(result.values())
+    if drift:
+        biggest = max(present, key=lambda c: class_sizes[c])
+        result[biggest] = max(1, result[biggest] + drift)
+    for c in present:
+        result[c] = min(result[c], class_sizes[c])
+    return result
+
+
 def merged_slr_scenarios(bc_cfg: dict, adapt_cfg: dict) -> list[str]:
     """Union of boundary_conditions.slr_scenarios and adaptation.slr_intensities.
 

@@ -608,6 +608,15 @@ def save_raster(
     # does, unlike the conventional "always use predictor 2 for integers"
     # guidance (which is more reliably true for older codecs like LZW).
     predictor = 1 if np.dtype(dtype).kind in "iu" else raster_config["predictor"]
+    # Snakemake auto-creates an output:'s parent directory before running a
+    # rule's script - but this function is also called from
+    # scripts/run_aqueduct_cli.py, a plain standalone CLI (not a Snakemake
+    # script:), which gets no such help. Explicit here so every caller is
+    # correct regardless of how it's invoked - found live 2026-08-10 (real
+    # HPC run: RasterioIOError "No such file or directory" writing
+    # waterdepth_*.tif for tiles whose results/ dir had never been created,
+    # since only preprocessing's inputs/ dir existed yet).
+    retry_transient_io(Path(output_path).parent.mkdir, parents=True, exist_ok=True)
     with retry_transient_io(
         rasterio.open,
         output_path,
@@ -660,6 +669,9 @@ def save_nodata_raster(reference_path: str | Path, output_path: str | Path, rast
         nodata=WATERDEPTH_NODATA_INT16,
     )
     data = np.full((profile["height"], profile["width"]), WATERDEPTH_NODATA_INT16, dtype="int16")
+    # See save_raster's own comment on why this is needed here (called from
+    # the standalone run_aqueduct_cli.py, not just Snakemake rules).
+    retry_transient_io(Path(output_path).parent.mkdir, parents=True, exist_ok=True)
     with retry_transient_io(rasterio.open, output_path, "w", **profile) as dst:
         dst.write(data, indexes=1)
 
@@ -702,5 +714,9 @@ def save_waterdepth_raster(
         "width": width,
         "height": height,
     }
+    # See save_raster's own comment on why this is needed here (called from
+    # the standalone run_aqueduct_cli.py, not just Snakemake rules) - this
+    # is the exact call site that hit the real 2026-08-10 HPC failure.
+    retry_transient_io(Path(output_path).parent.mkdir, parents=True, exist_ok=True)
     with retry_transient_io(rasterio.open, output_path, "w", **profile) as dst:
         dst.write(encoded, indexes=1)

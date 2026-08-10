@@ -60,7 +60,9 @@ import geopandas as gpd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from config_utils import load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
+from config_utils import (  # noqa: E402
+    load_config, merged_slr_scenarios, retry_transient_io, split_batches_proportionally,
+)
 
 
 def _account_line(sbatch_cfg: dict) -> list[str]:
@@ -153,23 +155,17 @@ def main() -> None:
     # than each class independently getting up to n_nodes - the latter
     # would let preprocessing use up to 2x n_nodes total (n_nodes for
     # small + n_nodes for large) even though "large" is a small minority
-    # of the actual work.
+    # of the actual work. Shared with hpc_dispatch.smk's simulation-wave
+    # batching (split_batches_proportionally, src/config_utils.py) - that
+    # rule used to duplicate this exact logic with its own independent
+    # min(n_nodes, len(class_tiles)) per class, which was the actual bug
+    # (found live 2026-08-10: a wave with both size classes present could
+    # claim up to 2x n_nodes at once) this shared helper now prevents from
+    # recurring in either place.
     present_classes = [c for c in ("small", "large") if tiles_by_class[c]]
-    total_tiles = sum(len(tiles_by_class[c]) for c in present_classes)
-    class_n_nodes: dict[str, int] = {}
-    if len(present_classes) == 1:
-        only = present_classes[0]
-        class_n_nodes[only] = min(n_nodes, len(tiles_by_class[only]))
-    else:
-        for c in present_classes:
-            class_n_nodes[c] = max(1, round(n_nodes * len(tiles_by_class[c]) / total_tiles))
-        drift = n_nodes - sum(class_n_nodes.values())
-        if drift:
-            # absorb rounding drift into whichever class has more tiles
-            biggest = max(present_classes, key=lambda c: len(tiles_by_class[c]))
-            class_n_nodes[biggest] = max(1, class_n_nodes[biggest] + drift)
-        for c in present_classes:
-            class_n_nodes[c] = min(class_n_nodes[c], len(tiles_by_class[c]))
+    class_n_nodes = split_batches_proportionally(
+        {c: len(tiles_by_class[c]) for c in present_classes}, n_nodes,
+    )
 
     batches = []  # [(size_class, batch_id, [tile_id, ...]), ...]
     for size_class, class_tiles in tiles_by_class.items():
