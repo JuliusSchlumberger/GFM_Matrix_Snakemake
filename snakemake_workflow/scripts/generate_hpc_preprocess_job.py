@@ -211,6 +211,7 @@ def main() -> None:
             "",
             (
                 f'snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
+                '--rerun-triggers mtime '
                 f'$(cat "{linux_jobs_dir}/{name}_targets.txt")'
             ),
             "",
@@ -242,7 +243,7 @@ def main() -> None:
         "",
         f'cd "{linux_code_root}"',
         'echo "=== Building shared preprocessing inputs ==="',
-        f'snakemake --cores 1 --nolock "{linux_shared_target}"',
+        f'snakemake --cores 1 --nolock --rerun-triggers mtime "{linux_shared_target}"',
         "",
     ]
     shared_script_path = local_jobs_dir / "build_shared_inputs.sbatch"
@@ -272,7 +273,7 @@ def main() -> None:
         "",
         f'cd "{linux_code_root}"',
         'echo "=== Generating wave sbatch scripts ==="',
-        "snakemake generate_aqueduct_jobs --cores 1 --nolock",
+        "snakemake generate_aqueduct_jobs --cores 1 --nolock --rerun-triggers mtime",
         "",
         'echo "=== Submitting simulation waves ==="',
         f'bash "{linux_jobs_dir}/submit_waves.sh"',

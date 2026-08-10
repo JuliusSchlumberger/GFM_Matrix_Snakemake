@@ -13,16 +13,34 @@
 #   # then edit config_local.yml
 
 paths:
-  # Linux mount of the SAME shared storage as paths.root (e.g. D:/GFM) on the
-  # Windows preprocessing machine - same underlying files, different mount
-  # prefix. Every {root}-based path in config.yml (model_outputs, etc.)
-  # resolves relative to this on the HPC side.
-  root: "/p/11212688-004-global-floodmaps/modelling"                     # ← change to your HPC's mount path
+  # Root directory for all project data and model outputs (D:/GFM on the
+  # primary machine).  Every path in config.yml that contains {root} resolves
+  # to this value.
+  root: "P:/11212688-004-global-floodmaps/modelling"         # ← change to your local path
 
-  # Linux path to this repository checkout (used to locate
-  # scripts/run_aqueduct_cli.py from the generated sbatch scripts) - must be
-  # overridden here even though config.yml already sets code_root, since
-  # that value is the Windows preprocessing machine's own repo path.
-  code_root: "/u/schlumbe/gfm_code"           # ← must be an absolute path: this gets embedded as `cd "{code_root}"` in
-  # generated sbatch scripts, and bash does NOT expand `~` inside double quotes - a `~`-based path here would silently
-  # fail every generated preprocessing/dispatch job
+  # Root of the repository clone.
+  code_root: "C:/Users/schlumbe/GFM_Matrix_Snakemake"   # ← change to your local path
+
+  # Root of the Aqueduct build tree (where aqueduct.exe lives). Only set this
+  # if the Aqueduct build lives somewhere other than code_root on this
+  # machine (e.g. a separate build directory or drive) - it defaults to
+  # code_root if omitted.
+  aqueduct_root: "C:/Users/schlumbe/GFM"   # ← uncomment and change if needed
+
+# NO tile_grid override here (2026-08-09, corrected): config.yml's own
+# tile_grid.path ({processed_inputs_dir}/mask/domain_tiles_global.gpkg) is
+# already correct - it's the real output of the 2026-08 fixed-tile-chunking
+# redesign (2578 chunks, confirmed against processed_inputs/mask/
+# domain_tiles_global.gpkg's actual feature count + hop_distance column).
+# An earlier version of this file overrode it back to the legacy
+# {root}/inputs/mask/domain_tiles_globally.gpkg (1428 tiles, last written
+# 2026-07-21) - that override was added right after the 2026-07-30 pull of
+# c6d5cad "flood model now in python", when config.yml's tile_grid.path
+# briefly pointed at a stale Western-Europe-only grid; config.yml has since
+# moved on to the correct global path, but this override kept silently
+# shadowing it with the OLD legacy file the whole time - confirmed directly
+# by comparing feature counts (1428 vs the real 2578) and the debug
+# checkpoint 13_chunks_ordered.gpkg's own write timing (build_tile_manifest.
+# py:452-477 - the checkpoint and the real output are written from the same
+# `final` GeoDataFrame in the same run, so the mismatch could only mean this
+# override was pointing somewhere the pipeline itself never wrote to).

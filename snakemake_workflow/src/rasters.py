@@ -14,6 +14,7 @@ import hydromt
 import numpy as np
 import rasterio
 import xarray as xr
+from hydromt.exceptions import NoDataException
 from rasterio.fill import fillnodata
 from scipy import ndimage
 from shapely.geometry import box as shapely_box
@@ -66,7 +67,39 @@ def _encode_int16(values: np.ndarray, scale: float, label: str, valid_hint: str)
 
 
 def encode_dem_cm(dem_m: np.ndarray) -> np.ndarray:
-    """Encode a float DEM (metres) as int16 centimetres."""
+    """Encode a float DEM (metres) as int16 centimetres.
+
+    DEM_VALUE_CLIPPED_TO_INT16_RANGE (2026-08-10, search this token to find
+    this note again): values below DeltaDTM's usual <=30m envelope can
+    still be real - confirmed directly against two real preprocessing
+    failures: tile 1464 (the Dead Sea, -369.29m) and tile 303 (the Danakil
+    Depression / Red Sea rift, -379.08m) - but int16-cm only spans
+    +-327.67m, so both genuinely overflow it. CLIPPED here, not rejected:
+    this is a deliberate, lossy alteration of the true DEM value for any
+    cell this extreme, on the reasoning that once an elevation is this far
+    below any plausible coastal water level, the exact number cannot affect
+    flood results - "-369m" and "-327.67m" both mean "never floods," so no
+    flood-extent difference is expected at either location. Flagged here
+    (and printed at runtime below) specifically so this is easy to find
+    again if that assumption ever needs revisiting - e.g. if a future
+    version of this pipeline computes anything OTHER than coastal flood
+    extent from this DEM (elevation-dependent exposure metrics, terrain
+    analysis, etc.) where the true (deeper) value would matter.
+    _encode_int16 itself is untouched - friction/waterdepth encoding still
+    raise a hard error on overflow; only this DEM-specific caller clips.
+    """
+    lo_m = np.iinfo(np.int16).min / DEM_SCALE  # -327.68
+    hi_m = np.iinfo(np.int16).max / DEM_SCALE  # 327.67
+    n_clipped = int(np.sum((dem_m < lo_m) | (dem_m > hi_m)))
+    if n_clipped:
+        print(
+            f"  DEM_VALUE_CLIPPED_TO_INT16_RANGE: {n_clipped} cell(s) outside "
+            f"[{lo_m:g}, {hi_m:g}] m (actual range [{float(dem_m.min()):g}, "
+            f"{float(dem_m.max()):g}] m) clipped before int16-cm encoding - "
+            "see encode_dem_cm's docstring.",
+            flush=True,
+        )
+    dem_m = np.clip(dem_m, lo_m, hi_m)
     return _encode_int16(dem_m, DEM_SCALE, "DEM", f"within DeltaDTM's <=30m validity envelope + the {DEM_NODATA_M}m gap-fill sentinel")
 
 
@@ -499,19 +532,26 @@ def compute_friction(
     """
     _MISSING = np.float32(-9999.0)  # internal sentinel for unclassified cells
 
-    da_lulc = data_catalog.get_rasterdataset(lulc_source, bbox=bbox)
-
     # Copernicus land-use coverage doesn't reach the poles (cuts off around
     # 80N) - a tile whose bbox extends beyond that has NO real land-use data
-    # at all, and the clipped da_lulc ends up with fewer than 2 cells in one
-    # spatial dim. reproject_like needs >=2 cells in each dim to compute a
-    # valid affine transform (HydroMT raises "Invalid raster: less than 2
-    # cells in y_dim ..." otherwise, crashing the whole preprocessing job) -
-    # treat this the same as "no valid land use classification anywhere in
-    # this tile" (the same fallback every individual unclassified cell
-    # already gets below), using `dem` itself as the coordinate/CRS
-    # template since it's already on the exact target grid.
-    if da_lulc.raster.height < 2 or da_lulc.raster.width < 2:
+    # at all. HydroMT surfaces this two different ways depending on exactly
+    # how little coverage remains: either get_rasterdataset itself raises
+    # NoDataException (confirmed directly: tile 234, Ellesmere Island,
+    # ~80-81N - zero pixels read at all), or it returns successfully but the
+    # clipped da_lulc ends up with fewer than 2 cells in one spatial dim
+    # (reproject_like then needs >=2 cells in each dim to compute a valid
+    # affine transform, raising "Invalid raster: less than 2 cells in y_dim
+    # ..." otherwise). Both are the same underlying condition - no valid
+    # land use classification anywhere in this tile - so both fall back the
+    # same way every individual unclassified cell already does below, using
+    # `dem` itself as the coordinate/CRS template since it's already on the
+    # exact target grid.
+    try:
+        da_lulc = data_catalog.get_rasterdataset(lulc_source, bbox=bbox)
+    except NoDataException:
+        da_lulc = None
+
+    if da_lulc is None or da_lulc.raster.height < 2 or da_lulc.raster.width < 2:
         friction = np.full((dem.raster.height, dem.raster.width), default_friction, dtype=np.float32)
         return dem.copy(data=encode_friction_int16(friction))
 
