@@ -6,6 +6,7 @@ This means raster datasets can simply be clipped with `bbox=...` - no
 additional `geometry_mask` step is required.
 """
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -576,6 +577,45 @@ def compute_friction(
     return da_lulc_repr.copy(data=encode_friction_int16(friction))
 
 
+def _atomic_raster_write(output_path: str | Path, profile: dict[str, Any], write_fn) -> None:
+    """Write a raster via a temp file in the same directory + atomic
+    `os.replace`, so a process killed mid-write (SIGKILL from a hard
+    `scancel`, node failure/preemption, OOM-killer) never leaves a
+    truncated/corrupted file sitting at the real `output_path` - see
+    conversation 2026-08-11. Either `output_path` is untouched (whatever
+    was there before, or nothing) or it's the complete, valid result -
+    there is no partially-written state visible at that path, ever.
+
+    `run_aqueduct_cli.py`'s own `_output_already_done` check already
+    treats a truncated file as "not done" (it tries to actually read it),
+    so a hard kill was already safe in the sense that the work would get
+    correctly redone rather than silently accepted as complete - this is
+    the complementary fix that avoids ever producing that truncated file
+    at the canonical path in the first place, rather than only detecting
+    it after the fact.
+
+    The temp filename includes the PID so two processes racing to (re)write
+    the SAME output_path concurrently (e.g. an old and a resumed dispatch
+    briefly overlapping) never clobber each other's in-progress temp file -
+    each gets its own, and only ONE `os.replace` call ultimately wins,
+    same as a normal same-content race.
+
+    `write_fn(dst)` performs the actual `dst.write(...)` call(s) - passed in
+    so this can wrap save_raster/save_nodata_raster/save_waterdepth_raster
+    without duplicating rasterio.open's `with`/exception handling three
+    times.
+    """
+    output_path = Path(output_path)
+    tmp_path = output_path.with_name(f"{output_path.name}.tmp{os.getpid()}")
+    try:
+        with retry_transient_io(rasterio.open, tmp_path, "w", **profile) as dst:
+            write_fn(dst)
+        retry_transient_io(os.replace, tmp_path, output_path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
 def save_raster(
     da: xr.DataArray,
     output_path: str | Path,
@@ -617,25 +657,22 @@ def save_raster(
     # waterdepth_*.tif for tiles whose results/ dir had never been created,
     # since only preprocessing's inputs/ dir existed yet).
     retry_transient_io(Path(output_path).parent.mkdir, parents=True, exist_ok=True)
-    with retry_transient_io(
-        rasterio.open,
-        output_path,
-        "w",
-        driver=raster_config["driver"],
-        crs=da.raster.crs,
-        transform=da.raster.transform,
-        dtype=dtype,
-        count=1,
-        nodata=raster_config["nodata"],
-        compress=raster_config["compression"],
-        predictor=predictor,
-        width=da.raster.width,
-        height=da.raster.height,
-        tiled=True,
-        blockxsize=512,
-        blockysize=512,
-    ) as dst:
-        dst.write(da.values, indexes=1)
+    profile = {
+        "driver": raster_config["driver"],
+        "crs": da.raster.crs,
+        "transform": da.raster.transform,
+        "dtype": dtype,
+        "count": 1,
+        "nodata": raster_config["nodata"],
+        "compress": raster_config["compression"],
+        "predictor": predictor,
+        "width": da.raster.width,
+        "height": da.raster.height,
+        "tiled": True,
+        "blockxsize": 512,
+        "blockysize": 512,
+    }
+    _atomic_raster_write(output_path, profile, lambda dst: dst.write(da.values, indexes=1))
 
 
 def save_nodata_raster(reference_path: str | Path, output_path: str | Path, raster_config: dict[str, Any]) -> None:
@@ -669,11 +706,12 @@ def save_nodata_raster(reference_path: str | Path, output_path: str | Path, rast
         nodata=WATERDEPTH_NODATA_INT16,
     )
     data = np.full((profile["height"], profile["width"]), WATERDEPTH_NODATA_INT16, dtype="int16")
-    # See save_raster's own comment on why this is needed here (called from
-    # the standalone run_aqueduct_cli.py, not just Snakemake rules).
+    # See save_raster's own comment on why mkdir is needed here (called from
+    # the standalone run_aqueduct_cli.py, not just Snakemake rules), and
+    # _atomic_raster_write's own docstring for why the write itself goes
+    # through a temp file + atomic replace.
     retry_transient_io(Path(output_path).parent.mkdir, parents=True, exist_ok=True)
-    with retry_transient_io(rasterio.open, output_path, "w", **profile) as dst:
-        dst.write(data, indexes=1)
+    _atomic_raster_write(output_path, profile, lambda dst: dst.write(data, indexes=1))
 
 
 def save_waterdepth_raster(
@@ -714,9 +752,12 @@ def save_waterdepth_raster(
         "width": width,
         "height": height,
     }
-    # See save_raster's own comment on why this is needed here (called from
+    # See save_raster's own comment on why mkdir is needed here (called from
     # the standalone run_aqueduct_cli.py, not just Snakemake rules) - this
-    # is the exact call site that hit the real 2026-08-10 HPC failure.
+    # is the exact call site that hit the real 2026-08-10 HPC failure - and
+    # _atomic_raster_write's own docstring for why the write itself goes
+    # through a temp file + atomic replace (2026-08-11: protects against a
+    # hard `scancel`/node failure leaving a truncated waterdepth_*.tif
+    # behind, the most expensive output in this pipeline to silently lose).
     retry_transient_io(Path(output_path).parent.mkdir, parents=True, exist_ok=True)
-    with retry_transient_io(rasterio.open, output_path, "w", **profile) as dst:
-        dst.write(encoded, indexes=1)
+    _atomic_raster_write(output_path, profile, lambda dst: dst.write(encoded, indexes=1))
