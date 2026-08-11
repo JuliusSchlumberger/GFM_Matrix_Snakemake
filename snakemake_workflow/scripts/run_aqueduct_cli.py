@@ -25,6 +25,7 @@ import sys
 from pathlib import Path
 
 import geopandas as gpd
+import rasterio
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -42,6 +43,25 @@ from boundaries import collect_neighbor_wave_seeds  # noqa: E402
 from config_utils import path_ready, retry_transient_io  # noqa: E402
 from rasters import save_nodata_raster  # noqa: E402
 from tiles import load_tile_grid  # noqa: E402
+
+
+def _output_already_done(output_path: str) -> bool:
+    """Whether `output_path` already exists and is a genuinely readable
+    raster - not just a bare existence check, since a job killed mid-write
+    (SLURM time limit, node failure/preemption) can leave a truncated file
+    behind that `os.path.exists` alone would wrongly treat as complete.
+
+    Reading one pixel is enough to force GDAL to validate the file's
+    structure without paying the cost of decoding the whole raster.
+    """
+    if not path_ready(output_path):
+        return False
+    try:
+        with rasterio.open(output_path) as src:
+            src.read(1, window=((0, 1), (0, 1)))
+        return True
+    except Exception:
+        return False
 
 
 def main() -> None:
@@ -73,6 +93,16 @@ def main() -> None:
     output_path = os.path.join(tile_dir, "results", f"waterdepth_{scenario_name}.tif")
     skipped_dir = os.path.join(model_outputs, "skipped_tiles")
     oom_dir = os.path.join(model_outputs, "oom_tiles")
+
+    # Idempotency: unlike run_aqueduct.py (which gets this for free from
+    # Snakemake's own output-tracking), this standalone CLI has no built-in
+    # "already done" check - added 2026-08 so a resumed/rebalanced dispatch
+    # (regenerated job list covering only what's still missing) is also
+    # safe to run even if a job for an already-complete (tile, rp, slr)
+    # somehow gets submitted again, instead of silently redoing real,
+    # already-correct work.
+    if _output_already_done(output_path):
+        return
 
     if tile_marked_oom(oom_dir, tile_id):
         log_skipped_tile(
