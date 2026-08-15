@@ -3,22 +3,40 @@ pipeline (analysis/compute_exposure_analysis.py's pass1_shares_all_
 intensities / pass2_all_tasks design - see that module's docstring for why
 CHUNKS, not individual scenario/adaptation tasks, are the partitioning unit).
 
-Splits the populated chunk_ids (same discovery + filter
-analysis/compute_exposure_analysis.py's own main() uses) into up to
-hpc.n_nodes batches, and writes:
-  - exposure_pass1_batch_{id}.sbatch  (fully parallel, no dependency)
-  - exposure_reduce_shares.sbatch     (afterany: every pass1 batch)
-  - exposure_pass2_batch_{id}.sbatch  (afterany: reduce_shares; reuses the
-                                        SAME chunk batches as pass1 - no
-                                        need to repartition)
-  - exposure_reduce_write.sbatch      (afterany: every pass2 batch) - writes
-                                        the final CSVs, identical output to
-                                        compute_exposure_analysis.py's
-                                        single-machine main()
-  - submit_exposure_analysis.sh       driver script, same afterany-join
-                                        pattern as
-                                        submit_preprocess_and_dispatch.sh /
-                                        submit_waves.sh
+The actual generation logic lives in `generate_exposure_dispatch()`, shared
+by two entry points:
+  - `main()` below (`python generate_exposure_jobs.py`) - standalone use,
+    e.g. regenerating/resuming the exposure dispatch after postprocessing
+    has already run on its own. Discovers chunk_ids by globbing real
+    flood_fraction files (same filter compute_exposure_analysis.py's own
+    main() uses), and writes its own self-contained submit_exposure_analysis.sh
+    with no incoming dependency (pass1 batches start immediately).
+  - `generate_hpc_postprocess_job.py` (2026-08-15, new) - calls
+    generate_exposure_dispatch() directly with the SAME tile-grid-derived
+    chunk_ids list postprocessing's own batches use (not a file glob, since
+    postprocessing hasn't produced the real files yet at the moment both
+    are being planned together), appending exposure analysis's own phases
+    onto postprocessing's OWN submit script, continuing the same
+    afterany-chain rather than writing a separate script. This is what lets
+    the whole postprocessing -> exposure-analysis handoff be submitted
+    ONCE, synchronously, from wherever the driver script runs (the login
+    node) - critically, NO phase anywhere in that combined chain calls
+    `sbatch` again from within a running compute-node job. That pattern
+    (a job submitting more jobs from a compute node) is what hung job
+    243654 for ~6h earlier this run (see generate_hpc_preprocess_job.py's
+    build_shared_inputs docstring) - `submit_waves.sh` itself never had
+    that problem because it submits every wave's jobs upfront, all at
+    once, with SLURM's own --dependency=afterany handling the timing; this
+    combined postprocessing+exposure chain follows that same proven shape
+    instead of the one that already broke.
+
+  Because chunk_ids may now be the UNFILTERED tile-grid-derived list (not
+  pre-filtered to non-empty population), pass1_shares_all_intensities/
+  pass2_all_tasks (compute_exposure_analysis.py) check each chunk's
+  population file for real content themselves now (_chunk_is_populated,
+  2026-08-15) rather than assuming the caller already filtered it - an
+  ocean/buffer chunk with a zero-byte population placeholder is skipped
+  inline instead of ever being handed to _load_chunk.
 
 Reuses hpc.n_nodes/hpc.sbatch rather than a separate config block - same
 reasoning as generate_hpc_preprocess_job.py's own choice (one place for
@@ -28,10 +46,10 @@ for, so hpc.sbatch alone is enough - no "large" size class here.
 
 Uses the same local-view/Linux-view dual path resolution as
 generate_hpc_preprocess_job.py (config_hpc.yml, if present) for the paths
-embedded INTO the generated sbatch scripts - but chunk discovery itself
-(a filesystem glob, needs to actually run against whatever mount the
-CURRENT machine sees) uses the local config, not the Linux one, so this
-works correctly regardless of which machine generates the scripts.
+embedded INTO the generated sbatch scripts - but chunk discovery in the
+standalone path (a filesystem glob, needs to actually run against whatever
+mount the CURRENT machine sees) uses the local config, not the Linux one,
+so this works correctly regardless of which machine generates the scripts.
 
 Usage:
     python generate_exposure_jobs.py [--config path/to/config.yml]
@@ -56,7 +74,9 @@ def _account_line(sbatch_cfg: dict) -> list[str]:
 def _discover_chunk_ids(flood_frac_dir: Path, chunks_dir: Path) -> list[str]:
     """Mirrors compute_exposure_analysis.discover_chunk_ids - kept as a plain
     path glob here (no need to import the analysis module for this) since
-    generation-time discovery only needs the file listing.
+    generation-time discovery only needs the file listing. Standalone
+    entry point only - the combined postprocessing+exposure entry point
+    passes an already-known chunk_ids list in instead (see module docstring).
     """
     all_chunk_ids = sorted(set(
         p.stem.split("_RP")[0].replace("flood_fraction_", "")
@@ -69,16 +89,29 @@ def _discover_chunk_ids(flood_frac_dir: Path, chunks_dir: Path) -> list[str]:
     ]
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
-    parser.add_argument("--config", default=str(default_config))
-    args = parser.parse_args()
+def generate_exposure_dispatch(
+    local_config: dict,
+    linux_config: dict,
+    chunk_ids: list[str],
+    submit_lines: list[str],
+    prev_ids_expr: str,
+) -> list[str]:
+    """Write the exposure-analysis pass1/reduce_shares/pass2/reduce_write
+    sbatch scripts and APPEND their submission onto an existing
+    `submit_lines` script, rather than building a fresh standalone one.
 
-    config_path = Path(args.config)
-    local_config = load_config(config_path)
-    linux_config = load_config(config_path, extra_override=config_path.parent / "config_hpc.yml")
+    `chunk_ids` is taken as given - NOT filtered for non-empty population
+    here (that filtering now happens inline in pass1_shares_all_intensities/
+    pass2_all_tasks, see _chunk_is_populated - necessary because this may be
+    the tile-grid-derived list, planned before the real population files
+    exist).
 
+    `prev_ids_expr`: a bash expression (e.g. `"$POSTPROCESS_IDS"`, or `""`
+    for no incoming dependency) that pass1's own batches should depend on
+    via `--dependency=afterany`. Returns the extended `submit_lines` list -
+    does NOT write it to disk itself, so the caller can keep appending
+    further phases before writing once at the end.
+    """
     local_jobs_dir = Path(local_config["hpc"]["jobs_dir"]) / "exposure"
     linux_jobs_dir = f"{linux_config['hpc']['jobs_dir']}/exposure"
     linux_code_root = linux_config["paths"]["code_root"]
@@ -92,12 +125,8 @@ def main() -> None:
     retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
 
-    # Local view (this machine's own reachable mount), not linux_config's -
-    # see module docstring.
-    merged_dir = Path(local_config["postprocessing"]["merged_outputs"])
-    chunk_ids = _discover_chunk_ids(merged_dir / "chunks" / "flood_fraction", merged_dir / "chunks")
     if not chunk_ids:
-        raise SystemExit(f"No populated chunk files found under {merged_dir}/chunks - run postprocessing first.")
+        raise SystemExit("generate_exposure_dispatch: chunk_ids is empty - nothing to plan.")
 
     n_batches = min(n_nodes, len(chunk_ids))
     k, m = divmod(len(chunk_ids), n_batches)
@@ -195,19 +224,22 @@ def main() -> None:
         f.write("\n".join(reduce_write_lines))
     print(f"  wrote {reduce_write_path}")
 
-    # Master driver: pass1 batches (parallel) -> reduce_shares (afterany all
-    # pass1) -> pass2 batches (afterany reduce_shares, parallel amongst
-    # themselves) -> reduce_write (afterany all pass2). Same afterany-join
-    # pattern as submit_preprocess_and_dispatch.sh / submit_waves.sh.
-    submit_lines = [
-        "#!/bin/bash",
-        "set -euo pipefail",
-        "",
-        'PASS1_IDS=""',
-    ]
+    # Append (not replace) - pass1 batches (parallel amongst themselves, but
+    # gated on prev_ids_expr if given) -> reduce_shares (afterany all pass1)
+    # -> pass2 batches (afterany reduce_shares) -> reduce_write (afterany
+    # all pass2). Same afterany-join pattern as submit_preprocess_and_
+    # dispatch.sh / submit_waves.sh - see module docstring for why this
+    # stays a single synchronous submission rather than a job calling
+    # sbatch again later.
+    submit_lines = list(submit_lines)
+    submit_lines.append("\n# exposure analysis: pass 1 (shares)")
+    submit_lines.append('PASS1_IDS=""')
     for script in pass1_script_paths:
+        if prev_ids_expr:
+            submit_lines.append(f'JID=$(sbatch --parsable --dependency=afterany:{prev_ids_expr} "{script}")')
+        else:
+            submit_lines.append(f'JID=$(sbatch --parsable "{script}")')
         submit_lines += [
-            f'JID=$(sbatch --parsable "{script}")',
             f'echo "submitted {script} -> job $JID"',
             'PASS1_IDS="${PASS1_IDS:+$PASS1_IDS:}$JID"',
         ]
@@ -241,12 +273,41 @@ def main() -> None:
             f'(depends on {n_batches} pass2 batches)"'
         ),
     ]
+
+    print(f"\nExposure analysis: {n_batches} chunk batch(es) covering {len(chunk_ids)} chunk(s).")
+    return submit_lines
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
+    parser.add_argument("--config", default=str(default_config))
+    args = parser.parse_args()
+
+    config_path = Path(args.config)
+    local_config = load_config(config_path)
+    linux_config = load_config(config_path, extra_override=config_path.parent / "config_hpc.yml")
+
+    # Local view (this machine's own reachable mount), not linux_config's -
+    # see module docstring.
+    merged_dir = Path(local_config["postprocessing"]["merged_outputs"])
+    chunk_ids = _discover_chunk_ids(merged_dir / "chunks" / "flood_fraction", merged_dir / "chunks")
+    if not chunk_ids:
+        raise SystemExit(f"No populated chunk files found under {merged_dir}/chunks - run postprocessing first.")
+
+    submit_lines = generate_exposure_dispatch(
+        local_config, linux_config, chunk_ids,
+        submit_lines=["#!/bin/bash", "set -euo pipefail"],
+        prev_ids_expr="",
+    )
+
+    local_jobs_dir = Path(local_config["hpc"]["jobs_dir"]) / "exposure"
     submit_script_path = local_jobs_dir / "submit_exposure_analysis.sh"
     with open(submit_script_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(submit_lines) + "\n")
 
-    print(f"\nDone. {n_batches} chunk batch(es) covering {len(chunk_ids)} populated chunks.")
-    print(f"Submit on Hydrax with: bash {linux_jobs_dir}/submit_exposure_analysis.sh")
+    linux_jobs_dir = f"{linux_config['hpc']['jobs_dir']}/exposure"
+    print(f"\nSubmit on Hydrax with: bash {linux_jobs_dir}/submit_exposure_analysis.sh")
 
 
 if __name__ == "__main__":

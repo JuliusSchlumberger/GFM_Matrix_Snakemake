@@ -625,6 +625,24 @@ def build_exposure_tasks(
     return tasks
 
 
+def _chunk_is_populated(chunks_dir: Path, cid: str) -> bool:
+    """Whether this chunk's population grid is a real (non-empty) file.
+
+    prepare_exposure_grid_chunk writes a zero-byte placeholder for a chunk
+    with no population coverage (pure ocean/buffer) - _load_chunk's
+    rasterio.open would raise on that, not return zeros. main()'s own
+    discover_chunk_ids filters these out up front via the same check; the
+    chunk-partitioned pass1/pass2 functions need the same guard inline
+    (2026-08-15) since their caller may now be handed an UNFILTERED
+    chunk_ids list - e.g. generate_hpc_postprocess_job.py's combined
+    postprocessing+exposure dispatch, which plans the exposure batches from
+    the tile-grid-derived chunk list before postprocessing has actually run
+    and produced the real population files to filter against.
+    """
+    p = chunks_dir / f"exposure_population_grid_{cid}.tif"
+    return p.exists() and p.stat().st_size > 0
+
+
 def pass1_shares_all_intensities(
     chunk_ids: list[str],
     chunks_dir: Path,
@@ -650,6 +668,8 @@ def pass1_shares_all_intensities(
     amt_total: dict[str, dict[str, float]] = {si: {} for si in slr_intensities}
     cap_total: dict[str, dict[str, float]] = {si: {} for si in slr_intensities}
     for cid in chunk_ids:
+        if not _chunk_is_populated(chunks_dir, cid):
+            continue
         c = _load_chunk(cid, chunks_dir, flood_frac_dir, return_periods, slr_scenarios, iso_lookup)
         for slr_int in slr_intensities:
             apf = build_adapt_protection_fraction(c.ff, return_periods, slr_int, rp_applied, c.geo)
@@ -694,6 +714,8 @@ def pass2_all_tasks(
     """
     totals: dict[str, pd.DataFrame] = {}
     for cid in chunk_ids:
+        if not _chunk_is_populated(chunks_dir, cid):
+            continue
         c = _load_chunk(cid, chunks_dir, flood_frac_dir, return_periods, slr_scenarios, iso_lookup)
         apf_cache: dict[str, np.ndarray] = {}
 
