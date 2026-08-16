@@ -69,6 +69,32 @@ def retry_transient_io(fn: Callable[..., _T], *args, retries: int = 4, delay_s: 
     raise last_err
 
 
+def atomic_write(output_path: str | Path, write_fn: Callable[[Any], None], mode: str = "w", **open_kwargs) -> None:
+    """Write a file via a temp file in the same directory + atomic
+    `os.replace`, so a process killed mid-write (SLURM time limit, node
+    failure/preemption) never leaves a truncated file at `output_path` -
+    the plain-file counterpart of `rasters._atomic_raster_write` (same
+    fix, generalized past just rasterio writers - e.g. json.dump/
+    pickle.dump in the exposure-analysis pass1/pass2 batch outputs, whose
+    resumability depends on "does this output file exist" actually meaning
+    "is it complete", 2026-08-16).
+
+    `write_fn(f)` performs the actual write(s) to the open file handle -
+    e.g. `lambda f: json.dump(data, f)` or `lambda f: pickle.dump(data, f)`.
+    `mode`/`open_kwargs` are passed to the temp file's own `open()` call
+    (e.g. `mode="wb"` for pickle, `mode="w", encoding="utf-8"` for json).
+    """
+    output_path = Path(output_path)
+    tmp_path = output_path.with_name(f"{output_path.name}.tmp{os.getpid()}")
+    try:
+        with retry_transient_io(open, tmp_path, mode, **open_kwargs) as f:
+            write_fn(f)
+        retry_transient_io(os.replace, tmp_path, output_path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
 def path_ready(path: str | Path) -> bool:
     """Check whether `path` exists, retrying transient I/O errors first.
 

@@ -19,7 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analysis"))
 
-from config_utils import load_config, retry_transient_io  # noqa: E402
+from config_utils import atomic_write, load_config, retry_transient_io  # noqa: E402
 from compute_exposure_analysis import load_analysis_context, pass1_shares_all_intensities  # noqa: E402
 
 
@@ -44,8 +44,11 @@ def main() -> None:
 
     out_path = Path(args.out)
     retry_transient_io(out_path.parent.mkdir, parents=True, exist_ok=True)
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(raw, f)
+    # Atomic (temp file + os.replace) - a --resume dispatch trusts this
+    # file's mere existence as "this batch is done"; a truncated file from
+    # a killed job must never appear at this exact path (see
+    # config_utils.atomic_write's own docstring).
+    atomic_write(out_path, lambda f: json.dump(raw, f), mode="w", encoding="utf-8")
     print(f"Written: {out_path}")
 
 

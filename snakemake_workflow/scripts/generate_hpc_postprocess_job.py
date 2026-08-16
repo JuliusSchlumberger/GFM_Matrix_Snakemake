@@ -71,7 +71,7 @@ from shapely.geometry import box as shapely_box
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from config_utils import load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
-from generate_exposure_jobs import generate_exposure_dispatch  # noqa: E402
+from generate_exposure_jobs import generate_exposure_dispatch, generate_exposure_resume_dispatch  # noqa: E402
 
 
 def _account_line(sbatch_cfg: dict) -> list[str]:
@@ -153,6 +153,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
     parser.add_argument("--config", default=str(default_config))
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="rebalance only the still-missing targets across the full node budget per phase "
+             "(skipping any phase that's already 100% done), instead of a fresh dispatch. "
+             "Cancel the original dispatch's still-running jobs FIRST - see "
+             "generate_hpc_simulation_jobs.py's own --resume docstring for why (same reasoning: "
+             "a stale batch racing a new one over the same still-incomplete targets would redo "
+             "work concurrently for as long as both stay alive).",
+    )
     args = parser.parse_args()
 
     config_path = Path(args.config)
@@ -184,56 +193,104 @@ def main() -> None:
           f"{len(return_periods)} RPs, {len(waterlevel_names)} SLRs, n_nodes={n_nodes}\n")
 
     linux_merged = linux_config["postprocessing"]["merged_outputs"]
+    local_merged = local_config["postprocessing"]["merged_outputs"]
+
+    # (linux_target, local_target) pairs, index-aligned by construction -
+    # resume mode filters on local existence, fresh mode uses every linux
+    # target unconditionally. Avoids needing a separate linux->local path
+    # translation helper.
+    phase1_pairs = [
+        (f"{linux_merged}/chunks/waterdepth_{cid}_{rp}_{slr}.tif",
+         f"{local_merged}/chunks/waterdepth_{cid}_{rp}_{slr}.tif")
+        for cid in chunk_ids for rp in return_periods for slr in waterlevel_names
+    ]
+    phase2_pairs = [
+        (f"{linux_merged}/chunks/exposure_population_grid_{cid}.tif",
+         f"{local_merged}/chunks/exposure_population_grid_{cid}.tif")
+        for cid in chunk_ids
+    ]
+    phase3_pairs = [
+        (f"{linux_merged}/chunks/flood_fraction/flood_fraction_{cid}_{rp}_{slr}.tif",
+         f"{local_merged}/chunks/flood_fraction/flood_fraction_{cid}_{rp}_{slr}.tif")
+        for cid in chunk_ids for rp in return_periods for slr in waterlevel_names
+    ]
+
+    if args.resume:
+        # One glob per flat output directory, not one exists() call per
+        # target (77,000+ individually would each be a separate network
+        # round-trip over P:\ - confirmed live 2026-08-16, >60s and still
+        # not done) - postprocessing's chunk outputs all live in a handful
+        # of FLAT directories (see check_postprocess_progress.py's own
+        # docstring on this), so a single directory listing gives every
+        # existing filename at once, then membership is a cheap in-memory
+        # set lookup.
+        chunks_dir_local = Path(local_merged) / "chunks"
+        flood_frac_dir_local = chunks_dir_local / "flood_fraction"
+        existing_merge = {p.name for p in chunks_dir_local.glob("waterdepth_*.tif")} if chunks_dir_local.is_dir() else set()
+        existing_grid = {p.name for p in chunks_dir_local.glob("exposure_population_grid_*.tif")} if chunks_dir_local.is_dir() else set()
+        existing_ff = {p.name for p in flood_frac_dir_local.glob("flood_fraction_*.tif")} if flood_frac_dir_local.is_dir() else set()
+
+        phase1_targets = [lx for lx, lo in phase1_pairs if Path(lo).name not in existing_merge]
+        phase2_targets = [lx for lx, lo in phase2_pairs if Path(lo).name not in existing_grid]
+        phase3_targets = [lx for lx, lo in phase3_pairs if Path(lo).name not in existing_ff]
+        print(f"Resume: phase 1 {len(phase1_targets)}/{len(phase1_pairs)} remaining, "
+              f"phase 2 {len(phase2_targets)}/{len(phase2_pairs)} remaining, "
+              f"phase 3 {len(phase3_targets)}/{len(phase3_pairs)} remaining\n")
+        name_prefix = "resume_postprocess_"
+        submit_name = "submit_resume_postprocess_and_exposure.sh"
+    else:
+        phase1_targets = [lx for lx, _ in phase1_pairs]
+        phase2_targets = [lx for lx, _ in phase2_pairs]
+        phase3_targets = [lx for lx, _ in phase3_pairs]
+        name_prefix = "postprocess_"
+        submit_name = "submit_postprocess_and_exposure.sh"
 
     # Phase 1: merge_chunk - every (chunk, rp, slr). Requesting the
     # waterdepth output also produces this rule's other declared outputs
     # (provenance, overlap_minmax) in the same job.
-    phase1_targets = [
-        f"{linux_merged}/chunks/waterdepth_{cid}_{rp}_{slr}.tif"
-        for cid in chunk_ids for rp in return_periods for slr in waterlevel_names
-    ]
     print(f"Phase 1 (merge_chunk): {len(phase1_targets)} target(s)")
     phase1_scripts = _write_batches(
         local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
-        "merge", phase1_targets, n_nodes,
-    )
+        f"{name_prefix}merge", phase1_targets, n_nodes,
+    ) if phase1_targets else []
 
     # Phase 2: prepare_exposure_grid_chunk - every chunk (not rp/slr).
     # Depends on phase 1 (specifically each chunk's own (return_periods[0],
     # baseline_slr) merge output, for grid metadata only - gated on ALL of
     # phase 1 via afterany rather than tracked per-chunk, same
     # simplification generate_hpc_preprocess_job.py's own phase-barriers use).
-    phase2_targets = [f"{linux_merged}/chunks/exposure_population_grid_{cid}.tif" for cid in chunk_ids]
     print(f"\nPhase 2 (prepare_exposure_grid_chunk): {len(phase2_targets)} target(s) "
           f"(reference scenario: {return_periods[0]}_{baseline_slr})")
     phase2_scripts = _write_batches(
         local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
-        "exposure_grid", phase2_targets, n_nodes,
-    )
+        f"{name_prefix}exposure_grid", phase2_targets, n_nodes,
+    ) if phase2_targets else []
 
     # Phase 3: compute_flood_fraction_chunk - every (chunk, rp, slr).
     # Depends on phase 2 (population grid) via afterany.
-    phase3_targets = [
-        f"{linux_merged}/chunks/flood_fraction/flood_fraction_{cid}_{rp}_{slr}.tif"
-        for cid in chunk_ids for rp in return_periods for slr in waterlevel_names
-    ]
     print(f"\nPhase 3 (compute_flood_fraction_chunk): {len(phase3_targets)} target(s)")
     phase3_scripts = _write_batches(
         local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
-        "flood_fraction", phase3_targets, n_nodes,
-    )
+        f"{name_prefix}flood_fraction", phase3_targets, n_nodes,
+    ) if phase3_targets else []
 
     # Master driver: phase 1 batches (parallel, no dependency) -> phase 2
     # batches (afterany: all phase 1) -> phase 3 batches (afterany: all
     # phase 2). Same afterany-join-multiple-jobs pattern already used for
     # preprocessing's build_shared_inputs -> batches and the exposure
-    # dispatch's pass1 -> reduce_shares -> pass2 -> reduce_write.
+    # dispatch's pass1 -> reduce_shares -> pass2 -> reduce_write. A phase
+    # with ZERO batches (resume mode, already 100% done) is skipped
+    # entirely - PREV_IDS then correctly carries forward from the last
+    # phase that DID have batches, same "skip empty phase" pattern
+    # generate_aqueduct_jobs.generate_resume_dispatch already uses.
     submit_lines = ["#!/bin/bash", "set -euo pipefail", "", 'PREV_IDS=""']
     for phase_label, scripts in [
         ("phase 1 (merge_chunk)", phase1_scripts),
         ("phase 2 (prepare_exposure_grid_chunk)", phase2_scripts),
         ("phase 3 (compute_flood_fraction_chunk)", phase3_scripts),
     ]:
+        if not scripts:
+            continue
         submit_lines.append(f'\n# {phase_label} ({len(scripts)} batch(es))')
         submit_lines.append('IDS=""')
         for script in scripts:
@@ -249,29 +306,34 @@ def main() -> None:
         submit_lines.append('PREV_IDS="$IDS"')
 
     # Append the exposure-analysis dispatch onto the SAME submission,
-    # continuing the afterany chain from phase 3's own job IDs ($PREV_IDS)
-    # rather than writing a separate script the user has to remember to run
-    # afterwards - see generate_exposure_jobs.py's own module docstring for
-    # why this stays one synchronous, upfront submission (no phase anywhere
-    # calls sbatch again from within a running compute-node job). Uses the
-    # SAME tile-grid-derived chunk_ids list phases 1-3 already computed -
-    # chunks with zero population are handled by pass1/pass2's own inline
-    # _chunk_is_populated skip (compute_exposure_analysis.py), not by
-    # filtering the list here, since the real population files don't exist
-    # yet at this point.
+    # continuing the afterany chain from postprocessing's own job IDs
+    # ($PREV_IDS, empty string if every postprocessing phase was already
+    # done) rather than writing a separate script - see
+    # generate_exposure_jobs.py's own module docstring for why this stays
+    # one synchronous, upfront submission. In resume mode, use the
+    # matching exposure resume/fresh path depending on whether exposure
+    # batches were ever generated before (batch_*_chunks.txt existing under
+    # hpc_jobs/exposure/) - if postprocessing itself is what needed
+    # resuming, exposure analysis may never have started at all yet, which
+    # needs a FRESH exposure dispatch, not a resume of nothing.
     print()
-    submit_lines = generate_exposure_dispatch(
-        local_config, linux_config, chunk_ids, submit_lines, prev_ids_expr="$PREV_IDS",
-    )
+    if args.resume and any((local_jobs_dir / "exposure").glob("batch_*_chunks.txt")):
+        submit_lines = generate_exposure_resume_dispatch(
+            local_config, linux_config, submit_lines, prev_ids_expr="$PREV_IDS",
+        )
+    else:
+        submit_lines = generate_exposure_dispatch(
+            local_config, linux_config, chunk_ids, submit_lines, prev_ids_expr="$PREV_IDS",
+        )
 
-    submit_script_path = local_jobs_dir / "submit_postprocess_and_exposure.sh"
+    submit_script_path = local_jobs_dir / submit_name
     with open(submit_script_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(submit_lines) + "\n")
 
     n_total_scripts = len(phase1_scripts) + len(phase2_scripts) + len(phase3_scripts)
     print(f"\nDone. 3 postprocessing phases + exposure analysis, {n_total_scripts}+ sbatch script(s) "
           f"written to {local_jobs_dir}")
-    print(f"Submit on Hydrax with: bash {linux_jobs_dir}/submit_postprocess_and_exposure.sh")
+    print(f"Submit on Hydrax with: bash {linux_jobs_dir}/{submit_name}")
     print("(This one call submits the ENTIRE remaining pipeline - postprocessing then exposure "
           "analysis - all at once; SLURM's own --dependency=afterany chain handles the timing.)")
 

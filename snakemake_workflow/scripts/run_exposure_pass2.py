@@ -22,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analysis"))
 
-from config_utils import load_config, retry_transient_io  # noqa: E402
+from config_utils import atomic_write, load_config, retry_transient_io  # noqa: E402
 from compute_exposure_analysis import (  # noqa: E402
     build_exposure_tasks, load_analysis_context, pass2_all_tasks,
 )
@@ -53,8 +53,9 @@ def main() -> None:
 
     out_path = Path(args.out)
     retry_transient_io(out_path.parent.mkdir, parents=True, exist_ok=True)
-    with open(out_path, "wb") as f:
-        pickle.dump(results, f)
+    # Atomic - see run_exposure_pass1.py's own comment on why (a --resume
+    # dispatch trusts mere existence of this file as "this batch is done").
+    atomic_write(out_path, lambda f: pickle.dump(results, f), mode="wb")
     print(f"Written: {out_path} ({len(results)} task results)")
 
 
