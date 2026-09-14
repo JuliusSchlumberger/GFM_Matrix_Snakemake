@@ -1,0 +1,432 @@
+{
+  "oslofjord": {
+    "bbox": [
+      10.55,
+      59.8,
+      10.9,
+      59.98
+    ],
+    "grid": [
+      648,
+      633
+    ],
+    "cell_m2": 949.7760555555556,
+    "native_res_arcsec": {
+      "copernicus": [
+        3.5714285714285596,
+        3.5714285714285596
+      ],
+      "deltadtm_vrt": [
+        1.6779021167587942,
+        1.0
+      ],
+      "deltadtm_tiles": [
+        [
+          "N59E010",
+          1.5,
+          1.0
+        ]
+      ]
+    },
+    "ddtm_nodata_px_in_footprint": 0,
+    "variants": {
+      "copernicus_80_200": {
+        "sea_px": 102659,
+        "sea_masked": 100204,
+        "sea_masked_pct": 97.60858765427288,
+        "land_px": 2032,
+        "land_masked": 982,
+        "land_masked_pct": 48.326771653543304
+      },
+      "deltadtm_vrt_123": {
+        "sea_px": 102659,
+        "sea_masked": 100293,
+        "sea_masked_pct": 97.69528243992247,
+        "land_px": 2032,
+        "land_masked": 778,
+        "land_masked_pct": 38.28740157480315
+      },
+      "deltadtm_tiles_123": {
+        "sea_px": 102659,
+        "sea_masked": 100306,
+        "sea_masked_pct": 97.7079457232196,
+        "land_px": 2032,
+        "land_masked": 776,
+        "land_masked_pct": 38.188976377952756
+      },
+      "deltadtm_tiles_ocean_only_1": {
+        "sea_px": 102659,
+        "sea_masked": 100306,
+        "sea_masked_pct": 97.7079457232196,
+        "land_px": 2032,
+        "land_masked": 776,
+        "land_masked_pct": 38.188976377952756
+      },
+      "union_cop_or_ddtm": {
+        "sea_px": 102659,
+        "sea_masked": 102252,
+        "sea_masked_pct": 99.60354182292834,
+        "land_px": 2032,
+        "land_masked": 1330,
+        "land_masked_pct": 65.45275590551181
+      },
+      "intersection_cop_and_ddtm": {
+        "sea_px": 102659,
+        "sea_masked": 98258,
+        "sea_masked_pct": 95.71299155456414,
+        "land_px": 2032,
+        "land_masked": 428,
+        "land_masked_pct": 21.062992125984252
+      }
+    }
+  },
+  "bergen": {
+    "bbox": [
+      5.2,
+      60.33,
+      5.42,
+      60.45
+    ],
+    "grid": [
+      433,
+      392
+    ],
+    "cell_m2": 949.7760555555556,
+    "native_res_arcsec": {
+      "copernicus": [
+        3.5714285714285596,
+        3.5714285714285596
+      ],
+      "deltadtm_vrt": [
+        1.6779021167587942,
+        1.0
+      ],
+      "deltadtm_tiles": [
+        [
+          "N60E005",
+          2.0,
+          1.0
+        ]
+      ]
+    },
+    "ddtm_nodata_px_in_footprint": 0,
+    "variants": {
+      "copernicus_80_200": {
+        "sea_px": 23860,
+        "sea_masked": 22126,
+        "sea_masked_pct": 92.73260687342834,
+        "land_px": 234,
+        "land_masked": 80,
+        "land_masked_pct": 34.18803418803419
+      },
+      "deltadtm_vrt_123": {
+        "sea_px": 23860,
+        "sea_masked": 23056,
+        "sea_masked_pct": 96.6303436714166,
+        "land_px": 234,
+        "land_masked": 103,
+        "land_masked_pct": 44.01709401709402
+      },
+      "deltadtm_tiles_123": {
+        "sea_px": 23860,
+        "sea_masked": 23083,
+        "sea_masked_pct": 96.74350377200335,
+        "land_px": 234,
+        "land_masked": 101,
+        "land_masked_pct": 43.162393162393165
+      },
+      "deltadtm_tiles_ocean_only_1": {
+        "sea_px": 23860,
+        "sea_masked": 22713,
+        "sea_masked_pct": 95.19279128248114,
+        "land_px": 234,
+        "land_masked": 96,
+        "land_masked_pct": 41.02564102564102
+      },
+      "union_cop_or_ddtm": {
+        "sea_px": 23860,
+        "sea_masked": 23399,
+        "sea_masked_pct": 98.06789606035206,
+        "land_px": 234,
+        "land_masked": 132,
+        "land_masked_pct": 56.41025641025641
+      },
+      "intersection_cop_and_ddtm": {
+        "sea_px": 23860,
+        "sea_masked": 21810,
+        "sea_masked_pct": 91.40821458507963,
+        "land_px": 234,
+        "land_masked": 49,
+        "land_masked_pct": 20.94017094017094
+      }
+    }
+  },
+  "naeroyfjord": {
+    "bbox": [
+      6.8,
+      60.85,
+      7.3,
+      61.15
+    ],
+    "grid": [
+      1080,
+      873
+    ],
+    "cell_m2": 949.7760555555556,
+    "native_res_arcsec": {
+      "copernicus": [
+        3.5714285714285596,
+        3.5714285714285596
+      ],
+      "deltadtm_vrt": [
+        1.6779021167587942,
+        1.0
+      ],
+      "deltadtm_tiles": [
+        [
+          "N60E006",
+          2.0,
+          1.0
+        ],
+        [
+          "N60E007",
+          2.0,
+          1.0
+        ],
+        [
+          "N61E006",
+          2.0,
+          1.0
+        ],
+        [
+          "N61E007",
+          2.0,
+          1.0
+        ]
+      ]
+    },
+    "ddtm_nodata_px_in_footprint": 0,
+    "variants": {
+      "copernicus_80_200": {
+        "sea_px": 134226,
+        "sea_masked": 130613,
+        "sea_masked_pct": 97.30827112481933,
+        "land_px": 292,
+        "land_masked": 84,
+        "land_masked_pct": 28.767123287671232
+      },
+      "deltadtm_vrt_123": {
+        "sea_px": 134226,
+        "sea_masked": 130486,
+        "sea_masked_pct": 97.2136545825697,
+        "land_px": 292,
+        "land_masked": 103,
+        "land_masked_pct": 35.273972602739725
+      },
+      "deltadtm_tiles_123": {
+        "sea_px": 134226,
+        "sea_masked": 130509,
+        "sea_masked_pct": 97.23078986187474,
+        "land_px": 292,
+        "land_masked": 97,
+        "land_masked_pct": 33.21917808219178
+      },
+      "deltadtm_tiles_ocean_only_1": {
+        "sea_px": 134226,
+        "sea_masked": 130509,
+        "sea_masked_pct": 97.23078986187474,
+        "land_px": 292,
+        "land_masked": 97,
+        "land_masked_pct": 33.21917808219178
+      },
+      "union_cop_or_ddtm": {
+        "sea_px": 134226,
+        "sea_masked": 132995,
+        "sea_masked_pct": 99.08289005110782,
+        "land_px": 292,
+        "land_masked": 150,
+        "land_masked_pct": 51.369863013698634
+      },
+      "intersection_cop_and_ddtm": {
+        "sea_px": 134226,
+        "sea_masked": 128127,
+        "sea_masked_pct": 95.45617093558624,
+        "land_px": 292,
+        "land_masked": 31,
+        "land_masked_pct": 10.616438356164384
+      }
+    }
+  },
+  "lofoten": {
+    "bbox": [
+      13.8,
+      68.1,
+      14.4,
+      68.4
+    ],
+    "grid": [
+      1081,
+      801
+    ],
+    "cell_m2": 949.7760555555556,
+    "native_res_arcsec": {
+      "copernicus": [
+        3.5714285714285596,
+        3.5714285714285596
+      ],
+      "deltadtm_vrt": [
+        1.6779021167587942,
+        1.0
+      ],
+      "deltadtm_tiles": [
+        [
+          "N68E013",
+          2.0,
+          1.0
+        ],
+        [
+          "N68E014",
+          2.0,
+          1.0
+        ]
+      ]
+    },
+    "ddtm_nodata_px_in_footprint": 0,
+    "variants": {
+      "copernicus_80_200": {
+        "sea_px": 521850,
+        "sea_masked": 511139,
+        "sea_masked_pct": 97.94749449075405,
+        "land_px": 11229,
+        "land_masked": 5901,
+        "land_masked_pct": 52.55142933475822
+      },
+      "deltadtm_vrt_123": {
+        "sea_px": 521850,
+        "sea_masked": 509073,
+        "sea_masked_pct": 97.55159528600173,
+        "land_px": 11229,
+        "land_masked": 4451,
+        "land_masked_pct": 39.63843619200285
+      },
+      "deltadtm_tiles_123": {
+        "sea_px": 521850,
+        "sea_masked": 509143,
+        "sea_masked_pct": 97.56500910223245,
+        "land_px": 11229,
+        "land_masked": 4459,
+        "land_masked_pct": 39.70968029210081
+      },
+      "deltadtm_tiles_ocean_only_1": {
+        "sea_px": 521850,
+        "sea_masked": 501347,
+        "sea_masked_pct": 96.07109322602281,
+        "land_px": 11229,
+        "land_masked": 2026,
+        "land_masked_pct": 18.042568349808533
+      },
+      "union_cop_or_ddtm": {
+        "sea_px": 521850,
+        "sea_masked": 517668,
+        "sea_masked_pct": 99.1986202931877,
+        "land_px": 11229,
+        "land_masked": 7175,
+        "land_masked_pct": 63.89705227535845
+      },
+      "intersection_cop_and_ddtm": {
+        "sea_px": 521850,
+        "sea_masked": 502614,
+        "sea_masked_pct": 96.3138832997988,
+        "land_px": 11229,
+        "land_masked": 3185,
+        "land_masked_pct": 28.364057351500577
+      }
+    }
+  },
+  "hammerfest": {
+    "bbox": [
+      23.4,
+      70.5,
+      24.0,
+      70.8
+    ],
+    "grid": [
+      1080,
+      716
+    ],
+    "cell_m2": 949.7760555555556,
+    "native_res_arcsec": {
+      "copernicus": [
+        3.5714285714285596,
+        3.5714285714285596
+      ],
+      "deltadtm_vrt": [
+        1.6779021167587942,
+        1.0
+      ],
+      "deltadtm_tiles": [
+        [
+          "N70E023",
+          3.0,
+          1.0
+        ],
+        [
+          "N70E024",
+          3.0,
+          1.0
+        ]
+      ]
+    },
+    "ddtm_nodata_px_in_footprint": 0,
+    "variants": {
+      "copernicus_80_200": {
+        "sea_px": 311991,
+        "sea_masked": 309286,
+        "sea_masked_pct": 99.13298781054581,
+        "land_px": 804,
+        "land_masked": 416,
+        "land_masked_pct": 51.741293532338304
+      },
+      "deltadtm_vrt_123": {
+        "sea_px": 311991,
+        "sea_masked": 308772,
+        "sea_masked_pct": 98.9682394684462,
+        "land_px": 804,
+        "land_masked": 272,
+        "land_masked_pct": 33.83084577114428
+      },
+      "deltadtm_tiles_123": {
+        "sea_px": 311991,
+        "sea_masked": 308805,
+        "sea_masked_pct": 98.97881669663548,
+        "land_px": 804,
+        "land_masked": 256,
+        "land_masked_pct": 31.8407960199005
+      },
+      "deltadtm_tiles_ocean_only_1": {
+        "sea_px": 311991,
+        "sea_masked": 308778,
+        "sea_masked_pct": 98.97016260084426,
+        "land_px": 804,
+        "land_masked": 252,
+        "land_masked_pct": 31.343283582089555
+      },
+      "union_cop_or_ddtm": {
+        "sea_px": 311991,
+        "sea_masked": 311351,
+        "sea_masked_pct": 99.79486587754134,
+        "land_px": 804,
+        "land_masked": 570,
+        "land_masked_pct": 70.8955223880597
+      },
+      "intersection_cop_and_ddtm": {
+        "sea_px": 311991,
+        "sea_masked": 306740,
+        "sea_masked_pct": 98.31693862963996,
+        "land_px": 804,
+        "land_masked": 102,
+        "land_masked_pct": 12.686567164179104
+      }
+    }
+  }
+}

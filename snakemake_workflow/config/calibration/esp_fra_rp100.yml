@@ -1,0 +1,36 @@
+# Group scenario for the ESP/FRA/NOR HPC calibration sweep
+# (docs/calibration_sweep_plan.md) - Spain + France, simulated at RP100
+# (matches both countries' real benchmark hazard maps). Layered on top of
+# config.yml + config_local.yml via src/config_utils.py::materialize_config
+# (see scripts/calibration/build_run_config.py), then further layered with
+# one sweep-point parameter delta (config/calibration/sweep/*.yml).
+#
+# tile_grid.path points at the real closure GeoPackage written by
+# scripts/calibration/select_country_tiles.py (78 tiles: 77 hop_distance=0,
+# 1 hop_distance=1 - run for real 2026-09, zero tiles pulled in as pure
+# dependency beyond the benchmark-region core).
+
+tile_grid:
+  path: "{processed_inputs_dir}/mask/calibration/esp_fra_tiles.gpkg"
+
+boundary_conditions:
+  return_periods: [100]
+  slr_scenarios: ["SLR_0"]
+
+# REQUIRED, not decorative - merged_slr_scenarios() unions this with
+# boundary_conditions.slr_scenarios; leaving it unset would silently pull in
+# config.yml's own SLR_500 intensity, against the "single baseline SLR_0,
+# no SLR sweep" decision.
+adaptation:
+  slr_intensities: []
+
+validation:
+  return_period: "RP100"
+  waterlevel_name: "SLR_0"
+
+# Small closure (78 tiles total, one wave of 77 + one wave of 1) - the
+# production default of 20 would over-fragment into ~1-tile-per-node
+# batches, wasting SLURM job overhead for no parallelism benefit at this
+# scale. Tuned against the real closure size above, not a guess.
+hpc:
+  n_nodes: 3

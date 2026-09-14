@@ -1,0 +1,4 @@
+# OFAT sweep point - waterlevel_epsilon_m 0.10 (default 0.03), looser convergence. See docs/calibration_sweep_plan.md.
+simulation:
+  flooding:
+    waterlevel_epsilon_m: 0.10

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import geopandas as gpd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import get_data_catalog, retry_transient_io  # noqa: E402
 from rasters import compute_model_bbox, get_tile_bbox  # noqa: E402

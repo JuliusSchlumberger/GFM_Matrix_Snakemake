@@ -158,17 +158,29 @@ deltadtm_mask:
   meta:
     category: topography
     description: >
-      Binary validity mask for DeltaDTM, co-registered to the DeltaDTM pixel
-      grid. A pixel value of 1 indicates that a reliable ICESat-2-corrected
-      DeltaDTM elevation exists at that location; 0 indicates no-data or an
-      area outside DeltaDTM coverage (e.g. open ocean, ice sheets, or inland
-      areas far from the coast). Used during preprocessing to restrict each
-      tile's flood-model domain to cells with valid DEM data.
+      Land/ocean/lake/river classification mask for DeltaDTM, co-registered to
+      the DeltaDTM pixel grid, derived from ESA WorldCover (~10m) at DeltaDTM
+      production time. Categorical, NOT a binary validity mask (corrected
+      2026-09 - the previous description here had this inverted): 0 = land
+      (where a real DeltaDTM elevation exists), 1 = ocean, 2 = lake, 3 =
+      river; 255 = nodata (outside DeltaDTM coverage - DeltaDTM is a coastal-
+      only product, see tile_generation.ocean_code/river_code in config.yml,
+      confirmed against real tiles 2026-09: 0-valued cells are 100% DEM-valid,
+      1/2/3-valued cells 0% DEM-valid). Used during preprocessing to restrict
+      each tile's flood-model domain to cells with valid DEM data (ocean_code/
+      river_code in config.yml), and by validation.read_permanent_water_mask
+      as the default permanent-water exclusion source for flood-extent
+      validation (validation.permanent_water_source, 2026-09) - a real,
+      measured resolution improvement over the coarser 100m Copernicus
+      land_use for this purpose (see docs/flood_extent_validation_caveats.md
+      §1.3 and snakemake_workflow/tests/norway_diagnostics/ for the real
+      quantified comparison).
     paper_doi: 10.5194/essd-16-2343-2024
     paper_ref: Pronk et al. (2024), Earth Syst. Sci. Data 16, 2343–2360
     source_author: Deltares / TU Delft
     source_url: https://doi.org/10.5281/zenodo.7296982
-    pixel_size_arcsec: 1
+    pixel_size_arcsec: "1 (Y, constant) x 1-5 (X, latitude-tiered - see preparation/build_deltadtm_vrt.py's
+      own module docstring for the real per-band-of-latitude values, confirmed against real tiles 2026-09)"
     nodata_value: 255
 
 land_polygons:

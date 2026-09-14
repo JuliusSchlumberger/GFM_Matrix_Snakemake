@@ -21,7 +21,7 @@ import geopandas as gpd
 import numpy as np
 from shapely.geometry import Point
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import retry_transient_io  # noqa: E402
 from plotting import plot_overlap_continent_diagnostics  # noqa: E402

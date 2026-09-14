@@ -19,11 +19,11 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 import rasterio
-from rasterio.warp import reproject, Resampling
 from rasterio.windows import Window
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from config_utils import retry_transient_io  # noqa: E402
+from rasters import average_pool_to_grid  # noqa: E402
 
 _NODATA_FINE = -1.0
 _NODATA_COARSE = -1.0
@@ -38,39 +38,18 @@ def compute_flood_fraction(
 ) -> None:
     """Write a coarse flood-fraction raster from a fine waterdepth chunk.
 
-    Processes the fine raster block-by-block (memory-safe), writes two
-    intermediate rasters to a temp directory, then reprojects both to the
-    population grid using AVERAGE downsampling.
+    Processes the fine raster block-by-block (memory-safe) into an
+    exceedance array (nodata outside the model domain) and a domain mask
+    (0/1, no nodata), then hands both to `rasters.average_pool_to_grid` for
+    the actual area-weighted reprojection - see that function's docstring
+    for the full A×B derivation and why it MUST run as two separate
+    `reproject()` calls (an earlier combined-call version silently
+    corrupted ~360,000 real coarse cells - reverted, correctness over that
+    specific speedup).
 
-    ff = sum(flooded fine pixels) / n_total_fine_pixels_in_cell
-
-    This is achieved via two passes so that out-of-domain (nodata) fine pixels
-    contribute 0 to the numerator and are counted in the denominator, without
-    needing to map nodata to 0 in the exceedance raster:
-
-        Pass A — binary exceedance, nodata preserved:
-            reproject(exclude nodata) → A = sum(flooded) / n_in_domain
-
-        Pass B — binary domain mask (1 = in domain, 0 = outside, no nodata):
-            reproject(all values count) → B = n_in_domain / n_total
-
-        ff = A × B = sum(flooded) / n_total
-
-    Coarse cells inside the tile but entirely outside the domain give
-    A = NaN, B = 0 → ff = NaN → nodata.
-
-    NOTE: an earlier version of this function tried combining A/B into two
-    bands of one file and warping both in a single `reproject()` call, to
-    avoid paying GDAL's warp-context setup cost twice (profiling showed
-    ~5.6s combined for the two-call version on one real chunk/scenario).
-    That changed results (verified against real production data: ~360,000
-    coarse cells differed, each by exactly 1.0) - `reproject()` evidently
-    shares one validity mask across bands under AVERAGE resampling rather
-    than applying `src_nodata` fully independently per band, so wherever
-    band A (exceedance) was nodata (which includes "in-domain but dry", not
-    just "outside the domain"), band B's (domain mask) own average was
-    silently corrupted too, even though band B itself never contains the
-    nodata value. Reverted - correctness over this specific speedup.
+    ff = sum(flooded fine pixels) / n_total_fine_pixels_in_cell. Coarse
+    cells inside the tile but entirely outside the domain end up NaN →
+    written as this module's own `_NODATA_COARSE`.
     """
     with TemporaryDirectory() as tmpdir:
         exc_path = Path(tmpdir) / "exc.tif"   # binary exceedance, nodata preserved
@@ -98,8 +77,19 @@ def compute_flood_fraction(
                             np.isfinite(depth) if wd.nodata is None
                             else (depth != wd.nodata)
                         )
+                        # valid-but-dry pixels MUST be 0.0, never _NODATA_FINE -
+                        # average_pool_to_grid's numerator contract (see its
+                        # own docstring in src/rasters.py) requires nodata to
+                        # mean ONLY "outside the domain"; marking dry pixels
+                        # as nodata too silently drops them from Pass A's
+                        # average instead of counting them as non-flooded,
+                        # inflating ff for any partially-flooded coarse cell
+                        # (confirmed on a real synthetic case, 2026-09: a
+                        # true fraction of 0.25 came out as 0.75 - not a
+                        # small error, and it scales with the domain/flood
+                        # ratio, so it's worse for less-flooded cells).
                         exc = np.where(
-                            valid & (depth > threshold_m), 1.0, _NODATA_FINE
+                            valid, np.where(depth > threshold_m, 1.0, 0.0), _NODATA_FINE
                         ).astype("float32")
                         dom = np.where(valid, 1.0, 0.0).astype("float32")
                         exc_dst.write(exc, 1, window=window)
@@ -118,32 +108,22 @@ def compute_flood_fraction(
         with rasterio.open(population_path) as pop_src:
             out_h, out_w = pop_src.height, pop_src.width
             dst_transform, dst_crs = pop_src.transform, pop_src.crs
-        dst_kwargs = dict(
-            dst_transform=dst_transform, dst_crs=dst_crs,
-            dst_nodata=np.nan, resampling=Resampling.average,
+
+        # ff = A × B = sum(flooded) / n_total (average_pool_to_grid's own
+        # "numerator"/"domain" split, extracted from this function's
+        # original inline two-pass logic - src/rasters.py::average_pool_to_grid
+        # for the shared implementation and why the two reproject() calls
+        # must stay separate).
+        with rasterio.open(exc_path) as exc_src, rasterio.open(dom_path) as dom_src:
+            exc_arr = exc_src.read(1)
+            dom_arr = dom_src.read(1)
+            src_transform, src_crs = exc_src.transform, exc_src.crs
+        frac = average_pool_to_grid(
+            numerator=exc_arr, domain=dom_arr,
+            src_transform=src_transform, src_crs=src_crs,
+            dst_transform=dst_transform, dst_crs=dst_crs, dst_shape=(out_h, out_w),
+            numerator_nodata=_NODATA_FINE,
         )
-
-        # Pass A: sum(flooded) / n_in_domain  (nodata excluded)
-        frac_a = np.full((out_h, out_w), np.nan, dtype="float32")
-        with rasterio.open(exc_path) as src:
-            reproject(
-                source=rasterio.band(src, 1), destination=frac_a,
-                src_transform=src.transform, src_crs=src.crs,
-                src_nodata=_NODATA_FINE, **dst_kwargs,
-            )
-
-        # Pass B: n_in_domain / n_total  (0 = outside domain, counts in denominator)
-        frac_b = np.full((out_h, out_w), np.nan, dtype="float32")
-        with rasterio.open(dom_path) as src:
-            reproject(
-                source=rasterio.band(src, 1), destination=frac_b,
-                src_transform=src.transform, src_crs=src.crs,
-                src_nodata=None, **dst_kwargs,
-            )
-
-        # ff = A × B = sum(flooded) / n_total
-        # NaN × anything = NaN → cells outside domain or tile remain nodata
-        frac = frac_a * frac_b
 
     # Step 3: write coarse output
     out_frac = np.where(np.isnan(frac), _NODATA_COARSE, frac).astype("float32")

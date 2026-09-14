@@ -1,0 +1,27 @@
+coastrp_variant,return_period,median_station_storm_tide_m,mdt_convention,mdt_offset_m,still_water_level_m,ceiling_hit_rate,ceiling_HR_at_0.10m_depth_threshold,x_observed_HR
+combined,2.0,0.271,no MDT (as run on disk),0.0,0.271,0.006,0.0045,2.0
+combined,2.0,0.271,"MDT SUBTRACTED (code as written, line 422)",-0.5952,-0.3242,0.0017,0.0017,0.6
+combined,2.0,0.271,MDT ADDED (physically correct),0.5952,0.8662,0.1017,0.0536,33.9
+combined,10.0,0.292,no MDT (as run on disk),0.0,0.292,0.0063,0.0048,2.1
+combined,10.0,0.292,"MDT SUBTRACTED (code as written, line 422)",-0.5952,-0.3032,0.0017,0.0017,0.6
+combined,10.0,0.292,MDT ADDED (physically correct),0.5952,0.8872,0.1097,0.0611,36.6
+combined,100.0,0.421,no MDT (as run on disk),0.0,0.421,0.0082,0.0069,2.7
+combined,100.0,0.421,"MDT SUBTRACTED (code as written, line 422)",-0.5952,-0.1742,0.0017,0.0017,0.6
+combined,100.0,0.421,MDT ADDED (physically correct),0.5952,1.0162,0.1781,0.1255,59.4
+combined,1000.0,0.559,no MDT (as run on disk),0.0,0.559,0.0138,0.0091,4.6
+combined,1000.0,0.559,"MDT SUBTRACTED (code as written, line 422)",-0.5952,-0.0362,0.0017,0.0017,0.6
+combined,1000.0,0.559,MDT ADDED (physically correct),0.5952,1.1542,0.2425,0.1946,80.8
+TC_only,2.0,0.196,no MDT (as run on disk),0.0,0.196,0.0048,0.0045,1.6
+TC_only,2.0,0.196,"MDT SUBTRACTED (code as written, line 422)",-0.5952,-0.3992,0.0017,0.0015,0.6
+TC_only,2.0,0.196,MDT ADDED (physically correct),0.5952,0.7912,0.0656,0.0345,21.9
+TC_only,10.0,0.238,no MDT (as run on disk),0.0,0.238,0.0058,0.0045,1.9
+TC_only,10.0,0.238,"MDT SUBTRACTED (code as written, line 422)",-0.5952,-0.3572,0.0017,0.0015,0.6
+TC_only,10.0,0.238,MDT ADDED (physically correct),0.5952,0.8332,0.0879,0.0445,29.3
+TC_only,100.0,0.421,no MDT (as run on disk),0.0,0.421,0.0082,0.0069,2.7
+TC_only,100.0,0.421,"MDT SUBTRACTED (code as written, line 422)",-0.5952,-0.1742,0.0017,0.0017,0.6
+TC_only,100.0,0.421,MDT ADDED (physically correct),0.5952,1.0162,0.1781,0.1255,59.4
+TC_only,1000.0,0.559,no MDT (as run on disk),0.0,0.559,0.0138,0.0091,4.6
+TC_only,1000.0,0.559,"MDT SUBTRACTED (code as written, line 422)",-0.5952,-0.0362,0.0017,0.0017,0.6
+TC_only,1000.0,0.559,MDT ADDED (physically correct),0.5952,1.1542,0.2425,0.1946,80.8
+-,,,SWL needed for ceiling HR = 0.50,,1.91,0.5018,0.4779,
+-,,,SWL needed for ceiling HR = 0.90,,3.72,0.9011,0.889,

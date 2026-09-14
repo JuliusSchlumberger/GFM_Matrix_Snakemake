@@ -24,8 +24,8 @@ from pathlib import Path
 
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analysis"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "analysis"))
 
 from config_utils import load_config  # noqa: E402
 from compute_exposure_analysis import (  # noqa: E402

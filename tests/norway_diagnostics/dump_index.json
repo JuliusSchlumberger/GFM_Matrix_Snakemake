@@ -1,0 +1,111 @@
+{
+  "dump": "P:\\11212688-004-global-floodmaps\\modelling\\inputs\\validation\\NOR\\Samfunnssikkerhet_0000_Norge_25833_StormfloHavniva_PostGIS.sql",
+  "size": 28045676508,
+  "blocks": [
+    {
+      "header": "COPY stormflohavniva_e097f6cc53a14e96bc5323a0a0b853d0.dekningsomrade (objid, objtype, lokalid, navnerom, oppdateringsdato, datauttaksdato, malemetode, opphav, omrade, dekningstatus) FROM stdin;",
+      "header_offset": 9366,
+      "data_offset": 9560,
+      "rows": 580,
+      "end_offset": 2668804
+    },
+    {
+      "header": "COPY stormflohavniva_e097f6cc53a14e96bc5323a0a0b853d0.dekningstatus (identifier, description) FROM stdin;",
+      "header_offset": 2668934,
+      "data_offset": 2669040,
+      "rows": 8,
+      "end_offset": 2669942
+    },
+    {
+      "header": "COPY stormflohavniva_e097f6cc53a14e96bc5323a0a0b853d0.malemetode (identifier, description) FROM stdin;",
+      "header_offset": 2670069,
+      "data_offset": 2670172,
+      "rows": 75,
+      "end_offset": 2678880
+    },
+    {
+      "header": "COPY stormflohavniva_e097f6cc53a14e96bc5323a0a0b853d0.middelhoyvann_klimaar2100 (objid, objtype, lokalid, navnerom, oppdateringsdato, datauttaksdato, malemetode, opphav, omrade, klimaar, vannstandovernn2000) FROM stdin;",
+      "header_offset": 2679022,
+      "data_offset": 2679242,
+      "rows": 115895,
+      "end_offset": 2531792652
+    },
+    {
+      "header": "COPY stormflohavniva_e097f6cc53a14e96bc5323a0a0b853d0.middelhoyvann_klimaar2150 (objid, objtype, lokalid, navnerom, oppdateringsdato, datauttaksdato, malemetode, opphav, omrade, klimaar, vannstandovernn2000) FROM stdin;",
+      "header_offset": 2531792794,
+      "data_offset": 2531793014,
+      "rows": 122456,
+      "end_offset": 5081684405
+    },
+    {
+      "header": "COPY stormflohavniva_e097f6cc53a14e96bc5323a0a0b853d0.middelhoyvann_klimaarna (objid, objtype, lokalid, navnerom, oppdateringsdato, datauttaksdato, malemetode, opphav, omrade, vannstandovernn2000) FROM stdin;",
+      "header_offset": 5081684545,
+      "data_offset": 5081684754,
+      "rows": 237178,
+      "end_offset": 7573293901
+    },
+    {
+      "header": "COPY stormflohavniva_e097f6cc53a14e96bc5323a0a0b853d0.sikkerhetsklasseflom (identifier, description) FROM stdin;",
+      "header_offset": 7573294038,
+      "data_offset": 7573294151,
+      "rows": 3,
+      "end_offset": 7573294217
+    },
+    {
+      "header": "COPY stormflohavniva_e097f6cc53a14e96bc5323a0a0b853d0.stormflo1000ar_klimaar2100 (objid, objtype, lokalid, navnerom, oppdateringsdato, datauttaksdato, malemetode, opphav, omrade, sikkerhetsklasseflom, klimaar, vannstandovernn2000) FROM stdin;",
+      "header_offset": 7573294360,
+      "data_offset": 7573294603,
+      "rows": 123693,
+      "end_offset": 10141040525
+    },
+    {
+      "header": "COPY stormflohavniva_e097f6cc53a14e96bc5323a0a0b853d0.stormflo1000ar_klimaarna (objid, objtype, lokalid, navnerom, oppdateringsdato, datauttaksdato, malemetode, opphav, omrade, sikkerhetsklasseflom, vannstandovernn2000) FROM stdin;",
+      "header_offset": 10141040666,
+      "data_offset": 10141040898,
+      "rows": 206135,
+      "end_offset": 12760424960
+    },
+    {
+      "header": "COPY stormflohavniva_e097f6cc53a14e96bc5323a0a0b853d0.stormflo200ar_klimaar2100 (objid, objtype, lokalid, navnerom, oppdateringsdato, datauttaksdato, malemetode, opphav, omrade, sikkerhetsklasseflom, klimaar, vannstandovernn2000) FROM stdin;",
+      "header_offset": 12760425102,
+      "data_offset": 12760425344,
+      "rows": 125209,
+      "end_offset": 15329890773
+    },
+    {
+      "header": "COPY stormflohavniva_e097f6cc53a14e96bc5323a0a0b853d0.stormflo200ar_klimaarna (objid, objtype, lokalid, navnerom, oppdateringsdato, datauttaksdato, malemetode, opphav, omrade, sikkerhetsklasseflom, vannstandovernn2000) FROM stdin;",
+      "header_offset": 15329890913,
+      "data_offset": 15329891144,
+      "rows": 115440,
+      "end_offset": 17888457111
+    },
+    {
+      "header": "COPY stormflohavniva_e097f6cc53a14e96bc5323a0a0b853d0.stormflo20ar_klimaarna (objid, objtype, lokalid, navnerom, oppdateringsdato, datauttaksdato, malemetode, opphav, omrade, sikkerhetsklasseflom, vannstandovernn2000) FROM stdin;",
+      "header_offset": 17888457250,
+      "data_offset": 17888457480,
+      "rows": 134814,
+      "end_offset": 20452741274
+    },
+    {
+      "header": "COPY stormflohavniva_e097f6cc53a14e96bc5323a0a0b853d0.stormfloovreestimat_klimaar2100 (objid, objtype, lokalid, navnerom, oppdateringsdato, datauttaksdato, malemetode, opphav, omrade, klimaar, vannstandovernn2000) FROM stdin;",
+      "header_offset": 20452741422,
+      "data_offset": 20452741648,
+      "rows": 110988,
+      "end_offset": 22979719163
+    },
+    {
+      "header": "COPY stormflohavniva_e097f6cc53a14e96bc5323a0a0b853d0.stormfloovreestimat_klimaar2150 (objid, objtype, lokalid, navnerom, oppdateringsdato, datauttaksdato, malemetode, opphav, omrade, klimaar, vannstandovernn2000) FROM stdin;",
+      "header_offset": 22979719311,
+      "data_offset": 22979719537,
+      "rows": 115851,
+      "end_offset": 25488679859
+    },
+    {
+      "header": "COPY stormflohavniva_e097f6cc53a14e96bc5323a0a0b853d0.stormfloovreestimat_klimaarna (objid, objtype, lokalid, navnerom, oppdateringsdato, datauttaksdato, malemetode, opphav, omrade, vannstandovernn2000) FROM stdin;",
+      "header_offset": 25488680005,
+      "data_offset": 25488680220,
+      "rows": 119768,
+      "end_offset": 28045676459
+    }
+  ]
+}

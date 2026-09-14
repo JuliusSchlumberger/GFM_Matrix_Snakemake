@@ -60,7 +60,7 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import load_config, retry_transient_io  # noqa: E402
 
@@ -116,7 +116,12 @@ def generate_exposure_dispatch(
     linux_jobs_dir = f"{linux_config['hpc']['jobs_dir']}/exposure"
     linux_code_root = linux_config["paths"]["code_root"]
     linux_scripts_dir = f"{linux_code_root}/snakemake_workflow/scripts"
-    linux_config_path = f"{linux_code_root}/snakemake_workflow/config/config.yml"
+    # resolved_config.yml (not a hardcoded production config.yml path) - so
+    # a scenario/calibration dispatch's own config actually reaches these
+    # exposure-analysis sbatch scripts too, not just postprocessing's own
+    # phases. Written by generate_hpc_preprocess_job.py/
+    # generate_hpc_postprocess_job.py earlier in the same dispatch chain.
+    linux_config_path = f"{linux_config['hpc']['jobs_dir']}/resolved_config.yml"
     linux_outdir = f"{linux_config['postprocessing']['merged_outputs']}/exposure"
     linux_shares_path = f"{linux_jobs_dir}/shares_by_intensity.json"
     hpc_cfg = linux_config["hpc"]
@@ -310,7 +315,12 @@ def generate_exposure_resume_dispatch(
     linux_jobs_dir = f"{linux_config['hpc']['jobs_dir']}/exposure"
     linux_code_root = linux_config["paths"]["code_root"]
     linux_scripts_dir = f"{linux_code_root}/snakemake_workflow/scripts"
-    linux_config_path = f"{linux_code_root}/snakemake_workflow/config/config.yml"
+    # resolved_config.yml (not a hardcoded production config.yml path) - so
+    # a scenario/calibration dispatch's own config actually reaches these
+    # exposure-analysis sbatch scripts too, not just postprocessing's own
+    # phases. Written by generate_hpc_preprocess_job.py/
+    # generate_hpc_postprocess_job.py earlier in the same dispatch chain.
+    linux_config_path = f"{linux_config['hpc']['jobs_dir']}/resolved_config.yml"
     linux_outdir = f"{linux_config['postprocessing']['merged_outputs']}/exposure"
     linux_shares_path = f"{linux_jobs_dir}/shares_by_intensity.json"
     hpc_cfg = linux_config["hpc"]

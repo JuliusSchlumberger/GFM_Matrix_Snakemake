@@ -1,0 +1,5 @@
+region,n_raw,n_proc,raw_storm_tide_rp_0100_min,raw_storm_tide_rp_0100_med,raw_storm_tide_rp_0100_max,raw_storm_tide_rp_1000_min,raw_storm_tide_rp_1000_med,raw_storm_tide_rp_1000_max,proc_min,proc_med,proc_max
+Martinique,13,13,0.334,0.4,0.523,0.472,0.538,0.754,0.334,0.4,0.523
+Guadeloupe,15,15,0.415,0.45,0.491,0.569,0.615,0.67,0.415,0.45,0.491
+FR_Gironde,11,11,3.047,3.205,3.315,3.222,3.397,3.515,3.047,3.205,3.315
+FR_Channel,25,25,3.618,4.235,7.831,3.837,4.473,8.441,3.618,4.235,7.831

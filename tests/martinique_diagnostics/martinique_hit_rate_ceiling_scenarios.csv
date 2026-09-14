@@ -1,0 +1,6 @@
+scenario,still_water_level_m,max_frac_benchmark_wet,max_frac_above_0.10m_threshold
+"as run (forcing 0.40 m, DEM +0.529 m geoid offset)",0.4,0.008,0.0063
+"as run, highest nearby station (0.52 m)",0.52,0.0119,0.0082
+MDT ADDED to forcing (0.400 + 0.611 = 1.011 m),1.011,0.1781,0.1255
+MDT SUBTRACTED as documented (0.400 - 0.611),-0.211,0.0017,0.0017
+water level needed for HR=0.50,1.91,0.5018,0.4779

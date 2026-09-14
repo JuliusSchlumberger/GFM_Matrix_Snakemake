@@ -65,7 +65,7 @@ from pathlib import Path
 
 import geopandas as gpd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import load_config, merged_slr_scenarios, retry_transient_io, split_batches_proportionally  # noqa: E402
 from generate_aqueduct_jobs import generate_resume_dispatch, generate_wave_dispatch  # noqa: E402
@@ -91,6 +91,7 @@ def main() -> None:
     hpc_cfg = linux_config["hpc"]
     n_nodes = hpc_cfg["n_nodes"]
     large_pixel_threshold = hpc_cfg["large_tile_pixel_threshold"]
+    large_batch_multiplier = hpc_cfg["large_tile_batch_multiplier"]
     model_outputs = Path(local_config["simulation"]["model_outputs"])
 
     # Local view (this machine's own reachable mount), not linux_config's -
@@ -136,6 +137,14 @@ def main() -> None:
                 if not class_tiles:
                     continue
                 n_batches = class_n_nodes[size_class]
+                if size_class == "large":
+                    # 2026-09: split large tiles across MORE, smaller batches
+                    # (on top of split_batches_proportionally's own result,
+                    # not carved out of "small"'s share) - see
+                    # hpc_dispatch.smk's mirrored comment for the full
+                    # rationale (large tiles were timing out even after
+                    # hpc.sbatch_large.time was raised).
+                    n_batches = min(len(class_tiles), n_batches * large_batch_multiplier)
                 k, m = divmod(len(class_tiles), n_batches)
                 for i in range(n_batches):
                     batch_tiles = class_tiles[i * k + min(i, m): (i + 1) * k + min(i + 1, m)]
@@ -213,6 +222,11 @@ def main() -> None:
             if not items:
                 continue
             n_batches = class_n_nodes[size_class]
+            if size_class == "large":
+                # Same treatment as the fresh-dispatch path above - and
+                # especially relevant here, since a large tile timing out is
+                # exactly what leads to a --resume in the first place.
+                n_batches = min(len(items), n_batches * large_batch_multiplier)
             k, m = divmod(len(items), n_batches)
             for i in range(n_batches):
                 batch_items = items[i * k + min(i, m): (i + 1) * k + min(i + 1, m)]

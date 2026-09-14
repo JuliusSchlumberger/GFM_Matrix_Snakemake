@@ -66,9 +66,10 @@ from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
+import yaml
 from shapely.geometry import box as shapely_box
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
 from generate_exposure_jobs import generate_exposure_dispatch, generate_exposure_resume_dispatch  # noqa: E402
@@ -101,11 +102,15 @@ def _build_chunk_grid(tile_gdf: gpd.GeoDataFrame, chunk_size_deg: float) -> gpd.
 
 def _write_batches(
     local_jobs_dir: Path, linux_jobs_dir: str, linux_code_root: str, sbatch_cfg: dict,
-    phase_name: str, targets: list[str], n_nodes: int,
+    phase_name: str, targets: list[str], n_nodes: int, configfile_path: str,
 ) -> list[str]:
     """Split `targets` evenly across up to n_nodes batches, write one sbatch
-    script per batch (plain `snakemake --cores N <targets>` call, matching
-    generate_hpc_preprocess_job.py's own pattern), return their Linux paths.
+    script per batch (plain `snakemake --cores N --configfile <configfile_path>
+    <targets>` call, matching generate_hpc_preprocess_job.py's own pattern -
+    configfile_path (resolved_config.yml) is what makes a compute node
+    re-parsing the Snakefile see the same config this dispatch was generated
+    from, rather than silently falling back to its own default config.yml),
+    return their Linux paths.
     """
     n_batches = min(n_nodes, len(targets))
     k, m = divmod(len(targets), n_batches)
@@ -137,7 +142,8 @@ def _write_batches(
             "",
             (
                 f'snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
-                f'--rerun-triggers=mtime $(cat "{linux_jobs_dir}/{name}_targets.txt")'
+                f'--rerun-triggers=mtime --configfile "{configfile_path}" '
+                f'$(cat "{linux_jobs_dir}/{name}_targets.txt")'
             ),
             "",
         ]
@@ -177,6 +183,17 @@ def main() -> None:
 
     retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
+
+    # Normally already written by the preceding preprocess/simulation
+    # phases for this same hpc.jobs_dir (generate_hpc_preprocess_job.py) -
+    # only write it here if this script is invoked standalone, so this
+    # script is safe to run on its own too. Referenced (via --configfile)
+    # by every snakemake call this script generates - see _write_batches.
+    resolved_config_path = local_jobs_dir / "resolved_config.yml"
+    if not resolved_config_path.exists():
+        with open(resolved_config_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(linux_config, f)
+    linux_resolved_config = f"{linux_jobs_dir}/resolved_config.yml"
 
     # Local view (this machine's own reachable mount) for the tile-grid
     # read - see generate_hpc_preprocess_job.py's own note on this exact
@@ -251,7 +268,7 @@ def main() -> None:
     print(f"Phase 1 (merge_chunk): {len(phase1_targets)} target(s)")
     phase1_scripts = _write_batches(
         local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
-        f"{name_prefix}merge", phase1_targets, n_nodes,
+        f"{name_prefix}merge", phase1_targets, n_nodes, linux_resolved_config,
     ) if phase1_targets else []
 
     # Phase 2: prepare_exposure_grid_chunk - every chunk (not rp/slr).
@@ -263,7 +280,7 @@ def main() -> None:
           f"(reference scenario: {return_periods[0]}_{baseline_slr})")
     phase2_scripts = _write_batches(
         local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
-        f"{name_prefix}exposure_grid", phase2_targets, n_nodes,
+        f"{name_prefix}exposure_grid", phase2_targets, n_nodes, linux_resolved_config,
     ) if phase2_targets else []
 
     # Phase 3: compute_flood_fraction_chunk - every (chunk, rp, slr).
@@ -271,7 +288,7 @@ def main() -> None:
     print(f"\nPhase 3 (compute_flood_fraction_chunk): {len(phase3_targets)} target(s)")
     phase3_scripts = _write_batches(
         local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
-        f"{name_prefix}flood_fraction", phase3_targets, n_nodes,
+        f"{name_prefix}flood_fraction", phase3_targets, n_nodes, linux_resolved_config,
     ) if phase3_targets else []
 
     # Master driver: phase 1 batches (parallel, no dependency) -> phase 2

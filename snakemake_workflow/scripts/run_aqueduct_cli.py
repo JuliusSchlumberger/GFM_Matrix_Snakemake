@@ -28,7 +28,7 @@ import geopandas as gpd
 import rasterio
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from aqueduct_runner import (  # noqa: E402
     NO_STATIONS_REASON,
@@ -173,6 +173,7 @@ def main() -> None:
             max_rounds=flooding_config["max_rounds"],
             outer_convergence_pct=oc_config.get("outer_convergence_pct", 0.01),
             waterlevel_epsilon_m=flooding_config["waterlevel_epsilon_m"],
+            friction_scale_factor=flooding_config.get("friction_scale_factor", 1.0),
         )
     except MemoryError:
         mark_tile_oom(oom_dir, tile_id, reason="MemoryError in flood_depth_dense - tile too large")

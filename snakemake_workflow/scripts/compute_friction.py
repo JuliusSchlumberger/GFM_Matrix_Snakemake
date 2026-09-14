@@ -3,7 +3,7 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import get_data_catalog  # noqa: E402
 from rasters import compute_friction, load_raster, save_raster  # noqa: E402

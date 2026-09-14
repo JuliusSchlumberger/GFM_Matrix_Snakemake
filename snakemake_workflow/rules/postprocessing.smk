@@ -8,13 +8,12 @@ merge job reads only the handful of tiles that overlap its chunk rather than
 the full tile set, and produces smaller, faster-to-write output files.
 """
 
-# Wildcard constraint so Snakemake does not try to match chunk_id against
-# other wildcard patterns (e.g. waterlevel_name, return_period).
-wildcard_constraints:
-    chunk_id        = r"[NS]\d{2}[EW]\d{3}",
-    waterlevel_name = r"SLR_\d+",
-    return_period   = r"RP\d+",
-
+# chunk_id's constraint (so Snakemake does not try to match it against other
+# wildcard patterns, e.g. waterlevel_name/return_period) lives in common.smk
+# alongside the other wildcard_constraints - Snakemake merges all such blocks
+# into one global dict, so declaring waterlevel_name/return_period again here
+# with a looser regex would just silently shadow common.smk's tighter,
+# config-derived ones for whichever file happens to be `include:`d last.
 # Checked directly here (not via the root Snakefile's own _plotting_enabled,
 # which is only defined AFTER this file's `include:` line) since
 # merge_chunk's own temp() marking below depends on it - see that rule's

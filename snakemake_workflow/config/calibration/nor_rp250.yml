@@ -1,0 +1,31 @@
+# Group scenario for the ESP/FRA/NOR HPC calibration sweep
+# (docs/calibration_sweep_plan.md) - Norway, simulated at RP250: COAST-RP has
+# no native RP200 field (confirmed 2026-09 directly against the real
+# COAST-RP.nc/_TC.nc/_ETC.nc files - only 1/2/5/10/25/50/100/250/500/1000
+# exist), RP250 chosen as the closest native value to Norway's real
+# ~200yr/F2 benchmark over RP100-for-everyone or new interpolation work
+# (user decision). This SUPERSEDES data_catalog_validation.yml's own
+# norway_stormflo_200ar comment about being "compared against the model's
+# RP100 anyway" - that was the prior decision, before this sweep.
+#
+# tile_grid.path points at the real closure GeoPackage written by
+# scripts/calibration/select_country_tiles.py (58 tiles: 57 hop_distance=0,
+# 1 hop_distance=1 - run for real 2026-09, zero tiles pulled in as pure
+# dependency beyond the benchmark-region core).
+
+tile_grid:
+  path: "{processed_inputs_dir}/mask/calibration/nor_tiles.gpkg"
+
+boundary_conditions:
+  return_periods: [250]
+  slr_scenarios: ["SLR_0"]
+
+adaptation:
+  slr_intensities: []   # see esp_fra_rp100.yml's comment - required, not decorative
+
+validation:
+  return_period: "RP250"
+  waterlevel_name: "SLR_0"
+
+hpc:
+  n_nodes: 3   # tuned against the real 58-tile closure - see esp_fra_rp100.yml's comment

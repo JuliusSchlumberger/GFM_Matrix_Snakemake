@@ -1,0 +1,290 @@
+# ── Root path ─────────────────────────────────────────────────────────────────
+# Separate catalog from data_catalog_gfm.yml (not merged with it) because it
+# needs its own `root` - see docs/flood_extent_validation_plan.md's §5.2.
+# Overridden at load time by validation/validate_country.py via
+# config_utils.get_data_catalog(..., root=config["validation"]["benchmark_root"]) -
+# the value below is only the checked-in default for this machine.
+root: "P:/11212688-004-global-floodmaps/modelling/inputs/validation"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Benchmark flood-hazard-map metadata. Per-country/per-dataset transformation
+# rules (attribute_filter, exclude_bbox, wet_values, depth_threshold_m) are read
+# by validation.load_benchmark() from each entry's own `meta` block, so adding a
+# new country/dataset is a catalog entry here, not a new `if country == ...`
+# branch in code. See docs/flood_extent_validation_plan.md §5.2 for the full
+# field reference and the France/Germany/Japan/Norway/Australia entries once
+# their data is downloaded.
+
+spain_zi_marina_q100:
+  data_type: GeoDataFrame
+  driver: vector
+  path: ESP/LAMINAS_Q100_MEDIA_ETRS89.shp
+  crs: 4258
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Spain
+    country_iso: ESP
+    hazard_type: coastal          # coastal | fluvial | mixed - only `coastal` is comparable
+    return_period: 100
+    variable: extent               # extent | depth
+    native_resolution_m: 5         # from PRECISION = "MDT 5x5" (documentation only -
+                                    # comparison happens on the model grid, not this)
+    # --- transformation rules read by validation.load_benchmark() ---
+    attribute_filter: {TIPO_ZONA: "Z.I. PROBABILIDAD MEDIA (100 AÑOS)"}
+    # Named sub-regions covering the whole benchmark, scored/reported/plotted
+    # separately instead of blended into one national row (2026-09 - previously
+    # the Canary Islands were dropped entirely via exclude_bbox; now scored as
+    # their own region instead, for consistency with France's kept-overseas
+    # approach - see docs/flood_extent_validation_caveats.md §2.1/§3).
+    regions:
+      mainland: [-9.5, 35.0, 4.5, 44.0]          # continental Spain + Balearic Islands
+      canary_islands: [-19.0, 27.0, -13.0, 30.0]
+    # raster sources instead use: wet_values: [1,2] | depth_threshold_m: 0.1 | nodata: 255
+    # ---
+    description: >
+      SNCZI "Zonas Inundables de origen marino" - marine-origin flood zones for the
+      Spanish coast, medium probability (100-year return period).
+    methodology: >
+      Still-water + wave levels from a 60-year C3E hindcast, run-up via IH2VOF
+      formulae at profiles spaced 200 m, flooded onto a 5 m LiDAR DTM. 90% band.
+    source_url: https://www.miteco.gob.es/es/cartografia-y-sig/ide/descargas/costas-medio-marino/zi-origen-marino.html
+    date_retrieved: "2026-09-08"
+    source_license: <to confirm - see the MITECO download page>
+    source_version: "2016-04-12"   # DBF_DATE_LAST_UPDATE
+    known_caveats: >
+      Covers only surveyed coastal stretches, NOT the whole coast - see the plan
+      doc's §3. Includes wave run-up, which the GFM model does not simulate.
+
+france_inondable_02moy:
+  data_type: GeoDataFrame
+  driver: vector
+  path: FRA/n_inondable_03_02moy_s.shp
+  crs: 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: France
+    country_iso: FRA
+    hazard_type: coastal
+    return_period: 100             # "02Moy" is officially "at least centennial", generally
+                                    # cited as a 100-300yr class - not an exact RP100 the way
+                                    # Spain's "100 AÑOS" label is. See known_caveats.
+    variable: extent               # extent | depth
+    # No attribute_filter: confirmed 2026-09 against the real shapefile (74,547 rows) - this
+    # file is ALREADY pre-split to typ_inond=03 (submersion marine) x scenario=02Moy only,
+    # every row already matches. Do NOT filter on cours_deau=='submar' here - in this file
+    # that column is mostly None/real river names, and filtering on it would wrongly drop
+    # ~85% of the real coastal rows (an earlier, stale note assumed the opposite).
+    regions:
+      metropole:  [-6.0, 41.0, 10.5, 51.5]     # mainland France + Corsica
+      guadeloupe: [-62.6, 15.2, -60.3, 17.4]
+      martinique: [-61.5, 14.0, -60.5, 15.2]
+      guyane:     [-53.5, 3.5, -51.5, 6.0]     # data only covers the Ile de Cayenne area,
+                                                 # not the whole Guyane coast - see known_caveats
+      mayotte:    [44.5, -13.5, 45.8, -12.0]
+      # Réunion is a SEPARATE catalog entry (france_inondable_reunion_03mcc below) - this
+      # file has no Réunion rows at all (no plain "02Moy" scenario exists for Réunion).
+    description: >
+      TRI ("Territoires à Risque important d'Inondation") submersion marine extent zones,
+      typ_inond=03 / scenario=02Moy ("moyen" probability class), covering metropolitan
+      France (incl. Corsica) plus Guadeloupe, Martinique, Guyane and Mayotte.
+    source_url: <to confirm - Géorisques / DREAL TRI download portal>
+    date_retrieved: "2026-09-09"
+    source_license: <to confirm>
+    known_caveats: >
+      Only the legally-designated TRI zones are surveyed, not the full coastline (see plan
+      doc/caveats doc). "02Moy" is officially "at least centennial", generally cited as a
+      100-300yr class - more definitional slack than Spain's exact "100 AÑOS" label. Guyane's
+      TRI zone only covers the Ile de Cayenne area, not French Guiana's whole coast.
+
+france_inondable_reunion_03mcc:
+  data_type: GeoDataFrame
+  driver: vector
+  path: FRA/n_inondable_03_03mcc_ct_s.shp
+  crs: 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: France
+    country_iso: FRA
+    hazard_type: coastal
+    return_period: 100             # approximate analog only - see known_caveats
+    variable: extent
+    # No attribute_filter: confirmed 2026-09 against the real shapefile (9 rows, 6 TRI
+    # zones) - already homogeneous, typ_inond=03 / scenario=03Mcc_ct throughout.
+    regions:
+      reunion: [54.5, -21.9, 56.0, -20.3]
+    description: >
+      TRI submersion marine extent zones for La Réunion, typ_inond=03 / scenario=03Mcc_ct
+      (the medium of Réunion's 3 cyclone-adjusted classes: 01Forcc_ct / 03Mcc_ct / 04Faicc_ct).
+      Réunion has no plain "02Moy" scenario in this dataset - this is the closest analog.
+    source_url: <to confirm - Géorisques / DREAL TRI download portal>
+    date_retrieved: "2026-09-09"
+    source_license: <to confirm>
+    known_caveats: >
+      Very sparse (9 polygons across 6 TRI zones for the whole island) - statistically close
+      to meaningless as a standalone metric, should be reported but flagged, not treated as a
+      real result (see caveats doc §2.2). "03Mcc_ct" is a cyclone-adjusted scenario, not a
+      strict return-period equivalent of the mainland file's "02Moy" - comparing it directly
+      against the model's RP100 scenario carries more uncertainty than the mainland comparison.
+
+france_inondable_ht_02moy:
+  data_type: GeoDataFrame
+  driver: vector
+  path: FRA/n_iso_ht_03_02moy_s.shp
+  crs: 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: France
+    country_iso: FRA
+    hazard_type: coastal
+    return_period: 100
+    variable: depth               # dispatches validate_country.py's depth-band comparison,
+    # not the binary extent one - see src/validation.py::rasterize_depth_bands /
+    # validate_country.py::validate_country_depth_bands
+    ht_min_col: ht_min
+    ht_max_col: ht_max            # open-ended top band uses inconsistent per-zone sentinels
+    # (9999/999/99, or NaN with no max recorded) - resolved generically by magnitude via
+    # validation.depth_band_open_ended_min_m, not enumerated here.
+    # No attribute_filter: confirmed 2026-09 against the real shapefile (788,947 rows) -
+    # already pre-split to typ_inond=03 / scenario=02Moy throughout, same as the companion
+    # extent entry france_inondable_02moy.
+    regions:
+      metropole:  [-6.0, 41.0, 10.5, 51.5]
+      guadeloupe: [-62.6, 15.2, -60.3, 17.4]
+      martinique: [-61.5, 14.0, -60.5, 15.2]
+      guyane:     [-53.5, 3.5, -51.5, 6.0]     # confirmed 2026-09: this file has ZERO rows
+      # for Guyane (unlike the extent layer, which has 123) - depth-band comparison simply
+      # produces no "guyane" region row for this benchmark; not an error, a real coverage gap.
+      mayotte:    [44.5, -13.5, 45.8, -12.0]
+    description: >
+      TRI submersion marine DEPTH-BAND zones (ht_min/ht_max, m), typ_inond=03 /
+      scenario=02Moy - the depth-resolved companion to france_inondable_02moy's extent
+      polygons. Confirmed 2026-09: each TRI zone's depth-band sub-polygons exactly tile
+      that same zone's own extent polygon (union area matches to floating-point noise) -
+      this is a finer spatial subdivision of the same flood zones, not a separate survey.
+    source_url: <to confirm - Géorisques / DREAL TRI download portal>
+    date_retrieved: "2026-09-10"
+    source_license: <to confirm>
+    known_caveats: >
+      Same coverage/return-period caveats as france_inondable_02moy (see that entry and the
+      caveats doc §2.2). Additionally: Guyane has NO depth-band rows in this file at all
+      (confirmed 2026-09) despite having extent rows - depth-band comparison is not possible
+      for Guyane via this dataset. Open-ended top-band sentinels are internally consistent
+      per TRI zone but vary across zones/regions (9999 most zones, 999 for Mayotte, 99 for
+      Martinique, NaN - no value recorded - for several Brittany/Normandy zones) - handled by
+      validation.rasterize_depth_bands' magnitude-threshold rule, not a literal sentinel value.
+
+france_inondable_ht_reunion_03mcc:
+  data_type: GeoDataFrame
+  driver: vector
+  path: FRA/n_iso_ht_03_03mcc_ct_s.shp
+  crs: 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: France
+    country_iso: FRA
+    hazard_type: coastal
+    return_period: 100             # approximate analog only - see known_caveats
+    variable: depth
+    ht_min_col: ht_min
+    ht_max_col: ht_max
+    # No attribute_filter: confirmed 2026-09 against the real shapefile (48 rows) - already
+    # homogeneous, typ_inond=03 / scenario=03Mcc_ct throughout, same as the companion extent
+    # entry france_inondable_reunion_03mcc.
+    regions:
+      reunion: [54.5, -21.9, 56.0, -20.3]
+    description: >
+      TRI submersion marine depth-band zones for La Réunion, typ_inond=03 / scenario=03Mcc_ct
+      - the depth-resolved companion to france_inondable_reunion_03mcc's extent polygons.
+    source_url: <to confirm - Géorisques / DREAL TRI download portal>
+    date_retrieved: "2026-09-10"
+    source_license: <to confirm>
+    known_caveats: >
+      Same caveats as france_inondable_reunion_03mcc (very sparse, cyclone-adjusted scenario
+      not a strict RP100 equivalent - see caveats doc §2.2).
+
+norway_stormflo_200ar:
+  data_type: GeoDataFrame
+  driver: vector
+  driver_kwargs: {layer: stormflo200ar_klimaarna}
+  path: NOR/stormflo200ar_klimaarna.gpkg
+  crs: 25833                     # ETRS89 / UTM zone 33N - projected, unlike Spain (4258) and
+                                  # France (4326); build_evaluation_clusters/benchmark_fraction_from_vector
+                                  # reproject to the working CRS as needed, no extra handling required.
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Norway
+    country_iso: NOR
+    hazard_type: coastal
+    return_period: 200            # real value ("F2"/TEK17 safety class 2, storm-surge recurring
+                                   # ~1/200yr) - Norway has no 100yr layer (only 20/200/1000yr,
+                                   # "sikkerhetsklasseflom" F1/F2/F3). Compared against the model's
+                                   # RP100 anyway (user decision 2026-09) - a real, documented
+                                   # return-period mismatch, same spirit as France's "02Moy" caveat.
+    variable: extent
+    coverage: national            # Kartverket assessed the ENTIRE Norwegian coastline (unlike
+    # Spain/France's isolated designated survey zones) - confirmed via the dump's own
+    # dekningsomrade (coverage) table: ikkeRelevant (inland, excluded) + kartlagtUtenFunn
+    # (mapped, nothing found - real dry evidence) + grundigKartlagtMedFunn (thoroughly mapped
+    # with findings) partition the whole country, no "unsurveyed" gap. Dispatches
+    # validate_country.py to validate_country_national_coverage (per-postprocessing-chunk,
+    # no buffer/cluster) instead of the cluster-based path - both because "outside the
+    # polygon" is unambiguous here (a real dry result, not "never looked at"), and because
+    # Norway's long, only-lightly-fragmented coastline collapses build_evaluation_clusters'
+    # buffer+merge into one cluster spanning almost the whole country, which crashed the
+    # cluster-based path's per-cluster bbox-sized array allocation (confirmed 2026-09: a
+    # single cluster with bbox 27deg x 13.5deg triggered a 65.9 GiB allocation).
+    # No attribute_filter: this GeoPackage (converted 2026-09 from Kartverket's real 26 GiB
+    # PostGIS dump by preparation/convert_norway_stormflo.py) is ALREADY a single-scenario
+    # extract - every one of its 115,440 rows has sikkerhetsklasseflom='F2' (confirmed).
+    # NOT pre-filtered/subtracted for the sea: each raw polygon is "everything below water
+    # level X", which includes the permanently-wet sea (confirmed 2026-09: 97.6-99.3% of raw
+    # polygon area at sampled AOIs). This is NOT stripped at conversion time - it relies on
+    # this pipeline's EXISTING Copernicus land-use permanent-water exclusion (the same
+    # `not_water` masking already applied for Spain/France) instead, confirmed 2026-09 to
+    # correctly classify 98.06% of the real sea area as permanent water even across Norway's
+    # narrow fjords/island coastline (92.7-99.1% at every one of 5 sampled AOIs, including a
+    # narrow fjord and an island maze) - see known_caveats for the corresponding land-side cost.
+    regions:
+      mainland: [4.0, 57.5, 31.5, 71.5]   # real data bounds (converted GeoPackage):
+      # lon 4.28-31.35, lat 57.85-71.31 (Utsira to the Russian border, to North Cape) - no
+      # overseas territories.
+    description: >
+      Kartverket (Norwegian Mapping Authority) official storm-surge hazard polygons,
+      "sikkerhetsklasseflom" F2 (TEK17 safety class 2, ~200-year recurrence), scale 1:80,000.
+      Source table stormflo200ar_klimaarna ("today's climate", as opposed to the same
+      dataset's climaar2100/2150 projection tables, not used here).
+    methodology: >
+      Kartverket's own storm-surge model output, water level referenced to NN2000 (Norway's
+      vertical datum), delineated onto Kartverket's own elevation data. Distributed as a
+      PostGIS SQL dump (schema stormflohavniva_*), converted once to this GeoPackage by
+      preparation/convert_norway_stormflo.py (not part of the regular Snakemake DAG - run
+      manually/on-demand, like analysis/extract_country_population.py).
+    source_url: https://kartkatalog.geonorge.no/metadata/stormflo-og-havnivaa/fbb95c67-623f-430a-9fa5-9cfcea8366b3
+    date_retrieved: "2026-09-10"
+    source_license: NLOD (Norwegian Licence for Open Government Data)
+    source_version: "2026-09-06"   # dataset's own last-updated date per the Geonorge API
+    known_caveats: >
+      (1) Return-period mismatch: F2/~200yr compared against the model's RP100 - looser than
+      even France's vague "02Moy", see return_period above. (2) Vertical datum: real measured
+      NN2000->GOCO06s offset is -0.196 m mean (-0.334 to -0.006 m across Norway's latitude
+      range, via Kartverket's own HREF2018B grid) - given Norway's coastline is steep enough
+      that this translates to only ~2 m of horizontal boundary shift (~10 m displacement per
+      1 m of water level, measured from Kartverket's own nested hazard layers), this is 7% of
+      one DEM pixel and 50x below the vector_simplify_tolerance_m already accepted elsewhere -
+      measured and deliberately NOT corrected for, see docs/flood_extent_validation_caveats.md.
+      (3) The SAME land-use masking that correctly excludes ~98% of the raw polygon's sea area
+      also masks ~51% of the genuine thin land-inundation strip (Norway's actual flooded land
+      is only ~0.2-2.1% of the raw polygon to begin with, and a coastal strip that narrow is
+      finer than Copernicus' 100 m resolution) - not Norway-specific (measured 97.8% for
+      Spain's own most-coastal feature too), but more consequential here given how thin
+      Norway's real flood extent is; effective benchmark-wet area is roughly ~1% of raw
+      polygon area. (4) Data-quality gap found in Bergen specifically: its four hazard layers
+      (mean-high-water/20yr/200yr/1000yr) have inconsistent feature counts (24/34/57/47) and
+      are not cleanly nested - real disagreement in Kartverket's own source data, unrelated to
+      anything this pipeline does, large enough to dominate the datum signal there.

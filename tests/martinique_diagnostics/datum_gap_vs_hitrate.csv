@@ -1,0 +1,7 @@
+region,HR,CSI,benchmark_wet_km2,model_wet_km2,n_coastrp_stations,median_RP100_forcing_m,geoid_offset_added_to_DEM_m,AVISO_MDT_m,datum_gap_m,effective_WL_above_DEM_datum_m
+metropole,0.758,0.499,1701.0,2729.0,244,4.285,0.065,0.089,0.153,4.22
+guyane,0.102,0.038,3.0,10.0,14,1.661,0.041,0.49,0.531,1.62
+guadeloupe,0.078,0.076,43.0,6.0,15,0.45,-0.088,0.628,0.539,0.538
+reunion,0.024,0.021,5.0,0.98,6,0.765,0.353,1.134,1.487,0.413
+mayotte,0.018,0.017,13.0,0.48,7,2.481,0.413,1.056,1.469,2.068
+martinique,0.003,0.003,7.0,0.04,13,0.4,0.529,0.611,1.141,-0.129

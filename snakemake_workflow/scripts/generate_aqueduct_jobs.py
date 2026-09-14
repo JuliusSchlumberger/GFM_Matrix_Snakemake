@@ -62,9 +62,69 @@ from pathlib import Path
 
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import load_config, retry_transient_io  # noqa: E402
+
+
+def _append_postprocess_bridge(
+    submit_lines: list[str],
+    hpc_cfg: dict,
+    linux_config: dict,
+    linux_jobs_dir: str,
+    local_jobs_dir: Path,
+) -> list[str]:
+    """Append one more phase to submit_lines: once ALL simulation waves are
+    done ($ALL_WAVE_IDS), generate + submit the postprocessing+exposure
+    dispatch - the same afterany-join pattern already used between
+    preprocessing and simulation (generate_hpc_preprocess_job.py's own
+    generate_jobs_and_dispatch.sbatch), applied one phase further out. Does
+    NOT write submit_lines to disk - caller writes once at the end.
+    """
+    sbatch_cfg = hpc_cfg["sbatch"]  # lightweight - just generates + submits further scripts
+    code_root = linux_config["paths"]["code_root"]
+    name = "gfm_generate_postprocess_and_dispatch"
+    lines = [
+        "#!/bin/bash",
+        f"#SBATCH --job-name={name}",
+        f"#SBATCH --partition={sbatch_cfg['partition']}",
+    ]
+    if sbatch_cfg.get("account"):
+        lines.append(f"#SBATCH --account={sbatch_cfg['account']}")
+    lines += [
+        f"#SBATCH --time={sbatch_cfg['time']}",
+        f"#SBATCH --mem={sbatch_cfg['mem']}",
+        "#SBATCH --cpus-per-task=1",
+        f"#SBATCH --output={linux_jobs_dir}/logs/{name}_%j.out",
+        f"#SBATCH --error={linux_jobs_dir}/logs/{name}_%j.err",
+        "",
+        "set -euo pipefail",
+        sbatch_cfg["env_activate_cmd"],
+        "",
+        f'cd "{code_root}"',
+        'echo "=== Generating postprocessing + exposure dispatch ==="',
+        "python snakemake_workflow/scripts/generate_hpc_postprocess_job.py",
+        "",
+        'echo "=== Submitting postprocessing + exposure ==="',
+        f'bash "{linux_jobs_dir}/submit_postprocess_and_exposure.sh"',
+        "",
+    ]
+    script_path = local_jobs_dir / f"{name}.sbatch"
+    with open(script_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines))
+
+    submit_lines = list(submit_lines)
+    submit_lines += [
+        "",
+        "# bridge: postprocessing + exposure analysis, once ALL simulation waves are done",
+        'if [ -z "$ALL_WAVE_IDS" ]; then',
+        f'  JID=$(sbatch --parsable "{linux_jobs_dir}/{name}.sbatch")',
+        "else",
+        f'  JID=$(sbatch --parsable --dependency=afterany:$ALL_WAVE_IDS "{linux_jobs_dir}/{name}.sbatch")',
+        "fi",
+        f'echo "submitted {linux_jobs_dir}/{name}.sbatch -> job $JID (depends on all simulation waves)"',
+    ]
+    return submit_lines
 
 
 def generate_wave_dispatch(
@@ -172,6 +232,7 @@ def generate_wave_dispatch(
         "set -euo pipefail",
         "",
         "PREV_IDS=\"\"",
+        "ALL_WAVE_IDS=\"\"",
     ]
     for wave in sorted(scripts_by_wave):
         submit_lines.append(f"\n# wave {wave} ({len(scripts_by_wave[wave])} batch(es))")
@@ -187,6 +248,9 @@ def generate_wave_dispatch(
                 'IDS="${IDS:+$IDS:}$JID"',
             ]
         submit_lines.append('PREV_IDS="$IDS"')
+        submit_lines.append('ALL_WAVE_IDS="${ALL_WAVE_IDS:+$ALL_WAVE_IDS:}$IDS"')
+
+    submit_lines = _append_postprocess_bridge(submit_lines, hpc_cfg, linux_config, linux_jobs_dir, local_jobs_dir)
 
     with open(submit_waves_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(submit_lines) + "\n")
@@ -292,6 +356,7 @@ def generate_resume_dispatch(
         "set -euo pipefail",
         "",
         "PREV_IDS=\"\"",
+        "ALL_WAVE_IDS=\"\"",
     ]
     for wave in sorted(scripts_by_wave):
         submit_lines.append(f"\n# wave {wave} ({len(scripts_by_wave[wave])} batch(es))")
@@ -307,6 +372,9 @@ def generate_resume_dispatch(
                 'IDS="${IDS:+$IDS:}$JID"',
             ]
         submit_lines.append('PREV_IDS="$IDS"')
+        submit_lines.append('ALL_WAVE_IDS="${ALL_WAVE_IDS:+$ALL_WAVE_IDS:}$IDS"')
+
+    submit_lines = _append_postprocess_bridge(submit_lines, hpc_cfg, linux_config, linux_jobs_dir, local_jobs_dir)
 
     with open(submit_waves_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(submit_lines) + "\n")

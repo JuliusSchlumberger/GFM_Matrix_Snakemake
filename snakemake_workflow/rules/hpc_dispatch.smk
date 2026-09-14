@@ -43,6 +43,16 @@ _approx_pixels_by_tile = {
     )
 }
 _LARGE_TILE_PIXEL_THRESHOLD = config["hpc"]["large_tile_pixel_threshold"]
+# 2026-09: large tiles were regularly not finishing within hpc.sbatch_large's
+# time limit even after that was raised - splitting large tiles across MORE,
+# smaller batches (fewer tiles serially processed per node) cuts each node's
+# own wall-clock need directly, on top of the longer time limit. Applied ON
+# TOP of split_batches_proportionally's own shared-budget result for "large"
+# specifically (not carved out of "small"'s share) - deliberately allows a
+# wave with large tiles to use more than hpc.n_nodes nodes at once, since the
+# whole point is more parallelism for the class that was timing out, not
+# redistributing a fixed budget away from the (already-fine) small class.
+_LARGE_TILE_BATCH_MULTIPLIER = config["hpc"]["large_tile_batch_multiplier"]
 
 _HPC_WAVES: dict[int, list[str]] = {}
 for _tid in TILE_IDS:
@@ -72,6 +82,8 @@ for _wave in sorted(_HPC_WAVES):
         if not _class_tiles:
             continue
         _n_nodes = _class_n_nodes[_size_class]
+        if _size_class == "large":
+            _n_nodes = min(len(_class_tiles), _n_nodes * _LARGE_TILE_BATCH_MULTIPLIER)
         _k, _m = divmod(len(_class_tiles), _n_nodes)
         for _i in range(_n_nodes):
             _batch_tiles = _class_tiles[_i * _k + min(_i, _m): (_i + 1) * _k + min(_i + 1, _m)]
@@ -109,6 +121,17 @@ rule generate_aqueduct_jobs:
         submit_waves=os.path.join(config["hpc"]["jobs_dir"], "submit_waves.sh"),
     params:
         hpc_cfg=config["hpc"],
+        # KNOWN TRAP (2026-09): this is a hardcoded literal path to
+        # production config.yml, NOT derived from whatever --configfile
+        # built the live `config` dict above - generate_wave_dispatch()
+        # re-reads THIS path from scratch to build resolved_config.yml (the
+        # file every compute node actually loads), so a scenario/calibration
+        # --configfile silently has no effect on resolved_config.yml even
+        # though `params` below correctly reflects it. Calibration runs
+        # bypass this rule entirely (generate_hpc_preprocess_job.py's
+        # --calibration flag calls generate_hpc_simulation_jobs.py directly
+        # instead, which threads --config through correctly) rather than
+        # fixing it here - see that script's module docstring.
         base_config_path=os.path.join(workflow.basedir, "snakemake_workflow", "config", "config.yml"),
         model_outputs=config["simulation"]["model_outputs"],
         tile_ids=TILE_IDS,

@@ -19,8 +19,8 @@ import pickle
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analysis"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "analysis"))
 
 from config_utils import atomic_write, load_config, retry_transient_io  # noqa: E402
 from compute_exposure_analysis import (  # noqa: E402

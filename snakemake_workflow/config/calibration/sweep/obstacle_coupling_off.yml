@@ -1,0 +1,11 @@
+# OFAT sweep point - obstacle_coupling disabled (default enabled: true).
+# Deliberate control point, not a deployment candidate - costs a full extra
+# solve per tile, kept anyway (user confirmed) to get real evidence of the
+# mechanism's actual marginal benefit against benchmarks rather than
+# assuming it helps, and as a sanity check that the validation pipeline is
+# sensitive enough to detect a known-worse configuration. See
+# docs/calibration_sweep_plan.md.
+simulation:
+  flooding:
+    obstacle_coupling:
+      enabled: false

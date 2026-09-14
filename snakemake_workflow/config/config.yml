@@ -224,9 +224,12 @@ boundary_conditions:
   confidence_level: "medium" # options: low/medium
   coastrp_min_lat: -60  # exclude antarctic stations (no exposure)
 
-  # MDT (mean dynamic topography) is always subtracted from COAST-RP storm-tide
-  # levels, re-referencing them from local MSL to the GOCO06s geoid - matching
-  # the DEM's own geoid correction above.
+  # MDT (mean dynamic topography) is always ADDED to COAST-RP storm-tide
+  # levels (fixed 2026-09 - was wrongly subtracted; see
+  # preparation/prepare_boundary_conditions.py's module docstring and
+  # tests/martinique_diagnostics/ for the real-data investigation), re-
+  # referencing them from local MSL to the GOCO06s geoid - matching the
+  # DEM's own geoid correction above.
   mdt_correction: # Vertical-reference correction for COAST-RP storm-tide levels
     mdt_variable: "mdt"
     fallback_search_deg: 3.0
@@ -329,6 +332,13 @@ simulation: # Used by: preprocessing rules
     knn: 15              # number of nearest water level stations used
     # Default Manning's n roughness (÷ 100) for cells with no land use class.
     default_friction: 0.001
+    # Runtime multiplier applied to the (already land-use-derived, already
+    # decoded) friction raster - 1.0 = no-op. A calibration-sweep lever
+    # (2026-09), NOT baked into compute_friction.py's own preprocessing
+    # output, so the expensive land-use-derived raster is computed once and
+    # reused unscaled by every sweep combination that varies a different
+    # parameter - see aqueduct_runner.run_aqueduct_python.
+    friction_scale_factor: 1.0
 
     # Caps the eikonal solve's round-based mode (4 individual directional
     # sweeps per round, each round checked for early-exit convergence - see
@@ -428,6 +438,14 @@ hpc:
   # hpc_dispatch.smk / generate_hpc_preprocess_job.py), not the real DEM,
   # so this is necessarily approximate - the margin below 8GB is deliberate.
   large_tile_pixel_threshold: 70000000
+  # 2026-09: large tiles were regularly not finishing within sbatch_large's
+  # time limit. Splits each wave's "large" class across this many times more
+  # batches than split_batches_proportionally's own shared-budget result
+  # would give it (e.g. 2 = half as many tiles processed serially per node) -
+  # applied ON TOP of, not carved out of, "small"'s share, so a wave with
+  # large tiles may use more than n_nodes nodes at once. 1 = no change. See
+  # hpc_dispatch.smk / generate_hpc_simulation_jobs.py.
+  large_tile_batch_multiplier: 2
   sbatch:
     # Deltares Hydrax partitions: 1vcpu/4vcpu/16vcpu/24vcpu/60vcpu (regular),
     # 44vcpu, gpu, test (30 min cap, quick smoke-test before a real run).
@@ -465,7 +483,7 @@ hpc:
   sbatch_large:
     partition: 4vcpu               # e.g. "16vcpu" - see large_tile_pixel_threshold's comment above
     account: ""
-    time: "1-00:00:00"
+    time: "2-00:00:00"             # 2026-09: raised from 1-00:00:00 - large tiles were regularly not finishing in 24h
     mem: "30G"                            # e.g. "96G" - well under the partition's per-node RAM, generous margin over the estimate
     cpus_per_task: 4                                  # simulation: one tile at a time regardless; preprocessing: real `snakemake --cores` parallelism for "large" batches
     env_activate_cmd: 'module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm'
@@ -548,6 +566,9 @@ population_growth: # Used by: analysis/compute_exposure_analysis.py
 # ── ANALYSIS PIPELINE SWITCHES ────────────────────────────────────────────────
 analysis: # Used by: analysis/run_analysis.py
   compute_exposure:      true   # baseline / protect / retreat / avoid EAI CSVs
+  compute_flood_totals:  true   # per-country total flooded area/exposed population per (RP, SLR),
+  # no protection/adaptation applied - consumed by flood_extent_validation's
+  # validate_country.py (validation.flood_totals_dir below)
   plot_burning_ember:    true   # impact-matrix (SLR × growth) figures
   plot_adaptation_bars:  false   # grouped bar charts per adaptation strategy
   plot_timeseries:       true   # EAI along SSP SLR trajectories over time
@@ -614,3 +635,82 @@ visualization:
 
   level_linestyles: ["--", ":", "-."] # plot_timeseries.py:
   baseline_linestyle: "-" # plot_timeseries.py:
+
+# ── COASTAL FLOOD-EXTENT VALIDATION ─────────────────────────────────────────────
+# Used by: validation/validate_country.py, validation/run_validation.py.
+# See docs/flood_extent_validation_plan.md for the full design.
+validation:
+  benchmark_catalog: "snakemake_workflow/config/data_catalog_validation.yml"
+  benchmark_root: "{root}/inputs/validation" # NOT the GFM catalog's own {root} - see the plan doc's §5.2
+  output_dir: "{root}/validation"
+  return_period: "RP100"
+  waterlevel_name: "SLR_0"
+  depth_thresholds_m: [0.05, 0.10, 0.25, 0.50]
+  primary_threshold_m: 0.10 # matches exposure.exceedance_threshold_m
+  benchmark_supersample: 5 # rasterisation supersampling factor per model pixel (plan §4.2)
+  benchmark_wet_fraction: 0.5 # coverage-fraction threshold for "this model pixel counts as benchmark-wet"
+  eval_domain:
+    buffer_km: 2.0 # max distance from a benchmark polygon still counted as "surveyed" (plan §4.3)
+    also_report_model_domain_only: true
+  # Evaluation units = benchmark-geometry clusters (buffer each polygon, merge
+  # overlapping ones, process per merged cluster), NOT a uniform grid - see
+  # validation.build_evaluation_clusters. Real timing on the Spain benchmark
+  # (397 polygons, 2026-09): simplify(100m, preserve_topology=False) +
+  # buffer(quad_segs=2) + union_all() -> 182 clusters in <1s. The default
+  # topology-preserving simplify and default buffer quad_segs are NOT safe -
+  # both hang (>160s) on a real degenerate high-vertex-count record.
+  vector_simplify_tolerance_m: 100.0
+  buffer_quad_segs: 2
+  population_source: "population" # data_catalog_gfm.yml key (WorldPop 2020)
+  permanent_water_source: "deltadtm_mask" # data_catalog_gfm.yml key - DeltaDTM's own native-
+  # resolution land/ocean/lake/river mask (~25-31m ground cell in Norway, 4-8x finer in area than
+  # Copernicus land_use's ~100m - see docs/flood_extent_validation_caveats.md §1.3 and
+  # tests/norway_diagnostics/ for the real quantified comparison, 2026-09). Switched from
+  # "land_use" (Copernicus Global Land Cover, still a valid catalog entry, just no longer the
+  # default here) - real measured improvement (coastal-strip masking loss 45.7%->30.1% within
+  # 240m of shore for Norway) but NOT a full fix: ~1/3 of the original loss was genuine
+  # coarse-cell aliasing (now eliminated), the rest is a waterline-DEFINITION disagreement
+  # (DeltaDTM/ESA WorldCover's optical water edge vs. a benchmark's own surveyed coastline) that
+  # no 30m-resolution mask can resolve - see the caveats doc for the full breakdown. Was called
+  # `landuse_source` before this switch - renamed since that name became misleading once it no
+  # longer necessarily points at a land-use product.
+  permanent_water_codes: [1, 2, 3] # DeltaDTM mask codes to exclude (1=ocean, 2=lake, 3=river -
+  # 0=land, 255=nodata/outside DeltaDTM coverage; confirmed against real tiles 2026-09 - see
+  # data_catalog_gfm.yml's own deltadtm_mask entry). Copernicus land_use's own codes were
+  # [80, 200] (permanent water bodies / open sea) - NOT interchangeable with these, update both
+  # keys together if ever switching permanent_water_source back.
+  geogunit_source: "geogunit_protection_units" # data_catalog_gfm.yml key (WRI geogunit_107) -
+  # used ONLY by validate_country_national_coverage (validation.read_country_mask) to restrict
+  # a national-coverage benchmark's rectangular region bbox down to cells that actually belong
+  # to that country - a bbox generous enough to cover a country's own latitude/longitude range
+  # can genuinely overlap real neighbouring-country territory (confirmed 2026-09: Norway's
+  # `mainland` bbox overlaps real Swedish/Danish coastline, whose own real GFM-modelled
+  # flooding would otherwise be scored as a false positive against Norway's benchmark).
+  iso_lookup_source: "flopros_protection_standards" # data_catalog_gfm.yml key - geogunit_107-ID-indexed, "ISO" column
+  flood_totals_dir: "{root}/merged_results/exposure/flood_totals" # written by
+  # analysis/compute_flood_totals.py (analysis.compute_flood_totals switch) - one
+  # flood_totals_{ISO}.csv per country, country-wide (not per-region) total flooded
+  # area/exposed population per (RP, SLR), no protection/adaptation applied. Read
+  # by validate_country.py for the model_total_wet_km2/pop_model_total columns
+  # (mitigates caveats doc §1.2 - see that file for why a country-wide total, not
+  # just a benchmark cluster's own local window, matters). Must match
+  # run_analysis.py's own exposure output dir (default "{merged_outputs}/exposure")
+  # plus "/flood_totals" if that script's --outdir is ever overridden from its default.
+  # (80 = Permanent water bodies, 200 = Open sea - confirmed against
+  # inputs/Copernicus/lu_to_roughness_lookup.csv; "is this pixel flooded" is
+  # meaningless over water that's always wet regardless of any storm event)
+  depth_band_open_ended_min_m: 50.0 # validation.rasterize_depth_bands (variable="depth"
+  # benchmarks only, e.g. France's n_iso_ht_* layers): a benchmark ht_max value at/above
+  # this, or NaN, is treated as "no upper bound" rather than a literal depth - real French
+  # data (2026-09) uses inconsistent per-zone sentinels for the open-ended top band (9999,
+  # 999, 99, or NaN with no max recorded at all), so this is a magnitude threshold
+  # comfortably above any real closed band (max found: 4.0 m) and comfortably below every
+  # sentinel found, not an enumeration of specific sentinel values.
+  plots:
+    resolution_m: 200
+    dpi: 300
+    figsize: [10, 10]
+    agreement_colors: # ColorBrewer Set1 - distinguishable under common colour-vision deficiencies
+      agree: "#4daf4a" # green - both wet
+      over:  "#e41a1c" # red   - model wet only
+      under: "#377eb8" # blue  - benchmark wet only

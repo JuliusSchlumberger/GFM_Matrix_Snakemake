@@ -1,4 +1,6 @@
-# GFM (Global Flood Model) runtime environment - snakemake_workflow/ only.
+# GFM (Global Flood Model) runtime environment - covers the whole repo
+# (Snakemake DAG under snakemake_workflow/, plus the standalone
+# preparation/analysis/validation pipelines and src/).
 #
 # Install with miniforge/mambaforge:
 #   mamba env create -f environment.yml
@@ -21,7 +23,9 @@
 # specific numeric path matplotlib's Bezier subdivision hits. `libblas=
 # *openblas` below forces OpenBLAS instead of MKL for every BLAS-linked
 # package (numpy/scipy/etc.), sidestepping MKL-version/CPU sensitivity
-# entirely - confirmed fixed the crash. See snakemake_workflow/memory.md.
+# entirely - confirmed fixed the crash. See snakemake_workflow/memory.md
+# (repo-layout note: memory.md itself still lives under snakemake_workflow/,
+# see that file's own "repo layout" section for the 2026-09 reorg).
 # Mirrors pixi.toml; keep the two in sync.
 #
 # (Replaces a stale, unrelated `name: hydromt-sfincs` environment.yml that

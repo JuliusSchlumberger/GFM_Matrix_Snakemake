@@ -3,7 +3,7 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from tiles import get_tile_geometry, load_tile_grid, save_tile_geometry  # noqa: E402
 

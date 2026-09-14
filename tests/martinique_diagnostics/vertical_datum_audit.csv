@@ -1,0 +1,10 @@
+location,lon,lat,geoid_offset_added_to_DEM_m,AVISO_MDT_m,MDT_actually_subtracted_from_forcing_m,datum_gap_DEM_minus_forcing_m
+Martinique (Fort-de-France),-61.05,14.6,0.529,0.611,0.0,1.14
+Martinique (Lamentin),-61.0,14.6,0.529,0.608,0.0,1.137
+Guadeloupe (Pointe-a-Pitre),-61.53,16.24,-0.088,0.636,0.0,0.548
+Guyane (Cayenne),-52.33,4.93,0.041,0.497,0.0,0.538
+Mayotte,45.16,-12.78,0.413,1.05,0.0,1.463
+Reunion,55.45,-20.88,0.353,1.128,0.0,1.481
+FR Gironde (Arcachon),-1.16,44.66,-0.001,0.094,0.0,0.093
+FR Normandy (Cherbourg),-1.62,49.64,0.065,0.086,0.0,0.151
+FR Dunkerque,2.37,51.04,0.166,0.113,0.0,0.279

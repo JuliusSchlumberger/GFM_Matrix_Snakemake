@@ -34,21 +34,40 @@ implementation across 26 real tiles (100.000% Jaccard, 0.0m RMSE/mean-error/
 max-diff) before the Julia path was removed — see `docs/python_vs_julia_qa.md`
 for that validation record.
 
-Repo layout:
-  `snakemake_workflow/` — the active pipeline (this file describes it).
-    `preparation/` — one-off scripts run BEFORE the Snakemake DAG (tile-grid
-      + boundary-condition prep), orchestrated by `run_preparation.py`.
-    `rules/`, `scripts/`, `src/` — the Snakemake DAG itself and its shared
-      library code.
-    `analysis/` — standalone exposure/adaptation analysis, run AFTER the DAG,
-      orchestrated by `run_analysis.py`.
-    `tests/` — calibration studies and standalone regression/validation
-      scripts (not a formal pytest suite) — see section 10.
+Repo layout (reorganized 2026-09 to separate what Snakemake actually
+orchestrates from standalone pipelines that just share the same library —
+see `docs/calibration_sweep_plan.md`'s "repo structure" discussion for the
+rationale; nothing below is under `snakemake_workflow/` anymore except the
+Snakemake DAG itself):
+  `src/` (repo root) — shared library imported by everything below via
+    `sys.path.insert` (rules-invoked scripts, preparation/analysis/
+    validation, tests/) — not a pip-installed package.
+  `preparation/` (repo root) — one-off scripts run BEFORE the Snakemake DAG
+    (tile-grid + boundary-condition prep), orchestrated by
+    `run_preparation.py`. NOT touched by Snakemake.
+  `analysis/` (repo root) — standalone exposure/adaptation analysis, run
+    AFTER the DAG, orchestrated by `run_analysis.py`. NOT touched by
+    Snakemake.
+  `validation/` (repo root) — standalone benchmark HR/FAR/CSI comparison
+    pipeline, orchestrated by `run_validation.py`. NOT touched by Snakemake.
+  `snakemake_workflow/` — ONLY what Snakemake itself orchestrates now:
+    `rules/`, `scripts/` (the DAG and its `script:` targets, plus HPC/SLURM
+    dispatch helpers), `config/` (config.yml + machine-local overrides +
+    data catalogs — still the single config location for every pipeline
+    above, even though they moved out).
+  `run_pipeline.py`, `check_{preprocess,simulation,postprocess}_progress.py`
+    (repo root) — top-level entry points/monitoring scripts.
+  `tests/` (repo root) — calibration studies, standalone regression/
+    validation scripts, and one-off diagnostic folders (not a formal pytest
+    suite) — see section 10. Previously split across two directories; now
+    consolidated here.
+  `scratch/` (repo root) — ad-hoc, unreferenced one-off scripts kept for
+    reference but not part of any pipeline.
   `core/` — the original Julia package. No longer used by the active
     pipeline; not part of any current workflow.
   Other repo dirs not part of the active pipeline: `python/` (old
     watershed-based preprocessing), `Boundary_conditions_waterlevels/` (old
-    notebook pipeline), `validation/` (a notebook), `old_code_Gundula/`.
+    notebook pipeline), `old_code_Gundula/`.
 
 Environment: managed via `pixi` (`pixi.toml`/`pixi.lock`). Several
 older/alternate env files exist at repo root from earlier setup attempts —
@@ -65,15 +84,14 @@ config, which lives at `snakemake_workflow/config/config.yml`.
 
 Three stages, run in order:
 
-  0. Preparation (`snakemake_workflow/preparation/run_preparation.py`, NOT a
-     Snakemake DAG) — builds the tile grid and boundary-condition scenario
-     files that everything else reads.
+  0. Preparation (`preparation/run_preparation.py`, NOT a Snakemake DAG) —
+     builds the tile grid and boundary-condition scenario files that
+     everything else reads.
   1. Snakemake DAG (`Snakefile` at repo root, `include:`s rule files from
      `snakemake_workflow/rules/`) — per-tile preprocessing, simulation, and
      spatial-chunk postprocessing.
-  2. Analysis (`snakemake_workflow/analysis/run_analysis.py`, NOT a Snakemake
-     DAG) — exposure/adaptation analysis on top of the DAG's flood-fraction
-     output.
+  2. Analysis (`analysis/run_analysis.py`, NOT a Snakemake DAG) — exposure/
+     adaptation analysis on top of the DAG's flood-fraction output.
 
 Snakefile targets (defined at the bottom of the root `Snakefile`):
   - `preprocess`  → all per-tile, per-scenario model inputs.
@@ -83,7 +101,7 @@ Snakefile targets (defined at the bottom of the root `Snakefile`):
   - `generate_aqueduct_jobs` → HPC/SLURM sbatch dispatch (see section 11).
 
 Run with: `snakemake all --cores 4 --resources mem_mb=8000`, or prefer
-`python snakemake_workflow/run_pipeline.py` — same invocation wrapped in a
+`python run_pipeline.py` — same invocation wrapped in a
 retry loop that auto-splits any tile the solve runs out of memory on (see
 section 9's OOM HANDLING) instead of silently giving up on it. Multiple
 tiles run fully concurrently on one machine without issue; the `mem_mb`
@@ -736,13 +754,16 @@ D:/GFM/processed_inputs/
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-10. TESTS / CALIBRATION TOOLING (snakemake_workflow/tests/, repo-root tests/)
+10. TESTS / CALIBRATION TOOLING (tests/, repo root)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Not a formal pytest suite — a mix of reusable calibration tooling and
 standalone regression scripts, each run directly (`python <script>.py`).
+Previously split across two directories (`snakemake_workflow/tests/` +
+repo-root `tests/`, actively coupled via hardcoded cross-directory paths);
+consolidated into one repo-root `tests/` in the 2026-09 reorg.
 
-`snakemake_workflow/tests/`:
+Calibration tooling (now at repo-root `tests/`, alongside its own output data):
   - `select_calibration_tiles.py` — picks a geographically/size-stratified
     candidate pool of wave-0 tiles.
   - `test_sweep_budget_calibration.py` — traces the non-coupling solve's
@@ -763,14 +784,16 @@ standalone regression scripts, each run directly (`python <script>.py`).
   - `diagnose_large_residual.py`, `_list_tiles_by_size.py` — smaller one-off/
     reusable diagnostic helpers.
 
-Repo-root `tests/` — standalone regression scripts, each validating a
-specific current `src/` function against known-good behaviour:
+Standalone regression scripts (also `tests/`), each validating a specific
+current `src/` function against known-good behaviour:
 `boundary_station_search_validation/`, `boundary_waterlevel_encoding_
 validation/`, `coastline_mask_validation/`, `flood_depth_dense_seed_path_
 validation/`, `neighbor_wave_seeding_validation/`, `tile_dedup_validation/`,
 `tile_run_order_validation/`, `tile_shave_split_validation/`,
 `river_mouth_tile_validation/`. Also holds calibration-study output data
-(`obstacle_coupling_calibration_40/` etc., see above).
+(`obstacle_coupling_calibration_40/` etc., see above) and the
+`martinique_diagnostics/`/`norway_diagnostics/` one-off investigation
+folders.
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -918,6 +941,28 @@ Both open gaps from the pre-2026-08 flat-dispatch design are now closed:
    against `sinfo`'s real per-node number, never the nominal partition
    size - some memory is always reserved for the OS/SLURM daemons.
 
+6b. **Simulation → postprocessing bridge (2026-09).** Mirrors item 6's own
+   preprocessing→simulation bridge one phase further out: `submit_waves.sh`
+   now ends with one more job, `gfm_generate_postprocess_and_dispatch`
+   (`hpc.sbatch` - lightweight), gated `--dependency=afterany:$ALL_WAVE_IDS`
+   - a NEW accumulator kept alongside the existing wave-to-wave `PREV_IDS`,
+   since `PREV_IDS` only ever holds the *previous* wave (overwritten each
+   wave, not accumulated) and there was previously no variable holding the
+   union of every wave's job ids. Once every wave has reached a terminal
+   state, this job runs `generate_hpc_postprocess_job.py` (fresh, on Hydrax
+   itself - no `config_hpc.yml` needed there, same "local view == Linux
+   view" degrade as item 6) and submits the `submit_postprocess_and_exposure.sh`
+   it writes - so one initial submission now genuinely carries through
+   preprocessing → simulation → postprocessing → exposure analysis
+   unattended. Implemented in `generate_aqueduct_jobs.py`'s new
+   `_append_postprocess_bridge()`, called from both `generate_wave_dispatch`
+   (fresh) and `generate_resume_dispatch` (resume - a resumed run with zero
+   remaining work in every wave leaves `ALL_WAVE_IDS` empty, so the bridge
+   submits immediately with no dependency, correctly, since everything real
+   is already done). The manual path (`snakemake postprocess --cores N`,
+   `python generate_hpc_postprocess_job.py` by hand) still works unchanged
+   for small/debug runs or deliberately-controlled resumes.
+
 7. **Tile-size partition routing (2026-08).** Hydrax's regular partitions
    scale RAM at a fixed 8GB/vCPU (confirmed from the real partition table:
    `1vcpu`=8GB ... `60vcpu`=480GB). Since the pipeline's own
@@ -934,6 +979,23 @@ Both open gaps from the pre-2026-08 flat-dispatch design are now closed:
    sbatch`; `submit_waves.sh` still only barriers on WAVE, submitting both
    size classes of a wave together (size only picks a batch's partition,
    never its ordering).
+
+   **Large tiles still timing out even on `sbatch_large` (2026-09).**
+   `hpc.sbatch_large.time` raised 24h → 48h (`2-00:00:00`), plus a new
+   `hpc.large_tile_batch_multiplier` (default 2) that splits each wave's
+   `large` class across that many times more batches than
+   `split_batches_proportionally`'s own proportional result would give it -
+   e.g. 2 = roughly half as many tiles processed serially per node, applied
+   ON TOP of (not carved out of) `small`'s share, since the goal is more
+   parallelism for the class that was timing out, not rebalancing a fixed
+   budget away from small tiles that were already fine - a wave with large
+   tiles may now use more than `hpc.n_nodes` nodes at once. Mirrored in
+   BOTH `hpc_dispatch.smk` (Snakemake path) and `generate_hpc_simulation_
+   jobs.py` (standalone CLI, fresh AND `--resume` dispatch - resume is
+   exactly the situation a large-tile timeout leads to, so it needs the same
+   treatment). Simulation batching only - preprocessing's own large-tile
+   batching (`generate_hpc_preprocess_job.py`) wasn't reported as slow, left
+   unchanged.
 
 8. **`pulp`/`snakemake` incompatibility (found live on Hydrax, 2026-08).**
    `snakemake==7.32.4`'s own `get_argument_parser()` calls

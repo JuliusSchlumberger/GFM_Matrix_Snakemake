@@ -15,15 +15,24 @@ groups tiles by wave, generates one set of sbatch scripts per wave, and
 writes a `submit_waves.sh` driver that submits each wave to SLURM with a
 `--dependency=afterany:<every prior-wave job id>` barrier.
 
-Three stages:
+Four stages:
 
 1. **Preprocessing + job generation** — Snakemake, on a many-core prep/login node.
 2. **Simulation** — SLURM, submitted via `submit_waves.sh`, across compute nodes.
 3. **Postprocessing** — Snakemake, back on the machine with the shared filesystem.
+4. **Exposure analysis** — Snakemake/SLURM, on top of postprocessing's output.
 
 Stage 1 can run either on your local preprocessing machine (as below) or as
 one more Hydrax job that also submits stage 2 for you — see "Bundling
-preprocessing + dispatch into one Hydrax job" below.
+preprocessing + dispatch into one Hydrax job" below. Stages 3 and 4 can
+likewise run manually (as documented below) or automatically once every
+simulation wave finishes — `submit_waves.sh` now ends with one more job,
+gated `--dependency=afterany` on every wave's job ids, that generates and
+submits the postprocessing+exposure dispatch itself (see "## 3. Postprocess"
+below). So a single `bash submit_preprocess_and_dispatch.sh` (or a plain
+`bash submit_waves.sh`, if job generation already happened) now carries all
+the way through to exposure analysis unattended, once
+`preparation/run_preparation.py` has been run.
 
 ## One-time setup
 
@@ -65,6 +74,22 @@ comfortable margin below `sbatch`'s partition RAM (see the comment in
 `config.yml`). On the real production tile grid this split is NOT a small
 tail — confirmed ~15% of tiles (389 of 2,578) land in `large`, not "very
 few" as the pixel-count intuition might suggest.
+
+Large tiles were regularly not finishing simulation within `sbatch_large`'s
+time limit — fixed from two directions at once (2026-09): `hpc.sbatch_large.
+time` raised to 48h (`2-00:00:00`), and `hpc.large_tile_batch_multiplier`
+(default 2) splits each wave's `large` class across that many times more
+batches than `split_batches_proportionally`'s own shared-budget result would
+give it — e.g. 2 means roughly half as many tiles processed serially per
+node. Applied **on top of**, not carved out of, `small`'s share (a
+deliberate choice — the goal is more parallelism for the class that was
+timing out, not redistributing a fixed budget away from small tiles that
+were already fine), so a wave with large tiles may use more than `hpc.
+n_nodes` nodes at once. Set to `1` for the old (undoubled) behaviour. Applies
+to simulation batching only (`hpc_dispatch.smk` / `generate_hpc_simulation_
+jobs.py`, both fresh and `--resume` dispatch) — preprocessing's own
+large-tile batching (`generate_hpc_preprocess_job.py`) is unaffected, since
+preprocessing wasn't the reported problem.
 
 For preprocessing specifically, `cpus_per_task` is not just a SLURM
 allocation size — it's passed straight to `snakemake --cores N` for that
@@ -214,7 +239,24 @@ categories:
 
 ## 3. Postprocess
 
-Once all waves finish, back on the machine with the shared mount:
+**Automatic (default once you've submitted via `submit_waves.sh`):** the
+last phase `submit_waves.sh` submits — `gfm_generate_postprocess_and_dispatch`
+— is gated `--dependency=afterany:<every wave's job ids>` (via a new
+`ALL_WAVE_IDS` accumulator kept alongside the existing wave-to-wave
+`PREV_IDS`, since `PREV_IDS` alone only ever holds the *previous* wave's
+ids). Once every wave has reached a terminal state, it runs
+`generate_hpc_postprocess_job.py` (fresh, no `--resume`) and submits the
+resulting `submit_postprocess_and_exposure.sh` itself — see that script's
+own docstring (`snakemake_workflow/scripts/generate_hpc_postprocess_job.py`)
+for the merge_chunk → prepare_exposure_grid_chunk →
+compute_flood_fraction_chunk → exposure-analysis phase chain it generates.
+No separate action needed; check `squeue`/`sacct` for
+`gfm_generate_postprocess_and_dispatch` and the phases after it the same way
+you'd watch any other stage.
+
+**Manual (still available — a small/debug run, or after a `--resume`
+situation you want to control by hand):** once all waves finish, back on the
+machine with the shared mount:
 
 ```
 snakemake postprocess --cores N
@@ -237,4 +279,5 @@ plotting — no different from a fully-local run.
   predecessor has finished regardless of individual job failures, since a
   failed tile there just means its downstream neighbours fall back to a
   real-zero result for that scenario, not that the whole next wave should
-  be blocked.
+  be blocked. The postprocessing bridge job at the end uses the same
+  `afterany` philosophy for the same reason.

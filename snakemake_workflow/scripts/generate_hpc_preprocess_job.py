@@ -57,8 +57,9 @@ import sys
 from pathlib import Path
 
 import geopandas as gpd
+import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import (  # noqa: E402
     load_config, merged_slr_scenarios, retry_transient_io, split_batches_proportionally,
@@ -83,6 +84,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
     parser.add_argument("--config", default=str(default_config))
+    parser.add_argument(
+        "--calibration", action="store_true",
+        help="use generate_hpc_simulation_jobs.py directly for the post-preprocessing "
+             "wave-dispatch phase instead of `snakemake generate_aqueduct_jobs` - skips "
+             "Snakemake's own full-DAG preprocessing-output verification (safe here: this "
+             "phase only runs after submit_preprocess_and_dispatch.sh's own afterany chain "
+             "already guarantees every preprocessing batch above finished), and - unlike "
+             "`rule generate_aqueduct_jobs`, whose own base_config_path is a hardcoded "
+             "literal path to production config.yml regardless of --configfile (see "
+             "hpc_dispatch.smk) - correctly honors a scenario --config end to end. "
+             "Appropriate at calibration-subset scale, where the full-DAG build's "
+             "multi-hour cost at production scale buys nothing anyway.",
+    )
     args = parser.parse_args()
 
     config_path = Path(args.config)
@@ -99,6 +113,18 @@ def main() -> None:
 
     retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
+
+    # Written once here and referenced (via --configfile) by every snakemake
+    # invocation this script generates - without this, a compute node
+    # re-parsing the Snakefile from a bare `snakemake ...` call falls back to
+    # its own default config.yml, silently ignoring whatever --config this
+    # script itself was given (a scenario config, when --config points at
+    # one - see generate_aqueduct_jobs.py's generate_wave_dispatch, which
+    # already does the same thing for the simulation phase).
+    resolved_config_path = local_jobs_dir / "resolved_config.yml"
+    with open(resolved_config_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(linux_config, f)
+    linux_resolved_config = f"{linux_jobs_dir}/resolved_config.yml"
 
     # Local view (this machine's own reachable mount), not linux_config's -
     # a genuine pre-existing bug, found 2026-08-10 while testing the
@@ -241,6 +267,7 @@ def main() -> None:
             (
                 f'snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
                 '--rerun-triggers=mtime '
+                f'--configfile "{linux_resolved_config}" '
                 f'$(cat "{linux_jobs_dir}/{name}_targets.txt")'
             ),
             "",
@@ -275,6 +302,7 @@ def main() -> None:
         'echo "=== Building shared preprocessing inputs ==="',
         (
             f'snakemake --cores 1 --nolock --rerun-triggers=mtime '
+            f'--configfile "{linux_resolved_config}" '
             f'$(cat "{linux_shared_targets_file}")'
         ),
         "",
@@ -289,6 +317,30 @@ def main() -> None:
     # submit them. Lightweight (just calls snakemake + a shell script), so
     # it uses hpc.sbatch (the smaller of the two) rather than needing its
     # own dedicated config.
+    #
+    # --calibration routes this through generate_hpc_simulation_jobs.py
+    # instead of `snakemake generate_aqueduct_jobs` - the latter's own
+    # base_config_path (hpc_dispatch.smk) is a hardcoded literal path to
+    # production config.yml, NOT derived from whatever --configfile this
+    # command line carries, so resolved_config.yml (and therefore every
+    # solver parameter + tile_grid.path baked into it) would silently
+    # revert to production defaults for a scenario run - see this script's
+    # own module docstring / --calibration's help text. The default
+    # (non-calibration) path still gets --configfile below for whatever
+    # partial effect it has (live in-memory Snakemake params - tile_ids,
+    # return_periods, batches - DO correctly reflect it; resolved_config.yml
+    # does not, a known, documented gap for that path only).
+    if args.calibration:
+        generate_call = (
+            f'python snakemake_workflow/scripts/generate_hpc_simulation_jobs.py '
+            f'--config "{linux_resolved_config}"'
+        )
+    else:
+        generate_call = (
+            f'snakemake generate_aqueduct_jobs --cores 1 --nolock --rerun-triggers=mtime '
+            f'--configfile "{linux_resolved_config}"'
+        )
+
     dispatch_cfg = hpc_cfg["sbatch"]
     dispatch_lines = [
         "#!/bin/bash",
@@ -306,7 +358,7 @@ def main() -> None:
         "",
         f'cd "{linux_code_root}"',
         'echo "=== Generating wave sbatch scripts ==="',
-        "snakemake generate_aqueduct_jobs --cores 1 --nolock --rerun-triggers=mtime",
+        generate_call,
         "",
         'echo "=== Submitting simulation waves ==="',
         f'bash "{linux_jobs_dir}/submit_waves.sh"',

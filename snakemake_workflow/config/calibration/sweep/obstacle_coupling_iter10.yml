@@ -1,0 +1,5 @@
+# OFAT sweep point - obstacle_coupling.max_outer_iterations 10 (default 5). See docs/calibration_sweep_plan.md.
+simulation:
+  flooding:
+    obstacle_coupling:
+      max_outer_iterations: 10

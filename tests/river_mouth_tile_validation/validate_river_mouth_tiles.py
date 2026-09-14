@@ -36,8 +36,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Rectangle
 
-REPO_ROOT = Path(r"C:/Users/Schlu005/GFM")
-sys.path.insert(0, str(REPO_ROOT / "snakemake_workflow" / "src"))
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from tile_chunking import (  # noqa: E402
     _confirm_river_mouth_component,

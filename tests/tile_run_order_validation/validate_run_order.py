@@ -29,8 +29,8 @@ from pathlib import Path
 
 import geopandas as gpd
 
-REPO_ROOT = Path(r"C:/Users/Schlu005/GFM")
-sys.path.insert(0, str(REPO_ROOT / "snakemake_workflow" / "src"))
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT / "src"))
 
 import tile_chunking as tc  # noqa: E402
 

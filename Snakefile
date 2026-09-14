@@ -1,18 +1,19 @@
 """GFM Aqueduct preprocessing & simulation workflow.
 
 For every tile in the fixed-DeltaDTM-tile chunk manifest (`tile_grid.path`,
-built by `snakemake_workflow/preparation/run_preparation.py` — see
-`snakemake_workflow/src/tile_chunking.py` and that directory's
-`build_tile_manifest.py` for how it's derived from DeltaDTM coverage,
-floodability and population exposure), this workflow preprocesses the
-DEM, DEM-validity mask, friction and water level boundary inputs for each
-(return period, sea level rise scenario) combination, and runs the Aqueduct
-flood model for every (tile, return_period, waterlevel_name) combination.
+built by `preparation/run_preparation.py` — see `src/tile_chunking.py` and
+that directory's `build_tile_manifest.py` for how it's derived from
+DeltaDTM coverage, floodability and population exposure), this workflow
+preprocesses the DEM, DEM-validity mask, friction and water level boundary
+inputs for each (return period, sea level rise scenario) combination, and
+runs the Aqueduct flood model for every (tile, return_period,
+waterlevel_name) combination.
 
-All fixed parameters are defined in `config/config.yml`.  `TILE_IDS` is the
-static list of `tile_id` values read from `paths.tile_grid` at parse time —
-run `snakemake_workflow/preparation/run_preparation.py` beforehand to build
-and filter the tile grid down to tiles with DEM coverage.
+All fixed parameters are defined in `snakemake_workflow/config/config.yml`.
+`TILE_IDS` is the static list of `tile_id` values read from
+`paths.tile_grid` at parse time — run `preparation/run_preparation.py`
+beforehand to build and filter the tile grid down to tiles with DEM
+coverage.
 
 The postprocessing stage partitions the study area into spatial chunks of size
 `postprocessing.chunk_size_deg` degrees.  Each chunk is merged independently
@@ -82,7 +83,7 @@ def _retrying_makedirs(name, mode=0o777, exist_ok=False, _retries=5, _delay_s=15
 
 os.makedirs = _retrying_makedirs
 
-sys.path.insert(0, os.path.join(workflow.basedir, "snakemake_workflow", "src"))
+sys.path.insert(0, os.path.join(workflow.basedir, "src"))
 from aqueduct_runner import estimate_aqueduct_mem_mb  # noqa: E402
 from config_utils import _expand_paths, get_data_catalog, merged_slr_scenarios, split_batches_proportionally  # noqa: E402
 

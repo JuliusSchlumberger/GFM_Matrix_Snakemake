@@ -31,7 +31,7 @@ from rasterio.enums import Resampling
 from rasterio.transform import from_bounds as transform_from_bounds
 from rasterio.warp import reproject
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import get_data_catalog, retry_transient_io  # noqa: E402
 from merge import AQUEDUCT_NODATA, _bounds_intersect, decode_waterdepth_array  # noqa: E402
