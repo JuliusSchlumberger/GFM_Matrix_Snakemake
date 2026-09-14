@@ -76,6 +76,11 @@ def main() -> None:
         config = yaml.safe_load(f)
 
     model_outputs = config["simulation"]["model_outputs"]
+    # See preprocessing.smk's own comment - defaults to model_outputs (no-op
+    # unless a scenario config sets it, e.g. the ESP/FRA/NOR calibration
+    # sweep, which points it at a group-shared directory since none of the
+    # 12 sweep points change anything preprocessing produces).
+    preprocessing_inputs_dir = config["simulation"].get("preprocessing_inputs_dir") or model_outputs
     raster_config = config["raster_format"]
     flooding_config = config["simulation"]["flooding"]
     ocean_code = config["tile_generation"]["ocean_code"]
@@ -85,7 +90,7 @@ def main() -> None:
     tile_id = args.tile_id
     scenario_name = f"{args.return_period}_{args.waterlevel_name}"
     tile_dir = os.path.join(model_outputs, tile_id)
-    inputs_dir = os.path.join(tile_dir, "inputs")
+    inputs_dir = os.path.join(preprocessing_inputs_dir, tile_id, "inputs")
     dem_path = os.path.join(inputs_dir, "dem.tif")
     mask_path = os.path.join(inputs_dir, "mask.tif")
     friction_path = os.path.join(inputs_dir, "friction.tif")
@@ -137,8 +142,8 @@ def main() -> None:
         ]
         available = []
         for cand_id in candidates["tile_id"]:
-            cand_dem = os.path.join(model_outputs, str(int(cand_id)), "inputs", "dem.tif")
-            cand_mask = os.path.join(model_outputs, str(int(cand_id)), "inputs", "mask.tif")
+            cand_dem = os.path.join(preprocessing_inputs_dir, str(int(cand_id)), "inputs", "dem.tif")
+            cand_mask = os.path.join(preprocessing_inputs_dir, str(int(cand_id)), "inputs", "mask.tif")
             cand_waterdepth = os.path.join(
                 model_outputs, str(int(cand_id)), "results", f"waterdepth_{scenario_name}.tif",
             )

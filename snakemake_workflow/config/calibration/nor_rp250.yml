@@ -30,4 +30,8 @@ validation:
 hpc:
   n_nodes: 8   # bumped 2026-09-14 to speed up each combination's own wall time -
   # see esp_fra_rp100.yml's comment (same rationale, scaled down slightly for
-  # this group's smaller 58-tile closure)
+  # this group's smaller 58-tile closure) - only affects simulation-wave
+  # batching now, see single_preprocess_job below
+  single_preprocess_job: true   # see esp_fra_rp100.yml's comment - same rationale
+  sbatch:
+    time: "06:00:00"   # see esp_fra_rp100.yml's comment - same rationale

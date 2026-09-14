@@ -84,6 +84,16 @@ wait_for_queue_empty() {
     echo "  queue clear."
 }
 
+echo "NOTE: preprocessing inputs (dem/mask/friction/boundaries) are shared"
+echo "  PER GROUP, not per sweep point (simulation.preprocessing_inputs_dir -"
+echo "  see build_run_config.py's own comment) - none of the 12 OFAT sweep"
+echo "  points change anything preprocessing produces, so after the first"
+echo "  sweep point in a group builds these files, every later sweep point"
+echo "  in that SAME group will see them already present and skip straight"
+echo "  to simulation (Snakemake's own file-existence/mtime check - not"
+echo "  something this script does). They are only rebuilt if missing."
+echo ""
+
 n_total=$((${#SCENARIO_GROUPS[@]} * ${#SWEEP_POINTS[@]}))
 n_done=0
 

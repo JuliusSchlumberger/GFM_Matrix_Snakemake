@@ -207,6 +207,12 @@ def main() -> None:
     linux_jobs_dir = linux_config["hpc"]["jobs_dir"]
     linux_code_root = linux_config["paths"]["code_root"]
     linux_model_outputs = linux_config["simulation"]["model_outputs"]
+    # Preprocessing TARGETS (this script only ever builds inputs/, never
+    # results/) live here - defaults to model_outputs (no-op for production)
+    # but a scenario config (e.g. the ESP/FRA/NOR calibration sweep) can
+    # point it at a group-shared directory instead - see preprocessing.smk's
+    # own comment for the full rationale.
+    linux_preprocessing_inputs_dir = linux_config["simulation"].get("preprocessing_inputs_dir") or linux_model_outputs
     hpc_cfg = linux_config["hpc"]
     n_nodes = hpc_cfg["n_nodes"]
     large_pixel_threshold = hpc_cfg["large_tile_pixel_threshold"]
@@ -285,32 +291,57 @@ def main() -> None:
     for size_class in tiles_by_class:
         tiles_by_class[size_class].sort(key=int)
 
-    # Node budget split PROPORTIONALLY to each class's share of tiles
-    # (e.g. ~15% large / ~85% small on the real production grid), rather
-    # than each class independently getting up to n_nodes - the latter
-    # would let preprocessing use up to 2x n_nodes total (n_nodes for
-    # small + n_nodes for large) even though "large" is a small minority
-    # of the actual work. Shared with hpc_dispatch.smk's simulation-wave
-    # batching (split_batches_proportionally, src/config_utils.py) - that
-    # rule used to duplicate this exact logic with its own independent
-    # min(n_nodes, len(class_tiles)) per class, which was the actual bug
-    # (found live 2026-08-10: a wave with both size classes present could
-    # claim up to 2x n_nodes at once) this shared helper now prevents from
-    # recurring in either place.
-    present_classes = [c for c in ("small", "large") if tiles_by_class[c]]
-    class_n_nodes = split_batches_proportionally(
-        {c: len(tiles_by_class[c]) for c in present_classes}, n_nodes,
-    )
+    # hpc.single_preprocess_job (default False, production unaffected):
+    # collapse EVERY tile (both size classes) into ONE job on hpc.sbatch
+    # (1vcpu, --cores 1, no parallelization at all) instead of splitting
+    # across n_nodes batches. Appropriate at calibration scale, NOT
+    # production scale - observed live 2026-09: real preprocessing compute
+    # time for a ~78-tile calibration domain is minutes, while SLURM
+    # queue wait time for each separately-submitted job was, at times,
+    # HOURS (`(Priority)` pending, even after halving batch count via
+    # n_nodes) - submitting ONE job gets ONE ticket in the scheduler's
+    # queue instead of several, trading away cross-node parallelism that
+    # buys nothing at this scale anyway since queue wait dominates.
+    # RISK, accepted knowingly (user decision): "large" tiles normally run
+    # on hpc.sbatch_large specifically because they need more memory than
+    # hpc.sbatch's ~7-8GB ceiling (Hydrax's fixed 8GB/vCPU on 1vcpu nodes)
+    # - forcing them onto a 1vcpu job here could OOM-kill preprocessing for
+    # those tiles specifically. Only ever set for the ESP/FRA/NOR
+    # calibration groups (small closures, unverified whether their
+    # "large"-classed tiles actually need the full 30G) - never for
+    # production without re-deriving that memory math for the full grid.
+    if hpc_cfg.get("single_preprocess_job", False):
+        present_classes = ["combined"]
+        class_n_nodes = {"combined": 1}
+        all_tiles = sorted((tid for tiles in tiles_by_class.values() for tid in tiles), key=int)
+        batches = [("combined", "000", all_tiles)]
+    else:
+        # Node budget split PROPORTIONALLY to each class's share of tiles
+        # (e.g. ~15% large / ~85% small on the real production grid), rather
+        # than each class independently getting up to n_nodes - the latter
+        # would let preprocessing use up to 2x n_nodes total (n_nodes for
+        # small + n_nodes for large) even though "large" is a small minority
+        # of the actual work. Shared with hpc_dispatch.smk's simulation-wave
+        # batching (split_batches_proportionally, src/config_utils.py) - that
+        # rule used to duplicate this exact logic with its own independent
+        # min(n_nodes, len(class_tiles)) per class, which was the actual bug
+        # (found live 2026-08-10: a wave with both size classes present could
+        # claim up to 2x n_nodes at once) this shared helper now prevents from
+        # recurring in either place.
+        present_classes = [c for c in ("small", "large") if tiles_by_class[c]]
+        class_n_nodes = split_batches_proportionally(
+            {c: len(tiles_by_class[c]) for c in present_classes}, n_nodes,
+        )
 
-    batches = []  # [(size_class, batch_id, [tile_id, ...]), ...]
-    for size_class, class_tiles in tiles_by_class.items():
-        if not class_tiles:
-            continue
-        n_batches = class_n_nodes[size_class]
-        k, m = divmod(len(class_tiles), n_batches)
-        for i in range(n_batches):
-            batch_tiles = class_tiles[i * k + min(i, m): (i + 1) * k + min(i + 1, m)]
-            batches.append((size_class, f"{i:03d}", batch_tiles))
+        batches = []  # [(size_class, batch_id, [tile_id, ...]), ...]
+        for size_class, class_tiles in tiles_by_class.items():
+            if not class_tiles:
+                continue
+            n_batches = class_n_nodes[size_class]
+            k, m = divmod(len(class_tiles), n_batches)
+            for i in range(n_batches):
+                batch_tiles = class_tiles[i * k + min(i, m): (i + 1) * k + min(i + 1, m)]
+                batches.append((size_class, f"{i:03d}", batch_tiles))
 
     batch_script_paths = []
     for size_class, batch_id, batch_tiles in batches:
@@ -318,7 +349,7 @@ def main() -> None:
         name = f"preprocess_{size_class}_batch_{batch_id}"
         targets = [
             p for tile_id in batch_tiles
-            for p in _target_paths(f"{linux_model_outputs}/{tile_id}", return_periods, waterlevel_names)
+            for p in _target_paths(f"{linux_preprocessing_inputs_dir}/{tile_id}", return_periods, waterlevel_names)
         ]
 
         # Target list written to its own file (thousands of paths per
@@ -504,10 +535,16 @@ def main() -> None:
     with open(submit_script_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(submit_lines) + "\n")
 
-    node_summary = ", ".join(f"{size_class}={class_n_nodes[size_class]}" for size_class in present_classes)
+    if hpc_cfg.get("single_preprocess_job", False):
+        node_summary = "single 1vcpu job, no batching - hpc.single_preprocess_job"
+    else:
+        node_summary = (
+            ", ".join(f"{size_class}={class_n_nodes[size_class]}" for size_class in present_classes)
+            + f" nodes, {n_nodes} total budget"
+        )
     print(
         f"\nDone. 1 synchronous shared-inputs build + {len(batch_script_paths)} preprocessing batch(es) "
-        f"({node_summary} nodes, {n_nodes} total budget) + 1 dispatch job written to {local_jobs_dir}"
+        f"({node_summary}) + 1 dispatch job written to {local_jobs_dir}"
     )
     print(f"Submit on Hydrax with: bash {linux_jobs_dir}/submit_preprocess_and_dispatch.sh")
 

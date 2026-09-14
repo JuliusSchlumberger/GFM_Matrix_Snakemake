@@ -16,6 +16,22 @@ fully isolated `simulation.model_outputs`/`postprocessing.merged_outputs`/
 with each other OR with production, even though `waterdepth_{rp}_{slr}.tif`
 output filenames carry no parameter tag of their own.
 
+`simulation.preprocessing_inputs_dir` is the one exception, deliberately NOT
+isolated per run_tag - it's shared at the GROUP level instead
+(`{root}/calibration_esp_fra_nor/{group}/model_outputs`), reused across all
+12 sweep points of that group (2026-09-14). None of the 12 OFAT sweep points
+(friction_scale_factor, max_rounds, obstacle_coupling.*,
+waterlevel_epsilon_m) touch anything preprocessing produces
+(dem/mask/friction/boundaries under inputs/) - they're all solver-runtime
+parameters read only when the flood solve itself actually runs - so every
+sweep point in a group needs byte-identical preprocessing inputs. Sharing
+them cuts preprocessing from 12x-per-group redundant work to 1x-per-group
+(2 total across the whole 24-combination sweep, not 24). Safe specifically
+because `results/waterdepth_*.tif` (the one output whose filename has no
+sweep-point tag, and genuinely DOES differ per sweep point) lives under
+`simulation.model_outputs`, which stays isolated per run_tag as before - see
+preprocessing.smk's own comment for the full inputs/-vs-results/ split.
+
 Deliberately does NOT bake `config_hpc.yml` into the materialized file - the
 generator scripts that consume it (generate_hpc_preprocess_job.py etc.)
 auto-discover `config_hpc.yml` NEXT TO whatever --config path they're given,
@@ -56,7 +72,13 @@ def build_run_config(group: str, sweep_point: str) -> Path:
 
     run_tag = f"{group}__{sweep_point}"
     path_overrides = {
-        "simulation": {"model_outputs": f"{{root}}/calibration_esp_fra_nor/{run_tag}/model_outputs"},
+        "simulation": {
+            "model_outputs": f"{{root}}/calibration_esp_fra_nor/{run_tag}/model_outputs",
+            # GROUP-level, not run_tag-level - see module docstring. Shared
+            # across all 12 sweep points of this group; only results/ (under
+            # model_outputs, above) is isolated per run_tag.
+            "preprocessing_inputs_dir": f"{{root}}/calibration_esp_fra_nor/{group}/model_outputs",
+        },
         "postprocessing": {"merged_outputs": f"{{root}}/calibration_esp_fra_nor/{run_tag}/merged_results"},
         "validation": {"output_dir": f"{{root}}/calibration_esp_fra_nor/{run_tag}/validation"},
         "hpc": {"jobs_dir": f"{{root}}/calibration_esp_fra_nor/{run_tag}/hpc_jobs"},

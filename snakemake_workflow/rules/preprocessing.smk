@@ -1,9 +1,26 @@
 """Rules for preprocessing per-tile model inputs.
 
-Each rule produces a single file in `model_outputs/{tile_id}/inputs/`. All
-fixed parameters (data source names, raster output options, water level
-scenario definitions) are read from `config/config.yml`.
+Each rule produces a single file in `{preprocessing_inputs_dir}/{tile_id}/
+inputs/`. All fixed parameters (data source names, raster output options,
+water level scenario definitions) are read from `config/config.yml`.
+
+`_preprocessing_inputs_dir` defaults to `simulation.model_outputs` (so
+production, which never sets `simulation.preprocessing_inputs_dir`, is
+byte-for-byte unaffected) but can be pointed elsewhere - added 2026-09-14
+for the ESP/FRA/NOR calibration sweep: within one group (e.g.
+esp_fra_rp100), none of the 12 OFAT sweep points (friction_scale_factor,
+max_rounds, obstacle_coupling.*, waterlevel_epsilon_m) touch anything
+preprocessing produces here - they're all solver-runtime parameters - so
+all 12 sweep points need byte-identical inputs/ content. build_run_config.py
+points preprocessing_inputs_dir at a GROUP-level shared directory instead
+of isolating it per run_tag like `simulation.model_outputs` (which stays
+isolated - it also holds results/waterdepth_*.tif, whose filename has no
+sweep-point tag, so THAT genuinely must not be shared - see that script's
+own comment). Cuts calibration preprocessing from 12x-per-group redundant
+to 1x-per-group.
 """
+
+_preprocessing_inputs_dir = config["simulation"].get("preprocessing_inputs_dir") or config["simulation"]["model_outputs"]
 
 
 rule compute_geoid_offset_raster:
@@ -28,7 +45,7 @@ rule compute_geoid_offset_raster:
 rule extract_tile_geometry:
     """Extract a single tile's geometry from the overlapping tile grid."""
     output:
-        tile_geometry=os.path.join(config["simulation"]["model_outputs"], "{tile_id}", "inputs", "tile_geometry.gpkg"),
+        tile_geometry=os.path.join(_preprocessing_inputs_dir, "{tile_id}", "inputs", "tile_geometry.gpkg"),
     params:
         tile_grid_path=config["tile_grid"]["path"],
     script:
@@ -40,7 +57,7 @@ rule compute_model_bbox:
     input:
         tile_geometry=rules.extract_tile_geometry.output.tile_geometry,
     output:
-        model_bbox=os.path.join(config["simulation"]["model_outputs"], "{tile_id}", "inputs", "model_bbox.json"),
+        model_bbox=os.path.join(_preprocessing_inputs_dir, "{tile_id}", "inputs", "model_bbox.json"),
     params:
         data_catalog=config["paths"]["hydromt_data_catalog"],
         data_catalog_root=config["paths"]["root"],
@@ -61,7 +78,7 @@ rule extract_dem:
         model_bbox=rules.compute_model_bbox.output.model_bbox,
         geoid_offset_raster=rules.compute_geoid_offset_raster.output.offset_raster,
     output:
-        dem=os.path.join(config["simulation"]["model_outputs"], "{tile_id}", "inputs", "dem.tif"),
+        dem=os.path.join(_preprocessing_inputs_dir, "{tile_id}", "inputs", "dem.tif"),
     params:
         data_catalog=config["paths"]["hydromt_data_catalog"],
         data_catalog_root=config["paths"]["root"],
@@ -76,7 +93,7 @@ rule extract_dem_mask:
     input:
         dem=rules.extract_dem.output.dem,
     output:
-        mask=os.path.join(config["simulation"]["model_outputs"], "{tile_id}", "inputs", "mask.tif"),
+        mask=os.path.join(_preprocessing_inputs_dir, "{tile_id}", "inputs", "mask.tif"),
     params:
         data_catalog=config["paths"]["hydromt_data_catalog"],
         data_catalog_root=config["paths"]["root"],
@@ -90,7 +107,7 @@ rule compute_friction:
     input:
         dem=rules.extract_dem.output.dem,
     output:
-        friction=os.path.join(config["simulation"]["model_outputs"], "{tile_id}", "inputs", "friction.tif"),
+        friction=os.path.join(_preprocessing_inputs_dir, "{tile_id}", "inputs", "friction.tif"),
     params:
         data_catalog=config["paths"]["hydromt_data_catalog"],
         data_catalog_root=config["paths"]["root"],
@@ -157,7 +174,7 @@ rule extract_boundaries:
         stations_cache=rules.cache_waterlevel_stations.output.stations_cache,
     output:
         boundaries=os.path.join(
-            config["simulation"]["model_outputs"], "{tile_id}", "inputs",
+            _preprocessing_inputs_dir, "{tile_id}", "inputs",
             "boundaries_{return_period}_{waterlevel_name}.gpkg",
         ),
     params:

@@ -44,6 +44,7 @@ from rasters import save_nodata_raster  # noqa: E402
 from tiles import load_tile_grid  # noqa: E402
 
 model_outputs = snakemake.params.model_outputs  # noqa: F821
+preprocessing_inputs_dir = snakemake.params.preprocessing_inputs_dir  # noqa: F821
 skipped_dir = os.path.join(model_outputs, "skipped_tiles")
 oom_dir = os.path.join(model_outputs, "oom_tiles")
 timings_dir = os.path.join(model_outputs, "run_timings")
@@ -93,8 +94,8 @@ else:
         ]
         available = []
         for cand_id in candidates["tile_id"]:
-            cand_dem = os.path.join(model_outputs, str(int(cand_id)), "inputs", "dem.tif")
-            cand_mask = os.path.join(model_outputs, str(int(cand_id)), "inputs", "mask.tif")
+            cand_dem = os.path.join(preprocessing_inputs_dir, str(int(cand_id)), "inputs", "dem.tif")
+            cand_mask = os.path.join(preprocessing_inputs_dir, str(int(cand_id)), "inputs", "mask.tif")
             cand_waterdepth = os.path.join(
                 model_outputs, str(int(cand_id)), "results", f"waterdepth_{scenario_name}.tif",
             )

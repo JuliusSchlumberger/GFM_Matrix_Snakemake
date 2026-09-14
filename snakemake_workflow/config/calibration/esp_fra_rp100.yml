@@ -36,6 +36,28 @@ validation:
 # low as 3 either: bumped to speed up each combination's own wall time
 # (2026-09-14, well under Hydrax's ~240-core responsible-use ceiling -
 # see config.yml's hpc.sbatch comment - even accounting for
-# large_tile_batch_multiplier on the 11 large tiles).
+# large_tile_batch_multiplier on the 11 large tiles). Only affects
+# SIMULATION-wave batching now - single_preprocess_job (below) takes
+# preprocessing itself out of n_nodes's control entirely.
 hpc:
   n_nodes: 10
+  # 2026-09-14: collapse ALL preprocessing (both size classes) into ONE
+  # 1vcpu job instead of splitting across nodes - see
+  # generate_hpc_preprocess_job.py's own comment on this flag for the full
+  # rationale/risk (real preprocessing compute time is minutes at this
+  # scale; SLURM queue wait per separately-submitted job was, at times,
+  # HOURS - one job means one queue ticket instead of several).
+  single_preprocess_job: true
+  # 2026-09-14: production's 24h default (config.yml's hpc.sbatch.time) badly
+  # mismatches calibration-scale preprocessing - SLURM's backfill scheduler
+  # favors jobs it can slot into small gaps without delaying higher-priority
+  # work, so requesting a full day when the job needs far less actively hurts
+  # queue placement (confirmed live: `squeue --start` showed the estimated
+  # start time getting WORSE, not better, between two checks minutes apart).
+  # 6h (user-chosen, 2026-09-14) accounts for single_preprocess_job (above)
+  # now running all 78 tiles' DEM/mask/friction/boundaries SERIALLY on one
+  # 1vcpu core instead of split across nodes - real parallel runs earlier
+  # today finished in ~15 minutes across ~10 nodes, so serial is naturally
+  # much slower, but still nowhere near the production 24h default.
+  sbatch:
+    time: "06:00:00"

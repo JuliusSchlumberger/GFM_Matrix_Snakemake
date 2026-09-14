@@ -66,6 +66,11 @@ rule run_aqueduct:
         ),
     params:
         model_outputs=config["simulation"]["model_outputs"],
+        # See preprocessing.smk's own comment - defaults to model_outputs
+        # (no-op for production, which never sets this) - used only for the
+        # hop>=1 neighbour-tile dem/mask lookup below, since those are
+        # preprocessing inputs (shared per calibration group), not results.
+        preprocessing_inputs_dir=config["simulation"].get("preprocessing_inputs_dir") or config["simulation"]["model_outputs"],
         raster_config=config["raster_format"],
         tile_grid_path=config["tile_grid"]["path"],
         # Reused from tile_generation.* (2026-08 - same values already used at
