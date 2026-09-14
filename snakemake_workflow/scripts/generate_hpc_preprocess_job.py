@@ -62,7 +62,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import (  # noqa: E402
-    load_config, merged_slr_scenarios, retry_transient_io, split_batches_proportionally,
+    atomic_write, load_config, merged_slr_scenarios, retry_transient_io, split_batches_proportionally,
 )
 
 
@@ -70,6 +70,39 @@ def _account_line(sbatch_cfg: dict) -> list[str]:
     if sbatch_cfg.get("account"):  # optional - Hydrax jobs don't require one
         return [f"#SBATCH --account={sbatch_cfg['account']}"]
     return []
+
+
+def _retry_wrapper_lines() -> list[str]:
+    """Bash function def: retries a `snakemake --configfile ...` invocation
+    on failure - confirmed live 2026-09: a job with NO SLURM dependency
+    (build_shared_inputs.sbatch - submitted essentially instantly after
+    resolved_config.yml is written on the login node, unlike every other
+    generated job, which waits on something first) can hit a cross-node
+    filesystem consistency gap on the shared P:\\ mount and read a
+    corrupted/stale copy of that file (UnicodeDecodeError inside
+    Snakemake's own --configfile loader) - the SAME exact byte at the SAME
+    exact position every time it's happened, ruling out a random race and
+    pointing at cache staleness specifically (very plausibly SMB/CIFS-style
+    client caching on this mount, not NFS). Retrying (rather than a fixed
+    sleep) matches this codebase's own retry_transient_io philosophy -
+    assume transient, retry with backoff, fail loudly only once attempts
+    are genuinely exhausted.
+    """
+    return [
+        "run_snakemake_with_retry() {",
+        "  local attempt=1 max_attempts=5 delay=15",
+        '  while [ "$attempt" -le "$max_attempts" ]; do',
+        '    if "$@"; then',
+        "      return 0",
+        "    fi",
+        '    echo "  [retry $attempt/$max_attempts] snakemake invocation failed - retrying in ${delay}s..." >&2',
+        '    sleep "$delay"',
+        "    attempt=$((attempt + 1))",
+        "  done",
+        '  echo "  snakemake invocation failed after $max_attempts attempts - giving up." >&2',
+        "  return 1",
+        "}",
+    ]
 
 
 def _target_paths(tile_dir: str, return_periods: list[str], waterlevel_names: list[str]) -> list[str]:
@@ -121,9 +154,18 @@ def main() -> None:
     # script itself was given (a scenario config, when --config points at
     # one - see generate_aqueduct_jobs.py's generate_wave_dispatch, which
     # already does the same thing for the simulation phase).
+    #
+    # atomic_write (temp file + os.replace), NOT a plain open()+write -
+    # confirmed live 2026-09: a SLURM job on a different compute node reading
+    # this over the shared P:\ network filesystem moments after it's written
+    # can otherwise see a partial/garbled file (UnicodeDecodeError on a
+    # mid-write or stale-cache read) - build_shared_inputs.sbatch hit exactly
+    # this, while a later read of the same file (~5min on, after more of the
+    # pipeline had run) succeeded. Same latent bug already existed in
+    # generate_aqueduct_jobs.py's own resolved_config.yml write - fixed
+    # there too, not just here.
     resolved_config_path = local_jobs_dir / "resolved_config.yml"
-    with open(resolved_config_path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(linux_config, f)
+    atomic_write(resolved_config_path, lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
     linux_resolved_config = f"{linux_jobs_dir}/resolved_config.yml"
 
     # Local view (this machine's own reachable mount), not linux_config's -
@@ -234,6 +276,8 @@ def main() -> None:
             "set -euo pipefail",
             sbatch_cfg["env_activate_cmd"],
             "",
+            *_retry_wrapper_lines(),
+            "",
             f'cd "{linux_code_root}"',
             f'echo "=== Preprocessing batch {size_class}/{batch_id}: {len(batch_tiles)} tiles ==="',
             "",
@@ -265,7 +309,7 @@ def main() -> None:
             f'done < "{linux_shared_targets_file}"',
             "",
             (
-                f'snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
+                f'run_snakemake_with_retry snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
                 '--rerun-triggers=mtime '
                 f'--configfile "{linux_resolved_config}" '
                 f'$(cat "{linux_jobs_dir}/{name}_targets.txt")'
@@ -298,10 +342,12 @@ def main() -> None:
         "set -euo pipefail",
         shared_cfg["env_activate_cmd"],
         "",
+        *_retry_wrapper_lines(),
+        "",
         f'cd "{linux_code_root}"',
         'echo "=== Building shared preprocessing inputs ==="',
         (
-            f'snakemake --cores 1 --nolock --rerun-triggers=mtime '
+            f'run_snakemake_with_retry snakemake --cores 1 --nolock --rerun-triggers=mtime '
             f'--configfile "{linux_resolved_config}" '
             f'$(cat "{linux_shared_targets_file}")'
         ),
@@ -337,8 +383,8 @@ def main() -> None:
         )
     else:
         generate_call = (
-            f'snakemake generate_aqueduct_jobs --cores 1 --nolock --rerun-triggers=mtime '
-            f'--configfile "{linux_resolved_config}"'
+            f'run_snakemake_with_retry snakemake generate_aqueduct_jobs --cores 1 --nolock '
+            f'--rerun-triggers=mtime --configfile "{linux_resolved_config}"'
         )
 
     dispatch_cfg = hpc_cfg["sbatch"]
@@ -355,6 +401,8 @@ def main() -> None:
         "",
         "set -euo pipefail",
         dispatch_cfg["env_activate_cmd"],
+        "",
+        *_retry_wrapper_lines(),  # only used by the non-calibration snakemake branch below; harmless if unused
         "",
         f'cd "{linux_code_root}"',
         'echo "=== Generating wave sbatch scripts ==="',

@@ -71,7 +71,7 @@ from shapely.geometry import box as shapely_box
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from config_utils import load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
+from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
 from generate_exposure_jobs import generate_exposure_dispatch, generate_exposure_resume_dispatch  # noqa: E402
 
 
@@ -79,6 +79,31 @@ def _account_line(sbatch_cfg: dict) -> list[str]:
     if sbatch_cfg.get("account"):  # optional - Hydrax jobs don't require one
         return [f"#SBATCH --account={sbatch_cfg['account']}"]
     return []
+
+
+def _retry_wrapper_lines() -> list[str]:
+    """Bash function def: retries a `snakemake --configfile ...` invocation
+    on failure - see generate_hpc_preprocess_job.py's matching helper for
+    the full rationale (confirmed live 2026-09: a job with no/minimal
+    dependency delay can read a stale/corrupted resolved_config.yml over
+    the shared P:\\ mount - same exact failure every time, pointing at
+    cross-node filesystem cache staleness, not a random race).
+    """
+    return [
+        "run_snakemake_with_retry() {",
+        "  local attempt=1 max_attempts=5 delay=15",
+        '  while [ "$attempt" -le "$max_attempts" ]; do',
+        '    if "$@"; then',
+        "      return 0",
+        "    fi",
+        '    echo "  [retry $attempt/$max_attempts] snakemake invocation failed - retrying in ${delay}s..." >&2',
+        '    sleep "$delay"',
+        "    attempt=$((attempt + 1))",
+        "  done",
+        '  echo "  snakemake invocation failed after $max_attempts attempts - giving up." >&2',
+        "  return 1",
+        "}",
+    ]
 
 
 def _build_chunk_grid(tile_gdf: gpd.GeoDataFrame, chunk_size_deg: float) -> gpd.GeoDataFrame:
@@ -137,11 +162,13 @@ def _write_batches(
             "set -euo pipefail",
             sbatch_cfg["env_activate_cmd"],
             "",
+            *_retry_wrapper_lines(),
+            "",
             f'cd "{linux_code_root}"',
             f'echo "=== Postprocessing {phase_name} batch {i:03d}: {len(batch_targets)} target(s) ==="',
             "",
             (
-                f'snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
+                f'run_snakemake_with_retry snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
                 f'--rerun-triggers=mtime --configfile "{configfile_path}" '
                 f'$(cat "{linux_jobs_dir}/{name}_targets.txt")'
             ),
@@ -189,10 +216,13 @@ def main() -> None:
     # only write it here if this script is invoked standalone, so this
     # script is safe to run on its own too. Referenced (via --configfile)
     # by every snakemake call this script generates - see _write_batches.
+    # atomic_write, not a plain open()+write - see generate_hpc_preprocess_job.py's
+    # matching comment: a SLURM job on a different node reading this over the
+    # shared P:\ filesystem moments after a non-atomic write can see a
+    # partial/garbled file (confirmed live 2026-09).
     resolved_config_path = local_jobs_dir / "resolved_config.yml"
     if not resolved_config_path.exists():
-        with open(resolved_config_path, "w", encoding="utf-8") as f:
-            yaml.safe_dump(linux_config, f)
+        atomic_write(resolved_config_path, lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
     linux_resolved_config = f"{linux_jobs_dir}/resolved_config.yml"
 
     # Local view (this machine's own reachable mount) for the tile-grid

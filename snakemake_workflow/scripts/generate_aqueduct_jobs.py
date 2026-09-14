@@ -64,7 +64,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from config_utils import load_config, retry_transient_io  # noqa: E402
+from config_utils import atomic_write, load_config, retry_transient_io  # noqa: E402
 
 
 def _append_postprocess_bridge(
@@ -171,8 +171,12 @@ def generate_wave_dispatch(
     retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
 
-    with open(resolved_config_path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(linux_config, f)
+    # atomic_write, not a plain open()+write - confirmed live 2026-09: a
+    # SLURM job on a different compute node reading this over the shared
+    # P:\ network filesystem moments after a non-atomic write can see a
+    # partial/garbled file (UnicodeDecodeError on a mid-write or
+    # stale-cache read) - see generate_hpc_preprocess_job.py's matching fix.
+    atomic_write(resolved_config_path, lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
 
     # ── Write one sbatch script per (wave, size_class, batch), in the same
     #    order as script_paths (caller built both from the same `batches`
@@ -306,8 +310,12 @@ def generate_resume_dispatch(
     retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
 
-    with open(resolved_config_path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(linux_config, f)
+    # atomic_write, not a plain open()+write - confirmed live 2026-09: a
+    # SLURM job on a different compute node reading this over the shared
+    # P:\ network filesystem moments after a non-atomic write can see a
+    # partial/garbled file (UnicodeDecodeError on a mid-write or
+    # stale-cache read) - see generate_hpc_preprocess_job.py's matching fix.
+    atomic_write(resolved_config_path, lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
 
     scripts_by_wave: dict[int, list[str]] = {}
 
