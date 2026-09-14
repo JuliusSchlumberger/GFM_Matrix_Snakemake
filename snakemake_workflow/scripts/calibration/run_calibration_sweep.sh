@@ -43,7 +43,13 @@ if [ "${1:-}" = "--poll-interval" ]; then
     POLL_INTERVAL_S="$2"
 fi
 
-GROUPS=(esp_fra_rp100 nor_rp250)
+# NOTE: named SCENARIO_GROUPS, not GROUPS - GROUPS is a reserved bash
+# special variable (the current user's real Unix group-ID list);
+# assigning to it silently does nothing and ${GROUPS[@]} keeps returning
+# the real system group list instead (confirmed live 2026-09-14 - every
+# combination's "group" became a real GID and n_total blew up to
+# len(real_groups) x len(SWEEP_POINTS)).
+SCENARIO_GROUPS=(esp_fra_rp100 nor_rp250)
 SWEEP_POINTS=(
     baseline
     friction_0.5 friction_2.0
@@ -78,10 +84,10 @@ wait_for_queue_empty() {
     echo "  queue clear."
 }
 
-n_total=$((${#GROUPS[@]} * ${#SWEEP_POINTS[@]}))
+n_total=$((${#SCENARIO_GROUPS[@]} * ${#SWEEP_POINTS[@]}))
 n_done=0
 
-for group in "${GROUPS[@]}"; do
+for group in "${SCENARIO_GROUPS[@]}"; do
     for sweep in "${SWEEP_POINTS[@]}"; do
         run_tag="${group}__${sweep}"
         n_done=$((n_done + 1))
