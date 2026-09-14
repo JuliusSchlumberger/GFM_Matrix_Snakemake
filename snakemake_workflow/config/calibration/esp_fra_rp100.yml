@@ -28,9 +28,14 @@ validation:
   return_period: "RP100"
   waterlevel_name: "SLR_0"
 
-# Small closure (78 tiles total, one wave of 77 + one wave of 1) - the
+# Small closure (78 tiles total, one wave of 77 + one wave of 1). The
 # production default of 20 would over-fragment into ~1-tile-per-node
-# batches, wasting SLURM job overhead for no parallelism benefit at this
-# scale. Tuned against the real closure size above, not a guess.
+# batches for the hop=1 wave, wasting SLURM job overhead for no
+# parallelism benefit at that scale - but the sweep runs one combination
+# at a time (run_calibration_sweep.sh), so there's no reason to stay as
+# low as 3 either: bumped to speed up each combination's own wall time
+# (2026-09-14, well under Hydrax's ~240-core responsible-use ceiling -
+# see config.yml's hpc.sbatch comment - even accounting for
+# large_tile_batch_multiplier on the 11 large tiles).
 hpc:
-  n_nodes: 3
+  n_nodes: 10
