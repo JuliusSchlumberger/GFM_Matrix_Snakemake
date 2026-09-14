@@ -95,6 +95,17 @@ def _retry_wrapper_lines() -> list[str]:
     sleep) matches this codebase's own retry_transient_io philosophy -
     assume transient, retry with backoff, fail loudly only once attempts
     are genuinely exhausted.
+
+    2026-09-14: staging resolved_config.yml to node-local disk first
+    (_stage_configfile_lines, below) did NOT stop this recurring, which
+    means it isn't necessarily resolved_config.yml at all - the Snakefile
+    itself has `configfile: "snakemake_workflow/config/config.yml"` +
+    a conditional one for config_local.yml, BOTH loaded automatically on
+    every snakemake invocation before --configfile is even merged in, and
+    raw UnicodeDecodeErrors never report which file they came from. Each
+    failed attempt below now dumps a checksum/mtime of every candidate
+    config file, so a recurrence gives real forensic evidence instead of
+    another guess.
     """
     return [
         "run_snakemake_with_retry() {",
@@ -104,6 +115,9 @@ def _retry_wrapper_lines() -> list[str]:
         "      return 0",
         "    fi",
         '    echo "  [retry $attempt/$max_attempts] snakemake invocation failed - retrying in ${delay}s..." >&2',
+        '    echo "  [forensics] candidate config files at time of failure:" >&2',
+        '    sha256sum snakemake_workflow/config/config.yml snakemake_workflow/config/config_local.yml "$LOCAL_CONFIGFILE" >&2 || true',
+        '    stat snakemake_workflow/config/config.yml snakemake_workflow/config/config_local.yml "$LOCAL_CONFIGFILE" >&2 || true',
         '    sleep "$delay"',
         "    attempt=$((attempt + 1))",
         "  done",

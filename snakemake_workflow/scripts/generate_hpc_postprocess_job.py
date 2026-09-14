@@ -88,6 +88,13 @@ def _retry_wrapper_lines() -> list[str]:
     dependency delay can read a stale/corrupted resolved_config.yml over
     the shared P:\\ mount - same exact failure every time, pointing at
     cross-node filesystem cache staleness, not a random race).
+
+    2026-09-14: staging resolved_config.yml locally did NOT stop this
+    recurring, so it may not be resolved_config.yml at all - the Snakefile
+    auto-loads config.yml + config_local.yml (configfile: directives)
+    before --configfile is even merged, and a raw UnicodeDecodeError never
+    reports which file it came from. Dumping checksums/mtimes of every
+    candidate on failure turns a recurrence into real evidence.
     """
     return [
         "run_snakemake_with_retry() {",
@@ -97,6 +104,9 @@ def _retry_wrapper_lines() -> list[str]:
         "      return 0",
         "    fi",
         '    echo "  [retry $attempt/$max_attempts] snakemake invocation failed - retrying in ${delay}s..." >&2',
+        '    echo "  [forensics] candidate config files at time of failure:" >&2',
+        '    sha256sum snakemake_workflow/config/config.yml snakemake_workflow/config/config_local.yml "$LOCAL_CONFIGFILE" >&2 || true',
+        '    stat snakemake_workflow/config/config.yml snakemake_workflow/config/config_local.yml "$LOCAL_CONFIGFILE" >&2 || true',
         '    sleep "$delay"',
         "    attempt=$((attempt + 1))",
         "  done",
