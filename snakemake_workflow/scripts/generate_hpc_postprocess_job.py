@@ -106,6 +106,41 @@ def _retry_wrapper_lines() -> list[str]:
     ]
 
 
+def _stage_configfile_lines() -> list[str]:
+    """Bash function def: copies a --configfile path to node-local scratch
+    and validates it parses as UTF-8 YAML before use, retrying the CHEAP
+    copy+validate step (not a full snakemake run) on failure - see
+    generate_hpc_preprocess_job.py's matching helper for the full
+    rationale (live evidence 2026-09-14: 5 fresh `snakemake` retries in a
+    row hit the identical byte/position UnicodeDecodeError on the same
+    node, while the file read cleanly from a different client moments
+    later - a node-local stale-cache issue that re-running snakemake
+    against the same P:\\ path doesn't fix).
+    """
+    return [
+        "stage_configfile_locally() {",
+        '  local src="$1" out_var="$2"',
+        '  local stage_dir="${TMPDIR:-/tmp}/gfm_resolved_config"',
+        '  mkdir -p "$stage_dir"',
+        '  local dst="$stage_dir/resolved_config_${SLURM_JOB_ID:-$$}_$$.yml"',
+        "  local attempt=1 max_attempts=8 delay=5",
+        '  while [ "$attempt" -le "$max_attempts" ]; do',
+        '    cp -f -- "$src" "$dst" 2>/dev/null',
+        "    if python -c \"import sys, yaml; yaml.safe_load(open(sys.argv[1], encoding='utf-8'))\" \"$dst\" 2>/dev/null; then",
+        "      printf -v \"$out_var\" '%s' \"$dst\"",
+        "      return 0",
+        "    fi",
+        '    echo "  [config-stage retry $attempt/$max_attempts] $src did not copy/parse cleanly - retrying in ${delay}s..." >&2',
+        '    rm -f -- "$dst"',
+        '    sleep "$delay"',
+        "    attempt=$((attempt + 1))",
+        "  done",
+        '  echo "  failed to stage a valid local copy of $src after $max_attempts attempts - giving up." >&2',
+        "  return 1",
+        "}",
+    ]
+
+
 def _build_chunk_grid(tile_gdf: gpd.GeoDataFrame, chunk_size_deg: float) -> gpd.GeoDataFrame:
     """Mirrors the root Snakefile's own _build_chunk_grid exactly."""
     minx, miny, maxx, maxy = tile_gdf.total_bounds
@@ -163,13 +198,15 @@ def _write_batches(
             sbatch_cfg["env_activate_cmd"],
             "",
             *_retry_wrapper_lines(),
+            *_stage_configfile_lines(),
             "",
             f'cd "{linux_code_root}"',
             f'echo "=== Postprocessing {phase_name} batch {i:03d}: {len(batch_targets)} target(s) ==="',
+            f'stage_configfile_locally "{configfile_path}" LOCAL_CONFIGFILE || exit 1',
             "",
             (
                 f'run_snakemake_with_retry snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
-                f'--rerun-triggers=mtime --configfile "{configfile_path}" '
+                f'--rerun-triggers=mtime --configfile "$LOCAL_CONFIGFILE" '
                 f'$(cat "{linux_jobs_dir}/{name}_targets.txt")'
             ),
             "",

@@ -105,6 +105,51 @@ def _retry_wrapper_lines() -> list[str]:
     ]
 
 
+def _stage_configfile_lines() -> list[str]:
+    """Bash function def: copies a --configfile path to node-local scratch
+    and validates it parses as UTF-8 YAML before use, retrying the CHEAP
+    copy+validate step (not a full snakemake run) on failure.
+
+    Escalation from run_snakemake_with_retry, above - live evidence
+    2026-09-14 showed 5 back-to-back FRESH `snakemake` retries (new
+    process each time, ~75s apart) all hit the IDENTICAL byte/position
+    UnicodeDecodeError reading resolved_config.yml over the shared P:\\
+    mount, while the very same file read completely cleanly from a
+    different client moments later. That rules out a short-lived cross-
+    node race (which retrying the whole snakemake invocation assumed) and
+    points at THIS COMPUTE NODE's own stale/corrupted client-side cache
+    for that specific file - re-running snakemake on the same node
+    against the same P:\\ path just keeps hitting the same bad cache
+    entry. Staging a local copy first isolates the flaky network read to
+    one small, cheap step that can be retried on its own; every
+    subsequent read (Snakemake's own config parse, or
+    generate_hpc_simulation_jobs.py's plain yaml.safe_load) then hits
+    node-local disk instead of the network mount again.
+    """
+    return [
+        "stage_configfile_locally() {",
+        '  local src="$1" out_var="$2"',
+        '  local stage_dir="${TMPDIR:-/tmp}/gfm_resolved_config"',
+        '  mkdir -p "$stage_dir"',
+        '  local dst="$stage_dir/resolved_config_${SLURM_JOB_ID:-$$}_$$.yml"',
+        "  local attempt=1 max_attempts=8 delay=5",
+        '  while [ "$attempt" -le "$max_attempts" ]; do',
+        '    cp -f -- "$src" "$dst" 2>/dev/null',
+        "    if python -c \"import sys, yaml; yaml.safe_load(open(sys.argv[1], encoding='utf-8'))\" \"$dst\" 2>/dev/null; then",
+        "      printf -v \"$out_var\" '%s' \"$dst\"",
+        "      return 0",
+        "    fi",
+        '    echo "  [config-stage retry $attempt/$max_attempts] $src did not copy/parse cleanly - retrying in ${delay}s..." >&2',
+        '    rm -f -- "$dst"',
+        '    sleep "$delay"',
+        "    attempt=$((attempt + 1))",
+        "  done",
+        '  echo "  failed to stage a valid local copy of $src after $max_attempts attempts - giving up." >&2',
+        "  return 1",
+        "}",
+    ]
+
+
 def _target_paths(tile_dir: str, return_periods: list[str], waterlevel_names: list[str]) -> list[str]:
     paths = [f"{tile_dir}/inputs/dem.tif", f"{tile_dir}/inputs/mask.tif", f"{tile_dir}/inputs/friction.tif"]
     for rp in return_periods:
@@ -277,9 +322,11 @@ def main() -> None:
             sbatch_cfg["env_activate_cmd"],
             "",
             *_retry_wrapper_lines(),
+            *_stage_configfile_lines(),
             "",
             f'cd "{linux_code_root}"',
             f'echo "=== Preprocessing batch {size_class}/{batch_id}: {len(batch_tiles)} tiles ==="',
+            f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
             "",
             # Hard pre-flight check, not just a submission-order convention:
             # --nolock (above) is only safe because build_shared_inputs.sbatch
@@ -311,7 +358,7 @@ def main() -> None:
             (
                 f'run_snakemake_with_retry snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
                 '--rerun-triggers=mtime '
-                f'--configfile "{linux_resolved_config}" '
+                '--configfile "$LOCAL_CONFIGFILE" '
                 f'$(cat "{linux_jobs_dir}/{name}_targets.txt")'
             ),
             "",
@@ -343,12 +390,14 @@ def main() -> None:
         shared_cfg["env_activate_cmd"],
         "",
         *_retry_wrapper_lines(),
+        *_stage_configfile_lines(),
         "",
         f'cd "{linux_code_root}"',
         'echo "=== Building shared preprocessing inputs ==="',
+        f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
         (
             f'run_snakemake_with_retry snakemake --cores 1 --nolock --rerun-triggers=mtime '
-            f'--configfile "{linux_resolved_config}" '
+            '--configfile "$LOCAL_CONFIGFILE" '
             f'$(cat "{linux_shared_targets_file}")'
         ),
         "",
@@ -379,12 +428,12 @@ def main() -> None:
     if args.calibration:
         generate_call = (
             f'python snakemake_workflow/scripts/generate_hpc_simulation_jobs.py '
-            f'--config "{linux_resolved_config}"'
+            f'--config "$LOCAL_CONFIGFILE"'
         )
     else:
         generate_call = (
             f'run_snakemake_with_retry snakemake generate_aqueduct_jobs --cores 1 --nolock '
-            f'--rerun-triggers=mtime --configfile "{linux_resolved_config}"'
+            f'--rerun-triggers=mtime --configfile "$LOCAL_CONFIGFILE"'
         )
 
     dispatch_cfg = hpc_cfg["sbatch"]
@@ -403,9 +452,11 @@ def main() -> None:
         dispatch_cfg["env_activate_cmd"],
         "",
         *_retry_wrapper_lines(),  # only used by the non-calibration snakemake branch below; harmless if unused
+        *_stage_configfile_lines(),
         "",
         f'cd "{linux_code_root}"',
         'echo "=== Generating wave sbatch scripts ==="',
+        f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
         generate_call,
         "",
         'echo "=== Submitting simulation waves ==="',

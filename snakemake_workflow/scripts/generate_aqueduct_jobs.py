@@ -67,6 +67,44 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from config_utils import atomic_write, load_config, retry_transient_io  # noqa: E402
 
 
+def _stage_configfile_lines() -> list[str]:
+    """Bash function def: copies a --config path to node-local scratch and
+    validates it parses as UTF-8 YAML before use, retrying the CHEAP
+    copy+validate step (not the whole per-tile job) on failure - see
+    generate_hpc_preprocess_job.py's matching helper for the full
+    rationale (live evidence 2026-09-14: 5 fresh `snakemake` retries in a
+    row hit the identical byte/position UnicodeDecodeError reading
+    resolved_config.yml over the shared P:\\ mount on the SAME compute
+    node, while the file read cleanly from a different client moments
+    later - a node-local stale-cache issue, not a short-lived race, so
+    simply re-reading the same P:\\ path from the same node doesn't help).
+    Every tile in a wave batch calls run_job with the SAME --config path,
+    so staging it once per batch (not per tile) is enough.
+    """
+    return [
+        "stage_configfile_locally() {",
+        '  local src="$1" out_var="$2"',
+        '  local stage_dir="${TMPDIR:-/tmp}/gfm_resolved_config"',
+        '  mkdir -p "$stage_dir"',
+        '  local dst="$stage_dir/resolved_config_${SLURM_JOB_ID:-$$}_$$.yml"',
+        "  local attempt=1 max_attempts=8 delay=5",
+        '  while [ "$attempt" -le "$max_attempts" ]; do',
+        '    cp -f -- "$src" "$dst" 2>/dev/null',
+        "    if python -c \"import sys, yaml; yaml.safe_load(open(sys.argv[1], encoding='utf-8'))\" \"$dst\" 2>/dev/null; then",
+        "      printf -v \"$out_var\" '%s' \"$dst\"",
+        "      return 0",
+        "    fi",
+        '    echo "  [config-stage retry $attempt/$max_attempts] $src did not copy/parse cleanly - retrying in ${delay}s..." >&2',
+        '    rm -f -- "$dst"',
+        '    sleep "$delay"',
+        "    attempt=$((attempt + 1))",
+        "  done",
+        '  echo "  failed to stage a valid local copy of $src after $max_attempts attempts - giving up." >&2',
+        "  return 1",
+        "}",
+    ]
+
+
 def _append_postprocess_bridge(
     submit_lines: list[str],
     hpc_cfg: dict,
@@ -203,12 +241,14 @@ def generate_wave_dispatch(
             "set -uo pipefail",  # not -e: one failed (tile,rp,slr) must not abort the rest of this node's batch
             sbatch_cfg["env_activate_cmd"],
             "",
+            *_stage_configfile_lines(),
             f'FAIL_LOG="{linux_jobs_dir}/logs/{name}_failures.txt"',
             ': > "$FAIL_LOG"',
+            f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
             "",
             "run_job() {",
             f'  python "{linux_aqueduct_cli}" \\',
-            f'    --config "{linux_resolved_config}" \\',
+            '    --config "$LOCAL_CONFIGFILE" \\',
             '    --tile-id "$1" --return-period "$2" --waterlevel-name "$3" \\',
             '    || echo "$1 $2 $3" >> "$FAIL_LOG"',
             "}",
@@ -339,12 +379,14 @@ def generate_resume_dispatch(
             "set -uo pipefail",
             sbatch_cfg["env_activate_cmd"],
             "",
+            *_stage_configfile_lines(),
             f'FAIL_LOG="{linux_jobs_dir}/logs/{name}_failures.txt"',
             ': > "$FAIL_LOG"',
+            f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
             "",
             "run_job() {",
             f'  python "{linux_aqueduct_cli}" \\',
-            f'    --config "{linux_resolved_config}" \\',
+            '    --config "$LOCAL_CONFIGFILE" \\',
             '    --tile-id "$1" --return-period "$2" --waterlevel-name "$3" \\',
             '    || echo "$1 $2 $3" >> "$FAIL_LOG"',
             "}",
