@@ -22,19 +22,27 @@ into submit_waves.sh. This is the exact same afterany-join-multiple-jobs
 pattern generate_aqueduct_jobs.py's own submit_waves.sh already uses between
 simulation waves - just one more phase in front of wave 0.
 
-Wave 0 of that phase-in-front is `build_shared_inputs.sbatch` - Snakemake
-locks its own working directory by default (one process at a time per
-directory), so N concurrent `snakemake` invocations from the same code_root
-would otherwise fail with LockException the instant a second one starts.
-Every `snakemake` call in this pipeline therefore passes `--nolock` - safe here
-ONLY because every genuinely tile-independent, shared-across-every-batch
-output this DAG has (`compute_geoid_offset_raster`'s single file, PLUS
+Before any batch is submitted, submit_preprocess_and_dispatch.sh itself
+builds every shared, tile-independent output this DAG has
+(`compute_geoid_offset_raster`'s single file, PLUS
 `cache_waterlevel_stations`'s one cached GeoPackage per (return_period,
 waterlevel_name) scenario, 2026-08 - unlike every other rule, which is
-per-tile) is built FIRST, alone, before any batch starts, eliminating every
-real write-write race `--nolock` would otherwise leave unprotected. Without
-this pre-build step, two batches racing to build the same shared file
-concurrently with locking disabled could corrupt it.
+per-tile) SYNCHRONOUSLY, in the same shell, before calling `sbatch` on
+anything (2026-09-14 - previously this was its own zero-dependency sbatch
+job, "wave 0"/`build_shared_inputs.sbatch`, submitted immediately after
+resolved_config.yml was written; that specific job kept hitting a
+cross-node stale-read of that file on the shared P:\\ mount, identical
+byte/position every time, that not even retries survived - see
+_stage_configfile_lines' docstring. Running it synchronously in the same
+process/machine that just wrote resolved_config.yml removes the network
+round-trip for this step entirely, not just mitigates it). Snakemake locks
+its own working directory by default (one process at a time per
+directory), so N concurrent `snakemake` invocations from the same
+code_root would otherwise fail with LockException the instant a second
+one starts - every batch's `snakemake` call therefore passes `--nolock`,
+safe ONLY because the shared build above has already completed by the
+time any batch is submitted, eliminating every real write-write race
+`--nolock` would otherwise leave unprotected.
 
 Target file paths are reconstructed directly (not via `rules.X.output.Y`
 references, since this is a standalone script, not a Snakemake `script:`)
@@ -329,26 +337,28 @@ def main() -> None:
             f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
             "",
             # Hard pre-flight check, not just a submission-order convention:
-            # --nolock (above) is only safe because build_shared_inputs.sbatch
-            # builds EVERY shared, non-tile-specific output this DAG has
-            # (geoid-offset raster + every cached water-level-station
-            # GeoPackage - see linux_shared_targets above) BEFORE any batch
-            # starts - see module docstring. That safety currently depends
-            # entirely on every batch actually being submitted via
-            # submit_preprocess_and_dispatch.sh's --dependency=afterany
-            # ordering; a batch launched by hand (or an old/stale sbatch
-            # script re-submitted directly) skips that ordering silently and
-            # could race a shared build with --nolock disabling Snakemake's
-            # own protection. This turns that into a loud, immediate,
+            # --nolock (above) is only safe because submit_preprocess_and_
+            # dispatch.sh itself builds EVERY shared, non-tile-specific
+            # output this DAG has (geoid-offset raster + every cached
+            # water-level-station GeoPackage - see linux_shared_targets
+            # above) SYNCHRONOUSLY, before submitting any batch - see module
+            # docstring. That safety currently depends entirely on every
+            # batch actually being submitted via submit_preprocess_and_
+            # dispatch.sh; a batch launched by hand (or an old/stale sbatch
+            # script re-submitted directly, without that shared build having
+            # run first) skips that ordering silently and could race a
+            # shared build with --nolock disabling Snakemake's own
+            # protection. This turns that into a loud, immediate,
             # unambiguous failure instead of an intermittent LockException or
             # (worse) silent corruption of a shared file - confirmed this is
             # a real failure mode, not hypothetical: exactly this happened on
             # 2026-08-08 (job 243423/243440 - LockException from a batch that
-            # started before build_shared_inputs had run).
+            # started before the shared build had run).
             f'while IFS= read -r shared_target; do',
             f'    if [ ! -f "$shared_target" ]; then',
             f'        echo "ERROR: shared preprocessing input not found: $shared_target" >&2',
-            '        echo "This batch must not start before build_shared_inputs.sbatch completes." >&2',
+            '        echo "This batch must not start before the shared-inputs build (in'
+            ' submit_preprocess_and_dispatch.sh) completes." >&2',
             '        echo "Submit via submit_preprocess_and_dispatch.sh (which orders this'
             ' correctly) rather than running this .sbatch file directly/out of order." >&2',
             "        exit 1",
@@ -368,44 +378,6 @@ def main() -> None:
             f.write("\n".join(lines))
         batch_script_paths.append(f"{linux_jobs_dir}/{name}.sbatch")
         print(f"  wrote {script_path} ({size_class}, {len(batch_tiles)} tiles, {len(targets)} target files)")
-
-    # Phase 0: build EVERY shared, tile-independent output this DAG has
-    # (geoid-offset raster + every cached water-level-station scenario file -
-    # see linux_shared_targets above) alone, before any batch starts - see
-    # module docstring for why this is what makes --nolock safe on every
-    # batch above. Lightweight, uses hpc.sbatch.
-    shared_cfg = hpc_cfg["sbatch"]
-    shared_lines = [
-        "#!/bin/bash",
-        "#SBATCH --job-name=gfm_build_shared_inputs",
-        f"#SBATCH --partition={shared_cfg['partition']}",
-        *_account_line(shared_cfg),
-        f"#SBATCH --time={shared_cfg['time']}",
-        f"#SBATCH --mem={shared_cfg['mem']}",
-        "#SBATCH --cpus-per-task=1",
-        f"#SBATCH --output={linux_jobs_dir}/logs/build_shared_inputs_%j.out",
-        f"#SBATCH --error={linux_jobs_dir}/logs/build_shared_inputs_%j.err",
-        "",
-        "set -euo pipefail",
-        shared_cfg["env_activate_cmd"],
-        "",
-        *_retry_wrapper_lines(),
-        *_stage_configfile_lines(),
-        "",
-        f'cd "{linux_code_root}"',
-        'echo "=== Building shared preprocessing inputs ==="',
-        f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
-        (
-            f'run_snakemake_with_retry snakemake --cores 1 --nolock --rerun-triggers=mtime '
-            '--configfile "$LOCAL_CONFIGFILE" '
-            f'$(cat "{linux_shared_targets_file}")'
-        ),
-        "",
-    ]
-    shared_script_path = local_jobs_dir / "build_shared_inputs.sbatch"
-    with open(shared_script_path, "w", encoding="utf-8", newline="\n") as f:
-        f.write("\n".join(shared_lines))
-    print(f"  wrote {shared_script_path}")
 
     # Phase 2: once every preprocessing batch above has finished, generate
     # the wave sbatch scripts (fast - every input already exists) and
@@ -468,22 +440,40 @@ def main() -> None:
         f.write("\n".join(dispatch_lines))
     print(f"  wrote {dispatch_script_path}")
 
-    # Master driver: submit build_shared_inputs.sbatch alone first (no
-    # dependency), then every preprocessing batch depending on IT
-    # (afterany) but NOT on each other (fully parallel amongst themselves),
-    # then the dispatch job depending on ALL batches via afterany.
+    # Master driver: build every shared, tile-independent input SYNCHRONOUSLY
+    # first, right here in this script (see module docstring, 2026-09-14 -
+    # this used to be its own zero-dependency sbatch job; running it inline
+    # instead means the machine that just wrote resolved_config.yml is the
+    # SAME machine that reads it back, removing the cross-node network-mount
+    # read that job kept failing on). Only once that has genuinely finished
+    # does this submit every preprocessing batch (still fully parallel
+    # amongst themselves - no dependency between them, none needed since
+    # shared inputs are now guaranteed to already exist), then the dispatch
+    # job depending on ALL batches via afterany.
+    shared_cfg = hpc_cfg["sbatch"]
     submit_lines = [
         "#!/bin/bash",
         "set -euo pipefail",
         "",
-        f'SHARED_JID=$(sbatch --parsable "{linux_jobs_dir}/build_shared_inputs.sbatch")',
-        f'echo "submitted {linux_jobs_dir}/build_shared_inputs.sbatch -> job $SHARED_JID"',
+        shared_cfg["env_activate_cmd"],
+        "",
+        *_retry_wrapper_lines(),
+        *_stage_configfile_lines(),
+        "",
+        f'cd "{linux_code_root}"',
+        'echo "=== Building shared preprocessing inputs (synchronous, on this login node) ==="',
+        f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
+        (
+            f'run_snakemake_with_retry snakemake --cores 1 --nolock --rerun-triggers=mtime '
+            '--configfile "$LOCAL_CONFIGFILE" '
+            f'$(cat "{linux_shared_targets_file}") 2>&1 | tee "{linux_jobs_dir}/logs/build_shared_inputs.log"'
+        ),
         "",
         'IDS=""',
     ]
     for script in batch_script_paths:
         submit_lines += [
-            f'JID=$(sbatch --parsable --dependency=afterany:$SHARED_JID "{script}")',
+            f'JID=$(sbatch --parsable "{script}")',
             f'echo "submitted {script} -> job $JID"',
             'IDS="${IDS:+$IDS:}$JID"',
         ]
@@ -501,7 +491,7 @@ def main() -> None:
 
     node_summary = ", ".join(f"{size_class}={class_n_nodes[size_class]}" for size_class in present_classes)
     print(
-        f"\nDone. 1 shared-inputs job + {len(batch_script_paths)} preprocessing batch(es) "
+        f"\nDone. 1 synchronous shared-inputs build + {len(batch_script_paths)} preprocessing batch(es) "
         f"({node_summary} nodes, {n_nodes} total budget) + 1 dispatch job written to {local_jobs_dir}"
     )
     print(f"Submit on Hydrax with: bash {linux_jobs_dir}/submit_preprocess_and_dispatch.sh")
