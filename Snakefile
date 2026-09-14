@@ -87,7 +87,25 @@ sys.path.insert(0, os.path.join(workflow.basedir, "src"))
 from aqueduct_runner import estimate_aqueduct_mem_mb  # noqa: E402
 from config_utils import _expand_paths, get_data_catalog, merged_slr_scenarios, split_batches_proportionally  # noqa: E402
 
-configfile: "snakemake_workflow/config/config.yml"
+# GFM_CONFIG_PATH lets HPC dispatch scripts point this Snakefile at a
+# fully-materialized, scenario-specific config (calibration/sensitivity
+# runs) WITHOUT going through Snakemake's own --configfile CLI merging.
+# 2026-09-14: added after --configfile exhibited a reproducible failure
+# (dry-run succeeded, real execution failed, identical byte/position every
+# time) reading resolved_config.yml, that survived atomic writes, node-
+# local staging, and a widened retry window - the actual mechanism was
+# never root-caused even after reading through Snakemake's own config-
+# loading source (__init__.py's CLI configfiles loop AND
+# Workflow.configfile()'s directive handler both looked correct and both
+# fire identically regardless of -n/dry-run). Meanwhile every PLAIN-PYTHON
+# config read in this codebase (config_utils.load_config, used by
+# run_aqueduct_cli.py/generate_hpc_simulation_jobs.py's own --config flag)
+# has never once failed - so this routes new HPC dispatch through the
+# Workflow's own `configfile:` directive instead of --configfile, a
+# genuinely different code path, rather than continuing to chase an
+# unexplained failure in the CLI one.
+_CONFIG_PATH = os.environ.get("GFM_CONFIG_PATH", "snakemake_workflow/config/config.yml")
+configfile: _CONFIG_PATH
 
 # Machine-local overrides (git-ignored, optional).  Create
 # snakemake_workflow/config/config_local.yml to override any key without
@@ -96,8 +114,11 @@ configfile: "snakemake_workflow/config/config.yml"
 # storage layouts. Every standalone (non-Snakemake) entry-point script
 # honors this same file via config_utils.load_config(), which mirrors this
 # exact merge-then-expand sequence - keep the two in sync if this ever changes.
+# Skipped when GFM_CONFIG_PATH is set (scenario run): build_run_config.py's
+# materialize_config() already folds config_local.yml's content into that
+# file, so applying it again here could silently override scenario values.
 _LOCAL_CFG = "snakemake_workflow/config/config_local.yml"
-if os.path.exists(_LOCAL_CFG):
+if "GFM_CONFIG_PATH" not in os.environ and os.path.exists(_LOCAL_CFG):
     configfile: _LOCAL_CFG
 
 

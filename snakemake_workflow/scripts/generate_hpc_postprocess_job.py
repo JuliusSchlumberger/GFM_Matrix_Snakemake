@@ -98,7 +98,7 @@ def _retry_wrapper_lines() -> list[str]:
     """
     return [
         "run_snakemake_with_retry() {",
-        "  local attempt=1 max_attempts=5 delay=15",
+        "  local attempt=1 max_attempts=10 delay=30",
         '  while [ "$attempt" -le "$max_attempts" ]; do',
         '    if "$@"; then',
         "      return 0",
@@ -175,12 +175,13 @@ def _write_batches(
     phase_name: str, targets: list[str], n_nodes: int, configfile_path: str,
 ) -> list[str]:
     """Split `targets` evenly across up to n_nodes batches, write one sbatch
-    script per batch (plain `snakemake --cores N --configfile <configfile_path>
-    <targets>` call, matching generate_hpc_preprocess_job.py's own pattern -
-    configfile_path (resolved_config.yml) is what makes a compute node
-    re-parsing the Snakefile see the same config this dispatch was generated
-    from, rather than silently falling back to its own default config.yml),
-    return their Linux paths.
+    script per batch (plain `GFM_CONFIG_PATH=<configfile_path> snakemake
+    --cores N <targets>` call, matching generate_hpc_preprocess_job.py's own
+    pattern - configfile_path (resolved_config.yml) is what makes a compute
+    node re-parsing the Snakefile see the same config this dispatch was
+    generated from, rather than silently falling back to its own default
+    config.yml; GFM_CONFIG_PATH rather than --configfile since 2026-09-14 -
+    see the Snakefile's own comment on that env var), return their Linux paths.
     """
     n_batches = min(n_nodes, len(targets))
     k, m = divmod(len(targets), n_batches)
@@ -215,8 +216,9 @@ def _write_batches(
             f'stage_configfile_locally "{configfile_path}" LOCAL_CONFIGFILE || exit 1',
             "",
             (
-                f'run_snakemake_with_retry snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
-                f'--rerun-triggers=mtime --configfile "$LOCAL_CONFIGFILE" '
+                f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
+                f'snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
+                f'--rerun-triggers=mtime '
                 f'$(cat "{linux_jobs_dir}/{name}_targets.txt")'
             ),
             "",
@@ -261,7 +263,7 @@ def main() -> None:
     # Normally already written by the preceding preprocess/simulation
     # phases for this same hpc.jobs_dir (generate_hpc_preprocess_job.py) -
     # only write it here if this script is invoked standalone, so this
-    # script is safe to run on its own too. Referenced (via --configfile)
+    # script is safe to run on its own too. Referenced (via GFM_CONFIG_PATH)
     # by every snakemake call this script generates - see _write_batches.
     # atomic_write, not a plain open()+write - see generate_hpc_preprocess_job.py's
     # matching comment: a SLURM job on a different node reading this over the

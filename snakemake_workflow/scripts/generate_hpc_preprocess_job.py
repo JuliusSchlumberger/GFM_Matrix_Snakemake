@@ -109,7 +109,7 @@ def _retry_wrapper_lines() -> list[str]:
     """
     return [
         "run_snakemake_with_retry() {",
-        "  local attempt=1 max_attempts=5 delay=15",
+        "  local attempt=1 max_attempts=10 delay=30",
         '  while [ "$attempt" -le "$max_attempts" ]; do',
         '    if "$@"; then',
         "      return 0",
@@ -214,7 +214,7 @@ def main() -> None:
     retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
 
-    # Written once here and referenced (via --configfile) by every snakemake
+    # Written once here and referenced (via GFM_CONFIG_PATH) by every snakemake
     # invocation this script generates - without this, a compute node
     # re-parsing the Snakefile from a bare `snakemake ...` call falls back to
     # its own default config.yml, silently ignoring whatever --config this
@@ -380,9 +380,9 @@ def main() -> None:
             f'done < "{linux_shared_targets_file}"',
             "",
             (
-                f'run_snakemake_with_retry snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
+                f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
+                f'snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
                 '--rerun-triggers=mtime '
-                '--configfile "$LOCAL_CONFIGFILE" '
                 f'$(cat "{linux_jobs_dir}/{name}_targets.txt")'
             ),
             "",
@@ -402,15 +402,15 @@ def main() -> None:
     # --calibration routes this through generate_hpc_simulation_jobs.py
     # instead of `snakemake generate_aqueduct_jobs` - the latter's own
     # base_config_path (hpc_dispatch.smk) is a hardcoded literal path to
-    # production config.yml, NOT derived from whatever --configfile this
-    # command line carries, so resolved_config.yml (and therefore every
-    # solver parameter + tile_grid.path baked into it) would silently
-    # revert to production defaults for a scenario run - see this script's
-    # own module docstring / --calibration's help text. The default
-    # (non-calibration) path still gets --configfile below for whatever
-    # partial effect it has (live in-memory Snakemake params - tile_ids,
-    # return_periods, batches - DO correctly reflect it; resolved_config.yml
-    # does not, a known, documented gap for that path only).
+    # production config.yml, NOT derived from GFM_CONFIG_PATH, so
+    # resolved_config.yml (and therefore every solver parameter +
+    # tile_grid.path baked into it) would silently revert to production
+    # defaults for a scenario run - see this script's own module
+    # docstring / --calibration's help text. The default (non-calibration)
+    # path still sets GFM_CONFIG_PATH below for whatever partial effect it
+    # has (live in-memory Snakemake params - tile_ids, return_periods,
+    # batches - DO correctly reflect it; resolved_config.yml does not, a
+    # known, documented gap for that path only).
     if args.calibration:
         generate_call = (
             f'python snakemake_workflow/scripts/generate_hpc_simulation_jobs.py '
@@ -418,8 +418,9 @@ def main() -> None:
         )
     else:
         generate_call = (
-            f'run_snakemake_with_retry snakemake generate_aqueduct_jobs --cores 1 --nolock '
-            f'--rerun-triggers=mtime --configfile "$LOCAL_CONFIGFILE"'
+            f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
+            f'snakemake generate_aqueduct_jobs --cores 1 --nolock '
+            f'--rerun-triggers=mtime'
         )
 
     dispatch_cfg = hpc_cfg["sbatch"]
@@ -478,8 +479,8 @@ def main() -> None:
         'echo "=== Building shared preprocessing inputs (synchronous, on this login node) ==="',
         f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
         (
-            f'run_snakemake_with_retry snakemake --cores 1 --nolock --rerun-triggers=mtime '
-            '--configfile "$LOCAL_CONFIGFILE" '
+            f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
+            'snakemake --cores 1 --nolock --rerun-triggers=mtime '
             f'$(cat "{linux_shared_targets_file}") 2>&1 | tee "{linux_jobs_dir}/logs/build_shared_inputs.log"'
         ),
         "",
