@@ -111,6 +111,7 @@ def _append_postprocess_bridge(
     linux_config: dict,
     linux_jobs_dir: str,
     local_jobs_dir: Path,
+    linux_resolved_config: str,
 ) -> list[str]:
     """Append one more phase to submit_lines: once ALL simulation waves are
     done ($ALL_WAVE_IDS), generate + submit the postprocessing+exposure
@@ -118,6 +119,21 @@ def _append_postprocess_bridge(
     preprocessing and simulation (generate_hpc_preprocess_job.py's own
     generate_jobs_and_dispatch.sbatch), applied one phase further out. Does
     NOT write submit_lines to disk - caller writes once at the end.
+
+    `linux_resolved_config` MUST be threaded into generate_hpc_postprocess_job.py's
+    own --config - found live 2026-09-14: without it, that script's own
+    --config defaults to production's plain config.yml, so a calibration/
+    scenario run silently computes PRODUCTION-SCALE postprocessing (real
+    example: 851 chunks/9 RPs/5 SLRs instead of a ~78-tile/1 RP/1 SLR
+    calibration domain) and writes it to production's own hpc.jobs_dir
+    instead of the calibration-isolated one - then the actual submission
+    step fails outright (this script's own bash call below looks for
+    submit_postprocess_and_exposure.sh under the CALIBRATION jobs_dir,
+    which was never written, since generate_hpc_postprocess_job.py wrote it
+    under production's jobs_dir instead) - so nothing catastrophic gets
+    submitted, but postprocessing/exposure/validation silently never run
+    for the scenario at all, with no obvious error pointing at the real
+    cause.
     """
     sbatch_cfg = hpc_cfg["sbatch"]  # lightweight - just generates + submits further scripts
     code_root = linux_config["paths"]["code_root"]
@@ -141,7 +157,7 @@ def _append_postprocess_bridge(
         "",
         f'cd "{code_root}"',
         'echo "=== Generating postprocessing + exposure dispatch ==="',
-        "python snakemake_workflow/scripts/generate_hpc_postprocess_job.py",
+        f'python snakemake_workflow/scripts/generate_hpc_postprocess_job.py --config "{linux_resolved_config}"',
         "",
         'echo "=== Submitting postprocessing + exposure ==="',
         f'bash "{linux_jobs_dir}/submit_postprocess_and_exposure.sh"',
@@ -205,7 +221,21 @@ def generate_wave_dispatch(
     linux_jobs_dir = linux_config["hpc"]["jobs_dir"]
     linux_resolved_config = f"{linux_jobs_dir}/resolved_config.yml"
 
-    local_jobs_dir = Path(hpc_cfg["jobs_dir"])
+    # ── Local view: THIS machine's own reachable mount - local_jobs_dir MUST
+    # come from this, NOT from the `hpc_cfg` parameter, whose "jobs_dir" the
+    # caller may have taken from the LINUX view - confirmed live
+    # 2026-09-15: generate_hpc_simulation_jobs.py passes
+    # hpc_cfg=linux_config["hpc"], so `Path(hpc_cfg["jobs_dir"])` here
+    # silently parses a Linux-style "/p/..." string as a drive-relative
+    # WindowsPath - the write still "succeeds" (even f".exists()" on it
+    # returns True) with zero errors anywhere, just at the wrong location
+    # entirely (e.g. C:\p\... instead of P:\...). This stayed completely
+    # latent because the wave scripts written below use `script_paths`
+    # (caller-supplied, already correct) rather than local_jobs_dir -
+    # _append_postprocess_bridge's own script write was the first thing to
+    # actually depend on local_jobs_dir being right.
+    local_config = load_config(base_config_path)
+    local_jobs_dir = Path(local_config["hpc"]["jobs_dir"])
     retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
 
@@ -294,7 +324,9 @@ def generate_wave_dispatch(
         submit_lines.append('PREV_IDS="$IDS"')
         submit_lines.append('ALL_WAVE_IDS="${ALL_WAVE_IDS:+$ALL_WAVE_IDS:}$IDS"')
 
-    submit_lines = _append_postprocess_bridge(submit_lines, hpc_cfg, linux_config, linux_jobs_dir, local_jobs_dir)
+    submit_lines = _append_postprocess_bridge(
+        submit_lines, hpc_cfg, linux_config, linux_jobs_dir, local_jobs_dir, linux_resolved_config,
+    )
 
     with open(submit_waves_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(submit_lines) + "\n")
@@ -346,7 +378,11 @@ def generate_resume_dispatch(
     linux_jobs_dir = linux_config["hpc"]["jobs_dir"]
     linux_resolved_config = f"{linux_jobs_dir}/resolved_config.yml"
 
-    local_jobs_dir = Path(hpc_cfg["jobs_dir"])
+    # See generate_wave_dispatch's own comment - local_jobs_dir must come
+    # from a freshly-loaded LOCAL config view, not the `hpc_cfg` parameter
+    # (the caller may have passed the LINUX view's hpc_cfg).
+    local_config = load_config(base_config_path)
+    local_jobs_dir = Path(local_config["hpc"]["jobs_dir"])
     retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
 
@@ -424,7 +460,9 @@ def generate_resume_dispatch(
         submit_lines.append('PREV_IDS="$IDS"')
         submit_lines.append('ALL_WAVE_IDS="${ALL_WAVE_IDS:+$ALL_WAVE_IDS:}$IDS"')
 
-    submit_lines = _append_postprocess_bridge(submit_lines, hpc_cfg, linux_config, linux_jobs_dir, local_jobs_dir)
+    submit_lines = _append_postprocess_bridge(
+        submit_lines, hpc_cfg, linux_config, linux_jobs_dir, local_jobs_dir, linux_resolved_config,
+    )
 
     with open(submit_waves_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(submit_lines) + "\n")
