@@ -1,8 +1,14 @@
 """Generate SLURM batch scripts to RUN already-built SFINCS tile models on
-Deltares' Hydrax/h7 cluster, via Apptainer, split across N nodes at one
-core each (per Deltares' own SFINCS-on-HPC guidance: the `sfincs` binary
-itself is invoked through a container image, no conda env needed on the
-compute node for the run step).
+Deltares' Hydrax/h7 cluster, via Apptainer, split across N nodes at
+CPUS_PER_TASK_DEFAULT cores each (per Deltares' own SFINCS-on-HPC guidance:
+the `sfincs` binary itself is invoked through a container image, no conda
+env needed on the compute node for the run step). SFINCS's own OpenMP
+parallelism (OMP_NUM_THREADS, set to match the node's own allocated core
+count exactly) is what actually uses the extra cores - originally 1
+core/1vcpu, switched to 4 cores/4vcpu (2026-09) after live evidence several
+of the 258 test tiles' real SFINCS UTM grids run up to 34M cells (see
+generate_sfincs_hpc_jobs.py's own PARTITION_DEFAULT/CPUS_PER_TASK_DEFAULT
+comments) - single-threaded was too slow for those.
 
 Two-phase split, deliberately:
   - BUILD (SfincsModel via hydromt_sfincs - sfincs.inp, .dep, .msk, .man,
@@ -62,9 +68,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import atomic_write, load_config, retry_transient_io  # noqa: E402
 
 N_NODES_DEFAULT = 20
-PARTITION_DEFAULT = "1vcpu"  # one core per node, per user instruction
+PARTITION_DEFAULT = "4vcpu"  # 4 cores per node, per user instruction (2026-09: switched
+# from the original 1vcpu/1-core design after live evidence several of the 258 test
+# tiles' real SFINCS UTM grids run up to 34M cells single-threaded - see
+# generate_sfincs_hpc_jobs.py's own git history / conversation for the investigation)
 TIME_DEFAULT = "08:00:00"
-MEM_DEFAULT = "7G"  # 1vcpu nodes report ~7950MB usable, not the nominal 8GB - see hpc.md's own note
+CPUS_PER_TASK_DEFAULT = 4
+MEM_DEFAULT = "30G"  # matches the main pipeline's own hpc.sbatch_large convention for the
+# 4vcpu partition (config.yml) - Hydrax's regular partitions scale RAM at a fixed 8GB/vCPU,
+# with a bit less than the nominal amount actually usable (see hpc.md's own note for 1vcpu)
 SIF_PATH_DEFAULT = (
     # NOT .../SFINCS_2026_branches/v2.4.0_Galibier_Release_CPU_apptainer/... -
     # that path (from the guidance this was originally built from) doesn't
@@ -76,7 +88,7 @@ SIF_PATH_DEFAULT = (
 )
 
 
-def _stage_tile_lines() -> list[str]:
+def _stage_tile_lines(cpus_per_task: int) -> list[str]:
     """Bash function: stage one tile's ALREADY-BUILT sfincs_model/ dir to
     node-local scratch (retrying the copy a few times - see module
     docstring on real, documented SMB flakiness for repeated small-file
@@ -111,7 +123,7 @@ def _stage_tile_lines() -> list[str]:
         "    return",
         "  fi",
         "",
-        "  export OMP_NUM_THREADS=1",  # one core allocated (partition), never let SFINCS/OpenMP oversubscribe it
+        f"  export OMP_NUM_THREADS={cpus_per_task}",  # match the node's own allocated core count exactly
         '  ( cd "$local_dir" && apptainer exec -B "$local_dir":/mnt/data "$SIF_PATH" sfincs ) '
         '> "$local_dir/sfincs_hpc_run.log" 2>&1',
         "  local run_rc=$?",
@@ -138,6 +150,7 @@ def generate_sfincs_batches(
     partition: str,
     time_limit: str,
     mem: str,
+    cpus_per_task: int,
     account: str,
     sif_path: str,
     linux_root: str,
@@ -169,7 +182,7 @@ def generate_sfincs_batches(
         lines += [
             f"#SBATCH --time={time_limit}",
             f"#SBATCH --mem={mem}",
-            "#SBATCH --cpus-per-task=1",
+            f"#SBATCH --cpus-per-task={cpus_per_task}",
             f"#SBATCH --output={linux_jobs_dir}/logs/{name}_%j.out",
             f"#SBATCH --error={linux_jobs_dir}/logs/{name}_%j.err",
             "",
@@ -179,7 +192,7 @@ def generate_sfincs_batches(
             f'FAIL_LOG="{linux_jobs_dir}/logs/{name}_failures.txt"',
             ': > "$FAIL_LOG"',
             "",
-            *_stage_tile_lines(),
+            *_stage_tile_lines(cpus_per_task),
             "",
         ]
         for tile_id in batch_tiles:
@@ -217,6 +230,7 @@ def main() -> None:
     parser.add_argument("--partition", default=PARTITION_DEFAULT)
     parser.add_argument("--time", default=TIME_DEFAULT)
     parser.add_argument("--mem", default=MEM_DEFAULT)
+    parser.add_argument("--cpus-per-task", type=int, default=CPUS_PER_TASK_DEFAULT)
     parser.add_argument("--account", default="")
     parser.add_argument("--sif-path", default=SIF_PATH_DEFAULT)
     args = parser.parse_args()
@@ -243,6 +257,7 @@ def main() -> None:
         partition=args.partition,
         time_limit=args.time,
         mem=args.mem,
+        cpus_per_task=args.cpus_per_task,
         account=args.account,
         sif_path=args.sif_path,
         linux_root=linux_root,
