@@ -1,0 +1,7 @@
+# OFAT sweep point - exposure.exceedance_threshold_m 0.20 (default 0.10, double),
+# the critical flood depth (m) above which a fine pixel counts as "flooded"
+# for exposure attribution (compute_flood_fraction_chunk) - NOT the same
+# parameter as waterlevel_epsilon_m (solver convergence tolerance), despite
+# the similar-sounding sweep dimension name. See docs/calibration_sweep_plan.md.
+exposure:
+  exceedance_threshold_m: 0.20

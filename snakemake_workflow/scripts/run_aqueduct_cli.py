@@ -79,7 +79,7 @@ def main() -> None:
     # See preprocessing.smk's own comment - defaults to model_outputs (no-op
     # unless a scenario config sets it, e.g. the ESP/FRA/NOR calibration
     # sweep, which points it at a group-shared directory since none of the
-    # 12 sweep points change anything preprocessing produces).
+    # 14 sweep points change anything preprocessing produces).
     preprocessing_inputs_dir = config["simulation"].get("preprocessing_inputs_dir") or model_outputs
     raster_config = config["raster_format"]
     flooding_config = config["simulation"]["flooding"]

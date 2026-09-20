@@ -27,7 +27,7 @@ The core flood model (an in-process Fast Sweeping Method eikonal solver, `src/ei
 
 ## Related cleanup (do first, separately)
 
-This investigation surfaced dead/broken code that predates and is unrelated to this plan — see the four files in point 6 above. They reference a module (`src/regions.py`) and Snakemake rules (`simulate_region`, `postprocess_region`) that no longer exist; importing any of them today raises `ModuleNotFoundError`. Recommend removing them (or reconstructing what they need, if the "batch by continent/region" capability they represented is still wanted) before building new tile-subsetting tooling on top of a clean codebase.
+**Resolved (verified 2026-09-18)** — this investigation surfaced dead/broken code that predated and was unrelated to this plan: the four files in point 6 above, which referenced a module (`src/regions.py`) and Snakemake rules (`simulate_region`, `postprocess_region`) that no longer existed. They have since been removed from the repository (confirmed absent, 2026-09-18) — no action needed.
 
 ## Implementation plan
 

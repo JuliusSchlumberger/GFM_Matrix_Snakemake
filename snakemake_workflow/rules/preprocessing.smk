@@ -8,15 +8,17 @@ water level scenario definitions) are read from `config/config.yml`.
 production, which never sets `simulation.preprocessing_inputs_dir`, is
 byte-for-byte unaffected) but can be pointed elsewhere - added 2026-09-14
 for the ESP/FRA/NOR calibration sweep: within one group (e.g.
-esp_fra_rp100), none of the 12 OFAT sweep points (friction_scale_factor,
-max_rounds, obstacle_coupling.*, waterlevel_epsilon_m) touch anything
-preprocessing produces here - they're all solver-runtime parameters - so
-all 12 sweep points need byte-identical inputs/ content. build_run_config.py
+esp_fra_rp100), none of the 14 OFAT sweep points (friction_scale_factor,
+max_rounds, obstacle_coupling.*, waterlevel_epsilon_m,
+exposure.exceedance_threshold_m) touch anything preprocessing produces
+here - they're all solver-runtime or postprocessing/exposure-only
+parameters - so all 14 sweep points need byte-identical inputs/ content.
+build_run_config.py
 points preprocessing_inputs_dir at a GROUP-level shared directory instead
 of isolating it per run_tag like `simulation.model_outputs` (which stays
 isolated - it also holds results/waterdepth_*.tif, whose filename has no
 sweep-point tag, so THAT genuinely must not be shared - see that script's
-own comment). Cuts calibration preprocessing from 12x-per-group redundant
+own comment). Cuts calibration preprocessing from 14x-per-group redundant
 to 1x-per-group.
 """
 

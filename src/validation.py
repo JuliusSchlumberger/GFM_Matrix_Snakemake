@@ -38,12 +38,10 @@ from config_utils import retry_transient_io
 class BenchmarkSpec:
     """Parsed from one data_catalog_validation.yml entry's `meta:` block.
 
-    Only the fields the vector-benchmark path (the only one implemented so
-    far - see validate_country.py) actually reads. Raster-benchmark-only
-    fields (`wet_values`, `depth_threshold_m`, a `nodata` override,
-    `return_period`, `variable`) were removed 2026-09 as dead code along
-    with `benchmark_fraction_from_raster` - re-add them together with that
-    function's caller when a raster benchmark is actually wired up.
+    Both GeoDataFrame and RasterDataset benchmarks are supported (RasterDataset
+    added 2026-09 for Denmark's continuous-depth GeoTIFFs - see
+    read_benchmark_raster_fraction and validate_country_national_coverage's
+    data_type dispatch).
     """
 
     key: str
@@ -53,6 +51,13 @@ class BenchmarkSpec:
     variable: str = "extent"    # extent | depth - dispatches validate_country.py to the
     # binary wet/dry comparison (extent) or the continuous-depth-vs-band comparison
     # (depth, France's n_iso_ht_* layers - see validate_country.validate_country_depth_bands)
+    wet_values: list | None = None       # RasterDataset only: categorical pixel values counted
+    # as "wet" (e.g. a discrete hazard-class raster) - mutually exclusive with
+    # depth_threshold_m; exactly one must be set for a RasterDataset benchmark, see
+    # read_benchmark_raster_fraction.
+    depth_threshold_m: float | None = None  # RasterDataset only: pixel value > this counts as
+    # "wet" (a continuous depth raster, e.g. Denmark's "Oversvømmelsesfare" GeoTIFFs) -
+    # mutually exclusive with wet_values.
     ht_min_col: str = "ht_min"  # variable="depth" only: column holding each band's lower bound (m)
     ht_max_col: str = "ht_max"  # variable="depth" only: column holding each band's upper bound (m) -
     # open-ended top bands use inconsistent, region/zone-specific sentinel values (confirmed
@@ -138,6 +143,8 @@ def load_benchmark_spec(catalog, key: str) -> BenchmarkSpec:
         attribute_filter=meta.get("attribute_filter"),
         exclude_bbox=meta.get("exclude_bbox"),
         regions=meta.get("regions"),
+        wet_values=meta.get("wet_values"),
+        depth_threshold_m=meta.get("depth_threshold_m"),
     )
 
 
@@ -446,6 +453,70 @@ def read_permanent_water_mask(
         resampling=Resampling.nearest,
     )
     return permanent_water_mask(dst, tuple(permanent_water_codes))
+
+
+def read_benchmark_raster_fraction(
+    bench_catalog, spec: BenchmarkSpec,
+    bbox: list[float], out_transform: Affine, out_shape: tuple[int, int],
+) -> np.ndarray:
+    """RasterDataset counterpart to benchmark_fraction_from_vector - classifies
+    a benchmark raster (e.g. Denmark's continuous-depth "Oversvømmelsesfare"
+    GeoTIFFs, ~5m native resolution) into a wet/dry mask and reprojects it onto
+    an arbitrary target grid, returning a 0/1 array compatible with
+    wet_mask_from_fraction (no partial-coverage supersampling - unlike the
+    vector path, the source is already a comparable-resolution raster grid, not
+    a polygon boundary needing sub-cell coverage estimation).
+
+    Classifies at the benchmark's OWN native resolution first (via
+    spec.wet_values for a categorical raster, or spec.depth_threshold_m for a
+    continuous depth one - exactly one must be set), THEN reprojects the
+    resulting binary mask with Resampling.max - deliberately NOT the reverse
+    order (reproject raw values with nearest-neighbour, then threshold). The
+    model grid is typically much coarser than a 5m source (Denmark: ~30m model
+    cells, ~36 native sub-pixels each) - thresholding after a nearest-neighbour
+    reproject would sample only ONE of those 36 sub-pixels per destination
+    cell, silently missing real benchmark flooding elsewhere in that cell.
+    Resampling.max on the pre-classified mask instead marks a destination cell
+    wet if ANY covered native pixel was wet - standard practice for
+    downsampling hazard-extent rasters, and the direction of error (slightly
+    over- rather than under-stating benchmark extent) is the safer one given
+    this pipeline's own §1.1 FAR-inflation caution already assumes benchmark
+    "wet" calls are read generously.
+
+    Nodata/dry pixels are folded into "not wet" at the native-resolution
+    classification step, so (unlike read_permanent_water_mask) no separate
+    src_nodata handling is needed at reproject time - the binary mask has
+    nothing left to distinguish.
+    """
+    try:
+        da = retry_transient_io(bench_catalog.get_rasterdataset, spec.key, bbox=bbox).squeeze(drop=True)
+    except Exception:
+        return np.zeros(out_shape, dtype="float64")
+    if da is None or da.size == 0:
+        return np.zeros(out_shape, dtype="float64")
+
+    arr = da.values
+    nodata = da.raster.nodata
+    valid = np.isfinite(arr) if nodata is None else (np.isfinite(arr) & (arr != nodata))
+
+    if spec.wet_values is not None:
+        wet = valid & np.isin(arr, spec.wet_values)
+    elif spec.depth_threshold_m is not None:
+        wet = valid & (arr > spec.depth_threshold_m)
+    else:
+        raise ValueError(
+            f"{spec.key}: RasterDataset benchmark needs meta.wet_values or "
+            "meta.depth_threshold_m (exactly one) - see BenchmarkSpec's own docstring."
+        )
+
+    dst = np.zeros(out_shape, dtype="uint8")
+    reproject(
+        source=wet.astype("uint8"), destination=dst,
+        src_transform=da.raster.transform, src_crs=da.raster.crs,
+        dst_transform=out_transform, dst_crs="EPSG:4326",
+        resampling=Resampling.max,
+    )
+    return dst.astype("float64")
 
 
 def load_iso_lookup(gfm_catalog, iso_lookup_source: str) -> dict[int, str]:

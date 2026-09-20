@@ -234,16 +234,85 @@ can propagate in every direction regardless of raster storage order —
 each direction uses the correspondingly-oriented pair of neighbours and
 corner cell.
 
-**Convergence.** Sweeps repeat until the maximum change across all
-vertices in one full directional pass falls below a small tolerance
-$\varepsilon$ (set from the minimum friction value and grid resolution).
-**[VERIFY / describe for the paper as appropriate to the audience]**: in
-this application's operating regime, the reference implementation's own
-convergence criterion is satisfied after a small, fixed number of
-directional sweeps rather than requiring many iterations to full
-numerical convergence — a property of this specific formulation's sign
+**Convergence.** Sweeps are grouped into **rounds** of 4 (one full pass in
+each of the four sweep directions); a round stops the solve early once the
+maximum per-cell water-level change across that round falls below a fixed
+tolerance $\varepsilon = 0.03\,\mathrm{m}$ (`waterlevel_epsilon_m`,
+configurable). This replaced an earlier formula that derived $\varepsilon$
+from the minimum friction value and grid resolution — chasing numerical
+precision around $10^{-6}$–$10^{-7}$ m, far finer than the $0.10\,\mathrm{m}$
+threshold at which a cell's flooded/dry classification is actually decided
+(§4.5), for no decision-relevant benefit. The solve is capped at
+`max_rounds` (default 12, i.e. up to 48 individual sweeps) if convergence is
+not reached first — empirically calibrated across production tiles ranging
+from a few thousand to over 200 million cells: a fixed, uniform sweep count
+(historically 3, matching the original reference implementation) was found
+to under-converge on some larger/geometrically complex tiles, so the
+round-based, convergence-checked scheme is now the production default,
+with the original fixed-count mode retained as an optional non-default
+configuration. **[VERIFY / describe for the paper as appropriate to the
+audience]**: in this application's operating regime, most tiles converge
+well within the round cap rather than requiring many rounds, a property of
+this specific formulation's sign
 convention and parameter ranges, confirmed empirically across production
 tiles, rather than a general property of Fast Sweeping methods.
+
+### 4.4a Structural correction: obstacle coupling
+
+The Fast Sweeping scheme in §4.4 shares a known structural weakness with
+cost-distance flood models generally (identified by Kasmalkar et al., 2024,
+as the "Flow-Tub" critique **[VERIFY citation]**): unlike a strictly
+monotonic, elevation-aware front-tracking method (e.g. Dijkstra/breadth-first
+search on a cost graph), Gauss–Seidel relaxation gives no per-step guarantee
+that a cell's value, once updated, respects elevation along the path that
+produced it. A friction-cheap route that happens to cross terrain higher
+than the water level realistically attenuated to at that point can still
+propagate an illegitimately high potential value to cells beyond it — there
+is no safe intermediate point during the sweeping process to check elevation
+against the still-converging solution.
+
+**Mitigation: an outer iterative loop, enabled by default in production.**
+Rather than accepting this risk, the solver optionally (default: on) wraps
+the single solve of §4.4 in an outer loop that identifies and blocks cells
+that cannot legitimately be on a real flood path, then re-solves:
+
+1. **Static pre-filter** (exact, no iteration cost): any cell whose
+   effective ground elevation exceeds the highest prescribed boundary water
+   level anywhere in the tile can never legitimately flood, under any
+   friction field or path — friction only ever attenuates the propagated
+   water level, it never amplifies it above its source value. Such cells are
+   assigned a prohibitively high friction value from the start. Ocean cells
+   are exempt (their effective elevation is defined as 0 — see §4.1 — always
+   below any real positive water level), since they are how the flood signal
+   legitimately reaches other coastal points, not something to exclude.
+2. **Iterative dynamic filter**: solve (§4.4, to the same convergence
+   criterion), then additionally block any cell whose resulting
+   (locally-attenuated) water level does not exceed its own elevation — such
+   a cell cannot legitimately be part of a real flood path either, since a
+   real flood path by definition floods every cell along it — and re-solve
+   with the newly-blocked cells' friction also raised. This repeats until
+   the number of newly-blocked cells in an iteration falls below a small
+   tolerance (percent of tile cells), or a maximum iteration count is
+   reached.
+
+Because raising a cell's friction can only lower or hold every eikonal
+solution value elsewhere in the tile (never raise one), the set of blocked
+cells only grows from one outer iteration to the next, guaranteeing
+termination in a finite number of iterations. This correction changes only
+which friction values the solver sees; it never changes which cells
+participate in the solve.
+
+In validation against both direct-boundary-forced tiles and hinterland tiles
+seeded from an already-solved neighbouring tile's output (§4.2's
+alternative, the "hop-distance" propagation used for tiles without their own
+direct coastal forcing), enabling this correction was found to leave the
+flooded-cell count unchanged in the case tested, with small (sub-metre,
+mean roughly 0.1 m) depth differences confined to cells flooded under both
+configurations — consistent with the correction acting as intended: removing
+a specific structural risk rather than materially changing typical-case
+output. **[VERIFY - state more precisely for the paper: this is one
+documented real-tile comparison, not a systematic validation across many
+tiles; frame accordingly.]**
 
 ### 4.5 Flood classification and depth
 
@@ -294,6 +363,16 @@ absolute difference all $0.0\,\mathrm{m}$) across every tile tested. This
 gives high confidence that the Python implementation faithfully reproduces
 the reference model's numerical behaviour rather than merely
 approximating it.
+
+This exact-match validation covers the base solver only (§4.4, fixed
+3-sweep configuration, matching the reference implementation's own
+behaviour exactly). The round-based convergence scheme and the §4.4a
+obstacle-coupling correction are both extensions beyond the original Julia
+reference implementation, which has neither — there is no reference output
+for either to be validated against; their own justification rests on the
+internal convergence/monotonicity arguments given in §4.4/§4.4a and the
+limited real-tile comparisons cited there, not on independent-implementation
+agreement.
 
 ---
 

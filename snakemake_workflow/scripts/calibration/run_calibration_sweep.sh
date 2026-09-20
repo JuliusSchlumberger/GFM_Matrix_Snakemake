@@ -7,7 +7,7 @@
 #
 # "Sequential" here means one combination's ENTIRE chain (preprocessing ->
 # simulation waves -> postprocessing -> exposure) runs to completion before
-# the next one is submitted - NOT all 24 combinations queued at once. This
+# the next one is submitted - NOT all 28 combinations queued at once. This
 # avoids overlapping SLURM usage across combinations, at the cost of not
 # using the cluster's own scheduler to interleave them.
 #
@@ -56,6 +56,11 @@ SWEEP_POINTS=(
     max_rounds_4 max_rounds_8 max_rounds_20
     obstacle_coupling_off obstacle_coupling_iter1 obstacle_coupling_iter3 obstacle_coupling_iter10
     waterlevel_eps_0.01 waterlevel_eps_0.10
+    # 2026-09-15: exposure.exceedance_threshold_m (the actual critical flood
+    # depth for exposure attribution) - distinct from waterlevel_eps above
+    # (solver convergence tolerance, not a flood-depth threshold at all,
+    # despite the similar-sounding name).
+    exceedance_threshold_0.05 exceedance_threshold_0.20
 )
 
 declare -A GROUP_COUNTRIES=(
@@ -86,12 +91,24 @@ wait_for_queue_empty() {
 
 echo "NOTE: preprocessing inputs (dem/mask/friction/boundaries) are shared"
 echo "  PER GROUP, not per sweep point (simulation.preprocessing_inputs_dir -"
-echo "  see build_run_config.py's own comment) - none of the 12 OFAT sweep"
+echo "  see build_run_config.py's own comment) - none of the 14 OFAT sweep"
 echo "  points change anything preprocessing produces, so after the first"
 echo "  sweep point in a group builds these files, every later sweep point"
 echo "  in that SAME group will see them already present and skip straight"
 echo "  to simulation (Snakemake's own file-existence/mtime check - not"
 echo "  something this script does). They are only rebuilt if missing."
+echo ""
+echo "NOTE: the exceedance_threshold_0.05/0.20 sweep points re-run the full"
+echo "  simulation chain (exposure.exceedance_threshold_m does not affect the"
+echo "  eikonal solve) but currently produce metrics_*.csv rows IDENTICAL to"
+echo "  the baseline run's, because validate_country.py reads raw waterdepth"
+echo "  directly and sweeps its OWN independent depth_thresholds_m - it never"
+echo "  reads exposure.exceedance_threshold_m at all. That parameter only"
+echo "  feeds postprocessing.smk's compute_flood_fraction_chunk step (exposure/"
+echo "  population accounting), which this script does not compare against any"
+echo "  benchmark. See docs/calibration_validation_methodology.md's calibration"
+echo "  section for the full explanation before spending HPC time on these 2"
+echo "  combinations expecting a different HR/FAR/CSI/EB number than baseline."
 echo ""
 
 n_total=$((${#SCENARIO_GROUPS[@]} * ${#SWEEP_POINTS[@]}))

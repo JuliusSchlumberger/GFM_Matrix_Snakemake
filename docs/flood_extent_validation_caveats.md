@@ -270,15 +270,184 @@ pipeline) before scoring - `validation.geogunit_source`/`iso_lookup_source` conf
 | **Vertical datum**: Kartverket's levels are referenced to NN2000, not the model's GOCO06s geoid | Same class of issue as Martinique's COAST-RP/MDT gap (§2.2 France notes forthcoming) — but a boundary-position question here, not a value-correction one, since this benchmark is already a finished polygon, not a raw water level to combine with the model's own DEM | Measured, not corrected: real NN2000→GOCO06s offset (via Kartverket's own official HREF2018B conversion grid, sign-verified the same way as the Martinique investigation) is −0.196 m mean (−0.334 to −0.006 m across Norway's ~13° of latitude). Norway's coastline is steep enough (≈10 m of horizontal boundary movement per 1 m of water level, measured from Kartverket's own nested hazard layers) that this implies only ~2 m of horizontal boundary shift — 7% of one DEM pixel, 50× below the `vector_simplify_tolerance_m` already accepted in §1.5 | Deliberately not corrected — the correction would be numerically meaningless at this pipeline's own resolution and would add a moving part that can only introduce error. Would matter (~10% of the value) if `vannstandovernn2000` were ever used as a forcing *value* rather than read from a finished polygon — not the case here |
 | **Bergen data-quality gap** — Kartverket's own four hazard layers for the Bergen area (mean-high-water/20yr/200yr/1000yr) have inconsistent feature counts (24/34/57/47) and are not cleanly nested | A real inconsistency in the source data itself, large enough to dominate any datum-related signal there | Not addressed — noted as a standing data-quality caveat specific to Bergen | Treat Bergen's own metrics with extra caution relative to the rest of Norway's coastline |
 
-### 2.4 Germany, Japan, Australia — not yet resolved
+### 2.4 Japan (`JPN`, benchmarks: 19 `japan_stormsurge_*` catalog entries, depth bands) — implemented 2026-09
+
+**Coverage is bay-specific, not national, and this is a real property of the source data, not a
+download gap.** 国土数値情報 (KSJ) publishes 高潮浸水想定区域 (storm surge inundation assumed
+area, category A49) per prefecture as separate hydrodynamic-model outputs for specific bays/coastal
+segments, not one continuous nationwide layer — only 12 of Japan's ~40 coastal prefectures have
+published A49 data at all as of the 2026-09 download, and even within a covered prefecture the
+polygons stop at the edge of whatever bay/inlet was actually modelled (e.g. Hyogo has four
+non-contiguous A49 files covering the Sea-of-Japan coast, Osaka Bay, and two distinct sections of
+the Harima Sea, with real gaps between them). `meta.coverage: partial` (the default, same as
+Spain/France) is therefore the correct classification — `benchmark_wet_outside_model_domain_pct`
+carries the same FAR-inflation caution as §1.1.
+
+**A31 (fluvial) vs A49 (storm surge) — confirmed, not assumed.** KSJ also publishes a much more
+widely-available 洪水浸水想定区域 (flood inundation assumed area) layer, category A31 — this is
+river/fluvial flooding and is deliberately excluded (`hazard_type: fluvial` would fail
+`validate_country`'s `hazard_type == "coastal"` requirement, same mechanism that already protects
+against mixing hazard types for other countries). Only A49 was downloaded and cataloged.
+
+**One catalog entry per non-overlapping source file, not one per prefecture and not one merged
+national file.** 22 files were downloaded; real geometry overlap checks (`unary_union` +
+`.intersection().area`, not bounding-box guessing) found 3 to be redundant — one exact duplicate,
+one file 96.6% covered by the union of two others, and one file 99.4% contained within a broader
+neighboring file — leaving 19 genuinely distinct files across the 12 prefectures. Several
+prefectures (Hyogo, Tokushima, Kanagawa) needed more than one catalog entry each because their
+downloaded files cover distinct, non-adjacent coastal sub-areas rather than one contiguous
+prefecture-wide polygon set.
+
+**No separate extent-only benchmark, unlike France's `_02moy`/`_ht_02moy` pair.** Every A49 polygon
+already carries a categorical depth class (there is no "extent-only, no depth" layer in the source),
+so — mirroring France's own confirmed 2026-09 finding that its depth-band polygons exactly tile its
+extent polygons (§3.2) — the depth-band comparison's own "has a band at all" condition already is
+the extent comparison; a duplicate `variable: extent` entry set would just re-read the same
+geometries for no new information, so only `variable: depth` entries were written.
+
+| Caveat | What it means | How this pipeline handles it | Residual implication |
+|---|---|---|---|
+| **Partial, bay-specific coverage** (see above) | Same FAR-inflation risk as Spain/France, but the *shape* of the gap is different — whole un-modelled coastline segments, not scattered survey-zone gaps | Same `buffered`/`model_only`/health-check machinery (§1.1), no country-specific change | Japan's national HR/FAR would be misleading if computed as a single blended number outside the 12 covered prefectures' own footprints — read per-file/per-region, not as a false national summary |
+| **Return period not confirmed** — Japan's post-2015 hazard-map legal framework generally specifies a "maximum class" (想定最大規模) scenario rather than a specific statistical return period the way Spain's "100 AÑOS" is labelled; the exact scenario basis for these specific FY2022 A49 layers was not independently confirmed this session | Same class of definitional slack as France's `02Moy` (§2.2) and Norway's F2/200yr (§2.3), but with lower confidence than either since the underlying scenario type itself is unconfirmed, not just its equivalent return period | Compared against the model's `RP100` anyway (best available analog, same convention used for every other country's own mismatch) — catalog `return_period` left `null` rather than guessed | A "disagreement" for Japan carries more unexplained definitional slack than any other country implemented so far; do not treat Japan's numbers as return-period-comparable to Spain's without revisiting this |
+| **Categorical depth bins, two different granularities** — most files bucket at 0.3 m at the low end (`0.3m未満`, `0.3m以上0.5m未満`, ...), a few instead start at a coarser `0.5m未満` step; both fully parse into the same generic `rasterize_depth_bands` mechanism already proven on France (§3.2) | Not a data-quality problem — a real source-data inconsistency across prefectures, confirmed via exhaustive category enumeration (zero unparsed strings across all 10 unique category strings found) | `ht_min_m`/`ht_max_m` parsed once (regex-based, handles both granularities and the open-ended `20m以上` top band, resolved to `NaN`→`inf` the same magnitude-threshold way as France's sentinels) into the 19 GeoPackages the catalog entries read | Depth-band metrics are not bucketed identically across all 19 files — comparing `depth_EB` *between* Japan sub-areas needs the same care as comparing across France's zones with different sentinel conventions |
+| **Mojibake source filenames** — several of the original 22 downloaded ZIPs extracted with Shift-JIS-encoded folder/file names corrupted into unreadable byte garbage on Windows (confirmed identical corruption via both Git Bash and PowerShell listings, ruling out a display-only artifact) | Cosmetic only — file *content* (geometry, attribute values) was unaffected; only the on-disk names were unreadable | Not corrected at the source; instead, the 19 non-redundant files were re-derived into cleanly-named English GeoPackages (`chiba.gpkg`, `hyogo_harima_a.gpkg`, etc.) under `JAP/parsed/`, which is what the catalog entries actually point at | None — purely a housekeeping step, already resolved |
+| **CRS is JGD2011 (EPSG:6668), not WGS84** | Numerically very close to EPSG:4326 but not identical (different datum realization) | Catalog declares the source's own real CRS (`crs: 6668`), not forced to 4326 — same convention as Spain declaring its own real ETRS89 (4258) rather than silently reprojecting at catalog-declaration time | Negligible — sub-meter datum differences, well below this pipeline's own DEM resolution and `vector_simplify_tolerance_m` (§1.5) |
+| **Defences / wave run-up** — not independently verified for Japan's A49 methodology | Assumed to carry similar risk to Spain's/France's equivalent caveats, but not confirmed | Not addressed | Same caution as Spain §2.1 and France §2.2, with the same lower confidence already noted there for France |
+
+### 2.5 Finland (`FIN`, benchmark: `finland_stormsurge_national`, extent only) — implemented 2026-09
+
+**Architecturally like Norway, not Spain/France/Japan** — the benchmark used
+(`kohdenro=133`, "Rannikkoalueen meritulvakartta") spans essentially the entire
+Finnish coast, so `meta.coverage: national` routes it through
+`validate_country_national_coverage` (§2.3's chunk-streaming path), not the
+cluster-based `validate_country` Spain/France/Japan use. Unlike Norway, this
+routing wasn't forced by a crash — it was a real, verified choice: the source file
+also ships 7 smaller, detailed, city-scale flood maps (Naantali, Hamina/Kotka,
+Rauma, Loviisa, Helsinki/Espoo, Turku/Raisio, Kemi), and a real spatial check
+(2026-09, GeoPackage rtree index query, not assumed) confirmed `kohdenro=133`'s own
+polygons genuinely overlap every one of those 7 areas — e.g. Naantali's own small
+bbox contains both its own 1178 detailed features and 347 of `kohdenro=133`'s
+features covering the same ground. The 7 city maps are therefore more-detailed
+*local alternatives* within `kohdenro=133`'s own footprint, not additional
+uncovered ground — using `kohdenro=133` alone is real national coverage, not a
+partial approximation of it.
+
+**Scale is the open risk, not yet stress-tested.** The raw file is a 20.3 GB
+GeoPackage; `kohdenro=133` alone has ~3.8 million polygon features at RP100 (a fine
+lidar-grid mesh, not dissolved zones) — over an order of magnitude larger than any
+benchmark this pipeline has processed so far (Japan's largest single file was
+258k). `driver_kwargs.where` (GDAL/SQLite pushdown, confirmed working: a real
+`kohdenro=100 AND syvvyohluokka_id IN (1,2,3,4,5)`-filtered read of one city area
+returned 50,451 features in 13.6s directly from the 20 GB file, no separate
+conversion step needed) keeps the *catalog wiring* simple, but `load_benchmark_full`
+/ `validate_country_national_coverage` still load the **entire filtered result**
+(~3.5M+ features after excluding dry land and permanent water) into one
+GeoDataFrame before any chunk-by-chunk processing begins — this exact code path
+has only ever been exercised on Norway's ~115k-row benchmark. Whether this holds up
+memory- and time-wise at Finland's scale has not been tested this session; treat
+the first real `validate_country.py --country FIN` run as that test, not as a
+foregone conclusion.
+
+**Depth classification is unusually explicit, and this pipeline is not using all of
+it (yet).** Each polygon in the source already carries both a raw depth class
+(`syvvyohluokka_id`: 0=dry land, 1-5=0-0.5/0.5-1/1-2/2-3/>3m, 99=permanent water
+body — explicit in the data, unlike Norway where "raw polygon includes the sea" had
+to be inferred and corrected via an external land-use mask, §2.3) **and** a
+separate defences-aware reclassification (`syvsuojluokka_id`, which recodes cells
+protected by real structural defences into a distinct code instead of their raw
+depth). This catalog entry uses only the raw (`syvvyohluokka_id`) column, filtered
+to classes 1-5, matching the "compare against undefended extent" convention already
+used for every other country. `variable: extent` only, not `depth` — the
+depth-band comparison (`validate_country_depth_bands`) is cluster-based-only by
+design (raises `NotImplementedError` for any non-partial-coverage benchmark); a
+chunk-based depth-band path does not exist yet and was not built this session.
+
+| Caveat | What it means | How this pipeline handles it | Residual implication |
+|---|---|---|---|
+| **National coverage relies on one verified assumption** — that `kohdenro=133` really is a superset of the 7 city-scale maps, not a coarser/independent survey with its own gaps | If wrong, some real Finnish coastal flooding (city-map areas) could be silently under-represented | Verified via a real rtree bbox-overlap query (see above), not assumed — but only checked at RP100, not independently re-verified per return period | Low residual risk for RP100 (what's actually compared); unverified for other return periods if this benchmark is ever extended to them |
+| **3.8M-feature single benchmark - scale confirmed workable, but slow** (see above) | Real `validate_country.py --country FIN` run (2026-09) against production `config.yml`: the single `get_geodataframe` load of the where-filtered (~3.5M-feature) benchmark took ~17 minutes, all 9 overlapping 5x5 degree postprocessing chunks then processed with real model data (9/9), total run ~41 minutes, no crash, no excess memory failure | Not optimized - acceptable for an occasional validation run, but noticeably slower than every other country (seconds to low minutes) | If this benchmark is ever run repeatedly (e.g. wired into a CI/regular check), the ~17 minute load is a real, now-measured cost worth revisiting via the same preprocessing/simplification workaround already used for Japan/Norway - not urgent for occasional manual runs |
+| **Defences are explicit and precisely quantifiable here** — unlike every other country so far, where "how much do defences matter" has been an open, unmeasured caveat (Spain §2.1, France §2.2) | At RP100, 12.57 km² of `kohdenro=133`'s raw wet area (1573.75 km², 0.80%) is reclassified as "protected by fixed structures" (`syvsuojluokka_id=12`) when Finland's own real flood defenses are accounted for | Not applied to the comparison (raw, undefended extent is used, matching every other country's convention) — computed and recorded here as a real, measured reference number instead of an unknown risk | A genuinely small fraction nationally (0.80%) — but this is a national average; could be locally concentrated (e.g. Helsinki) the way Norway's own Bergen data-quality gap was locally concentrated (§2.3) - not broken down by city here |
+| **Return period**: RP100 (`toistuvuus=100`) confirmed directly against the source (layer name and attribute agree) - an exact match, no definitional slack | Best case among every country implemented so far (even better than Spain's own "100 AÑOS") | Compared directly against the model's `RP100` | Low residual risk - the cleanest RP match in this validation suite |
+| **7 more-detailed city-scale maps exist but are unused** (Naantali, Hamina/Kotka, Rauma, Loviisa, Helsinki/Espoo, Turku/Raisio, Kemi) | Real, already-identified upgrade path if `kohdenro=133`'s coarser resolution ever proves inadequate for a specific city | Not wired in this session (see architectural note above) | None currently - `kohdenro=133` covers the same ground; revisit only if local-detail resolution becomes a real requirement |
+| **Defences / wave run-up beyond the quantified structural-protection figure above** — not independently verified for SYKE's broader methodology | Assumed to carry similar risk to every other country's equivalent caveat | Not addressed | Same caution as Spain §2.1, France §2.2, Japan §2.4 |
+
+### 2.6 Denmark (`DNK`, benchmark: `denmark_stormsurge_national`, extent only) — implemented 2026-09
+
+**First raster benchmark in this pipeline.** Every country so far (Spain, France,
+Norway, Japan, Finland) has a vector (`GeoDataFrame`) benchmark; Denmark's national
+"Oversvømmelsesfare" hazard maps are GeoTIFFs - continuous water depth in metres at
+5 m resolution (confirmed via each `.tif.xml`'s own ArcGIS rename lineage: the
+original filename was `H100_2023_dyb_5m.tif`, "dyb" = depth), not a categorical
+class raster. This required real new code, not just a new catalog entry:
+`BenchmarkSpec.wet_values`/`depth_threshold_m` (mutually exclusive - the former for
+a categorical hazard-class raster, the latter for a continuous depth one like
+Denmark's), `src/validation.py::read_benchmark_raster_fraction`, and a
+`spec.data_type` dispatch inside `validate_country_national_coverage` (GeoDataFrame
+benchmarks are completely unaffected - same function, same downstream metrics code,
+only the "how do we get the benchmark's wet/dry fraction for this chunk" step
+branches). Architecturally like Norway/Finland otherwise (`coverage: national`,
+processed chunk-by-chunk, no depth-band comparison path exists yet).
+
+**Classification order matters and was deliberately chosen**: the benchmark is
+thresholded into a binary wet/dry mask at its OWN native 5 m resolution FIRST, then
+reprojected onto the model's much coarser (~30 m) grid using `Resampling.max` - not
+the reverse (reproject raw depth values with nearest-neighbour, then threshold).
+The model grid is coarse enough that each destination cell covers roughly 36 native
+benchmark pixels; thresholding after a nearest-neighbour reproject would sample only
+ONE of those 36 per destination cell, silently missing real flooding elsewhere in
+that cell. `Resampling.max` on the pre-classified mask instead marks a destination
+cell wet if ANY covered native pixel was wet - the safer direction of error given
+this pipeline's own §1.1 FAR-inflation caution already assumes benchmark "wet"
+calls should be read generously, not conservatively.
+
+**Real bug found and fixed before this benchmark would produce anything
+meaningful**: the catalog entry was first written with `country_iso: DEN` (matching
+the P: drive folder name the raw data was dropped into) - "DEN" is not a real ISO
+3166-1 alpha-3 code (it's a common sports/FIFA abbreviation; Denmark's real code,
+confirmed directly against this pipeline's own `FLOPROS_NL_geogunit_107.xlsx` ISO
+column, is `DNK`). This did NOT error - `read_country_mask` (the same Sweden/
+Denmark-bbox-leakage guard already proven for Norway, §2.3) simply found zero
+geogunit cells matching "DEN" anywhere, silently masking out the ENTIRE country and
+producing an all-NaN metrics row (confirmed via a real first run: `tp_km2`/
+`fp_km2`/`fn_km2`/`tn_km2`/`model_wet_km2` all exactly 0.0, HR/FAR/CSI/EB all NaN) -
+no exception, no warning, a result that could easily have been mistaken for "no
+data" rather than "wrong lookup key". Fixed by correcting `country_iso` to `DNK`
+and renaming both the catalog path and the P: drive folder itself
+(`validation/DEN` -> `validation/DNK`) for consistency with every other country's
+folder matching its real ISO code - re-running produced real, non-degenerate
+metrics. Worth remembering when onboarding any future country: verify the ISO code
+against this pipeline's own lookup table before trusting a folder name or a
+colloquial/sports abbreviation.
+
+**ASCII-only path, same class of issue as Japan's CJK text (§2.4) but load-bearing
+here, not cosmetic**: the original folder/file names contain "ø"/"å"
+(`Oversvømmelsesfare`, `hav`/`år`) - hydromt's data_catalog reader opens this yml
+with the platform default encoding (cp1252 on Windows), which would silently
+mis-decode those bytes. For Japan this only mangled human-readable description
+text; here it would have corrupted the actual file PATH used to open the raster,
+causing a real file-not-found rather than a cosmetic issue. Fixed by renaming the
+one file actually used (RP100 Hav) to an ASCII-transliterated name and moving it
+out of the accented parent folder into `DNK/coastal/` - the other 8 return periods
+and all of Vandløb (fluvial, excluded anyway) are untouched at their original
+accented paths.
+
+| Caveat | What it means | How this pipeline handles it | Residual implication |
+|---|---|---|---|
+| **First-ever raster benchmark path - proven on one real run, not battle-tested** | The vector path has now been exercised across 5 countries with varied edge cases; the raster path has exactly one | Real run completed successfully post-fix (HR=0.818, FAR=0.691, CSI=0.289, EB=0.910 at the 0.10m primary threshold, `benchmark_wet_outside_model_domain_pct=0.0%`) | Treat as a working first implementation, not a mature one - a second raster-benchmark country would be the real stress test |
+| **High FAR (~0.69) alongside a reasonably high HR (~0.82)** | The model floods a lot of area the Danish benchmark doesn't mark as wet, while still catching most of what the benchmark does mark | Not investigated further this session - could reflect genuine over-prediction, the benchmark's own methodology (e.g. defended-area treatment), or a real physical difference (see next row) | Should be revisited before Denmark's numbers are quoted as a clean model-accuracy result - same caution as every other country's own unresolved defences/methodology caveats |
+| **Depth threshold used is 0 m ("any recorded depth")** | Denmark's hydraulic model already decided what counts as flooded at 5m resolution; this pipeline doesn't apply an additional cutoff on top | Simplest, most defensible choice given no evidence a different cutoff is more appropriate | If FAR turns out to be driven by many very-shallow benchmark-dry/model-wet edge cells, a non-zero cutoff might change the picture - not tested |
+| **Only RP100 wired in, despite the widest RP overlap with GFM's own COAST-RP scenarios of any country so far** (10/50/100/200~250/500/1000 all near-exact matches) | Real, identified opportunity for a genuine multi-RP comparison | Not built this session - `validate_country.py`'s single global `val_cfg['return_period']` would need per-benchmark RP-matching logic first (same open item as Finland §2.5) | None currently - just unrealized potential |
+| **Depth-band comparison not available** (extent only) | The continuous depth values would support a genuine depth-vs-depth comparison, better than any other country's categorical/binary benchmark | Not built this session - no chunk-based depth-band path exists yet for ANY country (same gap noted for Finland §2.5) | Real future opportunity, not a limitation of the source data |
+| **Defences / wave run-up** — not independently verified for this benchmark's methodology | Assumed to carry similar risk to every other country's equivalent caveat | Not addressed | Same caution as Spain §2.1, France §2.2, Japan §2.4, Finland §2.5 |
+
+### 2.7 Germany, Australia — not yet resolved
 
 - **Germany**: Niedersachsen's `Gefahrengebiete_HQ100_Z2` is "largely fluvial" per the original
   inventory (plan doc §2.2) — whether it's coastal enough to use at all is still an open question
   (plan doc §7.2 point 4), not yet answered. Schleswig-Holstein's data is an extension-less WFS GML
   file GDAL won't auto-detect — not yet readable. EPSG:4647 (ETRS89/UTM32N with a 32,000,000 m false
   easting) is a real CRS trap to handle correctly whenever this is picked up (plan doc §2.2).
-- **Japan, Australia**: not downloaded yet (only `url.txt` placeholders as of the original
-  inventory).
+- **Australia**: not downloaded yet (only a `url.txt` placeholder as of the original inventory).
 
 ---
 

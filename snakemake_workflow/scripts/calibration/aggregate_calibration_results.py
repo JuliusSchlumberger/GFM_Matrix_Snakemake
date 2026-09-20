@@ -48,6 +48,8 @@ SWEEP_POINTS: dict[str, tuple[str | None, object]] = {
     "obstacle_coupling_iter10": ("obstacle_coupling.max_outer_iterations", 10),
     "waterlevel_eps_0.01": ("waterlevel_epsilon_m", 0.01),
     "waterlevel_eps_0.10": ("waterlevel_epsilon_m", 0.10),
+    "exceedance_threshold_0.05": ("exposure.exceedance_threshold_m", 0.05),
+    "exceedance_threshold_0.20": ("exposure.exceedance_threshold_m", 0.20),
 }
 
 

@@ -56,6 +56,64 @@ coast_rp:
       before use, to match the DEM's own GOCO06s-referenced elevations (see
       `deltadtm`).
 
+coast_hg:
+  data_type: GeoDataset
+  driver: netcdf
+  path: inputs/COAST_HG/COAST-HG_RP100.nc
+  crs: 4326
+  filesystem: local
+  rename:
+    stations: index
+    station_x_coordinate: lon
+    station_y_coordinate: lat
+  meta:
+    category: ocean
+    description: >
+      COAST-HG (COastal dAtaset of Storm Tide HydroGraphs) - a global dataset of
+      RP100 storm-tide HYDROGRAPHS (full time-varying shape, not just the peak
+      level) at the same GTSM coastal output stations as `coast_rp` above,
+      generated via the HGRAPHER method (Dullaart et al., IVM - VU Amsterdam -
+      same research group as coast_rp; this is a companion dataset, not an
+      independent source). Intended for quasi-hydrodynamic (SFINCS) tile
+      modelling as an alternative to this pipeline's existing static-water-level
+      (planar/bathtub-via-eikonal) approach - a hydrograph lets a dynamic model
+      see the storm's actual rise/fall shape rather than only its peak.
+      23,226 stations, 894 timesteps at 10-minute spacing (~6.2 days spanning
+      the synthetic storm event). Two variants per station:
+      `hydrograph_average_tide_signal` (average high-tide conditions) and
+      `hydrograph_spring_tide_signal` (spring-tide conditions) - same RP100
+      storm surge, combined with two different tidal-phase assumptions. Values
+      are water level in metres; vertical reference not yet independently
+      confirmed for this dataset specifically (see known_caveats).
+    source_author: J.C.M. Dullaart, S. Muis, H. de Moel, P.J. Ward, D. Eilander,
+      J.C.J.H. Aerts - IVM, Vrije Universiteit Amsterdam
+    source_license: https://doi.org/10.4121/21270948.v2
+    source_url: <to confirm - README ships no DOI/URL, only a contact email
+      (job.dullaart@vu.nl); coast_rp's own paper/DOI above is the closest
+      citable reference for the underlying CoDEC/COAST-RP source data, but
+      HGRAPHER itself is a distinct, unconfirmed further reference>
+    source_version: "1.0"
+    date_created: "2022-10-05"  # per the file's own date_created attribute
+    known_caveats: >
+      (1) RP100 ONLY - unlike coast_rp's 10 return periods, this dataset has no
+      per-return-period axis at all (one hydrograph SHAPE per station, framed
+      as representative of "a" 1-in-100-year event, not one shape per RP).
+      (2) The `time` coordinate is a real datetime64 axis but starts at an
+      arbitrary reference (2000-01-01), NOT the real date of any actual storm -
+      only ELAPSED time within the synthetic hydrograph is meaningful, do not
+      join or compare it against any real calendar date. (3) Station count
+      (23,226) has not been cross-checked row-for-row against coast_rp's own
+      station set (~23,000 raw, ~22,670 after this pipeline's Antarctic-latitude
+      filter, see coast_rp above) - both are described as the same underlying
+      GTSM network and counts are consistent with that, but exact index/row
+      alignment (same station_id at the same row) is NOT yet confirmed and
+      should be checked directly (e.g. by comparing station_id/lon/lat, not
+      assumed from row position) before joining anything to coast_rp by index.
+      (4) Vertical reference (local MSL vs. already-geoid-corrected) not yet
+      independently confirmed for this dataset the way coast_rp's own MDT
+      correction requirement was - check before using these hydrographs as an
+      absolute water-level forcing rather than a relative shape.
+
 ipcc_ar6_slr_projections:
   data_type: GeoDataset
   driver: netcdf
@@ -182,6 +240,50 @@ deltadtm_mask:
     pixel_size_arcsec: "1 (Y, constant) x 1-5 (X, latitude-tiered - see preparation/build_deltadtm_vrt.py's
       own module docstring for the real per-band-of-latitude values, confirmed against real tiles 2026-09)"
     nodata_value: 255
+
+gebco:
+  data_type: RasterDataset
+  driver: raster
+  path: inputs/gebco_2026_geotiff/gebco.vrt
+  crs: 4326
+  filesystem: local
+  nodata: -32767
+  meta:
+    category: topography
+    description: >
+      GEBCO 2026 Grid - global bathymetry (ocean) + land topography on one
+      continuous 15 arc-second grid (SRTM15+ V2.8 base, augmented with
+      regional multibeam compilations from the four Seabed 2030 Regional
+      Centers). int16 metres, positive above / negative below sea level.
+      NOT used by the eikonal GFM model (which needs no real bathymetry at
+      all - effective_dem forces every ocean/lake/river cell to elevation
+      0.0 at solve time, see src/flood_extent.py) - added 2026-09 solely for
+      the SFINCS quasi-hydrodynamic first pass (sfincs_tiles/), which needs
+      real depth-below-sea-level for its shallow-water solve. Referenced to
+      local Mean Sea Level (per GEBCO's own metadata - "assuming all of them
+      to be referred to Mean Sea Level"), NOT the GOCO06s geoid deltadtm/
+      coast_rp use - sfincs_tiles' own DEM-build step applies the same MDT
+      correction (mdt_cnes_cls22 below) used for the boundary forcing to
+      reconcile this before merging with DeltaDTM land elevation. Built into
+      one VRT mosaic (sfincs_tiles/build_gebco_vrt.py) from 8 whole-globe
+      quadrant GeoTIFFs - see that script for the real build/verification.
+    source_author: GEBCO Compilation Group / Nippon Foundation-GEBCO Seabed 2030 Project
+    source_url: https://www.gebco.net/data-products/gridded-bathymetry-data
+    source_version: "2026"
+    source_license: <to confirm - see GEBCO_Grid_terms_of_use.pdf alongside the downloaded tiles>
+    pixel_size_arcsec: 15
+    nodata_value: -32767
+    vertical_reference: Local Mean Sea Level as distributed - NOT geoid-corrected at the
+      source; sfincs_tiles applies MDT correction (ADD, same sign convention as coast_rp's
+      own boundary correction) before merging with DeltaDTM, not corrected in this raw form.
+    known_caveats: >
+      GEBCO's own documentation notes it does not provide vertical accuracy or a single
+      consistent reference datum (assembled from heterogeneous sources, all assumed
+      referred to MSL) - real accuracy varies by region and input source, and nearshore/
+      intertidal areas specifically are the least reliable (satellite-altimetry-derived
+      regions break down at fine nearshore/tidal scale). Treat SFINCS results very close to
+      shore with appropriate caution; not a substitute for real nearshore surveyed
+      bathymetry where that matters.
 
 land_polygons:
   data_type: GeoDataFrame

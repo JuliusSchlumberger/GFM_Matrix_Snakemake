@@ -288,3 +288,873 @@ norway_stormflo_200ar:
       (mean-high-water/20yr/200yr/1000yr) have inconsistent feature counts (24/34/57/47) and
       are not cleanly nested - real disagreement in Kartverket's own source data, unrelated to
       anything this pipeline does, large enough to dominate the datum signal there.
+
+# -- Denmark (DEN) -------------------------------------------------------------
+# Danish "Oversvommelsesfare" (flood hazard) national flood-depth rasters,
+# downloaded 2026-09 from Statens IT's SFTP portal (see source_url). Two hazard
+# categories: "Hav" (sea/coastal, 9 return periods) and "Vandlob" (watercourse/
+# fluvial, 4 return periods) - only Hav is used (hazard_type: coastal; Vandlob
+# would be fluvial, same exclusion logic as Japan's A31, not downloaded/cataloged).
+#
+# RasterDataset, NOT GeoDataFrame - the first raster benchmark this pipeline
+# supports (added 2026-09: BenchmarkSpec.wet_values/depth_threshold_m,
+# src/validation.py::read_benchmark_raster_fraction, and a data_type dispatch in
+# validate_country_national_coverage - GeoDataFrame benchmarks are unaffected).
+# Original per-RP files (confirmed via each .tif.xml's own ArcGIS rename lineage,
+# e.g. "H100_2023_dyb_5m.tif" - "dyb" = depth) are CONTINUOUS water depth in
+# metres at 5m resolution, EPSG:25832 - not a categorical hazard-class raster, so
+# `depth_threshold_m` (not `wet_values`) is used: any pixel with a real recorded
+# depth above threshold counts as benchmark-wet, nodata (the vast majority of
+# each file - real coastal flooding is a thin fringe within a national bounding
+# box, same shape as Norway/Finland) counts as not-wet.
+#
+# NOTE ASCII-only path: the original folder/file names contain "ø"/"å"
+# (Oversvømmelsesfare, hav/år) - hydromt's data_catalog reader opens this yml
+# with the platform default encoding (cp1252 on Windows, see the Japan section's
+# own note above), which would silently mis-decode those bytes and break the
+# actual file path used to open the raster (not just cosmetic mangling the way
+# it is for meta text) - the RP100 file was renamed/moved to
+# DNK/coastal/Oversvommelsesfare_hav_100ar.tif (ASCII transliteration) rather
+# than referenced at its original location. Only RP100 was renamed - the other 8
+# return periods (and all of Vandlob) are still at their original accented paths,
+# unused by this catalog and untouched. The top-level folder itself was also
+# renamed DEN -> DNK (2026-09, alongside the country_iso fix below) for
+# consistency with every other country's folder matching its real ISO code.
+#
+# Scale/scope: RP100 only for now (matches every other country's convention);
+# Denmark's return periods (10/20/50/100/200/500/1000/5000/10000) overlap GFM's
+# own COAST-RP return periods more closely than any other country's benchmark so
+# far (10/50/100/200~250/500/1000 all near-exact matches) - a real opportunity
+# for a multi-RP comparison later, not built this session (validate_country.py's
+# single global val_cfg['return_period'] would need per-benchmark RP-matching
+# logic first, same open item already noted for Finland).
+denmark_stormsurge_national:
+  data_type: RasterDataset
+  driver: raster
+  path: DNK/coastal/Oversvommelsesfare_hav_100ar.tif
+  crs: 25832   # ETRS89 / UTM zone 32N - projected, same handling as Norway (25833) and Finland (3067)
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Denmark
+    country_iso: DNK   # real ISO 3166-1 alpha-3 code - confirmed 2026-09 against this
+    # pipeline's own FLOPROS_NL_geogunit_107.xlsx ISO column ("DEN" is not a valid ISO-3
+    # code at all, just a common sports/FIFA abbreviation - using it silently zeroed every
+    # metric via read_country_mask finding no matching geogunit cells, not a crash)
+    hazard_type: coastal
+    return_period: 100   # real value - original filename "H100_2023_dyb_5m.tif" confirms RP100, 2023 vintage
+    variable: extent
+    coverage: national
+    depth_threshold_m: 0.0   # any pixel with a real recorded depth (i.e. not nodata) counts as
+    # benchmark-wet - the source's own hydraulic model already decided what "flooded" means at
+    # 5m resolution; this pipeline doesn't re-threshold a deeper cutoff on top of that.
+    regions:
+      mainland: [7.82, 54.24, 15.78, 57.96]   # the Hav RP100 raster's own real bounds (EPSG:25832
+      # 441585/6049785/893020/6402300) reprojected to 4326 with a small pad - same bbox-can-
+      # overlap-a-neighbour caveat as Norway/Finland's own mainland regions (Denmark borders
+      # Germany and faces Sweden/Norway across narrow straits) - validate_country_national_
+      # coverage's read_country_mask step already handles this generically, no extra code needed.
+    description: >
+      Danish national coastal ("Hav") flood hazard depth raster, RP100, 5m resolution,
+      continuous water depth in metres (not categorical) - covers the entire Danish
+      coastline at fine resolution within one national bounding box.
+    source_url: https://sftp.statens-it.dk/public/folder/sudeyofd-echpkegqfxhbg/Plantrin%201%20National%20data%202024
+    date_retrieved: "2026-09-15"
+    source_license: <to confirm - Danish state data portal terms, see the download portal>
+    known_caveats: >
+      (1) First raster benchmark in this pipeline - the comparison code (read_benchmark_raster_
+      fraction) is new 2026-09, proven on this one real run, not battle-tested across many
+      countries the way the vector path is. (2) Extent only (depth_threshold_m=0, i.e. "any
+      recorded depth") - a genuine depth-vs-depth comparison is possible given this source's
+      continuous values (unlike every other country's categorical/binary benchmark) but was not
+      built this session - a real future opportunity, not a limitation of the source data itself.
+      (3) Only RP100 wired in despite Denmark having the widest RP overlap with GFM's own
+      COAST-RP scenarios of any country so far - see scope note above. (4) Defences / wave
+      run-up not independently verified for this benchmark's methodology - same caution as
+      every other country (Spain §2.1, France §2.2, Japan §2.4, Finland §2.5).
+
+# -- Finland (FIN) -------------------------------------------------------------
+# SYKE (Finnish Environment Institute) tulvavaaravyohykkeet - perusskenaariot
+# (flood hazard zones - basic scenarios), sea/coastal ("meri") flooding, downloaded
+# 2026-09 from https://ckan.ymparisto.fi/dataset/tulvavaaravyohykkeet-perusskenaariot-
+# flood-hazard-zones-basic-scenarios.
+#
+# Single GeoPackage, 20.3 GB, 8 named sub-areas ("kohde") x 8 return-period layers
+# (each ~4-5.6M features - a very fine lidar-derived grid-cell mesh, NOT dissolved
+# zones). Real investigation 2026-09 found kohdenro=133 ("Rannikkoalueen
+# meritulvakartta" - "coastal area sea flood map") alone spans nearly the entire
+# Finnish coast (40,258 km2 bbox, ~3.8M of the ~4.0M total RP100 features) and
+# genuinely spatially overlaps the other 7 named sub-areas (confirmed via a real
+# rtree-index bbox query, e.g. Naantali's own small bbox contains BOTH kohdenro=76's
+# own 1178 detailed features AND 347 of kohdenro=133's own features covering the same
+# ground) - the 7 smaller city-scale maps (Naantali/Hamina-Kotka/Rauma/Loviisa/
+# Helsinki-Espoo/Turku-Raisio/Kemi) are more detailed LOCAL alternatives, not
+# additional un-covered ground, so this pipeline uses kohdenro=133 only
+# (coverage: national, same architecture as Norway - see caveats doc). Loading a
+# 3.8M-feature single benchmark fully into memory (what load_benchmark_full/
+# validate_country_national_coverage both do today) is untested at this scale -
+# flagged as an open risk in the caveats doc, not resolved by this catalog wiring.
+#
+# Depth classification (`syvvyohluokka_id`, joined via domainmaartlvsyvyystaulu in
+# the source - not re-derived here, English values written directly): 0=dry land
+# (excluded), 1-5=depth bands 0-0.5/0.5-1/1-2/2-3/>3m, 99=permanent water body
+# (excluded - explicit in the source data, unlike Norway where this had to be
+# inferred from an external land-use mask). Filtering is pushed down to the GDAL/
+# SQLite read itself via `driver_kwargs.where` (confirmed working 2026-09: a real
+# `kohdenro=100 AND syvvyohluokka_id IN (1,2,3,4,5)` read returned 50,451 features
+# in 13.6s directly from the 20 GB file - no separate conversion/preprocessing file
+# needed, unlike Japan's per-prefecture GeoPackages).
+#
+# `variable: extent` only (not depth) for now - coverage=national depth-band
+# comparison has no chunk-based code path yet (validate_country_depth_bands raises
+# NotImplementedError for any non-partial-coverage benchmark by design - see its own
+# docstring); would need genuinely new code mirroring validate_country_national_
+# coverage's chunk-streaming architecture for depth bands specifically. Not built
+# this session - flagged as a known gap.
+finland_stormsurge_national:
+  data_type: GeoDataFrame
+  driver: vector
+  driver_kwargs:
+    layer: maartlvmeri0100syv
+    where: "kohdenro=133 AND syvvyohluokka_id IN (1,2,3,4,5)"
+  path: FIN/tulvavaaravyohykkeet_meri.gpkg
+  crs: 3067   # ETRS89 / TM35FIN - projected, same handling as Norway's 25833
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Finland
+    country_iso: FIN
+    hazard_type: coastal
+    return_period: 100   # real value - toistuvuus=100 confirmed directly against the
+    # source layer (layer name maartlvmeri0100syv, attribute toistuvuus all =100)
+    variable: extent
+    coverage: national
+    regions:
+      mainland: [17.3, 59.3, 28.3, 66.2]   # kohdenro=133's own real bounds (EPSG:3067
+      # 65000/6624000/548000/7314000) reprojected to 4326 with a small pad - same
+      # bbox-can-overlap-a-neighbour caveat as Norway's mainland region (Finland
+      # borders Sweden/Norway/Russia and the Gulf of Finland faces Estonia) -
+      # validate_country_national_coverage's own country-mask step (read_country_mask)
+      # already handles this generically, no extra code needed.
+    description: >
+      SYKE sea/coastal flood hazard zone polygons (kohdenro=133, "Rannikkoalueen
+      meritulvakartta"), RP100 basic scenario, covering essentially the entire
+      Finnish coastline at fine (lidar-grid) resolution. Extent-only (union of
+      depth classes 1-5) - see known_caveats for the depth-band gap and the
+      unused, more-detailed 7 city-scale sub-maps this pipeline does not read.
+    source_url: https://ckan.ymparisto.fi/dataset/tulvavaaravyohykkeet-perusskenaariot-flood-hazard-zones-basic-scenarios
+    date_retrieved: "2026-09-15"
+    source_license: <to confirm - SYKE/ymparisto.fi open data terms, see the download portal>
+    known_caveats: >
+      (1) National coverage assumed, not independently confirmed beyond kohdenro=133's
+      own bbox/feature-count dominance - see the file-header comment above for the real
+      overlap check performed. (2) No depth-band comparison yet (extent only) - the
+      chunk-based national-coverage path this benchmark requires has no depth-band
+      implementation (validate_country_depth_bands is partial-coverage-only by design).
+      (3) Defences are explicit and precisely quantifiable here (unlike every other
+      country so far, where this has been an open, unmeasured caveat): at RP100,
+      12.57 km2 of kohdenro=133's raw wet area (1573.75 km2, 0.80%) is reclassified as
+      "protected by fixed structures" (syvsuojluokka_id=12) when Finland's own real
+      flood defenses are accounted for - not applied to this comparison (this pipeline
+      compares raw, undefended extent, same convention as every other country), but now
+      a real measured number instead of an unknown risk. (4) The 7 detailed city-scale
+      sub-maps (kohdenro 76/97/98/100/101/145 + Naantali) are NOT read by this catalog
+      entry (see file-header comment) - if their local detail ever matters more than
+      kohdenro=133's coarser coverage for a specific city, they are a real, already-
+      identified upgrade path, not a data gap.
+
+# -- Japan (JPN) --------------------------------------------------------------
+# KSJ (kokudo suuchi joho / National Land Numerical Information) category A49,
+# storm surge inundation assumed area, downloaded 2026-09 from
+# https://nlftp.mlit.go.jp/ksj/gml/gml_datalist.html.
+# NOT the fluvial A31 flood-inundation category - A49 is storm surge specifically,
+# the coastal hazard type this model actually simulates (A31 would be hazard_type:
+# fluvial, not comparable - see BenchmarkSpec.hazard_type).
+#
+# NOTE: no raw CJK characters in this file - hydromt's data_catalog reader opens
+# this yml with the platform default encoding (cp1252 on Windows), which cannot
+# represent most CJK characters and raises UnicodeDecodeError on load for several
+# of them (found and fixed 2026-09 - this file is UTF-8 on disk but is NOT read
+# as UTF-8 by hydromt.DataCatalog.from_yml). Keep this section ASCII-only.
+#
+# One catalog entry per genuinely non-overlapping source polygon file, NOT one
+# merged national file and NOT strictly one per prefecture - several prefectures
+# (Hyogo, Tokushima, Kanagawa) had multiple separate downloaded files covering
+# distinct, non-adjacent coastal sub-areas (e.g. Hyogo borders both the Sea of
+# Japan and the Seto Inland Sea on completely different coastlines). Verified via
+# real geometry overlap checks (2026-09-15), not assumed: 3 of the 22 originally
+# downloaded files were excluded as redundant - see docs/flood_extent_validation_caveats.md
+# Japan section for the full reasoning and the excluded files' names.
+#
+# A49_003's categorical depth-class strings (Japanese, e.g. "0.3-0.5m" bands)
+# were parsed into numeric ht_min_m/ht_max_m columns (all 19 files, verified zero
+# unparsed strings) by a one-time script - see caveats doc. Two different bucket
+# granularities exist across prefectures (some resolve to 0.3 m steps at the low
+# end, others only to 0.5 m) - not an error, a real source-data inconsistency.
+# Coverage is `partial` (isolated bay/coastal segments, not the whole coastline -
+# same category as Spain/France, NOT Norway's national coverage).
+
+japan_stormsurge_chiba:
+  data_type: GeoDataFrame
+  driver: vector
+  path: JAP/parsed/chiba.gpkg
+  crs: 6668   # JGD2011 geographic - this source's own real CRS, not forced to 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Japan
+    country_iso: JPN
+    hazard_type: coastal   # storm surge (A49) - comparable; A31 (fluvial) would not be
+    return_period: null   # <to confirm> - Japan's storm surge maps are typically a legally-
+    # mandated "maximum class" scenario, not a specific statistical return
+    # period the way Spain's "100 ANOS" is labelled - compared against the model's RP100
+    # anyway (best available analog, same convention as France/Norway's own RP mismatches)
+    variable: depth   # dispatches validate_country.py's depth-band comparison
+    ht_min_col: ht_min_m
+    ht_max_col: ht_max_m   # open-ended top band (e.g. "20m or more") parsed to NaN,
+    # resolved by validation.depth_band_open_ended_min_m's magnitude-threshold rule, same
+    # mechanism as France's inconsistent per-zone sentinels - see rasterize_depth_bands
+    coverage: partial
+    description: >
+      KSJ storm surge (takashio shinsui soutei kuiki) inundation depth-class
+      polygons, Chiba prefecture, eastern Tokyo Bay coast. 114787 features. FY2022 data.
+      Depth classes parsed from the original Japanese A49_003 categorical column
+      into numeric ht_min_m/ht_max_m - see caveats doc.
+    source_url: https://nlftp.mlit.go.jp/ksj/gml/gml_datalist.html
+    date_retrieved: "2026-09-15"
+    source_license: <to confirm - KSJ general open-data terms, see the download portal>
+    known_caveats: >
+      See docs/flood_extent_validation_caveats.md Japan section for the full picture:
+      partial bay-only coverage (not the whole Japanese coastline), unconfirmed return
+      period, mixed depth-bucket granularity across prefectures, and the file-level
+      overlap exclusions this catalog entry set is already net of.
+
+japan_stormsurge_tokyo:
+  data_type: GeoDataFrame
+  driver: vector
+  path: JAP/parsed/tokyo.gpkg
+  crs: 6668   # JGD2011 geographic - this source's own real CRS, not forced to 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Japan
+    country_iso: JPN
+    hazard_type: coastal   # storm surge (A49) - comparable; A31 (fluvial) would not be
+    return_period: null   # <to confirm> - Japan's storm surge maps are typically a legally-
+    # mandated "maximum class" scenario, not a specific statistical return
+    # period the way Spain's "100 ANOS" is labelled - compared against the model's RP100
+    # anyway (best available analog, same convention as France/Norway's own RP mismatches)
+    variable: depth   # dispatches validate_country.py's depth-band comparison
+    ht_min_col: ht_min_m
+    ht_max_col: ht_max_m   # open-ended top band (e.g. "20m or more") parsed to NaN,
+    # resolved by validation.depth_band_open_ended_min_m's magnitude-threshold rule, same
+    # mechanism as France's inconsistent per-zone sentinels - see rasterize_depth_bands
+    coverage: partial
+    description: >
+      KSJ storm surge (takashio shinsui soutei kuiki) inundation depth-class
+      polygons, Tokyo prefecture, western/central Tokyo Bay coast. 59039 features. FY2022 data.
+      Depth classes parsed from the original Japanese A49_003 categorical column
+      into numeric ht_min_m/ht_max_m - see caveats doc.
+    source_url: https://nlftp.mlit.go.jp/ksj/gml/gml_datalist.html
+    date_retrieved: "2026-09-15"
+    source_license: <to confirm - KSJ general open-data terms, see the download portal>
+    known_caveats: >
+      See docs/flood_extent_validation_caveats.md Japan section for the full picture:
+      partial bay-only coverage (not the whole Japanese coastline), unconfirmed return
+      period, mixed depth-bucket granularity across prefectures, and the file-level
+      overlap exclusions this catalog entry set is already net of.
+
+japan_stormsurge_hyogo_osaka_bay:
+  data_type: GeoDataFrame
+  driver: vector
+  path: JAP/parsed/hyogo_osaka_bay.gpkg
+  crs: 6668   # JGD2011 geographic - this source's own real CRS, not forced to 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Japan
+    country_iso: JPN
+    hazard_type: coastal   # storm surge (A49) - comparable; A31 (fluvial) would not be
+    return_period: null   # <to confirm> - Japan's storm surge maps are typically a legally-
+    # mandated "maximum class" scenario, not a specific statistical return
+    # period the way Spain's "100 ANOS" is labelled - compared against the model's RP100
+    # anyway (best available analog, same convention as France/Norway's own RP mismatches)
+    variable: depth   # dispatches validate_country.py's depth-band comparison
+    ht_min_col: ht_min_m
+    ht_max_col: ht_max_m   # open-ended top band (e.g. "20m or more") parsed to NaN,
+    # resolved by validation.depth_band_open_ended_min_m's magnitude-threshold rule, same
+    # mechanism as France's inconsistent per-zone sentinels - see rasterize_depth_bands
+    coverage: partial
+    description: >
+      KSJ storm surge (takashio shinsui soutei kuiki) inundation depth-class
+      polygons, Hyogo prefecture, Osaka Bay-facing coast (Kobe/Akashi area). 26779 features. FY2022 data.
+      Depth classes parsed from the original Japanese A49_003 categorical column
+      into numeric ht_min_m/ht_max_m - see caveats doc.
+    source_url: https://nlftp.mlit.go.jp/ksj/gml/gml_datalist.html
+    date_retrieved: "2026-09-15"
+    source_license: <to confirm - KSJ general open-data terms, see the download portal>
+    known_caveats: >
+      See docs/flood_extent_validation_caveats.md Japan section for the full picture:
+      partial bay-only coverage (not the whole Japanese coastline), unconfirmed return
+      period, mixed depth-bucket granularity across prefectures, and the file-level
+      overlap exclusions this catalog entry set is already net of.
+
+japan_stormsurge_hyogo_sea_of_japan:
+  data_type: GeoDataFrame
+  driver: vector
+  path: JAP/parsed/hyogo_sea_of_japan.gpkg
+  crs: 6668   # JGD2011 geographic - this source's own real CRS, not forced to 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Japan
+    country_iso: JPN
+    hazard_type: coastal   # storm surge (A49) - comparable; A31 (fluvial) would not be
+    return_period: null   # <to confirm> - Japan's storm surge maps are typically a legally-
+    # mandated "maximum class" scenario, not a specific statistical return
+    # period the way Spain's "100 ANOS" is labelled - compared against the model's RP100
+    # anyway (best available analog, same convention as France/Norway's own RP mismatches)
+    variable: depth   # dispatches validate_country.py's depth-band comparison
+    ht_min_col: ht_min_m
+    ht_max_col: ht_max_m   # open-ended top band (e.g. "20m or more") parsed to NaN,
+    # resolved by validation.depth_band_open_ended_min_m's magnitude-threshold rule, same
+    # mechanism as France's inconsistent per-zone sentinels - see rasterize_depth_bands
+    coverage: partial
+    description: >
+      KSJ storm surge (takashio shinsui soutei kuiki) inundation depth-class
+      polygons, Hyogo prefecture, Sea-of-Japan-facing north coast (Tajima area). 9990 features. FY2022 data.
+      Depth classes parsed from the original Japanese A49_003 categorical column
+      into numeric ht_min_m/ht_max_m - see caveats doc.
+    source_url: https://nlftp.mlit.go.jp/ksj/gml/gml_datalist.html
+    date_retrieved: "2026-09-15"
+    source_license: <to confirm - KSJ general open-data terms, see the download portal>
+    known_caveats: >
+      See docs/flood_extent_validation_caveats.md Japan section for the full picture:
+      partial bay-only coverage (not the whole Japanese coastline), unconfirmed return
+      period, mixed depth-bucket granularity across prefectures, and the file-level
+      overlap exclusions this catalog entry set is already net of.
+
+japan_stormsurge_hyogo_harima_a:
+  data_type: GeoDataFrame
+  driver: vector
+  path: JAP/parsed/hyogo_harima_a.gpkg
+  crs: 6668   # JGD2011 geographic - this source's own real CRS, not forced to 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Japan
+    country_iso: JPN
+    hazard_type: coastal   # storm surge (A49) - comparable; A31 (fluvial) would not be
+    return_period: null   # <to confirm> - Japan's storm surge maps are typically a legally-
+    # mandated "maximum class" scenario, not a specific statistical return
+    # period the way Spain's "100 ANOS" is labelled - compared against the model's RP100
+    # anyway (best available analog, same convention as France/Norway's own RP mismatches)
+    variable: depth   # dispatches validate_country.py's depth-band comparison
+    ht_min_col: ht_min_m
+    ht_max_col: ht_max_m   # open-ended top band (e.g. "20m or more") parsed to NaN,
+    # resolved by validation.depth_band_open_ended_min_m's magnitude-threshold rule, same
+    # mechanism as France's inconsistent per-zone sentinels - see rasterize_depth_bands
+    coverage: partial
+    description: >
+      KSJ storm surge (takashio shinsui soutei kuiki) inundation depth-class
+      polygons, Hyogo prefecture, Harima Sea coast, western sub-area. 11446 features. FY2022 data.
+      Depth classes parsed from the original Japanese A49_003 categorical column
+      into numeric ht_min_m/ht_max_m - see caveats doc.
+    source_url: https://nlftp.mlit.go.jp/ksj/gml/gml_datalist.html
+    date_retrieved: "2026-09-15"
+    source_license: <to confirm - KSJ general open-data terms, see the download portal>
+    known_caveats: >
+      See docs/flood_extent_validation_caveats.md Japan section for the full picture:
+      partial bay-only coverage (not the whole Japanese coastline), unconfirmed return
+      period, mixed depth-bucket granularity across prefectures, and the file-level
+      overlap exclusions this catalog entry set is already net of.
+
+japan_stormsurge_hyogo_harima_b:
+  data_type: GeoDataFrame
+  driver: vector
+  path: JAP/parsed/hyogo_harima_b.gpkg
+  crs: 6668   # JGD2011 geographic - this source's own real CRS, not forced to 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Japan
+    country_iso: JPN
+    hazard_type: coastal   # storm surge (A49) - comparable; A31 (fluvial) would not be
+    return_period: null   # <to confirm> - Japan's storm surge maps are typically a legally-
+    # mandated "maximum class" scenario, not a specific statistical return
+    # period the way Spain's "100 ANOS" is labelled - compared against the model's RP100
+    # anyway (best available analog, same convention as France/Norway's own RP mismatches)
+    variable: depth   # dispatches validate_country.py's depth-band comparison
+    ht_min_col: ht_min_m
+    ht_max_col: ht_max_m   # open-ended top band (e.g. "20m or more") parsed to NaN,
+    # resolved by validation.depth_band_open_ended_min_m's magnitude-threshold rule, same
+    # mechanism as France's inconsistent per-zone sentinels - see rasterize_depth_bands
+    coverage: partial
+    description: >
+      KSJ storm surge (takashio shinsui soutei kuiki) inundation depth-class
+      polygons, Hyogo prefecture, Harima Sea coast, central sub-area. 11290 features. FY2022 data.
+      Depth classes parsed from the original Japanese A49_003 categorical column
+      into numeric ht_min_m/ht_max_m - see caveats doc.
+    source_url: https://nlftp.mlit.go.jp/ksj/gml/gml_datalist.html
+    date_retrieved: "2026-09-15"
+    source_license: <to confirm - KSJ general open-data terms, see the download portal>
+    known_caveats: >
+      See docs/flood_extent_validation_caveats.md Japan section for the full picture:
+      partial bay-only coverage (not the whole Japanese coastline), unconfirmed return
+      period, mixed depth-bucket granularity across prefectures, and the file-level
+      overlap exclusions this catalog entry set is already net of.
+
+japan_stormsurge_hyogo_harima_c:
+  data_type: GeoDataFrame
+  driver: vector
+  path: JAP/parsed/hyogo_harima_c.gpkg
+  crs: 6668   # JGD2011 geographic - this source's own real CRS, not forced to 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Japan
+    country_iso: JPN
+    hazard_type: coastal   # storm surge (A49) - comparable; A31 (fluvial) would not be
+    return_period: null   # <to confirm> - Japan's storm surge maps are typically a legally-
+    # mandated "maximum class" scenario, not a specific statistical return
+    # period the way Spain's "100 ANOS" is labelled - compared against the model's RP100
+    # anyway (best available analog, same convention as France/Norway's own RP mismatches)
+    variable: depth   # dispatches validate_country.py's depth-band comparison
+    ht_min_col: ht_min_m
+    ht_max_col: ht_max_m   # open-ended top band (e.g. "20m or more") parsed to NaN,
+    # resolved by validation.depth_band_open_ended_min_m's magnitude-threshold rule, same
+    # mechanism as France's inconsistent per-zone sentinels - see rasterize_depth_bands
+    coverage: partial
+    description: >
+      KSJ storm surge (takashio shinsui soutei kuiki) inundation depth-class
+      polygons, Hyogo prefecture, Harima Sea coast, southern sub-area. 5269 features. FY2022 data.
+      Depth classes parsed from the original Japanese A49_003 categorical column
+      into numeric ht_min_m/ht_max_m - see caveats doc.
+    source_url: https://nlftp.mlit.go.jp/ksj/gml/gml_datalist.html
+    date_retrieved: "2026-09-15"
+    source_license: <to confirm - KSJ general open-data terms, see the download portal>
+    known_caveats: >
+      See docs/flood_extent_validation_caveats.md Japan section for the full picture:
+      partial bay-only coverage (not the whole Japanese coastline), unconfirmed return
+      period, mixed depth-bucket granularity across prefectures, and the file-level
+      overlap exclusions this catalog entry set is already net of.
+
+japan_stormsurge_hyogo_harima_north:
+  data_type: GeoDataFrame
+  driver: vector
+  path: JAP/parsed/hyogo_harima_north.gpkg
+  crs: 6668   # JGD2011 geographic - this source's own real CRS, not forced to 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Japan
+    country_iso: JPN
+    hazard_type: coastal   # storm surge (A49) - comparable; A31 (fluvial) would not be
+    return_period: null   # <to confirm> - Japan's storm surge maps are typically a legally-
+    # mandated "maximum class" scenario, not a specific statistical return
+    # period the way Spain's "100 ANOS" is labelled - compared against the model's RP100
+    # anyway (best available analog, same convention as France/Norway's own RP mismatches)
+    variable: depth   # dispatches validate_country.py's depth-band comparison
+    ht_min_col: ht_min_m
+    ht_max_col: ht_max_m   # open-ended top band (e.g. "20m or more") parsed to NaN,
+    # resolved by validation.depth_band_open_ended_min_m's magnitude-threshold rule, same
+    # mechanism as France's inconsistent per-zone sentinels - see rasterize_depth_bands
+    coverage: partial
+    description: >
+      KSJ storm surge (takashio shinsui soutei kuiki) inundation depth-class
+      polygons, Hyogo prefecture, Harima Sea coast, northern sub-area. 57653 features. FY2022 data.
+      Depth classes parsed from the original Japanese A49_003 categorical column
+      into numeric ht_min_m/ht_max_m - see caveats doc.
+    source_url: https://nlftp.mlit.go.jp/ksj/gml/gml_datalist.html
+    date_retrieved: "2026-09-15"
+    source_license: <to confirm - KSJ general open-data terms, see the download portal>
+    known_caveats: >
+      See docs/flood_extent_validation_caveats.md Japan section for the full picture:
+      partial bay-only coverage (not the whole Japanese coastline), unconfirmed return
+      period, mixed depth-bucket granularity across prefectures, and the file-level
+      overlap exclusions this catalog entry set is already net of.
+
+japan_stormsurge_fukuoka:
+  data_type: GeoDataFrame
+  driver: vector
+  path: JAP/parsed/fukuoka.gpkg
+  crs: 6668   # JGD2011 geographic - this source's own real CRS, not forced to 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Japan
+    country_iso: JPN
+    hazard_type: coastal   # storm surge (A49) - comparable; A31 (fluvial) would not be
+    return_period: null   # <to confirm> - Japan's storm surge maps are typically a legally-
+    # mandated "maximum class" scenario, not a specific statistical return
+    # period the way Spain's "100 ANOS" is labelled - compared against the model's RP100
+    # anyway (best available analog, same convention as France/Norway's own RP mismatches)
+    variable: depth   # dispatches validate_country.py's depth-band comparison
+    ht_min_col: ht_min_m
+    ht_max_col: ht_max_m   # open-ended top band (e.g. "20m or more") parsed to NaN,
+    # resolved by validation.depth_band_open_ended_min_m's magnitude-threshold rule, same
+    # mechanism as France's inconsistent per-zone sentinels - see rasterize_depth_bands
+    coverage: partial
+    description: >
+      KSJ storm surge (takashio shinsui soutei kuiki) inundation depth-class
+      polygons, Fukuoka prefecture, Genkai Sea / Hakata Bay coast. 225153 features. FY2022 data.
+      Depth classes parsed from the original Japanese A49_003 categorical column
+      into numeric ht_min_m/ht_max_m - see caveats doc.
+    source_url: https://nlftp.mlit.go.jp/ksj/gml/gml_datalist.html
+    date_retrieved: "2026-09-15"
+    source_license: <to confirm - KSJ general open-data terms, see the download portal>
+    known_caveats: >
+      See docs/flood_extent_validation_caveats.md Japan section for the full picture:
+      partial bay-only coverage (not the whole Japanese coastline), unconfirmed return
+      period, mixed depth-bucket granularity across prefectures, and the file-level
+      overlap exclusions this catalog entry set is already net of.
+
+japan_stormsurge_mie:
+  data_type: GeoDataFrame
+  driver: vector
+  path: JAP/parsed/mie.gpkg
+  crs: 6668   # JGD2011 geographic - this source's own real CRS, not forced to 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Japan
+    country_iso: JPN
+    hazard_type: coastal   # storm surge (A49) - comparable; A31 (fluvial) would not be
+    return_period: null   # <to confirm> - Japan's storm surge maps are typically a legally-
+    # mandated "maximum class" scenario, not a specific statistical return
+    # period the way Spain's "100 ANOS" is labelled - compared against the model's RP100
+    # anyway (best available analog, same convention as France/Norway's own RP mismatches)
+    variable: depth   # dispatches validate_country.py's depth-band comparison
+    ht_min_col: ht_min_m
+    ht_max_col: ht_max_m   # open-ended top band (e.g. "20m or more") parsed to NaN,
+    # resolved by validation.depth_band_open_ended_min_m's magnitude-threshold rule, same
+    # mechanism as France's inconsistent per-zone sentinels - see rasterize_depth_bands
+    coverage: partial
+    description: >
+      KSJ storm surge (takashio shinsui soutei kuiki) inundation depth-class
+      polygons, Mie prefecture, Ise Bay coast. 91658 features. FY2022 data.
+      Depth classes parsed from the original Japanese A49_003 categorical column
+      into numeric ht_min_m/ht_max_m - see caveats doc.
+    source_url: https://nlftp.mlit.go.jp/ksj/gml/gml_datalist.html
+    date_retrieved: "2026-09-15"
+    source_license: <to confirm - KSJ general open-data terms, see the download portal>
+    known_caveats: >
+      See docs/flood_extent_validation_caveats.md Japan section for the full picture:
+      partial bay-only coverage (not the whole Japanese coastline), unconfirmed return
+      period, mixed depth-bucket granularity across prefectures, and the file-level
+      overlap exclusions this catalog entry set is already net of.
+
+japan_stormsurge_osaka:
+  data_type: GeoDataFrame
+  driver: vector
+  path: JAP/parsed/osaka.gpkg
+  crs: 6668   # JGD2011 geographic - this source's own real CRS, not forced to 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Japan
+    country_iso: JPN
+    hazard_type: coastal   # storm surge (A49) - comparable; A31 (fluvial) would not be
+    return_period: null   # <to confirm> - Japan's storm surge maps are typically a legally-
+    # mandated "maximum class" scenario, not a specific statistical return
+    # period the way Spain's "100 ANOS" is labelled - compared against the model's RP100
+    # anyway (best available analog, same convention as France/Norway's own RP mismatches)
+    variable: depth   # dispatches validate_country.py's depth-band comparison
+    ht_min_col: ht_min_m
+    ht_max_col: ht_max_m   # open-ended top band (e.g. "20m or more") parsed to NaN,
+    # resolved by validation.depth_band_open_ended_min_m's magnitude-threshold rule, same
+    # mechanism as France's inconsistent per-zone sentinels - see rasterize_depth_bands
+    coverage: partial
+    description: >
+      KSJ storm surge (takashio shinsui soutei kuiki) inundation depth-class
+      polygons, Osaka prefecture, Osaka Bay coast. 20659 features. FY2022 data.
+      Depth classes parsed from the original Japanese A49_003 categorical column
+      into numeric ht_min_m/ht_max_m - see caveats doc.
+    source_url: https://nlftp.mlit.go.jp/ksj/gml/gml_datalist.html
+    date_retrieved: "2026-09-15"
+    source_license: <to confirm - KSJ general open-data terms, see the download portal>
+    known_caveats: >
+      See docs/flood_extent_validation_caveats.md Japan section for the full picture:
+      partial bay-only coverage (not the whole Japanese coastline), unconfirmed return
+      period, mixed depth-bucket granularity across prefectures, and the file-level
+      overlap exclusions this catalog entry set is already net of.
+
+japan_stormsurge_oita:
+  data_type: GeoDataFrame
+  driver: vector
+  path: JAP/parsed/oita.gpkg
+  crs: 6668   # JGD2011 geographic - this source's own real CRS, not forced to 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Japan
+    country_iso: JPN
+    hazard_type: coastal   # storm surge (A49) - comparable; A31 (fluvial) would not be
+    return_period: null   # <to confirm> - Japan's storm surge maps are typically a legally-
+    # mandated "maximum class" scenario, not a specific statistical return
+    # period the way Spain's "100 ANOS" is labelled - compared against the model's RP100
+    # anyway (best available analog, same convention as France/Norway's own RP mismatches)
+    variable: depth   # dispatches validate_country.py's depth-band comparison
+    ht_min_col: ht_min_m
+    ht_max_col: ht_max_m   # open-ended top band (e.g. "20m or more") parsed to NaN,
+    # resolved by validation.depth_band_open_ended_min_m's magnitude-threshold rule, same
+    # mechanism as France's inconsistent per-zone sentinels - see rasterize_depth_bands
+    coverage: partial
+    description: >
+      KSJ storm surge (takashio shinsui soutei kuiki) inundation depth-class
+      polygons, Oita prefecture, Bungo Channel coast. 99060 features. FY2022 data.
+      Depth classes parsed from the original Japanese A49_003 categorical column
+      into numeric ht_min_m/ht_max_m - see caveats doc.
+    source_url: https://nlftp.mlit.go.jp/ksj/gml/gml_datalist.html
+    date_retrieved: "2026-09-15"
+    source_license: <to confirm - KSJ general open-data terms, see the download portal>
+    known_caveats: >
+      See docs/flood_extent_validation_caveats.md Japan section for the full picture:
+      partial bay-only coverage (not the whole Japanese coastline), unconfirmed return
+      period, mixed depth-bucket granularity across prefectures, and the file-level
+      overlap exclusions this catalog entry set is already net of.
+
+japan_stormsurge_miyazaki:
+  data_type: GeoDataFrame
+  driver: vector
+  path: JAP/parsed/miyazaki.gpkg
+  crs: 6668   # JGD2011 geographic - this source's own real CRS, not forced to 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Japan
+    country_iso: JPN
+    hazard_type: coastal   # storm surge (A49) - comparable; A31 (fluvial) would not be
+    return_period: null   # <to confirm> - Japan's storm surge maps are typically a legally-
+    # mandated "maximum class" scenario, not a specific statistical return
+    # period the way Spain's "100 ANOS" is labelled - compared against the model's RP100
+    # anyway (best available analog, same convention as France/Norway's own RP mismatches)
+    variable: depth   # dispatches validate_country.py's depth-band comparison
+    ht_min_col: ht_min_m
+    ht_max_col: ht_max_m   # open-ended top band (e.g. "20m or more") parsed to NaN,
+    # resolved by validation.depth_band_open_ended_min_m's magnitude-threshold rule, same
+    # mechanism as France's inconsistent per-zone sentinels - see rasterize_depth_bands
+    coverage: partial
+    description: >
+      KSJ storm surge (takashio shinsui soutei kuiki) inundation depth-class
+      polygons, Miyazaki prefecture, Pacific-facing coast. 55092 features. FY2022 data.
+      Depth classes parsed from the original Japanese A49_003 categorical column
+      into numeric ht_min_m/ht_max_m - see caveats doc.
+    source_url: https://nlftp.mlit.go.jp/ksj/gml/gml_datalist.html
+    date_retrieved: "2026-09-15"
+    source_license: <to confirm - KSJ general open-data terms, see the download portal>
+    known_caveats: >
+      See docs/flood_extent_validation_caveats.md Japan section for the full picture:
+      partial bay-only coverage (not the whole Japanese coastline), unconfirmed return
+      period, mixed depth-bucket granularity across prefectures, and the file-level
+      overlap exclusions this catalog entry set is already net of.
+
+japan_stormsurge_kagawa:
+  data_type: GeoDataFrame
+  driver: vector
+  path: JAP/parsed/kagawa.gpkg
+  crs: 6668   # JGD2011 geographic - this source's own real CRS, not forced to 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Japan
+    country_iso: JPN
+    hazard_type: coastal   # storm surge (A49) - comparable; A31 (fluvial) would not be
+    return_period: null   # <to confirm> - Japan's storm surge maps are typically a legally-
+    # mandated "maximum class" scenario, not a specific statistical return
+    # period the way Spain's "100 ANOS" is labelled - compared against the model's RP100
+    # anyway (best available analog, same convention as France/Norway's own RP mismatches)
+    variable: depth   # dispatches validate_country.py's depth-band comparison
+    ht_min_col: ht_min_m
+    ht_max_col: ht_max_m   # open-ended top band (e.g. "20m or more") parsed to NaN,
+    # resolved by validation.depth_band_open_ended_min_m's magnitude-threshold rule, same
+    # mechanism as France's inconsistent per-zone sentinels - see rasterize_depth_bands
+    coverage: partial
+    description: >
+      KSJ storm surge (takashio shinsui soutei kuiki) inundation depth-class
+      polygons, Kagawa prefecture, Seto Inland Sea coast. 81175 features. FY2022 data.
+      Depth classes parsed from the original Japanese A49_003 categorical column
+      into numeric ht_min_m/ht_max_m - see caveats doc.
+    source_url: https://nlftp.mlit.go.jp/ksj/gml/gml_datalist.html
+    date_retrieved: "2026-09-15"
+    source_license: <to confirm - KSJ general open-data terms, see the download portal>
+    known_caveats: >
+      See docs/flood_extent_validation_caveats.md Japan section for the full picture:
+      partial bay-only coverage (not the whole Japanese coastline), unconfirmed return
+      period, mixed depth-bucket granularity across prefectures, and the file-level
+      overlap exclusions this catalog entry set is already net of.
+
+japan_stormsurge_aichi:
+  data_type: GeoDataFrame
+  driver: vector
+  path: JAP/parsed/aichi.gpkg
+  crs: 6668   # JGD2011 geographic - this source's own real CRS, not forced to 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Japan
+    country_iso: JPN
+    hazard_type: coastal   # storm surge (A49) - comparable; A31 (fluvial) would not be
+    return_period: null   # <to confirm> - Japan's storm surge maps are typically a legally-
+    # mandated "maximum class" scenario, not a specific statistical return
+    # period the way Spain's "100 ANOS" is labelled - compared against the model's RP100
+    # anyway (best available analog, same convention as France/Norway's own RP mismatches)
+    variable: depth   # dispatches validate_country.py's depth-band comparison
+    ht_min_col: ht_min_m
+    ht_max_col: ht_max_m   # open-ended top band (e.g. "20m or more") parsed to NaN,
+    # resolved by validation.depth_band_open_ended_min_m's magnitude-threshold rule, same
+    # mechanism as France's inconsistent per-zone sentinels - see rasterize_depth_bands
+    coverage: partial
+    description: >
+      KSJ storm surge (takashio shinsui soutei kuiki) inundation depth-class
+      polygons, Aichi prefecture, Ise Bay / Mikawa Bay coast. 258376 features. FY2022 data.
+      Depth classes parsed from the original Japanese A49_003 categorical column
+      into numeric ht_min_m/ht_max_m - see caveats doc.
+    source_url: https://nlftp.mlit.go.jp/ksj/gml/gml_datalist.html
+    date_retrieved: "2026-09-15"
+    source_license: <to confirm - KSJ general open-data terms, see the download portal>
+    known_caveats: >
+      See docs/flood_extent_validation_caveats.md Japan section for the full picture:
+      partial bay-only coverage (not the whole Japanese coastline), unconfirmed return
+      period, mixed depth-bucket granularity across prefectures, and the file-level
+      overlap exclusions this catalog entry set is already net of.
+
+japan_stormsurge_tokushima_a:
+  data_type: GeoDataFrame
+  driver: vector
+  path: JAP/parsed/tokushima_a.gpkg
+  crs: 6668   # JGD2011 geographic - this source's own real CRS, not forced to 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Japan
+    country_iso: JPN
+    hazard_type: coastal   # storm surge (A49) - comparable; A31 (fluvial) would not be
+    return_period: null   # <to confirm> - Japan's storm surge maps are typically a legally-
+    # mandated "maximum class" scenario, not a specific statistical return
+    # period the way Spain's "100 ANOS" is labelled - compared against the model's RP100
+    # anyway (best available analog, same convention as France/Norway's own RP mismatches)
+    variable: depth   # dispatches validate_country.py's depth-band comparison
+    ht_min_col: ht_min_m
+    ht_max_col: ht_max_m   # open-ended top band (e.g. "20m or more") parsed to NaN,
+    # resolved by validation.depth_band_open_ended_min_m's magnitude-threshold rule, same
+    # mechanism as France's inconsistent per-zone sentinels - see rasterize_depth_bands
+    coverage: partial
+    description: >
+      KSJ storm surge (takashio shinsui soutei kuiki) inundation depth-class
+      polygons, Tokushima prefecture, southern coast. 12944 features. FY2022 data.
+      Depth classes parsed from the original Japanese A49_003 categorical column
+      into numeric ht_min_m/ht_max_m - see caveats doc.
+    source_url: https://nlftp.mlit.go.jp/ksj/gml/gml_datalist.html
+    date_retrieved: "2026-09-15"
+    source_license: <to confirm - KSJ general open-data terms, see the download portal>
+    known_caveats: >
+      See docs/flood_extent_validation_caveats.md Japan section for the full picture:
+      partial bay-only coverage (not the whole Japanese coastline), unconfirmed return
+      period, mixed depth-bucket granularity across prefectures, and the file-level
+      overlap exclusions this catalog entry set is already net of.
+
+japan_stormsurge_tokushima_b:
+  data_type: GeoDataFrame
+  driver: vector
+  path: JAP/parsed/tokushima_b.gpkg
+  crs: 6668   # JGD2011 geographic - this source's own real CRS, not forced to 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Japan
+    country_iso: JPN
+    hazard_type: coastal   # storm surge (A49) - comparable; A31 (fluvial) would not be
+    return_period: null   # <to confirm> - Japan's storm surge maps are typically a legally-
+    # mandated "maximum class" scenario, not a specific statistical return
+    # period the way Spain's "100 ANOS" is labelled - compared against the model's RP100
+    # anyway (best available analog, same convention as France/Norway's own RP mismatches)
+    variable: depth   # dispatches validate_country.py's depth-band comparison
+    ht_min_col: ht_min_m
+    ht_max_col: ht_max_m   # open-ended top band (e.g. "20m or more") parsed to NaN,
+    # resolved by validation.depth_band_open_ended_min_m's magnitude-threshold rule, same
+    # mechanism as France's inconsistent per-zone sentinels - see rasterize_depth_bands
+    coverage: partial
+    description: >
+      KSJ storm surge (takashio shinsui soutei kuiki) inundation depth-class
+      polygons, Tokushima prefecture, northern coast. 57861 features. FY2022 data.
+      Depth classes parsed from the original Japanese A49_003 categorical column
+      into numeric ht_min_m/ht_max_m - see caveats doc.
+    source_url: https://nlftp.mlit.go.jp/ksj/gml/gml_datalist.html
+    date_retrieved: "2026-09-15"
+    source_license: <to confirm - KSJ general open-data terms, see the download portal>
+    known_caveats: >
+      See docs/flood_extent_validation_caveats.md Japan section for the full picture:
+      partial bay-only coverage (not the whole Japanese coastline), unconfirmed return
+      period, mixed depth-bucket granularity across prefectures, and the file-level
+      overlap exclusions this catalog entry set is already net of.
+
+japan_stormsurge_kanagawa_a:
+  data_type: GeoDataFrame
+  driver: vector
+  path: JAP/parsed/kanagawa_a.gpkg
+  crs: 6668   # JGD2011 geographic - this source's own real CRS, not forced to 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Japan
+    country_iso: JPN
+    hazard_type: coastal   # storm surge (A49) - comparable; A31 (fluvial) would not be
+    return_period: null   # <to confirm> - Japan's storm surge maps are typically a legally-
+    # mandated "maximum class" scenario, not a specific statistical return
+    # period the way Spain's "100 ANOS" is labelled - compared against the model's RP100
+    # anyway (best available analog, same convention as France/Norway's own RP mismatches)
+    variable: depth   # dispatches validate_country.py's depth-band comparison
+    ht_min_col: ht_min_m
+    ht_max_col: ht_max_m   # open-ended top band (e.g. "20m or more") parsed to NaN,
+    # resolved by validation.depth_band_open_ended_min_m's magnitude-threshold rule, same
+    # mechanism as France's inconsistent per-zone sentinels - see rasterize_depth_bands
+    coverage: partial
+    description: >
+      KSJ storm surge (takashio shinsui soutei kuiki) inundation depth-class
+      polygons, Kanagawa prefecture, Sagami Bay-facing coast. 19243 features. FY2022 data.
+      Depth classes parsed from the original Japanese A49_003 categorical column
+      into numeric ht_min_m/ht_max_m - see caveats doc.
+    source_url: https://nlftp.mlit.go.jp/ksj/gml/gml_datalist.html
+    date_retrieved: "2026-09-15"
+    source_license: <to confirm - KSJ general open-data terms, see the download portal>
+    known_caveats: >
+      See docs/flood_extent_validation_caveats.md Japan section for the full picture:
+      partial bay-only coverage (not the whole Japanese coastline), unconfirmed return
+      period, mixed depth-bucket granularity across prefectures, and the file-level
+      overlap exclusions this catalog entry set is already net of.
+
+japan_stormsurge_kanagawa_b:
+  data_type: GeoDataFrame
+  driver: vector
+  path: JAP/parsed/kanagawa_b.gpkg
+  crs: 6668   # JGD2011 geographic - this source's own real CRS, not forced to 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: Japan
+    country_iso: JPN
+    hazard_type: coastal   # storm surge (A49) - comparable; A31 (fluvial) would not be
+    return_period: null   # <to confirm> - Japan's storm surge maps are typically a legally-
+    # mandated "maximum class" scenario, not a specific statistical return
+    # period the way Spain's "100 ANOS" is labelled - compared against the model's RP100
+    # anyway (best available analog, same convention as France/Norway's own RP mismatches)
+    variable: depth   # dispatches validate_country.py's depth-band comparison
+    ht_min_col: ht_min_m
+    ht_max_col: ht_max_m   # open-ended top band (e.g. "20m or more") parsed to NaN,
+    # resolved by validation.depth_band_open_ended_min_m's magnitude-threshold rule, same
+    # mechanism as France's inconsistent per-zone sentinels - see rasterize_depth_bands
+    coverage: partial
+    description: >
+      KSJ storm surge (takashio shinsui soutei kuiki) inundation depth-class
+      polygons, Kanagawa prefecture, Tokyo Bay-facing coast. 45411 features. FY2022 data.
+      Depth classes parsed from the original Japanese A49_003 categorical column
+      into numeric ht_min_m/ht_max_m - see caveats doc.
+    source_url: https://nlftp.mlit.go.jp/ksj/gml/gml_datalist.html
+    date_retrieved: "2026-09-15"
+    source_license: <to confirm - KSJ general open-data terms, see the download portal>
+    known_caveats: >
+      See docs/flood_extent_validation_caveats.md Japan section for the full picture:
+      partial bay-only coverage (not the whole Japanese coastline), unconfirmed return
+      period, mixed depth-bucket granularity across prefectures, and the file-level
+      overlap exclusions this catalog entry set is already net of.

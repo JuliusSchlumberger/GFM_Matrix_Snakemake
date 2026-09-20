@@ -780,10 +780,11 @@ def validate_country_national_coverage(
 
     for benchmark_key in benchmark_keys:
         spec = v.load_benchmark_spec(bench_catalog, benchmark_key)
-        if spec.data_type != "GeoDataFrame":
+        if spec.data_type not in ("GeoDataFrame", "RasterDataset"):
             raise NotImplementedError(
-                f"Raster benchmark dispatch not implemented for {benchmark_key} "
-                f"(data_type={spec.data_type}) - only GeoDataFrame benchmarks are wired up."
+                f"Benchmark dispatch not implemented for {benchmark_key} "
+                f"(data_type={spec.data_type}) - only GeoDataFrame and RasterDataset "
+                "benchmarks are wired up."
             )
         if not spec.regions:
             raise ValueError(
@@ -793,13 +794,19 @@ def validate_country_national_coverage(
             )
         print(f"  National-coverage benchmark: {benchmark_key} ({spec.data_type})")
 
-        full_gdf = v.load_benchmark_full(bench_catalog, spec)
-        if full_gdf.empty:
-            print(f"    {benchmark_key}: empty after filtering - skipping.")
-            continue
-        if full_gdf.crs is None or full_gdf.crs.to_epsg() != 4326:
-            full_gdf = full_gdf.to_crs(4326)
-        full_sindex = full_gdf.sindex
+        # RasterDataset benchmarks (e.g. Denmark's continuous-depth GeoTIFFs) are read
+        # windowed, per-chunk, directly from the catalog below - no upfront full-extent
+        # load needed (unlike GeoDataFrame, which needs the WHOLE benchmark in memory
+        # first to build a spatial index for per-chunk candidate queries).
+        full_gdf = full_sindex = None
+        if spec.data_type == "GeoDataFrame":
+            full_gdf = v.load_benchmark_full(bench_catalog, spec)
+            if full_gdf.empty:
+                print(f"    {benchmark_key}: empty after filtering - skipping.")
+                continue
+            if full_gdf.crs is None or full_gdf.crs.to_epsg() != 4326:
+                full_gdf = full_gdf.to_crs(4326)
+            full_sindex = full_gdf.sindex
 
         acc: dict[tuple[float, str], dict[str, float]] = defaultdict(_new_acc)
         benchmark_wet_km2_total: dict[str, float] = defaultdict(float)
@@ -824,11 +831,14 @@ def validate_country_national_coverage(
                 n_processed += 1
 
                 bbox = list(rasterio.transform.array_bounds(depth.shape[0], depth.shape[1], out_transform))
-                candidate_idx = list(full_sindex.query(box(*bbox), predicate="intersects"))
-                chunk_bench_gdf = full_gdf.iloc[candidate_idx]
-                fraction = v.benchmark_fraction_from_vector(
-                    chunk_bench_gdf, out_transform, "EPSG:4326", depth.shape, supersample=supersample,
-                )
+                if spec.data_type == "GeoDataFrame":
+                    candidate_idx = list(full_sindex.query(box(*bbox), predicate="intersects"))
+                    chunk_bench_gdf = full_gdf.iloc[candidate_idx]
+                    fraction = v.benchmark_fraction_from_vector(
+                        chunk_bench_gdf, out_transform, "EPSG:4326", depth.shape, supersample=supersample,
+                    )
+                else:
+                    fraction = v.read_benchmark_raster_fraction(bench_catalog, spec, bbox, out_transform, depth.shape)
                 benchmark_wet = v.wet_mask_from_fraction(fraction, wet_fraction)
 
                 water_mask = v.read_permanent_water_mask(
