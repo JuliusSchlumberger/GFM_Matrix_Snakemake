@@ -66,7 +66,12 @@ PARTITION_DEFAULT = "1vcpu"  # one core per node, per user instruction
 TIME_DEFAULT = "08:00:00"
 MEM_DEFAULT = "7G"  # 1vcpu nodes report ~7950MB usable, not the nominal 8GB - see hpc.md's own note
 SIF_PATH_DEFAULT = (
-    "/p/11202255-sfincs/executables/SFINCS_2026_branches/"
+    # NOT .../SFINCS_2026_branches/v2.4.0_Galibier_Release_CPU_apptainer/... -
+    # that path (from the guidance this was originally built from) doesn't
+    # exist on the share (confirmed live: apptainer's own "no such file or
+    # directory" on tile 37's first real HPC run) - verified this IS the
+    # real path by browsing the share directly (`find ... -iname "*.sif"`).
+    "/p/11202255-sfincs/executables/SFINCS_2026/SFINCS_2026_01/"
     "v2.4.0_Galibier_Release_CPU_apptainer/sfincs-cpu_v2.4.0-Galibier-Release.sif"
 )
 

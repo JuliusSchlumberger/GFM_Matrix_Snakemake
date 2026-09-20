@@ -128,30 +128,74 @@ def build_sfincs_tile(
     tstop = times[-1]
     sf.config.set("tstop", tstop)
 
-    # buffer: build_boundary_forcing.py's own select_k_nearest_boundary_points
-    # already restricts these to the k stations nearest the tile itself
-    # (default k=20 - see K_NEAREST_STATIONS there for why: the tile's own
-    # pre-selected boundaries_{RP}_{SLR}.gpkg set can otherwise include real
-    # GTSM stations 50-125 km away, too far to physically represent this
-    # tile's own local storm-tide forcing), but water_level.create() still
-    # spatially clips `locations` to within `buffer` metres of the model's
-    # own waterlevel-boundary cells - a small buffer (e.g. a few
-    # resolution-cell-widths) would silently drop the farther of those k
-    # points again. 100 km errs generous since k-nearest already keeps this
-    # set small and locally relevant - no risk of pulling in unrelated
-    # stations, just headroom so none of the k get clipped a second time.
-    sf.water_level.create(timeseries=wl_df, locations=locations_gdf, buffer=100_000.0)
-    print(f"[5/8] water-level forcing: {len(station_cols)} station(s), {len(times)} timestep(s), "
-          f"{tref} -> {tstop} ({elapsed_hr[-1]:.1f} h)")
-
-    # -- 6. initial conditions (zsini): IDW of the matched stations' own
-    # first-timestep corrected value, onto this model's own UTM grid --
-    first_vals = hydrographs[station_cols].iloc[0].to_numpy(dtype=np.float64)
+    # buffer: DYNAMIC, not a fixed guess - real bug found and fixed here
+    # (2026-09, live on the first 258-tile HPC test batch): a tile with only
+    # 1-2 pre-selected boundary points to begin with (build_boundary_forcing.
+    # py's own k-nearest filter can't invent stations that don't exist) can
+    # have its single real match sit farther than any fixed buffer guess -
+    # e.g. tile 1860's only station is 103.3 km from the tile, just past a
+    # flat 100 km buffer. water_level.create() then masks EVERY location
+    # out and hydromt raises `NoDataException: GeoDataFrame has no data
+    # after masking` - a hard crash, not a partial drop, since zero
+    # locations remain to build forcing from at all. Computing the real max
+    # distance from any of these already-vetted (k-nearest-filtered)
+    # stations to the model's own grid extent, instead of guessing a fixed
+    # number, means the buffer can never accidentally exclude a point
+    # build_boundary_forcing.py already decided belongs in this tile's own
+    # forcing set.
+    dep = sf.grid.data["dep"]
+    grid_x_min, grid_x_max = float(dep["x"].min()), float(dep["x"].max())
+    grid_y_min, grid_y_max = float(dep["y"].min()), float(dep["y"].max())
     locations_utm = locations_gdf.to_crs(sf.crs)
     station_x = locations_utm.geometry.x.to_numpy()
     station_y = locations_utm.geometry.y.to_numpy()
+    dx = np.maximum(np.maximum(grid_x_min - station_x, station_x - grid_x_max), 0.0)
+    dy = np.maximum(np.maximum(grid_y_min - station_y, station_y - grid_y_max), 0.0)
+    dist_to_grid_bbox = float(np.sqrt(dx ** 2 + dy ** 2).max())
+    # 2x + flat margin, not distance + a small flat margin: confirmed live
+    # (tile 2084, 79 deg N) that hydromt's own internal masking distance is
+    # NOT simply "distance to this grid's own bbox corner" - a +5 km margin
+    # on top of the real 106.3 km bbox-corner distance still raised the
+    # same NoDataException, and binary-searching the real threshold found
+    # it sits somewhere between 110 km and 150 km, i.e. genuinely more like
+    # 1.1-1.5x the bbox-corner estimate (plausibly UTM distortion this far
+    # north, or masking against the actual waterlevel-boundary-cell
+    # geometry rather than the raw grid bbox) - doubling errs safely past
+    # that without risk of ever pulling in an unrelated station, since only
+    # the already-vetted (k-nearest-filtered) locations exist to include.
+    buffer_m = dist_to_grid_bbox * 2.0 + 10_000.0
 
-    dep = sf.grid.data["dep"]
+    try:
+        sf.water_level.create(timeseries=wl_df, locations=locations_gdf, buffer=buffer_m)
+    except Exception as e:
+        # Known, separate limitation (not something this buffer formula can
+        # fix): hydromt's own internal masking does a shapely union_all() in
+        # raw EPSG:4326 lon/lat - for a tile near the antimeridian (confirmed
+        # live: tiles 2029/2077, both in the Chukchi Sea around -179 to -178
+        # deg lon), the buffered search geometry can straddle +-180 deg and
+        # produce a self-intersecting polygon there, which GEOS rejects as
+        # an invalid topology regardless of how tight or generous buffer_m
+        # is (confirmed: a SMALLER buffer briefly "worked" for tile 2077
+        # only by accident, not fixing anything - a marginally bigger one
+        # immediately hit the same failure). Not worth chasing inside this
+        # pipeline (would mean patching hydromt_sfincs's own dateline
+        # handling) - surfaced as a clear, actionable error instead of a
+        # raw GEOS traceback, so a batch run's failure log says WHY, and
+        # this tile can be dropped like any other "can't be forced" case.
+        if "TopologyException" in str(e) or "side location conflict" in str(e):
+            raise RuntimeError(
+                f"tile {tile_id}: antimeridian-crossing geometry error in hydromt_sfincs's own "
+                f"water_level.create() masking (tile is near +-180 deg longitude) - not fixable via "
+                f"buffer tuning, drop this tile from the batch. Original error: {e}"
+            ) from e
+        raise
+    print(f"[5/8] water-level forcing: {len(station_cols)} station(s), {len(times)} timestep(s), "
+          f"{tref} -> {tstop} ({elapsed_hr[-1]:.1f} h), buffer={buffer_m / 1000:.1f} km")
+
+    # -- 6. initial conditions (zsini): IDW of the matched stations' own
+    # first-timestep corrected value, onto this model's own UTM grid
+    # (station_x/station_y already computed above for the buffer calc) --
+    first_vals = hydrographs[station_cols].iloc[0].to_numpy(dtype=np.float64)
     yy, xx = np.meshgrid(dep["y"].values, dep["x"].values, indexing="ij")
     zsini_arr = idw_interpolate_to_grid(station_x, station_y, first_vals, xx, yy)
     zsini_da = xr.DataArray(zsini_arr.astype(np.float32), dims=dep.dims, coords=dep.coords)
