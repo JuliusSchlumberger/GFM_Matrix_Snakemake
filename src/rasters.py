@@ -315,6 +315,67 @@ def compute_model_bbox(
     ]
 
 
+def _compute_dem_gap_fill(
+    dem_vals: np.ndarray,
+    nodata: float,
+    is_land: np.ndarray,
+    min_hard_fill_component_size: int,
+    interp_max_search_distance: float,
+    interp_smoothing_iterations: int,
+    land_fill_value_m: float,
+) -> np.ndarray:
+    """Pure-array core of `extract_dem`'s gap-filling logic - land/river/lake
+    classification, small-vs-large missing-land gap splitting, and
+    small-gap interpolation - extracted so it's directly testable without a
+    real hydromt.DataCatalog. See `extract_dem`'s own docstring for the full
+    land/ocean/lake/river fill-value reasoning; this function is exactly
+    that logic, operating on plain arrays.
+    """
+    missing = dem_vals == nodata
+    missing_land = missing & is_land
+
+    # Connected components of missing-land cells only (4-connectivity) -
+    # ocean/lake/river nodata cells never participate here and always get
+    # 0.0 regardless of gap size.
+    structure = ndimage.generate_binary_structure(2, 1)  # 4-connectivity
+    labels, _ = ndimage.label(missing_land, structure=structure)
+    component_sizes = np.bincount(labels.ravel())
+    cell_component_size = component_sizes[labels]
+    small_gap = missing_land & (cell_component_size < min_hard_fill_component_size)
+
+    if small_gap.any():
+        # Interpolates a candidate value for every originally-missing cell
+        # (land and water alike) from real valid DeltaDTM cells only - only
+        # the small_gap subset of these candidates is actually used below;
+        # large land gaps and water cells get their own fixed fill value
+        # regardless of what this computes for them.
+        interpolated = fillnodata(
+            dem_vals.astype(np.float32).copy(),
+            mask=(~missing).astype(np.uint8),
+            max_search_distance=interp_max_search_distance,
+            smoothing_iterations=interp_smoothing_iterations,
+        )
+        # fillnodata has nothing to interpolate FROM if the entire read
+        # window happens to have zero valid DEM coverage (possible for a
+        # small/edge tile right at DeltaDTM's own coverage boundary, even
+        # when the validity mask itself claims land/ocean structure there -
+        # a genuine source-data mismatch, not a code bug on its own) - such
+        # cells are left unchanged (still the raw nodata sentinel) rather
+        # than actually filled. Route them through the same hard-fill as a
+        # large gap instead of letting a raw nodata value leak into the
+        # encoded output (found 2026-08 - a ~3K-pixel tile crashed
+        # encode_dem_cm with a stray -9999).
+        interpolated = np.where(interpolated == nodata, land_fill_value_m, interpolated)
+    else:
+        interpolated = dem_vals  # never read below (small_gap is all-False)
+
+    return np.where(
+        is_land,
+        np.where(small_gap, interpolated, land_fill_value_m),
+        0.0,
+    ).astype(np.float32)
+
+
 def extract_dem(
     data_catalog: hydromt.DataCatalog,
     dem_source: str,
@@ -410,49 +471,11 @@ def extract_dem(
     is_land = (mask_vals == 0) | (mask_vals == 255)
 
     dem_vals = da.values.reshape(mask_vals.shape)
-    missing = dem_vals == da.raster.nodata
-    missing_land = missing & is_land
-
-    # Connected components of missing-land cells only (4-connectivity) -
-    # ocean/lake/river nodata cells never participate here and always get
-    # 0.0 regardless of gap size.
-    structure = ndimage.generate_binary_structure(2, 1)  # 4-connectivity
-    labels, _ = ndimage.label(missing_land, structure=structure)
-    component_sizes = np.bincount(labels.ravel())
-    cell_component_size = component_sizes[labels]
-    small_gap = missing_land & (cell_component_size < min_hard_fill_component_size)
-
-    if small_gap.any():
-        # Interpolates a candidate value for every originally-missing cell
-        # (land and water alike) from real valid DeltaDTM cells only - only
-        # the small_gap subset of these candidates is actually used below;
-        # large land gaps and water cells get their own fixed fill value
-        # regardless of what this computes for them.
-        interpolated = fillnodata(
-            dem_vals.astype(np.float32).copy(),
-            mask=(~missing).astype(np.uint8),
-            max_search_distance=interp_max_search_distance,
-            smoothing_iterations=interp_smoothing_iterations,
-        )
-        # fillnodata has nothing to interpolate FROM if the entire read
-        # window happens to have zero valid DEM coverage (possible for a
-        # small/edge tile right at DeltaDTM's own coverage boundary, even
-        # when the validity mask itself claims land/ocean structure there -
-        # a genuine source-data mismatch, not a code bug on its own) - such
-        # cells are left unchanged (still the raw nodata sentinel) rather
-        # than actually filled. Route them through the same hard-fill as a
-        # large gap instead of letting a raw nodata value leak into the
-        # encoded output (found 2026-08 - a ~3K-pixel tile crashed
-        # encode_dem_cm with a stray -9999).
-        interpolated = np.where(interpolated == da.raster.nodata, land_fill_value_m, interpolated)
-    else:
-        interpolated = dem_vals  # never read below (small_gap is all-False)
-
-    fill = np.where(
-        is_land,
-        np.where(small_gap, interpolated, land_fill_value_m),
-        0.0,
-    ).reshape(da.shape).astype(np.float32)
+    fill = _compute_dem_gap_fill(
+        dem_vals, da.raster.nodata, is_land,
+        min_hard_fill_component_size, interp_max_search_distance,
+        interp_smoothing_iterations, land_fill_value_m,
+    ).reshape(da.shape)
 
     result = da.where(da != da.raster.nodata, da.copy(data=fill))
     # int16 centimetres (well within DeltaDTM's own vertical accuracy, and

@@ -16,10 +16,13 @@ from pathlib import Path
 
 import numpy as np
 import rasterio
-import xarray as xr
+from hydromt_sfincs import SfincsModel
+from hydromt_sfincs.workflows.downscaling import downscale_floodmap
 from rasterio.warp import Resampling, calculate_default_transform, reproject
+from rasterio.warp import transform as warp_transform
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from build_sfincs_tile import _ocean_polygon_wgs84  # noqa: E402 - generic despite the name (any mask code)
 from gfm_config import read_root  # noqa: E402
 from sfincs_run import run_sfincs_subprocess  # noqa: E402
 
@@ -38,95 +41,144 @@ class _SimpleLog:
         pass
 
 
-def compute_max_inundation(sfincs_dir: Path, land_mask_path: Path) -> tuple[np.ndarray, np.ndarray, dict]:
-    """(hmax_m, dep_m, grid_info) from sfincs_map.nc's own zsmax envelope,
-    on the model's own UTM grid - hmax = zsmax - dep, masked to positive
-    depth AND restricted to LAND cells only (matching 16_run_event.py's own
-    `da_hmax = zsmax - bed` pattern from the reference project, which
-    similarly requires a `sea_mask_path`).
+def _apply_land_mask_doublecheck(hmax: np.ndarray, transform, crs, land_mask_path: Path) -> np.ndarray:
+    """Second, independent land check on top of `downscale_floodmap()`'s own
+    `gdf_mask` - reproject `land_mask_path` directly onto `hmax`'s own fine
+    grid (nearest-neighbour) and require BOTH checks to agree a cell is
+    land before it counts, masking every other cell to NaN.
 
-    Real bug found and fixed here (first tile-1907 run): computing
-    zsmax - dep over EVERY cell, including deep ocean ones (dep down to
-    -38m for this tile), reports "38 m of inundation" at cells that were
-    never dry to begin with - the same permanent-water exclusion this
-    pipeline's own eikonal-model validation (src/validation.py's
-    permanent_water_mask, used throughout validate_country.py) already
-    handles for exactly this reason. `land_mask_path` is the tile's own
-    mask.tif (EPSG:4326, land=0/ocean=1/lake=2/river=3), reprojected onto
-    this model's own UTM grid (nearest-neighbour, categorical) before
-    masking.
+    Real, confirmed leak fixed here (2026-09, tile 1907's first subgrid
+    run): 32 cells still passed `gdf_mask` alone with clearly ocean-like
+    negative subgrid elevation (down to -9 m) - traced the worst one back
+    to its real lon/lat and confirmed the NATIVE mask.tif value there is
+    1.0 (ocean), not land. `gdf_mask`'s own polygon-vs-raster
+    rasterization at the coastline boundary lets a small number of edge
+    cells slip through - this independent raster-vs-raster check has no
+    such vector/raster boundary to disagree about.
+    """
+    with rasterio.open(land_mask_path) as src:
+        land_on_subgrid = np.empty(hmax.shape, dtype=np.float64)
+        reproject(
+            source=rasterio.band(src, 1), destination=land_on_subgrid,
+            src_transform=src.transform, src_crs=src.crs,
+            dst_transform=transform, dst_crs=crs,
+            resampling=Resampling.nearest,
+        )
+    return np.where(land_on_subgrid == 0.0, hmax, np.nan)
+
+
+def compute_max_inundation(sfincs_dir: Path, land_mask_path: Path) -> tuple[np.ndarray, dict]:
+    """(hmax_m, grid_info) - max flood depth on the model's own FINE
+    SUBGRID resolution, not the coarse computational grid, via
+    hydromt_sfincs's own downscale_floodmap() utility (replaces this
+    function's own earlier hand-rolled `zsmax - dep` check entirely, now
+    that the model has a real subgrid - see build_sfincs_tile.py's own
+    subgrid.create() comment for why: subgrid tables exist specifically so
+    a coarse-grid zsmax can be downscaled onto real fine-resolution terrain,
+    which is a fundamentally more correct approach than this function's own
+    old single-resolution "one dep value per computational cell" model ever
+    was, including for the land/ocean-cliff-smoothing artifact class of bug
+    that model used to need its own dep_m > -2.0 plausibility filter for
+    (see git history) - downscale_floodmap() reads the real fine-resolution
+    subgrid DEM directly, no separately-reprojected coarse land mask to
+    disagree with it in the first place.
+
+    `land_mask_path` (the tile's own mask.tif, EPSG:4326) is vectorised into
+    a land-only polygon and passed as downscale_floodmap()'s own gdf_mask,
+    excluding ocean/lake/river cells from the flood-depth output - the
+    subgrid-resolution equivalent of this function's old is_land check.
+
+    gdf_mask alone isn't quite enough, though - real, confirmed leak (2026-09,
+    tile 1907's first subgrid run): 32 cells still passed the mask with clearly
+    ocean-like negative subgrid elevation (down to -9 m); traced the worst one
+    back to its real lon/lat and confirmed the NATIVE mask.tif value there is
+    1.0 (ocean), not land - gdf_mask's own polygon-vs-raster rasterization at
+    the coastline boundary lets a small number of edge cells slip through
+    (a smaller-magnitude version of the same class of coastline-alignment bug
+    already fixed once for the old single-resolution code). Belt-and-suspenders
+    fix: ALSO reproject land_mask_path directly onto the subgrid's own fine
+    grid (nearest-neighbour) and intersect that with gdf_mask's own output -
+    two independent land checks, from two different code paths, must both
+    agree a cell is land before it counts.
     """
     map_path = sfincs_dir / "sfincs_map.nc"
     if not map_path.exists():
         raise FileNotFoundError(f"SFINCS ran but no map output found at {map_path}")
 
-    with xr.open_dataset(map_path) as ds:
-        if "zsmax" not in ds:
-            raise KeyError(f"'zsmax' not found in {map_path} - variables present: {list(ds.data_vars)}")
-        zsmax = ds["zsmax"]
-        if "timemax" in zsmax.dims:
-            zsmax = zsmax.max(dim="timemax", skipna=True)
-        zsmax_arr = np.squeeze(zsmax.values)
+    dep_subgrid_path = sfincs_dir / "subgrid" / "dep_subgrid.tif"
+    if not dep_subgrid_path.exists():
+        raise FileNotFoundError(
+            f"{dep_subgrid_path} not found - build_sfincs_tile.py's own sf.subgrid.create() "
+            "call needs write_dep_tif=True for this postprocessing step to have a fine-"
+            "resolution DEM to downscale onto."
+        )
 
-    # sfincs.dep is a raw binary grid, not georeferenced on its own - read
-    # the georeferencing from the model's own exported GeoTIFF instead
-    # (gis/ subfolder, written alongside sfincs.dep by sf.write()).
-    gis_dep_candidates = list((sfincs_dir / "gis").glob("*dep*.tif")) + list((sfincs_dir / "gis").glob("*elevation*.tif"))
-    if not gis_dep_candidates:
-        raise FileNotFoundError(f"No elevation GeoTIFF found under {sfincs_dir / 'gis'} to read the model's own georeferencing from")
-    with rasterio.open(gis_dep_candidates[0]) as src:
-        dep_arr = src.read(1)
+    # NOT a raw xr.open_dataset(map_path) - real bug found and fixed here (2026-09,
+    # first subgrid run): SFINCS's own sfincs_map.nc stores zsmax on its native
+    # staggered (n, m) index dims with x/y as 2D COORDINATE arrays, not proper 1D
+    # x/y dims - hydromt's own raster accessor (which downscale_floodmap() needs)
+    # can't recognize spatial dims from that shape at all ("x dimension not found").
+    # hydromt_sfincs's own SfincsOutput.read_map_file() translates this staggered
+    # format into a proper regular-grid DataArray via
+    # readers.read_sfincs_map_results(fn_map, ds_like=model.grid.mask, ...) - reuse
+    # that real, tested reader instead of hand-rolling the same translation.
+    sf_out = SfincsModel(root=str(sfincs_dir), mode="r")
+    sf_out.output.read()
+    if "zsmax" not in sf_out.output.data:
+        raise KeyError(f"'zsmax' not found in {map_path} - variables present: {list(sf_out.output.data.keys())}")
+    zsmax = sf_out.output.data["zsmax"]
+    if "timemax" in zsmax.dims:
+        zsmax = zsmax.max(dim="timemax", skipna=True)
+    zsmax = zsmax.squeeze().load()
+
+    land_gdf = _ocean_polygon_wgs84(land_mask_path, ocean_code=0)  # code=0 -> land cells, despite the function's name
+
+    hmax_subgrid_path = sfincs_dir / "hmax_subgrid.tif"
+    downscale_floodmap(
+        zsmax=zsmax, dep=dep_subgrid_path, reproj_method="nearest", subtract_dem=True,
+        hmin=0.05, gdf_mask=land_gdf, floodmap_fn=hmax_subgrid_path,
+    )
+
+    with rasterio.open(hmax_subgrid_path) as src:
+        hmax = src.read(1)
+        nodata = src.nodata
         transform = src.transform
         crs = src.crs
-        nodata = src.nodata
+    hmax = np.where(hmax == nodata, np.nan, hmax) if nodata is not None else hmax
 
-    if zsmax_arr.shape != dep_arr.shape:
-        raise ValueError(f"zsmax shape {zsmax_arr.shape} != dep shape {dep_arr.shape} from {gis_dep_candidates[0].name}")
+    hmax = _apply_land_mask_doublecheck(hmax, transform, crs, land_mask_path)
 
-    dep_m = np.where(dep_arr == nodata, np.nan, dep_arr) if nodata is not None else dep_arr.astype(np.float64)
-
-    with rasterio.open(land_mask_path) as src:
-        land_on_grid = np.empty(dep_arr.shape, dtype=np.float64)
-        reproject(
-            source=rasterio.band(src, 1), destination=land_on_grid,
-            src_transform=src.transform, src_crs=src.crs,
-            dst_transform=transform, dst_crs=crs,
-            resampling=Resampling.nearest,
-        )
-    is_land = land_on_grid == 0.0
-
-    # No depth-plausibility filter here (2026-09: an earlier version of this
-    # function had one, dep_m > -2.0 - removed). That was a band-aid for a
-    # real bug that's now fixed at the source instead: build_sfincs_tile.py
-    # used to let hydromt_sfincs reproject the elevation grid with bilinear
-    # smoothing while this function's own land_mask_path reprojects with
-    # nearest-neighbour, independently, on the same UTM grid - elevation_
-    # combined.tif has a DELIBERATE hard step at the coastline (real land
-    # directly abutting a GEBCO+MIN_BATHYMETRY_M-floored ocean value, not a
-    # physically continuous surface), so bilinear smoothing across it could
-    # produce a UTM cell the mask still calls "land" with a deeply negative
-    # interpolated dep - confirmed live: as low as -32.7 m, reporting >33 m
-    # of "inundation" at a perfectly normal zsmax~1 m open-water cell. A
-    # fixed numeric cutoff patching that symptom was itself not physically
-    # justified (real coastal land/polders genuinely do sit several metres
-    # below the reference datum) and, worse, wasn't even robust to a
-    # different MIN_BATHYMETRY_M value (confirmed: it let through a whole
-    # different set of artifacts when the floor changed from -50 to -10 m -
-    # see build_sfincs_tile.py's own elevation-reprojection comment for the
-    # real fix: pre-reproject with nearest-neighbour ourselves before
-    # elevation.create() ever runs, so dep_m here is never smoothed across
-    # that cliff in the first place, and no depth threshold is needed to
-    # compensate for it downstream).
-    hmax = zsmax_arr - dep_m
-    hmax = np.where((hmax > 0.0) & is_land, hmax, np.nan)
-
-    return hmax, dep_m, {"transform": transform, "crs": crs}
+    return hmax, {"transform": transform, "crs": crs}
 
 
 def reproject_to_4326(arr: np.ndarray, transform, crs, out_path: Path, nodata: float = -9999.0) -> None:
     dst_crs = "EPSG:4326"
+    src_bounds = rasterio.transform.array_bounds(arr.shape[0], arr.shape[1], transform)
+
+    # Explicit latitude-corrected target resolution, not calculate_default_transform()'s
+    # own default guess. Real bug found and fixed here (2026-09, comparing tile 1573
+    # against eikonal): letting calculate_default_transform() pick its own degree
+    # resolution from a projected (UTM, isotropic-METRE) source produces a
+    # SQUARE-IN-DEGREES output grid, which is NOT square in real ground distance
+    # except right at the equator - confirmed live at ~55 deg N: the true-metre UTM
+    # subgrid resolution (30x30 m) reprojected out to ~29 x ~50 m in real ground
+    # distance, inflating flooded-AREA comparisons against the eikonal model's own
+    # (already correctly latitude-corrected) grid by ~1.6x despite a nearly identical
+    # flooded CELL COUNT - not a real physical model disagreement, a reprojection
+    # resolution bug. Fix: get the source's own real metre resolution directly (UTM
+    # is isotropic, so this is just abs(transform.a)), convert to degrees separately
+    # per axis using the tile's own centre latitude, and pass that explicitly as
+    # calculate_default_transform()'s own `resolution` argument - keeps the
+    # reprojected grid square in real ground distance, like the eikonal model's own.
+    src_res_m = abs(transform.a)
+    center_x = (src_bounds[0] + src_bounds[2]) / 2.0
+    center_y = (src_bounds[1] + src_bounds[3]) / 2.0
+    _, center_lat = warp_transform(crs, dst_crs, [center_x], [center_y])
+    res_x_deg = src_res_m / (111320.0 * np.cos(np.radians(center_lat[0])))
+    res_y_deg = src_res_m / 110540.0
+
     dst_transform, width, height = calculate_default_transform(
-        crs, dst_crs, arr.shape[1], arr.shape[0], *rasterio.transform.array_bounds(arr.shape[0], arr.shape[1], transform)
+        crs, dst_crs, arr.shape[1], arr.shape[0], *src_bounds, resolution=(res_x_deg, res_y_deg),
     )
     dst = np.full((height, width), nodata, dtype=np.float32)
     src_arr = np.where(np.isnan(arr), nodata, arr).astype(np.float32)
@@ -178,7 +230,7 @@ def main() -> None:
         log = _SimpleLog()
         run_sfincs_subprocess(Path(args.sfincs_exe), sfincs_dir, args.timeout_s, log, label=f"SFINCS tile {args.tile_id}")
 
-    hmax, dep_m, grid_info = compute_max_inundation(sfincs_dir, land_mask_path)
+    hmax, grid_info = compute_max_inundation(sfincs_dir, land_mask_path)
     n_flooded = int(np.isfinite(hmax).sum())
     print(f"Flooded cells (UTM grid): {n_flooded} of {hmax.size} ({100 * n_flooded / hmax.size:.1f}%)")
     if n_flooded:
