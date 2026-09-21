@@ -95,6 +95,28 @@ def compute_max_inundation(sfincs_dir: Path, land_mask_path: Path) -> tuple[np.n
         )
     is_land = land_on_grid == 0.0
 
+    # No depth-plausibility filter here (2026-09: an earlier version of this
+    # function had one, dep_m > -2.0 - removed). That was a band-aid for a
+    # real bug that's now fixed at the source instead: build_sfincs_tile.py
+    # used to let hydromt_sfincs reproject the elevation grid with bilinear
+    # smoothing while this function's own land_mask_path reprojects with
+    # nearest-neighbour, independently, on the same UTM grid - elevation_
+    # combined.tif has a DELIBERATE hard step at the coastline (real land
+    # directly abutting a GEBCO+MIN_BATHYMETRY_M-floored ocean value, not a
+    # physically continuous surface), so bilinear smoothing across it could
+    # produce a UTM cell the mask still calls "land" with a deeply negative
+    # interpolated dep - confirmed live: as low as -32.7 m, reporting >33 m
+    # of "inundation" at a perfectly normal zsmax~1 m open-water cell. A
+    # fixed numeric cutoff patching that symptom was itself not physically
+    # justified (real coastal land/polders genuinely do sit several metres
+    # below the reference datum) and, worse, wasn't even robust to a
+    # different MIN_BATHYMETRY_M value (confirmed: it let through a whole
+    # different set of artifacts when the floor changed from -50 to -10 m -
+    # see build_sfincs_tile.py's own elevation-reprojection comment for the
+    # real fix: pre-reproject with nearest-neighbour ourselves before
+    # elevation.create() ever runs, so dep_m here is never smoothed across
+    # that cliff in the first place, and no depth threshold is needed to
+    # compensate for it downstream).
     hmax = zsmax_arr - dep_m
     hmax = np.where((hmax > 0.0) & is_land, hmax, np.nan)
 

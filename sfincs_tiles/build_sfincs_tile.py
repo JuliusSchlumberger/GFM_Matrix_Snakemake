@@ -32,6 +32,7 @@ import shapely.geometry
 import xarray as xr
 import yaml
 from hydromt_sfincs import SfincsModel
+from rasterio.warp import Resampling, reproject
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_boundary_forcing import idw_interpolate_to_grid  # noqa: E402
@@ -51,9 +52,16 @@ def _ocean_polygon_wgs84(mask_path: Path, ocean_code: int = 1) -> gpd.GeoDataFra
     return gpd.GeoDataFrame(geometry=geoms, crs="EPSG:4326")
 
 
+TRUNCATE_WINDOW_HR_DEFAULT = (40.0, 110.0)  # see build_sfincs_tile()'s own comment at the
+# boundary-forcing step for why: every COAST-HG hydrograph in this pipeline shares the exact
+# same synthetic time axis (confirmed live across all 4 real tiles tested so far - peak always
+# at t=74.5h), so this window isn't a per-tile tuning choice, it's a property of the dataset.
+
+
 def build_sfincs_tile(
     tile_id: str, root: Path, resolution_m: float = 30.0,
     dtmapout_s: float = 1800.0, tref: datetime | None = None,
+    truncate_window_hr: tuple[float, float] | None = TRUNCATE_WINDOW_HR_DEFAULT,
 ) -> Path:
     tile_dir = root / "model_outputs" / tile_id / "inputs"
     sfincs_dir = root / "validation_sfincs" / tile_id / "sfincs_model"
@@ -79,7 +87,58 @@ def build_sfincs_tile(
     print(f"[1/8] grid created: {dict(sf.grid.data.sizes)} cells, crs={sf.crs}")
 
     # -- 2. elevation (combined DeltaDTM+MDT-corrected-GEBCO, built by build_elevation.py) --
-    sf.elevation.create(elevation_list=[{"elevation": "local_elevation"}])
+    # Pre-reproject onto the SFINCS UTM grid OURSELVES (nearest-neighbour, via rasterio
+    # directly) before handing it to hydromt_sfincs, rather than passing
+    # reproj_method="nearest" to elevation.create() and trusting hydromt_sfincs to honour
+    # it. Real bug found and fixed here (2026-09, tile 2335 A/B bathymetry-floor test):
+    # confirmed passing reproj_method="nearest" has NO EFFECT - hydromt_sfincs's own
+    # merge_multi_dataarrays (hydromt_sfincs/workflows/merge.py, ~line 85-100) has
+    # `if method is None and da_like is not None: ...resolution-based choice...
+    # else: method = "bilinear"` - the else branch (taken whenever a reproj_method IS
+    # explicitly given) unconditionally OVERWRITES it with "bilinear" instead of
+    # respecting it, a real bug in the vendored library itself, not something fixable
+    # from our own elevation_list dict. elevation_combined.tif has a DELIBERATE hard
+    # step at the coastline (DeltaDTM land directly abutting a GEBCO+MIN_BATHYMETRY_M-
+    # floored ocean value, not a physically continuous surface), and mask.tif
+    # (land_mask_path in run_sfincs_tile.py's own compute_max_inundation) is reprojected
+    # with nearest-neighbour - so bilinear smoothing across that same cliff produces UTM
+    # cells the (nearest) mask still calls "land" but with an interpolated dep tens of
+    # metres deep - confirmed live: this alone explained an apparent "-10m floor causes
+    # more flooding" result that had nothing to do with wave speed/advection. Workaround:
+    # reproject to the EXACT destination grid ourselves first, so hydromt_sfincs's own
+    # forced-bilinear pass becomes a no-op (source and destination pixels already
+    # coincide exactly - bilinear of an aligned grid returns the same value, no blending
+    # possible). No floor-dependent threshold needed downstream once this is fixed at
+    # the source.
+    grid_transform = sf.grid.data.raster.transform
+    grid_crs = sf.grid.data.raster.crs
+    grid_height, grid_width = sf.grid.data.sizes["y"], sf.grid.data.sizes["x"]
+    elevation_utm_path = sfincs_dir / "elevation_combined_utm.tif"
+    with rasterio.open(sfincs_dir / "elevation_combined.tif") as src:
+        elevation_utm = np.empty((grid_height, grid_width), dtype=np.float32)
+        reproject(
+            source=rasterio.band(src, 1), destination=elevation_utm,
+            src_transform=src.transform, src_crs=src.crs,
+            dst_transform=grid_transform, dst_crs=grid_crs,
+            src_nodata=np.nan, dst_nodata=np.nan,
+            resampling=Resampling.nearest,
+        )
+    profile = {
+        "driver": "GTiff", "dtype": "float32", "count": 1,
+        "height": grid_height, "width": grid_width,
+        "transform": grid_transform, "crs": grid_crs, "nodata": np.nan, "compress": "deflate",
+    }
+    with rasterio.open(elevation_utm_path, "w", **profile) as dst:
+        dst.write(elevation_utm, 1)
+
+    local_catalog["local_elevation_utm"] = {"data_type": "RasterDataset", "uri": "elevation_combined_utm.tif", "driver": "rasterio"}
+    with open(local_catalog_path, "w") as fh:
+        yaml.dump(local_catalog, fh, sort_keys=False)
+    sf.data_catalog = None  # force re-read of local_catalog_path with the new entry just added
+    sf = SfincsModel(data_libs=[str(local_catalog_path)], root=str(sfincs_dir), mode="w+")
+    sf.grid.create_from_region(region={"geom": tile_gdf}, res=resolution_m, crs="utm")
+
+    sf.elevation.create(elevation_list=[{"elevation": "local_elevation_utm"}])
     print(f"[2/8] elevation set - range {float(sf.grid.data['dep'].min()):.2f} to {float(sf.grid.data['dep'].max()):.2f} m")
 
     # -- 3. mask: active cells (whole tile) + waterlevel boundary (ocean edge only) --
@@ -104,6 +163,28 @@ def build_sfincs_tile(
     # build_boundary_forcing.py's own prep output) --
     matched_points = gpd.read_file(sfincs_dir / "matched_boundary_points.gpkg")
     hydrographs = pd.read_csv(sfincs_dir / "corrected_hydrographs.csv")
+
+    # Truncate the full ~148.8h COAST-HG hydrograph down to a window around
+    # its own storm peak, instead of simulating the whole thing - real,
+    # confirmed speedup (2026-09): SFINCS's own wall-clock cost scales with
+    # simulated duration at a roughly fixed timestep, so cutting duration
+    # from 148.8h to 70h (40-110h) is a ~2.1x reduction on its own, on top
+    # of (not instead of) the -50m bathymetry-floor speedup. Every COAST-HG
+    # hydrograph in this pipeline shares the SAME synthetic time axis - not
+    # a per-station/per-tile-specific timing - confirmed by checking all 4
+    # real tiles built so far (2335, 1573, 1907, 929): every one peaks at
+    # EXACTLY t=74.5h, and hour 40/hour 110 both sit close to each tile's
+    # own tidal-only baseline (well before/after the storm builds up and
+    # decays), so this window is a property of the dataset, not something
+    # that needs per-tile tuning. zsini (below) now comes from hour 40's
+    # own corrected value instead of hour 0's, matching whatever the new
+    # truncated series' own first row is - no separate change needed there.
+    if truncate_window_hr is not None:
+        t_start, t_end = truncate_window_hr
+        keep = (hydrographs["elapsed_hr"] >= t_start) & (hydrographs["elapsed_hr"] <= t_end)
+        hydrographs = hydrographs.loc[keep].reset_index(drop=True)
+        hydrographs["elapsed_hr"] = hydrographs["elapsed_hr"] - hydrographs["elapsed_hr"].iloc[0]
+
     elapsed_hr = hydrographs["elapsed_hr"].to_numpy()
     station_cols = [c for c in hydrographs.columns if c != "elapsed_hr"]
 
@@ -229,10 +310,16 @@ def main() -> None:
     parser.add_argument("--tile-id", required=True)
     parser.add_argument("--config", default=str(_repo_root / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--resolution-m", type=float, default=30.0)
+    parser.add_argument(
+        "--no-truncate", action="store_true",
+        help="use the full ~148.8h COAST-HG hydrograph instead of the default "
+             f"{TRUNCATE_WINDOW_HR_DEFAULT} window - for A/B comparison only.",
+    )
     args = parser.parse_args()
 
     root = read_root(Path(args.config))
-    build_sfincs_tile(args.tile_id, root, resolution_m=args.resolution_m)
+    truncate_window_hr = None if args.no_truncate else TRUNCATE_WINDOW_HR_DEFAULT
+    build_sfincs_tile(args.tile_id, root, resolution_m=args.resolution_m, truncate_window_hr=truncate_window_hr)
 
 
 if __name__ == "__main__":

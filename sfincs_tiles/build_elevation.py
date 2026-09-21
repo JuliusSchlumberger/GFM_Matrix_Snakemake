@@ -28,7 +28,16 @@ LAKE_CODE = 2
 RIVER_CODE = 3
 
 
-MIN_BATHYMETRY_M = -50.0
+MIN_BATHYMETRY_M = -10.0  # was -50.0 until 2026-09's A/B test (tile 2335/2335b/2335c):
+# real ~1.7x additional speedup (larger CFL-stable timestep - shallower water means a
+# lower shallow-water wave celerity sqrt(g*h), so a shallower floor relaxes the
+# timestep constraint, not the other way around), confirmed via real SFINCS runs to
+# change the actual flood result negligibly (28 vs 29 flooded cells out of 20086,
+# identical 2.801 m max depth) ONCE the elevation-reprojection bug that was
+# contaminating that comparison got fixed (see build_sfincs_tile.py's own elevation-
+# reprojection comment) - the two changes were found and fixed together, don't split
+# this value back to -50 without also reverting that fix, the two were validated as a
+# pair, not independently.
 
 
 def build_combined_elevation(
