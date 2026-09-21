@@ -48,10 +48,20 @@ CPUS_PER_TASK_DEFAULT = 4
 MEM_DEFAULT = "30G"
 MAX_WAIT_ATTEMPTS_DEFAULT = 240  # * WAIT_INTERVAL_S below = max time a task waits for its own tile to be built
 WAIT_INTERVAL_S = 30
-SIF_PATH_DEFAULT = (
-    "/p/11202255-sfincs/executables/SFINCS_2026/SFINCS_2026_01/"
-    "v2.4.0_Galibier_Release_CPU_apptainer/sfincs-cpu_v2.4.0-Galibier-Release.sif"
-)
+SFINCS_IMAGE_DEFAULT = "docker://deltares/sfincs-cpu:sfincs-v2.4.0-Galibier-Release"
+# NOT a local .sif path under /p/11202255-sfincs/executables/... - confirmed live
+# (2026-09, first real array run): every task failed identically with "lstat
+# /p/11202255-sfincs/executables: permission denied" - that path is visible (and
+# readable) from this Windows machine's own P:\ (SMB) mount, but the Hydrax compute
+# nodes reach the same underlying storage over a different mount (NFS or similar)
+# with different permissions - not something fixable from here. apptainer itself is
+# confirmed working on this cluster (that's what produced the real permission
+# error), so pulling straight from Docker Hub (a public registry, no local-path
+# permission dependency at all) sidesteps the whole problem - this is also what the
+# user's own original Deltares docker-based example script used
+# (`docker run ... deltares/sfincs-cpu:sfincs-v2.4.0-Galibier-Release sfincs`),
+# just invoked through apptainer's own docker:// pull support instead of a
+# docker daemon (which most HPC clusters restrict for regular users anyway).
 
 
 def main() -> None:
@@ -67,7 +77,7 @@ def main() -> None:
     parser.add_argument("--cpus-per-task", type=int, default=CPUS_PER_TASK_DEFAULT)
     parser.add_argument("--max-wait-attempts", type=int, default=MAX_WAIT_ATTEMPTS_DEFAULT, help=f"* {WAIT_INTERVAL_S}s poll interval = max time a task waits for its own tile's sfincs.inp before giving up")
     parser.add_argument("--account", default="")
-    parser.add_argument("--sif-path", default=SIF_PATH_DEFAULT)
+    parser.add_argument("--sfincs-image", default=SFINCS_IMAGE_DEFAULT, help="apptainer target - a docker://... URI (pulled fresh/from cache) or a local .sif path")
     args = parser.parse_args()
 
     config_path = Path(args.config)
@@ -119,7 +129,7 @@ def main() -> None:
         "",
         "set -uo pipefail",  # not -e: this task's own failure must not be treated as a script bug
         f'SFINCS_ROOT="{linux_root}"',
-        f'SIF_PATH="{args.sif_path}"',
+        f'SFINCS_IMAGE="{args.sfincs_image}"',
         f'TILE_IDS_FILE="{linux_tile_ids_file}"',
         f'FAIL_LOG="{linux_jobs_dir}/logs/{name}_failures.txt"',
         "",
@@ -161,9 +171,16 @@ def main() -> None:
         "fi",
         "",
         f"export OMP_NUM_THREADS={args.cpus_per_task}",
-        '( cd "$LOCAL_DIR" && apptainer exec -B "$LOCAL_DIR":/mnt/data "$SIF_PATH" sfincs ) '
-        '> "$LOCAL_DIR/sfincs_hpc_run.log" 2>&1',
-        "run_rc=$?",
+        "echo \"=== tile $TILE_ID: starting sfincs ===\"",
+        # tee, not a plain redirect: streams SFINCS's own startup banner/progress
+        # live into this task's own stdout (SLURM's %A_%a.out file - `tail -f`
+        # it to watch a running task), while still keeping the same per-tile
+        # log file copied back to REMOTE_DIR below. $? after a pipeline is the
+        # LAST command's (tee's) exit code, not apptainer's - PIPESTATUS[0]
+        # (bash-only, fine here given the #!/bin/bash shebang) gives the real one.
+        '( cd "$LOCAL_DIR" && apptainer exec -B "$LOCAL_DIR":/mnt/data "$SFINCS_IMAGE" sfincs ) '
+        '2>&1 | tee "$LOCAL_DIR/sfincs_hpc_run.log"',
+        "run_rc=${PIPESTATUS[0]}",
         "",
         'if [ "$run_rc" -ne 0 ] || [ ! -f "$LOCAL_DIR/sfincs_map.nc" ]; then',
         '  echo "$TILE_ID  sfincs run failed (exit $run_rc) or produced no sfincs_map.nc" >> "$FAIL_LOG"',

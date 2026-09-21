@@ -77,15 +77,22 @@ CPUS_PER_TASK_DEFAULT = 4
 MEM_DEFAULT = "30G"  # matches the main pipeline's own hpc.sbatch_large convention for the
 # 4vcpu partition (config.yml) - Hydrax's regular partitions scale RAM at a fixed 8GB/vCPU,
 # with a bit less than the nominal amount actually usable (see hpc.md's own note for 1vcpu)
-SIF_PATH_DEFAULT = (
-    # NOT .../SFINCS_2026_branches/v2.4.0_Galibier_Release_CPU_apptainer/... -
-    # that path (from the guidance this was originally built from) doesn't
-    # exist on the share (confirmed live: apptainer's own "no such file or
-    # directory" on tile 37's first real HPC run) - verified this IS the
-    # real path by browsing the share directly (`find ... -iname "*.sif"`).
-    "/p/11202255-sfincs/executables/SFINCS_2026/SFINCS_2026_01/"
-    "v2.4.0_Galibier_Release_CPU_apptainer/sfincs-cpu_v2.4.0-Galibier-Release.sif"
-)
+SFINCS_IMAGE_DEFAULT = "docker://deltares/sfincs-cpu:sfincs-v2.4.0-Galibier-Release"
+# NOT a local .sif path under /p/11202255-sfincs/executables/... - two real, separate
+# problems found there in turn: first the guidance's own path (.../SFINCS_2026_branches/
+# v2.4.0_Galibier_Release_CPU_apptainer/...) didn't exist ("no such file or directory");
+# after finding the real path by browsing the share directly, a second real bug showed
+# up live on the first full array run - "lstat /p/11202255-sfincs/executables:
+# permission denied" - that path is visible (and readable) from this Windows machine's
+# own P:\ (SMB) mount, but the Hydrax compute nodes reach the same underlying storage
+# over a different mount with different permissions, not something fixable from here.
+# apptainer itself is confirmed working on this cluster (that's what produced the real
+# permission error), so pulling straight from Docker Hub (a public registry, no
+# local-path permission dependency at all) sidesteps the whole problem - this is also
+# what the user's own original Deltares docker-based example script used (`docker run
+# ... deltares/sfincs-cpu:sfincs-v2.4.0-Galibier-Release sfincs`), just invoked through
+# apptainer's own docker:// pull support instead of a docker daemon (which most HPC
+# clusters restrict for regular users anyway).
 
 
 def _stage_tile_lines(cpus_per_task: int) -> list[str]:
@@ -124,9 +131,15 @@ def _stage_tile_lines(cpus_per_task: int) -> list[str]:
         "  fi",
         "",
         f"  export OMP_NUM_THREADS={cpus_per_task}",  # match the node's own allocated core count exactly
-        '  ( cd "$local_dir" && apptainer exec -B "$local_dir":/mnt/data "$SIF_PATH" sfincs ) '
-        '> "$local_dir/sfincs_hpc_run.log" 2>&1',
-        "  local run_rc=$?",
+        '  echo "=== tile $tile_id: starting sfincs ==="',
+        # tee, not a plain redirect - streams SFINCS's own startup banner/progress
+        # live into this batch's own stdout (SLURM's %j.out file), while still
+        # keeping the per-tile log file copied back to remote_dir below. $? after
+        # a pipeline is the LAST command's (tee's) exit code, not apptainer's -
+        # PIPESTATUS[0] (bash-only, fine given the #!/bin/bash shebang) is the real one.
+        '  ( cd "$local_dir" && apptainer exec -B "$local_dir":/mnt/data "$SFINCS_IMAGE" sfincs ) '
+        '2>&1 | tee "$local_dir/sfincs_hpc_run.log"',
+        "  local run_rc=${PIPESTATUS[0]}",
         "",
         '  if [ "$run_rc" -ne 0 ] || [ ! -f "$local_dir/sfincs_map.nc" ]; then',
         '    echo "$tile_id  sfincs run failed (exit $run_rc) or produced no sfincs_map.nc" >> "$FAIL_LOG"',
@@ -152,7 +165,7 @@ def generate_sfincs_batches(
     mem: str,
     cpus_per_task: int,
     account: str,
-    sif_path: str,
+    sfincs_image: str,
     linux_root: str,
     linux_jobs_dir: str,
     local_jobs_dir: Path,
@@ -188,7 +201,7 @@ def generate_sfincs_batches(
             "",
             "set -uo pipefail",  # not -e: one tile's failure must not abort the rest of this node's batch
             f'SFINCS_ROOT="{linux_root}"',
-            f'SIF_PATH="{sif_path}"',
+            f'SFINCS_IMAGE="{sfincs_image}"',
             f'FAIL_LOG="{linux_jobs_dir}/logs/{name}_failures.txt"',
             ': > "$FAIL_LOG"',
             "",
@@ -226,13 +239,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(_repo_root / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--tile-ids-file", default=None, help="text file, one tile ID per line (default: validation_sfincs/test_tile_selection_ids.txt)")
+    parser.add_argument("--skip-tile-ids", type=str, nargs="*", default=[], help="tile IDs to exclude entirely (e.g. known antimeridian failures - see build_sfincs_tile.py's own TopologyException handling)")
     parser.add_argument("--n-nodes", type=int, default=N_NODES_DEFAULT)
     parser.add_argument("--partition", default=PARTITION_DEFAULT)
     parser.add_argument("--time", default=TIME_DEFAULT)
     parser.add_argument("--mem", default=MEM_DEFAULT)
     parser.add_argument("--cpus-per-task", type=int, default=CPUS_PER_TASK_DEFAULT)
     parser.add_argument("--account", default="")
-    parser.add_argument("--sif-path", default=SIF_PATH_DEFAULT)
+    parser.add_argument("--sfincs-image", default=SFINCS_IMAGE_DEFAULT, help="apptainer target - a docker://... URI (pulled fresh/from cache) or a local .sif path")
     args = parser.parse_args()
 
     config_path = Path(args.config)
@@ -243,10 +257,12 @@ def main() -> None:
     linux_root = linux_config["paths"]["root"]
 
     tile_ids_file = Path(args.tile_ids_file) if args.tile_ids_file else local_root / "validation_sfincs" / "test_tile_selection_ids.txt"
-    tile_ids = [line.strip() for line in tile_ids_file.read_text().splitlines() if line.strip()]
+    all_tile_ids = [line.strip() for line in tile_ids_file.read_text().splitlines() if line.strip()]
+    skip = set(args.skip_tile_ids)
+    tile_ids = [t for t in all_tile_ids if t not in skip]
     if not tile_ids:
-        raise ValueError(f"no tile IDs found in {tile_ids_file}")
-    print(f"{len(tile_ids)} tile(s) from {tile_ids_file}")
+        raise ValueError(f"no tile IDs left in {tile_ids_file} after excluding {skip}")
+    print(f"{len(tile_ids)} tile(s) from {tile_ids_file} ({len(skip)} excluded: {sorted(skip)})")
 
     local_jobs_dir = local_root / "validation_sfincs" / "hpc_jobs"
     linux_jobs_dir = f"{linux_root}/validation_sfincs/hpc_jobs"
@@ -259,7 +275,7 @@ def main() -> None:
         mem=args.mem,
         cpus_per_task=args.cpus_per_task,
         account=args.account,
-        sif_path=args.sif_path,
+        sfincs_image=args.sfincs_image,
         linux_root=linux_root,
         linux_jobs_dir=linux_jobs_dir,
         local_jobs_dir=local_jobs_dir,

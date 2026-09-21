@@ -244,7 +244,14 @@ def build_sfincs_tile(
     # geometry rather than the raw grid bbox) - doubling errs safely past
     # that without risk of ever pulling in an unrelated station, since only
     # the already-vetted (k-nearest-filtered) locations exist to include.
-    buffer_m = dist_to_grid_bbox * 2.0 + 10_000.0
+    # +25 km flat margin, not +10 km: confirmed live (tile 808, a huge Arctic tile
+    # at 69-70 deg N with its own matched stations already INSIDE the grid, i.e.
+    # dist_to_grid_bbox == 0) that a +10 km margin alone isn't always enough even
+    # when the naive computed distance is already zero - binary-searched the real
+    # threshold for that tile between 10 km (fails) and 20 km (works), so +25 km
+    # keeps real margin past the confirmed-working value instead of sitting right
+    # at it.
+    buffer_m = dist_to_grid_bbox * 2.0 + 25_000.0
 
     try:
         sf.water_level.create(timeseries=wl_df, locations=locations_gdf, buffer=buffer_m)
