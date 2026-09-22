@@ -30,3 +30,2793 @@ Replacing grid map: zs
 Dataset [165720.0, 7230840.0, 377760.0, 7345200.0] does not fully cover bbox [162979.029, 7227297.386, 378755.424, 7348574.500]
 Replacing grid map: zs
 tile 72: zsini rebuilt - 759289 ocean cell(s) initialized -0.1026 to 0.2090 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [168480.0, 773760.0, 345120.0, 885480.0] does not fully cover bbox [167714.498, 772933.608, 345477.065, 886428.135]
+Replacing grid map: zs
+tile 93: zsini rebuilt - 228706 ocean cell(s) initialized 0.0404 to 0.1655 m (interpolated from 18 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 132: zsini rebuilt - 909281 ocean cell(s) initialized -0.4682 to -0.2870 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [434760.0, 8100120.0, 500160.0, 8181840.0] does not fully cover bbox [431912.641, 8099032.134, 500167.085, 8182979.083]
+Replacing grid map: zs
+tile 249: zsini rebuilt - 21924 ocean cell(s) initialized 0.0775 to 0.0882 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [369000.0, 8480880.0, 474960.0, 8552160.0] does not fully cover bbox [362709.617, 8475544.858, 476115.565, 8557746.732]
+Replacing grid map: zs
+tile 315: zsini rebuilt - 209016 ocean cell(s) initialized -0.0008 to 0.0398 m (interpolated from 5 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 377: zsini rebuilt - 797955 ocean cell(s) initialized 0.0239 to 0.0872 m (interpolated from 18 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 382: zsini rebuilt - 861236 ocean cell(s) initialized -0.1579 to 0.4337 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [512400.0, 5016240.0, 581640.0, 5239200.0] does not fully cover bbox [511988.757, 5015730.137, 584439.882, 5239675.390]
+Replacing grid map: zs
+tile 385: zsini rebuilt - 776023 ocean cell(s) initialized 0.0208 to 0.1074 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [392520.0, 1658160.0, 515640.0, 1769160.0] does not fully cover bbox [391999.964, 1657922.548, 515715.839, 1769419.718]
+Replacing grid map: zs
+tile 390: zsini rebuilt - 664443 ocean cell(s) initialized 0.0567 to 0.2399 m (interpolated from 18 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [517440.0, 8855520.0, 559560.0, 8994600.0] does not fully cover bbox [515336.062, 8854116.920, 567706.649, 8996198.637]
+Replacing grid map: zs
+tile 391: zsini rebuilt - 256195 ocean cell(s) initialized 0.1663 to 0.2486 m (interpolated from 12 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [282240.0, 1326360.0, 518400.0, 1437960.0] does not fully cover bbox [281393.602, 1325575.849, 518472.032, 1438818.798]
+Replacing grid map: zs
+tile 399: zsini rebuilt - 1214288 ocean cell(s) initialized -0.0203 to 0.1845 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [616440.0, 6318840.0, 682320.0, 6490920.0] does not fully cover bbox [611572.413, 6316470.814, 690263.223, 6493433.686]
+Replacing grid map: zs
+tile 400: zsini rebuilt - 461206 ocean cell(s) initialized 0.2892 to 0.5958 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [207960.0, 4096560.0, 324720.0, 4210920.0] does not fully cover bbox [203920.818, 4093342.150, 327114.077, 4214260.472]
+Replacing grid map: zs
+tile 406: zsini rebuilt - 550015 ocean cell(s) initialized -0.0406 to -0.0321 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [64200.0, 1327200.0, 283440.0, 1440600.0] does not fully cover bbox [62478.780, 1324819.631, 284293.076, 1443194.817]
+Replacing grid map: zs
+tile 465: zsini rebuilt - 682876 ocean cell(s) initialized -0.5327 to 0.1792 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [281760.0, 6567840.0, 347760.0, 6790920.0] does not fully cover bbox [277310.019, 6566688.345, 350803.321, 6791981.838]
+Replacing grid map: zs
+tile 471: zsini rebuilt - 388349 ocean cell(s) initialized -0.0606 to 0.0064 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [722160.0, 9610560.0, 834000.0, 9778320.0] does not fully cover bbox [721878.012, 9610259.738, 834424.271, 9778490.644]
+Replacing grid map: zs
+tile 507: zsini rebuilt - 421926 ocean cell(s) initialized -0.0133 to 0.0284 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [299760.0, 2875680.0, 401640.0, 3069000.0] does not fully cover bbox [296663.159, 2874517.704, 403138.668, 3070253.764]
+Replacing grid map: zs
+tile 511: zsini rebuilt - 418378 ocean cell(s) initialized -0.0221 to 0.1002 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [254040.0, 4998600.0, 342840.0, 5277000.0] does not fully cover bbox [243513.093, 4995785.036, 349296.874, 5279579.628]
+Replacing grid map: zs
+tile 527: zsini rebuilt - 435488 ocean cell(s) initialized 0.2360 to 0.8755 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 546: zsini rebuilt - 43089 ocean cell(s) initialized 0.2331 to 0.2699 m (interpolated from 3 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [177360.0, 1658880.0, 294480.0, 1881960.0] does not fully cover bbox [174107.603, 1657581.373, 296532.318, 1883444.119]
+Replacing grid map: zs
+tile 554: zsini rebuilt - 276872 ocean cell(s) initialized -0.0783 to 0.1720 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [543480.0, 8211360.0, 592440.0, 8231160.0] does not fully cover bbox [543010.801, 8209548.398, 593446.340, 8232991.246]
+Replacing grid map: zs
+tile 586: zsini rebuilt - 47160 ocean cell(s) initialized -0.0602 to -0.0553 m (interpolated from 4 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [281160.0, 1170600.0, 391680.0, 1437960.0] does not fully cover bbox [279235.451, 1170070.175, 392624.602, 1438614.891]
+Replacing grid map: zs
+tile 651: zsini rebuilt - 1136490 ocean cell(s) initialized -0.0203 to 0.0794 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [278640.0, 673680.0, 390000.0, 897120.0] does not fully cover bbox [277671.207, 673371.163, 390479.471, 897532.638]
+Replacing grid map: zs
+tile 666: zsini rebuilt - 940840 ocean cell(s) initialized -0.0180 to 0.0126 m (interpolated from 11 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [463680.0, 8954280.0, 500040.0, 9094680.0] does not fully cover bbox [458089.802, 8953653.850, 500046.193, 9095404.466]
+Replacing grid map: zs
+tile 675: zsini rebuilt - 174627 ocean cell(s) initialized 0.2843 to 0.4224 m (interpolated from 6 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [365640.0, 4428000.0, 420000.0, 4873080.0] does not fully cover bbox [356932.554, 4427234.448, 424870.428, 4873961.069]
+Replacing grid map: zs
+tile 683: zsini rebuilt - 764624 ocean cell(s) initialized -0.0130 to 0.2025 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [304560.0, 6685200.0, 403680.0, 6831240.0] does not fully cover bbox [302034.431, 6683893.927, 404909.362, 6832477.333]
+Replacing grid map: zs
+tile 691: zsini rebuilt - 508599 ocean cell(s) initialized 0.0812 to 0.0898 m (interpolated from 17 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 700: zsini rebuilt - 37406 ocean cell(s) initialized 0.0357 to 0.0549 m (interpolated from 5 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [182760.0, 7792320.0, 290880.0, 7982880.0] does not fully cover bbox [179463.215, 7790700.055, 293032.139, 7984349.061]
+Replacing grid map: zs
+tile 703: zsini rebuilt - 701119 ocean cell(s) initialized -0.0156 to 0.0051 m (interpolated from 13 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [71760.0, 8115960.0, 287400.0, 8230080.0] does not fully cover bbox [69484.615, 8112640.607, 288525.218, 8233182.592]
+Replacing grid map: zs
+tile 733: zsini rebuilt - 779958 ocean cell(s) initialized 0.0206 to 0.2253 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [527040.0, 8396640.0, 583080.0, 8435520.0] does not fully cover bbox [526396.935, 8394755.287, 585099.008, 8437451.325]
+Replacing grid map: zs
+tile 746: zsini rebuilt - 66978 ocean cell(s) initialized 0.1181 to 0.1421 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [634680.0, 3873840.0, 724920.0, 3986760.0] does not fully cover bbox [632990.701, 3872060.955, 727775.138, 3988607.380]
+Replacing grid map: zs
+tile 753: zsini rebuilt - 316188 ocean cell(s) initialized -0.0977 to -0.0826 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 760: zsini rebuilt - 773109 ocean cell(s) initialized 0.0268 to 0.0371 m (interpolated from 16 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [277920.0, 9388200.0, 389400.0, 9554880.0] does not fully cover bbox [277434.048, 9387918.166, 389641.559, 9555084.663]
+Replacing grid map: zs
+tile 772: zsini rebuilt - 574666 ocean cell(s) initialized -0.2279 to -0.0477 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [656040.0, 5939520.0, 698760.0, 6287880.0] does not fully cover bbox [644288.782, 5937913.554, 714933.877, 6289683.786]
+Replacing grid map: zs
+tile 784: zsini rebuilt - 298507 ocean cell(s) initialized 0.0602 to 0.2274 m (interpolated from 15 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [209880.0, 6532320.0, 309840.0, 6707280.0] does not fully cover bbox [205152.199, 6530030.916, 312891.488, 6709428.893]
+Replacing grid map: zs
+tile 806: zsini rebuilt - 482290 ocean cell(s) initialized 0.0723 to 0.0828 m (interpolated from 14 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [340080.0, 7654920.0, 442680.0, 7770840.0] does not fully cover bbox [332160.362, 7650386.285, 445395.428, 7775622.276]
+Replacing grid map: zs
+tile 808: zsini rebuilt - 311848 ocean cell(s) initialized -0.0339 to 0.0844 m (interpolated from 3 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [451440.0, 8230680.0, 605880.0, 8341680.0] does not fully cover bbox [451204.619, 8230427.912, 606392.347, 8341865.479]
+Replacing grid map: zs
+tile 814: zsini rebuilt - 495655 ocean cell(s) initialized 0.0261 to 0.0322 m (interpolated from 15 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [395520.0, 6883680.0, 450360.0, 7047480.0] does not fully cover bbox [390178.528, 6882432.802, 452776.364, 7048807.933]
+Replacing grid map: zs
+tile 817: zsini rebuilt - 232649 ocean cell(s) initialized 0.1492 to 0.2205 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 819: zsini rebuilt - 58251 ocean cell(s) initialized 0.1266 to 0.1564 m (interpolated from 3 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [401280.0, 7067280.0, 500160.0, 7209960.0] does not fully cover bbox [396582.690, 7065736.023, 500167.704, 7211594.209]
+Replacing grid map: zs
+tile 831: zsini rebuilt - 374229 ocean cell(s) initialized 0.2122 to 0.2401 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [654840.0, 4984680.0, 765960.0, 5099640.0] does not fully cover bbox [652028.446, 4981022.759, 770870.925, 5103431.151]
+Replacing grid map: zs
+tile 837: zsini rebuilt - 312701 ocean cell(s) initialized -0.0396 to -0.0236 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 841: zsini rebuilt - 371716 ocean cell(s) initialized 0.0840 to 0.1381 m (interpolated from 10 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [426600.0, 4760760.0, 543720.0, 4872240.0] does not fully cover bbox [425373.951, 4760510.916, 544452.008, 4872647.275]
+Replacing grid map: zs
+tile 846: zsini rebuilt - 353519 ocean cell(s) initialized -0.0416 to -0.0364 m (interpolated from 10 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 862: zsini rebuilt - 774281 ocean cell(s) initialized -0.0176 to 0.1239 m (interpolated from 13 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 874: zsini rebuilt - 578880 ocean cell(s) initialized 0.0640 to 0.1387 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [623520.0, 2211720.0, 754560.0, 2324040.0] does not fully cover bbox [622709.110, 2210307.233, 756241.238, 2325531.846]
+Replacing grid map: zs
+tile 880: zsini rebuilt - 345272 ocean cell(s) initialized 0.0432 to 0.1101 m (interpolated from 13 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 881: zsini rebuilt - 554911 ocean cell(s) initialized 0.0541 to 0.0777 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [701520.0, 9667920.0, 791640.0, 9778800.0] does not fully cover bbox [701366.914, 9667737.112, 791861.634, 9778921.695]
+Replacing grid map: zs
+tile 886: zsini rebuilt - 236324 ocean cell(s) initialized -0.0253 to 0.0019 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [710880.0, 1933440.0, 818760.0, 2069640.0] does not fully cover bbox [709413.568, 1932030.233, 820990.799, 2071157.040]
+Replacing grid map: zs
+tile 889: zsini rebuilt - 337931 ocean cell(s) initialized 0.0576 to 0.2621 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 895: zsini rebuilt - 376874 ocean cell(s) initialized -0.2930 to -0.0475 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [531360.0, 1547520.0, 716400.0, 1659360.0] does not fully cover bbox [531218.042, 1546624.312, 717383.599, 1660323.821]
+Replacing grid map: zs
+tile 897: zsini rebuilt - 464526 ocean cell(s) initialized 0.0835 to 0.1347 m (interpolated from 17 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [654840.0, 4949280.0, 737880.0, 5098440.0] does not fully cover bbox [651222.350, 4946756.863, 743564.676, 5101083.741]
+Replacing grid map: zs
+tile 906: zsini rebuilt - 235626 ocean cell(s) initialized -0.0407 to -0.0285 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 923: zsini rebuilt - 357698 ocean cell(s) initialized 0.5179 to 1.0310 m (interpolated from 13 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [620640.0, 6789480.0, 736560.0, 6902160.0] does not fully cover bbox [619488.285, 6787680.405, 738838.703, 6903884.518]
+Replacing grid map: zs
+tile 951: zsini rebuilt - 219615 ocean cell(s) initialized -0.0015 to 0.0523 m (interpolated from 19 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [516840.0, 8993160.0, 569880.0, 9032400.0] does not fully cover bbox [516187.650, 8990893.315, 572682.679, 9034754.449]
+Replacing grid map: zs
+tile 966: zsini rebuilt - 29351 ocean cell(s) initialized 0.3072 to 0.3126 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 968: zsini rebuilt - 166829 ocean cell(s) initialized -0.0933 to 0.3426 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [531360.0, 8153520.0, 595320.0, 8180160.0] does not fully cover bbox [530919.540, 8151386.774, 596674.664, 8182323.928]
+Replacing grid map: zs
+tile 973: zsini rebuilt - 22784 ocean cell(s) initialized -0.0468 to -0.0352 m (interpolated from 4 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [311040.0, 6346800.0, 460440.0, 6459480.0] does not fully cover bbox [308903.038, 6345062.201, 460882.653, 6461150.778]
+Replacing grid map: zs
+tile 977: zsini rebuilt - 214283 ocean cell(s) initialized 0.1522 to 0.2061 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 981: zsini rebuilt - 324676 ocean cell(s) initialized 0.1226 to 0.2965 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [432840.0, 5872560.0, 601440.0, 5984520.0] does not fully cover bbox [431221.983, 5871982.665, 603870.197, 5985627.928]
+Replacing grid map: zs
+tile 986: zsini rebuilt - 186071 ocean cell(s) initialized 0.1390 to 0.4118 m (interpolated from 19 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [322680.0, 6429000.0, 442680.0, 6543960.0] does not fully cover bbox [317405.829, 6425477.731, 444339.015, 6547625.088]
+Replacing grid map: zs
+tile 987: zsini rebuilt - 125439 ocean cell(s) initialized -0.0620 to 0.0297 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [564120.0, 8027280.0, 601680.0, 8136840.0] does not fully cover bbox [560663.255, 8025752.556, 607464.268, 8138461.615]
+Replacing grid map: zs
+tile 991: zsini rebuilt - 37815 ocean cell(s) initialized 0.1311 to 0.3047 m (interpolated from 3 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [373080.0, 6131880.0, 439080.0, 6296640.0] does not fully cover bbox [368124.784, 6130478.031, 441370.777, 6298121.939]
+Replacing grid map: zs
+tile 1003: zsini rebuilt - 31422 ocean cell(s) initialized -0.0116 to 0.0049 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [465480.0, 8293200.0, 525840.0, 8323920.0] does not fully cover bbox [464861.722, 8293056.944, 526305.156, 8324267.258]
+Replacing grid map: zs
+tile 1012: zsini rebuilt - 122651 ocean cell(s) initialized 0.2137 to 0.2466 m (interpolated from 5 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1013: zsini rebuilt - 508797 ocean cell(s) initialized -0.1860 to -0.0981 m (interpolated from 7 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [396000.0, 7502520.0, 416640.0, 7550160.0] does not fully cover bbox [394081.960, 7501785.832, 418150.435, 7550909.785]
+Replacing grid map: zs
+tile 1016: zsini rebuilt - 54894 ocean cell(s) initialized 0.1930 to 0.2516 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [547200.0, 3101640.0, 649680.0, 3208920.0] does not fully cover bbox [546770.635, 3100798.109, 651053.674, 3209796.607]
+Replacing grid map: zs
+tile 1025: zsini rebuilt - 613528 ocean cell(s) initialized 0.0874 to 0.1273 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [547080.0, 3101640.0, 598560.0, 3177600.0] does not fully cover bbox [546778.135, 3101327.104, 599195.948, 3177921.989]
+Replacing grid map: zs
+tile 1033: zsini rebuilt - 207008 ocean cell(s) initialized 0.0874 to 0.1272 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [656760.0, 4976760.0, 784320.0, 5015160.0] does not fully cover bbox [655814.789, 4972306.738, 786041.572, 5019560.109]
+Replacing grid map: zs
+tile 1039: zsini rebuilt - 211625 ocean cell(s) initialized 0.1706 to 0.3443 m (interpolated from 16 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [721440.0, 9335520.0, 833160.0, 9498480.0] does not fully cover bbox [720918.301, 9335008.462, 833946.356, 9498865.197]
+Replacing grid map: zs
+tile 1058: zsini rebuilt - 825816 ocean cell(s) initialized -0.2741 to -0.0533 m (interpolated from 17 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [454560.0, 7319760.0, 521520.0, 7378680.0] does not fully cover bbox [453597.903, 7319482.198, 521977.911, 7379051.765]
+Replacing grid map: zs
+tile 1089: zsini rebuilt - 157406 ocean cell(s) initialized 0.0901 to 0.1937 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [184080.0, 7785480.0, 367080.0, 7898640.0] does not fully cover bbox [182089.231, 7783133.419, 367913.105, 7900855.401]
+Replacing grid map: zs
+tile 1094: zsini rebuilt - 814292 ocean cell(s) initialized 0.6396 to 1.0218 m (interpolated from 14 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1105: zsini rebuilt - 295279 ocean cell(s) initialized -0.3799 to -0.1433 m (interpolated from 19 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [670320.0, 4338720.0, 759240.0, 4450800.0] does not fully cover bbox [667857.063, 4336283.433, 763040.212, 4453325.616]
+Replacing grid map: zs
+tile 1106: zsini rebuilt - 361893 ocean cell(s) initialized -0.2410 to 0.0391 m (interpolated from 19 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [190680.0, 5104320.0, 348240.0, 5212920.0] does not fully cover bbox [185090.311, 5098423.347, 350940.546, 5219019.976]
+Replacing grid map: zs
+tile 1109: zsini rebuilt - 617701 ocean cell(s) initialized -0.0407 to 0.0177 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1116: zsini rebuilt - 676550 ocean cell(s) initialized 0.0401 to 0.0728 m (interpolated from 16 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [379440.0, 8248320.0, 443040.0, 8349840.0] does not fully cover bbox [372230.916, 8245180.814, 446265.716, 8353175.268]
+Replacing grid map: zs
+tile 1136: zsini rebuilt - 214348 ocean cell(s) initialized 0.1167 to 0.1439 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [275040.0, 8561760.0, 364080.0, 8673120.0] does not fully cover bbox [274167.265, 8561177.932, 364605.421, 8673655.425]
+Replacing grid map: zs
+tile 1137: zsini rebuilt - 357599 ocean cell(s) initialized 0.0089 to 0.0183 m (interpolated from 11 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [243480.0, 6678360.0, 307200.0, 6939840.0] does not fully cover bbox [237628.840, 6677064.334, 311501.383, 6941015.207]
+Replacing grid map: zs
+tile 1143: zsini rebuilt - 554229 ocean cell(s) initialized 0.0437 to 0.0544 m (interpolated from 19 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [234240.0, 7786320.0, 298440.0, 7898040.0] does not fully cover bbox [232586.255, 7785463.440, 299686.896, 7898849.712]
+Replacing grid map: zs
+tile 1159: zsini rebuilt - 241253 ocean cell(s) initialized -0.0017 to 0.0050 m (interpolated from 11 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [350160.0, 4361280.0, 415920.0, 4540200.0] does not fully cover bbox [346569.850, 4360290.772, 417888.154, 4541247.257]
+Replacing grid map: zs
+tile 1161: zsini rebuilt - 385925 ocean cell(s) initialized -0.0301 to 0.0412 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1175: zsini rebuilt - 169922 ocean cell(s) initialized -0.0417 to -0.0364 m (interpolated from 8 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [698280.0, 6454680.0, 812400.0, 6568560.0] does not fully cover bbox [696122.325, 6451824.708, 815833.516, 6571301.746]
+Replacing grid map: zs
+tile 1187: zsini rebuilt - 406195 ocean cell(s) initialized 0.0703 to 0.0763 m (interpolated from 11 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1198: zsini rebuilt - 348629 ocean cell(s) initialized 0.0994 to 0.1369 m (interpolated from 11 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [152400.0, 7452240.0, 295320.0, 7627320.0] does not fully cover bbox [148480.687, 7449610.536, 297604.233, 7629748.502]
+Replacing grid map: zs
+tile 1205: zsini rebuilt - 739615 ocean cell(s) initialized -0.2131 to 0.1797 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [594480.0, 6452400.0, 880560.0, 6529200.0] does not fully cover bbox [593779.951, 6445735.542, 883394.089, 6535680.409]
+Replacing grid map: zs
+tile 1238: zsini rebuilt - 600842 ocean cell(s) initialized 0.0925 to 0.1109 m (interpolated from 17 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1256: zsini rebuilt - 281973 ocean cell(s) initialized -0.0946 to 0.0326 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [541440.0, 7654560.0, 620040.0, 7768680.0] does not fully cover bbox [539507.220, 7651976.736, 625898.726, 7771404.798]
+Replacing grid map: zs
+tile 1258: zsini rebuilt - 238642 ocean cell(s) initialized -0.0260 to -0.0148 m (interpolated from 3 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [603960.0, 7676160.0, 709800.0, 7819320.0] does not fully cover bbox [603097.339, 7675160.069, 711554.828, 7820252.787]
+Replacing grid map: zs
+tile 1260: zsini rebuilt - 422820 ocean cell(s) initialized 0.3857 to 0.5568 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [317880.0, 5267160.0, 427080.0, 5430240.0] does not fully cover bbox [312593.580, 5264777.586, 429139.116, 5432747.886]
+Replacing grid map: zs
+tile 1261: zsini rebuilt - 466325 ocean cell(s) initialized -0.0980 to 0.0128 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1265: zsini rebuilt - 355343 ocean cell(s) initialized -0.1190 to -0.1102 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1271: zsini rebuilt - 182736 ocean cell(s) initialized -0.0193 to 0.0943 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1277: zsini rebuilt - 203122 ocean cell(s) initialized 0.1294 to 0.1406 m (interpolated from 10 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [524520.0, 2654040.0, 707400.0, 2766480.0] does not fully cover bbox [524323.771, 2652560.728, 709072.242, 2768030.965]
+Replacing grid map: zs
+tile 1281: zsini rebuilt - 537478 ocean cell(s) initialized 0.2546 to 0.4693 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [702360.0, 7268640.0, 771360.0, 7676520.0] does not fully cover bbox [696979.766, 7267462.538, 778769.137, 7677503.369]
+Replacing grid map: zs
+tile 1293: zsini rebuilt - 692163 ocean cell(s) initialized 0.0641 to 0.3290 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [608160.0, 6694440.0, 670440.0, 6766680.0] does not fully cover bbox [606004.613, 6692055.577, 673900.390, 6769127.117]
+Replacing grid map: zs
+tile 1294: zsini rebuilt - 115730 ocean cell(s) initialized -1.9078 to -1.4895 m (interpolated from 6 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [396720.0, 6762600.0, 500160.0, 6875640.0] does not fully cover bbox [393302.891, 6761095.317, 500165.369, 6877208.985]
+Replacing grid map: zs
+tile 1297: zsini rebuilt - 301636 ocean cell(s) initialized 0.4588 to 0.7484 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1299: zsini rebuilt - 574858 ocean cell(s) initialized 0.1438 to 0.1609 m (interpolated from 15 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [608880.0, 8672520.0, 689760.0, 8880480.0] does not fully cover bbox [608187.597, 8672117.164, 690974.206, 8880818.204]
+Replacing grid map: zs
+tile 1301: zsini rebuilt - 439439 ocean cell(s) initialized 0.1413 to 0.2722 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1302: zsini rebuilt - 279275 ocean cell(s) initialized 0.2748 to 0.3885 m (interpolated from 18 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [393600.0, 7898520.0, 486480.0, 8120400.0] does not fully cover bbox [392390.201, 7898219.236, 486632.016, 8120666.954]
+Replacing grid map: zs
+tile 1308: zsini rebuilt - 532124 ocean cell(s) initialized 0.0639 to 0.2538 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [266640.0, 5066400.0, 348120.0, 5209560.0] does not fully cover bbox [261093.051, 5063880.546, 351650.093, 5212194.952]
+Replacing grid map: zs
+tile 1315: zsini rebuilt - 279016 ocean cell(s) initialized -0.0362 to -0.0079 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [700320.0, 2766240.0, 903720.0, 2872320.0] does not fully cover bbox [698738.994, 2761756.082, 906926.331, 2877006.198]
+Replacing grid map: zs
+tile 1319: zsini rebuilt - 526611 ocean cell(s) initialized 0.1003 to 0.5015 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1323: zsini rebuilt - 48916 ocean cell(s) initialized 0.0910 to 0.1588 m (interpolated from 3 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [324360.0, 5717520.0, 454920.0, 5794080.0] does not fully cover bbox [322686.954, 5715712.976, 455345.639, 5795842.704]
+Replacing grid map: zs
+tile 1329: zsini rebuilt - 244901 ocean cell(s) initialized -0.0155 to 0.0900 m (interpolated from 19 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1358: zsini rebuilt - 13867 ocean cell(s) initialized 0.0726 to 0.0744 m (interpolated from 3 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1387: zsini rebuilt - 356907 ocean cell(s) initialized -0.0308 to 0.1190 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1394: zsini rebuilt - 434857 ocean cell(s) initialized -0.2169 to 0.0212 m (interpolated from 17 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [575280.0, 7686360.0, 618480.0, 7802040.0] does not fully cover bbox [571669.999, 7684631.578, 624438.253, 7803866.150]
+Replacing grid map: zs
+tile 1399: zsini rebuilt - 91520 ocean cell(s) initialized -0.0259 to -0.0148 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1429: zsini rebuilt - 168669 ocean cell(s) initialized 0.3457 to 0.5386 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [442200.0, 8323560.0, 490680.0, 8444760.0] does not fully cover bbox [437795.140, 8322610.946, 491340.746, 8445785.802]
+Replacing grid map: zs
+tile 1433: zsini rebuilt - 97675 ocean cell(s) initialized 0.1119 to 0.2725 m (interpolated from 4 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [393600.0, 7942800.0, 489240.0, 8120400.0] does not fully cover bbox [392644.295, 7942504.269, 489335.799, 8120668.560]
+Replacing grid map: zs
+tile 1445: zsini rebuilt - 245017 ocean cell(s) initialized 0.1329 to 0.7468 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [624000.0, 7232520.0, 754320.0, 7345200.0] does not fully cover bbox [623005.372, 7230716.758, 756375.119, 7346919.634]
+Replacing grid map: zs
+tile 1462: zsini rebuilt - 170890 ocean cell(s) initialized 0.1005 to 0.1437 m (interpolated from 11 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [661440.0, 3541560.0, 771840.0, 3654960.0] does not fully cover bbox [659622.037, 3539219.676, 774933.396, 3657394.975]
+Replacing grid map: zs
+tile 1464: zsini rebuilt - 124364 ocean cell(s) initialized -0.0184 to 0.0052 m (interpolated from 13 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [365160.0, 7348560.0, 416160.0, 7536960.0] does not fully cover bbox [355438.830, 7346579.949, 421806.581, 7539107.843]
+Replacing grid map: zs
+tile 1469: zsini rebuilt - 76133 ocean cell(s) initialized -0.1311 to -0.1311 m (interpolated from 1 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [332640.0, 6651240.0, 492840.0, 6699960.0] does not fully cover bbox [330401.253, 6647455.138, 492934.731, 6703809.563]
+Replacing grid map: zs
+tile 1475: zsini rebuilt - 58595 ocean cell(s) initialized 0.1178 to 0.1511 m (interpolated from 8 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: manning
+Replacing grid map: zs
+Dataset [416400.0, 7542510.0, 500130.0, 7668510.0] does not fully cover bbox [412101.598, 7541157.975, 500136.764, 7669941.912]
+Replacing grid map: zs
+tile 1492: zsini rebuilt - 31 ocean cell(s) initialized -0.0145 to -0.0144 m (interpolated from 3 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [238080.0, 552960.0, 279240.0, 786600.0] does not fully cover bbox [237059.624, 552823.701, 280096.826, 786794.432]
+Replacing grid map: zs
+tile 1498: zsini rebuilt - 652047 ocean cell(s) initialized 0.0292 to 0.0893 m (interpolated from 9 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [573000.0, 5228400.0, 622080.0, 5296080.0] does not fully cover bbox [572160.466, 5227590.628, 623499.805, 5296906.771]
+Replacing grid map: zs
+tile 1519: zsini rebuilt - 208003 ocean cell(s) initialized -0.2137 to -0.1325 m (interpolated from 16 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [648600.0, 6122760.0, 773280.0, 6193800.0] does not fully cover bbox [647458.876, 6119873.041, 775392.607, 6196618.043]
+Replacing grid map: zs
+tile 1541: zsini rebuilt - 490595 ocean cell(s) initialized 0.0629 to 0.1899 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [526920.0, 7877760.0, 680280.0, 8009760.0] does not fully cover bbox [526733.172, 7876892.827, 681539.474, 8010569.185]
+Replacing grid map: zs
+tile 1547: zsini rebuilt - 1144764 ocean cell(s) initialized 0.1938 to 0.2255 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [166320.0, 9667800.0, 341280.0, 9741600.0] does not fully cover bbox [166139.880, 9667445.283, 341365.691, 9741875.524]
+Replacing grid map: zs
+tile 1552: zsini rebuilt - 724419 ocean cell(s) initialized -0.0716 to -0.0412 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [691800.0, 7120680.0, 803160.0, 7233720.0] does not fully cover bbox [690184.966, 7118571.354, 805732.499, 7235733.294]
+Replacing grid map: zs
+tile 1556: zsini rebuilt - 663281 ocean cell(s) initialized -0.1406 to 0.0252 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [461280.0, 8881440.0, 504600.0, 8956680.0] does not fully cover bbox [458513.371, 8880786.428, 504931.970, 8957392.595]
+Replacing grid map: zs
+tile 1570: zsini rebuilt - 160379 ocean cell(s) initialized 0.1941 to 0.2771 m (interpolated from 3 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [687480.0, 2464560.0, 736320.0, 2485680.0] does not fully cover bbox [687224.656, 2463895.458, 736642.220, 2486350.992]
+Replacing grid map: zs
+tile 1572: zsini rebuilt - 49093 ocean cell(s) initialized 0.0643 to 0.0794 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [538560.0, 4982880.0, 649800.0, 5046840.0] does not fully cover bbox [538171.907, 4981240.195, 651321.956, 5048513.011]
+Replacing grid map: zs
+tile 1574: zsini rebuilt - 335645 ocean cell(s) initialized -0.1429 to -0.0027 m (interpolated from 15 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [685080.0, 5048400.0, 750240.0, 5099040.0] does not fully cover bbox [683577.898, 5046136.798, 752285.600, 5101339.316]
+Replacing grid map: zs
+tile 1579: zsini rebuilt - 147329 ocean cell(s) initialized -0.1733 to -0.0251 m (interpolated from 9 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [666240.0, 9312720.0, 721920.0, 9447480.0] does not fully cover bbox [665895.395, 9312535.378, 722380.900, 9447628.180]
+Replacing grid map: zs
+tile 1587: zsini rebuilt - 344084 ocean cell(s) initialized -0.0964 to 0.0092 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [418800.0, 4785600.0, 662520.0, 4873800.0] does not fully cover bbox [417706.691, 4784155.191, 664671.613, 4875796.495]
+Replacing grid map: zs
+tile 1588: zsini rebuilt - 958341 ocean cell(s) initialized 0.2330 to 0.3881 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [405120.0, 6457680.0, 689880.0, 6509760.0] does not fully cover bbox [404627.163, 6455914.876, 690841.968, 6511056.248]
+Replacing grid map: zs
+tile 1590: zsini rebuilt - 654435 ocean cell(s) initialized 0.0188 to 0.1006 m (interpolated from 12 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [315000.0, 3745800.0, 410040.0, 3985800.0] does not fully cover bbox [310078.986, 3744427.437, 412372.108, 3987287.609]
+Replacing grid map: zs
+tile 1594: zsini rebuilt - 970707 ocean cell(s) initialized -0.0139 to 0.0412 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [547560.0, 6094920.0, 590760.0, 6137040.0] does not fully cover bbox [547111.289, 6094252.399, 591624.139, 6137717.005]
+Replacing grid map: zs
+tile 1611: zsini rebuilt - 73751 ocean cell(s) initialized -0.0796 to -0.0668 m (interpolated from 13 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [528840.0, 8305800.0, 587640.0, 8325840.0] does not fully cover bbox [528506.416, 8303825.528, 588663.139, 8327837.062]
+Replacing grid map: zs
+tile 1615: zsini rebuilt - 43714 ocean cell(s) initialized 0.0544 to 0.0927 m (interpolated from 4 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1621: zsini rebuilt - 93040 ocean cell(s) initialized -0.0576 to -0.0519 m (interpolated from 3 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1624: zsini rebuilt - 844532 ocean cell(s) initialized 0.0624 to 0.1169 m (interpolated from 19 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [696360.0, 9004080.0, 766200.0, 9115320.0] does not fully cover bbox [695848.436, 9003678.441, 766895.133, 9115675.956]
+Replacing grid map: zs
+tile 1631: zsini rebuilt - 295824 ocean cell(s) initialized -0.0264 to -0.0019 m (interpolated from 16 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1647: zsini rebuilt - 320572 ocean cell(s) initialized 0.0575 to 0.1417 m (interpolated from 13 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [284040.0, 6768360.0, 396240.0, 6908280.0] does not fully cover bbox [275125.437, 6763297.579, 400366.491, 6913607.907]
+Replacing grid map: zs
+tile 1652: zsini rebuilt - 481251 ocean cell(s) initialized 0.7696 to 0.9314 m (interpolated from 3 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1656: zsini rebuilt - 178726 ocean cell(s) initialized 0.5290 to 0.5477 m (interpolated from 8 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [476280.0, 8844360.0, 507600.0, 8903640.0] does not fully cover bbox [475009.252, 8844146.308, 508008.805, 8903894.365]
+Replacing grid map: zs
+tile 1668: zsini rebuilt - 59932 ocean cell(s) initialized 0.0762 to 0.0801 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [192480.0, 7342320.0, 394560.0, 7456080.0] does not fully cover bbox [190086.948, 7339404.320, 395375.030, 7458854.055]
+Replacing grid map: zs
+tile 1669: zsini rebuilt - 723255 ocean cell(s) initialized 0.0662 to 0.2538 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [294120.0, 3319920.0, 334800.0, 3431520.0] does not fully cover bbox [291988.327, 3319237.223, 336493.349, 3432230.806]
+Replacing grid map: zs
+tile 1672: zsini rebuilt - 142417 ocean cell(s) initialized 0.0665 to 0.1332 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1677: zsini rebuilt - 234308 ocean cell(s) initialized -0.0764 to 0.0484 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [471240.0, 8328960.0, 490680.0, 8438880.0] does not fully cover bbox [469257.646, 8328743.308, 491281.141, 8439112.627]
+Replacing grid map: zs
+tile 1685: zsini rebuilt - 63538 ocean cell(s) initialized 0.1580 to 0.2509 m (interpolated from 3 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1702: zsini rebuilt - 497683 ocean cell(s) initialized -0.0014 to 0.0411 m (interpolated from 18 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [336600.0, 1658280.0, 418200.0, 1769520.0] does not fully cover bbox [335807.687, 1657859.776, 418594.805, 1769969.959]
+Replacing grid map: zs
+tile 1704: zsini rebuilt - 247987 ocean cell(s) initialized 0.0602 to 0.1158 m (interpolated from 9 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [66840.0, 1498800.0, 284760.0, 1602000.0] does not fully cover bbox [65088.630, 1496133.508, 285627.931, 1604862.362]
+Replacing grid map: zs
+tile 1708: zsini rebuilt - 623367 ocean cell(s) initialized 0.1138 to 0.1648 m (interpolated from 12 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1712: zsini rebuilt - 114802 ocean cell(s) initialized 0.0639 to 0.0811 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [555720.0, 6569640.0, 614160.0, 6658920.0] does not fully cover bbox [554405.834, 6568334.423, 616915.334, 6660267.750]
+Replacing grid map: zs
+tile 1719: zsini rebuilt - 135501 ocean cell(s) initialized 0.1373 to 0.2413 m (interpolated from 10 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [366360.0, 7432560.0, 416520.0, 7546080.0] does not fully cover bbox [360516.372, 7430555.534, 420022.938, 7548186.067]
+Replacing grid map: zs
+tile 1720: zsini rebuilt - 139154 ocean cell(s) initialized 0.1701 to 0.1985 m (interpolated from 5 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [517920.0, 7877280.0, 539040.0, 7896120.0] does not fully cover bbox [517766.613, 7877006.882, 539376.961, 7896395.723]
+Replacing grid map: zs
+tile 1736: zsini rebuilt - 10197 ocean cell(s) initialized 0.0318 to 0.0469 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [171120.0, 8855280.0, 264960.0, 8893800.0] does not fully cover bbox [170763.333, 8854522.047, 265214.742, 8894531.463]
+Replacing grid map: zs
+tile 1738: zsini rebuilt - 90348 ocean cell(s) initialized 0.1882 to 0.2095 m (interpolated from 11 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [530880.0, 8120160.0, 585600.0, 8204280.0] does not fully cover bbox [529534.389, 8118513.166, 589492.703, 8206006.984]
+Replacing grid map: zs
+tile 1748: zsini rebuilt - 103790 ocean cell(s) initialized 0.0622 to 0.1263 m (interpolated from 3 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [682440.0, 6118680.0, 776640.0, 6213600.0] does not fully cover bbox [680575.790, 6116303.623, 779493.539, 6215901.224]
+Replacing grid map: zs
+tile 1751: zsini rebuilt - 201279 ocean cell(s) initialized -0.0727 to -0.0195 m (interpolated from 8 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [184080.0, 2101560.0, 311640.0, 2214240.0] does not fully cover bbox [182097.743, 2099824.839, 312815.335, 2216077.105]
+Replacing grid map: zs
+tile 1752: zsini rebuilt - 325244 ocean cell(s) initialized 0.1582 to 0.1935 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1757: zsini rebuilt - 394629 ocean cell(s) initialized -0.0544 to -0.0453 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [55920.0, 506640.0, 278880.0, 636960.0] does not fully cover bbox [55098.785, 505709.330, 279288.653, 638133.608]
+Replacing grid map: zs
+tile 1760: zsini rebuilt - 617819 ocean cell(s) initialized 0.0266 to 0.0332 m (interpolated from 14 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [536280.0, 7766040.0, 614640.0, 7880160.0] does not fully cover bbox [534495.720, 7763501.520, 620555.186, 7882843.600]
+Replacing grid map: zs
+tile 1773: zsini rebuilt - 163960 ocean cell(s) initialized 0.1545 to 0.2912 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [331200.0, 6874320.0, 448680.0, 6945120.0] does not fully cover bbox [327608.056, 6870519.680, 449751.943, 6949020.526]
+Replacing grid map: zs
+tile 1793: zsini rebuilt - 122661 ocean cell(s) initialized 0.4344 to 0.6541 m (interpolated from 4 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [305280.0, 3212040.0, 404520.0, 3408960.0] does not fully cover bbox [301791.881, 3210787.772, 406201.040, 3410305.550]
+Replacing grid map: zs
+tile 1798: zsini rebuilt - 282160 ocean cell(s) initialized -0.0059 to 0.0434 m (interpolated from 8 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [552000.0, 6762840.0, 595440.0, 6901800.0] does not fully cover bbox [549948.901, 6761936.538, 599356.817, 6902751.468]
+Replacing grid map: zs
+tile 1811: zsini rebuilt - 60085 ocean cell(s) initialized -2.1403 to -2.0433 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1817: zsini rebuilt - 64821 ocean cell(s) initialized 0.0193 to 0.0275 m (interpolated from 16 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [462720.0, 7818480.0, 500040.0, 8100720.0] does not fully cover bbox [457377.711, 7818173.634, 500045.740, 8101075.361]
+Replacing grid map: zs
+tile 1821: zsini rebuilt - 26782 ocean cell(s) initialized 0.0325 to 0.0398 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [479400.0, 9183480.0, 486000.0, 9189600.0] does not fully cover bbox [479244.981, 9183340.625, 486104.602, 9189740.417]
+Replacing grid map: zs
+tile 1823: zsini rebuilt - 5 ocean cell(s) initialized 0.1451 to 0.1452 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [555240.0, 2619360.0, 569160.0, 2654760.0] does not fully cover bbox [555104.680, 2619300.465, 569329.832, 2654820.441]
+Replacing grid map: zs
+tile 1833: zsini rebuilt - 33525 ocean cell(s) initialized 0.0347 to 0.0432 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Traceback (most recent call last):
+  File "C:\Users\schlumbe\GFM_Matrix_Snakemake\sfincs_tiles\rebuild_zsini.py", line 102, in <module>
+    main()
+  File "C:\Users\schlumbe\GFM_Matrix_Snakemake\sfincs_tiles\rebuild_zsini.py", line 98, in main
+    rebuild_zsini(args.tile_id, root)
+  File "C:\Users\schlumbe\GFM_Matrix_Snakemake\sfincs_tiles\rebuild_zsini.py", line 40, in rebuild_zsini
+    sf.grid.read()
+  File "C:\Users\schlumbe\hydromt_sfincs\hydromt_sfincs\components\grid\regulargrid.py", line 174, in read
+    self.update_grid_from_config()
+  File "C:\Users\schlumbe\hydromt_sfincs\hydromt_sfincs\components\grid\regulargrid.py", line 533, in update_grid_from_config
+    self.x0 = self.model.config.get("x0")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\schlumbe\hydromt_sfincs\hydromt_sfincs\components\config\config.py", line 173, in get
+    value = self.data.model_dump().get(key, fallback)
+            ^^^^^^^^^
+  File "C:\Users\schlumbe\hydromt_sfincs\hydromt_sfincs\components\config\config.py", line 49, in data
+    self.read()
+  File "C:\Users\schlumbe\hydromt_sfincs\hydromt_sfincs\components\config\config.py", line 67, in read
+    inp_dict = read_config(filename=self.filename)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\schlumbe\hydromt_sfincs\hydromt_sfincs\readers.py", line 57, in read_config
+    raise FileNotFoundError(
+FileNotFoundError: SFINCS input file '//storage008.directory.intra/11212688-004-global-floodmaps/modelling/validation_sfincs/1852/sfincs_model/sfincs.inp' does not exist.
+FAILED: 1852
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [698760.0, 1024560.0, 715080.0, 1032600.0] does not fully cover bbox [698718.954, 1024473.604, 715124.423, 1032687.092]
+Replacing grid map: zs
+tile 1860: zsini rebuilt - 8751 ocean cell(s) initialized 0.0692 to 0.0692 m (interpolated from 1 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [381120.0, 2711280.0, 551280.0, 2765520.0] does not fully cover bbox [380652.978, 2710869.645, 551482.998, 2766036.320]
+Replacing grid map: zs
+tile 1875: zsini rebuilt - 614331 ocean cell(s) initialized -0.0619 to 0.0735 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [471480.0, 1889160.0, 549360.0, 2023920.0] does not fully cover bbox [471287.012, 1889121.153, 549693.909, 2023983.188]
+Replacing grid map: zs
+tile 1883: zsini rebuilt - 692432 ocean cell(s) initialized -0.0824 to 0.0880 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [216840.0, 800520.0, 220800.0, 804000.0] does not fully cover bbox [216820.330, 800497.823, 220819.394, 804022.275]
+Replacing grid map: zs
+tile 1897: zsini rebuilt - 860 ocean cell(s) initialized 0.0622 to 0.0622 m (interpolated from 1 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [371760.0, 2239920.0, 400440.0, 2316120.0] does not fully cover bbox [371182.901, 2239731.017, 400886.060, 2316316.014]
+Replacing grid map: zs
+tile 1913: zsini rebuilt - 134442 ocean cell(s) initialized 0.1565 to 0.1626 m (interpolated from 8 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [746400.0, 8408520.0, 804000.0, 8533920.0] does not fully cover bbox [745210.810, 8407882.325, 805473.866, 8534505.342]
+Replacing grid map: zs
+tile 1921: zsini rebuilt - 437441 ocean cell(s) initialized 0.1182 to 0.1767 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [782640.0, 364320.0, 880560.0, 531720.0] does not fully cover bbox [782114.942, 364027.086, 881267.904, 532148.366]
+Replacing grid map: zs
+tile 1923: zsini rebuilt - 1008301 ocean cell(s) initialized -0.2166 to 0.1571 m (interpolated from 10 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [725040.0, 7920720.0, 734040.0, 7924800.0] does not fully cover bbox [724991.061, 7920609.759, 734090.905, 7924910.004]
+Replacing grid map: zs
+tile 1929: zsini rebuilt - 2170 ocean cell(s) initialized 0.1292 to 0.1294 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [226200.0, 5456280.0, 332040.0, 5617800.0] does not fully cover bbox [220269.453, 5453096.258, 335605.026, 5620824.015]
+Replacing grid map: zs
+tile 1935: zsini rebuilt - 962568 ocean cell(s) initialized -0.0313 to 0.1817 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [722400.0, 9725160.0, 888600.0, 9816840.0] does not fully cover bbox [722284.382, 9724814.234, 888801.958, 9817070.060]
+Replacing grid map: zs
+tile 1944: zsini rebuilt - 890220 ocean cell(s) initialized 0.0077 to 0.0849 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [230880.0, 613080.0, 233880.0, 616560.0] does not fully cover bbox [230865.703, 613067.779, 233894.137, 616572.291]
+Replacing grid map: zs
+tile 1948: zsini rebuilt - 589 ocean cell(s) initialized 0.1107 to 0.1108 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [547560.0, 6651600.0, 627000.0, 6749400.0] does not fully cover bbox [546294.168, 6649722.071, 630468.510, 6751345.337]
+Replacing grid map: zs
+tile 1955: zsini rebuilt - 416909 ocean cell(s) initialized 0.1668 to 0.3101 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 1957: zsini rebuilt - 654 ocean cell(s) initialized 0.1040 to 0.1040 m (interpolated from 12 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [551040.0, 6138240.0, 626880.0, 6318120.0] does not fully cover bbox [548938.384, 6136710.775, 632324.110, 6319744.883]
+Replacing grid map: zs
+tile 1963: zsini rebuilt - 708021 ocean cell(s) initialized 0.4229 to 0.5696 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [615840.0, 5847000.0, 702600.0, 5940240.0] does not fully cover bbox [613604.296, 5844157.920, 706581.428, 5943168.962]
+Replacing grid map: zs
+tile 1970: zsini rebuilt - 416993 ocean cell(s) initialized -0.4470 to -0.1401 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [438000.0, 8766720.0, 443760.0, 8771520.0] does not fully cover bbox [437760.948, 8766447.443, 443976.106, 8771793.587]
+Replacing grid map: zs
+tile 1972: zsini rebuilt - 1357 ocean cell(s) initialized 0.3864 to 0.3864 m (interpolated from 1 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [437160.0, 8766960.0, 445200.0, 8774400.0] does not fully cover bbox [436783.588, 8766581.389, 445526.499, 8774780.848]
+Replacing grid map: zs
+tile 1981: zsini rebuilt - 2784 ocean cell(s) initialized 0.3864 to 0.3864 m (interpolated from 1 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [332400.0, 4564920.0, 423600.0, 4651680.0] does not fully cover bbox [330365.435, 4563393.284, 424516.879, 4653249.227]
+Replacing grid map: zs
+tile 2004: zsini rebuilt - 341479 ocean cell(s) initialized -0.2382 to 0.1046 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [741600.0, 1637040.0, 793560.0, 1666440.0] does not fully cover bbox [741303.138, 1636464.147, 793921.052, 1667026.859]
+Replacing grid map: zs
+tile 2008: zsini rebuilt - 66265 ocean cell(s) initialized 0.0097 to 0.0395 m (interpolated from 9 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2020: zsini rebuilt - 416742 ocean cell(s) initialized 0.2641 to 0.2852 m (interpolated from 4 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Traceback (most recent call last):
+  File "C:\Users\schlumbe\GFM_Matrix_Snakemake\sfincs_tiles\rebuild_zsini.py", line 102, in <module>
+    main()
+  File "C:\Users\schlumbe\GFM_Matrix_Snakemake\sfincs_tiles\rebuild_zsini.py", line 98, in main
+    rebuild_zsini(args.tile_id, root)
+  File "C:\Users\schlumbe\GFM_Matrix_Snakemake\sfincs_tiles\rebuild_zsini.py", line 40, in rebuild_zsini
+    sf.grid.read()
+  File "C:\Users\schlumbe\hydromt_sfincs\hydromt_sfincs\components\grid\regulargrid.py", line 174, in read
+    self.update_grid_from_config()
+  File "C:\Users\schlumbe\hydromt_sfincs\hydromt_sfincs\components\grid\regulargrid.py", line 533, in update_grid_from_config
+    self.x0 = self.model.config.get("x0")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\schlumbe\hydromt_sfincs\hydromt_sfincs\components\config\config.py", line 173, in get
+    value = self.data.model_dump().get(key, fallback)
+            ^^^^^^^^^
+  File "C:\Users\schlumbe\hydromt_sfincs\hydromt_sfincs\components\config\config.py", line 49, in data
+    self.read()
+  File "C:\Users\schlumbe\hydromt_sfincs\hydromt_sfincs\components\config\config.py", line 67, in read
+    inp_dict = read_config(filename=self.filename)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\schlumbe\hydromt_sfincs\hydromt_sfincs\readers.py", line 57, in read_config
+    raise FileNotFoundError(
+FileNotFoundError: SFINCS input file '//storage008.directory.intra/11212688-004-global-floodmaps/modelling/validation_sfincs/2029/sfincs_model/sfincs.inp' does not exist.
+FAILED: 2029
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [498240.0, 8937600.0, 518520.0, 8954760.0] does not fully cover bbox [498211.047, 8937441.260, 518821.775, 8954922.891]
+Replacing grid map: zs
+tile 2032: zsini rebuilt - 11897 ocean cell(s) initialized 0.1599 to 0.1798 m (interpolated from 3 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2033: zsini rebuilt - 1330 ocean cell(s) initialized 0.1225 to 0.1225 m (interpolated from 3 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [420960.0, 7683000.0, 539520.0, 7767120.0] does not fully cover bbox [418111.792, 7682056.809, 540961.708, 7768461.094]
+Replacing grid map: zs
+tile 2041: zsini rebuilt - 301213 ocean cell(s) initialized -0.0430 to 0.0134 m (interpolated from 3 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [360360.0, 4236840.0, 451560.0, 4324440.0] does not fully cover bbox [357923.167, 4235121.647, 452391.481, 4326110.816]
+Replacing grid map: zs
+tile 2042: zsini rebuilt - 235027 ocean cell(s) initialized -0.0271 to 0.2397 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2050: zsini rebuilt - 105063 ocean cell(s) initialized 0.0645 to 0.0837 m (interpolated from 3 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [340080.0, 7655520.0, 423840.0, 7770840.0] does not fully cover bbox [332201.221, 7651497.920, 427428.579, 7775082.109]
+Replacing grid map: zs
+tile 2051: zsini rebuilt - 233501 ocean cell(s) initialized -0.1048 to -0.0776 m (interpolated from 4 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2076: zsini rebuilt - 17975 ocean cell(s) initialized 0.3878 to 0.4374 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Traceback (most recent call last):
+  File "C:\Users\schlumbe\GFM_Matrix_Snakemake\sfincs_tiles\rebuild_zsini.py", line 102, in <module>
+    main()
+  File "C:\Users\schlumbe\GFM_Matrix_Snakemake\sfincs_tiles\rebuild_zsini.py", line 98, in main
+    rebuild_zsini(args.tile_id, root)
+  File "C:\Users\schlumbe\GFM_Matrix_Snakemake\sfincs_tiles\rebuild_zsini.py", line 40, in rebuild_zsini
+    sf.grid.read()
+  File "C:\Users\schlumbe\hydromt_sfincs\hydromt_sfincs\components\grid\regulargrid.py", line 174, in read
+    self.update_grid_from_config()
+  File "C:\Users\schlumbe\hydromt_sfincs\hydromt_sfincs\components\grid\regulargrid.py", line 533, in update_grid_from_config
+    self.x0 = self.model.config.get("x0")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\schlumbe\hydromt_sfincs\hydromt_sfincs\components\config\config.py", line 173, in get
+    value = self.data.model_dump().get(key, fallback)
+            ^^^^^^^^^
+  File "C:\Users\schlumbe\hydromt_sfincs\hydromt_sfincs\components\config\config.py", line 49, in data
+    self.read()
+  File "C:\Users\schlumbe\hydromt_sfincs\hydromt_sfincs\components\config\config.py", line 67, in read
+    inp_dict = read_config(filename=self.filename)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\schlumbe\hydromt_sfincs\hydromt_sfincs\readers.py", line 57, in read_config
+    raise FileNotFoundError(
+FileNotFoundError: SFINCS input file '//storage008.directory.intra/11212688-004-global-floodmaps/modelling/validation_sfincs/2077/sfincs_model/sfincs.inp' does not exist.
+FAILED: 2077
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2078: zsini rebuilt - 118604 ocean cell(s) initialized -0.6503 to -0.3761 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [540960.0, 8787600.0, 559800.0, 8818320.0] does not fully cover bbox [539933.552, 8786826.325, 561335.056, 8819113.734]
+Replacing grid map: zs
+tile 2084: zsini rebuilt - 2992 ocean cell(s) initialized 0.2108 to 0.2108 m (interpolated from 1 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2088: zsini rebuilt - 245 ocean cell(s) initialized 0.1435 to 0.1435 m (interpolated from 1 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [288600.0, 7954440.0, 298800.0, 7977960.0] does not fully cover bbox [288340.712, 7954329.650, 299046.486, 7978068.988]
+Replacing grid map: zs
+tile 2097: zsini rebuilt - 16108 ocean cell(s) initialized 0.1118 to 0.1118 m (interpolated from 1 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [275640.0, 20160.0, 342120.0, 97200.0] does not fully cover bbox [275614.887, 20153.659, 342137.673, 97230.585]
+Replacing grid map: zs
+tile 2108: zsini rebuilt - 353354 ocean cell(s) initialized 0.0138 to 0.0138 m (interpolated from 1 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [187680.0, 1253760.0, 216480.0, 1292880.0] does not fully cover bbox [187289.619, 1253490.351, 216833.995, 1293158.348]
+Replacing grid map: zs
+tile 2111: zsini rebuilt - 76126 ocean cell(s) initialized 0.0271 to 0.0271 m (interpolated from 1 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2118: zsini rebuilt - 138742 ocean cell(s) initialized 0.0138 to 0.0138 m (interpolated from 1 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2122: zsini rebuilt - 2983 ocean cell(s) initialized 0.0045 to 0.0079 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [764280.0, 12600.0, 828360.0, 55320.0] does not fully cover bbox [764270.509, 12594.080, 828371.788, 55346.004]
+Replacing grid map: zs
+tile 2135: zsini rebuilt - 185705 ocean cell(s) initialized 0.0939 to 0.0948 m (interpolated from 5 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2136: zsini rebuilt - 44848 ocean cell(s) initialized 0.1667 to 0.1823 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2137: zsini rebuilt - 27219 ocean cell(s) initialized 0.0466 to 0.0503 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [722040.0, 1297560.0, 763920.0, 1324680.0] does not fully cover bbox [721841.851, 1297228.635, 764155.689, 1325018.571]
+Replacing grid map: zs
+tile 2145: zsini rebuilt - 74623 ocean cell(s) initialized -0.0456 to -0.0430 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2146: zsini rebuilt - 12434 ocean cell(s) initialized 0.1731 to 0.1731 m (interpolated from 1 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [587880.0, 7084560.0, 613440.0, 7093200.0] does not fully cover bbox [587821.154, 7084360.192, 613516.007, 7093399.116]
+Replacing grid map: zs
+tile 2147: zsini rebuilt - 14590 ocean cell(s) initialized 0.1072 to 0.1186 m (interpolated from 5 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [735480.0, 2565480.0, 779640.0, 2630400.0] does not fully cover bbox [734441.410, 2564716.580, 780878.474, 2631185.242]
+Replacing grid map: zs
+tile 2162: zsini rebuilt - 183292 ocean cell(s) initialized 0.0082 to 0.1174 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2172: zsini rebuilt - 305 ocean cell(s) initialized -0.0641 to -0.0641 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [702360.0, 5853120.0, 748200.0, 5896680.0] does not fully cover bbox [701312.770, 5851881.431, 749490.552, 5897901.002]
+Replacing grid map: zs
+tile 2184: zsini rebuilt - 123404 ocean cell(s) initialized -0.0106 to 0.0174 m (interpolated from 6 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [246600.0, 4866480.0, 281880.0, 4876680.0] does not fully cover bbox [246209.651, 4865226.499, 282215.657, 4877937.529]
+Replacing grid map: zs
+tile 2192: zsini rebuilt - 20346 ocean cell(s) initialized -0.0717 to -0.0646 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [622800.0, 8127960.0, 676920.0, 8205840.0] does not fully cover bbox [622354.382, 8127572.895, 677564.242, 8206210.038]
+Replacing grid map: zs
+tile 2194: zsini rebuilt - 267843 ocean cell(s) initialized 0.1208 to 0.1319 m (interpolated from 6 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2201: zsini rebuilt - 383 ocean cell(s) initialized 0.0836 to 0.0836 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2205: zsini rebuilt - 181 ocean cell(s) initialized 0.1018 to 0.1018 m (interpolated from 1 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [468000.0, 8242080.0, 475920.0, 8254200.0] does not fully cover bbox [467783.253, 8241956.746, 476082.028, 8254324.147]
+Replacing grid map: zs
+tile 2224: zsini rebuilt - 5738 ocean cell(s) initialized 0.0221 to 0.0247 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2225: zsini rebuilt - 762 ocean cell(s) initialized 0.1689 to 0.1689 m (interpolated from 1 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2237: zsini rebuilt - 18680 ocean cell(s) initialized 0.0625 to 0.0726 m (interpolated from 5 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [656040.0, 6040560.0, 701160.0, 6085200.0] does not fully cover bbox [654509.313, 6038794.171, 703151.029, 6086991.770]
+Replacing grid map: zs
+tile 2239: zsini rebuilt - 114507 ocean cell(s) initialized -0.1199 to -0.0901 m (interpolated from 7 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [339360.0, 4247520.0, 436200.0, 4329720.0] does not fully cover bbox [337692.538, 4246172.457, 436855.784, 4331103.769]
+Replacing grid map: zs
+tile 2241: zsini rebuilt - 472504 ocean cell(s) initialized 0.1401 to 0.2070 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [514320.0, 5093040.0, 580200.0, 5177280.0] does not fully cover bbox [514139.129, 5092564.007, 581225.740, 5177743.567]
+Replacing grid map: zs
+tile 2261: zsini rebuilt - 326986 ocean cell(s) initialized -0.0146 to 0.0941 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2269: zsini rebuilt - 516 ocean cell(s) initialized 0.0198 to 0.0201 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [689040.0, 6266280.0, 707640.0, 6280560.0] does not fully cover bbox [688758.535, 6265894.144, 707949.577, 6280943.965]
+Replacing grid map: zs
+tile 2297: zsini rebuilt - 14272 ocean cell(s) initialized 0.0477 to 0.0722 m (interpolated from 6 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [517080.0, 8742000.0, 557640.0, 8768280.0] does not fully cover bbox [516727.143, 8740809.858, 558853.535, 8769495.059]
+Replacing grid map: zs
+tile 2299: zsini rebuilt - 55667 ocean cell(s) initialized 0.3261 to 0.3864 m (interpolated from 3 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2300: zsini rebuilt - 4634 ocean cell(s) initialized 0.1197 to 0.1198 m (interpolated from 6 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [659160.0, 186720.0, 705240.0, 227400.0] does not fully cover bbox [659126.795, 186681.177, 705282.822, 227447.297]
+Replacing grid map: zs
+tile 2302: zsini rebuilt - 99084 ocean cell(s) initialized 0.0772 to 0.0858 m (interpolated from 8 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2307: zsini rebuilt - 2201 ocean cell(s) initialized 0.0850 to 0.0850 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2313: zsini rebuilt - 18679 ocean cell(s) initialized 0.2500 to 0.2526 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [648000.0, 4358880.0, 665880.0, 4399560.0] does not fully cover bbox [647223.347, 4358519.449, 666754.955, 4399925.276]
+Replacing grid map: zs
+tile 2315: zsini rebuilt - 36680 ocean cell(s) initialized 0.2026 to 0.2288 m (interpolated from 7 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [513240.0, 8197920.0, 540360.0, 8240400.0] does not fully cover bbox [512935.566, 8197527.012, 541309.430, 8240802.915]
+Replacing grid map: zs
+tile 2332: zsini rebuilt - 55870 ocean cell(s) initialized 0.0985 to 0.0985 m (interpolated from 1 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2334: zsini rebuilt - 819 ocean cell(s) initialized 0.1335 to 0.1335 m (interpolated from 1 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2335: zsini rebuilt - 896 ocean cell(s) initialized 0.1395 to 0.1396 m (interpolated from 3 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [734640.0, 1231080.0, 774600.0, 1257240.0] does not fully cover bbox [734448.608, 1230766.108, 774824.128, 1257560.812]
+Replacing grid map: zs
+tile 2340: zsini rebuilt - 50285 ocean cell(s) initialized -0.0071 to 0.0077 m (interpolated from 16 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [370320.0, 2407800.0, 470760.0, 2459520.0] does not fully cover bbox [369894.395, 2407300.302, 470855.669, 2460031.641]
+Replacing grid map: zs
+tile 2349: zsini rebuilt - 243401 ocean cell(s) initialized 0.0260 to 0.1745 m (interpolated from 11 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [305280.0, 3969240.0, 309360.0, 3973320.0] does not fully cover bbox [305190.000, 3969151.022, 309448.077, 3973409.099]
+Replacing grid map: zs
+tile 2354: zsini rebuilt - 743 ocean cell(s) initialized 0.0206 to 0.0206 m (interpolated from 9 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2355: zsini rebuilt - 2634 ocean cell(s) initialized -0.0662 to -0.0627 m (interpolated from 4 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [567840.0, 746160.0, 605280.0, 827160.0] does not fully cover bbox [567732.483, 746099.842, 605447.110, 827226.763]
+Replacing grid map: zs
+tile 2359: zsini rebuilt - 136924 ocean cell(s) initialized -0.0001 to 0.0933 m (interpolated from 15 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2364: zsini rebuilt - 14086 ocean cell(s) initialized 0.1944 to 0.2186 m (interpolated from 8 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [574080.0, 6265080.0, 594720.0, 6276480.0] does not fully cover bbox [573880.066, 6264667.863, 594976.274, 6276893.716]
+Replacing grid map: zs
+tile 2377: zsini rebuilt - 9369 ocean cell(s) initialized -0.2746 to -0.2446 m (interpolated from 5 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2382: zsini rebuilt - 3232 ocean cell(s) initialized 0.0745 to 0.0745 m (interpolated from 1 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [652440.0, 6989400.0, 676200.0, 7007160.0] does not fully cover bbox [652222.725, 6989085.371, 676451.470, 7007472.448]
+Replacing grid map: zs
+tile 2386: zsini rebuilt - 17168 ocean cell(s) initialized 0.1013 to 0.1243 m (interpolated from 4 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2387: zsini rebuilt - 1842 ocean cell(s) initialized 0.0064 to 0.0064 m (interpolated from 1 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2389: zsini rebuilt - 11137 ocean cell(s) initialized 0.0757 to 0.1690 m (interpolated from 15 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [567000.0, 4404960.0, 613800.0, 4439880.0] does not fully cover bbox [566693.762, 4404408.119, 614322.425, 4440438.077]
+Replacing grid map: zs
+tile 2395: zsini rebuilt - 62805 ocean cell(s) initialized 0.0125 to 0.0301 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [513360.0, 8363520.0, 535080.0, 8421960.0] does not fully cover bbox [512892.235, 8363205.234, 536352.280, 8422286.886]
+Replacing grid map: zs
+tile 2397: zsini rebuilt - 47879 ocean cell(s) initialized 0.0065 to 0.0172 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [531360.0, 7729440.0, 585120.0, 7809720.0] does not fully cover bbox [531215.331, 7729256.137, 585514.465, 7809896.802]
+Replacing grid map: zs
+tile 2399: zsini rebuilt - 167068 ocean cell(s) initialized 0.1542 to 0.1880 m (interpolated from 13 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [200880.0, 8225400.0, 218880.0, 8240520.0] does not fully cover bbox [200676.986, 8225164.586, 219070.688, 8240753.276]
+Replacing grid map: zs
+tile 2408: zsini rebuilt - 9897 ocean cell(s) initialized 0.1061 to 0.1123 m (interpolated from 4 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [660840.0, 4087800.0, 677520.0, 4100040.0] does not fully cover bbox [660607.969, 4087467.855, 677776.432, 4100373.485]
+Replacing grid map: zs
+tile 2412: zsini rebuilt - 6856 ocean cell(s) initialized 0.2197 to 0.2634 m (interpolated from 9 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [212040.0, 1442640.0, 238680.0, 1476240.0] does not fully cover bbox [211684.129, 1442374.271, 239002.594, 1476512.186]
+Replacing grid map: zs
+tile 2414: zsini rebuilt - 30797 ocean cell(s) initialized 0.0088 to 0.0135 m (interpolated from 5 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2419: zsini rebuilt - 3503 ocean cell(s) initialized 0.1035 to 0.1039 m (interpolated from 2 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 2421: zsini rebuilt - 6093 ocean cell(s) initialized 0.1088 to 0.1221 m (interpolated from 5 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [431880.0, 8250240.0, 448680.0, 8271240.0] does not fully cover bbox [431073.358, 8249680.874, 449280.980, 8271806.093]
+Replacing grid map: zs
+tile 2424: zsini rebuilt - 10604 ocean cell(s) initialized 0.0106 to 0.0106 m (interpolated from 1 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [609840.0, 7880640.0, 629880.0, 7904640.0] does not fully cover bbox [609697.314, 7880509.107, 630048.929, 7904769.292]
+Replacing grid map: zs
+tile 2428: zsini rebuilt - 14673 ocean cell(s) initialized 0.1903 to 0.2038 m (interpolated from 3 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [416880.0, 3067200.0, 465360.0, 3118200.0] does not fully cover bbox [416526.617, 3066964.840, 465506.660, 3118439.774]
+Replacing grid map: zs
+tile 2435: zsini rebuilt - 61356 ocean cell(s) initialized 0.0709 to 0.0914 m (interpolated from 17 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [460680.0, 8964240.0, 485400.0, 8983920.0] does not fully cover bbox [459924.606, 8963601.245, 485675.544, 8984570.951]
+Replacing grid map: zs
+tile 2438: zsini rebuilt - 10562 ocean cell(s) initialized 0.1479 to 0.1479 m (interpolated from 1 station(s))
