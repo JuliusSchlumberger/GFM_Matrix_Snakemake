@@ -69,20 +69,17 @@ WATERLEVEL_NAME = "SLR_0"
 LAND_CODE = 0
 OCEAN_CODE = 1
 RIVER_CODE = 3
+NODATA_CODE = 4  # native mask.tif has no real coverage here - see build_inputs_from_sfincs_subgrid
 FRICTION_SCALE_FACTOR_DEFAULT = 30.0  # matches simulation.flooding.friction_scale_factor in config.yml
 DEFAULT_FRICTION = 0.002  # matches simulation.flooding.default_friction in config.yml
 MAX_ROUNDS_DEFAULT = 200
 WATERLEVEL_EPSILON_M_DEFAULT = 0.03
 
 
-NODATA_LAND_FALLBACK_DIST_M = 500.0  # see build_inputs_from_sfincs_subgrid's mask docstring
-
-
 def build_inputs_from_sfincs_subgrid(
     sfincs_dir: Path, native_mask_path: Path,
     friction_scale_factor: float = FRICTION_SCALE_FACTOR_DEFAULT,
     default_friction: float = DEFAULT_FRICTION,
-    nodata_land_fallback_dist_m: float = NODATA_LAND_FALLBACK_DIST_M,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, rasterio.Affine, str]:
     """(dem, mask, friction, transform, crs) on SFINCS's own subgrid UTM grid.
 
@@ -92,20 +89,39 @@ def build_inputs_from_sfincs_subgrid(
     mask: native mask.tif reprojected onto this grid (nearest-neighbour,
         the same pre-reprojection-workaround pattern build_sfincs_tile.py
         already uses). Cells with no real coverage (value outside
-        {0,1,2,3}) are NOT uniformly treated as land - real, confirmed bug
-        (2026-09, tile 1757 and others): most of a tile's own nodata area
-        is far offshore deep water that GFM's native mask.tif simply never
-        classified (irrelevant to the production eikonal pipeline, which
-        flattens every non-land cell to 0m regardless via effective_dem),
-        while SFINCS's own dep_subgrid.tif already has real negative-
-        elevation bathymetry there - blanket-labelling it "land" made it
-        flood as spurious dry land far from any real coastline (212/253
-        tiles affected by >5 km2 of this, summing to ~56,800 km2 across
-        the batch). Only nodata cells within nodata_land_fallback_dist_m
-        of a REAL (mask.tif-coded) land cell are treated as land -
-        matching the genuine, narrow case this fallback exists for (small
-        DeltaDTM coverage gaps right at the coastline, e.g. tiles
-        2111/1929/2033/2239). Nodata cells farther away default to ocean.
+        {0,1,2,3}) get their own NODATA_CODE rather than being folded into
+        land or ocean.
+
+        NOTE this is NOT a leftover DeltaDTM nodata signal - mask.tif
+        itself (confirmed directly, e.g. tile 1757) contains ONLY real
+        {0,1,2,3} values; extract_dem_mask() (src/rasters.py) already
+        resolves DeltaDTM's own raw 255 nodata sentinel to land(0) well
+        upstream of this file. The gaps reprojecting here to a real
+        "nothing here" value are a genuine geometry artefact: a tile's
+        native mask.tif is a rectangle in lon/lat, but reprojected to UTM
+        it becomes a CURVED shape (meridian convergence - e.g. tile
+        1757's own north edge, spanning 3 degrees of longitude, sits
+        ~4.4km further north at its east end than its west end).
+        SFINCS's create_from_region(..., crs="utm") builds an
+        axis-aligned UTM rectangle that must fully contain that curve, so
+        it overshoots at the opposite corners into territory the tile's
+        own native mask.tif never covered at all - genuinely outside the
+        tile, not unclassified deep ocean within it. Confirmed real,
+        substantial impact on wide/high-latitude tiles (212/253 tiles
+        affected by >5 km2 of this, ~56,800 km2 total across the batch;
+        negligible on typical ~1x1 degree tiles). A blanket "nodata ->
+        land" fallback flooded these corners as spurious dry land; a
+        blanket "nodata -> ocean" fallback would be an equally unjustified
+        guess the other way. Simplest and most honest: give it its own
+        code, excluded by construction from every existing
+        `mask == LAND_CODE` reporting/bathtub restriction elsewhere in
+        this module, without asserting a classification this data was
+        never able to support. effective_dem() (flood_model.py) already
+        flattens ANY non-LAND_CODE cell to 0m, so NODATA_CODE gets that
+        same treatment automatically - it behaves like open water for
+        propagation purposes without being counted as real ocean for
+        coastline/seeding logic (which checks mask == OCEAN_CODE
+        specifically, not "not land").
     friction: manning_subgrid.tif / 100 * friction_scale_factor, NaN cells
         filled with default_friction (matching config.yml's own
         simulation.flooding.default_friction) before scaling, same
@@ -135,15 +151,7 @@ def build_inputs_from_sfincs_subgrid(
             resampling=Resampling.nearest,
         )
     valid_code = np.isin(mask_f, [0, 1, 2, 3])
-    real_land = mask_f == LAND_CODE
-    if real_land.any():
-        dist_to_land_m = ndimage.distance_transform_edt(
-            ~real_land, sampling=(abs(transform.e), abs(transform.a)),
-        )
-        nodata_near_land = ~valid_code & (dist_to_land_m <= nodata_land_fallback_dist_m)
-    else:
-        nodata_near_land = np.zeros(shape, dtype=bool)
-    mask = np.where(real_land | nodata_near_land, np.float32(LAND_CODE), np.where(valid_code, mask_f, np.float32(OCEAN_CODE))).astype(np.int8)
+    mask = np.where(valid_code, mask_f, np.float32(NODATA_CODE)).astype(np.int8)
 
     return dem, mask, friction, transform, crs
 
