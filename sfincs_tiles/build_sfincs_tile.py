@@ -188,10 +188,11 @@ def build_sfincs_tile(
     subgrid_nr_pixels: int = SUBGRID_NR_PIXELS_DEFAULT,
     subgrid_nr_levels: int = SUBGRID_NR_LEVELS_DEFAULT,
     subgrid_nrmax: int = SUBGRID_NRMAX_DEFAULT,
+    base_dir_name: str = "validation_sfincs",
 ) -> Path:
     _validate_subgrid_params(resolution_m, subgrid_nr_pixels)
     tile_dir = root / "model_outputs" / tile_id / "inputs"
-    sfincs_dir = root / "validation_sfincs" / tile_id / "sfincs_model"
+    sfincs_dir = root / base_dir_name / tile_id / "sfincs_model"
     sfincs_dir.mkdir(parents=True, exist_ok=True)
 
     tile_gdf = gpd.read_file(tile_dir / "tile_geometry.gpkg")
@@ -474,6 +475,7 @@ def main() -> None:
         help="use the full ~148.8h COAST-HG hydrograph instead of the default "
              f"{TRUNCATE_WINDOW_HR_DEFAULT} window - for A/B comparison only.",
     )
+    parser.add_argument("--base-dir-name", default="validation_sfincs", help="output root directory name under paths.root (default: validation_sfincs)")
     args = parser.parse_args()
 
     root = read_root(Path(args.config))
@@ -481,6 +483,7 @@ def main() -> None:
     build_sfincs_tile(
         args.tile_id, root, resolution_m=args.resolution_m, truncate_window_hr=truncate_window_hr,
         subgrid_nr_pixels=args.subgrid_nr_pixels, subgrid_nr_levels=args.subgrid_nr_levels, subgrid_nrmax=args.subgrid_nrmax,
+        base_dir_name=args.base_dir_name,
     )
 
 

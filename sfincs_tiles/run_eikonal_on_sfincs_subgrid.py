@@ -247,12 +247,13 @@ def compute_bathtub_depth(dem: np.ndarray, mask: np.ndarray, max_waterlevel_m: f
 def run_eikonal_on_sfincs_subgrid(
     tile_id: str, root: Path, friction_scale_factor: float = FRICTION_SCALE_FACTOR_DEFAULT,
     max_rounds: int = MAX_ROUNDS_DEFAULT, waterlevel_epsilon_m: float = WATERLEVEL_EPSILON_M_DEFAULT,
+    base_dir_name: str = "validation_sfincs",
 ) -> tuple[np.ndarray, dict, dict] | None:
     """Returns (waterdepth, diagnostics, grid_info) on the SFINCS subgrid's
     own UTM grid, or None if this tile has no usable boundary forcing."""
-    sfincs_dir = root / "validation_sfincs" / tile_id / "sfincs_model"
-    native_mask_path = root / "validation_sfincs" / tile_id / "inputs" / "mask.tif"
-    boundaries_path = root / "validation_sfincs" / tile_id / "inputs" / f"boundaries_{RETURN_PERIOD}_{WATERLEVEL_NAME}.gpkg"
+    sfincs_dir = root / base_dir_name / tile_id / "sfincs_model"
+    native_mask_path = root / base_dir_name / tile_id / "inputs" / "mask.tif"
+    boundaries_path = root / base_dir_name / tile_id / "inputs" / f"boundaries_{RETURN_PERIOD}_{WATERLEVEL_NAME}.gpkg"
 
     dem, mask, friction, transform, crs = build_inputs_from_sfincs_subgrid(
         sfincs_dir, native_mask_path, friction_scale_factor,
@@ -288,6 +289,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tile-id", required=True)
     parser.add_argument("--config", default=None, help="config.yml or a resolved_config.yml; defaults to the main repo config.yml")
+    parser.add_argument("--base-dir-name", default="validation_sfincs", help="output root directory name under paths.root (default: validation_sfincs)")
     args = parser.parse_args()
 
     if args.config:
@@ -298,13 +300,13 @@ def main() -> None:
         _repo_root = Path(__file__).resolve().parent.parent
         root = read_root(_repo_root / "snakemake_workflow" / "config" / "config.yml")
 
-    out_dir = root / "validation_sfincs" / args.tile_id / "outputs"
+    out_dir = root / args.base_dir_name / args.tile_id / "outputs"
     bathtub_output_path = out_dir / f"bathtub_waterdepth_{RETURN_PERIOD}_{WATERLEVEL_NAME}.tif"
     eikonal_output_path = out_dir / f"eikonal_on_subgrid_waterdepth_{RETURN_PERIOD}_{WATERLEVEL_NAME}.tif"
 
-    sfincs_dir = root / "validation_sfincs" / args.tile_id / "sfincs_model"
-    native_mask_path = root / "validation_sfincs" / args.tile_id / "inputs" / "mask.tif"
-    boundaries_path = root / "validation_sfincs" / args.tile_id / "inputs" / f"boundaries_{RETURN_PERIOD}_{WATERLEVEL_NAME}.gpkg"
+    sfincs_dir = root / args.base_dir_name / args.tile_id / "sfincs_model"
+    native_mask_path = root / args.base_dir_name / args.tile_id / "inputs" / "mask.tif"
+    boundaries_path = root / args.base_dir_name / args.tile_id / "inputs" / f"boundaries_{RETURN_PERIOD}_{WATERLEVEL_NAME}.gpkg"
 
     if bathtub_output_path.exists() and eikonal_output_path.exists():
         print(f"tile {args.tile_id}: already done (bathtub + eikonal), skipping")
@@ -334,7 +336,7 @@ def main() -> None:
     if eikonal_output_path.exists():
         print(f"tile {args.tile_id}: eikonal already done, skipping")
         return
-    result = run_eikonal_on_sfincs_subgrid(args.tile_id, root)
+    result = run_eikonal_on_sfincs_subgrid(args.tile_id, root, base_dir_name=args.base_dir_name)
     if result is None:
         print(f"tile {args.tile_id}: SKIP eikonal - no usable coastline in this domain")
         return

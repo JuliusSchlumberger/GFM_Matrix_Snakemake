@@ -65,6 +65,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tile-id", required=True)
     parser.add_argument("--config", default=str(_repo_root / "snakemake_workflow" / "config" / "config.yml"))
+    parser.add_argument("--base-dir-name", default="validation_sfincs", help="output root directory name under paths.root (default: validation_sfincs)")
     args = parser.parse_args()
 
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -72,7 +73,7 @@ if __name__ == "__main__":
 
     root = read_root(Path(args.config))
     tile_dir = root / "model_outputs" / args.tile_id / "inputs"
-    out_path = root / "validation_sfincs" / args.tile_id / "sfincs_model" / "manning_n.tif"
+    out_path = root / args.base_dir_name / args.tile_id / "sfincs_model" / "manning_n.tif"
 
     lo, hi = build_manning_n(tile_dir / "friction.tif", out_path)
     print(f"Manning's n range: {lo:.5f} to {hi:.5f} (expected ~0.01-0.15 for real land cover)")

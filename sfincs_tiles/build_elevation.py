@@ -5,9 +5,11 @@ grid (dem.tif's own transform/shape), before any UTM reprojection.
 Kept entirely separate from model_outputs/{tile_id}/inputs/dem.tif - the
 eikonal model never reads this, never changes.
 
-Rivers (mask==3) are left at DeltaDTM's own dem.tif value (same as land) -
-this module doesn't attempt river bathymetry; see sfincs_tiles' own plan
-doc note on why test tiles are chosen with ~0% river coverage instead.
+Rivers and lakes (mask==3/2) don't get real bathymetry from this module -
+DeltaDTM's own dem.tif value is used as-is (same as land), just floored at
+LAKE_RIVER_MIN_ELEVATION_M (see that constant's own comment) so a real below-
+sea-level channel/basin can't act as a hidden storage volume that needs
+filling before it overflows onto adjacent land.
 """
 
 from __future__ import annotations
@@ -39,6 +41,27 @@ MIN_BATHYMETRY_M = -10.0  # was -50.0 until 2026-09's A/B test (tile 2335/2335b/
 # this value back to -50 without also reverting that fix, the two were validated as a
 # pair, not independently.
 
+MAX_OCEAN_ELEVATION_M = 0.0  # real, confirmed bug (2026-09, tile 1751): GEBCO's own
+# coarse (~450m) resolution produced implausible dry-land-height spikes at some
+# ocean-coded cells right at the GEBCO/DeltaDTM transition (mean +1.6m, up to +16.6m,
+# vs a tile-wide open-ocean baseline of -9.3m) - a real elevation wall the eikonal
+# comparison's own effective_dem() (flood_model.py, flattens ANY non-land cell to 0m
+# regardless of dep_subgrid's real value) is fully blind to, but that SFINCS's real
+# solver correctly treats as a barrier, blocking a coastal lagoon that eikonal floods
+# through it freely instead. Since gebco_corrected is already MDT-corrected into
+# DeltaDTM's own GOCO06s reference frame, a genuinely flat sea surface reads as ~0m
+# there - any ocean-coded cell above that is definitionally an artifact (open water
+# can't sit above its own surface), so clamped at 0m, same spirit as MIN_BATHYMETRY_M's
+# own floor on the deep end.
+
+LAKE_RIVER_MIN_ELEVATION_M = 0.0  # same 2026-09 session: a real below-sea-level lake/river
+# channel in DeltaDTM's own dem.tif would need to physically fill that below-datum volume
+# before SFINCS could ever see it overflow onto adjacent land - a real storage/delay
+# effect eikonal's own effective_dem() doesn't have (it flattens lakes AND rivers to 0m
+# too, i.e. already "full"). Not observed on tile 1751 itself (its own lake cells were
+# already all >= 0m, and it has no river cells at all), but a real, general risk
+# elsewhere in the batch - floored defensively on both lake and river cells.
+
 
 def build_combined_elevation(
     dem_path: Path,
@@ -48,21 +71,28 @@ def build_combined_elevation(
     mdt_variable: str = "mdt",
     mdt_fallback_deg: float = 3.0,
     min_bathymetry_m: float = MIN_BATHYMETRY_M,
+    max_ocean_elevation_m: float = MAX_OCEAN_ELEVATION_M,
+    lake_river_min_elevation_m: float = LAKE_RIVER_MIN_ELEVATION_M,
 ) -> tuple[np.ndarray, dict]:
     """Returns (combined_elevation_m, profile) on dem.tif's own grid.
 
-    combined_elevation_m: land/river/lake cells = DeltaDTM's own dem.tif
-    value (decoded to metres); ocean cells = GEBCO's own bathymetry,
-    reprojected onto this grid and corrected by ADDING the local MDT
-    (H_GOCO06s = H_MSL + MDT - see mdt.py's own module docstring) so both
-    halves of the merged surface share DeltaDTM's GOCO06s reference.
+    combined_elevation_m: land cells = DeltaDTM's own dem.tif value
+    (decoded to metres); lake/river cells = the same, floored at
+    ``lake_river_min_elevation_m`` (see LAKE_RIVER_MIN_ELEVATION_M's own
+    module-level comment); ocean cells = GEBCO's own bathymetry, reprojected
+    onto this grid and corrected by ADDING the local MDT (H_GOCO06s =
+    H_MSL + MDT - see mdt.py's own module docstring) so both halves of the
+    merged surface share DeltaDTM's GOCO06s reference.
 
-    Ocean depth is then floored at ``min_bathymetry_m`` (default -50 m):
-    the storm-tide/surge signal this model is forced with never reaches
-    anywhere near that deep, so real trench/shelf-break bathymetry below
-    it (e.g. tile 929's real -640 m near the Norwegian Trench) adds
-    nothing physically, just an unnecessarily wide elevation range for the
-    solver and for any downstream color scale.
+    Ocean elevation is then clipped to [``min_bathymetry_m``, ``max_ocean_elevation_m``]
+    (default -10 to 0 m): the deep floor exists because the storm-tide/surge
+    signal this model is forced with never reaches anywhere near that deep,
+    so real trench/shelf-break bathymetry below it (e.g. tile 929's real
+    -640 m near the Norwegian Trench) adds nothing physically, just an
+    unnecessarily wide elevation range for the solver and for any downstream
+    color scale. The shallow ceiling exists because an ocean-coded cell is
+    definitionally water - see MAX_OCEAN_ELEVATION_M's own module-level
+    comment for the real GEBCO artifact this guards against.
     """
     with rasterio.open(dem_path) as src:
         dem_cm = src.read(1)
@@ -80,6 +110,7 @@ def build_combined_elevation(
             raise ValueError(f"mask.tif shape {mask.shape} != dem.tif shape {shape} - expected pixel-identical grids")
 
     ocean = mask == OCEAN_CODE
+    lake_river = (mask == LAKE_CODE) | (mask == RIVER_CODE)
     if not ocean.any():
         raise ValueError("No ocean cells (mask==1) in this tile - nothing for GEBCO to fill in")
 
@@ -107,14 +138,18 @@ def build_combined_elevation(
     mdt_m = mdt_lookup(cx, cy)
     if np.isnan(mdt_m):
         raise ValueError(f"No valid MDT value found within {mdt_fallback_deg} deg of tile centroid ({cx}, {cy})")
-    gebco_corrected = np.maximum(gebco_arr + mdt_m, min_bathymetry_m)
+    gebco_shifted = gebco_arr + mdt_m
+    gebco_corrected = np.clip(gebco_shifted, min_bathymetry_m, max_ocean_elevation_m)
 
-    combined = np.where(ocean, gebco_corrected, dem_m)
+    land_lake_river = np.where(lake_river, np.maximum(dem_m, lake_river_min_elevation_m), dem_m)
+    combined = np.where(ocean, gebco_corrected, land_lake_river)
 
     return combined, {
         "profile": profile, "transform": transform, "crs": crs,
         "mdt_m": mdt_m, "n_ocean_nan": int(np.isnan(gebco_corrected[ocean]).sum()),
-        "n_floored": int(np.nansum((gebco_arr + mdt_m)[ocean] < min_bathymetry_m)),
+        "n_floored": int(np.nansum(gebco_shifted[ocean] < min_bathymetry_m)),
+        "n_ceiled": int(np.nansum(gebco_shifted[ocean] > max_ocean_elevation_m)),
+        "n_lake_river_floored": int(np.nansum(dem_m[lake_river] < lake_river_min_elevation_m)) if lake_river.any() else 0,
     }
 
 
@@ -127,7 +162,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tile-id", required=True)
     parser.add_argument("--config", default=str(_repo_root / "snakemake_workflow" / "config" / "config.yml"))
-    parser.add_argument("--out", default=None, help="output GeoTIFF path (default: validation_sfincs/{tile_id}/sfincs_model/elevation_combined.tif)")
+    parser.add_argument("--out", default=None, help="output GeoTIFF path (default: {base-dir-name}/{tile_id}/sfincs_model/elevation_combined.tif)")
+    parser.add_argument("--base-dir-name", default="validation_sfincs", help="output root directory name under paths.root (default: validation_sfincs)")
     args = parser.parse_args()
 
     root = read_root(Path(args.config))
@@ -144,10 +180,12 @@ def main() -> None:
     print(f"MDT applied to GEBCO (ADD): {info['mdt_m']:+.4f} m")
     print(f"Ocean cells with no valid GEBCO value: {info['n_ocean_nan']}")
     print(f"Ocean cells floored at {MIN_BATHYMETRY_M:.0f} m: {info['n_floored']}")
+    print(f"Ocean cells ceiled at {MAX_OCEAN_ELEVATION_M:.0f} m: {info['n_ceiled']}")
+    print(f"Lake/river cells floored at {LAKE_RIVER_MIN_ELEVATION_M:.0f} m: {info['n_lake_river_floored']}")
     finite = combined[np.isfinite(combined)]
     print(f"Combined elevation range: {finite.min():.2f} to {finite.max():.2f} m (n={finite.size})")
 
-    out_path = Path(args.out) if args.out else root / "validation_sfincs" / args.tile_id / "sfincs_model" / "elevation_combined.tif"
+    out_path = Path(args.out) if args.out else root / args.base_dir_name / args.tile_id / "sfincs_model" / "elevation_combined.tif"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     profile = info["profile"]
     profile.update(dtype="float32", nodata=np.nan, count=1)

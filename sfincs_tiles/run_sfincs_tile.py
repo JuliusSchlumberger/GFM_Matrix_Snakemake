@@ -205,20 +205,21 @@ def main() -> None:
     parser.add_argument("--tile-id", required=True)
     parser.add_argument("--config", default=str(_repo_root / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--sfincs-exe", default=None, help="required unless --skip-run")
-    parser.add_argument("--timeout-s", type=float, default=1800.0)
+    parser.add_argument("--timeout-s", type=float, default=14400.0)
     parser.add_argument(
         "--skip-run", action="store_true",
         help="skip run_sfincs_subprocess and go straight to postprocessing - for a tile "
              "already run elsewhere (e.g. generate_sfincs_hpc_jobs.py's own HPC batch jobs), "
              "whose sfincs_map.nc has already been copied back into sfincs_model/.",
     )
+    parser.add_argument("--base-dir-name", default="validation_sfincs", help="output root directory name under paths.root (default: validation_sfincs)")
     args = parser.parse_args()
     if not args.skip_run and not args.sfincs_exe:
         parser.error("--sfincs-exe is required unless --skip-run is given")
 
     root = read_root(Path(args.config))
-    sfincs_dir = root / "validation_sfincs" / args.tile_id / "sfincs_model"
-    out_dir = root / "validation_sfincs" / args.tile_id / "outputs"
+    sfincs_dir = root / args.base_dir_name / args.tile_id / "sfincs_model"
+    out_dir = root / args.base_dir_name / args.tile_id / "outputs"
     land_mask_path = root / "model_outputs" / args.tile_id / "inputs" / "mask.tif"
 
     if args.skip_run:

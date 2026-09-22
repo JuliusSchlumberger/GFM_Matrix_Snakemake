@@ -1,0 +1,33 @@
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\GFM_Matrix_Snakemake\sfincs_tiles\select_new_tile_sets.py:196: UserWarning: Geometry is in a geographic CRS. Results from 'centroid' are likely incorrect. Use 'GeoSeries.to_crs()' to re-project geometries to a projected CRS before this operation.
+
+  centroid = hop0.geometry.centroid
+2578 tiles total, 2445 with hop_distance == 0
+0 antimeridian-crossing tile(s) excluded, 2445 remain
+  checked 200/2445, 14 eligible so far
+  checked 400/2445, 59 eligible so far
+  checked 600/2445, 109 eligible so far
+  checked 800/2445, 211 eligible so far
+  checked 1000/2445, 305 eligible so far
+  checked 1200/2445, 422 eligible so far
+  checked 1400/2445, 543 eligible so far
+  checked 1600/2445, 663 eligible so far
+  checked 1800/2445, 799 eligible so far
+  checked 2000/2445, 957 eligible so far
+  checked 2200/2445, 1094 eligible so far
+  checked 2400/2445, 1253 eligible so far
+
+1294 of 2445 hop_distance==0, non-antimeridian tiles eligible (<= 20,000,000 cells, <= 1.0% river, real COAST-HG match)
+Wrote P:\11212688-004-global-floodmaps\modelling\validation_sfincs_v2\eligible_tile_pool.csv (full eligible pool, for audit)
+
+Set A: 260 tiles (smallest-by-area, |lat| 5.0-55.0, stratified)
+  428 of 1034 remaining tiles have ocean_frac in [5%, 50%]
+  boundary-distance proxy: checked 200/428
+  boundary-distance proxy: checked 400/428
+  299 tiles within the bottom 70th percentile of boundary-distance proxy (<= 16.56 km)
+
+Set B: 260 tiles (ocean_frac 5%-50%, low boundary-distance proxy, stratified)
+
+Wrote P:\11212688-004-global-floodmaps\modelling\validation_sfincs_v2\tile_selection_metadata.csv, P:\11212688-004-global-floodmaps\modelling\validation_sfincs_v2\set_a_tile_ids.txt (260), P:\11212688-004-global-floodmaps\modelling\validation_sfincs_v2\set_b_tile_ids.txt (260)
