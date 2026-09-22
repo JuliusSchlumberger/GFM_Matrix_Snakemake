@@ -110,6 +110,32 @@ def _reproject_nearest_to_grid(src_path: Path, dst_transform, dst_crs, dst_shape
     return dst_arr
 
 
+def _compute_zsini_array(
+    native_mask_path: Path, station_x: np.ndarray, station_y: np.ndarray, station_values: np.ndarray,
+    grid_coords: xr.DataArray, dst_transform, dst_crs, dst_shape: tuple[int, int],
+) -> np.ndarray:
+    """IDW-interpolated initial water level, kept only on real ocean cells.
+
+    IDW is evaluated everywhere (same as before), but any cell that isn't
+    ocean-coded in the tile's own native mask.tif (land=0, lake=2, river=3 -
+    any isolated/disconnected ocean-coded blob still counts as ocean here,
+    kept exactly as interpolated, per 2026-09 review) gets overwritten with
+    hydromt_sfincs's own official "no initial water" sentinel (-9999.0 - see
+    SfincsInitialConditions.create's own docstring: "For cells with initial
+    water levels of -9999.0, the SFINCS kernel will set the initial water
+    level to the bed level", i.e. dry, zero depth) instead of the IDW value -
+    see build_sfincs_tile()'s own step 5 for why (real, confirmed bug,
+    tiles 1702/1798: land far inland was starting the simulation already
+    "flooded" from the interpolated coastal water level alone).
+    """
+    yy, xx = np.meshgrid(grid_coords["y"].values, grid_coords["x"].values, indexing="ij")
+    zsini_arr = idw_interpolate_to_grid(station_x, station_y, station_values, xx, yy).astype(np.float32)
+
+    native_mask_on_grid = _reproject_nearest_to_grid(native_mask_path, dst_transform, dst_crs, dst_shape)
+    ocean = native_mask_on_grid == 1  # OCEAN_CODE, native mask.tif convention (0=land,1=ocean,2=lake,3=river)
+    return np.where(ocean, zsini_arr, np.float32(-9999.0))
+
+
 def _ocean_polygon_wgs84(mask_path: Path, ocean_code: int = 1) -> gpd.GeoDataFrame:
     """Vectorize mask.tif's ocean cells into a polygon GeoDataFrame (EPSG:4326)."""
     with rasterio.open(mask_path) as src:
@@ -386,16 +412,36 @@ def build_sfincs_tile(
     # (station_x/station_y already computed above for the buffer calc; grid_coords
     # is the "mask" DataArray from step 2, used purely as a coords/dims/transform
     # template here - same grid "dep" used to be, before subgrid removed it) --
+    #
+    # Real, confirmed bug (2026-09, tiles 1702/1798): the IDW above used to be
+    # kept at EVERY cell in the grid, land included, with no check that a cell
+    # is actually open water. For a large low-lying tile with real below-sea-
+    # level terrain far inland, the interpolated ~0.6-2m coastal water level
+    # read as several METRES of "depth" once compared to that cell's own real
+    # (very negative) bed elevation - so the cell started the simulation
+    # already flooded, before any storm physics ran at all. Confirmed live:
+    # 85.7% of tile 1702's real land (8,506 km2, mean "depth" 9.6m) and 28.3%
+    # of tile 1798's (4,209 km2) started spuriously wet this way, and 100% of
+    # BOTH tiles' own final reported flood extent (zsmax) turned out to be
+    # cells that were already wet at t=0 - zero cells were ever newly flooded
+    # by the simulated storm. Fixed via `_compute_zsini_array` below.
     first_vals = hydrographs[station_cols].iloc[0].to_numpy(dtype=np.float64)
-    yy, xx = np.meshgrid(grid_coords["y"].values, grid_coords["x"].values, indexing="ij")
-    zsini_arr = idw_interpolate_to_grid(station_x, station_y, first_vals, xx, yy)
-    zsini_da = xr.DataArray(zsini_arr.astype(np.float32), dims=grid_coords.dims, coords=grid_coords.coords)
+    zsini_arr = _compute_zsini_array(
+        tile_dir / "mask.tif", station_x, station_y, first_vals,
+        grid_coords, main_transform, main_crs, (main_height, main_width),
+    )
+
+    zsini_da = xr.DataArray(zsini_arr, dims=grid_coords.dims, coords=grid_coords.coords)
     zsini_da = zsini_da.rio.write_crs(sf.crs)
     zsini_da = zsini_da.rio.write_transform(grid_coords.rio.transform())
 
     sf.initial_conditions.create(zsini=zsini_da, fill_value=-9999.0, reproj_method="nearest")
-    print(f"[5/8] zsini set - range {float(np.nanmin(zsini_arr)):.4f} to {float(np.nanmax(zsini_arr)):.4f} m "
-          f"(interpolated from {len(station_x)} station(s))")
+    is_ocean_wet = zsini_arr > -9999.0
+    n_wet = int(is_ocean_wet.sum())
+    print(f"[5/8] zsini set - {n_wet} ocean cell(s) initialized "
+          f"{float(zsini_arr[is_ocean_wet].min()):.4f} to {float(zsini_arr[is_ocean_wet].max()):.4f} m "
+          f"(interpolated from {len(station_x)} station(s)); land/river/lake left dry (-9999.0, bed-level fallback)"
+          if n_wet else "[5/8] zsini set - WARNING: 0 ocean cells found, every cell left dry")
 
     # -- 6. output config: dtmaxout must span the WHOLE simulation, so the
     # zsmax envelope is one true whole-run maximum, not reset partway

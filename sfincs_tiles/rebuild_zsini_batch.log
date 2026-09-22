@@ -1,0 +1,32 @@
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Replacing grid map: zs
+tile 37: zsini rebuilt - 29187 ocean cell(s) initialized -0.0624 to 0.0176 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [654840.0, 2726880.0, 803880.0, 2879160.0] does not fully cover bbox [653099.752, 2724423.027, 807330.968, 2881775.724]
+Replacing grid map: zs
+tile 68: zsini rebuilt - 843068 ocean cell(s) initialized -0.0863 to 0.0358 m (interpolated from 20 station(s))
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+Warning 3: Cannot find header.dxf (GDAL_DATA is not defined)
+C:\Users\schlumbe\AppData\Local\miniforge3\envs\hydromt-sfincs-dev\Lib\site-packages\pyogrio\core.py:35: RuntimeWarning: Could not detect GDAL data files. Set GDAL_DATA environment variable to the correct path.
+  _init_gdal_data()
+No region component found in components.
+Replacing grid map: mask
+Replacing grid map: dep
+Replacing grid map: zs
+Dataset [165720.0, 7230840.0, 377760.0, 7345200.0] does not fully cover bbox [162979.029, 7227297.386, 378755.424, 7348574.500]
+Replacing grid map: zs
+tile 72: zsini rebuilt - 759289 ocean cell(s) initialized -0.1026 to 0.2090 m (interpolated from 20 station(s))
