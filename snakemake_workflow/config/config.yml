@@ -331,14 +331,22 @@ simulation: # Used by: preprocessing rules
     resolution: 30       # output raster resolution in metres
     knn: 15              # number of nearest water level stations used
     # Default Manning's n roughness (÷ 100) for cells with no land use class.
-    default_friction: 0.001
+    default_friction: 0.002
     # Runtime multiplier applied to the (already land-use-derived, already
-    # decoded) friction raster - 1.0 = no-op. A calibration-sweep lever
-    # (2026-09), NOT baked into compute_friction.py's own preprocessing
-    # output, so the expensive land-use-derived raster is computed once and
-    # reused unscaled by every sweep combination that varies a different
-    # parameter - see aqueduct_runner.run_aqueduct_python.
-    friction_scale_factor: 1.0
+    # decoded) friction raster - NOT baked into compute_friction.py's own
+    # preprocessing output, so the expensive land-use-derived raster is
+    # computed once and reused unscaled by every sweep combination that
+    # varies a different parameter - see aqueduct_runner.run_aqueduct_python.
+    # 30.0 (2026-09, production default, was 1.0/no-op): the raw friction
+    # value (Manning's_n/100) is used directly as cost-per-GRID-STEP, with
+    # no distance term anywhere in the solver - confirmed empirically (real
+    # 1D-corridor test, real land-cover friction values) that this produces
+    # only ~0.008-0.04 m/km water-level attenuation, roughly 30x weaker than
+    # the ~0.1-1.2 m/km range reported in Vafeidis et al. (2019) for
+    # comparable land cover. x30 brings the model's real per-km attenuation
+    # into that literature-supported range (DeltaDTM's own native grid step
+    # being ~30m is the origin of the factor, not a coincidence).
+    friction_scale_factor: 30.0
 
     # Caps the eikonal solve's round-based mode (4 individual directional
     # sweeps per round, each round checked for early-exit convergence - see
