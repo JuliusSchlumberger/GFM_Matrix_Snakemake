@@ -507,10 +507,15 @@ egm2008_geoid:
 
 # Used by prepare_boundary_conditions.compute_mdt_correction (always applied
 # - see boundary_conditions.mdt_correction in config.yml).
+# "Aviso" (not "AVISO"): the on-disk directory is mixed-case - Windows/SMB is
+# case-insensitive so a mismatched "AVISO" here still resolved fine from this
+# repo's own Windows preprocessing machine, but Hydrax's Linux mount of the
+# same P:\ share is case-sensitive and raised a persistent (non-transient)
+# FileNotFoundError for every retry (confirmed live 2026-09-23).
 mdt_cnes_cls22:
   data_type: GeoDataset
   driver: netcdf
-  path: inputs/AVISO/mdt_hybrid_cnes_cls22_cmems2020_global.nc
+  path: inputs/Aviso/mdt_hybrid_cnes_cls22_cmems2020_global.nc
   crs: 4326
   filesystem: local
   meta:
