@@ -76,7 +76,9 @@ if __name__ == "__main__":
     from gfm_config import read_root
 
     root = read_root(Path(args.config))
-    tile_dir = root / "model_outputs" / args.tile_id / "inputs"
+    # Read from THIS tile's own working copy, not model_outputs/ directly -
+    # see build_elevation.py's own note on this same gap.
+    tile_dir = root / args.base_dir_name / args.tile_id / "inputs"
     out_path = root / args.base_dir_name / args.tile_id / "sfincs_model" / "manning_n.tif"
 
     lo, hi = build_manning_n(tile_dir / "friction.tif", out_path)

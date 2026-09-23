@@ -376,6 +376,120 @@ def _compute_dem_gap_fill(
     ).astype(np.float32)
 
 
+_GEBCO_BBOX_BUFFER_DEG = 0.01  # ~1.1km - safely > GEBCO's ~0.0042deg (463m) native pixel
+
+
+def _buffer_bbox_for_coarse_source(bbox: list[float], buffer_deg: float = _GEBCO_BBOX_BUFFER_DEG) -> list[float]:
+    """Pad `bbox` before reading a coarse-resolution source like GEBCO.
+
+    Real, confirmed issue (2026-09, tile 1273): `data_catalog.get_rasterdataset
+    (bbox=...)` clips to the SOURCE's own native pixel grid, not the exact
+    requested bbox - for a coarse source like GEBCO (~463m pixels, vs.
+    DeltaDTM's ~30m), this can fall up to half a native GEBCO pixel short of
+    a tile's true edge, leaving a thin nodata sliver after
+    `reproject_like(dem, ...)` even though the underlying GEBCO VRT has full
+    global coverage there (confirmed directly against the raw VRT). A small
+    buffer well beyond one native pixel guarantees the read window fully
+    covers `bbox` after reprojection; the extra margin costs nothing since
+    the read is immediately reprojected onto the DEM's own grid anyway.
+    """
+    return [
+        max(bbox[0] - buffer_deg, -180.0),
+        max(bbox[1] - buffer_deg, -90.0),
+        min(bbox[2] + buffer_deg, 180.0),
+        min(bbox[3] + buffer_deg, 90.0),
+    ]
+
+
+def resolve_offshore_mask_gaps_via_gebco(
+    mask_vals: np.ndarray,
+    nodata_sentinel: int,
+    gebco_vals: np.ndarray,
+    gebco_nodata: float,
+    ocean_code: int = 1,
+    land_code: int = 0,
+) -> tuple[np.ndarray, dict]:
+    """Reclassify `deltadtm_mask` nodata cells to ocean where GEBCO bathymetry
+    and connectivity both agree it's plausible open water.
+
+    `deltadtm_mask`'s own coverage doesn't always extend to a tile's full
+    bbox - most commonly for tiles whose domain reaches well offshore, past
+    the coastal band DeltaDTM was built to cover. The default fallback
+    (nodata -> land, see `extract_dem`/`extract_dem_mask`) is safe for
+    genuinely inland data-sparse gaps but wrong for these far-offshore ones:
+    a false "land" strip between the true coast and a tile's outer edge can
+    starve `hydromt_sfincs`'s create_boundary() of almost its entire real
+    coastline, since it only places forcing on ocean cells touching the
+    domain's own rectangular perimeter (confirmed live on SFINCS validation
+    tile 1273 - 2026-09).
+
+    A nodata cell is only reclassified to ocean if BOTH:
+    - GEBCO reads negative (plausible bathymetry) at that cell, and
+    - it is 4-connected (matching `_compute_dem_gap_fill`'s own convention)
+      through a chain of other GEBCO-negative nodata cells to at least one
+      cell the mask already confirms is real ocean (`mask_vals ==
+      ocean_code`).
+
+    The connectivity requirement exists specifically to protect genuinely
+    isolated below-sea-level inland basins, which legitimately read negative
+    in GEBCO (a hybrid land+ocean product) but must stay land - real prior
+    cases already hit by this pipeline include tile 1464 (Dead Sea,
+    -369.29m) and tile 303 (Danakil Depression, -379.08m), see
+    `encode_dem_cm`. Anchoring is against `ocean_code` only, not lake/river,
+    since `build_sfincs_tile.py`'s boundary polygon is built strictly from
+    mask==1.
+
+    Note this only helps far-offshore gaps: GEBCO has a known coarse-
+    resolution artifact right at the coast (ocean cells reading up to
+    +16.6m near the DeltaDTM/GEBCO transition, see build_elevation.py's
+    MAX_OCEAN_ELEVATION_M), so nearshore nodata gaps will typically read
+    non-negative and correctly fail closed (stay land) rather than being
+    fixed here - the existing, safe status quo for that case.
+
+    Args:
+        mask_vals: Raw mask array, still containing `nodata_sentinel`.
+        nodata_sentinel: Value marking "no mask coverage at all".
+        gebco_vals: GEBCO elevation, reprojected onto the same grid as
+            `mask_vals`.
+        gebco_nodata: GEBCO's own nodata value.
+        ocean_code: Mask value meaning confirmed real ocean.
+        land_code: Mask value to fall back to when a nodata cell isn't
+            resolved to ocean.
+
+    Returns:
+        Tuple of the corrected mask array (no `nodata_sentinel` values
+        remain - every cell is `ocean_code` or an original valid value or
+        `land_code`) and a diagnostics dict with `n_resolved_ocean` and
+        `n_still_land` counts.
+    """
+    is_nodata = mask_vals == nodata_sentinel
+    is_ocean = mask_vals == ocean_code
+
+    if not is_ocean.any():
+        # No confirmed ocean anywhere in this tile's read window at all -
+        # nothing to anchor a reclassification to. Leave every nodata cell
+        # as the existing conservative land fallback.
+        corrected = np.where(is_nodata, land_code, mask_vals)
+        n_nodata = int(is_nodata.sum())
+        return corrected, {"n_resolved_ocean": 0, "n_still_land": n_nodata}
+
+    gebco_negative = (gebco_vals != gebco_nodata) & (gebco_vals < 0)
+    candidate = is_ocean | (is_nodata & gebco_negative)
+
+    structure = ndimage.generate_binary_structure(2, 1)  # 4-connectivity
+    labels, _ = ndimage.label(candidate, structure=structure)
+    anchor_labels = np.unique(labels[is_ocean])
+    anchor_labels = anchor_labels[anchor_labels != 0]
+
+    resolved_ocean = is_nodata & np.isin(labels, anchor_labels)
+    corrected = np.where(resolved_ocean, ocean_code, np.where(is_nodata, land_code, mask_vals))
+
+    return corrected, {
+        "n_resolved_ocean": int(resolved_ocean.sum()),
+        "n_still_land": int(is_nodata.sum() - resolved_ocean.sum()),
+    }
+
+
 def extract_dem(
     data_catalog: hydromt.DataCatalog,
     dem_source: str,
@@ -386,6 +500,7 @@ def extract_dem(
     interp_max_search_distance: float = 100.0,
     interp_smoothing_iterations: int = 0,
     land_fill_value_m: float = DEM_NODATA_M,
+    gebco_source: str = "gebco",
 ) -> xr.DataArray:
     """Clip the DEM to the model domain bbox and fill all missing cells.
 
@@ -444,6 +559,9 @@ def extract_dem(
             smoothing pass count for small-gap interpolation.
         land_fill_value_m: Elevation (m) written for large missing-land gaps
             (simulation.dem_gap_fill.land_fill_value_m).
+        gebco_source: Name of the GEBCO bathymetry RasterDataset in
+            `data_catalog`, used to reclassify far-offshore mask nodata
+            cells to ocean - see `resolve_offshore_mask_gaps_via_gebco`.
 
     Returns:
         The DEM clipped to `bbox`, all missing cells filled, encoded as
@@ -451,6 +569,28 @@ def extract_dem(
         envelope fits int16-cm with enormous headroom).
     """
     da = data_catalog.get_rasterdataset(dem_source, bbox=bbox)
+
+    # Real, confirmed bug (2026-09, tile 1454, 82.7N): a VRT-mosaic source
+    # can carry TWO distinct "missing" representations - a literal nodata
+    # sentinel within a real underlying source tile, and genuine NaN
+    # wherever the VRT has no underlying source file at all (a true
+    # coverage gap - GDAL's own "no source covers this pixel" fill, not a
+    # source tile's own choice). Every missing-data check below (this
+    # function's own valid_dem/da.where, and _compute_dem_gap_fill's own
+    # `== nodata`) only recognised the literal sentinel - a NaN coverage
+    # gap silently skipped ALL gap-filling (no interpolation, no
+    # land_fill_value_m hard-fill) and passed straight through uncaught
+    # even by encode_dem_cm's own overflow-safety check (NaN comparisons
+    # are always False in IEEE754, so `scaled.min() < lo`/`scaled.max() >
+    # hi` never fires), landing at exactly int16(NaN) == 0 after the final
+    # int16-cm cast (confirmed directly on this numpy build) - an
+    # invisible, wrong "sea level" reading for what should have been
+    # flagged as missing and gap-filled like any other void. Normalized to
+    # the literal nodata sentinel immediately after read so every
+    # downstream `== nodata` check below handles both cases identically,
+    # rather than patching each call site separately.
+    if np.isnan(da.values).any():
+        da = da.copy(data=np.where(np.isnan(da.values), da.raster.nodata, da.values))
 
     from vertical_datum import sample_geoid_offset
 
@@ -466,9 +606,15 @@ def extract_dem(
     da_mask.raster.set_nodata(255)  # uint8 nodata; mirrors extract_dem_mask
     mask_vals = da_mask.raster.reproject_like(da, method="nearest").values.squeeze()
 
-    # Land (0) or no mask coverage at all (255) -> irrelevant dry land.
-    # Ocean (1), lake (2), river (3) -> flood-passable, fill with 0.
-    is_land = (mask_vals == 0) | (mask_vals == 255)
+    da_gebco = data_catalog.get_rasterdataset(gebco_source, bbox=_buffer_bbox_for_coarse_source(bbox))
+    gebco_vals = da_gebco.raster.reproject_like(da, method="nearest").values.squeeze()
+    mask_vals, _ = resolve_offshore_mask_gaps_via_gebco(
+        mask_vals, 255, gebco_vals, da_gebco.raster.nodata,
+    )
+
+    # Land (0) -> irrelevant dry land. Ocean (1), lake (2), river (3) ->
+    # flood-passable, fill with 0. No 255 remains - resolved above.
+    is_land = mask_vals == 0
 
     dem_vals = da.values.reshape(mask_vals.shape)
     fill = _compute_dem_gap_fill(
@@ -493,17 +639,22 @@ def extract_dem_mask(
     bbox: list[float],
     dem: xr.DataArray,
     nodata_sentinel: int = 255,
+    gebco_source: str = "gebco",
 ) -> xr.DataArray:
     """Clip the DEM-validity mask and reproject it onto the DEM's grid.
 
     The mask source raster has a different native grid/resolution than the
     DEM, so it is reprojected (nearest-neighbour) onto the DEM's grid to
     ensure matching dimensions, as required by the flood model. Cells with no
-    mask coverage at all (value == `nodata_sentinel`) are set to land (0) —
+    mask coverage at all (value == `nodata_sentinel`) default to land (0) —
     consistent with `extract_dem`'s own fill rule: areas outside DeltaDTM's
     own coverage are irrelevant, definitely-dry terrain, not an unknown for a
-    separately sourced land polygon dataset to arbitrate. Valid DeltaTM
-    values (0 = land, 1 = ocean, 2 = lake, 3 = river) are kept unchanged.
+    separately sourced land polygon dataset to arbitrate — UNLESS GEBCO
+    bathymetry and connectivity to confirmed real ocean both indicate the gap
+    is actually far-offshore water; see
+    `resolve_offshore_mask_gaps_via_gebco` for the full reasoning and the
+    below-sea-level-inland-basin safeguard. Valid DeltaTM values (0 = land,
+    1 = ocean, 2 = lake, 3 = river) are kept unchanged.
 
     Args:
         data_catalog: HydroMT data catalog containing `mask_source`.
@@ -512,6 +663,9 @@ def extract_dem_mask(
         dem: The tile's DEM, as returned by `extract_dem`, used as the
             reprojection target grid.
         nodata_sentinel: Value used by `mask_source` to indicate no data.
+        gebco_source: Name of the GEBCO bathymetry RasterDataset in
+            `data_catalog`, used to reclassify far-offshore mask nodata
+            cells to ocean.
 
     Returns:
         The DEM-validity mask reprojected onto `dem`'s grid with no nodata cells.
@@ -519,7 +673,13 @@ def extract_dem_mask(
     da_mask = data_catalog.get_rasterdataset(mask_source, bbox=bbox)
     da_mask.raster.set_nodata(nodata_sentinel)
     da_mask_repr = da_mask.raster.reproject_like(dem, method="nearest")
-    return da_mask_repr.where(da_mask_repr != nodata_sentinel, 0)
+
+    da_gebco = data_catalog.get_rasterdataset(gebco_source, bbox=_buffer_bbox_for_coarse_source(bbox))
+    gebco_vals = da_gebco.raster.reproject_like(dem, method="nearest").values.squeeze()
+    mask_vals, _ = resolve_offshore_mask_gaps_via_gebco(
+        da_mask_repr.values.squeeze(), nodata_sentinel, gebco_vals, da_gebco.raster.nodata,
+    )
+    return da_mask_repr.copy(data=mask_vals.reshape(da_mask_repr.shape))
 
 
 def compute_friction(

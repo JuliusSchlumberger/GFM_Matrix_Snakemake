@@ -1,10 +1,13 @@
 #!/bin/bash
-# Per-tile pipeline for the v2 validation batch: copy eikonal inputs -> build
-# SFINCS inputs (hydromt-sfincs-dev env) -> bathtub+eikonal (gfm env) -> SFINCS
-# run (direct apptainer, staged to local scratch - same pattern this
-# session's own sfincs_batch_*.sbatch already used and proved) -> postprocess
-# + summary (hydromt-sfincs-dev env). Called per-tile from each batch
-# sbatch script's own loop - see generate_v2_batch_jobs.py.
+# Per-tile pipeline for the v2 validation batch: copy eikonal inputs ->
+# regenerate dem.tif/mask.tif with the CURRENT extract_dem/extract_dem_mask
+# logic (gfm env - see regenerate_dem_mask.py's own module docstring: the
+# copied model_outputs/ files can predate a since-fixed DEM-extraction bug/
+# version) -> build SFINCS inputs (hydromt-sfincs-dev env) -> bathtub+eikonal
+# (gfm env) -> SFINCS run (direct apptainer, staged to local scratch - same
+# pattern this session's own sfincs_batch_*.sbatch already used and proved)
+# -> postprocess + summary (hydromt-sfincs-dev env). Called per-tile from
+# each batch sbatch script's own loop - see generate_v2_batch_jobs.py.
 #
 # Idempotent at every stage (checks for the expected output file before
 # redoing work), so re-running after a partial batch failure only redoes
@@ -74,7 +77,17 @@ done
 
 cd "$CODE_ROOT/sfincs_tiles"
 
-# -- 2. build SFINCS inputs (hydromt-sfincs-dev env) --
+# -- 2. regenerate dem.tif/mask.tif with current extract_dem/extract_dem_mask
+# logic (gfm env - needs src/config_utils.py's hydromt.DataCatalog, same
+# constraint as run_eikonal_on_sfincs_subgrid.py below). Gated on the same
+# elevation_combined.tif check as step 3 - only needs doing once, and once
+# the SFINCS-input build has started, dem.tif/mask.tif must not change under it. --
+if [ ! -f "$SFINCS_MODEL_DIR/elevation_combined.tif" ]; then
+  "$GFM_PY" regenerate_dem_mask.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
+    || log_fail "regenerate_dem_mask.py failed (non-fatal - falling back to the copied model_outputs/ dem.tif/mask.tif)"
+fi
+
+# -- 3. build SFINCS inputs (hydromt-sfincs-dev env) --
 if [ ! -f "$SFINCS_MODEL_DIR/elevation_combined.tif" ]; then
   "$HYDROMT_SFINCS_DEV_PY" build_elevation.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
     || { log_fail "build_elevation.py failed"; exit 0; }
@@ -92,11 +105,11 @@ if [ ! -f "$SFINCS_MODEL_DIR/sfincs.inp" ]; then
     || { log_fail "build_sfincs_tile.py failed"; exit 0; }
 fi
 
-# -- 3. bathtub + eikonal (gfm env - needs src/flood_model.py's older-hydromt import chain) --
+# -- 4. bathtub + eikonal (gfm env - needs src/flood_model.py's older-hydromt import chain) --
 "$GFM_PY" run_eikonal_on_sfincs_subgrid.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
   || log_fail "run_eikonal_on_sfincs_subgrid.py failed (non-fatal - postprocess_tile_summary.py degrades gracefully on a missing method)"
 
-# -- 4. SFINCS run (direct apptainer, staged to local scratch) --
+# -- 5. SFINCS run (direct apptainer, staged to local scratch) --
 if [ ! -f "$SFINCS_MODEL_DIR/sfincs_map.nc" ]; then
   LOCAL_DIR="${TMPDIR:-/tmp}/sfincs_${TILE_ID}_${SLURM_JOB_ID:-$$}"
   rm -rf "$LOCAL_DIR"; mkdir -p "$LOCAL_DIR"
@@ -133,7 +146,7 @@ if [ ! -f "$SFINCS_MODEL_DIR/sfincs_map.nc" ]; then
   echo "tile $TILE_ID: sfincs run done"
 fi
 
-# -- 5. postprocess (hmax.tif/flood_extent.tif) + per-tile summary.json (hydromt-sfincs-dev env) --
+# -- 6. postprocess (hmax.tif/flood_extent.tif) + per-tile summary.json (hydromt-sfincs-dev env) --
 "$HYDROMT_SFINCS_DEV_PY" run_sfincs_tile.py --tile-id "$TILE_ID" --config "$CONFIG" --skip-run --base-dir-name "$BASE_DIR_NAME" \
   || log_fail "run_sfincs_tile.py postprocessing failed"
 "$HYDROMT_SFINCS_DEV_PY" postprocess_tile_summary.py --tile-id "$TILE_ID" --set "$TILE_SET" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \

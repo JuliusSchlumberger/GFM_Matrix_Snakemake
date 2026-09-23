@@ -17,6 +17,7 @@ mask = extract_dem_mask(
     "deltadtm_mask",
     bbox,
     dem,
+    gebco_source="gebco",
 )
 
 save_raster(mask, snakemake.output.mask, snakemake.params.raster_config)  # noqa: F821

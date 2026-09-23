@@ -26,6 +26,7 @@ dem = extract_dem(
     interp_max_search_distance=gap_fill_cfg["interp_max_search_distance"],
     interp_smoothing_iterations=gap_fill_cfg["interp_smoothing_iterations"],
     land_fill_value_m=gap_fill_cfg["land_fill_value_m"],
+    gebco_source="gebco",
 )
 
 save_raster(dem, snakemake.output.dem, snakemake.params.raster_config, dtype="int16")  # noqa: F821

@@ -37,6 +37,7 @@ from rasters import (  # noqa: E402
     average_pool_to_grid,
     decode_friction_int16,
     encode_dem_cm,
+    resolve_offshore_mask_gaps_via_gebco,
     save_waterdepth_raster,
 )
 
@@ -134,6 +135,57 @@ def test_dem_gap_fill_all_nodata_window_never_leaks_raw_nodata() -> None:
     print()
 
 
+def test_resolve_offshore_mask_gaps_via_gebco_connected_negative_becomes_ocean() -> None:
+    print("=== resolve_offshore_mask_gaps_via_gebco: nodata cell 4-connected to real ocean + negative GEBCO -> ocean ===")
+    # 1x4 strip: real ocean, then two nodata cells with negative (deep) GEBCO, then land.
+    mask_vals = np.array([[1, 255, 255, 0]], dtype=np.uint8)
+    gebco_vals = np.array([[-50.0, -40.0, -30.0, 5.0]], dtype=np.float32)
+
+    corrected, stats = resolve_offshore_mask_gaps_via_gebco(mask_vals, 255, gebco_vals, -32767.0)
+
+    assert not np.any(corrected == 255), corrected
+    assert corrected[0, 1] == 1 and corrected[0, 2] == 1, (
+        f"nodata cells chained to real ocean with negative GEBCO should resolve to ocean, got {corrected}"
+    )
+    assert stats["n_resolved_ocean"] == 2, stats
+    print(f"PASS: corrected={corrected.ravel()}, stats={stats}")
+    print()
+
+
+def test_resolve_offshore_mask_gaps_via_gebco_isolated_basin_stays_land() -> None:
+    print("=== resolve_offshore_mask_gaps_via_gebco: isolated below-sea-level basin (Dead Sea/Danakil analog) stays land ===")
+    # Real ocean on the left, a LAND cell breaking connectivity, then an
+    # isolated nodata cell with negative GEBCO (an inland depression) that
+    # has no connectivity path to the real ocean cell.
+    mask_vals = np.array([[1, 0, 255, 0]], dtype=np.uint8)
+    gebco_vals = np.array([[-50.0, 5.0, -400.0, 10.0]], dtype=np.float32)  # -400 ~ Danakil-scale
+
+    corrected, stats = resolve_offshore_mask_gaps_via_gebco(mask_vals, 255, gebco_vals, -32767.0)
+
+    assert corrected[0, 2] == 0, (
+        f"isolated inland nodata cell (no path to real ocean) must stay land despite negative GEBCO, got {corrected}"
+    )
+    assert stats["n_resolved_ocean"] == 0, stats
+    assert stats["n_still_land"] == 1, stats
+    print(f"PASS: corrected={corrected.ravel()}, stats={stats}")
+    print()
+
+
+def test_resolve_offshore_mask_gaps_via_gebco_positive_gebco_stays_land() -> None:
+    print("=== resolve_offshore_mask_gaps_via_gebco: nodata cell connected to ocean but non-negative/nodata GEBCO -> stays land ===")
+    mask_vals = np.array([[1, 255, 255]], dtype=np.uint8)
+    gebco_vals = np.array([[-50.0, 5.0, -32767.0]], dtype=np.float32)  # positive, then GEBCO's own nodata
+
+    corrected, stats = resolve_offshore_mask_gaps_via_gebco(mask_vals, 255, gebco_vals, -32767.0)
+
+    assert corrected[0, 1] == 0 and corrected[0, 2] == 0, (
+        f"nodata cells with non-negative or missing GEBCO must stay land regardless of ocean connectivity, got {corrected}"
+    )
+    assert stats["n_resolved_ocean"] == 0, stats
+    print(f"PASS: corrected={corrected.ravel()}, stats={stats}")
+    print()
+
+
 def test_save_waterdepth_raster_creates_missing_output_directory() -> None:
     """Real, live HPC failure (2026-08-10): run_aqueduct_cli.py (a plain
     standalone CLI, not a Snakemake rule with automatic output-dir
@@ -212,6 +264,9 @@ def main() -> None:
     test_dem_gap_fill_small_gap_interpolates_from_real_neighbors()
     test_dem_gap_fill_large_gap_hard_fills()
     test_dem_gap_fill_all_nodata_window_never_leaks_raw_nodata()
+    test_resolve_offshore_mask_gaps_via_gebco_connected_negative_becomes_ocean()
+    test_resolve_offshore_mask_gaps_via_gebco_isolated_basin_stays_land()
+    test_resolve_offshore_mask_gaps_via_gebco_positive_gebco_stays_land()
     test_save_waterdepth_raster_creates_missing_output_directory()
     test_average_pool_to_grid_closed_form_correctness()
     print("All rasters.py encoding/gap-fill validation checks passed.")

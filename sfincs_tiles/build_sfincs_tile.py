@@ -192,7 +192,9 @@ def build_sfincs_tile(
     base_dir_name: str = "validation_sfincs",
 ) -> Path:
     _validate_subgrid_params(resolution_m, subgrid_nr_pixels)
-    tile_dir = root / "model_outputs" / tile_id / "inputs"
+    # Read from THIS tile's own working copy, not model_outputs/ directly -
+    # see build_elevation.py's own note on this same gap.
+    tile_dir = root / base_dir_name / tile_id / "inputs"
     sfincs_dir = root / base_dir_name / tile_id / "sfincs_model"
     sfincs_dir.mkdir(parents=True, exist_ok=True)
 

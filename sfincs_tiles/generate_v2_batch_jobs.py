@@ -36,7 +36,8 @@ from config_utils import atomic_write, load_config, retry_transient_io  # noqa: 
 N_NODES_DEFAULT = 20
 PARTITION_DEFAULT = "4vcpu"  # matches generate_sfincs_hpc_jobs.py's own switch from 1vcpu -
 # this pipeline runs the same SFINCS solve step (OMP_NUM_THREADS=4, see run_one_tile_v2.sh)
-TIME_DEFAULT = "12:00:00"  # per plan: 4h SFINCS timeout + headroom for the build/eikonal steps
+TIME_DEFAULT = "16:00:00"  # raised from 12h 2026-09-23 (user direction) - more headroom for a
+# batch of 26 tiles/job each up to a 4h SFINCS timeout, plus the build/eikonal steps
 CPUS_PER_TASK_DEFAULT = 4
 MEM_DEFAULT = "30G"
 BASE_DIR_NAME_DEFAULT = "validation_sfincs_v2"

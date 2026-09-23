@@ -221,7 +221,14 @@ def main() -> None:
     root = read_root(Path(args.config))
     sfincs_dir = root / args.base_dir_name / args.tile_id / "sfincs_model"
     out_dir = root / args.base_dir_name / args.tile_id / "outputs"
-    land_mask_path = root / "model_outputs" / args.tile_id / "inputs" / "mask.tif"
+    # Read from THIS tile's own working copy, not model_outputs/ directly -
+    # real, confirmed gap (2026-09-23): previously hardcoded to
+    # model_outputs/ deliberately (to read "the original production mask"),
+    # but that's now inconsistent - the SFINCS model itself is built from
+    # base_dir_name's own (possibly regenerated/fixed, see
+    # regenerate_dem_mask.py) mask.tif, so the land-mask doublecheck here
+    # must use the same one, not a possibly-stale copy.
+    land_mask_path = root / args.base_dir_name / args.tile_id / "inputs" / "mask.tif"
 
     if args.skip_run:
         map_path = sfincs_dir / "sfincs_map.nc"

@@ -79,6 +79,7 @@ rule extract_dem:
     input:
         model_bbox=rules.compute_model_bbox.output.model_bbox,
         geoid_offset_raster=rules.compute_geoid_offset_raster.output.offset_raster,
+        gebco=_data_catalog.get_source("gebco").path,
     output:
         dem=os.path.join(_preprocessing_inputs_dir, "{tile_id}", "inputs", "dem.tif"),
     params:
@@ -94,6 +95,7 @@ rule extract_dem_mask:
     """Clip the DEM-validity mask and reproject it onto the DEM grid for a single tile."""
     input:
         dem=rules.extract_dem.output.dem,
+        gebco=_data_catalog.get_source("gebco").path,
     output:
         mask=os.path.join(_preprocessing_inputs_dir, "{tile_id}", "inputs", "mask.tif"),
     params:
