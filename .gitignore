@@ -28,6 +28,12 @@ __pycache__/
 build/
 python/
 core/
+
+# Ad-hoc diagnostic array dumps (sfincs_tiles/*.npy - the hydromt-sfincs-dev
+# env's matplotlib crash workaround: save raw arrays via np.save() and plot
+# from a different env). Scratch, not pipeline code/data - regenerate as
+# needed, don't track (some run 50-100MB each).
+sfincs_tiles/*.npy
 *.tif
 *.gpkg
 *.nc
