@@ -41,6 +41,7 @@ TIME_DEFAULT = "16:00:00"  # raised from 12h 2026-09-23 (user direction) - more 
 CPUS_PER_TASK_DEFAULT = 4
 MEM_DEFAULT = "30G"
 BASE_DIR_NAME_DEFAULT = "validation_sfincs_v2"
+RUNNER_SCRIPT_NAME_DEFAULT = "run_one_tile_v2.sh"
 
 
 def generate_batches(
@@ -110,6 +111,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(_repo_root / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--base-dir-name", default=BASE_DIR_NAME_DEFAULT)
+    parser.add_argument(
+        "--runner-script-name", default=RUNNER_SCRIPT_NAME_DEFAULT,
+        help="per-tile runner script under sfincs_tiles/ (e.g. run_one_tile_v3.sh for a fresh "
+             "output tree that starts with no stale per-stage outputs to skip)",
+    )
     parser.add_argument("--set-a-file", default=None, help="default: {base_dir_name}/set_a_tile_ids.txt")
     parser.add_argument("--set-b-file", default=None, help="default: {base_dir_name}/set_b_tile_ids.txt")
     parser.add_argument("--skip-tile-ids", type=str, nargs="*", default=[], help="tile IDs to exclude entirely")
@@ -154,7 +160,7 @@ def main() -> None:
 
     local_jobs_dir = base_dir_local / "hpc_jobs"
     linux_jobs_dir = f"{base_dir_linux}/hpc_jobs"
-    runner_script_linux = f"{linux_code_root}/sfincs_tiles/run_one_tile_v2.sh"
+    runner_script_linux = f"{linux_code_root}/sfincs_tiles/{args.runner_script_name}"
 
     generate_batches(
         tile_set_pairs=tile_set_pairs, n_nodes=args.n_nodes, partition=args.partition, time_limit=args.time,
@@ -163,7 +169,7 @@ def main() -> None:
         submit_path=local_jobs_dir / "submit_v2_batches.sh",
     )
     print(f"\nSubmit on Hydrax with: bash {linux_jobs_dir}/submit_v2_batches.sh")
-    print("(make sure run_one_tile_v2.sh is executable / callable via `bash` - no chmod needed since it's invoked as `bash <path>`)")
+    print(f"(make sure {args.runner_script_name} is executable / callable via `bash` - no chmod needed since it's invoked as `bash <path>`)")
 
 
 if __name__ == "__main__":
