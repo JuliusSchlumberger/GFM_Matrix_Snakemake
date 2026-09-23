@@ -13,6 +13,19 @@
 # Usage: run_one_tile_v2.sh <tile_id> <A|B>
 set -uo pipefail
 
+# Clear any PROJ_LIB/PROJ_DATA/GDAL_DATA inherited from whichever conda env
+# happened to be active in the parent interactive shell (confirmed live
+# 2026-09-23: a leaked PROJ_LIB from an earlier `conda activate gfm` pointed
+# hydromt-sfincs-dev's own python at the gfm env's older/incompatible
+# proj.db - "DATABASE.LAYOUT.VERSION.MINOR = 2 whereas a number >= 6 is
+# expected. It comes from another PROJ installation."). Calling each env's
+# python binary directly (see HYDROMT_SFINCS_DEV_PY/GFM_PY below) means we
+# don't get `conda activate`'s own automatic env-var reset, so this has to
+# be done explicitly. Unset (not hardcoded to some path) so each package
+# falls back to its own bundled default, relative to whichever python
+# binary actually ran it.
+unset PROJ_LIB PROJ_DATA GDAL_DATA
+
 TILE_ID="$1"
 TILE_SET="$2"
 
