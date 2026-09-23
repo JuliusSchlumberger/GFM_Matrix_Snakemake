@@ -23,6 +23,20 @@ CONFIG="$DATA_ROOT/$BASE_DIR_NAME/resolved_config.yml"
 SFINCS_IMAGE="docker://deltares/sfincs-cpu:sfincs-v2.4.0-Galibier-Release"
 SFINCS_TIMEOUT_S=14400
 
+# Full python binary paths, not `conda activate` - confirmed live 2026-09-23:
+# `module load miniconda && eval "$(conda shell.bash hook)" && conda activate
+# hydromt-sfincs-dev` silently stayed in (base) when run inside this script's
+# own non-interactive `bash run_one_tile_v2.sh` subshell (plain `bash
+# script.sh` doesn't source ~/.bashrc, so the `module` function - normally
+# defined there - didn't exist in this child shell), producing
+# `ModuleNotFoundError: No module named 'hydromt_sfincs'` despite the env
+# genuinely existing (`conda env list` confirmed it). Calling each env's own
+# python binary directly sidesteps all of that - also the safer pattern for
+# an unattended sbatch batch job, where the same activation fragility would
+# otherwise bite identically.
+HYDROMT_SFINCS_DEV_PY="/u/schlumbe/.conda/envs/hydromt-sfincs-dev/bin/python"
+GFM_PY="/u/schlumbe/.conda/envs/gfm/bin/python"
+
 TILE_DIR="$DATA_ROOT/$BASE_DIR_NAME/$TILE_ID"
 MODEL_OUTPUTS_DIR="$DATA_ROOT/model_outputs/$TILE_ID/inputs"
 INPUTS_DIR="$TILE_DIR/inputs"
@@ -45,33 +59,28 @@ for f in tile_geometry.gpkg model_bbox.json dem.tif mask.tif friction.tif bounda
   fi
 done
 
-module load miniconda
-eval "$(conda shell.bash hook)"
-
-# -- 2. build SFINCS inputs (hydromt-sfincs-dev env) --
-conda activate hydromt-sfincs-dev
 cd "$CODE_ROOT/sfincs_tiles"
 
+# -- 2. build SFINCS inputs (hydromt-sfincs-dev env) --
 if [ ! -f "$SFINCS_MODEL_DIR/elevation_combined.tif" ]; then
-  python build_elevation.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
+  "$HYDROMT_SFINCS_DEV_PY" build_elevation.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
     || { log_fail "build_elevation.py failed"; exit 0; }
 fi
 if [ ! -f "$SFINCS_MODEL_DIR/manning_n.tif" ]; then
-  python build_roughness.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
+  "$HYDROMT_SFINCS_DEV_PY" build_roughness.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
     || { log_fail "build_roughness.py failed"; exit 0; }
 fi
 if [ ! -f "$SFINCS_MODEL_DIR/matched_boundary_points.gpkg" ]; then
-  python build_boundary_forcing.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
+  "$HYDROMT_SFINCS_DEV_PY" build_boundary_forcing.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
     || { log_fail "build_boundary_forcing.py failed"; exit 0; }
 fi
 if [ ! -f "$SFINCS_MODEL_DIR/sfincs.inp" ]; then
-  python build_sfincs_tile.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
+  "$HYDROMT_SFINCS_DEV_PY" build_sfincs_tile.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
     || { log_fail "build_sfincs_tile.py failed"; exit 0; }
 fi
 
 # -- 3. bathtub + eikonal (gfm env - needs src/flood_model.py's older-hydromt import chain) --
-conda activate gfm
-python run_eikonal_on_sfincs_subgrid.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
+"$GFM_PY" run_eikonal_on_sfincs_subgrid.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
   || log_fail "run_eikonal_on_sfincs_subgrid.py failed (non-fatal - postprocess_tile_summary.py degrades gracefully on a missing method)"
 
 # -- 4. SFINCS run (direct apptainer, staged to local scratch) --
@@ -112,10 +121,9 @@ if [ ! -f "$SFINCS_MODEL_DIR/sfincs_map.nc" ]; then
 fi
 
 # -- 5. postprocess (hmax.tif/flood_extent.tif) + per-tile summary.json (hydromt-sfincs-dev env) --
-conda activate hydromt-sfincs-dev
-python run_sfincs_tile.py --tile-id "$TILE_ID" --config "$CONFIG" --skip-run --base-dir-name "$BASE_DIR_NAME" \
+"$HYDROMT_SFINCS_DEV_PY" run_sfincs_tile.py --tile-id "$TILE_ID" --config "$CONFIG" --skip-run --base-dir-name "$BASE_DIR_NAME" \
   || log_fail "run_sfincs_tile.py postprocessing failed"
-python postprocess_tile_summary.py --tile-id "$TILE_ID" --set "$TILE_SET" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
+"$HYDROMT_SFINCS_DEV_PY" postprocess_tile_summary.py --tile-id "$TILE_ID" --set "$TILE_SET" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
   || log_fail "postprocess_tile_summary.py failed"
 
 echo "=== tile $TILE_ID (set $TILE_SET): done ==="
