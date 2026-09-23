@@ -9,10 +9,14 @@ See sfincs_tiles' own plan doc for the full reasoning.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import numpy as np
 import rasterio
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from retry_io import retry_transient_io  # noqa: E402
 
 FRICTION_SCALE = 1_000_000
 
@@ -31,7 +35,7 @@ MANNING_N_MAX = 1.0
 
 
 def build_manning_n(friction_path: Path, out_path: Path) -> tuple[float, float]:
-    with rasterio.open(friction_path) as src:
+    with retry_transient_io(rasterio.open, friction_path) as src:
         friction_int16 = src.read(1)
         nodata = src.nodata
         profile = src.profile.copy()

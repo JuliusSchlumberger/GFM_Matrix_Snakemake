@@ -12,12 +12,16 @@ stations from scratch).
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 import xarray as xr
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from retry_io import retry_transient_io  # noqa: E402
 
 MAX_MATCH_DIST_DEG = 0.5  # generous - COAST-HG's 23,226 stations are dense
 # along real coastline; a genuine match should be much closer than this in
@@ -90,7 +94,7 @@ def match_boundary_points_to_coast_hg(
             returned/persisted explicitly rather than left for callers to
             (incorrectly) re-derive.
     """
-    with xr.open_dataset(coast_hg_nc_path) as ds:
+    with retry_transient_io(xr.open_dataset, coast_hg_nc_path) as ds:
         hg_lon = ds.station_x_coordinate.values
         hg_lat = ds.station_y_coordinate.values
         hg_values = ds[hydrograph_variable].values  # (station, time)
@@ -198,8 +202,8 @@ if __name__ == "__main__":
     out_dir = root / args.base_dir_name / args.tile_id / "sfincs_model"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    boundaries_gdf = gpd.read_file(
-        tile_dir / f"boundaries_{args.return_period}_{args.waterlevel_name}.gpkg"
+    boundaries_gdf = retry_transient_io(
+        gpd.read_file, tile_dir / f"boundaries_{args.return_period}_{args.waterlevel_name}.gpkg"
     )
     if boundaries_gdf.empty:
         raise ValueError(
@@ -207,7 +211,7 @@ if __name__ == "__main__":
             "(no COAST-RP station for this tile) - per plan, this tile cannot be forced at all, drop it."
         )
 
-    tile_gdf = gpd.read_file(tile_dir / "tile_geometry.gpkg")
+    tile_gdf = retry_transient_io(gpd.read_file, tile_dir / "tile_geometry.gpkg")
     n_before = len(boundaries_gdf)
     boundaries_gdf, dist_km = select_k_nearest_boundary_points(boundaries_gdf, tile_gdf, args.k_nearest)
     print(f"k-nearest station filter: kept {len(boundaries_gdf)} of {n_before} pre-selected boundary points "

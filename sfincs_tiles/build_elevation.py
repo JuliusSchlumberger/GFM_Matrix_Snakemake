@@ -23,6 +23,7 @@ from rasterio.warp import Resampling, reproject
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mdt import mdt_lookup_fn  # noqa: E402
+from retry_io import retry_transient_io  # noqa: E402
 
 LAND_CODE = 0
 OCEAN_CODE = 1
@@ -94,7 +95,7 @@ def build_combined_elevation(
     definitionally water - see MAX_OCEAN_ELEVATION_M's own module-level
     comment for the real GEBCO artifact this guards against.
     """
-    with rasterio.open(dem_path) as src:
+    with retry_transient_io(rasterio.open, dem_path) as src:
         dem_cm = src.read(1)
         dem_nodata = src.nodata
         profile = src.profile.copy()
@@ -104,7 +105,7 @@ def build_combined_elevation(
         bounds = src.bounds
     dem_m = np.where(dem_cm == dem_nodata, np.nan, dem_cm.astype(np.float64) / 100.0)
 
-    with rasterio.open(mask_path) as src:
+    with retry_transient_io(rasterio.open, mask_path) as src:
         mask = src.read(1)
         if mask.shape != shape:
             raise ValueError(f"mask.tif shape {mask.shape} != dem.tif shape {shape} - expected pixel-identical grids")
@@ -119,7 +120,7 @@ def build_combined_elevation(
     # latitudes, so this is an upsample; nearest keeps real GEBCO values
     # rather than interpolating across what is, locally, a near-flat
     # regional bathymetry gradient anyway).
-    with rasterio.open(gebco_path) as src:
+    with retry_transient_io(rasterio.open, gebco_path) as src:
         gebco_arr = np.empty(shape, dtype=np.float64)
         reproject(
             source=rasterio.band(src, 1), destination=gebco_arr,

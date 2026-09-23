@@ -24,6 +24,7 @@ from rasterio.warp import transform as warp_transform
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_sfincs_tile import _ocean_polygon_wgs84  # noqa: E402 - generic despite the name (any mask code)
 from gfm_config import read_root  # noqa: E402
+from retry_io import retry_transient_io  # noqa: E402
 from sfincs_run import run_sfincs_subprocess  # noqa: E402
 
 
@@ -56,7 +57,7 @@ def _apply_land_mask_doublecheck(hmax: np.ndarray, transform, crs, land_mask_pat
     cells slip through - this independent raster-vs-raster check has no
     such vector/raster boundary to disagree about.
     """
-    with rasterio.open(land_mask_path) as src:
+    with retry_transient_io(rasterio.open, land_mask_path) as src:
         land_on_subgrid = np.empty(hmax.shape, dtype=np.float64)
         reproject(
             source=rasterio.band(src, 1), destination=land_on_subgrid,
@@ -123,7 +124,7 @@ def compute_max_inundation(sfincs_dir: Path, land_mask_path: Path) -> tuple[np.n
     # readers.read_sfincs_map_results(fn_map, ds_like=model.grid.mask, ...) - reuse
     # that real, tested reader instead of hand-rolling the same translation.
     sf_out = SfincsModel(root=str(sfincs_dir), mode="r")
-    sf_out.output.read()
+    retry_transient_io(sf_out.output.read)
     if "zsmax" not in sf_out.output.data:
         raise KeyError(f"'zsmax' not found in {map_path} - variables present: {list(sf_out.output.data.keys())}")
     zsmax = sf_out.output.data["zsmax"]
@@ -139,7 +140,7 @@ def compute_max_inundation(sfincs_dir: Path, land_mask_path: Path) -> tuple[np.n
         hmin=0.05, gdf_mask=land_gdf, floodmap_fn=hmax_subgrid_path,
     )
 
-    with rasterio.open(hmax_subgrid_path) as src:
+    with retry_transient_io(rasterio.open, hmax_subgrid_path) as src:
         hmax = src.read(1)
         nodata = src.nodata
         transform = src.transform

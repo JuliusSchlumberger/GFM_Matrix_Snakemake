@@ -18,15 +18,25 @@ applies to both.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import numpy as np
 import xarray as xr
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from retry_io import retry_transient_io  # noqa: E402
+
 
 def _load_mdt(mdt_path: Path, mdt_variable: str = "mdt") -> xr.DataArray:
-    """Load the AVISO MDT as a 2-D lat/lon DataArray, ascending coordinates."""
-    with xr.open_dataset(mdt_path) as ds:
+    """Load the AVISO MDT as a 2-D lat/lon DataArray, ascending coordinates.
+
+    The open is retried (see retry_io.py) - a real, confirmed transient P:\\
+    blip hit exactly this open live on Hydrax 2026-09-23, for a file that
+    was reachable moments before and after. Mirrors
+    preparation/prepare_boundary_conditions.py's own _load_mdt, which
+    already wraps this same open with config_utils.retry_transient_io."""
+    with retry_transient_io(xr.open_dataset, mdt_path) as ds:
         da = ds[mdt_variable].load()
 
     lat_dim = next(d for d in da.dims if "lat" in d.lower())

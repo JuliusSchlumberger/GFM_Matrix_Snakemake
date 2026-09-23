@@ -63,6 +63,7 @@ from rasters import WATERDEPTH_NODATA_INT16, encode_waterdepth_cm  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_boundary_forcing import idw_interpolate_to_grid  # noqa: E402
 from gfm_config import read_root  # noqa: E402
+from retry_io import retry_transient_io  # noqa: E402
 
 RETURN_PERIOD = "RP100"
 WATERLEVEL_NAME = "SLR_0"
@@ -130,19 +131,19 @@ def build_inputs_from_sfincs_subgrid(
     dep_path = sfincs_dir / "subgrid" / "dep_subgrid.tif"
     man_path = sfincs_dir / "subgrid" / "manning_subgrid.tif"
 
-    with rasterio.open(dep_path) as src:
+    with retry_transient_io(rasterio.open, dep_path) as src:
         dem = src.read(1).astype(np.float32)
         transform = src.transform
         crs = src.crs
         shape = src.shape
     dem = np.where(np.isnan(dem), np.float32(99.0), dem)
 
-    with rasterio.open(man_path) as src:
+    with retry_transient_io(rasterio.open, man_path) as src:
         manning_n = src.read(1).astype(np.float32)
     manning_n = np.where(np.isnan(manning_n), np.float32(default_friction * 100.0), manning_n)
     friction = (manning_n / np.float32(100.0)) * np.float32(friction_scale_factor)
 
-    with rasterio.open(native_mask_path) as src:
+    with retry_transient_io(rasterio.open, native_mask_path) as src:
         mask_f = np.empty(shape, dtype=np.float32)
         reproject(
             source=rasterio.band(src, 1), destination=mask_f,
@@ -207,7 +208,7 @@ def compute_planar_idw_seeds(
     real 1.47-3.12m station spread down to a ~1.73-1.78m tile-wide average
     before it ever reached the solver, silently under-flooding the tile.
     """
-    boundaries = gpd.read_file(boundaries_path)
+    boundaries = retry_transient_io(gpd.read_file, boundaries_path)
     if boundaries.empty:
         return None
     station_values_m = boundaries[variable].to_numpy(dtype=np.float64) / 100.0  # cm -> m
@@ -314,7 +315,7 @@ def main() -> None:
     if not boundaries_path.exists():
         print(f"tile {args.tile_id}: SKIP - no {boundaries_path}")
         return
-    boundaries = gpd.read_file(boundaries_path)
+    boundaries = retry_transient_io(gpd.read_file, boundaries_path)
     if boundaries.empty:
         print(f"tile {args.tile_id}: SKIP - boundaries file is empty (no station for this tile)")
         return

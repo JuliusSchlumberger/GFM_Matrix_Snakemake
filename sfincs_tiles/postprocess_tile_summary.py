@@ -32,6 +32,7 @@ from scipy import ndimage
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gfm_config import read_root  # noqa: E402
+from retry_io import retry_transient_io  # noqa: E402
 
 LAND_CODE = 0
 WATERDEPTH_SCALE = 100.0
@@ -40,7 +41,7 @@ WATERDEPTH_NODATA_INT16 = 32767
 
 def _decode_waterdepth_cm(path: Path) -> tuple[np.ndarray, object, object, tuple]:
     """(depth_m, transform, crs, shape) - NaN where not flooded/nodata."""
-    with rasterio.open(path) as src:
+    with retry_transient_io(rasterio.open, path) as src:
         raw = src.read(1)
         nodata = src.nodata if src.nodata is not None else WATERDEPTH_NODATA_INT16
         transform = src.transform
@@ -77,7 +78,7 @@ def summarize_tile(tile_id: str, root: Path, base_dir_name: str, tile_set: str) 
     native_mask_path = tile_dir / "inputs" / "mask.tif"
     out_dir = tile_dir / "outputs"
 
-    with rasterio.open(native_mask_path) as src:
+    with retry_transient_io(rasterio.open, native_mask_path) as src:
         native_mask = src.read(1)
         native_transform = src.transform
         native_crs = src.crs
@@ -103,7 +104,7 @@ def summarize_tile(tile_id: str, root: Path, base_dir_name: str, tile_set: str) 
             continue
         depth_m, transform, crs, shape = _decode_waterdepth_cm(path)
         mog = np.empty(shape, dtype=np.float32)
-        with rasterio.open(native_mask_path) as src:
+        with retry_transient_io(rasterio.open, native_mask_path) as src:
             reproject(
                 source=rasterio.band(src, 1), destination=mog,
                 src_transform=src.transform, src_crs=src.crs,
@@ -119,7 +120,7 @@ def summarize_tile(tile_id: str, root: Path, base_dir_name: str, tile_set: str) 
     # -- SFINCS: hmax.tif, already reprojected to EPSG:4326 land-only via run_sfincs_tile.py's own doublecheck --
     hmax_path = out_dir / "hmax.tif"
     if hmax_path.exists():
-        with rasterio.open(hmax_path) as src:
+        with retry_transient_io(rasterio.open, hmax_path) as src:
             hmax = src.read(1)
             hmax_nodata = src.nodata
             hmax_transform = src.transform
@@ -140,13 +141,13 @@ def summarize_tile(tile_id: str, root: Path, base_dir_name: str, tile_set: str) 
     sfincs_model_dir = tile_dir / "sfincs_model"
     try:
         sf = SfincsModel(root=str(sfincs_model_dir), mode="r")
-        sf.grid.read()
+        retry_transient_io(sf.grid.read)
         sfincs_mask = sf.grid.data["mask"].values
         sfincs_transform = sf.grid.data.raster.transform
         sfincs_crs = sf.grid.data.raster.crs
         shape = sfincs_mask.shape
         mog = np.empty(shape, dtype=np.float32)
-        with rasterio.open(native_mask_path) as src:
+        with retry_transient_io(rasterio.open, native_mask_path) as src:
             reproject(
                 source=rasterio.band(src, 1), destination=mog,
                 src_transform=src.transform, src_crs=src.crs,

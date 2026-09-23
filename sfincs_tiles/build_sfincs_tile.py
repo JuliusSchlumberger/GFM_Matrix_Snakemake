@@ -39,6 +39,7 @@ from rasterio.warp import Resampling, reproject
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_boundary_forcing import idw_interpolate_to_grid  # noqa: E402
 from gfm_config import read_root  # noqa: E402
+from retry_io import retry_transient_io  # noqa: E402
 
 
 def _classify_water_level_create_error(e: Exception, tile_id: str) -> RuntimeError | None:
@@ -98,7 +99,7 @@ def _reproject_nearest_to_grid(src_path: Path, dst_transform, dst_crs, dst_shape
     blended/interpolated one - that guarantee is the entire point of this
     function, and is what its own test validates.
     """
-    with rasterio.open(src_path) as src:
+    with retry_transient_io(rasterio.open, src_path) as src:
         dst_arr = np.empty(dst_shape, dtype=np.float32)
         reproject(
             source=rasterio.band(src, 1), destination=dst_arr,
@@ -138,7 +139,7 @@ def _compute_zsini_array(
 
 def _ocean_polygon_wgs84(mask_path: Path, ocean_code: int = 1) -> gpd.GeoDataFrame:
     """Vectorize mask.tif's ocean cells into a polygon GeoDataFrame (EPSG:4326)."""
-    with rasterio.open(mask_path) as src:
+    with retry_transient_io(rasterio.open, mask_path) as src:
         mask = src.read(1)
         transform = src.transform
     ocean = (mask == ocean_code).astype(np.uint8)
@@ -195,7 +196,7 @@ def build_sfincs_tile(
     sfincs_dir = root / base_dir_name / tile_id / "sfincs_model"
     sfincs_dir.mkdir(parents=True, exist_ok=True)
 
-    tile_gdf = gpd.read_file(tile_dir / "tile_geometry.gpkg")
+    tile_gdf = retry_transient_io(gpd.read_file, tile_dir / "tile_geometry.gpkg")
 
     # -- local data catalog for elevation.create/roughness.create (both need
     # catalog-keyed sources, confirmed via the real hydromt_sfincs API -
@@ -302,8 +303,8 @@ def build_sfincs_tile(
 
     # -- 4. boundary forcing (COAST-HG hydrographs, empirically MDT-corrected -
     # build_boundary_forcing.py's own prep output) --
-    matched_points = gpd.read_file(sfincs_dir / "matched_boundary_points.gpkg")
-    hydrographs = pd.read_csv(sfincs_dir / "corrected_hydrographs.csv")
+    matched_points = retry_transient_io(gpd.read_file, sfincs_dir / "matched_boundary_points.gpkg")
+    hydrographs = retry_transient_io(pd.read_csv, sfincs_dir / "corrected_hydrographs.csv")
 
     # Truncate the full ~148.8h COAST-HG hydrograph down to a window around
     # its own storm peak, instead of simulating the whole thing - real,
