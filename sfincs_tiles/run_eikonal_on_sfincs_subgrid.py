@@ -291,6 +291,19 @@ def main() -> None:
     parser.add_argument("--tile-id", required=True)
     parser.add_argument("--config", default=None, help="config.yml or a resolved_config.yml; defaults to the main repo config.yml")
     parser.add_argument("--base-dir-name", default="validation_sfincs_v2", help="output root directory name under paths.root (default: validation_sfincs_v2)")
+    parser.add_argument(
+        "--models", nargs="+", choices=["bathtub", "eikonal"], default=["bathtub", "eikonal"],
+        help="which of this script's two models to (re-)run (2026-09-24, user direction: "
+             "e.g. --models bathtub to skip eikonal entirely while its own sweep-count "
+             "calibration is still in progress). Default: both.",
+    )
+    parser.add_argument(
+        "--max-rounds", type=int, default=None,
+        help=f"eikonal round cap forwarded to run_eikonal_on_sfincs_subgrid() (default: "
+             f"{MAX_ROUNDS_DEFAULT} - 2026-09-24, user direction: intended to eventually take "
+             f"the value the sweep-budget calibration study settles on, see tests/ "
+             f"test_sweep_budget_calibration.py)",
+    )
     args = parser.parse_args()
 
     if args.config:
@@ -309,8 +322,12 @@ def main() -> None:
     native_mask_path = root / args.base_dir_name / args.tile_id / "inputs" / "mask.tif"
     boundaries_path = root / args.base_dir_name / args.tile_id / "inputs" / f"boundaries_{RETURN_PERIOD}_{WATERLEVEL_NAME}.gpkg"
 
-    if bathtub_output_path.exists() and eikonal_output_path.exists():
-        print(f"tile {args.tile_id}: already done (bathtub + eikonal), skipping")
+    run_bathtub = "bathtub" in args.models
+    run_eikonal = "eikonal" in args.models
+
+    already_done = (not run_bathtub or bathtub_output_path.exists()) and (not run_eikonal or eikonal_output_path.exists())
+    if already_done:
+        print(f"tile {args.tile_id}: already done ({'+'.join(args.models)}), skipping")
         return
     if not boundaries_path.exists():
         print(f"tile {args.tile_id}: SKIP - no {boundaries_path}")
@@ -321,7 +338,9 @@ def main() -> None:
         return
 
     # -- bathtub: cheap, computed and written FIRST, ahead of the (much slower) eikonal solve --
-    if bathtub_output_path.exists():
+    if not run_bathtub:
+        print(f"tile {args.tile_id}: bathtub not requested (--models={args.models}), skipping")
+    elif bathtub_output_path.exists():
         print(f"tile {args.tile_id}: bathtub already done, skipping")
     else:
         dem, mask, _friction, transform, crs = build_inputs_from_sfincs_subgrid(sfincs_dir, native_mask_path)
@@ -334,10 +353,16 @@ def main() -> None:
         print(f"Wrote {bathtub_output_path}")
 
     # -- eikonal (the real, friction/propagation-aware solve) --
+    if not run_eikonal:
+        print(f"tile {args.tile_id}: eikonal not requested (--models={args.models}), skipping")
+        return
     if eikonal_output_path.exists():
         print(f"tile {args.tile_id}: eikonal already done, skipping")
         return
-    result = run_eikonal_on_sfincs_subgrid(args.tile_id, root, base_dir_name=args.base_dir_name)
+    eikonal_kwargs = {"base_dir_name": args.base_dir_name}
+    if args.max_rounds is not None:
+        eikonal_kwargs["max_rounds"] = args.max_rounds
+    result = run_eikonal_on_sfincs_subgrid(args.tile_id, root, **eikonal_kwargs)
     if result is None:
         print(f"tile {args.tile_id}: SKIP eikonal - no usable coastline in this domain")
         return

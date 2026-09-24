@@ -1,12 +1,26 @@
 """Select tiles for the SFINCS-vs-eikonal validation batch, using ONE
 consistent set of criteria across the whole sample: a real ocean edge
-(hop_distance==0), a minimum ocean fraction, antimeridian-excluded,
-spatially stratified for global scatter - deliberately NO latitude
-restriction and NO area-based pre-filter. Reuses select_test_tiles.py's
-own proven eligibility logic (evaluate_tile/build_coast_hg_tree) rather
-than re-deriving it - see that module's own docstring for the full
-eligibility rationale (hop_distance==0, mask.tif size cap, <=1% river,
-real COAST-HG match).
+(hop_distance==0), a minimum ocean fraction, antimeridian-excluded, a
+high-latitude cutoff (2026-09-24, reinstated - see below), spatially
+stratified for global scatter - deliberately NO area-based pre-filter.
+Reuses select_test_tiles.py's own proven eligibility logic
+(evaluate_tile/build_coast_hg_tree) rather than re-deriving it - see that
+module's own docstring for the full eligibility rationale
+(hop_distance==0, mask.tif size cap, <=1% river, real COAST-HG match).
+
+High-latitude exclusion (2026-09-24, user direction: reinstated - "anything
+above a certain latitude was excluded from being picked", matching the
+original Set A methodology's own |lat|<=55 deg ceiling below, not a new
+metric): tiles far from the equator suffer worse UTM-reprojection
+distortion (meridian convergence curves a tile's straight lon/lat edges
+once reprojected to SFINCS's own axis-aligned UTM grid - confirmed live
+earlier this session on tile 1757, a 3-deg-longitude-wide tile whose own
+north edge sat ~4.4km further north at its east end than its west end).
+`--max-abs-lat-deg` (default 55, the original Set A ceiling) drops any
+tile whose centroid falls outside that band - simple, already-agreed, and
+directly tied to the real cause (latitude), unlike a fractional-area
+distortion metric computed per tile (tried and reverted - see git history/
+conversation if ever needed).
 
 Replaces sfincs_tiles/select_new_tile_sets.py's earlier two-set ("Set
 A"/"Set B", 260 tiles each) design - see
@@ -20,35 +34,26 @@ two sets' own criteria, not a deliberate choice; and Set A's own nominal
 meant it never actually took effect on real data (confirmed: Set A's own
 median tile area came out HIGHER than its own source pool's median).
 Rather than fixing that bound to reinstate an area bias, this single
-selection intentionally has NO area-based pre-filter at all and NO
-latitude restriction - just eligibility, a minimum ocean-fraction floor,
-antimeridian exclusion, and spatial stratification across the whole
+selection intentionally has NO area-based pre-filter at all - just
+eligibility, a minimum ocean-fraction floor, antimeridian exclusion, the
+high-latitude cutoff above, and spatial stratification across the whole
 eligible pool - matching what Set A's own selection effectively already
-did, which was judged representative enough as-is (confirmed with the
-user 2026-09-24).
+did (confirmed with the user 2026-09-24), including its own |lat|<=55 deg
+ceiling (reinstated here 2026-09-24 after briefly being dropped, then
+re-added per explicit user direction - see this file's own git history).
 
 Works directly off model_outputs/{tile_id}/inputs/ as it currently exists
 on disk (not a fresh catalog re-derivation) - selection is meant to be
 cheap and immediate, not block on re-preprocessing the whole globe first.
-NOTE (2026-09-24): this script cannot actually run to completion until
-model_outputs/ has real dem.tif/mask.tif/boundaries_*.gpkg for (ideally
-all of) the hop_distance==0 tile population again - model_outputs/ was
-deliberately deleted the same day to force a clean rebuild of the
-production preprocessing pipeline after the GEBCO-based mask fix (see
-src/rasters.py::resolve_offshore_mask_gaps_via_gebco), and that rebuild
-was still in progress as of this script's own writing. Re-running THIS
-script (tile reselection) and then the whole SFINCS validation batch
-against its output is tracked as a pending TODO, not done yet - see
-sfincs_tiles/SFINCS_VALIDATION_METHODOLOGY.md's own "Known follow-up work"
-section and this project's own saved memory entry.
+A tile without a real model_outputs/<id>/inputs/mask.tif yet is excluded
+up front, explicitly and reported (see "make sure the tiles are present"
+below) - the production preprocessing rebuild (after the GEBCO-based mask
+fix, src/rasters.py::resolve_offshore_mask_gaps_via_gebco) may still be
+in progress for some of the global tile population when this runs.
 
-Writes set_a_tile_ids.txt (every selected tile ID) and an EMPTY
-set_b_tile_ids.txt, rather than introducing a new single-file convention:
-generate_v2_batch_jobs.py and every per-tile pipeline script downstream
-still take a --set A|B argument (used only as a bookkeeping label written
-into summary.json, with no behavioural difference between the two), so
-this keeps every one of those scripts working unchanged - every selected
-tile is simply labelled "A".
+Writes a single tile_ids.txt (every selected tile ID) - no more Set A/B
+bookkeeping (2026-09-24, user direction - see generate_v2_batch_jobs.py's
+own updated --tile-ids-file default, which reads this file directly).
 
 Antimeridian exclusion: real, confirmed failure mode (tiles straddling
 +-180 deg break hydromt_sfincs's own water_level.create() with a GEOS
@@ -99,6 +104,11 @@ from gfm_config import read_root  # noqa: E402
 N_TILES_DEFAULT = 520
 MIN_OCEAN_FRAC_DEFAULT = 0.05
 ANTIMERIDIAN_BBOX_WIDTH_DEG_DEFAULT = 60.0  # real GFM tiles are never anywhere near this wide
+MAX_ABS_LAT_DEG_DEFAULT = 55.0  # original Set A methodology's own ceiling (2026-09-24, reinstated
+# per user direction) - see module docstring's "High-latitude exclusion" note
+BASE_DIR_NAME_DEFAULT = "validation_sfincs_v4"  # 2026-09-24, user direction - fresh output tree
+# for this reselection + the high-latitude-cutoff fix, matching validation_sfincs_v2/v3's own
+# per-rebuild naming convention
 
 LAND_COLOR = "#d8d8d4"
 OCEAN_COLOR = "#fcfcfb"
@@ -281,6 +291,13 @@ def main() -> None:
     parser.add_argument("--n-tiles", type=int, default=N_TILES_DEFAULT)
     parser.add_argument("--min-ocean-frac", type=float, default=MIN_OCEAN_FRAC_DEFAULT)
     parser.add_argument("--antimeridian-width-deg", type=float, default=ANTIMERIDIAN_BBOX_WIDTH_DEG_DEFAULT)
+    parser.add_argument(
+        "--max-abs-lat-deg", type=float, default=MAX_ABS_LAT_DEG_DEFAULT,
+        help="exclude tiles whose centroid latitude falls outside +-this value (2026-09-24, "
+             "user direction, reinstates the original Set A methodology's own ceiling - see "
+             "module docstring's 'High-latitude exclusion' note)",
+    )
+    parser.add_argument("--base-dir-name", default=BASE_DIR_NAME_DEFAULT)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
@@ -295,11 +312,27 @@ def main() -> None:
     hop0 = hop0[~hop0["antimeridian"]].copy()
     print(f"{n_antimeridian} antimeridian-crossing tile(s) excluded, {len(hop0)} remain")
 
+    centroid = hop0.geometry.centroid
+    hop0["lat_centroid"] = centroid.y.to_numpy()
+    n_high_lat = int((hop0["lat_centroid"].abs() > args.max_abs_lat_deg).sum())
+    hop0 = hop0[hop0["lat_centroid"].abs() <= args.max_abs_lat_deg].copy()
+    print(f"{n_high_lat} tile(s) excluded for |lat_centroid| > {args.max_abs_lat_deg}, {len(hop0)} remain")
+
+    # Explicit model_outputs existence check (2026-09-24, user direction: "make sure that the
+    # tiles are present in the directory") - evaluate_tile() below already returns None for a
+    # missing mask.tif, so a tile without real inputs could never be SELECTED either way, but
+    # this makes that fact an audited, reported number up front rather than an implicit
+    # side-effect buried in evaluate_tile's own per-tile reject reasons - matches
+    # select_calibration_tiles.py's own same up-front check, added earlier this session.
+    model_outputs_root = root / "model_outputs"
+    has_inputs = hop0["tile_id"].apply(lambda t: (model_outputs_root / str(int(t)) / "inputs" / "mask.tif").is_file())
+    n_missing_inputs = int((~has_inputs).sum())
+    hop0 = hop0[has_inputs].copy()
+    print(f"{n_missing_inputs} tile(s) excluded - no model_outputs/<id>/inputs/mask.tif yet, {len(hop0)} remain")
+
     tiles_gdf["area_km2"] = _area_km2(tiles_gdf)
     hop0["area_km2"] = _area_km2(hop0)
     hop0["area_km2_bbox"] = hop0["area_km2"]
-    centroid = hop0.geometry.centroid
-    hop0["lat_centroid"] = centroid.y.to_numpy()
 
     coast_hg_tree = build_coast_hg_tree(root / "inputs" / "COAST_HG" / "COAST-HG_RP100.nc")
 
@@ -320,18 +353,18 @@ def main() -> None:
     print(f"\n{len(eligible_df)} of {len(hop0)} hop_distance==0, non-antimeridian tiles eligible "
           f"(<= {args.max_cells:,} cells, <= {args.max_river_frac:.1%} river, real COAST-HG match)")
 
-    out_dir = root / "validation_sfincs_v2"
+    out_dir = root / args.base_dir_name
     out_dir.mkdir(parents=True, exist_ok=True)
     eligible_df.to_csv(out_dir / "eligible_tile_pool.csv", index=False)
     print(f"Wrote {out_dir / 'eligible_tile_pool.csv'} (full eligible pool, for audit)")
 
-    # -- single selection: ocean_frac floor, antimeridian already excluded,
-    # NO area-based pre-filter, NO latitude restriction, spatially stratified --
+    # -- single selection: ocean_frac floor, antimeridian + high-latitude + missing-inputs
+    # already excluded, NO area-based pre-filter, spatially stratified --
     pool = eligible_df[eligible_df["ocean_frac"] >= args.min_ocean_frac].copy()
     print(f"  {len(pool)} of {len(eligible_df)} eligible tiles have ocean_frac >= {args.min_ocean_frac:.0%}")
     selected = stratified_sample_exact(pool, min(args.n_tiles, len(pool)), GRID_DEG, args.seed)
     print(f"\nSelected: {len(selected)} tiles (ocean_frac >= {args.min_ocean_frac:.0%}, "
-          f"antimeridian-excluded, no latitude restriction, stratified)")
+          f"antimeridian-excluded, |lat| <= {args.max_abs_lat_deg}, stratified)")
 
     # No "set" column any more (2026-09-24, user direction) - the two-batch
     # "Set A/Set B" split this superseded is gone, and there's only ever one

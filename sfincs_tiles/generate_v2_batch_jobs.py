@@ -62,6 +62,7 @@ def generate_batches(
     tile_set_pairs: list[tuple[str, str | None]], n_nodes: int, partition: str, time_limit: str,
     mem: str, cpus_per_task: int, account: str, runner_script_linux: str,
     linux_jobs_dir: str, local_jobs_dir: Path, submit_path: Path, batch_name_prefix: str,
+    runner_extra_args: str = "",
 ) -> None:
     n_batches = min(n_nodes, len(tile_set_pairs))
     k, m = divmod(len(tile_set_pairs), n_batches)
@@ -97,7 +98,8 @@ def generate_batches(
         ]
         for tile_id, tile_set in batch_pairs:
             set_arg = f" {tile_set}" if tile_set else ""
-            lines.append(f'bash "{runner_script_linux}" {tile_id}{set_arg}')
+            extra = f" {runner_extra_args}" if runner_extra_args else ""
+            lines.append(f'bash "{runner_script_linux}" {tile_id}{set_arg}{extra}')
         lines.append("")
 
         script_path = local_jobs_dir / f"{name}.sbatch"
@@ -148,6 +150,13 @@ def main() -> None:
     parser.add_argument("--mem", default=MEM_DEFAULT)
     parser.add_argument("--cpus-per-task", type=int, default=CPUS_PER_TASK_DEFAULT)
     parser.add_argument("--account", default="")
+    parser.add_argument(
+        "--runner-extra-args", default="",
+        help="extra args appended verbatim to every generated 'bash <runner> tile_id [set]' line "
+             "(2026-09-24, user direction) - e.g. '--models bathtub,sfincs' to skip eikonal while "
+             "its own sweep-count calibration (tests/test_sweep_budget_calibration.py) is still "
+             "running, or '--models eikonal --max-rounds 25' once that study settles on a value",
+    )
     args = parser.parse_args()
 
     config_path = Path(args.config)
@@ -201,6 +210,7 @@ def main() -> None:
         mem=args.mem, cpus_per_task=args.cpus_per_task, account=args.account,
         runner_script_linux=runner_script_linux, linux_jobs_dir=linux_jobs_dir, local_jobs_dir=local_jobs_dir,
         submit_path=local_jobs_dir / submit_filename, batch_name_prefix=batch_name_prefix,
+        runner_extra_args=args.runner_extra_args,
     )
     print(f"\nSubmit on Hydrax with: bash {linux_jobs_dir}/{submit_filename}")
     print(f"(make sure {args.runner_script_name} is executable / callable via `bash` - no chmod needed since it's invoked as `bash <path>`)")
