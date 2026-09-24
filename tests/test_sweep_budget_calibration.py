@@ -327,6 +327,15 @@ def main() -> None:
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--tile-ids", type=int, nargs="*", default=None)
     parser.add_argument("--epsilon", type=float, default=DEFAULT_EPSILON_M, help=f"round-level convergence threshold (default: {DEFAULT_EPSILON_M}, production's own simulation.flooding.waterlevel_epsilon_m)")
+    parser.add_argument(
+        "--write-wet-tiles-summary", action="store_true",
+        help="write wet_tiles_selected.txt from THIS process's own tiles only - only safe for a "
+             "single sequential run that sees every candidate tile. Off by default (2026-09-24): "
+             "under any parallel HPC split (array job OR N-node batch job), every concurrent "
+             "process would otherwise race to overwrite the same file with just its own tiny "
+             "slice. Use aggregate_wet_tiles.py after a parallel run instead - it scans every "
+             "tile's own CSV post-hoc and is safe regardless of how the work was split.",
+    )
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -386,16 +395,14 @@ def main() -> None:
             break
 
     print(f"\nDone. Per-tile CSVs written to {out_dir}")
-    # wet_tiles_selected.txt is only meaningful when THIS process saw every
-    # tile in the run (the normal, sequential invocation) - under the HPC
-    # array job (2026-09-24), each task calls main() with exactly ONE tile,
-    # so `wet_tiles` here would only ever hold 0 or 1 tile_id; every one of
-    # those ~300 concurrent tasks writing "the" wet_tiles_selected.txt would
-    # race and overwrite each other, corrupting it down to whichever task
-    # wrote last. Guarded on len(tiles) > 1 - build the real file with
-    # aggregate_wet_tiles.py instead once the array job's own per-tile CSVs
-    # are all on disk.
-    if len(tiles) > 1:
+    # wet_tiles_selected.txt: see --write-wet-tiles-summary's own help text
+    # above for why this defaults off - under ANY parallel HPC split (array
+    # job, one tile per task, OR N-node batch job, ~10 tiles per node - both
+    # 2026-09-24), every concurrent process only ever sees ITS OWN slice, so
+    # every one of them writing "the" wet_tiles_selected.txt would race and
+    # overwrite each other down to whichever process wrote last. Use
+    # aggregate_wet_tiles.py after a parallel run instead.
+    if args.write_wet_tiles_summary:
         selected = wet_tiles[:N_TILES_WANTED]
         wet_file = out_dir / "wet_tiles_selected.txt"
         with open(wet_file, "w") as f:
