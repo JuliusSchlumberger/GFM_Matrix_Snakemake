@@ -92,8 +92,10 @@ SCRIPTS = {
         "script_name": "test_obstacle_coupling_calibration.py",
         "out_subdir": "obstacle_coupling",
         # (max_outer+1) solves x inner_max_rounds rounds x 4 sweeps, at this study's own
-        # 15/50 defaults (DEFAULT_MAX_OUTER/DEFAULT_INNER_MAX_ROUNDS) - zero early exit ever.
-        "worst_case_sweeps_per_tile": 16 * 50 * SWEEPS_PER_ROUND,
+        # 15/40 defaults (DEFAULT_MAX_OUTER/DEFAULT_INNER_MAX_ROUNDS, the latter updated
+        # 2026-09-24 to match the sweep-budget study's own concluded round count) - zero
+        # early exit ever.
+        "worst_case_sweeps_per_tile": 16 * 40 * SWEEPS_PER_ROUND,
         "default_tile_ids_file": "sweep_budget/wet_tiles_selected.txt",
     },
 }

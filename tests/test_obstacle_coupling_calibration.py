@@ -121,7 +121,11 @@ BLOCK_FRICTION = 9999.0  # matches flood_model.OBSTACLE_BLOCK_FRICTION (was the 
 DEFAULT_OUTER_EPSILON_M = 0.1  # softer than production's own 0.03m default (2026-09-24, user
 # direction - see module docstring) - this script's own --epsilon default, not config-driven
 DEFAULT_MAX_OUTER = 15  # 2026-09-24 user direction - up from production's own default of 5
-DEFAULT_INNER_MAX_ROUNDS = 50  # 2026-09-24 user direction - up from production's own default of 12
+DEFAULT_INNER_MAX_ROUNDS = 40  # 2026-09-24 user direction - the sweep-budget calibration
+# study's own conclusion (see tests/plot_sweep_budget_convergence.py's output/figures):
+# 58.7% of tiles converge by round 40, and of the ones that don't, 84% have their flood
+# extent (depth>0 cells) already fully frozen by then too - up from production's own
+# default of 12, down from this study's own earlier 50 once the real number was in hand
 # Neither of the above two is config-driven, matching DEFAULT_OUTER_EPSILON_M above - this
 # calibration study is deliberately exploring beyond production's own current defaults, not
 # reproducing them (pass --max-outer/--inner-max-rounds explicitly to match config.yml instead).
