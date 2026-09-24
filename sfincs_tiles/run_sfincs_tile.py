@@ -213,7 +213,7 @@ def main() -> None:
              "already run elsewhere (e.g. generate_sfincs_hpc_jobs.py's own HPC batch jobs), "
              "whose sfincs_map.nc has already been copied back into sfincs_model/.",
     )
-    parser.add_argument("--base-dir-name", default="validation_sfincs", help="output root directory name under paths.root (default: validation_sfincs)")
+    parser.add_argument("--base-dir-name", default="validation_sfincs_v2", help="output root directory name under paths.root (default: validation_sfincs_v2)")
     args = parser.parse_args()
     if not args.skip_run and not args.sfincs_exe:
         parser.error("--sfincs-exe is required unless --skip-run is given")

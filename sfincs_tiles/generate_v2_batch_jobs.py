@@ -44,10 +44,21 @@ BASE_DIR_NAME_DEFAULT = "validation_sfincs_v2"
 RUNNER_SCRIPT_NAME_DEFAULT = "run_one_tile_v2.sh"
 
 
+def _batch_name_prefix(base_dir_name: str) -> str:
+    """e.g. 'validation_sfincs_v3' -> 'v3_batch', so batch/submit script
+    filenames reflect whichever base_dir_name they were generated for
+    instead of always saying 'v2' (real confusion, 2026-09-23: a v3 run's
+    files still being named v2_batch_*.sbatch/submit_v2_batches.sh made a
+    user try `bash .../submit_v3_batches.sh`, which never existed)."""
+    prefix = "validation_sfincs_"
+    tag = base_dir_name[len(prefix):] if base_dir_name.startswith(prefix) else base_dir_name
+    return f"{tag}_batch"
+
+
 def generate_batches(
     tile_set_pairs: list[tuple[str, str]], n_nodes: int, partition: str, time_limit: str,
     mem: str, cpus_per_task: int, account: str, runner_script_linux: str,
-    linux_jobs_dir: str, local_jobs_dir: Path, submit_path: Path,
+    linux_jobs_dir: str, local_jobs_dir: Path, submit_path: Path, batch_name_prefix: str,
 ) -> None:
     n_batches = min(n_nodes, len(tile_set_pairs))
     k, m = divmod(len(tile_set_pairs), n_batches)
@@ -62,7 +73,7 @@ def generate_batches(
 
     script_paths = []
     for batch_id, batch_pairs in batches:
-        name = f"v2_batch_{batch_id}"
+        name = f"{batch_name_prefix}_{batch_id}"
         lines = [
             "#!/bin/bash",
             f"#SBATCH --job-name={name}",
@@ -162,13 +173,16 @@ def main() -> None:
     linux_jobs_dir = f"{base_dir_linux}/hpc_jobs"
     runner_script_linux = f"{linux_code_root}/sfincs_tiles/{args.runner_script_name}"
 
+    batch_name_prefix = _batch_name_prefix(args.base_dir_name)
+    submit_filename = f"submit_{batch_name_prefix}es.sh"  # e.g. 'v3_batch' -> 'submit_v3_batches.sh'
+
     generate_batches(
         tile_set_pairs=tile_set_pairs, n_nodes=args.n_nodes, partition=args.partition, time_limit=args.time,
         mem=args.mem, cpus_per_task=args.cpus_per_task, account=args.account,
         runner_script_linux=runner_script_linux, linux_jobs_dir=linux_jobs_dir, local_jobs_dir=local_jobs_dir,
-        submit_path=local_jobs_dir / "submit_v2_batches.sh",
+        submit_path=local_jobs_dir / submit_filename, batch_name_prefix=batch_name_prefix,
     )
-    print(f"\nSubmit on Hydrax with: bash {linux_jobs_dir}/submit_v2_batches.sh")
+    print(f"\nSubmit on Hydrax with: bash {linux_jobs_dir}/{submit_filename}")
     print(f"(make sure {args.runner_script_name} is executable / callable via `bash` - no chmod needed since it's invoked as `bash <path>`)")
 
 

@@ -1,4 +1,28 @@
-"""Select two new, non-overlapping ~260-tile sets for the clean rebuild of
+"""TODO (2026-09-24, user direction, currently BLOCKED - see below): this
+two-set design is scheduled to be replaced with a SINGLE ~520-tile
+selection - no A/B split, no latitude restriction at all (drop Set A's own
+|lat| 5-55 deg band entirely - take from the full range, poles included),
+smallest-by-area, antimeridian-excluded, spatially stratified, with a NEW
+floor of ocean_frac >= 0.05 applied to every selected tile (not just a
+Set-B-only filter as before - every tile in the single selection must
+clear it). The old two-set design's own asymmetry (only Set A had a
+latitude restriction; Set B had none) pulled 56% of Set B's 260 tiles (127
+tiles, 96 of those above the Arctic/Antarctic Circle) outside that band,
+visible directly on the resulting tile-locations map - dropping the
+latitude restriction entirely (rather than re-applying it inconsistently)
+was the user's own direction once that asymmetry was pointed out. The
+replacement script (working name select_validation_tiles.py) should also
+generate, from the selected sample: a global Equal Earth tile-locations map
+(light grey land, no figure title), a histogram of the selected sample's
+size/ocean-fraction distribution against the eligible pool, and an Excel
+workbook with the summary statistics tables. BLOCKED until model_outputs/
+exists again (deliberately deleted 2026-09-24 to force a clean production
+preprocessing rebuild after the GEBCO-based mask fix) - this script's own
+evaluate_tile eligibility check reads each candidate tile's mask.tif/
+boundaries gpkg from model_outputs/{tile_id}/inputs/. See sfincs_tiles/
+SFINCS_VALIDATION_METHODOLOGY.md's own "Known follow-up work" section.
+
+Select two new, non-overlapping ~260-tile sets for the clean rebuild of
 the eikonal-vs-SFINCS validation batch (2026-09), reusing
 select_test_tiles.py's own proven eligibility logic (evaluate_tile/
 build_coast_hg_tree/stratified_sample) rather than re-deriving it - see

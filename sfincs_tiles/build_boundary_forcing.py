@@ -191,7 +191,7 @@ if __name__ == "__main__":
     parser.add_argument("--return-period", default="RP100")
     parser.add_argument("--waterlevel-name", default="SLR_0")
     parser.add_argument("--k-nearest", type=int, default=K_NEAREST_STATIONS)
-    parser.add_argument("--base-dir-name", default="validation_sfincs", help="output root directory name under paths.root (default: validation_sfincs)")
+    parser.add_argument("--base-dir-name", default="validation_sfincs_v2", help="output root directory name under paths.root (default: validation_sfincs_v2)")
     args = parser.parse_args()
 
     sys.path.insert(0, str(Path(__file__).resolve().parent))

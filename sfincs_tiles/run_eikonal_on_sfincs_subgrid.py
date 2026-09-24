@@ -248,7 +248,7 @@ def compute_bathtub_depth(dem: np.ndarray, mask: np.ndarray, max_waterlevel_m: f
 def run_eikonal_on_sfincs_subgrid(
     tile_id: str, root: Path, friction_scale_factor: float = FRICTION_SCALE_FACTOR_DEFAULT,
     max_rounds: int = MAX_ROUNDS_DEFAULT, waterlevel_epsilon_m: float = WATERLEVEL_EPSILON_M_DEFAULT,
-    base_dir_name: str = "validation_sfincs",
+    base_dir_name: str = "validation_sfincs_v2",
 ) -> tuple[np.ndarray, dict, dict] | None:
     """Returns (waterdepth, diagnostics, grid_info) on the SFINCS subgrid's
     own UTM grid, or None if this tile has no usable boundary forcing."""
@@ -290,7 +290,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tile-id", required=True)
     parser.add_argument("--config", default=None, help="config.yml or a resolved_config.yml; defaults to the main repo config.yml")
-    parser.add_argument("--base-dir-name", default="validation_sfincs", help="output root directory name under paths.root (default: validation_sfincs)")
+    parser.add_argument("--base-dir-name", default="validation_sfincs_v2", help="output root directory name under paths.root (default: validation_sfincs_v2)")
     args = parser.parse_args()
 
     if args.config:

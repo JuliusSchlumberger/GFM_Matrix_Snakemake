@@ -31,6 +31,7 @@ from rasterio.warp import Resampling, reproject
 from scipy import ndimage
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from flood_agreement import WET_THRESHOLD_M, confusion_counts  # noqa: E402
 from gfm_config import read_root  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
 
@@ -92,6 +93,41 @@ def summarize_tile(tile_id: str, root: Path, base_dir_name: str, tile_set: str) 
         "domain_area_km2": domain_area_km2, "ocean_frac": ocean_frac,
     }
 
+    # -- SFINCS's own subgrid-resolution hmax (hmax_subgrid.tif, still in its
+    # native UTM subgrid CRS - NOT the same file as hmax.tif below, which is
+    # already reprojected to EPSG:4326) - read once here so the bathtub/
+    # eikonal loop below can compute agreement counts against it directly,
+    # since bathtub_waterdepth_*.tif/eikonal_on_subgrid_waterdepth_*.tif are
+    # both pixel-identical to it (same shape/transform/crs - all three
+    # ultimately derive from sfincs_model/subgrid/dep_subgrid.tif), so no
+    # reprojection is needed between them (confirmed live, 2026-09).
+    # Computing this here - on the HPC node that already has these rasters
+    # open, right after the SFINCS run that produced them - means
+    # compute_calibration_metrics.py never needs to re-open/re-reproject any
+    # raster itself; it only aggregates the counts written below (2026-09-24,
+    # user direction: don't redo per-tile raster I/O sequentially afterward
+    # when it can be done once, in parallel, right here).
+    sfincs_wet_subgrid = None
+    hmax_subgrid_path = tile_dir / "sfincs_model" / "hmax_subgrid.tif"
+    if hmax_subgrid_path.exists():
+        with retry_transient_io(rasterio.open, hmax_subgrid_path) as src:
+            sfincs_depth_subgrid = src.read(1).astype(np.float32)
+            sg_nodata = src.nodata
+            sg_transform = src.transform
+            sg_crs = src.crs
+            sg_shape = src.shape
+        if sg_nodata is not None and not np.isnan(sg_nodata):
+            sfincs_depth_subgrid = np.where(sfincs_depth_subgrid == sg_nodata, np.nan, sfincs_depth_subgrid)
+        mog_sg = np.empty(sg_shape, dtype=np.float32)
+        with retry_transient_io(rasterio.open, native_mask_path) as src:
+            reproject(
+                source=rasterio.band(src, 1), destination=mog_sg,
+                src_transform=src.transform, src_crs=src.crs,
+                dst_transform=sg_transform, dst_crs=sg_crs, resampling=Resampling.nearest,
+            )
+        land_sg = mog_sg == LAND_CODE
+        sfincs_wet_subgrid = land_sg & np.isfinite(sfincs_depth_subgrid) & (sfincs_depth_subgrid > WET_THRESHOLD_M)
+
     # -- bathtub + eikonal: both on the SFINCS subgrid UTM grid (30m, isotropic) --
     for name, fname in [
         ("bathtub", "bathtub_waterdepth_RP100_SLR_0.tif"),
@@ -101,6 +137,7 @@ def summarize_tile(tile_id: str, root: Path, base_dir_name: str, tile_set: str) 
         if not path.exists():
             result[f"{name}_km2"] = None
             result.update({f"{name}_depth_{k}": None for k in ("mean_m", "median_m", "max_m")})
+            result.update({f"{name}_matched_km2": None, f"{name}_only_km2": None, f"{name}_sfincs_only_km2": None})
             continue
         depth_m, transform, crs, shape = _decode_waterdepth_cm(path)
         mog = np.empty(shape, dtype=np.float32)
@@ -116,6 +153,16 @@ def summarize_tile(tile_id: str, root: Path, base_dir_name: str, tile_set: str) 
         result[f"{name}_km2"] = float(flooded_land.sum() * cell_km2)
         stats = _depth_stats(np.where(flooded_land, depth_m, np.nan))
         result.update({f"{name}_depth_{k}": v for k, v in stats.items()})
+
+        if sfincs_wet_subgrid is not None and shape == sg_shape:
+            model_wet = np.isfinite(depth_m) & (depth_m > WET_THRESHOLD_M)
+            weight = np.full(shape, cell_km2, dtype=np.float64)
+            matched, model_only, sfincs_only = confusion_counts(model_wet, sfincs_wet_subgrid, land, weight)
+            result[f"{name}_matched_km2"] = matched
+            result[f"{name}_only_km2"] = model_only
+            result[f"{name}_sfincs_only_km2"] = sfincs_only
+        else:
+            result.update({f"{name}_matched_km2": None, f"{name}_only_km2": None, f"{name}_sfincs_only_km2": None})
 
     # -- SFINCS: hmax.tif, already reprojected to EPSG:4326 land-only via run_sfincs_tile.py's own doublecheck --
     hmax_path = out_dir / "hmax.tif"

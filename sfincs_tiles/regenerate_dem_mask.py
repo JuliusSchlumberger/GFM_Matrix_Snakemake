@@ -88,7 +88,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tile-id", required=True)
     parser.add_argument("--config", default=str(_repo_root / "snakemake_workflow" / "config" / "config.yml"))
-    parser.add_argument("--base-dir-name", default="validation_sfincs")
+    parser.add_argument("--base-dir-name", default="validation_sfincs_v2")
     args = parser.parse_args()
 
     config = load_config(Path(args.config))

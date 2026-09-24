@@ -435,7 +435,7 @@ simulation: # Used by: preprocessing rules
 # SLURM allocation size, so a `cpus_per_task: 1` partition means preprocessing
 # on that batch's tiles runs fully serial, not just one simulation tile at a time.
 hpc:
-  n_nodes: 20                                        # PLACEHOLDER: max sbatch scripts (node batches) to generate PER WAVE, PER SIZE CLASS
+  n_nodes: 40                                        # PLACEHOLDER: max sbatch scripts (node batches) to generate PER WAVE, PER SIZE CLASS
   jobs_dir: "{root}/model_outputs/hpc_jobs"           # generated sbatch scripts, resolved_config.yml, submit_waves.sh, logs/
   # Tiles at/above this pixel count go to sbatch_large instead of sbatch,
   # for BOTH preprocessing and simulation batching. Default 70,000,000 is
