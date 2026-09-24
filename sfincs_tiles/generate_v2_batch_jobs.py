@@ -1,7 +1,10 @@
 """Generate the N independent sbatch scripts that dispatch the v2 validation
-batch (Set A + Set B, see select_new_tile_sets.py) end to end, one job per
-script, each looping sequentially through its own tile-id/set slice and
-calling run_one_tile_v2.sh <tile_id> <set> per tile - the per-tile pipeline
+batch (see select_validation_tiles.py - current selections write a single
+tile_ids.txt, no more Set A/B, 2026-09-24 user direction; --set-a-file/
+--set-b-file remain as an explicit opt-in for regenerating older v2/v3
+batches that do still carry a set label) end to end, one job per script, each
+looping sequentially through its own tile-id slice and calling
+run_one_tile_v2.sh <tile_id> [<set>] per tile - the per-tile pipeline
 covering input-copy -> SFINCS-input build (hydromt-sfincs-dev env) ->
 bathtub+eikonal (gfm env) -> SFINCS run (apptainer) -> postprocess+summary
 (hydromt-sfincs-dev env), all inside that one script.
@@ -56,7 +59,7 @@ def _batch_name_prefix(base_dir_name: str) -> str:
 
 
 def generate_batches(
-    tile_set_pairs: list[tuple[str, str]], n_nodes: int, partition: str, time_limit: str,
+    tile_set_pairs: list[tuple[str, str | None]], n_nodes: int, partition: str, time_limit: str,
     mem: str, cpus_per_task: int, account: str, runner_script_linux: str,
     linux_jobs_dir: str, local_jobs_dir: Path, submit_path: Path, batch_name_prefix: str,
 ) -> None:
@@ -93,7 +96,8 @@ def generate_batches(
             "",
         ]
         for tile_id, tile_set in batch_pairs:
-            lines.append(f'bash "{runner_script_linux}" {tile_id} {tile_set}')
+            set_arg = f" {tile_set}" if tile_set else ""
+            lines.append(f'bash "{runner_script_linux}" {tile_id}{set_arg}')
         lines.append("")
 
         script_path = local_jobs_dir / f"{name}.sbatch"
@@ -127,8 +131,16 @@ def main() -> None:
         help="per-tile runner script under sfincs_tiles/ (e.g. run_one_tile_v3.sh for a fresh "
              "output tree that starts with no stale per-stage outputs to skip)",
     )
-    parser.add_argument("--set-a-file", default=None, help="default: {base_dir_name}/set_a_tile_ids.txt")
-    parser.add_argument("--set-b-file", default=None, help="default: {base_dir_name}/set_b_tile_ids.txt")
+    parser.add_argument(
+        "--tile-ids-file", default=None,
+        help="default: {base_dir_name}/tile_ids.txt (no set label) - current selection output",
+    )
+    parser.add_argument(
+        "--set-a-file", default=None,
+        help="opt-in backward-compat path for an older two-set batch (validation_sfincs_v2/v3); "
+             "if given (with --set-b-file), overrides --tile-ids-file entirely",
+    )
+    parser.add_argument("--set-b-file", default=None, help="see --set-a-file")
     parser.add_argument("--skip-tile-ids", type=str, nargs="*", default=[], help="tile IDs to exclude entirely")
     parser.add_argument("--n-nodes", type=int, default=N_NODES_DEFAULT)
     parser.add_argument("--partition", default=PARTITION_DEFAULT)
@@ -149,16 +161,24 @@ def main() -> None:
     base_dir_local = local_root / args.base_dir_name
     base_dir_linux = f"{linux_root}/{args.base_dir_name}"
 
-    set_a_file = Path(args.set_a_file) if args.set_a_file else base_dir_local / "set_a_tile_ids.txt"
-    set_b_file = Path(args.set_b_file) if args.set_b_file else base_dir_local / "set_b_tile_ids.txt"
     skip = set(args.skip_tile_ids)
+    tile_set_pairs: list[tuple[str, str | None]] = []
 
-    tile_set_pairs = []
-    for path, set_label in [(set_a_file, "A"), (set_b_file, "B")]:
-        ids = [line.strip() for line in path.read_text().splitlines() if line.strip()]
+    if args.set_a_file or args.set_b_file:
+        set_a_file = Path(args.set_a_file) if args.set_a_file else base_dir_local / "set_a_tile_ids.txt"
+        set_b_file = Path(args.set_b_file) if args.set_b_file else base_dir_local / "set_b_tile_ids.txt"
+        for path, set_label in [(set_a_file, "A"), (set_b_file, "B")]:
+            ids = [line.strip() for line in path.read_text().splitlines() if line.strip()]
+            ids = [t for t in ids if t not in skip]
+            tile_set_pairs += [(t, set_label) for t in ids]
+            print(f"Set {set_label}: {len(ids)} tile(s) from {path}")
+    else:
+        tile_ids_file = Path(args.tile_ids_file) if args.tile_ids_file else base_dir_local / "tile_ids.txt"
+        ids = [line.strip() for line in tile_ids_file.read_text().splitlines() if line.strip()]
         ids = [t for t in ids if t not in skip]
-        tile_set_pairs += [(t, set_label) for t in ids]
-        print(f"Set {set_label}: {len(ids)} tile(s) from {path}")
+        tile_set_pairs += [(t, None) for t in ids]
+        print(f"{len(ids)} tile(s) from {tile_ids_file}")
+
     if not tile_set_pairs:
         raise ValueError("no tile IDs to dispatch after excluding skip list")
     print(f"{len(tile_set_pairs)} tile(s) total ({len(skip)} excluded: {sorted(skip)})")

@@ -28,7 +28,7 @@ import numpy as np
 import rasterio
 from rasterio.fill import fillnodata
 from rasterio.warp import Resampling, reproject
-from scipy.ndimage import minimum_filter
+from scipy.ndimage import distance_transform_edt, minimum_filter
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mdt import mdt_lookup_fn  # noqa: E402
@@ -104,6 +104,17 @@ LAKE_RIVER_INTERP_MAX_SEARCH_DISTANCE_PX = 200  # rasterio.fill.fillnodata's sea
 # can't reach falls back to LAKE_RIVER_MIN_ELEVATION_M via the final floor below, not a
 # silent nodata leak.
 
+GEBCO_COAST_CLIP_M = 200.0  # distance (m) from the nearest land cell within which GEBCO's own
+# ocean elevation is discarded and interpolated instead - see _fill_coastal_transition_elevation's
+# own docstring (2026-09-24, user-proposed fix) for the full reasoning: GEBCO's own ~450m native
+# resolution means the nearest real sample to a given coastline can already be several hundred
+# metres offshore and already read as a clamped-deep value, with no intervening real sample for
+# bilinear to interpolate a gradual approach from - this discards that unreliable near-coast ring
+# outright and interpolates across it from the land edge and the still-real GEBCO value beyond it.
+
+GEBCO_COAST_CLIP_MAX_SEARCH_DISTANCE_PX = 50  # generous margin over GEBCO_COAST_CLIP_M's own
+# ~200m / ~30m-per-pixel = ~7px gap width.
+
 LAKE_RIVER_SMOOTH_WINDOW_M = 500.0  # 2D spatial minimum-filter window (not a
 # channel-direction-aware moving window - considered, but needs a real flow network/
 # centerline model to order pixels along an arbitrary river; a plain spatial minimum
@@ -138,13 +149,63 @@ def _fill_lake_river_elevation(
     )
 
     # real per-axis metre resolution at this tile's own latitude (same convention used
-    # throughout this pipeline, e.g. select_new_tile_sets.py's boundary_distance_proxy_km)
+    # throughout this pipeline, e.g. select_validation_tiles.py's _area_km2)
     px_w_m = abs(transform.a) * 111320.0 * np.cos(np.radians(lat_deg))
     px_h_m = abs(transform.e) * 110540.0
     win_px = max(1, round(smooth_window_m / max(min(px_w_m, px_h_m), 1e-6)))
     smoothed = minimum_filter(interpolated, size=win_px)
 
     return np.where(lake_river, smoothed, dem_m)
+
+
+def _fill_coastal_transition_elevation(
+    gebco_corrected: np.ndarray, land_lake_river: np.ndarray, ocean: np.ndarray, transform, lat_deg: float,
+    clip_m: float = GEBCO_COAST_CLIP_M,
+    interp_max_search_distance_px: float = GEBCO_COAST_CLIP_MAX_SEARCH_DISTANCE_PX,
+) -> tuple[np.ndarray, dict]:
+    """Discard GEBCO's own ocean elevation within `clip_m` of the nearest
+    land cell and interpolate across that gap from the land edge and the
+    still-real GEBCO value beyond it, instead of trusting GEBCO directly
+    there. Returns (corrected ocean elevation, diagnostics).
+
+    Real, confirmed root cause (2026-09-24, tile 1736, user-proposed fix):
+    GEBCO's own ~450m native resolution means the single nearest real GEBCO
+    sample to a given stretch of coastline can already be several hundred
+    metres offshore and already read as a clamped-deep value (MIN_BATHYMETRY_M),
+    with no intervening real sample for bilinear reprojection to interpolate
+    a gradual approach from - bilinear can only blend BETWEEN real GEBCO
+    samples, it can't invent a shallower one where none exists. The result
+    is a hard elevation cliff (land directly adjacent to a clamped-deep
+    ocean cell) that triggered a real, confirmed SFINCS numerical
+    instability (a zsmax spike wildly inconsistent with the model's own
+    smoothly-varying time-resolved water level at the same cell).
+
+    Discarding the near-coast GEBCO ring outright is also independently
+    justified, not just a workaround: a GEBCO pixel whose own centre sits
+    within ~200m of the coast, at ~450m native resolution, very likely has
+    real sub-pixel land contamination in its own source data - its "pure
+    bathymetry" value there is not especially trustworthy to begin with.
+    """
+    if not ocean.any():
+        return gebco_corrected, {"n_coastal_transition_cells": 0}
+
+    land = ~ocean & ~np.isnan(land_lake_river)  # land_lake_river is finite everywhere land/lake/river
+    px_w_m = abs(transform.a) * 111320.0 * np.cos(np.radians(lat_deg))
+    px_h_m = abs(transform.e) * 110540.0
+    dist_to_land_m = distance_transform_edt(~land, sampling=(px_h_m, px_w_m))
+
+    near_coast_ocean = ocean & (dist_to_land_m <= clip_m)
+    if not near_coast_ocean.any():
+        return gebco_corrected, {"n_coastal_transition_cells": 0}
+
+    combined_pre = np.where(ocean, gebco_corrected, land_lake_river).astype(np.float32)
+    fill_source = np.where(near_coast_ocean, np.nan, combined_pre)
+    valid_mask = (~np.isnan(fill_source)).astype(np.uint8)
+    interpolated = fillnodata(
+        fill_source, mask=valid_mask, max_search_distance=interp_max_search_distance_px,
+    )
+    gebco_filled = np.where(near_coast_ocean, interpolated, gebco_corrected)
+    return gebco_filled, {"n_coastal_transition_cells": int(near_coast_ocean.sum())}
 
 
 def build_combined_elevation(
@@ -202,11 +263,29 @@ def build_combined_elevation(
     if not ocean.any():
         raise ValueError("No ocean cells (mask==1) in this tile - nothing for GEBCO to fill in")
 
-    # Reproject GEBCO onto this tile's exact grid (nearest - GEBCO's own 15
-    # arc-sec native resolution is coarser than our ~30m tiles at most
-    # latitudes, so this is an upsample; nearest keeps real GEBCO values
-    # rather than interpolating across what is, locally, a near-flat
-    # regional bathymetry gradient anyway).
+    # Reproject GEBCO onto this tile's exact grid - BILINEAR, not nearest
+    # (changed 2026-09-24, real confirmed root cause: GEBCO's own 15 arc-sec
+    # native resolution (~450m) is far coarser than our ~30m tiles, so
+    # nearest-neighbour upsampling replicates a single GEBCO sample across
+    # many destination pixels, producing a locally FLAT "shelf" that then
+    # meets DeltaDTM's much finer land detail as a hard, artificial cliff
+    # right at the coast - confirmed live, tile 1736: a single 120m SFINCS
+    # subgrid cell held elevation values -10, -10, -10 (three GEBCO-derived
+    # ocean pixels, all clamped to MIN_BATHYMETRY_M) directly adjacent to
+    # +0.83m land, an unrealistic ~11m step within 30m. That artificial
+    # discontinuity is the most likely trigger for a real, confirmed SFINCS
+    # numerical instability: a spurious zsmax spike (2.21m) wildly
+    # inconsistent with the model's own smoothly-varying zs(time) field at
+    # the SAME cell (max 1.04m, matching the 1.05m boundary forcing almost
+    # exactly - no real amplification). Bilinear blends between neighbouring
+    # GEBCO samples instead, producing a gradually-varying approach to the
+    # coast rather than a flat clamped shelf meeting a cliff. Superseded
+    # reasoning (nearest was chosen to preserve "real" GEBCO sample values
+    # over a "near-flat regional gradient" this artefact wasn't understood
+    # at the time) - this doesn't affect eikonal-vs-SFINCS comparability the
+    # way DeltaDTM's own land-side resampling method would, since eikonal's
+    # own dem.tif never reads real bathymetry at all (every non-land cell is
+    # flattened to 0m there).
     with retry_transient_io(rasterio.open, gebco_path) as src:
         gebco_arr = np.empty(shape, dtype=np.float64)
         reproject(
@@ -214,7 +293,7 @@ def build_combined_elevation(
             src_transform=src.transform, src_crs=src.crs,
             dst_transform=transform, dst_crs=crs,
             src_nodata=src.nodata, dst_nodata=np.nan,
-            resampling=Resampling.nearest,
+            resampling=Resampling.bilinear,
         )
 
     # MDT correction: one lookup per unique-enough location is overkill for
@@ -236,6 +315,10 @@ def build_combined_elevation(
     land_lake_river = np.where(
         lake_river, np.maximum(lake_river_elevation, lake_river_min_elevation_m), land_floored,
     )
+
+    gebco_corrected, coastal_transition_info = _fill_coastal_transition_elevation(
+        gebco_corrected, land_lake_river, ocean, transform, lat_deg=cy,
+    )
     combined = np.where(ocean, gebco_corrected, land_lake_river)
 
     return combined, {
@@ -246,6 +329,7 @@ def build_combined_elevation(
         "n_lake_river_cells": int(lake_river.sum()),
         "n_lake_river_floored": int(np.nansum(lake_river_elevation[lake_river] < lake_river_min_elevation_m)) if lake_river.any() else 0,
         "n_land_floored": int(np.nansum(dem_m[land] < land_min_elevation_m)) if land.any() else 0,
+        **coastal_transition_info,
     }
 
 
@@ -285,6 +369,8 @@ def main() -> None:
     print(f"Lake/river cells re-derived from land + smoothed: {info['n_lake_river_cells']} "
           f"(floored at {LAKE_RIVER_MIN_ELEVATION_M:.0f} m: {info['n_lake_river_floored']})")
     print(f"Land cells floored at {LAND_MIN_ELEVATION_M:.0f} m: {info['n_land_floored']}")
+    print(f"Ocean cells within {GEBCO_COAST_CLIP_M:.0f} m of the coast: GEBCO discarded and "
+          f"interpolated instead: {info['n_coastal_transition_cells']}")
     finite = combined[np.isfinite(combined)]
     print(f"Combined elevation range: {finite.min():.2f} to {finite.max():.2f} m (n={finite.size})")
 

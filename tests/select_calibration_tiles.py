@@ -2,7 +2,17 @@
 AND a wide geographic spread, for the obstacle-coupling/sweep-budget
 calibration studies (2026-08 - 400-tile scale-up from the earlier 40-tile
 study; see `C:\\Users\\Schlu005\\.claude\\plans\\smooth-wandering-map.md`
-for that study's original methodology).
+for that study's original methodology; 2026-09-24 - repointed at this
+session's own machine/paths and the 260-tile study, ~10% of all hop=0
+tiles, replacing the never-actually-completed 100-tile study whose
+D:\\GFM\\model_outputs paths belonged to a different machine).
+
+Candidates are restricted to tiles whose model_outputs/<id>/inputs/dem.tif
+already exists (2026-09-24) - the 100-tile study's real failure mode was
+NOT dry tiles, it was candidates with no preprocessed inputs at all (the
+Snakemake rebuild was still failing on most tiles when that study ran, so
+only 6 of 143 candidates were usable) - checking this up front means every
+candidate this script hands out is actually runnable right now.
 
 Bbox area in deg2 is an exact-up-to-clipping proxy for pixel count here
 (DeltaDTM tiles are native EPSG:4326 at ~1 arcsecond, so pixel count =
@@ -33,6 +43,7 @@ order) to the given output directory, and prints a summary table.
 Usage:
     python select_calibration_tiles.py <output_dir> [n_candidates]
 """
+import argparse
 import math
 import sys
 from collections import defaultdict
@@ -41,15 +52,24 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 
-DOMAIN_TILES_PATH = Path(r"D:\GFM\processed_inputs\mask\domain_tiles_global.gpkg")
-DEFAULT_N_CANDIDATES = 460  # ~1.15x the 400 wanted - the 40-tile study saw a ~95% wet rate
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from config_utils import load_config  # noqa: E402
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_N_CANDIDATES = 300  # ~1.15x the 260 wanted (10% of ~2445 hop=0 tiles) - matches the
+# margin ratio the earlier 400-tile study used, for replacing dry-at-sweep-1 tiles
 GEO_BIN_DEG = 20.0  # lon/lat grid cell size for geographic stratification
 
 
-def select_candidates(n_candidates: int) -> list[tuple[int, str, float, float]]:
+def select_candidates(n_candidates: int, domain_tiles_path: Path, model_outputs_root: Path) -> list[tuple[int, str, float, float]]:
     """Returns [(tile_id, geo_bin, percentile_within_bin, area_deg2), ...]."""
-    gdf = gpd.read_file(DOMAIN_TILES_PATH)
+    gdf = gpd.read_file(domain_tiles_path)
     wave0 = gdf[gdf["hop_distance"] == 0].copy()
+    n_before_ready = len(wave0)
+    ready = wave0["tile_id"].apply(lambda t: (model_outputs_root / str(int(t)) / "inputs" / "dem.tif").is_file())
+    wave0 = wave0[ready].copy()
+    print(f"{len(wave0)} of {n_before_ready} hop=0 tile(s) already have model_outputs/inputs/dem.tif built "
+          f"- restricting candidates to these")
     bounds = wave0.geometry.bounds
     wave0["area_deg2"] = (bounds["maxx"] - bounds["minx"]) * (bounds["maxy"] - bounds["miny"])
     cx = (bounds["minx"] + bounds["maxx"]) / 2.0
@@ -87,11 +107,20 @@ def select_candidates(n_candidates: int) -> list[tuple[int, str, float, float]]:
 
 
 def main() -> None:
-    out_dir = Path(sys.argv[1])
-    n_candidates = int(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_N_CANDIDATES
-    out_dir.mkdir(parents=True, exist_ok=True)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("out_dir")
+    parser.add_argument("n_candidates", type=int, nargs="?", default=DEFAULT_N_CANDIDATES)
+    parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
+    args = parser.parse_args()
 
-    candidates = select_candidates(n_candidates)
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cfg = load_config(args.config)
+    root = Path(cfg["paths"]["root"])
+    domain_tiles_path = root / "processed_inputs" / "mask" / "domain_tiles_global.gpkg"
+    model_outputs_root = root / "model_outputs"
+
+    candidates = select_candidates(args.n_candidates, domain_tiles_path, model_outputs_root)
     n_bins = len({c[1] for c in candidates})
 
     print(f"{'tile_id':>10}  {'geo_bin':>12}  {'pct_in_bin':>10}  {'area_deg2':>12}  {'approx_px':>15}")

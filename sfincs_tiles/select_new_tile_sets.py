@@ -1,26 +1,27 @@
-"""TODO (2026-09-24, user direction, currently BLOCKED - see below): this
-two-set design is scheduled to be replaced with a SINGLE ~520-tile
-selection - no A/B split, no latitude restriction at all (drop Set A's own
-|lat| 5-55 deg band entirely - take from the full range, poles included),
-smallest-by-area, antimeridian-excluded, spatially stratified, with a NEW
-floor of ocean_frac >= 0.05 applied to every selected tile (not just a
-Set-B-only filter as before - every tile in the single selection must
-clear it). The old two-set design's own asymmetry (only Set A had a
-latitude restriction; Set B had none) pulled 56% of Set B's 260 tiles (127
-tiles, 96 of those above the Arctic/Antarctic Circle) outside that band,
-visible directly on the resulting tile-locations map - dropping the
-latitude restriction entirely (rather than re-applying it inconsistently)
-was the user's own direction once that asymmetry was pointed out. The
-replacement script (working name select_validation_tiles.py) should also
-generate, from the selected sample: a global Equal Earth tile-locations map
-(light grey land, no figure title), a histogram of the selected sample's
-size/ocean-fraction distribution against the eligible pool, and an Excel
-workbook with the summary statistics tables. BLOCKED until model_outputs/
-exists again (deliberately deleted 2026-09-24 to force a clean production
-preprocessing rebuild after the GEBCO-based mask fix) - this script's own
-evaluate_tile eligibility check reads each candidate tile's mask.tif/
-boundaries gpkg from model_outputs/{tile_id}/inputs/. See sfincs_tiles/
-SFINCS_VALIDATION_METHODOLOGY.md's own "Known follow-up work" section.
+"""SUPERSEDED (2026-09-24) by select_validation_tiles.py - kept only as the
+historical record of what actually produced the tile sample behind every
+result and figure currently in sfincs_tiles/SFINCS_VALIDATION_METHODOLOGY.md
+(including the tile 1273 case study and the pooled metrics). Two real
+problems were found in this two-set design after the fact (see
+select_validation_tiles.py's own docstring for the full writeup): Set B had
+no latitude restriction at all, pulling 56% of its 260 tiles outside the
+|lat| 5-55 deg band Set A was restricted to; and Set A's own nominal
+"smallest-by-area" pre-filter (line ~257 below,
+`set_a_pool.sort_values("area_km2_bbox").head(max(len(set_a_pool),
+args.n_set_a * 3))`) never actually took effect, since `max()` should have
+been `min()` - confirmed directly (Set A's own median area came out HIGHER
+than its own source pool's median). Do not fix that bound here; this file
+is frozen as historical record, not being carried forward - the
+replacement script deliberately drops the area pre-filter and the latitude
+restriction entirely rather than fixing this bug in place. Rerunning tile
+selection (via select_validation_tiles.py) and the whole SFINCS validation
+batch against its output is a pending TODO, tracked in this project's saved
+memory and in SFINCS_VALIDATION_METHODOLOGY.md's own "Known follow-up
+work" section - blocked until model_outputs/ has real dem.tif/mask.tif/
+boundaries_*.gpkg for the hop_distance==0 tile population again (it was
+deliberately deleted 2026-09-24 to force a clean production preprocessing
+rebuild after the GEBCO-based mask fix, and that rebuild was still in
+progress as of this note).
 
 Select two new, non-overlapping ~260-tile sets for the clean rebuild of
 the eikonal-vs-SFINCS validation batch (2026-09), reusing

@@ -74,7 +74,7 @@ def _depth_stats(depth_m: np.ndarray) -> dict:
     return {"mean_m": float(finite.mean()), "median_m": float(np.median(finite)), "max_m": float(finite.max())}
 
 
-def summarize_tile(tile_id: str, root: Path, base_dir_name: str, tile_set: str) -> dict:
+def summarize_tile(tile_id: str, root: Path, base_dir_name: str, tile_set: str | None = None) -> dict:
     tile_dir = root / base_dir_name / tile_id
     native_mask_path = tile_dir / "inputs" / "mask.tif"
     out_dir = tile_dir / "outputs"
@@ -88,10 +88,17 @@ def summarize_tile(tile_id: str, root: Path, base_dir_name: str, tile_set: str) 
     row_area_native = _pixel_area_km2_by_row(native_transform, native_height, native_crs)
     domain_area_km2 = float((np.ones(native_mask.shape[0]) * native_mask.shape[1] * row_area_native).sum())
 
-    result: dict = {
-        "tile_id": tile_id, "set": tile_set,
+    result: dict = {"tile_id": tile_id}
+    # "set" (Set A/B) is a 2026-09 batch-only bookkeeping label with no
+    # behavioural difference between the two - dropped for later validation
+    # batches that only ever use a single selection (2026-09-24, user
+    # direction); only written here at all for backward compatibility with
+    # earlier batches (validation_sfincs_v2/v3) that still pass --set.
+    if tile_set is not None:
+        result["set"] = tile_set
+    result.update({
         "domain_area_km2": domain_area_km2, "ocean_frac": ocean_frac,
-    }
+    })
 
     # -- SFINCS's own subgrid-resolution hmax (hmax_subgrid.tif, still in its
     # native UTM subgrid CRS - NOT the same file as hmax.tif below, which is
@@ -227,7 +234,8 @@ def main() -> None:
     _repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tile-id", required=True)
-    parser.add_argument("--set", required=True, choices=["A", "B"])
+    parser.add_argument("--set", required=False, default=None, choices=["A", "B"],
+                         help="optional bookkeeping label, only relevant for older two-set batches (validation_sfincs_v2/v3)")
     parser.add_argument("--config", default=str(_repo_root / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--base-dir-name", default="validation_sfincs_v2")
     args = parser.parse_args()

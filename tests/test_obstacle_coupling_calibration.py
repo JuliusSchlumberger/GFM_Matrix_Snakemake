@@ -5,9 +5,42 @@ come from `test_sweep_budget_calibration.py`'s `wet_tiles_selected.txt`
 (that script's sweep=1 result already confirmed each of these tiles has
 real flooding for this scenario - no separate dry-check needed here).
 
-Per outer iteration, the inner solve now runs up to INNER_MAX_ROUNDS full
+2026-09-24 rebuild - same staleness fixes as test_sweep_budget_calibration.py
+(current-machine `--config`-driven paths, no more per-tile `aqueduct_*.toml`,
+`friction_scale_factor` now applied in the decode->scale->floor order
+`aqueduct_runner.py` actually uses), plus two more found while planning this
+rebuild:
+  - `BLOCK_FRICTION = 100.0` was `flood_model.py`'s own OLD exploratory
+    value - production's real `OBSTACLE_BLOCK_FRICTION` is now `9999.0`
+    ("so the cost of any path crossing such a cell is unmistakably
+    prohibitive even in float32" - see that constant's own comment). Fixed
+    to match.
+  - `epsilon = friction.min() / (resolution * 10.0)` was the OLD
+    friction-derived formula - production's real default is now the fixed
+    `simulation.flooding.waterlevel_epsilon_m` config constant (0.03m, see
+    `flood_model.WATERLEVEL_EPSILON_M`'s own comment on why the old formula
+    "chased ~1e-6 to 1e-7m, far finer than anything physically meaningful").
+    Now read from config (or overridden via `--epsilon` for the softened-
+    threshold sensitivity variant discussed - see conversation).
+  - NEW: a reached/unreached guard on the blocking check. Every cell starts
+    at the eikonal solve's own `t=99` ("never reached") sentinel; until the
+    wavefront's influence actually reaches a cell, `waterlevel_b <= dem` is
+    trivially true (waterlevel=-99 is below virtually any real elevation),
+    so an inner solve stopped before it geometrically covers the tile would
+    misclassify "not reached yet" as "genuinely can't flood" - and because
+    blocked cells stay blocked in every later outer iteration, that error
+    is effectively permanent, not something a later iteration corrects.
+    `reached = t[1:, 1:] < UNREACHED_SENTINEL` restricts the DYNAMIC
+    (post-solve) blocking check to cells the solve has actually touched;
+    `static_blocked` (the free `dem > max_waterlevel` filter) is unaffected
+    since it never depends on solve state at all. `pct_unreached` is now
+    logged per row - the honest answer to "how much of the tile do we
+    actually have real information about yet" at any given inner-round
+    budget, instead of assuming full coverage.
+
+Per outer iteration, the inner solve now runs up to `--inner-max-rounds` full
 rounds (4 sweeps each, Julia's real Gray-code order), stopping early once
-its own round-level max_change drops to/below epsilon - this is the
+its own round-level max_change drops to/below `--epsilon` - this is the
 standard solve_eikonal_dense(max_rounds=...) semantics, NOT a fixed
 single-round call.
 
@@ -25,7 +58,7 @@ all) - the "no blocking whatsoever" baseline the outer-loop trace is
 compared against. From n_outer=1 onward, both configs still use:
   - the static dem > max_waterlevel pre-filter.
   - the tolerant outer-loop stopping criterion: stop once pct_newly_blocked
-    (relative to total tile cells) drops below OUTER_CONVERGENCE_PCT.
+    (relative to total tile cells) drops below `--outer-convergence-pct`.
 
 Per outer round (round 0/baseline is the implicit reference for round 1's
 diff, then round N vs round N-1 for N>=2 - matches pct_newly_blocked's own
@@ -48,9 +81,20 @@ much more."
 Output: ONE CSV per tile (not a single combined file), written
 incrementally, in CSV_DIR, plus a shared progress log on stdout.
 
+`--epsilon` defaults to `DEFAULT_OUTER_EPSILON_M` (0.1m), NOT production's
+own `simulation.flooding.waterlevel_epsilon_m` (0.03m) - 2026-09-24 user
+direction: a softer inner-solve convergence threshold is the safer lever
+for cutting this study's per-outer-iteration cost (vs. capping
+`--inner-max-rounds` low, which risks the reached/unreached guard's failure
+mode above on tiles the wavefront hasn't geometrically covered yet - see
+module docstring). Pass `--epsilon 0.03` explicitly to reproduce production's
+own strict threshold for comparison.
+
 Usage:
-    python test_obstacle_coupling_calibration.py <output_dir> [tile_id ...]
+    python test_obstacle_coupling_calibration.py <output_dir> [--config <config.yml>]
+        [--tile-ids id [id ...]] [--max-outer N] [--inner-max-rounds N] [--epsilon M]
 """
+import argparse
 import csv
 import gc
 import sys
@@ -62,46 +106,47 @@ import geopandas as gpd
 import numpy as np
 import rasterio
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from config_utils import load_config  # noqa: E402
 from eikonal import _ORTHANT_ORDER, _dense_sweep  # noqa: E402
 from flood_extent import effective_dem  # noqa: E402
 from flood_model import _idw_seed_values, coastline_mask, prune_to_coast_connected  # noqa: E402
 from rasters import decode_dem_cm, decode_friction_int16, decode_waterlevel_cm  # noqa: E402
 
-MODEL_OUTPUTS = Path("D:/GFM/model_outputs")
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 RETURN_PERIOD = "RP100"
 WATERLEVEL_NAME = "SLR_0"
 OCEAN_CODE = 1
-BLOCK_FRICTION = 100.0
-OUTER_CONVERGENCE_PCT = 0.01
-MAX_OUTER = 5  # 400-tile study (was 3 for the 40-tile study, 20 in the 7-tile pilot) - matches production's obstacle_coupling.max_outer_iterations default
-INNER_MAX_ROUNDS = 20  # 400-tile study (was 6 for the 40-tile study, 25 in the 7-tile pilot)
+BLOCK_FRICTION = 9999.0  # matches flood_model.OBSTACLE_BLOCK_FRICTION (was the stale 100.0)
+DEFAULT_OUTER_EPSILON_M = 0.1  # softer than production's own 0.03m default (2026-09-24, user
+# direction - see module docstring) - this script's own --epsilon default, not config-driven
+DEFAULT_MAX_OUTER = 15  # 2026-09-24 user direction - up from production's own default of 5
+DEFAULT_INNER_MAX_ROUNDS = 50  # 2026-09-24 user direction - up from production's own default of 12
+# Neither of the above two is config-driven, matching DEFAULT_OUTER_EPSILON_M above - this
+# calibration study is deliberately exploring beyond production's own current defaults, not
+# reproducing them (pass --max-outer/--inner-max-rounds explicitly to match config.yml instead).
+
+# A cell's `t` only ever decreases from the eikonal solve's own unseeded
+# default (99.0, see eikonal.solve_eikonal_dense) once real seed influence
+# reaches it - so any strict decrease is real signal, not noise. See module
+# docstring's "reached/unreached guard" note for why this matters.
+UNREACHED_SENTINEL = 99.0
 
 # tile_generation.river_code in config.yml - hardcoded here rather than
 # reading config.yml, matching this script's existing ocean_code convention.
 RIVER_CODE = 3
 
 # Fallback for a quick standalone smoke test if no tile_ids are given on
-# the command line - the real 40-tile study always passes an explicit list
-# read from test_sweep_budget_calibration.py's wet_tiles_selected.txt (see
+# the command line - the real study always passes an explicit list read
+# from test_sweep_budget_calibration.py's wet_tiles_selected.txt (see
 # module docstring).
 TILES = [1826, 711, 1722, 548, 1424, 1463, 497]
 
 
-def load_tile(tile_id: int):
-    tile_dir = MODEL_OUTPUTS / str(tile_id)
+def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor: float):
+    tile_dir = model_outputs / str(tile_id)
     scenario = f"{RETURN_PERIOD}_{WATERLEVEL_NAME}"
     inputs = tile_dir / "inputs"
-    with open(inputs / f"aqueduct_{scenario}.toml", "rb") as f:
-        toml_cfg = tomllib.load(f)
-    resolution = toml_cfg["flooding"]["resolution"]
-    knn = toml_cfg["waterlevels"]["knn"]
-    variable = toml_cfg["waterlevels"]["name"]
 
     with rasterio.open(inputs / "dem.tif") as src:
         dem = decode_dem_cm(src.read(1))
@@ -117,6 +162,9 @@ def load_tile(tile_id: int):
     boundaries = gpd.read_file(inputs / f"boundaries_{scenario}.gpkg")
 
     dem = effective_dem(dem, mask)
+    # decode -> scale -> floor, matching aqueduct_runner.py's own production order exactly
+    # (see test_sweep_budget_calibration.py's own load_tile() comment for the full reasoning).
+    friction = friction * friction_scale_factor
     friction = np.where(friction > 0, friction, friction.dtype.type(0.001))
     coastline = coastline_mask(mask, ocean_code=OCEAN_CODE, river_code=RIVER_CODE)
     coastline_rows, coastline_cols = np.nonzero(coastline)
@@ -131,7 +179,7 @@ def load_tile(tile_id: int):
     # BallTree construction (zero samples) or station_values.max() below
     # with a confusing scikit-learn traceback, in case that invariant is
     # ever violated (e.g. a hand-picked tile_id passed directly on the CLI).
-    station_values = decode_waterlevel_cm(boundaries[variable].to_numpy())
+    station_values = decode_waterlevel_cm(boundaries[WATERLEVEL_NAME].to_numpy())
     if len(station_values) == 0:
         raise ValueError(
             f"tile {tile_id} has zero boundary stations - should have been excluded "
@@ -145,9 +193,8 @@ def load_tile(tile_id: int):
         coastline_rows, coastline_cols, transform, stations_lonlat, station_values,
         min(knn, len(station_values)), mask, OCEAN_CODE,
     )
-    epsilon = float(friction.min()) / (resolution * 10.0)
     max_waterlevel = float(station_values.max())
-    return dem, mask, friction, coastline, coastline_rows, coastline_cols, initial, epsilon, max_waterlevel
+    return dem, mask, friction, coastline, coastline_rows, coastline_cols, initial, max_waterlevel
 
 
 def solve_inner(friction, seed_rows, seed_cols, seed_values, dtype, epsilon, max_rounds):
@@ -212,7 +259,7 @@ def _full_depth_array(waterlevel, dem, mask, coastline) -> np.ndarray:
 
 
 def _snapshot_from_depth(depth, n_outer, stopped_early, last_max_change, epsilon,
-                          cum_elapsed, iter_elapsed, change_stats) -> dict:
+                          cum_elapsed, iter_elapsed, change_stats, pct_unreached) -> dict:
     flood = depth > 0
     n_inundated = int(flood.sum())
     row = {
@@ -223,6 +270,7 @@ def _snapshot_from_depth(depth, n_outer, stopped_early, last_max_change, epsilon
         "last_max_change": round(float(last_max_change), 8),
         "epsilon": epsilon,
         "inner_converged": bool(last_max_change <= epsilon),
+        "pct_unreached": round(pct_unreached, 6),
         "n_inundated": n_inundated,
     }
     row.update(change_stats)
@@ -253,8 +301,13 @@ def _depth_change_metrics(depth_prev: np.ndarray, depth_curr: np.ndarray) -> dic
     }
 
 
-def run_tile_trace(tile_id: int, max_outer: int) -> list[dict]:
-    dem, mask, friction, coastline, seed_rows, seed_cols, initial, epsilon, max_waterlevel = load_tile(tile_id)
+def run_tile_trace(
+    tile_id: int, model_outputs: Path, knn: int, friction_scale_factor: float,
+    max_outer: int, inner_max_rounds: int, epsilon: float, outer_convergence_pct: float,
+) -> list[dict]:
+    dem, mask, friction, coastline, seed_rows, seed_cols, initial, max_waterlevel = load_tile(
+        tile_id, model_outputs, knn, friction_scale_factor,
+    )
     seed_values = -initial
     dtype = friction.dtype
     n_cells = dem.size
@@ -267,9 +320,14 @@ def run_tile_trace(tile_id: int, max_outer: int) -> list[dict]:
     # against (see module docstring's summary-row explanation).
     iter_t0 = time.perf_counter()
     t0_b, max_change0, change_stats0 = solve_inner(
-        friction, seed_rows, seed_cols, seed_values, dtype, epsilon, INNER_MAX_ROUNDS,
+        friction, seed_rows, seed_cols, seed_values, dtype, epsilon, inner_max_rounds,
     )
     wl0 = -t0_b[1:, 1:]
+    # pct_unreached here isn't used for any blocking decision (baseline has
+    # none) - logged anyway as a useful standalone diagnostic: how much of
+    # the tile does a plain solve even geometrically cover within
+    # inner_max_rounds, regardless of obstacle_coupling at all.
+    pct_unreached0 = 100.0 * float(np.count_nonzero(t0_b[1:, 1:] >= UNREACHED_SENTINEL)) / n_cells
     # t0_b (the dominant allocation, e.g. ~830MB on the largest tile at
     # float32) is never needed again once wl0 is extracted - without this,
     # it stays bound to a local variable (and therefore alive) for the
@@ -280,7 +338,8 @@ def run_tile_trace(tile_id: int, max_outer: int) -> list[dict]:
     prev_depth = _full_depth_array(wl0, dem, mask, coastline)
     del wl0
     baseline_snap = _snapshot_from_depth(prev_depth, 0, False, max_change0, epsilon,
-                                          time.perf_counter() - t0, time.perf_counter() - iter_t0, change_stats0)
+                                          time.perf_counter() - t0, time.perf_counter() - iter_t0,
+                                          change_stats0, pct_unreached0)
     baseline_snap["tile"] = tile_id
     baseline_snap["n_cells"] = n_cells
     baseline_snap["pct_newly_blocked"] = 0.0
@@ -301,25 +360,35 @@ def run_tile_trace(tile_id: int, max_outer: int) -> list[dict]:
         n_outer = outer + 1
         iter_t0 = time.perf_counter()
         t_b, max_change, change_stats = solve_inner(
-            friction_b, seed_rows, seed_cols, seed_values, dtype, epsilon, INNER_MAX_ROUNDS,
+            friction_b, seed_rows, seed_cols, seed_values, dtype, epsilon, inner_max_rounds,
         )
         iter_elapsed = time.perf_counter() - iter_t0
         wl_b = -t_b[1:, 1:]
+        # Reached/unreached guard (2026-09-24, see module docstring): a cell
+        # still at the unseeded sentinel reads as waterlevel~=-99, which is
+        # trivially <= almost any real dem elevation - without this guard,
+        # an inner solve that hasn't geometrically covered the tile yet
+        # would misclassify "not reached yet" as "genuinely can't flood",
+        # and that block is effectively permanent (every later outer
+        # iteration inherits it). static_blocked is unaffected - it's a
+        # pure dem-vs-max_waterlevel decision, never dependent on solve state.
+        reached = t_b[1:, 1:] < UNREACHED_SENTINEL
+        pct_unreached = 100.0 * float(np.count_nonzero(~reached)) / n_cells
         del t_b  # release the dominant allocation now - see baseline's own comment above for why
         gc.collect()
 
-        blocked = (wl_b <= dem) | static_blocked
+        blocked = ((wl_b <= dem) & reached) | static_blocked
         blocked[seed_rows, seed_cols] = False
         depth = _full_depth_array(wl_b, dem, mask, coastline)
         del wl_b
 
         n_newly = int(blocked.sum()) if prev_blocked is None else int((blocked & ~prev_blocked).sum())
         pct_newly = 100.0 * n_newly / n_cells
-        stopped_early = prev_blocked is not None and pct_newly < OUTER_CONVERGENCE_PCT
+        stopped_early = prev_blocked is not None and pct_newly < outer_convergence_pct
 
         change = _depth_change_metrics(prev_depth, depth)
         snap = _snapshot_from_depth(depth, n_outer, stopped_early, max_change, epsilon,
-                                     time.perf_counter() - t0, iter_elapsed, change_stats)
+                                     time.perf_counter() - t0, iter_elapsed, change_stats, pct_unreached)
         snap.update(change)
         snap["tile"] = tile_id
         snap["n_cells"] = n_cells
@@ -340,7 +409,7 @@ def run_tile_trace(tile_id: int, max_outer: int) -> list[dict]:
 FIELDNAMES = [
     "tile", "n_outer", "n_cells", "cum_time_s", "iter_time_s", "n_rounds_used",
     "outer_stopped_early", "pct_blocked_cumulative", "pct_newly_blocked",
-    "last_max_change", "epsilon", "inner_converged", "pct_cells_still_changing",
+    "last_max_change", "epsilon", "inner_converged", "pct_unreached", "pct_cells_still_changing",
     "mean_cell_change", "min_cell_change", "max_cell_change", "max_depth_change_abs",
     "n_newly_flooded", "n_no_longer_flooded", "n_inundated", "depth_mean",
     "depth_min", "depth_max", "depth_q20", "depth_q80", "status",
@@ -376,9 +445,33 @@ def build_summary_row(rows: list[dict], tile_id: int) -> dict:
 
 
 def main() -> None:
-    out_dir = Path(sys.argv[1])
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("out_dir")
+    parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
+    parser.add_argument("--tile-ids", type=int, nargs="*", default=None)
+    parser.add_argument("--max-outer", type=int, default=None, help=f"default: {DEFAULT_MAX_OUTER} (pass --max-outer 5 to match production's own config default)")
+    parser.add_argument("--inner-max-rounds", type=int, default=None, help=f"default: {DEFAULT_INNER_MAX_ROUNDS} (pass --inner-max-rounds 12 to match production's own config default)")
+    parser.add_argument("--epsilon", type=float, default=None, help=f"default: {DEFAULT_OUTER_EPSILON_M} (softer than production's own config simulation.flooding.waterlevel_epsilon_m=0.03 - pass --epsilon 0.03 to reproduce that strictly)")
+    parser.add_argument("--outer-convergence-pct", type=float, default=None, help="default: config simulation.flooding.obstacle_coupling.outer_convergence_pct")
+    args = parser.parse_args()
+
+    out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    tiles = [int(t) for t in sys.argv[2:]] if len(sys.argv) > 2 else TILES
+    tiles = args.tile_ids if args.tile_ids else TILES
+
+    cfg = load_config(args.config)
+    root = Path(cfg["paths"]["root"])
+    model_outputs = root / "model_outputs"
+    flooding_cfg = cfg["simulation"]["flooding"]
+    knn = int(flooding_cfg["knn"])
+    friction_scale_factor = float(flooding_cfg["friction_scale_factor"])
+    max_outer = args.max_outer if args.max_outer is not None else DEFAULT_MAX_OUTER
+    inner_max_rounds = args.inner_max_rounds if args.inner_max_rounds is not None else DEFAULT_INNER_MAX_ROUNDS
+    epsilon = args.epsilon if args.epsilon is not None else DEFAULT_OUTER_EPSILON_M
+    outer_convergence_pct = args.outer_convergence_pct if args.outer_convergence_pct is not None else float(flooding_cfg["obstacle_coupling"]["outer_convergence_pct"])
+    print(f"model_outputs={model_outputs}  knn={knn}  friction_scale_factor={friction_scale_factor}  "
+          f"max_outer={max_outer}  inner_max_rounds={inner_max_rounds}  epsilon={epsilon}  "
+          f"outer_convergence_pct={outer_convergence_pct}", flush=True)
 
     for tile_id in tiles:
         print(f"=== tile {tile_id} ===", flush=True)
@@ -387,7 +480,10 @@ def main() -> None:
             writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
             writer.writeheader()
             try:
-                tile_rows = run_tile_trace(tile_id, MAX_OUTER)
+                tile_rows = run_tile_trace(
+                    tile_id, model_outputs, knn, friction_scale_factor,
+                    max_outer, inner_max_rounds, epsilon, outer_convergence_pct,
+                )
                 for row in tile_rows:
                     label = "baseline (no blocking)" if row["n_outer"] == 0 else f"outer {row['n_outer']}"
                     print(f"  {label}: cum_time={row['cum_time_s']}s  "
@@ -396,7 +492,8 @@ def main() -> None:
                           f"pct_blocked_cumulative={row['pct_blocked_cumulative']}%  "
                           f"pct_newly_blocked={row['pct_newly_blocked']}%  "
                           f"last_max_change={row['last_max_change']:.8f}  "
-                          f"inner_converged={row['inner_converged']}", flush=True)
+                          f"inner_converged={row['inner_converged']}  "
+                          f"pct_unreached={row['pct_unreached']}%", flush=True)
                     print(f"    pct_cells_still_changing={row['pct_cells_still_changing']}%  "
                           f"mean_change={row['mean_cell_change']}  min_change={row['min_cell_change']}  "
                           f"max_change={row['max_cell_change']}", flush=True)

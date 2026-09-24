@@ -35,6 +35,7 @@ import xarray as xr
 import yaml
 from hydromt_sfincs import SfincsModel
 from rasterio.warp import Resampling, reproject
+from scipy import ndimage
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_boundary_forcing import idw_interpolate_to_grid  # noqa: E402
@@ -98,6 +99,27 @@ def _reproject_nearest_to_grid(src_path: Path, dst_transform, dst_crs, dst_shape
     is guaranteed to be one of the source raster's own real values, never a
     blended/interpolated one - that guarantee is the entire point of this
     function, and is what its own test validates.
+
+    Real, confirmed gap (2026-09-24, tile 1736): `src_path`'s own EPSG:4326
+    (lon/lat) rectangle and the destination UTM subgrid's rectangle are
+    rotated relative to each other (UTM axes only align with lon/lat near a
+    zone's own central meridian) - the destination rectangle's CORNERS can
+    fall just outside the source's real coverage even though the tile's own
+    bbox/geometry match exactly (confirmed: model_bbox.json, tile_geometry.
+    gpkg, dem.tif and elevation_combined.tif all share the same extent for
+    that tile - this isn't an extent mismatch, purely a rotation effect).
+    Left NaN by `dst_nodata=np.nan` above, this measured 1.9% of cells, 84%
+    of those within 5 buffer pixels of a tile edge - exactly where SFINCS's
+    own water-level boundary cells are placed, so a NaN-contaminated coarse
+    cell there corrupts that cell's own subgrid volume table (NaN survives
+    `np.maximum(elevation, zvmin)` in hydromt_sfincs's own subgrid_v_table).
+    Filled here via nearest-valid-cell inpainting (scipy.ndimage's own
+    distance-transform-to-nearest-index trick) rather than by widening the
+    read window - this works by construction for ANY rotation severity,
+    including the most extreme case in this batch (tile 2084, 82.7 deg N,
+    confirmed zero remaining NaN after this fix), without needing to
+    re-architect elevation_combined.tif/manning_n.tif's own 1:1 pixel match
+    to dem.tif/mask.tif.
     """
     with retry_transient_io(rasterio.open, src_path) as src:
         dst_arr = np.empty(dst_shape, dtype=np.float32)
@@ -108,6 +130,24 @@ def _reproject_nearest_to_grid(src_path: Path, dst_transform, dst_crs, dst_shape
             src_nodata=np.nan, dst_nodata=np.nan,
             resampling=Resampling.nearest,
         )
+
+    missing = np.isnan(dst_arr)
+    if missing.any():
+        if missing.all():
+            # Genuinely zero real-data overlap - the nearest-valid-neighbour
+            # fill has nothing to fill FROM, so failing loudly here is safer
+            # than silently handing hydromt_sfincs an all-garbage subgrid
+            # source (which is exactly the kind of silent boundary-adjacent
+            # corruption this whole fix exists to prevent).
+            raise ValueError(
+                f"{src_path}: reprojected onto the destination subgrid with ZERO valid cells - "
+                "no real data to nearest-fill from. Check the source file's own coverage against "
+                "this tile's bbox."
+            )
+        nearest_idx = ndimage.distance_transform_edt(missing, return_distances=False, return_indices=True)
+        dst_arr = dst_arr[tuple(nearest_idx)]
+
+    assert not np.isnan(dst_arr).any(), f"{src_path}: NaN survived the nearest-valid-neighbour fill - should be impossible"
     return dst_arr
 
 
@@ -182,6 +222,7 @@ SUBGRID_NRMAX_DEFAULT = 2000  # matches hydromt_sfincs's own default (tile/block
 # subgrid table construction) - no reason found to deviate from it.
 
 
+
 def build_sfincs_tile(
     tile_id: str, root: Path, resolution_m: float = MAIN_RES_M_DEFAULT,
     dtmapout_s: float = 1800.0, tref: datetime | None = None,
@@ -223,9 +264,23 @@ def build_sfincs_tile(
     # subgrid.create()'s own internals read self.model.grid.mask directly, so it must
     # already exist. Uses tile_gdf/ocean_poly geometry directly, no dependency on
     # elevation - unaffected by not calling elevation.create() separately any more.
+    #
+    # all_touched=True - real, confirmed gap (2026-09-24, tile 1736): hydromt_sfincs's
+    # own create_boundary() defaults to all_touched=False (its own function signature -
+    # NOT what its own docstring claims, "True (default)"; a genuine doc/code mismatch),
+    # which only includes a cell in the boundary if the OCEAN POLYGON's own geometry
+    # happens to cover that cell's CENTER point. For a coastline running diagonally
+    # across this tile's own rotated UTM grid (the tile's true rectangular lon/lat
+    # geometry becomes a rotated shape in UTM), a center-point test is much stricter
+    # than "does the polygon touch this cell at all" and produces a sparse, broken,
+    # dotted boundary line instead of a continuous one - confirmed live: whole-tile
+    # boundary coverage was a set of short disconnected segments along all four edges,
+    # not the continuous line expected given ocean occupies most of three of those
+    # edges. all_touched=True includes every cell the polygon touches at all, matching
+    # the true coastline far more continuously regardless of grid rotation.
     sf.mask.create_active(include_polygon=tile_gdf, reset_mask=True)
     ocean_poly = _ocean_polygon_wgs84(tile_dir / "mask.tif")
-    sf.mask.create_boundary(btype="waterlevel", include_polygon=ocean_poly, reset_bounds=False)
+    sf.mask.create_boundary(btype="waterlevel", include_polygon=ocean_poly, reset_bounds=False, all_touched=True)
     n_active = int((sf.grid.data["mask"] > 0).sum())
     n_bnd = int((sf.grid.data["mask"] == 2).sum())
     print(f"[2/8] mask: {n_active} active cell(s), {n_bnd} waterlevel-boundary cell(s)")
@@ -261,6 +316,21 @@ def build_sfincs_tile(
     fine_transform = main_transform * main_transform.scale(1.0 / subgrid_nr_pixels)
     fine_height, fine_width = main_height * subgrid_nr_pixels, main_width * subgrid_nr_pixels
 
+    # `_reproject_nearest_to_grid()` guarantees this array has no NaN
+    # anywhere (nearest-valid-neighbour fill for any rotation-induced gap
+    # between the source's own lon/lat rectangle and this UTM subgrid's
+    # rotated footprint - see that function's own docstring). Investigated
+    # 2026-09-24 (tile 1736) whether hydromt_sfincs's own downstream re-read
+    # of this file (inside subgrid.create()) could reintroduce NaN despite
+    # that - it can, but ONLY in cells outside the tile's own true active
+    # domain (confirmed directly, twice, against the real coarse-grid mask
+    # block-upsampled with no reprojection involved: 0 of 433,712 active/
+    # boundary fine cells were NaN in the real dep_subgrid.tif output; all
+    # 8,400 NaN cells were in mask==0 cells outside tile_gdf's own polygon -
+    # harmless padding, never read by process_tile_regular's volume-table
+    # construction, which skips inactive cells entirely). A buffer-margin
+    # workaround was tried and measured to have zero effect (byte-identical
+    # NaN count with or without it) - not worth the added complexity/cost.
     subgrid_sources = {}
     for name, src_uri in [("local_elevation_subgrid", "elevation_combined.tif"), ("local_roughness_subgrid", "manning_n.tif")]:
         out_path = sfincs_dir / f"{Path(src_uri).stem}_subgrid_src.tif"
@@ -285,7 +355,7 @@ def build_sfincs_tile(
     sf = SfincsModel(data_libs=[str(local_catalog_path)], root=str(sfincs_dir), mode="w+")
     sf.grid.create_from_region(region={"geom": tile_gdf}, res=resolution_m, crs="utm")
     sf.mask.create_active(include_polygon=tile_gdf, reset_mask=True)
-    sf.mask.create_boundary(btype="waterlevel", include_polygon=ocean_poly, reset_bounds=False)
+    sf.mask.create_boundary(btype="waterlevel", include_polygon=ocean_poly, reset_bounds=False, all_touched=True)
 
     # write_dep_tif=True writes subgrid/dep_subgrid.tif - the fine-resolution DEM
     # run_sfincs_tile.py's own postprocessing needs for hydromt_sfincs's own

@@ -1,11 +1,14 @@
 """Spatial agreement maps for the worst N eikonal-vs-SFINCS tiles (ranked by
-eikonal_HT, see compute_calibration_metrics.py): where SFINCS and eikonal
+eikonal_km2/sfincs_km2 ratio, ascending - i.e. worst underestimation only;
+for BOTH worst-under and worst-over tiles in one run, see the dedicated
+plot_eikonal_disagreement_extremes.py instead): where SFINCS and eikonal
 agree, where SFINCS floods but eikonal doesn't (SFINCS-only/over-predicts
 relative to eikonal), and where eikonal floods but SFINCS doesn't
 (eikonal-only). All on the SFINCS subgrid UTM grid, reusing
-compute_calibration_metrics.py's own read/threshold logic (WET_THRESHOLD_M,
-same convention as the HT/FAR/CSI/bias numbers) so the picture matches those
-numbers exactly.
+flood_agreement.py's own WET_THRESHOLD_M (same convention as the pooled
+HT/FAR/CSI/bias numbers) so the picture matches those numbers exactly.
+`build_rgb()` below is the reusable part - imported directly by
+plot_eikonal_disagreement_extremes.py.
 
 Run under gfm_python_preprocessing (NOT hydromt-sfincs-dev) -
 matplotlib.pyplot.savefig() crashes with exit code 127 under
@@ -33,20 +36,41 @@ import rasterio
 from rasterio.warp import Resampling, reproject
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from compute_calibration_metrics import LAND_CODE, WET_THRESHOLD_M, _decode_waterdepth_cm  # noqa: E402
+from flood_agreement import WET_THRESHOLD_M  # noqa: E402
 from gfm_config import read_root  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
 
+LAND_CODE = 0
 OCEAN_CODE = 1
 LAKE_CODE = 2
 RIVER_CODE = 3
+WATERDEPTH_SCALE = 100.0
+WATERDEPTH_NODATA_INT16 = 32767
 
-COLOR_OCEAN = "#d3d3d3"        # light grey, per user request
+
+def _decode_waterdepth_cm(path: Path) -> np.ndarray:
+    """int16-cm -> float32 metres, NaN at nodata - same convention as
+    postprocess_tile_summary.py's own _decode_waterdepth_cm (kept as a
+    separate local copy rather than a shared import, matching that
+    module's own precedent: this tiny decode is duplicated per-script on
+    purpose, not centralized, since it's the one piece of raster I/O each
+    of these otherwise-independent scripts needs)."""
+    with retry_transient_io(rasterio.open, path) as src:
+        raw = src.read(1)
+        nodata = src.nodata if src.nodata is not None else WATERDEPTH_NODATA_INT16
+    depth_m = raw.astype(np.float32) / WATERDEPTH_SCALE
+    depth_m[raw == nodata] = np.nan
+    return depth_m
+
+COLOR_OCEAN = "#a3b9cc"        # grey-blue (2026-09-24, user direction - was light grey; eikonal-only
+# recolored to orange below as a result, since blue was no longer distinct enough from ocean)
 COLOR_WATERBODY = "#8c8c8c"    # medium grey - lake/river (outside the compared land-only domain)
 COLOR_DRY = "#ffffff"          # land, dry in both
 COLOR_AGREE = "#2ca02c"        # green - both wet
 COLOR_SFINCS_ONLY = "#d62728"  # red - SFINCS wet, eikonal dry (SFINCS over-predicts vs eikonal)
-COLOR_EIKONAL_ONLY = "#1f77b4"  # blue - eikonal wet, SFINCS dry (eikonal over-predicts vs SFINCS)
+COLOR_EIKONAL_ONLY = "#eda100"  # yellow (was blue, then orange - both too close to the new
+# grey-blue ocean and/or to COLOR_SFINCS_ONLY's red respectively; user-confirmed orange/red were
+# "literally indistinguishable") - eikonal wet, SFINCS dry (eikonal over-predicts vs SFINCS)
 
 N_TILES_DEFAULT = 30
 MIN_SFINCS_KM2_DEFAULT = 1.0
@@ -117,11 +141,19 @@ def main() -> None:
     root = read_root(Path(args.config))
     base_dir = root / args.base_dir_name
 
-    cal = pd.read_csv(base_dir / "calibration_metrics_per_tile.csv")
-    summ = pd.read_csv(base_dir / "all_tiles_summary.csv")
-    df = cal.merge(summ, on="tile_id", how="left")
-    df = df[df["sfincs_km2"] > args.min_sfincs_km2].sort_values("eikonal_HT").head(args.n_tiles).reset_index(drop=True)
-    print(f"{len(df)} tile(s) selected (worst eikonal_HT, sfincs_km2 > {args.min_sfincs_km2})")
+    # Ranked by eikonal_km2/sfincs_km2 ratio (ascending = worst underestimation),
+    # not eikonal_HT/CSI - those per-tile ratio columns were deliberately dropped
+    # from calibration_metrics_per_tile.csv (2026-09-24, user direction: HT/FAR/
+    # CSI/bias should only ever be computed once, pooled across every tile, never
+    # per-tile - see compute_calibration_metrics.py's own module docstring). For
+    # ranking BOTH worst-under and worst-over tiles, see the dedicated
+    # plot_eikonal_disagreement_extremes.py instead of this script's own CLI.
+    df = pd.read_csv(base_dir / "all_tiles_summary.csv")
+    df = df.dropna(subset=["eikonal_km2", "sfincs_km2"])
+    df = df[df["sfincs_km2"] > args.min_sfincs_km2].copy()
+    df["ratio"] = df["eikonal_km2"] / df["sfincs_km2"]
+    df = df.sort_values("ratio").head(args.n_tiles).reset_index(drop=True)
+    print(f"{len(df)} tile(s) selected (worst eikonal_km2/sfincs_km2 ratio, sfincs_km2 > {args.min_sfincs_km2})")
 
     n = len(df)
     ncols = args.ncols
@@ -138,11 +170,11 @@ def main() -> None:
             ax.set_xticks([]); ax.set_yticks([])
             continue
         ax.imshow(rgb, origin="upper")
-        ht = row["eikonal_HT"]
-        csi = row["eikonal_CSI"]
-        ht_s = f"{ht:.2f}" if pd.notna(ht) else "NaN"
-        csi_s = f"{csi:.2f}" if pd.notna(csi) else "NaN"
-        ax.set_title(f"tile {tile_id} (set {row.get('set', '?')})\nHT={ht_s} CSI={csi_s}", fontsize=9)
+        ax.set_title(
+            f"tile {tile_id} (set {row.get('set', '?')})\n"
+            f"eikonal={row['eikonal_km2']:.2f} sfincs={row['sfincs_km2']:.2f} km2, ratio={row['ratio']:.2f}",
+            fontsize=9,
+        )
         ax.set_xticks([]); ax.set_yticks([])
 
     for ax in axes[n:]:
