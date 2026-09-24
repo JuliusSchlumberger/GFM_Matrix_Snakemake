@@ -97,7 +97,13 @@ done
 
 CODE_ROOT="/u/schlumbe/gfm_code"
 DATA_ROOT="/p/11212688-004-global-floodmaps/modelling"
-BASE_DIR_NAME="validation_sfincs_v3"
+# Overridable via a leading BASE_DIR_NAME=... env var on the invocation
+# (2026-09-24 fix, real bug: this used to be hardcoded, so `generate_v2_batch_jobs.py
+# --base-dir-name validation_sfincs_v4 --runner-script-name run_one_tile_v3.sh` would
+# generate sbatch scripts/resolved_config.yml under v4 but every actual tile op inside
+# THIS script would still silently run against v3's own data tree instead - the
+# generator now always sets this env var explicitly, see its own comment).
+BASE_DIR_NAME="${BASE_DIR_NAME:-validation_sfincs_v3}"
 CONFIG="$DATA_ROOT/$BASE_DIR_NAME/resolved_config.yml"
 SFINCS_IMAGE="docker://deltares/sfincs-cpu:sfincs-v2.4.0-Galibier-Release"
 SFINCS_TIMEOUT_S=14400

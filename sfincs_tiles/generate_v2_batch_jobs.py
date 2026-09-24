@@ -62,7 +62,7 @@ def generate_batches(
     tile_set_pairs: list[tuple[str, str | None]], n_nodes: int, partition: str, time_limit: str,
     mem: str, cpus_per_task: int, account: str, runner_script_linux: str,
     linux_jobs_dir: str, local_jobs_dir: Path, submit_path: Path, batch_name_prefix: str,
-    runner_extra_args: str = "",
+    base_dir_name: str, runner_extra_args: str = "",
 ) -> None:
     n_batches = min(n_nodes, len(tile_set_pairs))
     k, m = divmod(len(tile_set_pairs), n_batches)
@@ -99,7 +99,14 @@ def generate_batches(
         for tile_id, tile_set in batch_pairs:
             set_arg = f" {tile_set}" if tile_set else ""
             extra = f" {runner_extra_args}" if runner_extra_args else ""
-            lines.append(f'bash "{runner_script_linux}" {tile_id}{set_arg}{extra}')
+            # BASE_DIR_NAME=... prefix (2026-09-24, real bug fix): run_one_tile_v2.sh/v3.sh
+            # each hardcode their OWN BASE_DIR_NAME internally by default - without this,
+            # --base-dir-name here only controlled where THIS generator's own files
+            # (resolved_config.yml, the sbatch scripts themselves) went, while every actual
+            # tile operation inside the runner script silently still ran against whichever
+            # tree that script's own filename-matched default pointed at. Safe to always
+            # set even for a runner script that doesn't read it (an unused env var is inert).
+            lines.append(f'BASE_DIR_NAME="{base_dir_name}" bash "{runner_script_linux}" {tile_id}{set_arg}{extra}')
         lines.append("")
 
         script_path = local_jobs_dir / f"{name}.sbatch"
@@ -210,7 +217,7 @@ def main() -> None:
         mem=args.mem, cpus_per_task=args.cpus_per_task, account=args.account,
         runner_script_linux=runner_script_linux, linux_jobs_dir=linux_jobs_dir, local_jobs_dir=local_jobs_dir,
         submit_path=local_jobs_dir / submit_filename, batch_name_prefix=batch_name_prefix,
-        runner_extra_args=args.runner_extra_args,
+        base_dir_name=args.base_dir_name, runner_extra_args=args.runner_extra_args,
     )
     print(f"\nSubmit on Hydrax with: bash {linux_jobs_dir}/{submit_filename}")
     print(f"(make sure {args.runner_script_name} is executable / callable via `bash` - no chmod needed since it's invoked as `bash <path>`)")

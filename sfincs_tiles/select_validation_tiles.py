@@ -90,11 +90,13 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import rasterio
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from select_test_tiles import (  # noqa: E402
     MAX_CELLS_DEFAULT,
     MAX_RIVER_FRAC_DEFAULT,
+    OCEAN_CODE,
     GRID_DEG,
     build_coast_hg_tree,
     evaluate_tile,
@@ -115,6 +117,25 @@ OCEAN_COLOR = "#fcfcfb"
 COAST_COLOR = "#b8b8b3"
 SELECTED_COLOR = "#2a78d6"
 POPULATION_COLOR = "#b3b3ad"
+
+
+def read_ocean_frac(tile_id: int, root: Path) -> float | None:
+    """Lightweight, unconditional mask.tif read for the histogram's own
+    population - unlike evaluate_tile() (select_test_tiles.py), which
+    deliberately returns None BEFORE computing ocean_frac for any tile
+    exceeding max_cells (avoids an expensive full-array read on huge
+    tiles it's about to reject anyway), this always reads the full array,
+    since the whole point here is covering tiles evaluate_tile's own size
+    cap would otherwise silently drop from the population comparison too.
+    Returns None only if the tile has no mask.tif at all (already excluded
+    from hop0 by the explicit model_outputs check in main(), so this should
+    not actually happen in practice - kept as a safety net, not a real path)."""
+    mask_path = root / "model_outputs" / str(tile_id) / "inputs" / "mask.tif"
+    if not mask_path.exists():
+        return None
+    with rasterio.open(mask_path) as src:
+        mask = src.read(1)
+    return float(np.mean(mask == OCEAN_CODE))
 
 
 def is_antimeridian_tile(geom, max_width_deg: float) -> bool:
@@ -188,17 +209,32 @@ def plot_tile_locations_map(selected_df: pd.DataFrame, out_path: Path) -> None:
     plt.close(fig)
 
 
-def plot_selection_histograms(selected_df: pd.DataFrame, eligible_df: pd.DataFrame, out_path: Path) -> None:
+def plot_selection_histograms(selected_df: pd.DataFrame, population_df: pd.DataFrame, out_path: Path) -> None:
     """Two-panel histogram: the selected sample's own area/ocean-fraction
-    distribution against the eligible pool it was drawn from, to show
-    representativeness."""
+    distribution against the population it was drawn from, to show
+    representativeness.
+
+    `population_df` is the FULL available dataset (2026-09-24, user
+    direction: "should not consider only the eligible ones... but the
+    entire available dataset") - every hop_distance==0 tile with a real
+    model_outputs/<id>/inputs/mask.tif, after only the cheap antimeridian/
+    high-latitude/missing-inputs filters, NOT narrowed further to
+    eligible_df's own max_cells/river-frac/COAST-HG-match criteria (those
+    are computational eligibility constraints for THIS validation run, not
+    a property of "what tiles actually exist" - narrowing the comparison
+    population to them made the selected sample look more representative
+    of the true tile population than it really was measured against).
+    Needs both `area_km2_bbox` and `ocean_frac` columns - see main()'s own
+    hop0 construction (read_ocean_frac() computed directly, unconditionally,
+    unlike evaluate_tile()'s own size-gated version).
+    """
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), facecolor=OCEAN_COLOR)
 
     ax = axes[0]
-    area_pop = eligible_df["area_km2_bbox"].to_numpy()
+    area_pop = population_df["area_km2_bbox"].to_numpy()
     area_sel = selected_df["area_km2_bbox"].to_numpy()
     bins = np.logspace(np.log10(max(area_pop.min(), 0.1)), np.log10(area_pop.max()), 30)
-    ax.hist(area_pop, bins=bins, density=True, color=POPULATION_COLOR, alpha=0.75, label=f"Eligible pool (n={len(area_pop)})")
+    ax.hist(area_pop, bins=bins, density=True, color=POPULATION_COLOR, alpha=0.75, label=f"All available tiles (n={len(area_pop)})")
     ax.hist(area_sel, bins=bins, density=True, color=SELECTED_COLOR, alpha=0.55, label=f"Selected (n={len(area_sel)})")
     ax.set_xscale("log")
     ax.set_xlabel("Tile area (km2)")
@@ -208,10 +244,10 @@ def plot_selection_histograms(selected_df: pd.DataFrame, eligible_df: pd.DataFra
     ax.spines[["top", "right"]].set_visible(False)
 
     ax = axes[1]
-    ocean_pop = eligible_df["ocean_frac"].to_numpy()
+    ocean_pop = population_df["ocean_frac"].dropna().to_numpy()
     ocean_sel = selected_df["ocean_frac"].to_numpy()
     bins = np.linspace(0, 1, 26)
-    ax.hist(ocean_pop, bins=bins, density=True, color=POPULATION_COLOR, alpha=0.75, label=f"Eligible pool (n={len(ocean_pop)})")
+    ax.hist(ocean_pop, bins=bins, density=True, color=POPULATION_COLOR, alpha=0.75, label=f"All available tiles (n={len(ocean_pop)})")
     ax.hist(ocean_sel, bins=bins, density=True, color=SELECTED_COLOR, alpha=0.55, label=f"Selected (n={len(ocean_sel)})")
     ax.set_xlabel("Ocean fraction")
     ax.set_ylabel("Density")
@@ -334,6 +370,13 @@ def main() -> None:
     hop0["area_km2"] = _area_km2(hop0)
     hop0["area_km2_bbox"] = hop0["area_km2"]
 
+    # ocean_frac for the FULL hop0 population (2026-09-24, user direction - see
+    # plot_selection_histograms's own docstring) - unconditional per-tile mask.tif read,
+    # unlike evaluate_tile()'s own size-gated version below.
+    print(f"Reading ocean_frac for all {len(hop0)} available tile(s) (for the histogram's own "
+          f"population, not just the eligible subset)...", flush=True)
+    hop0["ocean_frac"] = hop0["tile_id"].apply(lambda t: read_ocean_frac(int(t), root))
+
     coast_hg_tree = build_coast_hg_tree(root / "inputs" / "COAST_HG" / "COAST-HG_RP100.nc")
 
     records = []
@@ -380,7 +423,7 @@ def main() -> None:
     print(f"Wrote {map_path}")
 
     hist_path = out_dir / "tile_selection_histograms.png"
-    plot_selection_histograms(selected, eligible_df, hist_path)
+    plot_selection_histograms(selected, hop0, hist_path)
     print(f"Wrote {hist_path}")
 
     xlsx_path = out_dir / "tile_selection_statistics.xlsx"

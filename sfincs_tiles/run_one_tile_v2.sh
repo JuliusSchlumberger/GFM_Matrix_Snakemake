@@ -34,7 +34,7 @@ TILE_SET="$2"
 
 CODE_ROOT="/u/schlumbe/gfm_code"
 DATA_ROOT="/p/11212688-004-global-floodmaps/modelling"
-BASE_DIR_NAME="validation_sfincs_v2"
+BASE_DIR_NAME="${BASE_DIR_NAME:-validation_sfincs_v2}"  # overridable via env var - see run_one_tile_v3.sh's own comment on this same line, 2026-09-24
 CONFIG="$DATA_ROOT/$BASE_DIR_NAME/resolved_config.yml"
 SFINCS_IMAGE="docker://deltares/sfincs-cpu:sfincs-v2.4.0-Galibier-Release"
 SFINCS_TIMEOUT_S=14400
