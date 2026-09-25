@@ -207,11 +207,14 @@ def _write_size_histogram(final: gpd.GeoDataFrame, path: Path) -> None:
     ax.set_yscale("log")
     ax.set_xlabel("Native (1 arcsecond) pixel count per chunk")
     ax.set_ylabel("Number of chunks (log scale)")
-    ax.set_title(f"Final chunk size distribution - n={len(final)} chunks, "
-                 f"median={int(np.median(n_cells)):,}, max={max(n_cells):,} px")
+    ax.set_title(
+        f"Final chunk size distribution - n={len(final)} chunks\n"
+        f"min={min(n_cells):,}, median={int(np.median(n_cells)):,}, "
+        f"mean={int(np.mean(n_cells)):,}, max={max(n_cells):,} px"
+    )
     fig.tight_layout()
     path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path, dpi=140)
+    fig.savefig(path, dpi=140, bbox_inches="tight")
     plt.close(fig)
 
 

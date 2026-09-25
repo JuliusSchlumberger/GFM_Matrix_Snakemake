@@ -82,17 +82,11 @@ def match_boundary_points_to_coast_hg(
         dropped_reasons: human-readable list of any boundary points dropped
             (no COAST-HG station within max_match_dist_deg) - empty if none.
         offsets_m: {boundary point index: applied mdt_offset (m)} - the
-            REAL applied offset, i.e. boundary_val - RAW hg_max (before it
+            real applied offset, i.e. boundary_val - raw hg_max (before it
             was added into corrected_df). Recovering this from corrected_df
             alone is impossible: corrected_df's own max is, by
-            construction, always == boundary_val (raw_max + offset ==
-            raw_max + (boundary_val - raw_max) == boundary_val), so any
-            downstream diagnostic that recomputes "boundary_val - max(
-            corrected hydrograph)" will always get ~0 regardless of the
-            real offset that was applied - a real bug caught in
-            plot_sfincs_build.py's own summary panel, which is why this is
-            returned/persisted explicitly rather than left for callers to
-            (incorrectly) re-derive.
+            construction, always == boundary_val, so returned/persisted
+            explicitly rather than left for callers to re-derive.
     """
     with retry_transient_io(xr.open_dataset, coast_hg_nc_path) as ds:
         hg_lon = ds.station_x_coordinate.values

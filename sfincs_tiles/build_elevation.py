@@ -5,17 +5,14 @@ grid (dem.tif's own transform/shape), before any UTM reprojection.
 Kept entirely separate from model_outputs/{tile_id}/inputs/dem.tif - the
 eikonal model never reads this, never changes.
 
-Rivers and lakes (mask==3/2): DeltaDTM genuinely has no real elevation data
-over open water (confirmed 2026-09, user) - upstream extract_dem.py hard-
-fills any DeltaDTM-nodata ocean/lake/river cell to a flat 0.0m regardless of
-gap size, so by the time this module reads dem.tif, a lake/river cell's own
-value can't be trusted as real data at all (it's usually just that flat
-0.0m fill, occasionally something else if DeltaDTM happened to have partial
-coverage, indistinguishable from here). So lake/river elevation is
-RE-DERIVED here from nearby valid LAND data only (nearest-neighbour fill),
+Rivers and lakes (mask==3/2): DeltaDTM has no real elevation data over open
+water - upstream extract_dem.py hard-fills any DeltaDTM-nodata ocean/lake/
+river cell to a flat 0.0m regardless of gap size, so a lake/river cell's
+own dem.tif value can't be trusted as real data. Lake/river elevation is
+re-derived here from nearby valid land data only (nearest-neighbour fill),
 then passed through a rolling-minimum window along the water body (see
-LAKE_RIVER_SMOOTH_WINDOW_M) so a single bank's higher bank elevation can't
-locally "bridge" across a channel and block flood propagation, then floored
+LAKE_RIVER_SMOOTH_WINDOW_M) so a single bank's higher elevation can't
+locally bridge across a channel and block flood propagation, then floored
 at LAKE_RIVER_MIN_ELEVATION_M as a final backstop.
 """
 
@@ -40,93 +37,53 @@ LAKE_CODE = 2
 RIVER_CODE = 3
 
 
-MIN_BATHYMETRY_M = -10.0  # was -50.0 until 2026-09's A/B test (tile 2335/2335b/2335c):
-# real ~1.7x additional speedup (larger CFL-stable timestep - shallower water means a
-# lower shallow-water wave celerity sqrt(g*h), so a shallower floor relaxes the
-# timestep constraint, not the other way around), confirmed via real SFINCS runs to
-# change the actual flood result negligibly (28 vs 29 flooded cells out of 20086,
-# identical 2.801 m max depth) ONCE the elevation-reprojection bug that was
-# contaminating that comparison got fixed (see build_sfincs_tile.py's own elevation-
-# reprojection comment) - the two changes were found and fixed together, don't split
-# this value back to -50 without also reverting that fix, the two were validated as a
-# pair, not independently.
+MIN_BATHYMETRY_M = -10.0  # ocean elevation floor - real storm-tide/surge forcing never
+# reaches this deep, so deeper real bathymetry adds nothing physically, just a wider
+# elevation range for the solver. A shallower floor also gives a larger CFL-stable
+# timestep (shallower water -> lower shallow-water wave celerity sqrt(g*h)).
 
-MAX_OCEAN_ELEVATION_M = 0.0  # real, confirmed bug (2026-09, tile 1751): GEBCO's own
-# coarse (~450m) resolution produced implausible dry-land-height spikes at some
-# ocean-coded cells right at the GEBCO/DeltaDTM transition (mean +1.6m, up to +16.6m,
-# vs a tile-wide open-ocean baseline of -9.3m) - a real elevation wall the eikonal
-# comparison's own effective_dem() (flood_model.py, flattens ANY non-land cell to 0m
-# regardless of dep_subgrid's real value) is fully blind to, but that SFINCS's real
-# solver correctly treats as a barrier, blocking a coastal lagoon that eikonal floods
-# through it freely instead. Since gebco_corrected is already MDT-corrected into
-# DeltaDTM's own GOCO06s reference frame, a genuinely flat sea surface reads as ~0m
-# there - any ocean-coded cell above that is definitionally an artifact (open water
-# can't sit above its own surface), so clamped at 0m, same spirit as MIN_BATHYMETRY_M's
-# own floor on the deep end.
+MAX_OCEAN_ELEVATION_M = 0.0  # ocean elevation ceiling - GEBCO's own coarse (~450m)
+# resolution can produce implausible dry-land-height spikes at ocean-coded cells near
+# the GEBCO/DeltaDTM transition. gebco_corrected is MDT-corrected into DeltaDTM's own
+# GOCO06s reference frame, so a genuinely flat sea surface reads as ~0m there - any
+# ocean-coded cell above that is an artifact, clamped at 0m.
 
-LAKE_RIVER_MIN_ELEVATION_M = 0.0  # same 2026-09 session: a real below-sea-level lake/river
-# channel in DeltaDTM's own dem.tif would need to physically fill that below-datum volume
-# before SFINCS could ever see it overflow onto adjacent land - a real storage/delay
-# effect eikonal's own effective_dem() doesn't have (it flattens lakes AND rivers to 0m
-# too, i.e. already "full"). Not observed on tile 1751 itself (its own lake cells were
-# already all >= 0m, and it has no river cells at all), but a real, general risk
-# elsewhere in the batch - floored defensively on both lake and river cells.
+LAKE_RIVER_MIN_ELEVATION_M = 0.0  # a below-sea-level lake/river channel would need to
+# physically fill that below-datum volume before SFINCS could see it overflow onto
+# adjacent land - a storage/delay effect eikonal's own effective_dem() doesn't have (it
+# flattens lakes and rivers to 0m, i.e. already "full"). Floored defensively on both
+# lake and river cells.
 
-LAND_MIN_ELEVATION_M = -15.0  # real, confirmed root cause (2026-09, v2 validation batch,
-# tile 1253/1431 - Lake Enriquillo, Dominican Republic, a real below-sea-level basin
-# whose data sources predate the lake's well-documented post-2004 expansion, so DeltaDTM
-# and our own water-body mask both still show it as plain dry land, down to a genuine
-# -39.32m reading): hydromt_sfincs's own subgrid table builder
-# (hydromt_sfincs/workflows/subgrid.py::subgrid_v_table, called with a HARDCODED
-# zvolmin=-20.0 from components/grid/subgrid.py, not exposed as a parameter we can pass)
-# clamps any subgrid pixel elevation below -20m to exactly -20m when building each SFINCS
-# main-grid cell's own volume/water-level lookup table ("needed with single precision",
-# per their own comment). That table's own dry-state reference level for such a cell
-# becomes -20.0m, not the true (possibly much deeper) elevation - confirmed live via
-# sfincs_map.nc: zs was EXACTLY -20.00m, CONSTANT from t=0 through every one of 141
-# timesteps, for every active cell whose true bed was below roughly -18m. Since our own
-# postprocessing computes flood depth as (simulated water level) - (TRUE, unclamped
-# elevation_combined.tif value), any land cell below hydromt_sfincs's -20m clamp produces
-# a large spurious "flood" purely from that mismatch, with NO real inflow or connectivity
-# involved at all (bathtub's own, much deeper max at the same tile - 39.99m vs SFINCS's
-# reported 19.32m - independently confirms the true terrain really is that deep; bathtub
-# has no subgrid table and so doesn't hit this particular clamp). Floored 5m above the
-# clamp for margin (not exactly -20m) since this floor applies to whole dem.tif pixels,
-# not the finer subgrid pixels the clamp actually operates on - a smoothed/interpolated
-# surface (see build_combined_elevation's own river/lake smoothing) could still dip
-# slightly below a -20m floor at the subgrid level even if the coarser pixel itself
-# doesn't. Applied to ALL land cells (mask==LAND_CODE), not just lake/river - the
-# Lake Enriquillo cells are land-coded, so LAKE_RIVER_MIN_ELEVATION_M never reached them.
+LAND_MIN_ELEVATION_M = -15.0  # hydromt_sfincs's own subgrid table builder
+# (hydromt_sfincs/workflows/subgrid.py::subgrid_v_table, called with a hardcoded
+# zvolmin=-20.0 from components/grid/subgrid.py, not exposed as a parameter) clamps any
+# subgrid pixel elevation below -20m to exactly -20m when building each SFINCS main-grid
+# cell's own volume/water-level lookup table. Since postprocessing computes flood depth
+# as (simulated water level) - (true, unclamped elevation_combined.tif value), any land
+# cell below that clamp produces a spurious "flood" purely from the mismatch. Floored 5m
+# above the -20m clamp for margin, since this floor applies to whole dem.tif pixels, not
+# the finer subgrid pixels the clamp actually operates on - a smoothed/interpolated
+# surface could still dip slightly below a -20m floor at the subgrid level even if the
+# coarser pixel doesn't. Applied to all land cells (mask==LAND_CODE), not just
+# lake/river.
 
 LAKE_RIVER_INTERP_MAX_SEARCH_DISTANCE_PX = 200  # rasterio.fill.fillnodata's search
-# radius (pixels) for the nearest-valid-LAND-neighbour fill - generous (wide rivers/
-# large lakes can be a long way from the nearest bank pixel); any cell fillnodata still
-# can't reach falls back to LAKE_RIVER_MIN_ELEVATION_M via the final floor below, not a
-# silent nodata leak.
+# radius (pixels) for the nearest-valid-land-neighbour fill - generous, since wide
+# rivers/large lakes can be a long way from the nearest bank pixel. Any cell fillnodata
+# can't reach falls back to LAKE_RIVER_MIN_ELEVATION_M via the final floor below.
 
-GEBCO_COAST_CLIP_M = 200.0  # distance (m) from the nearest land cell within which GEBCO's own
-# ocean elevation is discarded and interpolated instead - see _fill_coastal_transition_elevation's
-# own docstring (2026-09-24, user-proposed fix) for the full reasoning: GEBCO's own ~450m native
-# resolution means the nearest real sample to a given coastline can already be several hundred
-# metres offshore and already read as a clamped-deep value, with no intervening real sample for
-# bilinear to interpolate a gradual approach from - this discards that unreliable near-coast ring
-# outright and interpolates across it from the land edge and the still-real GEBCO value beyond it.
+GEBCO_COAST_CLIP_M = 200.0  # distance (m) from the nearest land cell within which
+# GEBCO's own ocean elevation is discarded and interpolated instead - see
+# _fill_coastal_transition_elevation's own docstring.
 
-GEBCO_COAST_CLIP_MAX_SEARCH_DISTANCE_PX = 50  # generous margin over GEBCO_COAST_CLIP_M's own
+GEBCO_COAST_CLIP_MAX_SEARCH_DISTANCE_PX = 50  # margin over GEBCO_COAST_CLIP_M's own
 # ~200m / ~30m-per-pixel = ~7px gap width.
 
 LAKE_RIVER_SMOOTH_WINDOW_M = 500.0  # 2D spatial minimum-filter window (not a
-# channel-direction-aware moving window - considered, but needs a real flow network/
-# centerline model to order pixels along an arbitrary river; a plain spatial minimum
-# filter is a much simpler, still-effective approximation for this pipeline's actual
-# goal: guarantee no local bank/rim peak can exceed its own neighbourhood's lowest
-# point, which directly prevents that peak from blocking flood propagation along the
-# channel). User-proposed 2026-09 fix for the SEPARATE flat-0m-lake/river-bed problem
-# (not the -20m subgrid clamp above) - a river/lake bed sitting at an artificially flat,
-# too-high fill value is trivially easy to flood from a shallow forcing with no real
-# depth/resistance to overcome; interpolating from real (if sparse) bank elevation and
-# then taking a local minimum gives a much more plausible, connected low-lying channel
-# profile instead.
+# channel-direction-aware moving window, which would need a real flow network/
+# centerline model to order pixels along an arbitrary river) - guarantees no local
+# bank/rim peak can exceed its own neighbourhood's lowest point, which prevents that
+# peak from blocking flood propagation along the channel.
 
 
 def _fill_lake_river_elevation(
@@ -168,23 +125,15 @@ def _fill_coastal_transition_elevation(
     still-real GEBCO value beyond it, instead of trusting GEBCO directly
     there. Returns (corrected ocean elevation, diagnostics).
 
-    Real, confirmed root cause (2026-09-24, tile 1736, user-proposed fix):
-    GEBCO's own ~450m native resolution means the single nearest real GEBCO
-    sample to a given stretch of coastline can already be several hundred
-    metres offshore and already read as a clamped-deep value (MIN_BATHYMETRY_M),
-    with no intervening real sample for bilinear reprojection to interpolate
-    a gradual approach from - bilinear can only blend BETWEEN real GEBCO
-    samples, it can't invent a shallower one where none exists. The result
-    is a hard elevation cliff (land directly adjacent to a clamped-deep
-    ocean cell) that triggered a real, confirmed SFINCS numerical
-    instability (a zsmax spike wildly inconsistent with the model's own
-    smoothly-varying time-resolved water level at the same cell).
-
-    Discarding the near-coast GEBCO ring outright is also independently
-    justified, not just a workaround: a GEBCO pixel whose own centre sits
-    within ~200m of the coast, at ~450m native resolution, very likely has
-    real sub-pixel land contamination in its own source data - its "pure
-    bathymetry" value there is not especially trustworthy to begin with.
+    GEBCO's own ~450m native resolution means the single nearest real
+    GEBCO sample to a given stretch of coastline can already be several
+    hundred metres offshore and already read as a clamped-deep value
+    (MIN_BATHYMETRY_M), with no intervening real sample for bilinear
+    reprojection to interpolate a gradual approach from - bilinear can
+    only blend between real GEBCO samples, it can't invent a shallower one
+    where none exists. A GEBCO pixel whose own centre sits within ~200m of
+    the coast, at ~450m native resolution, is also likely to have real
+    sub-pixel land contamination in its own source data.
     """
     if not ocean.any():
         return gebco_corrected, {"n_coastal_transition_cells": 0}
@@ -263,29 +212,16 @@ def build_combined_elevation(
     if not ocean.any():
         raise ValueError("No ocean cells (mask==1) in this tile - nothing for GEBCO to fill in")
 
-    # Reproject GEBCO onto this tile's exact grid - BILINEAR, not nearest
-    # (changed 2026-09-24, real confirmed root cause: GEBCO's own 15 arc-sec
-    # native resolution (~450m) is far coarser than our ~30m tiles, so
-    # nearest-neighbour upsampling replicates a single GEBCO sample across
-    # many destination pixels, producing a locally FLAT "shelf" that then
-    # meets DeltaDTM's much finer land detail as a hard, artificial cliff
-    # right at the coast - confirmed live, tile 1736: a single 120m SFINCS
-    # subgrid cell held elevation values -10, -10, -10 (three GEBCO-derived
-    # ocean pixels, all clamped to MIN_BATHYMETRY_M) directly adjacent to
-    # +0.83m land, an unrealistic ~11m step within 30m. That artificial
-    # discontinuity is the most likely trigger for a real, confirmed SFINCS
-    # numerical instability: a spurious zsmax spike (2.21m) wildly
-    # inconsistent with the model's own smoothly-varying zs(time) field at
-    # the SAME cell (max 1.04m, matching the 1.05m boundary forcing almost
-    # exactly - no real amplification). Bilinear blends between neighbouring
-    # GEBCO samples instead, producing a gradually-varying approach to the
-    # coast rather than a flat clamped shelf meeting a cliff. Superseded
-    # reasoning (nearest was chosen to preserve "real" GEBCO sample values
-    # over a "near-flat regional gradient" this artefact wasn't understood
-    # at the time) - this doesn't affect eikonal-vs-SFINCS comparability the
-    # way DeltaDTM's own land-side resampling method would, since eikonal's
-    # own dem.tif never reads real bathymetry at all (every non-land cell is
-    # flattened to 0m there).
+    # Reproject GEBCO onto this tile's exact grid - bilinear, not nearest:
+    # GEBCO's own 15 arc-sec native resolution (~450m) is far coarser than
+    # our ~30m tiles, so nearest-neighbour upsampling would replicate a
+    # single GEBCO sample across many destination pixels, producing a
+    # locally flat "shelf" that meets DeltaDTM's much finer land detail as
+    # a hard, artificial cliff at the coast. Bilinear blends between
+    # neighbouring GEBCO samples, producing a gradually-varying approach to
+    # the coast instead. This doesn't affect eikonal-vs-SFINCS
+    # comparability, since eikonal's own dem.tif never reads real
+    # bathymetry at all (every non-land cell is flattened to 0m there).
     with retry_transient_io(rasterio.open, gebco_path) as src:
         gebco_arr = np.empty(shape, dtype=np.float64)
         reproject(
@@ -350,10 +286,7 @@ def main() -> None:
     catalog_path = _repo_root / "snakemake_workflow" / "config" / "data_catalog_gfm.yml"
 
     # Read from THIS tile's own working copy (base_dir_name/inputs/), not
-    # model_outputs/ directly - real, confirmed gap (2026-09-23): this used
-    # to hardcode model_outputs/, silently bypassing run_one_tile_v2.sh's
-    # own copy step (and regenerate_dem_mask.py's fixed dem.tif/mask.tif)
-    # entirely, for every tile in the batch.
+    # model_outputs/ directly.
     tile_dir = root / args.base_dir_name / args.tile_id / "inputs"
     gebco_path = resolve_catalog_path(catalog_path, root, "gebco")
     mdt_path = resolve_catalog_path(catalog_path, root, "mdt_cnes_cls22")

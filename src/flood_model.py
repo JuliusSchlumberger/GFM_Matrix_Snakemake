@@ -1,20 +1,13 @@
 """Python port of Aqueduct's flood model (`core/src/core.jl`, `flood_depth`).
 
-`flood_depth_dense` is the validated, production implementation (dense
-domain, exactly 3 sweeps) - bit-for-bit identical to real Aqueduct output
-across 26 real tiles spanning ~9M-135M cells each (100.000% Jaccard, 0.0m
-RMSE/mean-error/90th-percentile/max-diff on every one - see
-`docs/python_vs_julia_qa.md`). See the project plan
-(`buzzing-enchanting-barto.md`) for the full derivation of every step below,
-including the two precision details that would otherwise silently diverge
-from Julia: `coastline_mask`'s exact boolean reduction, and the Haversine
+`flood_depth_dense` is the production implementation - its fixed-3-sweep
+mode is bit-for-bit identical to real Aqueduct output across 26 real tiles
+spanning ~9M-135M cells each (100.000% Jaccard, 0.0m RMSE/mean-error/
+90th-percentile/max-diff on every one - see `docs/python_vs_julia_qa.md`),
+including two precision details that would otherwise silently diverge from
+Julia: `coastline_mask`'s exact boolean reduction, and the Haversine
 axis-order/unit convention required by scikit-learn vs. the
 (internally-consistent) convention `core.jl` uses via `Distances.jl`.
-
-An earlier version of this module also had a `flood_depth` (compacted
-domain, iterated to full convergence) - removed once `flood_depth_dense`
-proved both correct and faster; see git history for reference if ever
-needed.
 """
 
 from __future__ import annotations
@@ -32,65 +25,43 @@ from flood_extent import effective_dem
 EARTH_RADIUS_M = 6_371_000.0
 _STRUCTURE_8 = np.ones((3, 3), dtype=bool)
 
-# Decision-relevant flood/no-flood depth threshold: below this, a "flooded"
-# cell is not considered meaningfully different from dry for reporting/
-# comparison purposes (not currently used to change flood_depth_dense's own
-# flood/no-flood classification, which stays the exact `waterlevel > dem`
-# test it always has - this is for diagnostics and any future consumer that
-# needs a "meaningful vs negligible" cut, e.g. the spatial-diagnostics
-# tooling's red/green extent-change classification). Expressed in
-# centimetres, matching every other quantity's on-disk precision now (see
-# rasters.py's int16 encodings) - see conversation 2026-08-01.
-MIN_FLOOD_DEPTH_CM = 10
-
 # Default convergence threshold for the eikonal solve's round-based mode
-# (used by the default max_rounds-capped path, every obstacle_coupling
-# inner solve, and ignored entirely only when an explicit fixed
-# `sweep_budget` is passed instead - see solve_eikonal_dense). 0.1m is the
-# decision-relevant flood/no-flood threshold - depth precision beyond that
-# isn't used - so epsilon is set well below it (not the previous
-# friction/resolution-derived formula, which chased ~1e-6 to 1e-7m, far
-# finer than anything physically meaningful) - see conversation 2026-07-31.
-# Overridable via flood_depth_dense's own `waterlevel_epsilon_m` parameter
-# (2026-08 - config-driven via simulation.flooding.waterlevel_epsilon_m in
-# config.yml, not just this hardcoded default) - this constant remains the
-# fallback for direct calls (tests, calibration scripts) that don't pass one.
+# (used by the default max_rounds-capped path and every obstacle_coupling
+# inner solve; ignored when an explicit fixed `sweep_budget` is passed
+# instead - see solve_eikonal_dense). 0.1m is the decision-relevant
+# flood/no-flood depth threshold - depth precision beyond that isn't used -
+# so epsilon is set well below it. Overridable via flood_depth_dense's own
+# `waterlevel_epsilon_m` parameter (config-driven via
+# simulation.flooding.waterlevel_epsilon_m in config.yml); this constant is
+# the fallback for direct calls that don't pass one.
 WATERLEVEL_EPSILON_M = 0.03
 
 # Friction assigned to cells the obstacle-coupling machinery has determined
 # cannot legitimately flood (see flood_depth_dense's `obstacle_coupling`
-# docs below) - deliberately far above OBSTACLE_BLOCK_FRICTION's earlier
-# exploratory value (100.0) so the cost of any path crossing such a cell is
-# unmistakably prohibitive even in float32, at negligible extra cost since
-# it is never on a real shortest path once blocked.
+# docs below) - high enough that the cost of any path crossing such a cell
+# is unmistakably prohibitive even in float32, at negligible extra cost
+# since it is never on a real shortest path once blocked.
 OBSTACLE_BLOCK_FRICTION = 9999.0
 
 
 def coastline_mask(mask: np.ndarray, ocean_code: int = 1, river_code: int | None = None) -> np.ndarray:
     """Ocean cells within 1px of land (or river) that are actually part of
-    the tile's real, edge-connected ocean body - 2026-08 fix to `core.jl`'s
-    original `coastlinemask` (`.!(dilate(landmask) .!= mask)`, equivalent to
-    `dilate(landmask) & (mask == ocean_code)`).
+    the tile's real, edge-connected ocean body.
 
-    The original formula treats ANY ocean-coded cell touching land as
-    coastline - including isolated inland "ocean" speckle. DeltaDTM
-    regularly miscodes ponds/aquaculture/thermokarst as `ocean_code`, the
-    same issue already worked around elsewhere in this pipeline (e.g.
-    `tile_generation.river_mouth_min_coastal_component_cells`) - such a
-    speckle patch would otherwise get IDW-seeded from real ocean stations
-    and start flooding from a location with no real path to the sea.
+    Differs from `core.jl`'s original `coastlinemask`
+    (`dilate(landmask) & (mask == ocean_code)`), which treats any ocean-coded
+    cell touching land as coastline - including isolated inland "ocean"
+    speckle DeltaDTM regularly miscodes (ponds, aquaculture, thermokarst),
+    which would otherwise get IDW-seeded from real ocean stations and start
+    flooding from a location with no real path to the sea.
 
-    Fix: label the tile's ocean-coded cells into 8-connected components,
-    keep only the component(s) that actually touch the tile's own array
-    edge (a genuine land-locked pond can never do this, since the tile
-    boundary is where this tile's real ocean connects to the wider world
-    ocean outside it), and require adjacency to land OR `river_code` (not
-    land only) - river mouths are legitimate forcing entry points too.
+    Labels the tile's ocean-coded cells into 8-connected components, keeps
+    only the component(s) touching the tile's own array edge (a land-locked
+    pond can never do this), and requires adjacency to land or `river_code`
+    (river mouths are legitimate forcing entry points too).
 
-    `river_code`: defaults to `None` (old land-only adjacency, for the two
-    existing direct callers - `tests/test_obstacle_coupling_calibration.py`,
-    `tests/diagnose_large_residual.py` - which still benefit from the
-    edge-connectivity fix even without passing it).
+    `river_code` defaults to `None` (land-only adjacency) for callers that
+    don't pass one, e.g. `tests/diagnose_large_residual.py`.
     """
     ocean = mask == ocean_code
     components, _n = ndimage.label(ocean, structure=_STRUCTURE_8)
@@ -162,21 +133,15 @@ def _idw_seed_values(
     Connectivity filter: nearest-by-straight-line-distance is not the same
     as nearest-by-water. A coastal cell on a thin isthmus/spit could
     otherwise draw its boundary forcing from a station on the physically
-    disconnected far side (e.g. a bay), which is not reachable by any real
-    water path. Cells are restricted to stations in the SAME connected
-    component of the tile's own ocean mask (8-connectivity, matching
-    `coastline_mask`'s dilation). A station is assigned to whichever
-    component its nearest coastline seed cell belongs to - stations
-    routinely fall outside the tile's own grid (`station_search_buffer_deg`
-    deliberately searches beyond the tile bbox), so there is no mask cell to
-    look them up in directly; this is a tile-local proxy, not a check
-    against the true global ocean topology, so it cannot see a land barrier
-    that lies mostly outside this tile - see conversation 2026-08-01.
-    Falls back to using every candidate station, ignoring connectivity, only
-    for cells in a component that ended up with zero stations assigned to it
-    at all (better than NaN/crashing; strictly rarer than the bug being
-    fixed, since a component with any real coastline nearly always has its
-    own nearby stations).
+    disconnected far side (e.g. a bay). Cells are restricted to stations in
+    the same connected component of the tile's own ocean mask (8-connectivity,
+    matching `coastline_mask`'s dilation); a station is assigned to whichever
+    component its nearest coastline seed cell belongs to, since stations
+    routinely fall outside the tile's own grid. This is a tile-local proxy,
+    not a check against true global ocean topology, so it cannot see a land
+    barrier lying mostly outside this tile. Falls back to using every
+    candidate station, ignoring connectivity, for a component with zero
+    stations assigned to it.
     """
     k = min(k, len(station_values))
     xs, ys = rasterio.transform.xy(transform, rows, cols)
@@ -252,49 +217,21 @@ def flood_depth_dense(
     river_code: int | None = None,
     sweep_budget: int | None = None,
     obstacle_coupling: bool = False,
-    max_outer_iterations: int = 5,
-    max_rounds: int = 12,
+    max_outer_iterations: int = 3,
+    max_rounds: int = 40,
     outer_convergence_pct: float = 0.01,
     waterlevel_epsilon_m: float = WATERLEVEL_EPSILON_M,
 ) -> tuple[np.ndarray, dict]:
-    """Production flood-depth solve: dense domain, round-based by default
-    (2026-08 - see `sweep_budget`/`max_rounds` below).
+    """Production flood-depth solve: dense domain, round-based by default.
 
-    The original fixed `sweep_budget=3` configuration (still available on
-    request, see `sweep_budget` below) was validated bit-for-bit identical
-    to real Aqueduct output across 26 real tiles spanning ~9M-135M cells
-    each (100.000% Jaccard, 0.0m RMSE/mean-error/90th-percentile/max-diff on
-    every one - see `docs/python_vs_julia_qa.md`), after two real bugs were
-    found and fixed in `eikonal.py`:
-      - a float32-precision discriminant bug (this port originally computed
-        the eikonal update's discriminant in higher precision than Julia
-        actually uses - matching Julia's real, imprecise arithmetic exactly
-        was necessary, not "more correct" arithmetic).
-      - a sweep-order bug (Julia's real Gray-code sweep order is (1, 4, 3, 2)
-        in this module's own orthant numbering, not the numerically-obvious
-        (1, 2, 3, 4) - see `eikonal._ORTHANT_ORDER`).
-
-    Follow-up calibration (2026-08, see `tests/sweep_budget_calibration/`
-    and `tests/obstacle_coupling_calibration/`, 7 real tiles spanning
-    ~4K-207M cells) found that a fixed 3 sweeps under-converges on larger/
-    geometrically-complex tiles - e.g. a ~25M-cell tile's flooded-cell count
-    was still ~1% below its sweep-64 value at sweep 3, and still slowly
-    growing at sweep 64. The round-based mode (default now - `sweep_budget=
-    None`, capped at `max_rounds`) fixes this: it costs nothing extra on the
-    many tiles that already converge in a handful of sweeps (it just stops
-    early via the same epsilon check `WATERLEVEL_EPSILON_M` the
-    `obstacle_coupling` inner solve already used), while giving harder tiles
-    up to `max_rounds` rounds instead of being hard-capped at 3.
-
-    The dense solver has no candidate/elevation domain restriction at all -
-    every cell participates, exactly like Julia's own full-tile solve - so
-    there is no pre-solve candidate-mask/connectivity pruning step, only the
-    same post-solve connectivity filter Julia itself applies. That's true
-    regardless of `obstacle_coupling` - it changes what FRICTION values the
+    The dense solver has no candidate/elevation domain restriction - every
+    cell participates, exactly like Julia's own full-tile solve - so there
+    is no pre-solve candidate-mask/connectivity pruning step, only the same
+    post-solve connectivity filter Julia itself applies. That's true
+    regardless of `obstacle_coupling` - it changes what friction values the
     solver sees, never which cells participate.
 
-    `obstacle_coupling` (default off - see below for why the default
-    solve above is unaffected either way): Fast Sweeping shares a known
+    `obstacle_coupling` (default off): Fast Sweeping shares a known
     structural weakness with cost-distance flood models (Kasmalkar et al.
     2024's "Flow-Tub" critique) - a friction-cheap "shortcut" through terrain
     higher than the locally-attenuated water level can produce an
@@ -334,74 +271,54 @@ def flood_depth_dense(
             `extract_dem`/`extract_dem_mask`/`compute_friction` - see
             `src/rasters.py`).
         boundaries: real/virtual water-level stations, IDW-seeded onto this
-            tile's own `coastline_mask` fringe (2026-08 - the wave-0 path,
-            for a tile with its own real ocean edge). Must be non-empty if
-            given (the caller, mirroring the existing `run_aqueduct.py`
-            skip logic, should not invoke this otherwise).
-        seed_rows, seed_cols, seed_values: 2026-08 - the hop>=1 hinterland
-            path, an alternative to `boundaries`: DIRECT eikonal seed cells
-            and values (already-known absolute water levels, typically
-            collected from an already-simulated neighbour tile's own wet
-            cells - see `boundaries.collect_neighbor_wave_seeds`), bypassing
+            tile's own `coastline_mask` fringe - the wave-0 path, for a tile
+            with its own real ocean edge. Must be non-empty if given.
+        seed_rows, seed_cols, seed_values: the hop>=1 hinterland path, an
+            alternative to `boundaries`: direct eikonal seed cells and values
+            (already-known absolute water levels, typically collected from
+            an already-simulated neighbour tile's own wet cells - see
+            `boundaries.collect_neighbor_wave_seeds`), bypassing
             `coastline_mask`/IDW entirely. A hop>=1 tile has no `ocean_code`
-            cells of its own by construction, so `coastline_mask` would
-            find nothing to seed from regardless of what `boundaries` it
-            was given - this is the only way such a tile can flood at all.
-            Must be non-empty (same convention as `boundaries`) if given.
-            Exactly one of `boundaries` or this triple must be given.
-            `obstacle_coupling=True` works with this path too (2026-08,
-            validated against a real hop>=1 tile - tile 2494, seeded from
-            already-simulated neighbour tile 1482's own real RP1000/SLR_2000
-            output, 78,648 real seed cells, values 3.11-4.61m after fixing
-            `collect_neighbor_wave_seeds`'s effective_dem bug - see that
-            function's own docstring): `station_values` is aliased to
-            `seed_values` below, so the static pre-filter's `max_waterlevel
-            = station_values.max()` uses the seed values' own max as the
-            "highest known water level for this tile" threshold. Coupled
-            and uncoupled solves produced IDENTICAL flooded-cell counts
-            (89,883 of 15,859,188) and a max per-cell depth difference of
-            0.52m / mean 0.07m over flooded-in-either cells (outer loop
-            converged in 2 iterations; the final iteration's own inner
-            solve did not fully converge within max_rounds=12) - consistent
-            with the coupling/non-coupling agreement already established
-            for wave-0 tiles, not a new discrepancy specific to the seed path.
+            cells of its own by construction, so this is the only way such a
+            tile can flood at all. Must be non-empty if given. Exactly one
+            of `boundaries` or this triple must be given.
+            `obstacle_coupling=True` works with this path too: `station_values`
+            is aliased to `seed_values` below, so the static pre-filter's
+            `max_waterlevel = station_values.max()` uses the seed values'
+            own max as the "highest known water level for this tile"
+            threshold.
         resolution, k, variable, ocean_code, river_code: flood-model
             parameters - resolution in metres, `k` nearest boundary
             stations for IDW, `variable` the boundary water-level column
             name, `ocean_code`/`river_code` the mask values marking open
             ocean/river (only used on the `boundaries` path - see
             `coastline_mask`).
-        sweep_budget: if given (an int), forces the OLD fixed-count mode -
-            run exactly this many individual directional sweeps
-            unconditionally, ignoring `max_rounds`/epsilon entirely (`3`
-            reproduces real Aqueduct/Julia's confirmed, bit-exact-validated
-            production behaviour - see module docstring history). `None`
-            (the default, 2026-08) instead runs the round-based solve capped
-            at `max_rounds`, stopping early once converged (round-level
-            max change <= `WATERLEVEL_EPSILON_M`) - see module docstring for
-            why this replaced the fixed count as the default. Only used when
-            `obstacle_coupling` is false (the outer-loop's own inner solve
-            below always uses the round-based mode).
+        sweep_budget: if given, forces the fixed-count mode - run exactly
+            this many individual directional sweeps unconditionally,
+            ignoring `max_rounds`/epsilon entirely (`3` reproduces real
+            Aqueduct/Julia's bit-exact-validated production behaviour - see
+            module docstring). `None` (the default) instead runs the
+            round-based solve capped at `max_rounds`, stopping early once
+            converged (round-level max change <= `waterlevel_epsilon_m`).
+            Only used when `obstacle_coupling` is false (the outer loop's
+            own inner solve always uses the round-based mode).
         obstacle_coupling: enable the static-pre-filter + outer-loop
             algorithm above instead of the single solve. Off by default.
         max_rounds: caps the round-based solve (4 individual sweeps per
-            round - see `sweep_budget` above), each round checked against
-            `WATERLEVEL_EPSILON_M` for early exit. Used both by the default
-            non-coupling path (when `sweep_budget` is `None`) and by every
-            `obstacle_coupling` outer iteration's own inner solve. Default
-            12 (up to 48 sweeps) - empirically calibrated 2026-08 across 7
-            real tiles spanning ~4K-207M cells (see module docstring).
+            round), each round checked against `waterlevel_epsilon_m` for
+            early exit. Used both by the default non-coupling path (when
+            `sweep_budget` is `None`) and by every `obstacle_coupling` outer
+            iteration's own inner solve.
         max_outer_iterations, outer_convergence_pct: only used when
             `obstacle_coupling` is true - `max_outer_iterations` caps the
-            outer loop; `outer_convergence_pct` is the tolerant early-stop
-            threshold (percent of the tile's cells newly blocked this outer
+            outer loop; `outer_convergence_pct` is the early-stop threshold
+            (percent of the tile's cells newly blocked this outer
             iteration).
         waterlevel_epsilon_m: round-level early-exit convergence threshold
             for the round-based solve (metres - see module docstring's
-            `WATERLEVEL_EPSILON_M` note on why 0.03m). Defaults to the
-            module constant; exposed as a parameter (2026-08) so it can be
-            set from `simulation.flooding.waterlevel_epsilon_m` in
-            `config.yml` rather than only ever the hardcoded default.
+            `WATERLEVEL_EPSILON_M`). Defaults to the module constant;
+            exposed as a parameter so it can be set from
+            `simulation.flooding.waterlevel_epsilon_m` in `config.yml`.
 
     Returns:
         `(waterdepth, diagnostics)`. `waterdepth` has the same shape as
@@ -419,11 +336,8 @@ def flood_depth_dense(
         raise ValueError("flood_depth_dense: seed_rows/seed_cols/seed_values must all be given together")
 
     # int8, not int64: mask only ever holds a handful of small codes (land=0,
-    # ocean/lake/river - see rasters.extract_dem_mask's docstring), and
-    # every downstream use is a plain equality/inequality comparison
-    # (dtype-agnostic) - int64 was 8x more memory than this array ever
-    # needed, for no functional reason (found 2026-08 investigating OOM
-    # failures on large real tiles during obstacle-coupling calibration).
+    # ocean/lake/river - see rasters.extract_dem_mask's docstring), and every
+    # downstream use is a plain equality/inequality comparison.
     mask = mask.astype(np.int8)
     dem = effective_dem(dem, mask)
     friction = np.where(friction > 0, friction, friction.dtype.type(0.001))
@@ -477,20 +391,14 @@ def flood_depth_dense(
             waterlevel_b = -t[1:, 1:]
             blocked = (waterlevel_b <= dem) | static_blocked
             if prev_blocked is not None:
-                # Monotonic accumulation (2026-09-25 bug fix): `blocked` above is
-                # recomputed from scratch each outer iteration, purely from THIS
-                # iteration's own solve - without this union, a cell blocked in a
-                # previous iteration's friction map could come back "unblocked" here
-                # (its own waterlevel reads > dem once OTHER cells' fresh blocking
-                # reroutes the flow), which then un-walls it for the NEXT iteration's
-                # friction map, letting water back through - confirmed live (260-tile
-                # calibration study, tests/test_obstacle_coupling_calibration.py):
-                # 91% of non-converging tiles were caught in an exact, undamped
-                # period-2 cycle between two blocked-cell configurations, never
-                # settling no matter how many outer iterations were allowed. The
-                # monotonicity argument in this function's own docstring ("the
-                # blocked-cell set only grows across iterations") was never actually
-                # enforced in code - this union is what makes it true.
+                # Monotonic accumulation: `blocked` above is recomputed from scratch
+                # each outer iteration, purely from THIS iteration's own solve -
+                # without this union, a cell blocked in a previous iteration's
+                # friction map could come back "unblocked" here (its own waterlevel
+                # reads > dem once other cells' fresh blocking reroutes the flow),
+                # letting water back through on the next iteration and preventing
+                # convergence. This union is what makes the blocked-cell set actually
+                # only grow, as this function's own docstring requires.
                 blocked = blocked | prev_blocked
             blocked[coastline_rows, coastline_cols] = False
 

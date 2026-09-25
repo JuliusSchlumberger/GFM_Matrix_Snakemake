@@ -1,67 +1,29 @@
-"""Select tiles for the SFINCS-vs-eikonal validation batch, using ONE
-consistent set of criteria across the whole sample: a real ocean edge
-(hop_distance==0), a minimum ocean fraction, antimeridian-excluded, a
-high-latitude cutoff (2026-09-24, reinstated - see below), spatially
-stratified for global scatter - deliberately NO area-based pre-filter.
-Reuses select_test_tiles.py's own proven eligibility logic
-(evaluate_tile/build_coast_hg_tree) rather than re-deriving it - see that
-module's own docstring for the full eligibility rationale
-(hop_distance==0, mask.tif size cap, <=1% river, real COAST-HG match).
+"""Select tiles for the SFINCS-vs-eikonal validation batch: a real ocean
+edge (hop_distance==0), a minimum ocean fraction, antimeridian-excluded,
+a high-latitude cutoff, spatially stratified for global scatter, no
+area-based pre-filter. Reuses select_test_tiles.py's eligibility logic
+(evaluate_tile/build_coast_hg_tree: hop_distance==0, mask.tif size cap,
+<=1% river, real COAST-HG match).
 
-High-latitude exclusion (2026-09-24, user direction: reinstated - "anything
-above a certain latitude was excluded from being picked", matching the
-original Set A methodology's own |lat|<=55 deg ceiling below, not a new
-metric): tiles far from the equator suffer worse UTM-reprojection
-distortion (meridian convergence curves a tile's straight lon/lat edges
-once reprojected to SFINCS's own axis-aligned UTM grid - confirmed live
-earlier this session on tile 1757, a 3-deg-longitude-wide tile whose own
-north edge sat ~4.4km further north at its east end than its west end).
-`--max-abs-lat-deg` (default 55, the original Set A ceiling) drops any
-tile whose centroid falls outside that band - simple, already-agreed, and
-directly tied to the real cause (latitude), unlike a fractional-area
-distortion metric computed per tile (tried and reverted - see git history/
-conversation if ever needed).
-
-Replaces sfincs_tiles/select_new_tile_sets.py's earlier two-set ("Set
-A"/"Set B", 260 tiles each) design - see
-sfincs_tiles/SFINCS_VALIDATION_METHODOLOGY.md's own "Known follow-up work"
-section for the full history. Two real problems were found in that design
-(2026-09-24): Set B's own missing latitude restriction pulled 56% of its
-260 tiles (127 tiles, 96 above the Arctic/Antarctic Circle) outside the
-|lat| 5-55 deg band Set A was restricted to - an inconsistency between the
-two sets' own criteria, not a deliberate choice; and Set A's own nominal
-"smallest-by-area" pre-filter had an inverted `max()`/`min()` bound that
-meant it never actually took effect on real data (confirmed: Set A's own
-median tile area came out HIGHER than its own source pool's median).
-Rather than fixing that bound to reinstate an area bias, this single
-selection intentionally has NO area-based pre-filter at all - just
-eligibility, a minimum ocean-fraction floor, antimeridian exclusion, the
-high-latitude cutoff above, and spatial stratification across the whole
-eligible pool - matching what Set A's own selection effectively already
-did (confirmed with the user 2026-09-24), including its own |lat|<=55 deg
-ceiling (reinstated here 2026-09-24 after briefly being dropped, then
-re-added per explicit user direction - see this file's own git history).
+High-latitude exclusion: tiles far from the equator suffer worse UTM-
+reprojection distortion (meridian convergence curves a tile's straight
+lon/lat edges once reprojected to SFINCS's own axis-aligned UTM grid).
+`--max-abs-lat-deg` (default 55) drops any tile whose centroid falls
+outside that band.
 
 Works directly off model_outputs/{tile_id}/inputs/ as it currently exists
-on disk (not a fresh catalog re-derivation) - selection is meant to be
-cheap and immediate, not block on re-preprocessing the whole globe first.
-A tile without a real model_outputs/<id>/inputs/mask.tif yet is excluded
-up front, explicitly and reported (see "make sure the tiles are present"
-below) - the production preprocessing rebuild (after the GEBCO-based mask
-fix, src/rasters.py::resolve_offshore_mask_gaps_via_gebco) may still be
-in progress for some of the global tile population when this runs.
+on disk, not a fresh catalog re-derivation. A tile without a real
+model_outputs/<id>/inputs/mask.tif yet is excluded up front, explicitly
+and reported.
 
-Writes a single tile_ids.txt (every selected tile ID) - no more Set A/B
-bookkeeping (2026-09-24, user direction - see generate_v2_batch_jobs.py's
-own updated --tile-ids-file default, which reads this file directly).
+Writes a single tile_ids.txt (every selected tile ID).
 
-Antimeridian exclusion: real, confirmed failure mode (tiles straddling
-+-180 deg break hydromt_sfincs's own water_level.create() with a GEOS
-topology exception - see build_sfincs_tile.py's own
-_classify_water_level_create_error). A tile whose own geometry bounds span
-an implausibly wide longitude range (only possible for a real coastal tile
-if its polygon wraps the dateline, since real GFM tiles are never anywhere
-near this wide) is flagged and dropped.
+Antimeridian exclusion: tiles straddling +-180 deg break
+hydromt_sfincs's own water_level.create() with a GEOS topology exception
+(see build_sfincs_tile.py's own _classify_water_level_create_error). A
+tile whose own geometry bounds span an implausibly wide longitude range
+(only possible for a real coastal tile if its polygon wraps the
+dateline) is flagged and dropped.
 
 Also writes, from the same selected sample:
   - tile_locations_map.png: global Equal Earth map of tile locations
@@ -106,11 +68,8 @@ from gfm_config import read_root  # noqa: E402
 N_TILES_DEFAULT = 520
 MIN_OCEAN_FRAC_DEFAULT = 0.05
 ANTIMERIDIAN_BBOX_WIDTH_DEG_DEFAULT = 60.0  # real GFM tiles are never anywhere near this wide
-MAX_ABS_LAT_DEG_DEFAULT = 55.0  # original Set A methodology's own ceiling (2026-09-24, reinstated
-# per user direction) - see module docstring's "High-latitude exclusion" note
-BASE_DIR_NAME_DEFAULT = "validation_sfincs_v4"  # 2026-09-24, user direction - fresh output tree
-# for this reselection + the high-latitude-cutoff fix, matching validation_sfincs_v2/v3's own
-# per-rebuild naming convention
+MAX_ABS_LAT_DEG_DEFAULT = 55.0  # see module docstring's "High-latitude exclusion" note
+BASE_DIR_NAME_DEFAULT = "validation_sfincs_v4"
 
 LAND_COLOR = "#d8d8d4"
 OCEAN_COLOR = "#fcfcfb"
@@ -120,16 +79,11 @@ POPULATION_COLOR = "#b3b3ad"
 
 
 def read_ocean_frac(tile_id: int, root: Path) -> float | None:
-    """Lightweight, unconditional mask.tif read for the histogram's own
-    population - unlike evaluate_tile() (select_test_tiles.py), which
-    deliberately returns None BEFORE computing ocean_frac for any tile
-    exceeding max_cells (avoids an expensive full-array read on huge
-    tiles it's about to reject anyway), this always reads the full array,
-    since the whole point here is covering tiles evaluate_tile's own size
-    cap would otherwise silently drop from the population comparison too.
-    Returns None only if the tile has no mask.tif at all (already excluded
-    from hop0 by the explicit model_outputs check in main(), so this should
-    not actually happen in practice - kept as a safety net, not a real path)."""
+    """Unconditional mask.tif read for the histogram's population - unlike
+    evaluate_tile() (select_test_tiles.py), which returns None before
+    computing ocean_frac for any tile exceeding max_cells, this always
+    reads the full array so the population comparison covers every tile.
+    Returns None if the tile has no mask.tif at all."""
     mask_path = root / "model_outputs" / str(tile_id) / "inputs" / "mask.tif"
     if not mask_path.exists():
         return None
@@ -149,13 +103,8 @@ def is_antimeridian_tile(geom, max_width_deg: float) -> bool:
 
 def stratified_sample_exact(df: pd.DataFrame, n_target: int, grid_deg: float, seed: int) -> pd.DataFrame:
     """Round-robins one tile at a time across coarse global lon/lat bins
-    until n_target is met or the pool is exhausted, instead of a single
-    capped pass. A single-pass per-bin "share" (select_test_tiles.py's own
-    stratified_sample) is fixed at visit time and never revisited, so when
-    bin sizes are uneven it can undershoot even when n_target == the pool
-    size (confirmed 2026-09-23, a different selection: asked for all 171 of
-    a 171-tile pool, got only 131). Guarantees exactly min(n_target,
-    len(df)) tiles, still spatially stratified."""
+    until n_target is met or the pool is exhausted. Guarantees exactly
+    min(n_target, len(df)) tiles, still spatially stratified."""
     rng = np.random.default_rng(seed)
     df = df.copy()
     df["_bin"] = (
@@ -211,22 +160,15 @@ def plot_tile_locations_map(selected_df: pd.DataFrame, out_path: Path) -> None:
 
 def plot_selection_histograms(selected_df: pd.DataFrame, population_df: pd.DataFrame, out_path: Path) -> None:
     """Two-panel histogram: the selected sample's own area/ocean-fraction
-    distribution against the population it was drawn from, to show
-    representativeness.
+    distribution against the population it was drawn from.
 
-    `population_df` is the FULL available dataset (2026-09-24, user
-    direction: "should not consider only the eligible ones... but the
-    entire available dataset") - every hop_distance==0 tile with a real
-    model_outputs/<id>/inputs/mask.tif, after only the cheap antimeridian/
-    high-latitude/missing-inputs filters, NOT narrowed further to
-    eligible_df's own max_cells/river-frac/COAST-HG-match criteria (those
-    are computational eligibility constraints for THIS validation run, not
-    a property of "what tiles actually exist" - narrowing the comparison
-    population to them made the selected sample look more representative
-    of the true tile population than it really was measured against).
-    Needs both `area_km2_bbox` and `ocean_frac` columns - see main()'s own
-    hop0 construction (read_ocean_frac() computed directly, unconditionally,
-    unlike evaluate_tile()'s own size-gated version).
+    `population_df` is every hop_distance==0 tile with a real
+    model_outputs/<id>/inputs/mask.tif, after only the antimeridian/
+    high-latitude/missing-inputs filters - not narrowed further to
+    eligible_df's own max_cells/river-frac/COAST-HG-match criteria, since
+    those are eligibility constraints for this validation run, not a
+    property of what tiles actually exist. Needs both `area_km2_bbox` and
+    `ocean_frac` columns - see main()'s own hop0 construction.
     """
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), facecolor=OCEAN_COLOR)
 
@@ -329,9 +271,8 @@ def main() -> None:
     parser.add_argument("--antimeridian-width-deg", type=float, default=ANTIMERIDIAN_BBOX_WIDTH_DEG_DEFAULT)
     parser.add_argument(
         "--max-abs-lat-deg", type=float, default=MAX_ABS_LAT_DEG_DEFAULT,
-        help="exclude tiles whose centroid latitude falls outside +-this value (2026-09-24, "
-             "user direction, reinstates the original Set A methodology's own ceiling - see "
-             "module docstring's 'High-latitude exclusion' note)",
+        help="exclude tiles whose centroid latitude falls outside +-this value - see module "
+             "docstring's 'High-latitude exclusion' note",
     )
     parser.add_argument("--base-dir-name", default=BASE_DIR_NAME_DEFAULT)
     parser.add_argument("--seed", type=int, default=0)
@@ -354,12 +295,8 @@ def main() -> None:
     hop0 = hop0[hop0["lat_centroid"].abs() <= args.max_abs_lat_deg].copy()
     print(f"{n_high_lat} tile(s) excluded for |lat_centroid| > {args.max_abs_lat_deg}, {len(hop0)} remain")
 
-    # Explicit model_outputs existence check (2026-09-24, user direction: "make sure that the
-    # tiles are present in the directory") - evaluate_tile() below already returns None for a
-    # missing mask.tif, so a tile without real inputs could never be SELECTED either way, but
-    # this makes that fact an audited, reported number up front rather than an implicit
-    # side-effect buried in evaluate_tile's own per-tile reject reasons - matches
-    # select_calibration_tiles.py's own same up-front check, added earlier this session.
+    # Explicit model_outputs existence check, reported up front rather than left as an
+    # implicit side-effect of evaluate_tile()'s own per-tile reject reasons.
     model_outputs_root = root / "model_outputs"
     has_inputs = hop0["tile_id"].apply(lambda t: (model_outputs_root / str(int(t)) / "inputs" / "mask.tif").is_file())
     n_missing_inputs = int((~has_inputs).sum())
@@ -370,9 +307,7 @@ def main() -> None:
     hop0["area_km2"] = _area_km2(hop0)
     hop0["area_km2_bbox"] = hop0["area_km2"]
 
-    # ocean_frac for the FULL hop0 population (2026-09-24, user direction - see
-    # plot_selection_histograms's own docstring) - unconditional per-tile mask.tif read,
-    # unlike evaluate_tile()'s own size-gated version below.
+    # ocean_frac for the FULL hop0 population - see plot_selection_histograms's own docstring.
     print(f"Reading ocean_frac for all {len(hop0)} available tile(s) (for the histogram's own "
           f"population, not just the eligible subset)...", flush=True)
     hop0["ocean_frac"] = hop0["tile_id"].apply(lambda t: read_ocean_frac(int(t), root))
@@ -409,11 +344,6 @@ def main() -> None:
     print(f"\nSelected: {len(selected)} tiles (ocean_frac >= {args.min_ocean_frac:.0%}, "
           f"antimeridian-excluded, |lat| <= {args.max_abs_lat_deg}, stratified)")
 
-    # No "set" column any more (2026-09-24, user direction) - the two-batch
-    # "Set A/Set B" split this superseded is gone, and there's only ever one
-    # selection now, so a bookkeeping label distinguishing "which set" has
-    # nothing left to distinguish. A single tile_ids.txt, not a set_a/set_b
-    # pair - see generate_v2_batch_jobs.py's own updated --tile-ids-file arg.
     selected.to_csv(out_dir / "tile_selection_metadata.csv", index=False)
     (out_dir / "tile_ids.txt").write_text("\n".join(str(t) for t in selected["tile_id"]) + "\n")
     print(f"\nWrote {out_dir / 'tile_selection_metadata.csv'}, {out_dir / 'tile_ids.txt'} ({len(selected)})")

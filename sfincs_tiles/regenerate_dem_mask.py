@@ -1,20 +1,7 @@
-"""Regenerate dem.tif and mask.tif for one tile using the CURRENT production
+"""Regenerate dem.tif and mask.tif for one tile using the current production
 DEM-extraction logic (src/rasters.py's extract_dem/extract_dem_mask),
-instead of trusting whatever copy exists in model_outputs/{tile_id}/inputs/.
-
-Real, confirmed problem (2026-09-23, tile 1454, 82.7N): model_outputs/
-tiles were built by whatever DEM-extraction code existed AT THE TIME -
-src/rasters.py itself was only added to this repo on 2026-09-14, weeks
-after many tiles' own dem.tif was generated (e.g. tile 1454's: 2026-08-10).
-An older/different DEM-extraction implementation flat-filled a 53,765-cell
-DeltaDTM coverage void (real, confirmed: raw deltadtm.vrt is NaN there,
-deltadtm_mask genuinely classifies it as land) to 0.0m, when the CURRENT
-gap-fill logic (config.yml's simulation.dem_gap_fill,
-min_hard_fill_component_size=15) would correctly hard-fill a gap this large
-to land_fill_value_m=99m instead - the flat, too-low fake terrain let
-SFINCS's real hydrodynamics flood a substantial area with nothing behind
-it but a stale DEM artifact, while eikonal's friction-cost model (correctly)
-couldn't reach it from the real coast.
+instead of trusting whatever copy exists in model_outputs/{tile_id}/inputs/,
+which may have been built by an older version of that logic.
 
 extract_dem/extract_dem_mask are plain functions with no Snakemake coupling
 (only the thin wrapper scripts snakemake_workflow/scripts/extract_dem.py /

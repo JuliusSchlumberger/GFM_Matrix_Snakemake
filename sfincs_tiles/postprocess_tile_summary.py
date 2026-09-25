@@ -1,16 +1,13 @@
-"""Per-tile results summary for the v2 validation batch - writes one small
+"""Per-tile results summary for a validation batch - writes one small
 {base_dir_name}/{tile_id}/outputs/summary.json per tile, so the whole batch's
-results can be merged with a trivial glob+concat (see
-aggregate_tile_summaries.py) instead of re-deriving everything from raw
-rasters after the fact.
+results can be merged with a glob+concat (see aggregate_tile_summaries.py)
+instead of re-deriving everything from raw rasters after the fact.
 
 Needs the hydromt-sfincs-dev env (imports hydromt_sfincs.SfincsModel to read
-the SFINCS grid's own boundary-cell mask) - run this as the LAST step of a
-tile's own pipeline, after the env has already switched back for the SFINCS
-run stage, so no extra env switch is needed just for postprocessing.
-Deliberately avoids importing src/rasters.py (older-hydromt-env only) - the
-waterdepth int16-cm decode (WATERDEPTH_SCALE=100, WATERDEPTH_NODATA_INT16=
-32767) is copied directly from its own documented convention instead.
+the SFINCS grid's own boundary-cell mask). Avoids importing src/rasters.py
+(older-hydromt-env only) - the waterdepth int16-cm decode
+(WATERDEPTH_SCALE=100, WATERDEPTH_NODATA_INT16=32767) is copied directly
+from its own documented convention instead.
 
 Usage:
     python postprocess_tile_summary.py --tile-id 12345 --set A
@@ -89,31 +86,22 @@ def summarize_tile(tile_id: str, root: Path, base_dir_name: str, tile_set: str |
     domain_area_km2 = float((np.ones(native_mask.shape[0]) * native_mask.shape[1] * row_area_native).sum())
 
     result: dict = {"tile_id": tile_id}
-    # "set" (Set A/B) is a 2026-09 batch-only bookkeeping label with no
-    # behavioural difference between the two - dropped for later validation
-    # batches that only ever use a single selection (2026-09-24, user
-    # direction); only written here at all for backward compatibility with
-    # earlier batches (validation_sfincs_v2/v3) that still pass --set.
+    # "set" (Set A/B) is a bookkeeping label, only written for backward compatibility
+    # with earlier batches (validation_sfincs_v2/v3) that still pass --set.
     if tile_set is not None:
         result["set"] = tile_set
     result.update({
         "domain_area_km2": domain_area_km2, "ocean_frac": ocean_frac,
     })
 
-    # -- SFINCS's own subgrid-resolution hmax (hmax_subgrid.tif, still in its
-    # native UTM subgrid CRS - NOT the same file as hmax.tif below, which is
-    # already reprojected to EPSG:4326) - read once here so the bathtub/
-    # eikonal loop below can compute agreement counts against it directly,
-    # since bathtub_waterdepth_*.tif/eikonal_on_subgrid_waterdepth_*.tif are
-    # both pixel-identical to it (same shape/transform/crs - all three
-    # ultimately derive from sfincs_model/subgrid/dep_subgrid.tif), so no
-    # reprojection is needed between them (confirmed live, 2026-09).
-    # Computing this here - on the HPC node that already has these rasters
-    # open, right after the SFINCS run that produced them - means
-    # compute_calibration_metrics.py never needs to re-open/re-reproject any
-    # raster itself; it only aggregates the counts written below (2026-09-24,
-    # user direction: don't redo per-tile raster I/O sequentially afterward
-    # when it can be done once, in parallel, right here).
+    # SFINCS's own subgrid-resolution hmax (hmax_subgrid.tif, still in its native UTM
+    # subgrid CRS - not the same file as hmax.tif below, which is already reprojected to
+    # EPSG:4326) - read once here so the bathtub/eikonal loop below can compute
+    # agreement counts against it directly, since bathtub_waterdepth_*.tif/
+    # eikonal_on_subgrid_waterdepth_*.tif are both pixel-identical to it (all three
+    # ultimately derive from sfincs_model/subgrid/dep_subgrid.tif), so no reprojection
+    # is needed between them. compute_calibration_metrics.py only aggregates the counts
+    # written below, rather than re-opening/re-reprojecting any raster itself.
     sfincs_wet_subgrid = None
     hmax_subgrid_path = tile_dir / "sfincs_model" / "hmax_subgrid.tif"
     if hmax_subgrid_path.exists():

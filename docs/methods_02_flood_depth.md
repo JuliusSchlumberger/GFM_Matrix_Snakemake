@@ -16,7 +16,7 @@ at every grid cell, the model treats inland flood propagation as a
 **static, boundary-value problem governed by the eikonal equation**, with the
 land-cover-dependent friction field acting as a spatially varying propagation
 resistance. This formulation is solved numerically with the Fast Sweeping
-Method (Zhao, 2005 **[VERIFY citation]**), giving a flood water level (and
+Method (Zhao, 2005), giving a flood water level (and
 hence depth) at every cell in a single, non-iterative-in-time pass per
 scenario. The approach follows the method implemented in the Deltares
 *Aqueduct Coastal Flooding* model **[VERIFY citation / reference]**, of which
@@ -66,12 +66,24 @@ classification (ESA WorldCover), reclassified to a Manning's roughness
 coefficient $n(x)$ per land-cover class via a land-cover-to-roughness
 mapping table (processed with the HydroMT/HydroMT-SFINCS toolchain), then
 converted to a per-cell friction/resistance value used directly as the
-eikonal equation's slowness field. Dense vegetation and built-up land are
-assigned substantially higher roughness/resistance than open water, bare
-ground, or grassland, so floodwater is attenuated faster crossing rough
-terrain than open terrain — matching the qualitative expectation that
-(e.g.) a mangrove fringe or urban block impedes inland flood propagation
-more than a flat, open floodplain of the same elevation.
+eikonal equation's slowness field. Cells with no assigned land-cover class
+default to $n = 0.002$. Dense vegetation and built-up land are assigned
+substantially higher roughness/resistance than open water, bare ground, or
+grassland, so floodwater is attenuated faster crossing rough terrain than
+open terrain — matching the qualitative expectation that (e.g.) a mangrove
+fringe or urban block impedes inland flood propagation more than a flat,
+open floodplain of the same elevation.
+
+The friction value is used directly as a propagation cost per grid step
+(30 m), with no separate distance term in the solver. Used unscaled, this
+produces a water-level attenuation of roughly 0.008–0.04 m/km, about 30×
+weaker than the ~0.1–1.2 m/km range reported for comparable land cover by
+Vafeidis et al. (2019) **[VERIFY citation]**. Production therefore applies
+a runtime multiplier of ×30 to the friction field (not baked into the
+land-cover-derived raster itself, so it can be varied independently of the
+land-cover processing) to bring the model's attenuation into that
+literature-supported range; the factor of 30 corresponds to DeltaDTM's own
+native ~30 m grid step.
 
 ### 2.4 Why this is an acceptable approximation
 
@@ -150,8 +162,11 @@ w_i = d(x_c, p_i)^{-2}
 $$
 
 where $d(\cdot,\cdot)$ is the haversine distance and $k$ is a configurable
-number of nearest boundary stations (default **[VERIFY default value used
-in production, e.g. $k=15$]**).
+number of nearest boundary stations (production default $k=15$), restricted
+to stations that are ocean-connected to the seed cell in question (a
+straight-line-nearest station on the far side of a land barrier is
+excluded - see the companion tile-processing/water-level document's own
+"assigning stations to a domain" section).
 
 ### 4.3 Governing equation
 
@@ -238,24 +253,37 @@ corner cell.
 each of the four sweep directions); a round stops the solve early once the
 maximum per-cell water-level change across that round falls below a fixed
 tolerance $\varepsilon = 0.03\,\mathrm{m}$ (`waterlevel_epsilon_m`,
-configurable). This replaced an earlier formula that derived $\varepsilon$
-from the minimum friction value and grid resolution — chasing numerical
-precision around $10^{-6}$–$10^{-7}$ m, far finer than the $0.10\,\mathrm{m}$
+configurable), a value chosen to sit well below the $0.10\,\mathrm{m}$
 threshold at which a cell's flooded/dry classification is actually decided
-(§4.5), for no decision-relevant benefit. The solve is capped at
-`max_rounds` (default 12, i.e. up to 48 individual sweeps) if convergence is
-not reached first — empirically calibrated across production tiles ranging
-from a few thousand to over 200 million cells: a fixed, uniform sweep count
-(historically 3, matching the original reference implementation) was found
-to under-converge on some larger/geometrically complex tiles, so the
-round-based, convergence-checked scheme is now the production default,
-with the original fixed-count mode retained as an optional non-default
-configuration. **[VERIFY / describe for the paper as appropriate to the
-audience]**: in this application's operating regime, most tiles converge
-well within the round cap rather than requiring many rounds, a property of
-this specific formulation's sign
-convention and parameter ranges, confirmed empirically across production
-tiles, rather than a general property of Fast Sweeping methods.
+(§4.5), rather than chasing numerical precision beyond what is
+decision-relevant.
+
+The solve is capped at `max_rounds` if convergence is not reached first. A
+fixed, uniform sweep count (3, matching the original Julia reference
+implementation) was found to under-converge on larger/geometrically complex
+tiles, so a round-based, convergence-checked scheme is the production
+default instead, with the original fixed-count mode retained as an optional
+non-default configuration. The round cap itself was set empirically: a
+calibration exercise across a representative sample of 260 real coastal
+domains found that 58.7% of domains fully converge (every cell's potential
+change drops to/below $\varepsilon$) within 40 rounds, and of the remaining
+domains that have not strictly converged by round 40, 84% already have a
+stable flood extent by then - the residual change is confined to depth
+still settling in already-flooded cells, not the flooded/dry boundary
+itself. Production therefore caps the solve at `max_rounds = 40`.
+
+**Illustrative example.** Figure 1 shows this on a small synthetic case
+(not a real tile) designed to need several rounds: a single source point
+seeded outside a nested-square-ring maze with alternating gaps, forcing the
+true shortest path to spiral inward, reversing direction repeatedly - a
+known slow case for a fixed 4-direction sweep order, since each round only
+relays information once along each direction. After 1 round only the outer
+ring is filled in; the solution keeps improving through round ~9, after
+which the per-round maximum change drops to zero (full convergence) -
+generated directly from the production solver code
+(`docs/generate_eikonal_solver_examples.py`).
+
+![Inner loop: rounds relax the solution toward convergence](eikonal_example_rounds.png)
 
 ### 4.4a Structural correction: obstacle coupling
 
@@ -297,22 +325,48 @@ that cannot legitimately be on a real flood path, then re-solves:
 
 Because raising a cell's friction can only lower or hold every eikonal
 solution value elsewhere in the tile (never raise one), the set of blocked
-cells only grows from one outer iteration to the next, guaranteeing
-termination in a finite number of iterations. This correction changes only
-which friction values the solver sees; it never changes which cells
-participate in the solve.
+cells is designed to only grow from one outer iteration to the next,
+guaranteeing termination in a finite number of iterations. This correction
+changes only which friction values the solver sees; it never changes which
+cells participate in the solve.
 
-In validation against both direct-boundary-forced tiles and hinterland tiles
-seeded from an already-solved neighbouring tile's output (§4.2's
-alternative, the "hop-distance" propagation used for tiles without their own
-direct coastal forcing), enabling this correction was found to leave the
-flooded-cell count unchanged in the case tested, with small (sub-metre,
-mean roughly 0.1 m) depth differences confined to cells flooded under both
-configurations — consistent with the correction acting as intended: removing
-a specific structural risk rather than materially changing typical-case
-output. **[VERIFY - state more precisely for the paper: this is one
-documented real-tile comparison, not a systematic validation across many
-tiles; frame accordingly.]**
+That monotonicity guarantee must be enforced explicitly, not merely
+assumed: an implementation that recomputes the blocked-cell set from
+scratch each outer iteration (rather than accumulating it as the union with
+every previous iteration's own blocked set) can let a cell blocked in one
+iteration appear "unblocked" in the next, once other cells' fresh blocking
+reroutes the flow around it - production accumulates the blocked-cell set
+as a running union across iterations for exactly this reason. Without that
+accumulation, a real calibration run across 260 domains showed the large
+majority (91%) of domains that failed to converge were instead caught in a
+stable, undamped two-state oscillation between alternating blocked-cell
+configurations, never settling regardless of how many outer iterations were
+allowed.
+
+With the accumulation in place, of the domains that did converge, the large
+majority reach convergence at the earliest mathematically possible outer
+iteration (iteration 2 - the stopping check needs a previous iteration to
+compare against, so it cannot fire any earlier), with only a small number
+needing more. Production caps the outer loop at `max_outer_iterations = 3`,
+a small margin above that dominant case. **[VERIFY before submission: this
+default has been spot-verified on individual domains under the corrected
+algorithm, but a full systematic re-validation across the 260-domain sample
+was still pending as of this writing - confirm current status before citing
+convergence statistics for the corrected algorithm specifically.]**
+
+**Illustrative example.** Figure 2 shows this on a small synthetic case (not
+a real tile): a ridge that is too tall to ever legitimately flood, but
+whose low friction makes it numerically the cheapest inland route for the
+rows directly behind it - cheaper than the honest detour around it via the
+open flanks above and below. Without obstacle coupling, this inflates
+reported depth in a band directly behind the ridge (up to ~0.25 m in this
+example) relative to the flank rows, which have no such shortcut available;
+with obstacle coupling, the ridge is detected and blocked, and depth in
+that band drops to what the honest detour alone would produce. Generated
+directly from the production solver code
+(`docs/generate_eikonal_solver_examples.py`).
+
+![Outer loop: obstacle coupling removes a friction-cheap shortcut's spurious depth inflation](eikonal_example_obstacle_coupling.png)
 
 ### 4.5 Flood classification and depth
 
@@ -377,7 +431,10 @@ agreement.
 ---
 
 *Items marked **[VERIFY]** should be checked against the original Zhao
-(2005) citation details, the Aqueduct Coastal Flooding project's own
-documentation/publications, the exact default value of $k$ used in
-production, and the land-cover-to-friction coefficient table's original
-source, before this text is used in a submission.*
+(2005), Kasmalkar et al. (2024), and Vafeidis et al. (2019) citation
+details, the Aqueduct Coastal Flooding project's own
+documentation/publications, the land-cover-to-friction coefficient table's
+original source, and the current status of the full 260-domain
+obstacle-coupling re-validation under the corrected (monotonic
+blocked-cell-accumulation) algorithm, before this text is used in a
+submission.*

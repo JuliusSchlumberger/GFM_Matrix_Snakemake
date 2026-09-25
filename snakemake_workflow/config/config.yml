@@ -308,13 +308,12 @@ simulation: # Used by: preprocessing rules
   # "{tile_id}/results" are created
 
   # Flood model implementation: src/flood_model.py's flood_depth_dense
-  # (dense domain, round-based solve capped at flooding.max_rounds below -
-  # 2026-08). Validated bit-for-bit identical to the original Aqueduct/Julia
-  # reference implementation across 26 real tiles spanning ~9M-135M cells
-  # each (100.000% Jaccard, 0.0m RMSE/mean-error/max-diff on every one) -
-  # see docs/python_vs_julia_qa.md. The old fixed 3-sweep configuration
-  # remains available on demand (flood_depth_dense's own `sweep_budget`
-  # param), just no longer the default (see flooding.max_rounds below for why).
+  # (dense domain, round-based solve capped at flooding.max_rounds below).
+  # Its fixed-3-sweep mode is validated bit-for-bit identical to the
+  # original Aqueduct/Julia reference implementation across 26 real tiles
+  # spanning ~9M-135M cells each - see docs/python_vs_julia_qa.md. That
+  # fixed-sweep mode remains available on demand (flood_depth_dense's own
+  # `sweep_budget` param), just no longer the default (see max_rounds below).
   model_bbox_buffer_arcsec: 3 # Buffer added to tile's previously shaved bbox to ensure thin strip of ocean.
   dem_gap_fill: # land-nodata gap handling: large connected (4-connectivity) group get Nodata value, other IDW-interpolation
     min_hard_fill_component_size: 15 # a missing-land DEM cell is only hard-filled to land_fill_value_m for patches larger than that
@@ -333,59 +332,42 @@ simulation: # Used by: preprocessing rules
     # Default Manning's n roughness (÷ 100) for cells with no land use class.
     default_friction: 0.002
     # Runtime multiplier applied to the (already land-use-derived, already
-    # decoded) friction raster - NOT baked into compute_friction.py's own
+    # decoded) friction raster - not baked into compute_friction.py's own
     # preprocessing output, so the expensive land-use-derived raster is
     # computed once and reused unscaled by every sweep combination that
-    # varies a different parameter - see aqueduct_runner.run_aqueduct_python.
-    # 30.0 (2026-09, production default, was 1.0/no-op): the raw friction
-    # value (Manning's_n/100) is used directly as cost-per-GRID-STEP, with
-    # no distance term anywhere in the solver - confirmed empirically (real
-    # 1D-corridor test, real land-cover friction values) that this produces
-    # only ~0.008-0.04 m/km water-level attenuation, roughly 30x weaker than
-    # the ~0.1-1.2 m/km range reported in Vafeidis et al. (2019) for
-    # comparable land cover. x30 brings the model's real per-km attenuation
-    # into that literature-supported range (DeltaDTM's own native grid step
-    # being ~30m is the origin of the factor, not a coincidence).
+    # varies a different parameter. The raw friction value (Manning's_n/100)
+    # is used directly as cost-per-grid-step, with no distance term anywhere
+    # in the solver; unscaled, this produces water-level attenuation ~30x
+    # weaker than the ~0.1-1.2 m/km range reported in Vafeidis et al. (2019)
+    # for comparable land cover - x30 brings it into that range (DeltaDTM's
+    # own native ~30m grid step is the origin of the factor).
     friction_scale_factor: 30.0
 
     # Caps the eikonal solve's round-based mode (4 individual directional
     # sweeps per round, each round checked for early-exit convergence - see
     # src/eikonal.py's solve_eikonal_dense and src/flood_model.py's
-    # flood_depth_dense). Used by BOTH the non-coupling single solve and
+    # flood_depth_dense). Used by both the non-coupling single solve and
     # each outer iteration's inner solve when obstacle_coupling is enabled
     # (below) - not obstacle_coupling-specific, hence top-level here rather
-    # than nested under it. 12 rounds (up to 48 sweeps) -
-    # empirically calibrated 2026-08 across 7 real tiles spanning
-    # ~4K-207M cells (see snakemake_workflow/tests/sweep_budget_calibration.py
-    # and .../obstacle_coupling_calibration.py), replacing the old fixed
-    # sweep_budget=3 default - a 3-sweep fixed count was found to
-    # under-converge on larger/geometrically-complex tiles (e.g. a
-    # ~25M-cell tile's flooded-cell count was still ~1% below its
-    # sweep-64 value at sweep 3). The old fixed-sweep_budget=3 mode (real
-    # Aqueduct/Julia's own confirmed, bit-exact-validated behaviour - see
-    # flood_depth_dense's docstring) remains available on demand via that
-    # function's own `sweep_budget` parameter, just no longer the default.
-    # 40 (2026-09-25, up from 12): the 260-tile sweep-budget calibration
-    # study's own conclusion (tests/test_sweep_budget_calibration.py +
-    # plot_sweep_budget_convergence.py) - 58.7% of tiles strictly converge
-    # by round 40, and of the ones that don't, 84% already have their flood
-    # extent (depth>0 cells) fully frozen by then too (the residual is a
-    # small number of stubborn cells' depth still settling, not genuinely
-    # unconverged physics - see the conversation's own nonconverged_*
-    # figures in calibration_260_tiles/figures/).
+    # than nested under it. 40 rounds: the 260-tile sweep-budget calibration
+    # study's conclusion (tests/test_sweep_budget_calibration.py) - 58.7% of
+    # tiles strictly converge by round 40, and of the ones that don't, 84%
+    # already have their flood extent (depth>0 cells) fully frozen by then
+    # too (the residual is a small number of cells' depth still settling,
+    # not genuinely unconverged extent). The old fixed-sweep_budget=3 mode
+    # (real Aqueduct/Julia's own bit-exact-validated behaviour) remains
+    # available via flood_depth_dense's own `sweep_budget` parameter, just
+    # no longer the default.
     max_rounds: 40
 
     # Round-level early-exit convergence threshold (metres) for the
     # round-based solve above - a round stops the solve early once its max
-    # per-cell waterlevel change drops to/below this. Used by BOTH the
+    # per-cell waterlevel change drops to/below this. Used by both the
     # non-coupling single solve and each outer iteration's inner solve when
-    # obstacle_coupling is enabled (below) - same top-level-not-nested
-    # reasoning as max_rounds. 0.03m sits well below the 0.1m
+    # obstacle_coupling is enabled (below). 0.03m sits well below the 0.1m
     # decision-relevant flood/no-flood depth threshold, so tightening/
     # loosening this trades convergence precision against sweep count
-    # directly - see src/flood_model.py's WATERLEVEL_EPSILON_M comment for
-    # the full reasoning (this value used to be that hardcoded constant
-    # only; now config-driven, 2026-08).
+    # directly - see src/flood_model.py's WATERLEVEL_EPSILON_M comment.
     waterlevel_epsilon_m: 0.03
 
     # Mitigates a structural weakness Fast Sweeping shares with cost-distance
@@ -396,29 +378,22 @@ simulation: # Used by: preprocessing rules
     # (friction -> 9999) and re-solves in an outer loop instead of a single
     # solve - see src/flood_model.py's flood_depth_dense docstring for the
     # full algorithm and monotonicity/termination argument. Enabled by
-    # default (2026-08) - validated on both the wave-0 (real boundary
-    # stations) and hop>=1 (explicit seed cells) paths; see that docstring
-    # for the real-tile validation numbers.
+    # default - validated on both the wave-0 (real boundary stations) and
+    # hop>=1 (explicit seed cells) paths; see that docstring.
     obstacle_coupling:
       enabled: true
-      # 3 (2026-09-25, up from 5): the 260-tile obstacle-coupling calibration
-      # study's own conclusion, AFTER fixing a real bug found live in this
-      # outer loop (2026-09-25, see this function's own comment on the
-      # `blocked = blocked | prev_blocked` union below flood_model.py's
-      # own obstacle_coupling branch): before the fix, the blocked-cell set
-      # was recomputed from scratch each outer iteration instead of being
-      # accumulated monotonically, so 91% of non-converging tiles were
-      # caught in a stable, undamped period-2 oscillation that no amount of
-      # extra outer iterations would have resolved. Once fixed, of the
-      # tiles that DID converge pre-fix, the overwhelming majority (166 of
-      # 170) converged at the earliest mathematically possible point
-      # (outer=2 - the stopping check needs a previous iteration to compare
-      # against, so it can't fire any earlier), with only a handful needing
-      # 4 or 6; the one tile spot-verified post-fix converged at outer=3.
-      # 3 gives a small margin over the dominant outer=2 case while staying
-      # cheap - not yet validated on the full 260-tile population under the
-      # fixed algorithm (only 1 tile re-verified so far), so treat this as
-      # a well-motivated starting point, not a fully closed-out result.
+      # 3: the 260-tile obstacle-coupling calibration study's conclusion,
+      # after fixing a bug where the blocked-cell set was recomputed from
+      # scratch each outer iteration instead of accumulated monotonically
+      # (see flood_model.py's own `blocked = blocked | prev_blocked`
+      # comment) - unfixed, this caused most non-converging tiles to
+      # oscillate indefinitely rather than settle. Once fixed, the
+      # overwhelming majority of tiles converge at the earliest
+      # mathematically possible point (outer=2), with only a handful
+      # needing 4 or 6. 3 gives a small margin over that dominant case
+      # while staying cheap - not yet validated on the full 260-tile
+      # population under the fixed algorithm, so treat as a well-motivated
+      # starting point rather than a closed-out result.
       max_outer_iterations: 3
       outer_convergence_pct: 0.01  # stop early once < this % of the tile's cells are newly blocked in an outer iteration
 

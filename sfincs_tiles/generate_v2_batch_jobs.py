@@ -1,24 +1,18 @@
-"""Generate the N independent sbatch scripts that dispatch the v2 validation
-batch (see select_validation_tiles.py - current selections write a single
-tile_ids.txt, no more Set A/B, 2026-09-24 user direction; --set-a-file/
---set-b-file remain as an explicit opt-in for regenerating older v2/v3
-batches that do still carry a set label) end to end, one job per script, each
-looping sequentially through its own tile-id slice and calling
-run_one_tile_v2.sh <tile_id> [<set>] per tile - the per-tile pipeline
-covering input-copy -> SFINCS-input build (hydromt-sfincs-dev env) ->
-bathtub+eikonal (gfm env) -> SFINCS run (apptainer) -> postprocess+summary
+"""Generate N independent sbatch scripts that dispatch a validation batch
+(see select_validation_tiles.py, which writes tile_ids.txt) end to end, one
+job per script, each looping sequentially through its own tile-id slice and
+calling run_one_tile_v2.sh/v3.sh <tile_id> [<set>] per tile - the per-tile
+pipeline covering input-copy -> SFINCS-input build (hydromt-sfincs-dev env)
+-> bathtub+eikonal (gfm env) -> SFINCS run (apptainer) -> postprocess+summary
 (hydromt-sfincs-dev env), all inside that one script.
 
-Deliberately NOT a SLURM --array job (unlike generate_sfincs_array_job.py) -
-per user direction, N independent sbatch scripts submitted individually, so
-SLURM schedules each onto a node as one frees up rather than managing array
-task indices.
+N independent sbatch scripts submitted individually (not a SLURM --array
+job), so SLURM schedules each onto a node as one frees up rather than
+managing array task indices.
 
-Reuses this repo's established dual-path-view pattern
-(config_utils.load_config(..., extra_override=config_hpc.yml), see
-generate_sfincs_hpc_jobs.py/generate_eikonal_on_subgrid_jobs.py) to resolve
-both the local (Windows, for writing files here) and Linux (HPC, for the
-generated scripts' own paths) views of paths.root from the same config.yml.
+Resolves both the local (Windows, for writing files here) and Linux (HPC,
+for the generated scripts' own paths) views of paths.root from the same
+config.yml (config_utils.load_config(..., extra_override=config_hpc.yml)).
 
 Usage:
     python generate_v2_batch_jobs.py
@@ -37,10 +31,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import atomic_write, load_config, retry_transient_io  # noqa: E402
 
 N_NODES_DEFAULT = 20
-PARTITION_DEFAULT = "4vcpu"  # matches generate_sfincs_hpc_jobs.py's own switch from 1vcpu -
-# this pipeline runs the same SFINCS solve step (OMP_NUM_THREADS=4, see run_one_tile_v2.sh)
-TIME_DEFAULT = "16:00:00"  # raised from 12h 2026-09-23 (user direction) - more headroom for a
-# batch of 26 tiles/job each up to a 4h SFINCS timeout, plus the build/eikonal steps
+PARTITION_DEFAULT = "4vcpu"  # matches this pipeline's SFINCS solve step (OMP_NUM_THREADS=4,
+# see run_one_tile_v2.sh)
+TIME_DEFAULT = "16:00:00"  # headroom for a batch of tiles/job each up to a 4h SFINCS timeout,
+# plus the build/eikonal steps
 CPUS_PER_TASK_DEFAULT = 4
 MEM_DEFAULT = "30G"
 BASE_DIR_NAME_DEFAULT = "validation_sfincs_v2"
@@ -49,10 +43,7 @@ RUNNER_SCRIPT_NAME_DEFAULT = "run_one_tile_v2.sh"
 
 def _batch_name_prefix(base_dir_name: str) -> str:
     """e.g. 'validation_sfincs_v3' -> 'v3_batch', so batch/submit script
-    filenames reflect whichever base_dir_name they were generated for
-    instead of always saying 'v2' (real confusion, 2026-09-23: a v3 run's
-    files still being named v2_batch_*.sbatch/submit_v2_batches.sh made a
-    user try `bash .../submit_v3_batches.sh`, which never existed)."""
+    filenames reflect whichever base_dir_name they were generated for."""
     prefix = "validation_sfincs_"
     tag = base_dir_name[len(prefix):] if base_dir_name.startswith(prefix) else base_dir_name
     return f"{tag}_batch"
@@ -99,13 +90,8 @@ def generate_batches(
         for tile_id, tile_set in batch_pairs:
             set_arg = f" {tile_set}" if tile_set else ""
             extra = f" {runner_extra_args}" if runner_extra_args else ""
-            # BASE_DIR_NAME=... prefix (2026-09-24, real bug fix): run_one_tile_v2.sh/v3.sh
-            # each hardcode their OWN BASE_DIR_NAME internally by default - without this,
-            # --base-dir-name here only controlled where THIS generator's own files
-            # (resolved_config.yml, the sbatch scripts themselves) went, while every actual
-            # tile operation inside the runner script silently still ran against whichever
-            # tree that script's own filename-matched default pointed at. Safe to always
-            # set even for a runner script that doesn't read it (an unused env var is inert).
+            # BASE_DIR_NAME=... prefix: run_one_tile_v2.sh/v3.sh each default to their own
+            # BASE_DIR_NAME internally, overridable via this env var.
             lines.append(f'BASE_DIR_NAME="{base_dir_name}" bash "{runner_script_linux}" {tile_id}{set_arg}{extra}')
         lines.append("")
 
@@ -159,10 +145,8 @@ def main() -> None:
     parser.add_argument("--account", default="")
     parser.add_argument(
         "--runner-extra-args", default="",
-        help="extra args appended verbatim to every generated 'bash <runner> tile_id [set]' line "
-             "(2026-09-24, user direction) - e.g. '--models bathtub,sfincs' to skip eikonal while "
-             "its own sweep-count calibration (tests/test_sweep_budget_calibration.py) is still "
-             "running, or '--models eikonal --max-rounds 25' once that study settles on a value",
+        help="extra args appended verbatim to every generated 'bash <runner> tile_id [set]' line, "
+             "e.g. '--models bathtub,sfincs' or '--models eikonal --max-rounds 40'",
     )
     args = parser.parse_args()
 

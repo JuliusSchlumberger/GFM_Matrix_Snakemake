@@ -1,40 +1,29 @@
 """Run the production eikonal flood solver directly on SFINCS's own subgrid
 inputs (dep_subgrid.tif / manning_subgrid.tif, real UTM metres) instead of
-the eikonal model's own separately-built lon/lat DeltaDTM grid - isolating
-the PHYSICS/NUMERICS disagreement between the two models from every
+the eikonal model's own separately-built lon/lat DeltaDTM grid, isolating
+the physics/numerics disagreement between the two models from any
 grid/projection/elevation-source difference between their normally-separate
 input pipelines.
 
-Real, concrete benefits of running on this shared grid (see conversation):
-  - SFINCS's subgrid IS a true UTM metre grid - genuinely isotropic (every
-    step the same real distance in every direction) - so the eikonal
-    solver's own known anisotropy bug (no real-distance scaling on a
-    lon/lat grid, investigated and reverted earlier this session) simply
-    doesn't apply here; no fix needed for this comparison.
-  - The subgrid's own resolution (30m at the current 120m/4 settings)
-    matches simulation.flooding.friction_scale_factor=30's own calibration
-    target - no recalibration needed.
-  - Reusing flood_model.py's own effective_dem() (flattens ANY non-land
-    cell - ocean, lake, AND river - to 0m) for free fixes the exact
-    "deep lake bathymetry contaminates a coarse cell's own hypsometric
-    table" issue found investigating tile 37's depth disagreement, on the
-    eikonal side at least.
+SFINCS's subgrid is a true, isotropic UTM metre grid, at the same
+resolution (30m at the current 120m/4 settings) simulation.flooding.
+friction_scale_factor=30 is calibrated for. Reusing flood_model.py's own
+effective_dem() (flattens any non-land cell - ocean, lake, and river - to
+0m) avoids deep lake/river bathymetry contaminating a coarse cell's own
+hypsometric table on the eikonal side.
 
-Boundary seeding uses the eikonal solver's own DIRECT seed_rows/seed_cols/
-seed_values path (the same one hop>=1 hinterland tiles already use in
-production) - NOT the boundaries=/coastline_mask+haversine-IDW path, since
-_idw_seed_values hard-codes a haversine (lon/lat) distance metric that
-would be wrong on this projected UTM grid. Seeding is computed here with a
-PLANAR Euclidean IDW instead (build_boundary_forcing.idw_interpolate_to_grid,
-already built for exactly this - SFINCS's own zsini uses the identical
-approach), from the SAME boundaries_RP100_SLR_0.gpkg values already used
-for every other comparison this session (deliberately still the old,
-pre-MDT-fix boundary forcing, for consistency with the existing SFINCS
-results being compared against).
+Boundary seeding uses the eikonal solver's own direct seed_rows/seed_cols/
+seed_values path (the same one hop>=1 hinterland tiles use in production),
+not the boundaries=/coastline_mask+haversine-IDW path (_idw_seed_values
+hard-codes a haversine, lon/lat, distance metric, which would be wrong on
+this projected UTM grid). Seeding is computed here with a planar Euclidean
+IDW instead (build_boundary_forcing.idw_interpolate_to_grid - the same
+approach SFINCS's own zsini uses), from the boundaries_RP100_SLR_0.gpkg
+values.
 
-No eikonal solver code changes needed at all - flood_depth_dense/
-effective_dem/coastline_mask are all pure array functions with no lon/lat
-assumption; only _idw_seed_values (not used here) is lon/lat-specific.
+flood_depth_dense/effective_dem/coastline_mask are pure array functions
+with no lon/lat assumption; only _idw_seed_values (not used here) is
+lon/lat-specific.
 
 Usage:
     python run_eikonal_on_sfincs_subgrid.py --tile-id 37
@@ -93,34 +82,20 @@ def build_inputs_from_sfincs_subgrid(
         {0,1,2,3}) get their own NODATA_CODE rather than being folded into
         land or ocean.
 
-        NOTE this is NOT a leftover DeltaDTM nodata signal - mask.tif
-        itself (confirmed directly, e.g. tile 1757) contains ONLY real
-        {0,1,2,3} values; extract_dem_mask() (src/rasters.py) already
-        resolves DeltaDTM's own raw 255 nodata sentinel to land(0) well
-        upstream of this file. The gaps reprojecting here to a real
-        "nothing here" value are a genuine geometry artefact: a tile's
-        native mask.tif is a rectangle in lon/lat, but reprojected to UTM
-        it becomes a CURVED shape (meridian convergence - e.g. tile
-        1757's own north edge, spanning 3 degrees of longitude, sits
-        ~4.4km further north at its east end than its west end).
-        SFINCS's create_from_region(..., crs="utm") builds an
-        axis-aligned UTM rectangle that must fully contain that curve, so
-        it overshoots at the opposite corners into territory the tile's
-        own native mask.tif never covered at all - genuinely outside the
-        tile, not unclassified deep ocean within it. Confirmed real,
-        substantial impact on wide/high-latitude tiles (212/253 tiles
-        affected by >5 km2 of this, ~56,800 km2 total across the batch;
-        negligible on typical ~1x1 degree tiles). A blanket "nodata ->
-        land" fallback flooded these corners as spurious dry land; a
-        blanket "nodata -> ocean" fallback would be an equally unjustified
-        guess the other way. Simplest and most honest: give it its own
-        code, excluded by construction from every existing
-        `mask == LAND_CODE` reporting/bathtub restriction elsewhere in
-        this module, without asserting a classification this data was
-        never able to support. effective_dem() (flood_model.py) already
-        flattens ANY non-LAND_CODE cell to 0m, so NODATA_CODE gets that
-        same treatment automatically - it behaves like open water for
-        propagation purposes without being counted as real ocean for
+        This is a genuine geometry artefact, not a leftover DeltaDTM nodata
+        signal: mask.tif itself contains only real {0,1,2,3} values, but a
+        tile's native mask.tif is a rectangle in lon/lat, which becomes a
+        curved shape in UTM (meridian convergence). SFINCS's
+        create_from_region(..., crs="utm") builds an axis-aligned UTM
+        rectangle that must fully contain that curve, so it overshoots at
+        the opposite corners into territory the tile's own native mask.tif
+        never covered - genuinely outside the tile, not unclassified deep
+        ocean within it. Given its own code (NODATA_CODE) rather than
+        folded into land or ocean, so it's excluded by construction from
+        every `mask == LAND_CODE` reporting/bathtub restriction elsewhere
+        in this module. effective_dem() (flood_model.py) flattens any
+        non-LAND_CODE cell to 0m, so NODATA_CODE behaves like open water
+        for propagation purposes without counting as real ocean for
         coastline/seeding logic (which checks mask == OCEAN_CODE
         specifically, not "not land").
     friction: manning_subgrid.tif / 100 * friction_scale_factor, NaN cells
@@ -158,28 +133,15 @@ def build_inputs_from_sfincs_subgrid(
 
 
 def sfincs_domain_coastline_mask(mask: np.ndarray, ocean_code: int = OCEAN_CODE, river_code: int | None = RIVER_CODE) -> np.ndarray:
-    """Ocean cells within 1px of land (or river) - deliberately WITHOUT
-    flood_model.coastline_mask's own edge-connectivity requirement.
-
-    That requirement exists to reject isolated inland ponds DeltaDTM
-    sometimes miscodes as ocean, and relies on GFM's own tile-generation
-    process (src/tile_chunking.py) deliberately building each eikonal tile
-    with a real "wet edge" - a property SFINCS's own grid never has (it's
-    just a rectangular UTM bounding box around the tile polygon plus a
-    buffer margin, unrelated to tile_chunking's own wet-edge convention).
-
-    Real, confirmed bug (2026-09, tile 37): reusing coastline_mask's
-    edge-connectivity check on the SFINCS subgrid's own domain rejected
-    84% of the tile's real coastline (12,829 native coastline cells ->
-    only 2,011 survived reprojection, clustered in one small corner,
-    because the SFINCS bounding box's own edges mostly cut through land
-    far from the coast). This simpler formula matches what
-    build_sfincs_tile.py's own _ocean_polygon_wgs84 already does to place
-    SFINCS's own real boundary forcing - already validated safe for this
-    exact domain shape (used successfully across every SFINCS tile this
-    session), since the domain is already tightly built around one real
-    coastal tile, not the whole-globe scope the edge-connectivity check
-    was originally guarding against.
+    """Ocean cells within 1px of land (or river) - deliberately without
+    flood_model.coastline_mask's own edge-connectivity requirement, which
+    exists to reject isolated inland ponds DeltaDTM sometimes miscodes as
+    ocean and relies on GFM's own tile-generation process building each
+    eikonal tile with a real "wet edge" - a property SFINCS's own grid
+    never has (a rectangular UTM bounding box around the tile polygon plus
+    a buffer margin). This simpler formula matches what
+    build_sfincs_tile.py's own _ocean_polygon_wgs84 uses to place SFINCS's
+    own real boundary forcing.
     """
     ocean = mask == ocean_code
     landlike = mask == LAND_CODE
@@ -199,14 +161,9 @@ def compute_planar_idw_seeds(
     haversine/lon-lat and can't be reused directly here). Returns None if
     the boundaries file is empty or no coastline cells exist.
 
-    k=15 matches production's own simulation.flooding.knn - genuinely
-    caps each cell's IDW to its k NEAREST stations, not "however many
-    stations this tile happens to have". Real, confirmed bug (2026-09):
-    an earlier k=20 default, combined with a tile that happened to have
-    exactly 20 stations, meant min(k, len(station_values))==20 used EVERY
-    station for EVERY coastline cell regardless of distance - collapsing a
-    real 1.47-3.12m station spread down to a ~1.73-1.78m tile-wide average
-    before it ever reached the solver, silently under-flooding the tile.
+    k=15 matches production's own simulation.flooding.knn - caps each
+    cell's IDW to its k nearest stations, not however many stations this
+    tile happens to have.
     """
     boundaries = retry_transient_io(gpd.read_file, boundaries_path)
     if boundaries.empty:
@@ -293,16 +250,13 @@ def main() -> None:
     parser.add_argument("--base-dir-name", default="validation_sfincs_v2", help="output root directory name under paths.root (default: validation_sfincs_v2)")
     parser.add_argument(
         "--models", nargs="+", choices=["bathtub", "eikonal"], default=["bathtub", "eikonal"],
-        help="which of this script's two models to (re-)run (2026-09-24, user direction: "
-             "e.g. --models bathtub to skip eikonal entirely while its own sweep-count "
-             "calibration is still in progress). Default: both.",
+        help="which of this script's two models to (re-)run, e.g. --models bathtub to skip "
+             "eikonal entirely. Default: both.",
     )
     parser.add_argument(
         "--max-rounds", type=int, default=None,
-        help=f"eikonal round cap forwarded to run_eikonal_on_sfincs_subgrid() (default: "
-             f"{MAX_ROUNDS_DEFAULT} - 2026-09-24, user direction: intended to eventually take "
-             f"the value the sweep-budget calibration study settles on, see tests/ "
-             f"test_sweep_budget_calibration.py)",
+        help=f"eikonal round cap forwarded to run_eikonal_on_sfincs_subgrid() "
+             f"(default: {MAX_ROUNDS_DEFAULT})",
     )
     args = parser.parse_args()
 
