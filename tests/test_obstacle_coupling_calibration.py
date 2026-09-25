@@ -81,14 +81,15 @@ much more."
 Output: ONE CSV per tile (not a single combined file), written
 incrementally, in CSV_DIR, plus a shared progress log on stdout.
 
-`--epsilon` defaults to `DEFAULT_OUTER_EPSILON_M` (0.1m), NOT production's
-own `simulation.flooding.waterlevel_epsilon_m` (0.03m) - 2026-09-24 user
-direction: a softer inner-solve convergence threshold is the safer lever
-for cutting this study's per-outer-iteration cost (vs. capping
-`--inner-max-rounds` low, which risks the reached/unreached guard's failure
-mode above on tiles the wavefront hasn't geometrically covered yet - see
-module docstring). Pass `--epsilon 0.03` explicitly to reproduce production's
-own strict threshold for comparison.
+`--epsilon` defaults to `DEFAULT_OUTER_EPSILON_M` (0.03m, 2026-09-25 -
+reverted back to match production's own `simulation.flooding.
+waterlevel_epsilon_m` exactly, after a brief stint at a softened 0.1m
+2026-09-24 to cut this study's per-outer-iteration cost - now that the
+outer loop's own monotonic-blocked-set bug is fixed (2026-09-25, see
+flood_model.py's own obstacle_coupling branch), the real convergence
+behavior at production's actual threshold is what this study should
+characterize). Pass `--epsilon 0.1` explicitly for the earlier softened
+comparison if ever needed again.
 
 Usage:
     python test_obstacle_coupling_calibration.py <output_dir> [--config <config.yml>]
@@ -118,8 +119,9 @@ RETURN_PERIOD = "RP100"
 WATERLEVEL_NAME = "SLR_0"
 OCEAN_CODE = 1
 BLOCK_FRICTION = 9999.0  # matches flood_model.OBSTACLE_BLOCK_FRICTION (was the stale 100.0)
-DEFAULT_OUTER_EPSILON_M = 0.1  # softer than production's own 0.03m default (2026-09-24, user
-# direction - see module docstring) - this script's own --epsilon default, not config-driven
+DEFAULT_OUTER_EPSILON_M = 0.03  # matches production's own simulation.flooding.waterlevel_epsilon_m
+# (2026-09-25, reverted after a brief 0.1m stint - see module docstring) - this script's own
+# --epsilon default, not config-driven
 DEFAULT_MAX_OUTER = 15  # 2026-09-24 user direction - up from production's own default of 5
 DEFAULT_INNER_MAX_ROUNDS = 40  # 2026-09-24 user direction - the sweep-budget calibration
 # study's own conclusion (see tests/plot_sweep_budget_convergence.py's output/figures):
@@ -382,6 +384,16 @@ def run_tile_trace(
         gc.collect()
 
         blocked = ((wl_b <= dem) & reached) | static_blocked
+        if prev_blocked is not None:
+            # Monotonic accumulation (2026-09-25 bug fix - mirrors the identical fix in
+            # src/flood_model.py's own obstacle_coupling branch, see that comment for the
+            # full story): without this union, `blocked` here is recomputed from scratch
+            # each outer iteration and can LOSE members present in prev_blocked, letting a
+            # previously-walled-off cell's path reopen - this is what produced the exact,
+            # undamped period-2 oscillation confirmed on 91% of this study's own
+            # non-converging tiles (pct_blocked_cumulative alternating between two fixed
+            # values every single iteration, never settling even at outer=15).
+            blocked = blocked | prev_blocked
         blocked[seed_rows, seed_cols] = False
         depth = _full_depth_array(wl_b, dem, mask, coastline)
         del wl_b
@@ -455,7 +467,7 @@ def main() -> None:
     parser.add_argument("--tile-ids", type=int, nargs="*", default=None)
     parser.add_argument("--max-outer", type=int, default=None, help=f"default: {DEFAULT_MAX_OUTER} (pass --max-outer 5 to match production's own config default)")
     parser.add_argument("--inner-max-rounds", type=int, default=None, help=f"default: {DEFAULT_INNER_MAX_ROUNDS} (pass --inner-max-rounds 12 to match production's own config default)")
-    parser.add_argument("--epsilon", type=float, default=None, help=f"default: {DEFAULT_OUTER_EPSILON_M} (softer than production's own config simulation.flooding.waterlevel_epsilon_m=0.03 - pass --epsilon 0.03 to reproduce that strictly)")
+    parser.add_argument("--epsilon", type=float, default=None, help=f"default: {DEFAULT_OUTER_EPSILON_M} (matches production's own config simulation.flooding.waterlevel_epsilon_m)")
     parser.add_argument("--outer-convergence-pct", type=float, default=None, help="default: config simulation.flooding.obstacle_coupling.outer_convergence_pct")
     args = parser.parse_args()
 

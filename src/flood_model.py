@@ -476,6 +476,22 @@ def flood_depth_dense(
             )
             waterlevel_b = -t[1:, 1:]
             blocked = (waterlevel_b <= dem) | static_blocked
+            if prev_blocked is not None:
+                # Monotonic accumulation (2026-09-25 bug fix): `blocked` above is
+                # recomputed from scratch each outer iteration, purely from THIS
+                # iteration's own solve - without this union, a cell blocked in a
+                # previous iteration's friction map could come back "unblocked" here
+                # (its own waterlevel reads > dem once OTHER cells' fresh blocking
+                # reroutes the flow), which then un-walls it for the NEXT iteration's
+                # friction map, letting water back through - confirmed live (260-tile
+                # calibration study, tests/test_obstacle_coupling_calibration.py):
+                # 91% of non-converging tiles were caught in an exact, undamped
+                # period-2 cycle between two blocked-cell configurations, never
+                # settling no matter how many outer iterations were allowed. The
+                # monotonicity argument in this function's own docstring ("the
+                # blocked-cell set only grows across iterations") was never actually
+                # enforced in code - this union is what makes it true.
+                blocked = blocked | prev_blocked
             blocked[coastline_rows, coastline_cols] = False
 
             n_newly = int(blocked.sum()) if prev_blocked is None else int((blocked & ~prev_blocked).sum())
