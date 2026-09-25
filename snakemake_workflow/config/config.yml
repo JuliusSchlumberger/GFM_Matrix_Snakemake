@@ -365,7 +365,15 @@ simulation: # Used by: preprocessing rules
     # Aqueduct/Julia's own confirmed, bit-exact-validated behaviour - see
     # flood_depth_dense's docstring) remains available on demand via that
     # function's own `sweep_budget` parameter, just no longer the default.
-    max_rounds: 12
+    # 40 (2026-09-25, up from 12): the 260-tile sweep-budget calibration
+    # study's own conclusion (tests/test_sweep_budget_calibration.py +
+    # plot_sweep_budget_convergence.py) - 58.7% of tiles strictly converge
+    # by round 40, and of the ones that don't, 84% already have their flood
+    # extent (depth>0 cells) fully frozen by then too (the residual is a
+    # small number of stubborn cells' depth still settling, not genuinely
+    # unconverged physics - see the conversation's own nonconverged_*
+    # figures in calibration_260_tiles/figures/).
+    max_rounds: 40
 
     # Round-level early-exit convergence threshold (metres) for the
     # round-based solve above - a round stops the solve early once its max
@@ -393,7 +401,25 @@ simulation: # Used by: preprocessing rules
     # for the real-tile validation numbers.
     obstacle_coupling:
       enabled: true
-      max_outer_iterations: 5   # cap on the outer block-and-resolve loop
+      # 3 (2026-09-25, up from 5): the 260-tile obstacle-coupling calibration
+      # study's own conclusion, AFTER fixing a real bug found live in this
+      # outer loop (2026-09-25, see this function's own comment on the
+      # `blocked = blocked | prev_blocked` union below flood_model.py's
+      # own obstacle_coupling branch): before the fix, the blocked-cell set
+      # was recomputed from scratch each outer iteration instead of being
+      # accumulated monotonically, so 91% of non-converging tiles were
+      # caught in a stable, undamped period-2 oscillation that no amount of
+      # extra outer iterations would have resolved. Once fixed, of the
+      # tiles that DID converge pre-fix, the overwhelming majority (166 of
+      # 170) converged at the earliest mathematically possible point
+      # (outer=2 - the stopping check needs a previous iteration to compare
+      # against, so it can't fire any earlier), with only a handful needing
+      # 4 or 6; the one tile spot-verified post-fix converged at outer=3.
+      # 3 gives a small margin over the dominant outer=2 case while staying
+      # cheap - not yet validated on the full 260-tile population under the
+      # fixed algorithm (only 1 tile re-verified so far), so treat this as
+      # a well-motivated starting point, not a fully closed-out result.
+      max_outer_iterations: 3
       outer_convergence_pct: 0.01  # stop early once < this % of the tile's cells are newly blocked in an outer iteration
 
   # Peak-memory estimate for run_aqueduct's `resources: mem_mb` (replaces the
@@ -435,7 +461,11 @@ simulation: # Used by: preprocessing rules
 # SLURM allocation size, so a `cpus_per_task: 1` partition means preprocessing
 # on that batch's tiles runs fully serial, not just one simulation tile at a time.
 hpc:
-  n_nodes: 40                                        # PLACEHOLDER: max sbatch scripts (node batches) to generate PER WAVE, PER SIZE CLASS
+  n_nodes: 35                                        # 2026-09-25, user direction (up from 40) - a SHARED budget across
+  # both size classes per wave, split proportionally by tile count (see hpc_dispatch.smk's own split_batches_proportionally
+  # call) - NOT "35 nodes per size class" despite this line's own stale wording below, see that file's own comments for the
+  # real (fixed) semantics: the "PER WAVE, PER SIZE CLASS" phrasing here describes the OLD, buggy independent-budget
+  # behaviour a 2026-08 fix replaced
   jobs_dir: "{root}/model_outputs/hpc_jobs"           # generated sbatch scripts, resolved_config.yml, submit_waves.sh, logs/
   # Tiles at/above this pixel count go to sbatch_large instead of sbatch,
   # for BOTH preprocessing and simulation batching. Default 70,000,000 is
