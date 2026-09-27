@@ -7,7 +7,7 @@ extract_dem/extract_dem_mask are plain functions with no Snakemake coupling
 (only the thin wrapper scripts snakemake_workflow/scripts/extract_dem.py /
 extract_dem_mask.py use the snakemake.input/output indirection) - this
 calls them directly, using model_bbox.json (already copied into this
-tile's own inputs/ by run_one_tile_v2.sh) for the tile's bbox, and the same
+tile's own inputs/ by run_one_tile.sh) for the tile's bbox, and the same
 data catalog / dem_gap_fill config production itself uses. Overwrites the
 copied dem.tif/mask.tif in place with what today's Snakemake rules would
 produce for the exact same tile.

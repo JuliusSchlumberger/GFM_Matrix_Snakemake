@@ -35,7 +35,7 @@ from affine import Affine
 from matplotlib.colors import LinearSegmentedColormap, ListedColormap
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from eikonal import solve_eikonal_dense  # noqa: E402
+from eikonal import _dense_sweep, _ORTHANT_ORDER, solve_eikonal_dense  # noqa: E402
 from flood_model import flood_depth_dense  # noqa: E402
 
 OUT_DIR = Path(__file__).resolve().parent
@@ -44,6 +44,9 @@ WATER_COLOR = "#2a78d6"
 LAND_COLOR = "#d8d8d4"
 WALL_COLOR = "#4a4a46"
 BLOCK_COLOR = "#d6572a"
+NOT_REACHED_COLOR = "#eeeeee"
+SWEEP_FILL_COLOR = "#f4d35e"  # panel (a) reached-cells fill - yellow, not blue, since blue reads as "flooded"
+ATTENUATION_CMAP = "Blues_r"  # dark = close to seed/little attenuation, light = far/heavily attenuated
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +87,66 @@ def build_spiral_friction(size: int = 27, n_rings: int = 3, gap_width: int = 9) 
     return friction
 
 
+# Per sweep, in round order (1, 4, 3, 2): (example cell offset from seed,
+# row-neighbour offset, column-neighbour offset) - verified against the real
+# quadrant each orthant alone reaches from a center seed (see conversation),
+# not just the neighbour table.
+SWEEP_NEIGHBOR_INFO = [
+    (1, "sweep 1", (2, 2), (1, 2), (2, 1)),
+    (4, "sweep 2", (2, -2), (1, -2), (2, -1)),
+    (3, "sweep 3", (-2, -2), (-1, -2), (-2, -1)),
+    (2, "sweep 4", (-2, 2), (-1, 2), (-2, 1)),
+]
+
+
+def _draw_sweep_quadrant_diagram(
+    ax, orthant: int, label: str, example_offset: tuple[int, int],
+    neighbor_a_offset: tuple[int, int], neighbor_b_offset: tuple[int, int], size: int = 7,
+) -> None:
+    """One sweep, run alone from a fresh (unseeded) grid with a single seed
+    at the center - shows exactly which cells that one sweep updates (real
+    output of `_dense_sweep`, not illustrative). A single arrow from the
+    seed toward one example cell shows the sweep's general direction; that
+    cell's own two upwind neighbours are outlined too.
+    """
+    friction = np.ones((size, size), dtype=np.float32)
+    cy, cx = size // 2, size // 2
+    t = np.full((size + 1, size + 1), 99.0, dtype=np.float32)
+    # Seed t[cy+1, cx+1], not t[cy, cx]: the displayed array is the cropped
+    # `reached = t[1:, 1:]` (see module docstring - cell (r,c) reads vertex
+    # (r+1,c+1)), so reached[cy, cx] == t[cy+1, cx+1]. Seeding t[cy, cx]
+    # directly would put the true seeded cell one row/col up-left of where
+    # the ★ marker below is actually drawn.
+    t[cy + 1, cx + 1] = 0.0
+    neg_two, eight, four = np.float32(-2.0), np.float32(8.0), np.float32(4.0)
+    _dense_sweep(t, friction, orthant, neg_two, eight, four)
+    reached = t[1:, 1:] < 99.0
+
+    ax.imshow(np.ones((size, size)), cmap=ListedColormap([NOT_REACHED_COLOR]), vmin=0, vmax=1)
+    ax.imshow(np.where(reached, 1, np.nan), cmap=ListedColormap([SWEEP_FILL_COLOR]), vmin=0, vmax=1)
+    ax.scatter([cx], [cy], marker="*", s=170, color=BLOCK_COLOR, edgecolor="white", linewidth=0.8, zorder=5)
+
+    ex_row, ex_col = cy + example_offset[0], cx + example_offset[1]
+    ax.annotate(
+        "", xy=(ex_col, ex_row), xytext=(cx, cy),
+        arrowprops=dict(arrowstyle="-|>", color=BLOCK_COLOR, linewidth=2.0, mutation_scale=16,
+                         shrinkA=14, shrinkB=22),
+        zorder=6,
+    )
+    for row_off, col_off in (neighbor_a_offset, neighbor_b_offset):
+        n_row, n_col = cy + row_off, cx + col_off
+        ax.add_patch(plt.Rectangle((n_col - 0.5, n_row - 0.5), 1, 1, fill=False,
+                                    edgecolor=BLOCK_COLOR, linewidth=1.5, linestyle=(0, (2, 1)), zorder=6))
+    ax.add_patch(plt.Rectangle((ex_col - 0.5, ex_row - 0.5), 1, 1, fill=False, edgecolor=BLOCK_COLOR, linewidth=2.0, zorder=7))
+    ax.text(ex_col, ex_row, "t", fontsize=11, ha="center", va="center", color=BLOCK_COLOR, weight="bold", zorder=8)
+
+    ax.set_title(label, fontsize=10.5)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+
 def make_figure_1() -> None:
     friction = build_spiral_friction()
     n_rows, n_cols = friction.shape
@@ -109,44 +172,65 @@ def make_figure_1() -> None:
             max_change_per_round.append(float(np.max(np.abs(cur - prev))))
         prev = cur
 
-    fig = plt.figure(figsize=(13, 7.5))
-    gs = fig.add_gridspec(2, 4, height_ratios=[3, 1.3], hspace=0.35, wspace=0.15)
+    fig = plt.figure(figsize=(12, 8.7))
+    gs = fig.add_gridspec(
+        3, 4, height_ratios=[1.9, 3, 1.3],
+        hspace=0.18, wspace=0.04, top=0.95, bottom=0.06, left=0.05, right=0.93,
+    )
 
+    panel_a_axes = []
+    for i, (orthant, label, ex_off, na_off, nb_off) in enumerate(SWEEP_NEIGHBOR_INFO):
+        ax = fig.add_subplot(gs[0, i])
+        _draw_sweep_quadrant_diagram(ax, orthant, label, ex_off, na_off, nb_off)
+        panel_a_axes.append(ax)
+
+    seed_row, seed_col = 0, n_cols // 2
     wall_mask = friction > 10
     converged = snapshots[round_checkpoints[-1]]
-    vmax = float(np.max(converged[converged < 90]))
+    raw_vmax = float(np.max(converged[converged < 90]))
+    # Rescaled for display so the colorbar reads like a real flood attenuation
+    # (0-2m), matching Figure 2's units - the maze's own friction units are
+    # otherwise arbitrary (friction=1 open cells, 50 walls) and only
+    # meaningful relative to each other, not as a real physical scale.
+    DISPLAY_VMAX_M = 2.0
+    panel_b_axes = []
     for i, n in enumerate(round_checkpoints):
-        ax = fig.add_subplot(gs[0, i])
+        ax = fig.add_subplot(gs[1, i])
         unreached_mask = wall_mask | (snapshots[n] >= 90)
-        arr = np.where(unreached_mask, np.nan, snapshots[n])
-        ax.imshow(np.ones_like(arr), cmap=ListedColormap(["#eeeeee"]), origin="upper")  # not-yet-reached
-        im = ax.imshow(arr, cmap="viridis", vmin=0, vmax=vmax, origin="upper")
+        arr = np.where(unreached_mask, np.nan, snapshots[n] / raw_vmax * DISPLAY_VMAX_M)
+        ax.imshow(np.ones_like(arr), cmap=ListedColormap([NOT_REACHED_COLOR]), origin="upper")  # not-yet-reached
+        im = ax.imshow(arr, cmap=ATTENUATION_CMAP, vmin=0, vmax=DISPLAY_VMAX_M, origin="upper")
         ax.imshow(np.where(wall_mask, 1, np.nan), cmap=ListedColormap([WALL_COLOR]), origin="upper")
+        ax.scatter([seed_col], [seed_row], marker="*", s=180, color=BLOCK_COLOR,
+                   edgecolor="white", linewidth=0.8, zorder=5)
         ax.set_title(f"after {n} round{'s' if n != 1 else ''}\n({4 * n} sweeps)", fontsize=11)
         ax.set_xticks([])
         ax.set_yticks([])
-        if i == 0:
-            ax.set_ylabel("source (t=0) along top edge", fontsize=9)
+        panel_b_axes.append(ax)
 
-    cbar_ax = fig.add_axes([0.92, 0.42, 0.015, 0.42])
-    fig.colorbar(im, cax=cbar_ax, label="arrival potential t")
+    fig.colorbar(
+        im, ax=panel_b_axes, fraction=0.046, pad=0.015, shrink=0.7, aspect=18,
+        label="cumulative attenuation from seed (m)",
+    )
 
-    ax2 = fig.add_subplot(gs[1, :])
+    ax2 = fig.add_subplot(gs[2, :])
     rounds_x = np.arange(2, 2 + len(max_change_per_round))
     display_change = np.maximum(max_change_per_round, 1e-3)  # log-scale floor; 0 = fully converged
     ax2.plot(rounds_x, display_change, color="#2a78d6", linewidth=1.6, marker="o", markersize=3)
     ax2.axhline(epsilon, color=BLOCK_COLOR, linestyle="--", linewidth=1.2, label=f"epsilon = {epsilon}")
     ax2.set_yscale("log")
     ax2.set_xlabel("round")
-    ax2.set_ylabel("max change\nthat round (log)")
+    ax2.set_ylabel("max change")
     ax2.legend(fontsize=9, loc="upper right")
     ax2.grid(True, alpha=0.3)
 
-    fig.suptitle(
-        "Inner loop: repeated rounds relax the solution toward convergence\n"
-        "(serpentine corridor - a known slow case for a fixed 4-direction sweep order)",
-        fontsize=13,
-    )
+    # Panel letters aligned on a common x (figure fraction), each at the top
+    # of its own row (in figure fraction, from each row's axes position).
+    label_x = 0.005
+    for ax, letter in ((panel_a_axes[0], "(a)"), (panel_b_axes[0], "(b)"), (ax2, "(c)")):
+        row_top = ax.get_position().y1
+        fig.text(label_x, row_top, letter, fontsize=13, weight="bold", ha="left", va="top")
+
     fig.savefig(OUT_DIR / "eikonal_example_rounds.png", dpi=170, bbox_inches="tight")
     plt.close(fig)
     print(f"Wrote {OUT_DIR / 'eikonal_example_rounds.png'}")

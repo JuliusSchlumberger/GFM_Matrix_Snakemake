@@ -1,21 +1,19 @@
 """Aggregate the per-tile flood-extent agreement counts that
 postprocess_tile_summary.py already writes into each tile's own
-outputs/summary.json (bathtub_{matched,only,sfincs_only}_km2 and
+outputs/summary_bathtub.json/summary_eikonal.json
+(bathtub_{matched,only,sfincs_only}_km2 and
 eikonal_{matched,only,sfincs_only}_km2) into pooled HT/FAR/CSI/bias for
 SFINCS-vs-bathtub and SFINCS-vs-eikonal.
 
-Pure JSON aggregation - no raster is opened here. Moved out of this script
-(2026-09-24, user direction) because the per-tile counts require reading
-and reprojecting each tile's rasters, which postprocess_tile_summary.py
-already does, per-tile, in parallel, on the HPC node that just produced
-those rasters - redoing that work here, sequentially, from one machine over
-the network mount, was pure waste. This script now only sums what's already
-in summary.json and computes ratios from the sums - see flood_agreement.py
-for why ratios are only ever computed on SUMMED counts, never per-tile.
+Pure JSON aggregation - no raster is opened here, since the per-tile counts
+already require reading and reprojecting each tile's rasters, which
+postprocess_tile_summary.py already does, per-tile - this script only sums
+what's already in those files and computes ratios from the sums - see
+flood_agreement.py for why ratios are only ever computed on summed counts,
+never per-tile.
 
 Usage:
-    python compute_calibration_metrics.py
-    python compute_calibration_metrics.py --base-dir-name validation_sfincs_v2
+    python compute_calibration_metrics.py --base-dir-name validation_sfincs_v4
 """
 
 from __future__ import annotations
@@ -36,14 +34,18 @@ from retry_io import retry_transient_io  # noqa: E402
 COUNT_FIELDS = ("matched_km2", "only_km2", "sfincs_only_km2")
 
 
-def _load_tile_row(summary_path: Path) -> dict | None:
-    with retry_transient_io(open, summary_path) as f:
-        data = json.load(f)
-    row = {"tile_id": data.get("tile_id", summary_path.parent.parent.name)}
+def _load_tile_rows(base_dir: Path) -> list[dict]:
+    """Merges each tile's separate summary_bathtub.json/summary_eikonal.json
+    (postprocess_tile_summary.py) into one row per tile."""
+    by_tile: dict[str, dict] = {}
     for prefix in ("bathtub", "eikonal"):
-        for field in COUNT_FIELDS:
-            row[f"{prefix}_{field}"] = data.get(f"{prefix}_{field}")
-    return row
+        for summary_path in sorted(base_dir.glob(f"*/outputs/summary_{prefix}.json")):
+            with retry_transient_io(open, summary_path) as f:
+                data = json.load(f)
+            row = by_tile.setdefault(data["tile_id"], {"tile_id": data["tile_id"]})
+            for field in COUNT_FIELDS:
+                row[f"{prefix}_{field}"] = data.get(f"{prefix}_{field}")
+    return list(by_tile.values())
 
 
 def pooled_metrics(df: pd.DataFrame, prefix: str) -> dict[str, float]:
@@ -57,18 +59,16 @@ def main() -> None:
     _repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(_repo_root / "snakemake_workflow" / "config" / "config.yml"))
-    parser.add_argument("--base-dir-name", default="validation_sfincs_v2")
+    parser.add_argument("--base-dir-name", required=True)
     args = parser.parse_args()
 
     root = read_root(Path(args.config))
     base_dir = root / args.base_dir_name
 
-    summary_paths = sorted(base_dir.glob("*/outputs/summary.json"), key=lambda p: int(p.parent.parent.name))
-    print(f"{len(summary_paths)} tile(s) with a summary.json found under {base_dir}")
-
-    rows = [_load_tile_row(p) for p in summary_paths]
+    rows = _load_tile_rows(base_dir)
+    print(f"{len(rows)} tile(s) with a summary_bathtub.json/summary_eikonal.json found under {base_dir}")
     if not rows:
-        print("No summary.json files found - nothing to aggregate.")
+        print("No summary files found - nothing to aggregate.")
         return
 
     df = pd.DataFrame(rows)

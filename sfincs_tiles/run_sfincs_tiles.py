@@ -17,9 +17,21 @@ stopping the whole batch on the first failure. Python equivalent of
 run_sfincs_tiles.ps1 - use whichever you prefer running from your own
 terminal.
 
+Requires setup_batch_inputs.py to have been run first for this batch (once,
+covers every tile) - populates each tile's own {base_dir_name}/{tile_id}/
+inputs/, which build_elevation.py and friends read from directly, not
+model_outputs/. By default also regenerates dem.tif/mask.tif per tile with
+the current extract_dem/extract_dem_mask logic (regenerate_dem_mask.py) as
+a first, NON-FATAL step - the one step in this script that genuinely needs
+a second environment (gfm_python_preprocessing, for src/config_utils.py's
+DataCatalog - see that script's own docstring), hence --gfm-python below;
+skip it with --skip-dem-regen to fall back to the plain copied dem.tif/
+mask.tif instead (same fallback run_one_tile.sh's own step 2 uses on
+failure).
+
 Usage:
-    python run_sfincs_tiles.py --tile-ids 1573 929 851
-    python run_sfincs_tiles.py --tile-ids 1573 --sfincs-exe "C:\\path\\to\\sfincs.exe"
+    python run_sfincs_tiles.py --tile-ids 1573 929 851 --base-dir-name validation_sfincs_v5
+    python run_sfincs_tiles.py --tile-ids 1573 --base-dir-name validation_sfincs_v5 --sfincs-exe "C:\\path\\to\\sfincs.exe"
 """
 
 from __future__ import annotations
@@ -38,20 +50,30 @@ _DEFAULT_SFINCS_EXE = (
     r"\SFINCS_v2.3.0_mt_Faber_release_exe\sfincs.exe"
 )
 _DEFAULT_CONFIG = str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml")
+_DEFAULT_GFM_PYTHON = r"C:\Users\schlumbe\AppData\Local\miniforge3\envs\gfm_python_preprocessing\python.exe"
 
 
-def _steps(sfincs_exe: str, timeout_s: float, build_only: bool) -> list[dict]:
-    """One (label, script, extra_args) step per pipeline stage, in the
-    exact order every tile must run them - every step now runs under the
-    SAME interpreter (sys.executable), so there's no per-step environment
-    to choose.
+def _steps(sfincs_exe: str, timeout_s: float, build_only: bool, gfm_python: str, skip_dem_regen: bool) -> list[dict]:
+    """One (label, script, extra_args, interpreter, non_fatal) step per
+    pipeline stage, in the exact order every tile must run them. Every step
+    runs under sys.executable (whichever interpreter launched this
+    orchestrator, e.g. hydromt-sfincs-dev) EXCEPT "regenerate dem/mask",
+    which needs its own explicit interpreter (gfm_python) since it imports
+    src/config_utils.py - the one real second-environment dependency this
+    script has (see module docstring).
 
     build_only=True drops the "run SFINCS + postprocess" step entirely -
     for building a large batch of tiles' sfincs_model/ dirs locally so
     they're ready for generate_sfincs_hpc_jobs.py's own HPC batch dispatch
     to actually run them, without also running (and therefore waiting on)
     the simulation itself here."""
-    steps = [
+    steps = []
+    if not skip_dem_regen:
+        steps.append({
+            "label": "regenerate dem/mask", "script": "regenerate_dem_mask.py",
+            "interpreter": gfm_python, "non_fatal": True,
+        })
+    steps += [
         {"label": "prep: elevation", "script": "build_elevation.py"},
         {"label": "prep: roughness", "script": "build_roughness.py"},
         {"label": "prep: boundary forcing", "script": "build_boundary_forcing.py"},
@@ -65,15 +87,21 @@ def _steps(sfincs_exe: str, timeout_s: float, build_only: bool) -> list[dict]:
     return steps
 
 
-def run_tile(tile_id: int, config_path: str, steps: list[dict]) -> tuple[bool, str | None]:
+def run_tile(tile_id: int, config_path: str, base_dir_name: str, steps: list[dict]) -> tuple[bool, str | None]:
     """Runs every step for one tile in order; stops at the first failing
-    step (real cross-step dependency - build_sfincs_tile.py needs the prep
-    stage's own output files, run_sfincs_tile.py needs the built model).
+    step UNLESS that step is marked non_fatal (currently only "regenerate
+    dem/mask" - real cross-step dependency otherwise, e.g.
+    build_sfincs_tile.py needs the prep stage's own output files,
+    run_sfincs_tile.py needs the built model.
 
-    Returns (passed, failed_step_label_or_None).
+    Returns (passed, failed_step_label_or_None) - failed_step_label is set
+    even for a non-fatal failure, purely informational (doesn't affect the
+    PASS/FAIL summary).
     """
     for step in steps:
-        args = [sys.executable, str(_SCRIPT_DIR / step["script"]), "--tile-id", str(tile_id), "--config", config_path]
+        interpreter = step.get("interpreter", sys.executable)
+        args = [interpreter, str(_SCRIPT_DIR / step["script"]), "--tile-id", str(tile_id),
+                "--config", config_path, "--base-dir-name", base_dir_name]
         args += step.get("extra_args", [])
 
         print(f"\n--- [{step['label']}] tile {tile_id} ---")
@@ -82,6 +110,10 @@ def run_tile(tile_id: int, config_path: str, steps: list[dict]) -> tuple[bool, s
         elapsed = time.monotonic() - t0
 
         if result.returncode != 0:
+            if step.get("non_fatal"):
+                print(f"non-fatal FAILURE: [{step['label']}] tile {tile_id} exited with code {result.returncode} "
+                      f"after {elapsed:.1f}s - continuing (falling back to whatever dem.tif/mask.tif already exist)")
+                continue
             print(f"FAILED: [{step['label']}] tile {tile_id} exited with code {result.returncode} after {elapsed:.1f}s")
             return False, step["label"]
         print(f"OK: [{step['label']}] tile {tile_id} ({elapsed:.1f}s)")
@@ -93,9 +125,20 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tile-ids", type=int, nargs="+", default=None, help="one or more tile IDs, e.g. --tile-ids 1573 929 851")
     parser.add_argument("--tile-ids-file", default=None, help="text file, one tile ID per line (alternative to --tile-ids, for a large batch)")
+    parser.add_argument("--base-dir-name", required=True, help="output root directory name under paths.root, "
+                         "e.g. validation_sfincs_v5 - every step writes/reads {base-dir-name}/{tile_id}/... . "
+                         "Run setup_batch_inputs.py --base-dir-name <name> first to populate each tile's inputs/.")
     parser.add_argument("--config", default=_DEFAULT_CONFIG)
     parser.add_argument("--sfincs-exe", default=_DEFAULT_SFINCS_EXE)
-    parser.add_argument("--timeout-s", type=float, default=1800.0)
+    parser.add_argument("--timeout-s", type=float, default=14400.0,
+                         help="per-tile SFINCS wall-clock timeout - matches run_one_tile.sh's own "
+                              "SFINCS_TIMEOUT_S (14400s/4h) so large tiles aren't spuriously killed early")
+    parser.add_argument("--gfm-python", default=_DEFAULT_GFM_PYTHON,
+                         help="interpreter for the one step (regenerate dem/mask) that needs the "
+                              "gfm_python_preprocessing env instead of whichever env launched this script")
+    parser.add_argument("--skip-dem-regen", action="store_true",
+                         help="skip the 'regenerate dem/mask' step entirely and use the plain "
+                              "model_outputs/-copied dem.tif/mask.tif as-is")
     parser.add_argument(
         "--build-only", action="store_true",
         help="only run the prep+build steps (no local SFINCS simulation/postprocess) - "
@@ -109,12 +152,12 @@ def main() -> None:
         int(line.strip()) for line in Path(args.tile_ids_file).read_text().splitlines() if line.strip()
     ]
 
-    steps = _steps(args.sfincs_exe, args.timeout_s, args.build_only)
+    steps = _steps(args.sfincs_exe, args.timeout_s, args.build_only, args.gfm_python, args.skip_dem_regen)
 
     results: dict[int, tuple[bool, str | None]] = {}
     for tile_id in tile_ids:
         print(f"\n{'=' * 50}\n=== Tile {tile_id} ===\n{'=' * 50}")
-        results[tile_id] = run_tile(tile_id, args.config, steps)
+        results[tile_id] = run_tile(tile_id, args.config, args.base_dir_name, steps)
 
     print(f"\n{'=' * 50}\n=== Summary ===\n{'=' * 50}")
     any_failed = False

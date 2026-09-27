@@ -31,23 +31,22 @@ Outputs, under `{root}/{base_dir_name}/`:
 
 ## 2. Batch job generation
 
-`generate_v2_batch_jobs.py` reads `tile_ids.txt` and writes N independent
-SLURM sbatch scripts (`{prefix}_batch_NNN.sbatch`) plus one
+`generate_validation_batch_jobs.py` reads `tile_ids.txt` and writes N
+independent SLURM sbatch scripts (`{prefix}_batch_NNN.sbatch`) plus one
 `submit_{prefix}es.sh` that submits all of them. Each sbatch script loops
 sequentially through its own slice of tile IDs, calling the per-tile runner
-script (`run_one_tile_v3.sh` or `run_one_tile_v2.sh`) once per tile, with
-`BASE_DIR_NAME=<base_dir_name>` set explicitly on every invocation. Tiles
-are split evenly across `--n-nodes` batches; batches are fully independent
-(no SLURM job dependency between them). Also writes `resolved_config.yml`
-(the Linux-path view of `config.yml`), which every per-tile Python step
-reads via `--config`.
+script (`run_one_tile.sh`) once per tile, with `BASE_DIR_NAME=<base_dir_name>`
+set explicitly on every invocation. Tiles are split evenly across
+`--n-nodes` batches; batches are fully independent (no SLURM job dependency
+between them). Also writes `resolved_config.yml` (the Linux-path view of
+`config.yml`), which every per-tile Python step reads via `--config`.
 
-## 3. Per-tile pipeline (`run_one_tile_v3.sh`)
+## 3. Per-tile pipeline (`run_one_tile.sh`)
 
-Runs on Hydrax, one invocation per tile, `bash run_one_tile_v3.sh <tile_id>
-[--models bathtub,eikonal,sfincs] [--max-rounds N]`. Each stage is gated on
-its own output file already existing, so a re-run after a partial failure
-only redoes what's missing. Steps:
+Runs on Hydrax, one invocation per tile, `BASE_DIR_NAME=<name> bash
+run_one_tile.sh <tile_id> [--models bathtub,eikonal,sfincs] [--max-rounds N]`.
+Each stage is gated on its own output file already existing, so a re-run
+after a partial failure only redoes what's missing. Steps:
 
 ### 3.1 Copy inputs
 
@@ -163,23 +162,36 @@ an explicit latitude-corrected target resolution (so the output pixel is
 square in real ground distance, not in degrees), writing
 `outputs/hmax.tif` and `outputs/flood_extent.tif`.
 
-**`postprocess_tile_summary.py`** writes `outputs/summary.json`: flooded
-area (km2) and depth stats for bathtub, eikonal, and SFINCS; SFINCS-vs-
-bathtub and SFINCS-vs-eikonal agreement (matched / model-only / SFINCS-only
-km2, via a shared wet threshold); and SFINCS boundary-cell distance to real
-land (mean/median/max km). A whole batch's summaries are merged with a glob
-+ concat (`aggregate_tile_summaries.py`).
+**`postprocess_tile_summary.py`** writes one `outputs/summary_{model}.json`
+per requested model (bathtub, eikonal, sfincs - `--models`, default all
+three): flooded area (km2) and depth stats for that model; for bathtub/
+eikonal, also SFINCS-vs-that-model agreement (matched / model-only /
+SFINCS-only km2, via a shared wet threshold, if SFINCS's own subgrid output
+already exists); for sfincs, also boundary-cell distance to real land
+(mean/median/max km). Each model's file is independent and self-contained
+(includes the shared domain-area/ocean-fraction stats too), so one model
+can be (re-)summarized without touching the others' files - a tile's fields
+for a model with no output yet are simply null, safe to re-run any time
+that model's own raster changes. A whole batch's per-model files are merged
+into one row per tile only by the consuming analysis code
+(`plot_validation_results.py`), never pre-combined on disk.
 
-## 4. Local sequential eikonal fill-in
+## 4. Local sequential runs
 
-`run_eikonal_v4_sequential.py` runs `run_eikonal_on_sfincs_subgrid.py
---models eikonal` for every tile in a batch's `tile_ids.txt`, one tile at a
-time on a local machine rather than via an HPC batch. For each tile it
-checks that `sfincs_model/elevation_combined_subgrid_src.tif` exists
-(skipping tiles whose SFINCS build hasn't landed yet) and that the eikonal
-output doesn't already exist (skipping tiles already done), so it is safe
-to interrupt and re-run. Passes `--max-rounds 40`
-(`simulation.flooding.max_rounds` in production `config.yml`) by default.
+Two general-purpose drivers loop over every tile in a batch's `tile_ids.txt`
+sequentially on a local machine (no HPC, no parallelism), for whichever
+`--base-dir-name` you point them at:
+
+- **`run_models_sequential.py --base-dir-name <name> --models bathtub,eikonal`**
+  runs `run_eikonal_on_sfincs_subgrid.py` per tile (SFINCS itself needs
+  apptainer and stays HPC-only). Skips a tile whose `sfincs_model/` isn't
+  built yet, and a tile whose requested model output(s) already exist -
+  safe to interrupt and re-run. Passes `--max-rounds 40`
+  (`simulation.flooding.max_rounds` in production `config.yml`) by default
+  when eikonal is requested.
+- **`postprocess_sequential.py --base-dir-name <name>`** runs
+  `postprocess_tile_summary.py` per tile, always re-writing (cheap, and
+  meant to always reflect whatever's currently on disk).
 
 ## Environments
 
@@ -209,5 +221,8 @@ to interrupt and re-run. Passes `--max-rounds 40`
                         sfincs.inp, sfincs_map.nc, subgrid/, ...
     outputs/            bathtub_waterdepth_RP100_SLR_0.tif,
                         eikonal_on_subgrid_waterdepth_RP100_SLR_0.tif,
-                        hmax.tif, flood_extent.tif, summary.json
+                        hmax.tif, flood_extent.tif,
+                        summary_bathtub.json, summary_eikonal.json, summary_sfincs.json
+  figures/              extent_scatter.png, extent_agreement_hist.png,
+                        depth_scatter.png, agreement_map.png, validation_summary.csv
 ```

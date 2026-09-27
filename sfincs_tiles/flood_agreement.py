@@ -17,6 +17,57 @@ import numpy as np
 
 WET_THRESHOLD_M = 0.05
 
+# Depth-agreement bin edges (metres), shared between postprocess_tile_summary.py
+# (which builds the per-tile joint histograms) and plot_validation_results.py
+# (which pools and plots them) - kept here so both always agree on what a
+# "bin" means without passing edges around at runtime.
+#
+# FINE: for the pooled depth-correlation density plot - 0.1m steps, 0 to 3m,
+# with implicit <0 (never occurs - both inputs are already wet-thresholded)
+# and >3m catch-all bins added by depth_joint_hist.
+DEPTH_CORR_FINE_EDGES = np.arange(0.0, 3.01, 0.1)
+
+# CATEGORY: the coarser 0.1-1.5m/0.2m-wide scheme used for the depth-bin
+# alignment heatmap - matches the range already described in the manuscript
+# text this supports. Implicit <0.1m and >1.5m catch-all bins are added by
+# depth_joint_hist, same as above.
+DEPTH_CATEGORY_EDGES = np.array([0.1, 0.3, 0.5, 0.7, 0.9, 1.1, 1.3, 1.5])
+
+
+def depth_joint_hist(x: np.ndarray, y: np.ndarray, edges: np.ndarray) -> np.ndarray:
+    """2D histogram of (x, y) using the same `edges` on both axes, with an
+    implicit catch-all bin below the first edge and above the last - so
+    every finite (x, y) pair lands somewhere, never silently dropped for
+    falling outside the named range. Shape: (len(edges)+1, len(edges)+1).
+    """
+    full_edges = np.concatenate(([-np.inf], edges, [np.inf]))
+    hist, _, _ = np.histogram2d(x, y, bins=[full_edges, full_edges])
+    return hist
+
+
+def depth_corr_sufficient_stats(x: np.ndarray, y: np.ndarray) -> dict[str, float]:
+    """n and the five sums needed to compute a pooled Pearson r later
+    (pearson_r_from_sums) from many tiles' worth of (x, y) pairs without
+    ever storing the raw pairs themselves - same "pool first, ratio last"
+    reasoning as metrics_from_counts above, applied to a correlation
+    instead of a contingency-table ratio."""
+    return {
+        "n": int(x.size),
+        "sum_x": float(x.sum()), "sum_y": float(y.sum()),
+        "sum_x2": float(np.square(x).sum()), "sum_y2": float(np.square(y).sum()),
+        "sum_xy": float((x * y).sum()),
+    }
+
+
+def pearson_r_from_sums(n: float, sum_x: float, sum_y: float, sum_x2: float, sum_y2: float, sum_xy: float) -> float:
+    """Pearson correlation from pooled sufficient statistics (see
+    depth_corr_sufficient_stats) - algebraically identical to computing it
+    from the raw pairs directly, but computable after summing many tiles'
+    stats together."""
+    num = n * sum_xy - sum_x * sum_y
+    den = np.sqrt((n * sum_x2 - sum_x**2) * (n * sum_y2 - sum_y**2))
+    return float(num / den) if den > 0 else float("nan")
+
 
 def confusion_counts(
     model_wet: np.ndarray, benchmark_wet: np.ndarray, domain_mask: np.ndarray, weight: np.ndarray,

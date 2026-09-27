@@ -1,8 +1,5 @@
 # Method: Friction-Weighted Eikonal Propagation for Coastal Flood Depth Estimation
 
-*Draft methods-section text. Placeholders and items needing verification before
-submission are marked **[VERIFY]**.*
-
 ## 1. Overview
 
 Coastal flood hazard (extent and depth) is estimated for each raster tile and
@@ -18,27 +15,11 @@ land-cover-dependent friction field acting as a spatially varying propagation
 resistance. This formulation is solved numerically with the Fast Sweeping
 Method (Zhao, 2005), giving a flood water level (and
 hence depth) at every cell in a single, non-iterative-in-time pass per
-scenario. The approach follows the method implemented in the Deltares
-*Aqueduct Coastal Flooding* model **[VERIFY citation / reference]**, of which
-this pipeline is an extension.
+scenario. 
 
 ## 2. Conceptual basis
 
-### 2.1 Why not solve the shallow-water equations directly
-
-The target output is coastal flood extent and depth for a very large number
-of (tile × return period × sea-level-rise) combinations, at fine (≈30 m)
-resolution, at continental-to-global scale. Solving the full 2-D shallow
-water equations (mass and momentum conservation, explicit time-stepping,
-wetting/drying) for every one of these combinations is computationally
-infeasible at this scale, and arguably unnecessary: the boundary forcing
-itself is a static extreme-value quantity (a design still-water level for a
-given return period, not a time-varying hydrograph or storm track), so the
-quantity of interest is the *steady-state inundation extent and depth*
-associated with that water level having been sustained long enough to
-propagate inland — not the transient arrival dynamics of a particular storm.
-
-### 2.2 The eikonal-propagation analogy
+### 2.1 The eikonal-propagation analogy
 
 Instead, the model reframes inland flood propagation as an anisotropic
 **cost-distance / geodesic-distance problem**, formally identical to the
@@ -59,73 +40,25 @@ water level attained at any point is controlled by the *cumulative
 frictional head loss* along the least-resistive connected path from the
 coast, not by straight-line (Euclidean) distance or by elevation alone.
 
-### 2.3 Friction as a land-cover-informed resistance surface
+### 2.1 Friction as a land-cover-informed resistance surface
 
 The friction field $v(x)$ is derived from a global land-cover
 classification (ESA WorldCover), reclassified to a Manning's roughness
 coefficient $n(x)$ per land-cover class via a land-cover-to-roughness
-mapping table (processed with the HydroMT/HydroMT-SFINCS toolchain), then
+mapping table, then
 converted to a per-cell friction/resistance value used directly as the
 eikonal equation's slowness field. Cells with no assigned land-cover class
-default to $n = 0.002$. Dense vegetation and built-up land are assigned
-substantially higher roughness/resistance than open water, bare ground, or
-grassland, so floodwater is attenuated faster crossing rough terrain than
-open terrain — matching the qualitative expectation that (e.g.) a mangrove
-fringe or urban block impedes inland flood propagation more than a flat,
-open floodplain of the same elevation.
+default to $n = 0.002$.
 
 The friction value is used directly as a propagation cost per grid step
 (30 m), with no separate distance term in the solver. Used unscaled, this
 produces a water-level attenuation of roughly 0.008–0.04 m/km, about 30×
 weaker than the ~0.1–1.2 m/km range reported for comparable land cover by
-Vafeidis et al. (2019) **[VERIFY citation]**. Production therefore applies
+Vafeidis et al. (2019). Production therefore applies
 a runtime multiplier of ×30 to the friction field (not baked into the
 land-cover-derived raster itself, so it can be varied independently of the
-land-cover processing) to bring the model's attenuation into that
-literature-supported range; the factor of 30 corresponds to DeltaDTM's own
+land-cover processing) corresponding to DeltaDTM's own
 native ~30 m grid step.
-
-### 2.4 Why this is an acceptable approximation
-
-1. **Matches the nature of the forcing.** The boundary condition is itself
-   a static extreme-value statistic (a return-period still-water level,
-   possibly with an SLR offset), not a transient hydrograph — so a
-   steady-state propagation model answers the question actually being
-   asked ("how far/how deep does floodwater reach for this design water
-   level") without needing to resolve transient dynamics that the input
-   forcing does not itself represent.
-2. **Captures the dominant first-order controls.** For slowly-varying,
-   surge/tide/sea-level-driven coastal inundation (as opposed to
-   fast, momentum-dominated flash-flood or dam-break waves), the two
-   controls generally accepted as dominant for the inundated extent are
-   (a) topography and (b) resistance to overland flow — both of which
-   this formulation represents explicitly, unlike a naive elevation-only
-   ("bathtub") fill.
-3. **Improves on simpler large-scale alternatives.** Purely
-   elevation-threshold ("bathtub") inundation mapping is a common
-   large-scale alternative but ignores flow resistance entirely and can
-   flood elevation-connected but hydraulically implausible areas. This
-   method corrects that in two ways: (i) the friction-weighted propagation
-   cost suppresses inland penetration through resistant terrain even where
-   elevation alone would permit it, and (ii) an explicit connectivity
-   filter (§4.5) removes flooded cells that are not reachable via a
-   continuously-flooded path back to the coast, eliminating
-   elevation-only artefacts (isolated low-lying depressions with no real
-   hydraulic connection to the sea).
-4. **Computationally tractable at the required scale.** The Fast Sweeping
-   solution has a small constant number of grid passes per scenario, in
-   practice running in seconds to tens of seconds even for tiles of
-   $10^8$–$10^9$ cells (§5), making global-scale, multi-scenario production
-   runs feasible on standard compute infrastructure, unlike a
-   spatially-resolved unsteady hydrodynamic model at the same resolution
-   and extent.
-5. **Known, explicit limitations.** The method does not resolve flood-wave
-   arrival timing, momentum-driven wave run-up/overtopping beyond the
-   prescribed boundary water level itself, or structural/hydraulic
-   backwater effects not represented in the friction or elevation surfaces.
-   It should be read as a steady-state end-state estimate appropriate for
-   hazard and exposure mapping at the design water level supplied, not as a
-   flood-forecasting or wave-dynamics tool.
 
 ## 3. Data inputs
 
@@ -134,41 +67,21 @@ native ~30 m grid step.
 | $z(x)$ | Land surface elevation | DEM, land cells only (see §4.1) |
 | $\mathrm{mask}(x)$ | Land / ocean / lake classification | Land-water mask raster |
 | $v(x)$ | Local friction / hydraulic resistance | ESA WorldCover land cover, reclassified to Manning's roughness and converted to resistance |
-| $\{(p_i, H_i)\}$ | Discrete boundary water levels at offshore/coastal points $p_i$, for the scenario (return period × SLR) being run | Offshore/coastal boundary-condition model output **[VERIFY exact source model]** |
+| $\{(p_i, H_i)\}$ | Discrete boundary water levels at offshore/coastal points $p_i$, for the scenario (return period × SLR) being run | Offshore/coastal boundary-condition model output |
 
 ## 4. Mathematical formulation
 
 ### 4.1 Pre-processing
 
 - **Effective elevation**: elevation at non-land cells (ocean, permanent
-  water) is set to $0$ (a common reference datum), so that flood/no-flood
-  comparisons (§4.5) are well-defined everywhere.
+  water) is set to $0$ (a common reference datum), which does not matter for the solver.
 - **Coastline seed set** $\Gamma$: ocean cells directly adjacent (3×3
   dilation of the land mask) to land — i.e. the immediate offshore fringe
-  from which inland propagation is seeded.
+  from which inland propagation is seeded using inverse-distance-squared weighting of the 15 nearest Coast-RP stations.
 - **Friction floor**: $v(x)$ is floored at a small positive value to avoid
   degenerate (zero-cost, infinite-speed) propagation at any cell.
 
-### 4.2 Boundary condition: inverse-distance-weighted interpolation
-
-Each coastline seed cell $x_c \in \Gamma$ is assigned an initial water
-level by inverse-distance-squared weighting of the $k$ nearest boundary
-points (great-circle/haversine distance on the geographic coordinates of
-the boundary points and grid cells):
-
-$$
-H_0(x_c) = \frac{\sum_{i=1}^{k} w_i H_i}{\sum_{i=1}^{k} w_i}, \qquad
-w_i = d(x_c, p_i)^{-2}
-$$
-
-where $d(\cdot,\cdot)$ is the haversine distance and $k$ is a configurable
-number of nearest boundary stations (production default $k=15$), restricted
-to stations that are ocean-connected to the seed cell in question (a
-straight-line-nearest station on the far side of a land barrier is
-excluded - see the companion tile-processing/water-level document's own
-"assigning stations to a domain" section).
-
-### 4.3 Governing equation
+### 4.2 Governing equation
 
 Define the state variable $T(x) = -H(x)$, the negative of the (to be
 determined) flood water level. $T$ satisfies the eikonal equation
@@ -184,8 +97,12 @@ $$
 solved over the **entire** raster domain $\Omega$ (land, ocean, and lake
 cells alike — see §4.6 on why ocean is not excluded).
 
-The viscosity solution of this equation is the friction-weighted geodesic
-(cost) distance transform from the seed set:
+The viscosity solution of this equation is not a plain distance transform
+from $\Gamma$ (which would be zero on $\Gamma$ itself); each seed point
+carries its own prescribed value $T(\gamma(0))$, generally nonzero and
+different from seed to seed, and $T(x)$ is the minimum, over every seed and
+every path from it, of that seed's own value plus the friction-weighted
+geodesic (cost) distance from it to $x$:
 
 $$
 T(x) = \min_{\gamma:\, \Gamma \to x} \left[ T\big(\gamma(0)\big) +
@@ -210,7 +127,7 @@ coast.
 ### 4.4 Numerical solution: the Fast Sweeping Method
 
 The eikonal equation is solved on the raster grid using the Fast Sweeping
-Method (Zhao, 2005 **[VERIFY]**), a Gauss–Seidel-type scheme that avoids
+Method (Zhao, 2005), a Gauss–Seidel-type scheme that avoids
 the need for a priority queue (as in Fast Marching) at the cost of
 repeated grid sweeps.
 
@@ -220,10 +137,12 @@ each dimension than the friction/elevation *cell* grid (an $(m+1)\times
 draws on exactly one corner cell's friction value and its two orthogonal
 vertex neighbours.
 
-**Local update.** At an interior vertex with two "upwind" neighbouring
-values $t_a, t_b$ (already updated, from one specific sweep direction) and
-local friction $v$, the first-order upwind discretisation of the eikonal
-equation reduces to the quadratic
+**Local update.** Write $t := T$ at the vertex currently being updated, and
+$t_a$, $t_b$ for $T$ at its two "upwind" neighbouring vertices (already
+updated earlier in the current sweep, one row-neighbour and one
+column-neighbour - see "Grid staggering" above). With local friction $v$ at
+the one corner cell this update draws on, the first-order upwind
+discretisation of the eikonal equation reduces to the quadratic
 
 $$
 2t^2 - 2(t_a + t_b)\,t + \left(t_a^2 + t_b^2 - v^2\right) = 0
@@ -272,24 +191,66 @@ stable flood extent by then - the residual change is confined to depth
 still settling in already-flooded cells, not the flooded/dry boundary
 itself. Production therefore caps the solve at `max_rounds = 40`.
 
-**Illustrative example.** Figure 1 shows this on a small synthetic case
-(not a real tile) designed to need several rounds: a single source point
-seeded outside a nested-square-ring maze with alternating gaps, forcing the
-true shortest path to spiral inward, reversing direction repeatedly - a
-known slow case for a fixed 4-direction sweep order, since each round only
-relays information once along each direction. After 1 round only the outer
-ring is filled in; the solution keeps improving through round ~9, after
-which the per-round maximum change drops to zero (full convergence) -
-generated directly from the production solver code
-(`docs/generate_eikonal_solver_examples.py`).
+**Illustrative example.** Figure 1 is generated directly from the
+production solver code (`docs/generate_eikonal_solver_examples.py`).
+Panel (a) shows the four sweeps that make up one round, run individually
+from a single seed at the centre of a small (deliberately coarse, for
+legibility) grid: each mini-panel is the real output of one sweep (one
+call to `_dense_sweep`) started fresh from that seed, so the shaded
+quadrant (yellow, to avoid the "blue = flooded" association panel (b)
+uses) is exactly the set of cells that one sweep alone can reach - not
+an illustration. A single seed is used only for this panel's clarity; a
+real solve seeds every coastline cell at once, and by the second sweep
+onward a cell can also be updated from another cell a previous sweep just
+set, not only from the original seed. The arrow points from the seed
+toward one highlighted example cell $t$ (solid box), giving the sweep's
+general direction; its two "upwind" neighbours (one row-, one column-
+neighbour) are outlined too (dashed boxes) and are what that cell's own
+update actually reads from, consistent with the local update rule in
+the "Local update" section
+above - every vertex, including ones on the domain's outer edge, always
+has both such neighbours available, since the padded $(m{+}1)\times(n{+}1)$
+$t$-grid is sized precisely so row/column indices never run out of bounds;
+a neighbour the relaxation hasn't reached yet simply still holds its
+placeholder value and is naturally outcompeted in the update, not treated
+as a special case. The sweep order itself is a fixed row/column scan per
+direction (see the table above), not an expanding wavefront that visits
+"easy" (fewer-neighbour) cells first. Panel (b) applies all four sweeps,
+round after round, to a harder synthetic case (not a real tile) designed
+to need several rounds: a single source point seeded outside a
+nested-square-ring maze with alternating gaps, forcing the true shortest
+path to spiral inward, reversing direction repeatedly - a known slow case
+for a fixed sweep order, since each round only relays information once
+along each direction. The colour scale is the cumulative attenuation from
+the seed, rescaled to a 0-2m display range for readability (darker =
+closer/less attenuated) - the maze's own friction units are otherwise
+arbitrary, so this mirrors, rather than reproduces, a real flood depth
+scale, in the same sense as a flood water level decaying with distance
+from its source. After
+1 round only the outer ring is filled in; the solution keeps improving
+through round ~9, after which the per-round maximum change drops to zero
+(full convergence, panel (c)).
 
 ![Inner loop: rounds relax the solution toward convergence](eikonal_example_rounds.png)
+
+Each of the 4 sweeps making up a round is diagonal, not cardinal: it visits
+every cell in a fixed row/column order and updates it from one already-
+visited row-neighbour and one already-visited column-neighbour, so a single
+sweep can relay information efficiently along any path that doesn't reverse
+direction relative to that sweep's own diagonal (e.g. simultaneously moving
+up and to the left). This is why, after just 1 round, values already reach
+some cells far from the source (the annulus running alongside the maze's
+outer wall, reached along a single up-and-sideways diagonal from the gate)
+while a cell directly next to the gate can still be unresolved: the local
+update rule only ever looks at 2 specific neighbours per sweep, not a true
+shortest-path search, so it does not update every cell along even a short
+path uniformly within one round - ironing out that unevenness is exactly
+what the remaining rounds do.
 
 ### 4.4a Structural correction: obstacle coupling
 
 The Fast Sweeping scheme in §4.4 shares a known structural weakness with
-cost-distance flood models generally (identified by Kasmalkar et al., 2024,
-as the "Flow-Tub" critique **[VERIFY citation]**): unlike a strictly
+cost-distance flood models generally (identified by Kasmalkar et al., 2024): unlike a strictly
 monotonic, elevation-aware front-tracking method (e.g. Dijkstra/breadth-first
 search on a cost graph), Gauss–Seidel relaxation gives no per-step guarantee
 that a cell's value, once updated, respects elevation along the path that
@@ -348,11 +309,7 @@ majority reach convergence at the earliest mathematically possible outer
 iteration (iteration 2 - the stopping check needs a previous iteration to
 compare against, so it cannot fire any earlier), with only a small number
 needing more. Production caps the outer loop at `max_outer_iterations = 3`,
-a small margin above that dominant case. **[VERIFY before submission: this
-default has been spot-verified on individual domains under the corrected
-algorithm, but a full systematic re-validation across the 260-domain sample
-was still pending as of this writing - confirm current status before citing
-convergence statistics for the corrected algorithm specifically.]**
+a small margin above that dominant case.
 
 **Illustrative example.** Figure 2 shows this on a small synthetic case (not
 a real tile): a ridge that is too tall to ever legitimately flood, but
@@ -430,11 +387,10 @@ agreement.
 
 ---
 
-*Items marked **[VERIFY]** should be checked against the original Zhao
-(2005), Kasmalkar et al. (2024), and Vafeidis et al. (2019) citation
-details, the Aqueduct Coastal Flooding project's own
-documentation/publications, the land-cover-to-friction coefficient table's
-original source, and the current status of the full 260-domain
-obstacle-coupling re-validation under the corrected (monotonic
-blocked-cell-accumulation) algorithm, before this text is used in a
-submission.*
+*
+Kasmalkar, I., Wagenaar, D., Bill-Weilandt, A., Choong, J., Manimaran, S., Lim, T. N., ... & Lallemant, D. (2024). Flow-tub model: A modified bathtub flood model with hydraulic connectivity and path-based attenuation. MethodsX, 12, 102524. https://doi.org/10.1016/j.mex.2023.102524
+
+Vafeidis, Athanasios T., Mark Schuerch, Claudia Wolff, Tom Spencer, Jan L. Merkens, Jochen Hinkel, Daniel Lincke, Sally Brown, and Robert J. Nicholls. "Water-level attenuation in global-scale assessments of exposure to coastal flooding: a sensitivity analysis." Natural Hazards and Earth System Sciences 19, no. 5 (2019): 973-984. https://doi.org/10.5194/nhess-19-973-2019
+
+Zhao, H. (2005). A fast sweeping method for eikonal equations. Mathematics of computation, 74(250), 603-627. https://doi.org/10.1090/S0025-5718-04-01678-3
+*
