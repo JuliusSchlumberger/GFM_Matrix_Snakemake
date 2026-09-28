@@ -100,7 +100,7 @@ and one-off investigation folders (e.g. `martinique_diagnostics/`,
 
 ## Further reading
 
-- `docs/flood_depth_method.md` — the flood-solver methodology.
+- `docs/methods_02_flood_depth.md` — the flood-solver methodology.
 - `docs/python_vs_julia_qa.md` — validation of the Python port against the
   original Julia reference implementation.
 - `docs/flood_extent_validation_plan.md` / `docs/flood_extent_validation_caveats.md`

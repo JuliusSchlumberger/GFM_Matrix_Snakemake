@@ -1,5 +1,5 @@
 """Builds two small, stylized (synthetic, not real-tile) example figures for
-docs/flood_depth_method.md, run directly against the real production solver
+docs/methods_02_flood_depth.md, run directly against the real production solver
 code (src/eikonal.py, src/flood_model.py) - not hand-drawn illustrations.
 
 Figure 1 (eikonal_example_rounds.png): why the inner loop needs more than

@@ -103,7 +103,7 @@ def main() -> None:
         variable=WATERLEVEL_NAME, boundaries_path=boundaries_path,
         ocean_code=ocean_code, river_code=river_code,
         obstacle_coupling=flooding_config.get("obstacle_coupling", {}).get("enabled", False),
-        max_outer_iterations=flooding_config.get("obstacle_coupling", {}).get("max_outer_iterations", 5),
+        max_outer_iterations=flooding_config.get("obstacle_coupling", {}).get("max_outer_iterations", 3),
         max_rounds=flooding_config["max_rounds"],
         outer_convergence_pct=flooding_config.get("obstacle_coupling", {}).get("outer_convergence_pct", 0.01),
         waterlevel_epsilon_m=flooding_config["waterlevel_epsilon_m"],

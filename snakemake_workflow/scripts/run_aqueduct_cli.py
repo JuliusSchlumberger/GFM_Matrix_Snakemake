@@ -174,7 +174,7 @@ def main() -> None:
             seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
             ocean_code=ocean_code, river_code=river_code,
             obstacle_coupling=oc_config.get("enabled", False),
-            max_outer_iterations=oc_config.get("max_outer_iterations", 5),
+            max_outer_iterations=oc_config.get("max_outer_iterations", 3),
             max_rounds=flooding_config["max_rounds"],
             outer_convergence_pct=oc_config.get("outer_convergence_pct", 0.01),
             waterlevel_epsilon_m=flooding_config["waterlevel_epsilon_m"],

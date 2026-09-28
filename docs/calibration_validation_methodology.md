@@ -7,7 +7,7 @@ by a flood risk domain expert. It intentionally omits software-engineering detai
 function names, config keys) except where needed to state a method precisely, and points to the
 underlying technical documents for anyone who wants that detail:
 
-- `docs/flood_depth_method.md` — the flood model itself (the eikonal-propagation formulation).
+- `docs/methods_02_flood_depth.md` — the flood model itself (the eikonal-propagation formulation).
 - `docs/flood_extent_validation_plan.md` — the validation method's design history and rationale.
 - `docs/flood_extent_validation_caveats.md` — every known bias/limitation, per-country and
   pipeline-wide, with mitigations and residual implications.
@@ -30,7 +30,7 @@ derived from land cover, seeded from offshore/coastal water-level forcing points
 steady-state approximation appropriate to a static extreme-value forcing (not a
 time-varying storm hydrograph), not a hydrodynamic simulation: it does not resolve
 wave run-up/overtopping beyond the prescribed boundary water level, arrival timing, or
-structural/hydraulic backwater effects. See `docs/flood_depth_method.md` for the full
+structural/hydraulic backwater effects. See `docs/methods_02_flood_depth.md` for the full
 mathematical formulation, its justification, and its stated limitations (§2.4 there lists
 these explicitly). The Python implementation was validated bit-for-bit identical to the
 original reference (Julia) implementation across a real-tile test set (§5 there) for the base
@@ -297,7 +297,7 @@ be materially larger than the country footprint itself, for either group).
 | Friction scale factor | A multiplier on the land-cover-derived hydraulic resistance field — the model's representation of how much vegetation/terrain/built-up land impedes inland flood propagation | 0.5× and 2× the production friction field (relative to 1× baseline) | Directly controls how far/fast floodwater is estimated to propagate inland for a given boundary water level |
 | Solver round cap | The maximum number of internal solver iterations allowed before the numerical solution is accepted, whether or not it has fully converged | 4, 8, 20 (baseline: 12) | Controls a precision/cost trade-off in the numerical solve itself, not a physical quantity |
 | Solver convergence tolerance | How small the per-iteration change must become before the solver accepts the result as converged (rather than exhausting the round cap above) | 0.01 m and 0.10 m (baseline: 0.03 m) | Also a purely numerical precision/cost trade-off, not physical |
-| Obstacle-coupling correction | Whether/how aggressively the structural correction described in `docs/flood_depth_method.md` §4.4a (preventing an illegitimate "shortcut" through high terrain from producing spuriously high water levels beyond it) is applied | disabled entirely; enabled with 1, 3, or 10 correction iterations (baseline: enabled, 5 iterations) | The one solver parameter with a specific, named numerical failure mode motivating it, rather than a general precision knob |
+| Obstacle-coupling correction | Whether/how aggressively the structural correction described in `docs/methods_02_flood_depth.md` §4.4a (preventing an illegitimate "shortcut" through high terrain from producing spuriously high water levels beyond it) is applied | disabled entirely; enabled with 1, 3, or 10 correction iterations (baseline: enabled, 5 iterations) | The one solver parameter with a specific, named numerical failure mode motivating it, rather than a general precision knob |
 | Exposure threshold | The minimum flood depth for a fine model pixel to count as "exposed" in population/asset accounting | 0.05 m and 0.20 m (baseline: 0.10 m) | **Currently does not affect the validation metrics reported by this sweep at all — see §3.5.** |
 
 The first four are genuine solver-runtime parameters: changing them requires a full new solve of
@@ -387,7 +387,7 @@ presented as a complete picture of "what was tested."
 
 ## 5. Supporting documents (fuller detail, one level down)
 
-- `docs/flood_depth_method.md` — the flood model's mathematical formulation, including the
+- `docs/methods_02_flood_depth.md` — the flood model's mathematical formulation, including the
   Fast Sweeping numerical method and the obstacle-coupling structural correction.
 - `docs/flood_extent_validation_plan.md` — the validation method's full design derivation,
   including measured performance/scale numbers and design alternatives that were tried and
@@ -403,7 +403,7 @@ The following mismatches between documentation and the actual running code were 
 corrected as part of producing this review, listed here for transparency about what "reviewing
 the code" concretely changed:
 
-1. `docs/flood_depth_method.md` did not describe the obstacle-coupling structural correction at
+1. `docs/methods_02_flood_depth.md` did not describe the obstacle-coupling structural correction at
    all, despite it being enabled by default in production and already well-documented in the
    configuration file and solver code. Added as new §4.4a, with a corrected note that this
    correction (and the round-based convergence scheme) were not part of the original

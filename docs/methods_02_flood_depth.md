@@ -189,7 +189,9 @@ change drops to/below $\varepsilon$) within 40 rounds, and of the remaining
 domains that have not strictly converged by round 40, 84% already have a
 stable flood extent by then - the residual change is confined to depth
 still settling in already-flooded cells, not the flooded/dry boundary
-itself. Production therefore caps the solve at `max_rounds = 40`.
+itself. Production therefore caps the solve at `max_rounds = 40`. See
+`methods_03_calibration_sensitivity.md` §2 for the full calibration
+methodology.
 
 **Illustrative example.** Figure 1 is generated directly from the
 production solver code (`docs/generate_eikonal_solver_examples.py`).
@@ -304,12 +306,17 @@ stable, undamped two-state oscillation between alternating blocked-cell
 configurations, never settling regardless of how many outer iterations were
 allowed.
 
-With the accumulation in place, of the domains that did converge, the large
-majority reach convergence at the earliest mathematically possible outer
-iteration (iteration 2 - the stopping check needs a previous iteration to
-compare against, so it cannot fire any earlier), with only a small number
-needing more. Production caps the outer loop at `max_outer_iterations = 3`,
-a small margin above that dominant case.
+With the accumulation in place, every domain converges, the large majority
+within a handful of outer iterations: the single largest group reaches
+convergence at the earliest mathematically possible outer iteration
+(iteration 2 - the stopping check needs a previous iteration to compare
+against, so it cannot fire any earlier), almost all of the remainder at
+iteration 3, and a small number at iteration 4 - no domain in this
+calibration needed more than that. Production caps the outer loop at
+`max_outer_iterations = 3`, covering all but that small iteration-4 group.
+See
+`methods_03_calibration_sensitivity.md` §3 for the full calibration
+methodology and exact per-tile breakdown.
 
 **Illustrative example.** Figure 2 shows this on a small synthetic case (not
 a real tile): a ridge that is too tall to ever legitimately flood, but
