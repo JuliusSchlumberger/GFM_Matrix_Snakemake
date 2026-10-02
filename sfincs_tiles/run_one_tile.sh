@@ -3,13 +3,12 @@
 # dem.tif/mask.tif (gfm env) -> build SFINCS inputs (hydromt-sfincs-dev env)
 # -> bathtub+eikonal (gfm env) -> SFINCS run (direct apptainer, staged to
 # local scratch) -> postprocess + per-model summary (hydromt-sfincs-dev env).
-# Called per-tile from each batch sbatch script's own loop - see
+# Called per-tile from each batch sbatch script's loop - see
 # generate_validation_batch_jobs.py --base-dir-name <name>
 # --runner-script-name run_one_tile.sh.
 #
-# Idempotent at every stage (checks for the expected output file before
-# redoing work), so re-running after a partial batch failure only redoes
-# what's actually missing.
+# Idempotent: checks for the expected output file before redoing work, so
+# re-running after a partial batch failure only redoes what's missing.
 #
 # Usage: run_one_tile.sh <tile_id> [--models bathtub,eikonal,sfincs] [--max-rounds N]
 #
@@ -18,18 +17,13 @@
 # regardless of --models, writing one summary_{model}.json per model
 # (bathtub, eikonal, sfincs) from whatever that model's own raster on disk
 # says right now - null fields for a model with no output yet, real values
-# once it has one, safe to re-run any time any model's output changes.
+# once it has one.
 # --max-rounds: forwarded to run_eikonal_on_sfincs_subgrid.py's own
 # --max-rounds (only meaningful when eikonal is in --models).
 set -uo pipefail
 
-# Clear any PROJ_LIB/PROJ_DATA/GDAL_DATA inherited from whichever conda env
-# happened to be active in the parent interactive shell. Calling each env's
-# python binary directly (see HYDROMT_SFINCS_DEV_PY/GFM_PY below) means we
-# don't get `conda activate`'s own automatic env-var reset, so this has to
-# be done explicitly. Unset (not hardcoded to some path) so each package
-# falls back to its own bundled default, relative to whichever python
-# binary actually ran it.
+# Clear conda env vars inherited from the parent shell so each python
+# binary below falls back to its own bundled PROJ/GDAL data.
 unset PROJ_LIB PROJ_DATA GDAL_DATA
 
 TILE_ID="$1"
@@ -60,17 +54,14 @@ done
 
 CODE_ROOT="/u/schlumbe/gfm_code"
 DATA_ROOT="/p/11212688-004-global-floodmaps/modelling"
-# Required, no default - overridden via a leading BASE_DIR_NAME=... env var on
-# the invocation; generate_validation_batch_jobs.py always sets this explicitly.
+# Required env var, set via a leading BASE_DIR_NAME=... prefix on the invocation.
 : "${BASE_DIR_NAME:?BASE_DIR_NAME must be set, e.g. BASE_DIR_NAME=validation_sfincs_v5 bash run_one_tile.sh <tile_id>}"
 CONFIG="$DATA_ROOT/$BASE_DIR_NAME/resolved_config.yml"
 SFINCS_IMAGE="docker://deltares/sfincs-cpu:sfincs-v2.4.0-Galibier-Release"
 SFINCS_TIMEOUT_S=14400
 
-# Full python binary paths, not `conda activate`: a plain `bash script.sh`
-# non-interactive subshell doesn't source ~/.bashrc, so `conda activate`
-# isn't reliably available - also the safer pattern for an unattended
-# sbatch batch job.
+# Full python binary paths, not `conda activate` - a non-interactive
+# subshell doesn't source ~/.bashrc, so `conda activate` isn't reliable.
 HYDROMT_SFINCS_DEV_PY="/u/schlumbe/.conda/envs/hydromt-sfincs-dev/bin/python"
 GFM_PY="/u/schlumbe/.conda/envs/gfm/bin/python"
 
@@ -98,11 +89,10 @@ done
 
 cd "$CODE_ROOT/sfincs_tiles"
 
-# -- 2. regenerate dem.tif/mask.tif with current extract_dem/extract_dem_mask
-# logic (gfm env - needs src/config_utils.py's hydromt.DataCatalog, same
-# constraint as run_eikonal_on_sfincs_subgrid.py below). Gated on the same
-# elevation_combined.tif check as step 3 - only needs doing once, and once
-# the SFINCS-input build has started, dem.tif/mask.tif must not change under it. --
+# -- 2. regenerate dem.tif/mask.tif via extract_dem/extract_dem_mask (gfm env
+# - needs src/config_utils.py's hydromt.DataCatalog). Gated on the same
+# elevation_combined.tif check as step 3: dem.tif/mask.tif must not change
+# once the SFINCS-input build has started. --
 if [ ! -f "$SFINCS_MODEL_DIR/elevation_combined.tif" ]; then
   "$GFM_PY" regenerate_dem_mask.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
     || log_fail "regenerate_dem_mask.py failed (non-fatal - falling back to the copied model_outputs/ dem.tif/mask.tif)"
@@ -180,12 +170,9 @@ elif [ ! -f "$SFINCS_MODEL_DIR/sfincs_map.nc" ]; then
 fi
 
 # -- 6. postprocess (hmax.tif/flood_extent.tif) + per-tile summary.json (hydromt-sfincs-dev env) --
-# run_sfincs_tile.py --skip-run needs a real sfincs_map.nc (it raises loudly if missing - see
-# its own FileNotFoundError) - only call it when one actually exists, from this run or a
-# previous one. postprocess_tile_summary.py always runs regardless of --models: it already
-# degrades any missing model's own stats to null via its own per-model `path.exists()` checks
-# (bathtub/eikonal/sfincs each independently - see that script), so a bathtub-only or
-# sfincs-only pass still gets a real summary.json for whatever it did compute.
+# run_sfincs_tile.py --skip-run requires a real sfincs_map.nc; only called when one exists.
+# postprocess_tile_summary.py always runs regardless of --models, writing null for any
+# missing model's stats.
 if [ -f "$SFINCS_MODEL_DIR/sfincs_map.nc" ]; then
   "$HYDROMT_SFINCS_DEV_PY" run_sfincs_tile.py --tile-id "$TILE_ID" --config "$CONFIG" --skip-run --base-dir-name "$BASE_DIR_NAME" \
     || log_fail "run_sfincs_tile.py postprocessing failed"

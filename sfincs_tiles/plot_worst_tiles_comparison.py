@@ -1,19 +1,15 @@
-"""Spatial agreement maps for the worst N eikonal-vs-SFINCS tiles (ranked by
-eikonal_km2/sfincs_km2 ratio, ascending - i.e. worst underestimation only;
-for BOTH worst-under and worst-over tiles in one run, see the dedicated
-plot_eikonal_disagreement_extremes.py instead): where SFINCS and eikonal
-agree, where SFINCS floods but eikonal doesn't (SFINCS-only/over-predicts
-relative to eikonal), and where eikonal floods but SFINCS doesn't
-(eikonal-only). All on the SFINCS subgrid UTM grid, reusing
-flood_agreement.py's own WET_THRESHOLD_M (same convention as the pooled
-HT/FAR/CSI/bias numbers) so the picture matches those numbers exactly.
-`build_rgb()` below is the reusable part - imported directly by
-plot_eikonal_disagreement_extremes.py.
+"""Spatial agreement maps for the worst N eikonal-vs-SFINCS tiles, ranked by
+eikonal_km2/sfincs_km2 ratio ascending (worst underestimation only): where
+SFINCS and eikonal agree, where SFINCS floods but eikonal doesn't, and
+where eikonal floods but SFINCS doesn't. All on the SFINCS subgrid UTM
+grid, using flood_agreement.py's own WET_THRESHOLD_M.
 
-Run under gfm_python_preprocessing (NOT hydromt-sfincs-dev) -
-matplotlib.pyplot.savefig() crashes with exit code 127 under
-hydromt-sfincs-dev, a real documented issue this session (broken native
-BLAS/font-rendering backend in that env).
+Superseded as a standalone CLI by plot_eikonal_disagreement_extremes.py,
+but `build_rgb()` below is still imported directly by other scripts as a
+library function.
+
+Run under gfm_python_preprocessing, not hydromt-sfincs-dev - matplotlib
+savefig() is broken in that environment.
 
 Usage:
     python plot_worst_tiles_comparison.py
@@ -40,6 +36,18 @@ from flood_agreement import WET_THRESHOLD_M  # noqa: E402
 from gfm_config import read_root  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from map_style import (  # noqa: E402
+    AGREE_COLOR as COLOR_AGREE,
+    A_ONLY_COLOR as COLOR_SFINCS_ONLY,
+    B_ONLY_COLOR as COLOR_EIKONAL_ONLY,
+    LAND_COLOR as COLOR_DRY,
+    LAND_LABEL,
+    WATER_COLOR as COLOR_WATER,
+    WATER_LABEL,
+    draw_caption_box,
+)
+
 LAND_CODE = 0
 OCEAN_CODE = 1
 LAKE_CODE = 2
@@ -49,12 +57,7 @@ WATERDEPTH_NODATA_INT16 = 32767
 
 
 def _decode_waterdepth_cm(path: Path) -> np.ndarray:
-    """int16-cm -> float32 metres, NaN at nodata - same convention as
-    postprocess_tile_summary.py's own _decode_waterdepth_cm (kept as a
-    separate local copy rather than a shared import, matching that
-    module's own precedent: this tiny decode is duplicated per-script on
-    purpose, not centralized, since it's the one piece of raster I/O each
-    of these otherwise-independent scripts needs)."""
+    """int16-cm -> float32 metres, NaN at nodata."""
     with retry_transient_io(rasterio.open, path) as src:
         raw = src.read(1)
         nodata = src.nodata if src.nodata is not None else WATERDEPTH_NODATA_INT16
@@ -62,15 +65,13 @@ def _decode_waterdepth_cm(path: Path) -> np.ndarray:
     depth_m[raw == nodata] = np.nan
     return depth_m
 
-COLOR_OCEAN = "#a3b9cc"        # grey-blue (2026-09-24, user direction - was light grey; eikonal-only
-# recolored to orange below as a result, since blue was no longer distinct enough from ocean)
-COLOR_WATERBODY = "#8c8c8c"    # medium grey - lake/river (outside the compared land-only domain)
-COLOR_DRY = "#ffffff"          # land, dry in both
-COLOR_AGREE = "#2ca02c"        # green - both wet
-COLOR_SFINCS_ONLY = "#d62728"  # red - SFINCS wet, eikonal dry (SFINCS over-predicts vs eikonal)
-COLOR_EIKONAL_ONLY = "#eda100"  # yellow (was blue, then orange - both too close to the new
-# grey-blue ocean and/or to COLOR_SFINCS_ONLY's red respectively; user-confirmed orange/red were
-# "literally indistinguishable") - eikonal wet, SFINCS dry (eikonal over-predicts vs SFINCS)
+# COLOR_DRY/COLOR_WATER/COLOR_AGREE/COLOR_SFINCS_ONLY/COLOR_EIKONAL_ONLY all
+# come from src/map_style.py (imported above as COLOR_DRY/COLOR_WATER/etc.) -
+# the same land/water/agree/A-only/B-only palette every agreement map in the
+# repo now shares (validation/plot_agreement_map.py included). Ocean and
+# lake/river are ONE "permanent water" colour here, not two - matching
+# validation's own permanent_water_source convention (ocean+lake+river
+# excluded as a single category), not a SFINCS-specific distinction.
 
 N_TILES_DEFAULT = 30
 MIN_SFINCS_KM2_DEFAULT = 1.0
@@ -110,8 +111,7 @@ def build_rgb(tile_id: str, root: Path, base_dir_name: str) -> np.ndarray:
             dst_transform=transform, dst_crs=crs, resampling=Resampling.nearest,
         )
 
-    ocean = mog == OCEAN_CODE
-    waterbody = (mog == LAKE_CODE) | (mog == RIVER_CODE)
+    water = (mog == OCEAN_CODE) | (mog == LAKE_CODE) | (mog == RIVER_CODE)
     land = mog == LAND_CODE
 
     sfincs_wet = land & np.isfinite(sfincs_depth) & (sfincs_depth > WET_THRESHOLD_M)
@@ -119,8 +119,7 @@ def build_rgb(tile_id: str, root: Path, base_dir_name: str) -> np.ndarray:
 
     rgb = np.empty(shape + (3,), dtype=np.float32)
     rgb[...] = _hex_to_rgb(COLOR_DRY)
-    rgb[ocean] = _hex_to_rgb(COLOR_OCEAN)
-    rgb[waterbody] = _hex_to_rgb(COLOR_WATERBODY)
+    rgb[water] = _hex_to_rgb(COLOR_WATER)
     rgb[land & sfincs_wet & eikonal_wet] = _hex_to_rgb(COLOR_AGREE)
     rgb[land & sfincs_wet & ~eikonal_wet] = _hex_to_rgb(COLOR_SFINCS_ONLY)
     rgb[land & ~sfincs_wet & eikonal_wet] = _hex_to_rgb(COLOR_EIKONAL_ONLY)
@@ -141,13 +140,9 @@ def main() -> None:
     root = read_root(Path(args.config))
     base_dir = root / args.base_dir_name
 
-    # Ranked by eikonal_km2/sfincs_km2 ratio (ascending = worst underestimation),
-    # not eikonal_HT/CSI - those per-tile ratio columns were deliberately dropped
-    # from calibration_metrics_per_tile.csv (2026-09-24, user direction: HT/FAR/
-    # CSI/bias should only ever be computed once, pooled across every tile, never
-    # per-tile - see compute_calibration_metrics.py's own module docstring). For
-    # ranking BOTH worst-under and worst-over tiles, see the dedicated
-    # plot_eikonal_disagreement_extremes.py instead of this script's own CLI.
+    # Ranked by eikonal_km2/sfincs_km2 ratio, ascending = worst underestimation.
+    # For ranking both worst-under and worst-over tiles, see
+    # plot_eikonal_disagreement_extremes.py instead.
     df = pd.read_csv(base_dir / "all_tiles_summary.csv")
     df = df.dropna(subset=["eikonal_km2", "sfincs_km2"])
     df = df[df["sfincs_km2"] > args.min_sfincs_km2].copy()
@@ -170,27 +165,24 @@ def main() -> None:
             ax.set_xticks([]); ax.set_yticks([])
             continue
         ax.imshow(rgb, origin="upper")
-        ax.set_title(
-            f"tile {tile_id} (set {row.get('set', '?')})\n"
+        draw_caption_box(ax, [
+            f"tile {tile_id} (set {row.get('set', '?')})",
             f"eikonal={row['eikonal_km2']:.2f} sfincs={row['sfincs_km2']:.2f} km2, ratio={row['ratio']:.2f}",
-            fontsize=9,
-        )
+        ])
         ax.set_xticks([]); ax.set_yticks([])
 
     for ax in axes[n:]:
         ax.set_visible(False)
 
     handles = [
-        mpatches.Patch(facecolor=COLOR_OCEAN, edgecolor="black", label="ocean"),
-        mpatches.Patch(facecolor=COLOR_WATERBODY, edgecolor="black", label="lake/river"),
-        mpatches.Patch(facecolor=COLOR_DRY, edgecolor="black", label="dry land"),
-        mpatches.Patch(facecolor=COLOR_AGREE, edgecolor="black", label="agree (both wet)"),
+        mpatches.Patch(facecolor=COLOR_AGREE, edgecolor="black", label="Agree (both wet)"),
         mpatches.Patch(facecolor=COLOR_SFINCS_ONLY, edgecolor="black", label="SFINCS only"),
-        mpatches.Patch(facecolor=COLOR_EIKONAL_ONLY, edgecolor="black", label="eikonal only"),
+        mpatches.Patch(facecolor=COLOR_EIKONAL_ONLY, edgecolor="black", label="EA-bathtub only"),
+        mpatches.Patch(facecolor=COLOR_DRY, edgecolor="black", label=LAND_LABEL),
+        mpatches.Patch(facecolor=COLOR_WATER, edgecolor="black", label=WATER_LABEL),
     ]
-    fig.legend(handles=handles, loc="lower center", ncol=6, fontsize=11, bbox_to_anchor=(0.5, -0.01))
-    fig.suptitle(f"Worst {n} tiles by eikonal hit-rate (SFINCS vs eikonal, land cells only)", fontsize=13)
-    fig.tight_layout(rect=[0, 0.03, 1, 0.97])
+    fig.legend(handles=handles, loc="lower center", ncol=5, fontsize=11, bbox_to_anchor=(0.5, -0.01))
+    fig.tight_layout(rect=[0, 0.03, 1, 1])
 
     out_path = Path(args.out) if args.out else base_dir / "worst_tiles_comparison.png"
     fig.savefig(out_path, dpi=130)

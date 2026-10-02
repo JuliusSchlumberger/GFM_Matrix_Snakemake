@@ -1,9 +1,8 @@
 """Unit tests for validation.metrics_from_counts / validation.confusion_counts
 against hand-computed contingency tables, including every degenerate case.
 
-See docs/flood_extent_validation_plan.md §6.1. Plain assert-based script
-(matches this repo's existing tests/ convention, e.g.
-tests/river_mouth_tile_validation/validate_river_mouth_tiles.py) - no
+Plain assert-based script (matches this repo's existing tests/ convention,
+e.g. tests/river_mouth_tile_validation/validate_river_mouth_tiles.py) - no
 pytest dependency anywhere in this repo.
 
 Usage:
@@ -19,7 +18,7 @@ import numpy as np
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from validation import confusion_counts, metrics_from_counts  # noqa: E402
+from validation import confusion_counts, confusion_counts_tolerant, metrics_from_counts  # noqa: E402
 
 _FAILURES: list[str] = []
 
@@ -121,6 +120,57 @@ def test_confusion_counts_area_weighted() -> None:
            (tp2, fp2, fn2) == (2.0, 3.0, 5.0), f"got {(tp2, fp2, fn2)}")
 
 
+def test_confusion_counts_tolerant_forgives_only_adjacent_disagreement() -> None:
+    """One-row synthetic grid, hand-traced, for v.confusion_counts_tolerant:
+
+        idx:        0    1    2    3    4    5    6    7    8
+        model_wet:  T    T    F    F    F    F    T    F    F
+        bench_wet:  F    T    T    F    F    F    F    F    T
+
+    Strict (tolerance_cells=0): tp={1}, fp={0,6}, fn={2,8}, tn={3,4,5,7}.
+    idx0's fp sits right next to idx1/2's real benchmark-wet cells - a
+    textbook "same boundary, one pixel off" disagreement - while idx6's fp
+    and idx8's fn each sit alone, with no opposite-type cell within one
+    pixel. A correct tolerant check forgives idx0 and idx2 only, leaving
+    idx6/idx8 as real (unforgiven) disagreement - confirming the mechanism
+    discriminates "boundary noise" from "isolated, unexplained mismatch"
+    rather than forgiving everything within reach.
+    """
+    print("test_confusion_counts_tolerant_forgives_only_adjacent_disagreement")
+    model_wet = np.array([[True, True, False, False, False, False, True, False, False]])
+    bench_wet = np.array([[False, True, True, False, False, False, False, False, True]])
+    fraction = bench_wet.astype(float)
+    domain = np.ones_like(model_wet, dtype=bool)
+    weight = np.ones_like(model_wet, dtype=float)
+
+    strict = confusion_counts_tolerant(model_wet, fraction, domain, weight, tolerance_cells=0)
+    _check("tolerance=0: tp == 1.0 (no forgiveness yet)", strict["tp"] == 1.0, f"got {strict['tp']}")
+    _check("tolerance=0: fp == 2.0 (idx0, idx6 - identical to the hard set)", strict["fp"] == 2.0, f"got {strict['fp']}")
+    _check("tolerance=0: fn == 2.0 (idx2, idx8 - identical to the hard set)", strict["fn"] == 2.0, f"got {strict['fn']}")
+    _check("tolerance=0: nothing forgiven", strict["fp_forgiven"] == 0.0 and strict["fn_forgiven"] == 0.0,
+           f"got fp_forgiven={strict['fp_forgiven']} fn_forgiven={strict['fn_forgiven']}")
+
+    tol = confusion_counts_tolerant(model_wet, fraction, domain, weight, tolerance_cells=1)
+    _check("tolerance=1: idx0's fp is forgiven (adjacent to real bench-wet idx1)",
+           tol["fp_forgiven"] == 1.0, f"got {tol['fp_forgiven']}")
+    _check("tolerance=1: idx6's fp is NOT forgiven (isolated)", tol["fp"] == 1.0, f"got {tol['fp']}")
+    _check("tolerance=1: idx2's fn is forgiven (adjacent to real model-wet idx1)",
+           tol["fn_forgiven"] == 1.0, f"got {tol['fn_forgiven']}")
+    _check("tolerance=1: idx8's fn is NOT forgiven (isolated)", tol["fn"] == 1.0, f"got {tol['fn']}")
+    _check("tolerance=1: tp/tn untouched by forgiveness",
+           tol["tp"] == strict["tp"] and tol["tn"] == strict["tn"],
+           f"got tp={tol['tp']} tn={tol['tn']}")
+
+    csi_strict = strict["tp"] / (strict["tp"] + strict["fp"] + strict["fn"])
+    csi_tol = tol["tp"] / (tol["tp"] + tol["fp"] + tol["fn"])
+    _check("CSI_tol > strict CSI (forgiveness can only help, never hurt)", csi_tol > csi_strict,
+           f"got csi_strict={csi_strict}, csi_tol={csi_tol}")
+
+    hard_disagreement = tol["fp"] + tol["fn"] + tol["fp_forgiven"] + tol["fn_forgiven"]
+    _check("hard disagreement is conserved (forgiven + unforgiven == original fp+fn)",
+           hard_disagreement == strict["fp"] + strict["fn"], f"got {hard_disagreement}")
+
+
 def main() -> None:
     test_hand_computed_contingency_table()
     test_perfect_match()
@@ -129,6 +179,7 @@ def main() -> None:
     test_no_model_wet()
     test_completely_empty_domain()
     test_confusion_counts_area_weighted()
+    test_confusion_counts_tolerant_forgives_only_adjacent_disagreement()
 
     print()
     if _FAILURES:

@@ -1,11 +1,11 @@
 """Coastal flood-extent validation against national hazard maps.
 
-Benchmark loading/dispatch, evaluation-cluster construction,
-benchmark-to-model-grid rasterization, evaluation-domain construction
-(including permanent-water exclusion), and area-/population-weighted
-contingency metrics. See docs/flood_extent_validation_plan.md for the full
-design - this module holds the stateless computational building blocks; the
-per-cluster iteration, accumulation, and I/O live in
+Benchmark loading/dispatch, benchmark-to-model-grid rasterization,
+evaluation-domain construction (TRI-zone/connectivity domains for
+partial-coverage benchmarks, permanent-water exclusion for every benchmark),
+and area-weighted contingency metrics. See docs/methods_04b_MapsValidation.md
+for the current design - this module holds the stateless computational
+building blocks; the per-benchmark iteration, accumulation, and I/O live in
 validation/validate_country.py.
 
 Per-country/per-dataset benchmark semantics (currently just
@@ -28,6 +28,7 @@ import yaml
 from affine import Affine
 from rasterio.features import rasterize
 from rasterio.warp import Resampling, reproject
+from scipy import ndimage
 
 from config_utils import retry_transient_io
 
@@ -65,29 +66,61 @@ class BenchmarkSpec:
     # see rasterize_depth_bands' open_ended_min_m param, not this column's raw values, for how
     # those get resolved to "no upper bound".
     coverage: str = "partial"   # partial | national - dispatches validate_country.py to the
-    # cluster-based comparison (partial, the default - Spain/France's benchmarks only survey
-    # isolated designated zones, so "outside any benchmark polygon" is genuinely ambiguous
-    # between "surveyed and dry" and "never looked at" - see caveats doc §1.1, the whole
-    # reason build_evaluation_clusters' buffer/merge exists) or the per-postprocessing-chunk
-    # comparison (national - the benchmark's own source assessed the ENTIRE coastline, so
-    # "outside the polygon" unambiguously means "surveyed, found dry" and a model-wet cell
-    # there is a genuine over-prediction, not an ambiguous FP - see
-    # validate_country.validate_country_national_coverage, added 2026-09 after Norway's
-    # long, only-lightly-fragmented coastline collapsed into one giant buffer/merge cluster
-    # spanning almost the whole country and crashed the cluster-based path's per-cluster
-    # bbox-sized array allocation - chunk-sized processing is bounded regardless of how far a
-    # national benchmark's footprint spans).
+    # TRI-zone/connectivity-domain comparison (partial, the default - Spain/France's
+    # benchmarks only survey isolated designated zones, so a per-benchmark study-area domain
+    # is used instead of "everywhere the model computed something" - see meta.study_area/
+    # tri_domain_mask/connectivity_domain_mask) or the per-postprocessing-chunk comparison
+    # (national - the benchmark's own source assessed the ENTIRE coastline, so "outside the
+    # polygon" unambiguously means "surveyed, found dry" and a model-wet cell there is a
+    # genuine over-prediction - see validate_country.validate_country_national_coverage,
+    # added 2026-09 after Norway's long, only-lightly-fragmented coastline collapsed into one
+    # giant buffer/merge cluster spanning almost the whole country and crashed the then-
+    # cluster-based path's per-cluster bbox-sized array allocation - chunk-sized processing
+    # is bounded regardless of how far a national benchmark's footprint spans).
     attribute_filter: dict | None = None    # vector: {column: value} rows to KEEP
     exclude_bbox: list[float] | None = None  # vector: [minx, miny, maxx, maxy] to DROP
     regions: dict[str, list[float]] | None = None  # {name: [minx, miny, maxx, maxy]} -
     # named sub-regions (mainland, each overseas territory/archipelago) covering the
-    # WHOLE country, used to (a) tag each evaluation cluster for per-region CSV
-    # reporting instead of one blended national row, and (b) as the read extent for
-    # compute_region_model_totals's benchmark-independent "how much does the model
-    # flood/expose in this region, full stop" figures. Every region a country cares
-    # about needs its own explicit bbox here - there is no implicit "everything else"
-    # catch-all, since that would just be the cluster union again (see caveats doc
-    # §1.2 for why that's not wide enough to be a useful comparison).
+    # WHOLE country, used to tag each evaluation unit for per-region CSV reporting instead of
+    # one blended national row (validate_country.py's own _blend_regions folds them back into
+    # one country-level row automatically). Every region a country cares about needs its own
+    # explicit bbox here - there is no implicit "everything else" catch-all.
+    geogunit_ids: list[int] | None = None  # explicit WRI geogunit_107 unit ID(s) to mask
+    # to, bypassing the country_iso->ISO-lookup match in read_country_mask entirely -
+    # for a benchmark that covers a SUB-national unit sharing its ISO code with
+    # siblings the benchmark does NOT cover (e.g. Wales: geogunit_107 ID 3367, ISO
+    # "GBR" like England/Scotland/N.Ireland's own separate IDs 3364/3366/3365 - using
+    # country_iso="GBR" alone would wrongly include their coastline too). None (the
+    # default) keeps the existing ISO-string lookup behaviour for every other country.
+    study_area: dict | None = None  # {source, geometry_type, attribute_filter?} - the
+    # benchmark agency's own official study design, used as the partial-coverage
+    # evaluation domain (2026-10, replacing the earlier flat eval_domain.buffer_km):
+    # geometry_type "perimeter" (France's TRI zones) -> that zone's own polygon used
+    # AS-IS (point-in-polygon, no buffer) as the domain, one evaluation unit per zone
+    # still present in this benchmark's own extent data (tri_domain_mask). geometry_type
+    # "segments" (Spain's ARPSI lines) -> a seeded-connectivity domain instead, NOT a
+    # buffer around the line (connectivity_domain_mask) - a line is a 1D seed, not an
+    # area, so "point near the line" was never the right domain-construction question
+    # for this geometry type the way it is for a perimeter polygon. `source` is a
+    # separate catalog key (category: study_area_source) holding the raw geometry;
+    # `attribute_filter` (optional) narrows it the same way BenchmarkSpec's own
+    # attribute_filter does (e.g. Spain's source has both marine and fluvial segments,
+    # filtered here to ORIGEN_INU=="Marina"). None (the default, no benchmark currently
+    # has this unset) means this benchmark has no study-area domain defined - see
+    # validate_country.py for what that does.
+    comparison_return_periods: list[int] | None = None  # extra NATIVE return periods
+    # (years, e.g. [100, 250] - must each have a real merged chunk, see
+    # boundary_conditions.return_periods in config.yml) to also score this benchmark
+    # against, beyond the single global `validation.return_period` every country is
+    # scored at by default - e.g. Norway, whose own real-world benchmark return period
+    # (~200yr class) has no exact native model scenario, so both of the model's own
+    # bracketing native RPs (100/250) are reported instead of estimating the 200yr
+    # point itself (2026-10 - an earlier log-linear-interpolated RP200 point was
+    # removed by user decision: report the model's own real, simulated return periods
+    # only). See validation/run_multi_rp_summary.py, the orchestration that actually
+    # sweeps this list; `validate_country.py` itself still only ever reads the single
+    # global `validation.return_period`. None (the default) means this benchmark is
+    # only ever scored at that one global RP.
 
 
 def fix_catalog_meta_encoding(catalog, yml_path: str | Path) -> None:
@@ -145,6 +178,9 @@ def load_benchmark_spec(catalog, key: str) -> BenchmarkSpec:
         regions=meta.get("regions"),
         wet_values=meta.get("wet_values"),
         depth_threshold_m=meta.get("depth_threshold_m"),
+        geogunit_ids=meta.get("geogunit_ids"),
+        study_area=meta.get("study_area"),
+        comparison_return_periods=meta.get("comparison_return_periods"),
     )
 
 
@@ -175,6 +211,34 @@ def region_for_point(x: float, y: float, regions: dict[str, list[float]] | None)
         if minx <= x <= maxx and miny <= y <= maxy:
             return name
     return None
+
+
+def primary_region_name(regions: dict[str, list[float]] | None) -> str | None:
+    """Which named region is "the main one" - the largest by bbox area
+    (lon/lat degrees - an approximation, fine for picking one region out of
+    a handful, not a real-area computation). Works uniformly for both
+    `regions:` usage patterns this catalog has: a disjoint partition (Spain
+    mainland vs. the much smaller canary_islands; France metropole vs. its
+    5 small overseas territories) and a nested whole-territory + sub-area
+    set (Wales/Scotland/New Brunswick - the whole-territory bbox is by
+    construction bigger than any sub-area bbox it contains). Returns None
+    if `regions` is empty/None - caller should fall back to "the whole
+    benchmark, no region split" in that case.
+
+    Used to pick a single representative region for a benchmark-wide
+    diagnostic that doesn't need (or want) one output per region - e.g. the
+    tile-coverage plot - distinct from `_blend_regions`' own bbox-
+    containment check in validate_country.py, which exists to avoid
+    double-counting nested regions, not to pick a display region.
+    """
+    if not regions:
+        return None
+
+    def _area(bbox: list[float]) -> float:
+        minx, miny, maxx, maxy = bbox
+        return max(0.0, maxx - minx) * max(0.0, maxy - miny)
+
+    return max(regions, key=lambda name: _area(regions[name]))
 
 
 def load_benchmark_full(catalog, spec: BenchmarkSpec) -> gpd.GeoDataFrame:
@@ -211,7 +275,7 @@ def filter_benchmark(gdf: gpd.GeoDataFrame, spec: BenchmarkSpec) -> gpd.GeoDataF
     return gdf
 
 
-# ── Bringing the benchmark onto the model grid (plan §4.2) ─────────────────
+# ── Bringing the benchmark onto the model grid ──────────────────────────────
 
 def benchmark_fraction_from_vector(
     gdf: gpd.GeoDataFrame,
@@ -227,7 +291,7 @@ def benchmark_fraction_from_vector(
     supersample x supersample sub-pixel block down to one destination cell.
     Unbiased, unlike `rasterize(all_touched=False)` (systematically loses
     thin coastal strips) or `all_touched=True` (systematically inflates
-    them) - see plan doc §4.2. Also gives an exact benchmark area for the
+    them). Also gives an exact benchmark area for the
     coverage diagnostic, independent of any wet-fraction threshold, if the
     caller sums this directly (before thresholding).
     """
@@ -252,7 +316,7 @@ def benchmark_fraction_from_vector(
 
 
 def wet_mask_from_fraction(fraction: np.ndarray, wet_fraction: float = 0.5) -> np.ndarray:
-    """Binary benchmark-wet decision from a coverage fraction grid (plan §4.2's 0.5 rule)."""
+    """Binary benchmark-wet decision from a coverage fraction grid (the 0.5-rule threshold)."""
     return fraction >= wet_fraction
 
 
@@ -326,7 +390,9 @@ def rasterize_depth_bands(
     return ht_min_grid, ht_max_grid
 
 
-# ── Evaluation domain (plan §4.3) ───────────────────────────────────────────
+# ── Multi-return-period comparison ──────────────────────────────────────────
+
+# ── Evaluation domain ────────────────────────────────────────────────────────
 
 def model_domain_mask(depth: np.ndarray, nodata: float = -9999.0) -> np.ndarray:
     """True where the model actually computed a value here (not outside its domain)."""
@@ -373,6 +439,17 @@ def build_evaluation_clusters(
 
     Returns a GeoDataFrame (EPSG:4326), one row per cluster, with a
     `cluster_id` column and geometry = that cluster's buffered domain.
+
+    2026-10: no longer the SCORING domain for any benchmark with a
+    meta.study_area block (every partial-coverage benchmark today - see
+    tri_domain_mask/connectivity_domain_mask below) - kept only as a
+    chunk-windowing optimization (which merged chunks to mosaic/read
+    together for a group of nearby evaluation units), since reading one
+    chunk per TRI zone/ARPSI segment independently would re-read the same
+    chunk file many times over for geographically close units. The actual
+    domain scored inside a window always comes from tri_domain_mask/
+    connectivity_domain_mask, never from this function's own buffered
+    geometry.
     """
     if gdf.empty:
         return gpd.GeoDataFrame({"cluster_id": []}, geometry=[], crs=4326)
@@ -396,13 +473,147 @@ def build_evaluation_clusters(
     return clusters.to_crs(4326)
 
 
+def units_with_extent_coverage(
+    perimeter_gdf: gpd.GeoDataFrame, extent_benchmark_gdf: gpd.GeoDataFrame, id_col: str = "id_tri",
+) -> gpd.GeoDataFrame:
+    """Filters a perimeter study-area source (e.g. `france_tri_perimeters`,
+    all 131 TRI zones including fluvial-only ones) down to only the rows
+    whose `id_col` value actually appears in the real coastal extent
+    benchmark (e.g. `france_inondable_02moy`'s own `id_tri` column - both
+    files share this field, confirmed 2026-10 via pyogrio.read_info against
+    the real shapefiles, no join ambiguity). This is what drops the
+    fluvial-only TRI zones without needing a generic proximity-based
+    run-filter - a zone with a perimeter but zero real coastal flood rows in
+    this specific benchmark was never meant to be evaluated against it.
+
+    Returns one row per surviving zone - this IS the evaluation-unit
+    granularity for a "perimeter" study area (one TRI zone = one unit),
+    unlike the "segments" case (connectivity_domain_mask), which does not
+    have a natural one-row-per-unit structure the same way.
+    """
+    if perimeter_gdf.empty or extent_benchmark_gdf.empty or id_col not in perimeter_gdf.columns:
+        return perimeter_gdf.iloc[0:0]
+    real_ids = set(extent_benchmark_gdf[id_col].dropna().unique()) if id_col in extent_benchmark_gdf.columns else set()
+    if not real_ids:
+        return perimeter_gdf.iloc[0:0]
+    return perimeter_gdf[perimeter_gdf[id_col].isin(real_ids)]
+
+
+def tri_domain_mask(
+    perimeter_gdf: gpd.GeoDataFrame, dst_transform: Affine, dst_crs, dst_shape: tuple[int, int],
+) -> np.ndarray:
+    """Evaluation domain for a "perimeter" study area: the perimeter
+    polygon(s) rasterized exactly as-is (point-in-polygon containment,
+    `all_touched=False`) - no buffer at all. Replaces the earlier flat
+    `eval_domain.buffer_km` margin for France: the TRI zone's own official
+    boundary IS the agency's own study design, so there is nothing a buffer
+    would be compensating for the way there was for an arbitrary distance
+    margin around a benchmark polygon that was never meant to define the
+    survey's own extent.
+
+    `perimeter_gdf` should already be filtered to the zones relevant to
+    this specific benchmark (units_with_extent_coverage) before calling
+    this - this function itself does no filtering, it only rasterizes
+    whatever geometries it's given.
+    """
+    if dst_crs is not None and perimeter_gdf.crs is not None and perimeter_gdf.crs != dst_crs:
+        perimeter_gdf = perimeter_gdf.to_crs(dst_crs)
+    geoms = [g for g in perimeter_gdf.geometry if g is not None and not g.is_empty]
+    if not geoms:
+        return np.zeros(dst_shape, dtype=bool)
+    return rasterize(
+        [(g, 1) for g in geoms], out_shape=dst_shape, transform=dst_transform,
+        fill=0, dtype="uint8", all_touched=False,
+    ).astype(bool)
+
+
+def connectivity_domain_mask(
+    model_wet: np.ndarray,
+    benchmark_wet: np.ndarray,
+    seed_gdf: gpd.GeoDataFrame,
+    dst_transform: Affine,
+    dst_crs,
+    not_water: np.ndarray,
+) -> np.ndarray:
+    """Evaluation domain for a "segments" study area (Spain's ARPSI coastal
+    seed lines): NOT a buffer around the lines - a line is a 1D seed marking
+    "flooding starting here is real," not an area with its own extent the
+    way a TRI perimeter polygon is. Instead, two independent 8-connected
+    connected-component analyses (scipy.ndimage.label), run on the FULL
+    (not yet water-masked) model-wet and benchmark-wet masks separately,
+    each keeping only the components that touch a seed cell - domain =
+    union of both connected results, so a real miss (one map connects to a
+    seed, the other doesn't reach there at all) stays detectable, unlike a
+    domain that was tautologically restricted to model_wet alone.
+
+    Seed cells: `seed_gdf`'s geometries rasterized with `all_touched=True`
+    (an exact rasterized touch, not a distance/snap-tolerance buffer - a
+    cell the line geometry doesn't actually pass through is never a seed).
+
+    `not_water` (rivers/lakes/ocean mask, already inverted - True means
+    NOT water) is applied only to the FINAL connected result, never before
+    labeling - a river/lake is a real physical flood conduit the
+    connectivity graph must be allowed to pass through; masking it out
+    first would sever genuine connectivity paths to real flooding on its
+    far side. A water-body cell itself still never counts as in-domain
+    (can't be "correctly flooded" over permanently-wet water), only the
+    connectivity PATH through it is preserved.
+    """
+    if seed_gdf.crs is not None and dst_crs is not None and seed_gdf.crs != dst_crs:
+        seed_gdf = seed_gdf.to_crs(dst_crs)
+    geoms = [g for g in seed_gdf.geometry if g is not None and not g.is_empty]
+    shape = model_wet.shape
+    if not geoms:
+        return np.zeros(shape, dtype=bool)
+    seed_mask = rasterize(
+        [(g, 1) for g in geoms], out_shape=shape, transform=dst_transform,
+        fill=0, dtype="uint8", all_touched=True,
+    ).astype(bool)
+
+    structure = ndimage.generate_binary_structure(2, 2)  # 8-connected
+
+    model_labels, _ = ndimage.label(model_wet, structure=structure)
+    model_seed_ids = set(np.unique(model_labels[seed_mask & model_wet])) - {0}
+    model_connected = np.isin(model_labels, list(model_seed_ids)) if model_seed_ids else np.zeros(shape, dtype=bool)
+
+    bench_labels, _ = ndimage.label(benchmark_wet, structure=structure)
+    bench_seed_ids = set(np.unique(bench_labels[seed_mask & benchmark_wet])) - {0}
+    bench_connected = np.isin(bench_labels, list(bench_seed_ids)) if bench_seed_ids else np.zeros(shape, dtype=bool)
+
+    return (model_connected | bench_connected) & not_water
+
+
+def connectivity_components(domain_mask: np.ndarray) -> np.ndarray:
+    """Re-labels a `connectivity_domain_mask` result into physically
+    contiguous components (8-connected) - this is the evaluation-UNIT
+    granularity for a "segments" study area's own per-unit CSI reporting
+    (e.g. the CSI-per-ARPSI dot map), since the seed table itself has no
+    natural one-row-per-unit structure the way a "perimeter" study area's
+    TRI zones already do (one call to tri_domain_mask each). Each
+    contiguous patch of the final (already seed-connected, already
+    water-masked) domain becomes one dot - not one dot per original ARPSI
+    table row, which would need a nontrivial nearest-seed attribution step
+    to split a component fed by multiple nearby segments.
+
+    Returns an int32 label array, 0 = outside the domain, 1..N = component
+    ID - pass each `labels == i` slice to confusion_counts_soft (restricted
+    further by this same domain_mask, which callers already have) for that
+    component's own tp/fp/fn/tn.
+    """
+    structure = ndimage.generate_binary_structure(2, 2)  # 8-connected, same as the labeling above
+    labels, _ = ndimage.label(domain_mask, structure=structure)
+    return labels.astype("int32")
+
+
 def permanent_water_mask(land_use: np.ndarray, exclude_codes: tuple[int, ...]) -> np.ndarray:
     """True where a cell is permanent water (rivers/lakes/sea) per whichever
     categorical source `land_use` came from and its own `exclude_codes`
     (`validation.permanent_water_source`/`permanent_water_codes` in
     config.yml - DeltaDTM's own land/ocean/lake/river mask, codes {1,2,3},
-    since 2026-09; was Copernicus Global Land Cover, codes {80,200} - see
-    docs/flood_extent_validation_caveats.md §1.3 for why the switch).
+    since 2026-09; was Copernicus Global Land Cover, codes {80,200} - the
+    DeltaDTM switch is a real, measured coastal-strip-masking improvement,
+    same DEM the model itself is built from, no second independently-
+    registered dataset in the loop).
 
     These cells must be excluded from the evaluation domain entirely, not
     scored as agree/dry/wet - "is this pixel flooded" is not a meaningful
@@ -422,8 +633,7 @@ def read_permanent_water_mask(
     `permanent_water_source` is a categorical raster (originally Copernicus
     land_use, ~100m; DeltaDTM's own native-resolution land/ocean/lake/river
     mask, ~25-31m in Norway, is the default since 2026-09 - a real, measured
-    resolution improvement, see docs/flood_extent_validation_caveats.md §1.3
-    - either works, this function doesn't care which), coarser than the model
+    resolution improvement - either works, this function doesn't care which), coarser than the model
     grid either way, so this is always a nearest-neighbour reproject onto
     `out_transform`/`out_shape` (same convention as
     protection.load_geogunit_ids - never interpolate a categorical raster).
@@ -462,26 +672,31 @@ def read_benchmark_raster_fraction(
     """RasterDataset counterpart to benchmark_fraction_from_vector - classifies
     a benchmark raster (e.g. Denmark's continuous-depth "Oversvømmelsesfare"
     GeoTIFFs, ~5m native resolution) into a wet/dry mask and reprojects it onto
-    an arbitrary target grid, returning a 0/1 array compatible with
-    wet_mask_from_fraction (no partial-coverage supersampling - unlike the
-    vector path, the source is already a comparable-resolution raster grid, not
-    a polygon boundary needing sub-cell coverage estimation).
+    an arbitrary target grid, returning a continuous 0-1 coverage FRACTION per
+    destination cell - the same semantics `benchmark_fraction_from_vector`
+    gives every vector benchmark, so `confusion_counts_soft` credits a Denmark
+    cell exactly like a France/Spain/Norway one (partial coverage = partial
+    credit), not as a degenerate always-0-or-1 input.
 
     Classifies at the benchmark's OWN native resolution first (via
     spec.wet_values for a categorical raster, or spec.depth_threshold_m for a
     continuous depth one - exactly one must be set), THEN reprojects the
-    resulting binary mask with Resampling.max - deliberately NOT the reverse
-    order (reproject raw values with nearest-neighbour, then threshold). The
-    model grid is typically much coarser than a 5m source (Denmark: ~30m model
-    cells, ~36 native sub-pixels each) - thresholding after a nearest-neighbour
-    reproject would sample only ONE of those 36 sub-pixels per destination
-    cell, silently missing real benchmark flooding elsewhere in that cell.
-    Resampling.max on the pre-classified mask instead marks a destination cell
-    wet if ANY covered native pixel was wet - standard practice for
-    downsampling hazard-extent rasters, and the direction of error (slightly
-    over- rather than under-stating benchmark extent) is the safer one given
-    this pipeline's own §1.1 FAR-inflation caution already assumes benchmark
-    "wet" calls are read generously.
+    resulting binary mask with Resampling.average - deliberately NOT the
+    reverse order (reproject raw values with nearest-neighbour, then
+    threshold). The model grid is typically much coarser than a 5m source
+    (Denmark: ~30m model cells, ~36 native sub-pixels each) - thresholding
+    after a nearest-neighbour reproject would sample only ONE of those 36
+    sub-pixels per destination cell, silently missing real benchmark flooding
+    elsewhere in that cell. Resampling.average on the pre-classified mask
+    instead computes the real proportion of covered native pixels that were
+    wet (e.g. 8/36 -> 0.22), the direct raster-grid equivalent of
+    `benchmark_supersample`'s sub-cell coverage estimate for a vector
+    benchmark (2026-10 - replaced an earlier Resampling.max choice, which
+    collapsed this to a binary "any wet sub-pixel -> whole cell counted
+    wet" call; harmless for the old hard-threshold `wet_mask_from_fraction`
+    comparison this function predates, but silently kept Denmark on
+    degenerate 0/1 scoring after confusion_counts_soft became the one
+    production scoring path for every other benchmark).
 
     Nodata/dry pixels are folded into "not wet" at the native-resolution
     classification step, so (unlike read_permanent_water_mask) no separate
@@ -509,14 +724,14 @@ def read_benchmark_raster_fraction(
             "meta.depth_threshold_m (exactly one) - see BenchmarkSpec's own docstring."
         )
 
-    dst = np.zeros(out_shape, dtype="uint8")
+    dst = np.zeros(out_shape, dtype="float64")
     reproject(
-        source=wet.astype("uint8"), destination=dst,
+        source=wet.astype("float32"), destination=dst,
         src_transform=da.raster.transform, src_crs=da.raster.crs,
         dst_transform=out_transform, dst_crs="EPSG:4326",
-        resampling=Resampling.max,
+        resampling=Resampling.average,
     )
-    return dst.astype("float64")
+    return dst
 
 
 def load_iso_lookup(gfm_catalog, iso_lookup_source: str) -> dict[int, str]:
@@ -535,6 +750,7 @@ def load_iso_lookup(gfm_catalog, iso_lookup_source: str) -> dict[int, str]:
 def read_country_mask(
     gfm_catalog, geogunit_source: str, iso_lookup: dict[int, str], country_iso: str,
     bbox: list[float], out_transform: Affine, out_shape: tuple[int, int],
+    geogunit_ids: list[int] | None = None,
 ) -> np.ndarray:
     """True where a cell's WRI geogunit (nearest-neighbour reprojected onto this
     call's own grid - same convention as read_permanent_water_mask, never
@@ -543,8 +759,8 @@ def read_country_mask(
     Needed anywhere a comparison's working extent is a rectangular bbox rather
     than the benchmark's own real geometry - a bbox can genuinely overlap a
     neighbouring country's territory (confirmed 2026-09, twice: Spain's
-    `mainland` bbox overlaps Portugal/France/Morocco - see the flood_totals
-    history in docs/flood_extent_validation_caveats.md §1.2; Norway's
+    `mainland` bbox overlaps Portugal/France/Morocco, via the flood_totals
+    computation's own earlier bbox-leakage bug; Norway's
     `mainland` bbox, generous enough to cover the country's full latitude
     range, overlaps real Swedish and Danish territory too -
     validate_country_national_coverage processes chunks found from that bbox
@@ -553,6 +769,12 @@ def read_country_mask(
     this mask, GFM's own real flooding in a neighbouring country would be
     scored as a false positive against a benchmark that was never meant to
     cover that territory at all.
+
+    `geogunit_ids`, when given (BenchmarkSpec.geogunit_ids), matches those
+    geogunit_107 IDs directly instead of resolving `country_iso` through
+    `iso_lookup` - for a benchmark covering a sub-national unit that shares
+    its ISO code with sibling units it does NOT cover (Wales: ID 3367, ISO
+    "GBR" like England/Scotland/N.Ireland's own separate IDs).
     """
     try:
         geo_da = retry_transient_io(
@@ -574,24 +796,25 @@ def read_country_mask(
         resampling=Resampling.nearest,
     )
     geo_ids = dst.astype("int32")
-    target_ids = [gid for gid, iso in iso_lookup.items() if iso == country_iso]
+    target_ids = list(geogunit_ids) if geogunit_ids else [
+        gid for gid, iso in iso_lookup.items() if iso == country_iso
+    ]
     if not target_ids:
         return np.zeros(out_shape, dtype=bool)
     return np.isin(geo_ids, target_ids)
 
 
-# ── Metrics (plan §4.4) ─────────────────────────────────────────────────────
+# ── Metrics ───────────────────────────────────────────────────────────────
 
 def confusion_counts(
     model_wet: np.ndarray, benchmark_wet: np.ndarray, domain_mask: np.ndarray, weight: np.ndarray,
 ) -> tuple[float, float, float, float]:
     """Weighted (tp, fp, fn, tn) sums within `domain_mask`.
 
-    `weight` is whatever consistent unit the caller wants area- or
-    population-weighted metrics in (km² from plotting.pixel_area_km2_grid,
-    or people from a population grid - plan doc §4.4/§4.5). Raw cell counts
-    (weight=1 everywhere) work too, for the reproducibility figure the plan
-    also wants reported alongside the area-weighted ones.
+    `weight` is whatever consistent unit the caller wants weighted metrics
+    in (km² from plotting.pixel_area_km2_grid is the production use today).
+    Raw cell counts (weight=1 everywhere) work too, for a reproducibility
+    figure alongside the area-weighted ones.
 
     tp = model wet AND benchmark wet (hit)
     fp = model wet AND NOT benchmark wet (over-prediction)
@@ -606,6 +829,144 @@ def confusion_counts(
     return tp, fp, fn, tn
 
 
+def confusion_counts_soft(
+    model_wet: np.ndarray, fraction: np.ndarray, domain_mask: np.ndarray, weight: np.ndarray,
+) -> tuple[float, float, float, float]:
+    """Weighted (tp, fp, fn, tn) sums within `domain_mask`, using the
+    benchmark coverage FRACTION directly as continuous credit instead of
+    thresholding it into a binary wet/dry call first
+    (wet_mask_from_fraction) - a cell 20% covered by the benchmark
+    contributes 0.2 of its weight to the wet side and 0.8 to the dry side,
+    regardless of the model's own (still binary) wet/dry call at that cell.
+
+    Replaces confusion_counts + wet_mask_from_fraction as the primary
+    scoring path 2026-09-30, after a per-country threshold sensitivity
+    sweep (single-tile spot-checks, tau in [0,1]) found the optimal
+    wet_fraction threshold diverges by country with no consistent winner -
+    Denmark/Finland preferred a lenient threshold (~0.1: CSI fell as tau
+    rose), Norway/France preferred a strict one (~1.0: CSI rose as tau
+    rose) - so no single global tau serves every country. This soft
+    formulation removes the threshold entirely; empirically it reproduces
+    the old tau=0.5 default almost exactly for all four tiles tested,
+    without needing to pick a value at all.
+
+    tp = model wet, weighted by fraction (partial hit)
+    fp = model wet, weighted by (1 - fraction) (partial over-prediction)
+    fn = model dry, weighted by fraction (partial miss)
+    tn = model dry, weighted by (1 - fraction)
+
+    wet_mask_from_fraction (the 0.5-style threshold call this function
+    itself never uses) survives for two narrow, still-real purposes, NOT
+    as a scoring shortcut: the agreement-map DISPLAY category raster
+    (_CAT_AGREE/_CAT_UNDER/_CAT_OVER need one discrete colour per cell; a
+    soft credit can't render as a single colour), and - 2026-10 -
+    connectivity_domain_mask's own binary benchmark-wet mask (a seeded
+    connected-component analysis needs a binary mask to label; this is
+    domain CONSTRUCTION, not scoring - the resulting domain is then scored
+    by this function, confusion_counts_soft, exactly like any other
+    benchmark). `confusion_counts` itself (the hard-threshold tp/fp/fn/tn
+    function this replaces) is no longer called anywhere in
+    validate_country.py at all - it remains a real, independently useful
+    function (generic weighted confusion counts over any two boolean
+    masks), still exercised by its own unit tests
+    (tests/flood_extent_validation/test_metrics.py).
+    """
+    d = domain_mask
+    f = np.clip(fraction, 0.0, 1.0)
+    tp = float((weight * f)[d & model_wet].sum())
+    fp = float((weight * (1.0 - f))[d & model_wet].sum())
+    fn = float((weight * f)[d & ~model_wet].sum())
+    tn = float((weight * (1.0 - f))[d & ~model_wet].sum())
+    return tp, fp, fn, tn
+
+
+def confusion_counts_tolerant(
+    model_wet: np.ndarray,
+    fraction: np.ndarray,
+    domain_mask: np.ndarray,
+    weight: np.ndarray,
+    tolerance_cells: int,
+) -> dict[str, float]:
+    """Diagnostic companion to confusion_counts_soft - NOT a replacement, and
+    never part of the primary scoring path (HR/FAR/CSI/EB/bias everywhere
+    else stay confusion_counts_soft's own continuous-credit numbers,
+    untouched). Answers one narrow question: how much of the STRICT (hard,
+    zero-tolerance) disagreement between model and benchmark sits within
+    `tolerance_cells` pixels of a cell where the two genuinely agree - i.e.
+    looks like the same flood boundary drawn with a small spatial offset,
+    rather than a real disagreement about whether an area floods at all.
+
+    Written for the permanent-water-mask-vs-benchmark-coastline
+    misalignment caveat (methods_04b_MapsValidation.md), but not specific to
+    that caveat, to any one country, or to the coastline specifically - it
+    is a generic small-scale-registration check applied uniformly over the
+    whole domain. In practice it mostly fires along a coastline because
+    that is where two independently-drawn wet/dry boundaries disagree by a
+    pixel or two; the mechanism itself has no notion of "coastline."
+
+    Guards against the obvious failure mode - silently inflating CSI:
+      - Operates on a HARD benchmark-wet basis (`fraction > 0`, "any real
+        benchmark-reported wet area in this cell at all" - an existence
+        test, not a reintroduced 0.5-style majority threshold) and a hard
+        tp/fp/fn/tn partition, entirely separate from confusion_counts_soft's
+        own continuous credit. CSI itself is never touched by this function.
+      - A disagreement cell is forgiven only if a REAL opposite-type cell
+        exists nearby (binary dilation of the actual wet masks, not a
+        blanket buffer drawn around the benchmark's extent) - an isolated
+        model-wet patch with no nearby benchmark-wet cell at all gets zero
+        credit regardless of `tolerance_cells`.
+      - Symmetric: forgives a false positive against nearby benchmark-wet
+        cells AND a false negative against nearby model-wet cells equally -
+        a one-directional version would just mechanically inflate precision
+        or recall, not test registration agreement.
+      - Can only ever move weight from fp/fn into fp_forgiven/fn_forgiven;
+        tp and tn are untouched, so CSI_tol >= the hard CSI this function's
+        own tp/fp/fn/tn would give at tolerance_cells=0, always, by
+        construction - never by estimation noise.
+      - `tolerance_cells` is meant to be set from a real, independently
+        justified registration-uncertainty distance (this pipeline's own
+        native 30m grid resolution and the permanent-water mask's own
+        ~25-31m native resolution are both close to one cell), not tuned
+        upward until the number looks good. Callers are expected to also
+        report fp_forgiven/fn_forgiven (or the share of strict disagreement
+        they represent) alongside CSI_tol, so a reader can see how much
+        work the tolerance is doing rather than just the headline number.
+
+    Returns a dict (not a 4-tuple like confusion_counts_soft - there are two
+    extra quantities here): tp, fp, fn, tn (feed straight into
+    metrics_from_counts for CSI_tol/HR_tol/FAR_tol), plus fp_forgiven/
+    fn_forgiven (the weight moved out of fp/fn by the tolerance check).
+    """
+    d = domain_mask
+    bench_wet = fraction > 1e-9
+    fp = d & model_wet & ~bench_wet
+    fn = d & ~model_wet & bench_wet
+    tp = d & model_wet & bench_wet
+    tn = d & ~model_wet & ~bench_wet
+
+    if tolerance_cells > 0:
+        struct = np.ones((3, 3), dtype=bool)
+        bench_wet_near = ndimage.binary_dilation(bench_wet, structure=struct, iterations=tolerance_cells)
+        model_wet_near = ndimage.binary_dilation(model_wet, structure=struct, iterations=tolerance_cells)
+    else:
+        bench_wet_near = bench_wet
+        model_wet_near = model_wet
+
+    fp_forgiven = fp & bench_wet_near
+    fn_forgiven = fn & model_wet_near
+    fp_tol = fp & ~bench_wet_near
+    fn_tol = fn & ~model_wet_near
+
+    return {
+        "tp": float(weight[tp].sum()),
+        "fp": float(weight[fp_tol].sum()),
+        "fn": float(weight[fn_tol].sum()),
+        "tn": float(weight[tn].sum()),
+        "fp_forgiven": float(weight[fp_forgiven].sum()),
+        "fn_forgiven": float(weight[fn_forgiven].sum()),
+    }
+
+
 def _safe_div(a: float, b: float) -> float:
     return a / b if b > 0 else float("nan")
 
@@ -614,7 +975,7 @@ def metrics_from_counts(tp: float, fp: float, fn: float, tn: float = 0.0) -> dic
     """HR, FAR, CSI, EB, EB_ratio, bias from (weighted) TP/FP/FN(/TN) counts.
 
     Zero denominators return NaN, never a silent 0 - "no benchmark wet area
-    in this domain" must not read as "CSI = 0" (plan doc §4.4). `EB == 0.5`
+    in this domain" must not read as "CSI = 0". `EB == 0.5`
     exactly whenever `FP == FN` (both nonzero) - the requested
     over/under-prediction form; `EB_ratio = FP/FN` is the Wing et al. (2017)
     form, more legible at extremes (kept alongside, not instead of, EB).
@@ -629,7 +990,7 @@ def metrics_from_counts(tp: float, fp: float, fn: float, tn: float = 0.0) -> dic
     }
 
 
-# ── Exposure difference / population weighting (plan §4.5) ─────────────────
+# ── Depth-band comparison ────────────────────────────────────────────────
 
 def depth_band_counts(
     model_depth: np.ndarray, ht_min_grid: np.ndarray, ht_max_grid: np.ndarray,
@@ -674,42 +1035,3 @@ def depth_band_metrics_from_counts(agree: float, under: float, over: float) -> d
     }
 
 
-def population_by_class(
-    class_mask: np.ndarray,
-    domain_mask: np.ndarray,
-    src_transform: Affine,
-    src_crs,
-    population: np.ndarray,
-    pop_transform: Affine,
-    pop_crs,
-) -> np.ndarray:
-    """Population (on the population grid) disaggregated into `class_mask`.
-
-    Implements the plan doc §4.5 identity without materialising a
-    fine-resolution population raster:
-
-        sum over fine cells of class C of (pop_coarse / n_subcells)
-            == sum over coarse cells of pop_coarse x (fraction of that
-               coarse cell in class C)
-
-    `rasters.average_pool_to_grid` computes exactly that fraction grid (fine
-    class_mask, restricted to domain_mask -> coarse fraction); multiplying
-    by `population` gives this class's disaggregated population per coarse
-    cell. Sum the result for pop_tp/pop_fp/pop_fn/pop_tn (e.g. class_mask =
-    model_wet & ~benchmark_wet for pop_fp/"pop_over").
-
-    Imports `average_pool_to_grid` lazily to avoid a hard rasters.py
-    dependency for callers that only need the non-population metrics.
-    """
-    from rasters import average_pool_to_grid
-
-    numerator = np.where(domain_mask, np.where(class_mask, 1.0, 0.0), np.nan).astype("float32")
-    domain = domain_mask.astype("float32")
-    fraction = average_pool_to_grid(
-        numerator=numerator, domain=domain,
-        src_transform=src_transform, src_crs=src_crs,
-        dst_transform=pop_transform, dst_crs=pop_crs, dst_shape=population.shape,
-        numerator_nodata=np.nan,
-    )
-    fraction = np.nan_to_num(fraction, nan=0.0)
-    return population * fraction

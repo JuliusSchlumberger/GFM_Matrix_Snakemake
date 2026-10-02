@@ -1,29 +1,14 @@
-"""Run the production eikonal flood solver directly on SFINCS's own subgrid
-inputs (dep_subgrid.tif / manning_subgrid.tif, real UTM metres) instead of
-the eikonal model's own separately-built lon/lat DeltaDTM grid, isolating
-the physics/numerics disagreement between the two models from any
-grid/projection/elevation-source difference between their normally-separate
-input pipelines.
+"""Runs the production eikonal flood solver directly on SFINCS's own subgrid
+inputs (dep_subgrid.tif / manning_subgrid.tif, UTM metres) instead of the
+eikonal model's own separately-built lon/lat DeltaDTM grid, isolating
+physics/numerics differences between the two models from any grid/
+projection/elevation-source difference.
 
-SFINCS's subgrid is a true, isotropic UTM metre grid, at the same
-resolution (30m at the current 120m/4 settings) simulation.flooding.
-friction_scale_factor=30 is calibrated for. Reusing flood_model.py's own
-effective_dem() (flattens any non-land cell - ocean, lake, and river - to
-0m) avoids deep lake/river bathymetry contaminating a coarse cell's own
-hypsometric table on the eikonal side.
-
-Boundary seeding uses the eikonal solver's own direct seed_rows/seed_cols/
-seed_values path (the same one hop>=1 hinterland tiles use in production),
-not the boundaries=/coastline_mask+haversine-IDW path (_idw_seed_values
-hard-codes a haversine, lon/lat, distance metric, which would be wrong on
-this projected UTM grid). Seeding is computed here with a planar Euclidean
-IDW instead (build_boundary_forcing.idw_interpolate_to_grid - the same
-approach SFINCS's own zsini uses), from the boundaries_RP100_SLR_0.gpkg
-values.
-
-flood_depth_dense/effective_dem/coastline_mask are pure array functions
-with no lon/lat assumption; only _idw_seed_values (not used here) is
-lon/lat-specific.
+Boundary seeding uses the eikonal solver's direct seed_rows/seed_cols/
+seed_values path (the hop>=1 hinterland path in production), with a planar
+Euclidean IDW (build_boundary_forcing.idw_interpolate_to_grid) from
+boundaries_RP100_SLR_0.gpkg instead of the haversine/lon-lat
+coastline_mask+IDW path, which doesn't apply on this projected UTM grid.
 
 Usage:
     python run_eikonal_on_sfincs_subgrid.py --tile-id 37
@@ -64,6 +49,9 @@ FRICTION_SCALE_FACTOR_DEFAULT = 30.0  # matches simulation.flooding.friction_sca
 DEFAULT_FRICTION = 0.002  # matches simulation.flooding.default_friction in config.yml
 MAX_ROUNDS_DEFAULT = 200
 WATERLEVEL_EPSILON_M_DEFAULT = 0.03
+OBSTACLE_COUPLING_DEFAULT = True  # matches simulation.flooding.obstacle_coupling in config.yml
+MAX_OUTER_ITERATIONS_DEFAULT = 4
+OUTER_CONVERGENCE_PCT_DEFAULT = 0.01
 
 
 def build_inputs_from_sfincs_subgrid(
@@ -73,35 +61,15 @@ def build_inputs_from_sfincs_subgrid(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, rasterio.Affine, str]:
     """(dem, mask, friction, transform, crs) on SFINCS's own subgrid UTM grid.
 
-    dem: dep_subgrid.tif, NaN cells (outside the real subgrid footprint,
-        e.g. tile buffer padding) filled with DEM_NODATA_M's own 99.0m
-        convention (definitely-dry sentinel - matches rasters.DEM_NODATA_M).
-    mask: native mask.tif reprojected onto this grid (nearest-neighbour,
-        the same pre-reprojection-workaround pattern build_sfincs_tile.py
-        already uses). Cells with no real coverage (value outside
-        {0,1,2,3}) get their own NODATA_CODE rather than being folded into
-        land or ocean.
-
-        This is a genuine geometry artefact, not a leftover DeltaDTM nodata
-        signal: mask.tif itself contains only real {0,1,2,3} values, but a
-        tile's native mask.tif is a rectangle in lon/lat, which becomes a
-        curved shape in UTM (meridian convergence). SFINCS's
-        create_from_region(..., crs="utm") builds an axis-aligned UTM
-        rectangle that must fully contain that curve, so it overshoots at
-        the opposite corners into territory the tile's own native mask.tif
-        never covered - genuinely outside the tile, not unclassified deep
-        ocean within it. Given its own code (NODATA_CODE) rather than
-        folded into land or ocean, so it's excluded by construction from
-        every `mask == LAND_CODE` reporting/bathtub restriction elsewhere
-        in this module. effective_dem() (flood_model.py) flattens any
-        non-LAND_CODE cell to 0m, so NODATA_CODE behaves like open water
-        for propagation purposes without counting as real ocean for
-        coastline/seeding logic (which checks mask == OCEAN_CODE
-        specifically, not "not land").
+    dem: dep_subgrid.tif, NaN cells filled with rasters.DEM_NODATA_M's 99.0m
+        dry sentinel.
+    mask: native mask.tif reprojected onto this grid (nearest-neighbour).
+        A tile's native mask.tif is a lon/lat rectangle, which becomes a
+        curved shape in UTM (meridian convergence); SFINCS's own UTM
+        rectangle overshoots that curve at the corners, so cells with no
+        real coverage there get NODATA_CODE rather than land or ocean.
     friction: manning_subgrid.tif / 100 * friction_scale_factor, NaN cells
-        filled with default_friction (matching config.yml's own
-        simulation.flooding.default_friction) before scaling, same
-        friction_scale_factor as production (see module docstring).
+        filled with default_friction * 100 before scaling.
     """
     dep_path = sfincs_dir / "subgrid" / "dep_subgrid.tif"
     man_path = sfincs_dir / "subgrid" / "manning_subgrid.tif"
@@ -133,15 +101,11 @@ def build_inputs_from_sfincs_subgrid(
 
 
 def sfincs_domain_coastline_mask(mask: np.ndarray, ocean_code: int = OCEAN_CODE, river_code: int | None = RIVER_CODE) -> np.ndarray:
-    """Ocean cells within 1px of land (or river) - deliberately without
-    flood_model.coastline_mask's own edge-connectivity requirement, which
-    exists to reject isolated inland ponds DeltaDTM sometimes miscodes as
-    ocean and relies on GFM's own tile-generation process building each
-    eikonal tile with a real "wet edge" - a property SFINCS's own grid
-    never has (a rectangular UTM bounding box around the tile polygon plus
-    a buffer margin). This simpler formula matches what
-    build_sfincs_tile.py's own _ocean_polygon_wgs84 uses to place SFINCS's
-    own real boundary forcing.
+    """Ocean cells within 1px of land (or river) - without
+    flood_model.coastline_mask's edge-connectivity requirement, since
+    SFINCS's rectangular UTM grid has no guaranteed real wet edge. Matches
+    build_sfincs_tile.py's _ocean_polygon_wgs84, which places SFINCS's own
+    boundary forcing.
     """
     ocean = mask == ocean_code
     landlike = mask == LAND_CODE
@@ -155,15 +119,11 @@ def compute_planar_idw_seeds(
     mask: np.ndarray, transform: rasterio.Affine, crs: str,
     boundaries_path: Path, variable: str, k: int = 15,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
-    """Coastline-cell seed_rows/seed_cols/seed_values via PLANAR (Euclidean,
+    """Coastline-cell seed_rows/seed_cols/seed_values via planar (Euclidean,
     UTM-metre) IDW from real boundary stations - the projected-grid
-    counterpart of flood_model._idw_seed_values (which hard-codes
-    haversine/lon-lat and can't be reused directly here). Returns None if
-    the boundaries file is empty or no coastline cells exist.
-
-    k=15 matches production's own simulation.flooding.knn - caps each
-    cell's IDW to its k nearest stations, not however many stations this
-    tile happens to have.
+    counterpart of flood_model._idw_seed_values. Returns None if the
+    boundaries file is empty or no coastline cells exist. k=15 matches
+    production's simulation.flooding.knn.
     """
     boundaries = retry_transient_io(gpd.read_file, boundaries_path)
     if boundaries.empty:
@@ -187,16 +147,10 @@ def compute_planar_idw_seeds(
 
 
 def compute_bathtub_depth(dem: np.ndarray, mask: np.ndarray, max_waterlevel_m: float) -> np.ndarray:
-    """Naive/unconstrained "bathtub" baseline: every LAND cell below
-    `max_waterlevel_m` is flooded to exactly that level - NO connectivity,
-    NO friction, NO propagation at all, the simplest possible flood model.
-    Restricted to land (mask==LAND_CODE) to match the eikonal/SFINCS
-    outputs' own land-only depth convention, so all three are directly
-    comparable. `max_waterlevel_m` is a single scalar (the tile's own
-    highest real boundary station value) - deliberately NOT spatially
-    interpolated the way the real solves are, since the whole point of
-    this baseline is to be the simplest possible reference, not a third
-    variant of the same IDW-seeded approach.
+    """Naive "bathtub" baseline: every land cell below `max_waterlevel_m`
+    (a single scalar - the tile's highest real boundary station value,
+    not spatially interpolated) floods to exactly that level. No
+    connectivity, friction, or propagation.
     """
     depth = np.maximum(np.float32(max_waterlevel_m) - dem, np.float32(0.0))
     return np.where(mask == LAND_CODE, depth, np.float32(0.0)).astype(np.float32)
@@ -205,6 +159,9 @@ def compute_bathtub_depth(dem: np.ndarray, mask: np.ndarray, max_waterlevel_m: f
 def run_eikonal_on_sfincs_subgrid(
     tile_id: str, root: Path, friction_scale_factor: float = FRICTION_SCALE_FACTOR_DEFAULT,
     max_rounds: int = MAX_ROUNDS_DEFAULT, waterlevel_epsilon_m: float = WATERLEVEL_EPSILON_M_DEFAULT,
+    obstacle_coupling: bool = OBSTACLE_COUPLING_DEFAULT,
+    max_outer_iterations: int = MAX_OUTER_ITERATIONS_DEFAULT,
+    outer_convergence_pct: float = OUTER_CONVERGENCE_PCT_DEFAULT,
     base_dir_name: str = "validation_sfincs_v2",
 ) -> tuple[np.ndarray, dict, dict] | None:
     """Returns (waterdepth, diagnostics, grid_info) on the SFINCS subgrid's
@@ -226,6 +183,8 @@ def run_eikonal_on_sfincs_subgrid(
         dem, mask, friction, transform,
         seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
         max_rounds=max_rounds, waterlevel_epsilon_m=waterlevel_epsilon_m,
+        obstacle_coupling=obstacle_coupling, max_outer_iterations=max_outer_iterations,
+        outer_convergence_pct=outer_convergence_pct,
     )
     return waterdepth, diagnostics, {"transform": transform, "crs": crs}
 
@@ -258,6 +217,13 @@ def main() -> None:
         help=f"eikonal round cap forwarded to run_eikonal_on_sfincs_subgrid() "
              f"(default: {MAX_ROUNDS_DEFAULT})",
     )
+    parser.add_argument(
+        "--friction-scale-factor", type=float, default=None,
+        help=f"runtime multiplier on manning_subgrid.tif (default: {FRICTION_SCALE_FACTOR_DEFAULT}, "
+             f"matching production's simulation.flooding.friction_scale_factor). A non-default value "
+             f"tags the eikonal output filename (_fsf<value>) so sweep points never collide with each "
+             f"other or with the default-friction result.",
+    )
     args = parser.parse_args()
 
     if args.config:
@@ -270,7 +236,15 @@ def main() -> None:
 
     out_dir = root / args.base_dir_name / args.tile_id / "outputs"
     bathtub_output_path = out_dir / f"bathtub_waterdepth_{RETURN_PERIOD}_{WATERLEVEL_NAME}.tif"
-    eikonal_output_path = out_dir / f"eikonal_on_subgrid_waterdepth_{RETURN_PERIOD}_{WATERLEVEL_NAME}.tif"
+    friction_scale_factor = (
+        args.friction_scale_factor if args.friction_scale_factor is not None else FRICTION_SCALE_FACTOR_DEFAULT
+    )
+    # Default friction keeps the original, untagged filename (backward
+    # compatible with every already-postprocessed validation_sfincs_v5
+    # tile) - only a sweep's non-default scale gets its own tagged path, so
+    # sweep points never collide with each other or with the real default.
+    _fsf_tag = "" if friction_scale_factor == FRICTION_SCALE_FACTOR_DEFAULT else f"_fsf{friction_scale_factor:g}"
+    eikonal_output_path = out_dir / f"eikonal_on_subgrid_waterdepth_{RETURN_PERIOD}_{WATERLEVEL_NAME}{_fsf_tag}.tif"
 
     sfincs_dir = root / args.base_dir_name / args.tile_id / "sfincs_model"
     native_mask_path = root / args.base_dir_name / args.tile_id / "inputs" / "mask.tif"
@@ -313,7 +287,7 @@ def main() -> None:
     if eikonal_output_path.exists():
         print(f"tile {args.tile_id}: eikonal already done, skipping")
         return
-    eikonal_kwargs = {"base_dir_name": args.base_dir_name}
+    eikonal_kwargs = {"base_dir_name": args.base_dir_name, "friction_scale_factor": friction_scale_factor}
     if args.max_rounds is not None:
         eikonal_kwargs["max_rounds"] = args.max_rounds
     result = run_eikonal_on_sfincs_subgrid(args.tile_id, root, **eikonal_kwargs)

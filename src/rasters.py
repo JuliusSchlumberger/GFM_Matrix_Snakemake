@@ -490,6 +490,56 @@ def resolve_offshore_mask_gaps_via_gebco(
     }
 
 
+def relabel_small_isolated_ocean_patches(
+    mask_vals: np.ndarray,
+    ocean_code: int = 1,
+    lake_code: int = 2,
+    min_cells: int = 30,
+) -> tuple[np.ndarray, dict]:
+    """Reclassify small ocean-coded (`ocean_code`) connected components
+    (fewer than `min_cells` cells) to `lake_code`.
+
+    `mask_vals`'s ocean/land/lake/river classification is otherwise trusted
+    as-is from the upstream `deltadtm_mask` source (see `extract_dem_mask`'s
+    own docstring) - but that source sometimes mislabels a small inland
+    water body (e.g. a coastal lagoon or reservoir) as ocean rather than
+    lake. Left uncorrected, such a patch is still 4-connected-boundary
+    "coastline" from `flood_model.coastline_mask`'s point of view and, more
+    consequentially, still `ocean_code` from `build_sfincs_tile.py::
+    _compute_zsini_array`'s point of view - which explicitly restricts its
+    IDW-interpolated initial water level to `ocean_code` cells but has no
+    way to tell a genuinely isolated ocean-coded blob from real coast, so it
+    seeds a nonzero initial water level there with no actual hydraulic
+    connection to the sea (found 2026-09-28, SFINCS validation tile 713 -
+    SFINCS reported the patch "flooded" from timestep zero, disconnected
+    from any real coastline).
+
+    4-connectivity, matching `resolve_offshore_mask_gaps_via_gebco`'s own
+    convention immediately above. Every component is checked purely by
+    size, including the tile's own dominant ocean body if it somehow fell
+    below `min_cells` (not a realistic case in production - every selected
+    tile already has a real, substantial ocean presence - but simpler and
+    more predictable than a "except the largest" special case).
+
+    Returns the corrected mask array and a diagnostics dict with
+    `n_relabeled` and `n_components_relabeled`.
+    """
+    ocean = mask_vals == ocean_code
+    structure = ndimage.generate_binary_structure(2, 1)  # 4-connectivity
+    labels, n_components = ndimage.label(ocean, structure=structure)
+    if n_components == 0:
+        return mask_vals, {"n_relabeled": 0, "n_components_relabeled": 0}
+
+    sizes = ndimage.sum(ocean, labels, index=np.arange(1, n_components + 1))
+    small_labels = np.nonzero(sizes < min_cells)[0] + 1
+    if len(small_labels) == 0:
+        return mask_vals, {"n_relabeled": 0, "n_components_relabeled": 0}
+
+    to_relabel = np.isin(labels, small_labels)
+    corrected = np.where(to_relabel, lake_code, mask_vals)
+    return corrected, {"n_relabeled": int(to_relabel.sum()), "n_components_relabeled": int(len(small_labels))}
+
+
 def extract_dem(
     data_catalog: hydromt.DataCatalog,
     dem_source: str,
@@ -654,7 +704,9 @@ def extract_dem_mask(
     is actually far-offshore water; see
     `resolve_offshore_mask_gaps_via_gebco` for the full reasoning and the
     below-sea-level-inland-basin safeguard. Valid DeltaTM values (0 = land,
-    1 = ocean, 2 = lake, 3 = river) are kept unchanged.
+    1 = ocean, 2 = lake, 3 = river) are otherwise kept unchanged, except
+    that any small (< 30 cells) ocean-coded connected component is
+    relabeled to lake - see `relabel_small_isolated_ocean_patches` for why.
 
     Args:
         data_catalog: HydroMT data catalog containing `mask_source`.
@@ -679,6 +731,7 @@ def extract_dem_mask(
     mask_vals, _ = resolve_offshore_mask_gaps_via_gebco(
         da_mask_repr.values.squeeze(), nodata_sentinel, gebco_vals, da_gebco.raster.nodata,
     )
+    mask_vals, _ = relabel_small_isolated_ocean_patches(mask_vals)
     return da_mask_repr.copy(data=mask_vals.reshape(da_mask_repr.shape))
 
 
@@ -978,10 +1031,13 @@ def average_pool_to_grid(
     the class - i.e. `sum(class) / n_total`, not `sum(class) / n_in_domain`.
 
     Extracted from `compute_flood_fraction_chunk.py`'s original inline
-    two-pass logic (2026-08) - see this module's own history and
-    docs/flood_extent_validation_plan.md §4.5 for the second use case
-    (population disaggregation across TP/FP/FN/TN class masks) this was
-    generalized for.
+    two-pass logic (2026-08) - generalized to a standalone function so a
+    second caller (population disaggregation across TP/FP/FN/TN class
+    masks, in the coastal flood-extent validation pipeline) could reuse it
+    without duplicating the same two-pass logic; that second caller was
+    later removed (2026-10, population weighting dropped from that
+    pipeline) - this function itself stays, still used by
+    compute_flood_fraction_chunk.py.
 
     Uses the identity `ff = A x B`:
         A = reproject(numerator, average, nodata excluded) = sum(class) / n_in_domain

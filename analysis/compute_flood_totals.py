@@ -13,7 +13,7 @@ already built at.
 
 Why this exists: flood_extent_validation compares the model against national
 hazard-map benchmarks, but can only ever read a benchmark's own local working
-window (see docs/flood_extent_validation_caveats.md §1.2) - it has no view of how
+window (each evaluation unit's own chunk mosaic) - it has no view of how
 much the model floods across the WHOLE country. Rather than re-deriving that
 country-wide total from raw depth inside validate_country.py (which needed its own
 bbox-vs-real-country-boundary correctness fix and re-reads large chunks on every

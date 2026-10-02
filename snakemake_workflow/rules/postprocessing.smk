@@ -14,12 +14,6 @@ the full tile set, and produces smaller, faster-to-write output files.
 # into one global dict, so declaring waterlevel_name/return_period again here
 # with a looser regex would just silently shadow common.smk's tighter,
 # config-derived ones for whichever file happens to be `include:`d last.
-# Checked directly here (not via the root Snakefile's own _plotting_enabled,
-# which is only defined AFTER this file's `include:` line) since
-# merge_chunk's own temp() marking below depends on it - see that rule's
-# docstring for why.
-_keep_merged_chunk_waterdepth = config["postprocessing"]["plots"]["enabled"]
-
 _merge_chunk_waterdepth_path = os.path.join(
     config["postprocessing"]["merged_outputs"], "chunks",
     "waterdepth_{chunk_id}_{return_period}_{waterlevel_name}.tif",
@@ -33,31 +27,30 @@ _merge_chunk_provenance_path = os.path.join(
 rule merge_chunk:
     """Merge per-tile water depths within one spatial chunk for one return period and SLR scenario.
 
-    The fine-resolution waterdepth output is marked temp() - auto-deleted by
-    Snakemake once its declared consumers have run - ONLY when
-    postprocessing.plots.enabled is false. When plots ARE enabled (the
-    default), it must stay on disk: build_mosaic_vrt's output VRT is a
+    The fine-resolution waterdepth output always stays on disk (NOT temp() -
+    2026-10, removed the earlier postprocessing.plots.enabled-gated
+    auto-deletion). Two independent reasons it must persist regardless of
+    whether plotting is on: (1) build_mosaic_vrt's output VRT is a
     lightweight XML reference to chunk file paths, not a data copy, so
     plot_merged_results (which reads real pixel data through that VRT - e.g.
     compute_flood_area_km2's windowed reads) needs the underlying chunk file
-    to still exist when it runs.
+    to still exist when it runs; (2) validation/validate_country.py and
+    validation/run_multi_rp_summary.py (docs/methods_04b_MapsValidation.md)
+    read these exact files directly, as a standalone step run well after
+    this pipeline finishes - a plots.enabled-gated temp() silently deleted
+    them before validation ever got a chance to run, with no error, just
+    quietly fewer (or zero) chunks found.
     """
     input:
         waterdepth_tiles=waterdepth_tiles_for_chunk,
     output:
-        waterdepth=(
-            _merge_chunk_waterdepth_path if _keep_merged_chunk_waterdepth
-            else temp(_merge_chunk_waterdepth_path)
-        ),
+        waterdepth=_merge_chunk_waterdepth_path,
         # Per-cell winning tile_id (int32) - the max-combine (2026-08,
         # replacing the previous valid-count-weighted mean) has no "average"
         # to inspect, so this is the practical debugging handle when a
-        # merged value looks wrong. Same temp()-or-not lifetime as
-        # waterdepth, since it's only useful alongside it.
-        provenance=(
-            _merge_chunk_provenance_path if _keep_merged_chunk_waterdepth
-            else temp(_merge_chunk_provenance_path)
-        ),
+        # merged value looks wrong. Same persistence as waterdepth, since
+        # it's only useful alongside it.
+        provenance=_merge_chunk_provenance_path,
         overlap_minmax=os.path.join(
             config["postprocessing"]["merged_outputs"], "chunks", "overlap_samples",
             "overlap_minmax_{chunk_id}_{return_period}_{waterlevel_name}.npz",
@@ -78,11 +71,11 @@ rule compute_flood_fraction_chunk:
     raster's native ~1 km resolution.
 
     Output: a tiny coarse raster (values 0–1) that replaces the large fine
-    waterdepth for all downstream exposure analysis. The fine waterdepth is
-    only deleted by Snakemake once this rule completes when
-    postprocessing.plots.enabled is false (see merge_chunk's own docstring
-    above) - otherwise it stays on disk for build_mosaic_vrt/
-    plot_merged_results to read later.
+    waterdepth for all downstream exposure analysis. The fine waterdepth
+    itself always stays on disk (merge_chunk's own output is no longer
+    temp() - see that rule's own docstring) for build_mosaic_vrt/
+    plot_merged_results and the standalone 04b validation pipeline to read
+    later.
     """
     input:
         waterdepth=rules.merge_chunk.output.waterdepth,

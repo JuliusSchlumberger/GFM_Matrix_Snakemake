@@ -1,9 +1,14 @@
 """Synthetic end-to-end test for validation.py against analytically known,
-closed-form expected values - proves the supersampled rasterisation and the
-area-weighted population disaggregation are exact, not just "close" (plan
-doc §6.2). No real production data needed - every geometry below is chosen
-to align exactly with pixel/subpixel boundaries so the expected values are
-exact fractions, not approximations.
+closed-form expected values - proves the supersampled rasterisation is exact,
+not just "close". No real production data needed - every geometry below is
+chosen to align exactly with pixel/subpixel boundaries so the expected
+values are exact fractions, not approximations.
+
+Also covers confusion_counts_soft (the production scoring path since
+2026-09-30, replacing confusion_counts/wet_mask_from_fraction for scoring -
+see that function's own docstring in src/validation.py) - both a
+reduces-to-the-hard-function-exactly check on binary fraction input, and a
+genuinely partial (non-0/1) closed-form check of the soft credit math itself.
 
 Usage:
     python tests/flood_extent_validation/test_synthetic_end_to_end.py
@@ -23,11 +28,13 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from plotting import pixel_area_km2_grid  # noqa: E402
 from validation import (  # noqa: E402
+    BenchmarkSpec,
     benchmark_fraction_from_vector,
     confusion_counts,
+    confusion_counts_soft,
     metrics_from_counts,
     model_domain_mask,
-    population_by_class,
+    read_benchmark_raster_fraction,
     wet_mask_from_fraction,
 )
 
@@ -103,6 +110,60 @@ def test_confusion_and_metrics_closed_form() -> None:
     _check("bias == 1.0 ((4+4)/(4+4))", _close(m["bias"], 1.0))
 
 
+def test_confusion_soft_reduces_to_hard_on_binary_fraction() -> None:
+    """confusion_counts_soft, given a `fraction` array that is already pure
+    0/1 (never actually partial), must reproduce confusion_counts exactly -
+    the soft formulation is a strict generalization of the hard one, not a
+    different metric that happens to agree in the common case. Same 4x4
+    scenario as test_confusion_and_metrics_closed_form (production's own
+    before/after pair for the 2026-09-30 scoring change)."""
+    print("test_confusion_soft_reduces_to_hard_on_binary_fraction")
+    rows, cols = np.indices((4, 4))
+    model_wet = cols < 2
+    benchmark_wet = rows < 2
+    fraction = benchmark_wet.astype("float64")  # pure 0/1 - no partial coverage
+    domain = np.ones((4, 4), dtype=bool)
+    weight = np.ones((4, 4), dtype=float)
+
+    tp_hard, fp_hard, fn_hard, tn_hard = confusion_counts(model_wet, benchmark_wet, domain, weight)
+    tp_soft, fp_soft, fn_soft, tn_soft = confusion_counts_soft(model_wet, fraction, domain, weight)
+    _check("tp: soft == hard on binary fraction", _close(tp_soft, tp_hard), f"{tp_soft} vs {tp_hard}")
+    _check("fp: soft == hard on binary fraction", _close(fp_soft, fp_hard), f"{fp_soft} vs {fp_hard}")
+    _check("fn: soft == hard on binary fraction", _close(fn_soft, fn_hard), f"{fn_soft} vs {fn_hard}")
+    _check("tn: soft == hard on binary fraction", _close(tn_soft, tn_hard), f"{tn_soft} vs {tn_hard}")
+
+
+def test_confusion_soft_partial_coverage_closed_form() -> None:
+    """4x4 grid, model wet = left two columns (8 cells). Benchmark coverage
+    fraction is genuinely partial: 0.25 under the model-wet columns, 0.75
+    under the model-dry columns - deliberately NOT 0/1, to prove the soft
+    credit math itself (not just the binary-reduction case above). Every
+    model-wet cell splits its own unit weight into 0.25 tp + 0.75 fp; every
+    model-dry cell splits into 0.75 fn + 0.25 tn - closed-form, not an
+    approximation."""
+    print("test_confusion_soft_partial_coverage_closed_form")
+    rows, cols = np.indices((4, 4))
+    model_wet = cols < 2
+    fraction = np.where(model_wet, 0.25, 0.75)
+    domain = np.ones((4, 4), dtype=bool)
+    weight = np.ones((4, 4), dtype=float)
+
+    tp, fp, fn, tn = confusion_counts_soft(model_wet, fraction, domain, weight)
+    _check("tp == 2.0 (8 model-wet cells x 0.25)", _close(tp, 2.0), f"got {tp}")
+    _check("fp == 6.0 (8 model-wet cells x 0.75)", _close(fp, 6.0), f"got {fp}")
+    _check("fn == 6.0 (8 model-dry cells x 0.75)", _close(fn, 6.0), f"got {fn}")
+    _check("tn == 2.0 (8 model-dry cells x 0.25)", _close(tn, 2.0), f"got {tn}")
+    _check("tp + fp == 8 (every model-wet cell's weight is fully accounted for)",
+           _close(tp + fp, 8.0), f"got {tp + fp}")
+    _check("fn + tn == 8 (every model-dry cell's weight is fully accounted for)",
+           _close(fn + tn, 8.0), f"got {fn + tn}")
+
+    m = metrics_from_counts(tp, fp, fn, tn)
+    _check("HR == 0.25 (2 / (2+6))", _close(m["HR"], 0.25), f"got {m['HR']}")
+    _check("FAR == 0.75 (6 / (2+6))", _close(m["FAR"], 0.75), f"got {m['FAR']}")
+    _check("CSI == 1/7 (2 / (2+6+6))", _close(m["CSI"], 1.0 / 7.0), f"got {m['CSI']}")
+
+
 def test_area_weighted_matches_pixel_area_grid() -> None:
     """Same 4x4 scenario, but weighted by real km2 area near the equator
     (cos(lat) ~ 1, so area-weighted and cell-count-weighted metrics must
@@ -127,38 +188,6 @@ def test_area_weighted_matches_pixel_area_grid() -> None:
            max(quadrants) / min(quadrants) < 1.001, f"got ratios {quadrants}")
 
 
-def test_population_disaggregation_closed_form() -> None:
-    """One coarse population cell (value=1000) exactly covering a 4x4 fine
-    grid; class_mask = left half (cols < 2) of the fine grid, fully inside
-    the domain. The disaggregated population in that class must be exactly
-    half of 1000 - the plan §4.5 identity in its simplest possible case."""
-    print("test_population_disaggregation_closed_form")
-    fine_transform = Affine(0.25, 0, 0.0, 0, -0.25, 1.0)  # 4x4 fine cells over lon/lat [0,1]
-    class_mask = np.zeros((4, 4), dtype=bool)
-    class_mask[:, :2] = True  # left half
-    domain_mask = np.ones((4, 4), dtype=bool)
-
-    pop_transform = Affine(1.0, 0, 0.0, 0, -1.0, 1.0)  # single 1x1 coarse cell, same extent
-    population = np.array([[1000.0]])
-
-    result = population_by_class(
-        class_mask, domain_mask, fine_transform, "EPSG:4326",
-        population, pop_transform, "EPSG:4326",
-    )
-    _check("disaggregated population == 500.0 (exactly half of 1000)",
-           _close(float(result[0, 0]), 500.0, tol=1e-6), f"got {result[0, 0]}")
-
-    # Sanity: the complementary class (right half) must account for the rest.
-    complement_mask = ~class_mask
-    result_complement = population_by_class(
-        complement_mask, domain_mask, fine_transform, "EPSG:4326",
-        population, pop_transform, "EPSG:4326",
-    )
-    total = float(result[0, 0]) + float(result_complement[0, 0])
-    _check("class + complement == full population (500 + 500 == 1000)",
-           _close(total, 1000.0, tol=1e-6), f"got {total}")
-
-
 def test_wet_mask_threshold() -> None:
     print("test_wet_mask_threshold")
     fraction = np.array([0.0, 0.49, 0.5, 0.51, 1.0])
@@ -175,14 +204,82 @@ def test_model_domain_mask() -> None:
            list(domain) == [False, True, True, False], f"got {domain}")
 
 
+def test_read_benchmark_raster_fraction_gives_true_coverage() -> None:
+    """read_benchmark_raster_fraction (Denmark's RasterDataset path) must
+    return a real continuous 0-1 coverage fraction (Resampling.average on
+    the native-resolution wet/dry mask) - NOT a degenerate 0/1 "any wet
+    sub-pixel -> whole cell wet" call (the old Resampling.max behaviour,
+    which silently kept Denmark on hard-threshold scoring even after
+    confusion_counts_soft became the one production scoring path for every
+    other benchmark - see that function's own docstring).
+
+    4x4 native-resolution source, downsampled to 1x2 destination cells
+    (left half / right half, each a cell-aligned 2x4 block of 8 native
+    pixels - no partial-overlap ambiguity, so the expected fractions are
+    exact): left block has exactly 2/8 wet, right block exactly 6/8 wet.
+    """
+    print("test_read_benchmark_raster_fraction_gives_true_coverage")
+    import shutil
+    import tempfile
+
+    import hydromt
+    import rasterio
+
+    wet, dry = 0.5, 0.0  # above/below depth_threshold_m=0.1 below
+    depth = np.array([
+        [wet, dry, wet, wet],
+        [wet, dry, wet, wet],
+        [dry, dry, wet, dry],
+        [dry, dry, wet, dry],
+    ], dtype="float32")
+    src_transform = Affine(1.0, 0, 0.0, 0, -1.0, 4.0)  # 4x4 cells, lon[0,4] x lat[0,4]
+
+    # Manual mkdtemp + best-effort rmtree (not tempfile.TemporaryDirectory's own
+    # __exit__ cleanup): rioxarray/rasterio's CachingFileManager can keep the
+    # source file's OS handle open on Windows even after an eager .load(),
+    # which makes TemporaryDirectory's own strict cleanup raise - a real file
+    # handle, not a test bug, so just tolerate it rather than chase it.
+    tmpdir = tempfile.mkdtemp()
+    try:
+        src_path = Path(tmpdir) / "denmark_depth.tif"
+        with rasterio.open(
+            src_path, "w", driver="GTiff", height=4, width=4, count=1,
+            dtype="float32", crs="EPSG:4326", transform=src_transform, nodata=-9999.0,
+        ) as dst:
+            dst.write(depth, 1)
+        da = hydromt.io.open_raster(src_path).load()
+
+        class _StubCatalog:
+            def get_rasterdataset(self, key, bbox=None):
+                return da
+
+        spec = BenchmarkSpec(
+            key="denmark_test", data_type="RasterDataset", country_iso="DNK",
+            hazard_type="coastal", depth_threshold_m=0.1,
+        )
+        dst_transform = Affine(2.0, 0, 0.0, 0, -4.0, 4.0)  # 1 row x 2 cols: left half / right half
+        fraction = read_benchmark_raster_fraction(_StubCatalog(), spec, [0.0, 0.0, 4.0, 4.0], dst_transform, (1, 2))
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    _check("left block (2/8 wet) == 0.25, not rounded up to 1.0", _close(fraction[0, 0], 0.25),
+           f"got {fraction[0, 0]}")
+    _check("right block (6/8 wet) == 0.75, not rounded up to 1.0", _close(fraction[0, 1], 0.75),
+           f"got {fraction[0, 1]}")
+    _check("fraction is genuinely continuous (not degenerate 0/1 for every cell)",
+           0.0 < fraction[0, 0] < 1.0 and 0.0 < fraction[0, 1] < 1.0, f"got {fraction}")
+
+
 def main() -> None:
     test_fraction_full_cell_aligned()
     test_fraction_partial_cell_supersample_aligned()
     test_confusion_and_metrics_closed_form()
+    test_confusion_soft_reduces_to_hard_on_binary_fraction()
+    test_confusion_soft_partial_coverage_closed_form()
     test_area_weighted_matches_pixel_area_grid()
-    test_population_disaggregation_closed_form()
     test_wet_mask_threshold()
     test_model_domain_mask()
+    test_read_benchmark_raster_fraction_gives_true_coverage()
 
     print()
     if _FAILURES:

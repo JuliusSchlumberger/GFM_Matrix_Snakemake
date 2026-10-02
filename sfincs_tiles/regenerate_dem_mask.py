@@ -1,19 +1,13 @@
-"""Regenerate dem.tif and mask.tif for one tile using the current production
-DEM-extraction logic (src/rasters.py's extract_dem/extract_dem_mask),
-instead of trusting whatever copy exists in model_outputs/{tile_id}/inputs/,
-which may have been built by an older version of that logic.
+"""Regenerates dem.tif and mask.tif for one tile using the current
+production DEM-extraction logic (src/rasters.py's extract_dem/
+extract_dem_mask), overwriting the copy in {tile}/inputs/ in place.
 
-extract_dem/extract_dem_mask are plain functions with no Snakemake coupling
-(only the thin wrapper scripts snakemake_workflow/scripts/extract_dem.py /
-extract_dem_mask.py use the snakemake.input/output indirection) - this
-calls them directly, using model_bbox.json (already copied into this
-tile's own inputs/ by run_one_tile.sh) for the tile's bbox, and the same
-data catalog / dem_gap_fill config production itself uses. Overwrites the
-copied dem.tif/mask.tif in place with what today's Snakemake rules would
-produce for the exact same tile.
+Calls extract_dem/extract_dem_mask directly (plain functions with no
+Snakemake coupling), using model_bbox.json for the tile's bbox and the
+same data catalog / dem_gap_fill config production itself uses.
 
-Needs the "gfm" env (config_utils.py needs hydromt 0.9.3, same constraint
-as run_eikonal_on_sfincs_subgrid.py) - NOT hydromt-sfincs-dev.
+Needs the "gfm" env (config_utils.py needs hydromt 0.9.3), not
+hydromt-sfincs-dev.
 
 Usage:
     python regenerate_dem_mask.py --tile-id 1454 --base-dir-name validation_sfincs_v2
@@ -39,9 +33,8 @@ def regenerate_dem_mask(tile_id: str, root: Path, base_dir_name: str, config: di
     with open(tile_inputs_dir / "model_bbox.json") as f:
         bbox = json.load(f)
 
-    # hydromt_data_catalog is relative to the repo root (not auto-expanded by
-    # load_config - only literal {root}/{code_root} placeholders are), same
-    # join pattern as build_tile_manifest.py/prepare_boundary_conditions.py.
+    # hydromt_data_catalog is relative to the repo root; load_config only
+    # auto-expands literal {root}/{code_root} placeholders, not this.
     repo_root = Path(__file__).resolve().parent.parent
     catalog_path = repo_root / config["paths"]["hydromt_data_catalog"]
     data_catalog = get_data_catalog(catalog_path, root=root)

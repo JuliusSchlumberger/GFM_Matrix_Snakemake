@@ -1,37 +1,22 @@
-"""Select tiles for the SFINCS-vs-eikonal validation batch: a real ocean
-edge (hop_distance==0), a minimum ocean fraction, antimeridian-excluded,
-a high-latitude cutoff, spatially stratified for global scatter, no
-area-based pre-filter. Reuses select_test_tiles.py's eligibility logic
-(evaluate_tile/build_coast_hg_tree: hop_distance==0, mask.tif size cap,
-<=1% river, real COAST-HG match).
+"""Selects tiles for the SFINCS-vs-eikonal validation batch: hop_distance==0
+tiles with a minimum ocean fraction, antimeridian-excluded, high-latitude
+cutoff, spatially stratified for global scatter. Reuses select_test_tiles.py's
+eligibility logic (evaluate_tile/build_coast_hg_tree).
 
-High-latitude exclusion: tiles far from the equator suffer worse UTM-
-reprojection distortion (meridian convergence curves a tile's straight
-lon/lat edges once reprojected to SFINCS's own axis-aligned UTM grid).
-`--max-abs-lat-deg` (default 55) drops any tile whose centroid falls
-outside that band.
+`--max-abs-lat-deg` (default 55) drops tiles whose centroid falls outside
++-that latitude band, to limit UTM-reprojection distortion near the poles.
 
-Works directly off model_outputs/{tile_id}/inputs/ as it currently exists
-on disk, not a fresh catalog re-derivation. A tile without a real
-model_outputs/<id>/inputs/mask.tif yet is excluded up front, explicitly
-and reported.
+Requires model_outputs/<tile_id>/inputs/mask.tif to already exist on disk;
+tiles without it are excluded and reported.
 
-Writes a single tile_ids.txt (every selected tile ID).
+Tiles straddling +-180 deg longitude are dropped (antimeridian-crossing
+geometry breaks hydromt_sfincs's water_level.create()).
 
-Antimeridian exclusion: tiles straddling +-180 deg break
-hydromt_sfincs's own water_level.create() with a GEOS topology exception
-(see build_sfincs_tile.py's own _classify_water_level_create_error). A
-tile whose own geometry bounds span an implausibly wide longitude range
-(only possible for a real coastal tile if its polygon wraps the
-dateline) is flagged and dropped.
-
-Also writes, from the same selected sample:
+Writes tile_ids.txt (selected tile IDs), plus:
   - tile_locations_map.png: global Equal Earth map of tile locations
-    (light grey land, no figure title)
-  - tile_selection_histograms.png: the selected sample's own size/ocean-
-    fraction distribution against the eligible pool it was drawn from
-  - tile_selection_statistics.xlsx: summary statistics tables (tile
-    counts, size stats, ocean-fraction stats)
+  - tile_selection_histograms.png: selected sample's size/ocean-fraction
+    distribution against the eligible pool
+  - tile_selection_statistics.xlsx: summary statistics tables
 
 Usage:
     python select_validation_tiles.py
@@ -65,25 +50,23 @@ from select_test_tiles import (  # noqa: E402
 )
 from gfm_config import read_root  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from map_style import LAND_COLOR, WATER_COLOR as OCEAN_COLOR  # noqa: E402
+
 N_TILES_DEFAULT = 520
 MIN_OCEAN_FRAC_DEFAULT = 0.05
-ANTIMERIDIAN_BBOX_WIDTH_DEG_DEFAULT = 60.0  # real GFM tiles are never anywhere near this wide
-MAX_ABS_LAT_DEG_DEFAULT = 55.0  # see module docstring's "High-latitude exclusion" note
+ANTIMERIDIAN_BBOX_WIDTH_DEG_DEFAULT = 60.0  # wider than any real tile's bbox
+MAX_ABS_LAT_DEG_DEFAULT = 55.0  # tiles outside +-this latitude band are excluded
 BASE_DIR_NAME_DEFAULT = "validation_sfincs_v4"
 
-LAND_COLOR = "#d8d8d4"
-OCEAN_COLOR = "#fcfcfb"
 COAST_COLOR = "#b8b8b3"
 SELECTED_COLOR = "#2a78d6"
 POPULATION_COLOR = "#b3b3ad"
 
 
 def read_ocean_frac(tile_id: int, root: Path) -> float | None:
-    """Unconditional mask.tif read for the histogram's population - unlike
-    evaluate_tile() (select_test_tiles.py), which returns None before
-    computing ocean_frac for any tile exceeding max_cells, this always
-    reads the full array so the population comparison covers every tile.
-    Returns None if the tile has no mask.tif at all."""
+    """Reads a tile's ocean fraction from mask.tif. Returns None if mask.tif
+    doesn't exist."""
     mask_path = root / "model_outputs" / str(tile_id) / "inputs" / "mask.tif"
     if not mask_path.exists():
         return None
@@ -93,10 +76,8 @@ def read_ocean_frac(tile_id: int, root: Path) -> float | None:
 
 
 def is_antimeridian_tile(geom, max_width_deg: float) -> bool:
-    """True if this tile's own geometry bounds span an implausibly wide
-    longitude range - the real signature of a polygon that wraps the dateline
-    (naive min/max longitude across a dateline-crossing feature spans nearly
-    360 deg, vastly wider than any real GFM tile)."""
+    """True if the tile's geometry bounds span more than max_width_deg of
+    longitude (signature of a dateline-wrapping polygon)."""
     minx, _, maxx, _ = geom.bounds
     return (maxx - minx) > max_width_deg
 
@@ -128,8 +109,7 @@ def stratified_sample_exact(df: pd.DataFrame, n_target: int, grid_deg: float, se
 
 
 def _area_km2(gdf: gpd.GeoDataFrame) -> np.ndarray:
-    """Lat-corrected bbox area (km2), straight from geometry - same
-    convention used throughout this pipeline."""
+    """Lat-corrected bounding-box area (km2), computed from geometry."""
     b = gdf.geometry.bounds
     lon_span = b["maxx"] - b["minx"]
     lat_span = b["maxy"] - b["miny"]
@@ -159,16 +139,10 @@ def plot_tile_locations_map(selected_df: pd.DataFrame, out_path: Path) -> None:
 
 
 def plot_selection_histograms(selected_df: pd.DataFrame, population_df: pd.DataFrame, out_path: Path) -> None:
-    """Two-panel histogram: the selected sample's own area/ocean-fraction
+    """Two-panel histogram: the selected sample's area/ocean-fraction
     distribution against the population it was drawn from.
 
-    `population_df` is every hop_distance==0 tile with a real
-    model_outputs/<id>/inputs/mask.tif, after only the antimeridian/
-    high-latitude/missing-inputs filters - not narrowed further to
-    eligible_df's own max_cells/river-frac/COAST-HG-match criteria, since
-    those are eligibility constraints for this validation run, not a
-    property of what tiles actually exist. Needs both `area_km2_bbox` and
-    `ocean_frac` columns - see main()'s own hop0 construction.
+    `population_df` must include `area_km2_bbox` and `ocean_frac` columns.
     """
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), facecolor=OCEAN_COLOR)
 
@@ -220,8 +194,8 @@ def write_statistics_excel(
     tiles_gdf: gpd.GeoDataFrame, hop0: gpd.GeoDataFrame,
     eligible_df: pd.DataFrame, selected_df: pd.DataFrame, out_path: Path,
 ) -> None:
-    """Summary tables: tile counts, size stats, ocean-fraction stats - the
-    same tables reported for this selection in conversation."""
+    """Writes summary tables (tile counts, size stats, ocean-fraction stats)
+    to an Excel workbook."""
     counts_df = pd.DataFrame([
         {"Population": "Full production grid", "n_tiles": len(tiles_gdf)},
         {"Population": "hop_distance==0 (own real ocean edge)", "n_tiles": len(hop0)},
@@ -271,8 +245,7 @@ def main() -> None:
     parser.add_argument("--antimeridian-width-deg", type=float, default=ANTIMERIDIAN_BBOX_WIDTH_DEG_DEFAULT)
     parser.add_argument(
         "--max-abs-lat-deg", type=float, default=MAX_ABS_LAT_DEG_DEFAULT,
-        help="exclude tiles whose centroid latitude falls outside +-this value - see module "
-             "docstring's 'High-latitude exclusion' note",
+        help="exclude tiles whose centroid latitude falls outside +-this value",
     )
     parser.add_argument("--base-dir-name", default=BASE_DIR_NAME_DEFAULT)
     parser.add_argument("--seed", type=int, default=0)
@@ -295,8 +268,7 @@ def main() -> None:
     hop0 = hop0[hop0["lat_centroid"].abs() <= args.max_abs_lat_deg].copy()
     print(f"{n_high_lat} tile(s) excluded for |lat_centroid| > {args.max_abs_lat_deg}, {len(hop0)} remain")
 
-    # Explicit model_outputs existence check, reported up front rather than left as an
-    # implicit side-effect of evaluate_tile()'s own per-tile reject reasons.
+    # Check model_outputs existence up front and report the count.
     model_outputs_root = root / "model_outputs"
     has_inputs = hop0["tile_id"].apply(lambda t: (model_outputs_root / str(int(t)) / "inputs" / "mask.tif").is_file())
     n_missing_inputs = int((~has_inputs).sum())
@@ -307,7 +279,7 @@ def main() -> None:
     hop0["area_km2"] = _area_km2(hop0)
     hop0["area_km2_bbox"] = hop0["area_km2"]
 
-    # ocean_frac for the FULL hop0 population - see plot_selection_histograms's own docstring.
+    # Read ocean_frac for the full hop0 population, not just eligible tiles.
     print(f"Reading ocean_frac for all {len(hop0)} available tile(s) (for the histogram's own "
           f"population, not just the eligible subset)...", flush=True)
     hop0["ocean_frac"] = hop0["tile_id"].apply(lambda t: read_ocean_frac(int(t), root))
@@ -336,8 +308,7 @@ def main() -> None:
     eligible_df.to_csv(out_dir / "eligible_tile_pool.csv", index=False)
     print(f"Wrote {out_dir / 'eligible_tile_pool.csv'} (full eligible pool, for audit)")
 
-    # -- single selection: ocean_frac floor, antimeridian + high-latitude + missing-inputs
-    # already excluded, NO area-based pre-filter, spatially stratified --
+    # Apply ocean_frac floor, then spatially stratified sampling.
     pool = eligible_df[eligible_df["ocean_frac"] >= args.min_ocean_frac].copy()
     print(f"  {len(pool)} of {len(eligible_df)} eligible tiles have ocean_frac >= {args.min_ocean_frac:.0%}")
     selected = stratified_sample_exact(pool, min(args.n_tiles, len(pool)), GRID_DEG, args.seed)

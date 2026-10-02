@@ -1,18 +1,14 @@
-"""Generate N independent sbatch scripts that dispatch a validation batch
+"""Generates N independent sbatch scripts that dispatch a validation batch
 (see select_validation_tiles.py, which writes tile_ids.txt) end to end, one
 job per script, each looping sequentially through its own tile-id slice and
-calling run_one_tile.sh <tile_id> per tile - the per-tile pipeline covering
-input-copy -> SFINCS-input build (hydromt-sfincs-dev env) -> bathtub+eikonal
-(gfm env) -> SFINCS run (apptainer) -> postprocess+per-model summary
-(hydromt-sfincs-dev env), all inside that one script.
+calling run_one_tile.sh <tile_id> per tile.
 
-N independent sbatch scripts submitted individually (not a SLURM --array
-job), so SLURM schedules each onto a node as one frees up rather than
-managing array task indices.
+Submitted as N independent sbatch scripts (not a SLURM --array job), so
+SLURM schedules each onto a node as one frees up.
 
 Resolves both the local (Windows, for writing files here) and Linux (HPC,
 for the generated scripts' own paths) views of paths.root from the same
-config.yml (config_utils.load_config(..., extra_override=config_hpc.yml)).
+config.yml.
 
 Usage:
     python generate_validation_batch_jobs.py --base-dir-name validation_sfincs_v5

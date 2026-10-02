@@ -20,9 +20,8 @@ def pixel_area_km2_grid(transform, width: int, height: int, row_offset: int = 0)
     × 111.32 km), varying **per row** since a pixel's real east-west ground
     size shrinks toward the poles even where its degree-width does not (a
     pixel's degree-width is not even reliably latitude-invariant to begin
-    with — see docs/flood_extent_validation_plan.md §2.1/§7.1's own
-    resolution investigation - so this must always be read from the
-    raster's own transform, never assumed/hardcoded).
+    with - so this must always be read from the raster's own transform,
+    never assumed/hardcoded).
 
     `row_offset`: the window's row offset within the FULL raster (0 for a
     read covering the whole raster) - required so a block-wise caller's

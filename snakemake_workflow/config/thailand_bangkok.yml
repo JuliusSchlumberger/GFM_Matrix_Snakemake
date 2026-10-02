@@ -1,0 +1,42 @@
+# Thailand / Bangkok bay side project. Originally an 8-tile subset selected
+# by Marjolijn; narrowed 2026-10-02 to just tiles 31 and 499, manually
+# resized by Marjolijn in a GIS tool to guarantee real overlap between them
+# (~1.0deg lon x ~2.8deg lat, confirmed) after a separate investigation this
+# session found the production tile grid's own overlap guarantee is
+# frequently eroded away by the shave step (see
+# docs/methods_01_tile_processing_and_waterlevels.md's "Known caveat"
+# paragraph) - resizing these two tiles by hand sidesteps that bug for this
+# side project rather than waiting on a production fix.
+#
+# The manually-edited geometries were slightly non-rectangular (GIS-tool
+# node-drag imprecision, ~0.01-0.02deg) - corrected to clean axis-aligned
+# rectangles (each tile's own bounding box) before writing to
+# {processed_inputs_dir}/mask/thailand_bangkok_tiles.gpkg. Both tiles kept
+# their original hop_distance=0 (real ocean edge) - with only 2, both
+# hop_distance=0 tiles, there is no neighbour-seeding wave ordering to
+# worry about (see src/boundaries.py's collect_neighbor_wave_seeds) -
+# `simulate` can run as a single stage, no wave split needed.
+#
+# Full production scenario grid (no RP/SLR restriction, unlike the
+# calibration sweep configs) - this is a real side project, not a parameter
+# sweep: 9 return periods x 5 SLR scenarios x 3 SSP population-growth paths.
+#
+# Layered on top of config.yml + config_local.yml via
+# src/config_utils.py::materialize_config, same pattern as
+# scripts/calibration/build_run_config.py but without a sweep-point layer.
+
+tile_grid:
+  path: "{processed_inputs_dir}/mask/thailand_bangkok_tiles.gpkg"
+
+# Isolated output paths so this never collides with or dirties production
+# model_outputs/merged_results.
+simulation:
+  model_outputs: "{root}/thailand_bangkok/model_outputs"
+postprocessing:
+  merged_outputs: "{root}/thailand_bangkok/merged_results"
+hpc:
+  jobs_dir: "{root}/thailand_bangkok/hpc_jobs"
+  # 2 tiles, both hop_distance=0 - one node per tile is plenty.
+  n_nodes: 2
+visualization:
+  output_dir: "{root}/thailand_bangkok/figures"

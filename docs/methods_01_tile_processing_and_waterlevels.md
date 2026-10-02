@@ -57,6 +57,39 @@ it is redundant, and domains that add no unique coverage are dropped, to
 keep the total number of domains and their total simulated area
 manageable.
 
+**Known caveat (2026-10-01): overlap is frequently eroded far below one
+tile, and domains occasionally end up with a genuine gap.** The one-tile
+overlap above is established once, in whole-tile units, by the
+`reduce_overlap`/`add_minimum_overlap`/`add_connector_chunks` stages of
+`src/tile_chunking.py`. A later stage, `filter_and_shave_chunks`, crops
+each domain independently to its own floodable extent plus a single
+coarse-cell (~500m) buffer, with no awareness of what a neighbouring
+domain needs - nothing after that stage re-validates or restores overlap
+against a neighbour. If the shared overlap zone between two domains is
+mostly dry land, shaving consumes nearly all of the originally-built
+~111km overlap, down to as little as the ~500m buffer.
+
+Sampling the real production tile grid (2578 tiles, 3031 genuine
+neighbour-pairs, 2026-10-01) found this is systematic, not a rare edge
+case: ~24% of neighbour pairs (732/3031) have overlap eroded below ~222m
+(functionally meaningless for boundary continuity), and ~0.8% (25 pairs)
+have a genuine gap - real daylight between domains, up to ~2-33km, where
+flood extent along that shared edge is not modelled by either domain. The
+effect is size-correlated: eroded overlap affects 5.2% of small domains,
+8.2% of mid-size, and 17.4% of the largest domains (near the 4°×4° cap) -
+roughly 3x worse for large domains, since they have proportionally more
+non-floodable interior/edge area for the shave step to cut back. Example:
+tiles 31 and 639 (neighbours, confirmed via direct geometry inspection)
+overlap by only ~220m against the intended ~111km.
+
+No fix has been implemented yet - this is a known, documented limitation
+of the current tile grid, not a config toggle or a dead buffer setting
+(`tile_generation` has no `buffer_deg`/`overlap_deg` key; overlap is
+purely tile-count-based). A real fix would need to make
+`filter_and_shave_chunks` neighbour-aware, or add a validation/repair pass
+after it that re-checks and restores overlap against already-shaved
+neighbours.
+
 **Exposure filtering.** After domains are built, each is checked against
 present-day population data (WorldPop, ~1km resolution, year 2020): a
 domain with no population anywhere within its footprint is dropped from

@@ -1,18 +1,12 @@
 """Per-tile, per-model results summary for a validation batch - writes one
 small {base_dir_name}/{tile_id}/outputs/summary_{model}.json per requested
-model (bathtub, eikonal, sfincs), so each model can be postprocessed
-independently, whenever and wherever it finishes (HPC batch, a separate
-local run, run again later after a model is recomputed) without needing the
-others to be present or re-touching their own already-written files. The
-whole batch's per-model files are combined into one row per tile only by
-the consuming analysis code (see plot_validation_results.py's
-collect_summaries()), never written pre-combined here.
+model (bathtub, eikonal, sfincs). Each model can be postprocessed
+independently without the others being present. The whole batch's per-model
+files are combined into one row per tile by the consuming analysis code
+(plot_validation_results.py's collect_summaries()).
 
 Needs the hydromt-sfincs-dev env (imports hydromt_sfincs.SfincsModel to read
-the SFINCS grid's own boundary-cell mask). Avoids importing src/rasters.py
-(older-hydromt-env only) - the waterdepth int16-cm decode
-(WATERDEPTH_SCALE=100, WATERDEPTH_NODATA_INT16=32767) is copied directly
-from its own documented convention instead.
+the SFINCS grid's boundary-cell mask).
 
 Usage:
     python postprocess_tile_summary.py --tile-id 12345 --base-dir-name validation_sfincs_v4
@@ -35,12 +29,14 @@ from scipy import ndimage
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from flood_agreement import (  # noqa: E402
     DEPTH_CATEGORY_EDGES, DEPTH_CORR_FINE_EDGES, WET_THRESHOLD_M,
-    confusion_counts, depth_corr_sufficient_stats, depth_joint_hist,
+    confusion_counts, depth_corr_sufficient_stats, depth_joint_hist, prune_to_ocean_connected,
 )
 from gfm_config import read_root  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
 
 LAND_CODE = 0
+OCEAN_CODE = 1
+RIVER_CODE = 3  # matches config.yml's tile_generation.ocean_code/river_code
 WATERDEPTH_SCALE = 100.0
 WATERDEPTH_NODATA_INT16 = 32767
 MODEL_WATERDEPTH_FILENAME = {
@@ -63,8 +59,7 @@ def _decode_waterdepth_cm(path: Path) -> tuple[np.ndarray, object, object, tuple
 
 
 def _pixel_area_km2_by_row(transform, height: int, crs) -> np.ndarray:
-    """Latitude-corrected per-row pixel area (km2) for an EPSG:4326 raster -
-    same convention used throughout this session's own area comparisons."""
+    """Latitude-corrected per-row pixel area (km2) for an EPSG:4326 raster."""
     assert str(crs).upper() == "EPSG:4326", crs
     px_w_deg = abs(transform.a)
     px_h_deg = abs(transform.e)
@@ -84,9 +79,7 @@ def _depth_stats(depth_m: np.ndarray) -> dict:
 
 
 def summarize_domain(native_mask_path: Path) -> dict:
-    """Stats shared by every model's own summary file - cheap enough
-    (one small raster read) to duplicate into each rather than split into
-    yet another file to look up separately."""
+    """Domain stats shared by every model's own summary file."""
     with retry_transient_io(rasterio.open, native_mask_path) as src:
         native_mask = src.read(1)
         native_transform = src.transform
@@ -101,18 +94,10 @@ def summarize_domain(native_mask_path: Path) -> dict:
 def _load_sfincs_wet_subgrid(
     tile_dir: Path, native_mask_path: Path,
 ) -> tuple[np.ndarray, np.ndarray, tuple] | None:
-    """SFINCS's own subgrid-resolution wet mask AND depth (hmax_subgrid.tif,
-    still in its native UTM subgrid CRS - not the same file as hmax.tif,
-    which is already reprojected to EPSG:4326), for the bathtub/eikonal
-    agreement counts below - bathtub_waterdepth_*.tif/eikonal_on_subgrid_
-    waterdepth_*.tif are both pixel-identical to it (all three ultimately
-    derive from sfincs_model/subgrid/dep_subgrid.tif), so no reprojection is
-    needed between them. Returns None (agreement stats degrade to null) if
-    SFINCS hasn't been run/postprocessed for this tile yet.
-
-    Returns (sfincs_wet_subgrid, sfincs_depth_subgrid, sg_shape) - the depth
-    array (NaN off-mask) is needed alongside the wet mask for the cell-level
-    depth-agreement joint histograms in summarize_extent_model.
+    """SFINCS's own subgrid-resolution wet mask and depth (hmax_subgrid.tif,
+    native UTM subgrid CRS, pixel-identical to bathtub/eikonal's own
+    waterdepth rasters). Returns (sfincs_wet_subgrid, sfincs_depth_subgrid,
+    sg_shape), or None if SFINCS hasn't been run/postprocessed yet.
     """
     hmax_subgrid_path = tile_dir / "sfincs_model" / "hmax_subgrid.tif"
     if not hmax_subgrid_path.exists():
@@ -160,7 +145,13 @@ def summarize_extent_model(name: str, tile_dir: Path, native_mask_path: Path, sf
             dst_transform=transform, dst_crs=crs, resampling=Resampling.nearest,
         )
     land = mog == LAND_CODE
-    flooded_land = np.isfinite(depth_m) & (depth_m > 0) & land
+    flooded_land = np.isfinite(depth_m) & (depth_m > WET_THRESHOLD_M) & land
+    if name == "bathtub":
+        # Naive bathtub has no connectivity/friction - restrict to
+        # ocean-connected flooding (eikonal/SFINCS enforce this upstream).
+        flooded_land = prune_to_ocean_connected(
+            flooded_land, mog, ocean_code=OCEAN_CODE, land_code=LAND_CODE, river_code=RIVER_CODE,
+        )
     cell_km2 = abs(transform.a) * abs(transform.e) / 1e6
     result[f"{name}_km2"] = float(flooded_land.sum() * cell_km2)
     stats = _depth_stats(np.where(flooded_land, depth_m, np.nan))
@@ -169,20 +160,16 @@ def summarize_extent_model(name: str, tile_dir: Path, native_mask_path: Path, sf
     if sfincs_wet is not None:
         sfincs_wet_subgrid, sfincs_depth_subgrid, sg_shape = sfincs_wet
         if shape == sg_shape:
-            model_wet = np.isfinite(depth_m) & (depth_m > WET_THRESHOLD_M)
+            model_wet = flooded_land  # same (possibly ocean-pruned) mask used for {name}_km2 above
             weight = np.full(shape, cell_km2, dtype=np.float64)
             matched, model_only, sfincs_only = confusion_counts(model_wet, sfincs_wet_subgrid, land, weight)
             result[f"{name}_matched_km2"] = matched
             result[f"{name}_only_km2"] = model_only
             result[f"{name}_sfincs_only_km2"] = sfincs_only
 
-            # Cell-level depth agreement, pixel-identical grids (both derive
-            # from the same subgrid - see _load_sfincs_wet_subgrid), so no
-            # reprojection needed: at every cell BOTH models call wet,
-            # compare SFINCS's own depth (x) against this model's (y).
-            # Pooled as sufficient stats + joint histograms, never as a
-            # per-tile ratio/correlation - same reasoning as confusion_counts
-            # above (see flood_agreement.py).
+            # Cell-level depth agreement at every mutually-wet cell:
+            # SFINCS's own depth (x) vs this model's (y), pixel-identical
+            # grids, no reprojection needed.
             both_wet = model_wet & sfincs_wet_subgrid & land
             if both_wet.any():
                 x = sfincs_depth_subgrid[both_wet].astype(np.float64)
@@ -211,7 +198,9 @@ def summarize_sfincs(tile_dir: Path, native_mask_path: Path) -> dict:
             hmax_transform = src.transform
             hmax_crs = src.crs
             hmax_height = src.height
-        valid = hmax != hmax_nodata if hmax_nodata is not None else np.isfinite(hmax)
+        valid = np.isfinite(hmax) & (hmax > WET_THRESHOLD_M)
+        if hmax_nodata is not None:
+            valid &= hmax != hmax_nodata
         row_area_hmax = _pixel_area_km2_by_row(hmax_transform, hmax_height, hmax_crs)
         n_per_row = valid.sum(axis=1)
         result["sfincs_km2"] = float((n_per_row * row_area_hmax).sum())
@@ -292,7 +281,7 @@ def main() -> None:
                          help="comma-separated subset to (re-)summarize - writes one summary_{model}.json per "
                               "entry, independent of whether the other models have been run for this tile yet")
     parser.add_argument("--set", required=False, default=None, choices=["A", "B"],
-                         help="optional bookkeeping label, only relevant for older two-set batches (validation_sfincs_v2/v3)")
+                         help="optional bookkeeping label for two-set batches")
     parser.add_argument("--config", default=str(_repo_root / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--base-dir-name", default="validation_sfincs_v4")
     args = parser.parse_args()

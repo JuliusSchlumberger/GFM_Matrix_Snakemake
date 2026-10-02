@@ -1,17 +1,12 @@
-"""Local batch equivalent of run_one_tile.sh's own step 1: for every tile in
-a batch's tile_ids.txt, copies the fixed set of eikonal/SFINCS input files
-from the shared, once-per-tile-ID model_outputs/{tile_id}/inputs/ into that
-batch's own working copy at {base_dir_name}/{tile_id}/inputs/ - every
-downstream script (regenerate_dem_mask.py, build_elevation.py, ...) reads
-from the batch's own copy, never from model_outputs/ directly (see
-build_elevation.py's own comment on this).
+"""Copies the fixed set of eikonal/SFINCS input files for every tile in a
+batch's tile_ids.txt from the shared model_outputs/{tile_id}/inputs/ into
+that batch's own working copy at {base_dir_name}/{tile_id}/inputs/. Every
+downstream script reads from the batch's own copy, never from
+model_outputs/ directly.
 
-Plain file copies, no hydromt/heavy imports - safe to run under any of this
-project's conda envs. Skip-if-already-there (idempotent), never overwrites
-an existing file in the batch's own inputs/ - if you deliberately want a
-tile's inputs/ regenerated from scratch, delete that tile's inputs/ dir (or
-just the specific file) first, same convention as every other script in
-this pipeline.
+Plain file copies, no heavy imports - safe under any conda env. Idempotent:
+skips files already present, never overwrites. To force a tile's inputs/ to
+be regenerated, delete that tile's inputs/ dir (or the specific file) first.
 
 Usage:
     python setup_batch_inputs.py --base-dir-name validation_sfincs_v5
@@ -34,10 +29,9 @@ INPUT_FILES = (
 
 
 def ensure_tile_inputs(tile_id: str, root: Path, base_dir_name: str) -> tuple[bool, str | None]:
-    """Returns (ok, missing_file_or_None). ok=False means model_outputs/
-    itself is missing a required file for this tile - same "skip tile"
-    condition run_one_tile.sh's own step 1 treats as unrunnable, not a bug
-    to crash on (a tile can legitimately have incomplete upstream prep)."""
+    """Returns (ok, missing_file_or_None). ok=False means model_outputs/ is
+    missing a required file for this tile (incomplete upstream prep, not an
+    error)."""
     inputs_dir = root / base_dir_name / tile_id / "inputs"
     model_outputs_dir = root / "model_outputs" / tile_id / "inputs"
     inputs_dir.mkdir(parents=True, exist_ok=True)

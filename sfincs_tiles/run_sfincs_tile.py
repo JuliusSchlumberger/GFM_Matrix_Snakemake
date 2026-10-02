@@ -1,10 +1,9 @@
-"""Run a built SFINCS model (build_sfincs_tile.py's own output) and
-postprocess: max inundation depth + max flood extent, reprojected back to
-EPSG:4326 for direct comparability with the eikonal model's own
-`waterdepth_{RP}_{SLR}.tif` global-grid convention.
+"""Runs a built SFINCS model (build_sfincs_tile.py's own output) and
+postprocesses it: max inundation depth + max flood extent, reprojected to
+EPSG:4326 to match the eikonal model's own `waterdepth_{RP}_{SLR}.tif`
+global-grid convention.
 
-Run under the hydromt-sfincs-dev env (needs rioxarray/rasterio consistent
-with the model build, and xarray for reading sfincs_map.nc):
+Run under the hydromt-sfincs-dev env:
     C:\\Users\\schlumbe\\AppData\\Local\\miniforge3\\envs\\hydromt-sfincs-dev\\python.exe run_sfincs_tile.py --tile-id 1907 --sfincs-exe <path>
 """
 
@@ -29,11 +28,9 @@ from sfincs_run import run_sfincs_subprocess  # noqa: E402
 
 
 class _SimpleLog:
-    """No-op: sfincs_run.py's run_sfincs_subprocess already prints every
-    forwarded line directly to stderr itself (for live console output in
-    its original logger-based context, where log.info/.warning write to a
-    real log file, not the console) - a log object that also prints here
-    would double every SFINCS output line."""
+    """No-op logger: run_sfincs_subprocess already prints every forwarded
+    line to stderr itself; a log object that also prints here would double
+    every SFINCS output line."""
 
     def info(self, msg):
         pass
@@ -44,14 +41,13 @@ class _SimpleLog:
 
 def _apply_land_mask_doublecheck(hmax: np.ndarray, transform, crs, land_mask_path: Path) -> np.ndarray:
     """Second, independent land check on top of `downscale_floodmap()`'s own
-    `gdf_mask` - reproject `land_mask_path` directly onto `hmax`'s own fine
-    grid (nearest-neighbour) and require BOTH checks to agree a cell is
+    `gdf_mask`: reprojects `land_mask_path` directly onto `hmax`'s own fine
+    grid (nearest-neighbour) and requires both checks to agree a cell is
     land before it counts, masking every other cell to NaN.
 
-    `gdf_mask`'s own polygon-vs-raster rasterization at the coastline
-    boundary can let a small number of edge cells with ocean-like
-    elevation slip through as "land" - this independent raster-vs-raster
-    check has no such vector/raster boundary to disagree about.
+    `gdf_mask`'s own polygon-vs-raster rasterization at the coastline can
+    let a small number of edge cells slip through as land; this raster-vs-
+    raster check has no such vector/raster boundary to disagree about.
     """
     with retry_transient_io(rasterio.open, land_mask_path) as src:
         land_on_subgrid = np.empty(hmax.shape, dtype=np.float64)
@@ -65,22 +61,16 @@ def _apply_land_mask_doublecheck(hmax: np.ndarray, transform, crs, land_mask_pat
 
 
 def compute_max_inundation(sfincs_dir: Path, land_mask_path: Path) -> tuple[np.ndarray, dict]:
-    """(hmax_m, grid_info) - max flood depth on the model's own fine
-    subgrid resolution, not the coarse computational grid, via
-    hydromt_sfincs's own downscale_floodmap() utility: subgrid tables
-    exist specifically so a coarse-grid zsmax can be downscaled onto real
-    fine-resolution terrain. downscale_floodmap() reads the real
-    fine-resolution subgrid DEM directly.
+    """Returns (hmax_m, grid_info): max flood depth on the model's own fine
+    subgrid resolution via hydromt_sfincs's own downscale_floodmap()
+    utility, which downscales the coarse-grid zsmax onto the real
+    fine-resolution subgrid DEM.
 
-    `land_mask_path` (the tile's own mask.tif, EPSG:4326) is vectorised
-    into a land-only polygon and passed as downscale_floodmap()'s own
-    gdf_mask, excluding ocean/lake/river cells from the flood-depth
-    output. gdf_mask's own polygon-vs-raster rasterization at the
-    coastline boundary can let a small number of edge cells slip through,
-    so `land_mask_path` is also reprojected directly onto the subgrid's
-    own fine grid (nearest-neighbour) and intersected with gdf_mask's
-    output - two independent land checks must both agree a cell is land
-    before it counts.
+    `land_mask_path` (the tile's own mask.tif, EPSG:4326) is vectorised into
+    a land-only polygon passed as downscale_floodmap()'s own gdf_mask,
+    excluding ocean/lake/river cells from the output. It is also reprojected
+    directly onto the subgrid's own fine grid and intersected with
+    gdf_mask's output - see `_apply_land_mask_doublecheck`.
     """
     map_path = sfincs_dir / "sfincs_map.nc"
     if not map_path.exists():
@@ -94,12 +84,11 @@ def compute_max_inundation(sfincs_dir: Path, land_mask_path: Path) -> tuple[np.n
             "resolution DEM to downscale onto."
         )
 
-    # Not a raw xr.open_dataset(map_path): SFINCS's own sfincs_map.nc stores zsmax on
-    # its native staggered (n, m) index dims with x/y as 2D coordinate arrays, not
-    # proper 1D x/y dims - hydromt's own raster accessor (which downscale_floodmap()
-    # needs) can't recognize spatial dims from that shape. hydromt_sfincs's own
-    # SfincsOutput.read_map_file() translates this staggered format into a proper
-    # regular-grid DataArray.
+    # Not a raw xr.open_dataset(map_path): SFINCS's own sfincs_map.nc stores zsmax
+    # on its native staggered (n, m) index dims with x/y as 2D coordinate arrays,
+    # which hydromt's own raster accessor (needed by downscale_floodmap()) can't
+    # recognize as spatial dims. SfincsOutput.read_map_file() translates this
+    # staggered format into a proper regular-grid DataArray.
     sf_out = SfincsModel(root=str(sfincs_dir), mode="r")
     retry_transient_io(sf_out.output.read)
     if "zsmax" not in sf_out.output.data:
@@ -134,14 +123,10 @@ def reproject_to_4326(arr: np.ndarray, transform, crs, out_path: Path, nodata: f
     src_bounds = rasterio.transform.array_bounds(arr.shape[0], arr.shape[1], transform)
 
     # Explicit latitude-corrected target resolution, not calculate_default_transform()'s
-    # own default guess: letting it pick its own degree resolution from a projected
-    # (UTM, isotropic-metre) source produces a square-in-degrees output grid, which is
-    # not square in real ground distance except at the equator. Get the source's own
-    # real metre resolution directly (UTM is isotropic, so this is just
-    # abs(transform.a)), convert to degrees separately per axis using the tile's own
-    # centre latitude, and pass that explicitly as calculate_default_transform()'s own
-    # `resolution` argument - keeps the reprojected grid square in real ground
-    # distance, like the eikonal model's own.
+    # own default guess: a UTM source's isotropic metre resolution converted to degrees
+    # is square in real ground distance only at the equator, so degrees are computed
+    # separately per axis from the tile's own centre latitude and passed explicitly as
+    # calculate_default_transform()'s own `resolution` argument.
     src_res_m = abs(transform.a)
     center_x = (src_bounds[0] + src_bounds[2]) / 2.0
     center_y = (src_bounds[1] + src_bounds[3]) / 2.0
@@ -181,7 +166,7 @@ def main() -> None:
     parser.add_argument(
         "--skip-run", action="store_true",
         help="skip run_sfincs_subprocess and go straight to postprocessing - for a tile "
-             "already run elsewhere (e.g. generate_sfincs_hpc_jobs.py's own HPC batch jobs), "
+             "already run elsewhere (e.g. run_one_tile.sh's own HPC batch dispatch), "
              "whose sfincs_map.nc has already been copied back into sfincs_model/.",
     )
     parser.add_argument("--base-dir-name", default="validation_sfincs_v2", help="output root directory name under paths.root (default: validation_sfincs_v2)")
@@ -192,10 +177,9 @@ def main() -> None:
     root = read_root(Path(args.config))
     sfincs_dir = root / args.base_dir_name / args.tile_id / "sfincs_model"
     out_dir = root / args.base_dir_name / args.tile_id / "outputs"
-    # Read from THIS tile's own working copy, not model_outputs/ directly: the SFINCS
-    # model itself is built from base_dir_name's own (possibly regenerated, see
-    # regenerate_dem_mask.py) mask.tif, so the land-mask doublecheck here must use the
-    # same one.
+    # Reads from the tile's working copy, not model_outputs/ directly: the SFINCS
+    # model is built from base_dir_name's own mask.tif, so the land-mask doublecheck
+    # here must use the same one.
     land_mask_path = root / args.base_dir_name / args.tile_id / "inputs" / "mask.tif"
 
     if args.skip_run:

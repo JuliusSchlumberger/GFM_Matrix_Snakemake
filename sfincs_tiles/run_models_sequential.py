@@ -1,22 +1,18 @@
 """Runs run_eikonal_on_sfincs_subgrid.py (bathtub and/or eikonal) for every
 tile in a validation batch's tile_ids.txt, one at a time on this machine -
-no HPC, no parallelism. General-purpose local counterpart to the
-bathtub+eikonal leg of run_one_tile.sh's own per-tile pipeline (SFINCS
-itself needs apptainer and stays HPC-only - see that script).
+no HPC, no parallelism. Local counterpart to the bathtub+eikonal leg of
+run_one_tile.sh's own per-tile pipeline.
 
 Each requested model writes its own independent output file
 (outputs/bathtub_waterdepth_{RP}_{SLR}.tif, outputs/
-eikonal_on_subgrid_waterdepth_{RP}_{SLR}.tif) - running --models bathtub and
---models eikonal as two separate invocations (e.g. on different machines, or
-one before the other) is safe and produces the same result as running both
-together; postprocess_tile_summary.py is what later combines whichever
-outputs exist into one summary.json per tile, not this script.
+eikonal_on_subgrid_waterdepth_{RP}_{SLR}.tif), so --models bathtub and
+--models eikonal can be run as separate invocations.
+postprocess_tile_summary.py later combines whichever outputs exist into one
+summary.json per tile.
 
-Idempotent: run_eikonal_on_sfincs_subgrid.py itself skips a tile whose
-requested model output(s) already exist, so interrupting (Ctrl+C) and
-re-running this driver just resumes where it left off. A tile whose
-sfincs_model/ isn't built yet is skipped up front rather than left to fail
-inside the subprocess.
+Idempotent: skips a tile whose requested model output(s) already exist, so
+interrupting (Ctrl+C) and re-running resumes where it left off. Tiles whose
+sfincs_model/ isn't built yet are skipped up front.
 
 Usage:
     python run_models_sequential.py --base-dir-name validation_sfincs_v4 --models eikonal

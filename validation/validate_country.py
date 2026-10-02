@@ -1,42 +1,61 @@
 """Per-country coastal flood-extent validation driver.
 
 For one country, finds every applicable coastal benchmark in the validation
-catalog, groups its geometries into evaluation CLUSTERS (buffer each
-polygon, merge any that overlap - see src/validation.py::build_evaluation_clusters),
-and for each cluster: mosaics the merged waterdepth chunk(s) covering its
-bounding box, rasterizes the cluster's own buffered geometry as the
-evaluation domain directly (no block-local distance transform needed - the
-buffer is exact), excludes permanent water bodies via the Copernicus
-land-use layer, and accumulates area-/population-weighted TP/FP/FN/TN
-across every (threshold_m x domain) combination. This cluster-based path
-(validate_country()) is only used for `coverage == "partial"` benchmarks
-(the default - Spain/France's isolated designated survey zones). Benchmarks
-whose source assessed the ENTIRE coastline (`coverage == "national"`, e.g.
-Norway's Kartverket data) instead use validate_country_national_coverage()'s
-per-postprocessing-chunk path, with no buffer/cluster step at all - see that
-function's own docstring for why partial-coverage's buffering logic neither
-applies nor is safe for a national benchmark's long, lightly-fragmented
-coastline (confirmed 2026-09: it collapses into one cluster spanning almost
-the whole country and crashes on the resulting bbox-sized array allocation).
+catalog and scores it against production model output. Partial-coverage
+benchmarks (`coverage: "partial"`, the default - Spain/France's isolated
+designated survey zones) use `validate_country()`: the evaluation DOMAIN
+comes from the benchmark agency's own official study design
+(`meta.study_area` in data_catalog_validation.yml), not an arbitrary
+distance buffer -
 
-2026-09 redesign: replaced an earlier uniform-0.5deg-grid-of-blocks design.
-That approach did real, wasted work (window reads, per-block distance
-transforms, ~64 reproject() calls per block for population disaggregation)
-on the ~60% of grid cells that had no benchmark data at all (Spain's Q100
-map only covers surveyed coastal stretches, plan doc §3), and split single
-contiguous benchmark polygons across multiple blocks needing independent
-halo-padding. Evaluation units now come directly from the benchmark's own
-geometry instead of an arbitrary grid overlaid on top of it.
+- `geometry_type: "perimeter"` (France's TRI zones): each zone's own polygon
+  used AS-IS (point-in-polygon, no buffer) as the domain - one evaluation
+  unit per TRI zone that actually has coastal extent rows in this specific
+  benchmark (`src/validation.py::units_with_extent_coverage`/`tri_domain_mask`).
+- `geometry_type: "segments"` (Spain's ARPSI coastal seed lines): a SEEDED
+  CONNECTIVITY domain instead - two independent 8-connected-component
+  analyses (one on the model's own wet mask, one on the benchmark's),
+  keeping only components that touch a seed cell, domain = union of both
+  (`src/validation.py::connectivity_domain_mask`). A line is a 1D seed, not
+  an area with its own extent - "near the line" was never the right
+  domain-construction question the way it is for a perimeter polygon.
+
+(2026-10 - replaced the earlier flat `eval_domain.buffer_km` margin and its
+"buffered"/"model_only" domain-variant reporting; `build_evaluation_clusters`
+survives only as a chunk-windowing optimization for the "segments" path, not
+as the scoring domain - see its own docstring.)
+
+Benchmarks whose source assessed the ENTIRE coastline (`coverage: "national"`,
+e.g. Norway's Kartverket data) instead use `validate_country_national_coverage()`'s
+per-postprocessing-chunk path - see that function's own docstring.
+
+Scoring itself is the soft/continuous confusion matrix throughout
+(`v.confusion_counts_soft`) at a single config-driven threshold
+(`validation.primary_threshold_m`) - no threshold sweep, no population
+weighting (removed 2026-10 - not needed by this pipeline).
+
+Every region row also carries a tolerant-confusion diagnostic (CSI_tol/
+HR_tol/FAR_tol, `v.confusion_counts_tolerant`, `validation.coastline_tolerance_cells`
+cells) alongside the strict CSI/HR/FAR - NOT a substitute for them, never
+used for any decision this pipeline makes on its own. It answers "how much
+of the strict disagreement sits right next to a cell where model and
+benchmark actually agree" (a small-scale boundary-registration effect, e.g.
+the permanent-water-mask-vs-benchmark-coastline mismatch described in
+methods_04b_MapsValidation.md's caveats), reported together with
+pct_disagreement_forgiven so the size of the effect is always visible next
+to the number it's explaining, not hidden behind it. Applies uniformly to
+every benchmark (partial and national coverage) - it is a generic
+registration check, not a per-country special case.
 
 If the benchmark's catalog entry defines `meta.regions: {name: [minx,miny,maxx,maxy]}`,
-each evaluation cluster is tagged by which named region its centroid falls in (e.g.
+each evaluation unit is tagged by which named region its centroid falls in (e.g.
 Spain's `mainland` vs `canary_islands`) and metrics are reported/plotted per region
 instead of blended into one national row; a country with no `regions` configured yet
-gets a single implicit region (its own ISO code). Every region-row also carries the
-same country-WIDE "model total" flooded area/exposed population (_read_flood_totals,
-read from analysis/compute_flood_totals.py's precomputed per-country CSV, not
-region-specific) as a denominator independent of any cluster's own local working
-window - see caveats doc §1.2.
+gets a single implicit region (its own ISO code). `_blend_regions` additionally folds
+every region into one country-level row (auto-detecting whether the regions are a
+disjoint partition - summed - or a nested whole-territory + sub-area set, like Wales/
+Scotland/New Brunswick - the whole-territory region's own numbers ARE the total, not
+re-summed with its nested sub-areas, which would double-count them).
 
 Writes:
   {validation.output_dir}/{country}/metrics_{country}_{RP}_{SLR}.csv
@@ -44,7 +63,7 @@ Writes:
     (plots.resolution_m, priority-reduced: over > under > agree > dry -
     see _write_agreement_raster)
 
-See docs/flood_extent_validation_plan.md for the full design; src/validation.py
+See docs/methods_04b_MapsValidation.md for the current design; src/validation.py
 for the stateless computational building blocks this file just orchestrates.
 
 Usage:
@@ -58,6 +77,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 import rasterio
@@ -75,8 +95,9 @@ import validation as v  # noqa: E402
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Agreement-category codes, ordered so Resampling.max correctly implements
-# the plan's "priority: over > under > agree > dry" display-downsampling
-# rule (plan doc §5.4) - the highest code present in a display cell wins.
+# a "priority: over > under > agree > dry" rule when a display raster does
+# need coarsening (_write_agreement_raster, whole-country-scale regions
+# only) - the highest code present in a coarse cell wins.
 _CAT_DRY = 0
 _CAT_AGREE = 1
 _CAT_UNDER = 2
@@ -86,6 +107,17 @@ _CAT_OVER = 3
 # bboxes (config error / gap in the partition, not expected in normal operation -
 # see validation.region_for_point).
 _UNCLASSIFIED_REGION = "unclassified"
+
+# _write_agreement_raster's own native-vs-coarsened resolution cutoff (pixels,
+# either dimension) - every evaluation unit/sub-region today (TRI zones, ARPSI
+# components, Wales/Scotland/New Brunswick's own nested sub-areas) is well
+# under this at the model's native 30m resolution (a few hundred to ~1000px
+# across), so stays at native resolution; a whole-country region (Norway,
+# Scotland mainland) is thousands of px across at 30m and falls back to
+# `plots.resolution_m` instead. See that function's own docstring for why
+# this matters (MAX-resampling a coarsened category raster visually
+# overstates disagreement - confirmed on Firth of Forth).
+_AGREEMENT_RASTER_MAX_DIM_PX = 2500
 
 
 def _postprocess_chunk_id(x: float, y: float, chunk_size_deg: float) -> str:
@@ -193,24 +225,31 @@ def _round_row(row: dict) -> dict:
     identically as "1" vs "0"), so they always keep 3 decimal places
     instead (matching this script's own console summary), regardless of
     magnitude.
+
+    CSI_tol/HR_tol/FAR_tol (v.confusion_counts_tolerant) are a diagnostic
+    companion to CSI/HR/FAR, not a substitute - always read them next to
+    pct_disagreement_forgiven (how much of the STRICT disagreement the
+    tolerance check actually excused): a high CSI_tol with a high
+    pct_disagreement_forgiven means "mostly boundary-registration noise,"
+    the same CSI_tol with a low pct_disagreement_forgiven would be
+    suspicious (shouldn't happen by construction - see that function's own
+    docstring - but the column is there so it's checkable, not assumed).
     """
     int_cols = (
         "tp_km2", "fp_km2", "fn_km2", "tn_km2",
         "benchmark_wet_km2", "model_wet_km2", "benchmark_wet_outside_model_domain_km2",
         "model_total_wet_km2",
-        "pop_tp", "pop_fp", "pop_fn", "pop_benchmark", "pop_model",
-        "pop_over", "pop_under", "pop_diff_net", "pop_model_total",
+        "tp_tol_km2", "fp_tol_km2", "fn_tol_km2", "tn_tol_km2",
+        "fp_forgiven_km2", "fn_forgiven_km2",
         # depth-band comparison (validate_country_depth_bands)
         "agree_km2", "under_km2", "over_km2", "benchmark_band_coverage_km2",
-        "pop_agree", "pop_under", "pop_over",
     )
     ratio_cols = (
         "benchmark_wet_outside_model_domain_pct",
         "HR", "FAR", "CSI", "EB", "EB_ratio", "bias",
-        "pop_HR", "pop_FAR", "pop_CSI",
+        "HR_tol", "FAR_tol", "CSI_tol", "pct_disagreement_forgiven",
         # depth-band comparison (validate_country_depth_bands)
         "pct_agree", "pct_under", "pct_over", "depth_EB",
-        "pop_pct_agree", "pop_pct_under", "pop_pct_over", "pop_depth_EB",
     )
     out = dict(row)
     for col in int_cols:
@@ -227,7 +266,11 @@ def _new_acc() -> dict[str, float]:
     return {
         "tp_km2": 0.0, "fp_km2": 0.0, "fn_km2": 0.0, "tn_km2": 0.0,
         "tp_cells": 0, "fp_cells": 0, "fn_cells": 0, "tn_cells": 0,
-        "pop_tp": 0.0, "pop_fp": 0.0, "pop_fn": 0.0, "pop_tn": 0.0,
+        # Tolerant confusion matrix (v.confusion_counts_tolerant) - a
+        # diagnostic companion to the tp/fp/fn/tn above, never a substitute.
+        # See _round_row's own CSI_tol/pct_disagreement_forgiven comment.
+        "tp_tol_km2": 0.0, "fp_tol_km2": 0.0, "fn_tol_km2": 0.0, "tn_tol_km2": 0.0,
+        "fp_forgiven_km2": 0.0, "fn_forgiven_km2": 0.0,
     }
 
 
@@ -247,6 +290,100 @@ def _find_benchmark_keys(catalog, country_iso: str) -> list[str]:
     return sorted(keys)
 
 
+_BLENDED_REGION = "ALL"  # country-level blended row's own region label, from _blend_regions
+
+
+def _blend_regions(rows: list[dict], regions_spec: dict[str, list[float]] | None) -> dict | None:
+    """One country-level row, folding every region row in `rows` (all sharing
+    the same benchmark_key/return_period/waterlevel_name - callers group by
+    that first) into a single total - "region pooling" (2026-09 through
+    2026-10: left to the consumer, see methods_04b_MapsValidation.md's own
+    former note to that effect) is now part of the pipeline itself.
+
+    Two region-partition shapes exist in this catalog and need different
+    handling, auto-detected by bbox containment (no new catalog field):
+
+    - DISJOINT partition (Spain mainland/canary_islands, France metropole +
+      5 overseas territories, Norway/Finland's own single region): every
+      region covers genuinely separate ground, so summing tp/fp/fn/tn
+      across all of them and recomputing HR/FAR/CSI/bias from the pooled
+      sums gives a real country-wide number.
+    - NESTED whole-territory + sub-area(s) (Wales wales+severn_estuary+
+      menai_strait, Scotland scotland+firth_of_forth, New Brunswick
+      new_brunswick+cumberland_basin+petitcodiac): a sub-area's bbox sits
+      entirely inside the whole-territory bbox and is independently
+      re-scored over the same ground (see each catalog entry's own
+      known_caveats) - summing would double-count the sub-area's cells.
+      The bbox that CONTAINS every sibling's bbox is the whole-territory
+      region; its own row already IS the country total, used as-is.
+
+    Returns None if `rows` is empty (nothing to blend) or there is only one
+    region row already (blending a single row would just be a relabeled
+    copy of it - not useful, and ambiguous with the real "ALL" semantics
+    once a country legitimately has only one region).
+    """
+    if len(rows) <= 1:
+        return None
+
+    if regions_spec and len(regions_spec) > 1:
+        def _contains(outer: list[float], inner: list[float]) -> bool:
+            return outer[0] <= inner[0] and outer[1] <= inner[1] and outer[2] >= inner[2] and outer[3] >= inner[3]
+
+        whole_name = next(
+            (name for name, bbox in regions_spec.items()
+             if all(_contains(bbox, other) for other_name, other in regions_spec.items() if other_name != name)),
+            None,
+        )
+        if whole_name is not None:
+            whole_row = next((r for r in rows if r.get("region") == whole_name), None)
+            if whole_row is not None:
+                blended = dict(whole_row)
+                blended["region"] = _BLENDED_REGION
+                return blended
+
+    tp = sum(r.get("tp_km2", 0.0) for r in rows)
+    fp = sum(r.get("fp_km2", 0.0) for r in rows)
+    fn = sum(r.get("fn_km2", 0.0) for r in rows)
+    tn = sum(r.get("tn_km2", 0.0) for r in rows)
+    tp_c = sum(r.get("tp_cells", 0.0) for r in rows)
+    fp_c = sum(r.get("fp_cells", 0.0) for r in rows)
+    fn_c = sum(r.get("fn_cells", 0.0) for r in rows)
+    tn_c = sum(r.get("tn_cells", 0.0) for r in rows)
+    metrics = v.metrics_from_counts(tp, fp, fn, tn)
+
+    tp_tol = sum(r.get("tp_tol_km2", 0.0) for r in rows)
+    fp_tol = sum(r.get("fp_tol_km2", 0.0) for r in rows)
+    fn_tol = sum(r.get("fn_tol_km2", 0.0) for r in rows)
+    tn_tol = sum(r.get("tn_tol_km2", 0.0) for r in rows)
+    fp_forgiven = sum(r.get("fp_forgiven_km2", 0.0) for r in rows)
+    fn_forgiven = sum(r.get("fn_forgiven_km2", 0.0) for r in rows)
+    tol_metrics = v.metrics_from_counts(tp_tol, fp_tol, fn_tol, tn_tol)
+    hard_disagreement = fp_tol + fn_tol + fp_forgiven + fn_forgiven
+    pct_forgiven = 100.0 * (fp_forgiven + fn_forgiven) / hard_disagreement if hard_disagreement > 0 else float("nan")
+
+    first = rows[0]
+    return _round_row({
+        "country": first["country"], "iso": first["iso"], "benchmark_key": first["benchmark_key"],
+        "region": _BLENDED_REGION,
+        "return_period": first["return_period"], "waterlevel_name": first["waterlevel_name"],
+        "tp_km2": tp, "fp_km2": fp, "fn_km2": fn, "tn_km2": tn,
+        "tp_cells": tp_c, "fp_cells": fp_c, "fn_cells": fn_c, "tn_cells": tn_c,
+        "benchmark_wet_km2": sum(r.get("benchmark_wet_km2", 0.0) for r in rows),
+        "model_wet_km2": sum(r.get("model_wet_km2", 0.0) for r in rows),
+        "benchmark_wet_outside_model_domain_km2": sum(
+            r.get("benchmark_wet_outside_model_domain_km2", 0.0) for r in rows
+        ),
+        "benchmark_wet_outside_model_domain_pct": float("nan"),  # not a meaningful sum - see per-region rows
+        "model_total_wet_km2": first.get("model_total_wet_km2", float("nan")),  # already country-wide, not per-region
+        "HR": metrics["HR"], "FAR": metrics["FAR"], "CSI": metrics["CSI"],
+        "EB": metrics["EB"], "EB_ratio": metrics["EB_ratio"], "bias": metrics["bias"],
+        "tp_tol_km2": tp_tol, "fp_tol_km2": fp_tol, "fn_tol_km2": fn_tol, "tn_tol_km2": tn_tol,
+        "fp_forgiven_km2": fp_forgiven, "fn_forgiven_km2": fn_forgiven,
+        "HR_tol": tol_metrics["HR"], "FAR_tol": tol_metrics["FAR"], "CSI_tol": tol_metrics["CSI"],
+        "pct_disagreement_forgiven": pct_forgiven,
+    })
+
+
 def validate_country(
     country_iso: str,
     cfg: dict,
@@ -256,26 +393,23 @@ def validate_country(
     val_cfg = cfg["validation"]
     rp = val_cfg["return_period"]
     slr = val_cfg["waterlevel_name"]
-    thresholds_m = [float(t) for t in val_cfg["depth_thresholds_m"]]
     primary_threshold_m = float(val_cfg["primary_threshold_m"])
     supersample = int(val_cfg["benchmark_supersample"])
     wet_fraction = float(val_cfg["benchmark_wet_fraction"])
-    buffer_km = float(val_cfg["eval_domain"]["buffer_km"])
-    also_model_only = bool(val_cfg["eval_domain"]["also_report_model_domain_only"])
-    domains = ["buffered", "model_only"] if also_model_only else ["buffered"]
+    tolerance_cells = int(val_cfg["coastline_tolerance_cells"])
+    windowing_buffer_km = float(val_cfg["eval_domain"]["buffer_km"])
     simplify_tol_m = float(val_cfg["vector_simplify_tolerance_m"])
     quad_segs = int(val_cfg["buffer_quad_segs"])
     pp_chunk_deg = float(cfg["postprocessing"]["chunk_size_deg"])
     merged_chunks_dir = Path(cfg["postprocessing"]["merged_outputs"]) / "chunks"
-    population_source = val_cfg["population_source"]
     permanent_water_source = val_cfg["permanent_water_source"]
     permanent_water_codes = val_cfg["permanent_water_codes"]
     flood_totals_dir = Path(val_cfg["flood_totals_dir"])
-    model_total_wet_km2, pop_model_total = _read_flood_totals(flood_totals_dir, country_iso, rp, slr)
+    model_total_wet_km2, _ = _read_flood_totals(flood_totals_dir, country_iso, rp, slr)
     if model_total_wet_km2 != model_total_wet_km2:  # NaN
         print(
             f"  NOTE: no flood_totals_{country_iso}.csv (or no matching {rp}/{slr} row) in "
-            f"{flood_totals_dir} - model_total_wet_km2/pop_model_total will be NaN. Run "
+            f"{flood_totals_dir} - model_total_wet_km2 will be NaN. Run "
             "analysis/run_analysis.py (analysis.compute_flood_totals) to populate it."
         )
 
@@ -298,6 +432,13 @@ def validate_country(
                 f"(data_type={spec.data_type}) - only GeoDataFrame benchmarks (Spain Q100) "
                 "are wired up so far."
             )
+        if not spec.study_area:
+            raise ValueError(
+                f"{benchmark_key}: coverage='partial' benchmarks require meta.study_area "
+                "(2026-10 - the earlier flat eval_domain.buffer_km margin was removed; the "
+                "evaluation domain always comes from the benchmark agency's own study design "
+                "now) - see BenchmarkSpec.study_area's own docstring."
+            )
         print(f"  Benchmark: {benchmark_key} ({spec.data_type})")
 
         full_gdf = v.load_benchmark_full(bench_catalog, spec)
@@ -307,181 +448,285 @@ def validate_country(
         if full_gdf.crs is None or full_gdf.crs.to_epsg() != 4326:
             full_gdf = full_gdf.to_crs(4326)
 
-        clusters = v.build_evaluation_clusters(full_gdf, buffer_km, simplify_tol_m, quad_segs)
-        print(f"    {len(clusters)} cluster(s) from {len(full_gdf)} benchmark polygon(s).")
+        study = spec.study_area
+        study_gdf = bench_catalog.get_geodataframe(study["source"])
+        if study_gdf is None or study_gdf.empty:
+            print(f"    study_area source {study['source']!r}: empty - skipping.")
+            continue
+        if study.get("attribute_filter"):
+            mask = np.ones(len(study_gdf), dtype=bool)
+            for col, val in study["attribute_filter"].items():
+                mask &= (study_gdf[col] == val).to_numpy()
+            study_gdf = study_gdf.loc[mask]
+        if study_gdf.crs is None or study_gdf.crs.to_epsg() != 4326:
+            study_gdf = study_gdf.to_crs(4326)
 
-        # Spatial index once, reused per cluster to find that cluster's own
-        # (unbuffered) benchmark polygons - no repeated catalog I/O per cluster.
-        full_sindex = full_gdf.sindex
+        geometry_type = study["geometry_type"]
+        full_sindex = full_gdf.sindex  # reused per unit to find that unit's own benchmark polygons
 
-        # Keyed by (threshold_m, domain_name, region) - region tagging (below) is
-        # per-cluster and dynamic (whatever spec.regions defines, or just
-        # country_iso if a country has no regions configured yet), so the set of
-        # keys actually populated isn't known up front the way (threshold, domain)
-        # alone was pre-redesign.
-        acc: dict[tuple[float, str, str], dict[str, float]] = defaultdict(_new_acc)
+        acc: dict[str, dict[str, float]] = defaultdict(_new_acc)  # keyed by region only (no more threshold/domain dims)
         benchmark_wet_km2_total: dict[str, float] = defaultdict(float)
         benchmark_wet_outside_model_domain_km2: dict[str, float] = defaultdict(float)
-        model_wet_km2: dict[tuple[float, str], float] = defaultdict(float)
+        model_wet_km2: dict[str, float] = defaultdict(float)
         agreement_pieces_by_region: dict[str, list[tuple[np.ndarray, Affine]]] = defaultdict(list)
+        unit_rows: list[dict] = []  # per-evaluation-unit CSI, for the CSI-dot map (plot_agreement_map.py)
         n_processed = 0
+        n_units = 0
         n_unclassified = 0
 
-        for _, cluster in clusters.iterrows():
-            cluster_geom = cluster.geometry
-            bbox = list(cluster_geom.bounds)
+        def _record_unit(unit_id, region, lon, lat, model_wet, fraction, unit_mask, area_km2) -> None:
+            """One row per evaluation unit (a TRI zone, or - for the
+            "segments" geometry_type - a distinct connected component) for
+            the CSI-dot map: that unit's OWN CSI, restricted to its own
+            cells only (`unit_mask`), not the region/country-level blend.
+            """
+            tp, fp, fn, _tn = v.confusion_counts_soft(model_wet, fraction, unit_mask, area_km2)
+            csi = tp / (tp + fp + fn) if (tp + fp + fn) > 0 else float("nan")
+            hr = tp / (tp + fn) if (tp + fn) > 0 else float("nan")
+            far = fp / (tp + fp) if (tp + fp) > 0 else float("nan")
+            unit_rows.append({
+                "unit_id": unit_id, "region": region, "lon": lon, "lat": lat,
+                "csi": csi, "hr": hr, "far": far, "n_cells": int(unit_mask.sum()),
+            })
 
+        def _region_for(geom) -> str:
+            nonlocal n_unclassified
             if spec.regions:
-                centroid = cluster_geom.centroid
-                region = v.region_for_point(centroid.x, centroid.y, spec.regions) or _UNCLASSIFIED_REGION
-                if region == _UNCLASSIFIED_REGION:
+                c = geom.centroid
+                r = v.region_for_point(c.x, c.y, spec.regions) or _UNCLASSIFIED_REGION
+                if r == _UNCLASSIFIED_REGION:
                     n_unclassified += 1
-            else:
-                region = country_iso
+                return r
+            return country_iso
 
-            chunk_paths = _chunks_overlapping_bbox(bbox, pp_chunk_deg, merged_chunks_dir, rp, slr)
-            if not chunk_paths:
-                continue
-            depth, out_transform = _mosaic_read(chunk_paths, bbox)
-            if depth is None or depth.size == 0:
-                continue
+        def _window_fraction(depth_transform, depth_shape, bbox) -> np.ndarray:
+            """This window's own benchmark coverage fraction (0-1 per cell) -
+            computed once per window and reused for both scoring (_score,
+            soft-weighted) and, for the "segments" branch, the connectivity
+            domain's own binary benchmark-wet mask - avoids rasterizing the
+            same benchmark geometries twice over the same grid.
+            """
+            candidate_idx = list(full_sindex.query(box(*bbox), predicate="intersects"))
+            window_bench_gdf = full_gdf.iloc[candidate_idx]
+            return v.benchmark_fraction_from_vector(
+                window_bench_gdf, depth_transform, "EPSG:4326", depth_shape, supersample=supersample,
+            )
 
+        def _score(depth, depth_transform, fraction, domain_mask, not_water, region):
+            """Shared scoring for one already-mosaicked, already-domain-resolved
+            window: classifies model_wet at the single config threshold,
+            scores this window's own (already-rasterized) benchmark coverage
+            `fraction` via confusion_counts_soft, accumulates into `acc`/
+            `benchmark_wet_km2_total`/`model_wet_km2` by region, and appends
+            this window's own agreement-category array. `depth`/`depth_transform`,
+            `fraction` (_window_fraction), and `domain_mask`/`not_water` are all
+            built by the caller - the two geometry_type branches below need
+            `fraction`/the depth grid before this point anyway, to build the
+            domain itself, so no redundant second computation here.
+
+            Returns `(model_wet, d, area_km2)` (or `None` if this window had
+            no real model data) so callers can compute per-unit CSI
+            (_record_unit) from the same arrays without recomputing them.
+            """
+            nonlocal n_processed
             model_domain = v.model_domain_mask(depth, nodata=-9999.0)
             if not model_domain.any():
-                continue
+                return None
             n_processed += 1
 
-            cluster_domain_mask = rasterize(
-                [(cluster_geom, 1)], out_shape=depth.shape, transform=out_transform,
-                fill=0, dtype="uint8", all_touched=False,
-            ).astype(bool)
+            benchmark_wet_display = v.wet_mask_from_fraction(fraction, wet_fraction)  # display only
 
-            candidate_idx = list(full_sindex.query(cluster_geom, predicate="intersects"))
-            cluster_bench_gdf = full_gdf.iloc[candidate_idx]
-            fraction = v.benchmark_fraction_from_vector(
-                cluster_bench_gdf, out_transform, "EPSG:4326", depth.shape, supersample=supersample,
-            )
-            benchmark_wet = v.wet_mask_from_fraction(fraction, wet_fraction)
-
-            water_mask = v.read_permanent_water_mask(
-                gfm_catalog, permanent_water_source, permanent_water_codes, bbox, out_transform, depth.shape,
-            )
-            not_water = ~water_mask
-
-            buffered_domain = model_domain & cluster_domain_mask & not_water
-            model_only_domain = model_domain & not_water
-            domain_masks = {"buffered": buffered_domain, "model_only": model_only_domain}
-
-            area_km2 = pixel_area_km2_grid(out_transform, depth.shape[1], depth.shape[0])
+            d = domain_mask & model_domain
+            model_wet = model_domain & (depth > primary_threshold_m) & not_water
+            area_km2 = pixel_area_km2_grid(depth_transform, depth.shape[1], depth.shape[0])
 
             benchmark_wet_km2_total[region] += float((fraction * area_km2 * not_water).sum())
             benchmark_wet_outside_model_domain_km2[region] += float(
                 (fraction * area_km2 * not_water * (~model_domain)).sum()
             )
+            model_wet_km2[region] += float((model_wet * area_km2).sum())
 
-            try:
-                pop_da = retry_transient_io(
-                    gfm_catalog.get_rasterdataset, population_source, bbox=bbox,
-                ).squeeze(drop=True)
-            except Exception:
-                pop_da = None
-            if pop_da is not None and pop_da.size > 0:
-                pop_arr = np.nan_to_num(pop_da.values.astype("float64"), nan=0.0)
-                pop_nodata = pop_da.raster.nodata
-                if pop_nodata is not None:
-                    pop_arr[pop_arr == pop_nodata] = 0.0
-                pop_transform, pop_crs = pop_da.raster.transform, pop_da.raster.crs
-            else:
-                pop_arr, pop_transform, pop_crs = None, None, None
+            tp, fp, fn, tn = v.confusion_counts_soft(model_wet, fraction, d, area_km2)
+            a = acc[region]
+            a["tp_km2"] += tp
+            a["fp_km2"] += fp
+            a["fn_km2"] += fn
+            a["tn_km2"] += tn
+            tp_c, fp_c, fn_c, tn_c = v.confusion_counts_soft(model_wet, fraction, d, np.ones_like(area_km2))
+            a["tp_cells"] += tp_c
+            a["fp_cells"] += fp_c
+            a["fn_cells"] += fn_c
+            a["tn_cells"] += tn_c
 
-            cluster_agreement = np.full(depth.shape, _CAT_DRY, dtype="uint8")
+            tol = v.confusion_counts_tolerant(model_wet, fraction, d, area_km2, tolerance_cells)
+            a["tp_tol_km2"] += tol["tp"]
+            a["fp_tol_km2"] += tol["fp"]
+            a["fn_tol_km2"] += tol["fn"]
+            a["tn_tol_km2"] += tol["tn"]
+            a["fp_forgiven_km2"] += tol["fp_forgiven"]
+            a["fn_forgiven_km2"] += tol["fn_forgiven"]
 
-            for threshold_m in thresholds_m:
-                model_wet = model_domain & (depth > threshold_m) & not_water
-                model_wet_km2[(threshold_m, region)] += float((model_wet * area_km2).sum())
+            cat = np.full(depth.shape, _CAT_DRY, dtype="uint8")
+            cat[d & model_wet & ~benchmark_wet_display] = _CAT_OVER
+            cat[d & ~model_wet & benchmark_wet_display] = _CAT_UNDER
+            still_dry = cat == _CAT_DRY
+            cat[still_dry & d & model_wet & benchmark_wet_display] = _CAT_AGREE
+            agreement_pieces_by_region[region].append((cat, depth_transform))
+            return model_wet, d, area_km2
 
-                for domain_name in domains:
-                    d = domain_masks[domain_name]
-                    tp, fp, fn, tn = v.confusion_counts(model_wet, benchmark_wet, d, area_km2)
-                    a = acc[(threshold_m, domain_name, region)]
-                    a["tp_km2"] += tp
-                    a["fp_km2"] += fp
-                    a["fn_km2"] += fn
-                    a["tn_km2"] += tn
-                    a["tp_cells"] += int((d & model_wet & benchmark_wet).sum())
-                    a["fp_cells"] += int((d & model_wet & ~benchmark_wet).sum())
-                    a["fn_cells"] += int((d & ~model_wet & benchmark_wet).sum())
-                    a["tn_cells"] += int((d & ~model_wet & ~benchmark_wet).sum())
+        if geometry_type == "perimeter":
+            # France: one evaluation unit per TRI zone that actually has
+            # coastal extent rows in THIS benchmark (drops the fluvial-only
+            # zones france_tri_perimeters also contains) - that zone's own
+            # polygon, used as-is, no buffer, IS the domain.
+            id_col = study.get("id_col", "id_tri")
+            units_gdf = v.units_with_extent_coverage(study_gdf, full_gdf, id_col=id_col)
+            n_units = len(units_gdf)
+            print(f"    {n_units} TRI zone(s) with real coastal extent coverage (of {len(study_gdf)} total).")
+            for _, unit in units_gdf.iterrows():
+                geom = unit.geometry
+                bbox = list(geom.bounds)
+                region = _region_for(geom)
 
-                    if pop_arr is not None:
-                        for cls_name, cls_mask in (
-                            ("pop_tp", model_wet & benchmark_wet),
-                            ("pop_fp", model_wet & ~benchmark_wet),
-                            ("pop_fn", ~model_wet & benchmark_wet),
-                            ("pop_tn", ~model_wet & ~benchmark_wet),
-                        ):
-                            pop_class = v.population_by_class(
-                                cls_mask, d, out_transform, "EPSG:4326",
-                                pop_arr, pop_transform, pop_crs,
-                            )
-                            a[cls_name] += float(pop_class.sum())
+                chunk_paths = _chunks_overlapping_bbox(bbox, pp_chunk_deg, merged_chunks_dir, rp, slr)
+                if not chunk_paths:
+                    continue
+                depth, depth_transform = _mosaic_read(chunk_paths, bbox)
+                if depth is None or depth.size == 0:
+                    continue
+                water_mask = v.read_permanent_water_mask(
+                    gfm_catalog, permanent_water_source, permanent_water_codes, bbox, depth_transform, depth.shape,
+                )
+                not_water = ~water_mask
+                tri_mask = v.tri_domain_mask(
+                    gpd.GeoDataFrame(geometry=[geom], crs=4326), depth_transform, "EPSG:4326", depth.shape,
+                )
+                domain_mask = tri_mask & not_water
+                fraction = _window_fraction(depth_transform, depth.shape, bbox)
+                result = _score(depth, depth_transform, fraction, domain_mask, not_water, region)
+                if result is not None:
+                    model_wet, d, area_km2 = result
+                    zone_id = unit[id_col]
+                    centroid = geom.centroid
+                    _record_unit(zone_id, region, centroid.x, centroid.y, model_wet, fraction, d, area_km2)
 
-                # Agreement category at the PRIMARY threshold only (one map,
-                # not one per threshold - plan §5.4 shows a single map).
-                if threshold_m == primary_threshold_m:
-                    buffered = domain_masks["buffered"]
-                    cluster_agreement[buffered & model_wet & ~benchmark_wet] = _CAT_OVER
-                    cluster_agreement[buffered & ~model_wet & benchmark_wet] = _CAT_UNDER
-                    still_dry = cluster_agreement == _CAT_DRY
-                    cluster_agreement[still_dry & buffered & model_wet & benchmark_wet] = _CAT_AGREE
+        elif geometry_type == "segments":
+            # Spain: no natural one-row-per-unit structure in the seed table
+            # (hundreds of ARPSI segments) - group nearby segments into
+            # windows purely for efficient chunk reading (build_evaluation_clusters,
+            # windowing only - see its own docstring), then score each window's
+            # FULL benchmark-wet/model-wet connectivity domain using every seed
+            # line that falls in it.
+            windows_gdf = v.build_evaluation_clusters(study_gdf, windowing_buffer_km, simplify_tol_m, quad_segs)
+            n_units = len(windows_gdf)
+            print(f"    {n_units} window(s) from {len(study_gdf)} ARPSI seed segment(s).")
+            study_sindex = study_gdf.sindex
+            component_counter = 0
+            for _, window in windows_gdf.iterrows():
+                window_geom = window.geometry
+                bbox = list(window_geom.bounds)
+                region = _region_for(window_geom)
 
-            agreement_pieces_by_region[region].append((cluster_agreement, out_transform))
+                chunk_paths = _chunks_overlapping_bbox(bbox, pp_chunk_deg, merged_chunks_dir, rp, slr)
+                if not chunk_paths:
+                    continue
+                depth, depth_transform = _mosaic_read(chunk_paths, bbox)
+                if depth is None or depth.size == 0:
+                    continue
+                water_mask = v.read_permanent_water_mask(
+                    gfm_catalog, permanent_water_source, permanent_water_codes, bbox, depth_transform, depth.shape,
+                )
+                not_water = ~water_mask
+                model_wet_raw = (depth != -9999.0) & (depth > primary_threshold_m)
 
-        print(f"    {n_processed}/{len(clusters)} cluster(s) had real model data.")
+                seed_idx = list(study_sindex.query(window_geom, predicate="intersects"))
+                window_seed_gdf = study_gdf.iloc[seed_idx]
+                fraction = _window_fraction(depth_transform, depth.shape, bbox)
+                benchmark_wet_binary = v.wet_mask_from_fraction(fraction, wet_fraction)
+
+                domain_mask = v.connectivity_domain_mask(
+                    model_wet_raw, benchmark_wet_binary, window_seed_gdf, depth_transform, "EPSG:4326", not_water,
+                )
+                result = _score(depth, depth_transform, fraction, domain_mask, not_water, region)
+                if result is not None:
+                    model_wet, d, area_km2 = result
+                    # One evaluation unit per distinct connected component of
+                    # the scored domain - see connectivity_components' own
+                    # docstring for why this (not per-original-ARPSI-row).
+                    labels = v.connectivity_components(d)
+                    for lbl in range(1, int(labels.max()) + 1):
+                        component_mask = labels == lbl
+                        rows, cols = np.nonzero(component_mask)
+                        if rows.size == 0:
+                            continue
+                        component_counter += 1
+                        lon, lat = rasterio.transform.xy(depth_transform, float(rows.mean()), float(cols.mean()))
+                        _record_unit(
+                            f"component_{component_counter}", region, lon, lat,
+                            model_wet, fraction, component_mask, area_km2,
+                        )
+        else:
+            raise ValueError(
+                f"{benchmark_key}: meta.study_area.geometry_type={geometry_type!r} not recognised "
+                "(expected 'perimeter' or 'segments')."
+            )
+
+        print(f"    {n_processed}/{n_units} unit(s)/window(s) had real model data.")
         if n_unclassified:
             print(
-                f"    WARNING: {n_unclassified} cluster(s) fell outside every bbox in this "
+                f"    WARNING: {n_unclassified} unit(s) fell outside every bbox in this "
                 f"benchmark's 'regions' - reported under region='{_UNCLASSIFIED_REGION}'."
             )
 
-        for threshold_m, domain_name, region in sorted(acc.keys()):
-            a = acc[(threshold_m, domain_name, region)]
+        region_rows: list[dict] = []
+        for region in sorted(acc.keys()):
+            a = acc[region]
             metrics = v.metrics_from_counts(a["tp_km2"], a["fp_km2"], a["fn_km2"], a["tn_km2"])
-            pop_metrics = v.metrics_from_counts(a["pop_tp"], a["pop_fp"], a["pop_fn"], a["pop_tn"])
             bm_total = benchmark_wet_km2_total[region]
             bm_outside = benchmark_wet_outside_model_domain_km2[region]
             bm_wet_pct = 100.0 * bm_outside / bm_total if bm_total > 0 else float("nan")
-            # model_total_wet_km2/pop_model_total are country-wide (not per-region -
-            # see _read_flood_totals) and only meaningful at the threshold the
-            # underlying flood_totals CSV was actually built at (the single fixed
-            # exposure.exceedance_threshold_m) - NaN at every other threshold in
-            # this sweep, rather than repeating a number that doesn't apply to it.
-            is_primary = threshold_m == primary_threshold_m
-            all_rows.append(_round_row({
+            tol_metrics = v.metrics_from_counts(a["tp_tol_km2"], a["fp_tol_km2"], a["fn_tol_km2"], a["tn_tol_km2"])
+            hard_disagreement = a["fp_tol_km2"] + a["fn_tol_km2"] + a["fp_forgiven_km2"] + a["fn_forgiven_km2"]
+            pct_forgiven = (
+                100.0 * (a["fp_forgiven_km2"] + a["fn_forgiven_km2"]) / hard_disagreement
+                if hard_disagreement > 0 else float("nan")
+            )
+            region_rows.append(_round_row({
                 "country": country_iso, "iso": country_iso, "benchmark_key": benchmark_key,
                 "region": region,
                 "return_period": rp, "waterlevel_name": slr,
-                "threshold_m": threshold_m, "domain": domain_name,
                 "tp_km2": a["tp_km2"], "fp_km2": a["fp_km2"], "fn_km2": a["fn_km2"], "tn_km2": a["tn_km2"],
                 "tp_cells": a["tp_cells"], "fp_cells": a["fp_cells"],
                 "fn_cells": a["fn_cells"], "tn_cells": a["tn_cells"],
                 "benchmark_wet_km2": bm_total,
-                "model_wet_km2": model_wet_km2[(threshold_m, region)],
+                "model_wet_km2": model_wet_km2[region],
                 "benchmark_wet_outside_model_domain_km2": bm_outside,
                 "benchmark_wet_outside_model_domain_pct": bm_wet_pct,
-                "model_total_wet_km2": model_total_wet_km2 if is_primary else float("nan"),
-                "pop_model_total": pop_model_total if is_primary else float("nan"),
+                "model_total_wet_km2": model_total_wet_km2,
                 "HR": metrics["HR"], "FAR": metrics["FAR"], "CSI": metrics["CSI"],
                 "EB": metrics["EB"], "EB_ratio": metrics["EB_ratio"], "bias": metrics["bias"],
-                "pop_tp": a["pop_tp"], "pop_fp": a["pop_fp"], "pop_fn": a["pop_fn"],
-                "pop_benchmark": a["pop_tp"] + a["pop_fn"], "pop_model": a["pop_tp"] + a["pop_fp"],
-                "pop_over": a["pop_fp"], "pop_under": a["pop_fn"],
-                "pop_diff_net": a["pop_fp"] - a["pop_fn"],
-                "pop_HR": pop_metrics["HR"], "pop_FAR": pop_metrics["FAR"], "pop_CSI": pop_metrics["CSI"],
+                "tp_tol_km2": a["tp_tol_km2"], "fp_tol_km2": a["fp_tol_km2"],
+                "fn_tol_km2": a["fn_tol_km2"], "tn_tol_km2": a["tn_tol_km2"],
+                "fp_forgiven_km2": a["fp_forgiven_km2"], "fn_forgiven_km2": a["fn_forgiven_km2"],
+                "HR_tol": tol_metrics["HR"], "FAR_tol": tol_metrics["FAR"], "CSI_tol": tol_metrics["CSI"],
+                "pct_disagreement_forgiven": pct_forgiven,
             }))
+
+        blended = _blend_regions(region_rows, spec.regions)
+        if blended is not None:
+            region_rows.append(blended)
+        all_rows.extend(region_rows)
 
         for region_name, pieces in agreement_pieces_by_region.items():
             _write_agreement_raster(pieces, cfg, country_iso, rp, slr, region_name, metric="agreement")
+
+        if unit_rows:
+            out_dir = Path(val_cfg["output_dir"]) / country_iso
+            retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
+            units_path = out_dir / f"units_{benchmark_key}_{rp}_{slr}.csv"
+            units_df = pd.DataFrame(unit_rows)
+            atomic_write(units_path, lambda f: units_df.to_csv(f, index=False), mode="w", encoding="utf-8", newline="")
+            print(f"    Per-unit CSI written: {units_path} ({len(units_df)} unit(s))")
 
     return pd.DataFrame(all_rows)
 
@@ -522,7 +767,6 @@ def validate_country_depth_bands(
     open_ended_min_m = float(val_cfg["depth_band_open_ended_min_m"])
     pp_chunk_deg = float(cfg["postprocessing"]["chunk_size_deg"])
     merged_chunks_dir = Path(cfg["postprocessing"]["merged_outputs"]) / "chunks"
-    population_source = val_cfg["population_source"]
     permanent_water_source = val_cfg["permanent_water_source"]
     permanent_water_codes = val_cfg["permanent_water_codes"]
 
@@ -572,7 +816,6 @@ def validate_country_depth_bands(
         # Keyed by (domain_name, region) - no threshold dimension here.
         acc: dict[tuple[str, str], dict[str, float]] = defaultdict(lambda: {
             "agree_km2": 0.0, "under_km2": 0.0, "over_km2": 0.0,
-            "pop_agree": 0.0, "pop_under": 0.0, "pop_over": 0.0,
         })
         band_coverage_km2: dict[str, float] = defaultdict(float)
         agreement_pieces_by_region: dict[str, list[tuple[np.ndarray, Affine]]] = defaultdict(list)
@@ -628,21 +871,6 @@ def validate_country_depth_bands(
             area_km2 = pixel_area_km2_grid(out_transform, depth.shape[1], depth.shape[0])
             band_coverage_km2[region] += float((has_band * area_km2 * not_water).sum())
 
-            try:
-                pop_da = retry_transient_io(
-                    gfm_catalog.get_rasterdataset, population_source, bbox=bbox,
-                ).squeeze(drop=True)
-            except Exception:
-                pop_da = None
-            if pop_da is not None and pop_da.size > 0:
-                pop_arr = np.nan_to_num(pop_da.values.astype("float64"), nan=0.0)
-                pop_nodata = pop_da.raster.nodata
-                if pop_nodata is not None:
-                    pop_arr[pop_arr == pop_nodata] = 0.0
-                pop_transform, pop_crs = pop_da.raster.transform, pop_da.raster.crs
-            else:
-                pop_arr, pop_transform, pop_crs = None, None, None
-
             class_agree = has_band & (depth >= ht_min_grid) & (depth <= ht_max_grid)
             class_under = has_band & (depth < ht_min_grid)
             class_over = has_band & (depth > ht_max_grid)
@@ -663,17 +891,6 @@ def validate_country_depth_bands(
                 a["under_km2"] += under_km2
                 a["over_km2"] += over_km2
 
-                if pop_arr is not None:
-                    d_band = d & has_band
-                    for cls_name, cls_mask in (
-                        ("pop_agree", class_agree), ("pop_under", class_under), ("pop_over", class_over),
-                    ):
-                        pop_class = v.population_by_class(
-                            cls_mask, d_band, out_transform, "EPSG:4326",
-                            pop_arr, pop_transform, pop_crs,
-                        )
-                        a[cls_name] += float(pop_class.sum())
-
         print(f"    {n_processed}/{len(clusters)} cluster(s) had real model data.")
         if n_unclassified:
             print(
@@ -684,7 +901,6 @@ def validate_country_depth_bands(
         for domain_name, region in sorted(acc.keys()):
             a = acc[(domain_name, region)]
             metrics = v.depth_band_metrics_from_counts(a["agree_km2"], a["under_km2"], a["over_km2"])
-            pop_metrics = v.depth_band_metrics_from_counts(a["pop_agree"], a["pop_under"], a["pop_over"])
             all_rows.append(_round_row({
                 "country": country_iso, "iso": country_iso, "benchmark_key": benchmark_key,
                 "region": region,
@@ -693,9 +909,6 @@ def validate_country_depth_bands(
                 "agree_km2": a["agree_km2"], "under_km2": a["under_km2"], "over_km2": a["over_km2"],
                 "pct_agree": metrics["pct_agree"], "pct_under": metrics["pct_under"],
                 "pct_over": metrics["pct_over"], "depth_EB": metrics["depth_EB"],
-                "pop_agree": a["pop_agree"], "pop_under": a["pop_under"], "pop_over": a["pop_over"],
-                "pop_pct_agree": pop_metrics["pct_agree"], "pop_pct_under": pop_metrics["pct_under"],
-                "pop_pct_over": pop_metrics["pct_over"], "pop_depth_EB": pop_metrics["depth_EB"],
             }))
 
         for region_name, pieces in agreement_pieces_by_region.items():
@@ -736,13 +949,11 @@ def validate_country_national_coverage(
        architecture) bounds memory per iteration regardless of how far a
        national benchmark's footprint spans.
 
-    Domain is always effectively "the model's own domain, nothing more
-    restrictive" (no buffered/model_only distinction - there is no cluster
-    window to be "narrower than intended" the way caveats doc §1.2 describes
-    for the partial-coverage path) - reported under `domain="model_only"` for
-    schema/column continuity with validate_country()'s own output, so both
-    functions' rows can be concatenated into one metrics CSV (see main()) -
-    EXCEPT it is also masked to `country_iso`'s own territory
+    Domain is always "the model's own domain, nothing more restrictive"
+    (there is no cluster/buffer concept here at all, unlike the
+    partial-coverage path's TRI-zone/connectivity domains - every cell the
+    model computed something for is in scope) - EXCEPT it is also masked to
+    `country_iso`'s own territory
     (validation.read_country_mask), since a region's bbox is just a rectangle
     and can genuinely overlap a neighbouring country (confirmed 2026-09:
     Norway's own `mainland` bbox overlaps real Swedish/Danish coastline) -
@@ -754,19 +965,18 @@ def validate_country_national_coverage(
     val_cfg = cfg["validation"]
     rp = val_cfg["return_period"]
     slr = val_cfg["waterlevel_name"]
-    thresholds_m = [float(t) for t in val_cfg["depth_thresholds_m"]]
     primary_threshold_m = float(val_cfg["primary_threshold_m"])
     supersample = int(val_cfg["benchmark_supersample"])
     wet_fraction = float(val_cfg["benchmark_wet_fraction"])
+    tolerance_cells = int(val_cfg["coastline_tolerance_cells"])
     pp_chunk_deg = float(cfg["postprocessing"]["chunk_size_deg"])
     merged_chunks_dir = Path(cfg["postprocessing"]["merged_outputs"]) / "chunks"
-    population_source = val_cfg["population_source"]
     permanent_water_source = val_cfg["permanent_water_source"]
     permanent_water_codes = val_cfg["permanent_water_codes"]
     geogunit_source = val_cfg["geogunit_source"]
     iso_lookup = v.load_iso_lookup(gfm_catalog, val_cfg["iso_lookup_source"])
     flood_totals_dir = Path(val_cfg["flood_totals_dir"])
-    model_total_wet_km2, pop_model_total = _read_flood_totals(flood_totals_dir, country_iso, rp, slr)
+    model_total_wet_km2, _ = _read_flood_totals(flood_totals_dir, country_iso, rp, slr)
 
     def _is_national_extent(key: str) -> bool:
         s = v.load_benchmark_spec(bench_catalog, key)
@@ -808,10 +1018,10 @@ def validate_country_national_coverage(
                 full_gdf = full_gdf.to_crs(4326)
             full_sindex = full_gdf.sindex
 
-        acc: dict[tuple[float, str], dict[str, float]] = defaultdict(_new_acc)
+        acc: dict[str, dict[str, float]] = defaultdict(_new_acc)
         benchmark_wet_km2_total: dict[str, float] = defaultdict(float)
         benchmark_wet_outside_model_domain_km2: dict[str, float] = defaultdict(float)
-        model_wet_km2: dict[tuple[float, str], float] = defaultdict(float)
+        model_wet_km2: dict[str, float] = defaultdict(float)
         agreement_pieces_by_region: dict[str, list[tuple[np.ndarray, Affine]]] = defaultdict(list)
         n_processed = 0
         n_chunks_total = 0
@@ -822,8 +1032,23 @@ def validate_country_national_coverage(
 
             for chunk_path in chunk_paths:
                 with retry_transient_io(rasterio.open, chunk_path) as src:
-                    depth = src.read(1)
-                    out_transform = src.transform
+                    # Window the read to region_bbox ∩ this chunk's own bounds - a
+                    # chunk is a fixed 5deg cell that can contain MULTIPLE named
+                    # regions (e.g. Wales' severn_estuary and menai_strait both
+                    # fall in the same chunk), so reading the whole chunk here
+                    # would evaluate the SAME data for every region sharing it
+                    # (confirmed 2026-09-30: produced byte-identical metrics for
+                    # two genuinely different, ~150km-apart Welsh regions before
+                    # this fix). region_bbox is a rectangle, not real geometry, so
+                    # this still relies on read_country_mask below to exclude any
+                    # non-target territory within the window.
+                    window = rasterio.windows.from_bounds(*region_bbox, transform=src.transform)
+                    window = window.intersection(rasterio.windows.Window(0, 0, src.width, src.height))
+                    window = window.round_offsets().round_lengths()
+                    if window.width <= 0 or window.height <= 0:
+                        continue
+                    depth = src.read(1, window=window)
+                    out_transform = src.window_transform(window)
 
                 model_domain = v.model_domain_mask(depth, nodata=-9999.0)
                 if not model_domain.any():
@@ -839,7 +1064,12 @@ def validate_country_national_coverage(
                     )
                 else:
                     fraction = v.read_benchmark_raster_fraction(bench_catalog, spec, bbox, out_transform, depth.shape)
-                benchmark_wet = v.wet_mask_from_fraction(fraction, wet_fraction)
+                # Scoring uses `fraction` directly (confusion_counts_soft) -
+                # never thresholded into a binary wet/dry call.
+                # benchmark_wet_display is ONLY for the agreement-map
+                # category raster below (one discrete colour per cell) - it
+                # plays no part in any number in the metrics CSV.
+                benchmark_wet_display = v.wet_mask_from_fraction(fraction, wet_fraction)
 
                 water_mask = v.read_permanent_water_mask(
                     gfm_catalog, permanent_water_source, permanent_water_codes, bbox, out_transform, depth.shape,
@@ -854,6 +1084,7 @@ def validate_country_national_coverage(
                 # without it.
                 in_country = v.read_country_mask(
                     gfm_catalog, geogunit_source, iso_lookup, country_iso, bbox, out_transform, depth.shape,
+                    geogunit_ids=spec.geogunit_ids,
                 )
                 not_water = not_water & in_country
                 domain_mask = model_domain & not_water
@@ -864,91 +1095,83 @@ def validate_country_national_coverage(
                     (fraction * area_km2 * not_water * (~model_domain)).sum()
                 )
 
-                try:
-                    pop_da = retry_transient_io(
-                        gfm_catalog.get_rasterdataset, population_source, bbox=bbox,
-                    ).squeeze(drop=True)
-                except Exception:
-                    pop_da = None
-                if pop_da is not None and pop_da.size > 0:
-                    pop_arr = np.nan_to_num(pop_da.values.astype("float64"), nan=0.0)
-                    pop_nodata = pop_da.raster.nodata
-                    if pop_nodata is not None:
-                        pop_arr[pop_arr == pop_nodata] = 0.0
-                    pop_transform, pop_crs = pop_da.raster.transform, pop_da.raster.crs
-                else:
-                    pop_arr, pop_transform, pop_crs = None, None, None
+                model_wet = model_domain & (depth > primary_threshold_m) & not_water
+                model_wet_km2[region] += float((model_wet * area_km2).sum())
 
+                tp, fp, fn, tn = v.confusion_counts_soft(model_wet, fraction, domain_mask, area_km2)
+                a = acc[region]
+                a["tp_km2"] += tp
+                a["fp_km2"] += fp
+                a["fn_km2"] += fn
+                a["tn_km2"] += tn
+                # "cells" columns are soft/effective counts (float,
+                # fraction-weighted) too - see validate_country()'s own
+                # comment on this.
+                tp_c, fp_c, fn_c, tn_c = v.confusion_counts_soft(
+                    model_wet, fraction, domain_mask, np.ones_like(area_km2),
+                )
+                a["tp_cells"] += tp_c
+                a["fp_cells"] += fp_c
+                a["fn_cells"] += fn_c
+                a["tn_cells"] += tn_c
+
+                tol = v.confusion_counts_tolerant(model_wet, fraction, domain_mask, area_km2, tolerance_cells)
+                a["tp_tol_km2"] += tol["tp"]
+                a["fp_tol_km2"] += tol["fp"]
+                a["fn_tol_km2"] += tol["fn"]
+                a["tn_tol_km2"] += tol["tn"]
+                a["fp_forgiven_km2"] += tol["fp_forgiven"]
+                a["fn_forgiven_km2"] += tol["fn_forgiven"]
+
+                # Display only - benchmark_wet_display's own threshold plays
+                # no part in the scoring above.
                 chunk_agreement = np.full(depth.shape, _CAT_DRY, dtype="uint8")
-
-                for threshold_m in thresholds_m:
-                    model_wet = model_domain & (depth > threshold_m) & not_water
-                    model_wet_km2[(threshold_m, region)] += float((model_wet * area_km2).sum())
-
-                    tp, fp, fn, tn = v.confusion_counts(model_wet, benchmark_wet, domain_mask, area_km2)
-                    a = acc[(threshold_m, region)]
-                    a["tp_km2"] += tp
-                    a["fp_km2"] += fp
-                    a["fn_km2"] += fn
-                    a["tn_km2"] += tn
-                    a["tp_cells"] += int((domain_mask & model_wet & benchmark_wet).sum())
-                    a["fp_cells"] += int((domain_mask & model_wet & ~benchmark_wet).sum())
-                    a["fn_cells"] += int((domain_mask & ~model_wet & benchmark_wet).sum())
-                    a["tn_cells"] += int((domain_mask & ~model_wet & ~benchmark_wet).sum())
-
-                    if pop_arr is not None:
-                        for cls_name, cls_mask in (
-                            ("pop_tp", model_wet & benchmark_wet),
-                            ("pop_fp", model_wet & ~benchmark_wet),
-                            ("pop_fn", ~model_wet & benchmark_wet),
-                            ("pop_tn", ~model_wet & ~benchmark_wet),
-                        ):
-                            pop_class = v.population_by_class(
-                                cls_mask, domain_mask, out_transform, "EPSG:4326",
-                                pop_arr, pop_transform, pop_crs,
-                            )
-                            a[cls_name] += float(pop_class.sum())
-
-                    if threshold_m == primary_threshold_m:
-                        chunk_agreement[domain_mask & model_wet & ~benchmark_wet] = _CAT_OVER
-                        chunk_agreement[domain_mask & ~model_wet & benchmark_wet] = _CAT_UNDER
-                        still_dry = chunk_agreement == _CAT_DRY
-                        chunk_agreement[still_dry & domain_mask & model_wet & benchmark_wet] = _CAT_AGREE
-
+                chunk_agreement[domain_mask & model_wet & ~benchmark_wet_display] = _CAT_OVER
+                chunk_agreement[domain_mask & ~model_wet & benchmark_wet_display] = _CAT_UNDER
+                still_dry = chunk_agreement == _CAT_DRY
+                chunk_agreement[still_dry & domain_mask & model_wet & benchmark_wet_display] = _CAT_AGREE
                 agreement_pieces_by_region[region].append((chunk_agreement, out_transform))
 
         print(f"    {n_processed}/{n_chunks_total} chunk(s) had real model data.")
 
-        for threshold_m, region in sorted(acc.keys()):
-            a = acc[(threshold_m, region)]
+        region_rows: list[dict] = []
+        for region in sorted(acc.keys()):
+            a = acc[region]
             metrics = v.metrics_from_counts(a["tp_km2"], a["fp_km2"], a["fn_km2"], a["tn_km2"])
-            pop_metrics = v.metrics_from_counts(a["pop_tp"], a["pop_fp"], a["pop_fn"], a["pop_tn"])
             bm_total = benchmark_wet_km2_total[region]
             bm_outside = benchmark_wet_outside_model_domain_km2[region]
             bm_wet_pct = 100.0 * bm_outside / bm_total if bm_total > 0 else float("nan")
-            is_primary = threshold_m == primary_threshold_m
-            all_rows.append(_round_row({
+            tol_metrics = v.metrics_from_counts(a["tp_tol_km2"], a["fp_tol_km2"], a["fn_tol_km2"], a["tn_tol_km2"])
+            hard_disagreement = a["fp_tol_km2"] + a["fn_tol_km2"] + a["fp_forgiven_km2"] + a["fn_forgiven_km2"]
+            pct_forgiven = (
+                100.0 * (a["fp_forgiven_km2"] + a["fn_forgiven_km2"]) / hard_disagreement
+                if hard_disagreement > 0 else float("nan")
+            )
+            region_rows.append(_round_row({
                 "country": country_iso, "iso": country_iso, "benchmark_key": benchmark_key,
                 "region": region,
                 "return_period": rp, "waterlevel_name": slr,
-                "threshold_m": threshold_m, "domain": "model_only",
                 "tp_km2": a["tp_km2"], "fp_km2": a["fp_km2"], "fn_km2": a["fn_km2"], "tn_km2": a["tn_km2"],
                 "tp_cells": a["tp_cells"], "fp_cells": a["fp_cells"],
                 "fn_cells": a["fn_cells"], "tn_cells": a["tn_cells"],
                 "benchmark_wet_km2": bm_total,
-                "model_wet_km2": model_wet_km2[(threshold_m, region)],
+                "model_wet_km2": model_wet_km2[region],
                 "benchmark_wet_outside_model_domain_km2": bm_outside,
                 "benchmark_wet_outside_model_domain_pct": bm_wet_pct,
-                "model_total_wet_km2": model_total_wet_km2 if is_primary else float("nan"),
-                "pop_model_total": pop_model_total if is_primary else float("nan"),
+                "model_total_wet_km2": model_total_wet_km2,
                 "HR": metrics["HR"], "FAR": metrics["FAR"], "CSI": metrics["CSI"],
                 "EB": metrics["EB"], "EB_ratio": metrics["EB_ratio"], "bias": metrics["bias"],
-                "pop_tp": a["pop_tp"], "pop_fp": a["pop_fp"], "pop_fn": a["pop_fn"],
-                "pop_benchmark": a["pop_tp"] + a["pop_fn"], "pop_model": a["pop_tp"] + a["pop_fp"],
-                "pop_over": a["pop_fp"], "pop_under": a["pop_fn"],
-                "pop_diff_net": a["pop_fp"] - a["pop_fn"],
-                "pop_HR": pop_metrics["HR"], "pop_FAR": pop_metrics["FAR"], "pop_CSI": pop_metrics["CSI"],
+                "tp_tol_km2": a["tp_tol_km2"], "fp_tol_km2": a["fp_tol_km2"],
+                "fn_tol_km2": a["fn_tol_km2"], "tn_tol_km2": a["tn_tol_km2"],
+                "fp_forgiven_km2": a["fp_forgiven_km2"], "fn_forgiven_km2": a["fn_forgiven_km2"],
+                "HR_tol": tol_metrics["HR"], "FAR_tol": tol_metrics["FAR"], "CSI_tol": tol_metrics["CSI"],
+                "pct_disagreement_forgiven": pct_forgiven,
             }))
+
+        blended = _blend_regions(region_rows, spec.regions)
+        if blended is not None:
+            region_rows.append(blended)
+        all_rows.extend(region_rows)
 
         for region_name, pieces in agreement_pieces_by_region.items():
             _write_agreement_raster(pieces, cfg, country_iso, rp, slr, region_name, metric="agreement")
@@ -965,16 +1188,36 @@ def _write_agreement_raster(
     region_name: str,
     metric: str = "agreement",
 ) -> None:
-    """Mosaic one region's clusters' native-resolution agreement category grids
-    down to `plots.resolution_m`, using MAX resampling on the category codes -
-    since codes are ordered dry(0) < agree(1) < under(2) < over(3), MAX
-    exactly implements the plan's "priority: over > under > agree > dry"
-    rule (plan doc §5.4) without a hand-rolled block-reduce. Shared by both
-    the extent comparison (`metric="agreement"`, the default) and the
-    depth-band comparison (`metric="depth_agreement"`, validate_country_depth_bands)
-    - the category codes/priority-reduction logic and output shape are
-    identical, only the classification rule that produced the category grid
-    differs, and the output filename prefix keeps the two from colliding.
+    """Mosaic one region's clusters' native-resolution agreement category
+    grids into one raster - at the model's own NATIVE resolution when the
+    region is small enough for that to stay a tractable file size/pixel
+    count (every partial-coverage unit, every nested sub-area like Wales'
+    menai_strait/severn_estuary or Scotland's firth_of_forth), falling back
+    to the coarser `plots.resolution_m` (with MAX resampling on the
+    category codes - dry(0) < agree(1) < under(2) < over(3), so MAX
+    implements "priority: over > under > agree > dry") only for a
+    whole-country-scale region where native resolution would make the
+    raster impractically large (Norway/Scotland's own mainland, hundreds of
+    km across).
+
+    2026-10: downsampling to `plots.resolution_m` UNCONDITIONALLY, as this
+    function used to, visually overstates disagreement on a close-up panel
+    - MAX-resampling the category codes means a single native cell inside a
+    coarse output cell (at 200m vs. the model's own 30m, one output cell
+    covers ~44 native cells) paints the WHOLE coarse cell with that single
+    cell's own category, so one real, small, isolated patch of
+    over-/under-prediction visually balloons to the size of the coarse
+    cell - confirmed directly on Firth of Forth. This never affected the
+    real CSI/HR/FAR numbers (computed earlier, from the native-resolution
+    depth/fraction grids, never from this downsampled display raster) - it
+    was purely a visualization artifact.
+
+    Shared by both the extent comparison (`metric="agreement"`, the
+    default) and the depth-band comparison (`metric="depth_agreement"`,
+    validate_country_depth_bands) - the category codes/priority-reduction
+    logic and output shape are identical, only the classification rule that
+    produced the category grid differs, and the output filename prefix
+    keeps the two from colliding.
 
     One raster PER REGION, not one combined per country - a country's named
     regions (e.g. Spain's mainland vs. Canary Islands) can be thousands of km
@@ -986,14 +1229,21 @@ def _write_agreement_raster(
     if not agreement_pieces:
         return
     val_cfg = cfg["validation"]
-    res_m = float(val_cfg["plots"]["resolution_m"])
-    res_deg = res_m / (111.32 * 1000.0)
 
     all_bounds = [rasterio.transform.array_bounds(a.shape[0], a.shape[1], t) for a, t in agreement_pieces]
     minx = min(b[0] for b in all_bounds)
     miny = min(b[1] for b in all_bounds)
     maxx = max(b[2] for b in all_bounds)
     maxy = max(b[3] for b in all_bounds)
+
+    native_res_deg = abs(agreement_pieces[0][1].a)  # every piece shares the same native (model) grid resolution
+    native_w = (maxx - minx) / native_res_deg
+    native_h = (maxy - miny) / native_res_deg
+    if max(native_w, native_h) <= _AGREEMENT_RASTER_MAX_DIM_PX:
+        res_deg = native_res_deg  # small enough region - no coarsening, no priority-max artifact at all
+    else:
+        res_deg = float(val_cfg["plots"]["resolution_m"]) / (111.32 * 1000.0)
+
     out_w = max(1, int(math.ceil((maxx - minx) / res_deg)))
     out_h = max(1, int(math.ceil((maxy - miny) / res_deg)))
     out_transform = Affine(res_deg, 0, minx, 0, -res_deg, maxy)
@@ -1063,23 +1313,19 @@ def main() -> None:
         atomic_write(out_path, lambda f: df.to_csv(f, index=False), mode="w", encoding="utf-8", newline="")
         print(f"\nMetrics written: {out_path} ({len(df)} row(s))")
 
-        # coverage=national benchmarks only ever produce "model_only" rows (no
-        # cluster/buffer concept - see validate_country_national_coverage's own
-        # docstring), so prefer "buffered" per (benchmark_key, region) but fall
-        # back to whatever domain that combination actually has, rather than
-        # silently printing nothing for a national-coverage country.
-        at_primary = df[df["threshold_m"] == float(val_cfg["primary_threshold_m"])]
-        preferred = (
-            # "buffered" > "model_only" alphabetically, so descending-sort puts
-            # "model_only" first and "buffered" last per (benchmark_key, region)
-            # group; keep="last" then picks "buffered" when both exist.
-            at_primary.sort_values("domain", ascending=False)
-            .drop_duplicates(subset=["benchmark_key", "region"], keep="last")
-        )
-        for _, row in preferred.iterrows():
+        # One row per region already (no more threshold_m/domain dimensions to
+        # dedup across - single config-driven threshold, one well-justified
+        # domain per benchmark). Print the blended country-level row
+        # (_BLENDED_REGION, "ALL") where one exists, else every region row.
+        has_blended = df["region"].eq(_BLENDED_REGION)
+        printed = df[has_blended] if has_blended.any() else df
+        for _, row in printed.iterrows():
             print(
-                f"\n[{row['region']}] Primary threshold ({val_cfg['primary_threshold_m']}m), {row['domain']} domain:\n"
+                f"\n[{row['region']}] Primary threshold ({val_cfg['primary_threshold_m']}m):\n"
                 f"  HR={row['HR']:.3f} FAR={row['FAR']:.3f} CSI={row['CSI']:.3f} EB={row['EB']:.3f}\n"
+                f"  CSI_tol={row['CSI_tol']:.3f} (tolerance={val_cfg['coastline_tolerance_cells']} cell(s), "
+                f"{row['pct_disagreement_forgiven']:.1f}% of strict disagreement forgiven - diagnostic only, "
+                "not the headline number)\n"
                 f"  benchmark_wet_outside_model_domain_pct={row['benchmark_wet_outside_model_domain_pct']:.1f}%"
                 " - health check: if this is high, don't quote the rest of this row as a model result."
             )

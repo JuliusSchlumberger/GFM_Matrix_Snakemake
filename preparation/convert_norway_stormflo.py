@@ -41,9 +41,8 @@ validation/validate_country.py already excludes permanent water from the
 evaluation domain for EVERY country, via validation.read_permanent_water_mask()
 / permanent_water_mask() (validation.permanent_water_source/permanent_water_codes
 in config.yml - DeltaDTM's own land/ocean/lake/river mask, codes {1,2,3}, since
-2026-09; was Copernicus Global Land Cover, codes {80,200} - see
-docs/flood_extent_validation_caveats.md §1.3), applied identically to the
-benchmark-wet area, the model-wet area and the domain. tests/norway_diagnostics/
+2026-09; was Copernicus Global Land Cover, codes {80,200}), applied identically
+to the benchmark-wet area, the model-wet area and the domain. tests/norway_diagnostics/
 09_landuse_mask_check.py measured the (then-default, Copernicus) mask against the
 real data on the model's own ~30 m grid: it removes 98.1% of the sea inside these
 polygons (92.7-99.1% per AOI, incl. the narrow Naeroyfjord and Lofoten's island

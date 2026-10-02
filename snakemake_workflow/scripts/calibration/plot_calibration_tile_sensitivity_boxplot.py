@@ -38,11 +38,11 @@ import pandas as pd
 import rasterio
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "sfincs_tiles"))
 from config_utils import load_config  # noqa: E402
+from flood_agreement import WET_THRESHOLD_M  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-
-WET_THRESHOLD_M = 0.05  # matches flood_agreement.py's own WET_THRESHOLD_M convention
 WATERDEPTH_SCALE = 100.0  # raw int16 = cm, matches rasters.py's encode_waterdepth_cm convention
 WATERDEPTH_NODATA = 32767
 

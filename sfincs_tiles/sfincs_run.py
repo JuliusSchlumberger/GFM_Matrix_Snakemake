@@ -1,16 +1,13 @@
 """
 sfincs_run.py -- Shared SFINCS subprocess execution (Popen + threaded
 stdout/stderr forwarding + timeout), used by every rule that executes the
-SFINCS binary. Also holds the shared "hand-craft a sfincs.inp that borrows
-geometry from a DIFFERENT SFINCS model directory via relative paths"
-helpers used by both 13_build_sfincs.py (borrows from sfincs_skeleton/)
-and 14_run_spinup.py (borrows from sfincs_skeleton/ too, as a sibling of
-its own spinup/ directory) -- see either script's own module docstring
-for why this is hand-written rather than done via HydroMT's own
-sf.config.write(): HydroMT's get_set_file_variable silently absolutizes
-any file reference outside the model's own root instead of preserving a
-relative ../ path, so a genuinely portable cross-directory reference has
-to be written by hand.
+SFINCS binary. Also holds helpers for hand-crafting a sfincs.inp that
+borrows geometry from a different SFINCS model directory via relative
+paths, used by 13_build_sfincs.py and 14_run_spinup.py.
+
+Paths are written by hand rather than via HydroMT's sf.config.write():
+HydroMT's get_set_file_variable absolutizes file references outside the
+model's own root instead of preserving a relative ../ path.
 """
 
 from __future__ import annotations
@@ -23,10 +20,10 @@ from pathlib import Path
 
 
 def parse_sfincs_inp(path: str | Path) -> dict[str, str]:
-    """Parse a sfincs.inp file into a lowercased {key: value} dict.
+    """Parses a sfincs.inp file into a lowercased {key: value} dict.
 
-    SFINCS's own format is plain ``key = value`` lines (comments start with
-    ``!``) -- this is a generic reader, not aware of which keys mean what.
+    SFINCS's format is plain ``key = value`` lines; comments start with
+    ``!``. Generic reader, not aware of which keys mean what.
     """
     cfg: dict[str, str] = {}
     with open(path) as fh:
@@ -44,18 +41,12 @@ def forward_geometry_files(
     dest_root: str | Path,
     exclude: frozenset[str] = frozenset(),
 ) -> list[str]:
-    """Build ``"key = <relative path>"`` lines forwarding every non-empty
-    ``*file`` entry in ``cfg`` (as parsed by parse_sfincs_inp from
-    ``source_root``'s own sfincs.inp) to a NEW sfincs.inp being written at
-    ``dest_root``, via a relative path computed with os.path.relpath (not
-    hand-derived ``../`` counting -- robust to whatever the actual nesting
-    depth between the two directories turns out to be).
+    """Builds ``"key = <relative path>"`` lines forwarding every non-empty
+    ``*file`` entry in ``cfg`` from ``source_root`` to a new sfincs.inp at
+    ``dest_root``, using a relative path computed with os.path.relpath.
 
-    Skips keys in ``exclude`` (typically {"rstfile"}: a restart file
-    reference must never be forwarded from a source model that doesn't
-    have one yet) and any ``*file`` entry whose target doesn't exist or is
-    a 0-byte placeholder (e.g. sfincs_subgrid.nc/sfincs.weir when that
-    feature is disabled for this basin).
+    Skips keys in ``exclude`` and any ``*file`` entry whose target doesn't
+    exist or is a 0-byte placeholder.
     """
     source_root = Path(source_root)
     dest_root = Path(dest_root)
@@ -79,29 +70,20 @@ def run_sfincs_subprocess(
     n_threads: int | None = None,
 ) -> None:
     """
-    Execute the SFINCS binary in ``cwd``, streaming stdout/stderr line-by-line
-    to both ``log`` and the terminal (via stderr) as it runs, with a timeout.
+    Executes the SFINCS binary in ``cwd``, streaming stdout/stderr
+    line-by-line to both ``log`` and the terminal, with a timeout.
 
     Args:
         sfincs_exe: Path to the sfincs executable.
-        cwd:        Working directory SFINCS runs in (its own relative file
-                    references -- dep, msk, bnd, rstfile, ... -- resolve
-                    against this).
+        cwd:        Working directory SFINCS runs in; its own relative file
+                    references (dep, msk, bnd, rstfile, ...) resolve
+                    against this.
         timeout_s:  Wall-clock timeout (seconds) before the process is killed.
         log:        Logger to write SFINCS's stdout (info) / stderr (warning) to.
-        label:      Used only in the raised error messages (e.g.
-                    "SFINCS spin-up", "SFINCS event run", "SFINCS calibration run").
-        n_threads:  OpenMP thread count to give SFINCS (sets OMP_NUM_THREADS
-                    for the subprocess only). SFINCS reads OMP_NUM_THREADS
-                    directly (reporting it in its own startup banner) and
-                    defaults to 1 thread when the variable is unset --
-                    callers should pass their own ``snakemake.threads`` here
-                    (paired with ``threads: workflow.cores`` on the rule, so
-                    Snakemake reserves the whole machine for the run and
-                    SFINCS actually uses it, instead of both blocking other
-                    jobs AND running on a single core). None/0 leaves the
-                    environment unchanged (whatever OMP_NUM_THREADS --
-                    typically unset -- the parent process already has).
+        label:      Used only in raised error messages.
+        n_threads:  OpenMP thread count for SFINCS (sets OMP_NUM_THREADS for
+                    the subprocess only). SFINCS defaults to 1 thread when
+                    unset. None/0 leaves the environment unchanged.
 
     Raises:
         RuntimeError: on timeout or non-zero exit code.
@@ -137,12 +119,8 @@ def run_sfincs_subprocess(
     t_out.start()
     t_err.start()
 
-    # proc.wait() must run BEFORE joining the reader threads: t_out.join()/
-    # t_err.join() block unconditionally until SFINCS's own stdout/stderr
-    # pipes close, which only happens once it exits on its own -- so calling
-    # them first makes the timeout unreachable until the process has already
-    # finished, silently defeating it. Killing the process here closes its
-    # pipes, which is what lets the reader threads finish and join() return.
+    # proc.wait() must run before joining the reader threads, or the timeout
+    # is unreachable (join() blocks until SFINCS's pipes close on exit).
     try:
         proc.wait(timeout=timeout_s)
     except subprocess.TimeoutExpired:

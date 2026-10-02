@@ -1,10 +1,9 @@
-"""Decode a tile's friction.tif into a real Manning's n GeoTIFF for SFINCS.
+"""Decodes a tile's friction.tif into a real Manning's n GeoTIFF for SFINCS.
 
-friction.tif stores Manning's_n / 100 (an eikonal-solver-specific "slowness"
-convention, decode /1_000_000 per src/rasters.py::decode_friction_int16) -
-NOT a real Manning's n. SFINCS's roughness.create() wants real Manning's n
-(~0.01-0.15 range), so this multiplies the decoded value back up by 100.
-See sfincs_tiles' own plan doc for the full reasoning.
+friction.tif stores Manning's n / 100 (decoded via /1_000_000, see
+src/rasters.py::decode_friction_int16), not a real Manning's n value.
+SFINCS's roughness.create() expects real Manning's n (~0.01-0.15), so this
+multiplies the decoded value back up by 100.
 """
 
 from __future__ import annotations
@@ -20,16 +19,11 @@ from retry_io import retry_transient_io  # noqa: E402
 
 FRICTION_SCALE = 1_000_000
 
-# Generous physical envelope for real Manning's n (open water ~0.02 to dense
-# forest/urban ~0.15-0.2) - NOT the "~0.01-0.15 for real land cover" figure
-# printed below, which is a tighter expectation for real data and not
-# something a bare land-cover lookup table is guaranteed to respect exactly.
-# This wider bound exists to catch a unit-convention regression, not unusual
-# land cover: forgetting the *100 fix above produces values ~100x too small
-# (order 1e-4, comfortably below MANNING_N_MIN), and applying it twice
-# produces values ~100x too large (order 1-15, comfortably above
-# MANNING_N_MAX) - both real, plausible mistakes given friction.tif's own
-# non-obvious "Manning's_n / 100" on-disk convention (see module docstring).
+# Envelope for real Manning's n (open water ~0.02 to dense forest/urban
+# ~0.15-0.2), wider than the ~0.01-0.15 typically expected, to catch a
+# unit-conversion bug rather than reject unusual land cover: missing the
+# *100 fix above yields values ~100x too small, applying it twice yields
+# values ~100x too large.
 MANNING_N_MIN = 0.001
 MANNING_N_MAX = 1.0
 
@@ -76,8 +70,7 @@ if __name__ == "__main__":
     from gfm_config import read_root
 
     root = read_root(Path(args.config))
-    # Read from THIS tile's own working copy, not model_outputs/ directly -
-    # see build_elevation.py's own note on this same gap.
+    # Reads from the tile's working copy, not model_outputs/ directly.
     tile_dir = root / args.base_dir_name / args.tile_id / "inputs"
     out_path = root / args.base_dir_name / args.tile_id / "sfincs_model" / "manning_n.tif"
 

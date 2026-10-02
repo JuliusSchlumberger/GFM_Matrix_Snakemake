@@ -1,19 +1,12 @@
 """Mean Dynamic Topography (MDT) lookup, for re-referencing local-MSL data
-onto the GOCO06s geoid this pipeline's DEM/boundary forcing already uses.
+onto the GOCO06s geoid used by this pipeline's DEM/boundary forcing.
 
 `_load_mdt`/`_nearest_valid_grid` are copied (not imported) from
-`preparation/prepare_boundary_conditions.py` - same functions, same
-behaviour, duplicated here rather than cross-imported across the
-preparation/ vs sfincs_tiles/ package boundary for two small, private
-(underscore-prefixed) helpers never meant to be a public library API.
+`preparation/prepare_boundary_conditions.py`.
 
-Sign convention (matches prepare_boundary_conditions.py's own module
-docstring, fixed 2026-09 after a real, confirmed sign-error investigation):
-MDT is ADDED to re-reference local-MSL data onto GOCO06s -
-`H_GOCO06s = H_MSL + MDT`. GEBCO (bathymetry) and COAST-HG (storm-tide
-hydrographs) are both local-MSL-referenced at the source, exactly like
-COAST-RP was before this same correction - so the same ADD convention
-applies to both.
+Sign convention: MDT is ADDED to re-reference local-MSL data onto GOCO06s -
+`H_GOCO06s = H_MSL + MDT`. Applies to both GEBCO (bathymetry) and COAST-HG
+(storm-tide hydrographs), which are local-MSL-referenced at the source.
 """
 
 from __future__ import annotations
@@ -29,13 +22,10 @@ from retry_io import retry_transient_io  # noqa: E402
 
 
 def _load_mdt(mdt_path: Path, mdt_variable: str = "mdt") -> xr.DataArray:
-    """Load the AVISO MDT as a 2-D lat/lon DataArray, ascending coordinates.
+    """Loads the AVISO MDT as a 2-D lat/lon DataArray, ascending coordinates.
 
-    The open is retried (see retry_io.py) - a real, confirmed transient P:\\
-    blip hit exactly this open live on Hydrax 2026-09-23, for a file that
-    was reachable moments before and after. Mirrors
-    preparation/prepare_boundary_conditions.py's own _load_mdt, which
-    already wraps this same open with config_utils.retry_transient_io."""
+    The open is retried (see retry_io.py) to handle transient P:\\ share I/O
+    errors."""
     with retry_transient_io(xr.open_dataset, mdt_path) as ds:
         da = ds[mdt_variable].load()
 
@@ -84,13 +74,10 @@ def _nearest_valid_grid(
 
 
 def mdt_lookup_fn(mdt_path: Path, mdt_variable: str = "mdt", fallback_deg: float = 3.0):
-    """Return a `f(lon, lat) -> MDT value (m)` closure, loading the MDT grid once.
+    """Returns a `f(lon, lat) -> MDT value (m)` closure, loading the MDT grid once.
 
     `fallback_deg` matches `boundary_conditions.mdt_correction.fallback_search_deg`
-    in config.yml (default 3.0) - same tolerance the production COAST-RP MDT
-    lookup uses for stations with no valid MDT cell exactly at their own
-    location (e.g. a station right at a coastline pixel the MDT grid itself
-    treats as land/nodata).
+    in config.yml (default 3.0).
     """
     da = _load_mdt(mdt_path, mdt_variable)
     lat_dim = next(d for d in da.dims if "lat" in d.lower())

@@ -1,7 +1,6 @@
-"""Glob every {base_dir_name}/{tile_id}/outputs/summary_{model}.json written
-by postprocess_tile_summary.py (one independent file per bathtub/eikonal/
-sfincs) and merge them into one master CSV, one row per tile - the direct
-input for the correlation/calibration analysis.
+"""Merges every {base_dir_name}/{tile_id}/outputs/summary_{model}.json
+written by postprocess_tile_summary.py into one master CSV, one row per
+tile.
 
 Usage:
     python aggregate_tile_summaries.py --base-dir-name validation_sfincs_v4

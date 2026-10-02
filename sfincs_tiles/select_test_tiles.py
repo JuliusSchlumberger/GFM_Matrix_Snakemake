@@ -1,29 +1,16 @@
-"""Select a globally diverse ~10% sample of GFM tiles for a broader SFINCS
-test batch, beyond the 3 hand-picked tiles used so far.
+"""Selects a globally diverse ~10% sample of GFM tiles for a SFINCS test
+batch.
 
-Eligibility (all real, checked against actual per-tile files, not assumed):
-  - hop_distance == 0 (real ocean boundary - see sfincs_tiles' own plan doc:
-    there is no SFINCS equivalent of the eikonal model's hop>=1 hinterland
-    neighbour-seeding, so hop>=1 tiles have nothing physically meaningful
-    to force a SFINCS boundary with).
-  - mask.tif exists and has <= MAX_CELLS cells (native EPSG:4326 grid, not
-    the later UTM SFINCS grid - a cheap proxy available before any SFINCS
-    build work happens, checked via a header-only read first so oversized
-    tiles never pay for a full array read).
-  - river-mask (mask==3) fraction <= MAX_RIVER_FRAC - build_elevation.py has
-    no river bathymetry/discharge handling (see its own module docstring),
-    so a tile with meaningful river coverage isn't usable yet regardless of
-    size.
-  - at least one of the tile's own already-selected boundaries_RP100_SLR_0
-    points has a real COAST-HG station within MAX_MATCH_DIST_DEG (same
-    backstop distance as build_boundary_forcing.py's own MAX_MATCH_DIST_DEG)
-    - otherwise build_boundary_forcing.py would drop every point and the
-    tile can't be forced at all.
+Eligibility criteria, checked against each tile's own files:
+  - hop_distance == 0 (tile has a real ocean boundary).
+  - mask.tif exists and has <= MAX_CELLS cells.
+  - river-mask (mask==3) fraction <= MAX_RIVER_FRAC.
+  - at least one boundaries_RP100_SLR_0 point has a COAST-HG station within
+    MAX_MATCH_DIST_DEG.
 
-From the eligible pool, samples ~10% of ALL tiles (not just the eligible
-pool) via spatially stratified sampling on a coarse global lon/lat grid, so
-the selection spans multiple continents/regions rather than clustering
-wherever the eligible pool happens to be densest.
+Samples ~10% of all tiles (not just the eligible pool) via spatially
+stratified sampling on a coarse global lon/lat grid, so the selection spans
+multiple regions rather than clustering where the eligible pool is densest.
 
 Usage:
     python select_test_tiles.py
@@ -44,7 +31,7 @@ from scipy.spatial import cKDTree
 
 MAX_CELLS_DEFAULT = 20_000_000
 MAX_RIVER_FRAC_DEFAULT = 0.01
-MAX_MATCH_DIST_DEG = 0.5  # same backstop as build_boundary_forcing.py's own MAX_MATCH_DIST_DEG
+MAX_MATCH_DIST_DEG = 0.5  # max distance (deg) to match a boundary point to a COAST-HG station
 SAMPLE_FRAC_DEFAULT = 0.10
 GRID_DEG = 15.0  # coarse global stratification cell size for diversity sampling
 RIVER_CODE = 3
@@ -59,9 +46,8 @@ def build_coast_hg_tree(coast_hg_nc_path: Path) -> cKDTree:
 
 
 def evaluate_tile(tile_id: int, root: Path, coast_hg_tree: cKDTree, max_cells: int, max_river_frac: float) -> dict | None:
-    """Returns a metadata dict if this tile passes every eligibility check,
-    else None (with the reason left in the caller's own reject-count log -
-    kept cheap: header-only size check before any full-array read)."""
+    """Returns a metadata dict if the tile passes every eligibility check,
+    else None."""
     tile_dir = root / "model_outputs" / str(tile_id) / "inputs"
     mask_path = tile_dir / "mask.tif"
     if not mask_path.exists():
@@ -103,9 +89,8 @@ def evaluate_tile(tile_id: int, root: Path, coast_hg_tree: cKDTree, max_cells: i
 
 
 def stratified_sample(df: pd.DataFrame, n_target: int, grid_deg: float, seed: int = 0) -> pd.DataFrame:
-    """Proportional-to-occupied-bin sampling on a coarse lon/lat grid, so the
-    selection spans whatever spread of regions the eligible pool actually
-    has rather than concentrating whichever region has the most tiles."""
+    """Proportional-to-occupied-bin sampling on a coarse lon/lat grid,
+    spreading the selection across regions rather than the densest one."""
     rng = np.random.default_rng(seed)
     df = df.copy()
     df["_bin"] = (

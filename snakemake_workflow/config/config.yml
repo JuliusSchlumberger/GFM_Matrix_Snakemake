@@ -382,17 +382,21 @@ simulation: # Used by: preprocessing rules
     # hop>=1 (explicit seed cells) paths; see that docstring.
     obstacle_coupling:
       enabled: true
-      # 3: the 260-tile obstacle-coupling calibration study's conclusion
+      # 4: the 260-tile obstacle-coupling calibration study's conclusion
       # (confirmed complete, see docs/methods_03_calibration_sensitivity.md
       # §3 and P:\...\modelling\calibration_260_tiles), after fixing a bug
       # where the blocked-cell set was recomputed from scratch each outer
       # iteration instead of accumulated monotonically (see flood_model.py's
       # own `blocked = blocked | prev_blocked` comment) - unfixed, this
       # caused most non-converging tiles to oscillate indefinitely rather
-      # than settle. Once fixed: all 260/260 tiles converge within 4 outer
-      # iterations - 166 at the earliest mathematically possible point
-      # (outer=2), 89 at outer=3, 5 at outer=4. 3 already covers 255/260
-      # (98.1%); the remaining 5 tiles need exactly one more iteration.
+      # than settle. Once fixed: all 260/260 tiles run to full convergence
+      # within 4 outer solves - 166 at the earliest mathematically possible
+      # point (outer=2), 89 at outer=3, 5 at outer=4. "n outer solves"
+      # counts inner solves performed, not blocking rounds applied to the
+      # output - a tile that stops at solve k only ever had (k-1) rounds of
+      # dynamic blocking baked into its returned flood map (solve k's own
+      # blocking decision is discarded once its delta is found negligible;
+      # see methods_03_calibration_sensitivity.md §3 for the full reasoning).
       max_outer_iterations: 4
       outer_convergence_pct: 0.01  # stop early once < this % of the tile's cells are newly blocked in an outer iteration
 
@@ -650,20 +654,59 @@ visualization:
 
 # ── COASTAL FLOOD-EXTENT VALIDATION ─────────────────────────────────────────────
 # Used by: validation/validate_country.py, validation/run_validation.py.
-# See docs/flood_extent_validation_plan.md for the full design.
+# See docs/methods_04b_MapsValidation.md for the full design.
 validation:
   benchmark_catalog: "snakemake_workflow/config/data_catalog_validation.yml"
-  benchmark_root: "{root}/inputs/validation" # NOT the GFM catalog's own {root} - see the plan doc's §5.2
+  benchmark_root: "{root}/inputs/validation" # NOT the GFM catalog's own {root}
   output_dir: "{root}/validation"
   return_period: "RP100"
   waterlevel_name: "SLR_0"
-  depth_thresholds_m: [0.05, 0.10, 0.25, 0.50]
-  primary_threshold_m: 0.10 # matches exposure.exceedance_threshold_m
-  benchmark_supersample: 5 # rasterisation supersampling factor per model pixel (plan §4.2)
-  benchmark_wet_fraction: 0.5 # coverage-fraction threshold for "this model pixel counts as benchmark-wet"
+  primary_threshold_m: 0.01 # the single model wet-cell threshold scoring uses everywhere - the
+  # model's own depth classification, a separate question from the benchmark's own coverage
+  # fraction (never thresholded for scoring at all). Deliberately NOT exposure.exceedance_threshold_m
+  # (still 0.10, a different purpose - flood-protection/damage accounting, not extent comparison) -
+  # a real, measured sensitivity check (GBR Wales/Scotland, 0.10/0.05/0.01m) found CSI/HR improving
+  # smoothly and monotonically all the way down to 0.01m with no noise or reversal, despite 0.01m
+  # being below the eikonal solver's own convergence tolerance (simulation.flooding.waterlevel_epsilon_m,
+  # 0.03m) - the "pure flood extent, any real depth counts" comparison this enables is more faithful
+  # to what the benchmark maps themselves represent (a binary flood/no-flood extent, not a
+  # depth-threshold policy choice) than reusing the exposure pipeline's own accounting threshold.
+  coastline_tolerance_cells: 1 # v.confusion_counts_tolerant's own dilation radius (pixels, on the
+  # model's native 30m grid - simulation.flooding.resolution) - a DIAGNOSTIC CSI_tol/HR_tol/FAR_tol
+  # reported alongside (never instead of) the strict CSI/HR/FAR, answering how much of the strict
+  # disagreement sits right next to a cell where model and benchmark actually agree (e.g. the
+  # permanent-water-mask-vs-benchmark-coastline mismatch - methods_04b_MapsValidation.md's own
+  # caveat). 1 cell (30m) matches the real registration-scale evidence already measured for this
+  # exact caveat (NN2000-vs-GOCO06s vertical-datum horizontal shift ~2m; DeltaDTM mask native
+  # resolution ~25-31m in Norway - both sub-pixel-to-one-pixel) - NOT tuned upward to make CSI_tol
+  # look better. Raise only with a real measured reason, and always read it next to
+  # pct_disagreement_forgiven (how much of the disagreement the tolerance actually excused) rather
+  # than CSI_tol alone - see confusion_counts_tolerant's own docstring for the full guard rationale.
+  benchmark_supersample: 5 # rasterisation supersampling factor per model pixel
+  benchmark_wet_fraction: 0.5 # DISPLAY ONLY (the agreement-map category raster's own coverage-
+  # fraction cutoff - one discrete colour per cell needs a yes/no wet call) and Spain's own
+  # connectivity domain construction (src/validation.py::connectivity_domain_mask needs a binary
+  # benchmark-wet mask to label, same reason - see that function's own docstring). Scoring itself
+  # (validation.confusion_counts_soft, 2026-09-30) weights tp/fp/fn/tn by the real coverage
+  # fraction directly instead of thresholding it first, after a per-country sensitivity sweep
+  # (DNK/FIN/NOR/FRA single-tile spot-checks, tau in [0,1]) found the optimal threshold diverges
+  # by country with no consistent winner - see src/validation.py's own confusion_counts_soft
+  # docstring for the full account.
+  # Evaluation domain for partial-coverage benchmarks (Spain/France, 2026-10): the benchmark
+  # agency's own official study design (meta.study_area per benchmark in
+  # data_catalog_validation.yml - geometry_type "perimeter" -> that zone's own polygon used as-is,
+  # no buffer; geometry_type "segments" -> a seeded-connectivity domain, not a buffer around the
+  # line) - see validate_country.py's own module docstring and src/validation.py's
+  # tri_domain_mask/connectivity_domain_mask. Replaced the earlier flat eval_domain.buffer_km
+  # margin and its "buffered"/"model_only" domain-variant reporting entirely.
   eval_domain:
-    buffer_km: 2.0 # max distance from a benchmark polygon still counted as "surveyed" (plan §4.3)
-    also_report_model_domain_only: true
+    buffer_km: 2.0 # (1) validate_country_depth_bands' own evaluation domain (buffer+cluster,
+    # unaffected by the 2026-10 change above - depth-band comparison has no study_area path yet).
+    # (2) validate_country()'s own "segments" branch (Spain): NOT the scoring domain any more -
+    # purely a chunk-windowing optimization, grouping nearby ARPSI seed segments so the same
+    # merged chunk isn't read once per segment - see build_evaluation_clusters' own docstring.
+    also_report_model_domain_only: true # validate_country_depth_bands only (see above) -
+    # whether to also report the unrestricted "model_only" domain alongside "buffered".
   # Evaluation units = benchmark-geometry clusters (buffer each polygon, merge
   # overlapping ones, process per merged cluster), NOT a uniform grid - see
   # validation.build_evaluation_clusters. Real timing on the Spain benchmark
@@ -673,17 +716,17 @@ validation:
   # both hang (>160s) on a real degenerate high-vertex-count record.
   vector_simplify_tolerance_m: 100.0
   buffer_quad_segs: 2
-  population_source: "population" # data_catalog_gfm.yml key (WorldPop 2020)
   permanent_water_source: "deltadtm_mask" # data_catalog_gfm.yml key - DeltaDTM's own native-
   # resolution land/ocean/lake/river mask (~25-31m ground cell in Norway, 4-8x finer in area than
-  # Copernicus land_use's ~100m - see docs/flood_extent_validation_caveats.md §1.3 and
-  # tests/norway_diagnostics/ for the real quantified comparison, 2026-09). Switched from
+  # Copernicus land_use's ~100m - see tests/norway_diagnostics/ for the real quantified
+  # comparison, 2026-09). Switched from
   # "land_use" (Copernicus Global Land Cover, still a valid catalog entry, just no longer the
   # default here) - real measured improvement (coastal-strip masking loss 45.7%->30.1% within
   # 240m of shore for Norway) but NOT a full fix: ~1/3 of the original loss was genuine
   # coarse-cell aliasing (now eliminated), the rest is a waterline-DEFINITION disagreement
   # (DeltaDTM/ESA WorldCover's optical water edge vs. a benchmark's own surveyed coastline) that
-  # no 30m-resolution mask can resolve - see the caveats doc for the full breakdown. Was called
+  # no 30m-resolution mask can resolve - see methods_04b_MapsValidation.md's own caveats section
+  # for the full breakdown, and coastline_tolerance_cells above for a diagnostic (not a fix). Was called
   # `landuse_source` before this switch - renamed since that name became misleading once it no
   # longer necessarily points at a land-use product.
   permanent_water_codes: [1, 2, 3] # DeltaDTM mask codes to exclude (1=ocean, 2=lake, 3=river -
@@ -703,7 +746,7 @@ validation:
   # analysis/compute_flood_totals.py (analysis.compute_flood_totals switch) - one
   # flood_totals_{ISO}.csv per country, country-wide (not per-region) total flooded
   # area/exposed population per (RP, SLR), no protection/adaptation applied. Read
-  # by validate_country.py for the model_total_wet_km2/pop_model_total columns
+  # by validate_country.py for the model_total_wet_km2 column
   # (mitigates caveats doc §1.2 - see that file for why a country-wide total, not
   # just a benchmark cluster's own local window, matters). Must match
   # run_analysis.py's own exposure output dir (default "{merged_outputs}/exposure")

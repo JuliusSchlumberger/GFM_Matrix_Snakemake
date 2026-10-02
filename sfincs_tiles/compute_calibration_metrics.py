@@ -1,16 +1,10 @@
-"""Aggregate the per-tile flood-extent agreement counts that
-postprocess_tile_summary.py already writes into each tile's own
-outputs/summary_bathtub.json/summary_eikonal.json
-(bathtub_{matched,only,sfincs_only}_km2 and
-eikonal_{matched,only,sfincs_only}_km2) into pooled HT/FAR/CSI/bias for
-SFINCS-vs-bathtub and SFINCS-vs-eikonal.
+"""Aggregates the per-tile flood-extent agreement counts
+postprocess_tile_summary.py writes into each tile's
+outputs/summary_bathtub.json/summary_eikonal.json into pooled HT/FAR/CSI/bias
+for SFINCS-vs-HC-bathtub and SFINCS-vs-EA-bathtub (display names only, see
+DISPLAY_LABEL - JSON field prefixes stay "bathtub"/"eikonal").
 
-Pure JSON aggregation - no raster is opened here, since the per-tile counts
-already require reading and reprojecting each tile's rasters, which
-postprocess_tile_summary.py already does, per-tile - this script only sums
-what's already in those files and computes ratios from the sums - see
-flood_agreement.py for why ratios are only ever computed on summed counts,
-never per-tile.
+Pure JSON aggregation, no raster I/O.
 
 Usage:
     python compute_calibration_metrics.py --base-dir-name validation_sfincs_v4
@@ -32,6 +26,7 @@ from gfm_config import read_root  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
 
 COUNT_FIELDS = ("matched_km2", "only_km2", "sfincs_only_km2")
+DISPLAY_LABEL = {"bathtub": "HC-bathtub", "eikonal": "EA-bathtub"}
 
 
 def _load_tile_rows(base_dir: Path) -> list[dict]:
@@ -80,7 +75,7 @@ def main() -> None:
         n_valid = df[f"{prefix}_matched_km2"].notna().sum()
         n_missing = len(df) - n_valid
         pooled = pooled_metrics(df.dropna(subset=[f"{prefix}_matched_km2"]), prefix)
-        print(f"\nSFINCS vs {prefix} - pooled across {n_valid} tile(s) ({n_missing} missing counts, skipped):")
+        print(f"\nSFINCS vs {DISPLAY_LABEL[prefix]} - pooled across {n_valid} tile(s) ({n_missing} missing counts, skipped):")
         for k, v in pooled.items():
             print(f"  {k}: {v:.3f}" if not np.isnan(v) else f"  {k}: NaN")
 

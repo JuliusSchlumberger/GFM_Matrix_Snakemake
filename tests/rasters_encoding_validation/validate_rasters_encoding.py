@@ -37,6 +37,7 @@ from rasters import (  # noqa: E402
     average_pool_to_grid,
     decode_friction_int16,
     encode_dem_cm,
+    relabel_small_isolated_ocean_patches,
     resolve_offshore_mask_gaps_via_gebco,
     save_waterdepth_raster,
 )
@@ -186,6 +187,35 @@ def test_resolve_offshore_mask_gaps_via_gebco_positive_gebco_stays_land() -> Non
     print()
 
 
+def test_relabel_small_isolated_ocean_patches_relabels_small_component() -> None:
+    print("=== relabel_small_isolated_ocean_patches: small isolated ocean blob -> lake ===")
+    mask_vals = np.zeros((5, 5), dtype=np.uint8)
+    mask_vals[1:3, 1:3] = 1  # 4-cell isolated "ocean" patch, well under the 30-cell threshold
+
+    corrected, stats = relabel_small_isolated_ocean_patches(mask_vals, min_cells=30)
+
+    assert np.all(corrected[1:3, 1:3] == 2), f"small ocean-coded blob should become lake, got {corrected}"
+    assert not np.any(corrected == 1), corrected
+    assert stats == {"n_relabeled": 4, "n_components_relabeled": 1}, stats
+    print(f"PASS: corrected=\n{corrected}, stats={stats}")
+    print()
+
+
+def test_relabel_small_isolated_ocean_patches_keeps_large_component() -> None:
+    print("=== relabel_small_isolated_ocean_patches: large ocean body stays ocean, small one still relabeled ===")
+    mask_vals = np.zeros((6, 10), dtype=np.uint8)
+    mask_vals[:, 0:6] = 1  # 36-cell real ocean body, at/above the threshold
+    mask_vals[4:6, 8:10] = 1  # 4-cell isolated blob, well below the threshold
+
+    corrected, stats = relabel_small_isolated_ocean_patches(mask_vals, min_cells=30)
+
+    assert np.all(corrected[:, 0:6] == 1), f"large ocean body must stay ocean, got {corrected}"
+    assert np.all(corrected[4:6, 8:10] == 2), f"small isolated blob should still become lake, got {corrected}"
+    assert stats == {"n_relabeled": 4, "n_components_relabeled": 1}, stats
+    print(f"PASS: corrected=\n{corrected}, stats={stats}")
+    print()
+
+
 def test_save_waterdepth_raster_creates_missing_output_directory() -> None:
     """Real, live HPC failure (2026-08-10): run_aqueduct_cli.py (a plain
     standalone CLI, not a Snakemake rule with automatic output-dir
@@ -267,6 +297,8 @@ def main() -> None:
     test_resolve_offshore_mask_gaps_via_gebco_connected_negative_becomes_ocean()
     test_resolve_offshore_mask_gaps_via_gebco_isolated_basin_stays_land()
     test_resolve_offshore_mask_gaps_via_gebco_positive_gebco_stays_land()
+    test_relabel_small_isolated_ocean_patches_relabels_small_component()
+    test_relabel_small_isolated_ocean_patches_keeps_large_component()
     test_save_waterdepth_raster_creates_missing_output_directory()
     test_average_pool_to_grid_closed_form_correctness()
     print("All rasters.py encoding/gap-fill validation checks passed.")

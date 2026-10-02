@@ -1,15 +1,10 @@
-"""Build gebco.vrt from the 8 GEBCO 2026 quadrant GeoTIFFs in
-inputs/gebco_2026_geotiff/, with a relative (portable) source reference -
-same "verify what actually got included, don't trust gdal.BuildVRT()
-silently" principle as preparation/build_deltadtm_vrt.py, but without that
-script's elaborate round-based-retry machinery: GEBCO ships as 8 large
-whole-globe-quadrant files, not ~7500 small tiles, so a single
-retry_transient_io-wrapped gdal.BuildVRT() call is proportionate here.
+"""Builds gebco.vrt from the 8 GEBCO 2026 quadrant GeoTIFFs in
+inputs/gebco_2026_geotiff/, with relative (portable) source references.
+Verifies every source tile actually made it into the VRT, since
+gdal.BuildVRT() can silently drop one.
 
-Not part of the main production preparation pipeline (preparation/
-run_preparation.py) - GEBCO is only used by this SFINCS first-pass
-(sfincs_tiles/), never by the eikonal model - so this stays a standalone
-script here rather than a registered preparation step.
+Not part of the main production preparation pipeline - GEBCO is only used
+by sfincs_tiles/, never by the eikonal model.
 
 Safe/idempotent to re-run any time after more GEBCO tiles are added.
 
@@ -42,10 +37,8 @@ def build_gebco_vrt(tile_dir: Path, out_vrt: Path) -> None:
 
     gdal.PushErrorHandler(_collect_warning)
     try:
-        # GEBCO quadrants already tile a regular global grid at one uniform
-        # native resolution (15 arcsec, confirmed identical on every tile
-        # checked) - no outputBounds/xRes/yRes pinning needed the way
-        # DeltaDTM's wildly-varying-resolution tiles required.
+        # GEBCO quadrants share one uniform native resolution (15 arcsec);
+        # no outputBounds/xRes/yRes pinning needed.
         ds = retry_transient_io(
             gdal.BuildVRT,
             str(out_vrt), [str(p) for p in tif_paths],
@@ -65,10 +58,8 @@ def build_gebco_vrt(tile_dir: Path, out_vrt: Path) -> None:
     if not out_vrt.exists():
         raise RuntimeError(f"gdal.BuildVRT produced no output at {out_vrt}")
 
-    # Verify every source tile actually made it in - gdal.BuildVRT silently
-    # drops a source it transiently fails to open instead of raising (same
-    # failure mode documented in build_deltadtm_vrt.py's own module
-    # docstring) - a real guarantee, not an assumption.
+    # Verify every source tile made it in - gdal.BuildVRT can silently drop
+    # a source it fails to open instead of raising.
     import xml.etree.ElementTree as ET
 
     tree = retry_transient_io(ET.parse, out_vrt)
@@ -86,10 +77,8 @@ def build_gebco_vrt(tile_dir: Path, out_vrt: Path) -> None:
             "until fixed (re-run this script - transient P: share failures are the usual cause)."
         )
 
-    # Rewrite every <SourceFilename> to a bare relative filename with
-    # relativeToVRT="1" ourselves, same reasoning as build_deltadtm_vrt.py's
-    # own _rewrite_sources_relative - do not trust gdal.BuildVRT's own
-    # relative-path autodetection on this P: share.
+    # Rewrite each <SourceFilename> to a bare relative filename with
+    # relativeToVRT="1".
     for el in tree.getroot().iter("SourceFilename"):
         el.text = Path(el.text.replace("\\", "/")).name
         el.set("relativeToVRT", "1")

@@ -103,8 +103,8 @@ and one-off investigation folders (e.g. `martinique_diagnostics/`,
 - `docs/methods_02_flood_depth.md` — the flood-solver methodology.
 - `docs/python_vs_julia_qa.md` — validation of the Python port against the
   original Julia reference implementation.
-- `docs/flood_extent_validation_plan.md` / `docs/flood_extent_validation_caveats.md`
-  — the benchmark-validation methodology and known caveats.
+- `docs/methods_04b_MapsValidation.md` — validation against official national
+  flood hazard maps.
 - `docs/calibration_sweep_plan.md` — a planned (not yet implemented)
   parameter-sensitivity study.
 - `snakemake_workflow/hpc.md` — HPC/SLURM setup and dispatch.

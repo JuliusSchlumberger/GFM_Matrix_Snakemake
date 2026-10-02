@@ -2,32 +2,21 @@
 
 Runs the full sfincs_tiles/ pipeline (build_elevation.py ->
 build_roughness.py -> build_boundary_forcing.py -> build_sfincs_tile.py ->
-run_sfincs_tile.py) for each tile ID given - entirely under ONE
-environment/interpreter (whichever `python` you launch this orchestrator
-with, e.g. hydromt-sfincs-dev). No `conda run`, no second environment: none
-of these scripts import src/config_utils.py (see gfm_config.py's own module
-docstring for why - it needs a much older hydromt than hydromt_sfincs
-does), so there's nothing left that requires the main pipeline's own
-gfm_python_preprocessing env.
+run_sfincs_tile.py) for each tile ID given, entirely under one
+environment/interpreter (whichever `python` launches this orchestrator,
+e.g. hydromt-sfincs-dev).
 
-Continues to the next tile if one fails (e.g. "no COAST-HG station within
-range" is a real, expected drop for some tiles per the plan doc, not
-necessarily a bug) - prints a final per-tile PASS/FAIL summary rather than
-stopping the whole batch on the first failure. Python equivalent of
-run_sfincs_tiles.ps1 - use whichever you prefer running from your own
-terminal.
+Continues to the next tile if one fails, then prints a final per-tile
+PASS/FAIL summary rather than stopping the whole batch on the first
+failure. Python equivalent of run_sfincs_tiles.ps1.
 
-Requires setup_batch_inputs.py to have been run first for this batch (once,
-covers every tile) - populates each tile's own {base_dir_name}/{tile_id}/
-inputs/, which build_elevation.py and friends read from directly, not
-model_outputs/. By default also regenerates dem.tif/mask.tif per tile with
-the current extract_dem/extract_dem_mask logic (regenerate_dem_mask.py) as
-a first, NON-FATAL step - the one step in this script that genuinely needs
-a second environment (gfm_python_preprocessing, for src/config_utils.py's
-DataCatalog - see that script's own docstring), hence --gfm-python below;
-skip it with --skip-dem-regen to fall back to the plain copied dem.tif/
-mask.tif instead (same fallback run_one_tile.sh's own step 2 uses on
-failure).
+Requires setup_batch_inputs.py to have been run first for this batch, to
+populate each tile's {base_dir_name}/{tile_id}/inputs/. By default also
+regenerates dem.tif/mask.tif per tile with the current
+extract_dem/extract_dem_mask logic (regenerate_dem_mask.py) as a
+non-fatal first step, under --gfm-python since that step needs the
+gfm_python_preprocessing env; skip it with --skip-dem-regen to use the
+plain copied dem.tif/mask.tif instead.
 
 Usage:
     python run_sfincs_tiles.py --tile-ids 1573 929 851 --base-dir-name validation_sfincs_v5
@@ -55,18 +44,13 @@ _DEFAULT_GFM_PYTHON = r"C:\Users\schlumbe\AppData\Local\miniforge3\envs\gfm_pyth
 
 def _steps(sfincs_exe: str, timeout_s: float, build_only: bool, gfm_python: str, skip_dem_regen: bool) -> list[dict]:
     """One (label, script, extra_args, interpreter, non_fatal) step per
-    pipeline stage, in the exact order every tile must run them. Every step
-    runs under sys.executable (whichever interpreter launched this
-    orchestrator, e.g. hydromt-sfincs-dev) EXCEPT "regenerate dem/mask",
-    which needs its own explicit interpreter (gfm_python) since it imports
-    src/config_utils.py - the one real second-environment dependency this
-    script has (see module docstring).
+    pipeline stage, in the order every tile runs them. Every step runs under
+    sys.executable except "regenerate dem/mask", which uses its own explicit
+    interpreter (gfm_python) since it imports src/config_utils.py.
 
-    build_only=True drops the "run SFINCS + postprocess" step entirely -
-    for building a large batch of tiles' sfincs_model/ dirs locally so
-    they're ready for generate_sfincs_hpc_jobs.py's own HPC batch dispatch
-    to actually run them, without also running (and therefore waiting on)
-    the simulation itself here."""
+    build_only=True drops the "run SFINCS + postprocess" step, for building
+    a batch of tiles' sfincs_model/ dirs locally without running the
+    simulation here."""
     steps = []
     if not skip_dem_regen:
         steps.append({
@@ -89,14 +73,10 @@ def _steps(sfincs_exe: str, timeout_s: float, build_only: bool, gfm_python: str,
 
 def run_tile(tile_id: int, config_path: str, base_dir_name: str, steps: list[dict]) -> tuple[bool, str | None]:
     """Runs every step for one tile in order; stops at the first failing
-    step UNLESS that step is marked non_fatal (currently only "regenerate
-    dem/mask" - real cross-step dependency otherwise, e.g.
-    build_sfincs_tile.py needs the prep stage's own output files,
-    run_sfincs_tile.py needs the built model.
+    step unless it's marked non_fatal.
 
-    Returns (passed, failed_step_label_or_None) - failed_step_label is set
-    even for a non-fatal failure, purely informational (doesn't affect the
-    PASS/FAIL summary).
+    Returns (passed, failed_step_label_or_None); failed_step_label is set
+    even for a non-fatal failure, purely informational.
     """
     for step in steps:
         interpreter = step.get("interpreter", sys.executable)
@@ -143,7 +123,7 @@ def main() -> None:
         "--build-only", action="store_true",
         help="only run the prep+build steps (no local SFINCS simulation/postprocess) - "
              "for building a batch of tiles' sfincs_model/ dirs ahead of running them "
-             "elsewhere, e.g. generate_sfincs_hpc_jobs.py's own HPC batch dispatch.",
+             "elsewhere, e.g. run_one_tile.sh's own HPC batch dispatch.",
     )
     args = parser.parse_args()
     if not args.tile_ids and not args.tile_ids_file:

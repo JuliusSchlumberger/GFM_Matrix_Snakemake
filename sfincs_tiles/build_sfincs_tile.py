@@ -1,20 +1,14 @@
-"""Build a runnable SFINCS model for one GFM tile, from the prep-stage
+"""Builds a runnable SFINCS model for one GFM tile from the prep-stage
 outputs (build_elevation.py, build_roughness.py, build_boundary_forcing.py).
 
-Every sfincs_tiles/ script, including the prep stage, runs under the same
-single hydromt-sfincs-dev env - none of them import src/config_utils.py
-(importing it fails under this env's hydromt 1.4.1,
-`ImportError: cannot import name 'setuplog' from 'hydromt.log'`, removed
-in hydromt's 1.x rewrite; config_utils.py was written against the main
-pipeline's hydromt 0.9.3). gfm_config.py's read_root/resolve_catalog_path
-cover the small amount sfincs_tiles/ actually needs from it. No separate
-gfm_python_preprocessing env or `conda run` needed for anything in this
-folder:
+Every sfincs_tiles/ script runs under the same hydromt-sfincs-dev env.
+src/config_utils.py is not importable there (hydromt 1.4.1 removed
+`setuplog` from hydromt.log); gfm_config.py's read_root/resolve_catalog_path
+cover what sfincs_tiles/ needs instead:
     C:\\Users\\schlumbe\\AppData\\Local\\miniforge3\\envs\\hydromt-sfincs-dev\\python.exe build_sfincs_tile.py --tile-id 1907
 
-No weirs, no restart, no discharge - see sfincs_tiles' own plan doc for the
-full design/reasoning. Uses a subgrid: a coarse computational grid with a
-finer subgrid table capturing sub-cell terrain detail (see
+No weirs, no restart, no discharge. Uses a subgrid: a coarse computational
+grid with a finer subgrid table capturing sub-cell terrain detail (see
 MAIN_RES_M_DEFAULT/SUBGRID_NR_PIXELS_DEFAULT's own comment below).
 """
 
@@ -44,19 +38,15 @@ from retry_io import retry_transient_io  # noqa: E402
 
 
 def _classify_water_level_create_error(e: Exception, tile_id: str) -> RuntimeError | None:
-    """Recognize hydromt_sfincs's own antimeridian-crossing masking failure
-    inside `sf.water_level.create()` and turn it into a clear, actionable
-    error - returns `None` if `e` doesn't match (caller should re-raise `e`
-    itself unchanged).
+    """Recognizes hydromt_sfincs's own antimeridian-crossing masking failure
+    inside `sf.water_level.create()` and turns it into a clear, actionable
+    error. Returns `None` if `e` doesn't match (caller re-raises `e`
+    unchanged).
 
     hydromt's own internal masking does a shapely union_all() in raw
-    EPSG:4326 lon/lat - for a tile near the antimeridian, the buffered
-    search geometry can straddle +-180 deg and produce a self-intersecting
-    polygon there, which GEOS rejects as an invalid topology regardless of
-    buffer size. Not fixable via buffer tuning (would mean patching
-    hydromt_sfincs's own dateline handling) - surfaced as a clear,
-    actionable error instead of a raw GEOS traceback, so this tile can be
-    dropped like any other "can't be forced" case.
+    EPSG:4326 lon/lat: for a tile near +-180 deg longitude, the buffered
+    search geometry can self-intersect there, which GEOS rejects regardless
+    of buffer size. Not fixable via buffer tuning.
     """
     if "TopologyException" in str(e) or "side location conflict" in str(e):
         return RuntimeError(
@@ -68,12 +58,9 @@ def _classify_water_level_create_error(e: Exception, tile_id: str) -> RuntimeErr
 
 
 def _validate_subgrid_params(resolution_m: float, subgrid_nr_pixels: int) -> None:
-    """Fail fast, before any grid/reprojection work: hydromt_sfincs's own
-    subgrid.create() hard-enforces `nr_subgrid_pixels` to be a multiple of 2
-    (components/grid/subgrid.py ~line 690) - checking here gives a clear,
-    immediate error instead of discovering it after the main grid, mask,
-    AND the (non-trivial, nearest-neighbour) pre-reprojection step have
-    already run.
+    """Validates subgrid params before any grid/reprojection work.
+    hydromt_sfincs's own subgrid.create() hard-enforces `nr_subgrid_pixels`
+    to be a multiple of 2 (components/grid/subgrid.py ~line 690).
     """
     if subgrid_nr_pixels <= 0 or subgrid_nr_pixels % 2 != 0:
         raise ValueError(
@@ -85,28 +72,21 @@ def _validate_subgrid_params(resolution_m: float, subgrid_nr_pixels: int) -> Non
 
 
 def _reproject_nearest_to_grid(src_path: Path, dst_transform, dst_crs, dst_shape: tuple[int, int]) -> np.ndarray:
-    """Nearest-neighbour reproject `src_path` onto the EXACT destination
-    grid (`dst_transform`/`dst_crs`/`dst_shape`) - the pre-reprojection
-    workaround `build_sfincs_tile()`'s own step 3 needs, since
-    hydromt_sfincs silently ignores `reproj_method` and always forces
-    bilinear internally (see that step's own comment). Every output pixel
-    is guaranteed to be one of the source raster's own real values, never a
-    blended/interpolated one - that guarantee is the entire point of this
-    function, and is what its own test validates.
+    """Nearest-neighbour reprojects `src_path` onto the exact destination
+    grid (`dst_transform`/`dst_crs`/`dst_shape`). Every output pixel is one
+    of the source raster's own real values, never blended/interpolated -
+    works around hydromt_sfincs silently ignoring `reproj_method` and always
+    forcing bilinear internally (see that step's own comment).
 
     `src_path`'s own EPSG:4326 (lon/lat) rectangle and the destination UTM
     subgrid's rectangle are rotated relative to each other (UTM axes only
-    align with lon/lat near a zone's own central meridian) - the
-    destination rectangle's corners can fall just outside the source's
-    real coverage even though the tile's own bbox/geometry match exactly.
-    Left NaN by `dst_nodata=np.nan` above, this is exactly where SFINCS's
-    own water-level boundary cells are placed, so a NaN-contaminated
-    coarse cell there would corrupt that cell's own subgrid volume table.
-    Filled here via nearest-valid-cell inpainting (scipy.ndimage's own
-    distance-transform-to-nearest-index trick), which works for any
-    rotation severity without needing to re-architect
-    elevation_combined.tif/manning_n.tif's own 1:1 pixel match to
-    dem.tif/mask.tif.
+    align with lon/lat near a zone's own central meridian), so the
+    destination rectangle's corners can fall just outside the source's real
+    coverage even though the tile's bbox/geometry match exactly. Those gaps
+    are left NaN by `dst_nodata=np.nan`, then filled via nearest-valid-cell
+    inpainting (scipy.ndimage's distance-transform-to-nearest-index) -
+    otherwise a NaN-contaminated coarse cell at a water-level boundary would
+    corrupt that cell's own subgrid volume table.
     """
     with retry_transient_io(rasterio.open, src_path) as src:
         dst_arr = np.empty(dst_shape, dtype=np.float32)
@@ -121,11 +101,8 @@ def _reproject_nearest_to_grid(src_path: Path, dst_transform, dst_crs, dst_shape
     missing = np.isnan(dst_arr)
     if missing.any():
         if missing.all():
-            # Genuinely zero real-data overlap - the nearest-valid-neighbour
-            # fill has nothing to fill FROM, so failing loudly here is safer
-            # than silently handing hydromt_sfincs an all-garbage subgrid
-            # source (which is exactly the kind of silent boundary-adjacent
-            # corruption this whole fix exists to prevent).
+            # Zero real-data overlap: nothing to nearest-fill from, so fail
+            # loudly rather than hand hydromt_sfincs an all-garbage subgrid source.
             raise ValueError(
                 f"{src_path}: reprojected onto the destination subgrid with ZERO valid cells - "
                 "no real data to nearest-fill from. Check the source file's own coverage against "
@@ -142,18 +119,12 @@ def _compute_zsini_array(
     native_mask_path: Path, station_x: np.ndarray, station_y: np.ndarray, station_values: np.ndarray,
     grid_coords: xr.DataArray, dst_transform, dst_crs, dst_shape: tuple[int, int],
 ) -> np.ndarray:
-    """IDW-interpolated initial water level, kept only on real ocean cells.
-
-    IDW is evaluated everywhere, but any cell that isn't ocean-coded in the
-    tile's own native mask.tif (land=0, lake=2, river=3 - any isolated/
-    disconnected ocean-coded blob still counts as ocean here) gets
-    overwritten with hydromt_sfincs's own official "no initial water"
-    sentinel (-9999.0 - see SfincsInitialConditions.create's own
-    docstring: "For cells with initial water levels of -9999.0, the SFINCS
-    kernel will set the initial water level to the bed level", i.e. dry,
-    zero depth) instead of the IDW value - otherwise land far inland would
-    start the simulation already "flooded" from the interpolated coastal
-    water level alone.
+    """IDW-interpolated initial water level, kept only on real ocean cells
+    (native mask.tif land=0/lake=2/river=3; any ocean-coded cell counts,
+    including isolated blobs). Non-ocean cells get hydromt_sfincs's own
+    "no initial water" sentinel (-9999.0), which SFINCS treats as dry at bed
+    level - otherwise inland land would start the simulation already
+    "flooded" from the interpolated coastal water level.
     """
     yy, xx = np.meshgrid(grid_coords["y"].values, grid_coords["x"].values, indexing="ij")
     zsini_arr = idw_interpolate_to_grid(station_x, station_y, station_values, xx, yy).astype(np.float32)
@@ -176,24 +147,20 @@ def _ocean_polygon_wgs84(mask_path: Path, ocean_code: int = 1) -> gpd.GeoDataFra
     return gpd.GeoDataFrame(geometry=geoms, crs="EPSG:4326")
 
 
-TRUNCATE_WINDOW_HR_DEFAULT = (40.0, 110.0)  # see build_sfincs_tile()'s own comment at the
-# boundary-forcing step: every COAST-HG hydrograph in this pipeline shares the same
-# synthetic time axis (peak always at t=74.5h), so this window is a property of the
-# dataset, not a per-tile tuning choice.
+TRUNCATE_WINDOW_HR_DEFAULT = (40.0, 110.0)  # truncation window (h) around COAST-HG's
+# storm peak: every hydrograph in this pipeline shares the same synthetic time axis
+# (peak at t=74.5h), so this window is a property of the dataset, not per-tile tuning.
 
-# Subgrid: coarse COMPUTATIONAL grid at MAIN_RES_M, with a SUBGRID_NR_PIXELS-times-finer
+# Subgrid: coarse computational grid at MAIN_RES_M, with a SUBGRID_NR_PIXELS-times-finer
 # subgrid table (hypsometric volume/roughness-depth relationships per coarse cell)
-# capturing real sub-cell terrain detail without paying the per-timestep cost of running
-# the whole simulation at that finer resolution - subgrid table construction is a
-# one-time preprocessing cost only. nr_subgrid_pixels must be a multiple of 2
-# (hydromt_sfincs's own hard-enforced check, hydromt_sfincs/components/grid/subgrid.py
-# ~line 690).
+# capturing sub-cell terrain detail without running the whole simulation at that finer
+# resolution - subgrid table construction is a one-time preprocessing cost only.
+# nr_subgrid_pixels must be a multiple of 2 (hydromt_sfincs's own hard-enforced check,
+# hydromt_sfincs/components/grid/subgrid.py ~line 690).
 #
-# 120m / 30m (SUBGRID_NR_PIXELS=4): 15m subgrid pixels are finer than DeltaDTM's own real
-# native resolution (~30m), and hydromt_sfincs's own forced-bilinear interpolation (see
-# subgrid.create()'s own comment below) at that over-fine scale fabricates small
-# spurious depressions with no real source support. 30m subgrid pixels sample real,
-# distinct DeltaDTM cells instead of interpolating below them.
+# 120m / 30m (SUBGRID_NR_PIXELS=4): 30m subgrid pixels match DeltaDTM's own native
+# resolution (~30m); finer would let hydromt_sfincs's forced-bilinear interpolation (see
+# subgrid.create()'s own comment below) fabricate spurious sub-pixel depressions.
 MAIN_RES_M_DEFAULT = 120.0
 SUBGRID_NR_PIXELS_DEFAULT = 4  # -> 120/4 = 30m subgrid resolution, DeltaDTM's own native scale
 SUBGRID_NR_LEVELS_DEFAULT = 20  # hypsometric bins; memory scales linearly with this
@@ -212,15 +179,15 @@ def build_sfincs_tile(
     base_dir_name: str = "validation_sfincs_v2",
 ) -> Path:
     _validate_subgrid_params(resolution_m, subgrid_nr_pixels)
-    # Read from THIS tile's own working copy, not model_outputs/ directly.
+    # Reads from the tile's working copy, not model_outputs/ directly.
     tile_dir = root / base_dir_name / tile_id / "inputs"
     sfincs_dir = root / base_dir_name / tile_id / "sfincs_model"
     sfincs_dir.mkdir(parents=True, exist_ok=True)
 
     tile_gdf = retry_transient_io(gpd.read_file, tile_dir / "tile_geometry.gpkg")
 
-    # -- local data catalog for elevation.create/roughness.create (both need
-    # catalog-keyed sources, not a raw-DataArray-accepting signature) --
+    # -- local data catalog: elevation.create/roughness.create need catalog-keyed
+    # sources, not raw DataArrays --
     local_catalog_path = sfincs_dir / "data_catalog_local.yml"
     local_catalog = {
         "meta": {"root": str(sfincs_dir)},
@@ -236,18 +203,14 @@ def build_sfincs_tile(
     print(f"[1/8] grid created: {dict(sf.grid.data.sizes)} cells, crs={sf.crs}")
 
     # -- 2. mask: active cells (whole tile) + waterlevel boundary (ocean edge only) --
-    # Before subgrid, not after - matches hydromt_sfincs's own real reference usage
-    # (grid -> mask -> ... -> subgrid.create()), and subgrid.create()'s own internals
-    # read self.model.grid.mask directly, so it must already exist.
+    # Built before subgrid: subgrid.create()'s own internals read self.model.grid.mask
+    # directly, so it must already exist.
     #
-    # all_touched=True: hydromt_sfincs's own create_boundary() defaults to
-    # all_touched=False, which only includes a cell in the boundary if the ocean
-    # polygon's own geometry covers that cell's center point. For a coastline running
-    # diagonally across this tile's own rotated UTM grid, a center-point test is much
-    # stricter than "does the polygon touch this cell at all" and produces a sparse,
-    # broken, dotted boundary line instead of a continuous one. all_touched=True
-    # includes every cell the polygon touches at all, matching the true coastline far
-    # more continuously regardless of grid rotation.
+    # all_touched=True: hydromt_sfincs's own create_boundary() defaults to a
+    # center-point test, which produces a sparse, broken boundary line on a coastline
+    # running diagonally across this tile's rotated UTM grid. all_touched=True
+    # includes every cell the ocean polygon touches at all, giving a continuous
+    # boundary regardless of grid rotation.
     sf.mask.create_active(include_polygon=tile_gdf, reset_mask=True)
     ocean_poly = _ocean_polygon_wgs84(tile_dir / "mask.tif")
     sf.mask.create_boundary(btype="waterlevel", include_polygon=ocean_poly, reset_bounds=False, all_touched=True)
@@ -261,31 +224,26 @@ def build_sfincs_tile(
             "No weir/discharge fallback exists in this pipeline - this tile can't be forced."
         )
 
-    # -- 3. subgrid table: combined DeltaDTM+MDT-corrected-GEBCO elevation (build_elevation.py)
-    # + Manning's n (friction.tif decoded by build_roughness.py), pre-reprojected onto the
-    # exact fine subgrid grid ourselves (nearest-neighbour) before calling subgrid.create().
+    # -- 3. subgrid table: combined elevation (build_elevation.py) and Manning's n
+    # (build_roughness.py), pre-reprojected onto the exact fine subgrid grid ourselves
+    # (nearest-neighbour) before calling subgrid.create().
     #
     # Nearest, not hydromt_sfincs's own forced-bilinear default: bilinear interpolation
-    # below DeltaDTM's own real native resolution creates small artificial depressions
-    # that don't exist in the source data. Nearest keeps every subgrid pixel traceable to
-    # a real DeltaDTM/GEBCO sample - the eikonal model's own dem.tif is itself
-    # nearest-sourced at native resolution, so this also minimises the two models' pixel-
-    # value divergence. Pre-reprojecting onto the exact destination grid ourselves makes
-    # hydromt's own forced-bilinear pass a no-op, at the fine subgrid resolution.
+    # below DeltaDTM's own native resolution fabricates artificial depressions with no
+    # real source support. Nearest keeps every subgrid pixel traceable to a real
+    # DeltaDTM/GEBCO sample, and pre-reprojecting onto the exact destination grid
+    # ourselves makes hydromt's own forced-bilinear pass a no-op.
     main_transform = sf.grid.data.raster.transform
     main_crs = sf.grid.data.raster.crs
     main_height, main_width = sf.grid.data.sizes["y"], sf.grid.data.sizes["x"]
     fine_transform = main_transform * main_transform.scale(1.0 / subgrid_nr_pixels)
     fine_height, fine_width = main_height * subgrid_nr_pixels, main_width * subgrid_nr_pixels
 
-    # `_reproject_nearest_to_grid()` guarantees this array has no NaN
-    # anywhere (nearest-valid-neighbour fill for any rotation-induced gap
-    # between the source's own lon/lat rectangle and this UTM subgrid's
-    # rotated footprint - see that function's own docstring). hydromt_sfincs's
-    # own downstream re-read of this file (inside subgrid.create()) can
-    # reintroduce NaN, but only in cells outside the tile's own true active
-    # domain - harmless padding, never read by process_tile_regular's
-    # volume-table construction, which skips inactive cells entirely.
+    # `_reproject_nearest_to_grid()` guarantees this array has no NaN anywhere
+    # (see its own docstring). hydromt_sfincs's own downstream re-read of this
+    # file (inside subgrid.create()) can reintroduce NaN, but only in padding
+    # cells outside the tile's active domain, which the volume-table
+    # construction skips entirely.
     subgrid_sources = {}
     for name, src_uri in [("local_elevation_subgrid", "elevation_combined.tif"), ("local_roughness_subgrid", "manning_n.tif")]:
         out_path = sfincs_dir / f"{Path(src_uri).stem}_subgrid_src.tif"
@@ -303,17 +261,15 @@ def build_sfincs_tile(
     local_catalog["local_roughness_subgrid"] = {"data_type": "RasterDataset", "uri": subgrid_sources["local_roughness_subgrid"], "driver": "rasterio"}
     with open(local_catalog_path, "w") as fh:
         yaml.dump(local_catalog, fh, sort_keys=False)
-    # Reconstruct sf so its DataCatalog re-reads local_catalog_path with the new entries -
-    # a SfincsModel's own DataCatalog is parsed once at construction, not re-read from a
-    # mid-session file rewrite.
+    # Reconstruct sf so its DataCatalog re-reads local_catalog_path with the new
+    # entries - DataCatalog is parsed once at construction, not re-read live.
     sf = SfincsModel(data_libs=[str(local_catalog_path)], root=str(sfincs_dir), mode="w+")
     sf.grid.create_from_region(region={"geom": tile_gdf}, res=resolution_m, crs="utm")
     sf.mask.create_active(include_polygon=tile_gdf, reset_mask=True)
     sf.mask.create_boundary(btype="waterlevel", include_polygon=ocean_poly, reset_bounds=False, all_touched=True)
 
-    # write_dep_tif=True writes subgrid/dep_subgrid.tif - the fine-resolution DEM
-    # run_sfincs_tile.py's own postprocessing needs for hydromt_sfincs's own
-    # downscale_floodmap() utility.
+    # write_dep_tif=True writes subgrid/dep_subgrid.tif, the fine-resolution DEM
+    # run_sfincs_tile.py's own postprocessing needs for downscale_floodmap().
     sf.subgrid.create(
         elevation_list=[{"elevation": "local_elevation_subgrid"}],
         roughness_list=[{"manning": "local_roughness_subgrid"}],
@@ -327,19 +283,16 @@ def build_sfincs_tile(
           f"({resolution_m:.0f}m main / {resolution_m / subgrid_nr_pixels:.0f}m subgrid), "
           f"{subgrid_nr_levels} levels, nearest-sourced")
 
-    # -- 4. boundary forcing (COAST-HG hydrographs, empirically MDT-corrected -
-    # build_boundary_forcing.py's own prep output) --
+    # -- 4. boundary forcing (COAST-HG hydrographs, MDT-corrected by
+    # build_boundary_forcing.py) --
     matched_points = retry_transient_io(gpd.read_file, sfincs_dir / "matched_boundary_points.gpkg")
     hydrographs = retry_transient_io(pd.read_csv, sfincs_dir / "corrected_hydrographs.csv")
 
-    # Truncate the full ~148.8h COAST-HG hydrograph down to a window around
-    # its own storm peak, instead of simulating the whole thing - SFINCS's
-    # own wall-clock cost scales with simulated duration at a roughly fixed
-    # timestep. Every COAST-HG hydrograph in this pipeline shares the same
-    # synthetic time axis (peaks at t=74.5h, with hour 40/hour 110 both
-    # close to each tile's own tidal-only baseline), so this window is a
-    # property of the dataset, not something that needs per-tile tuning.
-    # zsini (below) comes from the truncated series' own first row.
+    # Truncates the full ~148.8h COAST-HG hydrograph to a window around the storm
+    # peak (SFINCS's wall-clock cost scales with simulated duration). Every
+    # hydrograph in this pipeline shares the same synthetic time axis (peak at
+    # t=74.5h, with hour 40/110 near the tidal-only baseline). zsini below uses
+    # the truncated series' own first row.
     if truncate_window_hr is not None:
         t_start, t_end = truncate_window_hr
         keep = (hydrographs["elapsed_hr"] >= t_start) & (hydrographs["elapsed_hr"] <= t_end)
@@ -349,19 +302,16 @@ def build_sfincs_tile(
     elapsed_hr = hydrographs["elapsed_hr"].to_numpy()
     station_cols = [c for c in hydrographs.columns if c != "elapsed_hr"]
 
-    tref = tref or datetime(2026, 1, 1)  # arbitrary but fixed reference - only elapsed time
-    # within the hydrograph is physically meaningful (see coast_hg's own catalog caveats)
+    tref = tref or datetime(2026, 1, 1)  # arbitrary but fixed reference; only elapsed
+    # time within the hydrograph is physically meaningful
     times = pd.DatetimeIndex([tref + timedelta(hours=float(h)) for h in elapsed_hr])
     wl_df = hydrographs[station_cols].copy()
     wl_df.index = times
     wl_df.columns = range(len(station_cols))  # water_level.create expects positional columns matching locations' row order
 
-    # matched_points.gpkg and corrected_hydrographs.csv's columns were written
-    # in the same row order by build_boundary_forcing.py's own CLI - no
-    # re-matching needed here. water_level.create()'s own docstring requires
-    # an explicit "index" column matching timeseries' column names (its
-    # internal get_geodataframe/set_index("index") call) - a plain
-    # positional/row-order match is not enough.
+    # matched_points.gpkg and corrected_hydrographs.csv share row order (written
+    # together by build_boundary_forcing.py's own CLI). water_level.create()
+    # requires an explicit "index" column matching timeseries' column names.
     locations_gdf = matched_points.copy()
     locations_gdf["index"] = range(len(station_cols))
 
@@ -370,14 +320,12 @@ def build_sfincs_tile(
     tstop = times[-1]
     sf.config.set("tstop", tstop)
 
-    # buffer: computed dynamically from the real max distance of any already-vetted
-    # (k-nearest-filtered) station to the model's own grid extent, not a fixed guess - a
-    # tile with only 1-2 pre-selected boundary points can have its single real match sit
-    # farther than any fixed buffer would allow, and water_level.create() masks EVERY
+    # buffer: computed dynamically from the max distance of any k-nearest-filtered
+    # station to the model's own grid extent, since water_level.create() masks every
     # location out (hydromt raises `NoDataException`) if none remain within the buffer.
-    # "mask", not "dep": with subgrid, sf.grid.data has no "dep" variable at all any more
-    # (elevation lives only in the subgrid table now) - "mask" exists from step 2 above
-    # regardless, and only its x/y coords are needed here anyway.
+    # "mask", not "dep": with subgrid, sf.grid.data has no "dep" variable any more
+    # (elevation lives only in the subgrid table); "mask" exists from step 2 above,
+    # and only its x/y coords are needed here.
     grid_coords = sf.grid.data["mask"]
     grid_x_min, grid_x_max = float(grid_coords["x"].min()), float(grid_coords["x"].max())
     grid_y_min, grid_y_max = float(grid_coords["y"].min()), float(grid_coords["y"].max())
@@ -387,12 +335,10 @@ def build_sfincs_tile(
     dx = np.maximum(np.maximum(grid_x_min - station_x, station_x - grid_x_max), 0.0)
     dy = np.maximum(np.maximum(grid_y_min - station_y, station_y - grid_y_max), 0.0)
     dist_to_grid_bbox = float(np.sqrt(dx ** 2 + dy ** 2).max())
-    # 2x + a flat 25 km margin: hydromt's own internal masking distance is not simply
-    # "distance to this grid's own bbox corner" (plausibly UTM distortion at high
-    # latitude, or masking against the actual waterlevel-boundary-cell geometry rather
-    # than the raw grid bbox), so this errs safely past the naive bbox-corner estimate.
-    # Only the already-vetted (k-nearest-filtered) locations exist to include, so a
-    # generous buffer carries no risk of pulling in an unrelated station.
+    # 2x + a flat 25 km margin: errs safely past the naive bbox-corner distance
+    # estimate, since hydromt's own internal masking distance isn't simply that.
+    # Only already k-nearest-filtered locations exist to include, so a generous
+    # buffer carries no risk of pulling in an unrelated station.
     buffer_m = dist_to_grid_bbox * 2.0 + 25_000.0
 
     try:
@@ -407,11 +353,10 @@ def build_sfincs_tile(
 
     # -- 5. initial conditions (zsini): IDW of the matched stations' own
     # first-timestep corrected value, onto this model's own (coarse) UTM grid -
-    # zsini is a per-computational-cell initial condition, unaffected by subgrid
-    # (station_x/station_y already computed above for the buffer calc; grid_coords
+    # a per-computational-cell initial condition, unaffected by subgrid. grid_coords
     # is the "mask" DataArray from step 2, used purely as a coords/dims/transform
-    # template here). Kept only on cells the native mask marks as open water -
-    # see `_compute_zsini_array`'s own docstring for why.
+    # template. Kept only on cells the native mask marks as open water - see
+    # `_compute_zsini_array`'s own docstring.
     first_vals = hydrographs[station_cols].iloc[0].to_numpy(dtype=np.float64)
     zsini_arr = _compute_zsini_array(
         tile_dir / "mask.tif", station_x, station_y, first_vals,
@@ -430,11 +375,10 @@ def build_sfincs_tile(
           f"(interpolated from {len(station_x)} station(s)); land/river/lake left dry (-9999.0, bed-level fallback)"
           if n_wet else "[5/8] zsini set - WARNING: 0 ocean cells found, every cell left dry")
 
-    # -- 6. output config: dtmaxout must span the WHOLE simulation, so the
-    # zsmax envelope is one true whole-run maximum, not reset partway
-    # through (SFINCS default dtmaxout=86400s=1 day, shorter than most of
-    # our ~6.2-day COAST-HG events) - only max-inundation/extent is wanted
-    # (see plan doc), so history/velocity/wet-duration outputs stay off. --
+    # -- 6. output config: dtmaxout spans the whole simulation, so the zsmax
+    # envelope is one true whole-run maximum (SFINCS default dtmaxout=86400s=1
+    # day is shorter than most ~6.2-day COAST-HG events). Only max-inundation/
+    # extent is needed, so history/velocity/wet-duration outputs stay off. --
     total_span_s = elapsed_hr[-1] * 3600.0
     sf.config.set("dtmaxout", total_span_s + 3600.0)  # +1h margin, never triggers a reset
     sf.config.set("dtmapout", dtmapout_s)

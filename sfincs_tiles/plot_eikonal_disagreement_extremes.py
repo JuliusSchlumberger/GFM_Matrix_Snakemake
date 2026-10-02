@@ -2,21 +2,17 @@
 total-flooded-area disagreement: the N worst underestimations (eikonal
 floods much LESS than SFINCS) and the N worst overestimations (eikonal
 floods much MORE), ranked by the ratio eikonal_km2/sfincs_km2 among tiles
-where EITHER model's own flooded area exceeds MIN_FLOODED_KM2_DEFAULT
-(2026-09-24, user direction - excludes tiles whose extreme ratio comes from
-a trivially small absolute base, e.g. "5 agreed cells, 5 extra" looking
-like a 2x factor despite not being a meaningful disagreement; no gate on
-the earlier "agreed/matched area" - gate is on either model's own total).
+where either model's own flooded area exceeds MIN_FLOODED_KM2_DEFAULT (this
+excludes tiles whose extreme ratio comes from a trivially small absolute
+base, e.g. "5 agreed cells, 5 extra" looking like a 2x factor despite not
+being a meaningful disagreement).
 
 Reuses plot_worst_tiles_comparison.py's own build_rgb() (agree/SFINCS-only/
 eikonal-only categorical map on the SFINCS subgrid) and all_tiles_summary.csv
-(aggregate_tile_summaries.py's output - already has eikonal_km2/sfincs_km2
-per tile from postprocess_tile_summary.py, no separate merge needed).
+(aggregate_tile_summaries.py's output).
 
-Run under gfm_python_preprocessing (NOT hydromt-sfincs-dev) -
-matplotlib.pyplot.savefig() crashes with exit code 127 under
-hydromt-sfincs-dev, a real documented issue this session (broken native
-BLAS/font-rendering backend in that env).
+Run under gfm_python_preprocessing, not hydromt-sfincs-dev - matplotlib
+savefig() is broken in that environment.
 
 Usage:
     python plot_eikonal_disagreement_extremes.py
@@ -39,18 +35,19 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gfm_config import read_root  # noqa: E402
 from plot_worst_tiles_comparison import (  # noqa: E402
-    COLOR_AGREE, COLOR_DRY, COLOR_EIKONAL_ONLY, COLOR_OCEAN, COLOR_SFINCS_ONLY, COLOR_WATERBODY, build_rgb,
+    COLOR_AGREE, COLOR_DRY, COLOR_EIKONAL_ONLY, COLOR_SFINCS_ONLY, COLOR_WATER, build_rgb,
 )
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from map_style import LAND_LABEL, WATER_LABEL, draw_caption_box  # noqa: E402
 
 N_TILES_DEFAULT = 9
 NCOLS_DEFAULT = 3
-MIN_FLOODED_KM2_DEFAULT = 0.5  # candidate gate (2026-09-24, user direction): only consider tiles
-# where EITHER model's own flooded area exceeds this - excludes tiles whose extreme ratio comes
-# from a trivially small absolute base (e.g. "5 agreed cells, 5 extra" looks like a 2x factor but
-# isn't a meaningful disagreement).
+MIN_FLOODED_KM2_DEFAULT = 0.5  # only consider tiles where either model's flooded area exceeds
+# this - excludes tiles whose extreme ratio comes from a trivially small absolute base.
 
 
-def _plot_grid(df: pd.DataFrame, root: Path, base_dir_name: str, title: str, out_path: Path, ncols: int) -> None:
+def _plot_grid(df: pd.DataFrame, root: Path, base_dir_name: str, out_path: Path, ncols: int) -> None:
     n = len(df)
     nrows = -(-n // ncols)
     fig, axes = plt.subplots(nrows, ncols, figsize=(ncols * 3.8, nrows * 3.8))
@@ -65,27 +62,24 @@ def _plot_grid(df: pd.DataFrame, root: Path, base_dir_name: str, title: str, out
             ax.set_xticks([]); ax.set_yticks([])
             continue
         ax.imshow(rgb, origin="upper")
-        ax.set_title(
-            f"tile {tile_id} (set {row.get('set', '?')})\n"
+        draw_caption_box(ax, [
+            f"tile {tile_id} (set {row.get('set', '?')})",
             f"eikonal={row['eikonal_km2']:.2f} sfincs={row['sfincs_km2']:.2f} km2, ratio={row['ratio']:.2f}",
-            fontsize=9,
-        )
+        ])
         ax.set_xticks([]); ax.set_yticks([])
 
     for ax in axes[n:]:
         ax.set_visible(False)
 
     handles = [
-        mpatches.Patch(facecolor=COLOR_OCEAN, edgecolor="black", label="ocean"),
-        mpatches.Patch(facecolor=COLOR_WATERBODY, edgecolor="black", label="lake/river"),
-        mpatches.Patch(facecolor=COLOR_DRY, edgecolor="black", label="dry land"),
-        mpatches.Patch(facecolor=COLOR_AGREE, edgecolor="black", label="agree (both wet)"),
+        mpatches.Patch(facecolor=COLOR_AGREE, edgecolor="black", label="Agree (both wet)"),
         mpatches.Patch(facecolor=COLOR_SFINCS_ONLY, edgecolor="black", label="SFINCS only"),
-        mpatches.Patch(facecolor=COLOR_EIKONAL_ONLY, edgecolor="black", label="eikonal only"),
+        mpatches.Patch(facecolor=COLOR_EIKONAL_ONLY, edgecolor="black", label="EA-bathtub only"),
+        mpatches.Patch(facecolor=COLOR_DRY, edgecolor="black", label=LAND_LABEL),
+        mpatches.Patch(facecolor=COLOR_WATER, edgecolor="black", label=WATER_LABEL),
     ]
-    fig.legend(handles=handles, loc="lower center", ncol=6, fontsize=11, bbox_to_anchor=(0.5, -0.01))
-    fig.suptitle(title, fontsize=13)
-    fig.tight_layout(rect=[0, 0.03, 1, 0.97])
+    fig.legend(handles=handles, loc="lower center", ncol=5, fontsize=11, bbox_to_anchor=(0.5, -0.01))
+    fig.tight_layout(rect=[0, 0.03, 1, 1])
 
     fig.savefig(out_path, dpi=130)
     plt.close(fig)
@@ -122,12 +116,10 @@ def main() -> None:
 
     _plot_grid(
         under, root, args.base_dir_name,
-        f"Worst {len(under)} eikonal underestimations vs SFINCS (lowest eikonal_km2/sfincs_km2)",
         base_dir / "worst_eikonal_underestimation.png", args.ncols,
     )
     _plot_grid(
         over, root, args.base_dir_name,
-        f"Worst {len(over)} eikonal overestimations vs SFINCS (highest eikonal_km2/sfincs_km2)",
         base_dir / "worst_eikonal_overestimation.png", args.ncols,
     )
 
