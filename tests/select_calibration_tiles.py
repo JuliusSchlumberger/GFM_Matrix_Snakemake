@@ -7,12 +7,18 @@ session's own machine/paths and the 260-tile study, ~10% of all hop=0
 tiles, replacing the never-actually-completed 100-tile study whose
 D:\\GFM\\model_outputs paths belonged to a different machine).
 
-Candidates are restricted to tiles whose model_outputs/<id>/inputs/dem.tif
-already exists (2026-09-24) - the 100-tile study's real failure mode was
-NOT dry tiles, it was candidates with no preprocessed inputs at all (the
-Snakemake rebuild was still failing on most tiles when that study ran, so
-only 6 of 143 candidates were usable) - checking this up front means every
-candidate this script hands out is actually runnable right now.
+Candidates are selected from the FULL hop=0 population regardless of
+whether model_outputs/<id>/inputs/dem.tif already exists (changed 2026-10,
+after the connectivity-first tile-grid migration left model_outputs/
+entirely empty under the new tile numbering - the readiness filter this
+script used to hard-require, 2026-09-24, assumed a large background of
+already-preprocessed production tiles would exist by the time this ran,
+which is no longer true right after a full tile-grid regeneration). The
+readiness check is still computed and reported as an informational count
+(see `n_ready` in the printed summary), just no longer used to exclude
+candidates - preprocess the selected list afterward (e.g. via an isolated
+tile_grid subset + its own model_outputs, same pattern as the delta/Wales-
+Scotland/Thailand isolated runs) rather than relying on it already existing.
 
 Bbox area in deg2 is an exact-up-to-clipping proxy for pixel count here
 (DeltaDTM tiles are native EPSG:4326 at ~1 arcsecond, so pixel count =
@@ -65,11 +71,9 @@ def select_candidates(n_candidates: int, domain_tiles_path: Path, model_outputs_
     """Returns [(tile_id, geo_bin, percentile_within_bin, area_deg2), ...]."""
     gdf = gpd.read_file(domain_tiles_path)
     wave0 = gdf[gdf["hop_distance"] == 0].copy()
-    n_before_ready = len(wave0)
-    ready = wave0["tile_id"].apply(lambda t: (model_outputs_root / str(int(t)) / "inputs" / "dem.tif").is_file())
-    wave0 = wave0[ready].copy()
-    print(f"{len(wave0)} of {n_before_ready} hop=0 tile(s) already have model_outputs/inputs/dem.tif built "
-          f"- restricting candidates to these")
+    n_ready = int(wave0["tile_id"].apply(lambda t: (model_outputs_root / str(int(t)) / "inputs" / "dem.tif").is_file()).sum())
+    print(f"{len(wave0)} hop=0 tile(s) total ({n_ready} already have model_outputs/inputs/dem.tif built - "
+          f"informational only, NOT a selection filter, see module docstring)")
     bounds = wave0.geometry.bounds
     wave0["area_deg2"] = (bounds["maxx"] - bounds["minx"]) * (bounds["maxy"] - bounds["miny"])
     cx = (bounds["minx"] + bounds["maxx"]) / 2.0

@@ -47,7 +47,9 @@ RIVER_CODE = 3
 NODATA_CODE = 4  # native mask.tif has no real coverage here - see build_inputs_from_sfincs_subgrid
 FRICTION_SCALE_FACTOR_DEFAULT = 30.0  # matches simulation.flooding.friction_scale_factor in config.yml
 DEFAULT_FRICTION = 0.002  # matches simulation.flooding.default_friction in config.yml
-MAX_ROUNDS_DEFAULT = 200
+MAX_ROUNDS_DEFAULT = 40  # matches simulation.flooding.max_rounds in config.yml (was 200, a
+# stale/drifted default - confirmed mismatch 2026-10-03, fixed so the friction sweep's solver
+# behavior matches what production actually runs, not a more-converged variant of it)
 WATERLEVEL_EPSILON_M_DEFAULT = 0.03
 OBSTACLE_COUPLING_DEFAULT = True  # matches simulation.flooding.obstacle_coupling in config.yml
 MAX_OUTER_ITERATIONS_DEFAULT = 4

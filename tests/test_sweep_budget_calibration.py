@@ -126,7 +126,14 @@ RIVER_CODE = 3
 
 # Fallback for a quick standalone smoke test if no tile_ids are given on
 # the command line - the real 40-tile study always passes an explicit list
-# (see module docstring).
+# (see module docstring). STALE (2026-10): these tile_ids were valid under
+# the pre-connectivity-first-migration tile grid only - domain_tiles_global.gpkg
+# was fully regenerated and renumbered from scratch (see src/connectivity_
+# tiling.py::assign_tile_id), so these numbers now point at different,
+# unrelated domains (or nothing at all) under the current grid. Running
+# this script with no --tile-ids will silently use garbage tiles until this
+# is refreshed with real tile_ids from the current grid - always pass
+# --tile-ids explicitly for now.
 TILES = [1826, 711, 1722, 548, 1424, 1463, 497]
 
 SWEEPS_PER_ROUND = 4  # one full cycle of _ORTHANT_ORDER - see module docstring
@@ -134,7 +141,13 @@ MAX_ROUNDS_CEILING = 100  # 260-tile study (2026-09-24, user direction: "100 rou
 # as the ceiling, with round-level early exit on convergence - was a fixed 50-sweep/12.5-round
 # budget with no early exit at all)
 MAX_SWEEPS = MAX_ROUNDS_CEILING * SWEEPS_PER_ROUND
-N_TILES_WANTED = 260  # ~10% of ~2445 hop=0 tiles (2026-09-24, user direction)
+N_TILES_WANTED_DEFAULT = 260  # ~10% of ~2445 hop=0 tiles (2026-09-24, user direction) - now a
+# CLI default (--n-tiles-wanted, 2026-10), not a hardcoded target, so a differently-sized study
+# (e.g. ~500 tiles, global-representativeness re-run after the connectivity-first tile-grid
+# migration) doesn't need a code edit. Only matters for this script's own single-process early-
+# exit/summary path (see --write-wet-tiles-summary's docstring below) - the real batched-HPC flow
+# (generate_calibration_batch_jobs.py) never has enough tiles in one node's slice to reach this,
+# so changing it has no effect there either way.
 DEFAULT_EPSILON_M = 0.03  # production's own simulation.flooding.waterlevel_epsilon_m default -
 # this script characterizes production's real non-coupling behaviour, so it uses production's
 # real threshold (unlike test_obstacle_coupling_calibration.py's own softened 0.1m default)
@@ -327,6 +340,7 @@ def main() -> None:
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--tile-ids", type=int, nargs="*", default=None)
     parser.add_argument("--epsilon", type=float, default=DEFAULT_EPSILON_M, help=f"round-level convergence threshold (default: {DEFAULT_EPSILON_M}, production's own simulation.flooding.waterlevel_epsilon_m)")
+    parser.add_argument("--n-tiles-wanted", type=int, default=N_TILES_WANTED_DEFAULT, help=f"stop early once this many wet tiles are found, in this process's own single-process run only (default: {N_TILES_WANTED_DEFAULT})")
     parser.add_argument(
         "--write-wet-tiles-summary", action="store_true",
         help="write wet_tiles_selected.txt from THIS process's own tiles only - only safe for a "
@@ -341,6 +355,7 @@ def main() -> None:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     tiles = args.tile_ids if args.tile_ids else TILES
+    n_tiles_wanted = args.n_tiles_wanted
 
     cfg = load_config(args.config)
     root = Path(cfg["paths"]["root"])
@@ -349,7 +364,7 @@ def main() -> None:
     friction_scale_factor = float(cfg["simulation"]["flooding"]["friction_scale_factor"])
     print(f"model_outputs={model_outputs}  knn={knn}  friction_scale_factor={friction_scale_factor}  "
           f"max_sweeps={MAX_SWEEPS} ({MAX_ROUNDS_CEILING} rounds)  epsilon={args.epsilon}  "
-          f"n_tiles_wanted={N_TILES_WANTED}", flush=True)
+          f"n_tiles_wanted={n_tiles_wanted}", flush=True)
 
     wet_tiles: list[int] = []
 
@@ -378,7 +393,7 @@ def main() -> None:
                     n_rounds = len(tile_rows) // SWEEPS_PER_ROUND
                     conv_label = f"round-converged at round {n_rounds}" if round_converged else \
                         f"did NOT converge within {MAX_ROUNDS_CEILING} rounds"
-                    print(f"  SUMMARY: wet, {conv_label} ({len(wet_tiles)}/{N_TILES_WANTED} selected so far)", flush=True)
+                    print(f"  SUMMARY: wet, {conv_label} ({len(wet_tiles)}/{n_tiles_wanted} selected so far)", flush=True)
                 else:
                     print("  SUMMARY: DRY at sweep 1 - excluded", flush=True)
             except Exception as exc:
@@ -389,8 +404,8 @@ def main() -> None:
                 err_row["status"] = f"error: {exc}"
                 writer.writerow(err_row)
 
-        if len(wet_tiles) >= N_TILES_WANTED:
-            print(f"\n{N_TILES_WANTED} wet tiles found - stopping early, "
+        if len(wet_tiles) >= n_tiles_wanted:
+            print(f"\n{n_tiles_wanted} wet tiles found - stopping early, "
                   f"{len(tiles) - tiles.index(tile_id) - 1} remaining candidate(s) not needed", flush=True)
             break
 
@@ -403,13 +418,13 @@ def main() -> None:
     # overwrite each other down to whichever process wrote last. Use
     # aggregate_wet_tiles.py after a parallel run instead.
     if args.write_wet_tiles_summary:
-        selected = wet_tiles[:N_TILES_WANTED]
+        selected = wet_tiles[:n_tiles_wanted]
         wet_file = out_dir / "wet_tiles_selected.txt"
         with open(wet_file, "w") as f:
             for tile_id in selected:
                 f.write(f"{tile_id}\n")
-        print(f"{len(selected)}/{N_TILES_WANTED} wet tiles selected, written to {wet_file}")
-        if len(selected) < N_TILES_WANTED:
+        print(f"{len(selected)}/{n_tiles_wanted} wet tiles selected, written to {wet_file}")
+        if len(selected) < n_tiles_wanted:
             print(f"WARNING: only found {len(selected)} wet tiles out of {len(tiles)} candidates - "
                   f"need more candidates from select_calibration_tiles.py", flush=True)
 

@@ -26,183 +26,131 @@ vertical_datum_correction: # Used by: rules compute_geoid_offset_raster / extrac
 # ── PREPARATION PIPELINE SWITCHES ─────────────────────────────────────────────
 preparation: # Used by: preparation/run_preparation.py
   sync_deltadtm:       true   # download DeltaDTM DEM/mask tiles from 4TU.ResearchData
+  fix_ocean_mask:      true   # correct ocean_code mask misclassification against real OSM
+  # land polygons, IN PLACE on the per-tile mask .tif files, before the VRT mosaic is built
+  # over them (preparation/fix_ocean_mask_with_osm_land.py) - see that script's docstring
   build_deltadtm_vrt:  true   # build deltadtm.vrt / deltadtm_mask.vrt from those tiles,
   # with portable RELATIVE source paths (preparation/build_deltadtm_vrt.py) - separate
   # from sync_deltadtm so the mosaics can be rebuilt on their own, cheaply, without
   # re-downloading tiles
-  tile_generation:     true   # build the DeltaDTM-tile chunk manifest -> tile_grid.path
-  # (REPLACES tile_mask_creation/select_tiles/merge_tiles, and later the adaptive
-  # parent/child pipeline that replaced them - see src/tile_chunking.py)
+  tile_generation:     true   # build the connectivity-first domain manifest -> tile_grid.path
+  # (REPLACES tile_mask_creation/select_tiles/merge_tiles, the adaptive parent/child
+  # pipeline that replaced them, and the 13-stage greedy-covering/shave pipeline that
+  # replaced THAT in turn - see src/connectivity_tiling.py and
+  # docs/methods_01_tile_processing_and_waterlevels.md section 3)
   boundary_conditions: true   # COAST-RP + SLR fingerprint scenario NetCDFs
 
-# ── TILE GENERATION (fixed-DeltaDTM-tile chunking, 2026-08 - REPLACES the
-# adaptive parent/child pipeline, itself gone now) ──
-# See src/tile_chunking.py for the actual algorithms and memory.md's
-# FIXED-TILE CHUNKING REDESIGN entry for the full design/reasoning. Frozen
-# geometry DAG: this whole section only depends on the mask, DEM and
-# elev_threshold_m - never on scenario (Coast-RP station VALUES, SLR, RP) -
-# so the tile manifest is computed once and frozen. No parent/child
-# distinction this time - each chunk gets its own boundary-condition
-# stations directly at simulation time (extract_boundaries.py), so nothing
-# here feeds a separate forcing-context computation the way the old
-# parent grid did.
+# ── TILE GENERATION (connectivity-first domain construction, 2026-10 -
+# REPLACES the 13-stage greedy-covering/shave pipeline, itself gone now) ──
+# See src/connectivity_tiling.py for the actual algorithms and
+# docs/methods_01_tile_processing_and_waterlevels.md section 3 for the full
+# design/reasoning and real global validation numbers. Frozen geometry DAG:
+# this whole section only depends on the mask, DEM and elev_threshold_m -
+# never on scenario (Coast-RP station VALUES, SLR, RP) - so the tile
+# manifest is computed once and frozen. Each tile gets its own
+# boundary-condition stations directly at simulation time
+# (extract_boundaries.py), so nothing here feeds a separate forcing-context
+# computation.
+#
+# Known scope change vs. the old pipeline: there is no equivalent of the old
+# exposure filter (filter_and_shave_chunks used to drop any chunk with zero
+# WorldPop population anywhere in it) - this method can produce domains over
+# genuinely uninhabited floodable land (e.g. Arctic/Antarctic tundra) that
+# the old pipeline would have dropped. Not yet revisited; flagged here
+# rather than silently decided.
 tile_generation:
   elev_threshold_m: 30 # DeltaDTM's own <=30m real validity envelope. floodable =
   # valid DEM AND elevation < this; land with NO valid DEM reading does NOT
   # count as floodable. No plausible SLR+return-period combination approaches
   # this value (consistent with the pre-existing land_fill_value_m=99m
   # sentinel's own stated reasoning).
-  ocean_code: 1 # mask value treated as "ocean" - for wet-edge/coastline
-  # detection and river-mouth marking (with river_code below) - deliberately
-  # NOT lake(2)/river(3), matching flood_model._idw_seed_values' own
-  # ocean_code=1 convention.
-  river_code: 3 # mask value treated as "river" - used only for river-mouth
-  # marking (river_mouth_*_frac_min below), never for wet-edge/coastline
-  # detection (that's ocean_code only).
+  ocean_code: 1 # mask value treated as "ocean" - the only code Phase 1's
+  # connectivity graph treats as a non-connector, and the only code Phase 5's
+  # ocean-touch check looks for. Deliberately NOT lake(2)/river(3), matching
+  # flood_model._idw_seed_values' own ocean_code=1 convention - inland water
+  # stays "keep"-able land-equivalent for Phase 3's trim step, only open
+  # ocean is excluded.
+  river_code: 3 # mask value treated as "river" - NOT used by this module
+  # itself (the old pipeline's river-mouth marking is retired), but still a
+  # live, load-bearing constant read directly by run_aqueduct.py/
+  # run_aqueduct_cli.py/run_aqueduct_validation_sfincs.py - kept here.
 
   coarse_resolution_m: 500 # standard working resolution for every coarse
-  # (non-native) read in this pipeline: the floodability + river-mouth check
-  # (filter_floodable_tiles), the shave step's output cell size
-  # (filter_and_shave_chunks/merge_dry_chunks), and the river-mouth
-  # split-cut check (split_oversized_chunks) - deliberately the SAME value
-  # everywhere rather than three near-duplicate parameters, since all three
-  # are conceptually "the standard coarse resolution for this pipeline".
+  # (non-native) read in this pipeline: Phase 1's edge-connectivity check,
+  # Phase 3's trim/split grid, and Phase 5's ocean-touch check - deliberately
+  # the SAME value everywhere rather than near-duplicate parameters.
 
-  max_extent_tiles: 4 # hard cap, in whole DeltaDTM tiles (1x1deg), on a
-  # chunk's size in EITHER direction - both the initial greedy covering
-  # (build_chunks) and the final split_oversized_chunks pass respect this,
-  # though split_oversized_chunks will leave a chunk oversized rather than
-  # strand a dry piece or cut through a river mouth (see below) - real runs
-  # have left ~1-2% of chunks over this cap for exactly that reason.
+  # --- Phase 1 (build_connectivity_graph) ---
+  strip_resolution_m: 500 # resolution of the thin cross-border strip read
+  # when checking whether real floodable land touches across a shared tile
+  # edge - same value as coarse_resolution_m by default, kept separate since
+  # it's conceptually a different check (edge connectivity, not interior
+  # content).
+  strip_width_deg: 0.02 # ~2km - width of that cross-border strip on each
+  # side of the shared edge. Cheap, bounded-cost check.
 
-  # --- River-mouth marking (filter_floodable_tiles) - "large share of
-  # ocean AND water cells": an ocean-river MIXING signature, not just
-  # ocean-adjacent or just riverine. Consumed by build_chunks (seeds chunk
-  # growth at delta mouths first, hugging the coastline - see
-  # tile_chunking._seed_river_mouth_chunk) and split_oversized_chunks
-  # (refuses to cut a split through one). River channels occupy a much
-  # smaller share of a coarse check area than open ocean does even at a
-  # wide delta, so river_frac_min is set much lower than ocean_frac_min -
-  # both first-pass estimates, not independently validated against a
-  # reference delta list. A real global run flagged 79 tiles, including
-  # most of the world's major deltas (Ganges-Brahmaputra, Mekong, Yangtze,
-  # Irrawaddy, Lena, Yukon-Kuskokwim, Orinoco, Amazon, Rhine-Scheldt) but
-  # NOT the Nile or Mississippi - likely because DeltaDTM's mask doesn't
-  # code their heavily-engineered/channelized distributaries as river with
-  # enough coarse-cell fraction; worth revisiting if those deltas matter. ---
-  river_mouth_ocean_frac_min: 0.10
-  river_mouth_river_frac_min: 0.02
-  river_mouth_check_band_cells: 1.0 # split_oversized_chunks: width (in
-  # coarse_resolution_m cells, each side) of the band checked around a
-  # candidate split cut for the river-mouth signature above.
+  # --- Phase 3 (split_component_to_budget) ---
+  budget_cells: 25_000_000 # split target, in native (~30m) cells - a
+  # component's trimmed bbox is recursively split until every piece is at or
+  # under this. Tuned against real Southeast Asia/Europe data to land a
+  # majority of domains in the 20-30M ideal band (2026-10) - NOT the same
+  # thing as hard_ceiling_cells below, which bounds the LATER merge step.
+  min_split_gap_coarse_cells: 10 # minimum width (in coarse_resolution_m
+  # cells, ~5km at the default 500m) of a contiguous all-non-floodable
+  # interior row/column band before Phase 3 treats it as a genuine natural
+  # gap worth splitting on for free, rather than falling through to a forced
+  # geometric cut. This is the value actually used to validate the method on
+  # real Southeast Asia/Europe/world-scale data (2026-10) - NOT the old
+  # pipeline's own very differently-tuned shave-era value (60, ~30km) for a
+  # completely different splitting algorithm; that tuning history doesn't
+  # carry over.
+  overlap_target_km: 20 # bounded overlap width duplicated on both sides of a
+  # FORCED split (used only when no natural gap exists) - the one place a
+  # synthetic seam is introduced, always compensated by this explicit margin.
 
-  river_mouth_speckle_buffer_deg: 2.0 # filter_floodable_tiles: width (in
-  # degrees, each side) of the window checked around a river-mouth
-  # CANDIDATE tile's own footprint when confirming its ocean connectivity -
-  # see river_mouth_min_coastal_component_cells below.
-  river_mouth_min_coastal_component_cells: 5000 # a river-mouth candidate's
-  # ocean cells must belong to a connected component of at least this many
-  # coarse_resolution_m cells within the speckle_buffer_deg window to be
-  # confirmed - otherwise the tile is un-flagged. DeltaDTM regularly
-  # miscodes inland water (Arctic thermokarst ponds, Chinese aquaculture
-  # ponds/paddies, inland lakes) as ocean_code, which can spuriously clear
-  # river_mouth_ocean_frac_min within a single isolated tile even hundreds
-  # of km from real open sea. Empirically validated (tests/
-  # river_mouth_tile_validation/validate_river_mouth_tiles.py, 2026-08):
-  # every real delta checked (Ganges, Mekong, Yangtze, Rhine-Scheldt,
-  # Irrawaddy, etc.) cleared >100k connected cells within this window even
-  # with a naturally fragmented mangrove/braided-channel coastline, vs
-  # <=1500 for 5 confirmed false positives (N30E114, N31E118, N31E120,
-  # N32E119, N68W135 - all isolated inland water, none within tens of km of
-  # the coast) - this threshold sits with wide margin between the two. A
-  # per-isolated-tile component-size filter (no buffer) was tried first and
-  # rejected: it also wrongly dropped Ganges/Yangtze, whose real coastal
-  # ocean is itself fragmented into many small tidal/braided-channel pieces
-  # at 500m resolution.
+  # --- Phase 4 (merge_small_domains_tiered) - two-tier post-hoc merge of
+  # undersized domains, never crossing a component boundary ---
+  merge_trigger_cells: 20_000_000 # a domain below this size is a merge
+  # candidate.
+  preferred_ceiling_cells: 30_000_000 # tier 1: prefer the nearest same-
+  # component neighbour whose merge result stays under this (keeps the
+  # typical result centred near the ideal band).
+  hard_ceiling_cells: 100_000_000 # tier 2 (last resort) / absolute cap -
+  # also the ceiling Phase 6's coastal pad below must never push a domain
+  # past.
 
-  river_mouth_seeds_path: "{processed_inputs_dir}/mask/river_mouth_seeds.gpkg" # the
-  # is_river_mouth=True subset of filter_floodable_tiles' output, persisted
-  # as its own artifact (2026-08) - seeds build_chunks' coast-hugging growth
-  # and compute_run_order's river-mouth tie-break priority. Under
-  # processed_inputs (not inputs) since this is a COMPUTED tile-generation
-  # output, not raw synced source data (moved here 2026-08, alongside
-  # debug_gpkg_dir/tile_grid.path below - all three used to live under
-  # {root}/inputs/mask/, which was really a "tile-grid outputs" directory
-  # despite the "inputs" in its path).
+  # --- Phase 6 (pad_hop0_domains_bbox) - explicit coastal buffer, hop=0
+  # domains only (see that function's own docstring for why hop=0-only and
+  # why it runs strictly after Phase 5's hop-distance BFS) ---
+  coastal_buffer_km: 20 # outward pad applied to every hop_distance==0
+  # domain's bbox, on each side, restoring an explicit minimum-ocean-margin
+  # guarantee around a coastal nose/headland (Phase 3's own trim only gives
+  # an IMPLICIT buffer - see the pad function's docstring) - same order of
+  # magnitude as overlap_target_km above.
 
-  write_debug_gpkg: true # write one GeoPackage PER PIPELINE STAGE (numbered
-  # to match this module's own docstring stage list, e.g. 03_chunks_built.gpkg,
-  # 07_dropped_no_exposure.gpkg) to debug_gpkg_dir below - lets every drop and
-  # every intermediate shape change along the pipeline be inspected in QGIS,
-  # not just the final tile_grid.path output. Cheap relative to the raster
-  # I/O-heavy stages themselves, so left on by default; set false to skip it
-  # for a routine run.
+  write_debug_gpkg: true # write one GeoPackage per pipeline phase (numbered
+  # to match build_tile_manifest.py's own docstring phase list, e.g.
+  # 01_domains_presplit.gpkg, 03_dropped_unreachable.gpkg) to debug_gpkg_dir
+  # below - lets every drop and every intermediate shape change be inspected
+  # in QGIS, not just the final tile_grid.path output. Cheap relative to the
+  # raster I/O-heavy phases themselves, so left on by default; set false to
+  # skip it for a routine run. NOTE: unlike the old pipeline, this does NOT
+  # gate checkpointing/resume - that always works via
+  # tile_generation_phase3_checkpoint.jsonl under debug_gpkg_dir regardless
+  # of this flag.
   debug_gpkg_dir: "{processed_inputs_dir}/mask/tile_generation_debug" # directory for
-  # the per-stage GeoPackages above.
-
-  # --- Shave (filter_and_shave_chunks/merge_dry_chunks) - crops a chunk to
-  # its floodable-plus-1-coarse-cell-ocean-buffer footprint at coarse
-  # resolution only (never native - this is about trimming big irrelevant
-  # margins cheaply, not pixel-perfect edges). ---
-  shave_sample_resolution_m: 100 # intermediate sample grid (5x finer than
-  # coarse_resolution_m) used to estimate each coarse cell's unfloodable
-  # FRACTION - a direct read at coarse_resolution_m would give exactly 1
-  # sample per cell, no fraction possible, hence this two-stage sampling.
-  shave_unfloodable_fraction: 0.9 # a coarse cell is shaved away if >= this
-  # fraction of its samples are ocean/lake/river, nodata, or dem >= threshold.
-  min_split_gap_coarse_cells: 60 # 2026-08: filter_and_shave_chunks can now split
-  # off a disconnected interior feature (e.g. two islands sharing one bbox with
-  # open ocean between them) rather than only ever trimming the chunk's OUTER
-  # edges - ported from the retired pre-2026-08 pipeline's split_disconnected_tiles
-  # (see memory.md's FIXED-TILE CHUNKING REDESIGN entry), simplified to take the
-  # FIRST qualifying interior gap band found rather than the most balanced one.
-  # This is the minimum width (in coarse_resolution_m cells, ~30km at the
-  # default 500m) of a contiguous all-unfloodable interior row/column band
-  # before it counts as a genuine separate-feature gap worth splitting at,
-  # rather than an ordinary strait/river/complex-coastline gap between close
-  # features - tuned twice against real data: an initial 10-cell (~5km)
-  # estimate fired far too often (~2.8 pieces per input chunk), 200 cells
-  # (~100km) brought that down to a healthy ~0.95 ratio but was judged too
-  # wide by the user; settled on 60 cells (~30km) as the working value.
-  # Still a first-pass estimate, not exhaustively validated against real data.
-  # Only used at allow_split=True call sites (filter_and_shave_chunks's Stage A);
-  # merge_dry_chunks' re-shave of a freshly consolidated union always passes
-  # allow_split=False (never wants to re-fragment what it just merged), so this
-  # value is irrelevant there.
-
-  # --- Exposure filter (filter_and_shave_chunks) ---
-  population_source: "population" # hydromt data catalog key (WorldPop) -
-  # present-day, not scenario-varying, so this filter stays in the frozen
-  # geometry DAG. Drops any chunk with zero population anywhere in it.
-
-  # --- Redundant-chunk dedup (drop_redundant_chunks, runs twice: 1st pass
-  # before split_oversized_chunks, 2nd pass after - splitting can create
-  # NEW redundancy the 1st pass never saw) ---
-  dedup_min_coverage_fraction: 0.998 # a chunk is dropped if the UNION of
-  # every other overlapping chunk covers at least this fraction of its
-  # area - loosened from exact (100%) containment 2026-08 after real data
-  # showed the shave step can leave a neighbouring chunk's edge off by a
-  # sliver of a coarse cell's width (a few hundred metres), which exact
-  # containment - and even a single-chunk-only containment check - both
-  # missed even though the chunk was still genuinely redundant once every
-  # overlapping neighbour's territory is combined. First-pass estimate,
-  # not exhaustively validated against real data.
-
-  # --- Overlap-density cap (cap_overlap_density, final cleanup pass) ---
-  max_overlap_per_cell: 8 # wherever more chunks than this cover the same
-  # underlying tile cell, drop chunks that are safely redundant there
-  # (every cell they touch still covered by >=2 OTHER chunks afterwards).
+  # the per-phase GeoPackages above, and the Phase 3 resume checkpoint.
 
 # ── TILE GRID (final manifest location - read by run_preparation.py's
 # tile_generation step AND everything downstream: Snakefile, extract_tile_geometry) ──
 tile_grid:
   path: "{processed_inputs_dir}/mask/domain_tiles_global.gpkg" # Note this is both target of the preparation pipeline and
-  # starting point for simulation run. Renamed from domain_tiles_WesternEurope.gpkg (2026-08, alongside the
-  # fixed-tile chunking redesign) - that file no longer exists on disk, and the underlying DeltaDTM mask/DEM data
-  # (and both old and new tile-generation algorithms) have never been region-restricted; "global" matches reality.
-  # Moved from {root}/inputs/mask/ to {processed_inputs_dir}/mask/ (2026-08) - this file (and its siblings,
-  # tile_generation.river_mouth_seeds_path/debug_gpkg_dir) is a COMPUTED tile-generation output, not raw
-  # synced source data, so it belongs under processed_inputs like every other derived preparation artifact.
+  # starting point for simulation run. "global" matches reality - the underlying DeltaDTM mask/DEM data (and every
+  # tile-generation algorithm there's been) have never been region-restricted. A COMPUTED tile-generation output
+  # (like its sibling tile_generation.debug_gpkg_dir), not raw synced source data, so it belongs under
+  # processed_inputs like every other derived preparation artifact. Migrated 2026-10 to the connectivity-first
+  # method's output (src/connectivity_tiling.py) - the pre-migration file was kept as
+  # domain_tiles_global_pre_connectivity_migration.gpkg alongside it.
 
 
 # ── TILE SPLITTING (OOM RECOVERY) ───────────────────────────────────────────────
@@ -257,7 +205,7 @@ boundary_conditions:
   station_search_min_size_deg: 2.0 # extract_boundaries.py (boundaries.select_stations_for_tile): minimum
   # search-box width/height (degrees), centred on the tile - the ACTUAL search box is whichever is larger
   # per dimension, "bbox + station_search_buffer_deg" or this. Many chunks are now very small
-  # (post-2026-08 dedup/split - see tile_chunking.py), so this guarantees a station search always covers
+  # (post-2026-08 dedup/split, now also the connectivity-first split/merge - see src/connectivity_tiling.py), so this guarantees a station search always covers
   # a reasonable area regardless of chunk size, rather than relying on station_search_buffer_deg alone
   # (which happens to give >=2deg today only because it's 1.0 - a coincidence, not a guarantee, if that
   # value is ever tuned down for large chunks). First-pass estimate, not validated against real data.
@@ -275,22 +223,23 @@ boundary_conditions:
   # RETIRED (2026-08): connectivity_forcing (straight-line-IDW along-water
   # boundary forcing) and the along-water Dijkstra-graph design before it -
   # never validated beyond a regional subset, superseded by the frozen-
-  # geometry chunk-generation pipeline's own hop-distance/neighbour-forcing
-  # direction (src/tile_chunking.py's compute_run_order) as the intended
-  # way to give hinterland chunks non-ocean boundary forcing.
+  # geometry tile-generation pipeline's own hop-distance/neighbour-forcing
+  # direction (src/connectivity_tiling.py's compute_hop_distances, 2026-10 -
+  # was src/tile_chunking.py's compute_run_order before the connectivity-
+  # first migration) as the intended way to give hinterland tiles non-ocean
+  # boundary forcing.
 
-  # NOT IMPLEMENTED (2026-08) - inter-chunk boundary propagation for
-  # hinterland (hop>=1) tiles: a hop>=1 chunk no longer needs its own ocean
-  # edge (see compute_run_order / the retired merge_dry_chunks entry in
-  # tile_chunking.py's module docstring), and COULD draw extra virtual
-  # stations from an already-simulated, strictly-earlier neighbour's own
-  # results - but picking WHICH points needs the neighbour's actual
-  # simulated output (only the very few genuinely wet cells within the
-  # overlap are useful), so it can only happen AFTER a wave-0 run, in a
-  # step that doesn't exist yet - see tile_chunking.py's own NOT
-  # IMPLEMENTED note (just above its "Output" section) and
-  # build_tile_manifest.py's equivalent note at the end of Stage 13 for
-  # why a tile-generation-time precompute was tried and rejected.
+  # NOT IMPLEMENTED - inter-tile boundary propagation for hinterland
+  # (hop>=1) tiles: a hop>=1 tile doesn't need its own ocean edge, and COULD
+  # draw extra virtual stations from an already-simulated, strictly-lower-
+  # hop neighbour's own results - but picking WHICH points needs the
+  # neighbour's actual simulated output (only the very few genuinely wet
+  # cells within the overlap are useful), so it can only happen AFTER that
+  # neighbour's own run, in a step that doesn't exist yet. A tile-
+  # generation-time precompute (candidate point locations from frozen
+  # geometry alone) was tried and rejected: real overlaps can span up to
+  # hundreds of km, not thin border strips, so any fixed grid resolution
+  # produces a huge, mostly-dry-land point count.
   # boundaries.sample_waterlevel_at_points (the raster point-lookup
   # primitive) already exists, ready for whenever this gets built.
 
@@ -412,7 +361,7 @@ simulation: # Used by: preprocessing rules
 # ── HPC DISPATCH ────────────────────────────────────────────────────────────────
 # Used by: rule generate_aqueduct_jobs (rules/hpc_dispatch.smk) /
 # scripts/generate_aqueduct_jobs.py. Wave-based hinterland forcing
-# (src/tile_chunking.compute_run_order's hop_distance column) means a
+# (src/connectivity_tiling.compute_hop_distances's hop_distance column) means a
 # hop_distance>=1 tile is seeded from a strictly-lower-hop_distance
 # neighbour's own output for the same scenario, so tiles are grouped by wave
 # FIRST and split into node batches within each wave - this rule generates

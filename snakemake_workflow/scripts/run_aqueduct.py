@@ -6,7 +6,7 @@ round-based solve capped at `simulation.flooding.max_rounds`). See
 for the equivalent HPC/sbatch entry point - keep the two in sync.
 
 Wave-based hinterland forcing (2026-08): a tile's own `hop_distance`
-(`tile_grid_path`, `tile_chunking.compute_run_order`) selects which of two
+(`tile_grid_path`, `connectivity_tiling.compute_hop_distances`) selects which of two
 forcing paths this script uses - see the `hop_distance` branch below and
 `rules/simulation.smk`'s own rule docstring for the full picture. Locally,
 Snakemake's own DAG guarantees a hop>=1 tile's lower-hop neighbours are

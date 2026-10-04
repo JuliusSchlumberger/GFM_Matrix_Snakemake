@@ -18,8 +18,9 @@ _RASTER_OPEN_RETRIES = 4
 _RASTER_OPEN_RETRY_DELAY_S = 5.0
 
 
-def _open_mask_tile(path: Path):
-    """`rasterio.open(path)`, retrying briefly on I/O errors before giving up.
+def _open_mask_tile(path: Path, **open_kwargs):
+    """`rasterio.open(path, **open_kwargs)`, retrying briefly on I/O errors
+    before giving up.
 
     merge_tiles.py's per-tile loops (compute_tile_stats_batch,
     compute_trimmed_geometries) can run for hours over thousands of mask
@@ -31,11 +32,15 @@ def _open_mask_tile(path: Path):
     the retries are exhausted - this only adds a few seconds of delay to
     that case, in exchange for shrugging off a momentary drop in the far
     more common case.
+
+    `open_kwargs` (e.g. `OVERVIEW_LEVEL="NONE"`, see `_mosaic_nearest_coarse`
+    in tile_chunking.py) is forwarded to `rasterio.open` unchanged - plain
+    callers that don't pass any keep today's exact behaviour.
     """
     last_err = None
     for attempt in range(1, _RASTER_OPEN_RETRIES + 1):
         try:
-            return rasterio.open(path)
+            return rasterio.open(path, **open_kwargs)
         except rasterio.errors.RasterioIOError as e:
             last_err = e
             if attempt < _RASTER_OPEN_RETRIES:

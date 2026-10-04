@@ -6,11 +6,48 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 import rasterio
+import rasterio.features
+import shapely.geometry
 from rasterio.enums import Resampling
+from rasterio.windows import from_bounds
 
 from config_utils import retry_transient_io
 
 _KM_PER_DEG = 111.32
+_DELTADTM_LAND_CODE = 0  # inputs/DeltaDTM_masks/deltadtm_mask.vrt convention: 0=land, 1=ocean, 2=lake, 3=river
+
+
+def land_polygons_from_deltadtm_mask(data_catalog_root: str | Path, bounds: tuple[float, float, float, float]) -> gpd.GeoDataFrame:
+    """Land-polygon background for `plot_raster_with_coastlines`, vectorized
+    from the project's own `inputs/DeltaDTM_masks/deltadtm_mask.vrt`
+    (EPSG:4326, land=0) instead of the retired external OSM `land_polygons`
+    dataset this project no longer uses (2026-10-02). Windowed to `bounds`
+    only - cheap, same pattern as `sfincs_tiles/build_sfincs_tile.py`'s
+    `_ocean_polygon_wgs84` (that one vectorizes ocean cells from a single
+    tile's own mask.tif; this one vectorizes land cells from the global
+    mask VRT, windowed to an arbitrary plot bbox).
+
+    Returns an empty GeoDataFrame (never raises) if the VRT is missing or
+    the window has no land cells - this is a purely cosmetic background
+    layer (see plot_merged_results.py's own comment), never load-bearing.
+    """
+    mask_vrt = Path(data_catalog_root) / "inputs" / "DeltaDTM_masks" / "deltadtm_mask.vrt"
+    try:
+        with retry_transient_io(rasterio.open, mask_vrt) as src:
+            window = from_bounds(*bounds, transform=src.transform)
+            arr = src.read(1, window=window, boundless=True, fill_value=255)
+            transform = src.window_transform(window)
+    except Exception as exc:
+        print(f"WARNING: land_polygons_from_deltadtm_mask read failed ({type(exc).__name__}: {exc}) - "
+              f"plotting without the coastline background layer", flush=True)
+        return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+
+    land = (arr == _DELTADTM_LAND_CODE).astype(np.uint8)
+    if not land.any():
+        return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+    shapes = rasterio.features.shapes(land, mask=land.astype(bool), transform=transform)
+    geoms = [shapely.geometry.shape(geom) for geom, _val in shapes]
+    return gpd.GeoDataFrame(geometry=geoms, crs="EPSG:4326")
 
 
 def pixel_area_km2_grid(transform, width: int, height: int, row_offset: int = 0) -> np.ndarray:

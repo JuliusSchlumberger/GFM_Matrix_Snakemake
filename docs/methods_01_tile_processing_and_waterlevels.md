@@ -36,96 +36,185 @@ divided into a large number of separate rectangular simulation domains,
 each covering a stretch of coast or an inland floodplain, which are run
 individually (in parallel where possible) and later combined.
 
+Dividing the coastline this way is not a purely geometric problem. The
+flood solver (an Eikonal bathtub-type model) requires that water be able
+to propagate, within a single simulated domain, along any physically
+connected low-lying path from its forcing boundary at the coast inland.
+If a domain boundary bisects such a path without compensation, flood
+extent on either side of that boundary can be artificially truncated -
+wrong for a reason that has nothing to do with the physical problem, only
+with how the domain was cut. A valid partitioning scheme must therefore
+satisfy four requirements at once: every domain stays under a fixed
+computational cell budget; every domain is expressible as a rectangle (the
+solver's own grid requirement); no physically connected flood path is
+silently severed by a domain boundary; and the full set of domains, and
+the order they must run in, is computable up front, with no iterative
+re-simulation.
+
 **Base grid.** The starting unit is the same global 1°×1° tile grid used
-by the elevation data (section 1). A tile is kept for further processing 
-only if it contains at least
-one cell that is both on land and below a
-plausible flood elevation (30m); tiles that are entirely open ocean,
-entirely above that elevation, or have no valid elevation data at all are
-dropped.
+by the elevation data (section 1) - no geometric merging or trimming
+happens at this stage, it is simply the finest unit the rest of the method
+operates on.
 
-**Building domains.** Remaining tiles are merged into larger rectangular
-simulation domains by a greedy covering procedure: starting from an
-unprocessed tile, the algorithm grows the domain outward in each
-direction as far as the underlying tiles remain present, up to a maximum
-size of 4°×4°. This is repeated until every retained tile belongs to at
-least one domain. Neighbouring domains are deliberately built with a
-one-tile overlap along shared edges, so that boundary conditions and
-flood results remain consistent across a domain boundary rather than
-producing a visible discontinuity. Overlap is subsequently reduced where
-it is redundant, and domains that add no unique coverage are dropped, to
-keep the total number of domains and their total simulated area
-manageable.
+**Hydraulic-connectivity graph.** A graph is built with one node per base
+tile. An edge is added between two laterally adjacent tiles only if real,
+physically floodable land is present and touching across their shared
+border, checked by sampling a thin strip of cells on each side of the
+border. Open ocean is deliberately never treated as a connector: two tiles
+sharing only open sea at their border are not linked, even though they are
+geographically adjacent. A tile's exposure to the open ocean is already
+fully represented through its own direct coastal boundary forcing (below);
+two stretches of coastline happening to be adjacent is not evidence that
+flooding in one could propagate overland into the other, and treating
+ocean adjacency as a connector would inflate domain size with no
+corresponding physical justification.
 
-**Known caveat (2026-10-01): overlap is frequently eroded far below one
-tile, and domains occasionally end up with a genuine gap.** The one-tile
-overlap above is established once, in whole-tile units, by the
-`reduce_overlap`/`add_minimum_overlap`/`add_connector_chunks` stages of
-`src/tile_chunking.py`. A later stage, `filter_and_shave_chunks`, crops
-each domain independently to its own floodable extent plus a single
-coarse-cell (~500m) buffer, with no awareness of what a neighbouring
-domain needs - nothing after that stage re-validates or restores overlap
-against a neighbour. If the shared overlap zone between two domains is
-mostly dry land, shaving consumes nearly all of the originally-built
-~111km overlap, down to as little as the ~500m buffer.
+**Connected components.** A standard connected-components pass over that
+graph partitions the full set of base tiles into disjoint clusters, giving
+the method its central structural guarantee: every tile within one
+component is reachable from every other tile in the *same* component via
+an unbroken, physically floodable overland path, and tiles in *different*
+components are never connected by any physically plausible overland flood
+path. This is read directly from the terrain's own floodability structure,
+not an approximation - once components are identified, no later step ever
+needs to reconsider connectivity *between* components, only *within* one.
 
-Sampling the real production tile grid (2578 tiles, 3031 genuine
-neighbour-pairs, 2026-10-01) found this is systematic, not a rare edge
-case: ~24% of neighbour pairs (732/3031) have overlap eroded below ~222m
-(functionally meaningless for boundary continuity), and ~0.8% (25 pairs)
-have a genuine gap - real daylight between domains, up to ~2-33km, where
-flood extent along that shared edge is not modelled by either domain. The
-effect is size-correlated: eroded overlap affects 5.2% of small domains,
-8.2% of mid-size, and 17.4% of the largest domains (near the 4°×4° cap) -
-roughly 3x worse for large domains, since they have proportionally more
-non-floodable interior/edge area for the shave step to cut back. Example:
-tiles 31 and 639 (neighbours, confirmed via direct geometry inspection)
-overlap by only ~220m against the intended ~111km.
+**Building domains.** A connected component may still be too large to
+simulate as one domain (an entire continuous deltaic floodplain, for
+example). Each component is reduced to one or more rectangular domains,
+each within the computational budget, in a strict preference order. If the
+component's bounding box - trimmed to its real floodable extent - already
+fits the budget, it becomes a single domain with no internal seam. The
+trimming rule is deliberately conservative: a row or column of the
+bounding box is only ever dropped if it is *entirely* nodata or water
+across every sample taken along it, never on the basis of elevation alone
+and never partially - a binary, content-complete criterion, so two domains
+derived from the same underlying data can never disagree about where real
+content ends (the root cause of the overlap-erosion problem the previous
+version of this pipeline had - see "Superseded design", below). If the
+budget is exceeded, the method next searches for a genuine internal gap: a
+contiguous band of entirely non-floodable cells running fully across the
+component's extent, and splits there - free, since a cut through content-
+free terrain cannot sever any real connectivity. Only when a component is
+large and continuously floodable enough that no such gap exists anywhere
+does the method fall back to a forced geometric cut along the component's
+longer axis - the one case a synthetic domain boundary is introduced
+through real floodable content, and it is compensated explicitly: a
+bounded overlap margin (a fixed target width, not unbounded) is duplicated
+on both sides of the cut, so that flood connectivity which would, in
+reality, cross that line is still represented in both resulting domains.
+Each domain's record of which of these three cases produced it is kept
+alongside it, so the provenance of every domain boundary is traceable.
+Undersized domains are subsequently merged with a same-component neighbour
+where that keeps the result near the target band, to keep the total number
+of domains manageable - merging, like the forced-split overlap above, only
+ever happens within one connected component, never across one.
 
-No fix has been implemented yet - this is a known, documented limitation
-of the current tile grid, not a config toggle or a dead buffer setting
-(`tile_generation` has no `buffer_deg`/`overlap_deg` key; overlap is
-purely tile-count-based). A real fix would need to make
-`filter_and_shave_chunks` neighbour-aware, or add a validation/repair pass
-after it that re-checks and restores overlap against already-shaved
-neighbours.
+**Why this is a valid partitioning scheme.** Every domain boundary this
+method produces falls into exactly one of three physically justified
+categories, and no other kind of boundary is ever introduced: a boundary
+between two different connected components, across which no physically
+plausible connectivity exists at all; a boundary at a natural gap within
+one component, across which there is no floodable content to lose; or a
+forced boundary through genuinely continuous floodable terrain, the only
+case where real connectivity is cut, and the only case compensated with an
+explicit, bounded, duplicated margin sized to represent exactly the
+connectivity that would otherwise be lost. No boundary is ever placed by
+independent, local, per-tile judgment without reference to its neighbour -
+the failure mode of the previous design (below). The decomposition is also
+entirely data-driven (the same mechanism applies uniformly to simple
+coastlines, estuaries, and complex multi-channel deltas without region-
+specific tuning), bounded by construction, and single-pass/deterministic
+(the full run order is computed once, up front, before any simulation).
 
-**Exposure filtering.** After domains are built, each is checked against
-present-day population data (WorldPop, ~1km resolution, year 2020): a
-domain with no population anywhere within its footprint is dropped from
-the simulation set entirely, since there is nothing to assess flood
-impact for there. This check is applied to the domains' final, already-
-trimmed footprints (not their earlier, larger candidate extent), so that
-a domain is not kept purely because some other, unrelated part of a
-larger initial candidate area happened to be populated.
+**Simulation order and boundary forcing.** Once domains are finalised,
+each is assigned a "distance from the ocean" in terms of the number of
+domains that must be crossed to reach open water (hop distance: 0 for a
+domain with its own direct ocean edge, 1 for a domain adjacent to one of
+those, and so on) - found by a breadth-first search over domain adjacency,
+run strictly within one connected component (by the connected-components
+guarantee above, searching across components would be physically
+meaningless). Domains are then simulated in that order: ocean-fronting
+(hop 0) domains first, using the water levels described in section 4;
+inland ("hinterland") domains afterward, each using the flood levels
+already computed for its lower-hop neighbour(s) along their shared edge as
+its own boundary condition (see section 4's final paragraph) - this lets
+flooding propagate inland from the coast through a sequence of domain-
+level simulations without one single simulation spanning the whole domain
+chain at once. A domain with no path at all back to an ocean-fronting
+domain within its own component - i.e. one that could never receive
+boundary forcing of any kind - is dropped from the final domain set.
 
-**Coastline and river-mouth handling.** Tiles are flagged as a river
-mouth if a coarse check shows a substantial mixture of both open-ocean
-and river water within the same area - a signature of a delta or estuary,
-rather than open coast or an inland river reach on its own. This
-flag is re-checked against a wider surrounding area before being
-accepted, because small inland water bodies (ponds, aquaculture basins,
-lakes) are occasionally misclassified as ocean in the source elevation
-data at a single-tile scale, and would otherwise be mistaken for
-coastline. Confirmed river-mouth tiles are used as preferred starting
-points for domain growth, so that domains at deltas are built to hug the
-true coastline rather than growing inland by chance.
+**Coastal buffer.** Every hop-0 domain's bbox is padded outward by a fixed
+margin (order of several km) after the hop-distance assignment above. The
+trimming step earlier already gives an *implicit* buffer around a coastal
+nose or headland for free (water within the land's own row/column bounding
+extent survives, since domains are rectangles, not per-pixel masks), but
+not an *explicit* minimum-ocean-margin guarantee - this pad restores that
+guarantee specifically for hop-0 domains, the ones self-forced directly
+from the open coast, where a headland cutting too close to the domain edge
+would otherwise matter. Hinterland (hop >= 1) domains are forced from an
+already-simulated neighbour's wave rather than from direct coastline
+geometry, so they have no analogous need and are left untouched.
 
-**Simulation order.** Once domains are finalised, each is assigned a
-"distance from the ocean" in terms of the number of domains that must be
-crossed to reach open water (0 for a domain with its own ocean edge, 1
-for a domain adjacent to one of those, and so on). Domains are then
-simulated in that order: ocean-fronting domains first, using the water
-levels described in section 4; inland ("hinterland") domains afterward,
-each using the flood levels already computed for its lower-distance
-neighbour(s) along their shared edge as its own boundary condition (see
-section 4's final paragraph). This lets flooding propagate inland from
-the coast through a sequence of domain-level simulations, without
-requiring one single simulation spanning the whole domain chain at once.
-A domain with no chain of neighbouring domains leading back to any
-ocean-fronting domain at all - i.e. one that could never receive
-boundary forcing of any kind - is dropped from the final domain set at
-this stage.
+**Exposure filtering - removed.** The previous version of this pipeline
+dropped any domain with zero population (WorldPop) anywhere in it. This
+method has no equivalent step: it can produce domains over genuinely
+uninhabited floodable land (e.g. Arctic/Antarctic tundra) that the
+previous pipeline would have dropped. Not yet revisited; noted here as a
+real scope difference rather than decided silently.
+
+**Validation.** The method was first tested on two structurally different
+coastal regions - Southeast Asia (complex multi-delta coastline, 127 base
+tiles) and Europe (a more linear coastline with fewer deltaic features, 96
+base tiles) - then on the full global set of 7,417 base tiles, all using a
+20-30 million cell target domain size (hard ceiling 100 million):
+
+| | Southeast Asia | Europe | Global |
+|---|---|---|---|
+| Base tiles | 127 | 96 | 7,417 |
+| Connected components | 18 | 11 | 1,002 |
+| Final domains | 102 | 63 | 4,504 |
+| hop = 0 (direct ocean forcing) | 77 (75%) | 55 (87%) | 3,761 (81%) |
+| hop 1-3 | 22 (22%) | 7 (11%) | 658 (15%) |
+| hop >= 4 | 0 | 0 | 85 (2%) |
+| Maximum hop-chain length | 2 | 1 | 10 |
+| Dropped as unreachable | 3 | 1 | 114 (3%) |
+| Median domain size | 25.0 M cells | 26.0 M cells | 24.8 M cells |
+| p25 / p75 domain size | - | - | 21.2 / 30.7 M cells |
+| Domains exceeding the hard ceiling | 0% | 0% | 0% |
+
+A meaningful fraction of domains in every test require relayed (hop >= 1)
+rather than direct ocean forcing, confirming the hop-distance mechanism is
+actively exercised by real terrain rather than a redundant safeguard - the
+global run in particular surfaced a 10-hop relay chain, far deeper than
+either regional test alone suggested. Every domain dropped as
+"unreachable" that was checked was independently confirmed to be a
+genuinely isolated, sub-km²-scale fragment of floodable land (e.g. a
+single small islet) with no real path to open water within its own
+connected component - exactly the case the method is designed to identify
+and exclude rather than simulate with no meaningful boundary condition.
+Not every domain lands within the 20-30 million cell target band (the
+remainder stay under the hard ceiling but are larger than ideal) - a
+size-tuning characteristic of the merge step, not a connectivity concern.
+
+**Superseded design.** An earlier version of this pipeline built domains
+by a greedy covering procedure (grow outward from an unprocessed tile up to
+a 4°x4° cap, with a one-tile overlap along shared edges) and then cropped
+each domain *independently* to its own floodable extent plus a small
+buffer. Because that cropping decision was made per-domain, from each
+domain's own local content only, two neighbouring domains could legitimately
+make different cropping decisions along their shared border, eroding the
+intended overlap - confirmed on the real production tile grid at the time
+(2578 tiles, 2026-10-01): ~24% of neighbour pairs had overlap eroded below
+~222m (functionally meaningless for boundary continuity), and ~0.8% had a
+genuine gap of real, unmodelled daylight between domains, up to ~33km. That
+pipeline also handled deltas/estuaries as a special case (flagging a
+coarse ocean-river mixing signature and using it as a preferred seed point
+for domain growth) rather than letting the general mechanism handle them -
+the connectivity-first method needs no such special-casing, since the
+hydraulic-connectivity graph already generalises correctly to any coastline
+shape, deltas included, without region-specific tuning.
 
 ## 4. Water-level boundary conditions
 

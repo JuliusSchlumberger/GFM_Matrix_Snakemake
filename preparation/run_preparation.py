@@ -2,8 +2,9 @@
 
 Runs the one-off steps that must complete before the Snakemake DAG's
 `preprocess` target can run: downloading DeltaDTM DEM/mask tiles, building
-their VRT mosaics, building the fixed-DeltaDTM-tile chunk manifest (2026-08
-- see src/tile_chunking.py), and generating the COAST-RP + SLR fingerprint
+their VRT mosaics, building the connectivity-first domain manifest (2026-10
+- see src/connectivity_tiling.py and docs/methods_01_tile_processing_and_
+waterlevels.md section 3), and generating the COAST-RP + SLR fingerprint
 boundary-condition NetCDFs. Config is loaded once and passed to every
 step's `run()` function in-process; a failure in one step is caught and
 reported, and the rest continue unless --fail-fast is set.
@@ -17,6 +18,12 @@ Steps (in order) — also the names used to select them on the command line
 and the keys read from config.yml's preparation.* switches:
   sync_deltadtm      — download DeltaDTM DEM/mask tiles into the
                      data catalog's deltadtm/deltadtm_mask dirs
+  fix_ocean_mask     — correct ocean_code mask misclassification against
+                     real OSM land polygons, IN PLACE on the per-tile mask
+                     .tif files (preparation/fix_ocean_mask_with_osm_land.py;
+                     runs before build_deltadtm_vrt so the mosaic is built
+                     from already-corrected tiles - see that script's
+                     docstring for why DeltaDTM's mask needs this)
   build_deltadtm_vrt — build the deltadtm.vrt / deltadtm_mask.vrt mosaics
                      over those tiles, with portable RELATIVE source paths
                      (preparation/build_deltadtm_vrt.py; separate from
@@ -24,18 +31,22 @@ and the keys read from config.yml's preparation.* switches:
                      own, cheaply, without re-downloading tiles - see that
                      script's docstring for the cross-platform-path bug
                      this split fixed)
-  tile_generation    — build the DeltaDTM-tile-based chunk manifest ->
+  tile_generation    — build the connectivity-first domain manifest ->
                      tile_grid.path (preparation/build_tile_manifest.py;
                      REPLACES the pre-2026-08 tile_mask_creation/select_
-                     tiles/merge_tiles chain AND the adaptive parent/child
-                     pipeline that itself replaced it)
+                     tiles/merge_tiles chain, the adaptive parent/child
+                     pipeline that replaced it, and the 13-stage greedy-
+                     covering/shave pipeline that replaced THAT in turn -
+                     see src/connectivity_tiling.py)
   boundary_conditions — COAST-RP + SLR fingerprint scenario NetCDFs
                      (prepare_boundary_conditions.py)
 
-The individual step modules (sync_deltadtm.py, build_deltadtm_vrt.py,
-build_tile_manifest.py, prepare_boundary_conditions.py) are no longer
-standalone entry points — each exposes a `run(config, ...)` function and is
-only ever invoked from here, not via `python <script>.py` directly.
+The individual step modules (sync_deltadtm.py, fix_ocean_mask_with_osm_land.py,
+build_deltadtm_vrt.py, build_tile_manifest.py, prepare_boundary_conditions.py)
+are no longer standalone entry points — each exposes a `run(config, ...)`
+function and is only ever invoked from here, not via `python <script>.py`
+directly (fix_ocean_mask_with_osm_land.py is the one exception, with its own
+`--dry-run`/`--tiles` ad hoc testing mode - see its own `__main__` block).
 
 RETIRED (2026-08): connectivity_map / src/connectivity_forcing.py (the
 straight-line-IDW along-water boundary forcing feature it built an index
@@ -75,11 +86,13 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 import build_deltadtm_vrt  # noqa: E402
 import build_tile_manifest  # noqa: E402
+import fix_ocean_mask_with_osm_land  # noqa: E402
 import prepare_boundary_conditions  # noqa: E402
 import sync_deltadtm  # noqa: E402
 
 ALL_STEPS = [
     "sync_deltadtm",
+    "fix_ocean_mask",
     "build_deltadtm_vrt",
     "tile_generation",
     "boundary_conditions",
@@ -130,13 +143,6 @@ def main() -> None:
                              "cache to bypass, so this flag only affects boundary_conditions")
     parser.add_argument("--fail-fast", action="store_true",
                         help="abort on first failed step")
-    parser.add_argument(
-        "--start-from", default=None, metavar="CHECKPOINT",
-        help="resume tile_generation from a checkpoint file instead of running from scratch - "
-             f"one of: {', '.join(build_tile_manifest.CHECKPOINTS)}. Only valid when tile_generation "
-             "is the sole selected step (requires tile_generation.write_debug_gpkg=true, since the "
-             "checkpoint files ARE the debug GeoPackages from a previous run).",
-    )
     args = parser.parse_args()
 
     # Validated manually rather than via argparse's `choices=` on this
@@ -149,19 +155,6 @@ def main() -> None:
         parser.error(
             f"invalid STEP(s): {', '.join(invalid)} (choose from: {', '.join(ALL_STEPS)})"
         )
-
-    if args.start_from is not None:
-        if args.steps != ["tile_generation"]:
-            parser.error(
-                "--start-from is only valid when tile_generation is the SOLE selected step "
-                f"(got steps={args.steps!r}) - resuming a specific sub-stage of a different "
-                "step doesn't make sense."
-            )
-        if args.start_from not in build_tile_manifest.CHECKPOINTS:
-            parser.error(
-                f"invalid --start-from={args.start_from!r} "
-                f"(choose from: {', '.join(build_tile_manifest.CHECKPOINTS)})"
-            )
 
     logging.basicConfig(
         level=logging.INFO,
@@ -190,6 +183,15 @@ def main() -> None:
     else:
         print("\n  [ SKIP ] Download DeltaDTM tiles")
 
+    # ── Step 1a: Fix ocean_code mask misclassification against OSM land ────────
+    if "fix_ocean_mask" in selected:
+        results["fix_ocean_mask"] = _run_step(
+            fix_ocean_mask_with_osm_land.run, "Fix ocean_code mask misclassification (OSM land polygons)",
+            args.fail_fast, config=cfg,
+        )
+    else:
+        print("\n  [ SKIP ] Fix ocean_code mask misclassification")
+
     # ── Step 1b: Build the deltadtm/deltadtm_mask VRT mosaics ──────────────────
     if "build_deltadtm_vrt" in selected:
         results["build_deltadtm_vrt"] = _run_step(
@@ -199,11 +201,11 @@ def main() -> None:
     else:
         print("\n  [ SKIP ] Build DeltaDTM VRT mosaics")
 
-    # ── Step 2: Build the DeltaDTM-tile-based chunk manifest (2026-08) ─────────
+    # ── Step 2: Build the connectivity-first domain manifest (2026-10) ─────────
     if "tile_generation" in selected:
         results["tile_generation"] = _run_step(
-            build_tile_manifest.run, "Build DeltaDTM-tile chunk manifest -> tile_grid.path",
-            args.fail_fast, config=cfg, start_from=args.start_from,
+            build_tile_manifest.run, "Build connectivity-first domain manifest -> tile_grid.path",
+            args.fail_fast, config=cfg,
         )
     else:
         print("\n  [ SKIP ] Tile generation")

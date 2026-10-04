@@ -7,7 +7,7 @@ on those instead is cheaper than trying to make the solve itself more
 memory-efficient.
 
 Tile ID scheme (2026-08, fixed - see below): `tile_grid.path`'s tile_ids are
-plain sequential integers (src/tile_chunking.bboxes_to_geodataframe), not the
+plain sequential integers (src/connectivity_tiling.assign_tile_id), not the
 retired `parent_5deg_id*10+quadrant_id` scheme this module originally
 assumed - a split child's id is now simply one more than the current global
 maximum tile_id (`max(tile_grid["tile_id"]) + 1`), which is trivially
@@ -155,10 +155,21 @@ def split_tile(
     next_id = int(tile_grid["tile_id"].max()) + 1
     child_a_id, child_b_id = next_id, next_id + 1
 
+    # hop_distance is inherited from the parent, not recomputed - a split child is
+    # geometrically a sub-region of the parent, so the same ocean-distance/forcing-
+    # source classification applies. Fixed 2026-10: previously omitted entirely,
+    # leaving it NaN on every split child - run_aqueduct.py/run_aqueduct_cli.py both
+    # do `int(this_tile["hop_distance"].iloc[0])`, which raises on NaN, so this would
+    # crash the moment any hop_distance>=1 tile needed OOM-splitting (found via code
+    # review during the connectivity-tiling migration, not a real production
+    # incident yet).
+    parent_hop_distance = row["hop_distance"]
     new_rows = gpd.GeoDataFrame(
         [
-            {"tile_id": child_a_id, "split_depth": parent_depth + 1, "geometry": half_a},
-            {"tile_id": child_b_id, "split_depth": parent_depth + 1, "geometry": half_b},
+            {"tile_id": child_a_id, "split_depth": parent_depth + 1,
+             "hop_distance": parent_hop_distance, "geometry": half_a},
+            {"tile_id": child_b_id, "split_depth": parent_depth + 1,
+             "hop_distance": parent_hop_distance, "geometry": half_b},
         ],
         crs=tile_grid.crs,
     )

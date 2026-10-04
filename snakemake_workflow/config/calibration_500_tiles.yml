@@ -1,0 +1,69 @@
+# ~500-tile global-representativeness calibration study (2026-10), re-done
+# at the new, larger scale after the connectivity-first tile-grid migration
+# superseded the original 260-tile study's tile numbering entirely.
+#
+# 571 candidate tiles (stratified by size AND geography - see
+# tests/select_calibration_tiles.py), selected from the FULL hop_distance==0
+# population of the new grid (the readiness-filter this script used to
+# require was dropped 2026-10 - nothing is preprocessed yet right after a
+# full tile-grid regeneration, so it would otherwise find zero candidates;
+# see that script's own docstring). Final wet-tile count (target ~500) comes
+# from tests/aggregate_wet_tiles.py after the sweep-budget study runs - dry
+# candidates get dropped, same as the original study.
+#
+# Isolated preprocessing (own model_outputs, same as every other restricted-
+# subset run this session) - NOT production's shared model_outputs, so this
+# never risks colliding with or being overwritten by unrelated production
+# work. Boundary conditions (COAST-RP + SLR fingerprints) ARE shared with
+# production - those are scenario-only artifacts, never tile-geometry-
+# dependent, so production's existing waterlevel_nc_dir is safely reusable
+# as-is (unlike tile_grid.path, nothing about the tile-grid migration
+# invalidates it).
+
+tile_grid:
+  path: "{root}/calibration_500_tiles/calibration_500_tiles_grid.gpkg"
+
+simulation:
+  model_outputs: "{root}/calibration_500_tiles/model_outputs"
+
+# Single representative scenario per tile (2026-10, user direction) - a
+# calibration/representativeness study needs one real solve per tile, not
+# production's full ~10 RP x 5 SLR grid (which would be ~28,500 solves
+# across 571 tiles instead of 571). slr_intensities REQUIRED, not
+# decorative - merged_slr_scenarios() unions it with boundary_conditions.
+# slr_scenarios; leaving it unset would silently pull in config.yml's own
+# SLR_500 adaptation intensity (same trap documented in the Wales/Scotland
+# friction9 config).
+boundary_conditions:
+  return_periods: [100]
+  slr_scenarios: ["SLR_0"]
+adaptation:
+  slr_intensities: []
+
+# All 571 tiles are hop_distance==0 (confirmed), so this is a single-wave
+# dispatch - no cross-wave dependency complexity. 20 nodes (~29 tiles/node
+# for preprocessing, fewer for simulation's "large" sub-batching), 3h/job -
+# real measured/estimated rates (2026-10, this session): preprocessing
+# ~142.5 core-seconds/tile (measured on the 400-tile delta run) -> 571
+# tiles / 20 cores ~= 1.1h; simulate worst-case (production's real
+# max_rounds=40 ceiling, zero early exit, the 0.05s/Mcell/sweep rate
+# test_sweep_budget_calibration.py's own study measured and confirmed) on
+# this candidate pool's real total pixel count (~20.7 billion px) -> ~2.3h
+# worst case on 20 cores, likely well under that in practice since most
+# tiles converge long before 40 rounds. Both comfortably under 3h with
+# real margin - preprocessing and simulation are separate SLURM job
+# submissions (generate_hpc_preprocess_job.py's own afterany chain), each
+# gets its own fresh 3h clock, not a shared/combined budget.
+hpc:
+  n_nodes: 20
+  # hpc.jobs_dir is NOT scenario-isolated by default (it's a fixed
+  # "{root}/model_outputs/hpc_jobs" regardless of simulation.model_outputs) -
+  # confirmed the hard way: the first run of generate_hpc_preprocess_job.py
+  # against this config wrote its sbatch scripts straight into PRODUCTION's
+  # own model_outputs/hpc_jobs before this override was added. Isolate it
+  # explicitly, same tree as everything else this study owns.
+  jobs_dir: "{root}/calibration_500_tiles/model_outputs/hpc_jobs"
+  sbatch:
+    time: "0-03:00:00"
+  sbatch_large:
+    time: "0-03:00:00"

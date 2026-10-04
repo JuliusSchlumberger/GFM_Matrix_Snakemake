@@ -287,20 +287,32 @@ gebco:
 land_polygons:
   data_type: GeoDataFrame
   driver: vector
-  path: inputs/OSM_Coastlines/land_polygons.gpkg
+  path: inputs/OSM_land/land_polygons.shp
   crs: 4326
   filesystem: local
   meta:
     category: geography
     description: >
-      OpenStreetMap land polygons — a global vector dataset of land masses
-      derived from the OpenStreetMap coastline. Used as a land mask in flood-
-      depth and merged-result plots (whitesmoke land background) and to restrict
-      DEM extraction to cells that are plausibly on land.
+      OpenStreetMap land polygons (osmdata.openstreetmap.de "land-polygons-
+      split" product, 873,381 features) — a global vector dataset of land
+      masses derived from the OpenStreetMap coastline. Re-acquired 2026-10
+      (the previous inputs/OSM_Coastlines/land_polygons.gpkg copy had been
+      deleted and the plotting code paths that used it switched to
+      src/plotting.py's land_polygons_from_deltadtm_mask instead - see that
+      function's docstring) specifically so preparation/
+      fix_ocean_mask_with_osm_land.py can use real, ground-truth coastline
+      geometry to correct DeltaDTM mask misclassification: DeltaDTM's mask
+      regularly codes inland water (wide river confluences, aquaculture
+      ponds/paddies, thermokarst lakes) as ocean_code even far from any
+      real coast (confirmed directly on the Nakhon Sawan, Thailand
+      four-river confluence, 2026-10) - a cell strictly inside an OSM land
+      polygon can never be real open ocean, regardless of which DeltaDTM
+      mask sub-code it carries, since OSM's land/sea boundary IS the
+      coastline by construction.
     source_author: OpenStreetMap contributors
     source_license: ODbL 1.0 (https://opendatacommons.org/licenses/odbl/)
     source_url: https://osmdata.openstreetmap.de/data/land-polygons.html
-    source_version: "2020-01-09"
+    source_version: "2026-10-04"
 
 land_use:
   data_type: RasterDataset

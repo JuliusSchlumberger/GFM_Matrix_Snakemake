@@ -1,0 +1,54 @@
+# Global-deltas flood hazard maps, RCP2.6-equivalent scenario (ssp126),
+# RP100, all 5 production SLR magnitudes, 2026-10.
+#
+# 203 tiles (48 of 49 deltas in inputs/DeltasGlobal/all_deltas.shp matched
+# at least one production tile within a 0.5deg bbox buffer - see
+# preparation/build_delta_tile_subset.py. The 49th, Id=44 (Volga delta,
+# draining into the landlocked Caspian Sea), has NO production tile
+# coverage anywhere within 2deg - the Caspian is never coded ocean_code in
+# DeltaDTM's mask, so this pipeline's COAST-RP-based forcing has no real
+# station data there; tile_generation never produced a domain for it. Out
+# of scope for this deliverable under the current forcing scheme.
+#
+# friction_scale_factor=9.0 (0.3x production's 30.0) per explicit user
+# request - the friction-sweep's own best-CSI finding against SFINCS
+# (CSI=0.8012, bias=0.9877, validation_sfincs_v5, 2026-10-03), applied here
+# the same way the Wales/Scotland friction9 re-run used it.
+#
+# Fully isolated from BOTH production AND the sibling ssp245 run (own
+# model_outputs -> own preprocessing_inputs_dir by default, see
+# run_aqueduct_cli.py's `preprocessing_inputs_dir or model_outputs`
+# fallback - own WL_scenarios, own merged_results/figures) - built fresh
+# rather than reusing any existing production boundary-condition data, per
+# explicit user decision, even though ssp245 happens to be production's
+# own default slr_scenario.
+#
+# Layered on top of config.yml + config_local.yml via
+# src/config_utils.py::materialize_config, same pattern as
+# gbr_wales_scotland_friction9.yml / thailand_bangkok.yml.
+
+tile_grid:
+  path: "{processed_inputs_dir}/mask/deltas_global_tiles.gpkg"
+
+simulation:
+  flooding:
+    friction_scale_factor: 9.0
+  model_outputs: "{root}/deltas_floodmaps/ssp126/model_outputs"
+
+postprocessing:
+  merged_outputs: "{root}/deltas_floodmaps/ssp126/merged_results"
+
+visualization:
+  output_dir: "{root}/deltas_floodmaps/ssp126/figures"
+
+boundary_conditions:
+  slr_scenario: "ssp126"
+  waterlevel_nc_dir: "{root}/deltas_floodmaps/ssp126/WL_scenarios"
+  return_periods: [100]
+
+# REQUIRED, not decorative - merged_slr_scenarios() unions this with
+# boundary_conditions.slr_scenarios; leaving it unset would silently pull
+# in config.yml's own SLR_500 adaptation intensity (same trap documented in
+# gbr_wales_scotland_friction9.yml).
+adaptation:
+  slr_intensities: []

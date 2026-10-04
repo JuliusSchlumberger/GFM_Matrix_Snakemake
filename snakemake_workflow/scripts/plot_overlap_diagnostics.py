@@ -33,8 +33,9 @@ from rasterio.warp import reproject
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from config_utils import get_data_catalog, retry_transient_io  # noqa: E402
+from config_utils import retry_transient_io  # noqa: E402
 from merge import AQUEDUCT_NODATA, _bounds_intersect, decode_waterdepth_array  # noqa: E402
+from plotting import land_polygons_from_deltadtm_mask  # noqa: E402
 
 pp_cfg = snakemake.params.pp_cfg  # noqa: F821
 plot_cfg = pp_cfg["plots"]
@@ -61,8 +62,10 @@ TILE_PALETTE = plt.get_cmap(plot_cfg["overlap_tile_cmap"])
 
 retry_transient_io(output_dir.mkdir, parents=True, exist_ok=True)
 
-data_catalog = get_data_catalog(snakemake.params.data_catalog, root=snakemake.params.data_catalog_root)  # noqa: F821
-coastlines_path = data_catalog.get_source("land_polygons").path
+# Land-polygon background, from the project's own DeltaDTM mask - the
+# external OSM land_polygons dataset this used to read is retired
+# (2026-10-02, this project no longer uses OSM data).
+_data_catalog_root = snakemake.params.data_catalog_root  # noqa: F821
 
 
 def _tile_id(path: str) -> str:
@@ -192,9 +195,8 @@ for panel_idx, (focal, all_paths, combined_bounds, out_h, out_w) in enumerate(se
     # ── figure ───────────────────────────────────────────────────────────
     fig, ax = plt.subplots(figsize=tuple(plot_cfg["overlap_diag_figsize"]))
 
-    # Land polygon background
-    coastlines = retry_transient_io(gpd.read_file, coastlines_path, layer="land_polygons",
-                               bbox=(minx, miny, maxx, maxy))
+    # Land polygon background, from the project's own DeltaDTM mask.
+    coastlines = land_polygons_from_deltadtm_mask(_data_catalog_root, (minx, miny, maxx, maxy))
     if not coastlines.empty:
         coastlines.plot(ax=ax, color="whitesmoke", edgecolor="whitesmoke",
                         linewidth=0.5, zorder=0)

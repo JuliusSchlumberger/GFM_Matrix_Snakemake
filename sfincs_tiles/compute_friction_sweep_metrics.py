@@ -142,8 +142,11 @@ def main() -> None:
     pooled_df = pd.DataFrame(pooled_rows)
     per_tile_out = base_dir / "friction_sweep_per_tile_metrics.csv"
     pooled_out = base_dir / "friction_sweep_pooled_metrics.csv"
-    per_tile_df.to_csv(per_tile_out, index=False)
-    pooled_df.to_csv(pooled_out, index=False)
+    # Transient P:\ drive drops (SMB idle-session timeout/blip) happen on this
+    # codebase's shared mount - retry the write rather than losing every
+    # tile's already-done raster read over a momentary hiccup at the very end.
+    retry_transient_io(per_tile_df.to_csv, per_tile_out, index=False)
+    retry_transient_io(pooled_df.to_csv, pooled_out, index=False)
     print(f"\nWrote {per_tile_out} ({len(per_tile_df)} row(s))")
     print(f"Wrote {pooled_out} ({len(pooled_df)} row(s))")
 

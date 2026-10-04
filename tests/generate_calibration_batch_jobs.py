@@ -1,5 +1,5 @@
-"""Generate N independent sbatch scripts (one per node) to run the 260-tile
-sweep-budget or obstacle-coupling calibration study on Hydrax, each node
+"""Generate N independent sbatch scripts (one per node) to run a sweep-budget
+or obstacle-coupling calibration study on Hydrax, each node
 processing its OWN slice of tiles sequentially in one continuous process
 (2026-09-24 - replaces generate_calibration_array_job.py's one-task-per-tile
 design: submitting/scheduling ~300 individual SLURM tasks pays real
@@ -47,9 +47,20 @@ processes (see test_sweep_budget_calibration.py's own
 --write-wet-tiles-summary flag, off by default here) - build it with
 aggregate_wet_tiles.py once every node's CSVs are on disk.
 
+Study directory (2026-10): `--study-dir-name` selects which study's own
+output tree this points at (default `calibration_260_tiles`, the original
+study, preserved for exact backward compatibility) - every path below that
+was previously a literal `calibration_260_tiles` string is now built from
+this one parameter, so a second, independently-sized study (e.g. a
+~500-tile global-representativeness re-run after the connectivity-first
+tile-grid migration) gets its own separate directory rather than
+overwriting/mixing with the original's candidate pool, sweep-budget CSVs,
+or resolved_config.yml.
+
 Usage:
     python generate_calibration_batch_jobs.py sweep_budget
     python generate_calibration_batch_jobs.py obstacle_coupling --tile-ids-file <wet_tiles_selected.txt>
+    python generate_calibration_batch_jobs.py sweep_budget --study-dir-name calibration_500_tiles
     bash <printed submit script path>
 """
 
@@ -149,7 +160,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("study", choices=list(SCRIPTS))
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
-    parser.add_argument("--tile-ids-file", default=None, help="default: calibration_260_tiles/<study's own default>, see SCRIPTS above")
+    parser.add_argument(
+        "--study-dir-name", default="calibration_260_tiles",
+        help="name of the study's own output directory under paths.root - default is the "
+             "original 260-tile study, preserved for backward compatibility; pass a different "
+             "name (e.g. calibration_500_tiles) for an independent, separately-sized study",
+    )
+    parser.add_argument("--tile-ids-file", default=None, help="default: <study-dir-name>/<study's own default file>, see SCRIPTS above")
     parser.add_argument("--n-nodes", type=int, default=N_NODES_DEFAULT)
     parser.add_argument("--partition", default=PARTITION_DEFAULT)
     parser.add_argument("--time", default=None, help="default: derived from the worst-loaded node's own estimated worst-case time, see estimate_worst_case_hours()")
@@ -174,8 +191,8 @@ def main() -> None:
     linux_root = linux_config["paths"]["root"]
     linux_code_root = linux_config["paths"]["code_root"]
 
-    study_root_local = local_root / "calibration_260_tiles"
-    study_root_linux = f"{linux_root}/calibration_260_tiles"
+    study_root_local = local_root / args.study_dir_name
+    study_root_linux = f"{linux_root}/{args.study_dir_name}"
 
     tile_ids_file = Path(args.tile_ids_file) if args.tile_ids_file else study_root_local / spec["default_tile_ids_file"]
     all_tile_ids = [line.strip() for line in tile_ids_file.read_text().splitlines() if line.strip()]
@@ -201,7 +218,7 @@ def main() -> None:
     linux_jobs_dir = f"{study_root_linux}/hpc_jobs"
     retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
-    retry_transient_io((local_root / "calibration_260_tiles" / spec["out_subdir"]).mkdir, parents=True, exist_ok=True)
+    retry_transient_io((study_root_local / spec["out_subdir"]).mkdir, parents=True, exist_ok=True)
 
     # Same resolved_config.yml staging pattern as generate_calibration_array_job.py
     # (config_hpc.yml is a git-ignored, Windows-machine-only file - doesn't exist on

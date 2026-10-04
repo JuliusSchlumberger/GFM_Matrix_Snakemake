@@ -1,0 +1,31 @@
+# Global-deltas flood hazard maps, RCP4.5-equivalent scenario (ssp245),
+# RP100, all 5 production SLR magnitudes, 2026-10.
+#
+# Sibling of deltas_ssp126.yml - see that file's header for the full
+# rationale (delta tile selection, friction_scale_factor=9.0, isolation
+# policy, the Volga/Caspian exclusion). ssp245 happens to be production's
+# own default boundary_conditions.slr_scenario, but this run still builds
+# its own fresh, isolated WL_scenarios rather than reusing production's,
+# per explicit user decision.
+
+tile_grid:
+  path: "{processed_inputs_dir}/mask/deltas_global_tiles.gpkg"
+
+simulation:
+  flooding:
+    friction_scale_factor: 9.0
+  model_outputs: "{root}/deltas_floodmaps/ssp245/model_outputs"
+
+postprocessing:
+  merged_outputs: "{root}/deltas_floodmaps/ssp245/merged_results"
+
+visualization:
+  output_dir: "{root}/deltas_floodmaps/ssp245/figures"
+
+boundary_conditions:
+  slr_scenario: "ssp245"
+  waterlevel_nc_dir: "{root}/deltas_floodmaps/ssp245/WL_scenarios"
+  return_periods: [100]
+
+adaptation:
+  slr_intensities: []

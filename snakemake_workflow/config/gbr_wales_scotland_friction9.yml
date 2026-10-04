@@ -1,0 +1,55 @@
+# Wales/Scotland re-run at friction_scale_factor=9 (0.3x production's 30.0)
+# for comparison against the existing production (friction=30) results -
+# the friction-sweep's own best-CSI finding against SFINCS
+# (CSI=0.8012, bias=0.9877, validation_sfincs_v5), 2026-10-03.
+#
+# 23 tiles (confirmed via direct tile-grid intersection against all 5
+# benchmark regions' real bboxes - scotland, firth_of_forth, wales,
+# severn_estuary, menai_strait - data_catalog_validation.yml), spanning 9
+# merge chunks (N45W005, N45W010, N50E000, N50W005, N50W010, N50W015,
+# N55W005, N55W010, N60W005), ALL hop_distance=0 (no wave-ordering
+# complexity - every tile forces directly from its own COAST-RP stations).
+#
+# Layered on top of config.yml + config_local.yml via
+# src/config_utils.py::materialize_config, same pattern this session's
+# ESP/FRA/NOR calibration sweep (build_run_config.py) and the Thailand
+# side project both used.
+
+tile_grid:
+  path: "{processed_inputs_dir}/mask/gbr_wales_scotland_friction9_tiles.gpkg"
+
+simulation:
+  flooding:
+    friction_scale_factor: 9.0
+  # NOT sharing production's own preprocessing_inputs_dir here (even though
+  # dem/mask/friction/boundaries are identical regardless of
+  # friction_scale_factor) - production's geoid-offset raster was
+  # regenerated earlier this session and now has a newer mtime than these
+  # tiles' existing dem.tif, which would make Snakemake want to cascade-
+  # rebuild extract_dem/mask/friction for these 23 tiles INSIDE the shared
+  # production model_outputs tree. Regenerating fresh into the isolated
+  # dir instead costs a few minutes of redundant (but cheap) preprocessing
+  # and touches zero shared production state - a better trade than writing
+  # into shared files, even though the content would end up identical.
+  model_outputs: "{root}/gbr_wales_scotland_friction9/model_outputs"
+
+postprocessing:
+  merged_outputs: "{root}/gbr_wales_scotland_friction9/merged_results"
+
+validation:
+  output_dir: "{root}/gbr_wales_scotland_friction9/validation"
+
+visualization:
+  output_dir: "{root}/gbr_wales_scotland_friction9/figures"
+
+# Only the RP/SLR combo the real Wales/Scotland figures actually use -
+# matches this session's earlier GBR work (RP100 and RP250, SLR_0 panels).
+boundary_conditions:
+  return_periods: [100, 250]
+  slr_scenarios: ["SLR_0"]
+
+# REQUIRED, not decorative - merged_slr_scenarios() unions this with
+# boundary_conditions.slr_scenarios; leaving it unset would silently pull
+# in config.yml's own SLR_500 adaptation intensity.
+adaptation:
+  slr_intensities: []
