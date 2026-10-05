@@ -359,7 +359,15 @@ def main() -> None:
 
     cfg = load_config(args.config)
     root = Path(cfg["paths"]["root"])
-    model_outputs = root / "model_outputs"
+    # cfg["simulation"]["model_outputs"] (NOT a hardcoded root/"model_outputs" - that was a real
+    # bug, found live 2026-10 on calibration_500_tiles: every tile errored "No such file or
+    # directory" since that study's solver outputs are deliberately isolated at
+    # {root}/calibration_500_tiles/model_outputs, not the shared production tree, and this
+    # script was silently ignoring the override, always reading the shared path regardless of
+    # --config) - load_config() already expands this to an absolute path, so this is a no-op
+    # for plain production config.yml (whose own simulation.model_outputs is "{root}/model_outputs")
+    # and correctly isolated for any scenario config that overrides it.
+    model_outputs = Path(cfg["simulation"]["model_outputs"])
     knn = int(cfg["simulation"]["flooding"]["knn"])
     friction_scale_factor = float(cfg["simulation"]["flooding"]["friction_scale_factor"])
     print(f"model_outputs={model_outputs}  knn={knn}  friction_scale_factor={friction_scale_factor}  "

@@ -12,6 +12,12 @@ distinguishes dry (1 row) from wet (>1 row) without re-deriving n_inundated
 from the CSV content itself. A 0-byte/unreadable CSV means that task never
 started or is still running - treated as "not yet known", not dry.
 
+`aggregate_wet_tiles()` is also imported directly by
+plot_sweep_calibration_bands.py, which runs this as its own first step
+(2026-10) rather than requiring a separate manual invocation first - this
+script remains usable standalone too (e.g. to just check wet-tile counts
+without plotting).
+
 Usage:
     python aggregate_wet_tiles.py <sweep_budget_dir> [--n-tiles-wanted 260]
 """
@@ -24,13 +30,10 @@ from pathlib import Path
 import pandas as pd
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("sweep_budget_dir")
-    parser.add_argument("--n-tiles-wanted", type=int, default=260)
-    args = parser.parse_args()
-
-    sweep_budget_dir = Path(args.sweep_budget_dir)
+def aggregate_wet_tiles(sweep_budget_dir: Path, n_tiles_wanted: int) -> list[int]:
+    """Scans every *.csv in sweep_budget_dir, writes the first n_tiles_wanted
+    wet tile_ids (CSV mtime order) to wet_tiles_selected.txt, and returns
+    that same selected list."""
     csvs = sorted(sweep_budget_dir.glob("*.csv"), key=lambda p: p.stat().st_mtime)
 
     wet_tiles: list[int] = []
@@ -52,16 +55,25 @@ def main() -> None:
 
     print(f"{len(csvs)} CSV(s) found: {len(wet_tiles)} wet, {n_dry} dry, {n_unreadable} unreadable/still-running")
 
-    selected = wet_tiles[:args.n_tiles_wanted]
+    selected = wet_tiles[:n_tiles_wanted]
     wet_file = sweep_budget_dir / "wet_tiles_selected.txt"
     with open(wet_file, "w") as f:
         for tile_id in selected:
             f.write(f"{tile_id}\n")
-    print(f"{len(selected)}/{args.n_tiles_wanted} wet tiles selected, written to {wet_file}")
-    if len(selected) < args.n_tiles_wanted:
+    print(f"{len(selected)}/{n_tiles_wanted} wet tiles selected, written to {wet_file}")
+    if len(selected) < n_tiles_wanted:
         print(f"WARNING: only found {len(selected)} wet tiles - need more candidates from "
               f"select_calibration_tiles.py, or the array job hasn't finished yet "
               f"({n_unreadable} tile(s) still unreadable/running)")
+    return selected
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("sweep_budget_dir")
+    parser.add_argument("--n-tiles-wanted", type=int, default=260)
+    args = parser.parse_args()
+    aggregate_wet_tiles(Path(args.sweep_budget_dir), args.n_tiles_wanted)
 
 
 if __name__ == "__main__":

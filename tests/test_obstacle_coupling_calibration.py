@@ -477,7 +477,10 @@ def main() -> None:
 
     cfg = load_config(args.config)
     root = Path(cfg["paths"]["root"])
-    model_outputs = root / "model_outputs"
+    # cfg["simulation"]["model_outputs"] (NOT a hardcoded root/"model_outputs" - same real bug
+    # found live in test_sweep_budget_calibration.py, fixed there identically; see that script's
+    # own comment on this exact line for the full story).
+    model_outputs = Path(cfg["simulation"]["model_outputs"])
     flooding_cfg = cfg["simulation"]["flooding"]
     knn = int(flooding_cfg["knn"])
     friction_scale_factor = float(flooding_cfg["friction_scale_factor"])

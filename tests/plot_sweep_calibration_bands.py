@@ -35,8 +35,15 @@ Panels:
   (d) newly flooded cells per round (raw counts, not cumulative, not
       normalized by tile size - log scale).
 
+Runs aggregate_wet_tiles.py's own selection as its first step (2026-10,
+folded in here so a stale/missing wet_tiles_selected.txt no longer needs a
+separate manual command first) - rebuilds that file fresh from whatever
+sweep_budget CSVs currently exist, every time this script runs, so the
+figure always reflects the sweep's current state rather than a possibly-
+stale prior selection.
+
 Usage:
-    python plot_sweep_calibration_bands.py <sweep_budget_dir> <figures_dir> [--max-rounds 40]
+    python plot_sweep_calibration_bands.py <sweep_budget_dir> <figures_dir> [--max-rounds 40] [--n-tiles-wanted 260]
 """
 
 from __future__ import annotations
@@ -55,8 +62,11 @@ from matplotlib.ticker import MaxNLocator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from aggregate_wet_tiles import aggregate_wet_tiles  # noqa: E402
 from config_utils import load_config  # noqa: E402
 from plot_sweep_budget_convergence import N_COMPLETE_ROUNDS, collect as collect_convergence  # noqa: E402
+
+N_TILES_WANTED_DEFAULT = 260  # matches aggregate_wet_tiles.py's own default
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 SWEEPS_PER_ROUND = 4
@@ -201,6 +211,11 @@ def main() -> None:
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--epsilon", type=float, default=None, help="default: config simulation.flooding.waterlevel_epsilon_m")
     parser.add_argument("--max-rounds", type=int, default=None, help="default: config simulation.flooding.max_rounds")
+    parser.add_argument(
+        "--n-tiles-wanted", type=int, default=N_TILES_WANTED_DEFAULT,
+        help=f"forwarded to aggregate_wet_tiles.py's own selection, run as this script's first "
+             f"step (default: {N_TILES_WANTED_DEFAULT})",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -211,9 +226,8 @@ def main() -> None:
     figures_dir = Path(args.figures_dir)
     figures_dir.mkdir(parents=True, exist_ok=True)
 
-    wet_tiles_path = sweep_budget_dir / "wet_tiles_selected.txt"
-    tile_ids = [int(line.strip()) for line in wet_tiles_path.read_text().splitlines() if line.strip()]
-    print(f"{len(tile_ids)} wet tile(s) from {wet_tiles_path}")
+    tile_ids = aggregate_wet_tiles(sweep_budget_dir, args.n_tiles_wanted)
+    print(f"{len(tile_ids)} wet tile(s) selected (wet_tiles_selected.txt rebuilt fresh)")
 
     records = []
     for tid in tile_ids:
