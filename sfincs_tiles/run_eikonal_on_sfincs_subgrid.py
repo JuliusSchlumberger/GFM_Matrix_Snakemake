@@ -13,6 +13,7 @@ coastline_mask+IDW path, which doesn't apply on this projected UTM grid.
 Usage:
     python run_eikonal_on_sfincs_subgrid.py --tile-id 37
     python run_eikonal_on_sfincs_subgrid.py --config <resolved_config.yml> --tile-id 37
+    python run_eikonal_on_sfincs_subgrid.py --tile-id 37 --max-outer-iterations 5
 """
 
 from __future__ import annotations
@@ -226,6 +227,17 @@ def main() -> None:
              f"tags the eikonal output filename (_fsf<value>) so sweep points never collide with each "
              f"other or with the default-friction result.",
     )
+    parser.add_argument(
+        "--max-outer-iterations", type=int, default=None,
+        help=f"obstacle_coupling outer-iteration cap forwarded to flood_depth_dense (default: "
+             f"{MAX_OUTER_ITERATIONS_DEFAULT}, matching production's own simulation.flooding."
+             f"obstacle_coupling.max_outer_iterations - this script never reads that config key live, "
+             f"it's a plain hardcoded default here, same as every other solver constant in this file; "
+             f"pass this flag to test a different value). A non-default value tags the eikonal output "
+             f"filename (_outer<value>), same reasoning as --friction-scale-factor's own _fsf tag - "
+             f"otherwise a swept outer-iteration run would silently collide with (and skip itself "
+             f"against, via the already-done check) a prior default-outer result for the same tile.",
+    )
     args = parser.parse_args()
 
     if args.config:
@@ -246,7 +258,16 @@ def main() -> None:
     # tile) - only a sweep's non-default scale gets its own tagged path, so
     # sweep points never collide with each other or with the real default.
     _fsf_tag = "" if friction_scale_factor == FRICTION_SCALE_FACTOR_DEFAULT else f"_fsf{friction_scale_factor:g}"
-    eikonal_output_path = out_dir / f"eikonal_on_subgrid_waterdepth_{RETURN_PERIOD}_{WATERLEVEL_NAME}{_fsf_tag}.tif"
+    max_outer_iterations = (
+        args.max_outer_iterations if args.max_outer_iterations is not None else MAX_OUTER_ITERATIONS_DEFAULT
+    )
+    # Same reasoning as _fsf_tag above - a non-default outer-iteration cap gets its own tagged
+    # path so it never collides with (or silently skips itself against, via the already-done
+    # check below) the default-outer result for the same tile/friction_scale_factor.
+    _outer_tag = "" if max_outer_iterations == MAX_OUTER_ITERATIONS_DEFAULT else f"_outer{max_outer_iterations}"
+    eikonal_output_path = (
+        out_dir / f"eikonal_on_subgrid_waterdepth_{RETURN_PERIOD}_{WATERLEVEL_NAME}{_fsf_tag}{_outer_tag}.tif"
+    )
 
     sfincs_dir = root / args.base_dir_name / args.tile_id / "sfincs_model"
     native_mask_path = root / args.base_dir_name / args.tile_id / "inputs" / "mask.tif"
@@ -289,7 +310,10 @@ def main() -> None:
     if eikonal_output_path.exists():
         print(f"tile {args.tile_id}: eikonal already done, skipping")
         return
-    eikonal_kwargs = {"base_dir_name": args.base_dir_name, "friction_scale_factor": friction_scale_factor}
+    eikonal_kwargs = {
+        "base_dir_name": args.base_dir_name, "friction_scale_factor": friction_scale_factor,
+        "max_outer_iterations": max_outer_iterations,
+    }
     if args.max_rounds is not None:
         eikonal_kwargs["max_rounds"] = args.max_rounds
     result = run_eikonal_on_sfincs_subgrid(args.tile_id, root, **eikonal_kwargs)

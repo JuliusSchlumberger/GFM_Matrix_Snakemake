@@ -57,6 +57,7 @@ def generate_batches(
     pairs: list[tuple[str, float]], n_nodes: int, partition: str, time_limit: str,
     mem: str, cpus_per_task: int, account: str, env_activate_cmd: str, batch_runner_linux: str,
     linux_jobs_dir: str, local_jobs_dir: Path, submit_path: Path, base_dir_name: str, config_linux: str,
+    max_outer_iterations: int | None = None,
 ) -> None:
     n_batches = min(n_nodes, len(pairs))
     k, m = divmod(len(pairs), n_batches)
@@ -101,7 +102,8 @@ def generate_batches(
             "",
             f'python "{batch_runner_linux}" --pairs-file "{pairs_path_linux}" '
             f'--base-dir-name "{base_dir_name}" --config "{config_linux}" '
-            f'--workers {cpus_per_task}',
+            f'--workers {cpus_per_task}'
+            + (f' --max-outer-iterations {max_outer_iterations}' if max_outer_iterations is not None else ''),
             "",
         ]
 
@@ -141,6 +143,12 @@ def main() -> None:
     parser.add_argument("--mem", default=MEM_DEFAULT)
     parser.add_argument("--cpus-per-task", type=int, default=CPUS_PER_TASK_DEFAULT)
     parser.add_argument("--account", default="")
+    parser.add_argument(
+        "--max-outer-iterations", type=int, default=None,
+        help="forwarded verbatim to run_friction_sweep_batch.py's own --max-outer-iterations for "
+             "every pair in this dispatch (default: run_eikonal_on_sfincs_subgrid.py's own default, "
+             "4, matching production).",
+    )
     args = parser.parse_args()
 
     config_path = Path(args.config)
@@ -186,6 +194,7 @@ def main() -> None:
         env_activate_cmd=env_activate_cmd, batch_runner_linux=batch_runner_linux,
         linux_jobs_dir=linux_jobs_dir, local_jobs_dir=local_jobs_dir,
         submit_path=submit_path, base_dir_name=args.base_dir_name, config_linux=config_linux,
+        max_outer_iterations=args.max_outer_iterations,
     )
     print(f"\nSubmit on Hydrax with: bash {linux_jobs_dir}/submit_friction_sweep_batches.sh")
 

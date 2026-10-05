@@ -35,7 +35,10 @@ from pathlib import Path
 RUNNER = Path(__file__).resolve().parent / "run_eikonal_on_sfincs_subgrid.py"
 
 
-def _run_one(python_exe: str, config_path: str | None, base_dir_name: str, tile_id: str, fsf: float):
+def _run_one(
+    python_exe: str, config_path: str | None, base_dir_name: str, tile_id: str, fsf: float,
+    max_outer_iterations: int | None = None,
+):
     cmd = [
         python_exe, str(RUNNER),
         "--tile-id", str(tile_id), "--base-dir-name", base_dir_name,
@@ -43,6 +46,8 @@ def _run_one(python_exe: str, config_path: str | None, base_dir_name: str, tile_
     ]
     if config_path:
         cmd += ["--config", config_path]
+    if max_outer_iterations is not None:
+        cmd += ["--max-outer-iterations", str(max_outer_iterations)]
     t0 = time.time()
     result = subprocess.run(cmd, capture_output=True, text=True)
     elapsed = time.time() - t0
@@ -56,6 +61,12 @@ def main() -> None:
     parser.add_argument("--config", default=None)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--python", default=sys.executable)
+    parser.add_argument(
+        "--max-outer-iterations", type=int, default=None,
+        help="forwarded verbatim to every run_eikonal_on_sfincs_subgrid.py call in this batch "
+             "(default: that script's own default, 4, matching production) - see its own "
+             "--max-outer-iterations help text for the output-filename tagging this implies.",
+    )
     args = parser.parse_args()
 
     pairs: list[tuple[str, float]] = []
@@ -70,7 +81,7 @@ def main() -> None:
     t_batch0 = time.time()
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = [
-            pool.submit(_run_one, args.python, args.config, args.base_dir_name, tile_id, fsf)
+            pool.submit(_run_one, args.python, args.config, args.base_dir_name, tile_id, fsf, args.max_outer_iterations)
             for tile_id, fsf in pairs
         ]
         for i, fut in enumerate(as_completed(futures), start=1):

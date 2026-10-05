@@ -18,6 +18,11 @@ Usage:
     python compute_friction_sweep_metrics.py --base-dir-name validation_sfincs_v5 \\
         --tile-ids-file validation_sfincs_v5/friction_sweep_tile_ids.txt \\
         --friction-scale-factors 3 6 9 12 15 18 21 24 27 30
+    # if the sweep itself was run with a non-default --max-outer-iterations (run_eikonal_on_sfincs_subgrid.py),
+    # pass the SAME value here too, or every lookup silently misses (see _eikonal_path()):
+    python compute_friction_sweep_metrics.py --base-dir-name sfincs_calibration \\
+        --tile-ids-file sfincs_calibration/tile_ids.txt \\
+        --friction-scale-factors 3 6 9 12 15 18 21 24 27 30 --max-outer-iterations 5
 """
 
 from __future__ import annotations
@@ -40,6 +45,7 @@ LAND_CODE = 0
 WATERDEPTH_SCALE = 100.0
 WATERDEPTH_NODATA_INT16 = 32767
 FRICTION_SCALE_FACTOR_DEFAULT = 30.0  # matches run_eikonal_on_sfincs_subgrid.py
+MAX_OUTER_ITERATIONS_DEFAULT = 4  # matches run_eikonal_on_sfincs_subgrid.py's own default
 
 
 def _decode_waterdepth_cm(path: Path) -> tuple[np.ndarray, object, object, tuple]:
@@ -52,15 +58,22 @@ def _decode_waterdepth_cm(path: Path) -> tuple[np.ndarray, object, object, tuple
     return depth_m, transform, crs, shape
 
 
-def _eikonal_path(tile_dir: Path, friction_scale_factor: float) -> Path:
-    tag = "" if friction_scale_factor == FRICTION_SCALE_FACTOR_DEFAULT else f"_fsf{friction_scale_factor:g}"
-    return tile_dir / "outputs" / f"eikonal_on_subgrid_waterdepth_RP100_SLR_0{tag}.tif"
+def _eikonal_path(tile_dir: Path, friction_scale_factor: float, max_outer_iterations: int) -> Path:
+    # Same tagging scheme run_eikonal_on_sfincs_subgrid.py itself writes with - both tags
+    # independent and composable (a run can differ in friction, outer-iterations, both, or
+    # neither), so this must build the path identically or every file lookup here silently
+    # misses (tile_counts() below treats a missing file as "skip this tile", not an error).
+    fsf_tag = "" if friction_scale_factor == FRICTION_SCALE_FACTOR_DEFAULT else f"_fsf{friction_scale_factor:g}"
+    outer_tag = "" if max_outer_iterations == MAX_OUTER_ITERATIONS_DEFAULT else f"_outer{max_outer_iterations}"
+    return tile_dir / "outputs" / f"eikonal_on_subgrid_waterdepth_RP100_SLR_0{fsf_tag}{outer_tag}.tif"
 
 
-def tile_counts(tile_dir: Path, friction_scale_factor: float) -> tuple[float, float, float] | None:
+def tile_counts(
+    tile_dir: Path, friction_scale_factor: float, max_outer_iterations: int,
+) -> tuple[float, float, float] | None:
     """(matched_km2, eikonal_only_km2, sfincs_only_km2) for one tile at one
     friction scale, or None if either raster is missing."""
-    eikonal_path = _eikonal_path(tile_dir, friction_scale_factor)
+    eikonal_path = _eikonal_path(tile_dir, friction_scale_factor, max_outer_iterations)
     hmax_path = tile_dir / "sfincs_model" / "hmax_subgrid.tif"
     native_mask_path = tile_dir / "inputs" / "mask.tif"
     if not (eikonal_path.exists() and hmax_path.exists() and native_mask_path.exists()):
@@ -100,6 +113,12 @@ def main() -> None:
     parser.add_argument("--base-dir-name", default="validation_sfincs_v5")
     parser.add_argument("--tile-ids-file", required=True, help="one tile_id per line (select_friction_sweep_tiles.py)")
     parser.add_argument("--friction-scale-factors", type=float, nargs="+", required=True)
+    parser.add_argument(
+        "--max-outer-iterations", type=int, default=MAX_OUTER_ITERATIONS_DEFAULT,
+        help=f"must match whatever --max-outer-iterations the eikonal sweep was actually run with "
+             f"(default: {MAX_OUTER_ITERATIONS_DEFAULT}, matching run_eikonal_on_sfincs_subgrid.py's "
+             f"own default) - determines which tagged output filename this reads, see _eikonal_path().",
+    )
     args = parser.parse_args()
 
     root = read_root(Path(args.config))
@@ -113,7 +132,7 @@ def main() -> None:
         matched_sum = only_sum = sfincs_only_sum = 0.0
         n_scored = 0
         for tid in tile_ids:
-            counts = tile_counts(base_dir / str(tid), fsf)
+            counts = tile_counts(base_dir / str(tid), fsf, args.max_outer_iterations)
             if counts is None:
                 continue
             matched, only, sfincs_only = counts

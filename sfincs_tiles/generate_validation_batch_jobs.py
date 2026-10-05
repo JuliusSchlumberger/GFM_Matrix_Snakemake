@@ -123,7 +123,7 @@ def generate_batches(
     linux_jobs_dir: str, local_jobs_dir: Path, submit_path: Path, batch_name_prefix: str,
     base_dir_name: str, runner_extra_args: str = "", preprocess: dict | None = None,
     defer_eikonal: bool = False, sfincs_resolved_config_linux: str | None = None,
-    eikonal_deferred_factors: list[float] | None = None,
+    eikonal_deferred_factors: list[float] | None = None, eikonal_max_outer_iterations: int | None = None,
 ) -> None:
     """`preprocess`, if given (see --preprocess-config), is a dict with
     keys: return_periods, waterlevel_names, linux_model_outputs,
@@ -230,6 +230,7 @@ def generate_batches(
                     f'"$GFM_PY" "{friction_sweep_batch_linux}" --pairs-file "{linux_jobs_dir}/{name}_eikonal_pairs.csv" '
                     f'--base-dir-name "{base_dir_name}" --config "{sfincs_resolved_config_linux}" '
                     f'--workers {cpus_per_task} --python "$GFM_PY"'
+                    + (f' --max-outer-iterations {eikonal_max_outer_iterations}' if eikonal_max_outer_iterations is not None else '')
                 ),
                 "",
                 f'echo "=== Re-running postprocess (eikonal stats) for batch {batch_id}: {len(batch_tile_ids)} tile(s) ==="',
@@ -325,6 +326,13 @@ def main() -> None:
              "real 10-point sweep (same list generate_friction_sweep_jobs.py defaults to). Pass a "
              "single value (e.g. just 30.0) to only compute the production default, with no sweep.",
     )
+    parser.add_argument(
+        "--defer-eikonal-max-outer-iterations", type=int, default=None,
+        help="forwarded verbatim to run_friction_sweep_batch.py's own --max-outer-iterations for "
+             "--defer-eikonal's pass (default: run_eikonal_on_sfincs_subgrid.py's own default, 4, "
+             "matching production) - applies uniformly to every (tile, factor) pair in this batch, "
+             "not a second sweep dimension.",
+    )
     args = parser.parse_args()
     if args.defer_eikonal and "--models" in args.runner_extra_args:
         parser.error("--defer-eikonal already controls --models (bathtub,sfincs then \"\") - "
@@ -409,6 +417,7 @@ def main() -> None:
         base_dir_name=args.base_dir_name, runner_extra_args=args.runner_extra_args, preprocess=preprocess,
         defer_eikonal=args.defer_eikonal, sfincs_resolved_config_linux=f"{base_dir_linux}/resolved_config.yml",
         eikonal_deferred_factors=args.defer_eikonal_factors,
+        eikonal_max_outer_iterations=args.defer_eikonal_max_outer_iterations,
     )
     print(f"\nSubmit on Hydrax with: bash {linux_jobs_dir}/{submit_filename}")
     print(f"(make sure {args.runner_script_name} is executable / callable via `bash` - no chmod needed since it's invoked as `bash <path>`)")
