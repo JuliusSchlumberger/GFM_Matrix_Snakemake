@@ -75,24 +75,24 @@ simulation:
     knn: 15
     default_friction: 0.002
     friction_scale_factor: 30.0
-    max_rounds: 40
+    max_rounds: 100
     waterlevel_epsilon_m: 0.03
     obstacle_coupling:
       enabled: true
-      max_outer_iterations: 4
+      max_outer_iterations: 15
       outer_convergence_pct: 0.01
   aqueduct_mem_estimate:
     base_mb: 1000
     bytes_per_pixel: 80
 hpc:
-  n_nodes: 25
+  n_nodes: 30
   jobs_dir: '{root}/calibration_500_tiles/model_outputs/hpc_jobs'
   large_tile_pixel_threshold: 999999999999
   large_tile_batch_multiplier: 2
   sbatch:
     partition: 1vcpu
     account: ''
-    time: 0-02:00:00
+    time: 0-09:00:00
     mem: 7G
     cpus_per_task: 1
     env_activate_cmd: module load miniconda && eval "$(conda shell.bash hook)" &&
@@ -100,7 +100,7 @@ hpc:
   sbatch_large:
     partition: 4vcpu
     account: ''
-    time: 0-02:00:00
+    time: 0-09:00:00
     mem: 30G
     cpus_per_task: 4
     env_activate_cmd: module load miniconda && eval "$(conda shell.bash hook)" &&

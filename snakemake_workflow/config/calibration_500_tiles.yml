@@ -25,6 +25,17 @@ tile_grid:
 
 simulation:
   model_outputs: "{root}/calibration_500_tiles/model_outputs"
+  # This study's whole purpose: probe convergence at ceilings well above
+  # production's defaults (flooding.max_rounds: 40, obstacle_coupling.
+  # max_outer_iterations: 4, config.yml) - these were missing from this
+  # override entirely until now, which silently left every generated job
+  # running production's defaults instead (2026-10, caught before
+  # submission - see hpc.sbatch/sbatch_large's time-budget comment below
+  # for the real cost implication of this fix).
+  flooding:
+    max_rounds: 100
+    obstacle_coupling:
+      max_outer_iterations: 15
 
 # Single representative scenario per tile (2026-10, user direction) - a
 # calibration/representativeness study needs one real solve per tile, not
@@ -61,25 +72,35 @@ adaptation:
 # if a batch dies with a MemoryError (not just a time-limit kill), that is
 # almost certainly this, not a bug.
 #
-# Time budget - 2h (user direction, down from 5h). Real measured/estimated
-# worst case at 25 nodes (scaled down from the 20-node figures below):
+# Time budget - 9h, 30 nodes (user direction, 2026-10, after seeing the
+# corrected worst-case math below - a deliberate accepted-risk choice, not
+# a guarantee of zero truncation). Real measured/estimated worst case,
+# using the ACTUAL ceilings above (max_rounds=100, max_outer_iterations=15
+# -> 1,500 worst-case round-equivalents per tile, NOT the 160 production's
+# defaults give - a 9.4x difference caught only after noticing these
+# overrides were missing entirely, see simulation.flooding's own comment):
 # preprocessing ~142.5 core-seconds/tile (measured on the 400-tile delta
-# run) -> 571 tiles / 25 cores ~= 0.9h; simulate worst-case (production's
-# real max_rounds=40 ceiling, zero early exit, the 0.05s/Mcell/sweep rate
-# test_sweep_budget_calibration.py's own study measured and confirmed) on
-# this candidate pool's real total pixel count (~20.7 billion px) -> ~1.8h
-# worst case on 25 cores. Combined worst case ~2.7h > this 2h budget - a
-# batch unlucky enough to draw several slow-to-converge tiles COULD get
-# SLURM-killed mid-simulate before finishing. This is a real, accepted
-# possibility (not a bug), and safe to just resubmit past: every snakemake
-# call below now also passes --rerun-incomplete (2026-10 addition,
-# matching the exact fix already applied to run_delta_floodmaps.py for
-# the identical failure mode), so Snakemake treats whatever a time-limit
-# kill left mid-write as safely redoable rather than refusing with
+# run) -> 571 tiles / 30 cores ~= 0.75h; simulate worst-case (zero early
+# exit at either loop level, the 0.05s/Mcell/sweep rate
+# test_sweep_budget_calibration.py's own study measured and confirmed,
+# scaled by the 9.4x ceiling ratio above) on this candidate pool's real
+# total pixel count (~20.7 billion px) -> ~14.1h worst case on 30 cores.
+# Combined worst case ~14.9h > this 9h budget - STILL not a guarantee every
+# batch finishes in one shot. Accepted because (a) the original 260-tile
+# calibration study found the vast majority of tiles converge far short of
+# even the OLD, lower ceiling (58.7% by round 40 alone; only 2% of tiles
+# ever needed a 4th outer iteration) - the true worst case assumes every
+# single tile in a batch is a rare non-converging outlier, which is
+# unlikely in practice even though this study specifically exists to find
+# such outliers; and (b) it is safe to just resubmit past regardless: every
+# snakemake call below now also passes --rerun-incomplete (2026-10
+# addition, matching the exact fix already applied to run_delta_floodmaps.py
+# for the identical failure mode), so Snakemake treats whatever a time-
+# limit kill left mid-write as safely redoable rather than refusing with
 # IncompleteFilesException - just re-submit the same batch script and it
 # picks up only the still-missing targets, same as any other rerun.
 hpc:
-  n_nodes: 25
+  n_nodes: 30
   large_tile_pixel_threshold: 999999999999  # effectively infinite - see note above, forces every tile onto hpc.sbatch (1vcpu)
   # hpc.jobs_dir is NOT scenario-isolated by default (it's a fixed
   # "{root}/model_outputs/hpc_jobs" regardless of simulation.model_outputs) -
@@ -89,6 +110,6 @@ hpc:
   # explicitly, same tree as everything else this study owns.
   jobs_dir: "{root}/calibration_500_tiles/model_outputs/hpc_jobs"
   sbatch:
-    time: "0-02:00:00"
+    time: "0-09:00:00"
   sbatch_large:
-    time: "0-02:00:00"  # unused now (no tile is ever classified "large" - see above), kept in sync regardless
+    time: "0-09:00:00"  # unused now (no tile is ever classified "large" - see above), kept in sync regardless
