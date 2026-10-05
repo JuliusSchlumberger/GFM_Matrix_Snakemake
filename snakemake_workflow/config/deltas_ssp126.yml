@@ -33,6 +33,16 @@ tile_grid:
 simulation:
   flooding:
     friction_scale_factor: 9.0
+    # 5 (up from production's own default of 4) - user direction, 2026-10.
+    # Based on the calibration_500_tiles production-run byproduct (max
+    # outer_iterations_used observed was 5 across ~540 tiles, 0 hit the
+    # ceiling) - a real but sample-bounded signal, not the dedicated
+    # obstacle-coupling calibration study's own validated finding (that
+    # study was never actually run - see this session's own back-and-forth
+    # on this exact caveat). Applying it to a real deliverable now anyway,
+    # per explicit instruction.
+    obstacle_coupling:
+      max_outer_iterations: 5
   model_outputs: "{root}/deltas_floodmaps/ssp126/model_outputs"
 
 postprocessing:
@@ -52,3 +62,23 @@ boundary_conditions:
 # gbr_wales_scotland_friction9.yml).
 adaptation:
   slr_intensities: []
+
+# HPC dispatch (2026-10, new - this run was local-only via run_delta_floodmaps.py
+# until now). 8 nodes, all forced onto hpc.sbatch (1vcpu) via the
+# large_tile_pixel_threshold override below - user direction ("16 1vcpus...
+# 8 per ssp"), matching calibration_500_tiles's own "most tiles fit on
+# 1vcpu anyway" call. Generate with generate_hpc_preprocess_job.py
+# --calibration (NOT --fuse - this tile set spans multiple hop_distance
+# waves, unlike calibration_500_tiles/sfincs_calibration's hop=0-only
+# pools, so the real cross-wave dependency --fuse's own assertion guards
+# against is NOT satisfied here; --calibration alone still correctly
+# honors this scenario config end-to-end for the wave-dispatch phase,
+# unlike the default path's hardcoded-to-production base_config_path bug).
+hpc:
+  n_nodes: 8
+  large_tile_pixel_threshold: 999999999999  # effectively infinite - forces every tile onto hpc.sbatch (1vcpu), no sbatch_large batches at all
+  # NOT scenario-isolated by default (fixed "{root}/model_outputs/hpc_jobs"
+  # regardless of simulation.model_outputs) - isolate explicitly, same tree
+  # as everything else this run owns (see calibration_500_tiles.yml's own
+  # identical note on this exact trap).
+  jobs_dir: "{root}/deltas_floodmaps/ssp126/model_outputs/hpc_jobs"

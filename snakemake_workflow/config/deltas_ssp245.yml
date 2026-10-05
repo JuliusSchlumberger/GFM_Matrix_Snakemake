@@ -14,6 +14,10 @@ tile_grid:
 simulation:
   flooding:
     friction_scale_factor: 9.0
+    # 5 (up from production's own default of 4) - see deltas_ssp126.yml's
+    # own identical note for the full rationale/caveat.
+    obstacle_coupling:
+      max_outer_iterations: 5
   model_outputs: "{root}/deltas_floodmaps/ssp245/model_outputs"
 
 postprocessing:
@@ -29,3 +33,11 @@ boundary_conditions:
 
 adaptation:
   slr_intensities: []
+
+# HPC dispatch (2026-10, new) - see deltas_ssp126.yml's own identical
+# section for the full rationale (8 nodes, all 1vcpu, --calibration not
+# --fuse since this tile set spans multiple hop_distance waves).
+hpc:
+  n_nodes: 8
+  large_tile_pixel_threshold: 999999999999  # effectively infinite - forces every tile onto hpc.sbatch (1vcpu), no sbatch_large batches at all
+  jobs_dir: "{root}/deltas_floodmaps/ssp245/model_outputs/hpc_jobs"

@@ -20,21 +20,17 @@ tile_generation:
   ocean_code: 1
   river_code: 3
   coarse_resolution_m: 500
-  max_extent_tiles: 4
-  river_mouth_ocean_frac_min: 0.1
-  river_mouth_river_frac_min: 0.02
-  river_mouth_check_band_cells: 1.0
-  river_mouth_speckle_buffer_deg: 2.0
-  river_mouth_min_coastal_component_cells: 5000
-  river_mouth_seeds_path: '{processed_inputs_dir}/mask/river_mouth_seeds.gpkg'
+  strip_resolution_m: 500
+  strip_width_deg: 0.02
+  budget_cells: 25000000
+  min_split_gap_coarse_cells: 10
+  overlap_target_km: 20
+  merge_trigger_cells: 20000000
+  preferred_ceiling_cells: 30000000
+  hard_ceiling_cells: 100000000
+  coastal_buffer_km: 20
   write_debug_gpkg: true
   debug_gpkg_dir: '{processed_inputs_dir}/mask/tile_generation_debug'
-  shave_sample_resolution_m: 100
-  shave_unfloodable_fraction: 0.9
-  min_split_gap_coarse_cells: 60
-  population_source: population
-  dedup_min_coverage_fraction: 0.998
-  max_overlap_per_cell: 8
 tile_grid:
   path: '{processed_inputs_dir}/mask/deltas_global_tiles.gpkg'
 tile_split:
@@ -87,15 +83,15 @@ simulation:
     waterlevel_epsilon_m: 0.03
     obstacle_coupling:
       enabled: true
-      max_outer_iterations: 4
+      max_outer_iterations: 5
       outer_convergence_pct: 0.01
   aqueduct_mem_estimate:
     base_mb: 1000
     bytes_per_pixel: 80
 hpc:
-  n_nodes: 35
-  jobs_dir: '{root}/model_outputs/hpc_jobs'
-  large_tile_pixel_threshold: 70000000
+  n_nodes: 8
+  jobs_dir: '{root}/deltas_floodmaps/ssp126/model_outputs/hpc_jobs'
+  large_tile_pixel_threshold: 999999999999
   large_tile_batch_multiplier: 2
   sbatch:
     partition: 1vcpu
