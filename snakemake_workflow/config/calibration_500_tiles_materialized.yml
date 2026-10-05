@@ -85,14 +85,14 @@ simulation:
     base_mb: 1000
     bytes_per_pixel: 80
 hpc:
-  n_nodes: 20
+  n_nodes: 25
   jobs_dir: '{root}/calibration_500_tiles/model_outputs/hpc_jobs'
-  large_tile_pixel_threshold: 70000000
+  large_tile_pixel_threshold: 999999999999
   large_tile_batch_multiplier: 2
   sbatch:
     partition: 1vcpu
     account: ''
-    time: 0-03:00:00
+    time: 0-02:00:00
     mem: 7G
     cpus_per_task: 1
     env_activate_cmd: module load miniconda && eval "$(conda shell.bash hook)" &&
@@ -100,7 +100,7 @@ hpc:
   sbatch_large:
     partition: 4vcpu
     account: ''
-    time: 0-03:00:00
+    time: 0-02:00:00
     mem: 30G
     cpus_per_task: 4
     env_activate_cmd: module load miniconda && eval "$(conda shell.bash hook)" &&

@@ -13,8 +13,37 @@ For each scenario, runs in order:
      scenario's boundary-condition data).
   2. snakemake preprocess  - DEM/mask/friction/boundary extraction for the
      400 delta tiles.
-  3. snakemake simulate    - RP100 x 5 SLR magnitudes x 400 tiles.
+  3. simulate (hop-wave-ordered, NOT a single blanket `snakemake simulate`
+     call - see run_simulate_stage()) - RP100 x 5 SLR magnitudes x 400 tiles.
   4. snakemake postprocess - merge/mosaic per-tile results.
+
+Hop-wave ordering (2026-10, real bug found live on this run): a hop>=1
+tile's neighbour-seeding read (`collect_neighbor_wave_seeds`, via
+run_aqueduct.py's `path_ready()` check on each lower-hop candidate's own
+waterdepth output) treats a candidate that simply hasn't been simulated
+YET identically to one that will never exist - both just get omitted from
+`available`, and if every candidate is omitted the tile is marked
+"no upstream flooding" and gets a PERMANENT zero-waterdepth output
+(Snakemake then considers it done and never revisits it). A single blanket
+`snakemake simulate --cores N` call lets the scheduler freely interleave
+hop=0 and hop>=1 jobs, so this is a real race, not a rare edge case -
+verified live: 3 of 7 "no upstream flooding" skips on the ssp126 run were
+confirmed false negatives (the real neighbour finished minutes to hours
+AFTER the dependent tile had already been wrongly zeroed out), the other 4
+were genuine. Fixed by running `simulate` in explicit hop_distance waves
+(ascending), each wave's full target list given directly to `snakemake`
+and blocked on until that whole wave finishes, before the next wave's
+targets are even requested - same ordering guarantee production's HPC
+`generate_aqueduct_jobs`/`submit_waves.sh` already gives via SLURM
+`--dependency=afterany` chains, just as sequential local Snakemake calls
+instead of sequential sbatch submissions. This also makes the
+graceful-degradation omission trustworthy for small, spatially-restricted
+runs like this one: a hop=1 tile whose real hop=0 neighbour simply isn't
+part of this delta's 400-tile subset at all (out of scope, not merely
+not-yet-run) will, by the time its own wave starts, have waited for every
+hop=0 tile that COULD exist in this run to finish - so "still missing"
+then genuinely means "not in this run", and the resulting silent
+no-upstream-flooding skip is correct, by design, not a race artifact.
 
 Each Snakemake call is run with GFM_CONFIG_PATH pointed at that scenario's
 materialized config (snakemake_workflow/config/deltas_{scenario}_
@@ -53,11 +82,71 @@ CONFIG_DIR = REPO_ROOT / "snakemake_workflow" / "config"
 ALL_SCENARIOS = ["ssp126", "ssp245"]
 ALL_STAGES = ["boundary_conditions", "preprocess", "simulate", "postprocess"]
 
+# Per-snakemake-invocation cap on explicit target paths within one hop wave,
+# purely to stay under Windows' ~32,767-char CreateProcess command-line
+# limit (subprocess.run with a list goes straight to CreateProcess, no
+# shell, so this is a hard ceiling, not a style choice) - a single hop=0
+# wave on the full 400-tile subset can have up to ~2,000 targets (400 tiles
+# x 5 SLR). 150 targets x ~130 chars/path stays comfortably under that
+# limit with room for the base `snakemake --cores ... --resources ...`
+# prefix. Chunking has no correctness implications - every chunk belongs to
+# the SAME wave, so there is no ordering requirement between chunks, only
+# between waves (see run_simulate_stage's docstring).
+_MAX_TARGETS_PER_SNAKEMAKE_CALL = 150
+
 
 def _run(cmd: list[str], env: dict | None = None) -> bool:
     print(f"\n$ {' '.join(cmd)}", flush=True)
     result = subprocess.run(cmd, cwd=REPO_ROOT, env=env)
     return result.returncode == 0
+
+
+def _chunked(items: list, size: int):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
+
+
+def run_simulate_stage(materialized: Path, cores: int, mem_mb: int | None, env: dict) -> bool:
+    """Run the `simulate` stage in ascending hop_distance waves, blocking on
+    each wave's full completion before the next wave's targets are even
+    requested to snakemake - see this module's docstring for why (a real,
+    confirmed-live bug: a single blanket `snakemake simulate` call lets
+    hop>=1 jobs race their own lower-hop neighbours and wrongly self-zero).
+
+    Reads tile_grid/return_periods/SLR scenarios/model_outputs the same way
+    the Snakefile itself does, so the per-wave target lists exactly match
+    what `rule simulate`'s blanket _SIMULATION_OUTPUTS would have built -
+    this just splits that same flat list by hop_distance and sequences it.
+    """
+    sys.path.insert(0, str(REPO_ROOT / "src"))
+    import geopandas as gpd
+    from config_utils import load_config, merged_slr_scenarios
+
+    cfg = load_config(materialized)
+    tile_grid = gpd.read_file(cfg["tile_grid"]["path"])
+    tile_grid["tile_id"] = tile_grid["tile_id"].astype(int)
+    model_outputs = cfg["simulation"]["model_outputs"]
+    return_periods = [f"RP{rp}" for rp in cfg["boundary_conditions"]["return_periods"]]
+    waterlevel_names = merged_slr_scenarios(cfg["boundary_conditions"], cfg["adaptation"])
+
+    resources = ["--resources", f"mem_mb={mem_mb}"] if mem_mb else []
+    waves = sorted(tile_grid["hop_distance"].unique().tolist())
+    for wave in waves:
+        wave_tile_ids = tile_grid.loc[tile_grid["hop_distance"] == wave, "tile_id"].tolist()
+        targets = [
+            f"{model_outputs}/{tid}/results/waterdepth_{rp}_{wl}.tif"
+            for tid in wave_tile_ids for rp in return_periods for wl in waterlevel_names
+        ]
+        print(f"\n  -- simulate wave hop_distance={wave}: {len(wave_tile_ids)} tile(s), "
+              f"{len(targets)} target(s) --")
+        for chunk in _chunked(targets, _MAX_TARGETS_PER_SNAKEMAKE_CALL):
+            ok = _run(["snakemake", "--cores", str(cores), *resources, "-p",
+                       "--rerun-incomplete", *chunk], env=env)
+            if not ok:
+                print(f"  Stopping simulate - wave hop_distance={wave} failed; "
+                      f"later waves would read incomplete neighbour outputs.")
+                return False
+    return True
 
 
 def run_scenario(scenario: str, cores: int, mem_mb: int | None, stages: list[str]) -> dict[str, bool]:
@@ -82,6 +171,8 @@ def run_scenario(scenario: str, cores: int, mem_mb: int | None, stages: list[str
         if stage == "boundary_conditions":
             ok = _run([sys.executable, "preparation/run_preparation.py", "boundary_conditions",
                        "--config", str(materialized)])
+        elif stage == "simulate":
+            ok = run_simulate_stage(materialized, cores, mem_mb, env)
         else:
             ok = _run(["snakemake", stage, "--cores", str(cores), *resources, "-p", "--rerun-incomplete"], env=env)
         elapsed = time.time() - t0

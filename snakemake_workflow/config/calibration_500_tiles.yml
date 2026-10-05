@@ -41,21 +41,46 @@ adaptation:
   slr_intensities: []
 
 # All 571 tiles are hop_distance==0 (confirmed), so this is a single-wave
-# dispatch - no cross-wave dependency complexity. 20 nodes (~29 tiles/node
-# for preprocessing, fewer for simulation's "large" sub-batching), 3h/job -
-# real measured/estimated rates (2026-10, this session): preprocessing
-# ~142.5 core-seconds/tile (measured on the 400-tile delta run) -> 571
-# tiles / 20 cores ~= 1.1h; simulate worst-case (production's real
-# max_rounds=40 ceiling, zero early exit, the 0.05s/Mcell/sweep rate
+# study with NO cross-tile dependency at all for simulate (a hop=0 tile's
+# own simulate step only needs its own preprocessing, never another
+# tile's output) - run via generate_hpc_preprocess_job.py --calibration
+# --fuse (2026-10), which collapses preprocess+simulate into ONE sbatch
+# script per batch (run sequentially on the same node) instead of the
+# normal two-phase design, since the phase-2 cross-node afterany wait that
+# design exists for protects a dependency this study doesn't have.
+#
+# 25 nodes (user direction, 2026-10 - up from 20), all 1vcpu: every tile
+# forced onto hpc.sbatch regardless of size (large_tile_pixel_threshold
+# below set absurdly high so NO tile is ever classified "large" - the
+# normal small/large RAM-aware split is skipped entirely here, user's own
+# call: "most of them should be able to run on the 1vcpu"). Accepted risk:
+# the ~23 tiles that WOULD have been routed to sbatch_large's 30G (needed
+# specifically because hpc.sbatch's 1vcpu partition is capped at Hydrax's
+# fixed 8GB/vCPU) now run on ~7-8GB instead - possible, not certain, OOM
+# for exactly those tiles. Not mitigated here per explicit instruction;
+# if a batch dies with a MemoryError (not just a time-limit kill), that is
+# almost certainly this, not a bug.
+#
+# Time budget - 2h (user direction, down from 5h). Real measured/estimated
+# worst case at 25 nodes (scaled down from the 20-node figures below):
+# preprocessing ~142.5 core-seconds/tile (measured on the 400-tile delta
+# run) -> 571 tiles / 25 cores ~= 0.9h; simulate worst-case (production's
+# real max_rounds=40 ceiling, zero early exit, the 0.05s/Mcell/sweep rate
 # test_sweep_budget_calibration.py's own study measured and confirmed) on
-# this candidate pool's real total pixel count (~20.7 billion px) -> ~2.3h
-# worst case on 20 cores, likely well under that in practice since most
-# tiles converge long before 40 rounds. Both comfortably under 3h with
-# real margin - preprocessing and simulation are separate SLURM job
-# submissions (generate_hpc_preprocess_job.py's own afterany chain), each
-# gets its own fresh 3h clock, not a shared/combined budget.
+# this candidate pool's real total pixel count (~20.7 billion px) -> ~1.8h
+# worst case on 25 cores. Combined worst case ~2.7h > this 2h budget - a
+# batch unlucky enough to draw several slow-to-converge tiles COULD get
+# SLURM-killed mid-simulate before finishing. This is a real, accepted
+# possibility (not a bug), and safe to just resubmit past: every snakemake
+# call below now also passes --rerun-incomplete (2026-10 addition,
+# matching the exact fix already applied to run_delta_floodmaps.py for
+# the identical failure mode), so Snakemake treats whatever a time-limit
+# kill left mid-write as safely redoable rather than refusing with
+# IncompleteFilesException - just re-submit the same batch script and it
+# picks up only the still-missing targets, same as any other rerun.
 hpc:
-  n_nodes: 20
+  n_nodes: 25
+  large_tile_pixel_threshold: 999999999999  # effectively infinite - see note above, forces every tile onto hpc.sbatch (1vcpu)
   # hpc.jobs_dir is NOT scenario-isolated by default (it's a fixed
   # "{root}/model_outputs/hpc_jobs" regardless of simulation.model_outputs) -
   # confirmed the hard way: the first run of generate_hpc_preprocess_job.py
@@ -64,6 +89,6 @@ hpc:
   # explicitly, same tree as everything else this study owns.
   jobs_dir: "{root}/calibration_500_tiles/model_outputs/hpc_jobs"
   sbatch:
-    time: "0-03:00:00"
+    time: "0-02:00:00"
   sbatch_large:
-    time: "0-03:00:00"
+    time: "0-02:00:00"  # unused now (no tile is ever classified "large" - see above), kept in sync regardless
