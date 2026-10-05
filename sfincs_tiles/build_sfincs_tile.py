@@ -333,10 +333,29 @@ def build_sfincs_tile(
     # location out (hydromt raises `NoDataException`) if none remain within the buffer.
     # "mask", not "dep": with subgrid, sf.grid.data has no "dep" variable any more
     # (elevation lives only in the subgrid table); "mask" exists from step 2 above,
-    # and only its x/y coords are needed here.
+    # and only its real-world extent is needed here.
+    #
+    # grid_coords.raster.bounds, NOT grid_coords["x"]/["y"].min()/max() - a REAL
+    # bug, found live 2026-10 once rotated=True became the default: for a rotated
+    # grid, hydromt_sfincs's own "x"/"y" dim coordinates are plain PIXEL INDICES
+    # (e.g. 0..723), not real-world UTM metres - the real per-cell position lives
+    # in separate 2D curvilinear "xc"/"yc" arrays instead (confirmed directly:
+    # `sf.grid.data.variables` is ['yc','xc','spatial_ref','mask'] when rotated,
+    # vs plain ['y','x','spatial_ref','mask'] when not). Comparing those tiny
+    # pixel-index numbers against real station UTM coordinates produced a ~7,445
+    # km bogus "distance to grid", hence a ~14,914 km buffer_m, which then made
+    # water_level.create()'s own internal masking buffer a self-intersecting
+    # polygon once reprojected to WGS84 - the actual cause of the
+    # "antimeridian-crossing" exception below (mislabeled: GEOS's own
+    # TopologyException message doesn't know why the geometry is invalid, and
+    # the antimeridian case happens to raise the identical exception type/text,
+    # but the real self-intersection coordinates this produced were nowhere near
+    # +-180 deg - see the tile-5 troubleshooting session this was found in).
+    # `.raster.bounds` is rioxarray's own rotation-aware real-world bounding box -
+    # correct (and numerically identical to the old "x"/"y" min/max approach) for
+    # a non-rotated grid too, so this is a strict fix, not a rotated-only special case.
     grid_coords = sf.grid.data["mask"]
-    grid_x_min, grid_x_max = float(grid_coords["x"].min()), float(grid_coords["x"].max())
-    grid_y_min, grid_y_max = float(grid_coords["y"].min()), float(grid_coords["y"].max())
+    grid_x_min, grid_y_min, grid_x_max, grid_y_max = grid_coords.raster.bounds
     locations_utm = locations_gdf.to_crs(sf.crs)
     station_x = locations_utm.geometry.x.to_numpy()
     station_y = locations_utm.geometry.y.to_numpy()
