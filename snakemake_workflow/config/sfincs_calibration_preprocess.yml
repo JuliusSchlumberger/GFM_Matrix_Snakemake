@@ -1,0 +1,36 @@
+# Preprocessing-only prerequisite for the sfincs_calibration study (2026-10):
+# the SFINCS build/run pipeline (sfincs_tiles/setup_batch_inputs.py) reads
+# its per-tile dem.tif/mask.tif/friction.tif/boundaries_RP100_SLR_0.gpkg
+# straight from the SHARED production model_outputs/ (hardcoded there, not
+# config-driven), never from an isolated directory - same pattern as every
+# other restricted-subset run's "preprocessing is tile-geometry-dependent,
+# not scenario-isolated, safe to land in the shared tree" reasoning
+# (calibration_500_tiles.yml's own comment makes the same point about
+# boundary conditions). Confirmed live: 0 of the 1126 selected tiles had
+# any of these 4 files yet (production model_outputs/ is still empty for
+# them post-tiling-migration, same blocker calibration_500_tiles hit).
+#
+# tile_grid.path is the ONLY isolation here - restricts which tiles this
+# preprocess run touches - simulation.model_outputs is deliberately NOT
+# overridden (inherits config.yml's own "{root}/model_outputs").
+tile_grid:
+  path: "{root}/sfincs_calibration/sfincs_calibration_grid.gpkg"
+
+# Single scenario - setup_batch_inputs.py's INPUT_FILES only ever looks for
+# boundaries_RP100_SLR_0.gpkg (no other RP/SLR combination is read by the
+# SFINCS pipeline at all), so building anything else here would be wasted
+# compute. slr_intensities REQUIRED, not decorative - see
+# calibration_500_tiles.yml's own identical note on this exact trap.
+boundary_conditions:
+  return_periods: [100]
+  slr_scenarios: ["SLR_0"]
+adaptation:
+  slr_intensities: []
+
+hpc:
+  n_nodes: 25
+  jobs_dir: "{root}/sfincs_calibration/hpc_jobs"
+  sbatch:
+    time: "0-02:00:00"
+  sbatch_large:
+    time: "0-02:00:00"

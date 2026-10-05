@@ -1,0 +1,251 @@
+paths:
+  root: P:/11212688-004-global-floodmaps/modelling
+  code_root: C:/Users/schlumbe/GFM_Matrix_Snakemake
+  hydromt_data_catalog: snakemake_workflow/config/data_catalog_gfm.yml
+  processed_inputs_dir: '{root}/processed_inputs'
+  aqueduct_root: C:/Users/schlumbe/GFM
+sync_deltadtm:
+  zip_download_dir: '{root}/inputs/DeltaDTM/_zips'
+  delete_zips_after_extract: true
+vertical_datum_correction:
+  offset_raster_path: '{root}/inputs/ICGM/geoid_offset_egm2008_goco06s.tif'
+preparation:
+  sync_deltadtm: true
+  fix_ocean_mask: true
+  build_deltadtm_vrt: true
+  tile_generation: true
+  boundary_conditions: true
+tile_generation:
+  elev_threshold_m: 30
+  ocean_code: 1
+  river_code: 3
+  coarse_resolution_m: 500
+  strip_resolution_m: 500
+  strip_width_deg: 0.02
+  budget_cells: 25000000
+  min_split_gap_coarse_cells: 10
+  overlap_target_km: 20
+  merge_trigger_cells: 20000000
+  preferred_ceiling_cells: 30000000
+  hard_ceiling_cells: 100000000
+  coastal_buffer_km: 20
+  write_debug_gpkg: true
+  debug_gpkg_dir: '{processed_inputs_dir}/mask/tile_generation_debug'
+tile_grid:
+  path: '{root}/sfincs_calibration/sfincs_calibration_grid.gpkg'
+tile_split:
+  fraction: 0.667
+  max_depth: 2
+  max_retries: 5
+boundary_conditions:
+  waterlevel_nc_dir: '{processed_inputs_dir}/WL_scenarios'
+  slr_scenario: ssp245
+  confidence_level: medium
+  coastrp_min_lat: -60
+  mdt_correction:
+    mdt_variable: mdt
+    fallback_search_deg: 3.0
+  return_periods:
+  - 100
+  slr_scenarios:
+  - SLR_0
+  station_search_buffer_deg: 1.0
+  station_search_min_size_deg: 2.0
+  connectivity_resolution_m: 500
+  connectivity_water_fraction_threshold: 0.5
+  nc_filename_template: COAST-RP_EWL_{return_period}_{waterlevel_name}.nc
+  nc_variable_template: COAST-RP_EWL_{return_period}_{waterlevel_name}
+  station_x_var: station_x_coordinate
+  station_y_var: station_y_coordinate
+raster_format:
+  driver: GTiff
+  compression: zstd
+  predictor: 3
+  nodata: -9999
+simulation:
+  model_outputs: '{root}/model_outputs'
+  model_bbox_buffer_arcsec: 3
+  dem_gap_fill:
+    min_hard_fill_component_size: 15
+    interp_max_search_distance: 100
+    interp_smoothing_iterations: 0
+    land_fill_value_m: 99
+  flooding:
+    resolution: 30
+    knn: 15
+    default_friction: 0.002
+    friction_scale_factor: 30.0
+    max_rounds: 40
+    waterlevel_epsilon_m: 0.03
+    obstacle_coupling:
+      enabled: true
+      max_outer_iterations: 4
+      outer_convergence_pct: 0.01
+  aqueduct_mem_estimate:
+    base_mb: 1000
+    bytes_per_pixel: 80
+hpc:
+  n_nodes: 25
+  jobs_dir: '{root}/sfincs_calibration/hpc_jobs'
+  large_tile_pixel_threshold: 70000000
+  large_tile_batch_multiplier: 2
+  sbatch:
+    partition: 1vcpu
+    account: ''
+    time: 0-02:00:00
+    mem: 7G
+    cpus_per_task: 1
+    env_activate_cmd: module load miniconda && eval "$(conda shell.bash hook)" &&
+      conda activate gfm
+  sbatch_large:
+    partition: 4vcpu
+    account: ''
+    time: 0-02:00:00
+    mem: 30G
+    cpus_per_task: 4
+    env_activate_cmd: module load miniconda && eval "$(conda shell.bash hook)" &&
+      conda activate gfm
+postprocessing:
+  merged_outputs: '{root}/merged_results'
+  chunk_size_deg: 5
+  block_size: 2048
+  overlap_corr_max_samples: 50000
+  overlap_corr_seed: 42
+  plots:
+    enabled: true
+    debug: false
+    dpi: 300
+    merged_resolution_arcsec: 120
+    waterdepth_cmap: Blues
+    waterdepth_vmax_m: 10
+    merged_map_figsize:
+    - 10
+    - 10
+    overlap_pie_colors:
+      flood: '#d62728'
+      no_flood: '#1f77b4'
+      ambiguous: '#7f7f7f'
+    overlap_continent_figsize:
+    - 13
+    - 6.5
+    n_overlap_locations: 10
+    overlap_diag_resolution_arcsec: 240
+    overlap_diag_figsize:
+    - 10
+    - 8
+    overlap_tile_cmap: tab10
+    overlap_diff_cmap: Reds
+protection:
+  baseline_waterlevel_name: SLR_0
+  default_rp: 5
+exposure:
+  exceedance_threshold_m: 0.1
+adaptation:
+  slr_intensities: []
+population_growth:
+  ssps:
+  - SSP1
+  - SSP2
+  - SSP5
+  output_years:
+  - 2025
+  - 2030
+  - 2035
+  - 2040
+  - 2045
+  - 2050
+  - 2060
+  - 2075
+  - 2100
+analysis:
+  compute_exposure: true
+  compute_flood_totals: true
+  plot_burning_ember: true
+  plot_adaptation_bars: false
+  plot_timeseries: true
+  plot_world_maps: false
+  avoid_worker_memory_budget_gb: 4
+visualization:
+  output_dir: '{root}/figures'
+  growth_rates:
+    min: -0.5
+    max: 1.5
+    step: 0.1
+  slr_interp:
+    min_mm: 0
+    max_mm: 1500
+    n_points: 100
+  highlight_years:
+  - 2050
+  - 2100
+  country_eai_vmax: 1000000
+  slr_trajectories_csv: '{processed_inputs_dir}/slr_trajectories_global_median.csv'
+  dpi: 200
+  cmap_ember: YlOrRd
+  n_ember_contours: 6
+  ember_figsize:
+  - 8
+  - 7
+  adaptation_bars_figsize:
+  - 9
+  - 5
+  world_map_figsize:
+  - 14
+  - 7
+  world_map_lat_range:
+  - -60
+  - 85
+  world_map_downsample: 4
+  geo109_subsample: 10
+  ssp_rcp_codes:
+    SSP1: 126
+    SSP2: 245
+    SSP5: 585
+  ssp_colors:
+    SSP1: '#1f77b4'
+    SSP2: '#2ca02c'
+    SSP5: '#d62728'
+  measure_colors:
+    baseline: '#7f7f7f'
+    protect: '#1f77b4'
+    retreat: '#9467bd'
+    avoid: '#2ca02c'
+  level_linestyles:
+  - --
+  - ':'
+  - -.
+  baseline_linestyle: '-'
+validation:
+  benchmark_catalog: snakemake_workflow/config/data_catalog_validation.yml
+  benchmark_root: '{root}/inputs/validation'
+  output_dir: '{root}/validation'
+  return_period: RP100
+  waterlevel_name: SLR_0
+  primary_threshold_m: 0.01
+  coastline_tolerance_cells: 1
+  benchmark_supersample: 5
+  benchmark_wet_fraction: 0.5
+  eval_domain:
+    buffer_km: 2.0
+    also_report_model_domain_only: true
+  vector_simplify_tolerance_m: 100.0
+  buffer_quad_segs: 2
+  permanent_water_source: deltadtm_mask
+  permanent_water_codes:
+  - 1
+  - 2
+  - 3
+  geogunit_source: geogunit_protection_units
+  iso_lookup_source: flopros_protection_standards
+  flood_totals_dir: '{root}/merged_results/exposure/flood_totals'
+  depth_band_open_ended_min_m: 50.0
+  plots:
+    resolution_m: 200
+    dpi: 300
+    figsize:
+    - 10
+    - 10
+    agreement_colors:
+      agree: '#4daf4a'
+      over: '#e41a1c'
+      under: '#377eb8'

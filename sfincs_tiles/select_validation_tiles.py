@@ -161,7 +161,7 @@ def plot_selection_histograms(selected_df: pd.DataFrame, population_df: pd.DataF
 
     ax = axes[1]
     ocean_pop = population_df["ocean_frac"].dropna().to_numpy()
-    ocean_sel = selected_df["ocean_frac"].to_numpy()
+    ocean_sel = selected_df["ocean_frac"].dropna().to_numpy()
     bins = np.linspace(0, 1, 26)
     ax.hist(ocean_pop, bins=bins, density=True, color=POPULATION_COLOR, alpha=0.75, label=f"All available tiles (n={len(ocean_pop)})")
     ax.hist(ocean_sel, bins=bins, density=True, color=SELECTED_COLOR, alpha=0.55, label=f"Selected (n={len(ocean_sel)})")

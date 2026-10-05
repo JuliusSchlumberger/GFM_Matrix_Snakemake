@@ -237,9 +237,23 @@ def main() -> None:
              "pure added wait, inherited from the general multi-wave machinery rather "
              "than being a real requirement for a single-wave study like this one.",
     )
+    parser.add_argument(
+        "--preprocess-only", action="store_true",
+        help="skip phase 2 (generate+dispatch simulate waves) entirely - no "
+             "`generate_aqueduct_jobs`/`generate_hpc_simulation_jobs.py` call, no dispatch "
+             "sbatch, no afterany chain. For call sites that only need preprocessing "
+             "outputs (dem/mask/friction/boundaries) and never intend to run aqueduct's "
+             "own flood solve at all - e.g. building shared model_outputs/ inputs for a "
+             "downstream pipeline (SFINCS) that reads them directly and has its own, "
+             "separate run/dispatch mechanism. Mutually exclusive with --fuse (nothing to "
+             "fuse simulate into). Writes submit_preprocess_batches.sh instead of "
+             "submit_preprocess_and_dispatch.sh.",
+    )
     args = parser.parse_args()
     if args.fuse and not args.calibration:
         parser.error("--fuse requires --calibration")
+    if args.fuse and args.preprocess_only:
+        parser.error("--fuse and --preprocess-only are mutually exclusive")
 
     config_path = Path(args.config)
     local_config = load_config(config_path)
@@ -397,7 +411,12 @@ def main() -> None:
                 batch_tiles = class_tiles[i * k + min(i, m): (i + 1) * k + min(i + 1, m)]
                 batches.append((size_class, f"{i:03d}", batch_tiles))
 
-    submit_script_name = "submit_fused_batches.sh" if args.fuse else "submit_preprocess_and_dispatch.sh"
+    if args.fuse:
+        submit_script_name = "submit_fused_batches.sh"
+    elif args.preprocess_only:
+        submit_script_name = "submit_preprocess_batches.sh"
+    else:
+        submit_script_name = "submit_preprocess_and_dispatch.sh"
 
     batch_script_paths = []
     for size_class, batch_id, batch_tiles in batches:
@@ -525,7 +544,7 @@ def main() -> None:
     # batches - DO correctly reflect it; resolved_config.yml does not, a
     # known, documented gap for that path only).
     dispatch_script_path = None
-    if not args.fuse:
+    if not args.fuse and not args.preprocess_only:
         if args.calibration:
             generate_call = (
                 f'python snakemake_workflow/scripts/generate_hpc_simulation_jobs.py '
@@ -607,17 +626,18 @@ def main() -> None:
             f'echo "submitted {script} -> job $JID"',
             'IDS="${IDS:+$IDS:}$JID"',
         ]
-    if args.fuse:
-        # No dispatch job at all - every batch above already runs preprocess
-        # THEN simulate for its own tiles, so once all batches are submitted
-        # (still fully parallel amongst themselves - no dependency, same as
-        # before), there is nothing left to chain.
-        # Remove a stale dispatch script from a previous non-fused generation
-        # against this same jobs_dir, so it can't be submitted by mistake.
+    if args.fuse or args.preprocess_only:
+        # No dispatch job at all. --fuse: every batch above already runs
+        # preprocess THEN simulate for its own tiles, nothing left to chain.
+        # --preprocess-only: there is no simulate step wanted at all for
+        # this call site, by design (see --preprocess-only's own help text).
+        # Remove a stale dispatch script from a previous two-phase
+        # generation against this same jobs_dir, so it can't be submitted
+        # by mistake.
         stale_dispatch = local_jobs_dir / "generate_jobs_and_dispatch.sbatch"
         if stale_dispatch.exists():
             stale_dispatch.unlink()
-            print(f"  removed stale {stale_dispatch} (leftover from a prior non-fused generation)")
+            print(f"  removed stale {stale_dispatch} (leftover from a prior two-phase generation)")
     else:
         submit_lines += [
             "",
@@ -630,14 +650,16 @@ def main() -> None:
     submit_script_path = local_jobs_dir / submit_script_name
     with open(submit_script_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(submit_lines) + "\n")
-    # Remove a stale submit script of the OTHER kind from a previous
-    # generation against this same jobs_dir (fused vs two-phase each write
-    # under their own name, above) - only one should exist at a time.
-    other_name = "submit_preprocess_and_dispatch.sh" if args.fuse else "submit_fused_batches.sh"
-    stale_submit = local_jobs_dir / other_name
-    if stale_submit.exists():
-        stale_submit.unlink()
-        print(f"  removed stale {stale_submit} (leftover from a prior generation of the other kind)")
+    # Remove stale submit script(s) of the OTHER kind(s) from a previous
+    # generation against this same jobs_dir (fused / preprocess-only /
+    # two-phase each write under their own name, above) - only one should
+    # exist at a time.
+    all_submit_names = {"submit_fused_batches.sh", "submit_preprocess_batches.sh", "submit_preprocess_and_dispatch.sh"}
+    for other_name in all_submit_names - {submit_script_name}:
+        stale_submit = local_jobs_dir / other_name
+        if stale_submit.exists():
+            stale_submit.unlink()
+            print(f"  removed stale {stale_submit} (leftover from a prior generation of a different kind)")
 
     if hpc_cfg.get("single_preprocess_job", False):
         node_summary = "single 1vcpu job, no batching - hpc.single_preprocess_job"
@@ -650,6 +672,11 @@ def main() -> None:
         print(
             f"\nDone. 1 synchronous shared-inputs build + {len(batch_script_paths)} fused "
             f"preprocess+simulate batch(es) ({node_summary}) written to {local_jobs_dir}"
+        )
+    elif args.preprocess_only:
+        print(
+            f"\nDone. 1 synchronous shared-inputs build + {len(batch_script_paths)} preprocessing-only "
+            f"batch(es) ({node_summary}) written to {local_jobs_dir} - no simulate dispatch generated."
         )
     else:
         print(

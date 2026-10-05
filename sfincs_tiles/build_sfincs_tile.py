@@ -177,6 +177,7 @@ def build_sfincs_tile(
     subgrid_nr_levels: int = SUBGRID_NR_LEVELS_DEFAULT,
     subgrid_nrmax: int = SUBGRID_NRMAX_DEFAULT,
     base_dir_name: str = "validation_sfincs_v2",
+    rotated: bool = True,
 ) -> Path:
     _validate_subgrid_params(resolution_m, subgrid_nr_pixels)
     # Reads from the tile's working copy, not model_outputs/ directly.
@@ -198,9 +199,16 @@ def build_sfincs_tile(
         yaml.dump(local_catalog, fh, sort_keys=False)
 
     # -- 1. grid (coarse computational grid, MAIN_RES_M - see subgrid note above) --
+    # rotated=True (2026-10, user direction - was left at hydromt_sfincs's own
+    # library default of False/axis-aligned UTM until now): a rotated grid
+    # aligns its rows/columns with the tile's own coastline/flow direction
+    # instead of bare UTM axes, which is what create_from_region's own
+    # rotation search actually optimizes for when given a real region
+    # geometry (not an arbitrary bbox) - axis-aligned wastes active cells on
+    # dry corners for any coastline that isn't already UTM-axis-parallel.
     sf = SfincsModel(data_libs=[str(local_catalog_path)], root=str(sfincs_dir), mode="w+")
-    sf.grid.create_from_region(region={"geom": tile_gdf}, res=resolution_m, crs="utm")
-    print(f"[1/8] grid created: {dict(sf.grid.data.sizes)} cells, crs={sf.crs}")
+    sf.grid.create_from_region(region={"geom": tile_gdf}, res=resolution_m, crs="utm", rotated=rotated)
+    print(f"[1/8] grid created: {dict(sf.grid.data.sizes)} cells, crs={sf.crs}, rotated={rotated}")
 
     # -- 2. mask: active cells (whole tile) + waterlevel boundary (ocean edge only) --
     # Built before subgrid: subgrid.create()'s own internals read self.model.grid.mask
@@ -264,7 +272,7 @@ def build_sfincs_tile(
     # Reconstruct sf so its DataCatalog re-reads local_catalog_path with the new
     # entries - DataCatalog is parsed once at construction, not re-read live.
     sf = SfincsModel(data_libs=[str(local_catalog_path)], root=str(sfincs_dir), mode="w+")
-    sf.grid.create_from_region(region={"geom": tile_gdf}, res=resolution_m, crs="utm")
+    sf.grid.create_from_region(region={"geom": tile_gdf}, res=resolution_m, crs="utm", rotated=rotated)
     sf.mask.create_active(include_polygon=tile_gdf, reset_mask=True)
     sf.mask.create_boundary(btype="waterlevel", include_polygon=ocean_poly, reset_bounds=False, all_touched=True)
 
@@ -406,6 +414,11 @@ def main() -> None:
              f"{TRUNCATE_WINDOW_HR_DEFAULT} window - for A/B comparison only.",
     )
     parser.add_argument("--base-dir-name", default="validation_sfincs_v2", help="output root directory name under paths.root (default: validation_sfincs_v2)")
+    parser.add_argument(
+        "--no-rotated", dest="rotated", action="store_false",
+        help="use an axis-aligned UTM grid instead of the default rotated grid (2026-10 default flip - "
+             "was unrotated until now, see build_sfincs_tile's own comment)",
+    )
     args = parser.parse_args()
 
     root = read_root(Path(args.config))
@@ -413,7 +426,7 @@ def main() -> None:
     build_sfincs_tile(
         args.tile_id, root, resolution_m=args.resolution_m, truncate_window_hr=truncate_window_hr,
         subgrid_nr_pixels=args.subgrid_nr_pixels, subgrid_nr_levels=args.subgrid_nr_levels, subgrid_nrmax=args.subgrid_nrmax,
-        base_dir_name=args.base_dir_name,
+        base_dir_name=args.base_dir_name, rotated=args.rotated,
     )
 
 
