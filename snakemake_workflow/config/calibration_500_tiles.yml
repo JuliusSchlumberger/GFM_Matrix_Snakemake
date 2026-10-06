@@ -1,20 +1,19 @@
-# ~500-tile global-representativeness calibration study (2026-10), re-done
-# at the new, larger scale after the connectivity-first tile-grid migration
-# superseded the original 260-tile study's tile numbering entirely.
+# ~500-tile global-representativeness calibration study - the current
+# sweep-budget/obstacle-coupling calibration population, run at a larger
+# scale than the original 260-tile pilot study after the connectivity-first
+# tile-grid migration superseded its tile numbering entirely.
 #
 # 571 candidate tiles (stratified by size AND geography - see
-# tests/select_calibration_tiles.py), selected from the FULL hop_distance==0
-# population of the new grid (the readiness-filter this script used to
-# require was dropped 2026-10 - nothing is preprocessed yet right after a
-# full tile-grid regeneration, so it would otherwise find zero candidates;
-# see that script's own docstring). Final wet-tile count (target ~500) comes
-# from tests/aggregate_wet_tiles.py after the sweep-budget study runs - dry
-# candidates get dropped, same as the original study.
+# calibration_studies/select_calibration_tiles.py), selected from the FULL
+# hop_distance==0 population of the current grid regardless of whether
+# model_outputs already exists for them (see that script's own docstring).
+# Final wet-tile count (target ~500) comes from
+# calibration_studies/aggregate_wet_tiles.py after the sweep-budget study
+# runs - dry candidates get dropped, same as the original study.
 #
-# Isolated preprocessing (own model_outputs, same as every other restricted-
-# subset run this session) - NOT production's shared model_outputs, so this
-# never risks colliding with or being overwritten by unrelated production
-# work. Boundary conditions (COAST-RP + SLR fingerprints) ARE shared with
+# Isolated preprocessing (own model_outputs) - NOT production's shared
+# model_outputs, so this never risks colliding with or being overwritten by
+# unrelated production work. Boundary conditions (COAST-RP + SLR fingerprints) ARE shared with
 # production - those are scenario-only artifacts, never tile-geometry-
 # dependent, so production's existing waterlevel_nc_dir is safely reusable
 # as-is (unlike tile_grid.path, nothing about the tile-grid migration

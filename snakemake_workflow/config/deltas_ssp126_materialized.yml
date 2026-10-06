@@ -83,7 +83,7 @@ simulation:
     waterlevel_epsilon_m: 0.03
     obstacle_coupling:
       enabled: true
-      max_outer_iterations: 5
+      max_outer_iterations: 4
       outer_convergence_pct: 0.01
   aqueduct_mem_estimate:
     base_mb: 1000

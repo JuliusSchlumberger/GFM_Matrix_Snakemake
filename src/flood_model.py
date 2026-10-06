@@ -61,7 +61,7 @@ def coastline_mask(mask: np.ndarray, ocean_code: int = 1, river_code: int | None
     (river mouths are legitimate forcing entry points too).
 
     `river_code` defaults to `None` (land-only adjacency) for callers that
-    don't pass one, e.g. `tests/diagnose_large_residual.py`.
+    don't pass one, e.g. `calibration_studies/diagnose_large_residual.py`.
     """
     ocean = mask == ocean_code
     components, _n = ndimage.label(ocean, structure=_STRUCTURE_8)

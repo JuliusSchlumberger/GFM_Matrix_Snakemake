@@ -1,9 +1,7 @@
-"""Diagnose the implausible 2-6m single-cell residuals seen in the overnight
-calibration run (tiles 2330, 2340, 2341, 2642, 2871, 2873, 3053 all showed
-last_max_change of 1-6m even after 100 sweeps / 25 rounds, with the SAME
-few odd values - e.g. 2.20689845 and 2.21949720 - recurring across
-unrelated tiles, which is far too coincidental to be "genuinely slow
-geography" and smells like a specific numerical artifact instead).
+"""Diagnose implausibly large single-cell residuals (last_max_change still
+several metres after many sweeps/rounds, often with the same few odd
+values recurring across unrelated tiles - too coincidental to be
+"genuinely slow geography", and more likely a numerical artifact).
 
 For each target tile, replays the obstacle-coupling outer loop's static
 pre-filter + outer-1 inner solve, but with PER-ROUND diagnostics: the
@@ -13,8 +11,9 @@ keeps flipping between the same 2 (or few) values round after round, that's
 a genuine oscillation/limit-cycle, not slow convergence.
 
 Usage:
-    python diagnose_large_residual.py <tile_id> [<tile_id> ...]
+    python diagnose_large_residual.py <tile_id> [<tile_id> ...] [--config <config.yml>]
 """
+import argparse
 import sys
 from pathlib import Path
 
@@ -22,63 +21,61 @@ import geopandas as gpd
 import numpy as np
 import rasterio
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from config_utils import load_config  # noqa: E402
 from eikonal import _ORTHANT_ORDER, _dense_sweep  # noqa: E402
 from flood_extent import effective_dem  # noqa: E402
 from flood_model import _idw_seed_values, coastline_mask  # noqa: E402
-from rasters import decode_dem_cm, decode_friction_int16  # noqa: E402
+from rasters import decode_dem_cm, decode_friction_int16, decode_waterlevel_cm  # noqa: E402
 
-MODEL_OUTPUTS = Path("D:/GFM/model_outputs")
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 RETURN_PERIOD = "RP100"
 WATERLEVEL_NAME = "SLR_0"
+OCEAN_CODE = 1
+RIVER_CODE = 3
 BLOCK_FRICTION = 100.0
 INNER_MAX_ROUNDS = 25
-EPSILON = 0.03  # matches the new production WATERLEVEL_EPSILON_M
+EPSILON = 0.03  # matches production's simulation.flooding.waterlevel_epsilon_m
 
 
-def load_tile(tile_id: int):
-    tile_dir = MODEL_OUTPUTS / str(tile_id)
+def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor: float):
+    tile_dir = model_outputs / str(tile_id)
     scenario = f"{RETURN_PERIOD}_{WATERLEVEL_NAME}"
     inputs = tile_dir / "inputs"
-    with open(inputs / f"aqueduct_{scenario}.toml", "rb") as f:
-        toml_cfg = tomllib.load(f)
-    knn = toml_cfg["waterlevels"]["knn"]
-    variable = toml_cfg["waterlevels"]["name"]
 
     with rasterio.open(inputs / "dem.tif") as src:
         dem = decode_dem_cm(src.read(1))
         transform = src.transform
     with rasterio.open(inputs / "mask.tif") as src:
-        mask = src.read(1).astype(np.int64)
+        mask = src.read(1).astype(np.int8)
     with rasterio.open(inputs / "friction.tif") as src:
         friction = decode_friction_int16(src.read(1))
     boundaries = gpd.read_file(inputs / f"boundaries_{scenario}.gpkg")
 
     dem = effective_dem(dem, mask)
+    # decode -> scale -> floor, matching aqueduct_runner.py's production order.
+    friction = friction * friction_scale_factor
     friction = np.where(friction > 0, friction, friction.dtype.type(0.001))
-    coastline = coastline_mask(mask, ocean_code=1)
+    coastline = coastline_mask(mask, ocean_code=OCEAN_CODE, river_code=RIVER_CODE)
     coastline_rows, coastline_cols = np.nonzero(coastline)
 
     stations_lonlat = np.column_stack(
         [boundaries.geometry.x.to_numpy(), boundaries.geometry.y.to_numpy()]
     )
-    station_values = boundaries[variable].to_numpy()
+    station_values = decode_waterlevel_cm(boundaries[WATERLEVEL_NAME].to_numpy())
     initial = _idw_seed_values(
         coastline_rows, coastline_cols, transform, stations_lonlat, station_values,
-        min(knn, len(station_values)), mask, 1,
+        min(knn, len(station_values)), mask, OCEAN_CODE,
     )
     max_waterlevel = float(station_values.max())
     return dem, mask, friction, coastline_rows, coastline_cols, initial, max_waterlevel
 
 
-def diagnose(tile_id: int, n_rounds=INNER_MAX_ROUNDS):
+def diagnose(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor: float, n_rounds=INNER_MAX_ROUNDS):
     print(f"\n=== tile {tile_id} ===", flush=True)
-    dem, mask, friction, seed_rows, seed_cols, initial, max_waterlevel = load_tile(tile_id)
+    dem, mask, friction, seed_rows, seed_cols, initial, max_waterlevel = load_tile(
+        tile_id, model_outputs, knn, friction_scale_factor,
+    )
     seed_values = -initial
     dtype = friction.dtype
 
@@ -144,9 +141,18 @@ def diagnose(tile_id: int, n_rounds=INNER_MAX_ROUNDS):
 
 
 def main():
-    tile_ids = [int(a) for a in sys.argv[1:]]
-    for tile_id in tile_ids:
-        diagnose(tile_id)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("tile_ids", type=int, nargs="+")
+    parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
+    args = parser.parse_args()
+
+    cfg = load_config(args.config)
+    model_outputs = Path(cfg["simulation"]["model_outputs"])
+    knn = int(cfg["simulation"]["flooding"]["knn"])
+    friction_scale_factor = float(cfg["simulation"]["flooding"]["friction_scale_factor"])
+
+    for tile_id in args.tile_ids:
+        diagnose(tile_id, model_outputs, knn, friction_scale_factor)
 
 
 if __name__ == "__main__":

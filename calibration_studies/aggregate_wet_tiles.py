@@ -1,9 +1,9 @@
-"""Builds wet_tiles_selected.txt from a sweep_budget output directory's own
-per-tile CSVs, post-hoc (2026-09-24) - the counterpart to
-test_sweep_budget_calibration.py's own sequential-run wet_tiles_selected.txt
-write, which is deliberately skipped when that script runs as one tile per
-call (the HPC array job - see that script's own main() comment for why:
-~300 concurrent single-tile tasks all writing "the" same file would race).
+"""Builds wet_tiles_selected.txt from a sweep_budget output directory's
+per-tile CSVs, post-hoc. This is the counterpart to
+test_sweep_budget_calibration.py's own sequential-run write of that file,
+which is skipped when the script runs as one tile per call (concurrent
+single-tile HPC tasks all writing "the" same file would race - see that
+script's own main() comment).
 
 A tile is "wet" iff its CSV has more than 1 row - the trace loop writes
 exactly 1 row and stops immediately when sweep 1 shows zero flooding (see
@@ -14,12 +14,12 @@ started or is still running - treated as "not yet known", not dry.
 
 `aggregate_wet_tiles()` is also imported directly by
 plot_sweep_calibration_bands.py, which runs this as its own first step
-(2026-10) rather than requiring a separate manual invocation first - this
-script remains usable standalone too (e.g. to just check wet-tile counts
-without plotting).
+rather than requiring a separate manual invocation first - this script
+remains usable standalone too (e.g. to just check wet-tile counts without
+plotting).
 
 Usage:
-    python aggregate_wet_tiles.py <sweep_budget_dir> [--n-tiles-wanted 260]
+    python aggregate_wet_tiles.py <sweep_budget_dir> [--n-tiles-wanted 500]
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ def aggregate_wet_tiles(sweep_budget_dir: Path, n_tiles_wanted: int) -> list[int
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("sweep_budget_dir")
-    parser.add_argument("--n-tiles-wanted", type=int, default=260)
+    parser.add_argument("--n-tiles-wanted", type=int, default=500)
     args = parser.parse_args()
     aggregate_wet_tiles(Path(args.sweep_budget_dir), args.n_tiles_wanted)
 

@@ -298,9 +298,10 @@ simulation: # Used by: preprocessing rules
     # flood_depth_dense). Used by both the non-coupling single solve and
     # each outer iteration's inner solve when obstacle_coupling is enabled
     # (below) - not obstacle_coupling-specific, hence top-level here rather
-    # than nested under it. 40 rounds: the 260-tile sweep-budget calibration
-    # study's conclusion (tests/test_sweep_budget_calibration.py) - 58.7% of
-    # tiles strictly converge by round 40, and of the ones that don't, 84%
+    # than nested under it. 40 rounds: the sweep-budget calibration study's
+    # conclusion (calibration_studies/test_sweep_budget_calibration.py, see
+    # docs/methods_03_calibration_sensitivity.md §2) - 58.5% of tiles
+    # strictly converge by round 40, and of the ones that don't, 97.8%
     # already have their flood extent (depth>0 cells) fully frozen by then
     # too (the residual is a small number of cells' depth still settling,
     # not genuinely unconverged extent). The old fixed-sweep_budget=3 mode
@@ -331,18 +332,17 @@ simulation: # Used by: preprocessing rules
     # hop>=1 (explicit seed cells) paths; see that docstring.
     obstacle_coupling:
       enabled: true
-      # 4: the 260-tile obstacle-coupling calibration study's conclusion
-      # (confirmed complete, see docs/methods_03_calibration_sensitivity.md
-      # §3 and P:\...\modelling\calibration_260_tiles), after fixing a bug
-      # where the blocked-cell set was recomputed from scratch each outer
-      # iteration instead of accumulated monotonically (see flood_model.py's
-      # own `blocked = blocked | prev_blocked` comment) - unfixed, this
-      # caused most non-converging tiles to oscillate indefinitely rather
-      # than settle. Once fixed: all 260/260 tiles run to full convergence
-      # within 4 outer solves - 166 at the earliest mathematically possible
-      # point (outer=2), 89 at outer=3, 5 at outer=4. "n outer solves"
-      # counts inner solves performed, not blocking rounds applied to the
-      # output - a tile that stops at solve k only ever had (k-1) rounds of
+      # 4: the obstacle-coupling calibration study's conclusion (see
+      # docs/methods_03_calibration_sensitivity.md §3), with the blocked-cell
+      # set accumulated monotonically across outer iterations (see
+      # flood_model.py's own `blocked = blocked | prev_blocked` comment) -
+      # without that, most non-converging tiles oscillate indefinitely
+      # rather than settle. With it: all 500/500 tiles run to full
+      # convergence within 4 outer iterations - 370 at the earliest
+      # mathematically possible point (outer=2), 123 at outer=3, 7 at
+      # outer=4. "n outer iterations" counts inner solves performed, not
+      # blocking rounds applied to the output - a tile that stops at solve
+      # k only ever had (k-1) rounds of
       # dynamic blocking baked into its returned flood map (solve k's own
       # blocking decision is discarded once its delta is found negligible;
       # see methods_03_calibration_sensitivity.md §3 for the full reasoning).

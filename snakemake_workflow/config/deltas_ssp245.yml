@@ -14,10 +14,8 @@ tile_grid:
 simulation:
   flooding:
     friction_scale_factor: 9.0
-    # 5 (up from production's own default of 4) - see deltas_ssp126.yml's
-    # own identical note for the full rationale/caveat.
-    obstacle_coupling:
-      max_outer_iterations: 5
+    # Reverted to production's own default (4) - see deltas_ssp126.yml's
+    # own identical note for the full rationale.
   model_outputs: "{root}/deltas_floodmaps/ssp245/model_outputs"
 
 postprocessing:

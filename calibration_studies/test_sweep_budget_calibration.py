@@ -1,79 +1,50 @@
 """Calibration run of the production, non-obstacle-coupling sweep count
 (`flood_model.flood_depth_dense`'s `sweep_budget`/round-based `max_rounds`),
-across a representative pool of wave-0 tiles (2026-08 - see
-`C:\\Users\\Schlu005\\.claude\\plans\\smooth-wandering-map.md` for the
-scale-up-to-40-tiles methodology; tile IDs come from
-`select_calibration_tiles.py`'s `candidate_tiles.txt`; 2026-09-24 - rebuilt
-for the 260-tile study, ~10% of all hop=0 tiles, current-machine paths, and
-current production config, see below).
+across a representative pool of wave-0 tiles. Tile IDs come from
+`select_calibration_tiles.py`'s `candidate_tiles.txt`.
 
 For each tile, seeds exactly like production (`coastline_mask` +
 `_idw_seed_values`), then runs ONE continuous sequence of individual
 `_dense_sweep` calls in `_ORTHANT_ORDER[i % 4]` order - exactly
 `solve_eikonal_dense`'s own `sweep_budget` semantics, so results are
 directly comparable to the real production code path rather than a
-reimplementation that could drift - reporting EVERY individual SWEEP (not
-round - see the conversation this was rebuilt in for why the two units
-differ: a sweep is one single directional Gauss-Seidel pass, a round is 4
+reimplementation that could drift - reporting EVERY individual SWEEP, not
+round (a sweep is one single directional Gauss-Seidel pass, a round is 4
 sweeps, one full cycle through `_ORTHANT_ORDER`; production's own
 `max_rounds`/convergence check only ever operates at round granularity,
-never mid-round) from 1 up to MAX_SWEEPS (2026-09-24, user direction: 100
-rounds = 400 sweeps, up from the original fixed 50-sweep budget). Doing
-this as a single continuous pass (not N independent from-scratch solves)
-avoids O(N^2) redundant work on the largest tiles.
+never mid-round), from 1 up to MAX_SWEEPS. Doing this as a single
+continuous pass (not N independent from-scratch solves) avoids O(N^2)
+redundant work on the largest tiles.
 
-2026-09-24 - round-level early exit added (user direction: "they should
-stop when they converge"): after each COMPLETE round (every 4th sweep),
-checks that round's own max_change (the max of `_dense_sweep`'s own raw
-per-cell update magnitude over its 4 sweeps - exactly what
-`solve_eikonal_dense`'s real round loop computes and compares against
-`epsilon`) and stops the tile right there if it's already <= `--epsilon`
-- matching production's real round-based early-exit semantics exactly,
-instead of always burning the full 400-sweep ceiling on tiles that settle
-in a handful of rounds. `--epsilon` defaults to config's real
-`simulation.flooding.waterlevel_epsilon_m` (0.03m, NOT the softened 0.1m
-default `test_obstacle_coupling_calibration.py` now uses) - this script
-characterizes production's actual non-coupling behavior, so it should use
-production's actual threshold. A tile that never satisfies this within all
-100 available rounds is naturally recognizable downstream by its CSV
-having the full 400 rows with the last round's max_change still >
-epsilon - `plot_sweep_budget_convergence.py`'s existing post-hoc
-reconstruction logic already handles a variable-length trace correctly (it
-was always driven by "how many complete rounds does this tile's own CSV
-actually contain", never a hardcoded row count), so raising the ceiling
-here needed no corresponding logic change there, only its own
-N_COMPLETE_ROUNDS constant bumped to match.
+Round-level early exit: after each COMPLETE round (every 4th sweep), checks
+that round's own max_change (the max of `_dense_sweep`'s own raw per-cell
+update magnitude over its 4 sweeps - exactly what `solve_eikonal_dense`'s
+real round loop computes and compares against `epsilon`) and stops the
+tile right there if it's already <= `--epsilon` - matching production's
+real round-based early-exit semantics exactly, instead of always burning
+the full MAX_SWEEPS ceiling on tiles that settle in a handful of rounds.
+`--epsilon` defaults to config's real `simulation.flooding.
+waterlevel_epsilon_m` (0.03m) - this script characterizes production's
+actual non-coupling behavior, so it uses production's actual threshold. A
+tile that never satisfies this within all MAX_ROUNDS_CEILING available
+rounds is naturally recognizable downstream by its CSV having the full
+MAX_SWEEPS rows with the last round's max_change still > epsilon -
+`plot_sweep_budget_convergence.py`'s post-hoc reconstruction logic handles
+a variable-length trace correctly (driven by how many complete rounds a
+tile's own CSV actually contains, never a hardcoded row count).
 
-2026-09-24 rebuild - three real staleness fixes, found reviewing this
-against the current pipeline before reusing it:
-  - `MODEL_OUTPUTS`/`select_calibration_tiles.py`'s own domain-tiles path
-    were hardcoded to `D:\\GFM\\...`, a different machine's paths (the
-    `Schlu005` username in the old plan file, not this session's
-    `schlumbe`) - now read from `config.yml` via `--config` like the rest
-    of this repo's scripts.
-  - `load_tile()` used to read a per-tile `aqueduct_{scenario}.toml` for
-    `knn`/`resolution` - that file no longer exists in the current
-    `model_outputs/<tile_id>/inputs/` layout (checked directly - only
-    `dem.tif`/`friction.tif`/`mask.tif`/`model_bbox.json`/
-    `tile_geometry.gpkg`/`boundaries_*.gpkg`). `knn` now comes from
-    `config.yml`'s `simulation.flooding.knn`; the boundary water-level
-    column name is just `WATERLEVEL_NAME` itself (confirmed directly on a
-    real tile's `boundaries_RP100_SLR_0.gpkg` - the column is literally
-    named `SLR_0`, matching the filename's own SLR component, not a
-    separate `waterlevels.name` value from the now-gone TOML).
-  - Neither this script nor the old 100-tile study applied
-    `simulation.flooding.friction_scale_factor` (production default now
-    30.0, applied in `aqueduct_runner.py` as `friction = friction *
-    friction_scale_factor` BEFORE the `friction > 0` floor) - so results
-    from the old harness reflect an unscaled-friction era that no longer
-    matches what production actually runs. Now applied in the same
-    decode -> scale -> floor order as `aqueduct_runner.py`.
+load_tile() reads `knn` from `config.yml`'s `simulation.flooding.knn` and
+applies `simulation.flooding.friction_scale_factor` in the same
+decode -> scale -> floor order as `aqueduct_runner.py`
+(`friction = friction * friction_scale_factor` BEFORE the `friction > 0`
+floor), so results are directly comparable to what production actually
+runs.
 
 Dry-tile handling: if sweep 1 already shows zero flooding, the tile is
 logged DRY and the remaining sweeps are skipped for it (no point spending
-23 more sweeps on a tile already known uninformative) - this is how
-"replace dry tiles" is implemented for the 40-tile study: the candidate
-pool is deliberately over-provisioned (~55 tiles for 40 needed), and this
+more sweeps on a tile already known uninformative) - this is how "replace
+dry tiles" is implemented: the candidate pool is deliberately
+over-provisioned beyond the number of wet tiles actually wanted, and this
 script writes `wet_tiles_selected.txt` (the first N_TILES_WANTED
 confirmed-wet tile_ids, in the order given) for
 `test_obstacle_coupling_calibration.py` to consume directly.
@@ -124,33 +95,23 @@ WATERLEVEL_NAME = "SLR_0"
 OCEAN_CODE = 1
 RIVER_CODE = 3
 
-# Fallback for a quick standalone smoke test if no tile_ids are given on
-# the command line - the real 40-tile study always passes an explicit list
-# (see module docstring). STALE (2026-10): these tile_ids were valid under
-# the pre-connectivity-first-migration tile grid only - domain_tiles_global.gpkg
-# was fully regenerated and renumbered from scratch (see src/connectivity_
-# tiling.py::assign_tile_id), so these numbers now point at different,
-# unrelated domains (or nothing at all) under the current grid. Running
-# this script with no --tile-ids will silently use garbage tiles until this
-# is refreshed with real tile_ids from the current grid - always pass
-# --tile-ids explicitly for now.
-TILES = [1826, 711, 1722, 548, 1424, 1463, 497]
+# Fallback for a quick standalone smoke test if no tile_ids are given on the
+# command line - the real study always passes an explicit list (see module
+# docstring). These are real wet tile_ids under the current tile grid, but
+# always pass --tile-ids explicitly for an actual calibration run.
+TILES = [2083, 2514, 1421, 2569, 2858, 2314, 753]
 
 SWEEPS_PER_ROUND = 4  # one full cycle of _ORTHANT_ORDER - see module docstring
-MAX_ROUNDS_CEILING = 100  # 260-tile study (2026-09-24, user direction: "100 rounds instead"
-# as the ceiling, with round-level early exit on convergence - was a fixed 50-sweep/12.5-round
-# budget with no early exit at all)
+MAX_ROUNDS_CEILING = 100  # ceiling for this study's own round-level early exit on convergence
 MAX_SWEEPS = MAX_ROUNDS_CEILING * SWEEPS_PER_ROUND
-N_TILES_WANTED_DEFAULT = 260  # ~10% of ~2445 hop=0 tiles (2026-09-24, user direction) - now a
-# CLI default (--n-tiles-wanted, 2026-10), not a hardcoded target, so a differently-sized study
-# (e.g. ~500 tiles, global-representativeness re-run after the connectivity-first tile-grid
-# migration) doesn't need a code edit. Only matters for this script's own single-process early-
-# exit/summary path (see --write-wet-tiles-summary's docstring below) - the real batched-HPC flow
-# (generate_calibration_batch_jobs.py) never has enough tiles in one node's slice to reach this,
-# so changing it has no effect there either way.
+N_TILES_WANTED_DEFAULT = 500  # a CLI default (--n-tiles-wanted), not a hardcoded target, so a
+# differently-sized study doesn't need a code edit. Only matters for this script's own
+# single-process early-exit/summary path (see --write-wet-tiles-summary's docstring below) - the
+# real batched-HPC flow (generate_calibration_batch_jobs.py) never has enough tiles in one node's
+# slice to reach this, so changing it has no effect there either way.
 DEFAULT_EPSILON_M = 0.03  # production's own simulation.flooding.waterlevel_epsilon_m default -
 # this script characterizes production's real non-coupling behaviour, so it uses production's
-# real threshold (unlike test_obstacle_coupling_calibration.py's own softened 0.1m default)
+# real threshold
 
 
 def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor: float):
@@ -164,8 +125,8 @@ def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor
     with rasterio.open(inputs / "mask.tif") as src:
         # int8, not int64: mask only ever holds a handful of small codes,
         # every downstream use is a plain equality/inequality comparison -
-        # int64 was 8x more memory than this array ever needed (found
-        # 2026-08 investigating OOM failures on large real tiles).
+        # int64 would be 8x more memory than this array ever needs, enough
+        # to OOM on the largest real tiles.
         mask = src.read(1).astype(np.int8)
     with rasterio.open(inputs / "friction.tif") as src:
         friction = decode_friction_int16(src.read(1))
@@ -182,7 +143,7 @@ def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor
     coastline_rows, coastline_cols = np.nonzero(coastline)
 
     # boundaries.gpkg stores int16-centimetre-encoded water levels
-    # (rasters.encode_waterlevel_cm, 2026-08) - decode before use. An empty
+    # (rasters.encode_waterlevel_cm) - decode before use. An empty
     # boundaries file (no COAST-RP station found for this tile/scenario -
     # see extract_boundaries.py) is a real, expected outcome for small/
     # isolated tiles, matching production's own NO_STATIONS_REASON skip -
@@ -263,11 +224,11 @@ def run_tile_sweep_trace(
 
     m, n = friction.shape
     # t defaults to +99 (waterlevel=-t=-99m), not 0 - matches src/eikonal.py's
-    # solve_eikonal_dense (2026-08 fix): a cell no seed's influence ever
-    # reaches should read as "never flooded", not "flooded at exactly sea
-    # level". This script reimplements the sweep loop directly (bypassing
+    # solve_eikonal_dense: a cell no seed's influence ever reaches should
+    # read as "never flooded", not "flooded at exactly sea level". This
+    # script reimplements the sweep loop directly (bypassing
     # solve_eikonal_dense) for per-sweep instrumentation, so needs the same
-    # fix applied here explicitly to stay consistent with production.
+    # sentinel applied here explicitly to stay consistent with production.
     t = np.full((m + 1, n + 1), 99.0, dtype=dtype)
     t[seed_rows, seed_cols] = seed_values
     neg_two = dtype.type(-2.0)
@@ -285,10 +246,10 @@ def run_tile_sweep_trace(
         # like max_depth_change_abs below). This is exactly what
         # solve_eikonal_dense's round loop maxes over 4 sweeps and compares
         # against waterlevel_epsilon_m for its real convergence check - kept
-        # here (2026-09-24) so "how many rounds would production's own
-        # epsilon-based early-exit have taken" can be reconstructed exactly
-        # from this one continuous trace after the fact, without a second,
-        # separate round-based solve pass.
+        # here so "how many rounds would production's own epsilon-based
+        # early-exit have taken" can be reconstructed exactly from this one
+        # continuous trace after the fact, without a second, separate
+        # round-based solve pass.
         sweep_max_change_raw = _dense_sweep(t, friction, _ORTHANT_ORDER[(sweep - 1) % 4], neg_two, eight, four)
         depth = _full_depth_array(t, dem, mask, coastline)
         n_inundated = int((depth > 0).sum())
@@ -314,8 +275,7 @@ def run_tile_sweep_trace(
 
         prev_depth = depth
 
-        # Round-level early exit (2026-09-24, user direction: "they should stop
-        # when they converge") - checked only at a complete round boundary
+        # Round-level early exit, checked only at a complete round boundary
         # (every 4th sweep), matching solve_eikonal_dense's own round loop,
         # which never checks mid-round either.
         if sweep % SWEEPS_PER_ROUND == 0:
@@ -344,8 +304,8 @@ def main() -> None:
     parser.add_argument(
         "--write-wet-tiles-summary", action="store_true",
         help="write wet_tiles_selected.txt from THIS process's own tiles only - only safe for a "
-             "single sequential run that sees every candidate tile. Off by default (2026-09-24): "
-             "under any parallel HPC split (array job OR N-node batch job), every concurrent "
+             "single sequential run that sees every candidate tile. Off by default: under any "
+             "parallel HPC split (array job OR N-node batch job), every concurrent "
              "process would otherwise race to overwrite the same file with just its own tiny "
              "slice. Use aggregate_wet_tiles.py after a parallel run instead - it scans every "
              "tile's own CSV post-hoc and is safe regardless of how the work was split.",
@@ -359,14 +319,12 @@ def main() -> None:
 
     cfg = load_config(args.config)
     root = Path(cfg["paths"]["root"])
-    # cfg["simulation"]["model_outputs"] (NOT a hardcoded root/"model_outputs" - that was a real
-    # bug, found live 2026-10 on calibration_500_tiles: every tile errored "No such file or
-    # directory" since that study's solver outputs are deliberately isolated at
-    # {root}/calibration_500_tiles/model_outputs, not the shared production tree, and this
-    # script was silently ignoring the override, always reading the shared path regardless of
-    # --config) - load_config() already expands this to an absolute path, so this is a no-op
-    # for plain production config.yml (whose own simulation.model_outputs is "{root}/model_outputs")
-    # and correctly isolated for any scenario config that overrides it.
+    # cfg["simulation"]["model_outputs"], NOT a hardcoded root/"model_outputs" - a calibration
+    # study's solver outputs are deliberately isolated under its own study directory (e.g.
+    # {root}/calibration_500_tiles/model_outputs), not the shared production tree, and
+    # load_config() already expands simulation.model_outputs to the right absolute path for
+    # whichever --config is passed, so reading it directly keeps this script isolation-correct
+    # for both plain production config.yml and any scenario config that overrides the path.
     model_outputs = Path(cfg["simulation"]["model_outputs"])
     knn = int(cfg["simulation"]["flooding"]["knn"])
     friction_scale_factor = float(cfg["simulation"]["flooding"]["friction_scale_factor"])
@@ -420,10 +378,10 @@ def main() -> None:
     print(f"\nDone. Per-tile CSVs written to {out_dir}")
     # wet_tiles_selected.txt: see --write-wet-tiles-summary's own help text
     # above for why this defaults off - under ANY parallel HPC split (array
-    # job, one tile per task, OR N-node batch job, ~10 tiles per node - both
-    # 2026-09-24), every concurrent process only ever sees ITS OWN slice, so
-    # every one of them writing "the" wet_tiles_selected.txt would race and
-    # overwrite each other down to whichever process wrote last. Use
+    # job, one tile per task, OR N-node batch job, several tiles per node),
+    # every concurrent process only ever sees ITS OWN slice, so every one of
+    # them writing "the" wet_tiles_selected.txt would race and overwrite
+    # each other down to whichever process wrote last. Use
     # aggregate_wet_tiles.py after a parallel run instead.
     if args.write_wet_tiles_summary:
         selected = wet_tiles[:n_tiles_wanted]

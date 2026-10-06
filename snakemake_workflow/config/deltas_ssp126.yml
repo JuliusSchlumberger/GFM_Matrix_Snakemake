@@ -33,16 +33,12 @@ tile_grid:
 simulation:
   flooding:
     friction_scale_factor: 9.0
-    # 5 (up from production's own default of 4) - user direction, 2026-10.
-    # Based on the calibration_500_tiles production-run byproduct (max
-    # outer_iterations_used observed was 5 across ~540 tiles, 0 hit the
-    # ceiling) - a real but sample-bounded signal, not the dedicated
-    # obstacle-coupling calibration study's own validated finding (that
-    # study was never actually run - see this session's own back-and-forth
-    # on this exact caveat). Applying it to a real deliverable now anyway,
-    # per explicit instruction.
-    obstacle_coupling:
-      max_outer_iterations: 5
+    # Reverted to production's own default (4), 2026-10 - briefly set to 5
+    # based on a sample-bounded production-run byproduct signal, before the
+    # real obstacle-coupling calibration study (calibration_500_tiles,
+    # test_obstacle_coupling_calibration.py) actually ran and confirmed 4
+    # is sufficient. No override needed here any more - inherits config.yml's
+    # own simulation.flooding.obstacle_coupling.max_outer_iterations: 4.
   model_outputs: "{root}/deltas_floodmaps/ssp126/model_outputs"
 
 postprocessing:

@@ -1,7 +1,7 @@
-"""Shared tile-convergence detector for the sweep-budget calibration study
-(2026-09-24, 260-tile study), reused by plot_sweep_calibration_bands.py's
-panel (a) (ECDF of rounds-to-converge - see that script's own docstring for
-the full figure this feeds into).
+"""Shared tile-convergence detector for the sweep-budget calibration study,
+reused by plot_sweep_calibration_bands.py's panel (a) (ECDF of
+rounds-to-converge - see that script's own docstring for the full figure
+this feeds into).
 
 Reconstructs round-level convergence from the continuous per-SWEEP trace
 already collected (`sweep_max_change_raw` - `_dense_sweep`'s own return

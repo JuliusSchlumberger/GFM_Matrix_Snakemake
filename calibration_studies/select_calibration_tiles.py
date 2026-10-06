@@ -1,24 +1,16 @@
 """Pick a candidate pool of wave-0 tiles spanning both the full size range
 AND a wide geographic spread, for the obstacle-coupling/sweep-budget
-calibration studies (2026-08 - 400-tile scale-up from the earlier 40-tile
-study; see `C:\\Users\\Schlu005\\.claude\\plans\\smooth-wandering-map.md`
-for that study's original methodology; 2026-09-24 - repointed at this
-session's own machine/paths and the 260-tile study, ~10% of all hop=0
-tiles, replacing the never-actually-completed 100-tile study whose
-D:\\GFM\\model_outputs paths belonged to a different machine).
+calibration studies.
 
 Candidates are selected from the FULL hop=0 population regardless of
-whether model_outputs/<id>/inputs/dem.tif already exists (changed 2026-10,
-after the connectivity-first tile-grid migration left model_outputs/
-entirely empty under the new tile numbering - the readiness filter this
-script used to hard-require, 2026-09-24, assumed a large background of
-already-preprocessed production tiles would exist by the time this ran,
-which is no longer true right after a full tile-grid regeneration). The
-readiness check is still computed and reported as an informational count
-(see `n_ready` in the printed summary), just no longer used to exclude
+whether model_outputs/<id>/inputs/dem.tif already exists for this tile yet
+- a fresh tile-grid regeneration can leave model_outputs/ entirely empty,
+so requiring existing outputs would find zero candidates right after one.
+The readiness check is still computed and reported as an informational
+count (see `n_ready` in the printed summary), just not used to exclude
 candidates - preprocess the selected list afterward (e.g. via an isolated
-tile_grid subset + its own model_outputs, same pattern as the delta/Wales-
-Scotland/Thailand isolated runs) rather than relying on it already existing.
+tile_grid subset with its own model_outputs) rather than relying on it
+already existing.
 
 Bbox area in deg2 is an exact-up-to-clipping proxy for pixel count here
 (DeltaDTM tiles are native EPSG:4326 at ~1 arcsecond, so pixel count =
@@ -62,8 +54,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import load_config  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_N_CANDIDATES = 300  # ~1.15x the 260 wanted (10% of ~2445 hop=0 tiles) - matches the
-# margin ratio the earlier 400-tile study used, for replacing dry-at-sweep-1 tiles
+DEFAULT_N_CANDIDATES = 575  # ~1.15x the 500 wanted - overprovisions for tiles that turn out
+# dry at sweep 1 and get dropped by the calibration scripts themselves (see module docstring)
 GEO_BIN_DEG = 20.0  # lon/lat grid cell size for geographic stratification
 
 

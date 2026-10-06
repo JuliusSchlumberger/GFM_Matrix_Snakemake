@@ -1,5 +1,5 @@
 """Single 4-panel summary figure for the sweep-budget calibration study
-(see tests/test_sweep_budget_calibration.py and
+(see calibration_studies/test_sweep_budget_calibration.py and
 docs/methods_03_calibration_sensitivity.md §2).
 
 Panels (b)-(d) are median/98th-percentile/min-max bands across the wet
@@ -35,15 +35,15 @@ Panels:
   (d) newly flooded cells per round (raw counts, not cumulative, not
       normalized by tile size - log scale).
 
-Runs aggregate_wet_tiles.py's own selection as its first step (2026-10,
-folded in here so a stale/missing wet_tiles_selected.txt no longer needs a
-separate manual command first) - rebuilds that file fresh from whatever
+Runs aggregate_wet_tiles.py's own selection as its first step (folded in
+here so a stale/missing wet_tiles_selected.txt never needs a separate
+manual command first) - rebuilds that file fresh from whatever
 sweep_budget CSVs currently exist, every time this script runs, so the
 figure always reflects the sweep's current state rather than a possibly-
 stale prior selection.
 
 Usage:
-    python plot_sweep_calibration_bands.py <sweep_budget_dir> <figures_dir> [--max-rounds 40] [--n-tiles-wanted 260]
+    python plot_sweep_calibration_bands.py <sweep_budget_dir> <figures_dir> [--max-rounds 40] [--n-tiles-wanted 500]
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ from aggregate_wet_tiles import aggregate_wet_tiles  # noqa: E402
 from config_utils import load_config  # noqa: E402
 from plot_sweep_budget_convergence import N_COMPLETE_ROUNDS, collect as collect_convergence  # noqa: E402
 
-N_TILES_WANTED_DEFAULT = 260  # matches aggregate_wet_tiles.py's own default
+N_TILES_WANTED_DEFAULT = 500  # matches aggregate_wet_tiles.py's own default
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 SWEEPS_PER_ROUND = 4

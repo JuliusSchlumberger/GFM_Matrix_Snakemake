@@ -1,41 +1,32 @@
 """Generate N independent sbatch scripts (one per node) to run a sweep-budget
-or obstacle-coupling calibration study on Hydrax, each node
-processing its OWN slice of tiles sequentially in one continuous process
-(2026-09-24 - replaces generate_calibration_array_job.py's one-task-per-tile
-design: submitting/scheduling ~300 individual SLURM tasks pays real
-per-task dispatch overhead - conda/env setup, Python interpreter start,
-Numba JIT (re-)compile if the on-disk cache isn't warm yet - on every single
-tile regardless of how small, which dominates for the many tiles that only
-take a fraction of a second to actually compute. Batching ~10 tiles into one
-continuous process per node, like generate_v2_batch_jobs.py already does
-for the SFINCS validation batches, pays that overhead once per NODE instead
-of once per TILE).
+or obstacle-coupling calibration study on Hydrax, each node processing its
+OWN slice of tiles sequentially in one continuous process. Batching tiles
+into one continuous process per node (rather than one SLURM task per tile)
+amortizes per-task dispatch overhead - conda/env setup, Python interpreter
+start, Numba JIT (re-)compile if the on-disk cache isn't warm - once per
+NODE instead of once per TILE, which otherwise dominates for the many tiles
+that only take a fraction of a second to actually compute.
 
 Tiles are distributed by LPT (Longest Processing Time first) greedy
-bin-packing on ESTIMATED cost, not round-robin or a contiguous slice
-(2026-09-24, user direction: "spread the tiles based on their size across
-n batches"): each candidate's pixel count (`area_deg2 * 3600**2` from
-domain_tiles_global.gpkg's own bbox, EPSG:4326 ~1-arcsecond-native DeltaDTM
-tiles - the SAME proxy select_calibration_tiles.py already uses/trusts for
-this) stands in for its compute cost, tiles are sorted largest-first, and
-each one goes to whichever node currently has the LOWEST accumulated cost
-so far - the standard, simple, effective heuristic for balanced multiway
-partitioning without needing an exact solve. This directly targets the
-straggler problem a naive split (contiguous OR round-robin) doesn't fully
-avoid: candidate_tiles.txt is ordered "bin, then percentile-within-bin" (see
-select_calibration_tiles.py), so nearby entries can be similar in size by
-construction.
+bin-packing on ESTIMATED cost, not round-robin or a contiguous slice: each
+candidate's pixel count (`area_deg2 * 3600**2` from domain_tiles_global.
+gpkg's own bbox, EPSG:4326 ~1-arcsecond-native DeltaDTM tiles - the SAME
+proxy select_calibration_tiles.py already uses/trusts for this) stands in
+for its compute cost, tiles are sorted largest-first, and each one goes to
+whichever node currently has the LOWEST accumulated cost so far - the
+standard, simple, effective heuristic for balanced multiway partitioning
+without needing an exact solve. This directly targets the straggler
+problem a naive split (contiguous OR round-robin) doesn't fully avoid.
 
 The same per-tile pixel-count estimate also drives a real --time estimate
 (not a blanket guess): each node's own worst-case wall-clock time is its
-assigned tiles' total pixel count, converted via this session's own
-empirically-measured rate (~0.05s per (million cells x sweep), confirmed
-live on 3 real tiles spanning 196K-18.9M cells within ~10% of each other),
-times the study's own worst-case sweep count per tile (assumes zero early
-exit ever - a deliberately pessimistic bound, since real tiles mostly
-converge well before their round ceiling). Printed per node so the actual
---time (or the default) can be judged against real numbers instead of
-guessed - see estimate_worst_case_hours() below.
+assigned tiles' total pixel count, converted via an empirically-measured
+rate (RATE_S_PER_MCELL_SWEEP below), times the study's own worst-case sweep
+count per tile (assumes zero early exit ever - a deliberately pessimistic
+bound, since real tiles mostly converge well before their round ceiling).
+Printed per node so the actual --time (or the default) can be judged
+against real numbers instead of guessed - see estimate_worst_case_hours()
+below.
 
 Each node calls the target script ONCE with its full tile-id list (already
 multi-tile-capable via --tile-ids id1 id2 ...) - `set -uo pipefail`, not
@@ -47,15 +38,13 @@ processes (see test_sweep_budget_calibration.py's own
 --write-wet-tiles-summary flag, off by default here) - build it with
 aggregate_wet_tiles.py once every node's CSVs are on disk.
 
-Study directory (2026-10): `--study-dir-name` selects which study's own
-output tree this points at (default `calibration_260_tiles`, the original
-study, preserved for exact backward compatibility) - every path below that
-was previously a literal `calibration_260_tiles` string is now built from
-this one parameter, so a second, independently-sized study (e.g. a
-~500-tile global-representativeness re-run after the connectivity-first
-tile-grid migration) gets its own separate directory rather than
-overwriting/mixing with the original's candidate pool, sweep-budget CSVs,
-or resolved_config.yml.
+`--study-dir-name` selects which study's own output tree this points at
+(default `calibration_260_tiles`, the original pilot study, preserved for
+backward compatibility) - every output path is built from this one
+parameter, so a differently-sized study (e.g. the current 500-tile
+global-representativeness run, `calibration_500_tiles`) gets its own
+separate directory rather than overwriting/mixing with another study's
+candidate pool, sweep-budget CSVs, or resolved_config.yml.
 
 Usage:
     python generate_calibration_batch_jobs.py sweep_budget
@@ -84,10 +73,9 @@ MEM_DEFAULT = "7G"
 CPUS_PER_TASK_DEFAULT = 1
 GFM_PY_LINUX = "/u/schlumbe/.conda/envs/gfm/bin/python"
 
-# Empirically measured this session (tests/test_sweep_budget_calibration.py, 3 real tiles:
-# 196K/2.49M/18.9M cells, 0.040-0.049 s per (million cells x 50 sweeps), and confirmed again
-# on tile 948's full 400-sweep run at 369s for 18.9M cells) - used only for a worst-case
-# --time ESTIMATE, not for the bin-packing itself (pixel count alone is enough for balance).
+# Empirically measured on real tiles spanning 196K-18.9M cells (within ~10% of each other) -
+# used only for a worst-case --time ESTIMATE, not for the bin-packing itself (pixel count alone
+# is enough for balance).
 RATE_S_PER_MCELL_SWEEP = 0.05
 
 SWEEPS_PER_ROUND = 4
@@ -103,9 +91,7 @@ SCRIPTS = {
         "script_name": "test_obstacle_coupling_calibration.py",
         "out_subdir": "obstacle_coupling",
         # (max_outer+1) solves x inner_max_rounds rounds x 4 sweeps, at this study's own
-        # 15/40 defaults (DEFAULT_MAX_OUTER/DEFAULT_INNER_MAX_ROUNDS, the latter updated
-        # 2026-09-24 to match the sweep-budget study's own concluded round count) - zero
-        # early exit ever.
+        # 15/40 defaults (DEFAULT_MAX_OUTER/DEFAULT_INNER_MAX_ROUNDS) - zero early exit ever.
         "worst_case_sweeps_per_tile": 16 * 40 * SWEEPS_PER_ROUND,
         "default_tile_ids_file": "sweep_budget/wet_tiles_selected.txt",
     },
@@ -252,7 +238,7 @@ def main() -> None:
             f"#SBATCH --error={linux_jobs_dir}/logs/{name}_%j.err",
             "",
             "set -uo pipefail",  # not -e: one tile's failure must not abort the rest of this node's batch
-            f'"{GFM_PY_LINUX}" "{linux_code_root}/tests/{spec["script_name"]}" "{out_dir_linux}" '
+            f'"{GFM_PY_LINUX}" "{linux_code_root}/calibration_studies/{spec["script_name"]}" "{out_dir_linux}" '
             f'--config "{linux_config_path}" --tile-ids {" ".join(batch_tiles)} {args.extra_args}',
             "",
         ]

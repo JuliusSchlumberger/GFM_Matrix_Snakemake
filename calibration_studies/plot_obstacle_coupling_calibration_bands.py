@@ -1,5 +1,5 @@
 """Single 2-panel summary figure for the obstacle-coupling calibration
-study (see tests/test_obstacle_coupling_calibration.py and
+study (see calibration_studies/test_obstacle_coupling_calibration.py and
 docs/methods_03_calibration_sensitivity.md §3): each panel is a
 median/2nd/98th-percentile/min-max band across the wet calibration tiles
 that still have a real observation at that outer iteration, plotted
@@ -56,7 +56,7 @@ def _load_tile_trace(csv_path: Path) -> pd.DataFrame | None:
     iteration, and pct_newly_blocked (the literal outer-loop stopping-
     criterion metric). A tile's own baseline (n_outer=0, no blocking at
     all) must show some flooding for the tile to be included - matches
-    every other figure drawn from this same 260-tile pool."""
+    every other figure drawn from this same calibration-tile pool."""
     try:
         df = pd.read_csv(csv_path)
     except pd.errors.EmptyDataError:

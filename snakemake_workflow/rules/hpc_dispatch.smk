@@ -26,7 +26,7 @@ is chosen against. Pixel count is estimated from each tile's own bounding
 box (area_deg2 * 3600**2 - DeltaDTM is ~1 arcsec native resolution, and
 what matters here is relative compute/memory cost, not exact physical area,
 so no latitude correction is needed - same proxy already used by
-tests/select_calibration_tiles.py), not by reading the actual DEM raster,
+calibration_studies/select_calibration_tiles.py), not by reading the actual DEM raster,
 since this must be computable before any preprocessing has run.
 """
 
