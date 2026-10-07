@@ -388,7 +388,7 @@ simulation: # Used by: preprocessing rules
 # SLURM allocation size, so a `cpus_per_task: 1` partition means preprocessing
 # on that batch's tiles runs fully serial, not just one simulation tile at a time.
 hpc:
-  n_nodes: 35                                        # 2026-09-25, user direction (up from 40) - a SHARED budget across
+  n_nodes: 40                                        # 2026-10-06, user direction (down from 35) for a preprocess-only submission - a SHARED budget across
   # both size classes per wave, split proportionally by tile count (see hpc_dispatch.smk's own split_batches_proportionally
   # call) - NOT "35 nodes per size class" despite this line's own stale wording below, see that file's own comments for the
   # real (fixed) semantics: the "PER WAVE, PER SIZE CLASS" phrasing here describes the OLD, buggy independent-budget
@@ -446,11 +446,18 @@ hpc:
   # preprocessing and simulation. Expect very few batches here - most tiles
   # stay on sbatch:.
   sbatch_large:
-    partition: 4vcpu               # e.g. "16vcpu" - see large_tile_pixel_threshold's comment above
+    # 2026-10-06, user direction: dropped from 4vcpu/30G/4 cpus to match
+    # sbatch: above - for THIS preprocess-only submission, not needed for
+    # the memory margin large-tile simulation batches still rely on (see
+    # large_tile_pixel_threshold's own comment: tiles at/above that
+    # threshold were sized to leave only ~1.4GB headroom on a 1vcpu node's
+    # ~7.95GB usable RAM) - revert to partition=4vcpu/mem=30G/cpus_per_task=4
+    # before submitting a simulation run, or the largest tiles risk OOM.
+    partition: 1vcpu
     account: ""
     time: "2-00:00:00"             # 2026-09: raised from 1-00:00:00 - large tiles were regularly not finishing in 24h
-    mem: "30G"                            # e.g. "96G" - well under the partition's per-node RAM, generous margin over the estimate
-    cpus_per_task: 4                                  # simulation: one tile at a time regardless; preprocessing: real `snakemake --cores` parallelism for "large" batches
+    mem: "7G"                             # matches sbatch:'s own 1vcpu-node ceiling - see note above
+    cpus_per_task: 1
     env_activate_cmd: 'module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm'
 
 

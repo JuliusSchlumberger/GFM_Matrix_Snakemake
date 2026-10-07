@@ -34,11 +34,13 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
+from compute_friction_sweep_metrics import MAX_OUTER_ITERATIONS_DEFAULT
 from compute_metrics_overview_table import build_and_write_table
 from flood_agreement import (
     DEPTH_CATEGORY_EDGES, DEPTH_CORR_FINE_EDGES, depth_error_metrics_from_pooled, metrics_from_counts,
     pool_depth_joint,
 )
+from tile_sweep_cache import load_or_build_cache
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from map_style import LAND_COLOR, WATER_COLOR as OCEAN_COLOR, draw_caption_box  # noqa: E402
@@ -66,7 +68,7 @@ def collect_summaries(base_dir: Path, stale_cutoff: pd.Timestamp | None) -> pd.D
             except (json.JSONDecodeError, OSError):
                 continue
             # {model}_depth_joint is a nested dict, not a scalar - pooled
-            # separately by collect_depth_joint() for the depth plots.
+            # separately by pool_depth_joint()/collect_depth_joint_fsf() for the depth plots.
             d = {k: v for k, v in d.items() if not k.endswith("_depth_joint")}
             row = by_tile.setdefault(d["tile_id"], {})
             row.update(d)
@@ -99,12 +101,70 @@ def collect_summaries(base_dir: Path, stale_cutoff: pd.Timestamp | None) -> pd.D
     return df.merge(meta, on="tile_id", how="left")
 
 
-def collect_depth_joint(base_dir: Path, stale_eikonal_tile_ids: set[int]) -> dict[str, dict]:
-    """{model: pool_depth_joint(...)} for bathtub/eikonal, excluding stale
-    eikonal tiles from the eikonal pool."""
+def load_fsf_eikonal_override(
+    base_dir: Path, friction_scale_factor: float, max_outer_iterations: int, tile_ids: list[int],
+) -> pd.DataFrame:
+    """Per-tile eikonal_* columns (CSI inputs + flooded area + median depth)
+    at ONE sweep point, read straight from each tile's own
+    sweep_comparison_cache.json (tile_sweep_cache.py - built once per tile
+    as part of run_friction_sweep_batch.py's own end-of-batch step, or here
+    live-and-cached via load_or_build_cache's own fallback) - NOT from
+    summary_eikonal.json, which only ever reflects the single default
+    friction_scale_factor point (see postprocess_tile_summary.py's own
+    MODEL_WATERDEPTH_FILENAME)."""
+    rows = []
+    for i, tid in enumerate(tile_ids, start=1):
+        cache = load_or_build_cache(base_dir / str(tid), [friction_scale_factor], max_outer_iterations)
+        if i % 50 == 0 or i == len(tile_ids):
+            print(f"  [{i}/{len(tile_ids)}] tile {tid}: eikonal override loaded ({len(rows)} usable so far)", flush=True)
+        point = cache["points"].get(f"{friction_scale_factor:g}") if cache else None
+        if point is None:
+            continue
+        rows.append({
+            "tile_id": tid,
+            "eikonal_matched_km2": point["matched_km2"],
+            "eikonal_only_km2": point["model_only_km2"],
+            "eikonal_sfincs_only_km2": point["sfincs_only_km2"],
+            "eikonal_km2": point["matched_km2"] + point["model_only_km2"],
+            "eikonal_depth_median_m": point["model_depth_median_m"],
+            "has_eikonal": True, "eikonal_stale": False,
+        })
+    return pd.DataFrame(rows)
+
+
+def collect_depth_joint_fsf(
+    base_dir: Path, tile_ids: list[int], friction_scale_factor: float, max_outer_iterations: int,
+) -> dict:
+    """Same shape/semantics as flood_agreement.pool_depth_joint(base_dir,
+    "eikonal", ...)'s own return (n/sum_x/.../hist_fine/hist_category), but
+    pooled from each tile's own cached depth_joint (tile_sweep_cache.py)
+    instead of summary_eikonal.json's own precomputed joint, which only
+    ever exists for the single default friction_scale_factor=30.0 point."""
+    n = sum_x = sum_y = sum_x2 = sum_y2 = sum_xy = 0.0
+    hist_fine = hist_category = None
+
+    for i, tid in enumerate(tile_ids, start=1):
+        cache = load_or_build_cache(base_dir / str(tid), [friction_scale_factor], max_outer_iterations)
+        if i % 50 == 0 or i == len(tile_ids):
+            print(f"  [{i}/{len(tile_ids)}] tile {tid}: depth-joint pooled", flush=True)
+        point = cache["points"].get(f"{friction_scale_factor:g}") if cache else None
+        joint = point.get("depth_joint") if point else None
+        if not joint:
+            continue
+        n += joint["n"]
+        sum_x += joint["sum_x"]
+        sum_y += joint["sum_y"]
+        sum_x2 += joint["sum_x2"]
+        sum_y2 += joint["sum_y2"]
+        sum_xy += joint["sum_xy"]
+        hf = np.asarray(joint["hist_fine"])
+        hc = np.asarray(joint["hist_category"])
+        hist_fine = hf if hist_fine is None else hist_fine + hf
+        hist_category = hc if hist_category is None else hist_category + hc
+
     return {
-        model: pool_depth_joint(base_dir, model, stale_eikonal_tile_ids if model == "eikonal" else None)
-        for model in ("bathtub", "eikonal")
+        "n": n, "sum_x": sum_x, "sum_y": sum_y, "sum_x2": sum_x2, "sum_y2": sum_y2, "sum_xy": sum_xy,
+        "hist_fine": hist_fine, "hist_category": hist_category,
     }
 
 
@@ -410,6 +470,15 @@ def main() -> None:
     parser.add_argument("--stale-cutoff", default=None, help="optional timestamp (e.g. '2026-09-24 12:00:00'); "
                          "any tile whose EA-bathtub raster predates it is flagged 'stale' and excluded from "
                          "EA-bathtub summary statistics/maps")
+    parser.add_argument(
+        "--friction-scale-factor", type=float, default=None,
+        help="plot a specific sweep point instead of the default friction_scale_factor=30.0 run - reads "
+             "{base-dir-name}/friction_sweep_per_tile_metrics.csv (compute_friction_sweep_metrics.py's own "
+             "output) plus fresh per-tile raster reads for the depth figures (median depth, depth-joint "
+             "histograms) - see load_fsf_eikonal_override()/collect_depth_joint_fsf()'s own docstrings.",
+    )
+    parser.add_argument("--max-outer-iterations", type=int, default=MAX_OUTER_ITERATIONS_DEFAULT,
+                         help="must match whatever the sweep was run with - only used with --friction-scale-factor")
     args = parser.parse_args()
     stale_cutoff = pd.Timestamp(args.stale_cutoff) if args.stale_cutoff else None
 
@@ -417,26 +486,48 @@ def main() -> None:
     fig_dir = base_dir / "figures"
     fig_dir.mkdir(parents=True, exist_ok=True)
 
+    fsf = args.friction_scale_factor
+    fsf_suffix = "" if fsf is None else f"_fsf{fsf:g}"
+
     df = collect_summaries(base_dir, stale_cutoff)
+    if fsf is not None:
+        print(f"Overriding eikonal_* columns with friction_scale_factor={fsf:g} "
+              f"(max_outer_iterations={args.max_outer_iterations})...")
+        override = load_fsf_eikonal_override(base_dir, fsf, args.max_outer_iterations, df["tile_id"].tolist())
+        df = df.drop(columns=[c for c in override.columns if c != "tile_id"]).merge(override, on="tile_id", how="left")
+        df["has_eikonal"] = df["has_eikonal"].fillna(False)
+        df["eikonal_stale"] = df["eikonal_stale"].fillna(False)
+
     n_stale = int(df["eikonal_stale"].sum())
     n_has_eikonal = int(df["has_eikonal"].sum())
     print(f"{len(df)} tile summaries loaded ({n_has_eikonal} with {DISPLAY_LABEL['eikonal']} output, {n_stale} stale)")
-    df.to_csv(fig_dir / "validation_summary.csv", index=False)
-    print(f"Wrote {fig_dir / 'validation_summary.csv'}")
+    df.to_csv(fig_dir / f"validation_summary{fsf_suffix}.csv", index=False)
+    print(f"Wrote {fig_dir / f'validation_summary{fsf_suffix}.csv'}")
 
-    plot_extent_scatter(df, fig_dir / "extent_scatter.png")
-    plot_agreement_hist(df, fig_dir / "extent_agreement_hist.png")
-    plot_depth_scatter(df, fig_dir / "depth_scatter.png")
-    plot_tile_agreement_map(df, fig_dir / "agreement_map.png")
-    plot_agreement_vs_tile_size(df, fig_dir / "agreement_vs_tile_size.png")
+    plot_extent_scatter(df, fig_dir / f"extent_scatter{fsf_suffix}.png")
+    plot_agreement_hist(df, fig_dir / f"extent_agreement_hist{fsf_suffix}.png")
+    plot_depth_scatter(df, fig_dir / f"depth_scatter{fsf_suffix}.png")
+    plot_tile_agreement_map(df, fig_dir / f"agreement_map{fsf_suffix}.png")
+    plot_agreement_vs_tile_size(df, fig_dir / f"agreement_vs_tile_size{fsf_suffix}.png")
 
-    stale_tile_ids = set(df.loc[df["eikonal_stale"], "tile_id"].tolist())
-    pooled_depth = collect_depth_joint(base_dir, stale_tile_ids)
-    plot_depth_correlation(pooled_depth, fig_dir / "depth_correlation.png")
-    plot_depth_category_alignment(pooled_depth, fig_dir / "depth_category_alignment.png")
+    bathtub_depth_joint = pool_depth_joint(base_dir, "bathtub")  # friction_scale_factor-independent either way
+    if fsf is None:
+        stale_tile_ids = set(df.loc[df["eikonal_stale"], "tile_id"].tolist())
+        eikonal_depth_joint = pool_depth_joint(base_dir, "eikonal", stale_tile_ids)
+    else:
+        print(f"\nPooling depth-joint histograms from each tile's own sweep cache at friction_scale_factor={fsf:g}...")
+        tile_ids = df.loc[df["has_eikonal"], "tile_id"].astype(int).tolist()
+        eikonal_depth_joint = collect_depth_joint_fsf(base_dir, tile_ids, fsf, args.max_outer_iterations)
 
-    print()
-    build_and_write_table(base_dir)
+    pooled_depth = {"bathtub": bathtub_depth_joint, "eikonal": eikonal_depth_joint}
+    plot_depth_correlation(pooled_depth, fig_dir / f"depth_correlation{fsf_suffix}.png")
+    plot_depth_category_alignment(pooled_depth, fig_dir / f"depth_category_alignment{fsf_suffix}.png")
+
+    if fsf is None:
+        print()
+        build_and_write_table(base_dir)
+    else:
+        print("\nSkipping metrics_overview_table.csv - not yet available for a non-default friction_scale_factor.")
 
 
 if __name__ == "__main__":

@@ -180,6 +180,11 @@ if __name__ == "__main__":
         gpd.read_file, tile_dir / f"boundaries_{args.return_period}_{args.waterlevel_name}.gpkg"
     )
     if boundaries_gdf.empty:
+        from tile_status import write_tile_status
+        write_tile_status(
+            root, args.base_dir_name, args.tile_id, status="no_station", stage="build_boundary_forcing.py",
+            message=f"boundaries_{args.return_period}_{args.waterlevel_name}.gpkg is empty - no COAST-RP station for this tile",
+        )
         raise ValueError(
             f"tile {args.tile_id}: boundaries_{args.return_period}_{args.waterlevel_name}.gpkg is empty "
             "(no COAST-RP station for this tile) - per plan, this tile cannot be forced at all, drop it."

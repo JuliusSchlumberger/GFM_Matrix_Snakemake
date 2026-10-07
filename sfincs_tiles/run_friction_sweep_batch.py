@@ -32,6 +32,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from compute_friction_sweep_metrics import MAX_OUTER_ITERATIONS_DEFAULT  # noqa: E402
+from gfm_config import read_root  # noqa: E402
+from tile_sweep_cache import build_tile_sweep_cache, write_cache  # noqa: E402
+
 RUNNER = Path(__file__).resolve().parent / "run_eikonal_on_sfincs_subgrid.py"
 
 
@@ -98,6 +103,39 @@ def main() -> None:
                 print(f"  stderr: {err_line}", flush=True)
 
     print(f"\nBatch done in {time.time() - t_batch0:.0f}s: {n_ok} ok, {n_fail} failed, {len(pairs)} total", flush=True)
+
+    # -- build each distinct tile's sweep-vs-SFINCS(-and-bathtub) comparison cache,
+    # right here, right after ALL of this batch's own sweep points are done - "the
+    # required postprocess ... done as part of the main pipeline too, so that the
+    # postprocessing analysis actually is very quick" (2026-10-07). Opens SFINCS
+    # once per tile (tile_sweep_cache.load_tile_sfincs), not once per (tile, fsf)
+    # pair - see that module's own docstring. --
+    if args.config is None:
+        print("\nSkipping sweep-comparison cache build - no --config given, can't resolve paths.root", flush=True)
+        return
+    root = read_root(Path(args.config))
+    base_dir = root / args.base_dir_name
+    tiles_by_fsf: dict[str, list[float]] = {}
+    for tile_id, fsf in pairs:
+        tiles_by_fsf.setdefault(tile_id, []).append(fsf)
+    distinct_tile_ids = sorted(tiles_by_fsf, key=lambda t: int(t) if t.isdigit() else t)
+
+    # None here means "run_eikonal_on_sfincs_subgrid.py's own default" (see its --max-outer-iterations
+    # forwarding above) - resolve it to that same concrete value so _eikonal_path's own outer-tag
+    # matches the files actually on disk instead of comparing None against an int.
+    max_outer_iterations = args.max_outer_iterations if args.max_outer_iterations is not None else MAX_OUTER_ITERATIONS_DEFAULT
+
+    print(f"\nBuilding sweep-comparison cache for {len(distinct_tile_ids)} distinct tile(s) in this batch...", flush=True)
+    n_cached = 0
+    for i, tile_id in enumerate(distinct_tile_ids, start=1):
+        cache = build_tile_sweep_cache(base_dir / tile_id, sorted(set(tiles_by_fsf[tile_id])), max_outer_iterations)
+        if cache is not None:
+            write_cache(base_dir / tile_id, cache)
+            n_cached += 1
+        if i % 20 == 0 or i == len(distinct_tile_ids):
+            print(f"  [{i}/{len(distinct_tile_ids)}] {n_cached} cache(s) written so far", flush=True)
+    print(f"Wrote {n_cached}/{len(distinct_tile_ids)} sweep-comparison cache(s) "
+          f"({len(distinct_tile_ids) - n_cached} skipped - SFINCS not built yet for that tile)", flush=True)
 
 
 if __name__ == "__main__":

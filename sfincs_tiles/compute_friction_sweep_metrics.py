@@ -1,18 +1,24 @@
-"""Scores a friction_scale_factor sweep of run_eikonal_on_sfincs_subgrid.py
-(eikonal-vs-SFINCS, on SFINCS's own subgrid) against SFINCS as ground truth,
-pooled CSI/bias per sweep point across a fixed tile set
-(select_friction_sweep_tiles.py).
+"""Pools per-tile eikonal-sweep-vs-SFINCS agreement (CSI/bias per
+friction_scale_factor) across a fixed tile set (select_friction_sweep_tiles.py)
+into one pooled table.
 
-Reimplements postprocess_tile_summary.py's summarize_extent_model agreement
-logic directly on an arbitrary eikonal raster path (instead of going through
-its fixed MODEL_WATERDEPTH_FILENAME + summary_eikonal.json indirection,
-which assumes one eikonal result per tile) - same WET_THRESHOLD_M cutoff,
-same confusion_counts/metrics_from_counts primitives
-(sfincs_tiles/flood_agreement.py), same land-only domain mask. Needs only
-rasterio/scipy/numpy - no hydromt_sfincs import, so this runs fine under
-gfm_python_preprocessing (unlike postprocess_tile_summary.py, which needs
-the separate, currently-matplotlib-broken hydromt-sfincs-dev env only for
-SFINCS's own boundary-cell mask - not needed here).
+2026-10-07: reads each tile's own sweep_comparison_cache.json
+(tile_sweep_cache.py), built ONCE per tile as part of run_friction_sweep_batch.py's
+own end-of-batch step (SFINCS opened once, compared against every sweep
+point AND bathtub in one pass) - not recomputed from raw rasters here
+anymore. A tile missing a cache (swept before this existed) falls back to
+building+writing one live via load_or_build_cache(), so this is
+self-healing: slow the first time only. `load_tile_sfincs`/
+`_decode_waterdepth_cm`/`_eikonal_path` below are the low-level raster
+primitives tile_sweep_cache.py's own cache-building imports FROM this
+module - kept here, not moved, since this was the original home and
+nothing about ownership needed to change, just where the per-tile loop
+itself lives.
+
+Needs only rasterio/scipy/numpy - no hydromt_sfincs import, so this runs
+fine under gfm_python_preprocessing (unlike postprocess_tile_summary.py,
+which needs the separate, currently-matplotlib-broken hydromt-sfincs-dev
+env only for SFINCS's own boundary-cell mask - not needed here).
 
 Usage:
     python compute_friction_sweep_metrics.py --base-dir-name validation_sfincs_v5 \\
@@ -29,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -37,7 +44,7 @@ import rasterio
 from rasterio.warp import Resampling, reproject
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from flood_agreement import WET_THRESHOLD_M, confusion_counts, metrics_from_counts  # noqa: E402
+from flood_agreement import WET_THRESHOLD_M, metrics_from_counts  # noqa: E402
 from gfm_config import read_root  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
 
@@ -68,26 +75,25 @@ def _eikonal_path(tile_dir: Path, friction_scale_factor: float, max_outer_iterat
     return tile_dir / "outputs" / f"eikonal_on_subgrid_waterdepth_RP100_SLR_0{fsf_tag}{outer_tag}.tif"
 
 
-def tile_counts(
-    tile_dir: Path, friction_scale_factor: float, max_outer_iterations: int,
-) -> tuple[float, float, float] | None:
-    """(matched_km2, eikonal_only_km2, sfincs_only_km2) for one tile at one
-    friction scale, or None if either raster is missing."""
-    eikonal_path = _eikonal_path(tile_dir, friction_scale_factor, max_outer_iterations)
+def load_tile_sfincs(tile_dir: Path) -> dict | None:
+    """Loads this tile's SFINCS hmax_subgrid + native mask ONCE - neither
+    depends on friction_scale_factor, so this used to be re-opened and
+    re-reprojected once per SWEEP POINT (10x redundant reads of the exact
+    same unchanging rasters per tile - confirmed the dominant cost of this
+    script's own wall-clock, worse now that the sweep's own HPC batches are
+    concurrently writing to the same shared tree, each re-open risking a
+    transient-file retry). Call once per tile, reuse the result across every
+    fsf point via tile_counts_for_fsf() below."""
     hmax_path = tile_dir / "sfincs_model" / "hmax_subgrid.tif"
     native_mask_path = tile_dir / "inputs" / "mask.tif"
-    if not (eikonal_path.exists() and hmax_path.exists() and native_mask_path.exists()):
+    if not (hmax_path.exists() and native_mask_path.exists()):
         return None
-
-    depth_m, transform, crs, shape = _decode_waterdepth_cm(eikonal_path)
 
     with retry_transient_io(rasterio.open, hmax_path) as src:
         sfincs_depth = src.read(1).astype(np.float32)
-        sg_nodata, sg_shape = src.nodata, src.shape
+        sg_nodata, transform, crs, shape = src.nodata, src.transform, src.crs, src.shape
     if sg_nodata is not None and not np.isnan(sg_nodata):
         sfincs_depth = np.where(sfincs_depth == sg_nodata, np.nan, sfincs_depth)
-    if shape != sg_shape:
-        return None  # not pixel-identical (stale/mismatched raster) - skip rather than misrepresent
 
     mog = np.empty(shape, dtype=np.float32)
     with retry_transient_io(rasterio.open, native_mask_path) as src:
@@ -97,16 +103,24 @@ def tile_counts(
             dst_transform=transform, dst_crs=crs, resampling=Resampling.nearest,
         )
     land = mog == LAND_CODE
-
-    eikonal_wet = land & np.isfinite(depth_m) & (depth_m > WET_THRESHOLD_M)
     sfincs_wet = land & np.isfinite(sfincs_depth) & (sfincs_depth > WET_THRESHOLD_M)
 
     cell_km2 = abs(transform.a) * abs(transform.e) / 1e6
     weight = np.full(shape, cell_km2, dtype=np.float64)
-    return confusion_counts(eikonal_wet, sfincs_wet, land, weight)
+    return {
+        "transform": transform, "shape": shape, "land": land, "sfincs_wet": sfincs_wet, "weight": weight,
+        "sfincs_depth": sfincs_depth,  # raw depth (not just the wet boolean) - needed for depth-joint pooling
+    }
 
 
 def main() -> None:
+    # Deferred, not top-level: tile_sweep_cache.py itself imports load_tile_sfincs/
+    # _decode_waterdepth_cm/_eikonal_path/MAX_OUTER_ITERATIONS_DEFAULT FROM this
+    # module - a top-level import here would be circular. Safe deferred to inside
+    # main(): by the time this runs, this module's own top-level names are already
+    # fully defined, so tile_sweep_cache's own import of them succeeds.
+    from tile_sweep_cache import cache_path, load_or_build_cache
+
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     _repo_root = Path(__file__).resolve().parent.parent
     parser.add_argument("--config", default=str(_repo_root / "snakemake_workflow" / "config" / "config.yml"))
@@ -124,37 +138,75 @@ def main() -> None:
     root = read_root(Path(args.config))
     base_dir = root / args.base_dir_name
     tile_ids = [int(line) for line in Path(args.tile_ids_file).read_text().splitlines() if line.strip()]
-    print(f"{len(tile_ids)} tile(s) in sweep tile set")
+    print(f"{len(tile_ids)} tile(s) in sweep tile set", flush=True)
 
     per_tile_rows = []
-    pooled_rows = []
-    for fsf in args.friction_scale_factors:
-        matched_sum = only_sum = sfincs_only_sum = 0.0
-        n_scored = 0
-        for tid in tile_ids:
-            counts = tile_counts(base_dir / str(tid), fsf, args.max_outer_iterations)
-            if counts is None:
+    sums = {fsf: {"matched": 0.0, "only": 0.0, "sfincs_only": 0.0, "n_scored": 0} for fsf in args.friction_scale_factors}
+
+    # Reads each tile's own sweep_comparison_cache.json (tile_sweep_cache.py) -
+    # built ONCE per tile as part of run_friction_sweep_batch.py's own
+    # end-of-batch step, not recomputed here. A tile missing a cache (swept
+    # before that existed) falls back to building+writing one live, so this
+    # is self-healing: slow the first time only, fast on every run after
+    # (2026-10-07 - this used to re-open SFINCS/mask and redo the full
+    # confusion-matrix computation from raw rasters on every single
+    # invocation, the dominant cost of the "postprocessing analysis" step).
+    t_start = time.time()
+    progress_every = 1
+    n_tiles_loaded = 0
+    n_from_cache = n_built_live = 0
+    for i, tid in enumerate(tile_ids, start=1):
+        tile_dir = base_dir / str(tid)
+        was_cached = cache_path(tile_dir).exists()
+        cache = load_or_build_cache(tile_dir, args.friction_scale_factors, args.max_outer_iterations)
+        if cache is None:
+            if i % progress_every == 0 or i == len(tile_ids):
+                elapsed = time.time() - t_start
+                print(f"  [{i}/{len(tile_ids)}] tile {tid}: no usable SFINCS hmax/mask, skipped "
+                      f"({n_tiles_loaded} usable so far, {elapsed:.0f}s elapsed)", flush=True)
+            continue
+        n_tiles_loaded += 1
+        n_from_cache += was_cached
+        n_built_live += not was_cached
+
+        for fsf in args.friction_scale_factors:
+            point = cache["points"].get(f"{fsf:g}")
+            if point is None:
                 continue
-            matched, only, sfincs_only = counts
+            matched, only, sfincs_only = point["matched_km2"], point["model_only_km2"], point["sfincs_only_km2"]
             per_tile_rows.append({
                 "tile_id": tid, "friction_scale_factor": fsf,
                 "matched_km2": matched, "eikonal_only_km2": only, "sfincs_only_km2": sfincs_only,
-                **metrics_from_counts(matched, only, sfincs_only),
+                "HT": point["HT"], "FAR": point["FAR"], "CSI": point["CSI"], "bias": point["bias"],
             })
-            matched_sum += matched
-            only_sum += only
-            sfincs_only_sum += sfincs_only
-            n_scored += 1
+            s = sums[fsf]
+            s["matched"] += matched
+            s["only"] += only
+            s["sfincs_only"] += sfincs_only
+            s["n_scored"] += 1
 
-        pooled = metrics_from_counts(matched_sum, only_sum, sfincs_only_sum)
+        if i % progress_every == 0 or i == len(tile_ids):
+            elapsed = time.time() - t_start
+            rate = i / elapsed if elapsed > 0 else 0.0
+            eta_s = (len(tile_ids) - i) / rate if rate > 0 else float("nan")
+            print(f"  [{i}/{len(tile_ids)}] tile {tid}: scored from {'cache' if was_cached else 'live rebuild'} "
+                  f"({n_tiles_loaded} usable so far, {elapsed:.0f}s elapsed, ~{eta_s:.0f}s remaining)", flush=True)
+
+    print(f"{n_tiles_loaded}/{len(tile_ids)} tile(s) scored ({n_from_cache} from existing cache, "
+          f"{n_built_live} cache(s) built live just now and written for next time)", flush=True)
+
+    pooled_rows = []
+    for fsf in args.friction_scale_factors:
+        s = sums[fsf]
+        pooled = metrics_from_counts(s["matched"], s["only"], s["sfincs_only"])
         pooled_rows.append({
             "friction_scale_factor": fsf, "fraction_of_current": fsf / FRICTION_SCALE_FACTOR_DEFAULT,
-            "n_tiles_scored": n_scored, "matched_km2": matched_sum,
-            "eikonal_only_km2": only_sum, "sfincs_only_km2": sfincs_only_sum,
+            "n_tiles_scored": s["n_scored"], "matched_km2": s["matched"],
+            "eikonal_only_km2": s["only"], "sfincs_only_km2": s["sfincs_only"],
             **pooled,
         })
         print(f"friction_scale_factor={fsf:g} ({fsf/FRICTION_SCALE_FACTOR_DEFAULT:.1f}x current): "
-              f"n_scored={n_scored}, CSI={pooled['CSI']:.4f}, bias={pooled['bias']:.4f}, "
+              f"n_scored={s['n_scored']}, CSI={pooled['CSI']:.4f}, bias={pooled['bias']:.4f}, "
               f"HT={pooled['HT']:.4f}, FAR={pooled['FAR']:.4f}")
 
     per_tile_df = pd.DataFrame(per_tile_rows)

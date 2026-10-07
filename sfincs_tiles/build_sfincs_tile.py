@@ -15,6 +15,7 @@ MAIN_RES_M_DEFAULT/SUBGRID_NR_PIXELS_DEFAULT's own comment below).
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -35,6 +36,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_boundary_forcing import idw_interpolate_to_grid  # noqa: E402
 from gfm_config import read_root  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
+from tile_status import write_tile_status  # noqa: E402
+
+_COORD_RE = re.compile(r"at (-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)")
+_ANTIMERIDIAN_LON_THRESHOLD = 175.0  # within this many degrees of +-180
 
 
 def _classify_water_level_create_error(e: Exception, tile_id: str) -> RuntimeError | None:
@@ -47,14 +52,32 @@ def _classify_water_level_create_error(e: Exception, tile_id: str) -> RuntimeErr
     EPSG:4326 lon/lat: for a tile near +-180 deg longitude, the buffered
     search geometry can self-intersect there, which GEOS rejects regardless
     of buffer size. Not fixable via buffer tuning.
+
+    2026-10-07 fix: matching on exception TEXT alone ("TopologyException"/
+    "side location conflict") is too broad - GEOS raises the identical
+    message for ANY invalid-geometry self-intersection, antimeridian or
+    not (confirmed directly: tile 1262, at 120-122E/71-73N, got this exact
+    label with an "Original error" coordinate of 66.96E/-57.11S - South
+    Atlantic, nowhere near +-180 - a different, unrelated geometry bug
+    mislabeled as antimeridian-crossing). Now also requires the error's own
+    embedded coordinate (GEOS always prints "at <lon> <lat>") to actually be
+    near +-180 before classifying it this way; anything else falls through
+    to `other_error` instead of a confident but wrong diagnosis.
     """
-    if "TopologyException" in str(e) or "side location conflict" in str(e):
-        return RuntimeError(
-            f"tile {tile_id}: antimeridian-crossing geometry error in hydromt_sfincs's own "
-            f"water_level.create() masking (tile is near +-180 deg longitude) - not fixable via "
-            f"buffer tuning, drop this tile from the batch. Original error: {e}"
-        )
-    return None
+    text = str(e)
+    if "TopologyException" not in text and "side location conflict" not in text:
+        return None
+    match = _COORD_RE.search(text)
+    if match is None:
+        return None  # can't verify location - don't guess
+    lon = float(match.group(1))
+    if abs(lon) < _ANTIMERIDIAN_LON_THRESHOLD:
+        return None  # real geometry error, just not this one
+    return RuntimeError(
+        f"tile {tile_id}: antimeridian-crossing geometry error in hydromt_sfincs's own "
+        f"water_level.create() masking (tile is near +-180 deg longitude) - not fixable via "
+        f"buffer tuning, drop this tile from the batch. Original error: {e}"
+    )
 
 
 def _validate_subgrid_params(resolution_m: float, subgrid_nr_pixels: int) -> None:
@@ -442,11 +465,22 @@ def main() -> None:
 
     root = read_root(Path(args.config))
     truncate_window_hr = None if args.no_truncate else TRUNCATE_WINDOW_HR_DEFAULT
-    build_sfincs_tile(
-        args.tile_id, root, resolution_m=args.resolution_m, truncate_window_hr=truncate_window_hr,
-        subgrid_nr_pixels=args.subgrid_nr_pixels, subgrid_nr_levels=args.subgrid_nr_levels, subgrid_nrmax=args.subgrid_nrmax,
-        base_dir_name=args.base_dir_name, rotated=args.rotated,
-    )
+    try:
+        build_sfincs_tile(
+            args.tile_id, root, resolution_m=args.resolution_m, truncate_window_hr=truncate_window_hr,
+            subgrid_nr_pixels=args.subgrid_nr_pixels, subgrid_nr_levels=args.subgrid_nr_levels, subgrid_nrmax=args.subgrid_nrmax,
+            base_dir_name=args.base_dir_name, rotated=args.rotated,
+        )
+    except Exception as e:
+        text = str(e)
+        if "antimeridian-crossing" in text:
+            status = "antimeridian"
+        elif "0 waterlevel-boundary cells" in text:
+            status = "no_boundary_cells"
+        else:
+            status = "other_error"
+        write_tile_status(root, args.base_dir_name, args.tile_id, status=status, stage="build_sfincs_tile.py", message=text[:500])
+        raise
 
 
 if __name__ == "__main__":

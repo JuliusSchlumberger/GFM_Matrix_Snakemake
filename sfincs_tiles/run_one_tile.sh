@@ -10,6 +10,17 @@
 # Idempotent: checks for the expected output file before redoing work, so
 # re-running after a partial batch failure only redoes what's missing.
 #
+# Completeness/failure tracking: this script no longer keeps its own
+# run_one_tile_failures.txt log (removed 2026-10-07) - that file only ever
+# recorded that a tile failed AT SOME POINT, not whether it's still failing
+# now (idempotent re-runs regularly fix a tile on a later attempt, but
+# nothing ever removed its earlier entry - found to be ~75% stale in
+# practice). Every failure still prints to this job's own stderr (so it's
+# visible in hpc_jobs/logs/*.err as before); the authoritative CURRENT
+# completeness check is report_calibration_tile_status.py, which reads
+# real file presence on disk instead of a historical event log, and is
+# also what generates missing_eikonal_pairs.csv for a targeted resubmission.
+#
 # Usage: run_one_tile.sh <tile_id> [--models bathtub,eikonal,sfincs] [--max-rounds N]
 #
 # --models: comma-separated subset of bathtub,eikonal,sfincs to (re-)run
@@ -69,23 +80,50 @@ TILE_DIR="$DATA_ROOT/$BASE_DIR_NAME/$TILE_ID"
 MODEL_OUTPUTS_DIR="$DATA_ROOT/model_outputs/$TILE_ID/inputs"
 INPUTS_DIR="$TILE_DIR/inputs"
 SFINCS_MODEL_DIR="$TILE_DIR/sfincs_model"
-FAIL_LOG="$DATA_ROOT/$BASE_DIR_NAME/hpc_jobs/logs/run_one_tile_failures.txt"
-
-log_fail() { echo "$TILE_ID  $1" >> "$FAIL_LOG"; }
+TILE_STATUS_PY="$CODE_ROOT/sfincs_tiles/tile_status.py"
 
 echo "=== tile $TILE_ID: starting ==="
+
+# -- 0. fast short-circuit for a tile already known PERMANENTLY unsolvable
+# (no_station / no_boundary_cells / antimeridian - see tile_status.py's own
+# module docstring) - skip immediately, no retry, so neither this
+# invocation nor a later --models "" postprocess-only rerun (the sweep
+# batch's own final pass, which otherwise re-attempts every tile
+# unconditionally) wastes time re-attempting guaranteed-to-fail work.
+STATUS_CHECK=$("$GFM_PY" "$TILE_STATUS_PY" check --root "$DATA_ROOT" --base-dir-name "$BASE_DIR_NAME" --tile-id "$TILE_ID")
+if [ "$?" -eq 0 ]; then
+  echo "tile $TILE_ID: skipping - already known permanently unsolvable ($STATUS_CHECK)"
+  echo "=== tile $TILE_ID: done (skipped) ==="
+  exit 0
+fi
 
 # -- 1. copy eikonal inputs (no env needed - plain files, already built by production preprocessing) --
 mkdir -p "$INPUTS_DIR"
 for f in tile_geometry.gpkg model_bbox.json dem.tif mask.tif friction.tif boundaries_RP100_SLR_0.gpkg; do
   if [ ! -f "$INPUTS_DIR/$f" ]; then
     if [ ! -f "$MODEL_OUTPUTS_DIR/$f" ]; then
-      log_fail "missing $MODEL_OUTPUTS_DIR/$f - skipping tile"
+      echo "tile $TILE_ID: missing $MODEL_OUTPUTS_DIR/$f - skipping tile" >&2
       exit 0
     fi
     cp -f "$MODEL_OUTPUTS_DIR/$f" "$INPUTS_DIR/$f"
   fi
 done
+
+# -- 1.5. fast no-station check (first-time detection, before any status.json
+# exists yet) - build_boundary_forcing.py does this same check internally and
+# self-reports via tile_status.py, but it only runs AFTER
+# regenerate_dem_mask.py/build_elevation.py/build_roughness.py (step 2-3
+# below) - checking here too means a no-station tile skips BEFORE wasting
+# time on any of that, on every attempt until tile_status.json exists to
+# catch it via the fast path above instead. --
+if ! "$GFM_PY" "$TILE_STATUS_PY" check-station --inputs-dir "$INPUTS_DIR" 2>/dev/null; then
+  "$GFM_PY" "$TILE_STATUS_PY" write --root "$DATA_ROOT" --base-dir-name "$BASE_DIR_NAME" --tile-id "$TILE_ID" \
+    --status no_station --stage run_one_tile.sh \
+    --message "boundaries_RP100_SLR_0.gpkg is empty - no COAST-RP station for this tile"
+  echo "tile $TILE_ID: no COAST-RP station (boundaries file empty) - skipping tile" >&2
+  echo "=== tile $TILE_ID: done (skipped) ==="
+  exit 0
+fi
 
 cd "$CODE_ROOT/sfincs_tiles"
 
@@ -95,25 +133,41 @@ cd "$CODE_ROOT/sfincs_tiles"
 # once the SFINCS-input build has started. --
 if [ ! -f "$SFINCS_MODEL_DIR/elevation_combined.tif" ]; then
   "$GFM_PY" regenerate_dem_mask.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
-    || log_fail "regenerate_dem_mask.py failed (non-fatal - falling back to the copied model_outputs/ dem.tif/mask.tif)"
+    || echo "tile $TILE_ID: regenerate_dem_mask.py failed (non-fatal - falling back to the copied model_outputs/ dem.tif/mask.tif)" >&2
 fi
 
-# -- 3. build SFINCS inputs (hydromt-sfincs-dev env) --
+# -- 3. build SFINCS inputs (hydromt-sfincs-dev env). build_boundary_forcing.py/
+# build_sfincs_tile.py self-report a classified status via tile_status.py
+# (no_station/no_boundary_cells/antimeridian/other_error - see their own
+# modules); build_elevation.py/build_roughness.py don't (never seen fail in
+# practice), so this writes a generic other_error here as a fallback -
+# "any other failure is properly logged" without requiring every build_*.py
+# script to import tile_status.py for a category that's never been hit. --
 if [ ! -f "$SFINCS_MODEL_DIR/elevation_combined.tif" ]; then
   "$HYDROMT_SFINCS_DEV_PY" build_elevation.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
-    || { log_fail "build_elevation.py failed"; exit 0; }
+    || {
+      echo "tile $TILE_ID: build_elevation.py failed" >&2
+      "$GFM_PY" "$TILE_STATUS_PY" write --root "$DATA_ROOT" --base-dir-name "$BASE_DIR_NAME" --tile-id "$TILE_ID" \
+        --status other_error --stage build_elevation.py --message "see this batch's own .err log for the traceback"
+      exit 0
+    }
 fi
 if [ ! -f "$SFINCS_MODEL_DIR/manning_n.tif" ]; then
   "$HYDROMT_SFINCS_DEV_PY" build_roughness.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
-    || { log_fail "build_roughness.py failed"; exit 0; }
+    || {
+      echo "tile $TILE_ID: build_roughness.py failed" >&2
+      "$GFM_PY" "$TILE_STATUS_PY" write --root "$DATA_ROOT" --base-dir-name "$BASE_DIR_NAME" --tile-id "$TILE_ID" \
+        --status other_error --stage build_roughness.py --message "see this batch's own .err log for the traceback"
+      exit 0
+    }
 fi
 if [ ! -f "$SFINCS_MODEL_DIR/matched_boundary_points.gpkg" ]; then
   "$HYDROMT_SFINCS_DEV_PY" build_boundary_forcing.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
-    || { log_fail "build_boundary_forcing.py failed"; exit 0; }
+    || { echo "tile $TILE_ID: build_boundary_forcing.py failed" >&2; exit 0; }
 fi
 if [ ! -f "$SFINCS_MODEL_DIR/sfincs.inp" ]; then
   "$HYDROMT_SFINCS_DEV_PY" build_sfincs_tile.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
-    || { log_fail "build_sfincs_tile.py failed"; exit 0; }
+    || { echo "tile $TILE_ID: build_sfincs_tile.py failed" >&2; exit 0; }
 fi
 
 # -- 4. bathtub + eikonal (gfm env - needs src/flood_model.py's older-hydromt import chain) --
@@ -125,7 +179,7 @@ if [ "${#PY_MODELS[@]}" -gt 0 ]; then
   [ -n "$MAX_ROUNDS" ] && MAX_ROUNDS_ARGS=(--max-rounds "$MAX_ROUNDS")
   "$GFM_PY" run_eikonal_on_sfincs_subgrid.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
     --models "${PY_MODELS[@]}" "${MAX_ROUNDS_ARGS[@]}" \
-    || log_fail "run_eikonal_on_sfincs_subgrid.py failed (non-fatal - postprocess_tile_summary.py degrades gracefully on a missing method)"
+    || echo "tile $TILE_ID: run_eikonal_on_sfincs_subgrid.py failed (non-fatal - postprocess_tile_summary.py degrades gracefully on a missing method)" >&2
 else
   echo "tile $TILE_ID: bathtub/eikonal not requested (--models=$MODELS), skipping"
 fi
@@ -145,7 +199,7 @@ elif [ ! -f "$SFINCS_MODEL_DIR/sfincs_map.nc" ]; then
     attempt=$((attempt + 1))
   done
   if [ ! -f "$LOCAL_DIR/sfincs.inp" ]; then
-    log_fail "failed to stage input to node-local scratch after 5 attempts"
+    echo "tile $TILE_ID: failed to stage input to node-local scratch after 5 attempts" >&2
     rm -rf "$LOCAL_DIR"
     exit 0
   fi
@@ -156,7 +210,7 @@ elif [ ! -f "$SFINCS_MODEL_DIR/sfincs_map.nc" ]; then
   run_rc=${PIPESTATUS[0]}
 
   if [ "$run_rc" -ne 0 ] || [ ! -f "$LOCAL_DIR/sfincs_map.nc" ]; then
-    log_fail "sfincs run failed (exit $run_rc) or produced no sfincs_map.nc"
+    echo "tile $TILE_ID: sfincs run failed (exit $run_rc) or produced no sfincs_map.nc" >&2
     cp -f "$LOCAL_DIR/sfincs_hpc_run.log" "$SFINCS_MODEL_DIR/" 2>/dev/null
     rm -rf "$LOCAL_DIR"
     exit 0
@@ -175,11 +229,20 @@ fi
 # missing model's stats.
 if [ -f "$SFINCS_MODEL_DIR/sfincs_map.nc" ]; then
   "$HYDROMT_SFINCS_DEV_PY" run_sfincs_tile.py --tile-id "$TILE_ID" --config "$CONFIG" --skip-run --base-dir-name "$BASE_DIR_NAME" \
-    || log_fail "run_sfincs_tile.py postprocessing failed"
+    || echo "tile $TILE_ID: run_sfincs_tile.py postprocessing failed" >&2
 else
   echo "tile $TILE_ID: no sfincs_map.nc yet - skipping run_sfincs_tile.py postprocessing (hmax.tif/flood_extent.tif)"
 fi
 "$HYDROMT_SFINCS_DEV_PY" postprocess_tile_summary.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
-  || log_fail "postprocess_tile_summary.py failed"
+  || echo "tile $TILE_ID: postprocess_tile_summary.py failed" >&2
+
+# Mark success LAST, only if sfincs_map.nc actually exists - overwrites any
+# earlier failure status from a previous attempt now that this one made it
+# all the way through (status is current-state, not history - see
+# tile_status.py's own module docstring).
+if [ -f "$SFINCS_MODEL_DIR/sfincs_map.nc" ]; then
+  "$GFM_PY" "$TILE_STATUS_PY" write --root "$DATA_ROOT" --base-dir-name "$BASE_DIR_NAME" --tile-id "$TILE_ID" \
+    --status ok --stage run_one_tile.sh --message "sfincs_map.nc present"
+fi
 
 echo "=== tile $TILE_ID: done ==="
