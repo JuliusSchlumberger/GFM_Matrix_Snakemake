@@ -29,8 +29,6 @@ tile_generation:
   preferred_ceiling_cells: 30000000
   hard_ceiling_cells: 100000000
   coastal_buffer_km: 20
-  write_debug_gpkg: true
-  debug_gpkg_dir: '{processed_inputs_dir}/mask/tile_generation_debug'
 tile_grid:
   path: '{processed_inputs_dir}/mask/deltas_global_tiles.gpkg'
 tile_split:

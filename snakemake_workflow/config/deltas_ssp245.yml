@@ -37,5 +37,4 @@ adaptation:
 # --fuse since this tile set spans multiple hop_distance waves).
 hpc:
   n_nodes: 8
-  large_tile_pixel_threshold: 999999999999  # effectively infinite - forces every tile onto hpc.sbatch (1vcpu), no sbatch_large batches at all
   jobs_dir: "{root}/deltas_floodmaps/ssp245/model_outputs/hpc_jobs"

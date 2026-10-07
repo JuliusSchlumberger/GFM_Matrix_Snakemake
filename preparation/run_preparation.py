@@ -51,9 +51,9 @@ directly (fix_ocean_mask_with_osm_land.py is the one exception, with its own
 RETIRED (2026-08): connectivity_map / src/connectivity_forcing.py (the
 straight-line-IDW along-water boundary forcing feature it built an index
 for) - never validated beyond a regional subset, superseded by the
-frozen-geometry chunk-generation pipeline's own hop-distance/neighbour-
-forcing direction (src/tile_chunking.py's compute_run_order) as the
-intended way to give hinterland chunks non-ocean boundary forcing. A
+frozen-geometry tile-generation pipeline's own hop-distance/neighbour-
+forcing direction (now src/connectivity_tiling.py::compute_hop_distances)
+as the intended way to give hinterland chunks non-ocean boundary forcing. A
 chunk that can't find a real COAST-RP station now gets an explicit empty
 placeholder (see extract_boundaries.py) rather than being dropped from
 tile_grid.path.

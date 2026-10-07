@@ -45,6 +45,14 @@ from numba import njit
 # (1, 2, 3, 4).
 _ORTHANT_ORDER = (1, 4, 3, 2)
 
+# Unseeded/unreached default for `t` - see solve_eikonal_dense's own comment.
+UNREACHED_T = 99.0
+
+# Vertex block edge length for `_block_sweep`'s skip-unchanged-blocks
+# bookkeeping. Any value gives bit-identical results; 64 measured well on
+# real calibration tiles (2026-10: 1.2-5.8x over plain dense sweeps).
+SWEEP_BLOCK_SIZE = 64
+
 
 @njit(cache=True)
 def _update(t_a: float, t_b: float, v: float, neg_two: float, eight: float, four: float) -> float:
@@ -82,46 +90,181 @@ def _dense_sweep(
     """One dense directional sweep - the 4 concrete cases from the module
     docstring's table, operating directly on `t`'s (m+1, n+1) array via
     index arithmetic (no neighbor-index tables at all).
+
+    Loop order is row-outer/column-inner (contiguous for numpy's C-order
+    arrays), not Julia's column-outer/row-inner (contiguous for Julia's own
+    column-major arrays) - ~2.5-3x faster on real tiles. This is bit-for-bit
+    identical to Julia's order, not an approximation: within one orthant
+    sweep, vertex (i, j)'s update reads only its two upwind neighbours, and
+    both loop orders visit both of those before (i, j) itself, so every
+    update sees exactly the same inputs (locked in by
+    `tests/eikonal_kernel_validation`).
+
+    Early-out: `_update`'s result is always >= min(t_a, t_b) (the quadratic
+    branch requires > max(t_a, t_b); the fallback is min(t_a, t_b) + v with
+    v >= 0), so if min(t_a, t_b) >= t[i, j] it can never improve t[i, j] -
+    skipping it is exact, and avoids the sqrt for every blocked, unreached
+    or already-settled vertex.
     """
     m, n = friction.shape
     max_change = 0.0
     if orthant == 1:
-        for j in range(1, n + 1):
-            for i in range(1, m + 1):
-                cand = _update(t[i - 1, j], t[i, j - 1], friction[i - 1, j - 1], neg_two, eight, four)
-                if cand < t[i, j]:
-                    d = t[i, j] - cand
+        for i in range(1, m + 1):
+            for j in range(1, n + 1):
+                t_a = t[i - 1, j]
+                t_b = t[i, j - 1]
+                t_c = t[i, j]
+                if min(t_a, t_b) >= t_c:
+                    continue
+                cand = _update(t_a, t_b, friction[i - 1, j - 1], neg_two, eight, four)
+                if cand < t_c:
+                    d = t_c - cand
                     if d > max_change:
                         max_change = d
                     t[i, j] = cand
     elif orthant == 2:
-        for j in range(1, n + 1):
-            for i in range(m - 1, -1, -1):
-                cand = _update(t[i + 1, j], t[i, j - 1], friction[i, j - 1], neg_two, eight, four)
-                if cand < t[i, j]:
-                    d = t[i, j] - cand
+        for i in range(m - 1, -1, -1):
+            for j in range(1, n + 1):
+                t_a = t[i + 1, j]
+                t_b = t[i, j - 1]
+                t_c = t[i, j]
+                if min(t_a, t_b) >= t_c:
+                    continue
+                cand = _update(t_a, t_b, friction[i, j - 1], neg_two, eight, four)
+                if cand < t_c:
+                    d = t_c - cand
                     if d > max_change:
                         max_change = d
                     t[i, j] = cand
     elif orthant == 3:
-        for j in range(n - 1, -1, -1):
-            for i in range(m - 1, -1, -1):
-                cand = _update(t[i + 1, j], t[i, j + 1], friction[i, j], neg_two, eight, four)
-                if cand < t[i, j]:
-                    d = t[i, j] - cand
+        for i in range(m - 1, -1, -1):
+            for j in range(n - 1, -1, -1):
+                t_a = t[i + 1, j]
+                t_b = t[i, j + 1]
+                t_c = t[i, j]
+                if min(t_a, t_b) >= t_c:
+                    continue
+                cand = _update(t_a, t_b, friction[i, j], neg_two, eight, four)
+                if cand < t_c:
+                    d = t_c - cand
                     if d > max_change:
                         max_change = d
                     t[i, j] = cand
     else:
-        for j in range(n - 1, -1, -1):
-            for i in range(1, m + 1):
-                cand = _update(t[i - 1, j], t[i, j + 1], friction[i - 1, j], neg_two, eight, four)
-                if cand < t[i, j]:
-                    d = t[i, j] - cand
+        for i in range(1, m + 1):
+            for j in range(n - 1, -1, -1):
+                t_a = t[i - 1, j]
+                t_b = t[i, j + 1]
+                t_c = t[i, j]
+                if min(t_a, t_b) >= t_c:
+                    continue
+                cand = _update(t_a, t_b, friction[i - 1, j], neg_two, eight, four)
+                if cand < t_c:
+                    d = t_c - cand
                     if d > max_change:
                         max_change = d
                     t[i, j] = cand
     return max_change
+
+
+@njit(cache=True)
+def _block_sweep(
+    t: np.ndarray, friction: np.ndarray, orthant: int,
+    neg_two: float, eight: float, four: float,
+    block: int, changed_at: np.ndarray, swept_at: np.ndarray, sweep_idx: int,
+) -> tuple[float, int]:
+    """`_dense_sweep`, `block x block` vertex block by block, skipping blocks
+    that provably cannot change - bit-for-bit identical to `_dense_sweep`
+    (same `t`, same returned max_change; locked in by
+    `tests/eikonal_kernel_validation`). This is what `solve_eikonal_dense`
+    runs; `_dense_sweep` stays as the plain reference kernel.
+
+    Bookkeeping (caller-owned, persistent across one solve's sweeps):
+    `changed_at[b]` is the index of the last sweep in which any vertex of
+    block `b` changed; `swept_at[o, b]` the index of the last sweep in
+    orthant `o` (0-based) that actually processed block `b` (-1 = never).
+
+    Order: blocks in the orthant's own row/column direction, cells within a
+    block likewise - still a valid topological order of the sweep's
+    dependency graph (each vertex reads only its two upwind neighbours, see
+    `_dense_sweep`'s loop-order note), so every update sees the same inputs.
+
+    Skip rule: one orthant sweep is idempotent (re-running it with unchanged
+    inputs changes nothing - every vertex is already <= the update from its
+    upwind neighbours' final values). A block's inputs in orthant `o` are its
+    own vertices plus the halo row/column in its upwind vertical and
+    horizontal neighbour blocks (friction is constant within a solve). So if
+    none of those three blocks changed since this block was last swept in
+    orthant `o`, re-sweeping it is a no-op and is skipped. Changes made
+    during that same earlier sweep are already accounted for (upwind blocks
+    are processed first), hence `<=`. Later rounds typically only move a
+    narrow front through winding channels, so most blocks get skipped.
+
+    Returns `(max_change, n_blocks_swept)`.
+    """
+    m, n = friction.shape
+    if orthant == 1:
+        di, dj = -1, -1
+    elif orthant == 2:
+        di, dj = 1, -1
+    elif orthant == 3:
+        di, dj = 1, 1
+    else:
+        di, dj = -1, 1
+    fi = -1 if di == -1 else 0
+    fj = -1 if dj == -1 else 0
+    # Vertex row/col ranges per the module docstring's table.
+    row_min, row_end = (1, m + 1) if di == -1 else (0, m)
+    col_min, col_end = (1, n + 1) if dj == -1 else (0, n)
+    o = orthant - 1
+    nbr, nbc = changed_at.shape
+    max_change = 0.0
+    n_swept = 0
+    for bs in range(nbr):
+        bi = bs if di == -1 else nbr - 1 - bs
+        r_lo = max(bi * block, row_min)
+        r_hi = min((bi + 1) * block, row_end)
+        if r_lo >= r_hi:
+            continue
+        for cs in range(nbc):
+            bj = cs if dj == -1 else nbc - 1 - cs
+            c_lo = max(bj * block, col_min)
+            c_hi = min((bj + 1) * block, col_end)
+            if c_lo >= c_hi:
+                continue
+            last = swept_at[o, bi, bj]
+            if last >= 0:
+                newest = changed_at[bi, bj]
+                ui = bi + di
+                if 0 <= ui < nbr and changed_at[ui, bj] > newest:
+                    newest = changed_at[ui, bj]
+                uj = bj + dj
+                if 0 <= uj < nbc and changed_at[bi, uj] > newest:
+                    newest = changed_at[bi, uj]
+                if newest <= last:
+                    continue
+            swept_at[o, bi, bj] = sweep_idx
+            n_swept += 1
+            block_changed = False
+            for rs in range(r_hi - r_lo):
+                i = r_lo + rs if di == -1 else r_hi - 1 - rs
+                for cs2 in range(c_hi - c_lo):
+                    j = c_lo + cs2 if dj == -1 else c_hi - 1 - cs2
+                    t_a = t[i + di, j]
+                    t_b = t[i, j + dj]
+                    t_c = t[i, j]
+                    if min(t_a, t_b) >= t_c:
+                        continue
+                    cand = _update(t_a, t_b, friction[i + fi, j + fj], neg_two, eight, four)
+                    if cand < t_c:
+                        d = t_c - cand
+                        if d > max_change:
+                            max_change = d
+                        t[i, j] = cand
+                        block_changed = True
+            if block_changed:
+                changed_at[bi, bj] = sweep_idx
+    return max_change, n_swept
 
 
 def solve_eikonal_dense(
@@ -138,7 +281,9 @@ def solve_eikonal_dense(
     """Solve the eikonal equation on the full dense grid via Fast Sweeping.
 
     Every cell participates, exactly like Eikonal.jl's own domain (no
-    candidate/coastline/ocean restriction at all).
+    candidate/coastline/ocean restriction at all). Sweeps run block-wise
+    (`_block_sweep`, `SWEEP_BLOCK_SIZE`), skipping blocks that provably
+    cannot change - bit-for-bit identical to plain `_dense_sweep` sweeps.
 
     `verbose`: print each round's `max_change` and elapsed time - diagnostic
     only, for watching convergence rate without waiting for the whole run
@@ -146,8 +291,9 @@ def solve_eikonal_dense(
 
     `return_diagnostics`: if true, also return a dict with `n_rounds_used`,
     `max_change` (the last round's; `None` under `sweep_budget`, which
-    tracks no such thing) and `converged` (`max_change <= epsilon`; `None`
-    under `sweep_budget`) - used by `flood_model.py`'s obstacle-coupling
+    tracks no such thing), `converged` (`max_change <= epsilon`; `None`
+    under `sweep_budget`) and `frac_blocks_swept` (share of block visits
+    not skipped) - used by `flood_model.py`'s obstacle-coupling
     outer loop to log per-tile convergence behaviour.
 
     Args:
@@ -189,18 +335,40 @@ def solve_eikonal_dense(
     # candidate from an actual seed always overwrites the sentinel; a cell
     # no seed's influence ever reaches keeps it, correctly reading as
     # "never flooded" rather than "flooded at exactly sea level."
-    t = np.full((m + 1, n + 1), 99.0, dtype=dtype)
+    t = np.full((m + 1, n + 1), UNREACHED_T, dtype=dtype)
     t[seed_rows, seed_cols] = seed_values
 
     neg_two = dtype.type(-2.0)
     eight = dtype.type(8.0)
     four = dtype.type(4.0)
 
+    # _block_sweep's per-block bookkeeping - see its docstring.
+    n_block_rows = -(-(m + 1) // SWEEP_BLOCK_SIZE)
+    n_block_cols = -(-(n + 1) // SWEEP_BLOCK_SIZE)
+    changed_at = np.full((n_block_rows, n_block_cols), -1, dtype=np.int64)
+    swept_at = np.full((4, n_block_rows, n_block_cols), -1, dtype=np.int64)
+    sweep_count = 0
+    blocks_swept = 0
+
+    def sweep(orthant: int) -> float:
+        nonlocal sweep_count, blocks_swept
+        sweep_count += 1
+        change, n_swept = _block_sweep(
+            t, friction, orthant, neg_two, eight, four,
+            SWEEP_BLOCK_SIZE, changed_at, swept_at, sweep_count,
+        )
+        blocks_swept += n_swept
+        return change
+
+    def frac_blocks_swept() -> float:
+        return blocks_swept / max(sweep_count * changed_at.size, 1)
+
     if sweep_budget is not None:
         for i in range(sweep_budget):
-            _dense_sweep(t, friction, _ORTHANT_ORDER[i % 4], neg_two, eight, four)
+            sweep(_ORTHANT_ORDER[i % 4])
         if return_diagnostics:
-            return t, {"n_rounds_used": None, "max_change": None, "converged": None}
+            return t, {"n_rounds_used": None, "max_change": None, "converged": None,
+                       "frac_blocks_swept": frac_blocks_swept()}
         return t
 
     if verbose:
@@ -212,7 +380,7 @@ def solve_eikonal_dense(
     for round_idx in range(max_rounds):
         max_change = 0.0
         for orthant in _ORTHANT_ORDER:
-            max_change = max(max_change, _dense_sweep(t, friction, orthant, neg_two, eight, four))
+            max_change = max(max_change, sweep(orthant))
         n_rounds_used = round_idx + 1
         if verbose:
             print(f"    round {round_idx + 1}: max_change={max_change:.6g}  "
@@ -221,5 +389,6 @@ def solve_eikonal_dense(
         if max_change <= epsilon:
             break
     if return_diagnostics:
-        return t, {"n_rounds_used": n_rounds_used, "max_change": max_change, "converged": max_change <= epsilon}
+        return t, {"n_rounds_used": n_rounds_used, "max_change": max_change, "converged": max_change <= epsilon,
+                   "frac_blocks_swept": frac_blocks_swept()}
     return t

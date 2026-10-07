@@ -72,11 +72,12 @@ def select_stations_for_tile(
             selecting candidate stations (plain lon/lat expansion in
             EPSG:4326, not latitude-corrected). Should be
             `boundary_conditions.station_search_buffer_deg`. Needed because a
-            chunk's own bbox (src/tile_chunking.py's fixed-tile-chunking
-            pipeline) is shaved down to its floodable-plus-coastal-buffer
-            footprint, which would otherwise shrink the candidate pool
-            available to Aqueduct's k-nearest-neighbour IDW interpolation
-            (simulation.flooding.knn).
+            domain's own bbox (src/connectivity_tiling.py) is NOT uniformly
+            padded - only hop=0 domains get an explicit coastal buffer
+            (Phase 6), every other domain's bbox is exactly its real
+            connectivity-derived footprint - which would otherwise shrink
+            the candidate pool available to Aqueduct's k-nearest-neighbour
+            IDW interpolation (simulation.flooding.knn).
         min_search_size_deg: Minimum width/height (degrees) of the search
             area, applied per-dimension and centred on the TILE's own
             centre (not the buffered box's centre - the same point unless

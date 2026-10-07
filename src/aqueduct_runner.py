@@ -65,13 +65,26 @@ def run_aqueduct_python(
     `simulation.flooding` in config.yml (`max_rounds`/`waterlevel_epsilon_m`
     top-level, the rest under `.obstacle_coupling`).
 
-    `friction_scale_factor` (default 1.0, no-op): a runtime multiplier
-    applied to the already-decoded friction raster, for a calibration
-    sensitivity sweep (2026-09) - deliberately NOT baked into
-    `compute_friction.py`'s own preprocessing output, so the expensive,
-    land-use-derived friction raster is computed once and reused unscaled
-    across every sweep combination that varies a DIFFERENT parameter; only
-    combinations that actually sweep friction pay for this cheap multiply.
+    `friction_scale_factor` (default 1.0 here, a true no-op for this
+    function - production's real value, 9.0, lives in config.yml's
+    `simulation.flooding.friction_scale_factor` and is passed in explicitly
+    by callers, never read from config by this function itself): a runtime
+    multiplier applied to the already-decoded friction raster, deliberately
+    NOT baked into `compute_friction.py`'s own preprocessing output, so the
+    expensive, land-use-derived friction raster is computed once and reused
+    across every sweep combination that varies a DIFFERENT parameter.
+
+    NOT a free empirical tuning knob on an otherwise-correct baseline - see
+    config.yml's own comment on `simulation.flooding.friction_scale_factor`
+    and docs/methods_02_flood_depth.md section 2.1: most of production's
+    9.0 (specifically, a factor of 30) is a REQUIRED correction for
+    `src/eikonal.py`'s discretisation having no distance term at all (it
+    treats friction, a per-METRE rate, as a cost-per-GRID-STEP, so it must
+    be pre-multiplied by DeltaDTM's ~30m grid step just to be dimensionally
+    correct) - only the remaining ×0.3 is real calibration, from comparing
+    against SFINCS directly. `friction_scale_factor=1.0` (this function's
+    own default) is therefore NOT a meaningful "unscaled" physical baseline,
+    just a no-op for callers that don't care about friction at all.
 
     Returns:
         The `diagnostics` dict from `flood_depth_dense` - see its docstring.
@@ -264,26 +277,44 @@ def log_run_timing(
     elapsed_s: float,
     obstacle_coupling_diagnostics: dict | None = None,
 ) -> None:
-    """Record one successful flood-solve invocation's wall-clock time.
+    """Record one (tile_id, return_period, waterlevel_name) invocation's
+    wall-clock time and outcome to a JSON file - no stdout/terminal logging
+    at all, by design (2026-10-08 - this is the file-based record every real
+    HPC dispatch job writes, in place of printing anything).
 
     Written one file per (tile_id, return_period, waterlevel_name) - same
     reasoning as `log_skipped_tile`: avoids concurrent-write corruption
-    between parallel Snakemake jobs. Only called for genuine solve runs (not
-    the no-stations/OOM skip branches in run_aqueduct.py), since those don't
-    reflect solver run time at all.
+    between parallel jobs. Called from EVERY outcome branch in
+    run_aqueduct_cli.py (genuine solve, skip - no stations/no upstream
+    flooding, OOM) - NOT from the idempotent "already done" early return,
+    since that one's own trivial elapsed time would silently overwrite the
+    REAL record an earlier invocation already wrote for the same (tile, rp,
+    slr). `run_aqueduct.py` (the Snakemake-local path) only ever calls this
+    for genuine solves - its own skip/OOM branches instead rely solely on
+    `log_skipped_tile`'s marker file, unchanged.
 
     Args:
         log_dir: Directory to write the marker file to. Created if missing.
         tile_id: The tile's `tile_id`.
         return_period: The run's `return_period` wildcard value.
         waterlevel_name: The run's `waterlevel_name` wildcard value.
-        elapsed_s: Wall-clock seconds spent inside `run_aqueduct_python`,
-            excluding this script's own setup/skip-check overhead.
-        obstacle_coupling_diagnostics: the dict returned by
-            `run_aqueduct_python`/`flood_depth_dense`. Merged directly into
-            the record so tiles that hit `max_outer_iterations` or
-            `max_rounds` without converging are visible in production, not
-            just in ad-hoc test scripts.
+        elapsed_s: Wall-clock seconds for this invocation. For a genuine
+            solve, this is inside `run_aqueduct_python` specifically
+            (excluding this script's own setup/skip-check overhead) when
+            called from `run_aqueduct.py`; `run_aqueduct_cli.py` instead
+            times its own ENTIRE invocation from argument parsing onward,
+            since that end-to-end wall-clock is what HPC scheduling/ETA
+            estimates actually care about.
+        obstacle_coupling_diagnostics: for a genuine solve, the dict
+            `run_aqueduct_python`/`flood_depth_dense` returned (merged
+            directly into the record so tiles that hit `max_outer_iterations`
+            or `max_rounds` without converging are visible in production,
+            not just in ad-hoc test scripts) - `run_aqueduct_cli.py` adds its
+            own `"outcome"` key to this same dict ("solved"). For a skip/OOM
+            call from `run_aqueduct_cli.py`, instead a small dict of its own,
+            e.g. `{"outcome": "skip_no_inundation", "skip_reason": ...}` or
+            `{"outcome": "oom"}` - no real solver diagnostics exist for
+            those cases.
     """
     log_dir = Path(log_dir)
     retry_transient_io(log_dir.mkdir, parents=True, exist_ok=True)

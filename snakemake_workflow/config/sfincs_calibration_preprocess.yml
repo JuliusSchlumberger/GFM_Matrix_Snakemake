@@ -32,5 +32,3 @@ hpc:
   jobs_dir: "{root}/sfincs_calibration/hpc_jobs"
   sbatch:
     time: "0-02:00:00"
-  sbatch_large:
-    time: "0-02:00:00"

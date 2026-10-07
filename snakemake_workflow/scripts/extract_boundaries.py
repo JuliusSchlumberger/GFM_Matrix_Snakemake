@@ -57,9 +57,14 @@ selected = filter_stations_by_ocean_connectivity(
 # entirely by the now-retired connectivity_map step. That step is gone, so
 # this is now an explicit, intentional EMPTY placeholder instead - `selected`
 # already has the right schema/crs even with zero rows, so save_boundary_points
-# writes it as-is. Revisit once neighbour-derived boundary forcing (see
-# src/tile_chunking.py's compute_run_order / the "NOT IMPLEMENTED" note in
-# build_tile_manifest.py's Stage 13) exists to actually fill this in.
+# writes it as-is. Revisit if a tile's OWN COAST-RP station search (this
+# script) should also pull from a lower-hop neighbour's already-SIMULATED
+# result, the way inland tiles already get their actual flood-boundary
+# forcing from their lower-hop neighbour's output at run time (see
+# src/connectivity_tiling.py::compute_hop_distances and this project's own
+# methods doc, section 3) - that propagation already exists for simulation
+# itself; this placeholder is specifically about the upstream
+# station-selection step, which doesn't consult it.
 if selected.empty:
     print(f"  no COAST-RP station found for this tile/scenario - writing an empty "  # noqa: T201
           f"placeholder boundaries file (tile_id={snakemake.wildcards.tile_id})")  # noqa: F821

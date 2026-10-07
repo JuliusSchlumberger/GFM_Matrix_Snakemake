@@ -43,7 +43,7 @@ from flood_agreement import (
 from tile_sweep_cache import load_or_build_cache
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from map_style import LAND_COLOR, WATER_COLOR as OCEAN_COLOR, draw_caption_box  # noqa: E402
+from map_style import LAND_COLOR  # noqa: E402
 
 DATA_ROOT = Path(r"P:\11212688-004-global-floodmaps\modelling")
 
@@ -385,54 +385,33 @@ def _agreement_df(df: pd.DataFrame) -> pd.DataFrame:
     return plot_df[np.isfinite(plot_df["csi"]) & fresh & plot_df["lon"].notna()]
 
 
-MIN_FLOODED_KM2_FOR_COLOR = 1.0  # below this union area, a tile's CSI is
-# too noise-dominated to color - shown as a grey marker instead.
-
-
 def plot_tile_agreement_map(df: pd.DataFrame, out_path: Path) -> None:
-    """Global map of per-tile EA-bathtub-SFINCS extent agreement (CSI).
-    Tiles with at least MIN_FLOODED_KM2_FOR_COLOR km2 of union area
-    (matched + eikonal-only + SFINCS-only, CSI's own denominator) get the
-    CSI color scale; every other fresh, geolocated tile is plotted as a
-    flat grey marker.
-    """
+    """Global map of per-tile EA-bathtub-SFINCS extent agreement (CSI) -
+    every fresh, geolocated tile with a defined CSI (i.e. some real union
+    area - CSI is NaN only when matched+eikonal-only+SFINCS-only=0, no
+    flooding in either model at all) is plotted, colored by CSI. No
+    small-union-area grey split and no caption box (2026-10-07, user
+    request - was distinguishing by union area before)."""
     fresh = ~df["eikonal_stale"].fillna(False)
     csi = _csi(df["eikonal_matched_km2"], df["eikonal_only_km2"], df["eikonal_sfincs_only_km2"])
-    union_km2 = df["eikonal_matched_km2"] + df["eikonal_only_km2"] + df["eikonal_sfincs_only_km2"]
-    plot_df = df.assign(csi=csi, union_km2=union_km2)
-    plot_df = plot_df[fresh & plot_df["lon"].notna()]
-
-    has_real_flooding = plot_df["union_km2"].fillna(0) >= MIN_FLOODED_KM2_FOR_COLOR
-    colored_df = plot_df[has_real_flooding & np.isfinite(plot_df["csi"])]
-    grey_df = plot_df[~(has_real_flooding & np.isfinite(plot_df["csi"]))]
+    plot_df = df.assign(csi=csi)
+    plot_df = plot_df[fresh & plot_df["lon"].notna() & np.isfinite(plot_df["csi"])]
 
     proj = ccrs.EqualEarth()
-    fig = plt.figure(figsize=(14, 7.5), facecolor=OCEAN_COLOR)
+    fig = plt.figure(figsize=(14, 7.5), facecolor="white")
     ax = plt.axes(projection=proj)
     ax.set_global()
-    ax.set_facecolor(OCEAN_COLOR)
     ax.add_feature(cfeature.LAND, facecolor=LAND_COLOR, edgecolor=COAST_COLOR, linewidth=0.4, zorder=1)
-    ax.scatter(
-        grey_df["lon"], grey_df["lat"], transform=ccrs.PlateCarree(),
-        c="#999990", s=18, alpha=0.7, linewidths=0.3, edgecolors="white", zorder=2,
-        label=f"< {MIN_FLOODED_KM2_FOR_COLOR:g} km2 union area (n={len(grey_df)})",
-    )
     sc = ax.scatter(
-        colored_df["lon"], colored_df["lat"], transform=ccrs.PlateCarree(),
-        c=colored_df["csi"], cmap="RdYlGn", vmin=0, vmax=1, s=22, alpha=0.9,
+        plot_df["lon"], plot_df["lat"], transform=ccrs.PlateCarree(),
+        c=plot_df["csi"], cmap="RdYlGn", vmin=0, vmax=1, s=22, alpha=0.9,
         linewidths=0.3, edgecolors="white", zorder=3,
     )
     ax.spines["geo"].set_edgecolor(COAST_COLOR)
     ax.spines["geo"].set_linewidth(0.6)
     cbar = fig.colorbar(sc, ax=ax, fraction=0.025, pad=0.02)
     cbar.set_label(f"{DISPLAY_LABEL['eikonal']}-SFINCS extent agreement (CSI)")
-    ax.legend(loc="lower left", fontsize=8, framealpha=0.9)
-    draw_caption_box(ax, [
-        f"n={len(colored_df)} colored by CSI",
-        f"n={len(grey_df)} below {MIN_FLOODED_KM2_FOR_COLOR:g} km2 shown grey",
-        "current-settings tiles only",
-    ])
-    fig.savefig(out_path, dpi=220, bbox_inches="tight", facecolor=OCEAN_COLOR)
+    fig.savefig(out_path, dpi=220, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     print(f"Wrote {out_path}")
 

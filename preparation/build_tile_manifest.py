@@ -1,8 +1,8 @@
 """Build the connectivity-first domain manifest -> tile_grid.path (2026-10).
 
 Replaces the old 13-stage greedy-covering pipeline (build_chunks/reduce_overlap/
-filter_and_shave_chunks/.../compute_run_order - retired, see src/tile_chunking.py's
-own RETIRED note) with src/connectivity_tiling.py's connectivity-first method - see
+filter_and_shave_chunks/.../compute_run_order - fully retired and removed, 2026-10)
+with src/connectivity_tiling.py's connectivity-first method - see
 that module's docstring for the phases and docs/methods_01_tile_processing_and_
 waterlevels.md section 3 for the full conceptual design, the "why this is correct"
 argument, and real global validation numbers.
@@ -30,24 +30,23 @@ component_id/approx_cells_M as harmless extra diagnostic columns - nothing
 downstream is column-position-sensitive). `tile_id` is assigned by hop_distance-
 ascending run order, same spirit as the old pipeline's `compute_run_order`.
 
-Debug output (tile_generation.write_debug_gpkg): one GeoPackage per stage,
-written to tile_generation.debug_gpkg_dir, lets every intermediate shape be
-inspected in QGIS, not just the final tile_grid.path output. Also writes a
-50-bin histogram of each final domain's native (1 arcsecond) pixel count -
-Aqueduct's OOM risk is dominated by tile pixel count (see src/tile_split.py's
-own docstring).
+Intermediate output: one GeoPackage per stage (00_raw_tile_index.gpkg through
+04_tile_grid_final.gpkg) is always written straight into tile_grid.path's own
+directory - not a "debug" extra, lets every intermediate shape be inspected in
+QGIS, not just the final tile_grid.path output. Also writes a 50-bin histogram
+of each final domain's native (1 arcsecond) pixel count - Aqueduct's OOM risk
+is dominated by tile pixel count (see src/tile_split.py's own docstring).
 
-Checkpointed (independent of write_debug_gpkg - this is the step's resilience
-mechanism, not just a QA convenience): Phase 3 is by far the most expensive stage
-(a real global run: ~1.2h out of ~5.3h total, dominated by per-component raster
-reads), so every component's result is appended to tile_generation_phase3_
-checkpoint.jsonl (under debug_gpkg_dir) immediately after that component
-finishes, including an explicit marker line even for a component that produces
-zero domains (a pure-ocean/ice singleton tile) - without that marker, a
-zero-domain component would look indistinguishable from "not yet processed" on
-resume and get silently, harmlessly redone. Re-running `run()` after any
-interruption automatically resumes from whatever's already checkpointed; delete
-the checkpoint file to force a clean re-run.
+Checkpointed: Phase 3 is by far the most expensive stage (a real global run:
+~1.2h out of ~5.3h total, dominated by per-component raster reads), so every
+component's result is appended to tile_generation_phase3_checkpoint.jsonl
+(in the same directory) immediately after that component finishes, including
+an explicit marker line even for a component that produces zero domains (a
+pure-ocean/ice singleton tile) - without that marker, a zero-domain component
+would look indistinguishable from "not yet processed" on resume and get
+silently, harmlessly redone. Re-running `run()` after any interruption
+automatically resumes from whatever's already checkpointed; delete the
+checkpoint file to force a clean re-run.
 
 Not a standalone entry point - exposes `run(config)`, called from
 run_preparation.py (`python run_preparation.py tile_generation`).
@@ -81,6 +80,8 @@ from connectivity_tiling import (  # noqa: E402
     split_component_to_budget,
 )
 from tiles import _scan_mask_dir  # noqa: E402
+
+from plot_domain_maps import plot_dropped_unreachable_map, plot_final_domains_map  # noqa: E402
 
 
 def _write_gpkg(gdf: gpd.GeoDataFrame, path: Path) -> None:
@@ -165,12 +166,10 @@ def _write_size_histogram(final: gpd.GeoDataFrame, path: Path) -> None:
 def run(config: dict) -> None:
     tg_cfg = config["tile_generation"]
     output_path = Path(config["tile_grid"]["path"])
-    write_debug = tg_cfg.get("write_debug_gpkg", False)
-    debug_dir = Path(tg_cfg["debug_gpkg_dir"])
+    intermediate_dir = output_path.parent
 
-    def _debug(gdf: gpd.GeoDataFrame, filename: str) -> None:
-        if write_debug:
-            _write_gpkg(gdf, debug_dir / filename)
+    def _write_intermediate(gdf: gpd.GeoDataFrame, filename: str) -> None:
+        _write_gpkg(gdf, intermediate_dir / filename)
 
     repo_root = Path(__file__).resolve().parent.parent
     catalog_path = repo_root / config["paths"]["hydromt_data_catalog"]
@@ -200,7 +199,7 @@ def run(config: dict) -> None:
     print("Phase 0: load_raw_tile_index", flush=True)
     sub = load_raw_tile_index(mask_dir)
     print(f"  {len(sub)} raw DeltaDTM tiles", flush=True)
-    _debug(sub, "00_raw_tile_index.gpkg")
+    _write_intermediate(sub, "00_raw_tile_index.gpkg")
 
     # ---- Phase 1: connectivity graph ----------------------------------------
     print("\nPhase 1: build_connectivity_graph", flush=True)
@@ -214,8 +213,8 @@ def run(config: dict) -> None:
     print(f"Phase 2: {len(sizes)} connected component(s)", flush=True)
 
     # ---- Phase 3: budget-aware splitting, per component, checkpointed ------
-    debug_dir.mkdir(parents=True, exist_ok=True)  # checkpoint needs this dir regardless of write_debug_gpkg
-    checkpoint_path = debug_dir / "tile_generation_phase3_checkpoint.jsonl"
+    intermediate_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint_path = intermediate_dir / "tile_generation_phase3_checkpoint.jsonl"
     all_domains, done_ids = _load_checkpoint(checkpoint_path)
     if done_ids:
         print(f"Resuming Phase 3 - {len(done_ids)} component(s) already checkpointed in {checkpoint_path}", flush=True)
@@ -242,22 +241,22 @@ def run(config: dict) -> None:
 
     print(f"\nPhase 3 complete: {len(all_domains)} domain(s) across {n_total} component(s), "
           f"t={time.time() - t_phase3:.0f}s", flush=True)
-    _debug(_domains_to_gdf(all_domains), "01_domains_presplit.gpkg")
+    _write_intermediate(_domains_to_gdf(all_domains), "01_domains_presplit.gpkg")
 
     # ---- Phase 4: post-hoc merge of undersized domains ----------------------
     merged = merge_small_domains_tiered(
         all_domains, cfg.merge_trigger_cells, cfg.preferred_ceiling_cells, cfg.hard_ceiling_cells,
     )
     print(f"Phase 4 merge: {len(all_domains)} -> {len(merged)} domain(s)", flush=True)
-    _debug(_domains_to_gdf(merged), "02_domains_merged.gpkg")
+    _write_intermediate(_domains_to_gdf(merged), "02_domains_merged.gpkg")
 
     # ---- Phase 5: hop-distance BFS, drop unreachable ------------------------
     hop, unreachable = compute_hop_distances(merged, mask_index, dem_index, cfg)
     n_hop0 = sum(1 for h in hop if h == 0)
     print(f"Phase 5 hop-distance: hop=0 {n_hop0}/{len(merged)}, unreachable (dropped) {len(unreachable)}", flush=True)
     unreachable_set = set(unreachable)
-    if write_debug and unreachable:
-        _debug(_domains_to_gdf([merged[i] for i in unreachable]), "03_dropped_unreachable.gpkg")
+    if unreachable:
+        _write_intermediate(_domains_to_gdf([merged[i] for i in unreachable]), "03_dropped_unreachable.gpkg")
     final_domains = [d for i, d in enumerate(merged) if i not in unreachable_set]
     final_hop = [h for i, h in enumerate(hop) if i not in unreachable_set]
 
@@ -273,13 +272,20 @@ def run(config: dict) -> None:
     final_gdf = assign_tile_id(padded_domains, final_hop)
     retry_transient_io(final_gdf.to_file, output_path, driver="GPKG")
     print(f"\nWrote {len(final_gdf)} domains to {output_path}", flush=True)
-    _debug(final_gdf, "04_tile_grid_final.gpkg")
+    _write_intermediate(final_gdf, "04_tile_grid_final.gpkg")
 
-    if write_debug:
-        histogram_path = debug_dir / "tile_generation_final_size_histogram.png"
-        _write_size_histogram(final_gdf, histogram_path)
-        print(f"Wrote domain-size histogram -> {histogram_path}")
-        print(f"Debug GeoPackages written to {debug_dir}")
+    histogram_path = intermediate_dir / "tile_generation_final_size_histogram.png"
+    _write_size_histogram(final_gdf, histogram_path)
+    print(f"Wrote domain-size histogram -> {histogram_path}")
+    print(f"Intermediate per-phase GeoPackages written to {intermediate_dir}")
+
+    # ---- Methods-figure maps (2026-10-07): folded in here so they're always
+    # in sync with whatever this run just wrote - no extra disk read, uses the
+    # already-in-memory final_gdf/dropped-unreachable domains directly. ----
+    plot_final_domains_map(final_gdf, intermediate_dir)
+    if unreachable:
+        dropped_gdf = _domains_to_gdf([merged[i] for i in unreachable])
+        plot_dropped_unreachable_map(dropped_gdf, intermediate_dir)
 
 
 if __name__ == "__main__":

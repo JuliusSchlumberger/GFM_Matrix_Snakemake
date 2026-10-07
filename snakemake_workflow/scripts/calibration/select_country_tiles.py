@@ -1,7 +1,10 @@
-"""Build hop_distance-closed tile subsets for the ESP/FRA/NOR HPC calibration
-sweep (docs/calibration_sweep_plan.md) - two groups, `esp_fra` (simulated at
-RP100) and `nor` (RP250), each written as its own GeoPackage under
-{processed_inputs_dir}/mask/calibration/.
+"""Build hop_distance-closed tile subsets for country-scoped calibration/
+validation studies - originally the ESP/FRA/NOR HPC calibration sweep
+(docs/calibration_sweep_plan.md: `esp_fra` at RP100, `nor` at RP250), reused
+as-is for other country groups (`gbr_wales_scotland`, `new_brunswick`,
+2026-10-08 - RP100 against their own real benchmark maps, no sweep, just
+production's own current defaults). Each group is written as its own
+GeoPackage under {processed_inputs_dir}/mask/calibration/.
 
 For each group: finds every coastal benchmark catalog entry for its member
 countries, then unions tile IDs intersecting each NAMED region SEPARATELY -
@@ -52,6 +55,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 GROUPS = {
     "esp_fra": ["ESP", "FRA"],
     "nor": ["NOR"],
+    # 2026-10-08: GBR currently only has Wales/Scotland coastal benchmark entries
+    # (no England/N.Ireland entry exists yet), so this group selects exactly those
+    # two, nothing more - re-derives the same tile set the earlier, ad hoc
+    # gbr_wales_scotland_friction9_tiles.gpkg used, now via this reusable mechanism.
+    "gbr_wales_scotland": ["GBR"],
+    "new_brunswick": ["CAN"],
 }
 
 
@@ -130,7 +139,14 @@ def main() -> None:
         help="output directory for the subset GeoPackages "
              "(default: {processed_inputs_dir}/mask/calibration/)",
     )
+    parser.add_argument(
+        "--groups", nargs="+", default=None, choices=list(GROUPS),
+        help=f"which GROUPS entries to (re-)build (default: all of them - "
+             f"{', '.join(GROUPS)}). Pass this to add/refresh one group without "
+             f"touching another, already-complete group's own output file.",
+    )
     args = parser.parse_args()
+    groups = {k: GROUPS[k] for k in args.groups} if args.groups else GROUPS
 
     cfg = load_config(args.config)
     val_cfg = cfg["validation"]
@@ -146,7 +162,7 @@ def main() -> None:
     out_dir = Path(args.out_dir) if args.out_dir else Path(cfg["paths"]["processed_inputs_dir"]) / "mask" / "calibration"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    for group_name, country_isos in GROUPS.items():
+    for group_name, country_isos in groups.items():
         print(f"=== {group_name} ({'+'.join(country_isos)}) ===")
         core_ids = _core_tile_ids(tile_grid, bench_catalog, country_isos)
         closure_ids = _hop_distance_closure(tile_grid, core_ids)

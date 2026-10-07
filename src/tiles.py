@@ -34,7 +34,7 @@ def _open_mask_tile(path: Path, **open_kwargs):
     more common case.
 
     `open_kwargs` (e.g. `OVERVIEW_LEVEL="NONE"`, see `_mosaic_nearest_coarse`
-    in tile_chunking.py) is forwarded to `rasterio.open` unchanged - plain
+    in connectivity_tiling.py) is forwarded to `rasterio.open` unchanged - plain
     callers that don't pass any keep today's exact behaviour.
     """
     last_err = None

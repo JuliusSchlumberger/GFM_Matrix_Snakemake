@@ -41,8 +41,7 @@ by two entry points:
 Reuses hpc.n_nodes/hpc.sbatch rather than a separate config block - same
 reasoning as generate_hpc_preprocess_job.py's own choice (one place for
 partition/mem choices). These jobs are I/O-bound chunk reads plus small
-per-country arrays, not the memory-heavy tile solves hpc.sbatch_large exists
-for, so hpc.sbatch alone is enough - no "large" size class here.
+per-country arrays, not memory-heavy, so hpc.sbatch alone is enough.
 
 Uses the same local-view/Linux-view dual path resolution as
 generate_hpc_preprocess_job.py (config_hpc.yml, if present) for the paths

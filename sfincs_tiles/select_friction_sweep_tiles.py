@@ -1,9 +1,12 @@
 """Selects the tile set for the friction_scale_factor sensitivity sweep
 (see docs/methods_04a_SFINCSvalidation.md's friction-sweep section): every
 validation_sfincs_v5 tile with fresh eikonal data, EXCLUDING tiles where
-eikonal (at the current production friction_scale_factor=30.0) already
-over-predicts flood extent by more than `--max-eikonal-only-km2` relative
-to SFINCS (eikonal_only_km2, i.e. false-alarm area).
+eikonal (at friction_scale_factor=30.0, the full grid-resolution-corrected
+baseline this sweep started from, and production's own value at the time -
+since recalibrated down to 9.0 from this sweep's own best-CSI finding, see
+config.yml's own comment on simulation.flooding.friction_scale_factor)
+already over-predicts flood extent by more than `--max-eikonal-only-km2`
+relative to SFINCS (eikonal_only_km2, i.e. false-alarm area).
 
 Rationale (2026-10-02): a large eikonal-only area usually means SFINCS's
 own domain boundary sits too far offshore to let water reach the area at

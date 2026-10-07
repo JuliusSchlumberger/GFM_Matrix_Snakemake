@@ -141,14 +141,30 @@ def write_cache(tile_dir: Path, cache: dict) -> Path:
 def load_or_build_cache(
     tile_dir: Path, friction_scale_factors: list[float], max_outer_iterations: int, write_if_missing: bool = True,
 ) -> dict | None:
-    """Fast path: read the existing cache. Fallback (a tile swept before
-    this cache existed): build it live and write it, so the NEXT read is
-    fast too - self-healing rather than requiring every tile be rebuilt
-    through the new pipeline before it can be scored at all."""
+    """Fast path: read the existing cache, but ONLY if it already covers
+    every fsf point being asked for now. Rebuilds (and rewrites) otherwise -
+    both for a tile swept before this cache existed at all, AND for a tile
+    whose cache was written EARLY, before its own sweep had finished (found
+    2026-10-08: run_friction_sweep_batch.py's own end-of-batch cache build
+    ran per BATCH, and batches for the same tile's remaining fsf points
+    landed later via resume_calibration.py's targeted resubmission - the
+    cache from the first batch never got invalidated, so most tiles sat
+    with a stale 1-point cache, typically just friction_scale_factor=9
+    specifically since that was the point resubmitted first/separately as
+    the newly-chosen production default - while every later fsf point's
+    real .tif was silently ignored by every subsequent read of this
+    "fast path". `points` keys are the ONLY thing checked (not `bathtub` or
+    `max_outer_iterations`) - a tile missing just the bathtub raster still
+    has every fsf point correctly cached and must not be needlessly rebuilt
+    on every call.
+    """
     p = cache_path(tile_dir)
+    requested = {f"{fsf:g}" for fsf in friction_scale_factors}
     if p.exists():
         try:
-            return json.loads(retry_transient_io(p.read_text, encoding="utf-8"))
+            cached = json.loads(retry_transient_io(p.read_text, encoding="utf-8"))
+            if requested <= cached.get("points", {}).keys():
+                return cached
         except (json.JSONDecodeError, OSError):
             pass  # fall through and rebuild
     cache = build_tile_sweep_cache(tile_dir, friction_scale_factors, max_outer_iterations)

@@ -128,18 +128,14 @@ tile_generation:
   # an IMPLICIT buffer - see the pad function's docstring) - same order of
   # magnitude as overlap_target_km above.
 
-  write_debug_gpkg: true # write one GeoPackage per pipeline phase (numbered
-  # to match build_tile_manifest.py's own docstring phase list, e.g.
-  # 01_domains_presplit.gpkg, 03_dropped_unreachable.gpkg) to debug_gpkg_dir
-  # below - lets every drop and every intermediate shape change be inspected
-  # in QGIS, not just the final tile_grid.path output. Cheap relative to the
-  # raster I/O-heavy phases themselves, so left on by default; set false to
-  # skip it for a routine run. NOTE: unlike the old pipeline, this does NOT
-  # gate checkpointing/resume - that always works via
-  # tile_generation_phase3_checkpoint.jsonl under debug_gpkg_dir regardless
-  # of this flag.
-  debug_gpkg_dir: "{processed_inputs_dir}/mask/tile_generation_debug" # directory for
-  # the per-phase GeoPackages above, and the Phase 3 resume checkpoint.
+  # Intermediate per-phase GeoPackages (00_raw_tile_index.gpkg through
+  # 04_tile_grid_final.gpkg, numbered to match build_tile_manifest.py's own
+  # docstring phase list) plus the Phase 3 resume checkpoint
+  # (tile_generation_phase3_checkpoint.jsonl) are always written straight
+  # into tile_grid.path's own directory (processed_inputs/mask/, no
+  # subdirectory) - cheap relative to the raster I/O-heavy phases
+  # themselves, and the checkpoint is load-bearing (Phase 3's resilience
+  # mechanism), not optional, so there is no flag to turn either off.
 
 # ── TILE GRID (final manifest location - read by run_preparation.py's
 # tile_generation step AND everything downstream: Snakefile, extract_tile_geometry) ──
@@ -147,7 +143,7 @@ tile_grid:
   path: "{processed_inputs_dir}/mask/domain_tiles_global.gpkg" # Note this is both target of the preparation pipeline and
   # starting point for simulation run. "global" matches reality - the underlying DeltaDTM mask/DEM data (and every
   # tile-generation algorithm there's been) have never been region-restricted. A COMPUTED tile-generation output
-  # (like its sibling tile_generation.debug_gpkg_dir), not raw synced source data, so it belongs under
+  # (like the intermediate per-phase GeoPackages written alongside it), not raw synced source data, so it belongs under
   # processed_inputs like every other derived preparation artifact. Migrated 2026-10 to the connectivity-first
   # method's output (src/connectivity_tiling.py) - the pre-migration file was kept as
   # domain_tiles_global_pre_connectivity_migration.gpkg alongside it.
@@ -283,14 +279,28 @@ simulation: # Used by: preprocessing rules
     # Runtime multiplier applied to the (already land-use-derived, already
     # decoded) friction raster - not baked into compute_friction.py's own
     # preprocessing output, so the expensive land-use-derived raster is
-    # computed once and reused unscaled by every sweep combination that
-    # varies a different parameter. The raw friction value (Manning's_n/100)
-    # is used directly as cost-per-grid-step, with no distance term anywhere
-    # in the solver; unscaled, this produces water-level attenuation ~30x
-    # weaker than the ~0.1-1.2 m/km range reported in Vafeidis et al. (2019)
-    # for comparable land cover - x30 brings it into that range (DeltaDTM's
-    # own native ~30m grid step is the origin of the factor).
-    friction_scale_factor: 30.0
+    # computed once and reused by every sweep combination that varies a
+    # different parameter.
+    #
+    # NOT a free empirical tuning knob - most of this number is a REQUIRED
+    # unit correction, not calibration. friction (Manning's_n/100) is a
+    # per-METRE resistance rate, but src/eikonal.py's discretisation has no
+    # distance term at all - it uses whatever value it's given directly as
+    # the cost of ONE grid step, whatever that step's real size is. DeltaDTM's
+    # native grid step is ~30m, so the solver needs friction*30 to correctly
+    # represent "per metre" in the first place; friction_scale_factor=1 is
+    # NOT a meaningful "unscaled" baseline, it's just wrong by a factor of 30
+    # with no physical interpretation. See docs/methods_02_flood_depth.md
+    # section 2.1 for the full derivation (including how this was confused
+    # for pure literature/empirical tuning before, and corrected 2026-10-07).
+    #
+    # Production's actual value (9.0) = 30 (the mandatory grid-resolution
+    # correction above) x 0.3 (a further calibration factor, from comparing
+    # the eikonal solver directly against real SFINCS runs - the friction-
+    # sweep's own best-CSI finding: CSI=0.80, bias=0.99, validation_sfincs_v5,
+    # 2026-10-03, piloted in gbr_wales_scotland_friction9.yml before being
+    # promoted to this production default, 2026-10-07).
+    friction_scale_factor: 9.0
 
     # Caps the eikonal solve's round-based mode (4 individual directional
     # sweeps per round, each round checked for early-exit convergence - see
@@ -376,41 +386,34 @@ simulation: # Used by: preprocessing rules
 #
 # Within each wave (simulation) / on its own (preprocessing), tiles are
 # ALSO split by estimated size (2026-08): Hydrax's regular partitions all
-# scale RAM at a fixed 8GB/vCPU (1vcpu=8GB, 4vcpu=32GB, 16vcpu=128GB, ...),
-# so a tile whose estimated peak memory (aqueduct_mem_estimate, above)
-# would leave little/no headroom on `sbatch`'s partition is routed to
-# `sbatch_large` (a bigger partition) instead - large_tile_pixel_threshold
-# controls the cutoff. `sbatch`/`sbatch_large` are shared by BOTH
-# simulation batching (hpc_dispatch.smk) AND preprocessing batching
-# (generate_hpc_preprocess_job.py) - there is no separate preprocessing-only
-# config; a preprocessing batch's `cpus_per_task` (passed to `snakemake
-# --cores`) determines its actual Snakemake-level parallelism, not just its
-# SLURM allocation size, so a `cpus_per_task: 1` partition means preprocessing
-# on that batch's tiles runs fully serial, not just one simulation tile at a time.
+# scale RAM at a fixed 8GB/vCPU (1vcpu=8GB, 4vcpu=32GB, 16vcpu=128GB, ...).
+# `sbatch` is shared by BOTH simulation batching (hpc_dispatch.smk) AND
+# preprocessing batching (generate_hpc_preprocess_job.py) - there is no
+# separate preprocessing-only config; a preprocessing batch's `cpus_per_task`
+# (passed to `snakemake --cores`) determines its actual Snakemake-level
+# parallelism, not just its SLURM allocation size, so a `cpus_per_task: 1`
+# partition means preprocessing on that batch's tiles runs fully serial, not
+# just one simulation tile at a time.
+#
+# NOTE (2026-10-08): this used to also route tiles above a pixel-count
+# threshold to a separate, bigger-RAM `sbatch_large` partition - a real need
+# under the OLD (pre-2026-10) greedy-covering tiling pipeline, which could
+# produce much larger domains. The connectivity-first pipeline's own
+# hard_ceiling_cells (tile_generation.hard_ceiling_cells, 100,000,000) caps
+# every tile's size directly, and a live check against the real production
+# grid (domain_tiles_global.gpkg, 4504 tiles) confirmed only one tile exceeds
+# aqueduct_mem_estimate's 1vcpu-node ceiling (~87M px) at all (95.08M px,
+# tile 2569, hop_distance=0 - safely absorbed by hpc.wave_tiers' shared
+# 168GB/24-way pool for that wave, not an isolated 1vcpu allocation) - so the
+# large/small split, `sbatch_large`, and every "size_class" branch that read
+# it (hpc_dispatch.smk, generate_hpc_simulation_jobs.py,
+# generate_hpc_preprocess_job.py, generate_aqueduct_jobs.py,
+# check_simulation_progress.py's --by-size) were removed as dead weight from
+# a retired pipeline generation, not a currently-needed safeguard.
 hpc:
   n_nodes: 40                                        # 2026-10-06, user direction (down from 35) for a preprocess-only submission - a SHARED budget across
-  # both size classes per wave, split proportionally by tile count (see hpc_dispatch.smk's own split_batches_proportionally
-  # call) - NOT "35 nodes per size class" despite this line's own stale wording below, see that file's own comments for the
-  # real (fixed) semantics: the "PER WAVE, PER SIZE CLASS" phrasing here describes the OLD, buggy independent-budget
-  # behaviour a 2026-08 fix replaced
+  # every batch per wave, split evenly by tile count (see hpc_dispatch.smk's own batch-splitting logic)
   jobs_dir: "{root}/model_outputs/hpc_jobs"           # generated sbatch scripts, resolved_config.yml, submit_waves.sh, logs/
-  # Tiles at/above this pixel count go to sbatch_large instead of sbatch,
-  # for BOTH preprocessing and simulation batching. Default 70,000,000 is
-  # chosen against aqueduct_mem_estimate (base_mb=1000, bytes_per_pixel=80):
-  # 1000 + 80*70e6/1e6 = 6600MB, leaving ~1.4GB headroom below a 1vcpu
-  # node's 8GB before even accounting for the estimate being deliberately
-  # generous. Pixel count itself is estimated from tile bbox area (see
-  # hpc_dispatch.smk / generate_hpc_preprocess_job.py), not the real DEM,
-  # so this is necessarily approximate - the margin below 8GB is deliberate.
-  large_tile_pixel_threshold: 70000000
-  # 2026-09: large tiles were regularly not finishing within sbatch_large's
-  # time limit. Splits each wave's "large" class across this many times more
-  # batches than split_batches_proportionally's own shared-budget result
-  # would give it (e.g. 2 = half as many tiles processed serially per node) -
-  # applied ON TOP of, not carved out of, "small"'s share, so a wave with
-  # large tiles may use more than n_nodes nodes at once. 1 = no change. See
-  # hpc_dispatch.smk / generate_hpc_simulation_jobs.py.
-  large_tile_batch_multiplier: 2
   sbatch:
     # Deltares Hydrax partitions: 1vcpu/4vcpu/16vcpu/24vcpu/60vcpu (regular),
     # 44vcpu, gpu, test (30 min cap, quick smoke-test before a real run).
@@ -428,37 +431,65 @@ hpc:
     # with "Memory specification can not be satisfied". Stay safely under
     # the real ceiling, not the marketing number.
     mem: "7G"
-    # For simulation batches: irrelevant beyond the SLURM allocation size
-    # (each node runs one tile at a time regardless). For preprocessing
-    # batches (generate_hpc_preprocess_job.py): this IS the real
-    # `snakemake --cores N` parallelism for that batch - 1 means fully
-    # serial preprocessing on "small" tiles, which is most of the domain.
-    # Bump this up if preprocessing throughput matters more than minimal
-    # per-node footprint.
+    # For simulation batches: this IS the real concurrency each node runs -
+    # run_simulation_batch.py (2026-10-08) runs up to this many tiles' solves
+    # at once via a thread pool (each eikonal solve is single-threaded numba,
+    # so N concurrent solves on an N-cpu node is a genuine use of the
+    # allocation, not oversubscription - see that script's own docstring).
+    # For preprocessing batches (generate_hpc_preprocess_job.py): this IS
+    # also the real `snakemake --cores N` parallelism for that batch - 1
+    # means fully serial preprocessing. Bump this up if throughput matters
+    # more than minimal per-node footprint.
     cpus_per_task: 1
     # Hydrax uses Environment Modules (Lmod) + conda, not a single module
     # for this custom env - e.g.:
     #   module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm
     env_activate_cmd: 'module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm'
-  # Same shape as sbatch: above, for tiles at/above large_tile_pixel_threshold
-  # - a bigger partition (e.g. 16vcpu=128GB) so the largest tiles in the
-  # domain don't OOM on sbatch:'s (e.g. 1vcpu=8GB) node RAM, for BOTH
-  # preprocessing and simulation. Expect very few batches here - most tiles
-  # stay on sbatch:.
-  sbatch_large:
-    # 2026-10-06, user direction: dropped from 4vcpu/30G/4 cpus to match
-    # sbatch: above - for THIS preprocess-only submission, not needed for
-    # the memory margin large-tile simulation batches still rely on (see
-    # large_tile_pixel_threshold's own comment: tiles at/above that
-    # threshold were sized to leave only ~1.4GB headroom on a 1vcpu node's
-    # ~7.95GB usable RAM) - revert to partition=4vcpu/mem=30G/cpus_per_task=4
-    # before submitting a simulation run, or the largest tiles risk OOM.
-    partition: 1vcpu
-    account: ""
-    time: "2-00:00:00"             # 2026-09: raised from 1-00:00:00 - large tiles were regularly not finishing in 24h
-    mem: "7G"                             # matches sbatch:'s own 1vcpu-node ceiling - see note above
-    cpus_per_task: 1
-    env_activate_cmd: 'module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm'
+
+  # Per-hop_distance-wave node-count/partition tiers (2026-10-08), for a
+  # throughput-driven dispatch of the real global simulation run - overrides
+  # the uniform hpc.n_nodes/hpc.sbatch choice above. Read only by the
+  # standalone generate_hpc_simulation_jobs.py CLI, not by hpc_dispatch.smk's
+  # own Snakemake-rule entry point, which still uses the uniform
+  # n_nodes/sbatch behaviour unchanged.
+  #
+  # Matched by each wave's own hop_distance against every tier's `hops`
+  # list, in order - the FIRST match wins. A tier's own `n_nodes: null`
+  # means uncapped - one 1vcpu node per tile in that wave (never more nodes
+  # than tiles, same as every tile-capped wave already behaves once node
+  # count exceeds tile count). `hops: null` is a catch-all, matching any
+  # hop_distance no earlier tier already claimed - MUST be last.
+  #
+  # This specific node split (6x24vcpu for hop=0's 3761 tiles, 2x24vcpu for
+  # hop=1/2's 462+139, everything else one-1vcpu-per-tile) was sized against
+  # a real measured ~3.6min/solve average (48-tile GBR/New Brunswick
+  # country-validation run, 2026-10-07). `time:` budgets below were
+  # re-sized 2026-10-08 for the ~6x solver speedup from src/eikonal.py's
+  # block-sweep + loop-order + early-out optimizations (same measured
+  # baseline / 6 =~ 0.6min/solve) - ask for the current wall-clock estimate
+  # before reusing either the node split or these time budgets for a
+  # differently-shaped tile grid or a further solver change.
+  wave_tiers:
+    - hops: [0]
+      n_nodes: 6
+      partition: "24vcpu"
+      cpus_per_task: 24
+      mem: "168G"           # 7G/vcpu, same headroom ratio as sbatch: above (7/8 of the nominal 8G/vcpu)
+      time: "0-16:00:00"    # user direction, 2026-10-08 (~12h worst-case estimate (627 tiles/batch x 45 scenarios / 24-way / ~0.6min) + margin)
+    - hops: [1, 2]
+      n_nodes: 2
+      partition: "24vcpu"
+      cpus_per_task: 24
+      mem: "168G"
+      time: "0-04:00:00"    # user direction, 2026-10-08 - close to the ~4.4h worst-case estimate (hop=1's own
+      # batches, the larger of the two) with little margin; re-check if hop=1's own batch sizing changes
+    - hops: null
+      n_nodes: null         # uncapped - one 1vcpu node per tile (hop_distance 3..10 today)
+      partition: "1vcpu"
+      cpus_per_task: 1
+      mem: "7G"
+      time: "0-01:00:00"    # user direction, 2026-10-08 (~27min worst-case estimate (one tile's own 45
+      # scenarios, serial, ~0.6min each) + margin)
 
 
 # ── POSTPROCESSING ────────────────────────────────────────────────────────────

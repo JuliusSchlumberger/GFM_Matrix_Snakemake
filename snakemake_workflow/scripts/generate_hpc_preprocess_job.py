@@ -9,13 +9,10 @@ Preprocessing has no wave/hop_distance ordering constraint (every tile's
 DEM/mask/friction/boundaries are independent of every other tile) - unlike
 simulation, where hop>=1 tiles must wait for their neighbours. So instead of
 one monolithic `snakemake generate_aqueduct_jobs --cores N` run on a single
-node, this splits tiles by estimated size FIRST (same bbox-area pixel-count
-proxy and hpc.large_tile_pixel_threshold hpc_dispatch.smk uses for
-simulation batching - tiles at/above it use hpc.sbatch_large, the rest use
-hpc.sbatch), then splits each size class's target files evenly across up to
-hpc.n_nodes batches, writes one `snakemake --cores N <explicit target file
-list>` sbatch script per batch, and submits all of them with NO dependency
-between them (fully parallel) - then submits ONE more job with
+node, this splits every tile's target files evenly across up to hpc.n_nodes
+batches, writes one `snakemake --cores N <explicit target file list>`
+sbatch script per batch, and submits all of them with NO dependency between
+them (fully parallel) - then submits ONE more job with
 `--dependency=afterany:<every batch job id>` that runs generate_aqueduct_jobs
 (fast, since every preprocessing output already exists by then) and chains
 into submit_waves.sh. This is the exact same afterany-join-multiple-jobs
@@ -83,9 +80,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from config_utils import (  # noqa: E402
-    atomic_write, load_config, merged_slr_scenarios, retry_transient_io, split_batches_proportionally,
-)
+from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
 
 
 def _account_line(sbatch_cfg: dict) -> list[str]:
@@ -271,7 +266,6 @@ def main() -> None:
     linux_preprocessing_inputs_dir = linux_config["simulation"].get("preprocessing_inputs_dir") or linux_model_outputs
     hpc_cfg = linux_config["hpc"]
     n_nodes = hpc_cfg["n_nodes"]
-    large_pixel_threshold = hpc_cfg["large_tile_pixel_threshold"]
 
     retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
@@ -344,72 +338,29 @@ def main() -> None:
         f.write("\n".join(linux_shared_targets) + "\n")
     linux_shared_targets_file = f"{linux_jobs_dir}/shared_targets.txt"
 
-    # Same bbox-area pixel-count proxy hpc_dispatch.smk uses for simulation
-    # batching (area_deg2 * 3600**2 - DeltaDTM's ~1 arcsec native
-    # resolution) - computable from tile geometry alone, no DEM read
-    # needed, so it works before any preprocessing has run.
-    bounds = tile_gdf.geometry.bounds
-    tiles_by_class: dict[str, list[str]] = {"small": [], "large": []}
-    for tile_id, minx, miny, maxx, maxy in zip(
-        tile_gdf["tile_id"], bounds["minx"], bounds["miny"], bounds["maxx"], bounds["maxy"],
-    ):
-        approx_pixels = (maxx - minx) * (maxy - miny) * 3600.0 * 3600.0
-        size_class = "large" if approx_pixels >= large_pixel_threshold else "small"
-        tiles_by_class[size_class].append(str(int(tile_id)))
-    for size_class in tiles_by_class:
-        tiles_by_class[size_class].sort(key=int)
+    all_tiles = sorted(tile_gdf["tile_id"].astype(int).astype(str).tolist(), key=int)
 
     # hpc.single_preprocess_job (default False, production unaffected):
-    # collapse EVERY tile (both size classes) into ONE job on hpc.sbatch
-    # (1vcpu, --cores 1, no parallelization at all) instead of splitting
-    # across n_nodes batches. Appropriate at calibration scale, NOT
-    # production scale - observed live 2026-09: real preprocessing compute
-    # time for a ~78-tile calibration domain is minutes, while SLURM
-    # queue wait time for each separately-submitted job was, at times,
-    # HOURS (`(Priority)` pending, even after halving batch count via
-    # n_nodes) - submitting ONE job gets ONE ticket in the scheduler's
-    # queue instead of several, trading away cross-node parallelism that
-    # buys nothing at this scale anyway since queue wait dominates.
-    # RISK, accepted knowingly (user decision): "large" tiles normally run
-    # on hpc.sbatch_large specifically because they need more memory than
-    # hpc.sbatch's ~7-8GB ceiling (Hydrax's fixed 8GB/vCPU on 1vcpu nodes)
-    # - forcing them onto a 1vcpu job here could OOM-kill preprocessing for
-    # those tiles specifically. Only ever set for the ESP/FRA/NOR
-    # calibration groups (small closures, unverified whether their
-    # "large"-classed tiles actually need the full 30G) - never for
-    # production without re-deriving that memory math for the full grid.
+    # collapse EVERY tile into ONE job on hpc.sbatch (1vcpu, --cores 1, no
+    # parallelization at all) instead of splitting across n_nodes batches.
+    # Appropriate at calibration scale, NOT production scale - observed live
+    # 2026-09: real preprocessing compute time for a ~78-tile calibration
+    # domain is minutes, while SLURM queue wait time for each separately-
+    # submitted job was, at times, HOURS (`(Priority)` pending, even after
+    # halving batch count via n_nodes) - submitting ONE job gets ONE ticket
+    # in the scheduler's queue instead of several, trading away cross-node
+    # parallelism that buys nothing at this scale anyway since queue wait
+    # dominates.
     if hpc_cfg.get("single_preprocess_job", False):
-        present_classes = ["combined"]
-        class_n_nodes = {"combined": 1}
-        all_tiles = sorted((tid for tiles in tiles_by_class.values() for tid in tiles), key=int)
-        batches = [("combined", "000", all_tiles)]
+        n_batches = 1
+        batches = [("000", all_tiles)]
     else:
-        # Node budget split PROPORTIONALLY to each class's share of tiles
-        # (e.g. ~15% large / ~85% small on the real production grid), rather
-        # than each class independently getting up to n_nodes - the latter
-        # would let preprocessing use up to 2x n_nodes total (n_nodes for
-        # small + n_nodes for large) even though "large" is a small minority
-        # of the actual work. Shared with hpc_dispatch.smk's simulation-wave
-        # batching (split_batches_proportionally, src/config_utils.py) - that
-        # rule used to duplicate this exact logic with its own independent
-        # min(n_nodes, len(class_tiles)) per class, which was the actual bug
-        # (found live 2026-08-10: a wave with both size classes present could
-        # claim up to 2x n_nodes at once) this shared helper now prevents from
-        # recurring in either place.
-        present_classes = [c for c in ("small", "large") if tiles_by_class[c]]
-        class_n_nodes = split_batches_proportionally(
-            {c: len(tiles_by_class[c]) for c in present_classes}, n_nodes,
-        )
-
-        batches = []  # [(size_class, batch_id, [tile_id, ...]), ...]
-        for size_class, class_tiles in tiles_by_class.items():
-            if not class_tiles:
-                continue
-            n_batches = class_n_nodes[size_class]
-            k, m = divmod(len(class_tiles), n_batches)
-            for i in range(n_batches):
-                batch_tiles = class_tiles[i * k + min(i, m): (i + 1) * k + min(i + 1, m)]
-                batches.append((size_class, f"{i:03d}", batch_tiles))
+        n_batches = min(n_nodes, len(all_tiles))
+        k, m = divmod(len(all_tiles), n_batches)
+        batches = [  # [(batch_id, [tile_id, ...]), ...]
+            (f"{i:03d}", all_tiles[i * k + min(i, m): (i + 1) * k + min(i + 1, m)])
+            for i in range(n_batches)
+        ]
 
     if args.fuse:
         submit_script_name = "submit_fused_batches.sh"
@@ -419,9 +370,9 @@ def main() -> None:
         submit_script_name = "submit_preprocess_and_dispatch.sh"
 
     batch_script_paths = []
-    for size_class, batch_id, batch_tiles in batches:
-        sbatch_cfg = hpc_cfg["sbatch_large"] if size_class == "large" else hpc_cfg["sbatch"]
-        name = f"preprocess_{size_class}_batch_{batch_id}"
+    for batch_id, batch_tiles in batches:
+        sbatch_cfg = hpc_cfg["sbatch"]
+        name = f"preprocess_batch_{batch_id}"
         targets = [
             p for tile_id in batch_tiles
             for p in _target_paths(f"{linux_preprocessing_inputs_dir}/{tile_id}", return_periods, waterlevel_names)
@@ -466,7 +417,7 @@ def main() -> None:
             *_stage_configfile_lines(),
             "",
             f'cd "{linux_code_root}"',
-            f'echo "=== Preprocessing batch {size_class}/{batch_id}: {len(batch_tiles)} tiles ==="',
+            f'echo "=== Preprocessing batch {batch_id}: {len(batch_tiles)} tiles ==="',
             f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
             "",
             # Hard pre-flight check, not just a submission-order convention:
@@ -508,7 +459,7 @@ def main() -> None:
         ]
         if args.fuse:
             lines += [
-                f'echo "=== Simulating batch {size_class}/{batch_id}: {len(batch_tiles)} tiles ==="',
+                f'echo "=== Simulating batch {batch_id}: {len(batch_tiles)} tiles ==="',
                 (
                     f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
                     f'snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
@@ -521,7 +472,7 @@ def main() -> None:
         with open(script_path, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(lines))
         batch_script_paths.append(f"{linux_jobs_dir}/{name}.sbatch")
-        print(f"  wrote {script_path} ({size_class}, {len(batch_tiles)} tiles, {len(targets)} target files)")
+        print(f"  wrote {script_path} ({len(batch_tiles)} tiles, {len(targets)} target files)")
 
     # Phase 2 (skipped entirely under --fuse - each batch above already ran
     # its own simulate step, so there is nothing left to generate/dispatch):
@@ -664,10 +615,7 @@ def main() -> None:
     if hpc_cfg.get("single_preprocess_job", False):
         node_summary = "single 1vcpu job, no batching - hpc.single_preprocess_job"
     else:
-        node_summary = (
-            ", ".join(f"{size_class}={class_n_nodes[size_class]}" for size_class in present_classes)
-            + f" nodes, {n_nodes} total budget"
-        )
+        node_summary = f"{n_batches} nodes, {n_nodes} total budget"
     if args.fuse:
         print(
             f"\nDone. 1 synchronous shared-inputs build + {len(batch_script_paths)} fused "

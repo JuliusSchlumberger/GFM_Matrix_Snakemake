@@ -123,10 +123,9 @@ def plot_tile_locations_map(selected_df: pd.DataFrame, out_path: Path) -> None:
     """Global Equal Earth map of selected tile centroids - light grey
     land, no figure title."""
     proj = ccrs.EqualEarth()
-    fig = plt.figure(figsize=(14, 7.5), facecolor=OCEAN_COLOR)
+    fig = plt.figure(figsize=(14, 7.5), facecolor="white")
     ax = plt.axes(projection=proj)
     ax.set_global()
-    ax.set_facecolor(OCEAN_COLOR)
     ax.add_feature(cfeature.LAND, facecolor=LAND_COLOR, edgecolor=COAST_COLOR, linewidth=0.4, zorder=1)
     ax.scatter(
         selected_df["lon"], selected_df["lat"], transform=ccrs.PlateCarree(),
@@ -134,7 +133,7 @@ def plot_tile_locations_map(selected_df: pd.DataFrame, out_path: Path) -> None:
     )
     ax.spines["geo"].set_edgecolor(COAST_COLOR)
     ax.spines["geo"].set_linewidth(0.6)
-    fig.savefig(out_path, dpi=300, bbox_inches="tight", facecolor=OCEAN_COLOR)
+    fig.savefig(out_path, dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
 

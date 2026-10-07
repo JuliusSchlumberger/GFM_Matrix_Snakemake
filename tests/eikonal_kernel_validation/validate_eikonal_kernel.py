@@ -17,6 +17,7 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
+import eikonal  # noqa: E402
 from eikonal import _ORTHANT_ORDER, _dense_sweep, _update, solve_eikonal_dense  # noqa: E402
 
 
@@ -160,9 +161,129 @@ def test_unseeded_cells_default_to_never_flooded_sentinel_not_sea_level() -> Non
     print()
 
 
+def _reference_sweep_julia_loop_order(t, friction, orthant, neg_two, eight, four) -> float:
+    """The original, Julia-loop-order kernel (column-outer/row-inner, no
+    early-out), bit-for-bit validated against real Aqueduct output - kept
+    here as plain Python as the reference `_dense_sweep` must reproduce."""
+    m, n = friction.shape
+    if orthant == 1:
+        cells = [(i, j, i - 1, j, i, j - 1, i - 1, j - 1) for j in range(1, n + 1) for i in range(1, m + 1)]
+    elif orthant == 2:
+        cells = [(i, j, i + 1, j, i, j - 1, i, j - 1) for j in range(1, n + 1) for i in range(m - 1, -1, -1)]
+    elif orthant == 3:
+        cells = [(i, j, i + 1, j, i, j + 1, i, j) for j in range(n - 1, -1, -1) for i in range(m - 1, -1, -1)]
+    else:
+        cells = [(i, j, i - 1, j, i, j + 1, i - 1, j) for j in range(n - 1, -1, -1) for i in range(1, m + 1)]
+    max_change = 0.0
+    for i, j, ai, aj, bi, bj, fi, fj in cells:
+        cand = _update(t[ai, aj], t[bi, bj], friction[fi, fj], neg_two, eight, four)
+        if cand < t[i, j]:
+            max_change = max(max_change, float(t[i, j] - cand))
+            t[i, j] = cand
+    return max_change
+
+
+def test_dense_sweep_matches_julia_loop_order_bit_for_bit() -> None:
+    """`_dense_sweep` loops row-major and skips no-improvement updates for
+    speed (see its docstring) - both are claimed exact, not approximate.
+    This locks that in: after every individual sweep, on an under-converged
+    grid with impassable obstacles, unreached cells and multiple seeds, the
+    full `t` array and each sweep's max_change must equal the original
+    Julia-loop-order kernel exactly."""
+    print("=== _dense_sweep: bit-identical to the original Julia-loop-order kernel ===")
+    rng = np.random.default_rng(1)
+    m, n = 23, 31  # non-square, asymmetric
+    friction = rng.uniform(0.002, 0.06, (m, n)).astype(np.float32)
+    friction[rng.random((m, n)) < 0.25] = np.float32(9999.0)  # obstacles -> winding paths
+    neg_two, eight, four = np.float32(-2.0), np.float32(8.0), np.float32(4.0)
+
+    t_fast = np.full((m + 1, n + 1), 99.0, dtype=np.float32)
+    t_fast[rng.integers(0, m + 1, 6), rng.integers(0, n + 1, 6)] = -rng.uniform(1.0, 4.0, 6).astype(np.float32)
+    t_ref = t_fast.copy()
+    n_sweeps = 24
+    for s in range(n_sweeps):
+        orthant = _ORTHANT_ORDER[s % 4]
+        mc_fast = _dense_sweep(t_fast, friction, orthant, neg_two, eight, four)
+        mc_ref = _reference_sweep_julia_loop_order(t_ref, friction, orthant, neg_two, eight, four)
+        assert np.array_equal(t_fast, t_ref), (
+            f"sweep {s + 1} (orthant {orthant}): t differs from the reference kernel, "
+            f"max diff {np.abs(t_fast - t_ref).max()}"
+        )
+        assert np.float32(mc_fast) == np.float32(mc_ref), (
+            f"sweep {s + 1}: max_change {mc_fast} != reference {mc_ref}"
+        )
+    print(f"PASS: t and max_change identical to the reference kernel after each of {n_sweeps} sweeps")
+    print()
+
+
+def _winding_test_grid(seed: int, m: int = 61, n: int = 83):
+    """Non-square grid with impassable obstacles (winding paths, unreached
+    pockets) and a few seeds."""
+    rng = np.random.default_rng(seed)
+    friction = rng.uniform(0.002, 0.06, (m, n)).astype(np.float32)
+    friction[rng.random((m, n)) < 0.3] = np.float32(9999.0)
+    seed_rows = rng.integers(0, m, 5)
+    seed_cols = rng.integers(0, n, 5)
+    seed_values = -rng.uniform(1.0, 4.0, 5).astype(np.float32)
+    return friction, seed_rows, seed_cols, seed_values
+
+
+def _reference_dense_solve(friction, seed_rows, seed_cols, seed_values, epsilon, max_rounds):
+    """solve_eikonal_dense's round loop on plain `_dense_sweep` (no block
+    skipping) - the reference the block-skipping solver must reproduce."""
+    m, n = friction.shape
+    t = np.full((m + 1, n + 1), 99.0, dtype=friction.dtype)
+    t[seed_rows, seed_cols] = seed_values
+    neg_two, eight, four = (friction.dtype.type(x) for x in (-2.0, 8.0, 4.0))
+    max_change, n_rounds = 0.0, 0
+    for n_rounds in range(1, max_rounds + 1):
+        max_change = 0.0
+        for orthant in _ORTHANT_ORDER:
+            max_change = max(max_change, _dense_sweep(t, friction, orthant, neg_two, eight, four))
+        if max_change <= epsilon:
+            break
+    return t, n_rounds, max_change
+
+
+def test_block_skipping_solve_is_bit_identical_to_dense_sweeps() -> None:
+    """`solve_eikonal_dense` sweeps block-wise and skips blocks that provably
+    cannot change (`_block_sweep`) - claimed exact, not approximate. Same
+    `t`, round count and final max_change as plain `_dense_sweep` rounds,
+    both fully converged (epsilon=0) and early-stopped, for block sizes from
+    1 (every vertex its own block) to larger than the grid."""
+    print("=== solve_eikonal_dense: block skipping bit-identical to plain dense sweeps ===")
+    production_block_size = eikonal.SWEEP_BLOCK_SIZE
+    try:
+        for grid_seed in (2, 3):
+            friction, sr, sc, sv = _winding_test_grid(grid_seed)
+            for epsilon in (0.0, 0.05):
+                t_ref, rounds_ref, mc_ref = _reference_dense_solve(friction, sr, sc, sv, epsilon, 500)
+                for block in (1, 3, 8, 16, production_block_size, 200):
+                    eikonal.SWEEP_BLOCK_SIZE = block
+                    t_blk, diag = solve_eikonal_dense(friction, sr, sc, sv, epsilon, max_rounds=500,
+                                                      return_diagnostics=True)
+                    assert np.array_equal(t_ref, t_blk), (
+                        f"grid {grid_seed}, eps={epsilon}, block={block}: t differs, "
+                        f"max diff {np.abs(t_ref - t_blk).max()}"
+                    )
+                    assert diag["n_rounds_used"] == rounds_ref and diag["max_change"] == mc_ref, (
+                        f"grid {grid_seed}, eps={epsilon}, block={block}: rounds/max_change "
+                        f"{diag['n_rounds_used']}/{diag['max_change']} != {rounds_ref}/{mc_ref}"
+                    )
+                    if grid_seed == 2 and epsilon == 0.0:
+                        print(f"  block={block:3d}: identical ({rounds_ref} rounds, "
+                              f"{100 * diag['frac_blocks_swept']:.0f}% of block visits swept)")
+    finally:
+        eikonal.SWEEP_BLOCK_SIZE = production_block_size
+    print("PASS")
+    print()
+
+
 def main() -> None:
     test_orthant_order_is_julias_real_gray_code_order()
     test_sweep_order_actually_changes_the_result()
+    test_dense_sweep_matches_julia_loop_order_bit_for_bit()
+    test_block_skipping_solve_is_bit_identical_to_dense_sweeps()
     test_update_uses_the_callers_own_dtype_not_promoted()
     test_unseeded_cells_default_to_never_flooded_sentinel_not_sea_level()
     print("All eikonal kernel validation checks passed.")

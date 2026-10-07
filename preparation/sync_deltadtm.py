@@ -2,8 +2,8 @@
 Download DeltaDTM v1.1 tiles from 4TU.ResearchData and sort them into the
 DEM/mask tile directories the rest of the pipeline expects — the parent
 directories of the `deltadtm` / `deltadtm_mask` sources in
-data_catalog_gfm.yml (e.g. src/tile_chunking.py and extract_dem.py both
-read individual tile files from those same directories, next to the
+data_catalog_gfm.yml (e.g. src/connectivity_tiling.py and extract_dem.py
+both read individual tile files from those same directories, next to the
 `deltadtm.vrt` / `deltadtm_mask.vrt` mosaics).
 
 Tiles only - this script does NOT build either VRT mosaic itself (that used
@@ -182,7 +182,7 @@ def run(config: dict) -> None:
     sync_cfg = config["sync_deltadtm"]
 
     # DEM/mask tiles land next to the `deltadtm`/`deltadtm_mask` VRT mosaics
-    # in data_catalog_gfm.yml — the same directories src/tile_chunking.py
+    # in data_catalog_gfm.yml — the same directories src/connectivity_tiling.py
     # already reads individual tile files from, so nothing downstream needs
     # to know this script ran. The VRT mosaics themselves are built
     # separately, by build_deltadtm_vrt.py (run_preparation.py's next step)

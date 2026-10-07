@@ -8,10 +8,10 @@ chains up to depth 10, 114 domains correctly dropped as unreachable). This
 module's docstrings below cover implementation detail only.
 
 Supersedes the old 13-stage greedy-covering pipeline (build_chunks/reduce_overlap/
-filter_and_shave_chunks/.../compute_run_order, retired from src/tile_chunking.py -
-see that file's own RETIRED note) whose per-tile independent shave decisions could
-silently erode the overlap meant to preserve flood connectivity across a chunk
-boundary. This method instead derives every domain boundary from the real
+filter_and_shave_chunks/.../compute_run_order - fully retired and removed, 2026-10)
+whose per-tile independent shave decisions could silently erode the overlap meant
+to preserve flood connectivity across a chunk boundary. This method instead
+derives every domain boundary from the real
 floodable-land connectivity structure of the terrain itself: a boundary is placed
 only where no floodable connectivity crosses it at all, or where a bounded,
 explicit overlap compensates for cutting through content that IS connected - never
@@ -19,7 +19,7 @@ from an independent, local, per-tile judgment call.
 
 Phases (orchestrated by preparation/build_tile_manifest.py, not in this module):
   0. Raw 1x1deg DeltaDTM tile index (`load_raw_tile_index`, thin wrapper over
-     tile_chunking.build_tile_index - filename-parsed only, no raster read).
+     `build_tile_index` below - filename-parsed only, no raster read).
   1. Tile-adjacency graph, edged by real floodable-LAND connectivity only, never
      ocean (`build_connectivity_graph`) - see the module-level rationale below.
   2. Connected components over that graph (`connected_components`, plain
@@ -59,6 +59,7 @@ carried into this production module.
 
 from __future__ import annotations
 
+import re
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -66,15 +67,20 @@ from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
-from rasterio.windows import Window
+from affine import Affine
+from rasterio.enums import Resampling
+from rasterio.windows import Window, from_bounds
 from rasterio.windows import bounds as window_bounds
 from shapely.geometry import box
 
-from tile_chunking import _first_interior_gap, _mosaic_nearest_coarse, build_tile_index
+from config_utils import retry_transient_io
+from tiles import _clamp_window, _coord_str, _degree_tiles_for_bbox, _open_mask_tile
 
 _DEG_TO_NATIVE_PX = 3600.0  # DeltaDTM's own 1 arcsec native resolution - independent of latitude
 # (confirmed: native cell count = lon_extent_deg*3600 * lat_extent_deg*3600)
 _KM_PER_DEG = 111.32
+_M_PER_DEG = 111_320.0  # equatorial approximation, matches tiles.py's own constant - used by
+# _mosaic_nearest_coarse below (metres, not km, unlike _KM_PER_DEG above)
 
 
 @dataclass
@@ -98,8 +104,201 @@ class ConnectivityConfig:
             self.water_codes = (self.ocean_code,)
 
 
+# ---------------------------------------------------------------------------
+# Phase 0 - tile index (filenames only, no raster data read). Moved in from
+# the now-deleted src/tile_chunking.py (2026-10) - that module used to hold
+# the retired 13-stage greedy-covering pipeline too (see this file's own
+# module docstring); once that pipeline was gone, all that was left in it
+# were these few shared primitives this module already imported, so there
+# was no reason to keep them in a separate file.
+# ---------------------------------------------------------------------------
+
+_COORD_RE = re.compile(r"([NS])(\d{2})([EW])(\d{3})")
+
+
+def _parse_coord_from_filename(name: str) -> tuple[int, int] | None:
+    m = _COORD_RE.search(name)
+    if not m:
+        return None
+    ns, lat, ew, lon = m.groups()
+    return int(lat) * (1 if ns == "N" else -1), int(lon) * (1 if ew == "E" else -1)
+
+
+def build_tile_index(mask_dir: Path) -> gpd.GeoDataFrame:
+    """One 1x1deg polygon per real DeltaDTM mask tile file found in
+    `mask_dir`, built purely from filenames (the {NS}{lat:02d}{EW}{lon:03d}
+    SW-corner coordinate token, same convention as tiles.py's
+    _scan_mask_dir/_coord_str) - no raster data read at all.
+    """
+    rows = []
+    for path in mask_dir.glob("*.tif"):
+        coord = _parse_coord_from_filename(path.name)
+        if coord is None:
+            continue
+        lat, lon = coord
+        rows.append({
+            "coord": _coord_str(lat, lon),
+            "lat": lat,
+            "lon": lon,
+            "geometry": box(lon, lat, lon + 1, lat + 1),
+        })
+    return gpd.GeoDataFrame(rows, geometry="geometry", crs="EPSG:4326")
+
+
+# ---------------------------------------------------------------------------
+# Shared coarse mosaic reader - every phase of this module goes through this.
+# ---------------------------------------------------------------------------
+
+def _mosaic_nearest_coarse(
+    bbox: tuple[float, float, float, float], mask_index: dict, dem_index: dict | None, resolution_m: float,
+    allowed_coords: set[str] | None = None,
+) -> tuple[np.ndarray, np.ndarray, Affine] | None:
+    """Direct-to-coarse mosaic of mask+dem, BOTH via nearest-neighbour
+    resampling - same per-source-tile read loop as tiles.mosaic_mask_dem_
+    coarse, but nearest (not MIN) for elevation too. mosaic_mask_dem_coarse's
+    MIN-for-elevation is a deliberate, biased-low choice for a different
+    question ("does any low pocket exist in this coarse cell") - it would
+    systematically UNDER-count how much of a cell is above the threshold.
+    This gives unbiased point SAMPLES of the true native distribution
+    instead, suitable for estimating a fraction. `dem_index=None` skips
+    the elevation read entirely (only the mask is needed by some callers).
+
+    `allowed_coords`, if given, restricts which degree-tiles within `bbox`
+    are actually read - any coord not in the set is skipped exactly like a
+    missing mask file (left at the default nodata fill), regardless of
+    whether a real tile exists there. Default (None) is unrestricted,
+    unchanged behaviour for every existing caller. Added for Phase 3
+    (split_component_to_budget): a connected component's bounding-box
+    rectangle can enclose far more tiles than its real members (e.g. a
+    continent-scale component's bbox - confirmed on real worldwide data,
+    2026-10 - can geometrically contain thousands of degree-cells against a
+    few hundred real members), and reading every one of them is both slow
+    (far more file opens than the component actually needs) and a latent
+    correctness risk: real floodable land belonging to a DIFFERENT,
+    Phase-1-unconnected component could otherwise be swept into this
+    component's `keep` mask purely because its bbox happens to enclose it
+    geographically, contradicting the whole method's core guarantee that
+    nothing crosses a component boundary without reason.
+
+    Opens every source tile with `OVERVIEW_LEVEL="NONE"` (forcing the base
+    full-resolution layer) - confirmed necessary, not cosmetic, 2026-10:
+    DeltaDTM mask tiles carry embedded GDAL overview pyramids, and at least
+    one real tile's overviews contain mask value 1 (ocean_code) at pixels
+    where the true base-resolution data has NO ocean_code cell anywhere
+    (verified directly against DeltaDTM_v1_1_N15E100.tif - base-resolution
+    full read: {0, 2, 3} only; its own level-0/level-1 overviews: also
+    contain 1). rasterio's windowed `read(..., out_shape=..., resampling=
+    Resampling.nearest)` silently lets GDAL substitute a matching overview
+    as the read source for a large decimation factor (an internal GDAL
+    performance optimization, not controlled by the `resampling=` argument,
+    which only governs how pixels are picked FROM whichever layer GDAL
+    chose) - so without this override, "nearest" picks a real pixel, but
+    from an already-corrupted overview, not the native grid. The overviews
+    were evidently built with an averaging-type resampler over categorical
+    codes (0=land/2=lake averages to exactly 1=ocean_code) - invalid for
+    this data regardless of which GDAL step produced them. This was traced
+    from a real, data-grounded false positive during the connectivity-
+    first migration - a domain over the Nakhon Sawan, Thailand river
+    confluence was marked hop_distance=0 (self-forced, i.e. "touches
+    ocean") purely from this artifact; the true base-resolution mask has
+    no ocean_code there at all.
+    """
+    minx, miny, maxx, maxy = bbox
+    px_deg = resolution_m / _M_PER_DEG
+    out_width = max(1, round((maxx - minx) / px_deg))
+    out_height = max(1, round((maxy - miny) / px_deg))
+    transform = Affine.translation(minx, maxy) * Affine.scale(px_deg, -px_deg)
+
+    mask_out = np.full((out_height, out_width), 255, dtype=np.uint8)
+    dem_out = np.full((out_height, out_width), -9999.0, dtype=np.float32)
+    any_coverage = False
+
+    for lat, lon in _degree_tiles_for_bbox(bbox):
+        coord = _coord_str(lat, lon)
+        if allowed_coords is not None and coord not in allowed_coords:
+            continue
+        mask_path = mask_index.get(coord)
+        if mask_path is None:
+            continue
+        ix0, iy0 = max(minx, lon), max(miny, lat)
+        ix1, iy1 = min(maxx, lon + 1), min(maxy, lat + 1)
+        if ix0 >= ix1 or iy0 >= iy1:
+            continue
+        dst_window = from_bounds(ix0, iy0, ix1, iy1, transform).round_lengths().round_offsets()
+        r0, c0 = int(dst_window.row_off), int(dst_window.col_off)
+        h, w = int(dst_window.height), int(dst_window.width)
+        h, w = _clamp_window(r0, c0, h, w, out_height, out_width)
+        if h <= 0 or w <= 0:
+            continue
+        any_coverage = True
+
+        with _open_mask_tile(mask_path, OVERVIEW_LEVEL="NONE") as src:
+            src_window = from_bounds(ix0, iy0, ix1, iy1, src.transform)
+            mask_out[r0:r0 + h, c0:c0 + w] = retry_transient_io(
+                src.read, 1, window=src_window, boundless=True, fill_value=255,
+                out_shape=(h, w), resampling=Resampling.nearest,
+            )
+
+        dem_path = dem_index.get(coord) if dem_index is not None else None
+        if dem_path is not None:
+            with _open_mask_tile(dem_path, OVERVIEW_LEVEL="NONE") as src:
+                src_window = from_bounds(ix0, iy0, ix1, iy1, src.transform)
+                dem_out[r0:r0 + h, c0:c0 + w] = retry_transient_io(
+                    src.read, 1, window=src_window, boundless=True, fill_value=-9999.0,
+                    out_shape=(h, w), resampling=Resampling.nearest,
+                )
+
+    if not any_coverage:
+        return None
+    return mask_out, dem_out, transform
+
+
+# ---------------------------------------------------------------------------
+# Phase 3's natural-gap search (_split_window, below)
+# ---------------------------------------------------------------------------
+
+def _contiguous_true_runs(arr_1d: np.ndarray, max_extent: int | None = None) -> list[tuple[int, int]]:
+    """Maximal contiguous (start, end) index runs of True, inclusive - each
+    further split into sub-runs of at most `max_extent` if given.
+    """
+    runs = []
+    start = None
+    for i, v in enumerate(arr_1d):
+        if v and start is None:
+            start = i
+        elif not v and start is not None:
+            runs.append((start, i - 1))
+            start = None
+    if start is not None:
+        runs.append((start, len(arr_1d) - 1))
+
+    if not max_extent:
+        return runs
+    capped = []
+    for start, end in runs:
+        pos = start
+        while pos <= end:
+            capped.append((pos, min(pos + max_extent - 1, end)))
+            pos += max_extent
+    return capped
+
+
+def _first_interior_gap(mask_1d: np.ndarray, min_len: int) -> tuple[int, int] | None:
+    """First (start, end) inclusive run of True in `mask_1d` at least
+    `min_len` long, EXCLUDING any run touching either edge of `mask_1d`
+    (that's ordinary trimmable margin, already handled by the tight-bbox
+    step - not a genuine interior gap). Reuses `_contiguous_true_runs`
+    rather than a new scan.
+    """
+    n = len(mask_1d)
+    for start, end in _contiguous_true_runs(mask_1d):
+        if start > 0 and end < n - 1 and (end - start + 1) >= min_len:
+            return start, end
+    return None
+
+
 def load_raw_tile_index(mask_dir: Path) -> gpd.GeoDataFrame:
-    """Phase 0 - thin wrapper over tile_chunking.build_tile_index (one 1x1deg
+    """Phase 0 - thin wrapper over build_tile_index (one 1x1deg
     polygon per real DeltaDTM mask tile file, filename-parsed only)."""
     return build_tile_index(mask_dir).reset_index(drop=True)
 

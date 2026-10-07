@@ -60,19 +60,21 @@ adaptation:
   slr_intensities: []
 
 # HPC dispatch (2026-10, new - this run was local-only via run_delta_floodmaps.py
-# until now). 8 nodes, all forced onto hpc.sbatch (1vcpu) via the
-# large_tile_pixel_threshold override below - user direction ("16 1vcpus...
-# 8 per ssp"), matching calibration_500_tiles's own "most tiles fit on
-# 1vcpu anyway" call. Generate with generate_hpc_preprocess_job.py
-# --calibration (NOT --fuse - this tile set spans multiple hop_distance
-# waves, unlike calibration_500_tiles/sfincs_calibration's hop=0-only
-# pools, so the real cross-wave dependency --fuse's own assertion guards
-# against is NOT satisfied here; --calibration alone still correctly
-# honors this scenario config end-to-end for the wave-dispatch phase,
-# unlike the default path's hardcoded-to-production base_config_path bug).
+# until now). 8 nodes, all on hpc.sbatch (1vcpu) - user direction ("16
+# 1vcpus... 8 per ssp"), matching calibration_500_tiles's own "most tiles
+# fit on 1vcpu anyway" call (2026-10-08: confirmed generally true and made
+# the production default - see config.yml's own comment on hpc.sbatch; the
+# old small/large RAM-aware split this used to force off via
+# large_tile_pixel_threshold no longer exists at all). Generate with
+# generate_hpc_preprocess_job.py --calibration (NOT --fuse - this tile set
+# spans multiple hop_distance waves, unlike calibration_500_tiles/
+# sfincs_calibration's hop=0-only pools, so the real cross-wave dependency
+# --fuse's own assertion guards against is NOT satisfied here; --calibration
+# alone still correctly honors this scenario config end-to-end for the
+# wave-dispatch phase, unlike the default path's hardcoded-to-production
+# base_config_path bug).
 hpc:
   n_nodes: 8
-  large_tile_pixel_threshold: 999999999999  # effectively infinite - forces every tile onto hpc.sbatch (1vcpu), no sbatch_large batches at all
   # NOT scenario-isolated by default (fixed "{root}/model_outputs/hpc_jobs"
   # regardless of simulation.model_outputs) - isolate explicitly, same tree
   # as everything else this run owns (see calibration_500_tiles.yml's own

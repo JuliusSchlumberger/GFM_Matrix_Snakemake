@@ -1,6 +1,6 @@
 """Raster extraction and processing functions for a single tile.
 
-Tiles in the tile grid (see `src/tile_chunking.py`) are exact rectangles,
+Tiles in the tile grid (see `src/connectivity_tiling.py`) are exact rectangles,
 so a tile's bounding box is identical to its geometry.
 This means raster datasets can simply be clipped with `bbox=...` - no
 additional `geometry_mask` step is required.
@@ -747,8 +747,18 @@ def compute_friction(
 
     Land use classes are reclassified to Manning's n roughness coefficients
     using the `lookup_source` lookup table, then converted to a friction
-    value via `roughness / 100` (empirical formula). Cells with no valid
-    land use classification are filled with `default_friction`.
+    value via `roughness / 100`, giving a per-METRE resistance rate. Cells
+    with no valid land use classification are filled with `default_friction`
+    (already in this same per-metre convention, not itself divided by 100).
+
+    This raster does NOT include the grid-resolution correction the eikonal
+    solver actually needs (src/eikonal.py's discretisation has no distance
+    term, so it needs cost-per-GRID-STEP, not cost-per-metre) - that's
+    applied separately, at runtime, via `simulation.flooding.
+    friction_scale_factor` (see config.yml's own comment on that key and
+    docs/methods_02_flood_depth.md section 2.1), specifically so this
+    expensive land-use raster is computed once and reused unscaled across
+    every sweep that varies a different parameter.
 
     Args:
         data_catalog: HydroMT data catalog containing `lulc_source` and `lookup_source`.

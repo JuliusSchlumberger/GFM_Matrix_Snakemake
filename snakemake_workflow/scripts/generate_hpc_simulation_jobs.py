@@ -12,8 +12,8 @@ first time - but once preprocessing is confirmed done (e.g. via
 check_preprocess_progress.py), REGENERATING the wave scripts afterwards
 (e.g. after an hpc.n_nodes change, like the 2026-08-10 fix reducing peak
 concurrent nodes from 40 to 20) does not need to re-pay that cost every
-time. This script computes the exact same (wave, size_class, batch_id,
-tile_ids) partition hpc_dispatch.smk does, directly from the tile grid, and
+time. This script computes the exact same (wave, batch_id, tile_ids)
+partition hpc_dispatch.smk does, directly from the tile grid, and
 calls the SAME generate_wave_dispatch() function
 scripts/generate_aqueduct_jobs.py's Snakemake path uses - one implementation,
 two entry points, so they can't drift apart.
@@ -67,8 +67,19 @@ import geopandas as gpd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from config_utils import load_config, merged_slr_scenarios, retry_transient_io, split_batches_proportionally  # noqa: E402
+from config_utils import load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
 from generate_aqueduct_jobs import generate_resume_dispatch, generate_wave_dispatch  # noqa: E402
+
+
+def _resolve_wave_tier(hop: int, wave_tiers: list[dict]) -> dict:
+    """First `hpc.wave_tiers` entry whose `hops` list contains `hop` (or
+    `hops: null`, a catch-all - must be last). See config.yml's own comment
+    on `hpc.wave_tiers` for the full semantics."""
+    for tier in wave_tiers:
+        hops = tier.get("hops")
+        if hops is None or hop in hops:
+            return tier
+    raise ValueError(f"no hpc.wave_tiers entry matches hop_distance={hop} - add a catch-all 'hops: null' tier")
 
 
 def main() -> None:
@@ -90,8 +101,6 @@ def main() -> None:
     local_jobs_dir = Path(local_config["hpc"]["jobs_dir"])
     hpc_cfg = linux_config["hpc"]
     n_nodes = hpc_cfg["n_nodes"]
-    large_pixel_threshold = hpc_cfg["large_tile_pixel_threshold"]
-    large_batch_multiplier = hpc_cfg["large_tile_batch_multiplier"]
     model_outputs = Path(local_config["simulation"]["model_outputs"])
 
     # Local view (this machine's own reachable mount), not linux_config's -
@@ -102,15 +111,6 @@ def main() -> None:
     return_periods = [f"RP{rp}" for rp in local_config["boundary_conditions"]["return_periods"]]
     waterlevel_names = merged_slr_scenarios(local_config["boundary_conditions"], local_config["adaptation"])
 
-    # Same bbox-area pixel-count proxy hpc_dispatch.smk uses.
-    bounds = tile_gdf.geometry.bounds
-    approx_pixels_by_tile = {
-        str(tid): float(maxx - minx) * float(maxy - miny) * 3600.0 * 3600.0
-        for tid, minx, miny, maxx, maxy in zip(
-            tile_gdf["tile_id"], bounds["minx"], bounds["miny"], bounds["maxx"], bounds["maxy"],
-        )
-    }
-
     hpc_waves: dict[int, list[str]] = {}
     for tid in tile_ids:
         hpc_waves.setdefault(hop_by_tile[str(tid)], []).append(str(tid))
@@ -119,48 +119,50 @@ def main() -> None:
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
 
     if not args.resume:
-        # Same proportional node-budget split as hpc_dispatch.smk (2026-08 fix -
-        # see split_batches_proportionally's own docstring for why this matters:
-        # without it, a wave with both size classes present could claim up to
-        # 2x n_nodes at once).
-        batches = []  # [(wave, size_class, batch_id, [tile_id, ...]), ...]
+        wave_tiers = hpc_cfg.get("wave_tiers")
+        wave_sbatch_cfg: dict[int, dict] = {}
+
+        batches = []  # [(wave, batch_id, [tile_id, ...]), ...]
         for wave in sorted(hpc_waves):
             wave_tiles = hpc_waves[wave]
-            tiles_by_class = {"small": [], "large": []}
-            for t in wave_tiles:
-                is_large = approx_pixels_by_tile[t] >= large_pixel_threshold
-                tiles_by_class["large" if is_large else "small"].append(t)
-            class_n_nodes = split_batches_proportionally(
-                {c: len(ts) for c, ts in tiles_by_class.items()}, n_nodes,
-            )
-            for size_class, class_tiles in tiles_by_class.items():
-                if not class_tiles:
-                    continue
-                n_batches = class_n_nodes[size_class]
-                if size_class == "large":
-                    # 2026-09: split large tiles across MORE, smaller batches
-                    # (on top of split_batches_proportionally's own result,
-                    # not carved out of "small"'s share) - see
-                    # hpc_dispatch.smk's mirrored comment for the full
-                    # rationale (large tiles were timing out even after
-                    # hpc.sbatch_large.time was raised).
-                    n_batches = min(len(class_tiles), n_batches * large_batch_multiplier)
-                k, m = divmod(len(class_tiles), n_batches)
-                for i in range(n_batches):
-                    batch_tiles = class_tiles[i * k + min(i, m): (i + 1) * k + min(i + 1, m)]
-                    batches.append((wave, size_class, f"{i:03d}", batch_tiles))
+            if wave_tiers:
+                # hpc.wave_tiers present (2026-10-08) - see config.yml's own
+                # comment on hpc.wave_tiers for the full semantics.
+                tier = _resolve_wave_tier(wave, wave_tiers)
+                wave_sbatch_cfg[wave] = {
+                    "partition": tier["partition"], "cpus_per_task": tier["cpus_per_task"],
+                    "mem": tier["mem"], "time": tier["time"],
+                    "account": hpc_cfg["sbatch"].get("account", ""),
+                    "env_activate_cmd": hpc_cfg["sbatch"]["env_activate_cmd"],
+                }
+                n_batches = len(wave_tiles) if tier["n_nodes"] is None else min(tier["n_nodes"], len(wave_tiles))
+            else:
+                # No hpc.wave_tiers configured - original uniform behaviour, unchanged.
+                n_batches = min(n_nodes, len(wave_tiles))
+
+            k, m = divmod(len(wave_tiles), n_batches)
+            for i in range(n_batches):
+                batch_tiles = wave_tiles[i * k + min(i, m): (i + 1) * k + min(i + 1, m)]
+                batches.append((wave, f"{i:03d}", batch_tiles))
 
         script_paths = [
-            str(local_jobs_dir / f"wave{wave}_{size_class}_batch_{batch_id}.sbatch")
-            for wave, size_class, batch_id, _ in batches
+            str(local_jobs_dir / f"wave{wave}_batch_{batch_id}.sbatch")
+            for wave, batch_id, _ in batches
         ]
 
         n_by_wave: dict[int, int] = {}
-        for wave, _, _, _ in batches:
+        for wave, _, _ in batches:
             n_by_wave[wave] = n_by_wave.get(wave, 0) + 1
-        print(f"{len(tile_ids)} tiles, {len(hpc_waves)} wave(s), n_nodes={n_nodes}:")
-        for wave in sorted(n_by_wave):
-            print(f"  wave {wave}: {n_by_wave[wave]} batch(es)")
+        if wave_tiers:
+            print(f"{len(tile_ids)} tiles, {len(hpc_waves)} wave(s), hpc.wave_tiers active:")
+            for wave in sorted(n_by_wave):
+                tier = _resolve_wave_tier(wave, wave_tiers)
+                print(f"  wave {wave}: {n_by_wave[wave]} batch(es) (tier: {tier['partition']}, "
+                      f"{tier['cpus_per_task']}-way concurrent, n_nodes={tier['n_nodes']})")
+        else:
+            print(f"{len(tile_ids)} tiles, {len(hpc_waves)} wave(s), n_nodes={n_nodes}:")
+            for wave in sorted(n_by_wave):
+                print(f"  wave {wave}: {n_by_wave[wave]} batch(es)")
         print()
 
         generate_wave_dispatch(
@@ -176,19 +178,22 @@ def main() -> None:
             script_paths=script_paths,
             resolved_config_path=str(local_jobs_dir / "resolved_config.yml"),
             submit_waves_path=str(local_jobs_dir / "submit_waves.sh"),
+            wave_sbatch_cfg=wave_sbatch_cfg or None,
         )
         print(f"\nSubmit on Hydrax with: bash {linux_config['hpc']['jobs_dir']}/submit_waves.sh")
         return
 
     # ── --resume: scan what's actually missing, rebalance across all nodes ──
+    wave_tiers = hpc_cfg.get("wave_tiers")
+    wave_sbatch_cfg: dict[int, dict] = {}
+
     print("Scanning existing results/ dirs for already-completed scenarios…")
     all_scenario_names = {f"{rp}_{slr}" for rp in return_periods for slr in waterlevel_names}
-    remaining_by_wave_class: dict[tuple[int, str], list[tuple[str, str, str]]] = {}
+    remaining_by_wave: dict[int, list[tuple[str, str, str]]] = {}
     n_done_total = 0
     for tid in tile_ids:
         tid_s = str(tid)
         wave = hop_by_tile[tid_s]
-        size_class = "large" if approx_pixels_by_tile[tid_s] >= large_pixel_threshold else "small"
         results_dir = model_outputs / tid_s / "results"
         done = set()
         if results_dir.is_dir():
@@ -198,53 +203,49 @@ def main() -> None:
         missing = all_scenario_names - done
         if not missing:
             continue
-        key = (wave, size_class)
-        remaining_by_wave_class.setdefault(key, [])
+        remaining_by_wave.setdefault(wave, [])
         for scenario_name in missing:
             rp, slr = scenario_name.split("_", 1)
-            remaining_by_wave_class[key].append((tid_s, rp, slr))
+            remaining_by_wave[wave].append((tid_s, rp, slr))
 
     n_total = len(tile_ids) * len(all_scenario_names)
     n_remaining = n_total - n_done_total
     print(f"{n_done_total}/{n_total} scenario-jobs already done, {n_remaining} remaining.\n")
 
-    batches = []  # [(wave, size_class, batch_id, [(tile_id, rp, slr), ...]), ...]
+    batches = []  # [(wave, batch_id, [(tile_id, rp, slr), ...]), ...]
     for wave in sorted(hpc_waves):
-        class_sizes = {
-            c: len(remaining_by_wave_class.get((wave, c), []))
-            for c in ("small", "large")
-        }
-        if not any(class_sizes.values()):
+        items = remaining_by_wave.get(wave, [])
+        if not items:
             continue
-        class_n_nodes = split_batches_proportionally(class_sizes, n_nodes)
-        for size_class in ("small", "large"):
-            items = remaining_by_wave_class.get((wave, size_class), [])
-            if not items:
-                continue
-            n_batches = class_n_nodes[size_class]
-            if size_class == "large":
-                # Same treatment as the fresh-dispatch path above - and
-                # especially relevant here, since a large tile timing out is
-                # exactly what leads to a --resume in the first place.
-                n_batches = min(len(items), n_batches * large_batch_multiplier)
-            k, m = divmod(len(items), n_batches)
-            for i in range(n_batches):
-                batch_items = items[i * k + min(i, m): (i + 1) * k + min(i + 1, m)]
-                if batch_items:
-                    batches.append((wave, size_class, f"{i:03d}", batch_items))
+        if wave_tiers:
+            tier = _resolve_wave_tier(wave, wave_tiers)
+            wave_sbatch_cfg[wave] = {
+                "partition": tier["partition"], "cpus_per_task": tier["cpus_per_task"],
+                "mem": tier["mem"], "time": tier["time"],
+                "account": hpc_cfg["sbatch"].get("account", ""),
+                "env_activate_cmd": hpc_cfg["sbatch"]["env_activate_cmd"],
+            }
+            n_batches = len(items) if tier["n_nodes"] is None else min(tier["n_nodes"], len(items))
+        else:
+            n_batches = min(n_nodes, len(items))
+        k, m = divmod(len(items), n_batches)
+        for i in range(n_batches):
+            batch_items = items[i * k + min(i, m): (i + 1) * k + min(i + 1, m)]
+            if batch_items:
+                batches.append((wave, f"{i:03d}", batch_items))
 
     script_paths = [
-        str(local_jobs_dir / f"resume_wave{wave}_{size_class}_batch_{batch_id}.sbatch")
-        for wave, size_class, batch_id, _ in batches
+        str(local_jobs_dir / f"resume_wave{wave}_batch_{batch_id}.sbatch")
+        for wave, batch_id, _ in batches
     ]
 
     n_by_wave: dict[int, int] = {}
-    for wave, _, _, items in batches:
+    for wave, _, items in batches:
         n_by_wave[wave] = n_by_wave.get(wave, 0) + len(items)
     print(f"n_nodes={n_nodes}, remaining work by wave:")
     for wave in sorted(n_by_wave):
         print(f"  wave {wave}: {n_by_wave[wave]} job(s) across "
-              f"{sum(1 for w, _, _, _ in batches if w == wave)} batch(es)")
+              f"{sum(1 for w, _, _ in batches if w == wave)} batch(es)")
     print()
 
     generate_resume_dispatch(
@@ -254,6 +255,7 @@ def main() -> None:
         script_paths=script_paths,
         resolved_config_path=str(local_jobs_dir / "resolved_config.yml"),
         submit_waves_path=str(local_jobs_dir / "submit_resume_waves.sh"),
+        wave_sbatch_cfg=wave_sbatch_cfg or None,
     )
     print(f"\nCancel the original dispatch's still-running jobs for these wave(s) FIRST (see module docstring), then:")
     print(f"Submit on Hydrax with: bash {linux_config['hpc']['jobs_dir']}/submit_resume_waves.sh")

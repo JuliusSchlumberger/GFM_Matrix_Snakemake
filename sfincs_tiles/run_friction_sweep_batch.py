@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import subprocess
 import sys
 import time
@@ -35,7 +36,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from compute_friction_sweep_metrics import MAX_OUTER_ITERATIONS_DEFAULT  # noqa: E402
 from gfm_config import read_root  # noqa: E402
-from tile_sweep_cache import build_tile_sweep_cache, write_cache  # noqa: E402
+from tile_sweep_cache import build_tile_sweep_cache, cache_path, write_cache  # noqa: E402
 
 RUNNER = Path(__file__).resolve().parent / "run_eikonal_on_sfincs_subgrid.py"
 
@@ -128,9 +129,28 @@ def main() -> None:
     print(f"\nBuilding sweep-comparison cache for {len(distinct_tile_ids)} distinct tile(s) in this batch...", flush=True)
     n_cached = 0
     for i, tile_id in enumerate(distinct_tile_ids, start=1):
-        cache = build_tile_sweep_cache(base_dir / tile_id, sorted(set(tiles_by_fsf[tile_id])), max_outer_iterations)
+        tile_dir = base_dir / tile_id
+        cache = build_tile_sweep_cache(tile_dir, sorted(set(tiles_by_fsf[tile_id])), max_outer_iterations)
         if cache is not None:
-            write_cache(base_dir / tile_id, cache)
+            # MERGE with whatever's already on disk, don't overwrite it - this batch's own pairs
+            # file may cover only a SUBSET of fsf points for this tile (e.g. a targeted resubmission
+            # of just the still-missing points), and an earlier batch/run may have already cached
+            # other points for this same tile. Blindly overwriting silently threw those away (found
+            # 2026-10-08: nearly every sfincs_calibration tile's cache held only friction_scale_
+            # factor=9, because that point was resubmitted separately and each resubmission's own
+            # write here stomped the rest) - union the "points" dicts instead, this run's own
+            # freshly-computed points (reflecting whatever is on disk right now) taking precedence
+            # over any stale entry of the same key.
+            existing_path = cache_path(tile_dir)
+            if existing_path.exists():
+                try:
+                    existing = json.loads(existing_path.read_text(encoding="utf-8"))
+                    cache["points"] = {**existing.get("points", {}), **cache["points"]}
+                    if cache.get("bathtub") is None:
+                        cache["bathtub"] = existing.get("bathtub")
+                except (json.JSONDecodeError, OSError):
+                    pass
+            write_cache(tile_dir, cache)
             n_cached += 1
         if i % 20 == 0 or i == len(distinct_tile_ids):
             print(f"  [{i}/{len(distinct_tile_ids)}] {n_cached} cache(s) written so far", flush=True)

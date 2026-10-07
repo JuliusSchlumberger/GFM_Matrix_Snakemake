@@ -45,17 +45,23 @@ hop>=1 job started before its neighbour's job has finished would read
 "no neighbour output yet" as "no flooding", not as "not run yet".
 
 `batches` (built in hpc_dispatch.smk / generate_hpc_simulation_jobs.py from
-the tile grid's hop_distance column AND each tile's estimated pixel count,
-node budget split proportionally between size classes via
-config_utils.split_batches_proportionally) already carries the full (wave,
-size_class, batch_id, tile_ids) partition - this script only turns each
-batch into one sbatch script (using hpc.sbatch or the bigger-RAM
-hpc.sbatch_large, per the batch's size_class) and groups them into
-submit_waves.sh's per-wave dependency chain (both size classes within a
-wave submit together - size only picks a batch's partition, not when it
-starts).
+the tile grid's hop_distance column) already carries the full (wave,
+batch_id, tile_ids) partition - this script turns each batch into one
+sbatch script (using hpc.sbatch, or a wave-specific override from
+hpc.wave_tiers - see generate_wave_dispatch's own docstring on
+wave_sbatch_cfg) and groups them into submit_waves.sh's per-wave dependency
+chain.
+
+Each sbatch script's own tiles run CONCURRENTLY, up to that batch's
+cpus_per_task, via run_simulation_batch.py (2026-10-08) - NOT sequentially
+in a bash loop (the pre-2026-10-08 behaviour, which never actually used
+cpus_per_task for simulation throughput - see hpc.md's old comment on this).
+A companion `{batch_name}_triples.csv` (tile_id, return_period,
+waterlevel_name rows) is written alongside each sbatch script for that
+runner to read.
 """
 
+import csv
 import os
 import sys
 from pathlib import Path
@@ -194,13 +200,22 @@ def generate_wave_dispatch(
     script_paths: list,
     resolved_config_path: str,
     submit_waves_path: str,
+    wave_sbatch_cfg: dict | None = None,
 ) -> None:
     """Write every wave's sbatch scripts + resolved_config.yml + submit_waves.sh.
 
     `script_paths` must be in the same order as `batches` (one path per
-    (wave, size_class, batch_id, tile_ids) entry) - both the Snakemake rule
-    and the standalone CLI build them from the same `batches` list, so the
-    order always matches by construction.
+    (wave, batch_id, tile_ids) entry) - both the Snakemake rule and the
+    standalone CLI build them from the same `batches` list, so the order
+    always matches by construction.
+
+    `wave_sbatch_cfg` (optional, 2026-10-08): `{wave: sbatch_cfg}` - overrides
+    `hpc_cfg["sbatch"]` for that specific wave (e.g. `hpc.wave_tiers` resolved
+    by generate_hpc_simulation_jobs.py, for a wave that needs a bigger/smaller
+    node allocation - e.g. a big-24vcpu, heavily-parallel dispatch for
+    hop_distance=0 - than production's default 1vcpu `hpc.sbatch`). `None`
+    (the Snakemake-rule caller's default, unchanged) preserves the original
+    uniform `hpc_cfg["sbatch"]`-for-every-wave behaviour exactly.
     """
     # Every (tile, rp, slr) combo is included unconditionally - wave-0 jobs
     # whose boundaries turn out empty are no longer pre-filtered here (2026-08
@@ -217,7 +232,7 @@ def generate_wave_dispatch(
 
     # ── Linux view: fully Linux-expanded config, for the sbatch scripts ─────────
     linux_config = load_config(base_config_path, extra_override=base_config_path.parent / "config_hpc.yml")
-    linux_aqueduct_cli = f"{linux_config['paths']['code_root']}/snakemake_workflow/scripts/run_aqueduct_cli.py"
+    linux_batch_runner = f"{linux_config['paths']['code_root']}/snakemake_workflow/scripts/run_simulation_batch.py"
     linux_jobs_dir = linux_config["hpc"]["jobs_dir"]
     linux_resolved_config = f"{linux_jobs_dir}/resolved_config.yml"
 
@@ -246,14 +261,31 @@ def generate_wave_dispatch(
     # stale-cache read) - see generate_hpc_preprocess_job.py's matching fix.
     atomic_write(resolved_config_path, lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
 
-    # ── Write one sbatch script per (wave, size_class, batch), in the same
-    #    order as script_paths (caller built both from the same `batches`
-    #    list, so the order always matches).
+    # ── Write one sbatch script per (wave, batch), in the same order as
+    #    script_paths (caller built both from the same `batches` list, so
+    #    the order always matches).
     scripts_by_wave: dict[int, list[str]] = {}
 
-    for (wave, size_class, batch_id, batch_tiles), script_path in zip(batches, script_paths):
-        sbatch_cfg = hpc_cfg["sbatch_large"] if size_class == "large" else hpc_cfg["sbatch"]
-        name = f"wave{wave}_{size_class}_batch_{batch_id}"
+    for (wave, batch_id, batch_tiles), script_path in zip(batches, script_paths):
+        sbatch_cfg = wave_sbatch_cfg[wave] if wave_sbatch_cfg and wave in wave_sbatch_cfg else hpc_cfg["sbatch"]
+        name = f"wave{wave}_batch_{batch_id}"
+
+        # One (tile_id, rp, slr) CSV row per job in this batch - run_simulation_batch.py's
+        # own --triples-file, CONCURRENTLY up to this batch's cpus_per_task (2026-10-08,
+        # replacing the old sequential bash run_job loop, which never actually used
+        # cpus_per_task for simulation throughput - see this function's own docstring on
+        # wave_sbatch_cfg). A worthwhile node allocation (cpus_per_task > 1, e.g. a 24vcpu
+        # tier) is otherwise pure waste if every tile still runs one at a time.
+        local_triples_path = Path(script_path).parent / f"{name}_triples.csv"
+        linux_triples_path = f"{linux_jobs_dir}/{name}_triples.csv"
+        n_jobs = 0
+        with open(local_triples_path, "w", encoding="utf-8", newline="\n") as f:
+            writer = csv.writer(f)
+            for tile_id in batch_tiles:
+                for rp, slr in jobs_by_tile[tile_id]:
+                    writer.writerow([tile_id, rp, slr])
+                    n_jobs += 1
+
         lines = [
             "#!/bin/bash",
             f"#SBATCH --job-name={name}",
@@ -276,25 +308,19 @@ def generate_wave_dispatch(
             ': > "$FAIL_LOG"',
             f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
             "",
-            "run_job() {",
-            f'  python "{linux_aqueduct_cli}" \\',
-            '    --config "$LOCAL_CONFIGFILE" \\',
-            '    --tile-id "$1" --return-period "$2" --waterlevel-name "$3" \\',
-            '    || echo "$1 $2 $3" >> "$FAIL_LOG"',
-            "}",
+            f'python "{linux_batch_runner}" \\',
+            f'  --triples-file "{linux_triples_path}" \\',
+            '  --config "$LOCAL_CONFIGFILE" \\',
+            f'  --workers {sbatch_cfg["cpus_per_task"]} \\',
+            '  --fail-log "$FAIL_LOG"',
             "",
         ]
-        n_jobs = 0
-        for tile_id in batch_tiles:
-            for rp, slr in jobs_by_tile[tile_id]:
-                lines.append(f"run_job {tile_id} {rp} {slr}")
-                n_jobs += 1
-        lines.append("")
 
         with open(script_path, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(lines))
         scripts_by_wave.setdefault(wave, []).append(f"{linux_jobs_dir}/{name}.sbatch")
-        print(f"  wrote {script_path} (wave {wave}, {size_class}, {len(batch_tiles)} tiles, {n_jobs} jobs)")
+        print(f"  wrote {script_path} (wave {wave}, {len(batch_tiles)} tiles, "
+              f"{n_jobs} jobs, {sbatch_cfg['cpus_per_task']}-way concurrent on {sbatch_cfg['partition']})")
 
     # ── submit_waves.sh: submits every wave to SLURM in order, each wave
     #    depending on EVERY job in the previous wave (afterany - a wave starts
@@ -334,7 +360,7 @@ def generate_wave_dispatch(
     n_waves = len(scripts_by_wave)
     n_scripts = sum(len(v) for v in scripts_by_wave.values())
     print(f"\nDone. {n_waves} wave(s), {n_scripts} sbatch script(s) + resolved_config.yml + submit_waves.sh written to {local_jobs_dir}")
-    print(f"Fill in {base_config_path.parent / 'config_hpc.yml'} and hpc.sbatch.*/hpc.sbatch_large.* placeholders before submitting for real.")
+    print(f"Fill in {base_config_path.parent / 'config_hpc.yml'} and hpc.sbatch.* placeholders before submitting for real.")
 
 
 def generate_resume_dispatch(
@@ -344,37 +370,41 @@ def generate_resume_dispatch(
     script_paths: list,
     resolved_config_path: str,
     submit_waves_path: str,
+    wave_sbatch_cfg: dict | None = None,
 ) -> None:
     """Write sbatch scripts for a RESUME/rebalance dispatch (2026-08, new).
 
     Unlike generate_wave_dispatch (whole-tile-per-batch - every scenario for
-    an included tile), each entry in `batches` here is `(wave, size_class,
-    batch_id, items)` where `items` is a flat list of individual
-    `(tile_id, rp, slr)` triples - built by the caller
-    (generate_hpc_simulation_jobs.py's --resume mode) from whatever's still
-    missing on disk, then re-split evenly across the full node budget
-    without regard to the ORIGINAL whole-tile batch boundaries. This is what
-    lets a rebalance recover from batches that finished their own (uneven)
-    original tile lists early and went idle (see conversation 2026-08-11) -
-    the new batches are sized by remaining WORK ITEMS, not by how many whole
-    tiles happened to land in a batch originally.
+    an included tile), each entry in `batches` here is `(wave, batch_id,
+    items)` where `items` is a flat list of individual `(tile_id, rp, slr)`
+    triples - built by the caller (generate_hpc_simulation_jobs.py's
+    --resume mode) from whatever's still missing on disk, then re-split
+    evenly across the full node budget without regard to the ORIGINAL
+    whole-tile batch boundaries. This is what lets a rebalance recover from
+    batches that finished their own (uneven) original tile lists early and
+    went idle (see conversation 2026-08-11) - the new batches are sized by
+    remaining WORK ITEMS, not by how many whole tiles happened to land in a
+    batch originally.
 
-    Each generated job is still exactly one `run_aqueduct_cli.py` call per
-    (tile, rp, slr), identical to a fresh dispatch - combined with that
-    script's own idempotency check (`_output_already_done`), submitting
-    these is safe even if a listed item finishes via some other path before
-    its job actually runs, though the intended usage is to cancel the
-    original batches first (see module docstring) so there's no double-
-    processing window at all.
+    Each batch's items run CONCURRENTLY via run_simulation_batch.py, same as
+    generate_wave_dispatch (see that function's own docstring) - combined
+    with run_aqueduct_cli.py's own idempotency check (`_output_already_done`),
+    submitting these is safe even if a listed item finishes via some other
+    path before its job actually runs, though the intended usage is to
+    cancel the original batches first (see module docstring) so there's no
+    double-processing window at all.
 
     A wave with zero remaining items is skipped entirely (no key in
     `scripts_by_wave`) - submit_waves.sh's PREV_IDS then correctly carries
     forward from the last wave that DID have batches, so a fully-finished
     early wave doesn't break the dependency chain into whatever wave
     genuinely has remaining work first.
+
+    `wave_sbatch_cfg`: see generate_wave_dispatch's own docstring - same
+    `{wave: sbatch_cfg}` override, `None` preserves uniform `hpc_cfg["sbatch"]`.
     """
     linux_config = load_config(base_config_path, extra_override=base_config_path.parent / "config_hpc.yml")
-    linux_aqueduct_cli = f"{linux_config['paths']['code_root']}/snakemake_workflow/scripts/run_aqueduct_cli.py"
+    linux_batch_runner = f"{linux_config['paths']['code_root']}/snakemake_workflow/scripts/run_simulation_batch.py"
     linux_jobs_dir = linux_config["hpc"]["jobs_dir"]
     linux_resolved_config = f"{linux_jobs_dir}/resolved_config.yml"
 
@@ -395,9 +425,17 @@ def generate_resume_dispatch(
 
     scripts_by_wave: dict[int, list[str]] = {}
 
-    for (wave, size_class, batch_id, items), script_path in zip(batches, script_paths):
-        sbatch_cfg = hpc_cfg["sbatch_large"] if size_class == "large" else hpc_cfg["sbatch"]
-        name = f"resume_wave{wave}_{size_class}_batch_{batch_id}"
+    for (wave, batch_id, items), script_path in zip(batches, script_paths):
+        sbatch_cfg = wave_sbatch_cfg[wave] if wave_sbatch_cfg and wave in wave_sbatch_cfg else hpc_cfg["sbatch"]
+        name = f"resume_wave{wave}_batch_{batch_id}"
+
+        local_triples_path = Path(script_path).parent / f"{name}_triples.csv"
+        linux_triples_path = f"{linux_jobs_dir}/{name}_triples.csv"
+        with open(local_triples_path, "w", encoding="utf-8", newline="\n") as f:
+            writer = csv.writer(f)
+            for tile_id, rp, slr in items:
+                writer.writerow([tile_id, rp, slr])
+
         lines = [
             "#!/bin/bash",
             f"#SBATCH --job-name={name}",
@@ -420,22 +458,19 @@ def generate_resume_dispatch(
             ': > "$FAIL_LOG"',
             f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
             "",
-            "run_job() {",
-            f'  python "{linux_aqueduct_cli}" \\',
-            '    --config "$LOCAL_CONFIGFILE" \\',
-            '    --tile-id "$1" --return-period "$2" --waterlevel-name "$3" \\',
-            '    || echo "$1 $2 $3" >> "$FAIL_LOG"',
-            "}",
+            f'python "{linux_batch_runner}" \\',
+            f'  --triples-file "{linux_triples_path}" \\',
+            '  --config "$LOCAL_CONFIGFILE" \\',
+            f'  --workers {sbatch_cfg["cpus_per_task"]} \\',
+            '  --fail-log "$FAIL_LOG"',
             "",
         ]
-        for tile_id, rp, slr in items:
-            lines.append(f"run_job {tile_id} {rp} {slr}")
-        lines.append("")
 
         with open(script_path, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(lines))
         scripts_by_wave.setdefault(wave, []).append(f"{linux_jobs_dir}/{name}.sbatch")
-        print(f"  wrote {script_path} (wave {wave}, {size_class}, {len(items)} jobs)")
+        print(f"  wrote {script_path} (wave {wave}, {len(items)} jobs, "
+              f"{sbatch_cfg['cpus_per_task']}-way concurrent on {sbatch_cfg['partition']})")
 
     submit_lines = [
         "#!/bin/bash",
@@ -469,7 +504,7 @@ def generate_resume_dispatch(
 
     n_waves = len(scripts_by_wave)
     n_scripts = sum(len(v) for v in scripts_by_wave.values())
-    n_jobs = sum(len(items) for _, _, _, items in batches)
+    n_jobs = sum(len(items) for _, _, items in batches)
     print(
         f"\nDone. {n_waves} wave(s) with remaining work, {n_scripts} sbatch script(s), "
         f"{n_jobs} total remaining job(s) written to {local_jobs_dir}"

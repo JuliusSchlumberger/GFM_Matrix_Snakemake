@@ -50,15 +50,36 @@ converted to a per-cell friction/resistance value used directly as the
 eikonal equation's slowness field. Cells with no assigned land-cover class
 default to $n = 0.002$.
 
-The friction value is used directly as a propagation cost per grid step
-(30 m), with no separate distance term in the solver. Used unscaled, this
-produces a water-level attenuation of roughly 0.008–0.04 m/km, about 30×
-weaker than the ~0.1–1.2 m/km range reported for comparable land cover by
-Vafeidis et al. (2019). Production therefore applies
-a runtime multiplier of ×30 to the friction field (not baked into the
-land-cover-derived raster itself, so it can be varied independently of the
-land-cover processing) corresponding to DeltaDTM's own
-native ~30 m grid step.
+**`friction_scale_factor` is not a free empirical tuning knob - most of it is
+a required unit correction, and only a small remaining piece is calibration.**
+$v(x) = n(x)/100$ is a *per-metre* resistance rate (head loss per metre
+travelled). But the Fast Sweeping discretisation (§4.4) has **no separate
+distance term at all** - it uses whatever friction value it's given directly
+as the cost of crossing one grid step, regardless of that step's real size.
+Feeding it the raw per-metre rate therefore silently mis-scales every
+result by the grid's own resolution: DeltaDTM's native grid step is ~30 m,
+so the solver needs `v(x) × 30`, not `v(x)`, to correctly represent "head
+loss per metre" at all. Skipping this (`friction_scale_factor=1`) doesn't
+give a physically meaningful "unscaled" baseline - it gives a result that's
+~30× too weak for no principled reason, not a real alternative friction
+regime.
+
+This `×30` grid-resolution correction is applied at runtime
+(`simulation.flooding.friction_scale_factor`), not baked into the
+land-cover-derived raster itself, purely so it can be combined with further
+calibration without recomputing the expensive land-cover processing. And it
+is further calibrated: the roughness/friction-sweep study (comparing the
+eikonal solver directly against real SFINCS runs, see
+`calibration_studies/` and the `sfincs_tiles/` friction-sweep tooling) found
+the best match (CSI=0.80, bias=0.99, `validation_sfincs_v5`, 2026-10-03) at
+**0.3× the grid-resolution-corrected baseline**, i.e.
+`friction_scale_factor = 30 × 0.3 = 9.0` - production's actual default.
+The resulting real-world attenuation rate at this production value is
+roughly `n(x) × 3` m/km (the full, uncalibrated ×30 baseline gives `n(x) ×
+10` m/km, which happens to land in the ~0.1-1.2 m/km range reported for
+comparable land cover by Vafeidis et al. (2019) - a useful sanity check
+that the ×30 grid correction is dimensionally sound, not the reason it was
+chosen).
 
 ## 3. Data inputs
 
@@ -249,6 +270,61 @@ shortest-path search, so it does not update every cell along even a short
 path uniformly within one round - ironing out that unevenness is exactly
 what the remaining rounds do.
 
+**Computational implementation.** Two implementation choices make the solver
+substantially faster without changing its result in any way: every vertex
+value is bit-for-bit identical to a plain implementation of the sweeps
+described above (`tests/eikonal_kernel_validation`).
+
+1. *Memory-order traversal and skipped no-op updates.* Within one sweep, a
+   vertex reads only its two upwind neighbours, so any traversal order that
+   visits both of them first produces exactly the same values. The sweeps
+   therefore run row by row, matching the row-major layout of the raster
+   arrays, rather than the column-by-column order inherited from the
+   (column-major) Julia reference implementation. In addition, the local
+   update is skipped whenever $\min(t_a, t_b)$ is already no smaller than the
+   vertex's current value: every candidate the update can produce is at
+   least $\min(t_a, t_b)$, so no improvement is possible. This avoids the
+   square root for every unreached, blocked or already-settled vertex.
+2. *Block skipping.* The vertex grid is divided into $64 \times 64$ blocks,
+   and the solver records, for each block, the last sweep in which any of its
+   values changed and, per sweep direction, the last sweep that processed it.
+   One sweep direction is idempotent: repeating it with unchanged inputs
+   changes nothing. A block's inputs in a given direction are its own values
+   plus its upwind neighbour block in the row direction and in the column
+   direction (e.g. the blocks above and to the left for the top-left to
+   bottom-right sweep), and friction is fixed within a solve. A block is
+   therefore skipped if none of those three blocks has changed since it was
+   last processed in the same direction (Figure 2a). Blocks are visited in
+   the sweep's own direction, so every vertex's upwind neighbours are still
+   updated before the vertex itself. Because most of a domain settles within
+   the first few rounds, and later rounds only move a narrow front through
+   winding channels (Figure 2b), most block visits are skipped (Figure 2c).
+
+On ten real calibration tiles (2–72 million cells), the first change alone
+made the complete obstacle-coupled flood solve (§4.4a) 2–7 times faster, and
+block skipping made it a further 1.2–5.8 times faster. Typically only 4–30% of
+block visits are processed. The gain is largest on tiles that need many
+rounds: one tile needing 100 rounds in its first outer iteration went from
+354 s to about 9 s. Both changes alter only how much work the solver does,
+not what it computes, so neither affects the convergence criterion, the round
+cap or any calibration result.
+
+Figure 2 is generated from the production `_block_sweep` code
+(`docs/generate_eikonal_solver_examples.py`) on a synthetic domain (not a real
+tile): uniform open land seeded along its top edge (the "coastline"), with
+one spiral maze of impassable walls in the lower right, the same construction
+as Figure 1b, built at a larger size. A block size of 16 is used for legibility
+(production uses 64 on grids roughly 30 times larger in each dimension). In
+panel (b), outlined blocks are processed in at least one of that round's four
+sweeps and washed-out blocks are skipped throughout the round. Most of the
+open land settles after the first round, and by round 8 only blocks in and
+around the maze are still processed, while the front keeps winding through it
+for 25 rounds; over the whole solve, 17% of the plain sweep's block visits are
+processed, and the script asserts that the result is identical both to the
+production solver and to plain dense sweeps.
+
+![Block skipping: only blocks whose inputs changed are re-swept](eikonal_example_block_sweep.png)
+
 ### 4.4a Structural correction: obstacle coupling
 
 The Fast Sweeping scheme in §4.4 shares a known structural weakness with
@@ -318,7 +394,7 @@ See
 `methods_03_calibration_sensitivity.md` §3 for the full calibration
 methodology and exact per-tile breakdown.
 
-**Illustrative example.** Figure 2 shows this on a small synthetic case (not
+**Illustrative example.** Figure 3 shows this on a small synthetic case (not
 a real tile): a ridge that is too tall to ever legitimately flood, but
 whose low friction makes it numerically the cheapest inland route for the
 rows directly behind it - cheaper than the honest detour around it via the
@@ -391,6 +467,14 @@ for either to be validated against; their own justification rests on the
 internal convergence/monotonicity arguments given in §4.4/§4.4a and the
 limited real-tile comparisons cited there, not on independent-implementation
 agreement.
+
+The two performance changes described under "Computational implementation"
+in §4.4 (memory-order traversal with skipped no-op updates, and block
+skipping) postdate this validation. Both are exact reorderings or omissions
+of work that provably changes nothing, so they preserve it. Both are covered
+by unit tests that require bit-for-bit agreement with the original sweep
+loop, and on ten real calibration tiles the full flood-depth output was
+bit-for-bit identical to the previous implementation's.
 
 ---
 

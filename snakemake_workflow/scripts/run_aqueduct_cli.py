@@ -22,6 +22,7 @@ Usage:
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
 
 import geopandas as gpd
@@ -33,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from aqueduct_runner import (  # noqa: E402
     NO_STATIONS_REASON,
     NO_UPSTREAM_FLOODING_REASON,
+    log_run_timing,
     log_skipped_tile,
     mark_tile_oom,
     run_aqueduct_python,
@@ -71,6 +73,7 @@ def main() -> None:
     parser.add_argument("--return-period", required=True)
     parser.add_argument("--waterlevel-name", required=True)
     args = parser.parse_args()
+    start = time.perf_counter()
 
     with open(args.config, encoding="utf-8") as f:
         config = yaml.safe_load(f)
@@ -106,7 +109,14 @@ def main() -> None:
     # safe to run even if a job for an already-complete (tile, rp, slr)
     # somehow gets submitted again, instead of silently redoing real,
     # already-correct work.
+    timings_dir = os.path.join(model_outputs, "run_timings")
+
     if _output_already_done(output_path):
+        # No log_run_timing call here - this (tile, rp, slr) was already solved in
+        # some EARLIER invocation (that's what "already done" means), which already
+        # wrote the real timing record for it; writing a near-zero entry now would
+        # silently overwrite that real data with this idempotency check's own trivial
+        # elapsed time.
         return
 
     if tile_marked_oom(oom_dir, tile_id):
@@ -115,6 +125,11 @@ def main() -> None:
             reason="tile too large (out-of-memory on a previous return period/SLR scenario for this tile)",
         )
         save_nodata_raster(dem_path, output_path, raster_config)
+        log_run_timing(
+            timings_dir, tile_id, args.return_period, args.waterlevel_name,
+            elapsed_s=time.perf_counter() - start,
+            obstacle_coupling_diagnostics={"outcome": "oom_premarked"},
+        )
         return
 
     tile_grid = load_tile_grid(tile_grid_path)
@@ -162,11 +177,16 @@ def main() -> None:
     if skip_reason is not None:
         log_skipped_tile(skipped_dir, tile_id, scenario_name, reason=skip_reason)
         write_zero_waterdepth(dem_path, output_path)
+        log_run_timing(
+            timings_dir, tile_id, args.return_period, args.waterlevel_name,
+            elapsed_s=time.perf_counter() - start,
+            obstacle_coupling_diagnostics={"outcome": "skip_no_inundation", "skip_reason": skip_reason},
+        )
         return
 
     oc_config = flooding_config.get("obstacle_coupling", {})
     try:
-        run_aqueduct_python(
+        diagnostics = run_aqueduct_python(
             dem_path, mask_path, friction_path, output_path,
             resolution=flooding_config["resolution"], k=flooding_config["knn"],
             variable=args.waterlevel_name,
@@ -184,6 +204,17 @@ def main() -> None:
         mark_tile_oom(oom_dir, tile_id, reason="MemoryError in flood_depth_dense - tile too large")
         log_skipped_tile(skipped_dir, tile_id, scenario_name, reason="MemoryError - tile too large")
         save_nodata_raster(dem_path, output_path, raster_config)
+        log_run_timing(
+            timings_dir, tile_id, args.return_period, args.waterlevel_name,
+            elapsed_s=time.perf_counter() - start,
+            obstacle_coupling_diagnostics={"outcome": "oom"},
+        )
+    else:
+        log_run_timing(
+            timings_dir, tile_id, args.return_period, args.waterlevel_name,
+            elapsed_s=time.perf_counter() - start,
+            obstacle_coupling_diagnostics={"outcome": "solved", **diagnostics},
+        )
 
 
 if __name__ == "__main__":

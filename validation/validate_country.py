@@ -90,6 +90,7 @@ from shapely.geometry import box
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from plotting import pixel_area_km2_grid  # noqa: E402
+from tiles import load_tile_grid  # noqa: E402
 import validation as v  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -170,6 +171,30 @@ def _mosaic_read(chunk_paths: list[Path], bbox: list[float]) -> tuple[np.ndarray
         for s in srcs:
             s.close()
     return mosaic[0], out_transform
+
+
+def _tile_paths_overlapping_bbox(
+    bbox: list[float], tile_grid: gpd.GeoDataFrame, model_outputs: str, rp: str, slr: str,
+) -> list[Path]:
+    """Every production tile's own raw `results/waterdepth_{rp}_{slr}.tif` whose
+    tile intersects `bbox` AND already exists on disk - the direct per-tile
+    counterpart to `_chunks_overlapping_bbox`, for scoring a small, ad hoc
+    tile subset that was never (and is not meant to be) run through
+    `merge_chunk` (2026-10-08 - a country-validation run over a handful of
+    tiles would otherwise require simulating every OTHER tile sharing their
+    5deg postprocessing chunk too, see merge_chunk's own `waterdepth_tiles_for_chunk`
+    input function in the Snakefile). A tile simply not yet simulated is
+    silently skipped here, same spirit as `_chunks_overlapping_bbox` skipping
+    a chunk that was never merged - not an error, just not part of this run.
+    """
+    region_geom = box(*bbox)
+    hits = tile_grid[tile_grid.geometry.intersects(region_geom)]
+    paths = []
+    for tid in hits["tile_id"].astype(int):
+        p = Path(model_outputs) / str(tid) / "results" / f"waterdepth_{rp}_{slr}.tif"
+        if p.exists():
+            paths.append(p)
+    return paths
 
 
 def _read_flood_totals(flood_totals_dir: Path, country_iso: str, rp: str, slr: str) -> tuple[float, float]:
@@ -922,6 +947,7 @@ def validate_country_national_coverage(
     cfg: dict,
     gfm_catalog,
     bench_catalog,
+    read_tiles_directly: bool = False,
 ) -> pd.DataFrame:
     """Extent comparison for `coverage == "national"` benchmarks (the ENTIRE
     coastline was assessed, e.g. Norway's Kartverket storm-surge polygons -
@@ -961,6 +987,17 @@ def validate_country_national_coverage(
     a false positive against a benchmark that never covered it. The
     partial-coverage path never needs this guard because its clusters ARE the
     benchmark's own geometry, not a bbox.
+
+    `read_tiles_directly` (default False): read each region's model depth by
+    mosaicking production's own per-tile `results/waterdepth_{rp}_{slr}.tif`
+    files directly (`_tile_paths_overlapping_bbox` + `_mosaic_read`) instead
+    of `merge_chunk`'s merged 5deg chunk files. For a small, ad hoc tile
+    subset (e.g. a country-validation run over a handful of tiles) that was
+    deliberately never run through `merge_chunk` - doing so would require
+    simulating every OTHER tile sharing the same 5deg chunk too, see
+    `_tile_paths_overlapping_bbox`'s own docstring. One mosaic read per
+    region instead of one open+window per overlapping chunk file; everything
+    downstream (scoring, agreement rasters) is unchanged either way.
     """
     val_cfg = cfg["validation"]
     rp = val_cfg["return_period"]
@@ -977,6 +1014,8 @@ def validate_country_national_coverage(
     iso_lookup = v.load_iso_lookup(gfm_catalog, val_cfg["iso_lookup_source"])
     flood_totals_dir = Path(val_cfg["flood_totals_dir"])
     model_total_wet_km2, _ = _read_flood_totals(flood_totals_dir, country_iso, rp, slr)
+    model_outputs = cfg["simulation"]["model_outputs"]
+    tile_grid = load_tile_grid(cfg["tile_grid"]["path"]) if read_tiles_directly else None
 
     def _is_national_extent(key: str) -> bool:
         s = v.load_benchmark_spec(bench_catalog, key)
@@ -1027,29 +1066,44 @@ def validate_country_national_coverage(
         n_chunks_total = 0
 
         for region, region_bbox in spec.regions.items():
-            chunk_paths = _chunks_overlapping_bbox(region_bbox, pp_chunk_deg, merged_chunks_dir, rp, slr)
-            n_chunks_total += len(chunk_paths)
+            # Each piece is one (depth, out_transform) to score - either one
+            # per overlapping merge_chunk file (windowed to region_bbox,
+            # since a chunk can hold multiple named regions, see comment
+            # below) or, read_tiles_directly, a single mosaic read spanning
+            # the whole region_bbox directly from production's per-tile
+            # results (see this function's own docstring).
+            pieces: list[tuple[np.ndarray, Affine]] = []
+            if read_tiles_directly:
+                tile_paths = _tile_paths_overlapping_bbox(region_bbox, tile_grid, model_outputs, rp, slr)
+                n_chunks_total += len(tile_paths)
+                depth, out_transform = _mosaic_read(tile_paths, region_bbox)
+                if depth is not None:
+                    pieces.append((depth, out_transform))
+            else:
+                chunk_paths = _chunks_overlapping_bbox(region_bbox, pp_chunk_deg, merged_chunks_dir, rp, slr)
+                n_chunks_total += len(chunk_paths)
+                for chunk_path in chunk_paths:
+                    with retry_transient_io(rasterio.open, chunk_path) as src:
+                        # Window the read to region_bbox ∩ this chunk's own bounds - a
+                        # chunk is a fixed 5deg cell that can contain MULTIPLE named
+                        # regions (e.g. Wales' severn_estuary and menai_strait both
+                        # fall in the same chunk), so reading the whole chunk here
+                        # would evaluate the SAME data for every region sharing it
+                        # (confirmed 2026-09-30: produced byte-identical metrics for
+                        # two genuinely different, ~150km-apart Welsh regions before
+                        # this fix). region_bbox is a rectangle, not real geometry, so
+                        # this still relies on read_country_mask below to exclude any
+                        # non-target territory within the window.
+                        window = rasterio.windows.from_bounds(*region_bbox, transform=src.transform)
+                        window = window.intersection(rasterio.windows.Window(0, 0, src.width, src.height))
+                        window = window.round_offsets().round_lengths()
+                        if window.width <= 0 or window.height <= 0:
+                            continue
+                        depth = src.read(1, window=window)
+                        out_transform = src.window_transform(window)
+                    pieces.append((depth, out_transform))
 
-            for chunk_path in chunk_paths:
-                with retry_transient_io(rasterio.open, chunk_path) as src:
-                    # Window the read to region_bbox ∩ this chunk's own bounds - a
-                    # chunk is a fixed 5deg cell that can contain MULTIPLE named
-                    # regions (e.g. Wales' severn_estuary and menai_strait both
-                    # fall in the same chunk), so reading the whole chunk here
-                    # would evaluate the SAME data for every region sharing it
-                    # (confirmed 2026-09-30: produced byte-identical metrics for
-                    # two genuinely different, ~150km-apart Welsh regions before
-                    # this fix). region_bbox is a rectangle, not real geometry, so
-                    # this still relies on read_country_mask below to exclude any
-                    # non-target territory within the window.
-                    window = rasterio.windows.from_bounds(*region_bbox, transform=src.transform)
-                    window = window.intersection(rasterio.windows.Window(0, 0, src.width, src.height))
-                    window = window.round_offsets().round_lengths()
-                    if window.width <= 0 or window.height <= 0:
-                        continue
-                    depth = src.read(1, window=window)
-                    out_transform = src.window_transform(window)
-
+            for depth, out_transform in pieces:
                 model_domain = v.model_domain_mask(depth, nodata=-9999.0)
                 if not model_domain.any():
                     continue
@@ -1283,6 +1337,15 @@ def main() -> None:
              "{group}__{sweep_point} identity, see scripts/calibration/aggregate_calibration_results.py). "
              "Optional - omit for a normal single/production validation run.",
     )
+    parser.add_argument(
+        "--read-tiles-directly", action="store_true",
+        help="score national-coverage benchmarks (validate_country_national_coverage) "
+             "straight from production's own per-tile results/waterdepth_{rp}_{slr}.tif "
+             "files instead of merge_chunk's merged chunks - for an ad hoc tile subset "
+             "(e.g. a country-validation run over a handful of tiles) that was never run "
+             "through merge_chunk, see that function's own docstring. No effect on "
+             "validate_country/validate_country_depth_bands (unchanged, still chunk-based).",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -1302,7 +1365,9 @@ def main() -> None:
     print(f"=== Validating {country_iso} (extent) ===")
     df_partial = validate_country(country_iso, cfg, gfm_catalog, bench_catalog)
     print(f"\n=== Validating {country_iso} (extent, national coverage) ===")
-    df_national = validate_country_national_coverage(country_iso, cfg, gfm_catalog, bench_catalog)
+    df_national = validate_country_national_coverage(
+        country_iso, cfg, gfm_catalog, bench_catalog, read_tiles_directly=args.read_tiles_directly,
+    )
     df = pd.concat([df_partial, df_national], ignore_index=True)
     if df.empty:
         print("No extent rows produced.")

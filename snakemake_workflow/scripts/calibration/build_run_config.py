@@ -44,9 +44,17 @@ keeping it a separate Linux-view override the way it's meant to be used
 (see materialize_config's own docstring for why it doesn't just fold this
 in like config_local.yml).
 
+Reused as-is (2026-10-08) for other, unrelated country-validation studies via
+`--calibration-dir-name` (default `calibration_esp_fra_nor`, kept for
+backward compatibility with this study's own already-materialized configs) -
+same layering/isolation logic, just a different output directory under
+`{root}` so an unrelated study's runs never collide with this one's.
+
 Usage:
     python build_run_config.py --group esp_fra_rp100 --sweep max_rounds_20
     python build_run_config.py --group nor_rp250 --sweep baseline
+    python build_run_config.py --group new_brunswick_rp100 --sweep baseline \\
+        --calibration-dir-name calibration_country_validation
 """
 
 import argparse
@@ -61,7 +69,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _CONFIG_DIR = _REPO_ROOT / "snakemake_workflow" / "config"
 
 
-def build_run_config(group: str, sweep_point: str) -> Path:
+def build_run_config(
+    group: str, sweep_point: str, calibration_dir_name: str = "calibration_esp_fra_nor",
+    preprocessing_inputs_dir: str | None = None,
+) -> Path:
     group_path = _CONFIG_DIR / "calibration" / f"{group}.yml"
     sweep_path = _CONFIG_DIR / "calibration" / "sweep" / f"{sweep_point}.yml"
     # Fail loudly on a typo'd --group/--sweep rather than silently
@@ -75,17 +86,21 @@ def build_run_config(group: str, sweep_point: str) -> Path:
         raise FileNotFoundError(f"unknown --sweep {sweep_point!r}: {sweep_path} does not exist")
 
     run_tag = f"{group}__{sweep_point}"
+    # Default: group-level isolated preprocessing dir, shared across every sweep point of
+    # THIS group (module docstring's own reasoning) - but a caller whose tiles are already
+    # preprocessed under PRODUCTION's own model_outputs (e.g. a country-validation study
+    # that only needs the solve + CSI scoring, not fresh dem/mask/friction/boundaries) can
+    # pass --preprocessing-inputs-dir to reuse that directly instead, skipping preprocessing
+    # entirely (2026-10-07, gbr_wales_scotland/new_brunswick country-validation runs).
+    preprocessing_inputs_dir = preprocessing_inputs_dir or f"{{root}}/{calibration_dir_name}/{group}/model_outputs"
     path_overrides = {
         "simulation": {
-            "model_outputs": f"{{root}}/calibration_esp_fra_nor/{run_tag}/model_outputs",
-            # GROUP-level, not run_tag-level - see module docstring. Shared
-            # across all 14 sweep points of this group; only results/ (under
-            # model_outputs, above) is isolated per run_tag.
-            "preprocessing_inputs_dir": f"{{root}}/calibration_esp_fra_nor/{group}/model_outputs",
+            "model_outputs": f"{{root}}/{calibration_dir_name}/{run_tag}/model_outputs",
+            "preprocessing_inputs_dir": preprocessing_inputs_dir,
         },
-        "postprocessing": {"merged_outputs": f"{{root}}/calibration_esp_fra_nor/{run_tag}/merged_results"},
-        "validation": {"output_dir": f"{{root}}/calibration_esp_fra_nor/{run_tag}/validation"},
-        "hpc": {"jobs_dir": f"{{root}}/calibration_esp_fra_nor/{run_tag}/hpc_jobs"},
+        "postprocessing": {"merged_outputs": f"{{root}}/{calibration_dir_name}/{run_tag}/merged_results"},
+        "validation": {"output_dir": f"{{root}}/{calibration_dir_name}/{run_tag}/validation"},
+        "hpc": {"jobs_dir": f"{{root}}/{calibration_dir_name}/{run_tag}/hpc_jobs"},
     }
 
     materialized_dir = _CONFIG_DIR / "calibration" / "materialized"
@@ -104,9 +119,22 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--group", required=True, help="e.g. esp_fra_rp100, nor_rp250")
     parser.add_argument("--sweep", required=True, help="e.g. baseline, max_rounds_20, obstacle_coupling_off")
+    parser.add_argument(
+        "--calibration-dir-name", default="calibration_esp_fra_nor",
+        help="output directory name under {root} - default matches the original ESP/FRA/NOR study "
+             "(kept as the default for backward compatibility with existing materialized configs); "
+             "pass a different name for an unrelated study, e.g. calibration_country_validation",
+    )
+    parser.add_argument(
+        "--preprocessing-inputs-dir", default=None,
+        help="override simulation.preprocessing_inputs_dir (default: an isolated group-level dir "
+             "under --calibration-dir-name, as usual) - pass '{root}/model_outputs' (literal, "
+             "{root} expanded later by load_config) to reuse already-preprocessed PRODUCTION tiles "
+             "directly and skip preprocessing entirely for this study",
+    )
     args = parser.parse_args()
 
-    out_path = build_run_config(args.group, args.sweep)
+    out_path = build_run_config(args.group, args.sweep, args.calibration_dir_name, args.preprocessing_inputs_dir)
     print(f"run_tag: {args.group}__{args.sweep}")
     print(f"wrote {out_path}")
 

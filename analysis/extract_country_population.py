@@ -11,8 +11,9 @@ WorldPop and WRI products is handled automatically, not assumed away).
 
 Unlike the exposure pipeline's own exposure_population_grid_{chunk_id}.tif
 (prepare_exposure_grid_chunk() in src/exposure.py), which is clipped to each
-chunk's flood-simulation bbox (coastal/floodable buffer only - see
-src/tile_chunking.py's module docstring), this reads the population raster's
+chunk's flood-simulation bbox (its own real connectivity-derived footprint,
+plus an explicit coastal buffer for hop=0 domains only - see
+src/connectivity_tiling.py's module docstring), this reads the population raster's
 FULL global extent in latitude bands, so it can serve as a true
 country-population denominator for "% of population exposed" figures
 (analysis/plot_burning_ember.py, analysis/plot_timeseries.py) - not just

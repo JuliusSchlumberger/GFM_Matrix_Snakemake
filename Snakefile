@@ -1,9 +1,9 @@
 """GFM Aqueduct preprocessing & simulation workflow.
 
-For every tile in the fixed-DeltaDTM-tile chunk manifest (`tile_grid.path`,
-built by `preparation/run_preparation.py` — see `src/tile_chunking.py` and
-that directory's `build_tile_manifest.py` for how it's derived from
-DeltaDTM coverage, floodability and population exposure), this workflow
+For every tile in the fixed-DeltaDTM-tile domain manifest (`tile_grid.path`,
+built by `preparation/run_preparation.py` — see `preparation/build_tile_manifest.py`
+and `src/connectivity_tiling.py` for how it's derived from DeltaDTM coverage,
+floodability, and real floodable-land connectivity to open water), this workflow
 preprocesses the DEM, DEM-validity mask, friction and water level boundary
 inputs for each (return period, sea level rise scenario) combination, and
 runs the Aqueduct flood model for every (tile, return_period,
@@ -85,7 +85,7 @@ os.makedirs = _retrying_makedirs
 
 sys.path.insert(0, os.path.join(workflow.basedir, "src"))
 from aqueduct_runner import estimate_aqueduct_mem_mb  # noqa: E402
-from config_utils import _expand_paths, get_data_catalog, merged_slr_scenarios, split_batches_proportionally  # noqa: E402
+from config_utils import _expand_paths, get_data_catalog, merged_slr_scenarios  # noqa: E402
 
 # GFM_CONFIG_PATH lets HPC dispatch scripts point this Snakefile at a
 # fully-materialized, scenario-specific config (calibration/sensitivity

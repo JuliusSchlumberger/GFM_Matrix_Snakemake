@@ -46,7 +46,14 @@ LAND_CODE = 0
 OCEAN_CODE = 1
 RIVER_CODE = 3
 NODATA_CODE = 4  # native mask.tif has no real coverage here - see build_inputs_from_sfincs_subgrid
-FRICTION_SCALE_FACTOR_DEFAULT = 30.0  # matches simulation.flooding.friction_scale_factor in config.yml
+FRICTION_SCALE_FACTOR_DEFAULT = 30.0  # the full grid-resolution-corrected baseline (DeltaDTM's
+# ~30m native grid step - see config.yml's own comment on simulation.flooding.friction_scale_factor
+# and docs/methods_02_flood_depth.md section 2.1 for why this ×30 is a required unit correction,
+# not a tunable value) - this is a frozen sweep-identity constant (the untagged/reference point
+# every _fsf<v>-tagged sweep file is compared against), deliberately NOT kept in sync with
+# config.yml's own friction_scale_factor, which has since been calibrated down to 9.0 (2026-10-07,
+# =30 x the sweep's own best-CSI finding of 0.3 - this script's own sweep is exactly what produced
+# that finding). Changing this constant would retag every already-written sweep .tif on disk.
 DEFAULT_FRICTION = 0.002  # matches simulation.flooding.default_friction in config.yml
 MAX_ROUNDS_DEFAULT = 40  # matches simulation.flooding.max_rounds in config.yml (was 200, a
 # stale/drifted default - confirmed mismatch 2026-10-03, fixed so the friction sweep's solver

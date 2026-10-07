@@ -48,8 +48,13 @@ TIME_DEFAULT = "16:00:00"
 CPUS_PER_TASK_DEFAULT = 4
 MEM_DEFAULT = "30G"
 FRICTION_SCALE_FACTORS_DEFAULT = [3.0, 6.0, 9.0, 12.0, 15.0, 18.0, 21.0, 24.0, 27.0, 30.0]  # 0.1x-1.0x of
-# production's current 30.0 (config.yml's simulation.flooding.friction_scale_factor) - see
-# select_friction_sweep_tiles.py's own docstring for why "scale the current values by 0.1-1.0"
+# 30.0, the full grid-resolution-corrected baseline (production's value AT THE TIME this sweep
+# was designed and run - see config.yml's own comment on simulation.flooding.friction_scale_factor
+# for why ×30 is a required unit correction, not itself a calibration choice). This frozen list is
+# what the already-collected sweep data on disk (sfincs_tiles/.../eikonal_on_subgrid_waterdepth_
+# ..._fsf<v>.tif) is keyed on, so it stays as-is even though production's own friction_scale_factor
+# has since moved to 9.0 (= 30 x 0.3, this exact sweep's own best-CSI finding against SFINCS,
+# 2026-10-03) - see select_friction_sweep_tiles.py's own docstring for why "scale the current values by 0.1-1.0"
 # means these absolute values, not friction_scale_factor=0.1..1.0 literally.
 
 
@@ -185,8 +190,8 @@ def main() -> None:
     config_linux = f"{base_dir_linux}/resolved_config.yml"
     print(f"Wrote {resolved_config_path} (Linux path view, for every batch's --config)")
 
-    # hpc.sbatch_large (the 4vcpu partition), not hpc.sbatch - matches --partition/--mem's own defaults above.
-    env_activate_cmd = local_config["hpc"]["sbatch_large"]["env_activate_cmd"]
+    # Same env_activate_cmd as every other partition - just module load + conda activate, not partition-specific.
+    env_activate_cmd = local_config["hpc"]["sbatch"]["env_activate_cmd"]
 
     generate_batches(
         pairs=pairs, n_nodes=args.n_nodes, partition=args.partition, time_limit=args.time,

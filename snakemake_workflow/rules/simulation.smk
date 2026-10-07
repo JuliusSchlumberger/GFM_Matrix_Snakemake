@@ -20,8 +20,9 @@ rule run_aqueduct:
     the command line (`<N>` should leave headroom below total system RAM
     for the OS and other processes, e.g. ~80% of physical RAM).
 
-    Wave-based hinterland forcing (2026-08): `tile_grid_path`'s `hop_distance`
-    column (`tile_chunking.compute_run_order`) tells `run_aqueduct.py` which
+    Wave-based hinterland forcing (2026-08, hop_distance now computed by
+    `connectivity_tiling.compute_hop_distances`): `tile_grid_path`'s `hop_distance`
+    column tells `run_aqueduct.py` which
     of two forcing paths a tile uses. `hop_distance == 0` (wave-0, has its
     own real ocean edge): the existing COAST-RP/IDW path - if `boundaries`
     has no stations at all (see `boundaries.select_stations_for_tile`),

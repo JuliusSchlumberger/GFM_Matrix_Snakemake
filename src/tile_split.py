@@ -21,7 +21,8 @@ sequential ids carry no such structure to exploit - see split_depth() below.
 
 FIXED 2026-08: this module's original digit-encoding/`parent_grid`-column
 design predated the fixed-DeltaDTM-tile-chunking tile-generation rewrite
-(src/tile_chunking.py) and was never updated for it, which would have
+(the now-retired 13-stage pipeline, replaced 2026-10 by
+src/connectivity_tiling.py) and was never updated for it, which would have
 crashed the first real OOM-split (`row["parent_grid"]` KeyError - that
 column doesn't exist in the current schema) and, even past that, silently
 produced colliding tile_ids (new sequential tile_ids can land anywhere,
