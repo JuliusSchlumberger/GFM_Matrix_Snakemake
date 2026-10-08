@@ -76,7 +76,7 @@ for f in hmax.tif flood_extent.tif summary_sfincs.json summary_eikonal.json summ
 done
 
 # -- 2. smoothed nearest-boundary forcing (rewrites sfincs.bnd/sfincs.bzs/gis/bnd.geojson) --
-"$GFM_PY" boundary_forcing_smoothed.py --tile-dir "$TILE_DIR" --reference-bzs "$SM/sfincs_origforcing.bzs" \
+"$GFM_PY" boundary_forcing_smoothed.py --tile-dir "$TILE_DIR" --stations all --reference-bzs "$SM/sfincs_origforcing.bzs" \
   || fail "boundary_forcing_smoothed.py failed"
 
 # -- 3. SFINCS run (same container/staging as run_one_tile.sh step 5, $SFINCS_THREADS threads) --
