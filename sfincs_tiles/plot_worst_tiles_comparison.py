@@ -46,6 +46,7 @@ from map_style import (  # noqa: E402
     WATER_COLOR as COLOR_WATER,
     WATER_LABEL,
     draw_caption_box,
+    orient_north_up,
 )
 
 LAND_CODE = 0
@@ -123,7 +124,9 @@ def build_rgb(tile_id: str, root: Path, base_dir_name: str) -> np.ndarray:
     rgb[land & sfincs_wet & eikonal_wet] = _hex_to_rgb(COLOR_AGREE)
     rgb[land & sfincs_wet & ~eikonal_wet] = _hex_to_rgb(COLOR_SFINCS_ONLY)
     rgb[land & ~sfincs_wet & eikonal_wet] = _hex_to_rgb(COLOR_EIKONAL_ONLY)
-    return rgb
+    # Subgrid rasters are stored south-up - returned north-up so every
+    # caller's imshow(origin="upper") shows the map the right way round.
+    return orient_north_up(rgb, transform)
 
 
 def main() -> None:

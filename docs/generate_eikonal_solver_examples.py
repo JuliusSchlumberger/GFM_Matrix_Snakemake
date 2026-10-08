@@ -12,10 +12,9 @@ against epsilon.
 Figure 2 (eikonal_example_block_sweep.png): how block skipping saves work.
 Uniform open land seeded along its top edge, with one larger Figure-1-style
 spiral maze (impassable walls), solved with the real `_block_sweep` kernel:
-the skip rule, which blocks are actually processed round by round as the
-front winds inward, and the share of block visits processed per round versus
-a plain sweep (asserted bit-identical to both the production solver and
-plain dense sweeps).
+a two-colour block grid per round (re-swept vs skipped) as the front winds
+inward (asserted bit-identical to both the production solver and plain
+dense sweeps).
 
 Figure 3 (eikonal_example_obstacle_coupling.png): why the outer loop is
 needed. A low-friction (easy-to-cross) but tall ridge separates the coast
@@ -348,7 +347,7 @@ def make_figure_3() -> None:
 # Figure 2: block skipping
 # ---------------------------------------------------------------------------
 
-FIG3_BLOCK = 16  # illustration block size (production: SWEEP_BLOCK_SIZE=64 on ~5000x8000-cell tiles)
+FIG2_BLOCK = 16  # illustration block size (production: SWEEP_BLOCK_SIZE=64 on ~5000x8000-cell tiles)
 
 
 def _traced_block_solve(friction, seed_rows, seed_cols, seed_values, max_rounds: int):
@@ -361,7 +360,7 @@ def _traced_block_solve(friction, seed_rows, seed_cols, seed_values, max_rounds:
     t = np.full((m + 1, n + 1), 99.0, dtype=friction.dtype)
     t[seed_rows, seed_cols] = seed_values
     neg_two, eight, four = np.float32(-2.0), np.float32(8.0), np.float32(4.0)
-    nbr, nbc = -(-(m + 1) // FIG3_BLOCK), -(-(n + 1) // FIG3_BLOCK)
+    nbr, nbc = -(-(m + 1) // FIG2_BLOCK), -(-(n + 1) // FIG2_BLOCK)
     changed_at = np.full((nbr, nbc), -1, dtype=np.int64)
     swept_at = np.full((4, nbr, nbc), -1, dtype=np.int64)
     sweep_idx = 0
@@ -372,7 +371,7 @@ def _traced_block_solve(friction, seed_rows, seed_cols, seed_values, max_rounds:
         for orthant in _ORTHANT_ORDER:
             sweep_idx += 1
             change, swept = _block_sweep(t, friction, orthant, neg_two, eight, four,
-                                         FIG3_BLOCK, changed_at, swept_at, sweep_idx)
+                                         FIG2_BLOCK, changed_at, swept_at, sweep_idx)
             n_swept += swept
             max_change = max(max_change, change)
         records.append({
@@ -386,38 +385,16 @@ def _traced_block_solve(friction, seed_rows, seed_cols, seed_values, max_rounds:
     return t, records
 
 
-def _draw_skip_rule_schematic(ax) -> None:
-    """Panel (a): sweep 1 (top-left -> bottom-right) on a 5x5 block grid -
-    block B reads only from itself and its upwind neighbours above/left."""
-    n = 5
-    ax.set_xlim(-0.6, n + 0.1)
-    ax.set_ylim(n + 1.9, -0.9)
-    ax.set_aspect("equal")
-    ax.axis("off")
-    for r in range(n):
-        for c in range(n):
-            ax.add_patch(plt.Rectangle((c, r), 1, 1, facecolor=NOT_REACHED_COLOR, edgecolor="white", linewidth=2))
-    br, bc = 2, 2
-    for (r, c), label in (((br - 1, bc), "above"), ((br, bc - 1), "left")):
-        ax.add_patch(plt.Rectangle((c, r), 1, 1, facecolor=SWEEP_FILL_COLOR, edgecolor="white", linewidth=2))
-        ax.text(c + 0.5, r + 0.5, label, ha="center", va="center", fontsize=9)
-    ax.add_patch(plt.Rectangle((bc, br), 1, 1, facecolor=SWEEP_FILL_COLOR, edgecolor=BLOCK_COLOR, linewidth=2.5))
-    ax.text(bc + 0.5, br + 0.5, "B", ha="center", va="center", fontsize=13, weight="bold", color=BLOCK_COLOR)
-    # block visiting order of this sweep: row by row, left to right
-    for r in range(n):
-        ax.annotate("", xy=(n - 0.1, r + 0.12), xytext=(0.1, r + 0.12),
-                    arrowprops=dict(arrowstyle="-|>", color=WALL_COLOR, linewidth=0.8, alpha=0.5))
-    ax.text(n / 2, -0.45, "sweep 1 visits blocks row by row,\ntop-left to bottom-right",
-            ha="center", va="center", fontsize=9)
-    ax.text(n / 2, n + 0.35, "B is skipped unless B, the block above\nor the block left changed since B's\n"
-            "last sweep in this direction", ha="center", va="top", fontsize=9.5)
-
-
-def build_coastal_maze_scene(n_rows: int = 176, n_cols: int = 256, maze_size: int = 97) -> np.ndarray:
+def build_coastal_maze_scene(n_rows: int = 175, n_cols: int = 255, maze_size: int = 97) -> np.ndarray:
     """Uniform open land (settles within a few rounds) with one Figure-1-style
     spiral maze in the lower right, its walls impassable (friction 9999, the
     obstacle-coupling block value) - mimics a real tile, where most of the
     domain settles early and only a few winding areas keep the solve going.
+
+    Sized so the (n_rows+1, n_cols+1) vertex grid is an exact multiple of
+    FIG2_BLOCK: otherwise the extra vertex row/column forms a thin edge block
+    with nothing to update in some sweep directions, which would read as
+    "skipped" (e.g. only 93% processed in round 1) without being real skipping.
     """
     friction = np.full((n_rows, n_cols), 0.01, dtype=np.float32)
     maze = build_spiral_friction(size=maze_size, n_rings=10, gap_width=7)
@@ -450,62 +427,38 @@ def make_figure_2() -> None:
     print(f"Figure 2: {n_rounds} rounds to full convergence, "
           f"block visits processed overall {100 * frac.mean():.1f}%")
 
-    checkpoints = [1, 3, 8, 16]
-    wall_mask = friction > 10
-    final = records[-1]["t"]
-    raw_vmax = float(np.max(final[final < 90]))
-    DISPLAY_VMAX_M = 2.0
+    checkpoints = [1, 3, 8, 16, 22]
+    skip_color, swept_color = "#e4e4e0", BLOCK_COLOR
+    block_cmap = ListedColormap([skip_color, swept_color])
 
-    fig = plt.figure(figsize=(14, 6.6))
-    gs = fig.add_gridspec(2, 5, height_ratios=[1.7, 1.3], width_ratios=[1.15, 1, 1, 1, 1],
-                          hspace=0.18, wspace=0.08, top=0.92, bottom=0.08, left=0.05, right=0.93)
-    ax_a = fig.add_subplot(gs[0, 0])
-    _draw_skip_rule_schematic(ax_a)
+    fig = plt.figure(figsize=(14, 3.1))
+    gs = fig.add_gridspec(1, len(checkpoints), wspace=0.08, top=0.83, bottom=0.02, left=0.02, right=0.98)
 
-    panel_b_axes = []
     for i, k in enumerate(checkpoints):
         rec = records[k - 1]
-        ax = fig.add_subplot(gs[0, i + 1])
-        arr = np.where(wall_mask | (rec["t"] >= 90), np.nan, rec["t"] / raw_vmax * DISPLAY_VMAX_M)
-        ax.imshow(np.ones_like(arr), cmap=ListedColormap([NOT_REACHED_COLOR]), origin="upper")
-        im = ax.imshow(arr, cmap=ATTENUATION_CMAP, vmin=0, vmax=DISPLAY_VMAX_M, origin="upper")
-        ax.imshow(np.where(wall_mask, 1, np.nan), cmap=ListedColormap([WALL_COLOR]), origin="upper")
-        # Skipped blocks washed out; processed blocks outlined.
-        for bi, bj in zip(*np.nonzero(~rec["processed"])):
-            ax.add_patch(plt.Rectangle((bj * FIG3_BLOCK - 1.5, bi * FIG3_BLOCK - 1.5), FIG3_BLOCK, FIG3_BLOCK,
-                                       facecolor="white", alpha=0.6, edgecolor="none", zorder=4))
-        for bi, bj in zip(*np.nonzero(rec["processed"])):
-            ax.add_patch(plt.Rectangle((bj * FIG3_BLOCK - 1.5, bi * FIG3_BLOCK - 1.5), FIG3_BLOCK, FIG3_BLOCK,
-                                       fill=False, edgecolor=BLOCK_COLOR, linewidth=0.9, zorder=5))
-        ax.plot([-0.5, n_cols - 0.5], [-0.5, -0.5], color=WATER_COLOR, linewidth=4, zorder=6,
-                solid_capstyle="butt", clip_on=False)
-        ax.set_xlim(-0.5, n_cols - 0.5)
-        ax.set_ylim(n_rows - 0.5, -0.5)
-        ax.set_title(f"round {k}\n{100 * rec['frac_swept']:.0f}% of blocks processed", fontsize=10.5)
+        ax = fig.add_subplot(gs[0, i])
+        # One square per block: re-swept this round (in at least one of its 4 sweeps) vs skipped.
+        ax.pcolormesh(rec["processed"].astype(int), cmap=block_cmap, vmin=0, vmax=1,
+                      edgecolors="white", linewidth=1.2)
+        nbr, nbc = rec["processed"].shape
+        ax.plot([0, nbc], [0, 0], color=WATER_COLOR, linewidth=5, solid_capstyle="butt", clip_on=False)
+        ax.set_xlim(0, nbc)
+        ax.set_ylim(nbr, 0)
+        ax.set_aspect("equal")
         ax.set_xticks([])
         ax.set_yticks([])
-        panel_b_axes.append(ax)
-    fig.colorbar(im, ax=panel_b_axes, fraction=0.046, pad=0.015, shrink=0.7, aspect=18,
-                 label="cumulative attenuation from coast (m)")
-
-    ax_c = fig.add_subplot(gs[1, :])
-    rounds_x = np.arange(1, n_rounds + 1)
-    ax_c.bar(rounds_x, 100 * frac, color=BLOCK_COLOR, width=0.8, label="block sweep: blocks processed")
-    ax_c.axhline(100, color=WALL_COLOR, linestyle="--", linewidth=1.2, label="plain sweep: every block, every round")
-    ax_c.set_xlim(0.3, n_rounds + 0.7)
-    ax_c.set_ylim(0, 108)
-    ax_c.set_xlabel("round")
-    ax_c.set_ylabel("block visits processed (%)")
-    ax_c.legend(fontsize=9, loc="center right")
-    ax_c.grid(True, axis="y", alpha=0.3)
-    ax_c.text(0.99, 0.80, f"over all {n_rounds} rounds: {100 * frac.mean():.0f}% of the plain sweep's block visits, "
-              f"identical result", transform=ax_c.transAxes, fontsize=9.5, va="top", ha="right")
-
-    label_x = 0.005
-    fig.text(label_x, ax_a.get_position().y1, "(a)", fontsize=13, weight="bold", ha="left", va="top")
-    fig.text(label_x, ax_c.get_position().y1 + 0.04, "(c)", fontsize=13, weight="bold", ha="left", va="top")
-    fig.text(panel_b_axes[0].get_position().x0 - 0.02, ax_a.get_position().y1, "(b)",
-             fontsize=13, weight="bold", ha="left", va="top")
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        ax.set_title(f"round {k}\n{100 * rec['frac_swept']:.0f}% of block visits", fontsize=10.5)
+    fig.legend(
+        handles=[plt.Rectangle((0, 0), 1, 1, color=swept_color),
+                 plt.Rectangle((0, 0), 1, 1, color=skip_color),
+                 plt.Line2D([0], [0], color=WATER_COLOR, linewidth=5)],
+        labels=["re-swept: the block or an upwind neighbour block changed",
+                "skipped: nothing it depends on changed",
+                "coast (seeded edge)"],
+        loc="upper center", ncol=3, fontsize=10, frameon=False, bbox_to_anchor=(0.5, 1.0),
+    )
 
     fig.savefig(OUT_DIR / "eikonal_example_block_sweep.png", dpi=170, bbox_inches="tight")
     plt.close(fig)

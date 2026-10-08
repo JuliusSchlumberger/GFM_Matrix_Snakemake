@@ -45,7 +45,7 @@ from plot_validation_results import DATA_ROOT, _csi, collect_summaries  # noqa: 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from map_style import (  # noqa: E402
     AGREE_COLOR, A_ONLY_COLOR, B_ONLY_COLOR, LAND_COLOR, LAND_LABEL, WATER_COLOR, WATER_LABEL,
-    draw_caption_box,
+    draw_caption_box, orient_north_up,
 )
 
 LAND_CODE = 0
@@ -157,6 +157,10 @@ def _make_panel(
         if cls is None:
             ax.text(0.5, 0.5, "no subgrid data", ha="center", va="center", transform=ax.transAxes)
         else:
+            # build_classification keeps the subgrid's own (south-up) row order -
+            # flipped here for display only.
+            with rasterio.open(tile_dir / "sfincs_model" / "hmax_subgrid.tif") as src:
+                cls = orient_north_up(cls, src.transform)
             cls = _crop_to_disagreement(cls)
             ax.imshow(cls, cmap=cmap, vmin=0, vmax=3, interpolation="nearest")
         ax.set_xticks([])

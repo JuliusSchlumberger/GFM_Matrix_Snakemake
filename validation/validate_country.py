@@ -1333,8 +1333,8 @@ def main() -> None:
     parser.add_argument(
         "--run-tag", default=None,
         help="tags every output row with this value in a run_tag column - for "
-             "aggregating results across multiple runs (e.g. the calibration sweep's "
-             "{group}__{sweep_point} identity, see scripts/calibration/aggregate_calibration_results.py). "
+             "aggregating results across multiple runs (e.g. a {group}__{sweep_point} "
+             "identity for some future calibration sweep). "
              "Optional - omit for a normal single/production validation run.",
     )
     parser.add_argument(

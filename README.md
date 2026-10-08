@@ -105,8 +105,6 @@ and one-off investigation folders (e.g. `martinique_diagnostics/`,
   original Julia reference implementation.
 - `docs/methods_04b_MapsValidation.md` — validation against official national
   flood hazard maps.
-- `docs/calibration_sweep_plan.md` — a planned (not yet implemented)
-  parameter-sensitivity study.
 - `snakemake_workflow/hpc.md` — HPC/SLURM setup and dispatch.
 - `snakemake_workflow/memory.md` — running engineering-notes/design-log for
   the codebase (what each part does and why, not development history).

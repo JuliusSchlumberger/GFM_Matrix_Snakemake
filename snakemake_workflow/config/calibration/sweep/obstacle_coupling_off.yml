@@ -3,8 +3,7 @@
 # solve per tile, kept anyway (user confirmed) to get real evidence of the
 # mechanism's actual marginal benefit against benchmarks rather than
 # assuming it helps, and as a sanity check that the validation pipeline is
-# sensitive enough to detect a known-worse configuration. See
-# docs/calibration_sweep_plan.md.
+# sensitive enough to detect a known-worse configuration.
 simulation:
   flooding:
     obstacle_coupling:

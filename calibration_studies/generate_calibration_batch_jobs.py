@@ -39,12 +39,12 @@ processes (see test_sweep_budget_calibration.py's own
 aggregate_wet_tiles.py once every node's CSVs are on disk.
 
 `--study-dir-name` selects which study's own output tree this points at
-(default `calibration_260_tiles`, the original pilot study, preserved for
-backward compatibility) - every output path is built from this one
-parameter, so a differently-sized study (e.g. the current 500-tile
-global-representativeness run, `calibration_500_tiles`) gets its own
-separate directory rather than overwriting/mixing with another study's
-candidate pool, sweep-budget CSVs, or resolved_config.yml.
+(default `calibration_500_tiles`, 2026-10-08 - the current global-
+representativeness study; was `calibration_260_tiles`, the original pilot,
+until that study was fully superseded) - every output path is built from
+this one parameter, so a differently-sized study gets its own separate
+directory rather than overwriting/mixing with another study's candidate
+pool, sweep-budget CSVs, or resolved_config.yml.
 
 Usage:
     python generate_calibration_batch_jobs.py sweep_budget
@@ -147,10 +147,10 @@ def main() -> None:
     parser.add_argument("study", choices=list(SCRIPTS))
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument(
-        "--study-dir-name", default="calibration_260_tiles",
+        "--study-dir-name", default="calibration_500_tiles",
         help="name of the study's own output directory under paths.root - default is the "
-             "original 260-tile study, preserved for backward compatibility; pass a different "
-             "name (e.g. calibration_500_tiles) for an independent, separately-sized study",
+             "current global-representativeness study; pass a different name for an "
+             "independent, separately-sized study",
     )
     parser.add_argument("--tile-ids-file", default=None, help="default: <study-dir-name>/<study's own default file>, see SCRIPTS above")
     parser.add_argument("--n-nodes", type=int, default=N_NODES_DEFAULT)

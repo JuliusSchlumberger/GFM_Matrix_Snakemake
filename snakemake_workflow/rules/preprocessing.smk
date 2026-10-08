@@ -7,19 +7,18 @@ water level scenario definitions) are read from `config/config.yml`.
 `_preprocessing_inputs_dir` defaults to `simulation.model_outputs` (so
 production, which never sets `simulation.preprocessing_inputs_dir`, is
 byte-for-byte unaffected) but can be pointed elsewhere - added 2026-09-14
-for the ESP/FRA/NOR calibration sweep: within one group (e.g.
-esp_fra_rp100), none of the 14 OFAT sweep points (friction_scale_factor,
-max_rounds, obstacle_coupling.*, waterlevel_epsilon_m,
-exposure.exceedance_threshold_m) touch anything preprocessing produces
-here - they're all solver-runtime or postprocessing/exposure-only
-parameters - so all 14 sweep points need byte-identical inputs/ content.
-build_run_config.py
-points preprocessing_inputs_dir at a GROUP-level shared directory instead
-of isolating it per run_tag like `simulation.model_outputs` (which stays
-isolated - it also holds results/waterdepth_*.tif, whose filename has no
-sweep-point tag, so THAT genuinely must not be shared - see that script's
-own comment). Cuts calibration preprocessing from 14x-per-group redundant
-to 1x-per-group.
+for the ESP/FRA/NOR calibration sweep (now complete and removed): within
+one group (e.g. esp_fra_rp100), none of the 14 OFAT sweep points
+(friction_scale_factor, max_rounds, obstacle_coupling.*,
+waterlevel_epsilon_m, exposure.exceedance_threshold_m) touch anything
+preprocessing produces here - they're all solver-runtime or
+postprocessing/exposure-only parameters - so all 14 sweep points needed
+byte-identical inputs/ content, by pointing preprocessing_inputs_dir at a
+GROUP-level shared directory instead of isolating it per run_tag like
+`simulation.model_outputs` (which stays isolated - it also holds
+results/waterdepth_*.tif, whose filename has no sweep-point tag, so THAT
+genuinely must not be shared). Cut calibration preprocessing from
+14x-per-group redundant to 1x-per-group.
 """
 
 _preprocessing_inputs_dir = config["simulation"].get("preprocessing_inputs_dir") or config["simulation"]["model_outputs"]

@@ -1,10 +1,11 @@
 """Build hop_distance-closed tile subsets for country-scoped calibration/
-validation studies - originally the ESP/FRA/NOR HPC calibration sweep
-(docs/calibration_sweep_plan.md: `esp_fra` at RP100, `nor` at RP250), reused
-as-is for other country groups (`gbr_wales_scotland`, `new_brunswick`,
-2026-10-08 - RP100 against their own real benchmark maps, no sweep, just
-production's own current defaults). Each group is written as its own
-GeoPackage under {processed_inputs_dir}/mask/calibration/.
+validation studies - originally built for the ESP/FRA/NOR HPC calibration
+sweep (`esp_fra` at RP100, `nor` at RP250; that study is now complete and its
+group entries removed), reused as-is for other country groups
+(`gbr_wales_scotland`, `new_brunswick`, 2026-10-08 - RP100 against their own
+real benchmark maps, no sweep, just production's own current defaults). Each
+group is written as its own GeoPackage under
+{processed_inputs_dir}/mask/calibration/.
 
 For each group: finds every coastal benchmark catalog entry for its member
 countries, then unions tile IDs intersecting each NAMED region SEPARATELY -
@@ -53,8 +54,6 @@ from tiles import load_tile_grid  # noqa: E402
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 GROUPS = {
-    "esp_fra": ["ESP", "FRA"],
-    "nor": ["NOR"],
     # 2026-10-08: GBR currently only has Wales/Scotland coastal benchmark entries
     # (no England/N.Ireland entry exists yet), so this group selects exactly those
     # two, nothing more - re-derives the same tile set the earlier, ad hoc

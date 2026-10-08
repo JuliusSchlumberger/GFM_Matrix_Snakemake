@@ -11,9 +11,8 @@
 # complexity - every tile forces directly from its own COAST-RP stations).
 #
 # Layered on top of config.yml + config_local.yml via
-# src/config_utils.py::materialize_config, same pattern this session's
-# ESP/FRA/NOR calibration sweep (build_run_config.py) and the Thailand
-# side project both used.
+# src/config_utils.py::materialize_config, same pattern the (now-removed)
+# ESP/FRA/NOR calibration sweep and the Thailand side project both used.
 
 tile_grid:
   path: "{processed_inputs_dir}/mask/gbr_wales_scotland_friction9_tiles.gpkg"

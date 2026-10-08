@@ -22,6 +22,8 @@ Figures:
 
 Usage:
     python plot_sfincs_tile_diagnostics.py --tile-id 1693 --base-dir-name validation_sfincs_v5
+    python plot_sfincs_tile_diagnostics.py --tile-id 1974 --base-dir-name sfincs_calibration \
+        --friction-scale-factor 9 --max-outer-iterations 5
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import rasterio
+import yaml
 from matplotlib.colors import ListedColormap
 from matplotlib.patches import Patch
 from rasterio.warp import transform as warp_transform
@@ -45,6 +48,7 @@ from scipy import ndimage
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gfm_config import read_root  # noqa: E402
+from compute_friction_sweep_metrics import FRICTION_SCALE_FACTOR_DEFAULT, MAX_OUTER_ITERATIONS_DEFAULT  # noqa: E402
 from plot_worst_tiles_panel import (  # noqa: E402
     CATEGORY_COLORS, CATEGORY_LABELS, DRY, EIKONAL_ONLY, MATCHED, SFINCS_ONLY,
     build_classification,
@@ -52,6 +56,9 @@ from plot_worst_tiles_panel import (  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from map_style import WATER_COLOR, WATER_LABEL, draw_caption_box, draw_panel_letter  # noqa: E402
+from rasters import decode_waterlevel_cm  # noqa: E402
+
+OCEAN_CODE = 1
 
 INACTIVE, ACTIVE, BOUNDARY = 0, 1, 2
 MASK_COLORS = ["#f5f5f2", "#a8c8e8", "#d62728"]  # inactive, active, boundary
@@ -97,32 +104,56 @@ def _read_sfincs_mask(sfincs_dir: Path) -> tuple[np.ndarray, rasterio.Affine, st
     grid = np.zeros(mmax * nmax, dtype=np.uint8)
     grid[ind] = msk
     mask2d = grid.reshape(mmax, nmax).T  # (ncol, nrow) -> (nrow, ncol)
+    crs = f"EPSG:{epsg}" if epsg else None
+
+    if rotation != 0.0:
+        # Rotated grid (counter-clockwise by `rotation` degrees about (x0, y0)):
+        # keep SFINCS's own row order (row 0 = n=0, the y0 edge) and use the
+        # matching rotated affine - the same transform hydromt writes to
+        # gis/mask.tif. Plots draw cell corners from it (see _grid_corners_lonlat).
+        theta = np.deg2rad(rotation)
+        transform = rasterio.Affine(dx * np.cos(theta), -dy * np.sin(theta), x0,
+                                    dx * np.sin(theta), dy * np.cos(theta), y0)
+        return mask2d, transform, crs
+
     # SFINCS's (m, n) indexing has n=0 at y0 (south edge); flip so row 0 is
     # north, matching the north-up Affine transform below.
     mask2d = np.flipud(mask2d)
-
-    if rotation != 0.0:
-        raise NotImplementedError(f"sfincs.inp has a nonzero rotation ({rotation}) - "
-                                   "this reader only handles axis-aligned grids")
     transform = rasterio.Affine(dx, 0.0, x0, 0.0, -dy, y0 + dy * nmax)
-    crs = f"EPSG:{epsg}" if epsg else None
     return mask2d, transform, crs
 
 
-def _grid_lonlat(transform: rasterio.Affine, crs: str, shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
-    """Corner lon/lat for imshow's `extent=` (tiles are axis-aligned UTM, so
-    a bounding-box reprojection is exact enough for a diagnostic plot)."""
+def _read_sfincs_bnd_bzs(sfincs_dir: Path) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
+    """The boundary points SFINCS is actually forced with (`sfincs.bnd`, x/y
+    in the model CRS) and their water-level series (`sfincs.bzs`: time in
+    seconds, then one column per bnd point) - which can be far fewer than
+    the matched_boundary_points.gpkg candidates."""
+    bnd_path, bzs_path = sfincs_dir / "sfincs.bnd", sfincs_dir / "sfincs.bzs"
+    if not (bnd_path.exists() and bzs_path.exists()):
+        return None, None
+    return np.loadtxt(bnd_path, ndmin=2), np.loadtxt(bzs_path, ndmin=2)
+
+
+def _grid_corners_lonlat(transform: rasterio.Affine, crs: str,
+                         shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
+    """(nrow+1, ncol+1) lon/lat of every cell corner, for pcolormesh - exact
+    for rotated SFINCS grids too, unlike a rectangular imshow extent."""
     nrow, ncol = shape
-    x0, y0 = transform.c, transform.f
-    x1, y1 = transform.c + transform.a * ncol, transform.f + transform.e * nrow
-    lons, lats = warp_transform(crs, "EPSG:4326", [x0, x1], [y0, y1])
-    return [min(lons), max(lons)], [min(lats), max(lats)]
+    cols, rows = np.meshgrid(np.arange(ncol + 1), np.arange(nrow + 1))
+    xs, ys = transform * (cols.ravel(), rows.ravel())
+    lons, lats = warp_transform(crs, "EPSG:4326", xs, ys)
+    return np.asarray(lons).reshape(nrow + 1, ncol + 1), np.asarray(lats).reshape(nrow + 1, ncol + 1)
+
+
+def _cell_centres_lonlat(transform: rasterio.Affine, crs: str, rows: np.ndarray,
+                         cols: np.ndarray) -> tuple[list, list]:
+    xs, ys = transform * (cols + 0.5, rows + 0.5)
+    return warp_transform(crs, "EPSG:4326", xs, ys)
 
 
 def plot_mask(mask2d: np.ndarray, transform: rasterio.Affine, crs: str, out_path: Path,
                stations_path: Path | None = None) -> None:
-    lon_range, lat_range = _grid_lonlat(transform, crs, mask2d.shape)
-    extent = [lon_range[0], lon_range[1], lat_range[0], lat_range[1]]
+    corner_lon, corner_lat = _grid_corners_lonlat(transform, crs, mask2d.shape)
 
     # dilate boundary cells by 1px for display - a 1-cell-wide line is easy to miss at figure scale.
     boundary = mask2d == BOUNDARY
@@ -130,8 +161,8 @@ def plot_mask(mask2d: np.ndarray, transform: rasterio.Affine, crs: str, out_path
     display = np.where(boundary_display, BOUNDARY, mask2d)
 
     fig, ax = plt.subplots(figsize=(10, 11))
-    ax.imshow(display, extent=extent, origin="upper", cmap=ListedColormap(MASK_COLORS),
-               vmin=0, vmax=2, aspect="auto", interpolation="nearest")
+    ax.pcolormesh(corner_lon, corner_lat, display, cmap=ListedColormap(MASK_COLORS),
+                  vmin=0, vmax=2, shading="flat", rasterized=True)
 
     n_stations = 0
     if stations_path is not None and stations_path.exists():
@@ -167,38 +198,49 @@ def plot_boundary_forcing(mask2d: np.ndarray, transform: rasterio.Affine, crs: s
 
     # (a) map: active domain (context) + boundary cell line + boundary station points
     ax = axes[0]
-    lon_range, lat_range = _grid_lonlat(transform, crs, mask2d.shape)
-    extent = [lon_range[0], lon_range[1], lat_range[0], lat_range[1]]
+    corner_lon, corner_lat = _grid_corners_lonlat(transform, crs, mask2d.shape)
     active_display = np.where(mask2d == ACTIVE, 1, 0)
-    ax.imshow(active_display, extent=extent, origin="upper", cmap=ListedColormap(["white", "#d8d8d4"]),
-               vmin=0, vmax=1, aspect="auto", interpolation="nearest", alpha=0.8)
+    ax.pcolormesh(corner_lon, corner_lat, active_display, cmap=ListedColormap(["white", "#d8d8d4"]),
+                  vmin=0, vmax=1, shading="flat", alpha=0.8, rasterized=True)
 
     b_rows, b_cols = np.nonzero(mask2d == BOUNDARY)
-    bxs = transform.c + transform.a * (b_cols + 0.5)
-    bys = transform.f + transform.e * (b_rows + 0.5)
-    blons, blats = warp_transform(crs, "EPSG:4326", bxs, bys)
+    blons, blats = _cell_centres_lonlat(transform, crs, b_rows, b_cols)
     ax.scatter(blons, blats, s=8, color="#d62728", marker="s", label=f"boundary cells (n={len(blons)})", zorder=4)
 
     points_path = sfincs_dir / "matched_boundary_points.gpkg"
     if points_path.exists():
         points = gpd.read_file(points_path).to_crs("EPSG:4326")
         ax.scatter(points.geometry.x, points.geometry.y, s=80, facecolors="none", edgecolors="#1f4e8c",
-                   linewidths=1.5, marker="o", label=f"forcing stations (n={len(points)})", zorder=5)
+                   linewidths=1.5, marker="o", label=f"matched COAST-RP stations (n={len(points)})", zorder=5)
+    bnd, bzs = _read_sfincs_bnd_bzs(sfincs_dir)
+    if bnd is not None:
+        bnd_lons, bnd_lats = warp_transform(crs, "EPSG:4326", bnd[:, 0], bnd[:, 1])
+        ax.scatter(bnd_lons, bnd_lats, s=220, color="#f2b705", edgecolors="black", linewidths=1.0, marker="*",
+                   label=f"points actually forcing SFINCS (sfincs.bnd, n={len(bnd)})", zorder=6)
+        for k, (lo, la) in enumerate(zip(bnd_lons, bnd_lats)):
+            ax.annotate(f"bnd {k + 1}: peak {bzs[:, k + 1].max():.2f} m", (lo, la), xytext=(6, 6),
+                        textcoords="offset points", fontsize=8, weight="bold", zorder=7)
     ax.set_xlabel("longitude")
     ax.set_ylabel("latitude")
     draw_panel_letter(ax, "a")
     draw_caption_box(ax, "Boundary stations + boundary cell line(s)", loc="lower left")
     ax.legend(fontsize=8, loc="best")
 
-    # (b) forcing timeseries
+    # (b) forcing timeseries: every matched station's hydrograph (context) and
+    # the bzs series SFINCS actually receives at its bnd points.
     ax = axes[1]
     hydro_path = sfincs_dir / "corrected_hydrographs.csv"
     hydro = pd.read_csv(hydro_path)
     station_cols = [c for c in hydro.columns if c != "elapsed_hr"]
     for col in station_cols:
         ax.plot(hydro["elapsed_hr"], hydro[col], color="#1f4e8c", alpha=0.35, linewidth=0.9)
-    ax.plot(hydro["elapsed_hr"], hydro[station_cols].median(axis=1), color="#d62728", linewidth=2,
-             label=f"median across {len(station_cols)} station(s)")
+    ax.plot(hydro["elapsed_hr"], hydro[station_cols].median(axis=1), color="#1f4e8c", linewidth=2,
+             label=f"median across {len(station_cols)} matched station(s)")
+    if bzs is not None:
+        for k in range(bzs.shape[1] - 1):
+            ax.plot(bzs[:, 0] / 3600.0, bzs[:, k + 1], color="#f2b705", linewidth=2.2,
+                    label="sfincs.bzs (applied forcing)" if k == 0 else None)
+        ax.axvline(bzs[-1, 0] / 3600.0, color="grey", linestyle=":", linewidth=1.2, label="end of bzs / SFINCS run")
     ax.set_xlabel("elapsed time (h)")
     ax.set_ylabel("water level (m)")
     draw_panel_letter(ax, "b")
@@ -212,8 +254,9 @@ def plot_boundary_forcing(mask2d: np.ndarray, transform: rasterio.Affine, crs: s
     print(f"Wrote {out_path}")
 
 
-def plot_biggest_disagreement(tile_dir: Path, out_path: Path) -> None:
-    cls = build_classification(tile_dir)
+def plot_biggest_disagreement(tile_dir: Path, out_path: Path, friction_scale_factor: float,
+                              max_outer_iterations: int) -> None:
+    cls = build_classification(tile_dir, friction_scale_factor, max_outer_iterations)
     if cls is None:
         print(f"SKIP {out_path}: no usable SFINCS/eikonal subgrid data for this tile")
         return
@@ -245,9 +288,28 @@ def plot_biggest_disagreement(tile_dir: Path, out_path: Path) -> None:
     fig, ax = plt.subplots(figsize=(9, 9))
     ax.set_facecolor(WATER_COLOR)  # non-land (ocean/river/lake) cells within the crop -
     # same shared colour every agreement map in the repo uses, not a plain white background.
-    ax.imshow(crop, cmap=ListedColormap(CATEGORY_COLORS), vmin=0, vmax=3, interpolation="nearest")
-    ax.set_xticks([])
-    ax.set_yticks([])
+    # Draw every cell at its real corner coordinates (subgrid CRS) rather than
+    # imshow's "row 0 = north" assumption: SFINCS subgrid rasters are stored
+    # south-up (positive y step) and, on rotated grids, rotated - imshow would
+    # show them mirrored north-south. Ticks are labelled in lon/lat along the
+    # crop's centre lines (UTM grid convergence over a crop this size is far
+    # below the label precision).
+    with rasterio.open(tile_dir / "sfincs_model" / "hmax_subgrid.tif") as src:
+        sg_transform, sg_crs = src.transform, src.crs
+    cc, rr = np.meshgrid(np.arange(c0, c1 + 1), np.arange(r0, r1 + 1))
+    xs, ys = sg_transform * (cc, rr)
+    ax.pcolormesh(xs, ys, crop, cmap=ListedColormap(CATEGORY_COLORS), vmin=0, vmax=3, shading="flat",
+                  rasterized=True)
+    ax.set_aspect("equal")
+    x_lo, x_hi, y_lo, y_hi = xs.min(), xs.max(), ys.min(), ys.max()
+    ax.set_xlim(x_lo, x_hi)
+    ax.set_ylim(y_lo, y_hi)
+    xc, yc = 0.5 * (x_lo + x_hi), 0.5 * (y_lo + y_hi)
+    xt, yt = np.linspace(x_lo, x_hi, 6)[1:-1], np.linspace(y_lo, y_hi, 6)[1:-1]
+    xt_lon, _ = warp_transform(sg_crs, "EPSG:4326", xt, np.full_like(xt, yc))
+    _, yt_lat = warp_transform(sg_crs, "EPSG:4326", np.full_like(yt, xc), yt)
+    ax.set_xticks(xt, [f"{v:.3f}°E" for v in xt_lon], fontsize=8)
+    ax.set_yticks(yt, [f"{v:.3f}°N" for v in yt_lat], fontsize=8)
     handles = [Patch(facecolor=c, edgecolor="grey", linewidth=0.5, label=l)
                for c, l in zip(CATEGORY_COLORS, CATEGORY_LABELS)]
     handles.append(Patch(facecolor=WATER_COLOR, edgecolor="grey", linewidth=0.5, label=WATER_LABEL))
@@ -263,10 +325,146 @@ def plot_biggest_disagreement(tile_dir: Path, out_path: Path) -> None:
     print(f"Wrote {out_path}")
 
 
+def _order_along_coast(lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Greedy nearest-neighbour chain through the stations, starting from the
+    one farthest from their centroid (an end of the coastline) - an along-coast
+    order without needing the coastline geometry itself. Returns (order,
+    cumulative distance in km)."""
+    kx = 111.32 * np.cos(np.radians(np.mean(lat)))
+    xy = np.column_stack([lon * kx, lat * 110.57])
+    start = int(np.argmax(np.hypot(*(xy - xy.mean(axis=0)).T)))
+    order, left = [start], set(range(len(xy))) - {start}
+    while left:
+        nxt = min(left, key=lambda k: np.hypot(*(xy[k] - xy[order[-1]])))
+        order.append(nxt)
+        left.remove(nxt)
+    steps = np.hypot(*np.diff(xy[order], axis=0).T)
+    return np.array(order), np.concatenate([[0.0], np.cumsum(steps)])
+
+
+def plot_coastrp_forcing(tile_dir: Path, sfincs_dir: Path, mask2d: np.ndarray, transform: rasterio.Affine,
+                         crs: str, out_path: Path, knn: int, river_code: int) -> None:
+    """(a) COAST-RP RP100 levels across the tile: every station, the eikonal's
+    own IDW seed level along the coastline (production `_idw_seed_values`,
+    `knn` nearest stations) and SFINCS's actual forcing points/boundary line.
+    (b) Along the coast, per station inside the tile: the station's own level,
+    the eikonal seed level and SFINCS's peak water level (zsmax) nearby - i.e.
+    what each model is actually driven by at that stretch of coast."""
+    from flood_model import _idw_seed_values, coastline_mask  # src/, heavy imports only needed here
+
+    with rasterio.open(tile_dir / "inputs" / "mask.tif") as src:
+        mask_native = src.read(1).astype(np.int8)
+        native_transform, native_bounds = src.transform, src.bounds
+    stations = gpd.read_file(tile_dir / "inputs" / "boundaries_RP100_SLR_0.gpkg").to_crs("EPSG:4326")
+    level_m = decode_waterlevel_cm(stations["SLR_0"].to_numpy())
+    st_lon, st_lat = stations.geometry.x.to_numpy(), stations.geometry.y.to_numpy()
+
+    coast = coastline_mask(mask_native, ocean_code=OCEAN_CODE, river_code=river_code)
+    c_rows, c_cols = np.nonzero(coast)
+    seed = _idw_seed_values(c_rows, c_cols, native_transform, np.column_stack([st_lon, st_lat]), level_m,
+                            min(knn, len(level_m)), mask_native, OCEAN_CODE)
+    c_lon, c_lat = rasterio.transform.xy(native_transform, c_rows, c_cols)
+    c_lon, c_lat = np.asarray(c_lon), np.asarray(c_lat)
+
+    zsmax_lon = zsmax_lat = zsmax = None
+    map_path = sfincs_dir / "sfincs_map.nc"
+    if map_path.exists():
+        import xarray as xr
+        with xr.open_dataset(map_path) as ds:
+            z = ds["zsmax"].values.reshape(ds["zsmax"].shape[-2:])
+            cx, cy = ds["corner_x"].values, ds["corner_y"].values
+        cx = 0.25 * (cx[:-1, :-1] + cx[1:, :-1] + cx[:-1, 1:] + cx[1:, 1:])
+        cy = 0.25 * (cy[:-1, :-1] + cy[1:, :-1] + cy[:-1, 1:] + cy[1:, 1:])
+        ok = np.isfinite(z)
+        zsmax_lon, zsmax_lat = (np.asarray(v) for v in warp_transform(crs, "EPSG:4326", cx[ok], cy[ok]))
+        zsmax = z[ok]
+
+    vmax = float(np.ceil(level_m.max() * 2) / 2)
+    cmap = plt.get_cmap("YlOrRd")
+    fig, axes = plt.subplots(1, 2, figsize=(18, 8.5), gridspec_kw={"width_ratios": [1, 1.25]})
+
+    # (a) map
+    ax = axes[0]
+    step = max(1, mask_native.shape[0] // 1500)
+    land_sea = np.where(mask_native[::step, ::step] == 0, 1, 0)
+    ax.imshow(land_sea, extent=[native_bounds.left, native_bounds.right, native_bounds.bottom, native_bounds.top],
+              cmap=ListedColormap([WATER_COLOR, "#e4e4e0"]), vmin=0, vmax=1, interpolation="nearest")
+    sc = ax.scatter(c_lon, c_lat, c=seed, s=2, cmap=cmap, vmin=0, vmax=vmax, zorder=3, rasterized=True)
+    ax.scatter(st_lon, st_lat, c=level_m, s=70, cmap=cmap, vmin=0, vmax=vmax, edgecolors="black",
+               linewidths=1.0, zorder=5)
+    b_rows, b_cols = np.nonzero(mask2d == BOUNDARY)
+    blons, blats = _cell_centres_lonlat(transform, crs, b_rows, b_cols)
+    ax.scatter(blons, blats, s=4, color="#1f4e8c", marker="s", zorder=4)
+    bnd, bzs = _read_sfincs_bnd_bzs(sfincs_dir)
+    if bnd is not None:
+        bnd_lons, bnd_lats = warp_transform(crs, "EPSG:4326", bnd[:, 0], bnd[:, 1])
+        ax.scatter(bnd_lons, bnd_lats, s=260, facecolors="none", edgecolors="#1f4e8c", linewidths=2.0,
+                   marker="*", zorder=6)
+    ax.set_xlim(native_bounds.left, native_bounds.right)
+    ax.set_ylim(native_bounds.bottom, native_bounds.top)
+    ax.set_aspect(1 / np.cos(np.radians(0.5 * (native_bounds.bottom + native_bounds.top))))
+    ax.set_xlabel("longitude (°E)")
+    ax.set_ylabel("latitude (°N)")
+    fig.colorbar(sc, ax=ax, fraction=0.04, pad=0.02, label="COAST-RP RP100 water level (m)")
+    ax.legend(handles=[
+        plt.Line2D([0], [0], marker="o", color="none", markerfacecolor="#f4a261", markeredgecolor="black",
+                   markersize=8, label="COAST-RP station (colour = level)"),
+        plt.Line2D([0], [0], color=cmap(0.5), linewidth=3, label=f"eikonal coastline seed (IDW, k={knn})"),
+        plt.Line2D([0], [0], marker="s", color="none", markerfacecolor="#1f4e8c", markersize=5,
+                   label="SFINCS waterlevel-boundary cells"),
+        plt.Line2D([0], [0], marker="*", color="none", markeredgecolor="#1f4e8c", markersize=14,
+                   label="SFINCS forcing points (sfincs.bnd)"),
+    ], loc="lower right", fontsize=8)
+    draw_panel_letter(ax, "a")
+
+    # (b) along the coast, stations inside the tile only
+    ax = axes[1]
+    inside = ((st_lon >= native_bounds.left) & (st_lon <= native_bounds.right)
+              & (st_lat >= native_bounds.bottom) & (st_lat <= native_bounds.top))
+    idx = np.nonzero(inside)[0]
+    order, dist_km = _order_along_coast(st_lon[idx], st_lat[idx])
+    idx = idx[order]
+    kx = 111.32 * np.cos(np.radians(np.mean(st_lat[idx])))
+
+    def near_median(lon: np.ndarray, lat: np.ndarray, values: np.ndarray, radius_km: float = 3.0) -> np.ndarray:
+        out = np.full(len(idx), np.nan)
+        for i, k in enumerate(idx):
+            d = np.hypot((lon - st_lon[k]) * kx, (lat - st_lat[k]) * 110.57)
+            if (d <= radius_km).any():
+                out[i] = np.median(values[d <= radius_km])
+        return out
+
+    ax.plot(dist_km, level_m[idx], "o-", color="black", linewidth=1.2, label="COAST-RP station level")
+    ax.plot(dist_km, near_median(c_lon, c_lat, seed), "s-", color=cmap(0.6), linewidth=2,
+            label=f"eikonal coastline seed (IDW k={knn}, median within 3 km)")
+    if zsmax is not None:
+        ax.plot(dist_km, near_median(zsmax_lon, zsmax_lat, zsmax), "^-", color="#1f4e8c", linewidth=2,
+                label="SFINCS peak water level zsmax (median within 3 km)")
+    if bzs is not None:
+        for k in range(bzs.shape[1] - 1):
+            ax.axhline(bzs[:, k + 1].max(), color="#1f4e8c", linestyle=":", linewidth=1,
+                       label="SFINCS bnd forcing peaks" if k == 0 else None)
+    ax.set_xticks(dist_km)
+    ax.set_xticklabels([f"{st_lon[k]:.2f}E\n{st_lat[k]:.2f}N" for k in idx], rotation=90, fontsize=7)
+    ax.set_xlabel("COAST-RP stations inside the tile, ordered along the coast")
+    ax.set_ylabel("water level (m)")
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=9, loc="upper right")
+    draw_panel_letter(ax, "b")
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=170)
+    plt.close(fig)
+    print(f"Wrote {out_path}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tile-id", required=True)
     parser.add_argument("--base-dir-name", default="validation_sfincs_v5")
+    parser.add_argument("--friction-scale-factor", type=float, default=FRICTION_SCALE_FACTOR_DEFAULT,
+                        help="which friction-sweep point's eikonal raster to compare against")
+    parser.add_argument("--max-outer-iterations", type=int, default=MAX_OUTER_ITERATIONS_DEFAULT)
     parser.add_argument("--config", default=str(Path(__file__).resolve().parent.parent
                                                  / "snakemake_workflow" / "config" / "config.yml"))
     args = parser.parse_args()
@@ -281,7 +479,14 @@ def main() -> None:
     plot_mask(mask2d, transform, crs, fig_dir / f"{args.tile_id}_mask.png",
               stations_path=sfincs_dir / "matched_boundary_points.gpkg")
     plot_boundary_forcing(mask2d, transform, crs, sfincs_dir, fig_dir / f"{args.tile_id}_boundary_forcing.png")
-    plot_biggest_disagreement(tile_dir, fig_dir / f"{args.tile_id}_biggest_disagreement.png")
+    plot_biggest_disagreement(tile_dir, fig_dir / f"{args.tile_id}_biggest_disagreement.png",
+                              args.friction_scale_factor, args.max_outer_iterations)
+    with open(args.config, encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs,
+                         fig_dir / f"{args.tile_id}_coastrp_forcing.png",
+                         knn=int(cfg["simulation"]["flooding"]["knn"]),
+                         river_code=int(cfg["tile_generation"]["river_code"]))
 
 
 if __name__ == "__main__":

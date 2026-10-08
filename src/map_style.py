@@ -40,6 +40,29 @@ LAND_LABEL = "Land"
 WATER_LABEL = "Permanent water"
 
 
+def orient_north_up(arr, transform):
+    """Return `arr` (rows x cols [x bands]) flipped so row 0 is north and
+    column 0 is west, for display with imshow's default origin="upper".
+
+    SFINCS subgrid rasters (hmax_subgrid.tif, the eikonal/bathtub rasters
+    written on the same grid) are stored south-up - positive y step, row 0
+    at the southern edge - so imshow without this shows them mirrored
+    north-south. Decides from the transform's own row/column direction
+    vectors, so it is a no-op for ordinary north-up rasters. A rotated grid
+    (non-zero transform.b/.d) keeps its small rotation; use the real cell
+    corners (pcolormesh) where exact geometry matters.
+    """
+    import numpy as np  # local: this module otherwise needs only matplotlib
+
+    row_step_north = transform.e  # y change per row (cos-dominated for small rotations)
+    col_step_east = transform.a
+    if row_step_north > 0:
+        arr = np.flip(arr, axis=0)
+    if col_step_east < 0:
+        arr = np.flip(arr, axis=1)
+    return arr
+
+
 def draw_panel_letter(ax: plt.Axes, letter: str | None) -> None:
     """'(a)'/'(b)'/... drawn just OUTSIDE the axes (above its top-left
     corner, axes-fraction y > 1) - a bare letter, never inside the data

@@ -221,9 +221,8 @@ def materialize_config(
     output_path: str | Path | None = None,
 ) -> dict:
     """Deep-merge config.yml + config_local.yml (if present) + `overrides`,
-    for building a real, standalone scenario config file (e.g. the
-    calibration sweep's per-run configs, `scripts/calibration/
-    build_run_config.py`).
+    for building a real, standalone scenario config file (e.g.
+    `scripts/build_delta_run_configs.py`'s per-scenario configs).
 
     Each entry in `overrides` is either a path to a YAML file (merged in
     list order, missing ones silently skipped - same convention as

@@ -294,11 +294,11 @@ described above (`tests/eikonal_kernel_validation`).
    direction (e.g. the blocks above and to the left for the top-left to
    bottom-right sweep), and friction is fixed within a solve. A block is
    therefore skipped if none of those three blocks has changed since it was
-   last processed in the same direction (Figure 2a). Blocks are visited in
-   the sweep's own direction, so every vertex's upwind neighbours are still
-   updated before the vertex itself. Because most of a domain settles within
-   the first few rounds, and later rounds only move a narrow front through
-   winding channels (Figure 2b), most block visits are skipped (Figure 2c).
+   last processed in the same direction. Blocks are visited in the sweep's
+   own direction, so every vertex's upwind neighbours are still updated
+   before the vertex itself. Because most of a domain settles within the
+   first few rounds, and later rounds only move a narrow front through
+   winding channels, most block visits are skipped (Figure 2).
 
 On ten real calibration tiles (2–72 million cells), the first change alone
 made the complete obstacle-coupled flood solve (§4.4a) 2–7 times faster, and
@@ -314,14 +314,17 @@ Figure 2 is generated from the production `_block_sweep` code
 tile): uniform open land seeded along its top edge (the "coastline"), with
 one spiral maze of impassable walls in the lower right, the same construction
 as Figure 1b, built at a larger size. A block size of 16 is used for legibility
-(production uses 64 on grids roughly 30 times larger in each dimension). In
-panel (b), outlined blocks are processed in at least one of that round's four
-sweeps and washed-out blocks are skipped throughout the round. Most of the
-open land settles after the first round, and by round 8 only blocks in and
-around the maze are still processed, while the front keeps winding through it
-for 25 rounds; over the whole solve, 17% of the plain sweep's block visits are
-processed, and the script asserts that the result is identical both to the
-production solver and to plain dense sweeps.
+(production uses 64 on grids roughly 30 times larger in each dimension).
+The figure shows only the block grid, not the solution itself: each square
+is one block, coloured if it is re-swept in at least one of that round's four
+sweeps (because it or an upwind neighbour block changed) and grey if it is
+skipped for the whole round (nothing it depends on changed). The titles give
+the share of individual block visits (blocks × 4 sweeps) that are processed.
+Most of the open land settles after the first round, and by round 8 only the
+blocks in and around the maze are still re-swept, while the front keeps
+winding through it for 26 rounds. Over the whole solve, 19% of the plain
+sweep's block visits are processed, and the script asserts that the result is
+identical both to the production solver and to plain dense sweeps.
 
 ![Block skipping: only blocks whose inputs changed are re-swept](eikonal_example_block_sweep.png)
 

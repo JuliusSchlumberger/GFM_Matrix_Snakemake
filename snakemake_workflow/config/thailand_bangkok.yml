@@ -22,8 +22,8 @@
 # sweep: 9 return periods x 5 SLR scenarios x 3 SSP population-growth paths.
 #
 # Layered on top of config.yml + config_local.yml via
-# src/config_utils.py::materialize_config, same pattern as
-# scripts/calibration/build_run_config.py but without a sweep-point layer.
+# src/config_utils.py::materialize_config - a single scenario-config
+# override layer, no sweep-point layer (this isn't a parameter sweep).
 
 tile_grid:
   path: "{processed_inputs_dir}/mask/thailand_bangkok_tiles.gpkg"

@@ -1,4 +1,4 @@
-# OFAT sweep point - eikonal max_rounds 8 (default 12). See docs/calibration_sweep_plan.md.
+# OFAT sweep point - eikonal max_rounds 8 (default 12).
 simulation:
   flooding:
     max_rounds: 8
