@@ -90,7 +90,14 @@ def main() -> None:
     results: dict[str, bool] = {}
     t_start = time.time()
 
-    for country in countries:
+    for i, country in enumerate(countries, 1):
+        elapsed_min = (time.time() - t_start) / 60
+        print(
+            f"\n\n{'#' * 60}\n"
+            f"#  Country {i}/{len(countries)}: {country}  "
+            f"({elapsed_min:.1f} min elapsed so far)\n"
+            f"{'#' * 60}"
+        )
         ok = _run(
             [PYTHON, str(SCRIPTS_DIR / "validate_country.py")] + cfg_arg + ["--country", country],
             f"validate_country: {country}", args.fail_fast,

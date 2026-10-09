@@ -236,6 +236,18 @@ def main() -> None:
     print(eikonal_over[["tile_id", "csi", "union_km2", "eikonal_only_km2", "eikonal_sfincs_only_km2"]].to_string(index=False))
 
     fsf_suffix = "" if args.friction_scale_factor is None else f"_fsf{fsf:g}"
+    # Which tiles each panel shows, in panel order - read back by
+    # run_calibration_sweep_analysis.py to draw per-tile diagnostics for exactly these tiles.
+    selection_cols = ["tile_id", "csi", "union_km2", "eikonal_only_km2", "eikonal_sfincs_only_km2"]
+    selection = pd.concat([
+        sfincs_over[selection_cols].assign(panel="sfincs_overpredicts"),
+        eikonal_over[selection_cols].assign(panel="eikonal_overpredicts"),
+    ])
+    selection["rank"] = selection.groupby("panel").cumcount() + 1
+    selection_path = fig_dir / f"worst_tiles_selection{fsf_suffix}.csv"
+    selection[["panel", "rank", *selection_cols]].to_csv(selection_path, index=False)
+    print(f"Wrote {selection_path}")
+
     _make_panel(
         sfincs_over, base_dir,
         fig_dir / f"worst_tiles_panel_sfincs_overpredicts{fsf_suffix}.png",

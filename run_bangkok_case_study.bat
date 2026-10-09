@@ -18,7 +18,7 @@ set REPO=%~dp0
 set PYEXE=C:\Users\schlumbe\AppData\Local\miniforge3\envs\gfm_python_preprocessing\python.exe
 set SNAKEMAKE=C:\Users\schlumbe\AppData\Local\miniforge3\envs\gfm_python_preprocessing\Scripts\snakemake.exe
 set STUDY_ROOT=P:\11212688-004-global-floodmaps\modelling\bangkok_chao_phraya
-set CASE_GPKG=P:\11212688-004-global-floodmaps\modelling\Marjolijn_Thailand\Bangkok_tiles.gpkg
+set CASE_GPKG=%STUDY_ROOT%\bangkok_chao_phraya_domain.gpkg
 set MATERIALIZED=%REPO%snakemake_workflow\config\bangkok_chao_phraya_materialized.yml
 set RESOLVED=%STUDY_ROOT%\resolved_config.yml
 
@@ -60,7 +60,7 @@ echo.
 echo === Step 5b: case-polygon exposure CSV ===
 "%PYEXE%" "%REPO%analysis\compute_bangkok_case_exposure.py" ^
   --config "%MATERIALIZED%" ^
-  --case-polygon-gpkg "%CASE_GPKG%" --case-polygon-layer domain_tiles_globalgpkg
+  --case-polygon-gpkg "%CASE_GPKG%" --case-polygon-layer bangkok_tile
 if %ERRORLEVEL% NEQ 0 (
   echo.
   echo FAILED at compute_bangkok_case_exposure.py.
@@ -79,7 +79,7 @@ echo.
 echo === Step 6b: case flood map (RP100) ===
 "%PYEXE%" "%REPO%analysis\plot_bangkok_case_flood_map.py" ^
   --config "%MATERIALIZED%" ^
-  --case-polygon-gpkg "%CASE_GPKG%" --case-polygon-layer domain_tiles_globalgpkg ^
+  --case-polygon-gpkg "%CASE_GPKG%" --case-polygon-layer bangkok_tile ^
   --return-period RP100
 if %ERRORLEVEL% NEQ 0 (echo FAILED at plot_bangkok_case_flood_map.py. & exit /b 1)
 

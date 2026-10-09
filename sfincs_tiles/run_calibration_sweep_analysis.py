@@ -1,5 +1,5 @@
 """THE single entry point for the sfincs_calibration friction-sweep
-analysis/postprocessing pipeline - one command, four steps, each a real
+analysis/postprocessing pipeline - one command, five steps, each a real
 subprocess call to an existing, independently-tested script (nothing
 reimplemented here, stdout/stderr stream straight through so you see the
 same live progress running any of them standalone would give you):
@@ -20,6 +20,11 @@ same live progress running any of them standalone would give you):
      depth-joint correlation/category-alignment heatmaps) all for the one
      friction factor that actually performs best, not the production
      default.
+  5. plot_sfincs_tile_diagnostics.py --figures coastrp_forcing for every
+     tile in those two worst-tile panels (plot_worst_tiles_panel.py's
+     worst_tiles_selection_fsf{X}.csv) - written to figures/ as
+     {overprediction,underprediction}_{tile_id}_forcing_comparison.png
+     (eikonal over-/under-predicting relative to SFINCS).
 
 Usage:
     python run_calibration_sweep_analysis.py --base-dir-name sfincs_calibration --max-outer-iterations 5
@@ -44,6 +49,9 @@ sys.path.insert(0, str(_THIS_DIR))
 from gfm_config import read_root  # noqa: E402
 
 FRICTION_SCALE_FACTORS_DEFAULT = [3.0, 6.0, 9.0, 12.0, 15.0, 18.0, 21.0, 24.0, 27.0, 30.0]
+
+# worst-tile panel -> figure-name prefix, from the eikonal's point of view
+_EIKONAL_PREDICTION = {"eikonal_overpredicts": "overprediction", "sfincs_overpredicts": "underprediction"}
 
 
 def _run(cmd: list[str]) -> None:
@@ -125,6 +133,29 @@ def main() -> None:
         "--friction-scale-factor", str(best_fsf),
         "--max-outer-iterations", str(args.max_outer_iterations),
     ])
+
+    # Step 5: COAST-RP forcing figure for every tile in the two worst-tile panels
+    # (the selection step 3 wrote). One subprocess per tile; a failing tile is
+    # reported at the end instead of aborting the rest.
+    fig_dir = root / args.base_dir_name / "figures"
+    selection = pd.read_csv(fig_dir / f"worst_tiles_selection_fsf{best_fsf:g}.csv")
+    failed = []
+    for row in selection.itertuples():
+        cmd = [
+            python, str(_THIS_DIR / "plot_sfincs_tile_diagnostics.py"),
+            "--config", args.config,
+            "--tile-id", str(row.tile_id),
+            "--base-dir-name", args.base_dir_name,
+            "--figures", "coastrp_forcing",
+            "--fig-dir", str(fig_dir),
+            "--out-name", f"{_EIKONAL_PREDICTION[row.panel]}_{row.tile_id}_forcing_comparison.png",
+        ]
+        print(f"\n$ {' '.join(cmd)}", flush=True)
+        if subprocess.run(cmd).returncode != 0:
+            failed.append(f"{row.panel}/{row.tile_id}")
+    if failed:
+        print(f"\nCOAST-RP forcing figure FAILED for {len(failed)} tile(s): {', '.join(failed)}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -82,6 +82,10 @@ def main() -> None:
     parser.add_argument("--only-exposure",    action="store_true")
     parser.add_argument("--only-plots",       action="store_true")
     parser.add_argument("--skip-exposure",    action="store_true")
+    parser.add_argument("--skip-flood-totals", action="store_true",
+                        help="skip compute_flood_totals.py even if analysis.compute_flood_totals is true "
+                             "(e.g. it already ran standalone - see analysis/compute_flood_totals.py's own "
+                             "--workers for a much faster parallel run of just that step)")
     parser.add_argument("--skip-world-maps",  action="store_true")
     args = parser.parse_args()
 
@@ -110,6 +114,8 @@ def main() -> None:
         do_exposure = False
     if args.skip_exposure:
         do_exposure = False
+    if args.skip_flood_totals:
+        do_flood_totals = False
     if args.skip_world_maps:
         do_world_maps = False
 

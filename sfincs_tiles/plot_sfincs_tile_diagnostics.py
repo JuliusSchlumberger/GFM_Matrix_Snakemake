@@ -1,4 +1,4 @@
-"""Default per-tile SFINCS validation inspection: three diagnostic figures
+"""Default per-tile SFINCS validation inspection: four diagnostic figures
 for one built (and ideally run) tile, written to
 `{base_dir_name}/{tile_id}/figures/`.
 
@@ -19,11 +19,19 @@ Figures:
      contiguous eikonal-only-or-SFINCS-only patch (four-way classification
      reused from plot_worst_tiles_panel.py's own build_classification()),
      labelled with which model over-predicts there and its area.
+  4. {tile_id}_coastrp_forcing.png - (a) COAST-RP RP100 levels across the
+     tile, the eikonal's IDW coastline seed and SFINCS's forcing points,
+     (b) station level vs. eikonal seed vs. SFINCS zsmax along the coast.
+     Drawn automatically for the worst-tile panel tiles by
+     run_calibration_sweep_analysis.py (step 5).
 
 Usage:
     python plot_sfincs_tile_diagnostics.py --tile-id 1693 --base-dir-name validation_sfincs_v5
     python plot_sfincs_tile_diagnostics.py --tile-id 1974 --base-dir-name sfincs_calibration \
         --friction-scale-factor 9 --max-outer-iterations 5
+    # one figure only, into another directory under another name:
+    python plot_sfincs_tile_diagnostics.py --tile-id 1974 --base-dir-name sfincs_calibration \
+        --figures coastrp_forcing --fig-dir <dir> --out-name underprediction_1974_forcing_comparison.png
 """
 
 from __future__ import annotations
@@ -63,6 +71,8 @@ OCEAN_CODE = 1
 INACTIVE, ACTIVE, BOUNDARY = 0, 1, 2
 MASK_COLORS = ["#f5f5f2", "#a8c8e8", "#d62728"]  # inactive, active, boundary
 MASK_LABELS = ["inactive", "active", "waterlevel boundary"]
+
+FIGURES = ["mask", "boundary_forcing", "biggest_disagreement", "coastrp_forcing"]
 
 
 def _parse_sfincs_inp(inp_path: Path) -> dict:
@@ -422,6 +432,15 @@ def plot_coastrp_forcing(tile_dir: Path, sfincs_dir: Path, mask2d: np.ndarray, t
     inside = ((st_lon >= native_bounds.left) & (st_lon <= native_bounds.right)
               & (st_lat >= native_bounds.bottom) & (st_lat <= native_bounds.top))
     idx = np.nonzero(inside)[0]
+    if len(idx) == 0:
+        ax.text(0.5, 0.5, "no COAST-RP station inside the tile", ha="center", va="center", transform=ax.transAxes)
+        ax.set_axis_off()
+        draw_panel_letter(ax, "b")
+        fig.tight_layout()
+        fig.savefig(out_path, dpi=170)
+        plt.close(fig)
+        print(f"Wrote {out_path}")
+        return
     order, dist_km = _order_along_coast(st_lon[idx], st_lat[idx])
     idx = idx[order]
     kx = 111.32 * np.cos(np.radians(np.mean(st_lat[idx])))
@@ -467,26 +486,42 @@ def main() -> None:
     parser.add_argument("--max-outer-iterations", type=int, default=MAX_OUTER_ITERATIONS_DEFAULT)
     parser.add_argument("--config", default=str(Path(__file__).resolve().parent.parent
                                                  / "snakemake_workflow" / "config" / "config.yml"))
+    parser.add_argument("--figures", nargs="+", choices=FIGURES, default=FIGURES,
+                        help="which figure(s) to draw (default: all four)")
+    parser.add_argument("--fig-dir", default=None,
+                        help="output directory (default: {base-dir-name}/{tile_id}/figures)")
+    parser.add_argument("--out-name", default=None,
+                        help="file name for the figure, only with exactly one --figures entry "
+                             "(default: {tile_id}_{figure}.png)")
     args = parser.parse_args()
+    if args.out_name and len(args.figures) != 1:
+        parser.error("--out-name needs exactly one --figures entry")
 
     root = read_root(Path(args.config))
     tile_dir = root / args.base_dir_name / args.tile_id
     sfincs_dir = tile_dir / "sfincs_model"
-    fig_dir = tile_dir / "figures"
+    fig_dir = Path(args.fig_dir) if args.fig_dir else tile_dir / "figures"
     fig_dir.mkdir(parents=True, exist_ok=True)
 
+    def out_path(figure: str) -> Path:
+        return fig_dir / (args.out_name or f"{args.tile_id}_{figure}.png")
+
     mask2d, transform, crs = _read_sfincs_mask(sfincs_dir)
-    plot_mask(mask2d, transform, crs, fig_dir / f"{args.tile_id}_mask.png",
-              stations_path=sfincs_dir / "matched_boundary_points.gpkg")
-    plot_boundary_forcing(mask2d, transform, crs, sfincs_dir, fig_dir / f"{args.tile_id}_boundary_forcing.png")
-    plot_biggest_disagreement(tile_dir, fig_dir / f"{args.tile_id}_biggest_disagreement.png",
-                              args.friction_scale_factor, args.max_outer_iterations)
-    with open(args.config, encoding="utf-8") as f:
-        cfg = yaml.safe_load(f)
-    plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs,
-                         fig_dir / f"{args.tile_id}_coastrp_forcing.png",
-                         knn=int(cfg["simulation"]["flooding"]["knn"]),
-                         river_code=int(cfg["tile_generation"]["river_code"]))
+    if "mask" in args.figures:
+        plot_mask(mask2d, transform, crs, out_path("mask"),
+                  stations_path=sfincs_dir / "matched_boundary_points.gpkg")
+    if "boundary_forcing" in args.figures:
+        plot_boundary_forcing(mask2d, transform, crs, sfincs_dir, out_path("boundary_forcing"))
+    if "biggest_disagreement" in args.figures:
+        plot_biggest_disagreement(tile_dir, out_path("biggest_disagreement"),
+                                  args.friction_scale_factor, args.max_outer_iterations)
+    if "coastrp_forcing" in args.figures:
+        with open(args.config, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+        plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs,
+                             out_path("coastrp_forcing"),
+                             knn=int(cfg["simulation"]["flooding"]["knn"]),
+                             river_code=int(cfg["tile_generation"]["river_code"]))
 
 
 if __name__ == "__main__":

@@ -148,8 +148,15 @@ def _compute_zsini_array(
     "no initial water" sentinel (-9999.0), which SFINCS treats as dry at bed
     level - otherwise inland land would start the simulation already
     "flooded" from the interpolated coastal water level.
+
+    Cell centres come from `dst_transform` (rotation-aware), not from
+    grid_coords' "x"/"y": on a rotated grid those are plain pixel indices
+    (see the forcing step's own comment), which put every cell ~equally far
+    from all stations and gave a uniform zsini (the station mean) - fixed
+    2026-10-09. `grid_coords` is kept in the signature for callers only.
     """
-    yy, xx = np.meshgrid(grid_coords["y"].values, grid_coords["x"].values, indexing="ij")
+    rows, cols = np.indices(dst_shape)
+    xx, yy = dst_transform * (cols + 0.5, rows + 0.5)
     zsini_arr = idw_interpolate_to_grid(station_x, station_y, station_values, xx, yy).astype(np.float32)
 
     native_mask_on_grid = _reproject_nearest_to_grid(native_mask_path, dst_transform, dst_crs, dst_shape)
@@ -168,6 +175,29 @@ def _ocean_polygon_wgs84(mask_path: Path, ocean_code: int = 1) -> gpd.GeoDataFra
     if not geoms:
         raise ValueError(f"{mask_path}: no ocean (code={ocean_code}) cells found")
     return gpd.GeoDataFrame(geometry=geoms, crs="EPSG:4326")
+
+
+def _create_mask(sf: SfincsModel, tile_gdf: gpd.GeoDataFrame, ocean_poly: gpd.GeoDataFrame,
+                 boundary_lines_gpkg: Path | None, resolution_m: float) -> None:
+    """Active cells + waterlevel boundary cells.
+
+    Default: the whole tile active, boundary = active-domain edge cells in the
+    ocean. With `boundary_lines_gpkg` (build_station_boundary_lines.py output):
+    active = the tile minus the line's inactive (ocean-side) faces, boundary =
+    the active-domain edge cells along the boundary line (incl. its tile-edge
+    stretches) - the model then ends at the line instead of the open-sea tile edge.
+    """
+    if boundary_lines_gpkg is None:
+        sf.mask.create_active(include_polygon=tile_gdf, reset_mask=True)
+        sf.mask.create_boundary(btype="waterlevel", include_polygon=ocean_poly, reset_bounds=False, all_touched=True)
+        return
+    tile_4326 = tile_gdf.to_crs("EPSG:4326")
+    inactive = retry_transient_io(gpd.read_file, boundary_lines_gpkg, layer="inactive").to_crs("EPSG:4326")
+    active = tile_4326.geometry.iloc[0].difference(inactive.union_all()) if len(inactive) else tile_4326.geometry.iloc[0]
+    sf.mask.create_active(include_polygon=gpd.GeoDataFrame(geometry=[active], crs="EPSG:4326"), reset_mask=True)
+    lines = retry_transient_io(gpd.read_file, boundary_lines_gpkg, layer="boundary_line").to_crs(sf.crs)
+    band = gpd.GeoDataFrame(geometry=[lines.union_all().buffer(1.5 * resolution_m)], crs=sf.crs)
+    sf.mask.create_boundary(btype="waterlevel", include_polygon=band, reset_bounds=False, all_touched=True)
 
 
 TRUNCATE_WINDOW_HR_DEFAULT = (40.0, 110.0)  # truncation window (h) around COAST-HG's
@@ -201,6 +231,7 @@ def build_sfincs_tile(
     subgrid_nrmax: int = SUBGRID_NRMAX_DEFAULT,
     base_dir_name: str = "validation_sfincs_v2",
     rotated: bool = True,
+    boundary_lines_gpkg: Path | None = None,
 ) -> Path:
     _validate_subgrid_params(resolution_m, subgrid_nr_pixels)
     # Reads from the tile's working copy, not model_outputs/ directly.
@@ -242,9 +273,8 @@ def build_sfincs_tile(
     # running diagonally across this tile's rotated UTM grid. all_touched=True
     # includes every cell the ocean polygon touches at all, giving a continuous
     # boundary regardless of grid rotation.
-    sf.mask.create_active(include_polygon=tile_gdf, reset_mask=True)
     ocean_poly = _ocean_polygon_wgs84(tile_dir / "mask.tif")
-    sf.mask.create_boundary(btype="waterlevel", include_polygon=ocean_poly, reset_bounds=False, all_touched=True)
+    _create_mask(sf, tile_gdf, ocean_poly, boundary_lines_gpkg, resolution_m)
     n_active = int((sf.grid.data["mask"] > 0).sum())
     n_bnd = int((sf.grid.data["mask"] == 2).sum())
     print(f"[2/8] mask: {n_active} active cell(s), {n_bnd} waterlevel-boundary cell(s)")
@@ -296,8 +326,7 @@ def build_sfincs_tile(
     # entries - DataCatalog is parsed once at construction, not re-read live.
     sf = SfincsModel(data_libs=[str(local_catalog_path)], root=str(sfincs_dir), mode="w+")
     sf.grid.create_from_region(region={"geom": tile_gdf}, res=resolution_m, crs="utm", rotated=rotated)
-    sf.mask.create_active(include_polygon=tile_gdf, reset_mask=True)
-    sf.mask.create_boundary(btype="waterlevel", include_polygon=ocean_poly, reset_bounds=False, all_touched=True)
+    _create_mask(sf, tile_gdf, ocean_poly, boundary_lines_gpkg, resolution_m)
 
     # write_dep_tif=True writes subgrid/dep_subgrid.tif, the fine-resolution DEM
     # run_sfincs_tile.py's own postprocessing needs for downscale_floodmap().
@@ -457,6 +486,12 @@ def main() -> None:
     )
     parser.add_argument("--base-dir-name", default="validation_sfincs_v2", help="output root directory name under paths.root (default: validation_sfincs_v2)")
     parser.add_argument(
+        "--boundary-lines-gpkg", default=None,
+        help="build_station_boundary_lines.py output for this tile: mask the ocean side of its "
+             "boundary line inactive and force along the line (default: whole tile active, "
+             "forced along the open-sea tile edge)",
+    )
+    parser.add_argument(
         "--no-rotated", dest="rotated", action="store_false",
         help="use an axis-aligned UTM grid instead of the default rotated grid (2026-10 default flip - "
              "was unrotated until now, see build_sfincs_tile's own comment)",
@@ -470,6 +505,7 @@ def main() -> None:
             args.tile_id, root, resolution_m=args.resolution_m, truncate_window_hr=truncate_window_hr,
             subgrid_nr_pixels=args.subgrid_nr_pixels, subgrid_nr_levels=args.subgrid_nr_levels, subgrid_nrmax=args.subgrid_nrmax,
             base_dir_name=args.base_dir_name, rotated=args.rotated,
+            boundary_lines_gpkg=Path(args.boundary_lines_gpkg) if args.boundary_lines_gpkg else None,
         )
     except Exception as e:
         text = str(e)

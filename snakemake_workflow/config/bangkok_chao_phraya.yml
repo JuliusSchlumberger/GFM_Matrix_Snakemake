@@ -1,6 +1,9 @@
 # Bangkok / Chao Phraya basin case study (Marjolijn, 2026-10-08). Case
-# polygon: Marjolijn_Thailand/Bangkok_tiles.gpkg's `domain_tiles_globalgpkg`
-# layer (~99.79-101.23E / 13.03-14.77N). That gpkg's own `domain_tiles_global`
+# polygon: {root}/bangkok_chao_phraya/bangkok_chao_phraya_domain.gpkg, layer
+# `bangkok_tile` (~99.79-101.23E / 13.03-14.77N; since 2026-10-09 - geometry
+# identical to the original Marjolijn_Thailand/Bangkok_tiles.gpkg
+# `domain_tiles_globalgpkg` layer, so the tile selection below is unchanged).
+# Bangkok_tiles.gpkg's own `domain_tiles_global`
 # layer (tile_id 31/499) is from a now-superseded tile grid snapshot (the
 # production grid was regenerated 2026-10-05, and those IDs now point at
 # tiles in Alaska/northern Canada) - NOT used. Real candidate tiles were
