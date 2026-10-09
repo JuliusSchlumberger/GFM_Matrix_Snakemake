@@ -15,7 +15,6 @@ deleted automatically by Snakemake).
 
 import sys
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import numpy as np
 import rasterio
@@ -51,79 +50,70 @@ def compute_flood_fraction(
     cells inside the tile but entirely outside the domain end up NaN →
     written as this module's own `_NODATA_COARSE`.
     """
-    with TemporaryDirectory() as tmpdir:
-        exc_path = Path(tmpdir) / "exc.tif"   # binary exceedance, nodata preserved
-        dom_path = Path(tmpdir) / "dom.tif"   # domain mask (0/1, no nodata)
+    # Step 1: build the exceedance and domain arrays in memory, block by block
+    # (single read pass). Previously each block was written to an LZW GeoTIFF
+    # in a temp dir and both files were then read back WHOLE for step 2 - no
+    # memory saved, just an extra compress/decompress of ~2 full-size float32
+    # rasters per job. Filling the arrays directly gives average_pool_to_grid
+    # the exact same values (LZW is lossless; 1/0/_NODATA_FINE are exact in
+    # float32) with the exact same transform/CRS (the temp files copied both
+    # from the waterdepth chunk's own profile) - bit-identical output,
+    # verified on all 90 thailand_bangkok (chunk, RP, SLR) scenarios.
+    with retry_transient_io(rasterio.open, waterdepth_path) as wd:
+        src_transform, src_crs = wd.transform, wd.crs
+        exc_arr = np.empty((wd.height, wd.width), dtype="float32")  # binary exceedance, nodata preserved
+        dom_arr = np.empty((wd.height, wd.width), dtype="float32")  # domain mask (0/1, no nodata)
+        for row_off in range(0, wd.height, block_size):
+            bh = min(block_size, wd.height - row_off)
+            for col_off in range(0, wd.width, block_size):
+                bw = min(block_size, wd.width - col_off)
+                window = Window(col_off, row_off, bw, bh)
+                depth = wd.read(1, window=window)
+                valid = (
+                    np.isfinite(depth) if wd.nodata is None
+                    else (depth != wd.nodata)
+                )
+                # valid-but-dry pixels MUST be 0.0, never _NODATA_FINE -
+                # average_pool_to_grid's numerator contract (see its
+                # own docstring in src/rasters.py) requires nodata to
+                # mean ONLY "outside the domain"; marking dry pixels
+                # as nodata too silently drops them from Pass A's
+                # average instead of counting them as non-flooded,
+                # inflating ff for any partially-flooded coarse cell
+                # (confirmed on a real synthetic case, 2026-09: a
+                # true fraction of 0.25 came out as 0.75 - not a
+                # small error, and it scales with the domain/flood
+                # ratio, so it's worse for less-flooded cells).
+                exc_arr[row_off:row_off + bh, col_off:col_off + bw] = np.where(
+                    valid, np.where(depth > threshold_m, 1.0, 0.0), _NODATA_FINE
+                ).astype("float32")
+                dom_arr[row_off:row_off + bh, col_off:col_off + bw] = np.where(valid, 1.0, 0.0).astype("float32")
 
-        # Step 1: write exceedance and domain mask simultaneously (single read pass)
-        with retry_transient_io(rasterio.open, waterdepth_path) as wd:
-            exc_profile = wd.profile.copy()
-            exc_profile.update(dtype="float32", count=1, nodata=_NODATA_FINE,
-                               compress="lzw", tiled=True, bigtiff="YES")
-            dom_profile = wd.profile.copy()
-            dom_profile.update(dtype="float32", count=1, compress="lzw",
-                               tiled=True, bigtiff="YES")
-            dom_profile.pop("nodata", None)  # no nodata: 0 = outside domain, 1 = inside
+    # Step 2: reproject both rasters to the coarse population grid.
+    # Population grid metadata read directly via rasterio (no
+    # xarray/rioxarray) since only height/width/transform/crs are
+    # needed; profiling showed the xarray-backend-plugin-discovery
+    # machinery (`load_raster`'s `xr.open_dataarray`, even with
+    # `engine=` given explicitly) costs ~4s of pure import/reflection
+    # overhead per process, unrelated to this raster's actual (tiny)
+    # size - a real cost repeated on every one of this rule's many
+    # fresh-process invocations. This part IS verified safe (metadata
+    # only, no resampling/masking logic touched).
+    with rasterio.open(population_path) as pop_src:
+        out_h, out_w = pop_src.height, pop_src.width
+        dst_transform, dst_crs = pop_src.transform, pop_src.crs
 
-            with rasterio.open(exc_path, "w", **exc_profile) as exc_dst, \
-                 rasterio.open(dom_path, "w", **dom_profile) as dom_dst:
-                for row_off in range(0, wd.height, block_size):
-                    bh = min(block_size, wd.height - row_off)
-                    for col_off in range(0, wd.width, block_size):
-                        bw = min(block_size, wd.width - col_off)
-                        window = Window(col_off, row_off, bw, bh)
-                        depth = wd.read(1, window=window)
-                        valid = (
-                            np.isfinite(depth) if wd.nodata is None
-                            else (depth != wd.nodata)
-                        )
-                        # valid-but-dry pixels MUST be 0.0, never _NODATA_FINE -
-                        # average_pool_to_grid's numerator contract (see its
-                        # own docstring in src/rasters.py) requires nodata to
-                        # mean ONLY "outside the domain"; marking dry pixels
-                        # as nodata too silently drops them from Pass A's
-                        # average instead of counting them as non-flooded,
-                        # inflating ff for any partially-flooded coarse cell
-                        # (confirmed on a real synthetic case, 2026-09: a
-                        # true fraction of 0.25 came out as 0.75 - not a
-                        # small error, and it scales with the domain/flood
-                        # ratio, so it's worse for less-flooded cells).
-                        exc = np.where(
-                            valid, np.where(depth > threshold_m, 1.0, 0.0), _NODATA_FINE
-                        ).astype("float32")
-                        dom = np.where(valid, 1.0, 0.0).astype("float32")
-                        exc_dst.write(exc, 1, window=window)
-                        dom_dst.write(dom, 1, window=window)
-
-        # Step 2: reproject both rasters to the coarse population grid.
-        # Population grid metadata read directly via rasterio (no
-        # xarray/rioxarray) since only height/width/transform/crs are
-        # needed; profiling showed the xarray-backend-plugin-discovery
-        # machinery (`load_raster`'s `xr.open_dataarray`, even with
-        # `engine=` given explicitly) costs ~4s of pure import/reflection
-        # overhead per process, unrelated to this raster's actual (tiny)
-        # size - a real cost repeated on every one of this rule's many
-        # fresh-process invocations. This part IS verified safe (metadata
-        # only, no resampling/masking logic touched).
-        with rasterio.open(population_path) as pop_src:
-            out_h, out_w = pop_src.height, pop_src.width
-            dst_transform, dst_crs = pop_src.transform, pop_src.crs
-
-        # ff = A × B = sum(flooded) / n_total (average_pool_to_grid's own
-        # "numerator"/"domain" split, extracted from this function's
-        # original inline two-pass logic - src/rasters.py::average_pool_to_grid
-        # for the shared implementation and why the two reproject() calls
-        # must stay separate).
-        with rasterio.open(exc_path) as exc_src, rasterio.open(dom_path) as dom_src:
-            exc_arr = exc_src.read(1)
-            dom_arr = dom_src.read(1)
-            src_transform, src_crs = exc_src.transform, exc_src.crs
-        frac = average_pool_to_grid(
-            numerator=exc_arr, domain=dom_arr,
-            src_transform=src_transform, src_crs=src_crs,
-            dst_transform=dst_transform, dst_crs=dst_crs, dst_shape=(out_h, out_w),
-            numerator_nodata=_NODATA_FINE,
-        )
+    # ff = A × B = sum(flooded) / n_total (average_pool_to_grid's own
+    # "numerator"/"domain" split, extracted from this function's
+    # original inline two-pass logic - src/rasters.py::average_pool_to_grid
+    # for the shared implementation and why the two reproject() calls
+    # must stay separate).
+    frac = average_pool_to_grid(
+        numerator=exc_arr, domain=dom_arr,
+        src_transform=src_transform, src_crs=src_crs,
+        dst_transform=dst_transform, dst_crs=dst_crs, dst_shape=(out_h, out_w),
+        numerator_nodata=_NODATA_FINE,
+    )
 
     # Step 3: write coarse output
     out_frac = np.where(np.isnan(frac), _NODATA_COARSE, frac).astype("float32")

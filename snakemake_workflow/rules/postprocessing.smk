@@ -51,10 +51,6 @@ rule merge_chunk:
         # merged value looks wrong. Same persistence as waterdepth, since
         # it's only useful alongside it.
         provenance=_merge_chunk_provenance_path,
-        overlap_minmax=os.path.join(
-            config["postprocessing"]["merged_outputs"], "chunks", "overlap_samples",
-            "overlap_minmax_{chunk_id}_{return_period}_{waterlevel_name}.npz",
-        ),
     params:
         chunk_bounds=lambda wildcards: _chunk_bounds_dict[wildcards.chunk_id],
         pp_cfg=config["postprocessing"],
@@ -171,59 +167,3 @@ rule prepare_exposure_grid_chunk:
         geogunit_source="geogunit_protection_units",
     script:
         "../scripts/prepare_exposure_grid_chunk.py"
-
-
-
-rule plot_overlap_diagnostics:
-    """Diagnostic figures comparing flood depths across tile overlap zones.
-
-    For each of up to 6 focal tiles that overlap at least one other tile, one
-    PNG is written to the output directory showing:
-      - Whitesmoke land-polygon background.
-      - Grey: cells where exactly one tile reports flooding (unique extent).
-      - Red shades: cells where multiple tiles report flooding, coloured by the
-        maximum depth difference.
-      - Coloured rectangle outlines: each tile's model domain bbox.
-    """
-    input:
-        waterdepth_tiles=expand(
-            rules.run_aqueduct.output.waterdepth,
-            tile_id=TILE_IDS, allow_missing=True,
-        ),
-    output:
-        diagnostics=directory(os.path.join(
-            config["postprocessing"]["merged_outputs"], "plots",
-            "overlap_diagnostics_{return_period}_{waterlevel_name}",
-        )),
-    params:
-        pp_cfg=config["postprocessing"],
-        data_catalog=config["paths"]["hydromt_data_catalog"],
-        data_catalog_root=config["paths"]["root"],
-    script:
-        "../scripts/plot_overlap_diagnostics.py"
-
-
-rule plot_overlap_continent_diagnostics:
-    """Per-continent overlap-agreement diagnostics for one return period and SLR scenario.
-
-    Pools every chunk's reservoir-sampled per-cell (min, max) depth across
-    overlapping tiles (merge_chunk.output.overlap_minmax), groups chunks by
-    continent (Natural Earth naturalearth_lowres), and writes one two-subplot
-    PNG per continent: a min/max hexbin with Pearson r, and a pie chart
-    classifying cells as confirmed-flood / confirmed-no-flood / ambiguous.
-    """
-    input:
-        overlap_files=expand(
-            rules.merge_chunk.output.overlap_minmax,
-            chunk_id=CHUNK_IDS, allow_missing=True,
-        ),
-    output:
-        diagnostics=directory(os.path.join(
-            config["postprocessing"]["merged_outputs"], "plots",
-            "overlap_diagnostics_continents_{return_period}_{waterlevel_name}",
-        )),
-    params:
-        pp_cfg=config["postprocessing"],
-        threshold_m=config["exposure"]["exceedance_threshold_m"],
-    script:
-        "../scripts/plot_overlap_continent_diagnostics.py"

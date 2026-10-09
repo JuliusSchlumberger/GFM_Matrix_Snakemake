@@ -115,6 +115,7 @@ from exposure_analysis import (                                 # noqa: E402
     compute_retreat,
     compute_avoid,
     compute_country_eai,
+    compute_country_eai_from_cells,
     interpolate_eai_linear,
     resolve_ssp_scenario_eai,
     apply_growth_rates_to_eai,
@@ -595,11 +596,17 @@ def build_exposure_tasks(
         share_retreat = shares_by_intensity.get(slr_int, {})
 
         if ctx.growth_df is not None and ctx.slr_traj is not None:
+            # iso_lookup maps every geogunit to its ISO - thousands of entries
+            # but only ~200 distinct ISOs. interpolate_growth_factor is a pure
+            # function of (ssp, iso, year), so evaluating it once per distinct
+            # ISO (in first-occurrence order, as the former per-geogunit dict
+            # comprehension's keys were) gives the identical dict.
+            unique_isos = list(dict.fromkeys(ctx.iso_lookup.values()))
             for ssp in available_ssps:
                 for yr in ctx.output_years:
                     growth_by_iso = {
                         iso: interpolate_growth_factor(ctx.growth_df, ssp, iso, yr, default=1.0)
-                        for iso in ctx.iso_lookup.values()
+                        for iso in unique_isos
                     }
                     redirected_share = {
                         iso: share_retreat[iso] * max(0.0, growth_by_iso.get(iso, 1.0) - 1.0)
@@ -667,10 +674,14 @@ def pass1_shares_all_intensities(
     """
     amt_total: dict[str, dict[str, float]] = {si: {} for si in slr_intensities}
     cap_total: dict[str, dict[str, float]] = {si: {} for si in slr_intensities}
+    # build_adapt_protection_fraction only ever reads ff[(rp, slr_int)] for the
+    # design intensities, so only those SLR levels' flood-fraction files are
+    # loaded (e.g. 27 of 45 files per chunk) - every value used is unchanged.
+    needed_slr = [slr for slr in slr_scenarios if slr in set(slr_intensities)]
     for cid in chunk_ids:
         if not _chunk_is_populated(chunks_dir, cid):
             continue
-        c = _load_chunk(cid, chunks_dir, flood_frac_dir, return_periods, slr_scenarios, iso_lookup)
+        c = _load_chunk(cid, chunks_dir, flood_frac_dir, return_periods, needed_slr, iso_lookup)
         for slr_int in slr_intensities:
             apf = build_adapt_protection_fraction(c.ff, return_periods, slr_int, rp_applied, c.geo)
             retreating = apf * c.pop
@@ -711,38 +722,66 @@ def pass2_all_tasks(
     each task's own share_retreat/growth_by_iso/redirected_share - but that
     alone still collapses their previous once-per-(task, RP, SLR-key) cost
     to once-per-task.
+
+    Only the cells that can contribute are evaluated (2026-10-09, bit-
+    identical to the former full-grid version - verified on thailand_bangkok):
+      - compute_country_eai only ever sums `grid.ravel()[cell_idx]` (cells
+        with a country), so every input is gathered to those cells first and
+        the same elementwise formulas (protect_exposure_grid/compute_retreat/
+        compute_avoid, unchanged) run on 1-D arrays - identical per-cell
+        values. apply_country_shares/scatter_country_values are inlined as
+        their own cell formulas (`cap * share[iso_idx]`, `values[iso_idx]`).
+      - per design intensity, cells where NO scenario's ff exceeds apf
+        contribute exactly 0 to every task at that intensity (protect: the
+        np.where else-branch; retreat: max(0, ff - apf) == 0; avoid: its
+        `exceeds` mask), so they are dropped too. np.bincount adds weights
+        per country sequentially in cell order from +0.0; the kept cells
+        keep their order and exact zeros never change a sum.
+    See compute_country_eai_from_cells.
     """
     totals: dict[str, pd.DataFrame] = {}
     for cid in chunk_ids:
         if not _chunk_is_populated(chunks_dir, cid):
             continue
         c = _load_chunk(cid, chunks_dir, flood_frac_dir, return_periods, slr_scenarios, iso_lookup)
-        apf_cache: dict[str, np.ndarray] = {}
+        iso_list, iso_idx, cell_idx = c.iso_index
+        pop_cells = c.pop.ravel()[cell_idx]
+        ff_cells = {key: ff.ravel()[cell_idx] for key, ff in c.ff.items()}
+        # design intensity -> (kept cell positions within cell_idx, their iso_idx, pop, apf, ff per key)
+        sub_cache: dict[str, tuple] = {}
 
         for task in tasks:
-            if task.design_intensity not in apf_cache:
-                apf_cache[task.design_intensity] = build_adapt_protection_fraction(
+            if task.design_intensity not in sub_cache:
+                apf_cells = build_adapt_protection_fraction(
                     c.ff, return_periods, task.design_intensity, rp_applied, c.geo,
+                ).ravel()[cell_idx]
+                can_exceed = np.zeros(len(cell_idx), dtype=bool)
+                for ff in ff_cells.values():
+                    can_exceed |= _safe(ff) > _safe(apf_cells)
+                keep = np.nonzero(can_exceed)[0]
+                sub_cache[task.design_intensity] = (
+                    iso_idx[keep], pop_cells[keep], apf_cells[keep],
+                    {key: ff[keep] for key, ff in ff_cells.items()},
                 )
-            apf = apf_cache[task.design_intensity]
+            iso_k, pop_k, apf_k, ff_k = sub_cache[task.design_intensity]
 
             if task.kind in ("baseline", "protect"):
-                grids = {key: protect_exposure_grid(ff, apf, c.pop) for key, ff in c.ff.items()}
+                weights = {key: protect_exposure_grid(ff, apf_k, pop_k) for key, ff in ff_k.items()}
             elif task.kind == "retreat":
-                cap = np.maximum(0.0, 1.0 - apf)
-                redistributed = apply_country_shares(cap, task.share_retreat, c.geo, iso_lookup, c.iso_index)
-                eff_pop = c.pop * (1.0 - apf) + redistributed
-                grids = {key: compute_retreat(ff, apf, eff_pop) for key, ff in c.ff.items()}
+                cap = np.maximum(0.0, 1.0 - apf_k)
+                share = np.array([task.share_retreat.get(iso, 0.0) for iso in iso_list], dtype="float64")
+                redistributed = cap * share[iso_k]
+                eff_pop = pop_k * (1.0 - apf_k) + redistributed
+                weights = {key: compute_retreat(ff, apf_k, eff_pop) for key, ff in ff_k.items()}
             else:  # avoid_ssp / avoid_growth
-                iso_list, iso_idx, cell_idx = c.iso_index
-                g = scatter_country_values(task.growth_by_iso, iso_list, iso_idx, cell_idx, c.geo.shape, default=1.0)
-                cap = np.maximum(0.0, 1.0 - apf)
-                redirected = apply_country_shares(cap, task.redirected_share, c.geo, iso_lookup, c.iso_index)
-                grids = {key: compute_avoid(ff, apf, c.pop, redirected, g) for key, ff in c.ff.items()}
+                g_values = np.array([task.growth_by_iso.get(iso, 1.0) for iso in iso_list], dtype="float64")
+                g = g_values[iso_k]
+                cap = np.maximum(0.0, 1.0 - apf_k)
+                share = np.array([task.redirected_share.get(iso, 0.0) for iso in iso_list], dtype="float64")
+                redirected = cap * share[iso_k]
+                weights = {key: compute_avoid(ff, apf_k, pop_k, redirected, g) for key, ff in ff_k.items()}
 
-            chunk_eai = compute_country_eai(
-                grids, return_periods, slr_scenarios, c.geo, iso_lookup, iso_index=c.iso_index,
-            )
+            chunk_eai = compute_country_eai_from_cells(weights, return_periods, slr_scenarios, iso_list, iso_k)
             totals[task.key] = chunk_eai if task.key not in totals else totals[task.key].add(chunk_eai, fill_value=0.0)
     return totals
 

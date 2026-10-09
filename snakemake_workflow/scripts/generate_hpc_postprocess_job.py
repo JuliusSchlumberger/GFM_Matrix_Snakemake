@@ -31,6 +31,18 @@ previous phase via --dependency=afterany:
   Phase 2 (prepare_exposure_grid_chunk): every chunk - afterany: all phase 1
   Phase 3 (compute_flood_fraction_chunk): every (chunk, rp, slr) - afterany: all phase 2
 
+Per-chunk mode (2026-10-09, used whenever there are at least as many chunks
+as hpc.n_nodes): instead of the three barriers above, each batch gets WHOLE
+chunks and requests their flood-fraction targets, so one Snakemake call runs
+each chunk's merge -> exposure grid -> flood fraction chain in order - the
+fine-grained per-chunk dependency resolved by Snakemake itself rather than by
+SLURM phase barriers. On the ssp245 deltas run the barriers cost ~2.5 h of
+queueing out of a 4.3 h wall clock (~1 h of actual compute). Same rules on the
+same inputs, so outputs are identical. Chunks are spread over batches by tile
+count (longest-processing-time-first); a chunk never spans two batches, so no
+two jobs build the same chunk's exposure grid. With fewer chunks than nodes
+the three-phase mode is kept - whole-chunk batches would leave nodes idle.
+
 No phase-0 shared-inputs step is needed here (unlike preprocessing's
 compute_geoid_offset_raster) - none of these three rules has a single
 output shared across every chunk, so there is no write-write race for
@@ -170,24 +182,49 @@ def _build_chunk_grid(tile_gdf: gpd.GeoDataFrame, chunk_size_deg: float) -> gpd.
     return gpd.GeoDataFrame(rows, crs=tile_gdf.crs)
 
 
-def _write_batches(
-    local_jobs_dir: Path, linux_jobs_dir: str, linux_code_root: str, sbatch_cfg: dict,
-    phase_name: str, targets: list[str], n_nodes: int, configfile_path: str,
-) -> list[str]:
-    """Split `targets` evenly across up to n_nodes batches, write one sbatch
-    script per batch (plain `GFM_CONFIG_PATH=<configfile_path> snakemake
-    --cores N <targets>` call, matching generate_hpc_preprocess_job.py's own
-    pattern - configfile_path (resolved_config.yml) is what makes a compute
-    node re-parsing the Snakefile see the same config this dispatch was
-    generated from, rather than silently falling back to its own default
-    config.yml; GFM_CONFIG_PATH rather than --configfile since 2026-09-14 -
-    see the Snakefile's own comment on that env var), return their Linux paths.
-    """
+def _split_evenly(targets: list[str], n_nodes: int) -> list[list[str]]:
+    """Split `targets` into up to n_nodes contiguous, near-equal batches."""
     n_batches = min(n_nodes, len(targets))
     k, m = divmod(len(targets), n_batches)
+    return [targets[i * k + min(i, m): (i + 1) * k + min(i + 1, m)] for i in range(n_batches)]
+
+
+def _split_by_chunk(
+    targets_by_chunk: dict[str, list[str]], chunk_weight: dict[str, float], n_nodes: int,
+) -> list[list[str]]:
+    """Assign WHOLE chunks to up to n_nodes batches, heaviest chunk first onto
+    the currently lightest batch (longest-processing-time-first). Keeping a
+    chunk's targets in one batch is what lets one Snakemake call run that
+    chunk's merge_chunk -> prepare_exposure_grid_chunk ->
+    compute_flood_fraction_chunk chain itself, with no cross-batch barrier,
+    and guarantees no two batches ever build the same chunk's shared
+    exposure grid concurrently."""
+    chunks = [c for c in targets_by_chunk if targets_by_chunk[c]]
+    n_batches = min(n_nodes, len(chunks))
+    loads = [0.0] * n_batches
+    batches: list[list[str]] = [[] for _ in range(n_batches)]
+    for cid in sorted(chunks, key=lambda c: -chunk_weight.get(c, 1.0)):
+        j = loads.index(min(loads))
+        batches[j] += targets_by_chunk[cid]
+        loads[j] += chunk_weight.get(cid, 1.0)
+    return batches
+
+
+def _write_batches(
+    local_jobs_dir: Path, linux_jobs_dir: str, linux_code_root: str, sbatch_cfg: dict,
+    phase_name: str, batches: list[list[str]], configfile_path: str,
+) -> list[str]:
+    """Write one sbatch script per batch of targets (plain
+    `GFM_CONFIG_PATH=<configfile_path> snakemake --cores N <targets>` call,
+    matching generate_hpc_preprocess_job.py's own pattern - configfile_path
+    (resolved_config.yml) is what makes a compute node re-parsing the
+    Snakefile see the same config this dispatch was generated from, rather
+    than silently falling back to its own default config.yml;
+    GFM_CONFIG_PATH rather than --configfile since 2026-09-14 - see the
+    Snakefile's own comment on that env var), return their Linux paths.
+    """
     script_paths = []
-    for i in range(n_batches):
-        batch_targets = targets[i * k + min(i, m): (i + 1) * k + min(i + 1, m)]
+    for i, batch_targets in enumerate(batches):
         name = f"postprocess_{phase_name}_batch_{i:03d}"
 
         targets_path = local_jobs_dir / f"{name}_targets.txt"
@@ -218,7 +255,10 @@ def _write_batches(
             (
                 f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
                 f'snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
-                f'--rerun-triggers=mtime '
+                # --rerun-incomplete: an output a cancelled/killed earlier job
+                # was still writing stays flagged incomplete in Snakemake's
+                # metadata - redo just those instead of aborting the batch.
+                f'--rerun-triggers=mtime --rerun-incomplete '
                 f'$(cat "{linux_jobs_dir}/{name}_targets.txt")'
             ),
             "",
@@ -291,25 +331,39 @@ def main() -> None:
     linux_merged = linux_config["postprocessing"]["merged_outputs"]
     local_merged = local_config["postprocessing"]["merged_outputs"]
 
-    # (linux_target, local_target) pairs, index-aligned by construction -
-    # resume mode filters on local existence, fresh mode uses every linux
-    # target unconditionally. Avoids needing a separate linux->local path
-    # translation helper.
+    # (chunk_id, linux_target, local_target) triples - resume mode filters on
+    # local existence, fresh mode uses every linux target unconditionally.
+    # Avoids needing a separate linux->local path translation helper.
     phase1_pairs = [
-        (f"{linux_merged}/chunks/waterdepth_{cid}_{rp}_{slr}.tif",
+        (cid, f"{linux_merged}/chunks/waterdepth_{cid}_{rp}_{slr}.tif",
          f"{local_merged}/chunks/waterdepth_{cid}_{rp}_{slr}.tif")
         for cid in chunk_ids for rp in return_periods for slr in waterlevel_names
     ]
     phase2_pairs = [
-        (f"{linux_merged}/chunks/exposure_population_grid_{cid}.tif",
+        (cid, f"{linux_merged}/chunks/exposure_population_grid_{cid}.tif",
          f"{local_merged}/chunks/exposure_population_grid_{cid}.tif")
         for cid in chunk_ids
     ]
     phase3_pairs = [
-        (f"{linux_merged}/chunks/flood_fraction/flood_fraction_{cid}_{rp}_{slr}.tif",
+        (cid, f"{linux_merged}/chunks/flood_fraction/flood_fraction_{cid}_{rp}_{slr}.tif",
          f"{local_merged}/chunks/flood_fraction/flood_fraction_{cid}_{rp}_{slr}.tif")
         for cid in chunk_ids for rp in return_periods for slr in waterlevel_names
     ]
+
+    # Dispatch mode (2026-10-09). Per chunk (one phase): each batch gets whole
+    # chunks and Snakemake runs every chunk's merge -> exposure grid -> flood
+    # fraction chain itself - no all-of-phase-N barrier, which on the ssp245
+    # deltas run cost ~2.5 h of SLURM queueing out of a 4.3 h wall clock for
+    # ~1 h of compute. Same rules, same inputs: outputs are identical to the
+    # three-phase dispatch. Parallelism is capped at the number of chunks,
+    # though, so a study with fewer chunks than n_nodes keeps the three-phase
+    # dispatch (it can spread one chunk's merges over several nodes).
+    per_chunk = len(chunk_ids) >= n_nodes
+    # merge cost scales with the number of tiles per chunk - LPT weight
+    chunk_weight = {
+        row.chunk_id: 1.0 + float(tile_gdf.geometry.intersects(row.geometry).sum())
+        for row in chunk_grid.itertuples()
+    }
 
     if args.resume:
         # One glob per flat output directory, not one exists() call per
@@ -326,53 +380,81 @@ def main() -> None:
         existing_grid = {p.name for p in chunks_dir_local.glob("exposure_population_grid_*.tif")} if chunks_dir_local.is_dir() else set()
         existing_ff = {p.name for p in flood_frac_dir_local.glob("flood_fraction_*.tif")} if flood_frac_dir_local.is_dir() else set()
 
-        phase1_targets = [lx for lx, lo in phase1_pairs if Path(lo).name not in existing_merge]
-        phase2_targets = [lx for lx, lo in phase2_pairs if Path(lo).name not in existing_grid]
-        phase3_targets = [lx for lx, lo in phase3_pairs if Path(lo).name not in existing_ff]
-        print(f"Resume: phase 1 {len(phase1_targets)}/{len(phase1_pairs)} remaining, "
-              f"phase 2 {len(phase2_targets)}/{len(phase2_pairs)} remaining, "
-              f"phase 3 {len(phase3_targets)}/{len(phase3_pairs)} remaining\n")
+        phase1_sel = [p for p in phase1_pairs if Path(p[2]).name not in existing_merge]
+        phase2_sel = [p for p in phase2_pairs if Path(p[2]).name not in existing_grid]
+        phase3_sel = [p for p in phase3_pairs if Path(p[2]).name not in existing_ff]
+        print(f"Resume: phase 1 {len(phase1_sel)}/{len(phase1_pairs)} remaining, "
+              f"phase 2 {len(phase2_sel)}/{len(phase2_pairs)} remaining, "
+              f"phase 3 {len(phase3_sel)}/{len(phase3_pairs)} remaining\n")
         name_prefix = "resume_postprocess_"
         submit_name = "submit_resume_postprocess_and_exposure.sh"
     else:
-        phase1_targets = [lx for lx, _ in phase1_pairs]
-        phase2_targets = [lx for lx, _ in phase2_pairs]
-        phase3_targets = [lx for lx, _ in phase3_pairs]
+        phase1_sel, phase2_sel, phase3_sel = phase1_pairs, phase2_pairs, phase3_pairs
         name_prefix = "postprocess_"
         submit_name = "submit_postprocess_and_exposure.sh"
 
-    # Phase 1: merge_chunk - every (chunk, rp, slr). Requesting the
-    # waterdepth output also produces this rule's other declared outputs
-    # (provenance, overlap_minmax) in the same job.
-    print(f"Phase 1 (merge_chunk): {len(phase1_targets)} target(s)")
-    phase1_scripts = _write_batches(
-        local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
-        f"{name_prefix}merge", phase1_targets, n_nodes, linux_resolved_config,
-    ) if phase1_targets else []
+    if per_chunk:
+        # One phase: per chunk, the still-needed flood-fraction targets (which
+        # pull in that chunk's merges and exposure grid as Snakemake inputs),
+        # plus - in resume mode - any merge/grid output missing on its own
+        # (e.g. a merged waterdepth deleted after its flood fraction exists).
+        # A fresh dispatch only needs the flood-fraction targets: every
+        # (chunk, rp, slr) merge output is an input of exactly one of them.
+        targets_by_chunk: dict[str, list[str]] = {cid: [] for cid in chunk_ids}
+        for sel in ([phase3_sel] if not args.resume else [phase1_sel, phase2_sel, phase3_sel]):
+            for cid, lx, _ in sel:
+                targets_by_chunk[cid].append(lx)
+        n_targets = sum(len(v) for v in targets_by_chunk.values())
+        print(f"Per-chunk dispatch ({len(chunk_ids)} chunk(s) >= n_nodes={n_nodes}): "
+              f"{n_targets} target(s), merge -> exposure grid -> flood fraction per chunk, no phase barriers")
+        chunk_scripts = _write_batches(
+            local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
+            f"{name_prefix}chunks", _split_by_chunk(targets_by_chunk, chunk_weight, n_nodes), linux_resolved_config,
+        ) if n_targets else []
+        phases = [("postprocessing (per chunk: merge -> exposure grid -> flood fraction)", chunk_scripts)]
+    else:
+        print(f"Three-phase dispatch ({len(chunk_ids)} chunk(s) < n_nodes={n_nodes} - spreads merges over more nodes)")
+        phase1_targets = [lx for _, lx, _ in phase1_sel]
+        phase2_targets = [lx for _, lx, _ in phase2_sel]
+        phase3_targets = [lx for _, lx, _ in phase3_sel]
 
-    # Phase 2: prepare_exposure_grid_chunk - every chunk (not rp/slr).
-    # Depends on phase 1 (specifically each chunk's own (return_periods[0],
-    # baseline_slr) merge output, for grid metadata only - gated on ALL of
-    # phase 1 via afterany rather than tracked per-chunk, same
-    # simplification generate_hpc_preprocess_job.py's own phase-barriers use).
-    print(f"\nPhase 2 (prepare_exposure_grid_chunk): {len(phase2_targets)} target(s) "
-          f"(reference scenario: {return_periods[0]}_{baseline_slr})")
-    phase2_scripts = _write_batches(
-        local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
-        f"{name_prefix}exposure_grid", phase2_targets, n_nodes, linux_resolved_config,
-    ) if phase2_targets else []
+        # Phase 1: merge_chunk - every (chunk, rp, slr). Requesting the
+        # waterdepth output also produces this rule's other declared output
+        # (provenance) in the same job.
+        print(f"Phase 1 (merge_chunk): {len(phase1_targets)} target(s)")
+        phase1_scripts = _write_batches(
+            local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
+            f"{name_prefix}merge", _split_evenly(phase1_targets, n_nodes), linux_resolved_config,
+        ) if phase1_targets else []
 
-    # Phase 3: compute_flood_fraction_chunk - every (chunk, rp, slr).
-    # Depends on phase 2 (population grid) via afterany.
-    print(f"\nPhase 3 (compute_flood_fraction_chunk): {len(phase3_targets)} target(s)")
-    phase3_scripts = _write_batches(
-        local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
-        f"{name_prefix}flood_fraction", phase3_targets, n_nodes, linux_resolved_config,
-    ) if phase3_targets else []
+        # Phase 2: prepare_exposure_grid_chunk - every chunk (not rp/slr).
+        # Depends on phase 1 (specifically each chunk's own (return_periods[0],
+        # baseline_slr) merge output, for grid metadata only - gated on ALL of
+        # phase 1 via afterany rather than tracked per-chunk, same
+        # simplification generate_hpc_preprocess_job.py's own phase-barriers use).
+        print(f"\nPhase 2 (prepare_exposure_grid_chunk): {len(phase2_targets)} target(s) "
+              f"(reference scenario: {return_periods[0]}_{baseline_slr})")
+        phase2_scripts = _write_batches(
+            local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
+            f"{name_prefix}exposure_grid", _split_evenly(phase2_targets, n_nodes), linux_resolved_config,
+        ) if phase2_targets else []
 
-    # Master driver: phase 1 batches (parallel, no dependency) -> phase 2
-    # batches (afterany: all phase 1) -> phase 3 batches (afterany: all
-    # phase 2). Same afterany-join-multiple-jobs pattern already used for
+        # Phase 3: compute_flood_fraction_chunk - every (chunk, rp, slr).
+        # Depends on phase 2 (population grid) via afterany.
+        print(f"\nPhase 3 (compute_flood_fraction_chunk): {len(phase3_targets)} target(s)")
+        phase3_scripts = _write_batches(
+            local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
+            f"{name_prefix}flood_fraction", _split_evenly(phase3_targets, n_nodes), linux_resolved_config,
+        ) if phase3_targets else []
+        phases = [
+            ("phase 1 (merge_chunk)", phase1_scripts),
+            ("phase 2 (prepare_exposure_grid_chunk)", phase2_scripts),
+            ("phase 3 (compute_flood_fraction_chunk)", phase3_scripts),
+        ]
+
+    # Master driver: each phase's batches (parallel), gated on ALL of the
+    # previous phase via afterany (three-phase mode); per-chunk mode is a
+    # single phase. Same afterany-join-multiple-jobs pattern already used for
     # preprocessing's build_shared_inputs -> batches and the exposure
     # dispatch's pass1 -> reduce_shares -> pass2 -> reduce_write. A phase
     # with ZERO batches (resume mode, already 100% done) is skipped
@@ -380,11 +462,7 @@ def main() -> None:
     # phase that DID have batches, same "skip empty phase" pattern
     # generate_aqueduct_jobs.generate_resume_dispatch already uses.
     submit_lines = ["#!/bin/bash", "set -euo pipefail", "", 'PREV_IDS=""']
-    for phase_label, scripts in [
-        ("phase 1 (merge_chunk)", phase1_scripts),
-        ("phase 2 (prepare_exposure_grid_chunk)", phase2_scripts),
-        ("phase 3 (compute_flood_fraction_chunk)", phase3_scripts),
-    ]:
+    for phase_label, scripts in phases:
         if not scripts:
             continue
         submit_lines.append(f'\n# {phase_label} ({len(scripts)} batch(es))')
@@ -426,8 +504,8 @@ def main() -> None:
     with open(submit_script_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(submit_lines) + "\n")
 
-    n_total_scripts = len(phase1_scripts) + len(phase2_scripts) + len(phase3_scripts)
-    print(f"\nDone. 3 postprocessing phases + exposure analysis, {n_total_scripts}+ sbatch script(s) "
+    n_total_scripts = sum(len(s) for _, s in phases)
+    print(f"\nDone. {len(phases)} postprocessing phase(s) + exposure analysis, {n_total_scripts}+ sbatch script(s) "
           f"written to {local_jobs_dir}")
     print(f"Submit on Hydrax with: bash {linux_jobs_dir}/{submit_name}")
     print("(This one call submits the ENTIRE remaining pipeline - postprocessing then exposure "

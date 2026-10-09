@@ -493,22 +493,18 @@ hpc:
 
 
 # ── POSTPROCESSING ────────────────────────────────────────────────────────────
-# Used by: merge_chunk.py, build_mosaic_vrt.py, plot_merged_results.py,
-#          plot_overlap_diagnostics.py.
+# Used by: merge_chunk.py, compute_flood_fraction_chunk.py, build_mosaic_vrt.py,
+#          plot_merged_results.py.
 
 postprocessing:
   # Root directory for combined (multi-tile) rasters, VRTs and plots.
   merged_outputs: "{root}/merged_results"
   chunk_size_deg: 5 # Spatial chunk size (degrees) used to partition the study area for merging.
   block_size: 2048 # Side length (pixels) of the write blocks used inside each chunk.
-  overlap_corr_max_samples: 50000 # Maximum (min, max)-depth-pair random samples per chunk for
-  # correlation/agreement diagnostics
-  overlap_corr_seed: 42  # Fixed random seed to reproduce identical samples.
 
   # Visualisation parameters for all postprocessing plots.
   plots:
-    enabled: true # to plot merged maps, per-continent overlap correlation/agreement plots
-    debug: false # to plot plot_overlap_diagnostics
+    enabled: true # to plot merged maps (plot_merged_results)
 
     # Output resolution (DPI) for all saved plot images.
     dpi: 300
@@ -516,18 +512,6 @@ postprocessing:
     waterdepth_cmap: "Blues"
     waterdepth_vmax_m: 10
     merged_map_figsize: [10, 10] # for plot_merged_results
-
-    overlap_pie_colors: # Wedge colours for the per-continent overlap-agreement pie chart
-      flood: "#d62728"
-      no_flood: "#1f77b4"
-      ambiguous: "#7f7f7f"
-    overlap_continent_figsize: [13, 6.5] # for the per-continent overlap diagnostic
-
-    n_overlap_locations: 10 # focal tiles shown in the overlap diagnostic figure
-    overlap_diag_resolution_arcsec: 240 # Target pixel size for the overlap diagnostic figures
-    overlap_diag_figsize: [10, 8] # for each per-tile overlap diagnostic panel
-    overlap_tile_cmap: "tab10" # per-tile domain-bbox outline colours
-    overlap_diff_cmap: "Reds" # for the overlap-zone max-depth-difference shading
 
 
 # ── COASTAL PROTECTION BASELINE ────────────────────────────────────────────────

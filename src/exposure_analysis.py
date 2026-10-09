@@ -566,6 +566,43 @@ def compute_country_eai(
     return pd.DataFrame.from_dict(rows, orient="index").fillna(0.0)
 
 
+def compute_country_eai_from_cells(
+    weights_per_rp_slr: dict[tuple[int, str], np.ndarray],
+    return_periods: list[int],
+    slr_scenarios: list[str],
+    iso_list: list[str],
+    iso_idx: np.ndarray,
+) -> pd.DataFrame:
+    """`compute_country_eai` for exposure values already gathered per cell.
+
+    `weights_per_rp_slr[key]` holds the exposure of exactly the cells whose
+    country index is `iso_idx` (same length, same order) - i.e. what
+    compute_country_eai reads as `grid.ravel()[cell_idx]`, optionally with
+    cells of exactly zero exposure left out. Produces the identical DataFrame
+    (same values to the last bit, same index/column order): np.bincount adds
+    weights per bin sequentially in cell order starting from +0.0, so the
+    same weights in the same order give the same sums, and dropping exact
+    zeros never changes a sum. A missing key counts as all-zero exposure,
+    exactly like compute_country_eai's zeros-grid fallback.
+    """
+    sorted_rps = sorted(return_periods)
+    n_iso = len(iso_list)
+    zeros = np.zeros(len(iso_idx), dtype="float64")
+
+    rows: dict[str, dict[str, float]] = {}
+    for slr in slr_scenarios:
+        country_rp = np.zeros((n_iso, len(sorted_rps)), dtype="float64")
+        for rp_i, rp in enumerate(sorted_rps):
+            weights = weights_per_rp_slr.get((rp, slr), zeros)
+            country_rp[:, rp_i] = np.bincount(iso_idx, weights=weights, minlength=n_iso)
+
+        eai_arr = _trapezoid_eai(country_rp, sorted_rps)
+        for i, iso in enumerate(iso_list):
+            rows.setdefault(iso, {})[slr] = float(eai_arr[i])
+
+    return pd.DataFrame.from_dict(rows, orient="index").fillna(0.0)
+
+
 def interpolate_eai_linear(
     eai_df: pd.DataFrame,
     slr_mm_values: list[float],

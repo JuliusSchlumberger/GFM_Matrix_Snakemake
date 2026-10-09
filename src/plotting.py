@@ -50,6 +50,59 @@ def land_polygons_from_deltadtm_mask(data_catalog_root: str | Path, bounds: tupl
     return gpd.GeoDataFrame(geometry=geoms, crs="EPSG:4326")
 
 
+def cached_land_polygons(data_catalog_root: str | Path, bounds: tuple[float, float, float, float],
+                         cache_dir: str | Path) -> gpd.GeoDataFrame:
+    """`land_polygons_from_deltadtm_mask`, computed once per (plot bounds,
+    mask VRT) and reused from `cache_dir` afterwards.
+
+    Every plot_merged_results job of one study plots the same mosaic extent,
+    so all of them vectorized the identical land polygons from the full-
+    resolution mask - ~half of each plot job's runtime (thailand_bangkok,
+    2026-10-09: 45 s of 94 s). The cache is a pickle of the exact
+    GeoDataFrame (float64 coordinates and row order preserved), so the
+    rendered figure is pixel-identical to an uncached run. The key covers the
+    exact bounds and the mask VRT's path, size and mtime - a changed mask or
+    extent gets its own entry. Written to a temp name and atomically renamed,
+    so concurrent plot jobs never read a partial file (at worst two of them
+    compute the same entry once). An empty result - including the
+    read-failure fallback - is never cached.
+    """
+    import hashlib
+    import os
+    import pickle
+
+    mask_vrt = Path(data_catalog_root) / "inputs" / "DeltaDTM_masks" / "deltadtm_mask.vrt"
+    try:
+        st = mask_vrt.stat()
+        stamp = f"{st.st_size}:{st.st_mtime_ns}"
+    except OSError:
+        stamp = "missing"
+    key_src = f"{mask_vrt.resolve()}|{stamp}|{tuple(float(b).hex() for b in bounds)}"
+    key = hashlib.sha256(key_src.encode()).hexdigest()[:24]
+    cache_dir = Path(cache_dir)
+    cache_path = cache_dir / f"land_polygons_{key}.pkl"
+    if cache_path.exists():
+        try:
+            with open(cache_path, "rb") as f:
+                cached_key, gdf = pickle.load(f)
+            if cached_key == key_src:
+                return gdf
+        except Exception as exc:  # corrupt/unreadable entry: recompute and overwrite
+            print(f"WARNING: ignoring unreadable land-polygon cache {cache_path} ({type(exc).__name__}: {exc})", flush=True)
+
+    gdf = land_polygons_from_deltadtm_mask(data_catalog_root, bounds)
+    if len(gdf):
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            tmp = cache_path.with_suffix(f".{os.getpid()}.tmp")
+            with open(tmp, "wb") as f:
+                pickle.dump((key_src, gdf), f, protocol=pickle.HIGHEST_PROTOCOL)
+            os.replace(tmp, cache_path)
+        except OSError as exc:  # caching is an optimisation only - never fail the plot over it
+            print(f"WARNING: could not write land-polygon cache {cache_path} ({exc})", flush=True)
+    return gdf
+
+
 def pixel_area_km2_grid(transform, width: int, height: int, row_offset: int = 0) -> np.ndarray:
     """Per-cell area (km²) grid for a `(height, width)` window of an EPSG:4326 raster.
 
@@ -89,138 +142,53 @@ def compute_flood_area_km2(raster_path: str | Path, threshold_m: float) -> float
     Returns:
         Total flooded area in km².
     """
-    total_km2 = 0.0
+    import os
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
     with retry_transient_io(rasterio.open, raster_path) as src:
         t = src.transform
         nodata = src.nodata
-        for _, window in src.block_windows(1):
-            data = src.read(1, window=window)
-            valid = (data >= threshold_m)
-            if nodata is not None:
-                valid &= data != nodata
-            valid &= ~np.isnan(data)
-            if not valid.any():
-                continue
-            pixel_area_km2 = pixel_area_km2_grid(
-                t, window.width, window.height, row_offset=window.row_off,
-            )
-            total_km2 += float((valid * pixel_area_km2).sum())
+        windows = [window for _, window in src.block_windows(1)]
+
+    # Windows are read and reduced in parallel threads (GDAL and numpy release
+    # the GIL; one dataset handle per thread - rasterio handles must not be
+    # shared across threads), but the per-window partial sums are added to
+    # the total sequentially IN THE ORIGINAL WINDOW ORDER, exactly as the
+    # former serial loop did - the result is bit-identical to it (float
+    # addition is not associative, so the order is what must not change).
+    local, handles, handles_lock = threading.local(), [], threading.Lock()
+
+    def window_sum(window) -> float | None:
+        ds = getattr(local, "ds", None)
+        if ds is None:
+            ds = local.ds = retry_transient_io(rasterio.open, raster_path)
+            with handles_lock:
+                handles.append(ds)
+        data = ds.read(1, window=window)
+        valid = (data >= threshold_m)
+        if nodata is not None:
+            valid &= data != nodata
+        valid &= ~np.isnan(data)
+        if not valid.any():
+            return None
+        pixel_area_km2 = pixel_area_km2_grid(
+            t, window.width, window.height, row_offset=window.row_off,
+        )
+        return float((valid * pixel_area_km2).sum())
+
+    try:
+        with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 1)) as pool:
+            partials = list(pool.map(window_sum, windows))  # map() preserves input order
+    finally:
+        for ds in handles:
+            ds.close()
+
+    total_km2 = 0.0
+    for part in partials:
+        if part is not None:
+            total_km2 += part
     return total_km2
-
-
-def plot_overlap_continent_diagnostics(
-    mins: np.ndarray,
-    maxs: np.ndarray,
-    threshold_m: float,
-    output_path: str | Path,
-    continent_name: str,
-    waterlevel_name: str,
-    n_chunks: int,
-    total_overlap_cells: int = 0,
-    pie_colors: dict[str, str] | None = None,
-    figsize: tuple[float, float] = (13, 6.5),
-    dpi: int = 200,
-) -> None:
-    """Two-subplot per-continent overlap-agreement diagnostic.
-
-    Left: hexbin density of (min depth, max depth) across all tiles
-    overlapping each cell, pooled from every chunk in this continent, with
-    Pearson r and a y = x "perfect agreement" line.
-    Right: pie chart classifying every sampled cell as confirmed-flood
-    (min >= threshold), confirmed-no-flood (max < threshold), or ambiguous
-    (min < threshold <= max, i.e. tiles disagree on flood status) —
-    mutually exclusive and exhaustive over the sampled cells.
-
-    Args:
-        mins, maxs: Per-cell min/max depth across overlapping tiles, pooled
-            across all of this continent's chunks (see
-            merge_tile_rasters_chunk / plot_overlap_continent_diagnostics.py).
-            Each chunk's contribution is reservoir-sub-sampled to at most
-            postprocessing.overlap_corr_max_samples cells, so len(mins) may
-            be smaller than the true overlap-cell population.
-        threshold_m: Minimum depth (m) counted as "flooded"
-            (exposure.exceedance_threshold_m).
-        output_path: Where to save the PNG.
-        continent_name: Continent label used in the plot title.
-        waterlevel_name: Scenario label used in the plot title.
-        n_chunks: Number of chunks pooled into this continent's sample, for
-            the title annotation.
-        total_overlap_cells: True number of overlap cells across those
-            chunks before any reservoir sub-sampling was applied (>=
-            len(mins)); shown alongside the sampled count so the title makes
-            clear what fraction of the real overlap population the Pearson r
-            / pie chart are actually based on.
-        pie_colors: {"flood": ..., "no_flood": ..., "ambiguous": ...} hex
-            colours for the pie wedges (postprocessing.plots.overlap_pie_colors).
-            Falls back to a fixed default triple if not given.
-        figsize: Figure size in inches (postprocessing.plots.overlap_continent_figsize).
-    """
-    fig, (ax_hex, ax_pie) = plt.subplots(1, 2, figsize=figsize, dpi=dpi)
-
-    if len(mins) == 0:
-        for ax in (ax_hex, ax_pie):
-            ax.text(0.5, 0.5, "No overlapping flood cells found.",
-                    ha="center", va="center", transform=ax.transAxes, fontsize=11)
-            ax.set_axis_off()
-        fig.suptitle(f"{continent_name} — overlap diagnostics ({waterlevel_name})")
-        fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
-        plt.close(fig)
-        return
-
-    n_total = len(mins)
-    r = float(np.corrcoef(mins, maxs)[0, 1]) if n_total > 1 else float("nan")
-
-    # ── Left: min/max hexbin ────────────────────────────────────────────────
-    vmax = float(max(mins.max(), maxs.max()))
-    hb = ax_hex.hexbin(mins, maxs, gridsize=60, cmap="YlOrRd", mincnt=1,
-                       extent=(0, vmax, 0, vmax))
-    fig.colorbar(hb, ax=ax_hex, label="Number of cells", shrink=0.75)
-    ax_hex.plot([0, vmax], [0, vmax], "k--", lw=1.5, label="y = x  (perfect agreement)")
-    ax_hex.legend(fontsize=8, loc="upper left")
-    ax_hex.set_xlim(0, vmax)
-    ax_hex.set_ylim(0, vmax)
-    ax_hex.set_aspect("equal", adjustable="box")
-    ax_hex.set_xlabel("Min depth across overlapping tiles (m)")
-    ax_hex.set_ylabel("Max depth across overlapping tiles (m)")
-    if total_overlap_cells > n_total:
-        n_label = f"n = {n_total:,} sampled of {total_overlap_cells:,} total"
-    else:
-        n_label = f"n = {n_total:,}"
-    ax_hex.set_title(f"Pearson r = {r:.4f}   ({n_label})", fontsize=10)
-
-    # ── Right: flood-agreement pie chart ────────────────────────────────────
-    confirmed_flood = int((mins >= threshold_m).sum())
-    confirmed_no_flood = int((maxs < threshold_m).sum())
-    ambiguous = int(((mins < threshold_m) & (maxs >= threshold_m)).sum())
-    counts = [confirmed_flood, confirmed_no_flood, ambiguous]
-    labels = [
-        f"Confirmed flood\n({confirmed_flood:,})",
-        f"Confirmed no-flood\n({confirmed_no_flood:,})",
-        f"Ambiguous\n({ambiguous:,})",
-    ]
-    colors = (
-        [pie_colors["flood"], pie_colors["no_flood"], pie_colors["ambiguous"]]
-        if pie_colors else ["#d62728", "#1f77b4", "#7f7f7f"]
-    )
-    nonzero = [(c, l, col) for c, l, col in zip(counts, labels, colors) if c > 0]
-    ax_pie.pie(
-        [c for c, _, _ in nonzero],
-        labels=[l for _, l, _ in nonzero],
-        colors=[col for _, _, col in nonzero],
-        autopct="%1.1f%%",
-        startangle=90,
-        textprops={"fontsize": 8},
-    )
-    ax_pie.set_title(f"Flood-status agreement (threshold = {threshold_m:.2f} m)", fontsize=10)
-
-    fig.suptitle(
-        f"{continent_name} — overlap diagnostics ({waterlevel_name})\n"
-        f"pooled from {n_chunks} chunk{'s' if n_chunks != 1 else ''}",
-        fontsize=11,
-    )
-    fig.tight_layout()
-    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
-    plt.close(fig)
 
 
 def plot_raster_with_coastlines(

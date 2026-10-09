@@ -271,7 +271,6 @@ include: "snakemake_workflow/rules/hpc_dispatch.smk"
 
 _plot_cfg = config["postprocessing"]["plots"]
 _plotting_enabled = _plot_cfg["enabled"]
-_plot_debug_enabled = _plot_cfg.get("debug", False)
 
 # Primary postprocessing outputs:
 #   - per-chunk coarse flood-fraction rasters (all RP × SLR × chunks)
@@ -287,18 +286,9 @@ _POSTPROCESS_OUTPUTS = expand(
 )
 
 if _plotting_enabled:
-    _POSTPROCESS_OUTPUTS += (
-        expand(rules.plot_merged_results.output.waterdepth_plot, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES)
-        + expand(rules.plot_overlap_continent_diagnostics.output.diagnostics, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES)
+    _POSTPROCESS_OUTPUTS += expand(
+        rules.plot_merged_results.output.waterdepth_plot, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES,
     )
-    # Per-tile overlap diagnostic maps are a debugging aid (see
-    # postprocessing.plots.debug in config.yml) - not requested by default,
-    # unlike the per-continent correlation/agreement plot above.
-    if _plot_debug_enabled:
-        _POSTPROCESS_OUTPUTS += expand(
-            rules.plot_overlap_diagnostics.output.diagnostics,
-            return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES,
-        )
 
 
 rule preprocess:

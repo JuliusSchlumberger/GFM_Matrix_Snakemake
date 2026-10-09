@@ -10,7 +10,7 @@ import rasterio
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import retry_transient_io  # noqa: E402
-from plotting import compute_flood_area_km2, land_polygons_from_deltadtm_mask, plot_raster_with_coastlines  # noqa: E402
+from plotting import cached_land_polygons, compute_flood_area_km2, plot_raster_with_coastlines  # noqa: E402
 
 pp_cfg = snakemake.params.pp_cfg  # noqa: F821
 plot_cfg = pp_cfg["plots"]
@@ -23,8 +23,13 @@ with retry_transient_io(rasterio.open, snakemake.input.waterdepth) as src:  # no
 
 # Land-polygon background, from the project's own DeltaDTM mask - the
 # external OSM land_polygons dataset this used to read is retired
-# (2026-10-02, this project no longer uses OSM data).
-coastlines = land_polygons_from_deltadtm_mask(snakemake.params.data_catalog_root, tuple(bounds))  # noqa: F821
+# (2026-10-02, this project no longer uses OSM data). Identical for every
+# scenario of a study (same mosaic extent), so computed once and cached next
+# to the plots - see plotting.cached_land_polygons.
+coastlines = cached_land_polygons(  # noqa: F821
+    snakemake.params.data_catalog_root, tuple(bounds),  # noqa: F821
+    cache_dir=Path(snakemake.output.waterdepth_plot).parent / ".land_polygons_cache",  # noqa: F821
+)
 
 oom_dir = os.path.join(snakemake.params.model_outputs, "oom_tiles")  # noqa: F821
 if os.path.isdir(oom_dir):

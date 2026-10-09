@@ -1,0 +1,38 @@
+# Bangkok / Chao Phraya basin case study (Marjolijn, 2026-10-08). Case
+# polygon: Marjolijn_Thailand/Bangkok_tiles.gpkg's `domain_tiles_globalgpkg`
+# layer (~99.79-101.23E / 13.03-14.77N). That gpkg's own `domain_tiles_global`
+# layer (tile_id 31/499) is from a now-superseded tile grid snapshot (the
+# production grid was regenerated 2026-10-05, and those IDs now point at
+# tiles in Alaska/northern Canada) - NOT used. Real candidate tiles were
+# re-derived against the current production grid: 6 core tiles
+# (1026, 1048, 1195 hop_distance=0; 3930, 3933, 3943 hop_distance=1,
+# together covering 100% of the case polygon) plus 3 more hop_distance=0
+# tiles (1092, 1194, 1199) pulled in as pure wave-seeding dependencies via
+# select_country_tiles.py's own `_hop_distance_closure` - see
+# {processed_inputs_dir}/mask/bangkok_chao_phraya_tiles.gpkg.
+#
+# Inputs (dem/mask/friction/boundaries) for all 9 tiles already exist in
+# production's own model_outputs - copied verbatim into this study's own
+# isolated model_outputs rather than regenerated, per Marjolijn's own
+# request. Full production scenario grid (no RP/SLR restriction, same
+# choice thailand_bangkok.yml already made): 9 return periods x 5 SLR
+# scenarios, simulated in two sequential waves (hop_distance=0 tiles fully
+# complete before hop_distance=1 tiles start - a hidden runtime dependency,
+# not encoded in Snakemake's own DAG, see run_aqueduct_cli.py's
+# collect_neighbor_wave_seeds) via run_simulation_batch.py, 3 local cores.
+#
+# Layered on top of config.yml + config_local.yml via
+# src/config_utils.py::materialize_config - a single scenario-config
+# override layer, no sweep-point layer (this isn't a parameter sweep).
+
+tile_grid:
+  path: "{processed_inputs_dir}/mask/bangkok_chao_phraya_tiles.gpkg"
+
+# Isolated output paths so this never collides with or dirties production
+# model_outputs/merged_results.
+simulation:
+  model_outputs: "{root}/bangkok_chao_phraya/model_outputs"
+postprocessing:
+  merged_outputs: "{root}/bangkok_chao_phraya/merged_results"
+visualization:
+  output_dir: "{root}/bangkok_chao_phraya/figures"
