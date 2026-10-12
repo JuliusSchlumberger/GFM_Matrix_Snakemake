@@ -123,6 +123,7 @@ import pyogrio
 import rasterio
 import shapely
 import xarray as xr
+import yaml
 from matplotlib.colors import ListedColormap
 from rasterio.enums import Resampling
 from rasterio.features import shapes
@@ -140,7 +141,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from map_style import WATER_COLOR  # noqa: E402
 
 OCEAN_CODE = 1
-STATIONS_NC = "processed_inputs/WL_scenarios/COAST-RP_EWL_RP100_SLR_0.nc"
+STATIONS_NC = "processed_inputs/WL_scenarios/COAST-RP_EWL_RP100_SLR_0.nc"  # --station-source global
+TILE_STATIONS_GPKG = "inputs/boundaries_RP100_SLR_0.gpkg"  # --station-source tile (default)
+COAST_HG_NC = "inputs/COAST_HG/COAST-HG_RP100.nc"
+MAX_HG_MATCH_DEG = 0.5  # same backstop build_line_forcing.py / build_boundary_forcing.py use
+MIN_FORCING_STATIONS = 2  # a tile needs this many used stations with a COAST-HG hydrograph
 MASK_VRT = "inputs/DeltaDTM_masks/deltadtm_mask.vrt"
 MAX_MASK_PX = 3000            # coastline traced on the mask decimated to at most this many px per side
 MIN_OCEAN_AREA_KM2 = 0.5      # drop ocean specks (misclassified pixels) from the coastline
@@ -822,6 +827,51 @@ def _merge_lines(links: list[dict]):
     return MultiLineString([merged]) if isinstance(merged, LineString) else merged
 
 
+def _search_box(tile: gpd.GeoDataFrame, buffer_deg: float, min_size_deg: float) -> tuple:
+    """Production's station search box (boundaries.select_stations_for_tile):
+    the envelope of the tile bbox + buffer_deg and a min_size_deg box centred
+    on the tile."""
+    minx, miny, maxx, maxy = tile.total_bounds
+    cx, cy, half = (minx + maxx) / 2, (miny + maxy) / 2, min_size_deg / 2
+    return (min(minx - buffer_deg, cx - half), max(min(miny - buffer_deg, cy - half), -89.0),
+            max(maxx + buffer_deg, cx + half), min(max(maxy + buffer_deg, cy + half), 89.0))
+
+
+def _tile_stations(tile_dir: Path) -> gpd.GeoDataFrame:
+    """The tile's own pre-selected COAST-RP stations (production's
+    boundaries_RP100_SLR_0.gpkg: search box + ocean-connectivity filter,
+    MDT-corrected, int16 cm)."""
+    st = gpd.read_file(tile_dir / TILE_STATIONS_GPKG).to_crs("EPSG:4326").reset_index(drop=True)
+    level = st["SLR_0"].to_numpy(dtype=np.float64) / 100.0
+    return gpd.GeoDataFrame({"station_index": np.arange(len(st)), "rp100_level_m": level},
+                            geometry=st.geometry.values, crs="EPSG:4326")
+
+
+_HG_XY = {}
+
+
+def _n_with_coast_hg(root: Path, lonlat: np.ndarray) -> int:
+    """How many of these stations have a COAST-HG hydrograph within MAX_HG_MATCH_DEG."""
+    if "xy" not in _HG_XY:
+        with xr.open_dataset(root / COAST_HG_NC) as ds:
+            _HG_XY["xy"] = np.column_stack([ds.station_x_coordinate.values, ds.station_y_coordinate.values])
+            _HG_XY["tree"] = cKDTree(_HG_XY["xy"])
+    if len(lonlat) == 0:
+        return 0
+    d, _ = _HG_XY["tree"].query(lonlat)
+    return int((d <= MAX_HG_MATCH_DEG).sum())
+
+
+def _clean(geom):
+    """Valid, single-type geometry for writing (make_valid can return a
+    GeometryCollection with stray points/lines next to the polygons)."""
+    geom = shapely.make_valid(geom)
+    if geom.geom_type == "GeometryCollection":
+        parts = [g for g in shapely.get_parts(geom) if g.geom_type in ("Polygon", "MultiPolygon")]
+        geom = unary_union(parts) if parts else shapely.Polygon()
+    return geom
+
+
 def _stations_in(root: Path, bounds) -> gpd.GeoDataFrame:
     with xr.open_dataset(root / STATIONS_NC) as ds:
         x = ds["station_x_coordinate"].values.astype(float)
@@ -833,17 +883,16 @@ def _stations_in(root: Path, bounds) -> gpd.GeoDataFrame:
 
 
 def build_tile(root: Path, tile_dir: Path, out_dir: Path, buffer_deg: float, overwrite: bool,
-               plot: str = "suitable") -> dict:
+               plot: str = "suitable", station_source: str = "tile", min_size_deg: float = 0.0) -> dict:
     tile_id = tile_dir.name
     gpkg = out_dir / f"{tile_id}.gpkg"
     row = {"tile_id": int(tile_id)}
     tile = gpd.read_file(tile_dir / "inputs" / "tile_geometry.gpkg").to_crs("EPSG:4326")
-    minx, miny, maxx, maxy = tile.total_bounds
-    bounds = (minx - buffer_deg, max(miny - buffer_deg, -89.0), maxx + buffer_deg, min(maxy + buffer_deg, 89.0))
+    bounds = _search_box(tile, buffer_deg, min_size_deg)
     utm_crs = tile.estimate_utm_crs()
     area_utm = gpd.GeoSeries([box(*bounds)], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
 
-    stations = _stations_in(root, bounds)
+    stations = _tile_stations(tile_dir) if station_source == "tile" else _stations_in(root, bounds)
     row.update(n_stations=len(stations),
                n_stations_in_tile=int(stations.within(tile.geometry.iloc[0]).sum()))
 
@@ -916,8 +965,9 @@ def build_tile(root: Path, tile_dir: Path, out_dir: Path, buffer_deg: float, ove
                   "ocean_active": split["ocean_active"]}
         for name, geom in layers.items():
             if not geom.is_empty:
-                gpd.GeoDataFrame({"tile_id": [int(tile_id)]}, geometry=[geom], crs=utm_crs).to_crs(
-                    "EPSG:4326").to_file(gpkg, layer=name, driver="GPKG")
+                out = gpd.GeoSeries([geom], crs=utm_crs).to_crs("EPSG:4326").iloc[0]
+                gpd.GeoDataFrame({"tile_id": [int(tile_id)]}, geometry=[_clean(out)], crs="EPSG:4326").to_file(
+                    gpkg, layer=name, driver="GPKG")
         if links:
             segs = gpd.GeoDataFrame(links, crs=utm_crs)
             merged = _merge_lines(links)
@@ -944,8 +994,11 @@ def build_tile(root: Path, tile_dir: Path, out_dir: Path, buffer_deg: float, ove
                    max_station_coast_dist_km=round(float(np.nanmax(coast_dist)) / 1000, 2),
                    mode=mode, land_inactive_pct=round(100 * split["land_inactive_frac"], 1),
                    ocean_active_pct=round(100 * split["ocean_active_frac"], 1),
-                   ocean_enclosed_pct=round(100 * split["ocean_enclosed_frac"], 1),
-                   suitable=best["n_conflicts"] == 0)
+                   ocean_enclosed_pct=round(100 * split["ocean_enclosed_frac"], 1))
+        used = stations[status == "used"]
+        n_forcing = _n_with_coast_hg(root, np.column_stack([used.geometry.x, used.geometry.y]))
+        row.update(n_used_stations=len(used), n_forcing_stations=n_forcing,
+                   suitable=best["n_conflicts"] == 0 and n_forcing >= MIN_FORCING_STATIONS)
         row["status"] = "written"
 
     # suitable tiles -> figures/, unsuitable ones -> figures_unsuitable/
@@ -1062,12 +1115,12 @@ def _running_marker(out_dir: Path, tile_id) -> Path:
 
 
 def _safe_build(args):
-    root, tile_dir, out_dir, buffer_deg, overwrite, plot = args
+    root, tile_dir, out_dir, buffer_deg, overwrite, plot, station_source, min_size_deg = args
     marker = _running_marker(out_dir, tile_dir.name)
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(str(os.getpid()))  # tells the parent which tiles were running if this worker dies
     try:
-        row = build_tile(root, tile_dir, out_dir, buffer_deg, overwrite, plot)
+        row = build_tile(root, tile_dir, out_dir, buffer_deg, overwrite, plot, station_source, min_size_deg)
     except Exception as exc:  # one broken tile must not stop the batch
         row = {"tile_id": int(tile_dir.name), "status": f"error: {exc!r}",
                "traceback": traceback.format_exc(limit=3)}
@@ -1151,7 +1204,16 @@ def main() -> None:
     parser.add_argument("--tile-ids", nargs="*", help="default: every tile with a built SFINCS model")
     parser.add_argument("--tile-ids-file", default=None, help="one tile id per line (e.g. one HPC job's share)")
     parser.add_argument("--sample", type=int, default=0, help="random sample of N tiles (seed 0) instead of all")
-    parser.add_argument("--station-buffer-deg", type=float, default=0.5)
+    parser.add_argument("--station-source", choices=["tile", "global"], default="tile",
+                        help="tile (default): the tile's own inputs/boundaries_RP100_SLR_0.gpkg and production's "
+                             "search box (boundary_conditions.station_search_buffer_deg / _min_size_deg); "
+                             "global: every COAST-RP station within the tile bbox + --station-buffer-deg")
+    parser.add_argument("--station-buffer-deg", type=float, default=None,
+                        help="search-box buffer (default: config's station_search_buffer_deg for --station-source "
+                             "tile, 0.5 for global)")
+    parser.add_argument("--tiles-dir-name", default=None,
+                        help="where the tile dirs (with inputs/) live, under paths.root - default: --base-dir-name; "
+                             "model_outputs for the production candidate pool")
     parser.add_argument("--overwrite", action="store_true", help="rebuild existing {tile_id}.gpkg (loses hand edits)")
     parser.add_argument("--skip-done", action="store_true",
                         help="skip tiles that already have a status file (not an error one) - resume a run")
@@ -1166,15 +1228,24 @@ def main() -> None:
     root = read_root(Path(args.config))
     base = root / args.base_dir_name
     out_dir = base / "boundary_lines"
+    tiles_root = root / (args.tiles_dir_name or args.base_dir_name)
+    with open(args.config, encoding="utf-8") as f:
+        bc = (yaml.safe_load(f) or {}).get("boundary_conditions", {})
+    if args.station_source == "tile":
+        buffer_deg = args.station_buffer_deg if args.station_buffer_deg is not None else float(bc.get("station_search_buffer_deg", 1.0))
+        min_size_deg = float(bc.get("station_search_min_size_deg", 2.0))
+    else:
+        buffer_deg, min_size_deg = (args.station_buffer_deg if args.station_buffer_deg is not None else 0.5), 0.0
     if args.summarize:
         summarize(out_dir)
         return
     if args.tile_ids or args.tile_ids_file:
         ids = list(args.tile_ids or []) + (
             [t.strip() for t in Path(args.tile_ids_file).read_text().split() if t.strip()] if args.tile_ids_file else [])
-        tile_dirs = [base / t for t in ids]
+        tile_dirs = [tiles_root / t for t in ids]
     else:
-        tile_dirs = sorted((d for d in base.iterdir() if d.name.isdigit() and (d / "sfincs_model" / "sfincs.msk").exists()),
+        need = TILE_STATIONS_GPKG if args.tiles_dir_name else "sfincs_model/sfincs.msk"
+        tile_dirs = sorted((d for d in tiles_root.iterdir() if d.name.isdigit() and (d / need).exists()),
                            key=lambda d: int(d.name))
         if args.sample:
             tile_dirs = sorted(random.Random(0).sample(tile_dirs, min(args.sample, len(tile_dirs))),
@@ -1188,7 +1259,8 @@ def main() -> None:
         print(f"--skip-done: {n0 - len(tile_dirs)} tile(s) already done")
     print(f"{len(tile_dirs)} tile(s) -> {out_dir}", flush=True)
 
-    jobs = [(root, d, out_dir, args.station_buffer_deg, args.overwrite, args.plot) for d in tile_dirs]
+    jobs = [(root, d, out_dir, buffer_deg, args.overwrite, args.plot, args.station_source, min_size_deg)
+            for d in tile_dirs]
     rows = _run_jobs(jobs, args.workers, out_dir)
     if rows:
         print()

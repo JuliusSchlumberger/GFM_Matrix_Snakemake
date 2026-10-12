@@ -23,8 +23,10 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import pyogrio
 import rasterio
 import rasterio.features
+import shapely
 import shapely.geometry
 import xarray as xr
 import yaml
@@ -191,12 +193,20 @@ def _create_mask(sf: SfincsModel, tile_gdf: gpd.GeoDataFrame, ocean_poly: gpd.Ge
         sf.mask.create_active(include_polygon=tile_gdf, reset_mask=True)
         sf.mask.create_boundary(btype="waterlevel", include_polygon=ocean_poly, reset_bounds=False, all_touched=True)
         return
-    tile_4326 = tile_gdf.to_crs("EPSG:4326")
-    inactive = retry_transient_io(gpd.read_file, boundary_lines_gpkg, layer="inactive").to_crs("EPSG:4326")
-    active = tile_4326.geometry.iloc[0].difference(inactive.union_all()) if len(inactive) else tile_4326.geometry.iloc[0]
+    # Every polygon goes through make_valid first: the line builder's inactive
+    # faces can carry self-touching rings once reprojected, and GEOS then fails
+    # the difference with "side location conflict" (19 tiles of the bline run).
+    # A tile whose line needs no inactive face has no "inactive" layer at all.
+    tile_geom = shapely.make_valid(tile_gdf.to_crs("EPSG:4326").geometry.iloc[0])
+    active = tile_geom
+    if "inactive" in pyogrio.list_layers(boundary_lines_gpkg)[:, 0]:
+        inactive = retry_transient_io(gpd.read_file, boundary_lines_gpkg, layer="inactive").to_crs("EPSG:4326")
+        if len(inactive):
+            inactive_geom = shapely.make_valid(shapely.union_all(shapely.make_valid(inactive.geometry.values)))
+            active = shapely.make_valid(tile_geom.difference(inactive_geom))
     sf.mask.create_active(include_polygon=gpd.GeoDataFrame(geometry=[active], crs="EPSG:4326"), reset_mask=True)
     lines = retry_transient_io(gpd.read_file, boundary_lines_gpkg, layer="boundary_line").to_crs(sf.crs)
-    band = gpd.GeoDataFrame(geometry=[lines.union_all().buffer(1.5 * resolution_m)], crs=sf.crs)
+    band = gpd.GeoDataFrame(geometry=[shapely.union_all(lines.geometry.values).buffer(1.5 * resolution_m)], crs=sf.crs)
     sf.mask.create_boundary(btype="waterlevel", include_polygon=band, reset_bounds=False, all_touched=True)
 
 

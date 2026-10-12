@@ -143,9 +143,28 @@ def _idw_seed_values(
     candidate station, ignoring connectivity, for a component with zero
     stations assigned to it.
     """
-    k = min(k, len(station_values))
     xs, ys = rasterio.transform.xy(transform, rows, cols)
-    cell_latlon_rad = np.radians(np.column_stack([ys, xs]))
+    return idw_seed_values_at(np.column_stack([xs, ys]), rows, cols, stations_lonlat, station_values,
+                              k, mask, ocean_code)
+
+
+def idw_seed_values_at(
+    cell_lonlat: np.ndarray,
+    rows: np.ndarray,
+    cols: np.ndarray,
+    stations_lonlat: np.ndarray,
+    station_values: np.ndarray,
+    k: int,
+    mask: np.ndarray,
+    ocean_code: int,
+) -> np.ndarray:
+    """`_idw_seed_values` for cells whose (lon, lat) positions are given
+    explicitly - the same haversine k-nearest IDW with the same ocean-
+    connectivity restriction (components of `mask` at `rows`/`cols`), for
+    grids that are not lon/lat themselves (e.g. a projected, rotated SFINCS
+    subgrid: pass its cell centres transformed to EPSG:4326)."""
+    k = min(k, len(station_values))
+    cell_latlon_rad = np.radians(np.asarray(cell_lonlat)[:, ::-1])  # (lon,lat) -> (lat,lon)
     station_latlon_rad = np.radians(stations_lonlat[:, ::-1])  # (lon,lat) -> (lat,lon)
 
     ocean = mask == ocean_code

@@ -24,6 +24,11 @@ Figures:
      (b) station level vs. eikonal seed vs. SFINCS zsmax along the coast.
      Drawn automatically for the worst-tile panel tiles by
      run_calibration_sweep_analysis.py (step 5).
+  5. setup_comparison (only with --compare-base-dir-name, not by default):
+     the same tile under two SFINCS set-ups (e.g. sfincs_calibration's 25 km
+     equal-spaced forcing vs sfincs_calibration_bline's boundary line) -
+     (a) map with both set-ups' boundary cells + forcing points, (b)/(c) the
+     along-coast COAST-RP / eikonal seed / SFINCS zsmax profile of each.
 
 Usage:
     python plot_sfincs_tile_diagnostics.py --tile-id 1693 --base-dir-name validation_sfincs_v5
@@ -53,6 +58,7 @@ from matplotlib.colors import ListedColormap
 from matplotlib.patches import Patch
 from rasterio.warp import transform as warp_transform
 from scipy import ndimage
+from scipy.spatial import cKDTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gfm_config import read_root  # noqa: E402
@@ -73,6 +79,13 @@ MASK_COLORS = ["#f5f5f2", "#a8c8e8", "#d62728"]  # inactive, active, boundary
 MASK_LABELS = ["inactive", "active", "waterlevel boundary"]
 
 FIGURES = ["mask", "boundary_forcing", "biggest_disagreement", "coastrp_forcing"]
+COMPARISON_FIGURES = ["setup_comparison"]  # need --compare-base-dir-name, never drawn by default
+NEAREST_MAX_KM = 3.0  # profile panels: comparison point = the coastline cell nearest the station, if this close
+SAME_POINT_MAX_KM = 0.5  # ... and SFINCS is read at its wet cell at that same point, if this close
+STATION_OCEAN_TOL_M = 2000.0  # profile panels: a station counts as "on ocean" with an ocean pixel this close
+# (same tolerance as build_station_boundary_lines.py's not-open-ocean station filter)
+PREFIXED_FIGURE_NAMES = {"coastrp_forcing": "forcing_comparison",
+                         "setup_comparison": "forcing_setup_comparison"}  # --out-prefix file names
 
 
 def _parse_sfincs_inp(inp_path: Path) -> dict:
@@ -352,56 +365,152 @@ def _order_along_coast(lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np
     return np.array(order), np.concatenate([[0.0], np.cumsum(steps)])
 
 
-def plot_coastrp_forcing(tile_dir: Path, sfincs_dir: Path, mask2d: np.ndarray, transform: rasterio.Affine,
-                         crs: str, out_path: Path, knn: int, river_code: int) -> None:
-    """(a) COAST-RP RP100 levels across the tile: every station, the eikonal's
-    own IDW seed level along the coastline (production `_idw_seed_values`,
-    `knn` nearest stations) and SFINCS's actual forcing points/boundary line.
-    (b) Along the coast, per station inside the tile: the station's own level,
-    the eikonal seed level and SFINCS's peak water level (zsmax) nearby - i.e.
-    what each model is actually driven by at that stretch of coast."""
+def _coastrp_context(tile_dir: Path, knn: int, river_code: int) -> dict:
+    """Native land/sea mask, COAST-RP stations (lon/lat/RP100 level), the
+    eikonal's own IDW seed level along the coastline (production
+    `_idw_seed_values`, `knn` nearest stations) and the stations inside the
+    tile ordered along the coast (`idx`, cumulative `dist_km`)."""
     from flood_model import _idw_seed_values, coastline_mask  # src/, heavy imports only needed here
 
     with rasterio.open(tile_dir / "inputs" / "mask.tif") as src:
         mask_native = src.read(1).astype(np.int8)
-        native_transform, native_bounds = src.transform, src.bounds
+        native_transform, bounds = src.transform, src.bounds
     stations = gpd.read_file(tile_dir / "inputs" / "boundaries_RP100_SLR_0.gpkg").to_crs("EPSG:4326")
     level_m = decode_waterlevel_cm(stations["SLR_0"].to_numpy())
     st_lon, st_lat = stations.geometry.x.to_numpy(), stations.geometry.y.to_numpy()
-
     coast = coastline_mask(mask_native, ocean_code=OCEAN_CODE, river_code=river_code)
     c_rows, c_cols = np.nonzero(coast)
     seed = _idw_seed_values(c_rows, c_cols, native_transform, np.column_stack([st_lon, st_lat]), level_m,
                             min(knn, len(level_m)), mask_native, OCEAN_CODE)
-    c_lon, c_lat = rasterio.transform.xy(native_transform, c_rows, c_cols)
-    c_lon, c_lat = np.asarray(c_lon), np.asarray(c_lat)
+    c_lon, c_lat = (np.asarray(v) for v in rasterio.transform.xy(native_transform, c_rows, c_cols))
+    inside = ((st_lon >= bounds.left) & (st_lon <= bounds.right) & (st_lat >= bounds.bottom) & (st_lat <= bounds.top))
+    # compared stations must be on ocean: an ocean pixel of the native mask within
+    # STATION_OCEAN_TOL_M (COAST-RP points follow a coarser coastline and often sit a
+    # few hundred m on land-coded pixels; this drops the ones up rivers / inland).
+    # Every station still feeds the eikonal seed above, as in production.
+    on_ocean = np.zeros(len(st_lon), dtype=bool)
+    px_m = abs(native_transform.e) * 110570.0
+    w = int(np.ceil(STATION_OCEAN_TOL_M / px_m))
+    for k in np.nonzero(inside)[0]:
+        r, c = rasterio.transform.rowcol(native_transform, st_lon[k], st_lat[k])
+        r0, c0 = max(r - w, 0), max(c - w, 0)
+        rr, cc = np.nonzero(mask_native[r0:r + w + 1, c0:c + w + 1] == OCEAN_CODE)
+        if len(rr):
+            d = np.hypot((rr + r0 - r) * px_m, (cc + c0 - c) * px_m * np.cos(np.radians(st_lat[k])))
+            on_ocean[k] = d.min() <= STATION_OCEAN_TOL_M
+    off_ocean = np.nonzero(inside & ~on_ocean)[0]
+    idx = np.nonzero(inside & on_ocean)[0]
+    dist_km = np.array([])
+    if len(idx):
+        order, dist_km = _order_along_coast(st_lon[idx], st_lat[idx])
+        idx = idx[order]
+    return {"mask": mask_native, "bounds": bounds, "st_lon": st_lon, "st_lat": st_lat, "level_m": level_m,
+            "c_lon": c_lon, "c_lat": c_lat, "seed": seed, "idx": idx, "dist_km": dist_km, "knn": knn,
+            "off_ocean": off_ocean}
 
-    zsmax_lon = zsmax_lat = zsmax = None
+
+def _zsmax_lonlat(sfincs_dir: Path, crs: str):
+    """(lon, lat, zsmax) of every wet SFINCS cell centre, or (None, None, None)."""
     map_path = sfincs_dir / "sfincs_map.nc"
-    if map_path.exists():
-        import xarray as xr
-        with xr.open_dataset(map_path) as ds:
-            z = ds["zsmax"].values.reshape(ds["zsmax"].shape[-2:])
-            cx, cy = ds["corner_x"].values, ds["corner_y"].values
-        cx = 0.25 * (cx[:-1, :-1] + cx[1:, :-1] + cx[:-1, 1:] + cx[1:, 1:])
-        cy = 0.25 * (cy[:-1, :-1] + cy[1:, :-1] + cy[:-1, 1:] + cy[1:, 1:])
-        ok = np.isfinite(z)
-        zsmax_lon, zsmax_lat = (np.asarray(v) for v in warp_transform(crs, "EPSG:4326", cx[ok], cy[ok]))
-        zsmax = z[ok]
+    if not map_path.exists():
+        return None, None, None
+    import xarray as xr
+    with xr.open_dataset(map_path) as ds:
+        z = ds["zsmax"].values.reshape(ds["zsmax"].shape[-2:])
+        cx, cy = ds["corner_x"].values, ds["corner_y"].values
+    cx = 0.25 * (cx[:-1, :-1] + cx[1:, :-1] + cx[:-1, 1:] + cx[1:, 1:])
+    cy = 0.25 * (cy[:-1, :-1] + cy[1:, :-1] + cy[:-1, 1:] + cy[1:, 1:])
+    ok = np.isfinite(z)
+    lon, lat = (np.asarray(v) for v in warp_transform(crs, "EPSG:4326", cx[ok], cy[ok]))
+    return lon, lat, z[ok]
 
+
+def _land_sea_background(ax, ctx: dict) -> None:
+    mask_native, bounds = ctx["mask"], ctx["bounds"]
+    step = max(1, mask_native.shape[0] // 1500)
+    ax.imshow(np.where(mask_native[::step, ::step] == 0, 1, 0),
+              extent=[bounds.left, bounds.right, bounds.bottom, bounds.top],
+              cmap=ListedColormap([WATER_COLOR, "#e4e4e0"]), vmin=0, vmax=1, interpolation="nearest")
+    ax.set_xlim(bounds.left, bounds.right)
+    ax.set_ylim(bounds.bottom, bounds.top)
+    ax.set_aspect(1 / np.cos(np.radians(0.5 * (bounds.bottom + bounds.top))))
+    ax.set_xlabel("longitude (°E)")
+    ax.set_ylabel("latitude (°N)")
+
+
+def _profile_panel(ax, ctx: dict, zsmax_lonlat, bzs, letter: str, title: str | None = None) -> None:
+    """Along the coast, per COAST-RP station inside the tile and on ocean
+    (_coastrp_context): the station's level and - at ONE shared comparison
+    point per station, the coastline cell nearest the station (within
+    NEAREST_MAX_KM) - the eikonal seed level there and SFINCS's peak water
+    level (zsmax) of the wet SFINCS cell at that same point (within
+    SAME_POINT_MAX_KM - the 120 m SFINCS grid does not line up with the 1"
+    coastline cells). Either left out where there is none (no SFINCS value =
+    SFINCS never got wet at that point). SFINCS forcing peaks dotted."""
+    idx, dist_km, st_lon, st_lat = ctx["idx"], ctx["dist_km"], ctx["st_lon"], ctx["st_lat"]
+    if len(idx) == 0:
+        ax.text(0.5, 0.5, "no COAST-RP station inside the tile", ha="center", va="center", transform=ax.transAxes)
+        ax.set_axis_off()
+        draw_panel_letter(ax, letter)
+        return
+    kx = 111.32 * np.cos(np.radians(np.mean(st_lat[idx])))
+
+    def km(lon, lat) -> np.ndarray:
+        return np.column_stack([np.asarray(lon) * kx, np.asarray(lat) * 110.57])
+
+    # the shared comparison point: the coastline cell nearest each station
+    d_c, j_c = cKDTree(km(ctx["c_lon"], ctx["c_lat"])).query(km(st_lon[idx], st_lat[idx]))
+    has_point = d_c <= NEAREST_MAX_KM
+    seed_at = np.where(has_point, ctx["seed"][j_c], np.nan)
+    point_xy = km(ctx["c_lon"][j_c], ctx["c_lat"][j_c])
+
+    cmap = plt.get_cmap("YlOrRd")
+    ax.plot(dist_km, ctx["level_m"][idx], "o-", color="black", linewidth=1.2, label="COAST-RP station level")
+    ax.plot(dist_km, seed_at, "s-", color=cmap(0.6), linewidth=2,
+            label=f"eikonal coastline seed (IDW k={ctx['knn']}) at the comparison point")
+    zlon, zlat, zs = zsmax_lonlat
+    if zs is not None:
+        d_z, j_z = cKDTree(km(zlon, zlat)).query(point_xy)
+        zs_at = np.where(has_point & (d_z <= SAME_POINT_MAX_KM), zs[j_z], np.nan)
+        ax.plot(dist_km, zs_at, "^-", color="#1f4e8c", linewidth=2,
+                label="SFINCS peak water level zsmax at the same point")
+    if bzs is not None:
+        for k in range(bzs.shape[1] - 1):
+            ax.axhline(bzs[:, k + 1].max(), color="#1f4e8c", linestyle=":", linewidth=1,
+                       label="SFINCS bnd forcing peaks" if k == 0 else None)
+    ax.set_xticks(dist_km)
+    ax.set_xticklabels([f"{st_lon[k]:.2f}E\n{st_lat[k]:.2f}N" for k in idx], rotation=90, fontsize=7)
+    ax.set_xlabel("COAST-RP stations on ocean inside the tile, ordered along the coast")
+    ax.set_ylabel("water level (m)")
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=9, loc="upper right")
+    if title:
+        ax.set_title(title, fontsize=10)
+    draw_panel_letter(ax, letter)
+
+
+def plot_coastrp_forcing(tile_dir: Path, sfincs_dir: Path, mask2d: np.ndarray, transform: rasterio.Affine,
+                         crs: str, out_path: Path, knn: int, river_code: int) -> None:
+    """(a) COAST-RP RP100 levels across the tile: every station, the eikonal's
+    own IDW seed level along the coastline and SFINCS's actual forcing
+    points/boundary line. (b) Along the coast, per station inside the tile: the
+    station's own level, the eikonal seed level and SFINCS's peak water level
+    (zsmax) nearby - i.e. what each model is actually driven by at that
+    stretch of coast."""
+    ctx = _coastrp_context(tile_dir, knn, river_code)
+    level_m = ctx["level_m"]
     vmax = float(np.ceil(level_m.max() * 2) / 2)
     cmap = plt.get_cmap("YlOrRd")
     fig, axes = plt.subplots(1, 2, figsize=(18, 8.5), gridspec_kw={"width_ratios": [1, 1.25]})
 
-    # (a) map
     ax = axes[0]
-    step = max(1, mask_native.shape[0] // 1500)
-    land_sea = np.where(mask_native[::step, ::step] == 0, 1, 0)
-    ax.imshow(land_sea, extent=[native_bounds.left, native_bounds.right, native_bounds.bottom, native_bounds.top],
-              cmap=ListedColormap([WATER_COLOR, "#e4e4e0"]), vmin=0, vmax=1, interpolation="nearest")
-    sc = ax.scatter(c_lon, c_lat, c=seed, s=2, cmap=cmap, vmin=0, vmax=vmax, zorder=3, rasterized=True)
-    ax.scatter(st_lon, st_lat, c=level_m, s=70, cmap=cmap, vmin=0, vmax=vmax, edgecolors="black",
+    _land_sea_background(ax, ctx)
+    sc = ax.scatter(ctx["c_lon"], ctx["c_lat"], c=ctx["seed"], s=2, cmap=cmap, vmin=0, vmax=vmax, zorder=3,
+                    rasterized=True)
+    ax.scatter(ctx["st_lon"], ctx["st_lat"], c=level_m, s=70, cmap=cmap, vmin=0, vmax=vmax, edgecolors="black",
                linewidths=1.0, zorder=5)
+    off = ctx["off_ocean"]
+    ax.scatter(ctx["st_lon"][off], ctx["st_lat"][off], s=90, marker="x", color="black", linewidths=1.8, zorder=6)
     b_rows, b_cols = np.nonzero(mask2d == BOUNDARY)
     blons, blats = _cell_centres_lonlat(transform, crs, b_rows, b_cols)
     ax.scatter(blons, blats, s=4, color="#1f4e8c", marker="s", zorder=4)
@@ -410,15 +519,12 @@ def plot_coastrp_forcing(tile_dir: Path, sfincs_dir: Path, mask2d: np.ndarray, t
         bnd_lons, bnd_lats = warp_transform(crs, "EPSG:4326", bnd[:, 0], bnd[:, 1])
         ax.scatter(bnd_lons, bnd_lats, s=260, facecolors="none", edgecolors="#1f4e8c", linewidths=2.0,
                    marker="*", zorder=6)
-    ax.set_xlim(native_bounds.left, native_bounds.right)
-    ax.set_ylim(native_bounds.bottom, native_bounds.top)
-    ax.set_aspect(1 / np.cos(np.radians(0.5 * (native_bounds.bottom + native_bounds.top))))
-    ax.set_xlabel("longitude (°E)")
-    ax.set_ylabel("latitude (°N)")
     fig.colorbar(sc, ax=ax, fraction=0.04, pad=0.02, label="COAST-RP RP100 water level (m)")
     ax.legend(handles=[
         plt.Line2D([0], [0], marker="o", color="none", markerfacecolor="#f4a261", markeredgecolor="black",
                    markersize=8, label="COAST-RP station (colour = level)"),
+        plt.Line2D([0], [0], marker="x", color="none", markeredgecolor="black", markersize=9, markeredgewidth=1.8,
+                   label=f"no ocean within {STATION_OCEAN_TOL_M / 1000:g} km - left out of (b) (n={len(off)})"),
         plt.Line2D([0], [0], color=cmap(0.5), linewidth=3, label=f"eikonal coastline seed (IDW, k={knn})"),
         plt.Line2D([0], [0], marker="s", color="none", markerfacecolor="#1f4e8c", markersize=5,
                    label="SFINCS waterlevel-boundary cells"),
@@ -427,52 +533,65 @@ def plot_coastrp_forcing(tile_dir: Path, sfincs_dir: Path, mask2d: np.ndarray, t
     ], loc="lower right", fontsize=8)
     draw_panel_letter(ax, "a")
 
-    # (b) along the coast, stations inside the tile only
-    ax = axes[1]
-    inside = ((st_lon >= native_bounds.left) & (st_lon <= native_bounds.right)
-              & (st_lat >= native_bounds.bottom) & (st_lat <= native_bounds.top))
-    idx = np.nonzero(inside)[0]
-    if len(idx) == 0:
-        ax.text(0.5, 0.5, "no COAST-RP station inside the tile", ha="center", va="center", transform=ax.transAxes)
-        ax.set_axis_off()
-        draw_panel_letter(ax, "b")
-        fig.tight_layout()
-        fig.savefig(out_path, dpi=170)
-        plt.close(fig)
-        print(f"Wrote {out_path}")
-        return
-    order, dist_km = _order_along_coast(st_lon[idx], st_lat[idx])
-    idx = idx[order]
-    kx = 111.32 * np.cos(np.radians(np.mean(st_lat[idx])))
-
-    def near_median(lon: np.ndarray, lat: np.ndarray, values: np.ndarray, radius_km: float = 3.0) -> np.ndarray:
-        out = np.full(len(idx), np.nan)
-        for i, k in enumerate(idx):
-            d = np.hypot((lon - st_lon[k]) * kx, (lat - st_lat[k]) * 110.57)
-            if (d <= radius_km).any():
-                out[i] = np.median(values[d <= radius_km])
-        return out
-
-    ax.plot(dist_km, level_m[idx], "o-", color="black", linewidth=1.2, label="COAST-RP station level")
-    ax.plot(dist_km, near_median(c_lon, c_lat, seed), "s-", color=cmap(0.6), linewidth=2,
-            label=f"eikonal coastline seed (IDW k={knn}, median within 3 km)")
-    if zsmax is not None:
-        ax.plot(dist_km, near_median(zsmax_lon, zsmax_lat, zsmax), "^-", color="#1f4e8c", linewidth=2,
-                label="SFINCS peak water level zsmax (median within 3 km)")
-    if bzs is not None:
-        for k in range(bzs.shape[1] - 1):
-            ax.axhline(bzs[:, k + 1].max(), color="#1f4e8c", linestyle=":", linewidth=1,
-                       label="SFINCS bnd forcing peaks" if k == 0 else None)
-    ax.set_xticks(dist_km)
-    ax.set_xticklabels([f"{st_lon[k]:.2f}E\n{st_lat[k]:.2f}N" for k in idx], rotation=90, fontsize=7)
-    ax.set_xlabel("COAST-RP stations inside the tile, ordered along the coast")
-    ax.set_ylabel("water level (m)")
-    ax.grid(True, alpha=0.3)
-    ax.legend(fontsize=9, loc="upper right")
-    draw_panel_letter(ax, "b")
-
+    _profile_panel(axes[1], ctx, _zsmax_lonlat(sfincs_dir, crs), bzs, "b")
     fig.tight_layout()
     fig.savefig(out_path, dpi=170)
+    plt.close(fig)
+    print(f"Wrote {out_path}")
+
+
+SETUP_COLORS = ("#1f4e8c", "#d95f02")  # reference setup, this setup
+
+
+def plot_setup_comparison(tile_dirs: tuple[Path, Path], labels: tuple[str, str], out_path: Path,
+                          knn: int, river_code: int) -> None:
+    """Two SFINCS set-ups of the same tile side by side: (a) land/sea, the
+    COAST-RP stations, the eikonal coastline seed and BOTH set-ups' boundary
+    cells + forcing points; (b)/(c) the along-coast profile (COAST-RP level,
+    eikonal seed, SFINCS zsmax, forcing peaks) of each set-up, same y-axis."""
+    ctx = _coastrp_context(tile_dirs[1], knn, river_code)  # inputs are identical copies
+    level_m = ctx["level_m"]
+    vmax = float(np.ceil(level_m.max() * 2) / 2)
+    cmap = plt.get_cmap("YlOrRd")
+    fig = plt.figure(figsize=(20, 17))
+    gs = fig.add_gridspec(2, 2, height_ratios=[1.15, 1])
+    ax = fig.add_subplot(gs[0, :])  # map across the full width on top, the two profiles below
+    _land_sea_background(ax, ctx)
+    sc = ax.scatter(ctx["c_lon"], ctx["c_lat"], c=ctx["seed"], s=2, cmap=cmap, vmin=0, vmax=vmax, zorder=3,
+                    rasterized=True)
+    ax.scatter(ctx["st_lon"], ctx["st_lat"], c=level_m, s=70, cmap=cmap, vmin=0, vmax=vmax, edgecolors="black",
+               linewidths=1.0, zorder=6)
+    handles = [plt.Line2D([0], [0], marker="o", color="none", markerfacecolor="#f4a261", markeredgecolor="black",
+                          markersize=8, label="COAST-RP station (colour = level)"),
+               plt.Line2D([0], [0], color=cmap(0.5), linewidth=3, label=f"eikonal coastline seed (IDW, k={knn})")]
+    runs = []
+    for tile_dir, label, color, marker in zip(tile_dirs, labels, SETUP_COLORS, ("*", "P")):
+        sfincs_dir = tile_dir / "sfincs_model"
+        mask2d, transform, crs = _read_sfincs_mask(sfincs_dir)
+        b_rows, b_cols = np.nonzero(mask2d == BOUNDARY)
+        blons, blats = _cell_centres_lonlat(transform, crs, b_rows, b_cols)
+        ax.scatter(blons, blats, s=6, color=color, marker="s", zorder=4)
+        bnd, bzs = _read_sfincs_bnd_bzs(sfincs_dir)
+        if bnd is not None:
+            bnd_lons, bnd_lats = warp_transform(crs, "EPSG:4326", bnd[:, 0], bnd[:, 1])
+            ax.scatter(bnd_lons, bnd_lats, s=220, facecolors="none", edgecolors=color, linewidths=2.0,
+                       marker=marker, zorder=7)
+        n_bnd = 0 if bnd is None else len(bnd)
+        handles += [plt.Line2D([0], [0], marker="s", color="none", markerfacecolor=color, markersize=5,
+                               label=f"{label}: boundary cells"),
+                    plt.Line2D([0], [0], marker=marker, color="none", markeredgecolor=color, markersize=12,
+                               label=f"{label}: forcing points (n={n_bnd})")]
+        runs.append((_zsmax_lonlat(sfincs_dir, crs), bzs))
+    fig.colorbar(sc, ax=ax, fraction=0.03, pad=0.01, label="COAST-RP RP100 water level (m)")
+    ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.07, 1.0), fontsize=9, borderaxespad=0)
+    draw_panel_letter(ax, "a")
+
+    ax_b = fig.add_subplot(gs[1, 0])
+    ax_c = fig.add_subplot(gs[1, 1], sharey=ax_b)
+    for axp, (zs, bzs), label, letter in zip((ax_b, ax_c), runs, labels, ("b", "c")):
+        _profile_panel(axp, ctx, zs, bzs, letter, title=label)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
     plt.close(fig)
     print(f"Wrote {out_path}")
 
@@ -486,16 +605,26 @@ def main() -> None:
     parser.add_argument("--max-outer-iterations", type=int, default=MAX_OUTER_ITERATIONS_DEFAULT)
     parser.add_argument("--config", default=str(Path(__file__).resolve().parent.parent
                                                  / "snakemake_workflow" / "config" / "config.yml"))
-    parser.add_argument("--figures", nargs="+", choices=FIGURES, default=FIGURES,
-                        help="which figure(s) to draw (default: all four)")
+    parser.add_argument("--figures", nargs="+", choices=FIGURES + COMPARISON_FIGURES, default=FIGURES,
+                        help="which figure(s) to draw (default: the four single-run ones)")
+    parser.add_argument("--compare-base-dir-name", default=None,
+                        help="setup_comparison: the reference run of the same tile (e.g. sfincs_calibration), "
+                             "drawn next to --base-dir-name's run")
     parser.add_argument("--fig-dir", default=None,
                         help="output directory (default: {base-dir-name}/{tile_id}/figures)")
+    parser.add_argument("--out-prefix", default=None,
+                        help="name every figure <prefix>_<figure>.png (coastrp_forcing -> forcing_comparison), "
+                             "e.g. --out-prefix underprediction_1974")
     parser.add_argument("--out-name", default=None,
                         help="file name for the figure, only with exactly one --figures entry "
                              "(default: {tile_id}_{figure}.png)")
     args = parser.parse_args()
     if args.out_name and len(args.figures) != 1:
         parser.error("--out-name needs exactly one --figures entry")
+    if args.out_name and args.out_prefix:
+        parser.error("--out-name and --out-prefix are mutually exclusive")
+    if "setup_comparison" in args.figures and not args.compare_base_dir_name:
+        parser.error("setup_comparison needs --compare-base-dir-name")
 
     root = read_root(Path(args.config))
     tile_dir = root / args.base_dir_name / args.tile_id
@@ -504,7 +633,11 @@ def main() -> None:
     fig_dir.mkdir(parents=True, exist_ok=True)
 
     def out_path(figure: str) -> Path:
-        return fig_dir / (args.out_name or f"{args.tile_id}_{figure}.png")
+        if args.out_name:
+            return fig_dir / args.out_name
+        if args.out_prefix:
+            return fig_dir / f"{args.out_prefix}_{PREFIXED_FIGURE_NAMES.get(figure, figure)}.png"
+        return fig_dir / f"{args.tile_id}_{figure}.png"
 
     mask2d, transform, crs = _read_sfincs_mask(sfincs_dir)
     if "mask" in args.figures:
@@ -515,13 +648,17 @@ def main() -> None:
     if "biggest_disagreement" in args.figures:
         plot_biggest_disagreement(tile_dir, out_path("biggest_disagreement"),
                                   args.friction_scale_factor, args.max_outer_iterations)
-    if "coastrp_forcing" in args.figures:
+    if "coastrp_forcing" in args.figures or "setup_comparison" in args.figures:
         with open(args.config, encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
+        knn, river_code = int(cfg["simulation"]["flooding"]["knn"]), int(cfg["tile_generation"]["river_code"])
+    if "coastrp_forcing" in args.figures:
         plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs,
-                             out_path("coastrp_forcing"),
-                             knn=int(cfg["simulation"]["flooding"]["knn"]),
-                             river_code=int(cfg["tile_generation"]["river_code"]))
+                             out_path("coastrp_forcing"), knn=knn, river_code=river_code)
+    if "setup_comparison" in args.figures:
+        plot_setup_comparison((root / args.compare_base_dir_name / args.tile_id, tile_dir),
+                              (args.compare_base_dir_name, args.base_dir_name),
+                              out_path("setup_comparison"), knn=knn, river_code=river_code)
 
 
 if __name__ == "__main__":

@@ -13,11 +13,13 @@
 #   - forcing: one point per station node on the line, its own COAST-HG
 #     hydrograph scaled to its COAST-RP RP100 level (build_line_forcing.py).
 #
-# Nothing in $SRC_BASE_DIR_NAME is modified: the tile's inputs/, the prepared
-# elevation_combined.tif/manning_n.tif and the eikonal/bathtub rasters
-# (computed on the same SFINCS subgrid - the grid itself does not change with
-# the mask) are symlinked; the boundary line gpkg is copied (provenance - a
-# later hand edit of the source does not silently change a finished run).
+# Nothing in $SRC_BASE_DIR_NAME is modified: the tile's inputs/ and its
+# eikonal (outer5) / bathtub rasters (computed on the same SFINCS subgrid -
+# the grid itself does not change with the mask) are copied, so the analysis
+# can read them from Windows too; the prepared elevation_combined.tif /
+# manning_n.tif are symlinked (only read by the build); the boundary line gpkg
+# is copied (provenance - a later hand edit of the source does not silently
+# change a finished run).
 #
 # Idempotent: a tile with outputs/bline_run.done is skipped. A failure writes
 # outputs/bline_run.failed (cleared on a later success).
@@ -68,10 +70,14 @@ fi
 
 # -- 1. tile dir: symlinked inputs / prepared rasters / eikonal + bathtub rasters, copied line --
 mkdir -p "$TILE_DIR/inputs" "$SM" "$OUT" || fail "cannot create $TILE_DIR"
-for f in "$SRC"/inputs/*; do ln -sfn "$f" "$TILE_DIR/inputs/$(basename "$f")"; done
+# inputs and the rasters the calibration analysis reads are COPIED (Windows can't
+# follow Linux symlinks over the P: share); --remove-destination replaces an old
+# symlink instead of writing through it into the source. The prep rasters are only
+# read by the build here, so they stay symlinks.
+for f in "$SRC"/inputs/*; do cp --remove-destination "$f" "$TILE_DIR/inputs/"; done
 for f in elevation_combined.tif manning_n.tif; do ln -sfn "$SRC/sfincs_model/$f" "$SM/$f"; done
-for f in "$SRC"/outputs/eikonal_on_subgrid_waterdepth_*.tif "$SRC"/outputs/bathtub_waterdepth_*.tif; do
-  [ -f "$f" ] && ln -sfn "$f" "$OUT/$(basename "$f")"
+for f in "$SRC"/outputs/eikonal_on_subgrid_waterdepth_RP100_SLR_0*_outer5.tif "$SRC"/outputs/bathtub_waterdepth_*.tif; do
+  [ -f "$f" ] && cp --remove-destination "$f" "$OUT/"
 done
 cp -f "$LINES_SRC" "$LINES" || fail "copying the boundary line failed"
 

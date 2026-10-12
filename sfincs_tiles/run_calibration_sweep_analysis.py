@@ -20,14 +20,18 @@ same live progress running any of them standalone would give you):
      depth-joint correlation/category-alignment heatmaps) all for the one
      friction factor that actually performs best, not the production
      default.
-  5. plot_sfincs_tile_diagnostics.py --figures coastrp_forcing for every
-     tile in those two worst-tile panels (plot_worst_tiles_panel.py's
-     worst_tiles_selection_fsf{X}.csv) - written to figures/ as
-     {overprediction,underprediction}_{tile_id}_forcing_comparison.png
-     (eikonal over-/under-predicting relative to SFINCS).
+  5. plot_sfincs_tile_diagnostics.py --figures coastrp_forcing boundary_forcing
+     for EVERY tile scored at that sweep point (friction_sweep_per_tile_metrics.csv,
+     --forcing-checks-workers at a time) - written to figures/forcing_checks/ as
+     {overprediction,underprediction}_{tile_id}_forcing_comparison.png and
+     ..._boundary_forcing.png (eikonal over-/under-predicting relative to SFINCS).
+     --forcing-checks-only redoes just this step (best point from the existing
+     friction_sweep_pooled_metrics.csv and per-tile metrics).
 
 Usage:
     python run_calibration_sweep_analysis.py --base-dir-name sfincs_calibration --max-outer-iterations 5
+    # only the forcing figures of the worst tiles, from an earlier full run's outputs:
+    python run_calibration_sweep_analysis.py --base-dir-name sfincs_calibration_bline --forcing-checks-only
     # score only a specific tile subset instead of the study's full tile_ids.txt:
     python run_calibration_sweep_analysis.py --base-dir-name sfincs_calibration \\
         --tile-ids-file sfincs_calibration/tile_ids_done.txt --max-outer-iterations 5
@@ -38,6 +42,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pandas as pd
@@ -49,9 +54,6 @@ sys.path.insert(0, str(_THIS_DIR))
 from gfm_config import read_root  # noqa: E402
 
 FRICTION_SCALE_FACTORS_DEFAULT = [3.0, 6.0, 9.0, 12.0, 15.0, 18.0, 21.0, 24.0, 27.0, 30.0]
-
-# worst-tile panel -> figure-name prefix, from the eikonal's point of view
-_EIKONAL_PREDICTION = {"eikonal_overpredicts": "overprediction", "sfincs_overpredicts": "underprediction"}
 
 
 def _run(cmd: list[str]) -> None:
@@ -76,11 +78,18 @@ def main() -> None:
         "--select-by", choices=["CSI", "bias"], default="CSI",
         help="'CSI': highest pooled CSI (default). 'bias': |bias-1| closest to 0 (least over/under-prediction overall).",
     )
+    parser.add_argument("--forcing-checks-workers", type=int, default=4,
+                        help="step 5: tiles drawn in parallel (one subprocess each)")
+    parser.add_argument("--forcing-checks-only", action="store_true",
+                        help="only step 5 (forcing figures), from the existing pooled + per-tile metrics")
     args = parser.parse_args()
 
     python = sys.executable
     root = read_root(Path(args.config))
     tile_ids_file = args.tile_ids_file or str(root / args.base_dir_name / "tile_ids.txt")
+    if args.forcing_checks_only:
+        _forcing_checks(python, args, root, _best_fsf(root, args))
+        return
 
     # Step 0: tile completion status (informational - writes calibration_tile_status.csv
     # + missing_eikonal_pairs.csv, never blocks the steps below).
@@ -103,17 +112,7 @@ def main() -> None:
     ])
 
     # Step 2: pick the best sweep point from what step 1 just wrote.
-    pooled_path = root / args.base_dir_name / "friction_sweep_pooled_metrics.csv"
-    pooled = pd.read_csv(pooled_path)
-
-    if args.select_by == "CSI":
-        best = pooled.loc[pooled["CSI"].idxmax()]
-    else:
-        best = pooled.loc[(pooled["bias"] - 1.0).abs().idxmin()]
-    best_fsf = float(best["friction_scale_factor"])
-    print(f"\nBest sweep point by {args.select_by}: friction_scale_factor={best_fsf:g} "
-          f"({best['fraction_of_current']:.1f}x current), CSI={best['CSI']:.4f}, bias={best['bias']:.4f}, "
-          f"n_tiles_scored={int(best['n_tiles_scored'])}")
+    best_fsf = _best_fsf(root, args)
 
     # Step 3: worst-tile panels for that best point.
     _run([
@@ -134,27 +133,66 @@ def main() -> None:
         "--max-outer-iterations", str(args.max_outer_iterations),
     ])
 
-    # Step 5: COAST-RP forcing figure for every tile in the two worst-tile panels
-    # (the selection step 3 wrote). One subprocess per tile; a failing tile is
-    # reported at the end instead of aborting the rest.
-    fig_dir = root / args.base_dir_name / "figures"
-    selection = pd.read_csv(fig_dir / f"worst_tiles_selection_fsf{best_fsf:g}.csv")
+    # Step 5: forcing figures for the worst tiles.
+    _forcing_checks(python, args, root, best_fsf)
+
+
+def _best_fsf(root: Path, args) -> float:
+    pooled = pd.read_csv(root / args.base_dir_name / "friction_sweep_pooled_metrics.csv")
+    if args.select_by == "CSI":
+        best = pooled.loc[pooled["CSI"].idxmax()]
+    else:
+        best = pooled.loc[(pooled["bias"] - 1.0).abs().idxmin()]
+    best_fsf = float(best["friction_scale_factor"])
+    print(f"\nBest sweep point by {args.select_by}: friction_scale_factor={best_fsf:g} "
+          f"({best['fraction_of_current']:.1f}x current), CSI={best['CSI']:.4f}, bias={best['bias']:.4f}, "
+          f"n_tiles_scored={int(best['n_tiles_scored'])}")
+    return best_fsf
+
+
+def _eikonal_prediction(row) -> str:
+    """Figure-name prefix from the eikonal's point of view at the chosen sweep point."""
+    if row.eikonal_only_km2 > row.sfincs_only_km2:
+        return "overprediction"
+    if row.sfincs_only_km2 > row.eikonal_only_km2:
+        return "underprediction"
+    return "agreement"
+
+
+def _forcing_checks(python: str, args, root: Path, best_fsf: float) -> None:
+    """COAST-RP forcing comparison + boundary forcing figure for EVERY tile scored at the chosen
+    sweep point (friction_sweep_per_tile_metrics.csv) into
+    figures/forcing_checks/, named {over,under}prediction_<tile>_... from the
+    eikonal's point of view. --forcing-checks-workers tiles at a time, one
+    subprocess each; a failing tile is reported at the end instead of aborting
+    the rest."""
+    base = root / args.base_dir_name
+    out_dir = base / "figures" / "forcing_checks"
+    per_tile = pd.read_csv(base / "friction_sweep_per_tile_metrics.csv")
+    rows = list(per_tile[per_tile["friction_scale_factor"] == best_fsf].sort_values("tile_id").itertuples())
+    figures = ["coastrp_forcing", "boundary_forcing"]
+
+    def run_one(row) -> tuple[str, bool]:
+        prefix = f"{_eikonal_prediction(row)}_{int(row.tile_id)}"
+        cmd = [python, str(_THIS_DIR / "plot_sfincs_tile_diagnostics.py"),
+               "--config", args.config, "--tile-id", str(int(row.tile_id)), "--base-dir-name", args.base_dir_name,
+               "--figures", *figures, "--fig-dir", str(out_dir), "--out-prefix", prefix]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode != 0:
+            print(f"  tile {int(row.tile_id)} FAILED: {(res.stderr or '').strip().splitlines()[-1:]}", flush=True)
+        return prefix, res.returncode == 0
+
+    print(f"\nforcing figures ({', '.join(figures)}) for {len(rows)} tile(s) -> {out_dir}", flush=True)
     failed = []
-    for row in selection.itertuples():
-        cmd = [
-            python, str(_THIS_DIR / "plot_sfincs_tile_diagnostics.py"),
-            "--config", args.config,
-            "--tile-id", str(row.tile_id),
-            "--base-dir-name", args.base_dir_name,
-            "--figures", "coastrp_forcing",
-            "--fig-dir", str(fig_dir),
-            "--out-name", f"{_EIKONAL_PREDICTION[row.panel]}_{row.tile_id}_forcing_comparison.png",
-        ]
-        print(f"\n$ {' '.join(cmd)}", flush=True)
-        if subprocess.run(cmd).returncode != 0:
-            failed.append(f"{row.panel}/{row.tile_id}")
+    with ThreadPoolExecutor(args.forcing_checks_workers) as ex:
+        for k, (prefix, ok) in enumerate(ex.map(run_one, rows), 1):
+            if not ok:
+                failed.append(prefix)
+            if k % 25 == 0 or k == len(rows):
+                print(f"  [{k}/{len(rows)}] done, {len(failed)} failed", flush=True)
+    print(f"\nforcing figures for {len(rows) - len(failed)}/{len(rows)} tile(s) in {out_dir}")
     if failed:
-        print(f"\nCOAST-RP forcing figure FAILED for {len(failed)} tile(s): {', '.join(failed)}")
+        print(f"FAILED for {len(failed)} tile(s): {', '.join(failed[:50])}{' ...' if len(failed) > 50 else ''}")
         sys.exit(1)
 
 
