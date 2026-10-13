@@ -428,11 +428,11 @@ ssp_population_growth_factors:
 population:
   data_type: RasterDataset
   driver: raster
-  # (global, ~30 arcsec / ~1 km resolution, EPSG:4326, lat -72..84, nodata
-  # -3.4028235e+38). A count per cell, not a density - downstream code must
-  # not nearest/bilinear-resample this onto a finer grid without inflating
-  # totals; see src/exposure.py module docstring.
-  path: inputs/exposure/ppp_2020_1km_Aggregated.tif
+  # (global, ~30 arcsec / ~1 km resolution, EPSG:4326, lat -60..84, nodata
+  # -99999 - only settled cells carry a value). A count per cell, not a
+  # density - downstream code must not nearest/bilinear-resample this onto a
+  # finer grid without inflating totals; see src/exposure.py module docstring.
+  path: inputs/exposure/global_pop_2020_CN_1km_R2025A_UA_v1.tif
   crs: 4326
   filesystem: local
   meta:
@@ -441,8 +441,8 @@ population:
       WorldPop global population count, ~1 km resolution, year 2020. Used to
       estimate population exposed to coastal flooding beyond the baseline
       protection height (src/exposure.py).
-    source_author: WorldPop (www.worldpop.org)
-    source_url: https://www.worldpop.org/
+    source_author: Bondarenko M., Priyatikanto R., Tejedor-Garavito N., Zhang W., McKeen T., Cunningham A., Woods T., Hilton J., Cihan D., Nosatiuk B., Brinkhoff T., Tatem A., Sorichetta A.. 2025. The spatial distribution of population in 2015-2030 at a resolution of 30 arc (approximately 1km at the equator) R2025A version v1. Global Demographic Data Project - Funded by The Bill and Melinda Gates Foundation (INV-045237). WorldPop - School of Geography and Environmental Science, University of Southampton.
+    source_url: https://hub.worldpop.org/doi/10.5258/SOTON/WP00845
 
 lu_to_roughness_lookup:
   data_type: DataFrame

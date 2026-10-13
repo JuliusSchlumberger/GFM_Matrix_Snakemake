@@ -39,6 +39,7 @@ import matplotlib.pyplot as plt
 LAND_COLOR = "#d8d8d4"
 COAST_COLOR = "#b8b8b3"
 DOMAIN_COLOR = "#2a78d6"
+INLAND_DOMAIN_COLOR = "#8db9ea"  # hop_distance > 0 (no own ocean edge) - a lighter DOMAIN_COLOR
 DROPPED_COLOR = "#d6572a"
 
 DEFAULT_TILE_GRID = Path(
@@ -47,16 +48,23 @@ DEFAULT_TILE_GRID = Path(
 DEFAULT_OUT_DIR = Path(r"P:\11212688-004-global-floodmaps\modelling\processed_inputs\mask")
 
 
-def plot_domains_map(gdf: gpd.GeoDataFrame, out_path: Path, color: str, label: str) -> None:
+def plot_domains_map(gdf: gpd.GeoDataFrame, out_path: Path, color: str, label: str,
+                     inland_color: str | None = None) -> None:
+    """`inland_color`: draw hop_distance > 0 domains in this colour, underneath
+    the hop_distance == 0 ones (`color`) - only if gdf has a hop_distance column."""
     proj = ccrs.EqualEarth()
     fig = plt.figure(figsize=(14, 7.5), facecolor="white")
     ax = plt.axes(projection=proj)
     ax.set_global()
     ax.add_feature(cfeature.LAND, facecolor=LAND_COLOR, edgecolor=COAST_COLOR, linewidth=0.4, zorder=1)
-    ax.add_geometries(
-        gdf.geometry, crs=ccrs.PlateCarree(),
-        facecolor=color, edgecolor=color, linewidth=0.2, alpha=0.75, zorder=3,
-    )
+    layers = [(gdf, color, 3)]
+    if inland_color is not None and "hop_distance" in gdf.columns:
+        inland = gdf["hop_distance"] > 0
+        layers = [(gdf[inland], inland_color, 3), (gdf[~inland], color, 4)]
+    for sub, c, z in layers:
+        if len(sub):
+            ax.add_geometries(sub.geometry, crs=ccrs.PlateCarree(),
+                              facecolor=c, edgecolor=c, linewidth=0.2, alpha=0.75, zorder=z)
     ax.spines["geo"].set_edgecolor(COAST_COLOR)
     ax.spines["geo"].set_linewidth(0.6)
     fig.savefig(out_path, dpi=300, bbox_inches="tight", facecolor="white")
@@ -67,7 +75,8 @@ def plot_domains_map(gdf: gpd.GeoDataFrame, out_path: Path, color: str, label: s
 def plot_final_domains_map(final_gdf: gpd.GeoDataFrame, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "domains_final.png"
-    plot_domains_map(final_gdf, out_path, DOMAIN_COLOR, "final simulation domains")
+    plot_domains_map(final_gdf, out_path, DOMAIN_COLOR, "final simulation domains (hop > 0 lighter)",
+                     inland_color=INLAND_DOMAIN_COLOR)
     return out_path
 
 
