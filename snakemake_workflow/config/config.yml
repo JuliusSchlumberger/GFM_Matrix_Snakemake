@@ -546,15 +546,22 @@ population_growth: # Used by: analysis/compute_exposure_analysis.py
     - SSP5
   # Years for which to produce output columns (5-year grid; intermediate
   # years are linearly interpolated from the 5-year data in the Excel file).
-  output_years: # Years for which to produce output columns (intermediate years are linearly interpolated 
+  output_years: # every 5-year step of the IIASA projections, so time series show when a design is exceeded
     - 2025
     - 2030
     - 2035
     - 2040
     - 2045
     - 2050
+    - 2055
     - 2060
+    - 2065
+    - 2070
     - 2075
+    - 2080
+    - 2085
+    - 2090
+    - 2095
     - 2100
 
 # ── ANALYSIS PIPELINE SWITCHES ────────────────────────────────────────────────
@@ -567,6 +574,7 @@ analysis: # Used by: analysis/run_analysis.py
   plot_adaptation_bars:  false   # grouped bar charts per adaptation strategy
   plot_timeseries:       true   # EAI along SSP SLR trajectories over time (global, per country, per continent)
   plot_tipping_points:   true   # tipping-point figure (visualization.tipping_points)
+  plot_extended_pathways: true  # pathways beyond 2100 through the growth matrices (visualization.extended_pathways)
   plot_world_maps:       false  # world choropleth maps (slow for global runs)
 
   avoid_worker_memory_budget_gb: 4 # number of feasible parallelization stream
@@ -577,15 +585,23 @@ visualization:
   output_dir: "{root}/figures" # Output directory for all generated figures.
 
   # ── Burning-ember ────────────────────────────────────────
+  # The growth matrices span a wider space than the ember figures show, so pathways can be
+  # followed beyond the SSPs (Nigeria SSP2 reaches +239 % by 2100) and beyond 2100 (AR6
+  # SSP5-8.5 p83 passes 1.5 m before 2150; plot_extended_pathways.py).
   growth_rates: # relative to baseline year (2020)
     min: -0.5
-    max:  1.5
+    max:  3.0
     step:  0.1
 
   slr_interp: # interpolated based on run scenarios used for smoothing the curve.
     min_mm:   0
-    max_mm: 1500
-    n_points: 100
+    max_mm: 2000   # highest modelled SLR scenario (boundary_conditions.slr_scenarios)
+    n_points: 133  # ~15 mm spacing, as before
+
+  ember_display: # plot_burning_ember.py: window of the growth matrix shown in the ember figures
+    slr_max_mm: 1500
+    growth_min: -0.5
+    growth_max:  1.5
 
   highlight_years: [2050, 2100]
 
@@ -606,8 +622,17 @@ visualization:
     n_contours: 5          # labelled contour lines, evenly spaced up to the shared colour-scale maximum
 
   timeseries_overview: # plot_timeseries.py: all continents in one figure (continent/timeseries_continents_overview.png)
-    ssps: [SSP2, SSP5]   # one panel per SSP per continent
-    ncols: 2             # continents per row
+    ssps: [SSP2, SSP5]   # one column per SSP; one row per continent, sorted by no-adaptation EAI in 2100
+
+  extended_pathways: # plot_extended_pathways.py: SSP pathways continued beyond 2100 through the growth matrices
+    to_year: 2150      # AR6 SLR trajectories run to 2150; population after 2100 follows the variants below
+    ssps: [SSP2, SSP5]
+    variants:          # illustrative population continuations from each country's 2100 SSP level (assumptions)
+      stabilise: {mode: constant, label: "stabilises at 2100 level"}
+      trend:     {mode: trend, window: 25, half_life: 50, label: "2075-2100 trend continues, halving every 50 yr"}
+      decline:   {mode: rate, annual: -0.005, label: "declines by 0.5 %/yr"}
+    strategies: [baseline, protect_SLR_500, avoid_SLR_500, retreat_SLR_500] # growth-matrix labels in the time-series figure
+    ember_countries: [NGA, EGY, IND, CHN, JPN, USA]
 
   tipping_points: # plot_tipping_points.py: when does a country's EAI exceed a fixed number of people?
     countries: [NGA, EGY, THA]    # all strategies tip by 2100 (at the p83 SLR end): growth-driven,

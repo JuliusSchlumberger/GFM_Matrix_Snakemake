@@ -13,6 +13,7 @@ Analysis switches in config.yml:
   analysis.plot_adaptation_bars — grouped bar comparison per scenario
   analysis.plot_timeseries      — EAI along SSP SLR trajectories over time (global / country / continent)
   analysis.plot_tipping_points  — tipping-point figure (isolines x SSP pathways, tipping years)
+  analysis.plot_extended_pathways — SSP pathways continued beyond 2100 (population variants)
   analysis.plot_world_maps      — world choropleth maps (slow for global runs)
 
 Usage:
@@ -108,10 +109,11 @@ def main() -> None:
     do_bars        = sw.get("plot_adaptation_bars", True)
     do_timeseries  = sw.get("plot_timeseries",      True)
     do_tipping     = sw.get("plot_tipping_points",  True)
+    do_extended    = sw.get("plot_extended_pathways", True)
     do_world_maps  = sw.get("plot_world_maps",      False)
 
     if args.only_exposure:
-        do_ember = do_bars = do_timeseries = do_tipping = do_world_maps = False
+        do_ember = do_bars = do_timeseries = do_tipping = do_extended = do_world_maps = False
     if args.only_plots:
         do_exposure = False
     if args.skip_exposure:
@@ -201,6 +203,19 @@ def main() -> None:
         results["tipping_points"] = success
     else:
         print("\n  [ SKIP ] Tipping-point figure (analysis.plot_tipping_points = false)")
+
+    # ── Step 4c: Pathways beyond 2100 ─────────────────────────────────────────
+    if do_extended:
+        success = _run(
+            SCRIPTS_DIR / "plot_extended_pathways.py",
+            cfg_arg + ["--expdir", str(exp_dir),
+                        "--outdir", str(fig_dir / "extended_pathways")],
+            "Pathways beyond 2100 (visualization.extended_pathways)",
+            args.fail_fast,
+        )
+        results["extended_pathways"] = success
+    else:
+        print("\n  [ SKIP ] Pathways beyond 2100 (analysis.plot_extended_pathways = false)")
 
     # ── Step 5: World maps ────────────────────────────────────────────────────
     if do_world_maps:

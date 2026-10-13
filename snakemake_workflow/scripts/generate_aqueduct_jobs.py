@@ -111,6 +111,52 @@ def _stage_configfile_lines() -> list[str]:
     ]
 
 
+def _stage_tile_grid_lines() -> list[str]:
+    """Bash function def: copies the tile_grid gpkg to node-local scratch,
+    validated by comparing copied/source byte sizes (not UTF-8/YAML parsing
+    like `_stage_configfile_lines` - a GeoPackage is a binary SQLite file),
+    retrying on failure - see that function's own docstring for the matching
+    retry rationale.
+
+    Added 2026-10-13: `load_tile_grid()` (src/tiles.py) opens this gpkg via
+    GDAL/OGR, which - unlike a plain `os.stat`/`open()` - has SQLite try to
+    acquire an advisory file lock first. Confirmed live that this lock
+    acquisition can hang indefinitely on Hydrax's 24vcpu compute nodes
+    reading P:\\ directly (reproduced with a single, non-concurrent read -
+    not a concurrency/contention issue: 24 simultaneous reads and 1 serial
+    read both hung the full job time limit with zero output), while the
+    identical read completes instantly from the login node. Staging the
+    gpkg locally once per job (same pattern as resolved_config.yml) sidesteps
+    GDAL/SQLite's own network-mount locking path entirely, regardless of its
+    underlying (likely NFS lock-daemon-side) cause - a plain `cp` never
+    triggers that lock acquisition.
+    """
+    return [
+        "stage_tile_grid_locally() {",
+        '  local src="$1" out_var="$2"',
+        '  local stage_dir="${TMPDIR:-/tmp}/gfm_tile_grid"',
+        '  mkdir -p "$stage_dir"',
+        '  local dst="$stage_dir/tile_grid_${SLURM_JOB_ID:-$$}_$$.gpkg"',
+        "  local attempt=1 max_attempts=8 delay=5",
+        '  local src_size; src_size=$(stat -c%s -- "$src" 2>/dev/null)',
+        '  while [ "$attempt" -le "$max_attempts" ]; do',
+        '    cp -f -- "$src" "$dst" 2>/dev/null',
+        '    local dst_size; dst_size=$(stat -c%s -- "$dst" 2>/dev/null)',
+        '    if [ -n "$dst_size" ] && [ "$dst_size" = "$src_size" ]; then',
+        "      printf -v \"$out_var\" '%s' \"$dst\"",
+        "      return 0",
+        "    fi",
+        '    echo "  [tile-grid-stage retry $attempt/$max_attempts] $src did not copy cleanly - retrying in ${delay}s..." >&2',
+        '    rm -f -- "$dst"',
+        '    sleep "$delay"',
+        "    attempt=$((attempt + 1))",
+        "  done",
+        '  echo "  failed to stage a valid local copy of $src after $max_attempts attempts - giving up." >&2',
+        "  return 1",
+        "}",
+    ]
+
+
 def _append_postprocess_bridge(
     submit_lines: list[str],
     hpc_cfg: dict,
@@ -235,6 +281,7 @@ def generate_wave_dispatch(
     linux_batch_runner = f"{linux_config['paths']['code_root']}/snakemake_workflow/scripts/run_simulation_batch.py"
     linux_jobs_dir = linux_config["hpc"]["jobs_dir"]
     linux_resolved_config = f"{linux_jobs_dir}/resolved_config.yml"
+    linux_tile_grid_path = linux_config["tile_grid"]["path"]
 
     # ── Local view: THIS machine's own reachable mount - local_jobs_dir MUST
     # come from this, NOT from the `hpc_cfg` parameter, whose "jobs_dir" the
@@ -304,9 +351,15 @@ def generate_wave_dispatch(
             sbatch_cfg["env_activate_cmd"],
             "",
             *_stage_configfile_lines(),
+            *_stage_tile_grid_lines(),
             f'FAIL_LOG="{linux_jobs_dir}/logs/{name}_failures.txt"',
             ': > "$FAIL_LOG"',
             f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
+            f'stage_tile_grid_locally "{linux_tile_grid_path}" LOCAL_TILE_GRID || exit 1',
+            "python -c 'import sys, yaml; cfg_path, new_path = sys.argv[1], sys.argv[2]; "
+            "cfg = yaml.safe_load(open(cfg_path, encoding=\"utf-8\")); cfg[\"tile_grid\"][\"path\"] = new_path; "
+            "yaml.safe_dump(cfg, open(cfg_path, \"w\", encoding=\"utf-8\"))' "
+            '"$LOCAL_CONFIGFILE" "$LOCAL_TILE_GRID"',
             "",
             f'python "{linux_batch_runner}" \\',
             f'  --triples-file "{linux_triples_path}" \\',
@@ -407,6 +460,7 @@ def generate_resume_dispatch(
     linux_batch_runner = f"{linux_config['paths']['code_root']}/snakemake_workflow/scripts/run_simulation_batch.py"
     linux_jobs_dir = linux_config["hpc"]["jobs_dir"]
     linux_resolved_config = f"{linux_jobs_dir}/resolved_config.yml"
+    linux_tile_grid_path = linux_config["tile_grid"]["path"]
 
     # See generate_wave_dispatch's own comment - local_jobs_dir must come
     # from a freshly-loaded LOCAL config view, not the `hpc_cfg` parameter
@@ -454,9 +508,15 @@ def generate_resume_dispatch(
             sbatch_cfg["env_activate_cmd"],
             "",
             *_stage_configfile_lines(),
+            *_stage_tile_grid_lines(),
             f'FAIL_LOG="{linux_jobs_dir}/logs/{name}_failures.txt"',
             ': > "$FAIL_LOG"',
             f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
+            f'stage_tile_grid_locally "{linux_tile_grid_path}" LOCAL_TILE_GRID || exit 1',
+            "python -c 'import sys, yaml; cfg_path, new_path = sys.argv[1], sys.argv[2]; "
+            "cfg = yaml.safe_load(open(cfg_path, encoding=\"utf-8\")); cfg[\"tile_grid\"][\"path\"] = new_path; "
+            "yaml.safe_dump(cfg, open(cfg_path, \"w\", encoding=\"utf-8\"))' "
+            '"$LOCAL_CONFIGFILE" "$LOCAL_TILE_GRID"',
             "",
             f'python "{linux_batch_runner}" \\',
             f'  --triples-file "{linux_triples_path}" \\',

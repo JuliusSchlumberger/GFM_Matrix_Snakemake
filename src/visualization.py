@@ -160,7 +160,9 @@ def ssp_rcp_label(ssp: str, ssp_rcp_codes: dict[str, int] | None) -> str:
 
 # ── 1. Data preparation ───────────────────────────────────────────────────────
 
-def load_growth_matrix_csv(csv_path: str | Path) -> tuple[pd.DataFrame, list[float], list[float]]:
+def load_growth_matrix_csv(
+    csv_path: str | Path, window: dict | None = None,
+) -> tuple[pd.DataFrame, list[float], list[float]]:
     """Load a scenario-neutral growth-matrix CSV (exposure_*_growth_matrix.csv).
 
     Columns are named ``EAI_{SLR}_g{pct}`` (e.g. ``EAI_SLR_250_g-50``,
@@ -174,6 +176,10 @@ def load_growth_matrix_csv(csv_path: str | Path) -> tuple[pd.DataFrame, list[flo
                         sorted ascending on both levels.
         slr_mm_values: sorted unique SLR levels (mm) found in the columns.
         growth_fracs:  sorted unique growth fractions (e.g. -0.5 … 1.5).
+
+    `window` (e.g. visualization.ember_display: slr_max_mm / growth_min /
+    growth_max, each optional) keeps only that part of the matrix - for
+    figures that show less than the stored matrix covers.
     """
     import re
 
@@ -190,6 +196,11 @@ def load_growth_matrix_csv(csv_path: str | Path) -> tuple[pd.DataFrame, list[flo
 
     slr_mm_values = sorted({k[0] for k in parsed})
     growth_fracs = sorted({k[1] for k in parsed})
+    if window:
+        eps = 1e-9
+        slr_mm_values = [s for s in slr_mm_values if s <= window.get("slr_max_mm", np.inf) + eps]
+        growth_fracs = [g for g in growth_fracs
+                        if window.get("growth_min", -np.inf) - eps <= g <= window.get("growth_max", np.inf) + eps]
     df = pd.DataFrame(
         {(slr, g): raw[parsed[(slr, g)]] for slr in slr_mm_values for g in growth_fracs},
         index=raw.index,

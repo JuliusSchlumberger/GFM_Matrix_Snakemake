@@ -46,10 +46,10 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
-from scipy.interpolate import RegularGridInterpolator  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
+from pathways import eai_along_pathway, matrix_interpolator, slr_pathway  # noqa: E402
 from population_growth import _build_name_to_iso, interpolate_growth_factor, load_ssp_growth_factors  # noqa: E402
 from visualization import (  # noqa: E402
     _DEFAULT_SLR_COLORS, build_growth_matrix_from_grid, load_growth_matrix_csv,
@@ -108,8 +108,7 @@ def main() -> None:
     traj = load_slr_trajectories(viz["slr_trajectories_csv"])
     ssps = [s for s in cfg.get("population_growth", {}).get("ssps", list(s_colors))
             if all(f"{s}_{p}" in traj.columns for p in ("p17", "p50", "p83"))]
-    slr_paths = {(s, p): np.interp(YEARS, traj.index.to_numpy(dtype=float), traj[f"{s}_{p}"].to_numpy(dtype=float))
-                 for s in ssps for p in ("p17", "p50", "p83")}  # mm
+    slr_paths = {(s, p): slr_pathway(traj, f"{s}_{p}", YEARS) for s in ssps for p in ("p17", "p50", "p83")}  # mm
 
     catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
     growth_df = load_ssp_growth_factors(Path(catalog.get_source("ssp_population_growth_factors").path))
@@ -137,8 +136,7 @@ def main() -> None:
             if iso not in eai_grid.index:
                 continue
             matrix = build_growth_matrix_from_grid(eai_grid.loc[[iso]], slr_mm, growth_fracs)
-            interp = RegularGridInterpolator((np.array(growth_fracs), np.array(slr_mm)), matrix,
-                                             bounds_error=False, fill_value=None)
+            interp = matrix_interpolator(matrix, slr_mm, growth_fracs)
             gg, ss = np.meshgrid(g_dense, slr_mm, indexing="ij")
             dense = np.clip(interp(np.column_stack([gg.ravel(), ss.ravel()])).reshape(gg.shape), 0.0, None)
             if dense.max() >= thr:
@@ -147,7 +145,7 @@ def main() -> None:
             for ssp in ssps:
                 years = {}
                 for p in ("p17", "p50", "p83"):
-                    eai = np.clip(interp(np.column_stack([growth_paths[ssp], slr_paths[(ssp, p)]])), 0.0, None)
+                    eai = eai_along_pathway(matrix, slr_mm, growth_fracs, slr_paths[(ssp, p)], growth_paths[ssp])
                     years[p] = _first_crossing(eai, thr)
                 crossings[(strat, ssp)] = years
                 rows.append({"ISO": iso, "threshold": thr, "strategy": strat, "design_intensity": design,

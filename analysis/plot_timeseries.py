@@ -81,11 +81,9 @@ def _draw_panel(
             rank = level_rank.get(intensity)
             ls = level_linestyles[rank % len(level_linestyles)] if rank is not None else baseline_linestyle
             s = series_by_label[label]
-            # Marker at every actual data point - population_growth.output_years
-            # is not evenly spaced (5-year steps until 2050, then 2060/2075/2100),
-            # so a plain line would make the long unmarked stretches (e.g.
-            # 2050-2060) look like real interpolated data rather than a
-            # straight connector between the two nearest computed points.
+            # Marker at every actual data point (population_growth.output_years),
+            # so the line segments read as straight connectors between computed
+            # years - the configured years need not be evenly spaced.
             ax.plot(s.index, s.to_numpy(), linestyle=ls, linewidth=2, color=mc,
                     marker="o", markersize=4, markeredgewidth=0,
                     alpha=0.85, label=label, zorder=2)
@@ -161,40 +159,52 @@ def _continent_overview_figure(
     ssps: list[str],
     years: list[int],
     measure_colors: dict,
-    ssp_colors: dict,
     slr_intensities: list[str],
     dpi: int,
     ssp_rcp_codes: dict[str, int] | None = None,
     level_linestyles=("--", ":", "-."),
     baseline_linestyle: str = "-",
-    ncols: int = 2,
 ) -> plt.Figure:
-    """All continents in one figure: one block per continent (`ncols` blocks
-    per row), each block one panel per SSP in `ssps` sharing a y-axis scaled
-    to that continent's data. Same lines and styles as _timeseries_figure."""
-    conts = [c for c in continent_isos if continent_isos[c]]
-    nrows = -(-len(conts) // ncols)
-    fig = plt.figure(figsize=(4.2 * len(ssps) * ncols + 0.5, 3.9 * nrows + 1.0), dpi=dpi)
-    blocks = fig.subfigures(nrows, ncols, wspace=0.04, hspace=0.06, squeeze=False)
-    handles, labels = [], []
-    for block, cont in zip(blocks.flat, conts):
-        axes = block.subplots(1, len(ssps), sharey=True, squeeze=False)[0]
+    """All continents in one figure: one row per continent, sorted by
+    no-adaptation EAI in the last year (largest over `ssps`) from highest to
+    lowest, one column per SSP in `ssps`; the panels of a row share a y-axis
+    scaled to that continent's data. Same lines and styles as
+    _timeseries_figure. Continent names run vertically left of each row, the
+    legend sits right of the panels."""
+    last = max(years)
+
+    def _end_baseline(isos: list[str]) -> float:
+        df = eai_by_label.get("baseline")
+        if df is None:
+            return 0.0
+        sub = df.loc[df.index.isin(isos)]
+        return max((float(sub[f"EAI_{s}_{last}"].sum()) for s in ssps if f"EAI_{s}_{last}" in sub.columns),
+                   default=0.0)
+
+    conts = sorted((c for c in continent_isos if continent_isos[c]),
+                   key=lambda c: _end_baseline(continent_isos[c]), reverse=True)
+    fig, axes = plt.subplots(len(conts), len(ssps), figsize=(4.6 * len(ssps) + 3.2, 2.7 * len(conts) + 0.6),
+                             sharex=True, sharey="row", squeeze=False, dpi=dpi)
+    fmt = plt.FuncFormatter(lambda v, _: f"{v / 1e6:g} M" if v >= 1e6 else (f"{v / 1e3:g} k" if v >= 1e3 else f"{v:g}"))
+    for row, cont in zip(axes, conts):
         data_max = 0.0
-        for ax, ssp in zip(axes, ssps):
+        for ax, ssp in zip(row, ssps):
             data_max = max(data_max, _draw_panel(ax, eai_by_label, ssp, years, continent_isos[cont], measure_colors,
                                                  slr_intensities, level_linestyles, baseline_linestyle))
-            ax.set_title(ssp_rcp_label(ssp, ssp_rcp_codes), color=ssp_colors.get(ssp, "#444444"), fontsize=10)
             ax.grid(alpha=0.3)
             ax.set_xticks([2025, 2050, 2075, 2100])
-            ax.yaxis.set_major_formatter(plt.FuncFormatter(
-                lambda v, _: f"{v / 1e6:g} M" if v >= 1e6 else (f"{v / 1e3:g} k" if v >= 1e3 else f"{v:g}")))
-        axes[0].set_ylim(0, 1.05 * data_max or 1.0)
-        axes[0].set_ylabel("EAI (people)", fontsize=10)
-        block.suptitle(cont, fontsize=13, fontweight="bold")
-        if not handles:
-            handles, labels = axes[0].get_legend_handles_labels()
-    for block in blocks.flat[len(conts):]:
-        block.set_visible(False)
+            ax.yaxis.set_major_formatter(fmt)
+        row[0].set_ylim(0, 1.05 * data_max or 1.0)
+        row[0].set_ylabel("EAI (people)", fontsize=10)
+        row[0].annotate(cont, xy=(0, 0.5), xycoords="axes fraction", xytext=(-62, 0), textcoords="offset points",
+                        rotation=90, ha="center", va="center", fontsize=13, fontweight="bold")
+    for ax, ssp in zip(axes[0], ssps):
+        ax.set_title(ssp_rcp_label(ssp, ssp_rcp_codes), fontsize=12)
+    for ax in axes[-1]:
+        ax.set_xlabel("Year", fontsize=10)
+    fig.tight_layout(rect=(0.03, 0, 1, 1))
+
+    handles, labels = axes[0, 0].get_legend_handles_labels()
     if handles:
         names = {"baseline": "No adaptation", "protect": "Protect", "avoid": "Avoid", "retreat": "Retreat",
                  "protect_avoid": "Protect + Avoid"}
@@ -204,8 +214,8 @@ def _continent_overview_figure(
             return names.get(measure, measure) + (f" ({int(level) / 1000:g} m)" if level else "")
 
         order = sorted(range(len(labels)), key=lambda i: (labels[i] != "baseline", labels[i]))
-        fig.legend([handles[i] for i in order], [_pretty(labels[i]) for i in order], loc="upper center",
-                   fontsize=10, bbox_to_anchor=(0.5, 0.0), ncol=min(len(handles), 7), frameon=False,
+        fig.legend([handles[i] for i in order], [_pretty(labels[i]) for i in order], loc="center left",
+                   fontsize=10, bbox_to_anchor=(1.0, 0.5), frameon=False,
                    title="Strategy (design SLR)", title_fontsize=10)
     return fig
 
@@ -289,9 +299,8 @@ def main() -> None:
     if ov_ssps:
         fig = _continent_overview_figure(
             eai_by_label, {c: [i for i, k in continent_of.items() if k == c] for c in CONTINENTS},
-            ov_ssps, years, m_colors, s_colors, slr_intensities, dpi, ssp_rcp_codes=ssp_rcp_codes,
-            level_linestyles=level_linestyles, baseline_linestyle=baseline_linestyle,
-            ncols=int(ov_cfg.get("ncols", 2)))
+            ov_ssps, years, m_colors, slr_intensities, dpi, ssp_rcp_codes=ssp_rcp_codes,
+            level_linestyles=level_linestyles, baseline_linestyle=baseline_linestyle)
         fig.savefig(cont_dir / "timeseries_continents_overview.png", bbox_inches="tight")
         plt.close(fig)
         print(f"Continent overview ({', '.join(ov_ssps)}) → {cont_dir / 'timeseries_continents_overview.png'}")

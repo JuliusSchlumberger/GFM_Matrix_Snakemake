@@ -128,7 +128,7 @@ def plot_top_countries_ember(
     are given, each panel also shows every SSP-RCP's pathway to 2100 (median
     SLR vs the country's own SSP population change), with 2050 and 2100
     marked."""
-    eai_grid, slr_mm, growth_fracs = load_growth_matrix_csv(growth_matrix_path)
+    eai_grid, slr_mm, growth_fracs = load_growth_matrix_csv(growth_matrix_path, window=viz.get("ember_display"))
     g0 = min(growth_fracs, key=abs)
     slr_rank = min(slr_mm, key=lambda v: abs(v - rank_slr_mm))
     ranked = eai_grid[(slr_rank, g0)].sort_values(ascending=False)
@@ -185,7 +185,7 @@ def plot_country_selection_ember(
     (0 to the largest EAI among them, rounded up) and one colorbar so the
     panels differ only in the SHAPE of the response to SLR and population;
     `n_contours` labelled contour lines."""
-    eai_grid, slr_mm, growth_fracs = load_growth_matrix_csv(growth_matrix_path)
+    eai_grid, slr_mm, growth_fracs = load_growth_matrix_csv(growth_matrix_path, window=viz.get("ember_display"))
     countries = [i for i in countries if i in eai_grid.index]
     matrices = {iso: build_growth_matrix_from_grid(eai_grid.loc[[iso]], slr_mm, growth_fracs) for iso in countries}
     top = max(float(m.max()) for m in matrices.values()) or 1.0
@@ -324,7 +324,7 @@ def main() -> None:
             print(f"  Skipping {scenario_label}: missing {growth_matrix_path.name}.")
             continue
 
-        eai_grid, slr_mm_grid, growth_fracs = load_growth_matrix_csv(growth_matrix_path)
+        eai_grid, slr_mm_grid, growth_fracs = load_growth_matrix_csv(growth_matrix_path, window=viz.get("ember_display"))
         growth_rates = np.array(growth_fracs)
 
         # ── Global aggregate ──────────────────────────────────────────────────
