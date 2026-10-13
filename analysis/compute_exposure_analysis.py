@@ -1,4 +1,4 @@
-"""Run all four flood-exposure scenarios (baseline, protect, retreat, avoid) globally.
+"""Run all five flood-exposure scenarios (baseline, protect, retreat, avoid, protect + avoid) globally.
 
 Reads coarse flood-fraction rasters produced by compute_flood_fraction_chunk and the
 pre-computed per-chunk population and geogunit rasters, and runs exposure analysis at
@@ -35,10 +35,16 @@ Three CSVs per scenario (baseline, protect_{slr_int}, retreat_{slr_int}):
       plot_timeseries.py, already fully resolved (no further interpolation
       needed downstream).
 
-Avoid has no growth-free base curve (its "redirected growth" term is
-inherently growth-dependent), so it only gets File 2 and File 3, each
-genuinely recomputed per growth-rate/SSP-year rather than derived from a
-shared File 1 - see _avoid_growth_matrix_worker_task / _avoid_ssp_worker_task.
+Avoid and protect + avoid (AVOID_VARIANTS) have no growth-free base curve
+(their "redirected growth" term is inherently growth-dependent), so they only
+get File 2 and File 3 (exposure_{variant}_{slr_int}_growth_matrix.csv /
+_ssp.csv), each genuinely recomputed per growth-rate/SSP-year rather than
+derived from a shared File 1 - see _avoid_growth_matrix_worker_task /
+_avoid_ssp_worker_task. The two variants differ only in the protection the
+EXISTING population gets (exposure_analysis.compute_avoid): avoid keeps the
+baseline protection (it only steers growth out of the design floodplain, so
+it equals baseline at growth <= 0); protect + avoid raises it to the design
+standard as well (equals protect at growth <= 0).
 
 Usage:
     python compute_exposure_analysis.py \\
@@ -128,6 +134,11 @@ from exposure_analysis import (                                 # noqa: E402
 
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Avoid-family strategies: output/task label -> whether the existing
+# population keeps the BASELINE protection (True: avoid) or gets the
+# adaptation design protection (False: protect + avoid). See compute_avoid.
+AVOID_VARIANTS: dict[str, bool] = {"avoid": True, "protect_avoid": False}
 
 
 def _slr_mm(slr_name: str) -> int:
@@ -268,11 +279,11 @@ def _scenario_done(label: str, out_dir: Path, expect_ssp: bool) -> bool:
     return all(p.exists() for p in required)
 
 
-def _avoid_done(slr_int: str, out_dir: Path, expect_ssp: bool) -> bool:
-    """Whether an avoid slr_intensity's File 2(/3) already exist in out_dir."""
-    required = [out_dir / f"exposure_avoid_{slr_int}_growth_matrix.csv"]
+def _avoid_done(variant: str, slr_int: str, out_dir: Path, expect_ssp: bool) -> bool:
+    """Whether an avoid-variant slr_intensity's File 2(/3) already exist in out_dir."""
+    required = [out_dir / f"exposure_{variant}_{slr_int}_growth_matrix.csv"]
     if expect_ssp:
-        required.append(out_dir / f"exposure_avoid_{slr_int}_ssp.csv")
+        required.append(out_dir / f"exposure_{variant}_{slr_int}_ssp.csv")
     return all(p.exists() for p in required)
 
 
@@ -323,9 +334,11 @@ def _init_avoid_worker(
     slr_mm_sorted: list[float],
     slr_interp_mm: np.ndarray,
     slr_traj: "pd.DataFrame | None",
+    slr_baseline: str = "SLR_0",
 ) -> None:
     """ProcessPoolExecutor initializer: stash the shared (now tiny) read-only inputs."""
     _AVOID_CTX.update(
+        slr_baseline=slr_baseline,
         chunk_ids=chunk_ids,
         chunks_dir=chunks_dir,
         flood_frac_dir=flood_frac_dir,
@@ -343,30 +356,41 @@ def _init_avoid_worker(
 def _avoid_exposure_fn(
     chunk: ChunkData, ff: np.ndarray, apf: np.ndarray,
     growth_by_iso: dict[str, float], redirected_share: dict[str, float],
+    existing_pf: "np.ndarray | None" = None,
 ) -> np.ndarray:
-    """Shared per-chunk avoid exposure computation for one (RP, SLR) grid.
+    """Shared per-chunk avoid / protect + avoid exposure computation for one (RP, SLR) grid.
 
     `growth_by_iso`/`redirected_share` are per-country dicts, scattered onto
     this chunk's small grid via the existing `scatter_country_values`/
-    `apply_country_shares` helpers.
+    `apply_country_shares` helpers. `existing_pf`: the existing population's
+    protection (baseline grid for avoid, None = design grid for protect + avoid).
     """
     iso_list, iso_idx, cell_idx = chunk.iso_index
     g = scatter_country_values(growth_by_iso, iso_list, iso_idx, cell_idx, chunk.geo.shape, default=1.0)
     cap = np.maximum(0.0, 1.0 - apf)
     redirected = apply_country_shares(cap, redirected_share, chunk.geo, _AVOID_CTX["iso_lookup"], chunk.iso_index)
-    return compute_avoid(ff, apf, chunk.pop, redirected, g)
+    return compute_avoid(ff, apf, chunk.pop, redirected, g, existing_prot_frac=existing_pf)
+
+
+def _avoid_apf_pair(c: ChunkData, variant: str, slr_int: str) -> tuple[np.ndarray, "np.ndarray | None"]:
+    """(design apf, existing population's protection or None) for one avoid variant."""
+    ctx = _AVOID_CTX
+    apf = build_adapt_protection_fraction(c.ff, ctx["return_periods"], slr_int, ctx["rp_applied"], c.geo)
+    if not AVOID_VARIANTS[variant]:
+        return apf, None
+    return apf, build_adapt_protection_fraction(c.ff, ctx["return_periods"], ctx["slr_baseline"], ctx["rp_applied"], c.geo)
 
 
 def _avoid_ssp_worker_task(
-    slr_int: str, share_retreat: dict[str, float], ssp: str, yr: int,
-) -> tuple[str, str, int, "pd.Series | None"]:
-    """Compute one (slr_intensity, SSP, year) AVOID EAI value (File 3)."""
+    variant: str, slr_int: str, share_retreat: dict[str, float], ssp: str, yr: int,
+) -> tuple[str, str, str, int, "pd.Series | None"]:
+    """Compute one (variant, slr_intensity, SSP, year) avoid / protect + avoid EAI value (File 3)."""
     ctx = _AVOID_CTX
     growth_df = ctx["growth_df"]
     slr_traj = ctx["slr_traj"]
 
     if slr_traj is None or ssp not in slr_traj.columns:
-        return slr_int, ssp, yr, None
+        return variant, slr_int, ssp, yr, None
 
     iso_list = sorted(set(ctx["iso_lookup"].values()))
     growth_by_iso = {
@@ -377,8 +401,8 @@ def _avoid_ssp_worker_task(
     share_avoid = {iso: share_retreat[iso] * max(0.0, growth_by_iso.get(iso, 1.0) - 1.0) for iso in share_retreat}
 
     def exposure_fn(c: ChunkData, ff: np.ndarray) -> np.ndarray:
-        apf = build_adapt_protection_fraction(c.ff, ctx["return_periods"], slr_int, ctx["rp_applied"], c.geo)
-        return _avoid_exposure_fn(c, ff, apf, growth_by_iso, share_avoid)
+        apf, existing_pf = _avoid_apf_pair(c, variant, slr_int)
+        return _avoid_exposure_fn(c, ff, apf, growth_by_iso, share_avoid, existing_pf)
 
     avoid_eai = _stream_eai(
         ctx["chunk_ids"], ctx["chunks_dir"], ctx["flood_frac_dir"],
@@ -394,21 +418,21 @@ def _avoid_ssp_worker_task(
         iso: float(np.clip(np.interp(slr_at_yr, x, avoid_eai.loc[iso].to_numpy(dtype=float)), 0.0, None))
         for iso in avoid_eai.index
     }
-    return slr_int, ssp, yr, pd.Series(resolved, name=f"EAI_{ssp}_{yr}")
+    return variant, slr_int, ssp, yr, pd.Series(resolved, name=f"EAI_{ssp}_{yr}")
 
 
 def _avoid_growth_matrix_worker_task(
-    slr_int: str, share_retreat: dict[str, float], g_pct: int,
-) -> tuple[str, int, pd.DataFrame]:
-    """Compute one (slr_intensity, growth_rate) scenario-neutral AVOID EAI slice (File 2)."""
+    variant: str, slr_int: str, share_retreat: dict[str, float], g_pct: int,
+) -> tuple[str, str, int, pd.DataFrame]:
+    """Compute one (variant, slr_intensity, growth_rate) scenario-neutral avoid / protect + avoid EAI slice (File 2)."""
     ctx = _AVOID_CTX
     growth_factor = 1.0 + g_pct / 100.0
     share_avoid = {iso: v * max(0.0, growth_factor - 1.0) for iso, v in share_retreat.items()}
     growth_by_iso_const = {iso: growth_factor for iso in ctx["iso_lookup"].values()}
 
     def exposure_fn(c: ChunkData, ff: np.ndarray) -> np.ndarray:
-        apf = build_adapt_protection_fraction(c.ff, ctx["return_periods"], slr_int, ctx["rp_applied"], c.geo)
-        return _avoid_exposure_fn(c, ff, apf, growth_by_iso_const, share_avoid)
+        apf, existing_pf = _avoid_apf_pair(c, variant, slr_int)
+        return _avoid_exposure_fn(c, ff, apf, growth_by_iso_const, share_avoid, existing_pf)
 
     avoid_eai = _stream_eai(
         ctx["chunk_ids"], ctx["chunks_dir"], ctx["flood_frac_dir"],
@@ -416,7 +440,7 @@ def _avoid_growth_matrix_worker_task(
     )
     dense = interpolate_eai_linear(avoid_eai, ctx["slr_mm_sorted"], ctx["slr_interp_mm"])
     dense.columns = [f"EAI_{c}_g{g_pct}" for c in dense.columns]
-    return slr_int, g_pct, dense
+    return variant, slr_int, g_pct, dense
 
 
 # ── Chunk-partitioned HPC pipeline ─────────────────────────────────────────────
@@ -550,6 +574,9 @@ class ExposureTask:
     kind: str  # "baseline" | "protect" | "retreat" | "avoid_ssp" | "avoid_growth"
     design_intensity: str  # slr_baseline for "baseline", else the task's own slr_int
     slr_int: str | None = None            # protect/retreat/avoid (== design_intensity for these)
+    variant: str | None = None            # avoid_* only: an AVOID_VARIANTS key ("avoid" / "protect_avoid")
+    existing_intensity: str | None = None  # avoid_* only: existing population's protection intensity
+                                           # (slr_baseline for "avoid", None = design_intensity)
     share_retreat: dict | None = None     # retreat only
     growth_by_iso: dict | None = None     # avoid only
     redirected_share: dict | None = None  # avoid only
@@ -562,7 +589,7 @@ def build_exposure_tasks(
     ctx: AnalysisContext, shares_by_intensity: dict[str, dict[str, float]],
 ) -> list[ExposureTask]:
     """Enumerate the full independent task list - the same tasks main()
-    computes (baseline / protect_* / retreat_* / avoid_ssp_* / avoid_growth_*),
+    computes (baseline / protect_* / retreat_* / {avoid,protect_avoid}_*_ssp_* / _growth_*),
     up front rather than looped inline, so pass2_all_tasks (and each HPC batch
     job) can work through the identical list against its own chunk subset.
 
@@ -592,43 +619,47 @@ def build_exposure_tasks(
     available_ssps = [s for s in ctx.ssps if ctx.slr_traj is not None and s in ctx.slr_traj.columns]
     growth_pct_labels = [int(round(g * 100)) for g in ctx.growth_rates]
 
-    for slr_int in ctx.slr_intensities:
-        share_retreat = shares_by_intensity.get(slr_int, {})
+    for variant, keeps_baseline in AVOID_VARIANTS.items():
+        existing_intensity = ctx.slr_baseline if keeps_baseline else None
+        for slr_int in ctx.slr_intensities:
+            share_retreat = shares_by_intensity.get(slr_int, {})
 
-        if ctx.growth_df is not None and ctx.slr_traj is not None:
-            # iso_lookup maps every geogunit to its ISO - thousands of entries
-            # but only ~200 distinct ISOs. interpolate_growth_factor is a pure
-            # function of (ssp, iso, year), so evaluating it once per distinct
-            # ISO (in first-occurrence order, as the former per-geogunit dict
-            # comprehension's keys were) gives the identical dict.
-            unique_isos = list(dict.fromkeys(ctx.iso_lookup.values()))
-            for ssp in available_ssps:
-                for yr in ctx.output_years:
-                    growth_by_iso = {
-                        iso: interpolate_growth_factor(ctx.growth_df, ssp, iso, yr, default=1.0)
-                        for iso in unique_isos
-                    }
-                    redirected_share = {
-                        iso: share_retreat[iso] * max(0.0, growth_by_iso.get(iso, 1.0) - 1.0)
-                        for iso in share_retreat
-                    }
-                    tasks.append(ExposureTask(
-                        key=f"avoid_{slr_int}_ssp_{ssp}_{yr}", kind="avoid_ssp",
-                        design_intensity=slr_int, slr_int=slr_int,
-                        growth_by_iso=growth_by_iso, redirected_share=redirected_share,
-                        ssp=ssp, year=yr,
-                    ))
+            if ctx.growth_df is not None and ctx.slr_traj is not None:
+                # iso_lookup maps every geogunit to its ISO - thousands of entries
+                # but only ~200 distinct ISOs. interpolate_growth_factor is a pure
+                # function of (ssp, iso, year), so evaluating it once per distinct
+                # ISO (in first-occurrence order, as the former per-geogunit dict
+                # comprehension's keys were) gives the identical dict.
+                unique_isos = list(dict.fromkeys(ctx.iso_lookup.values()))
+                for ssp in available_ssps:
+                    for yr in ctx.output_years:
+                        growth_by_iso = {
+                            iso: interpolate_growth_factor(ctx.growth_df, ssp, iso, yr, default=1.0)
+                            for iso in unique_isos
+                        }
+                        redirected_share = {
+                            iso: share_retreat[iso] * max(0.0, growth_by_iso.get(iso, 1.0) - 1.0)
+                            for iso in share_retreat
+                        }
+                        tasks.append(ExposureTask(
+                            key=f"{variant}_{slr_int}_ssp_{ssp}_{yr}", kind="avoid_ssp",
+                            design_intensity=slr_int, slr_int=slr_int,
+                            variant=variant, existing_intensity=existing_intensity,
+                            growth_by_iso=growth_by_iso, redirected_share=redirected_share,
+                            ssp=ssp, year=yr,
+                        ))
 
-        for g_pct in growth_pct_labels:
-            growth_factor = 1.0 + g_pct / 100.0
-            growth_by_iso = {iso: growth_factor for iso in ctx.iso_lookup.values()}
-            redirected_share = {iso: v * max(0.0, growth_factor - 1.0) for iso, v in share_retreat.items()}
-            tasks.append(ExposureTask(
-                key=f"avoid_{slr_int}_growth_{g_pct}", kind="avoid_growth",
-                design_intensity=slr_int, slr_int=slr_int,
-                growth_by_iso=growth_by_iso, redirected_share=redirected_share,
-                g_pct=g_pct,
-            ))
+            for g_pct in growth_pct_labels:
+                growth_factor = 1.0 + g_pct / 100.0
+                growth_by_iso = {iso: growth_factor for iso in ctx.iso_lookup.values()}
+                redirected_share = {iso: v * max(0.0, growth_factor - 1.0) for iso, v in share_retreat.items()}
+                tasks.append(ExposureTask(
+                    key=f"{variant}_{slr_int}_growth_{g_pct}", kind="avoid_growth",
+                    design_intensity=slr_int, slr_int=slr_int,
+                    variant=variant, existing_intensity=existing_intensity,
+                    growth_by_iso=growth_by_iso, redirected_share=redirected_share,
+                    g_pct=g_pct,
+                ))
     return tasks
 
 
@@ -731,10 +762,11 @@ def pass2_all_tasks(
         compute_avoid, unchanged) run on 1-D arrays - identical per-cell
         values. apply_country_shares/scatter_country_values are inlined as
         their own cell formulas (`cap * share[iso_idx]`, `values[iso_idx]`).
-      - per design intensity, cells where NO scenario's ff exceeds apf
-        contribute exactly 0 to every task at that intensity (protect: the
-        np.where else-branch; retreat: max(0, ff - apf) == 0; avoid: its
-        `exceeds` mask), so they are dropped too. np.bincount adds weights
+      - per (design intensity, existing-population intensity), cells where
+        NO scenario's ff exceeds either protection contribute exactly 0 to
+        every task sharing that pair (protect: the np.where else-branch;
+        retreat: max(0, ff - apf) == 0; avoid / protect + avoid: their
+        `exposed`/`exceeds` masks), so they are dropped too. np.bincount adds weights
         per country sequentially in cell order from +0.0; the kept cells
         keep their order and exact zeros never change a sum.
     See compute_country_eai_from_cells.
@@ -747,23 +779,36 @@ def pass2_all_tasks(
         iso_list, iso_idx, cell_idx = c.iso_index
         pop_cells = c.pop.ravel()[cell_idx]
         ff_cells = {key: ff.ravel()[cell_idx] for key, ff in c.ff.items()}
-        # design intensity -> (kept cell positions within cell_idx, their iso_idx, pop, apf, ff per key)
-        sub_cache: dict[str, tuple] = {}
+        # intensity -> apf at the country cells (shared by design and existing-population use)
+        apf_cache: dict[str, np.ndarray] = {}
+
+        def _apf_cells(intensity: str) -> np.ndarray:
+            if intensity not in apf_cache:
+                apf_cache[intensity] = build_adapt_protection_fraction(
+                    c.ff, return_periods, intensity, rp_applied, c.geo,
+                ).ravel()[cell_idx]
+            return apf_cache[intensity]
+
+        # (design intensity, existing intensity) -> (kept cells' iso_idx, pop, apf, existing pf, ff per key)
+        sub_cache: dict[tuple, tuple] = {}
 
         for task in tasks:
-            if task.design_intensity not in sub_cache:
-                apf_cells = build_adapt_protection_fraction(
-                    c.ff, return_periods, task.design_intensity, rp_applied, c.geo,
-                ).ravel()[cell_idx]
+            sub_key = (task.design_intensity, task.existing_intensity)
+            if sub_key not in sub_cache:
+                apf_cells = _apf_cells(task.design_intensity)
+                epf_cells = _apf_cells(task.existing_intensity) if task.existing_intensity else None
                 can_exceed = np.zeros(len(cell_idx), dtype=bool)
                 for ff in ff_cells.values():
                     can_exceed |= _safe(ff) > _safe(apf_cells)
+                    if epf_cells is not None:
+                        can_exceed |= _safe(ff) > _safe(epf_cells)
                 keep = np.nonzero(can_exceed)[0]
-                sub_cache[task.design_intensity] = (
+                sub_cache[sub_key] = (
                     iso_idx[keep], pop_cells[keep], apf_cells[keep],
+                    epf_cells[keep] if epf_cells is not None else None,
                     {key: ff[keep] for key, ff in ff_cells.items()},
                 )
-            iso_k, pop_k, apf_k, ff_k = sub_cache[task.design_intensity]
+            iso_k, pop_k, apf_k, epf_k, ff_k = sub_cache[sub_key]
 
             if task.kind in ("baseline", "protect"):
                 weights = {key: protect_exposure_grid(ff, apf_k, pop_k) for key, ff in ff_k.items()}
@@ -779,7 +824,8 @@ def pass2_all_tasks(
                 cap = np.maximum(0.0, 1.0 - apf_k)
                 share = np.array([task.redirected_share.get(iso, 0.0) for iso in iso_list], dtype="float64")
                 redirected = cap * share[iso_k]
-                weights = {key: compute_avoid(ff, apf_k, pop_k, redirected, g) for key, ff in ff_k.items()}
+                weights = {key: compute_avoid(ff, apf_k, pop_k, redirected, g, existing_prot_frac=epf_k)
+                           for key, ff in ff_k.items()}
 
             chunk_eai = compute_country_eai_from_cells(weights, return_periods, slr_scenarios, iso_list, iso_k)
             totals[task.key] = chunk_eai if task.key not in totals else totals[task.key].add(chunk_eai, fill_value=0.0)
@@ -812,49 +858,50 @@ def write_exposure_outputs(
             ctx.growth_df, ctx.ssps, ctx.output_years, ctx.slr_traj,
         )
 
-    # ── Avoid: group by slr_int, mirroring main()'s _maybe_write_avoid ─────────
-    for slr_int in ctx.slr_intensities:
-        ssp_series: list[pd.Series] = []
-        for task in tasks:
-            if task.kind != "avoid_ssp" or task.slr_int != slr_int:
-                continue
-            avoid_eai = results.get(task.key)
-            if avoid_eai is None or ctx.slr_traj is None or task.ssp not in ctx.slr_traj.columns:
-                continue
-            traj_years = ctx.slr_traj.index.to_numpy(dtype=float)
-            traj_mm = ctx.slr_traj[task.ssp].to_numpy(dtype=float)
-            slr_at_yr = float(np.interp(float(task.year), traj_years, traj_mm))
-            x = np.asarray(ctx.slr_mm_sorted, dtype=float)
-            resolved = {
-                iso: float(np.clip(np.interp(slr_at_yr, x, avoid_eai.loc[iso].to_numpy(dtype=float)), 0.0, None))
-                for iso in avoid_eai.index
-            }
-            ssp_series.append(pd.Series(resolved, name=f"EAI_{task.ssp}_{task.year}"))
+    # ── Avoid / protect + avoid: group by (variant, slr_int), mirroring main()'s _maybe_write_avoid ──
+    for variant in AVOID_VARIANTS:
+        for slr_int in ctx.slr_intensities:
+            ssp_series: list[pd.Series] = []
+            for task in tasks:
+                if task.kind != "avoid_ssp" or task.variant != variant or task.slr_int != slr_int:
+                    continue
+                avoid_eai = results.get(task.key)
+                if avoid_eai is None or ctx.slr_traj is None or task.ssp not in ctx.slr_traj.columns:
+                    continue
+                traj_years = ctx.slr_traj.index.to_numpy(dtype=float)
+                traj_mm = ctx.slr_traj[task.ssp].to_numpy(dtype=float)
+                slr_at_yr = float(np.interp(float(task.year), traj_years, traj_mm))
+                x = np.asarray(ctx.slr_mm_sorted, dtype=float)
+                resolved = {
+                    iso: float(np.clip(np.interp(slr_at_yr, x, avoid_eai.loc[iso].to_numpy(dtype=float)), 0.0, None))
+                    for iso in avoid_eai.index
+                }
+                ssp_series.append(pd.Series(resolved, name=f"EAI_{task.ssp}_{task.year}"))
 
-        growth_dfs: list[pd.DataFrame] = []
-        for task in tasks:
-            if task.kind != "avoid_growth" or task.slr_int != slr_int:
-                continue
-            avoid_eai = results.get(task.key)
-            if avoid_eai is None:
-                continue
-            dense = interpolate_eai_linear(avoid_eai, ctx.slr_mm_sorted, ctx.slr_interp_mm)
-            dense.columns = [f"EAI_{c}_g{task.g_pct}" for c in dense.columns]
-            growth_dfs.append(dense)
+            growth_dfs: list[pd.DataFrame] = []
+            for task in tasks:
+                if task.kind != "avoid_growth" or task.variant != variant or task.slr_int != slr_int:
+                    continue
+                avoid_eai = results.get(task.key)
+                if avoid_eai is None:
+                    continue
+                dense = interpolate_eai_linear(avoid_eai, ctx.slr_mm_sorted, ctx.slr_interp_mm)
+                dense.columns = [f"EAI_{c}_g{task.g_pct}" for c in dense.columns]
+                growth_dfs.append(dense)
 
-        if ssp_series:
-            ssp_out = pd.concat(ssp_series, axis=1).fillna(0.0)
-            ssp_out.index.name = "ISO"
-            ssp_out.to_csv(out_dir / f"exposure_avoid_{slr_int}_ssp.csv")
-            print(f"  Written: exposure_avoid_{slr_int}_ssp.csv")
-        elif expect_ssp:
-            print(f"  Skipping exposure_avoid_{slr_int}_ssp.csv: no matching results.")
+            if ssp_series:
+                ssp_out = pd.concat(ssp_series, axis=1).fillna(0.0)
+                ssp_out.index.name = "ISO"
+                ssp_out.to_csv(out_dir / f"exposure_{variant}_{slr_int}_ssp.csv")
+                print(f"  Written: exposure_{variant}_{slr_int}_ssp.csv")
+            elif expect_ssp:
+                print(f"  Skipping exposure_{variant}_{slr_int}_ssp.csv: no matching results.")
 
-        if growth_dfs:
-            growth_out = pd.concat(growth_dfs, axis=1).fillna(0.0)
-            growth_out.index.name = "ISO"
-            growth_out.to_csv(out_dir / f"exposure_avoid_{slr_int}_growth_matrix.csv")
-            print(f"  Written: exposure_avoid_{slr_int}_growth_matrix.csv")
+            if growth_dfs:
+                growth_out = pd.concat(growth_dfs, axis=1).fillna(0.0)
+                growth_out.index.name = "ISO"
+                growth_out.to_csv(out_dir / f"exposure_{variant}_{slr_int}_growth_matrix.csv")
+                print(f"  Written: exposure_{variant}_{slr_int}_growth_matrix.csv")
 
 
 def main() -> None:
@@ -864,7 +911,7 @@ def main() -> None:
     parser.add_argument("--outdir", required=True)
     parser.add_argument(
         "--skip-existing", action="store_true",
-        help="Skip a scenario (baseline/protect_*/retreat_*) or an avoid "
+        help="Skip a scenario (baseline/protect_*/retreat_*) or an avoid / protect + avoid "
              "slr_intensity entirely if its output CSVs already exist in "
              "--outdir, instead of recomputing and overwriting them. Useful "
              "for resuming after a partial failure without redoing already-"
@@ -1051,18 +1098,18 @@ def main() -> None:
             growth_df, ssps, output_years, slr_traj,
         )
 
-    # ── Avoid ─────────────────────────────────────────────────────────────────
-    # Every (slr_intensity, SSP, year) / (slr_intensity, growth_rate) combination
-    # is independent - parallelized across worker processes. Each worker's
-    # payload is tiny (chunk paths + small dicts, not multi-GB arrays), so
-    # worker count is effectively unconstrained by memory in practice;
-    # avoid_worker_memory_budget_gb is kept for reference only.
-    avoid_slr_intensities = slr_intensities
+    # ── Avoid / protect + avoid ───────────────────────────────────────────────
+    # Every (variant, slr_intensity, SSP, year) / (variant, slr_intensity,
+    # growth_rate) combination is independent - parallelized across worker
+    # processes. Each worker's payload is tiny (chunk paths + small dicts, not
+    # multi-GB arrays), so worker count is effectively unconstrained by memory
+    # in practice; avoid_worker_memory_budget_gb is kept for reference only.
+    avoid_units = [(v, s) for v in AVOID_VARIANTS for s in slr_intensities]
     if args.skip_existing:
-        avoid_slr_intensities = [s for s in slr_intensities if not _avoid_done(s, out_dir, expect_ssp)]
-        for s in slr_intensities:
-            if s not in avoid_slr_intensities:
-                print(f"  Skipping AVOID exposure ({s}) (--skip-existing, files already present).")
+        done_units = [u for u in avoid_units if _avoid_done(*u, out_dir, expect_ssp)]
+        for v, s in done_units:
+            print(f"  Skipping {v.upper()} exposure ({s}) (--skip-existing, files already present).")
+        avoid_units = [u for u in avoid_units if u not in done_units]
 
     # Only enqueue tasks for ssps that actually have a trajectory column -
     # _avoid_ssp_worker_task returns None for any ssp not in slr_traj.columns
@@ -1078,101 +1125,97 @@ def main() -> None:
         print(f"  WARNING: no SLR trajectory for {missing_ssps} - excluded from AVOID File 3 (*_ssp.csv).")
     growth_pct_labels = [int(round(g * 100)) for g in growth_rates]
     ssp_tasks = [
-        (slr_int, ssp, yr)
-        for slr_int in avoid_slr_intensities
+        (v, slr_int, ssp, yr)
+        for v, slr_int in avoid_units
         for ssp in available_ssps
         for yr in output_years
     ] if (growth_df is not None and slr_traj is not None) else []
     growth_tasks = [
-        (slr_int, g_pct)
-        for slr_int in avoid_slr_intensities
+        (v, slr_int, g_pct)
+        for v, slr_int in avoid_units
         for g_pct in growth_pct_labels
     ]
     n_tasks = len(ssp_tasks) + len(growth_tasks)
     budget_gb = float(cfg.get("analysis", {}).get("avoid_worker_memory_budget_gb", 8))
     n_workers = max(1, min(os.cpu_count() or 1, max(n_tasks, 1)))
     print(
-        f"\nComputing AVOID exposure: {len(avoid_slr_intensities)} slr_intensities x "
+        f"\nComputing AVOID / PROTECT + AVOID exposure: {len(avoid_units)} (variant, slr_intensity) units x "
         f"{len(ssps)} SSPs x {len(output_years)} years = {len(ssp_tasks)} SSP tasks, plus "
-        f"{len(avoid_slr_intensities)} slr_intensities x {len(growth_pct_labels)} growth rates = "
+        f"{len(avoid_units)} units x {len(growth_pct_labels)} growth rates = "
         f"{len(growth_tasks)} scenario-neutral tasks ({n_tasks} total). "
         f"Per-worker payload is now file paths + small dicts (not full grids), "
         f"budget {budget_gb:.1f} GiB no longer constrains worker count -> {n_workers} worker process(es)…"
     )
 
-    ssp_results: dict[str, list[pd.Series]] = {slr_int: [] for slr_int in avoid_slr_intensities}
-    growth_results: dict[str, list[pd.DataFrame]] = {slr_int: [] for slr_int in avoid_slr_intensities}
-    expected_ssp = {slr_int: sum(1 for s, _, _ in ssp_tasks if s == slr_int) for slr_int in avoid_slr_intensities}
-    expected_growth = {slr_int: sum(1 for s, _ in growth_tasks if s == slr_int) for slr_int in avoid_slr_intensities}
-    written = {slr_int: False for slr_int in avoid_slr_intensities}
+    ssp_results: dict[tuple, list[pd.Series]] = {u: [] for u in avoid_units}
+    growth_results: dict[tuple, list[pd.DataFrame]] = {u: [] for u in avoid_units}
+    expected_ssp = {u: sum(1 for v, s, _, _ in ssp_tasks if (v, s) == u) for u in avoid_units}
+    expected_growth = {u: sum(1 for v, s, _ in growth_tasks if (v, s) == u) for u in avoid_units}
+    written = {u: False for u in avoid_units}
 
-    def _maybe_write_avoid(slr_int: str) -> None:
-        if written[slr_int]:
+    def _maybe_write_avoid(unit: tuple) -> None:
+        variant, slr_int = unit
+        if written[unit]:
             return
-        if len(ssp_results[slr_int]) < expected_ssp[slr_int]:
+        if len(ssp_results[unit]) < expected_ssp[unit]:
             return
-        if len(growth_results[slr_int]) < expected_growth[slr_int]:
+        if len(growth_results[unit]) < expected_growth[unit]:
             return
-        if ssp_results[slr_int]:
-            ssp_df = pd.concat(ssp_results[slr_int], axis=1).fillna(0.0)
+        if ssp_results[unit]:
+            ssp_df = pd.concat(ssp_results[unit], axis=1).fillna(0.0)
             ssp_df.index.name = "ISO"
-            ssp_df.to_csv(out_dir / f"exposure_avoid_{slr_int}_ssp.csv")
-            print(f"  Written: exposure_avoid_{slr_int}_ssp.csv")
+            ssp_df.to_csv(out_dir / f"exposure_{variant}_{slr_int}_ssp.csv")
+            print(f"  Written: exposure_{variant}_{slr_int}_ssp.csv")
         else:
-            print(f"  Skipping exposure_avoid_{slr_int}_ssp.csv: no SSP growth factors or SLR trajectory available.")
-        growth_df_out = pd.concat(growth_results[slr_int], axis=1).fillna(0.0)
+            print(f"  Skipping exposure_{variant}_{slr_int}_ssp.csv: no SSP growth factors or SLR trajectory available.")
+        growth_df_out = pd.concat(growth_results[unit], axis=1).fillna(0.0)
         growth_df_out.index.name = "ISO"
-        growth_df_out.to_csv(out_dir / f"exposure_avoid_{slr_int}_growth_matrix.csv")
-        print(f"  Written: exposure_avoid_{slr_int}_growth_matrix.csv")
-        written[slr_int] = True
-        ssp_results[slr_int] = []
-        growth_results[slr_int] = []
+        growth_df_out.to_csv(out_dir / f"exposure_{variant}_{slr_int}_growth_matrix.csv")
+        print(f"  Written: exposure_{variant}_{slr_int}_growth_matrix.csv")
+        written[unit] = True
+        ssp_results[unit] = []
+        growth_results[unit] = []
 
+    init_args = (chunk_ids, chunks_dir, flood_frac_dir, iso_lookup, rp_applied,
+                 return_periods, slr_scenarios, growth_df,
+                 slr_mm_sorted, slr_interp_mm, slr_traj, slr_baseline)
     if n_workers == 1:
-        _init_avoid_worker(chunk_ids, chunks_dir, flood_frac_dir, iso_lookup, rp_applied,
-                            return_periods, slr_scenarios, growth_df,
-                            slr_mm_sorted, slr_interp_mm, slr_traj)
-        for slr_int, ssp, yr in ssp_tasks:
-            _, _, _, series = _avoid_ssp_worker_task(slr_int, shares_by_intensity[slr_int], ssp, yr)
+        _init_avoid_worker(*init_args)
+        for v, slr_int, ssp, yr in ssp_tasks:
+            _, _, _, _, series = _avoid_ssp_worker_task(v, slr_int, shares_by_intensity[slr_int], ssp, yr)
             if series is not None:
-                ssp_results[slr_int].append(series)
-            print(f"  [{slr_int}] {ssp} {yr} done.")
-            _maybe_write_avoid(slr_int)
-        for slr_int, g_pct in growth_tasks:
-            _, _, df = _avoid_growth_matrix_worker_task(slr_int, shares_by_intensity[slr_int], g_pct)
-            growth_results[slr_int].append(df)
-            print(f"  [{slr_int}] growth g{g_pct} done.")
-            _maybe_write_avoid(slr_int)
+                ssp_results[(v, slr_int)].append(series)
+            print(f"  [{v} {slr_int}] {ssp} {yr} done.")
+            _maybe_write_avoid((v, slr_int))
+        for v, slr_int, g_pct in growth_tasks:
+            _, _, _, df = _avoid_growth_matrix_worker_task(v, slr_int, shares_by_intensity[slr_int], g_pct)
+            growth_results[(v, slr_int)].append(df)
+            print(f"  [{v} {slr_int}] growth g{g_pct} done.")
+            _maybe_write_avoid((v, slr_int))
     else:
-        with ProcessPoolExecutor(
-            max_workers=n_workers,
-            initializer=_init_avoid_worker,
-            initargs=(chunk_ids, chunks_dir, flood_frac_dir, iso_lookup, rp_applied,
-                      return_periods, slr_scenarios, growth_df,
-                      slr_mm_sorted, slr_interp_mm, slr_traj),
-        ) as pool:
+        with ProcessPoolExecutor(max_workers=n_workers, initializer=_init_avoid_worker, initargs=init_args) as pool:
             futures = {
-                pool.submit(_avoid_ssp_worker_task, slr_int, shares_by_intensity[slr_int], ssp, yr): "ssp"
-                for slr_int, ssp, yr in ssp_tasks
+                pool.submit(_avoid_ssp_worker_task, v, slr_int, shares_by_intensity[slr_int], ssp, yr): "ssp"
+                for v, slr_int, ssp, yr in ssp_tasks
             }
             futures.update({
-                pool.submit(_avoid_growth_matrix_worker_task, slr_int, shares_by_intensity[slr_int], g_pct): "growth"
-                for slr_int, g_pct in growth_tasks
+                pool.submit(_avoid_growth_matrix_worker_task, v, slr_int, shares_by_intensity[slr_int], g_pct): "growth"
+                for v, slr_int, g_pct in growth_tasks
             })
             for future in as_completed(futures):
                 if futures[future] == "ssp":
-                    slr_int, ssp, yr, series = future.result()
+                    v, slr_int, ssp, yr, series = future.result()
                     if series is not None:
-                        ssp_results[slr_int].append(series)
-                    print(f"  [{slr_int}] {ssp} {yr} done.")
+                        ssp_results[(v, slr_int)].append(series)
+                    print(f"  [{v} {slr_int}] {ssp} {yr} done.")
                 else:
-                    slr_int, g_pct, df = future.result()
-                    growth_results[slr_int].append(df)
-                    print(f"  [{slr_int}] growth g{g_pct} done.")
-                _maybe_write_avoid(slr_int)
+                    v, slr_int, g_pct, df = future.result()
+                    growth_results[(v, slr_int)].append(df)
+                    print(f"  [{v} {slr_int}] growth g{g_pct} done.")
+                _maybe_write_avoid((v, slr_int))
 
-    for slr_int in avoid_slr_intensities:
-        _maybe_write_avoid(slr_int)
+    for unit in avoid_units:
+        _maybe_write_avoid(unit)
 
     print(f"\nAll exposure CSVs written to: {out_dir}")
 

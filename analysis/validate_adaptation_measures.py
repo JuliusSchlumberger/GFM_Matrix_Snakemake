@@ -1,4 +1,4 @@
-"""Synthetic sense-check of the baseline/protect/avoid/retreat exposure formulas.
+"""Synthetic sense-check of the baseline/protect/avoid/retreat/protect + avoid exposure formulas.
 
 Not part of the Snakemake DAG or run_analysis.py - a standalone diagnostic
 that runs the REAL production formulas from src/exposure_analysis.py
@@ -26,24 +26,27 @@ proportionally more new activations the next step, compounding both cell
 count and per-cell value into roughly exponential growth in total flooded
 extent.
 
-Output: a 4x3 grid of burning-ember plots - columns = baseline/protect/
-avoid/retreat, rows = three "modes" describing which axis of the
+Output: 15 burning-ember plots - columns = baseline/protect/
+avoid/retreat/protect + avoid, rows = three "modes" describing which axis of the
 (severity x growth) EAI matrix is actually left free to vary:
   - SLR driven:        growth_factor forced to 1.0 for every row (both of
                         avoid's growth-dependent terms - organic-growth and
                         redirected-growth - use max(0, growth_factor - 1),
-                        so they vanish here and avoid should collapse onto
-                        protect exactly).
+                        so they vanish here: avoid should collapse onto
+                        baseline and protect + avoid onto protect exactly).
   - Population driven: severity forced to the level-0 (mostly dry) grid for
                         every column; only growth varies.
   - Mixed drivers:      both vary for real, the closest analogue to
                         production behaviour.
-plot_burning_ember() itself is reused unmodified (one call per panel); since
-it always builds its own standalone figure, the 12 individual PNGs are also
-stitched into one 4x3 contact sheet for convenience.
+plot_burning_ember() itself is reused unmodified for the 15 individual
+diagnostic PNGs (one call per panel, with EAI numbers). The same 15 matrices
+are also drawn as one conceptual manuscript figure, validation_grid_5x3.png
+/.pdf (plot_conceptual_grid): rows Population / SLR / Combination driven,
+columns No adaptation / Protect / Avoid / Retreat / Protect + Avoid, one shared colour scale,
+no numbers on axes or contours.
 
 Usage:
-    python snakemake_workflow/analysis/validate_adaptation_measures.py
+    python analysis/validate_adaptation_measures.py
         [--outdir D:/GFM/figures/validation]
 """
 
@@ -55,7 +58,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from PIL import Image
 from scipy import ndimage
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -75,19 +77,30 @@ N_SEVERITY = 7
 SLR_MM = np.linspace(0, 1500, N_SEVERITY)
 GROWTH_RATES = np.arange(-0.5, 1.5 + 1e-9, 0.1)
 
-# Design/protection standard: a single flood_fraction cutoff, applied
-# uniformly across the grid (a spatially-flat stand-in for the real
-# pipeline's build_adapt_protection_fraction map). Must sit strictly between
-# SEED_WET_VALUE and INITIAL_WET_VALUE below - see their comments for why.
-DESIGN_STANDARD = 0.20
+# Design/protection standard: a flood_fraction cutoff applied inside the
+# DESIGN ZONE only - the cells already flooded at severity DESIGN_LEVEL (the
+# SLR the adaptation is designed for); every other cell has no design
+# floodplain (0). A stand-in for the real pipeline's
+# build_adapt_protection_fraction map, which is likewise non-zero only where
+# the design event floods. Must sit above INITIAL_WET_VALUE and inside the
+# SEED_WET_RANGE - see their comments for why.
+# 0.50 (was 0.20, 2026-10-13): high enough that protection visibly removes a
+# share of the flooding in every mode, so protect reads as distinct from baseline.
+# Zone-limited (was uniform over the whole grid, 2026-10-13): with a uniform
+# design floodplain every dry inland cell also counted as 50 % floodplain, so
+# avoid/retreat moved people into cells no safer than the ones they left and
+# protect + avoid was hardly distinguishable from protect.
+DESIGN_STANDARD = 0.50
+DESIGN_LEVEL = 4  # severity level (SLR_MM[4] = 1 m) the design zone is taken from
 
 # Flood-fraction contagion parameters (see module docstring).
-# SEED_WET_VALUE (> DESIGN_STANDARD) is the level-0 seed patch's starting
-# value: it's already "established" flooding that exceeds the design
-# standard from severity 0 onward, which is what gives "Population driven"
-# (severity pinned to level 0) a non-zero protect/avoid/retreat signal -
-# without a value already above the standard at severity 0, every
-# adaptation measure reads exactly 0 there regardless of population growth.
+# SEED_WET_RANGE is the level-0 seed patch's starting flood fraction, a
+# gradient across the patch (high at the coast edge, low inland): the part
+# above DESIGN_STANDARD is established flooding that protection cannot stop,
+# which gives "Population driven" (severity pinned to level 0) a non-zero
+# protect/avoid/retreat signal; the part below it is protected, so protect
+# is lower than baseline there too (with one uniform seed value either all of
+# it or none of it would be protected).
 # INITIAL_WET_VALUE (< DESIGN_STANDARD) is what a cell newly reached by the
 # contagion frontier starts at: below standard, so a freshly-flooded cell
 # needs a few growth steps before it breaches protection - this is what
@@ -96,13 +109,19 @@ DESIGN_STANDARD = 0.20
 # time to grow past the standard), instead of exactly tracking baseline at
 # every severity level the way a self-referential threshold (e.g. "0.7x
 # this same cell's own level-0 value") would.
-SEED_WET_VALUE = 0.35
+SEED_WET_RANGE = (0.80, 0.20)  # seed patch flood fraction, first to last column
 INITIAL_WET_VALUE = 0.12
 ACTIVATION_PROB = 0.30     # per-step chance a dry neighbour of a wet cell activates
 WET_GROWTH_FACTOR = 1.3    # per-step multiplicative growth of already-wet cells
 
-MEASURES = ["baseline", "protect", "avoid", "retreat"]
+MEASURES = ["baseline", "protect", "avoid", "retreat", "protect_avoid"]
 MODES = ["SLR driven", "Population driven", "Mixed drivers"]
+
+# Conceptual manuscript figure (validation_grid_5x3.png/.pdf): row order and labels.
+FIGURE_ROWS = [("Population driven", "Population driven"), ("SLR driven", "SLR driven"),
+               ("Mixed drivers", "Combination driven")]
+FIGURE_COLUMNS = {"baseline": "No adaptation", "protect": "Protect", "avoid": "Avoid", "retreat": "Retreat",
+                  "protect_avoid": "Protect + Avoid"}
 
 # Single-"country" bookkeeping: the whole grid is one region, so
 # compute_retreat/compute_avoid's real redistribution logic (which sums and
@@ -119,7 +138,7 @@ def generate_population(rng: np.random.Generator) -> np.ndarray:
 def generate_flood_fraction_sequence(rng: np.random.Generator) -> list[np.ndarray]:
     """One flood_fraction grid per severity level, via seeded contagion growth."""
     ff = np.zeros((GRID_SIZE, GRID_SIZE), dtype="float64")
-    ff[GRID_SIZE // 2 - 3 : GRID_SIZE // 2 + 3, 0:5] = SEED_WET_VALUE  # seed patch
+    ff[GRID_SIZE // 2 - 3 : GRID_SIZE // 2 + 3, 0:5] = np.linspace(*SEED_WET_RANGE, 5)  # seed patch, gradient
 
     structure = ndimage.generate_binary_structure(2, 1)  # 4-connectivity
     sequence = [ff.copy()]
@@ -135,6 +154,12 @@ def generate_flood_fraction_sequence(rng: np.random.Generator) -> list[np.ndarra
     return sequence
 
 
+def design_grid(ff_sequence: list[np.ndarray]) -> np.ndarray:
+    """Adaptation design flood fraction: DESIGN_STANDARD inside the design
+    zone (cells flooded at severity DESIGN_LEVEL), 0 elsewhere."""
+    return np.where(ff_sequence[DESIGN_LEVEL] > 0, DESIGN_STANDARD, 0.0)
+
+
 def compute_eai_matrix(
     measure: str,
     mode: str,
@@ -147,8 +172,11 @@ def compute_eai_matrix(
     design-threshold comparison never depends on population), so their EAI
     is computed once per severity level at growth_factor=1 and scaled
     afterward - mirrors apply_growth_rates_to_eai's production shortcut.
-    avoid is genuinely non-linear in growth (compute_avoid_redirected), so
-    it's recomputed at every (severity, growth) cell directly.
+    avoid and protect + avoid are genuinely non-linear in growth
+    (compute_avoid_redirected), so they're recomputed at every (severity,
+    growth) cell directly. They share compute_avoid and differ only in the
+    existing population's protection: avoid keeps baseline's (here: none),
+    protect + avoid gets the design standard.
     """
     n_growth = len(GROWTH_RATES)
     matrix = np.zeros((n_growth, N_SEVERITY))
@@ -156,7 +184,7 @@ def compute_eai_matrix(
     apf_grid = (
         np.zeros((GRID_SIZE, GRID_SIZE))
         if measure == "baseline"
-        else np.full((GRID_SIZE, GRID_SIZE), DESIGN_STANDARD)
+        else design_grid(ff_sequence)
     )
 
     if measure == "retreat":
@@ -164,7 +192,8 @@ def compute_eai_matrix(
 
     # SLR driven forces growth_factor == 1 for every row - this is also what
     # makes compute_avoid_redirected's max(0, growth_factor - 1) term vanish,
-    # so avoid should collapse onto protect's numbers in that mode.
+    # so avoid should collapse onto baseline's and protect + avoid onto
+    # protect's numbers in that mode.
     if mode == "SLR driven":
         growth_factors = np.ones(n_growth)
     else:
@@ -180,14 +209,73 @@ def compute_eai_matrix(
         elif measure == "retreat":
             eai0 = compute_retreat(ff_col, apf_grid, eff_pop).sum()
             matrix[:, s] = eai0 * growth_factors
-        elif measure == "avoid":
+        elif measure in ("avoid", "protect_avoid"):
+            # avoid: existing population keeps baseline's protection (none here)
+            existing = np.zeros((GRID_SIZE, GRID_SIZE)) if measure == "avoid" else None
             for gi, gf in enumerate(growth_factors):
                 redirected = compute_avoid_redirected(
                     apf_grid, population, gf, _GEO_IDS, _ISO_LOOKUP
                 )
-                matrix[gi, s] = compute_avoid(ff_col, apf_grid, population, redirected, gf).sum()
+                matrix[gi, s] = compute_avoid(ff_col, apf_grid, population, redirected, gf,
+                                              existing_prot_frac=existing).sum()
 
     return matrix
+
+
+def plot_conceptual_grid(
+    matrices: dict[tuple[str, str], np.ndarray], out_path: Path,
+    vmin: float, vcenter: float, vmax: float, n_contours: int = 9,
+) -> None:
+    """The 15 panels as one manuscript figure: rows = drivers (FIGURE_ROWS),
+    columns = measures (FIGURE_COLUMNS), one shared diverging colour scale
+    (same norm as the per-panel figures), unlabelled contour lines, no
+    numbers on any axis - only the zero-population-change line is marked.
+    Written as .png (300 dpi) and .pdf."""
+    import matplotlib.colors as mcolors
+
+    slr_x = SLR_MM / 1000.0
+    gr_y = GROWTH_RATES * 100.0
+    extent = [slr_x[0], slr_x[-1], gr_y[0], gr_y[-1]]
+    norm = mcolors.TwoSlopeNorm(vmin=min(vmin, vcenter - 1e-9), vcenter=vcenter, vmax=max(vmax, vcenter + 1e-9))
+
+    fig, axes = plt.subplots(len(FIGURE_ROWS), len(FIGURE_COLUMNS), figsize=(21, 11.5),
+                             sharex=True, sharey=True, gridspec_kw={"hspace": 0.12, "wspace": 0.08})
+    im = None
+    for r, (mode, row_label) in enumerate(FIGURE_ROWS):
+        for c, (measure, col_label) in enumerate(FIGURE_COLUMNS.items()):
+            ax = axes[r, c]
+            matrix = matrices[(mode, measure)]
+            im = ax.imshow(matrix, origin="lower", aspect="auto", extent=extent, cmap="RdBu_r", norm=norm,
+                           interpolation="bilinear")
+            hi = float(matrix.max()) or 1.0
+            levels = np.linspace(vcenter, hi, n_contours + 1)[1:]
+            if hi > vcenter:
+                ax.contour(slr_x, gr_y, matrix, levels=levels, colors="k", linewidths=1.0, alpha=0.7)
+            ax.axhline(0.0, color="0.25", linestyle="--", linewidth=1.0)
+            ax.set_xticks([])
+            ax.set_yticks([0.0])
+            ax.set_yticklabels(["0"])
+            ax.tick_params(axis="y", labelsize=16, length=5)
+            if r == 0:
+                ax.set_title(col_label, fontsize=20, fontweight="bold", pad=12)
+            if r == len(FIGURE_ROWS) - 1:
+                ax.set_xlabel("Sea level rise →", fontsize=17)
+            if c == 0:
+                ax.set_ylabel("← Population change →", fontsize=17)
+                ax.annotate(row_label, xy=(0, 0.5), xycoords="axes fraction", xytext=(-62, 0),
+                            textcoords="offset points", rotation=90, ha="right", va="center",
+                            fontsize=20, fontweight="bold")
+
+    cbar = fig.colorbar(im, ax=axes, fraction=0.025, pad=0.02)
+    cbar.set_ticks([])
+    cbar.set_label("Expected annual impact (people)", fontsize=17)
+    cbar.ax.text(0.5, -0.015, "lower", transform=cbar.ax.transAxes, ha="center", va="top", fontsize=15)
+    cbar.ax.text(0.5, 1.015, "higher", transform=cbar.ax.transAxes, ha="center", va="bottom", fontsize=15)
+
+    for suffix in (".png", ".pdf"):
+        fig.savefig(out_path.with_suffix(suffix), dpi=300, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    print(f"\nManuscript figure: {out_path.with_suffix('.png')} (+ .pdf)")
 
 
 def main() -> None:
@@ -211,7 +299,7 @@ def main() -> None:
         for measure in MEASURES:
             matrices[(mode, measure)] = compute_eai_matrix(measure, mode, ff_sequence, population)
 
-    # One global vmax/colour scale across all 12 panels, so absolute EAI is
+    # One global vmax/colour scale across all 15 panels, so absolute EAI is
     # directly comparable across modes and measures, not just within a row.
     # Contour LEVELS are placed independently per panel (contour_vmax below)
     # so a panel whose own range is much smaller than the global vmax still
@@ -237,7 +325,7 @@ def main() -> None:
     all_ok = True
     for mode in MODES:
         baseline = matrices[(mode, "baseline")]
-        for measure in ("protect", "avoid", "retreat"):
+        for measure in ("protect", "avoid", "retreat", "protect_avoid"):
             diff = matrices[(mode, measure)] - baseline
             ok = bool(np.all(diff <= 1e-6))
             all_ok &= ok
@@ -245,16 +333,22 @@ def main() -> None:
             print(f"  {mode} / {measure} <= baseline: {status}")
     print("  ALL PASS" if all_ok else "  SOME INVARIANTS VIOLATED - see above")
 
-    slr_avoid = matrices[("SLR driven", "avoid")]
-    slr_protect = matrices[("SLR driven", "protect")]
-    max_rel_diff = float(np.max(np.abs(slr_avoid - slr_protect) / np.maximum(slr_protect, 1e-9)))
-    print(
-        f"\nSLR driven: avoid vs protect max relative difference = {max_rel_diff:.2%} "
-        "(expected ~0 - both of avoid's growth-dependent terms vanish when growth_factor==1 everywhere)"
-    )
+    # Without population growth avoid only keeps today's protection (== baseline)
+    # and protect + avoid only raises it (== protect): their growth terms vanish.
+    print("\nInvariant: at growth <= 0, avoid == baseline and protect + avoid == protect:")
+    no_growth = GROWTH_RATES <= 1e-9
+    for mode in MODES:
+        rows = np.ones(len(GROWTH_RATES), dtype=bool) if mode == "SLR driven" else no_growth
+        for measure, ref in (("avoid", "baseline"), ("protect_avoid", "protect")):
+            a, b = matrices[(mode, measure)][rows], matrices[(mode, ref)][rows]
+            rel = float(np.max(np.abs(a - b) / np.maximum(np.abs(b), 1e-9)))
+            ok = rel < 1e-9
+            all_ok &= ok
+            print(f"  {mode} / {measure} == {ref}: {'OK' if ok else f'VIOLATED (max rel diff {rel:.2%})'}")
+    print("  ALL PASS" if all_ok else "  SOME INVARIANTS VIOLATED - see above")
 
     # One shared diverging colour scale (vmin/vcenter/vmax), used identically
-    # on all 12 panels - not just recomputed per panel - so every panel maps
+    # on all 15 panels - not just recomputed per panel - so every panel maps
     # a given EAI value to the exact same colour. vmin/vcenter come from
     # "Population driven" (the row this scale was designed for: growth is
     # its only driver, so its own low end and its own growth=0% reference
@@ -269,7 +363,6 @@ def main() -> None:
         f"vcenter={diverging_center:,.0f}, vmax={global_vmax:,.0f}"
     )
 
-    panel_paths: dict[tuple[str, str], Path] = {}
     for mode in MODES:
         for measure in MEASURES:
             safe_mode = mode.replace(" ", "_")
@@ -282,27 +375,18 @@ def main() -> None:
                 n_contours=9, fontsize=13,
                 diverging_center=diverging_center,
                 diverging_vmin=diverging_vmin,
-                contour_vmax=float(matrix.max()) or 1.0,
+                # contour levels run from diverging_center up: a panel lying wholly
+                # below the centre (e.g. Population driven retreat) gets none
+                contour_vmax=max(float(matrix.max()), diverging_center * 1.05),
             )
             fig.savefig(out_path, bbox_inches="tight")
             plt.close(fig)
-            panel_paths[(mode, measure)] = out_path
             print(f"  wrote {out_path.name}")
 
-    # Stitch the 12 individual panels into one 4x3 contact sheet for a
-    # quick side-by-side look (plot_burning_ember always builds its own
-    # standalone figure, so this composes the PNGs after the fact rather
-    # than modifying that function to support subplot embedding).
-    images = {key: Image.open(p) for key, p in panel_paths.items()}
-    cell_w = max(im.width for im in images.values())
-    cell_h = max(im.height for im in images.values())
-    sheet = Image.new("RGB", (cell_w * len(MEASURES), cell_h * len(MODES)), "white")
-    for row, mode in enumerate(MODES):
-        for col, measure in enumerate(MEASURES):
-            sheet.paste(images[(mode, measure)], (col * cell_w, row * cell_h))
-    sheet_path = out_dir / "validation_grid_4x3.png"
-    sheet.save(sheet_path)
-    print(f"\nContact sheet: {sheet_path}")
+    # All 15 panels as one conceptual manuscript figure (same colour scale as
+    # the individual panels above, no numbers on the axes or contours).
+    plot_conceptual_grid(matrices, out_dir / "validation_grid_5x3.png",
+                         vmin=diverging_vmin, vcenter=diverging_center, vmax=global_vmax)
 
 
 if __name__ == "__main__":

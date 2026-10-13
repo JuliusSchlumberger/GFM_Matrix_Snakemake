@@ -1,4 +1,4 @@
-"""Coarse-resolution flood exposure analysis — baseline, protect, retreat, avoid.
+"""Coarse-resolution flood exposure analysis — baseline, protect, retreat, avoid, protect + avoid.
 
 All functions operate on flood_fraction grids at the population raster's native
 ~1 km resolution (one float per population cell, values 0–1).  No fine-resolution
@@ -450,8 +450,9 @@ def compute_avoid(
     population: np.ndarray,
     redirected: np.ndarray,
     growth_factor: "float | np.ndarray",
+    existing_prot_frac: "np.ndarray | None" = None,
 ) -> np.ndarray:
-    """Per-cell avoid exposure for one (RP, SLR) scenario.
+    """Per-cell avoid (or protect + avoid) exposure for one (RP, SLR) scenario.
 
     `population` is E0, the UNSCALED 2020 population. `redirected` is the
     precomputed redistributed-growth grid from compute_avoid_redirected()
@@ -459,51 +460,55 @@ def compute_avoid(
     the same per-country (SSP, year) or scenario-neutral scalar/grid passed
     to compute_avoid_redirected() for this scenario.
 
-    For cells where ff > adapt_prot_frac:
-        exposure = E0 × ff × min(1,g)                                         [original-population term]
-                 + (ff − ff_prot)/(1 − ff_prot) × E0×(1−ff_prot)×max(0,g−1)    [organic-growth term]
-                 + (ff − ff_prot)/(1 − ff_prot) × redirected                   [redirected-growth term]
-    Cells where ff ≤ adapt_prot_frac: exposure = 0.
+    Two strategies share this formula and differ only in the protection the
+    EXISTING population gets (`existing_prot_frac`, ff_exist below):
+      - avoid: the baseline (today's) protection - avoid only steers new
+        growth away from the design floodplain, it does not raise any
+        defence. Callers pass baseline's protection grid. At growth_factor
+        <= 1 avoid therefore equals baseline exactly.
+      - protect + avoid: `existing_prot_frac=None` -> the adaptation design
+        protection (adapt_prot_frac), i.e. protection is raised AND growth
+        is steered away. At growth_factor <= 1 it equals protect exactly.
 
-    The first term is protect_exposure_grid's binary formula applied to E0,
-    scaled by min(1,g) so it shrinks under population decline exactly like
-    apply_growth_rates_to_eai scales protect/baseline (both are E0×ff×g for
-    g<=1) - without this cap, avoid's original-population term would stay
-    pinned at its full g=1 value even as growth_factor fell toward 0,
-    eventually exceeding baseline/protect at strongly negative growth. Above
-    g=1 the cap saturates at 1, leaving this term at exactly E0×ff (all
-    further growth is handled by the other two terms instead, which is why
-    avoid == protect - for any growth_factor <= 1, since both the
-    organic-growth and redirected-growth terms vanish at max(0,g-1) == 0,
-    leaving only this now-matching first term). The second and third
-    terms both use retreat's /(1 - adapt_prot_frac)-normalized marginal
-    exceedance, applied to the GROWTH INCREMENT (max(0, growth_factor - 1),
-    same convention as compute_avoid_redirected) of the population that
-    already lived outside the design floodplain: the second applies it to
-    the increment that stayed in place (never displaced, so it grows in
-    place and is exposed to the marginal risk of the safe area it lives
-    in); the third applies it to the increment that was redirected out of
-    the floodplain instead. Omitting the second term would silently treat
-    the in-place growth increment outside the (usually small) design
-    floodplain as permanently safe from any exceedance beyond the design
-    standard - understating avoid's exposure, increasingly so at higher
-    growth/longer horizons.
+        exposure = E0 × ff × min(1,g)                   where ff > ff_exist   [original-population term]
+                 + (ff − ff_prot)/(1 − ff_prot) × E0×(1−ff_prot)×max(0,g−1)
+                                                         where ff > ff_prot   [organic-growth term]
+                 + (ff − ff_prot)/(1 − ff_prot) × redirected
+                                                         where ff > ff_prot   [redirected-growth term]
+
+    ff_prot = adapt_prot_frac, the design floodplain the growth is steered
+    out of. The first term is protect_exposure_grid's binary formula applied
+    to E0 at the existing population's protection, scaled by min(1,g) so it
+    shrinks under population decline exactly like apply_growth_rates_to_eai
+    scales protect/baseline (both are E0×ff×g for g<=1). Above g=1 the cap
+    saturates at 1; all further growth is handled by the other two terms,
+    which both vanish at max(0,g-1) == 0. Those use retreat's
+    /(1 - adapt_prot_frac)-normalized marginal exceedance, applied to the
+    GROWTH INCREMENT (same convention as compute_avoid_redirected) of the
+    population living outside the design floodplain: the second to the
+    increment that stayed in place, the third to the increment redirected
+    out of the floodplain. Omitting the second term would treat in-place
+    growth outside the (usually small) design floodplain as permanently safe
+    from any exceedance beyond the design standard.
     """
     ff_s = _safe(ff)
     apf = _safe(adapt_prot_frac)
+    epf = apf if existing_prot_frac is None else _safe(existing_prot_frac)
     g = np.broadcast_to(np.asarray(growth_factor, dtype="float64"), population.shape)
 
-    # Only cells where scenario exceeds design level
-    exceeds = ff_s > apf
     avoid_exp = np.zeros_like(population)
 
     # Original (2020) population term: same binary form as protect_exposure_grid,
-    # scaled by min(1,g) so it shrinks under decline like protect/baseline do
-    # (see docstring) instead of staying pinned at its g=1 value.
+    # at the existing population's protection, scaled by min(1,g) so it shrinks
+    # under decline like protect/baseline do (see docstring).
+    exposed = ff_s > epf
     term1_scale = np.minimum(g, 1.0)
-    avoid_exp[exceeds] = ff_s[exceeds] * population[exceeds] * term1_scale[exceeds]
+    avoid_exp[exposed] = ff_s[exposed] * population[exposed] * term1_scale[exposed]
 
-    # Marginal exceedance fraction, same /(1-apf) normalization as compute_retreat
+    # Growth terms: only where the scenario exceeds the design level the
+    # growth was steered out of. Marginal exceedance fraction, same
+    # /(1-apf) normalization as compute_retreat.
+    exceeds = ff_s > apf
     safe_frac = np.maximum(1e-10, 1.0 - apf)
     marginal_frac = np.minimum(1.0, (ff_s - apf) / safe_frac)
 

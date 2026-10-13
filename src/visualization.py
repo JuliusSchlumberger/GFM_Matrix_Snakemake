@@ -54,6 +54,7 @@ _DEFAULT_MEASURE_COLORS = {
     "protect": "#1f77b4",
     "retreat": "#9467bd",
     "avoid": "#2ca02c",
+    "protect_avoid": "#17becf",
 }
 
 

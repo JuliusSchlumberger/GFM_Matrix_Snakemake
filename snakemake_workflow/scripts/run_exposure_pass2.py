@@ -1,7 +1,7 @@
 """HPC batch worker: pass 2 of the chunk-partitioned exposure pipeline.
 
 Streams this batch's chunk subset ONCE, computing every scenario/adaptation
-task's (baseline/protect/retreat/avoid) per-country EAI contribution in the
+task's (baseline/protect/retreat/avoid/protect_avoid) per-country EAI contribution in the
 same pass. See analysis/compute_exposure_analysis.py's module docstring and
 pass2_all_tasks/build_exposure_tasks for the full design. Requires
 reduce_exposure_shares.py's output (the FINAL, globally-reduced share, not

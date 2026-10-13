@@ -157,7 +157,7 @@ def main() -> None:
         "baseline": exp_dir / "exposure_baseline_growth_matrix.csv"
     }
     for slr_int in slr_intensities:
-        for meas in ["protect", "retreat", "avoid"]:
+        for meas in ["protect", "retreat", "avoid", "protect_avoid"]:
             p = exp_dir / f"exposure_{meas}_{slr_int}_growth_matrix.csv"
             if p.exists():
                 scenario_files[f"{meas}_{slr_int}"] = p

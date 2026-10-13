@@ -6,7 +6,7 @@ subprocess so modules are properly isolated and crashes in one step do not
 abort subsequent steps (unless --fail-fast is set).
 
 Analysis switches in config.yml:
-  analysis.compute_exposure     — baseline / protect / retreat / avoid EAI CSVs
+  analysis.compute_exposure     — baseline / protect / retreat / avoid / protect + avoid EAI CSVs
   analysis.compute_flood_totals — per-country total flooded area/exposed population per (RP, SLR),
                                    no protection/adaptation applied - consumed by flood_extent_validation
   analysis.plot_burning_ember   — impact-matrix (SLR × growth) figures
@@ -124,12 +124,12 @@ def main() -> None:
     results: dict[str, bool] = {}
     t_start = time.time()
 
-    # ── Step 1: Compute exposure (baseline / protect / retreat / avoid) ────────
+    # ── Step 1: Compute exposure (baseline / protect / retreat / avoid / protect + avoid) ──
     if do_exposure:
         success = _run(
             SCRIPTS_DIR / "compute_exposure_analysis.py",
             cfg_arg + ["--outdir", str(exp_dir)],
-            "Exposure analysis (baseline / protect / retreat / avoid)",
+            "Exposure analysis (baseline / protect / retreat / avoid / protect + avoid)",
             args.fail_fast,
         )
         results["exposure"] = success

@@ -559,7 +559,7 @@ population_growth: # Used by: analysis/compute_exposure_analysis.py
 
 # ── ANALYSIS PIPELINE SWITCHES ────────────────────────────────────────────────
 analysis: # Used by: analysis/run_analysis.py
-  compute_exposure:      true   # baseline / protect / retreat / avoid EAI CSVs
+  compute_exposure:      true   # baseline / protect / retreat / avoid / protect_avoid EAI CSVs
   compute_flood_totals:  true   # per-country total flooded area/exposed population per (RP, SLR),
   # no protection/adaptation applied - consumed by flood_extent_validation's
   # validate_country.py (validation.flood_totals_dir below)
@@ -626,6 +626,7 @@ visualization:
     protect:  "#1f77b4"
     retreat:  "#9467bd"
     avoid:    "#2ca02c"
+    protect_avoid: "#17becf"
 
   level_linestyles: ["--", ":", "-."] # plot_timeseries.py:
   baseline_linestyle: "-" # plot_timeseries.py:

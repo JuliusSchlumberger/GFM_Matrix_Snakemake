@@ -42,7 +42,7 @@ def _timeseries_figure(
 ) -> plt.Figure:
     """One figure: one sub-panel per SSP, one line + intensity envelope per measure.
 
-    Color encodes the adaptation measure (baseline/protect/retreat/avoid,
+    Color encodes the adaptation measure (baseline/protect/retreat/avoid/protect_avoid,
     via measure_colors) - one fixed color per measure. Linestyle encodes
     protection level: each measure's intensity variants (e.g.
     protect_SLR_250/500/1000) are ranked by their position in
@@ -79,12 +79,14 @@ def _timeseries_figure(
                 yrs, vals = zip(*ts_vals)
                 series_by_label[label] = pd.Series(vals, index=yrs)
 
-        # Group labels by measure (baseline / protect / retreat / avoid) so
-        # multi-intensity measures get a min-max envelope across their
-        # SLR_250/500/1000 variants, in addition to each individual line.
+        # Group labels by measure (baseline / protect / retreat / avoid /
+        # protect_avoid) so multi-intensity measures get a min-max envelope
+        # across their SLR_250/500/1000 variants, in addition to each
+        # individual line. The measure is everything before "_SLR_" (a plain
+        # split("_")[0] would file protect_avoid_SLR_500 under protect).
         labels_by_measure: dict[str, list[str]] = {}
         for label in series_by_label:
-            labels_by_measure.setdefault(label.split("_")[0], []).append(label)
+            labels_by_measure.setdefault(label.partition("_SLR_")[0], []).append(label)
 
         for measure, labels in labels_by_measure.items():
             mc = measure_colors.get(measure, "#999999")
