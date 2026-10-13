@@ -225,7 +225,26 @@ def main() -> None:
                 "account": hpc_cfg["sbatch"].get("account", ""),
                 "env_activate_cmd": hpc_cfg["sbatch"]["env_activate_cmd"],
             }
-            n_batches = len(items) if tier["n_nodes"] is None else min(tier["n_nodes"], len(items))
+            if tier["n_nodes"] is None:
+                # Uncapped tier = "one 1vcpu node per TILE" (its own documented
+                # meaning in config.yml - correct for generate_wave_dispatch's
+                # own whole-tile batches). `items` here is a FLAT list of
+                # individual (tile_id, rp, slr) triples, though (resume mode's
+                # own rebalance-by-work-item design) - naively doing
+                # `n_batches = len(items)` therefore created one SLURM job
+                # PER MISSING TRIPLE instead of per tile (confirmed live
+                # 2026-10-13: wave 4's 27 tiles turned into 1200+ one-item
+                # batches). Group by tile_id first instead, so a resumed
+                # uncapped-tier wave gets back to the same "one node, every
+                # remaining triple for that tile" shape the fresh dispatch
+                # already uses.
+                items_by_tile: dict[str, list[tuple[str, str, str]]] = {}
+                for tile_id, rp, slr in items:
+                    items_by_tile.setdefault(tile_id, []).append((tile_id, rp, slr))
+                for i, tile_items in enumerate(items_by_tile.values()):
+                    batches.append((wave, f"{i:03d}", tile_items))
+                continue
+            n_batches = min(tier["n_nodes"], len(items))
         else:
             n_batches = min(n_nodes, len(items))
         k, m = divmod(len(items), n_batches)

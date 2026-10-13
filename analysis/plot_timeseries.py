@@ -8,7 +8,9 @@ interpolation needed here.
 
 Writes one figure globally, one per country (country/) and one per continent
 (continent/, EAI summed over the continent's countries - Natural Earth's six
-continents via visualization.iso_to_continent).
+continents via visualization.iso_to_continent), plus one overview of all
+continents for the SSPs in visualization.timeseries_overview.ssps
+(continent/timeseries_continents_overview.png).
 
 Usage:
     python snakemake_workflow/analysis/plot_timeseries.py \\
@@ -27,6 +29,67 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import load_config, retry_transient_io  # noqa: E402
 from visualization import CONTINENTS, iso_to_continent, ssp_rcp_label  # noqa: E402
+
+
+def _draw_panel(
+    ax: plt.Axes,
+    eai_by_label: dict[str, pd.DataFrame],
+    ssp: str,
+    years: list[int],
+    entity_isos: list[str],
+    measure_colors: dict,
+    slr_intensities: list[str],
+    level_linestyles=("--", ":", "-."),
+    baseline_linestyle: str = "-",
+) -> float:
+    """Draw one SSP's EAI time series (summed over `entity_isos`) into `ax`:
+    one line per label plus a min-max envelope per multi-intensity measure.
+    Returns the largest plotted value (for autoscaling)."""
+    level_rank = {level: i for i, level in enumerate(slr_intensities)}
+    data_max = 0.0
+    series_by_label: dict[str, pd.Series] = {}
+    for label, df in eai_by_label.items():
+        sub = df.loc[df.index.isin(entity_isos)]
+        if sub.empty:
+            continue
+        ts_vals = [
+            (yr, float(sub[f"EAI_{ssp}_{yr}"].sum()))
+            for yr in years if f"EAI_{ssp}_{yr}" in sub.columns
+        ]
+        if ts_vals:
+            yrs, vals = zip(*ts_vals)
+            series_by_label[label] = pd.Series(vals, index=yrs)
+            data_max = max(data_max, max(vals))
+
+    # Group labels by measure (baseline / protect / retreat / avoid /
+    # protect_avoid) so multi-intensity measures get a min-max envelope
+    # across their SLR_250/500/1000 variants, in addition to each
+    # individual line. The measure is everything before "_SLR_" (a plain
+    # split("_")[0] would file protect_avoid_SLR_500 under protect).
+    labels_by_measure: dict[str, list[str]] = {}
+    for label in series_by_label:
+        labels_by_measure.setdefault(label.partition("_SLR_")[0], []).append(label)
+
+    for measure, labels in labels_by_measure.items():
+        mc = measure_colors.get(measure, "#999999")
+        if len(labels) > 1:
+            stacked = pd.concat([series_by_label[l] for l in labels], axis=1)
+            ax.fill_between(stacked.index, stacked.min(axis=1), stacked.max(axis=1),
+                            color=mc, alpha=0.15, zorder=1, linewidth=0)
+        for label in labels:
+            intensity = label[len(measure) + 1:]  # "" for baseline (no suffix)
+            rank = level_rank.get(intensity)
+            ls = level_linestyles[rank % len(level_linestyles)] if rank is not None else baseline_linestyle
+            s = series_by_label[label]
+            # Marker at every actual data point - population_growth.output_years
+            # is not evenly spaced (5-year steps until 2050, then 2060/2075/2100),
+            # so a plain line would make the long unmarked stretches (e.g.
+            # 2050-2060) look like real interpolated data rather than a
+            # straight connector between the two nearest computed points.
+            ax.plot(s.index, s.to_numpy(), linestyle=ls, linewidth=2, color=mc,
+                    marker="o", markersize=4, markeredgewidth=0,
+                    alpha=0.85, label=label, zorder=2)
+    return data_max
 
 
 def _timeseries_figure(
@@ -59,8 +122,6 @@ def _timeseries_figure(
     variants at each year. baseline has no intensity variant, so it's a
     single solid line (visualization.baseline_linestyle).
     """
-    level_rank = {level: i for i, level in enumerate(slr_intensities)}
-
     any_df = next(iter(eai_by_label.values()))
     ssps_avail = [s for s in ssps if any(c.startswith(f"EAI_{s}_") for c in any_df.columns)]
     fig, axes = plt.subplots(1, len(ssps_avail), figsize=(4 * len(ssps_avail) + 2, 5),
@@ -71,54 +132,14 @@ def _timeseries_figure(
 
     for ax, ssp in zip(axes, ssps_avail):
         col = ssp_colors.get(ssp, "#444444")
-        series_by_label: dict[str, pd.Series] = {}
-        for label, df in eai_by_label.items():
-            sub = df.loc[df.index.isin(entity_isos)]
-            if sub.empty:
-                continue
-            ts_vals = [
-                (yr, float(sub[f"EAI_{ssp}_{yr}"].sum()))
-                for yr in years if f"EAI_{ssp}_{yr}" in sub.columns
-            ]
-            if ts_vals:
-                yrs, vals = zip(*ts_vals)
-                series_by_label[label] = pd.Series(vals, index=yrs)
-                data_max = max(data_max, max(vals))
-
-        # Group labels by measure (baseline / protect / retreat / avoid /
-        # protect_avoid) so multi-intensity measures get a min-max envelope
-        # across their SLR_250/500/1000 variants, in addition to each
-        # individual line. The measure is everything before "_SLR_" (a plain
-        # split("_")[0] would file protect_avoid_SLR_500 under protect).
-        labels_by_measure: dict[str, list[str]] = {}
-        for label in series_by_label:
-            labels_by_measure.setdefault(label.partition("_SLR_")[0], []).append(label)
-
-        for measure, labels in labels_by_measure.items():
-            mc = measure_colors.get(measure, "#999999")
-            if len(labels) > 1:
-                stacked = pd.concat([series_by_label[l] for l in labels], axis=1)
-                ax.fill_between(stacked.index, stacked.min(axis=1), stacked.max(axis=1),
-                                 color=mc, alpha=0.15, zorder=1, linewidth=0)
-            for label in labels:
-                intensity = label[len(measure) + 1:]  # "" for baseline (no suffix)
-                rank = level_rank.get(intensity)
-                ls = level_linestyles[rank % len(level_linestyles)] if rank is not None else baseline_linestyle
-                s = series_by_label[label]
-                # Marker at every actual data point - population_growth.output_years
-                # is not evenly spaced (5-year steps until 2050, then 2060/2075/2100),
-                # so a plain line would make the long unmarked stretches (e.g.
-                # 2050-2060) look like real interpolated data rather than a
-                # straight connector between the two nearest computed points.
-                ax.plot(s.index, s.to_numpy(), linestyle=ls, linewidth=2, color=mc,
-                         marker="o", markersize=4, markeredgewidth=0,
-                         alpha=0.85, label=label, zorder=2)
-
+        data_max = max(data_max, _draw_panel(ax, eai_by_label, ssp, years, entity_isos, measure_colors,
+                                             slr_intensities, level_linestyles, baseline_linestyle))
         ax.set_title(f"Dynamic flood risk under {ssp_rcp_label(ssp, ssp_rcp_codes)}",
                      color=col, fontsize=10)
         ax.set_xlabel("Year", fontsize=9)
-        ax.set_ylim(0, y_max if y_max is not None else 1.05 * data_max or 1.0)
         ax.grid(alpha=0.3)
+    for ax in axes:
+        ax.set_ylim(0, y_max if y_max is not None else 1.05 * data_max or 1.0)
 
     axes[0].set_ylabel("EAI (people)", fontsize=10)
     handles, labels = axes[0].get_legend_handles_labels()
@@ -131,6 +152,61 @@ def _timeseries_figure(
                    bbox_to_anchor=(0.5, 0.02), ncol=5)
     fig.suptitle(entity_label, fontsize=13, y=1.02)
     fig.tight_layout(rect=(0, 0.08, 1, 1))
+    return fig
+
+
+def _continent_overview_figure(
+    eai_by_label: dict[str, pd.DataFrame],
+    continent_isos: dict[str, list[str]],
+    ssps: list[str],
+    years: list[int],
+    measure_colors: dict,
+    ssp_colors: dict,
+    slr_intensities: list[str],
+    dpi: int,
+    ssp_rcp_codes: dict[str, int] | None = None,
+    level_linestyles=("--", ":", "-."),
+    baseline_linestyle: str = "-",
+    ncols: int = 2,
+) -> plt.Figure:
+    """All continents in one figure: one block per continent (`ncols` blocks
+    per row), each block one panel per SSP in `ssps` sharing a y-axis scaled
+    to that continent's data. Same lines and styles as _timeseries_figure."""
+    conts = [c for c in continent_isos if continent_isos[c]]
+    nrows = -(-len(conts) // ncols)
+    fig = plt.figure(figsize=(4.2 * len(ssps) * ncols + 0.5, 3.9 * nrows + 1.0), dpi=dpi)
+    blocks = fig.subfigures(nrows, ncols, wspace=0.04, hspace=0.06, squeeze=False)
+    handles, labels = [], []
+    for block, cont in zip(blocks.flat, conts):
+        axes = block.subplots(1, len(ssps), sharey=True, squeeze=False)[0]
+        data_max = 0.0
+        for ax, ssp in zip(axes, ssps):
+            data_max = max(data_max, _draw_panel(ax, eai_by_label, ssp, years, continent_isos[cont], measure_colors,
+                                                 slr_intensities, level_linestyles, baseline_linestyle))
+            ax.set_title(ssp_rcp_label(ssp, ssp_rcp_codes), color=ssp_colors.get(ssp, "#444444"), fontsize=10)
+            ax.grid(alpha=0.3)
+            ax.set_xticks([2025, 2050, 2075, 2100])
+            ax.yaxis.set_major_formatter(plt.FuncFormatter(
+                lambda v, _: f"{v / 1e6:g} M" if v >= 1e6 else (f"{v / 1e3:g} k" if v >= 1e3 else f"{v:g}")))
+        axes[0].set_ylim(0, 1.05 * data_max or 1.0)
+        axes[0].set_ylabel("EAI (people)", fontsize=10)
+        block.suptitle(cont, fontsize=13, fontweight="bold")
+        if not handles:
+            handles, labels = axes[0].get_legend_handles_labels()
+    for block in blocks.flat[len(conts):]:
+        block.set_visible(False)
+    if handles:
+        names = {"baseline": "No adaptation", "protect": "Protect", "avoid": "Avoid", "retreat": "Retreat",
+                 "protect_avoid": "Protect + Avoid"}
+
+        def _pretty(label: str) -> str:
+            measure, _, level = label.partition("_SLR_")
+            return names.get(measure, measure) + (f" ({int(level) / 1000:g} m)" if level else "")
+
+        order = sorted(range(len(labels)), key=lambda i: (labels[i] != "baseline", labels[i]))
+        fig.legend([handles[i] for i in order], [_pretty(labels[i]) for i in order], loc="upper center",
+                   fontsize=10, bbox_to_anchor=(0.5, 0.0), ncol=min(len(handles), 7), frameon=False,
+                   title="Strategy (design SLR)", title_fontsize=10)
     return fig
 
 
@@ -206,6 +282,19 @@ def main() -> None:
         if cont_isos:
             _save(cont_isos, continent, cont_dir / f"timeseries_{continent.replace(' ', '_')}.png", y_max=None)
     print(f"Per-continent done → {cont_dir}")
+
+    # All continents in one figure, restricted to visualization.timeseries_overview.ssps.
+    ov_cfg = viz.get("timeseries_overview", {})
+    ov_ssps = [s for s in ov_cfg.get("ssps", ["SSP2", "SSP5"]) if s in ssps]
+    if ov_ssps:
+        fig = _continent_overview_figure(
+            eai_by_label, {c: [i for i, k in continent_of.items() if k == c] for c in CONTINENTS},
+            ov_ssps, years, m_colors, s_colors, slr_intensities, dpi, ssp_rcp_codes=ssp_rcp_codes,
+            level_linestyles=level_linestyles, baseline_linestyle=baseline_linestyle,
+            ncols=int(ov_cfg.get("ncols", 2)))
+        fig.savefig(cont_dir / "timeseries_continents_overview.png", bbox_inches="tight")
+        plt.close(fig)
+        print(f"Continent overview ({', '.join(ov_ssps)}) → {cont_dir / 'timeseries_continents_overview.png'}")
 
     print(f"\nAll time series written to: {out_dir}")
 

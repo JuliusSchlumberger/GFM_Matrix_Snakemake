@@ -535,7 +535,7 @@ adaptation: # Used by: analysis/compute_exposure_analysis.py
   slr_intensities: # Protection against certain amount of SLR
     - "SLR_500"
     - "SLR_1000"
-    - "SLR_1500"
+    # - "SLR_1500"   # dropped: beyond the 2100 SLR range (median <= 0.72 m, p83 ~1 m), so it never tips
 
 # ── POPULATION GROWTH (SSP SCENARIOS) ─────────────────────────────────────────
 population_growth: # Used by: analysis/compute_exposure_analysis.py
@@ -605,11 +605,17 @@ visualization:
     ncols: 4
     n_contours: 5          # labelled contour lines, evenly spaced up to the shared colour-scale maximum
 
+  timeseries_overview: # plot_timeseries.py: all continents in one figure (continent/timeseries_continents_overview.png)
+    ssps: [SSP2, SSP5]   # one panel per SSP per continent
+    ncols: 2             # continents per row
+
   tipping_points: # plot_tipping_points.py: when does a country's EAI exceed a fixed number of people?
-    countries: [VNM, NLD, NGA]
-    eai_threshold: 1000000        # people per year
-    per_country_eai_threshold: {} # optional overrides, e.g. {NLD: 100000}
-    design_intensity: SLR_1000    # adaptation design the strategies' isolines use
+    countries: [NGA, EGY, THA]    # all strategies tip by 2100 (at the p83 SLR end): growth-driven,
+                                  # delta, and SLR-driven with a shrinking population
+    eai_threshold: 500000         # people per year
+    per_country_eai_threshold: {EGY: 250000} # optional overrides
+    design_intensity: SLR_500     # adaptation design the strategies' isolines use; SLR_1000 is not exceeded
+                                  # by 2100 (median SLR <= 0.72 m), so adaptation would never tip
     strategies: [baseline, protect, avoid, retreat, protect_avoid] # missing files are skipped
 
   # ── SSP SLR trajectory CSV ────────────────────────────────────────────────
