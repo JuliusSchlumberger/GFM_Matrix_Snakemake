@@ -1,26 +1,23 @@
-"""Result visualizations for a SFINCS-vs-HC-bathtub-vs-EA-bathtub validation
-batch. HC-bathtub = hydraulically-connected bathtub (elevation threshold +
-ocean-connectivity pruning, see flood_agreement.prune_to_ocean_connected).
-EA-bathtub = Eikonal-attenuated bathtub (the friction/propagation-aware
-eikonal solve). Both read from summary_bathtub.json/summary_eikonal.json -
-DISPLAY_LABEL below sets the display names only.
-Reads every tile's outputs/summary.json (postprocess_tile_summary.py /
-postprocess_sequential.py) plus tile_selection_metadata.csv for lon/lat.
+"""Result figures of the final SFINCS calibration at one friction point:
+HC-bathtub (hydraulically-connected bathtub - elevation threshold +
+ocean-connectivity pruning) and EA-bathtub (the eikonal solve at friction
+scale factor --friction-scale-factor) against SFINCS, from every tile's
+outputs/calibration_result.json (calibration_results.py) plus
+tile_selection_metadata.csv for lon/lat. Written to {base}/figures/ with an
+_fsf<X> suffix:
 
---stale-cutoff flags any tile whose EA-bathtub raster predates a given
-timestamp as "stale" (e.g. carried over from an earlier batch via a
-recovery copy). Stale tiles are shown distinctly, never silently pooled
-with the rest. Omit for a freshly-run batch.
+  extent_scatter, extent_agreement_hist, depth_scatter, agreement_map,
+  agreement_vs_tile_size, depth_correlation, depth_category_alignment (.png),
+  validation_summary (.csv, one row per tile) and
+  {base}/metrics_overview_table_fsf<X>.csv (pooled extent + depth agreement).
 
 Usage:
-    python plot_validation_results.py --base-dir-name validation_sfincs_v4
-    python plot_validation_results.py --base-dir-name validation_sfincs_v4 --stale-cutoff "2026-09-24 12:00:00"
+    python plot_validation_results.py --base-dir-name calibration_roughness_SFINCS --friction-scale-factor 9
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -34,138 +31,19 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
-from compute_friction_sweep_metrics import MAX_OUTER_ITERATIONS_DEFAULT
-from compute_metrics_overview_table import build_and_write_table
-from flood_agreement import (
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from calibration_results import DISPLAY_LABEL, load_results, metrics_overview, pooled_depth_joint, tile_table  # noqa: E402
+from flood_agreement import (  # noqa: E402
     DEPTH_CATEGORY_EDGES, DEPTH_CORR_FINE_EDGES, depth_error_metrics_from_pooled, metrics_from_counts,
-    pool_depth_joint,
 )
-from tile_sweep_cache import load_or_build_cache
+from gfm_config import read_root  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from map_style import LAND_COLOR  # noqa: E402
 
-DATA_ROOT = Path(r"P:\11212688-004-global-floodmaps\modelling")
-
 COAST_COLOR = "#b8b8b3"
 HC_BATHTUB_COLOR = "#8a8a86"
 EA_BATHTUB_COLOR = "#2a78d6"
-STALE_COLOR = "#d6572a"
-
-# Display names only - JSON field prefixes stay "bathtub"/"eikonal".
-DISPLAY_LABEL = {"bathtub": "HC-bathtub", "eikonal": "EA-bathtub"}
-
-
-def collect_summaries(base_dir: Path, stale_cutoff: pd.Timestamp | None) -> pd.DataFrame:
-    """Merges each tile's separate summary_{bathtub,eikonal,sfincs}.json
-    (postprocess_tile_summary.py) into one row per tile. A tile missing one
-    or more of these files contributes no columns for that model."""
-    by_tile: dict[str, dict] = {}
-    for model in ("bathtub", "eikonal", "sfincs"):
-        for p in sorted(base_dir.glob(f"*/outputs/summary_{model}.json")):
-            try:
-                d = json.loads(p.read_text())
-            except (json.JSONDecodeError, OSError):
-                continue
-            # {model}_depth_joint is a nested dict, not a scalar - pooled
-            # separately by pool_depth_joint()/collect_depth_joint_fsf() for the depth plots.
-            d = {k: v for k, v in d.items() if not k.endswith("_depth_joint")}
-            row = by_tile.setdefault(d["tile_id"], {})
-            row.update(d)
-            if model == "eikonal":
-                eik_path = p.parent / "eikonal_on_subgrid_waterdepth_RP100_SLR_0.tif"
-                row["has_eikonal"] = eik_path.exists()
-                row["eikonal_stale"] = bool(
-                    stale_cutoff is not None and eik_path.exists()
-                    and pd.Timestamp(eik_path.stat().st_mtime, unit="s") < stale_cutoff
-                )
-
-    df = pd.DataFrame(list(by_tile.values()))
-    df["tile_id"] = df["tile_id"].astype(int)
-    if "has_eikonal" not in df.columns:
-        df["has_eikonal"] = False
-    if "eikonal_stale" not in df.columns:
-        df["eikonal_stale"] = False
-    # Ensures every column the plotting functions below expect exists, even
-    # for a partially-complete batch.
-    for name in ("bathtub", "eikonal"):
-        for col in (f"{name}_km2", f"{name}_depth_median_m", f"{name}_matched_km2",
-                    f"{name}_only_km2", f"{name}_sfincs_only_km2"):
-            if col not in df.columns:
-                df[col] = None
-    for col in ("sfincs_km2", "sfincs_depth_median_m"):
-        if col not in df.columns:
-            df[col] = None
-
-    meta = pd.read_csv(base_dir / "tile_selection_metadata.csv")[["tile_id", "lon", "lat"]]
-    return df.merge(meta, on="tile_id", how="left")
-
-
-def load_fsf_eikonal_override(
-    base_dir: Path, friction_scale_factor: float, max_outer_iterations: int, tile_ids: list[int],
-) -> pd.DataFrame:
-    """Per-tile eikonal_* columns (CSI inputs + flooded area + median depth)
-    at ONE sweep point, read straight from each tile's own
-    sweep_comparison_cache.json (tile_sweep_cache.py - built once per tile
-    as part of run_friction_sweep_batch.py's own end-of-batch step, or here
-    live-and-cached via load_or_build_cache's own fallback) - NOT from
-    summary_eikonal.json, which only ever reflects the single default
-    friction_scale_factor point (see postprocess_tile_summary.py's own
-    MODEL_WATERDEPTH_FILENAME)."""
-    rows = []
-    for i, tid in enumerate(tile_ids, start=1):
-        cache = load_or_build_cache(base_dir / str(tid), [friction_scale_factor], max_outer_iterations)
-        if i % 50 == 0 or i == len(tile_ids):
-            print(f"  [{i}/{len(tile_ids)}] tile {tid}: eikonal override loaded ({len(rows)} usable so far)", flush=True)
-        point = cache["points"].get(f"{friction_scale_factor:g}") if cache else None
-        if point is None:
-            continue
-        rows.append({
-            "tile_id": tid,
-            "eikonal_matched_km2": point["matched_km2"],
-            "eikonal_only_km2": point["model_only_km2"],
-            "eikonal_sfincs_only_km2": point["sfincs_only_km2"],
-            "eikonal_km2": point["matched_km2"] + point["model_only_km2"],
-            "eikonal_depth_median_m": point["model_depth_median_m"],
-            "has_eikonal": True, "eikonal_stale": False,
-        })
-    return pd.DataFrame(rows)
-
-
-def collect_depth_joint_fsf(
-    base_dir: Path, tile_ids: list[int], friction_scale_factor: float, max_outer_iterations: int,
-) -> dict:
-    """Same shape/semantics as flood_agreement.pool_depth_joint(base_dir,
-    "eikonal", ...)'s own return (n/sum_x/.../hist_fine/hist_category), but
-    pooled from each tile's own cached depth_joint (tile_sweep_cache.py)
-    instead of summary_eikonal.json's own precomputed joint, which only
-    ever exists for the single default friction_scale_factor=30.0 point."""
-    n = sum_x = sum_y = sum_x2 = sum_y2 = sum_xy = 0.0
-    hist_fine = hist_category = None
-
-    for i, tid in enumerate(tile_ids, start=1):
-        cache = load_or_build_cache(base_dir / str(tid), [friction_scale_factor], max_outer_iterations)
-        if i % 50 == 0 or i == len(tile_ids):
-            print(f"  [{i}/{len(tile_ids)}] tile {tid}: depth-joint pooled", flush=True)
-        point = cache["points"].get(f"{friction_scale_factor:g}") if cache else None
-        joint = point.get("depth_joint") if point else None
-        if not joint:
-            continue
-        n += joint["n"]
-        sum_x += joint["sum_x"]
-        sum_y += joint["sum_y"]
-        sum_x2 += joint["sum_x2"]
-        sum_y2 += joint["sum_y2"]
-        sum_xy += joint["sum_xy"]
-        hf = np.asarray(joint["hist_fine"])
-        hc = np.asarray(joint["hist_category"])
-        hist_fine = hf if hist_fine is None else hist_fine + hf
-        hist_category = hc if hist_category is None else hist_category + hc
-
-    return {
-        "n": n, "sum_x": sum_x, "sum_y": sum_y, "sum_x2": sum_x2, "sum_y2": sum_y2, "sum_xy": sum_xy,
-        "hist_fine": hist_fine, "hist_category": hist_category,
-    }
 
 
 def _category_bin_labels(edges: np.ndarray) -> list[str]:
@@ -278,26 +156,18 @@ def plot_extent_scatter(df: pd.DataFrame, out_path: Path) -> None:
     ax.set_title(f"{DISPLAY_LABEL['bathtub']} vs SFINCS (n={int(valid.sum())})")
 
     ax = axes[1]
-    fresh = ~df["eikonal_stale"].fillna(False)
     x = df["sfincs_km2"].to_numpy(dtype=float)
     y = df["eikonal_km2"].to_numpy(dtype=float)
-    valid_fresh = np.isfinite(x) & np.isfinite(y) & (x > 0) & (y > 0) & fresh.to_numpy()
-    valid_stale = np.isfinite(x) & np.isfinite(y) & (x > 0) & (y > 0) & ~fresh.to_numpy()
-    ax.scatter(x[valid_fresh], y[valid_fresh], s=14, alpha=0.5, color=EA_BATHTUB_COLOR,
-               edgecolors="none", label=f"current settings (n={int(valid_fresh.sum())})")
-    if valid_stale.any():
-        ax.scatter(x[valid_stale], y[valid_stale], s=14, alpha=0.6, color=STALE_COLOR,
-                   edgecolors="none", label=f"stale (n={int(valid_stale.sum())})")
-    all_valid = valid_fresh | valid_stale
-    if all_valid.any():
-        lim = [min(x[all_valid].min(), y[all_valid].min()), max(x[all_valid].max(), y[all_valid].max())]
+    valid = np.isfinite(x) & np.isfinite(y) & (x > 0) & (y > 0)
+    ax.scatter(x[valid], y[valid], s=14, alpha=0.5, color=EA_BATHTUB_COLOR, edgecolors="none")
+    if valid.any():
+        lim = [min(x[valid].min(), y[valid].min()), max(x[valid].max(), y[valid].max())]
         ax.plot(lim, lim, color="black", linestyle=":", linewidth=1)
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel("SFINCS flooded area (km2)")
     ax.set_ylabel(f"{DISPLAY_LABEL['eikonal']} flooded area (km2)")
-    ax.set_title(f"{DISPLAY_LABEL['eikonal']} vs SFINCS")
-    ax.legend(fontsize=8, loc="upper left")
+    ax.set_title(f"{DISPLAY_LABEL['eikonal']} vs SFINCS (n={int(valid.sum())})")
 
     fig.suptitle("Flooded extent agreement against SFINCS (log-log, dotted = 1:1)", fontsize=13)
     fig.tight_layout(rect=[0, 0, 1, 0.94])
@@ -309,10 +179,9 @@ def plot_extent_scatter(df: pd.DataFrame, out_path: Path) -> None:
 def plot_agreement_hist(df: pd.DataFrame, out_path: Path) -> None:
     bathtub_csi = _csi(df["bathtub_matched_km2"], df["bathtub_only_km2"], df["bathtub_sfincs_only_km2"])
     eikonal_csi = _csi(df["eikonal_matched_km2"], df["eikonal_only_km2"], df["eikonal_sfincs_only_km2"])
-    fresh = ~df["eikonal_stale"].fillna(False)
 
     bt_mask = np.isfinite(bathtub_csi)
-    ek_mask = np.isfinite(eikonal_csi) & fresh.to_numpy()
+    ek_mask = np.isfinite(eikonal_csi)
 
     fig, ax = plt.subplots(figsize=(9, 5.5))
     bins = np.linspace(0, 1, 26)
@@ -321,7 +190,7 @@ def plot_agreement_hist(df: pd.DataFrame, out_path: Path) -> None:
     ax.hist(bt_valid, bins=bins, alpha=0.6, color=HC_BATHTUB_COLOR,
             label=f"{DISPLAY_LABEL['bathtub']} (median={np.median(bt_valid):.2f}, n={len(bt_valid)})")
     ax.hist(ek_valid, bins=bins, alpha=0.6, color=EA_BATHTUB_COLOR,
-            label=f"{DISPLAY_LABEL['eikonal']}, current settings (median={np.median(ek_valid):.2f}, n={len(ek_valid)})")
+            label=f"{DISPLAY_LABEL['eikonal']} (median={np.median(ek_valid):.2f}, n={len(ek_valid)})")
     ax.set_xlabel("extent agreement with SFINCS (CSI: matched / (matched + model-only + SFINCS-only))")
     ax.set_ylabel("number of tiles")
     ax.legend(fontsize=9)
@@ -337,7 +206,7 @@ def plot_agreement_hist(df: pd.DataFrame, out_path: Path) -> None:
     # alongside rather than replacing the per-tile view.
     for prefix, label, mask, valid in (
         ("bathtub", DISPLAY_LABEL["bathtub"], bt_mask, bt_valid),
-        ("eikonal", f"{DISPLAY_LABEL['eikonal']} (current settings)", ek_mask, ek_valid),
+        ("eikonal", DISPLAY_LABEL["eikonal"], ek_mask, ek_valid),
     ):
         pooled = metrics_from_counts(
             df[f"{prefix}_matched_km2"][mask].sum(),
@@ -350,7 +219,6 @@ def plot_agreement_hist(df: pd.DataFrame, out_path: Path) -> None:
 
 def plot_depth_scatter(df: pd.DataFrame, out_path: Path) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(12, 5.5))
-    fresh = ~df["eikonal_stale"].fillna(False)
 
     for ax, col, color, label in [
         (axes[0], "bathtub_depth_median_m", HC_BATHTUB_COLOR, DISPLAY_LABEL["bathtub"]),
@@ -358,8 +226,7 @@ def plot_depth_scatter(df: pd.DataFrame, out_path: Path) -> None:
     ]:
         x = df["sfincs_depth_median_m"].to_numpy(dtype=float)
         y = df[col].to_numpy(dtype=float)
-        mask = fresh.to_numpy() if col.startswith("eikonal") else np.ones(len(df), dtype=bool)
-        valid = np.isfinite(x) & np.isfinite(y) & mask
+        valid = np.isfinite(x) & np.isfinite(y)
         ax.scatter(x[valid], y[valid], s=14, alpha=0.5, color=color, edgecolors="none")
         if valid.any():
             lim = [0, max(x[valid].max(), y[valid].max())]
@@ -377,25 +244,22 @@ def plot_depth_scatter(df: pd.DataFrame, out_path: Path) -> None:
 
 def _agreement_df(df: pd.DataFrame) -> pd.DataFrame:
     """Shared prep for the two agreement-map figures below: per-tile CSI +
-    misalignment (1 - CSI), restricted to fresh, geolocated, finite-CSI
-    tiles."""
-    fresh = ~df["eikonal_stale"].fillna(False)
+    misalignment (1 - CSI), restricted to geolocated, finite-CSI tiles."""
     csi = _csi(df["eikonal_matched_km2"], df["eikonal_only_km2"], df["eikonal_sfincs_only_km2"])
     plot_df = df.assign(csi=csi, misalignment=1 - csi)
-    return plot_df[np.isfinite(plot_df["csi"]) & fresh & plot_df["lon"].notna()]
+    return plot_df[np.isfinite(plot_df["csi"]) & plot_df["lon"].notna()]
 
 
 def plot_tile_agreement_map(df: pd.DataFrame, out_path: Path) -> None:
     """Global map of per-tile EA-bathtub-SFINCS extent agreement (CSI) -
-    every fresh, geolocated tile with a defined CSI (i.e. some real union
+    every geolocated tile with a defined CSI (i.e. some real union
     area - CSI is NaN only when matched+eikonal-only+SFINCS-only=0, no
     flooding in either model at all) is plotted, colored by CSI. No
     small-union-area grey split and no caption box (2026-10-07, user
     request - was distinguishing by union area before)."""
-    fresh = ~df["eikonal_stale"].fillna(False)
     csi = _csi(df["eikonal_matched_km2"], df["eikonal_only_km2"], df["eikonal_sfincs_only_km2"])
     plot_df = df.assign(csi=csi)
-    plot_df = plot_df[fresh & plot_df["lon"].notna() & np.isfinite(plot_df["csi"])]
+    plot_df = plot_df[plot_df["lon"].notna() & np.isfinite(plot_df["csi"])]
 
     proj = ccrs.EqualEarth()
     fig = plt.figure(figsize=(14, 7.5), facecolor="white")
@@ -417,17 +281,17 @@ def plot_tile_agreement_map(df: pd.DataFrame, out_path: Path) -> None:
 
 
 def plot_agreement_vs_tile_size(df: pd.DataFrame, out_path: Path) -> None:
-    """Per-tile misalignment (1 - CSI) against domain area (log scale).
+    """Per-tile misalignment (1 - CSI) against the tile's land area (log scale).
     Pearson r on log10(area); Spearman rho alongside as a rank-based check."""
     plot_df = _agreement_df(df)
 
     fig, ax = plt.subplots(figsize=(9, 6.5))
-    size = plot_df["domain_area_km2"].to_numpy(dtype=float)
+    size = plot_df["land_km2"].to_numpy(dtype=float)
     mis = plot_df["misalignment"].to_numpy(dtype=float)
     valid = np.isfinite(size) & (size > 0) & np.isfinite(mis)
     ax.scatter(size[valid], mis[valid], s=18, alpha=0.5, color=EA_BATHTUB_COLOR, edgecolors="none")
     ax.set_xscale("log")
-    ax.set_xlabel("tile domain area (km2, log)")
+    ax.set_xlabel("tile land area (km2, log)")
     ax.set_ylabel("misalignment (1 - CSI)")
     ax.grid(True, alpha=0.3)
     title = f"Misalignment vs. tile size (n={int(valid.sum())})"
@@ -443,70 +307,44 @@ def plot_agreement_vs_tile_size(df: pd.DataFrame, out_path: Path) -> None:
 
 
 def main() -> None:
+    repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--base-dir-name", required=True, help="output root directory name under paths.root, "
-                         "e.g. validation_sfincs_v4 - created by select_validation_tiles.py")
-    parser.add_argument("--stale-cutoff", default=None, help="optional timestamp (e.g. '2026-09-24 12:00:00'); "
-                         "any tile whose EA-bathtub raster predates it is flagged 'stale' and excluded from "
-                         "EA-bathtub summary statistics/maps")
-    parser.add_argument(
-        "--friction-scale-factor", type=float, default=None,
-        help="plot a specific sweep point instead of the default friction_scale_factor=30.0 run - reads "
-             "{base-dir-name}/friction_sweep_per_tile_metrics.csv (compute_friction_sweep_metrics.py's own "
-             "output) plus fresh per-tile raster reads for the depth figures (median depth, depth-joint "
-             "histograms) - see load_fsf_eikonal_override()/collect_depth_joint_fsf()'s own docstrings.",
-    )
-    parser.add_argument("--max-outer-iterations", type=int, default=MAX_OUTER_ITERATIONS_DEFAULT,
-                         help="must match whatever the sweep was run with - only used with --friction-scale-factor")
+    parser.add_argument("--config", default=str(repo_root / "snakemake_workflow" / "config" / "config.yml"))
+    parser.add_argument("--base-dir-name", required=True)
+    parser.add_argument("--friction-scale-factor", type=float, required=True, help="the eikonal friction point to plot")
+    parser.add_argument("--tile-ids-file", default=None, help="restrict to these tiles (default: every tile with a result)")
     args = parser.parse_args()
-    stale_cutoff = pd.Timestamp(args.stale_cutoff) if args.stale_cutoff else None
 
-    base_dir = DATA_ROOT / args.base_dir_name
+    base_dir = read_root(Path(args.config)) / args.base_dir_name
     fig_dir = base_dir / "figures"
     fig_dir.mkdir(parents=True, exist_ok=True)
-
     fsf = args.friction_scale_factor
-    fsf_suffix = "" if fsf is None else f"_fsf{fsf:g}"
+    sfx = f"_fsf{fsf:g}"
 
-    df = collect_summaries(base_dir, stale_cutoff)
-    if fsf is not None:
-        print(f"Overriding eikonal_* columns with friction_scale_factor={fsf:g} "
-              f"(max_outer_iterations={args.max_outer_iterations})...")
-        override = load_fsf_eikonal_override(base_dir, fsf, args.max_outer_iterations, df["tile_id"].tolist())
-        df = df.drop(columns=[c for c in override.columns if c != "tile_id"]).merge(override, on="tile_id", how="left")
-        df["has_eikonal"] = df["has_eikonal"].fillna(False)
-        df["eikonal_stale"] = df["eikonal_stale"].fillna(False)
+    ids = Path(args.tile_ids_file).read_text().split() if args.tile_ids_file else None
+    results = load_results(base_dir, ids)
+    meta = pd.read_csv(base_dir / "tile_selection_metadata.csv")
+    df = tile_table(results, fsf, meta)
+    print(f"{len(df)} tile result(s) loaded, friction_scale_factor={fsf:g}")
+    df.to_csv(fig_dir / f"validation_summary{sfx}.csv", index=False)
+    print(f"Wrote {fig_dir / f'validation_summary{sfx}.csv'}")
 
-    n_stale = int(df["eikonal_stale"].sum())
-    n_has_eikonal = int(df["has_eikonal"].sum())
-    print(f"{len(df)} tile summaries loaded ({n_has_eikonal} with {DISPLAY_LABEL['eikonal']} output, {n_stale} stale)")
-    df.to_csv(fig_dir / f"validation_summary{fsf_suffix}.csv", index=False)
-    print(f"Wrote {fig_dir / f'validation_summary{fsf_suffix}.csv'}")
+    plot_extent_scatter(df, fig_dir / f"extent_scatter{sfx}.png")
+    plot_agreement_hist(df, fig_dir / f"extent_agreement_hist{sfx}.png")
+    plot_depth_scatter(df, fig_dir / f"depth_scatter{sfx}.png")
+    plot_tile_agreement_map(df, fig_dir / f"agreement_map{sfx}.png")
+    plot_agreement_vs_tile_size(df, fig_dir / f"agreement_vs_tile_size{sfx}.png")
 
-    plot_extent_scatter(df, fig_dir / f"extent_scatter{fsf_suffix}.png")
-    plot_agreement_hist(df, fig_dir / f"extent_agreement_hist{fsf_suffix}.png")
-    plot_depth_scatter(df, fig_dir / f"depth_scatter{fsf_suffix}.png")
-    plot_tile_agreement_map(df, fig_dir / f"agreement_map{fsf_suffix}.png")
-    plot_agreement_vs_tile_size(df, fig_dir / f"agreement_vs_tile_size{fsf_suffix}.png")
+    pooled_depth = {m: pooled_depth_joint(results, m, fsf) for m in ("bathtub", "eikonal")}
+    plot_depth_correlation(pooled_depth, fig_dir / f"depth_correlation{sfx}.png")
+    plot_depth_category_alignment(pooled_depth, fig_dir / f"depth_category_alignment{sfx}.png")
 
-    bathtub_depth_joint = pool_depth_joint(base_dir, "bathtub")  # friction_scale_factor-independent either way
-    if fsf is None:
-        stale_tile_ids = set(df.loc[df["eikonal_stale"], "tile_id"].tolist())
-        eikonal_depth_joint = pool_depth_joint(base_dir, "eikonal", stale_tile_ids)
-    else:
-        print(f"\nPooling depth-joint histograms from each tile's own sweep cache at friction_scale_factor={fsf:g}...")
-        tile_ids = df.loc[df["has_eikonal"], "tile_id"].astype(int).tolist()
-        eikonal_depth_joint = collect_depth_joint_fsf(base_dir, tile_ids, fsf, args.max_outer_iterations)
-
-    pooled_depth = {"bathtub": bathtub_depth_joint, "eikonal": eikonal_depth_joint}
-    plot_depth_correlation(pooled_depth, fig_dir / f"depth_correlation{fsf_suffix}.png")
-    plot_depth_category_alignment(pooled_depth, fig_dir / f"depth_category_alignment{fsf_suffix}.png")
-
-    if fsf is None:
-        print()
-        build_and_write_table(base_dir)
-    else:
-        print("\nSkipping metrics_overview_table.csv - not yet available for a non-default friction_scale_factor.")
+    table = metrics_overview(results, fsf)
+    table_path = base_dir / f"metrics_overview_table{sfx}.csv"
+    table.to_csv(table_path, index=False)
+    print(f"\nWrote {table_path}")
+    with pd.option_context("display.float_format", "{:.3f}".format, "display.width", 160):
+        print(table.to_string(index=False))
 
 
 if __name__ == "__main__":

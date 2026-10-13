@@ -15,13 +15,9 @@ allocation (e.g. `24vcpu`, requested specifically to run many tiles
 CONCURRENTLY on one node for a hop_distance wave with heavy node contention)
 pure waste - 23 of 24 cores sit idle the whole time. This script is what
 `generate_wave_dispatch` now calls instead, genuinely using the node's
-`cpus_per_task` the same way `sfincs_tiles/run_friction_sweep_batch.py`
-already does for the SFINCS friction sweep: each eikonal solve is
-single-threaded numba (src/eikonal.py has no parallel=True/prange anywhere),
-so N concurrent solves on an N-cpu node is a real use of the allocation, not
-oversubscription - one implementation idea, two separate scripts, since they
-wrap different underlying runners (`run_aqueduct_cli.py` vs
-`run_eikonal_on_sfincs_subgrid.py`) with different per-item argument shapes.
+`cpus_per_task`: each eikonal solve is single-threaded numba (src/eikonal.py
+has no parallel=True/prange anywhere), so N concurrent solves on an N-cpu
+node is a real use of the allocation, not oversubscription.
 
 One triple's failure (non-zero exit) is logged to FAIL_LOG and does NOT
 abort the rest of the batch - same "set -uo pipefail, not -e" philosophy

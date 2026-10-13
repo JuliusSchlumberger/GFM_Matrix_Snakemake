@@ -21,8 +21,9 @@ Schema:
 }
 vs_sfincs: matched_km2, model_only_km2, sfincs_only_km2, HT, FAR, CSI, bias,
 depth_joint (sufficient stats + hist_fine/hist_category, flood_agreement's
-pooling shape). Bathtub is pruned to coast-connected flooding first (as in
-postprocess_tile_summary.py); eikonal and SFINCS are connected by construction.
+pooling shape). Bathtub is pruned to coast-connected flooding first
+(flood_agreement.prune_to_ocean_connected); eikonal and SFINCS are connected by
+construction.
 
 Needs hydromt-sfincs-dev (reads sfincs.msk through SfincsModel).
 
@@ -47,8 +48,9 @@ from rasterio.warp import Resampling, reproject
 from scipy import ndimage
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from calibration_paths import FRICTION_SCALE_FACTORS, WATERLEVEL_NAME, bathtub_path, eikonal_path  # noqa: E402
-from compute_friction_sweep_metrics import _decode_waterdepth_cm  # noqa: E402
+from calibration_paths import (  # noqa: E402
+    FRICTION_SCALE_FACTORS, WATERLEVEL_NAME, bathtub_path, decode_waterdepth_cm, eikonal_path,
+)
 from flood_agreement import (  # noqa: E402
     DEPTH_CATEGORY_EDGES, DEPTH_CORR_FINE_EDGES, WET_THRESHOLD_M, confusion_counts, depth_corr_sufficient_stats,
     depth_joint_hist, metrics_from_counts, prune_to_ocean_connected,
@@ -119,7 +121,7 @@ def compute_result(tile_dir: Path, fsfs: list[float], flooding: dict, river_code
               "sfincs_inactive_land_km2": float((land & ~active).sum() * cell_km2), **counts}
     forcing = sfincs_dir / "matched_boundary_points.gpkg"
     domain["n_forcing_points"] = int(len(gpd.read_file(forcing))) if forcing.exists() else None
-    # boundary cells' distance to real land (postprocess_tile_summary.py's diagnostic), on the coarse grid
+    # boundary cells' distance to real land, on the coarse grid
     land_c = land[::4, ::4][: msk.shape[0], : msk.shape[1]]
     bnd = msk == 2
     if land_c.any() and bnd.any():
@@ -139,7 +141,7 @@ def compute_result(tile_dir: Path, fsfs: list[float], flooding: dict, river_code
 
     bp = bathtub_path(out_dir)
     if bp.exists():
-        depth, _, _, bshape = _decode_waterdepth_cm(bp)
+        depth, _, _, bshape = decode_waterdepth_cm(bp)
         if bshape == shape:
             wet = prune_to_ocean_connected(land & np.isfinite(depth) & (depth > WET_THRESHOLD_M), mog,
                                            ocean_code=OCEAN_CODE, land_code=LAND_CODE, river_code=river_code) & score
@@ -155,7 +157,7 @@ def compute_result(tile_dir: Path, fsfs: list[float], flooding: dict, river_code
         p = eikonal_path(out_dir, fsf)
         if not p.exists():
             continue
-        depth, _, _, eshape = _decode_waterdepth_cm(p)
+        depth, _, _, eshape = decode_waterdepth_cm(p)
         if eshape != shape:
             continue
         wet = score & np.isfinite(depth) & (depth > WET_THRESHOLD_M)

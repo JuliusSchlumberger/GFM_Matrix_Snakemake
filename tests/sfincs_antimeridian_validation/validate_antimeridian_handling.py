@@ -1,91 +1,82 @@
-"""Validate build_sfincs_tile.py's antimeridian-crossing error classifier
-(`_classify_water_level_create_error`) - turns hydromt_sfincs's own raw
-GEOS `TopologyException`/"side location conflict" (from a shapely
-union_all() over a buffered search geometry that straddles +-180 deg
-longitude) into a clear, actionable `RuntimeError` naming the tile, instead
-of letting a raw GEOS traceback propagate.
+"""Regression test for the water-level forcing step near +-180 deg longitude.
 
-Real, confirmed failures this guards against: tiles 1852, 2029, 2077 (all
-near +-180 deg longitude) hit exactly this failure live during the first
-258-tile HPC test batch. Without this classifier, a batch run's failure log
-would show an opaque GEOS error instead of "this tile is antimeridian-
-crossing, drop it" - the only signal telling a human (or a batch script's
-own `--skip-tile-ids` list) which tiles are permanently unforceable versus
-which hit a real, fixable bug.
+hydromt_sfincs's water_level.create() selects the forcing locations with the
+polygonized waterlevel-boundary cells, reprojected to the locations' CRS and
+merged (union_all). With EPSG:4326 locations, the rotated-grid cell polygons
+of a tile at the antimeridian reproject to invalid geometry and GEOS raises
+"TopologyException: side location conflict" (5 tiles of the final
+calibration run, 2026-10-13). build_sfincs_tile.py therefore passes the
+locations in the model's own UTM CRS, where nothing is reprojected.
 
-This test does NOT reproduce a real antimeridian geometry through the full
-hydromt_sfincs pipeline (expensive, and hydromt's own internal error text
-isn't a stable contract to build a synthetic case against) - it directly
-validates the classifier's own string-matching contract against realistic
-exception messages/types, which is the actual logic this repo depends on.
+This test rebuilds tile 1359's grid + boundary-line mask (no subgrid - a few
+seconds) from its calibration_roughness_SFINCS files and checks that
+water_level.create() succeeds with UTM locations and keeps every forcing
+point. Skips (not fails) without the P: share or the tile's files.
 
 Usage:
     python validate_antimeridian_handling.py
 """
 
+import shutil
 import sys
+import tempfile
 from pathlib import Path
+
+import geopandas as gpd
+import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "sfincs_tiles"))
 
-from build_sfincs_tile import _classify_water_level_create_error  # noqa: E402
+from build_sfincs_tile import MAIN_RES_M_DEFAULT, _create_mask  # noqa: E402
+from gfm_config import read_root  # noqa: E402
+
+TILE_ID = "1359"  # tile reaches 180.18 deg E
+BASE_DIR_NAME = "calibration_roughness_SFINCS"
 
 
-class _FakeTopologyException(Exception):
-    """Stand-in for shapely's real TopologyException - only the class NAME
-    matters to the classifier (it matches on str(e), not isinstance), which
-    itself is worth locking down as a test: if hydromt/shapely's error text
-    ever changes, this test - not a live antimeridian tile failure - is
-    where that would be caught."""
+def test_water_level_create_near_antimeridian() -> None:
+    print(f"=== water_level.create() with UTM locations on tile {TILE_ID} (crosses 180 deg) ===")
+    try:
+        root = read_root(REPO_ROOT / "snakemake_workflow" / "config" / "config.yml")
+    except Exception:
+        root = None
+    tile = root / BASE_DIR_NAME / TILE_ID if root else None
+    needed = ["inputs/tile_geometry.gpkg", f"boundary_line_{TILE_ID}.gpkg",
+              "sfincs_model/matched_boundary_points.gpkg", "sfincs_model/corrected_hydrographs.csv"]
+    if tile is None or not all((tile / f).exists() for f in needed):
+        print(f"SKIP: tile {TILE_ID}'s files under {BASE_DIR_NAME} are not available here.\n")
+        return
 
+    from hydromt_sfincs import SfincsModel
 
-def test_classifies_topology_exception_by_name() -> None:
-    print("=== _classify_water_level_create_error: matches on 'TopologyException' in the message ===")
-    e = _FakeTopologyException("TopologyException: side location conflict at 179.998 65.432")
-    result = _classify_water_level_create_error(e, tile_id="2029")
-    assert result is not None, "expected a wrapped RuntimeError, got None (fell through to re-raise original)"
-    assert isinstance(result, RuntimeError)
-    assert "2029" in str(result)
-    assert "antimeridian" in str(result).lower()
-    assert "side location conflict at 179.998 65.432" in str(result), "original error text should be preserved"
-    print(f"PASS: wrapped as RuntimeError naming the tile: {result}")
-    print()
-
-
-def test_classifies_side_location_conflict_without_topology_exception_name() -> None:
-    """The real GEOS message sometimes surfaces as a bare RuntimeError/
-    ValueError whose text includes 'side location conflict' without the
-    class name 'TopologyException' literally in the string - the
-    classifier matches on EITHER substring, not just one."""
-    print("=== _classify_water_level_create_error: matches on 'side location conflict' alone ===")
-    e = ValueError("GEOS error: side location conflict")
-    result = _classify_water_level_create_error(e, tile_id="2077")
-    assert result is not None
-    assert isinstance(result, RuntimeError)
-    assert "2077" in str(result)
-    print(f"PASS: wrapped even without the literal 'TopologyException' substring: {result}")
-    print()
-
-
-def test_unrelated_error_is_not_classified() -> None:
-    """A genuinely different failure (e.g. a real missing-file bug) must
-    NOT be silently reclassified as antimeridian - the caller re-raises the
-    original exception unchanged when this returns None, so masking a real
-    bug as antimeridian would hide it from a batch's own failure triage."""
-    print("=== _classify_water_level_create_error: leaves unrelated errors alone ===")
-    e = FileNotFoundError("matched_boundary_points.gpkg not found")
-    result = _classify_water_level_create_error(e, tile_id="1573")
-    assert result is None, f"unrelated error was wrongly classified as antimeridian: {result}"
-    print("PASS: unrelated error returns None (caller re-raises it unchanged)")
-    print()
+    tile_gdf = gpd.read_file(tile / "inputs" / "tile_geometry.gpkg")
+    points = gpd.read_file(tile / "sfincs_model" / "matched_boundary_points.gpkg")
+    hydro = pd.read_csv(tile / "sfincs_model" / "corrected_hydrographs.csv")
+    tmp = Path(tempfile.mkdtemp(prefix="antimeridian_wl_"))
+    try:
+        sf = SfincsModel(root=str(tmp), mode="w+")
+        sf.grid.create_from_region(region={"geom": tile_gdf}, res=MAIN_RES_M_DEFAULT, crs="utm", rotated=True)
+        _create_mask(sf, tile_gdf, tile / f"boundary_line_{TILE_ID}.gpkg", MAIN_RES_M_DEFAULT)
+        cols = [c for c in hydro.columns if c != "elapsed_hr"]
+        times = pd.date_range("2026-01-01", periods=len(hydro), freq="10min")
+        wl = hydro[cols].copy()
+        wl.index = times
+        wl.columns = range(len(cols))
+        for key, t in (("tref", times[0]), ("tstart", times[0]), ("tstop", times[-1])):
+            sf.config.set(key, t.to_pydatetime())
+        locations = points.to_crs(sf.crs)
+        locations["index"] = range(len(cols))
+        sf.water_level.create(timeseries=wl, locations=locations, buffer=25_000.0)
+        n_kept = len(sf.water_level.gdf)
+        assert n_kept == len(points), f"{n_kept} of {len(points)} forcing points kept"
+        print(f"PASS: water_level.create() succeeded, {n_kept}/{len(points)} forcing points kept\n")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def main() -> None:
-    test_classifies_topology_exception_by_name()
-    test_classifies_side_location_conflict_without_topology_exception_name()
-    test_unrelated_error_is_not_classified()
-    print("All antimeridian error-classification checks passed.")
+    test_water_level_create_near_antimeridian()
 
 
 if __name__ == "__main__":

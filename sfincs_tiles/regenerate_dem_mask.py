@@ -10,7 +10,7 @@ Needs the "gfm" env (config_utils.py needs hydromt 0.9.3), not
 hydromt-sfincs-dev.
 
 Usage:
-    python regenerate_dem_mask.py --tile-id 1454 --base-dir-name validation_sfincs_v2
+    python regenerate_dem_mask.py --tile-id 1454 --base-dir-name calibration_roughness_SFINCS
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tile-id", required=True)
     parser.add_argument("--config", default=str(_repo_root / "snakemake_workflow" / "config" / "config.yml"))
-    parser.add_argument("--base-dir-name", default="validation_sfincs_v2")
+    parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
     args = parser.parse_args()
 
     config = load_config(Path(args.config))

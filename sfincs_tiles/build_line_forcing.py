@@ -8,17 +8,15 @@ Per used station (status "used" in the line's stations layer):
     ~1 km out to sea, where the line passes);
   - hydrograph: the nearest COAST-HG station's average-tide hydrograph,
     shifted so its peak equals the station's COAST-RP RP100 level
-    (rp100_level_m, MDT-corrected) - the same empirical offset
-    build_boundary_forcing.py applies (`boundary_value - hydrograph_max`).
+    (rp100_level_m, MDT-corrected): offset = boundary_value - hydrograph_max.
 
-Writes the two files build_sfincs_tile.py reads for its forcing step, in the
-same format build_boundary_forcing.py writes them:
+Writes the two files build_sfincs_tile.py reads for its forcing step:
   sfincs_model/matched_boundary_points.gpkg  (points at the nodes, EPSG:4326)
   sfincs_model/corrected_hydrographs.csv     (elapsed_hr + one column per point)
 
 Usage:
-    python build_line_forcing.py --tile-id 1122 --base-dir-name sfincs_boundary_line_test \\
-        --lines-gpkg <root>/sfincs_calibration/boundary_lines/1122.gpkg
+    python build_line_forcing.py --tile-id 1122 --base-dir-name calibration_roughness_SFINCS \\
+        --lines-gpkg <root>/calibration_roughness_SFINCS/boundary_lines/1122.gpkg
 """
 
 from __future__ import annotations
@@ -38,7 +36,7 @@ from retry_io import retry_transient_io  # noqa: E402
 
 COAST_HG_NC = "inputs/COAST_HG/COAST-HG_RP100.nc"
 HYDROGRAPH_VARIABLE = "hydrograph_average_tide_signal"
-MAX_MATCH_DIST_DEG = 0.5  # same backstop as build_boundary_forcing.MAX_MATCH_DIST_DEG
+MAX_MATCH_DIST_DEG = 0.5  # nearest COAST-HG station must be this close (COAST-HG is dense along real coastline)
 
 
 def build_line_forcing(lines_gpkg: Path, coast_hg_nc: Path) -> tuple[gpd.GeoDataFrame, pd.DataFrame]:

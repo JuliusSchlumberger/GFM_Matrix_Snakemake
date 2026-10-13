@@ -3,7 +3,7 @@
 Three subcommands, run in this order by the HPC chain (generate_calibration_jobs.py):
 
   pool    - the domain tile grid's hop_distance == 0 tiles minus antimeridian-
-            crossing ones - the same population as select_sfincs_calibration_tiles.py
+            crossing ones - the same population as the earlier sfincs_calibration study
             (no size / river / ocean-fraction / latitude filter, by design), split
             into --n-shards interleaved id files for the stage-1 jobs:
               {base}/candidates/candidate_tile_ids.txt, shard_NNN.txt
@@ -48,10 +48,11 @@ import rasterio  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gfm_config import read_root  # noqa: E402
-from select_test_tiles import GRID_DEG, OCEAN_CODE, RIVER_CODE  # noqa: E402
 
 TILE_GRID = "processed_inputs/mask/domain_tiles_global.gpkg"
-ANTIMERIDIAN_WIDTH_DEG = 60.0  # wider than any real tile's bbox (select_sfincs_calibration_tiles.py)
+OCEAN_CODE, RIVER_CODE = 1, 3  # config tile_generation.ocean_code / river_code
+GRID_DEG = 15.0  # lon/lat bin size for the stratified sample
+ANTIMERIDIAN_WIDTH_DEG = 60.0  # wider than any real tile's bbox
 CATEGORY_STYLE = {  # funnel stage -> (colour, label)
     "selected": ("#2a78d6", "selected"),
     "eligible": ("#7fb3e8", "eligible, not sampled"),
@@ -63,9 +64,8 @@ CATEGORY_STYLE = {  # funnel stage -> (colour, label)
 
 
 def stratified_sample_exact(df: pd.DataFrame, n_target: int, grid_deg: float, seed: int) -> pd.DataFrame:
-    """select_validation_tiles.stratified_sample_exact (not imported: that
-    module pulls in cartopy) - round-robin one tile at a time over shuffled
-    lon/lat bins until n_target is met."""
+    """Round-robin one tile at a time over shuffled lon/lat bins until
+    n_target is met."""
     rng = np.random.default_rng(seed)
     df = df.copy()
     df["_bin"] = (np.floor(df["lon"] / grid_deg).astype(int).astype(str) + "_"

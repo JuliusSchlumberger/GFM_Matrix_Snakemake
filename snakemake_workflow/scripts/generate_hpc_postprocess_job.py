@@ -85,6 +85,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
 from generate_exposure_jobs import generate_exposure_dispatch, generate_exposure_resume_dispatch  # noqa: E402
+from generate_hpc_flood_totals_and_plots_job import write_flood_totals_and_plots_job  # noqa: E402
 
 
 def _account_line(sbatch_cfg: dict) -> list[str]:
@@ -284,6 +285,17 @@ def main() -> None:
              "a stale batch racing a new one over the same still-incomplete targets would redo "
              "work concurrently for as long as both stay alive).",
     )
+    parser.add_argument(
+        "--no-flood-totals-and-plots", action="store_true",
+        help="don't append the flood_totals_and_plots phase (compute_flood_totals.py + "
+             "run_analysis.py --only-plots) onto the end of this chain - by default it IS "
+             "appended (2026-10-13), gated --dependency=afterany on exposure analysis's own "
+             "final reduce_write job, so the full postprocessing -> exposure -> flood-totals -> "
+             "plots pipeline is one single submission from the login node.",
+    )
+    parser.add_argument("--flood-totals-partition", default="24vcpu")
+    parser.add_argument("--flood-totals-cpus", type=int, default=24)
+    parser.add_argument("--flood-totals-mem", default="32G")
     args = parser.parse_args()
 
     config_path = Path(args.config)
@@ -500,16 +512,37 @@ def main() -> None:
             local_config, linux_config, chunk_ids, submit_lines, prev_ids_expr="$PREV_IDS",
         )
 
+    # Append flood_totals_and_plots as the FINAL phase of this same chain
+    # (2026-10-13) - gated on exposure analysis's own last job ($JID, the
+    # reduce_write job both generate_exposure_dispatch and
+    # generate_exposure_resume_dispatch leave it set to, since each
+    # function's own last emitted line is that job's `sbatch` call) so the
+    # whole remaining pipeline - postprocessing -> exposure analysis ->
+    # flood totals -> plots - is one single synchronous submission, same
+    # reasoning as the postprocessing->exposure handoff above (no job
+    # calling sbatch again from a compute node).
+    if not args.no_flood_totals_and_plots:
+        _, linux_ftp_script = write_flood_totals_and_plots_job(
+            local_config, linux_config,
+            partition=args.flood_totals_partition, cpus=args.flood_totals_cpus, mem=args.flood_totals_mem,
+        )
+        submit_lines.append("\n# flood totals + plots (final phase)")
+        submit_lines += [
+            f'JID=$(sbatch --parsable --dependency=afterany:$JID "{linux_ftp_script}")',
+            f'echo "submitted {linux_ftp_script} -> job $JID (depends on exposure analysis\'s reduce_write)"',
+        ]
+
     submit_script_path = local_jobs_dir / submit_name
     with open(submit_script_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(submit_lines) + "\n")
 
     n_total_scripts = sum(len(s) for _, s in phases)
-    print(f"\nDone. {len(phases)} postprocessing phase(s) + exposure analysis, {n_total_scripts}+ sbatch script(s) "
-          f"written to {local_jobs_dir}")
+    tail = "" if args.no_flood_totals_and_plots else " -> flood totals -> plots"
+    print(f"\nDone. {len(phases)} postprocessing phase(s) + exposure analysis{tail}, "
+          f"{n_total_scripts}+ sbatch script(s) written to {local_jobs_dir}")
     print(f"Submit on Hydrax with: bash {linux_jobs_dir}/{submit_name}")
-    print("(This one call submits the ENTIRE remaining pipeline - postprocessing then exposure "
-          "analysis - all at once; SLURM's own --dependency=afterany chain handles the timing.)")
+    print(f"(This one call submits the ENTIRE remaining pipeline - postprocessing -> exposure "
+          f"analysis{tail} - all at once; SLURM's own --dependency=afterany chain handles the timing.)")
 
 
 if __name__ == "__main__":

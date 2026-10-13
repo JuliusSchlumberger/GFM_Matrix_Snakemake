@@ -1,13 +1,16 @@
-"""Test: a candidate SFINCS waterlevel-boundary line per calibration tile,
-built from COAST-RP stations as nodes - first step towards a coast-following
-boundary instead of the current open-sea domain edge (whose distance from the
-coast lets the tide amplify across a -10 m-floored sea, see build_elevation.py's
-MIN_BATHYMETRY_M).
+"""The SFINCS waterlevel-boundary line of a calibration tile, built from
+COAST-RP stations as nodes: a coast-following boundary ~1 km offshore
+instead of the open-sea tile edge (whose distance from the coast lets the
+tide amplify across a -10 m-floored sea, see build_elevation.py's
+MIN_BATHYMETRY_M). build_sfincs_tile.py masks the line's ocean side inactive
+and forces the model along it (build_line_forcing.py).
 
-Rules (fourth iteration):
-  1. Nodes: every COAST-RP station (global station set, the RP100 SLR_0
-     scenario file) inside the tile's bbox buffered by --station-buffer-deg
-     (default 0.5 deg) that lies at (or within STATION_OCEAN_TOL_M of) open
+Rules:
+  1. Nodes: every station of the tile's own production selection
+     (inputs/boundaries_RP100_SLR_0.gpkg: production's search box - the tile
+     bbox + boundary_conditions.station_search_buffer_deg, at least
+     station_search_min_size_deg wide - minus stations in separate water
+     bodies) that lies at (or within STATION_OCEAN_TOL_M of) open
      ocean - ocean water bodies touching the search area's edge or larger
      than OPEN_OCEAN_MIN_KM2; stations on land or in closed lagoons are
      dropped before anything is built, and so are stations in a bay whose
@@ -80,7 +83,7 @@ Outputs under {base-dir-name}/boundary_lines/:
                    offset), stations, inactive (the tile faces that would be
                    inactive SFINCS cells)
   figures/{tile_id}.png   (a) the lines on the land/sea mask with the tile
-                   outline and the current SFINCS boundary cells, (b) the
+                   outline (and SFINCS boundary cells if the tile has a model), (b) the
                    tile's active/inactive split and its conflicts
   summary.csv      per tile counts/flags, to find the tiles needing hand edits
 
@@ -93,10 +96,10 @@ them into summary.csv, suitable_tiles.txt and unsuitable_tiles.txt. The
 inspection figure goes to figures/ (suitable) or figures_unsuitable/ (not).
 
 Usage:
-    python build_station_boundary_lines.py --base-dir-name sfincs_calibration [--tile-ids 841 2905 | --sample 30] [--workers 8]
+    python build_station_boundary_lines.py [--tile-ids 841 2905 | --sample 30] [--workers 8]
     python build_station_boundary_lines.py --tile-ids-file tiles_000.txt --overwrite --skip-done   # one HPC job
     python build_station_boundary_lines.py --summarize
-    (HPC jobs: generate_boundary_lines_jobs.py)
+    (HPC jobs: generate_calibration_jobs.py stage1)
 """
 
 from __future__ import annotations
@@ -141,10 +144,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from map_style import WATER_COLOR  # noqa: E402
 
 OCEAN_CODE = 1
-STATIONS_NC = "processed_inputs/WL_scenarios/COAST-RP_EWL_RP100_SLR_0.nc"  # --station-source global
-TILE_STATIONS_GPKG = "inputs/boundaries_RP100_SLR_0.gpkg"  # --station-source tile (default)
+TILE_STATIONS_GPKG = "inputs/boundaries_RP100_SLR_0.gpkg"  # the tile's own production station selection
 COAST_HG_NC = "inputs/COAST_HG/COAST-HG_RP100.nc"
-MAX_HG_MATCH_DEG = 0.5  # same backstop build_line_forcing.py / build_boundary_forcing.py use
+MAX_HG_MATCH_DEG = 0.5  # same backstop build_line_forcing.py uses
 MIN_FORCING_STATIONS = 2  # a tile needs this many used stations with a COAST-HG hydrograph
 MASK_VRT = "inputs/DeltaDTM_masks/deltadtm_mask.vrt"
 MAX_MASK_PX = 3000            # coastline traced on the mask decimated to at most this many px per side
@@ -872,18 +874,8 @@ def _clean(geom):
     return geom
 
 
-def _stations_in(root: Path, bounds) -> gpd.GeoDataFrame:
-    with xr.open_dataset(root / STATIONS_NC) as ds:
-        x = ds["station_x_coordinate"].values.astype(float)
-        y = ds["station_y_coordinate"].values.astype(float)
-        level = ds["COAST-RP_EWL_RP100_SLR_0"].values.astype(float)
-    sel = (x >= bounds[0]) & (x <= bounds[2]) & (y >= bounds[1]) & (y <= bounds[3])
-    return gpd.GeoDataFrame({"station_index": np.nonzero(sel)[0], "rp100_level_m": level[sel]},
-                            geometry=gpd.points_from_xy(x[sel], y[sel]), crs="EPSG:4326")
-
-
 def build_tile(root: Path, tile_dir: Path, out_dir: Path, buffer_deg: float, overwrite: bool,
-               plot: str = "suitable", station_source: str = "tile", min_size_deg: float = 0.0) -> dict:
+               plot: str = "suitable", min_size_deg: float = 0.0) -> dict:
     tile_id = tile_dir.name
     gpkg = out_dir / f"{tile_id}.gpkg"
     row = {"tile_id": int(tile_id)}
@@ -892,7 +884,7 @@ def build_tile(root: Path, tile_dir: Path, out_dir: Path, buffer_deg: float, ove
     utm_crs = tile.estimate_utm_crs()
     area_utm = gpd.GeoSeries([box(*bounds)], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
 
-    stations = _tile_stations(tile_dir) if station_source == "tile" else _stations_in(root, bounds)
+    stations = _tile_stations(tile_dir)
     row.update(n_stations=len(stations),
                n_stations_in_tile=int(stations.within(tile.geometry.iloc[0]).sum()))
 
@@ -1031,11 +1023,11 @@ def _plot(tile_id, tile_dir, gpkg, mask, bounds, tile, out_path: Path, row: dict
     ax.plot([], [], color="black", linewidth=1.0, label="tile")
     msk_path = tile_dir / "sfincs_model" / "sfincs.msk"
     if msk_path.exists():
-        from plot_sfincs_tile_diagnostics import BOUNDARY, _read_sfincs_mask
-        m2d, tr, crs = _read_sfincs_mask(tile_dir / "sfincs_model")
-        r, c = np.nonzero(m2d == BOUNDARY)
+        from sfincs_grid import read_sfincs_mask
+        m2d, tr, crs = read_sfincs_mask(tile_dir / "sfincs_model")
+        r, c = np.nonzero(m2d == 2)  # waterlevel boundary
         lon, lat = warp_transform(crs, "EPSG:4326", *(tr * (c + 0.5, r + 0.5)))
-        ax.scatter(lon, lat, s=1.5, color="#1f4e8c", alpha=0.6, label="current SFINCS boundary cells", zorder=3)
+        ax.scatter(lon, lat, s=1.5, color="#1f4e8c", alpha=0.6, label="SFINCS boundary cells", zorder=3)
     if segs is not None:
         for kind, color in SEGMENT_KINDS.items():
             sel = segs[segs["kind"] == kind]
@@ -1115,12 +1107,12 @@ def _running_marker(out_dir: Path, tile_id) -> Path:
 
 
 def _safe_build(args):
-    root, tile_dir, out_dir, buffer_deg, overwrite, plot, station_source, min_size_deg = args
+    root, tile_dir, out_dir, buffer_deg, overwrite, plot, min_size_deg = args
     marker = _running_marker(out_dir, tile_dir.name)
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(str(os.getpid()))  # tells the parent which tiles were running if this worker dies
     try:
-        row = build_tile(root, tile_dir, out_dir, buffer_deg, overwrite, plot, station_source, min_size_deg)
+        row = build_tile(root, tile_dir, out_dir, buffer_deg, overwrite, plot, min_size_deg)
     except Exception as exc:  # one broken tile must not stop the batch
         row = {"tile_id": int(tile_dir.name), "status": f"error: {exc!r}",
                "traceback": traceback.format_exc(limit=3)}
@@ -1200,20 +1192,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(Path(__file__).resolve().parents[1]
                                                  / "snakemake_workflow" / "config" / "config.yml"))
-    parser.add_argument("--base-dir-name", default="sfincs_calibration")
-    parser.add_argument("--tile-ids", nargs="*", help="default: every tile with a built SFINCS model")
+    parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS",
+                        help="where boundary_lines/ is written, under paths.root")
+    parser.add_argument("--tile-ids", nargs="*", help="default: every tile in --tiles-dir-name with a station file")
     parser.add_argument("--tile-ids-file", default=None, help="one tile id per line (e.g. one HPC job's share)")
     parser.add_argument("--sample", type=int, default=0, help="random sample of N tiles (seed 0) instead of all")
-    parser.add_argument("--station-source", choices=["tile", "global"], default="tile",
-                        help="tile (default): the tile's own inputs/boundaries_RP100_SLR_0.gpkg and production's "
-                             "search box (boundary_conditions.station_search_buffer_deg / _min_size_deg); "
-                             "global: every COAST-RP station within the tile bbox + --station-buffer-deg")
     parser.add_argument("--station-buffer-deg", type=float, default=None,
-                        help="search-box buffer (default: config's station_search_buffer_deg for --station-source "
-                             "tile, 0.5 for global)")
-    parser.add_argument("--tiles-dir-name", default=None,
-                        help="where the tile dirs (with inputs/) live, under paths.root - default: --base-dir-name; "
-                             "model_outputs for the production candidate pool")
+                        help="search-box buffer (default: the config's boundary_conditions.station_search_buffer_deg)")
+    parser.add_argument("--tiles-dir-name", default="model_outputs",
+                        help="where the tile dirs (with inputs/) live, under paths.root (default: model_outputs)")
     parser.add_argument("--overwrite", action="store_true", help="rebuild existing {tile_id}.gpkg (loses hand edits)")
     parser.add_argument("--skip-done", action="store_true",
                         help="skip tiles that already have a status file (not an error one) - resume a run")
@@ -1228,14 +1215,11 @@ def main() -> None:
     root = read_root(Path(args.config))
     base = root / args.base_dir_name
     out_dir = base / "boundary_lines"
-    tiles_root = root / (args.tiles_dir_name or args.base_dir_name)
+    tiles_root = root / args.tiles_dir_name
     with open(args.config, encoding="utf-8") as f:
         bc = (yaml.safe_load(f) or {}).get("boundary_conditions", {})
-    if args.station_source == "tile":
-        buffer_deg = args.station_buffer_deg if args.station_buffer_deg is not None else float(bc.get("station_search_buffer_deg", 1.0))
-        min_size_deg = float(bc.get("station_search_min_size_deg", 2.0))
-    else:
-        buffer_deg, min_size_deg = (args.station_buffer_deg if args.station_buffer_deg is not None else 0.5), 0.0
+    buffer_deg = args.station_buffer_deg if args.station_buffer_deg is not None else float(bc.get("station_search_buffer_deg", 1.0))
+    min_size_deg = float(bc.get("station_search_min_size_deg", 2.0))
     if args.summarize:
         summarize(out_dir)
         return
@@ -1244,8 +1228,7 @@ def main() -> None:
             [t.strip() for t in Path(args.tile_ids_file).read_text().split() if t.strip()] if args.tile_ids_file else [])
         tile_dirs = [tiles_root / t for t in ids]
     else:
-        need = TILE_STATIONS_GPKG if args.tiles_dir_name else "sfincs_model/sfincs.msk"
-        tile_dirs = sorted((d for d in tiles_root.iterdir() if d.name.isdigit() and (d / need).exists()),
+        tile_dirs = sorted((d for d in tiles_root.iterdir() if d.name.isdigit() and (d / TILE_STATIONS_GPKG).exists()),
                            key=lambda d: int(d.name))
         if args.sample:
             tile_dirs = sorted(random.Random(0).sample(tile_dirs, min(args.sample, len(tile_dirs))),
@@ -1259,8 +1242,7 @@ def main() -> None:
         print(f"--skip-done: {n0 - len(tile_dirs)} tile(s) already done")
     print(f"{len(tile_dirs)} tile(s) -> {out_dir}", flush=True)
 
-    jobs = [(root, d, out_dir, buffer_deg, args.overwrite, args.plot, args.station_source, min_size_deg)
-            for d in tile_dirs]
+    jobs = [(root, d, out_dir, buffer_deg, args.overwrite, args.plot, min_size_deg) for d in tile_dirs]
     rows = _run_jobs(jobs, args.workers, out_dir)
     if rows:
         print()

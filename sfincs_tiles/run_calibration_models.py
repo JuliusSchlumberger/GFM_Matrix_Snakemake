@@ -2,8 +2,7 @@
 calibration (calibration_roughness_SFINCS), on SFINCS's own 30 m subgrid -
 the same grid SFINCS's hmax_subgrid.tif is compared on.
 
-Differences from run_eikonal_on_sfincs_subgrid.py (kept unchanged for the
-older base dirs):
+Compared with the eikonal runner of the earlier calibration studies:
   - solver settings come from the main config's simulation.flooding block
     (max_rounds, waterlevel_epsilon_m, obstacle_coupling.enabled /
     max_outer_iterations / outer_convergence_pct, knn) - nothing hard-coded;
@@ -38,11 +37,12 @@ import numpy as np
 import rasterio
 import yaml
 from pyproj import Transformer
+from rasterio.warp import Resampling, reproject
 from scipy import ndimage
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from flood_model import flood_depth_dense, idw_seed_values_at  # noqa: E402
-from rasters import decode_waterlevel_cm  # noqa: E402
+from rasters import WATERDEPTH_NODATA_INT16, decode_waterlevel_cm, encode_waterdepth_cm  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from calibration_paths import (  # noqa: E402
@@ -50,11 +50,78 @@ from calibration_paths import (  # noqa: E402
 )
 from gfm_config import read_root  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
-from run_eikonal_on_sfincs_subgrid import (  # noqa: E402
-    LAND_CODE, NODATA_CODE, OCEAN_CODE, _write_waterdepth, build_inputs_from_sfincs_subgrid, compute_bathtub_depth,
-)
 
 _STRUCTURE_8 = np.ones((3, 3), dtype=bool)
+LAND_CODE, OCEAN_CODE = 0, 1
+NODATA_CODE = 4  # subgrid cells the native lon/lat mask.tif does not cover - see build_inputs_from_sfincs_subgrid
+
+
+def build_inputs_from_sfincs_subgrid(
+    sfincs_dir: Path, native_mask_path: Path,
+    friction_scale_factor: float, default_friction: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, rasterio.Affine, str]:
+    """(dem, mask, friction, transform, crs) on SFINCS's own subgrid UTM grid.
+
+    dem: dep_subgrid.tif, NaN cells filled with rasters.DEM_NODATA_M's 99.0m
+        dry sentinel.
+    mask: native mask.tif reprojected onto this grid (nearest-neighbour).
+        A tile's native mask.tif is a lon/lat rectangle, which becomes a
+        curved shape in UTM (meridian convergence); SFINCS's own UTM
+        rectangle overshoots that curve at the corners, so cells with no
+        real coverage there get NODATA_CODE rather than land or ocean.
+    friction: manning_subgrid.tif / 100 * friction_scale_factor, NaN cells
+        filled with default_friction * 100 before scaling.
+    """
+    dep_path = sfincs_dir / "subgrid" / "dep_subgrid.tif"
+    man_path = sfincs_dir / "subgrid" / "manning_subgrid.tif"
+
+    with retry_transient_io(rasterio.open, dep_path) as src:
+        dem = src.read(1).astype(np.float32)
+        transform = src.transform
+        crs = src.crs
+        shape = src.shape
+    dem = np.where(np.isnan(dem), np.float32(99.0), dem)
+
+    with retry_transient_io(rasterio.open, man_path) as src:
+        manning_n = src.read(1).astype(np.float32)
+    manning_n = np.where(np.isnan(manning_n), np.float32(default_friction * 100.0), manning_n)
+    friction = (manning_n / np.float32(100.0)) * np.float32(friction_scale_factor)
+
+    with retry_transient_io(rasterio.open, native_mask_path) as src:
+        mask_f = np.empty(shape, dtype=np.float32)
+        reproject(
+            source=rasterio.band(src, 1), destination=mask_f,
+            src_transform=src.transform, src_crs=src.crs,
+            dst_transform=transform, dst_crs=crs,
+            resampling=Resampling.nearest,
+        )
+    valid_code = np.isin(mask_f, [0, 1, 2, 3])
+    mask = np.where(valid_code, mask_f, np.float32(NODATA_CODE)).astype(np.int8)
+
+    return dem, mask, friction, transform, crs
+
+
+def compute_bathtub_depth(dem: np.ndarray, mask: np.ndarray, max_waterlevel_m: float) -> np.ndarray:
+    """Naive "bathtub" baseline: every land cell below `max_waterlevel_m`
+    (a single scalar - the tile's highest real boundary station value,
+    not spatially interpolated) floods to exactly that level. No
+    connectivity, friction, or propagation.
+    """
+    depth = np.maximum(np.float32(max_waterlevel_m) - dem, np.float32(0.0))
+    return np.where(mask == LAND_CODE, depth, np.float32(0.0)).astype(np.float32)
+
+
+def _write_waterdepth(waterdepth: np.ndarray, transform, crs, output_path: Path) -> None:
+    encoded = encode_waterdepth_cm(waterdepth)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    profile = {
+        "driver": "GTiff", "dtype": "int16", "count": 1,
+        "height": waterdepth.shape[0], "width": waterdepth.shape[1],
+        "transform": transform, "crs": crs, "nodata": WATERDEPTH_NODATA_INT16,
+        "compress": "zstd", "predictor": 1, "tiled": True, "blockxsize": 512, "blockysize": 512,
+    }
+    with rasterio.open(output_path, "w", **profile) as dst:
+        dst.write(encoded, indexes=1)
 
 
 def subgrid_coastline_mask(mask: np.ndarray, ocean_code: int, river_code: int | None) -> np.ndarray:

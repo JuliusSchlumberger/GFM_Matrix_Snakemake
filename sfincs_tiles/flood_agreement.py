@@ -1,13 +1,9 @@
-"""Shared flood-extent agreement primitives, used by postprocess_tile_summary.py
-to compute raw per-tile contingency counts and depth-agreement stats, and by
-compute_calibration_metrics.py/compute_metrics_overview_table.py to pool them
-into HT/FAR/CSI/bias and depth-error metrics.
+"""Shared flood-extent agreement primitives: compute_calibration_result.py uses
+them for the per-tile contingency counts and depth-agreement stats,
+calibration_results.py to pool those into HT/FAR/CSI/bias and depth-error metrics.
 """
 
 from __future__ import annotations
-
-import json
-from pathlib import Path
 
 import numpy as np
 from scipy import ndimage
@@ -18,9 +14,9 @@ WET_THRESHOLD_M = 0.10  # postprocessing/reporting's "flooded" cutoff, independe
 # from src/flood_model.py's MIN_FLOOD_DEPTH_M (the solver's own internal
 # connectivity/flood-path threshold).
 
-# Depth-agreement bin edges (metres), shared between postprocess_tile_summary.py
-# (builds the per-tile joint histograms) and plot_validation_results.py (pools
-# and plots them).
+# Depth-agreement bin edges (metres), shared between compute_calibration_result.py
+# (builds the per-tile joint histograms) and plot_validation_results.py (plots
+# them, pooled by calibration_results.py).
 #
 # FINE: pooled depth-correlation density plot - 0.1m steps, 0 to 3m, plus
 # implicit <0/>3m catch-all bins added by depth_joint_hist.
@@ -61,45 +57,9 @@ def pearson_r_from_sums(n: float, sum_x: float, sum_y: float, sum_x2: float, sum
     return float(num / den) if den > 0 else float("nan")
 
 
-def pool_depth_joint(base_dir: Path, model: str, exclude_tile_ids: set[int] | None = None) -> dict:
-    """Pools every tile's {model}_depth_joint (postprocess_tile_summary.py:
-    cell-level SFINCS-vs-model depth sufficient stats + 2D histograms, at
-    every mutually-wet cell) into one dict: summed n/sums (for
-    pearson_r_from_sums / depth_error_metrics_from_pooled) and
-    elementwise-summed hist_fine/hist_category matrices.
-    """
-    n = sum_x = sum_y = sum_x2 = sum_y2 = sum_xy = 0.0
-    hist_fine = hist_category = None
-    exclude_tile_ids = exclude_tile_ids or set()
-    for p in sorted(base_dir.glob(f"*/outputs/summary_{model}.json")):
-        try:
-            d = json.loads(p.read_text())
-        except (json.JSONDecodeError, OSError):
-            continue
-        if int(d["tile_id"]) in exclude_tile_ids:
-            continue
-        joint = d.get(f"{model}_depth_joint")
-        if not joint:
-            continue
-        n += joint["n"]
-        sum_x += joint["sum_x"]
-        sum_y += joint["sum_y"]
-        sum_x2 += joint["sum_x2"]
-        sum_y2 += joint["sum_y2"]
-        sum_xy += joint["sum_xy"]
-        hf = np.asarray(joint["hist_fine"])
-        hc = np.asarray(joint["hist_category"])
-        hist_fine = hf if hist_fine is None else hist_fine + hf
-        hist_category = hc if hist_category is None else hist_category + hc
-    return {
-        "n": n, "sum_x": sum_x, "sum_y": sum_y, "sum_x2": sum_x2, "sum_y2": sum_y2, "sum_xy": sum_xy,
-        "hist_fine": hist_fine, "hist_category": hist_category,
-    }
-
-
 def depth_error_metrics_from_pooled(pooled: dict, within_band_m: float = 0.2) -> dict[str, float]:
     """Depth-agreement summary stats (model - SFINCS, pooled across tiles)
-    from pool_depth_joint's output:
+    from pooled depth-joint stats (calibration_results.pooled_depth_joint):
       - r: Pearson correlation (pattern/shape agreement).
       - bias_m, rmse_m: mean error and RMSE, exact from the pooled
         sufficient stats.
@@ -147,9 +107,8 @@ def prune_to_ocean_connected(
     naive-bathtub flooding in interior basins with no hydraulic path to the
     sea. Same "label components, keep those touching a dilated coastline"
     logic as src/flood_model.py's prune_to_coast_connected, but without that
-    module's edge-connectivity requirement - matches
-    run_eikonal_on_sfincs_subgrid.py's sfincs_domain_coastline_mask instead,
-    since SFINCS's rectangular UTM subgrid has no real wet edge.
+    module's edge-connectivity requirement, since SFINCS's rectangular UTM
+    subgrid has no real wet edge.
     """
     landlike = mask == land_code
     if river_code is not None:

@@ -13,15 +13,17 @@ import argparse
 import sys
 from pathlib import Path
 
+import geopandas as gpd
 import numpy as np
 import rasterio
+import rasterio.features
+import shapely.geometry
 from hydromt_sfincs import SfincsModel
 from hydromt_sfincs.workflows.downscaling import downscale_floodmap
 from rasterio.warp import Resampling, calculate_default_transform, reproject
 from rasterio.warp import transform as warp_transform
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_sfincs_tile import _ocean_polygon_wgs84  # noqa: E402 - generic despite the name (any mask code)
 from gfm_config import read_root  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
 from sfincs_run import run_sfincs_subprocess  # noqa: E402
@@ -37,6 +39,18 @@ class _SimpleLog:
 
     def warning(self, msg):
         pass
+
+
+def _mask_polygon_wgs84(mask_path: Path, code: int) -> gpd.GeoDataFrame:
+    """Vectorize mask.tif's cells of one class (`code`, e.g. 0 = land) into polygons (EPSG:4326)."""
+    with retry_transient_io(rasterio.open, mask_path) as src:
+        mask = src.read(1)
+        transform = src.transform
+    sel = (mask == code).astype(np.uint8)
+    geoms = [shapely.geometry.shape(geom) for geom, _ in rasterio.features.shapes(sel, mask=sel.astype(bool), transform=transform)]
+    if not geoms:
+        raise ValueError(f"{mask_path}: no cells with code {code}")
+    return gpd.GeoDataFrame(geometry=geoms, crs="EPSG:4326")
 
 
 def _apply_land_mask_doublecheck(hmax: np.ndarray, transform, crs, land_mask_path: Path) -> np.ndarray:
@@ -98,7 +112,7 @@ def compute_max_inundation(sfincs_dir: Path, land_mask_path: Path) -> tuple[np.n
         zsmax = zsmax.max(dim="timemax", skipna=True)
     zsmax = zsmax.squeeze().load()
 
-    land_gdf = _ocean_polygon_wgs84(land_mask_path, ocean_code=0)  # code=0 -> land cells, despite the function's name
+    land_gdf = _mask_polygon_wgs84(land_mask_path, code=0)
 
     hmax_subgrid_path = sfincs_dir / "hmax_subgrid.tif"
     downscale_floodmap(
@@ -166,10 +180,10 @@ def main() -> None:
     parser.add_argument(
         "--skip-run", action="store_true",
         help="skip run_sfincs_subprocess and go straight to postprocessing - for a tile "
-             "already run elsewhere (e.g. run_one_tile.sh's own HPC batch dispatch), "
+             "already run elsewhere (e.g. run_final_tile.sh's apptainer run on HPC), "
              "whose sfincs_map.nc has already been copied back into sfincs_model/.",
     )
-    parser.add_argument("--base-dir-name", default="validation_sfincs_v2", help="output root directory name under paths.root (default: validation_sfincs_v2)")
+    parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS", help="output root directory name under paths.root (default: calibration_roughness_SFINCS)")
     args = parser.parse_args()
     if not args.skip_run and not args.sfincs_exe:
         parser.error("--sfincs-exe is required unless --skip-run is given")

@@ -1,40 +1,27 @@
-"""THE single entry point for the sfincs_calibration friction-sweep
-analysis/postprocessing pipeline - one command, five steps, each a real
-subprocess call to an existing, independently-tested script (nothing
-reimplemented here, stdout/stderr stream straight through so you see the
-same live progress running any of them standalone would give you):
+"""THE single entry point for the final SFINCS calibration analysis
+(calibration_roughness_SFINCS) - one command, each step a real subprocess
+call to an independently runnable script, all reading the per-tile
+outputs/calibration_result.json files (compute_calibration_result.py), so it
+can be rerun at any time on whatever tiles have finished:
 
-  0. report_calibration_tile_status.py - which tiles are fully done, which
-     have no COAST-RP station (can never complete), which need a full
-     rebuild vs. just the sweep, and writes missing_eikonal_pairs.csv (the
-     direct resubmission target for the fixable ones). Informational only
-     - never blocks the steps below, which just work with whatever sweep
-     data already exists on disk.
-  1. compute_friction_sweep_metrics.py - pooled CSI/bias per
-     friction_scale_factor against SFINCS.
-  2. Pick the sweep point with the BEST CSI (or --select-by bias).
-  3. plot_worst_tiles_panel.py + plot_validation_results.py, both pointed
-     at that winning friction_scale_factor - worst-tile panels AND the full
-     validation_sfincs_v5-style figure set (extent scatter, agreement
-     histogram, depth scatter, agreement map, agreement-vs-tile-size,
-     depth-joint correlation/category-alignment heatmaps) all for the one
-     friction factor that actually performs best, not the production
-     default.
+  1. compute_friction_sweep_metrics.py - eikonal vs SFINCS per tile and
+     pooled per friction scale factor (friction_sweep_{per_tile,pooled}_metrics.csv).
+  2. Pick the friction scale factor with the best pooled CSI (or --select-by bias).
+  3. plot_worst_tiles_panel.py - worst-tile panels at that point.
+  4. plot_validation_results.py - extent/depth/agreement figure set and
+     metrics_overview_table_fsf<X>.csv (HC-bathtub and EA-bathtub vs SFINCS) at that point.
   5. plot_sfincs_tile_diagnostics.py --figures coastrp_forcing boundary_forcing
-     for EVERY tile scored at that sweep point (friction_sweep_per_tile_metrics.csv,
-     --forcing-checks-workers at a time) - written to figures/forcing_checks/ as
-     {overprediction,underprediction}_{tile_id}_forcing_comparison.png and
+     for EVERY tile scored at that point, --forcing-checks-workers at a time,
+     into figures/forcing_checks/ as
+     {overprediction,underprediction,agreement}_{tile_id}_forcing_comparison.png and
      ..._boundary_forcing.png (eikonal over-/under-predicting relative to SFINCS).
-     --forcing-checks-only redoes just this step (best point from the existing
-     friction_sweep_pooled_metrics.csv and per-tile metrics).
+     --forcing-checks-only redoes just this step from the existing metrics.
 
 Usage:
-    python run_calibration_sweep_analysis.py --base-dir-name sfincs_calibration --max-outer-iterations 5
-    # only the forcing figures of the worst tiles, from an earlier full run's outputs:
-    python run_calibration_sweep_analysis.py --base-dir-name sfincs_calibration_bline --forcing-checks-only
-    # score only a specific tile subset instead of the study's full tile_ids.txt:
-    python run_calibration_sweep_analysis.py --base-dir-name sfincs_calibration \\
-        --tile-ids-file sfincs_calibration/tile_ids_done.txt --max-outer-iterations 5
+    python run_calibration_sweep_analysis.py --base-dir-name calibration_roughness_SFINCS
+    python run_calibration_sweep_analysis.py --base-dir-name calibration_roughness_SFINCS --forcing-checks-only
+    # a tile subset instead of every tile with a result:
+    python run_calibration_sweep_analysis.py --base-dir-name calibration_roughness_SFINCS --tile-ids-file <ids.txt>
 """
 
 from __future__ import annotations
@@ -53,8 +40,6 @@ _REPO_ROOT = _THIS_DIR.parent
 sys.path.insert(0, str(_THIS_DIR))
 from gfm_config import read_root  # noqa: E402
 
-FRICTION_SCALE_FACTORS_DEFAULT = [3.0, 6.0, 9.0, 12.0, 15.0, 18.0, 21.0, 24.0, 27.0, 30.0]
-
 
 def _run(cmd: list[str]) -> None:
     print(f"\n$ {' '.join(cmd)}", flush=True)
@@ -64,14 +49,9 @@ def _run(cmd: list[str]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
-    parser.add_argument("--base-dir-name", required=True)
+    parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
     parser.add_argument("--tile-ids-file", default=None,
-                         help="one tile_id per line, passed to compute_friction_sweep_metrics.py - "
-                              "default: {base-dir-name}/tile_ids.txt (the study's own full tile list; "
-                              "tiles with no data yet are skipped automatically)")
-    parser.add_argument("--friction-scale-factors", type=float, nargs="+", default=FRICTION_SCALE_FACTORS_DEFAULT)
-    parser.add_argument("--max-outer-iterations", type=int, default=4,
-                         help="must match whatever the sweep was actually run with (sfincs_calibration used 5)")
+                        help="restrict every step to these tiles (default: every tile with a calibration_result.json)")
     parser.add_argument("--n-tiles", type=int, default=9, help="worst-tile panel size, forwarded to plot_worst_tiles_panel.py")
     parser.add_argument("--min-union-km2", type=float, default=1.0, help="forwarded to plot_worst_tiles_panel.py")
     parser.add_argument(
@@ -86,54 +66,18 @@ def main() -> None:
 
     python = sys.executable
     root = read_root(Path(args.config))
-    tile_ids_file = args.tile_ids_file or str(root / args.base_dir_name / "tile_ids.txt")
+    common = ["--config", args.config, "--base-dir-name", args.base_dir_name]
+    subset = ["--tile-ids-file", args.tile_ids_file] if args.tile_ids_file else []
     if args.forcing_checks_only:
         _forcing_checks(python, args, root, _best_fsf(root, args))
         return
 
-    # Step 0: tile completion status (informational - writes calibration_tile_status.csv
-    # + missing_eikonal_pairs.csv, never blocks the steps below).
-    _run([
-        python, str(_THIS_DIR / "report_calibration_tile_status.py"),
-        "--config", args.config,
-        "--base-dir-name", args.base_dir_name,
-        "--friction-scale-factors", *[str(f) for f in args.friction_scale_factors],
-        "--max-outer-iterations", str(args.max_outer_iterations),
-    ])
-
-    # Step 1: score the sweep (writes {base_dir}/friction_sweep_{per_tile,pooled}_metrics.csv)
-    _run([
-        python, str(_THIS_DIR / "compute_friction_sweep_metrics.py"),
-        "--config", args.config,
-        "--base-dir-name", args.base_dir_name,
-        "--tile-ids-file", tile_ids_file,
-        "--friction-scale-factors", *[str(f) for f in args.friction_scale_factors],
-        "--max-outer-iterations", str(args.max_outer_iterations),
-    ])
-
-    # Step 2: pick the best sweep point from what step 1 just wrote.
+    _run([python, str(_THIS_DIR / "compute_friction_sweep_metrics.py"), *common, *subset])
     best_fsf = _best_fsf(root, args)
-
-    # Step 3: worst-tile panels for that best point.
-    _run([
-        python, str(_THIS_DIR / "plot_worst_tiles_panel.py"),
-        "--base-dir-name", args.base_dir_name,
-        "--friction-scale-factor", str(best_fsf),
-        "--max-outer-iterations", str(args.max_outer_iterations),
-        "--n-tiles", str(args.n_tiles),
-        "--min-union-km2", str(args.min_union_km2),
-    ])
-
-    # Step 4: full validation figure set (extent scatter, agreement histogram, depth
-    # scatter, agreement map, agreement-vs-tile-size) for that same best point.
-    _run([
-        python, str(_THIS_DIR / "plot_validation_results.py"),
-        "--base-dir-name", args.base_dir_name,
-        "--friction-scale-factor", str(best_fsf),
-        "--max-outer-iterations", str(args.max_outer_iterations),
-    ])
-
-    # Step 5: forcing figures for the worst tiles.
+    _run([python, str(_THIS_DIR / "plot_worst_tiles_panel.py"), *common, "--friction-scale-factor", f"{best_fsf:g}",
+          "--n-tiles", str(args.n_tiles), "--min-union-km2", str(args.min_union_km2)])
+    _run([python, str(_THIS_DIR / "plot_validation_results.py"), *common, *subset,
+          "--friction-scale-factor", f"{best_fsf:g}"])
     _forcing_checks(python, args, root, best_fsf)
 
 
@@ -144,9 +88,8 @@ def _best_fsf(root: Path, args) -> float:
     else:
         best = pooled.loc[(pooled["bias"] - 1.0).abs().idxmin()]
     best_fsf = float(best["friction_scale_factor"])
-    print(f"\nBest sweep point by {args.select_by}: friction_scale_factor={best_fsf:g} "
-          f"({best['fraction_of_current']:.1f}x current), CSI={best['CSI']:.4f}, bias={best['bias']:.4f}, "
-          f"n_tiles_scored={int(best['n_tiles_scored'])}")
+    print(f"\nBest sweep point by {args.select_by}: friction_scale_factor={best_fsf:g}, CSI={best['CSI']:.4f}, "
+          f"bias={best['bias']:.4f}, n_tiles_scored={int(best['n_tiles_scored'])}")
     return best_fsf
 
 
@@ -169,7 +112,10 @@ def _forcing_checks(python: str, args, root: Path, best_fsf: float) -> None:
     base = root / args.base_dir_name
     out_dir = base / "figures" / "forcing_checks"
     per_tile = pd.read_csv(base / "friction_sweep_per_tile_metrics.csv")
-    rows = list(per_tile[per_tile["friction_scale_factor"] == best_fsf].sort_values("tile_id").itertuples())
+    rows = per_tile[per_tile["friction_scale_factor"] == best_fsf].sort_values("tile_id")
+    if args.tile_ids_file:
+        rows = rows[rows["tile_id"].astype(str).isin(Path(args.tile_ids_file).read_text().split())]
+    rows = list(rows.itertuples())
     figures = ["coastrp_forcing", "boundary_forcing"]
 
     def run_one(row) -> tuple[str, bool]:

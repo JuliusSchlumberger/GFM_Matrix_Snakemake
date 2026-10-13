@@ -36,34 +36,70 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from config_utils import atomic_write, load_config, retry_transient_io  # noqa: E402
-from generate_hpc_postprocess_job import _account_line, _stage_configfile_lines  # noqa: E402
+
+# Duplicated from generate_hpc_postprocess_job.py (not imported - that module
+# imports write_flood_totals_and_plots_job FROM here to append this phase
+# onto its own chain, so importing back the other way would be circular;
+# same small-helper-duplication convention generate_hpc_preprocess_job.py's
+# own matching helpers already use rather than a shared module).
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
-    parser.add_argument("--config", default=str(default_config))
-    parser.add_argument("--partition", default="24vcpu")
-    parser.add_argument("--cpus", type=int, default=24)
-    parser.add_argument("--mem", default="32G", help="a guess at this partition's safe ceiling - "
-                         "confirm against `sinfo -N -o \"%%N %%P %%m %%c\"` before relying on it "
-                         "(see hpc.sbatch.mem's own comment on 1vcpu's real-vs-nominal gap)")
-    parser.add_argument("--time", default=None, help="default: hpc.sbatch.time from --config")
-    args = parser.parse_args()
+def _account_line(sbatch_cfg: dict) -> list[str]:
+    if sbatch_cfg.get("account"):  # optional - Hydrax jobs don't require one
+        return [f"#SBATCH --account={sbatch_cfg['account']}"]
+    return []
 
-    config_path = Path(args.config)
-    local_config = load_config(config_path)
-    linux_config = load_config(config_path, extra_override=config_path.parent / "config_hpc.yml")
 
+def _stage_configfile_lines() -> list[str]:
+    """Bash function def: copies a --configfile path to node-local scratch
+    and validates it parses as UTF-8 YAML before use, retrying the CHEAP
+    copy+validate step on failure - see generate_hpc_postprocess_job.py's
+    matching helper for the full rationale (live evidence 2026-09-14: a
+    node-local stale-cache issue on the shared P:\\ mount that re-running
+    against the same path alone doesn't fix)."""
+    return [
+        "stage_configfile_locally() {",
+        '  local src="$1" out_var="$2"',
+        '  local stage_dir="${TMPDIR:-/tmp}/gfm_resolved_config"',
+        '  mkdir -p "$stage_dir"',
+        '  local dst="$stage_dir/resolved_config_${SLURM_JOB_ID:-$$}_$$.yml"',
+        "  local attempt=1 max_attempts=8 delay=5",
+        '  while [ "$attempt" -le "$max_attempts" ]; do',
+        '    cp -f -- "$src" "$dst" 2>/dev/null',
+        "    if python -c \"import sys, yaml; yaml.safe_load(open(sys.argv[1], encoding='utf-8'))\" \"$dst\" 2>/dev/null; then",
+        "      printf -v \"$out_var\" '%s' \"$dst\"",
+        "      return 0",
+        "    fi",
+        '    echo "  [config-stage retry $attempt/$max_attempts] $src did not copy/parse cleanly - retrying in ${delay}s..." >&2',
+        '    rm -f -- "$dst"',
+        '    sleep "$delay"',
+        "    attempt=$((attempt + 1))",
+        "  done",
+        '  echo "  failed to stage a valid local copy of $src after $max_attempts attempts - giving up." >&2',
+        "  return 1",
+        "}",
+    ]
+
+
+def write_flood_totals_and_plots_job(
+    local_config: dict, linux_config: dict,
+    partition: str = "24vcpu", cpus: int = 24, mem: str = "32G", time: str | None = None,
+) -> tuple[Path, str]:
+    """Write the flood_totals_and_plots.sbatch script (NOT submitted here -
+    the caller decides whether to submit it standalone or append it onto an
+    existing chain, see generate_hpc_postprocess_job.py's own use of this
+    for the latter). Returns (local_script_path, linux_script_path) so a
+    caller can reference the Linux path in a generated `sbatch` line.
+    """
     local_jobs_dir = Path(local_config["hpc"]["jobs_dir"])
     linux_jobs_dir = linux_config["hpc"]["jobs_dir"]
     linux_code_root = linux_config["paths"]["code_root"]
     sbatch_cfg = dict(linux_config["hpc"]["sbatch"])
-    sbatch_cfg["partition"] = args.partition
-    sbatch_cfg["cpus_per_task"] = args.cpus
-    sbatch_cfg["mem"] = args.mem
-    if args.time:
-        sbatch_cfg["time"] = args.time
+    sbatch_cfg["partition"] = partition
+    sbatch_cfg["cpus_per_task"] = cpus
+    sbatch_cfg["mem"] = mem
+    if time:
+        sbatch_cfg["time"] = time
 
     retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
@@ -113,8 +149,30 @@ def main() -> None:
     with open(script_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines))
 
+    return script_path, f"{linux_jobs_dir}/{name}.sbatch"
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
+    parser.add_argument("--config", default=str(default_config))
+    parser.add_argument("--partition", default="24vcpu")
+    parser.add_argument("--cpus", type=int, default=24)
+    parser.add_argument("--mem", default="32G", help="a guess at this partition's safe ceiling - "
+                         "confirm against `sinfo -N -o \"%%N %%P %%m %%c\"` before relying on it "
+                         "(see hpc.sbatch.mem's own comment on 1vcpu's real-vs-nominal gap)")
+    parser.add_argument("--time", default=None, help="default: hpc.sbatch.time from --config")
+    args = parser.parse_args()
+
+    config_path = Path(args.config)
+    local_config = load_config(config_path)
+    linux_config = load_config(config_path, extra_override=config_path.parent / "config_hpc.yml")
+
+    script_path, linux_script_path = write_flood_totals_and_plots_job(
+        local_config, linux_config, args.partition, args.cpus, args.mem, args.time,
+    )
     print(f"Wrote {script_path}")
-    print(f"Submit on Hydrax with: sbatch {linux_jobs_dir}/{name}.sbatch")
+    print(f"Submit on Hydrax with: sbatch {linux_script_path}")
 
 
 if __name__ == "__main__":

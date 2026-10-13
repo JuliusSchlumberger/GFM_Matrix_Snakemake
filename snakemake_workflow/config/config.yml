@@ -73,7 +73,7 @@ tile_generation:
   river_code: 3 # mask value treated as "river" - NOT used by this module
   # itself (the old pipeline's river-mouth marking is retired), but still a
   # live, load-bearing constant read directly by run_aqueduct.py/
-  # run_aqueduct_cli.py/run_aqueduct_validation_sfincs.py - kept here.
+  # run_aqueduct_cli.py - kept here.
 
   coarse_resolution_m: 500 # standard working resolution for every coarse
   # (non-native) read in this pipeline: Phase 1's edge-connectivity check,
@@ -294,13 +294,20 @@ simulation: # Used by: preprocessing rules
     # section 2.1 for the full derivation (including how this was confused
     # for pure literature/empirical tuning before, and corrected 2026-10-07).
     #
-    # Production's actual value (9.0) = 30 (the mandatory grid-resolution
-    # correction above) x 0.3 (a further calibration factor, from comparing
-    # the eikonal solver directly against real SFINCS runs - the friction-
-    # sweep's own best-CSI finding: CSI=0.80, bias=0.99, validation_sfincs_v5,
-    # 2026-10-03, piloted in gbr_wales_scotland_friction9.yml before being
-    # promoted to this production default, 2026-10-07).
-    friction_scale_factor: 9.0
+    # Production's actual value (12.0) = 30 (the mandatory grid-resolution
+    # correction above) x 0.4 (a further calibration factor, from comparing
+    # the eikonal solver directly against real SFINCS runs on the smoothed-
+    # forcing boundary data - P:/.../calibration_roughness_SFINCS's own
+    # friction_sweep_pooled_metrics.csv, 1000 tiles, 2026-10-13): fsf=12.0
+    # beats fsf=9.0 (the previous default, 2026-10-07-2026-10-13) on BOTH
+    # metrics - CSI 0.7428 vs 0.7320, and bias 1.053 vs 1.209 (much closer to
+    # the unbiased 1.0) - not just a narrower CSI win, a clearly better fit
+    # on the metric that matters most for a global product (systematic
+    # over/under-prediction). Supersedes the earlier gbr_wales_scotland_
+    # friction9.yml / validation_sfincs_v5 pilot (CSI=0.80, bias=0.99 at
+    # fsf=9.0) - that was against the PRE-smoothed-forcing SFINCS boundary
+    # data, not directly comparable 1:1 to this sweep's own numbers.
+    friction_scale_factor: 12.0
 
     # Caps the eikonal solve's round-based mode (4 individual directional
     # sweeps per round, each round checked for early-exit convergence - see

@@ -1,5 +1,6 @@
 """Builds a runnable SFINCS model for one GFM tile from the prep-stage
-outputs (build_elevation.py, build_roughness.py, build_boundary_forcing.py).
+outputs (build_elevation.py, build_roughness.py) and its boundary line + line forcing
+(build_station_boundary_lines.py, build_line_forcing.py).
 
 Every sfincs_tiles/ script runs under the same hydromt-sfincs-dev env.
 src/config_utils.py is not importable there (hydromt 1.4.1 removed
@@ -15,7 +16,6 @@ MAIN_RES_M_DEFAULT/SUBGRID_NR_PIXELS_DEFAULT's own comment below).
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -25,9 +25,7 @@ import numpy as np
 import pandas as pd
 import pyogrio
 import rasterio
-import rasterio.features
 import shapely
-import shapely.geometry
 import xarray as xr
 import yaml
 from hydromt_sfincs import SfincsModel
@@ -35,51 +33,38 @@ from rasterio.warp import Resampling, reproject
 from scipy import ndimage
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_boundary_forcing import idw_interpolate_to_grid  # noqa: E402
 from gfm_config import read_root  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
-from tile_status import write_tile_status  # noqa: E402
-
-_COORD_RE = re.compile(r"at (-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)")
-_ANTIMERIDIAN_LON_THRESHOLD = 175.0  # within this many degrees of +-180
 
 
-def _classify_water_level_create_error(e: Exception, tile_id: str) -> RuntimeError | None:
-    """Recognizes hydromt_sfincs's own antimeridian-crossing masking failure
-    inside `sf.water_level.create()` and turns it into a clear, actionable
-    error. Returns `None` if `e` doesn't match (caller re-raises `e`
-    unchanged).
 
-    hydromt's own internal masking does a shapely union_all() in raw
-    EPSG:4326 lon/lat: for a tile near +-180 deg longitude, the buffered
-    search geometry can self-intersect there, which GEOS rejects regardless
-    of buffer size. Not fixable via buffer tuning.
-
-    2026-10-07 fix: matching on exception TEXT alone ("TopologyException"/
-    "side location conflict") is too broad - GEOS raises the identical
-    message for ANY invalid-geometry self-intersection, antimeridian or
-    not (confirmed directly: tile 1262, at 120-122E/71-73N, got this exact
-    label with an "Original error" coordinate of 66.96E/-57.11S - South
-    Atlantic, nowhere near +-180 - a different, unrelated geometry bug
-    mislabeled as antimeridian-crossing). Now also requires the error's own
-    embedded coordinate (GEOS always prints "at <lon> <lat>") to actually be
-    near +-180 before classifying it this way; anything else falls through
-    to `other_error` instead of a confident but wrong diagnosis.
+def idw_interpolate_to_grid(
+    station_x: np.ndarray, station_y: np.ndarray, station_values: np.ndarray,
+    grid_x: np.ndarray, grid_y: np.ndarray, k: int | None = None,
+) -> np.ndarray:
+    """Inverse-distance-squared interpolation of `station_values` (in the
+    same planar/metric CRS as station_x/y and grid_x/y - e.g. the SFINCS UTM
+    grid) onto every (grid_x, grid_y) point using plain Euclidean distance.
+    `k` defaults to using every station.
     """
-    text = str(e)
-    if "TopologyException" not in text and "side location conflict" not in text:
-        return None
-    match = _COORD_RE.search(text)
-    if match is None:
-        return None  # can't verify location - don't guess
-    lon = float(match.group(1))
-    if abs(lon) < _ANTIMERIDIAN_LON_THRESHOLD:
-        return None  # real geometry error, just not this one
-    return RuntimeError(
-        f"tile {tile_id}: antimeridian-crossing geometry error in hydromt_sfincs's own "
-        f"water_level.create() masking (tile is near +-180 deg longitude) - not fixable via "
-        f"buffer tuning, drop this tile from the batch. Original error: {e}"
-    )
+    k = k if k is not None else len(station_values)
+    k = min(k, len(station_values))
+
+    gx = np.asarray(grid_x).ravel()
+    gy = np.asarray(grid_y).ravel()
+    dist2 = (gx[:, None] - station_x[None, :]) ** 2 + (gy[:, None] - station_y[None, :]) ** 2
+    dist2 = np.where(dist2 == 0.0, np.finfo(np.float64).tiny, dist2)
+
+    if k < len(station_values):
+        idx = np.argpartition(dist2, k, axis=1)[:, :k]
+        dist2 = np.take_along_axis(dist2, idx, axis=1)
+        vals = station_values[idx]
+    else:
+        vals = np.broadcast_to(station_values, (gx.size, len(station_values)))
+
+    weights = 1.0 / dist2
+    result = (vals * weights).sum(axis=1) / weights.sum(axis=1)
+    return result.reshape(np.asarray(grid_x).shape)
 
 
 def _validate_subgrid_params(resolution_m: float, subgrid_nr_pixels: int) -> None:
@@ -166,33 +151,13 @@ def _compute_zsini_array(
     return np.where(ocean, zsini_arr, np.float32(-9999.0))
 
 
-def _ocean_polygon_wgs84(mask_path: Path, ocean_code: int = 1) -> gpd.GeoDataFrame:
-    """Vectorize mask.tif's ocean cells into a polygon GeoDataFrame (EPSG:4326)."""
-    with retry_transient_io(rasterio.open, mask_path) as src:
-        mask = src.read(1)
-        transform = src.transform
-    ocean = (mask == ocean_code).astype(np.uint8)
-    shapes = rasterio.features.shapes(ocean, mask=ocean.astype(bool), transform=transform)
-    geoms = [shapely.geometry.shape(geom) for geom, val in shapes]
-    if not geoms:
-        raise ValueError(f"{mask_path}: no ocean (code={ocean_code}) cells found")
-    return gpd.GeoDataFrame(geometry=geoms, crs="EPSG:4326")
-
-
-def _create_mask(sf: SfincsModel, tile_gdf: gpd.GeoDataFrame, ocean_poly: gpd.GeoDataFrame,
-                 boundary_lines_gpkg: Path | None, resolution_m: float) -> None:
-    """Active cells + waterlevel boundary cells.
-
-    Default: the whole tile active, boundary = active-domain edge cells in the
-    ocean. With `boundary_lines_gpkg` (build_station_boundary_lines.py output):
-    active = the tile minus the line's inactive (ocean-side) faces, boundary =
-    the active-domain edge cells along the boundary line (incl. its tile-edge
-    stretches) - the model then ends at the line instead of the open-sea tile edge.
+def _create_mask(sf: SfincsModel, tile_gdf: gpd.GeoDataFrame, boundary_lines_gpkg: Path, resolution_m: float) -> None:
+    """Active cells + waterlevel boundary cells from the tile's boundary line
+    (build_station_boundary_lines.py output): active = the tile minus the
+    line's inactive (ocean-side) faces, boundary = the active-domain edge cells
+    along the boundary line (incl. its tile-edge stretches) - the model ends at
+    the line instead of the open-sea tile edge.
     """
-    if boundary_lines_gpkg is None:
-        sf.mask.create_active(include_polygon=tile_gdf, reset_mask=True)
-        sf.mask.create_boundary(btype="waterlevel", include_polygon=ocean_poly, reset_bounds=False, all_touched=True)
-        return
     # Every polygon goes through make_valid first: the line builder's inactive
     # faces can carry self-touching rings once reprojected, and GEOS then fails
     # the difference with "side location conflict" (19 tiles of the bline run).
@@ -239,10 +204,12 @@ def build_sfincs_tile(
     subgrid_nr_pixels: int = SUBGRID_NR_PIXELS_DEFAULT,
     subgrid_nr_levels: int = SUBGRID_NR_LEVELS_DEFAULT,
     subgrid_nrmax: int = SUBGRID_NRMAX_DEFAULT,
-    base_dir_name: str = "validation_sfincs_v2",
+    base_dir_name: str = "calibration_roughness_SFINCS",
     rotated: bool = True,
-    boundary_lines_gpkg: Path | None = None,
+    boundary_lines_gpkg: Path | None = None,  # required - keyword only for call-site readability
 ) -> Path:
+    if boundary_lines_gpkg is None:
+        raise ValueError("build_sfincs_tile needs boundary_lines_gpkg (build_station_boundary_lines.py output)")
     _validate_subgrid_params(resolution_m, subgrid_nr_pixels)
     # Reads from the tile's working copy, not model_outputs/ directly.
     tile_dir = root / base_dir_name / tile_id / "inputs"
@@ -274,17 +241,16 @@ def build_sfincs_tile(
     sf.grid.create_from_region(region={"geom": tile_gdf}, res=resolution_m, crs="utm", rotated=rotated)
     print(f"[1/8] grid created: {dict(sf.grid.data.sizes)} cells, crs={sf.crs}, rotated={rotated}")
 
-    # -- 2. mask: active cells (whole tile) + waterlevel boundary (ocean edge only) --
+    # -- 2. mask: active cells (tile minus the line's inactive faces) + waterlevel boundary along the line --
     # Built before subgrid: subgrid.create()'s own internals read self.model.grid.mask
     # directly, so it must already exist.
     #
-    # all_touched=True: hydromt_sfincs's own create_boundary() defaults to a
-    # center-point test, which produces a sparse, broken boundary line on a coastline
+    # all_touched=True (in _create_mask): hydromt_sfincs's own create_boundary() defaults
+    # to a center-point test, which produces a sparse, broken boundary on a line
     # running diagonally across this tile's rotated UTM grid. all_touched=True
-    # includes every cell the ocean polygon touches at all, giving a continuous
-    # boundary regardless of grid rotation.
-    ocean_poly = _ocean_polygon_wgs84(tile_dir / "mask.tif")
-    _create_mask(sf, tile_gdf, ocean_poly, boundary_lines_gpkg, resolution_m)
+    # includes every cell the line's buffer touches, giving a continuous boundary
+    # regardless of grid rotation.
+    _create_mask(sf, tile_gdf, boundary_lines_gpkg, resolution_m)
     n_active = int((sf.grid.data["mask"] > 0).sum())
     n_bnd = int((sf.grid.data["mask"] == 2).sum())
     print(f"[2/8] mask: {n_active} active cell(s), {n_bnd} waterlevel-boundary cell(s)")
@@ -336,7 +302,7 @@ def build_sfincs_tile(
     # entries - DataCatalog is parsed once at construction, not re-read live.
     sf = SfincsModel(data_libs=[str(local_catalog_path)], root=str(sfincs_dir), mode="w+")
     sf.grid.create_from_region(region={"geom": tile_gdf}, res=resolution_m, crs="utm", rotated=rotated)
-    _create_mask(sf, tile_gdf, ocean_poly, boundary_lines_gpkg, resolution_m)
+    _create_mask(sf, tile_gdf, boundary_lines_gpkg, resolution_m)
 
     # write_dep_tif=True writes subgrid/dep_subgrid.tif, the fine-resolution DEM
     # run_sfincs_tile.py's own postprocessing needs for downscale_floodmap().
@@ -353,8 +319,8 @@ def build_sfincs_tile(
           f"({resolution_m:.0f}m main / {resolution_m / subgrid_nr_pixels:.0f}m subgrid), "
           f"{subgrid_nr_levels} levels, nearest-sourced")
 
-    # -- 4. boundary forcing (COAST-HG hydrographs, MDT-corrected by
-    # build_boundary_forcing.py) --
+    # -- 4. boundary forcing (COAST-HG hydrographs at the line's station nodes,
+    # MDT-corrected by build_line_forcing.py) --
     matched_points = retry_transient_io(gpd.read_file, sfincs_dir / "matched_boundary_points.gpkg")
     hydrographs = retry_transient_io(pd.read_csv, sfincs_dir / "corrected_hydrographs.csv")
 
@@ -380,7 +346,7 @@ def build_sfincs_tile(
     wl_df.columns = range(len(station_cols))  # water_level.create expects positional columns matching locations' row order
 
     # matched_points.gpkg and corrected_hydrographs.csv share row order (written
-    # together by build_boundary_forcing.py's own CLI). water_level.create()
+    # together by build_line_forcing.py). water_level.create()
     # requires an explicit "index" column matching timeseries' column names.
     locations_gdf = matched_points.copy()
     locations_gdf["index"] = range(len(station_cols))
@@ -407,12 +373,7 @@ def build_sfincs_tile(
     # pixel-index numbers against real station UTM coordinates produced a ~7,445
     # km bogus "distance to grid", hence a ~14,914 km buffer_m, which then made
     # water_level.create()'s own internal masking buffer a self-intersecting
-    # polygon once reprojected to WGS84 - the actual cause of the
-    # "antimeridian-crossing" exception below (mislabeled: GEOS's own
-    # TopologyException message doesn't know why the geometry is invalid, and
-    # the antimeridian case happens to raise the identical exception type/text,
-    # but the real self-intersection coordinates this produced were nowhere near
-    # +-180 deg - see the tile-5 troubleshooting session this was found in).
+    # polygon once reprojected to WGS84.
     # `.raster.bounds` is rioxarray's own rotation-aware real-world bounding box -
     # correct (and numerically identical to the old "x"/"y" min/max approach) for
     # a non-rotated grid too, so this is a strict fix, not a rotated-only special case.
@@ -430,13 +391,13 @@ def build_sfincs_tile(
     # buffer carries no risk of pulling in an unrelated station.
     buffer_m = dist_to_grid_bbox * 2.0 + 25_000.0
 
-    try:
-        sf.water_level.create(timeseries=wl_df, locations=locations_gdf, buffer=buffer_m)
-    except Exception as e:
-        wrapped = _classify_water_level_create_error(e, tile_id)
-        if wrapped is not None:
-            raise wrapped from e
-        raise
+    # Locations in the model's own UTM CRS: water_level.create() selects them with
+    # the polygonized waterlevel-boundary cells, reprojected to the locations' CRS
+    # and merged (union_all). Given EPSG:4326 locations, that reprojection of
+    # rotated-grid cell polygons near +-180 deg produced invalid geometry and a GEOS
+    # "side location conflict" (5 tiles of the final calibration run, 2026-10-13);
+    # in UTM nothing is reprojected.
+    sf.water_level.create(timeseries=wl_df, locations=locations_utm, buffer=buffer_m)
     print(f"[4/8] water-level forcing: {len(station_cols)} station(s), {len(times)} timestep(s), "
           f"{tref} -> {tstop} ({elapsed_hr[-1]:.1f} h), buffer={buffer_m / 1000:.1f} km")
 
@@ -494,12 +455,11 @@ def main() -> None:
         help="use the full ~148.8h COAST-HG hydrograph instead of the default "
              f"{TRUNCATE_WINDOW_HR_DEFAULT} window - for A/B comparison only.",
     )
-    parser.add_argument("--base-dir-name", default="validation_sfincs_v2", help="output root directory name under paths.root (default: validation_sfincs_v2)")
+    parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS", help="output root directory name under paths.root (default: calibration_roughness_SFINCS)")
     parser.add_argument(
-        "--boundary-lines-gpkg", default=None,
-        help="build_station_boundary_lines.py output for this tile: mask the ocean side of its "
-             "boundary line inactive and force along the line (default: whole tile active, "
-             "forced along the open-sea tile edge)",
+        "--boundary-lines-gpkg", required=True,
+        help="build_station_boundary_lines.py output for this tile: the ocean side of its "
+             "boundary line is masked inactive and the model is forced along the line",
     )
     parser.add_argument(
         "--no-rotated", dest="rotated", action="store_false",
@@ -510,23 +470,12 @@ def main() -> None:
 
     root = read_root(Path(args.config))
     truncate_window_hr = None if args.no_truncate else TRUNCATE_WINDOW_HR_DEFAULT
-    try:
-        build_sfincs_tile(
-            args.tile_id, root, resolution_m=args.resolution_m, truncate_window_hr=truncate_window_hr,
-            subgrid_nr_pixels=args.subgrid_nr_pixels, subgrid_nr_levels=args.subgrid_nr_levels, subgrid_nrmax=args.subgrid_nrmax,
-            base_dir_name=args.base_dir_name, rotated=args.rotated,
-            boundary_lines_gpkg=Path(args.boundary_lines_gpkg) if args.boundary_lines_gpkg else None,
-        )
-    except Exception as e:
-        text = str(e)
-        if "antimeridian-crossing" in text:
-            status = "antimeridian"
-        elif "0 waterlevel-boundary cells" in text:
-            status = "no_boundary_cells"
-        else:
-            status = "other_error"
-        write_tile_status(root, args.base_dir_name, args.tile_id, status=status, stage="build_sfincs_tile.py", message=text[:500])
-        raise
+    build_sfincs_tile(
+        args.tile_id, root, resolution_m=args.resolution_m, truncate_window_hr=truncate_window_hr,
+        subgrid_nr_pixels=args.subgrid_nr_pixels, subgrid_nr_levels=args.subgrid_nr_levels, subgrid_nrmax=args.subgrid_nrmax,
+        base_dir_name=args.base_dir_name, rotated=args.rotated,
+        boundary_lines_gpkg=Path(args.boundary_lines_gpkg),
+    )
 
 
 if __name__ == "__main__":

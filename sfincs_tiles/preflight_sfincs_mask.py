@@ -44,7 +44,7 @@ def preflight_tile(tile_id: str, tiles_root: Path, lines_dir: Path, resolution_m
     try:
         sf = SfincsModel(root=str(tmp), mode="w+")
         sf.grid.create_from_region(region={"geom": tile_gdf}, res=resolution_m, crs="utm", rotated=True)
-        _create_mask(sf, tile_gdf, None, gpkg, resolution_m)
+        _create_mask(sf, tile_gdf, gpkg, resolution_m)
         msk = sf.grid.data["mask"]
         row["n_active"] = int((msk > 0).sum())
         row["n_boundary"] = int((msk == 2).sum())

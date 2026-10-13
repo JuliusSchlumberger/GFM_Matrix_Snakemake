@@ -1,7 +1,7 @@
 """Validate that build_sfincs_tile.py's TRUNCATE_WINDOW_HR_DEFAULT actually
 covers the real, current COAST-HG corrected-hydrograph peak, for EVERY
 tile's own corrected_hydrographs.csv already on disk under
-validation_sfincs/ - not just the 4 tiles (2335, 1573, 1907, 929) whose
+the calibration base dir - not just the 4 tiles (2335, 1573, 1907, 929) whose
 agreement on this originally justified the constant.
 
 build_sfincs_tile.py's own comment on TRUNCATE_WINDOW_HR_DEFAULT=(40, 110)
@@ -36,9 +36,11 @@ sys.path.insert(0, str(REPO_ROOT / "sfincs_tiles"))
 
 from build_sfincs_tile import TRUNCATE_WINDOW_HR_DEFAULT  # noqa: E402
 
+BASE_DIR_NAME = "calibration_roughness_SFINCS"  # the final calibration's tiles
+
 
 def find_corrected_hydrograph_files(root: Path) -> list[Path]:
-    validation_dir = root / "validation_sfincs"
+    validation_dir = root / BASE_DIR_NAME
     if not validation_dir.exists():
         return []
     return sorted(validation_dir.glob("*/sfincs_model/corrected_hydrographs.csv"))
@@ -73,8 +75,8 @@ def test_all_available_tiles_peak_within_truncation_window(root: Path | None = N
         ]
         root = next((c for c in candidates if c.exists()), None)
 
-    if root is None or not (root / "validation_sfincs").exists():
-        print("SKIP: no validation_sfincs/ data available at the expected root - "
+    if root is None or not (root / BASE_DIR_NAME).exists():
+        print(f"SKIP: no {BASE_DIR_NAME}/ data available at the expected root - "
               "this check needs at least one real build_boundary_forcing.py output "
               "(corrected_hydrographs.csv) to validate against. Not a failure, just "
               "nothing to check in this environment.")
@@ -83,7 +85,7 @@ def test_all_available_tiles_peak_within_truncation_window(root: Path | None = N
 
     files = find_corrected_hydrograph_files(root)
     if not files:
-        print(f"SKIP: {root / 'validation_sfincs'} exists but no corrected_hydrographs.csv found under it yet.")
+        print(f"SKIP: {root / BASE_DIR_NAME} exists but no corrected_hydrographs.csv found under it yet.")
         print()
         return
 
@@ -99,7 +101,7 @@ def test_all_available_tiles_peak_within_truncation_window(root: Path | None = N
         if not ok:
             failures.append(f"{f.parent.parent.name}: {detail}")
 
-    print(f"Checked {n_checked} tile(s) under {root / 'validation_sfincs'}")
+    print(f"Checked {n_checked} tile(s) under {root / BASE_DIR_NAME}")
     assert not failures, (
         f"{len(failures)} tile(s) have a hydrograph peak outside "
         f"TRUNCATE_WINDOW_HR_DEFAULT={TRUNCATE_WINDOW_HR_DEFAULT} - the truncation window "

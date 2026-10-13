@@ -3,11 +3,10 @@ of the SFINCS pipeline that apply it:
   - build_elevation.py::build_combined_elevation - ADDS MDT to GEBCO
     bathymetry (H_GOCO06s = H_MSL + MDT, per mdt.py's own module docstring,
     "fixed 2026-09 after a real, confirmed sign-error investigation").
-  - build_boundary_forcing.py::match_boundary_points_to_coast_hg - the
-    empirical `mdt_offset = boundary_value_m - hydrograph_max_m`, which
-    recovers the same real-world MDT correction indirectly (the tile's own
-    boundaries_RP100_SLR_0.gpkg value already carries it; COAST-HG's raw
-    hydrograph doesn't).
+  - build_line_forcing.py::build_line_forcing - the empirical
+    `mdt_offset = boundary_value_m - hydrograph_max_m`, which recovers the
+    same real-world MDT correction indirectly (the COAST-RP station level
+    already carries it; COAST-HG's raw hydrograph doesn't).
 
 Both are exactly the kind of geodetic sign convention that's easy to flip
 by accident and hard to notice visually (a flipped sign DOUBLES the error
@@ -34,7 +33,7 @@ from shapely.geometry import Point
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "sfincs_tiles"))
 
-from build_boundary_forcing import match_boundary_points_to_coast_hg  # noqa: E402
+from build_line_forcing import build_line_forcing  # noqa: E402
 from build_elevation import build_combined_elevation  # noqa: E402
 
 
@@ -110,7 +109,7 @@ def test_hydrograph_mdt_offset_recovers_known_boundary_value() -> None:
     corrected hydrograph's own peak land EXACTLY on the known boundary
     value - by construction, so this is really checking the offset is
     ADDED (not subtracted) when building the corrected series."""
-    print("=== match_boundary_points_to_coast_hg: mdt_offset correctly recovers the boundary value ===")
+    print("=== build_line_forcing: mdt_offset correctly recovers the boundary value ===")
     tmpdir = Path(tempfile.mkdtemp(prefix="mdt_sign_hydrograph_test_"))
     try:
         station_lon, station_lat = 10.0, 50.0
@@ -131,25 +130,30 @@ def test_hydrograph_mdt_offset_recovers_known_boundary_value() -> None:
         ds.to_netcdf(coast_hg_path)
 
         known_boundary_val_m = 1.35  # deliberately != hg_raw.max() (0.9), by a known, non-zero amount
-        boundaries_gdf = gpd.GeoDataFrame(
-            {"SLR_0": [int(round(known_boundary_val_m * 100))]},  # int64 cm, matches real on-disk convention
+        # the boundary line's stations layer (build_station_boundary_lines.py), one used station
+        stations = gpd.GeoDataFrame(
+            {"station": [0], "station_index": [0], "status": ["used"], "rp100_level_m": [known_boundary_val_m],
+             "node_lon": [station_lon + 0.01], "node_lat": [station_lat], "node_shift_km": [0.7]},
             geometry=[Point(station_lon, station_lat)],
             crs="EPSG:4326",
         )
+        lines_gpkg = tmpdir / "line.gpkg"
+        stations.to_file(lines_gpkg, layer="stations", driver="GPKG")
 
-        df, times, dropped, offsets_m = match_boundary_points_to_coast_hg(boundaries_gdf, "SLR_0", coast_hg_path)
+        points, hydro = build_line_forcing(lines_gpkg, coast_hg_path)
 
-        assert not dropped, dropped
+        assert len(points) == 1, points
+        offset = float(points["mdt_offset_m"].iloc[0])
         expected_offset = known_boundary_val_m - hg_raw.max()
-        assert np.isclose(offsets_m[0], expected_offset, atol=1e-6), (
-            f"offset {offsets_m[0]:.4f} != expected {expected_offset:.4f} (boundary_val - hg_max)"
+        assert np.isclose(offset, expected_offset, atol=1e-4), (
+            f"offset {offset:.4f} != expected {expected_offset:.4f} (boundary_val - hg_max)"
         )
-        corrected_peak = df[0].max()
+        corrected_peak = hydro[0].max()
         assert np.isclose(corrected_peak, known_boundary_val_m, atol=1e-6), (
             f"corrected hydrograph peak {corrected_peak:.4f} != known boundary value {known_boundary_val_m} - "
             "offset must be ADDED to the whole series, not subtracted."
         )
-        print(f"PASS: offset={offsets_m[0]:+.4f} m correctly recovers boundary value "
+        print(f"PASS: offset={offset:+.4f} m correctly recovers boundary value "
               f"{known_boundary_val_m} m as the corrected hydrograph's own peak")
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)

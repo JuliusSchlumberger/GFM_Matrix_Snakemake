@@ -3,7 +3,7 @@ for one built (and ideally run) tile, written to
 `{base_dir_name}/{tile_id}/figures/`.
 
 Reads `sfincs.msk`/`sfincs.ind` directly as SFINCS's own raw binary format
-(see `_read_sfincs_mask`) instead of going through `hydromt_sfincs.
+(sfincs_grid.read_sfincs_mask) instead of going through `hydromt_sfincs.
 SfincsModel`, so it needs only rasterio/scipy/matplotlib and runs under
 `gfm_python_preprocessing` like every other sfincs_tiles/ plotting script.
 
@@ -22,20 +22,15 @@ Figures:
   4. {tile_id}_coastrp_forcing.png - (a) COAST-RP RP100 levels across the
      tile, the eikonal's IDW coastline seed and SFINCS's forcing points,
      (b) station level vs. eikonal seed vs. SFINCS zsmax along the coast.
-     Drawn automatically for the worst-tile panel tiles by
-     run_calibration_sweep_analysis.py (step 5).
-  5. setup_comparison (only with --compare-base-dir-name, not by default):
-     the same tile under two SFINCS set-ups (e.g. sfincs_calibration's 25 km
-     equal-spaced forcing vs sfincs_calibration_bline's boundary line) -
-     (a) map with both set-ups' boundary cells + forcing points, (b)/(c) the
-     along-coast COAST-RP / eikonal seed / SFINCS zsmax profile of each.
+     Drawn for every scored tile by run_calibration_sweep_analysis.py
+     (forcing checks).
 
 Usage:
-    python plot_sfincs_tile_diagnostics.py --tile-id 1693 --base-dir-name validation_sfincs_v5
-    python plot_sfincs_tile_diagnostics.py --tile-id 1974 --base-dir-name sfincs_calibration \
-        --friction-scale-factor 9 --max-outer-iterations 5
+    python plot_sfincs_tile_diagnostics.py --tile-id 1693 --base-dir-name calibration_roughness_SFINCS
+    python plot_sfincs_tile_diagnostics.py --tile-id 1974 --base-dir-name calibration_roughness_SFINCS \
+        --friction-scale-factor 9
     # one figure only, into another directory under another name:
-    python plot_sfincs_tile_diagnostics.py --tile-id 1974 --base-dir-name sfincs_calibration \
+    python plot_sfincs_tile_diagnostics.py --tile-id 1974 --base-dir-name calibration_roughness_SFINCS \
         --figures coastrp_forcing --fig-dir <dir> --out-name underprediction_1974_forcing_comparison.png
 """
 
@@ -62,7 +57,7 @@ from scipy.spatial import cKDTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gfm_config import read_root  # noqa: E402
-from compute_friction_sweep_metrics import FRICTION_SCALE_FACTOR_DEFAULT, MAX_OUTER_ITERATIONS_DEFAULT  # noqa: E402
+from sfincs_grid import read_sfincs_mask  # noqa: E402
 from plot_worst_tiles_panel import (  # noqa: E402
     CATEGORY_COLORS, CATEGORY_LABELS, DRY, EIKONAL_ONLY, MATCHED, SFINCS_ONLY,
     build_classification,
@@ -79,71 +74,11 @@ MASK_COLORS = ["#f5f5f2", "#a8c8e8", "#d62728"]  # inactive, active, boundary
 MASK_LABELS = ["inactive", "active", "waterlevel boundary"]
 
 FIGURES = ["mask", "boundary_forcing", "biggest_disagreement", "coastrp_forcing"]
-COMPARISON_FIGURES = ["setup_comparison"]  # need --compare-base-dir-name, never drawn by default
 NEAREST_MAX_KM = 3.0  # profile panels: comparison point = the coastline cell nearest the station, if this close
 SAME_POINT_MAX_KM = 0.5  # ... and SFINCS is read at its wet cell at that same point, if this close
 STATION_OCEAN_TOL_M = 2000.0  # profile panels: a station counts as "on ocean" with an ocean pixel this close
 # (same tolerance as build_station_boundary_lines.py's not-open-ocean station filter)
-PREFIXED_FIGURE_NAMES = {"coastrp_forcing": "forcing_comparison",
-                         "setup_comparison": "forcing_setup_comparison"}  # --out-prefix file names
-
-
-def _parse_sfincs_inp(inp_path: Path) -> dict:
-    """`key = value` lines in sfincs.inp - only the handful of grid-geometry
-    keys this script needs (mmax, nmax, dx, dy, x0, y0, epsg; rotation
-    defaults to 0 - none of this pipeline's own tiles set it)."""
-    out: dict = {}
-    for line in inp_path.read_text().splitlines():
-        if "=" not in line:
-            continue
-        key, _, val = line.partition("=")
-        out[key.strip()] = val.strip()
-    return out
-
-
-def _read_sfincs_mask(sfincs_dir: Path) -> tuple[np.ndarray, rasterio.Affine, str]:
-    """Reconstructs the 2D active/boundary mask directly from SFINCS's own
-    `sfincs.ind`/`sfincs.msk` binary files, without hydromt_sfincs.
-
-    Format: sfincs.ind is uint32 little-endian, first value N = active-cell
-    count, remaining N values are 1-based flat (column-major, ncol x nrow)
-    indices of active cells. sfincs.msk is N raw uint8 values (0/1/2/3),
-    same order as sfincs.ind's indices. Reshape to (ncol, nrow) then
-    transpose to get a normal (nrow, ncol) row-major array.
-    """
-    inp = _parse_sfincs_inp(sfincs_dir / "sfincs.inp")
-    mmax, nmax = int(inp["mmax"]), int(inp["nmax"])  # mmax=ncol, nmax=nrow
-    dx, dy = float(inp["dx"]), float(inp["dy"])
-    x0, y0 = float(inp["x0"]), float(inp["y0"])
-    rotation = float(inp.get("rotation", 0.0))
-    epsg = inp.get("epsg")
-
-    ind_raw = np.fromfile(sfincs_dir / "sfincs.ind", dtype="<u4")
-    n = int(ind_raw[0])
-    ind = ind_raw[1:1 + n].astype(np.int64) - 1
-    msk = np.fromfile(sfincs_dir / "sfincs.msk", dtype="u1")
-    assert msk.size == n, f"sfincs.msk has {msk.size} values, expected {n} from sfincs.ind"
-
-    grid = np.zeros(mmax * nmax, dtype=np.uint8)
-    grid[ind] = msk
-    mask2d = grid.reshape(mmax, nmax).T  # (ncol, nrow) -> (nrow, ncol)
-    crs = f"EPSG:{epsg}" if epsg else None
-
-    if rotation != 0.0:
-        # Rotated grid (counter-clockwise by `rotation` degrees about (x0, y0)):
-        # keep SFINCS's own row order (row 0 = n=0, the y0 edge) and use the
-        # matching rotated affine - the same transform hydromt writes to
-        # gis/mask.tif. Plots draw cell corners from it (see _grid_corners_lonlat).
-        theta = np.deg2rad(rotation)
-        transform = rasterio.Affine(dx * np.cos(theta), -dy * np.sin(theta), x0,
-                                    dx * np.sin(theta), dy * np.cos(theta), y0)
-        return mask2d, transform, crs
-
-    # SFINCS's (m, n) indexing has n=0 at y0 (south edge); flip so row 0 is
-    # north, matching the north-up Affine transform below.
-    mask2d = np.flipud(mask2d)
-    transform = rasterio.Affine(dx, 0.0, x0, 0.0, -dy, y0 + dy * nmax)
-    return mask2d, transform, crs
+PREFIXED_FIGURE_NAMES = {"coastrp_forcing": "forcing_comparison"}  # --out-prefix file names
 
 
 def _read_sfincs_bnd_bzs(sfincs_dir: Path) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
@@ -277,9 +212,8 @@ def plot_boundary_forcing(mask2d: np.ndarray, transform: rasterio.Affine, crs: s
     print(f"Wrote {out_path}")
 
 
-def plot_biggest_disagreement(tile_dir: Path, out_path: Path, friction_scale_factor: float,
-                              max_outer_iterations: int) -> None:
-    cls = build_classification(tile_dir, friction_scale_factor, max_outer_iterations)
+def plot_biggest_disagreement(tile_dir: Path, out_path: Path, friction_scale_factor: float) -> None:
+    cls = build_classification(tile_dir, friction_scale_factor)
     if cls is None:
         print(f"SKIP {out_path}: no usable SFINCS/eikonal subgrid data for this tile")
         return
@@ -540,76 +474,17 @@ def plot_coastrp_forcing(tile_dir: Path, sfincs_dir: Path, mask2d: np.ndarray, t
     print(f"Wrote {out_path}")
 
 
-SETUP_COLORS = ("#1f4e8c", "#d95f02")  # reference setup, this setup
-
-
-def plot_setup_comparison(tile_dirs: tuple[Path, Path], labels: tuple[str, str], out_path: Path,
-                          knn: int, river_code: int) -> None:
-    """Two SFINCS set-ups of the same tile side by side: (a) land/sea, the
-    COAST-RP stations, the eikonal coastline seed and BOTH set-ups' boundary
-    cells + forcing points; (b)/(c) the along-coast profile (COAST-RP level,
-    eikonal seed, SFINCS zsmax, forcing peaks) of each set-up, same y-axis."""
-    ctx = _coastrp_context(tile_dirs[1], knn, river_code)  # inputs are identical copies
-    level_m = ctx["level_m"]
-    vmax = float(np.ceil(level_m.max() * 2) / 2)
-    cmap = plt.get_cmap("YlOrRd")
-    fig = plt.figure(figsize=(20, 17))
-    gs = fig.add_gridspec(2, 2, height_ratios=[1.15, 1])
-    ax = fig.add_subplot(gs[0, :])  # map across the full width on top, the two profiles below
-    _land_sea_background(ax, ctx)
-    sc = ax.scatter(ctx["c_lon"], ctx["c_lat"], c=ctx["seed"], s=2, cmap=cmap, vmin=0, vmax=vmax, zorder=3,
-                    rasterized=True)
-    ax.scatter(ctx["st_lon"], ctx["st_lat"], c=level_m, s=70, cmap=cmap, vmin=0, vmax=vmax, edgecolors="black",
-               linewidths=1.0, zorder=6)
-    handles = [plt.Line2D([0], [0], marker="o", color="none", markerfacecolor="#f4a261", markeredgecolor="black",
-                          markersize=8, label="COAST-RP station (colour = level)"),
-               plt.Line2D([0], [0], color=cmap(0.5), linewidth=3, label=f"eikonal coastline seed (IDW, k={knn})")]
-    runs = []
-    for tile_dir, label, color, marker in zip(tile_dirs, labels, SETUP_COLORS, ("*", "P")):
-        sfincs_dir = tile_dir / "sfincs_model"
-        mask2d, transform, crs = _read_sfincs_mask(sfincs_dir)
-        b_rows, b_cols = np.nonzero(mask2d == BOUNDARY)
-        blons, blats = _cell_centres_lonlat(transform, crs, b_rows, b_cols)
-        ax.scatter(blons, blats, s=6, color=color, marker="s", zorder=4)
-        bnd, bzs = _read_sfincs_bnd_bzs(sfincs_dir)
-        if bnd is not None:
-            bnd_lons, bnd_lats = warp_transform(crs, "EPSG:4326", bnd[:, 0], bnd[:, 1])
-            ax.scatter(bnd_lons, bnd_lats, s=220, facecolors="none", edgecolors=color, linewidths=2.0,
-                       marker=marker, zorder=7)
-        n_bnd = 0 if bnd is None else len(bnd)
-        handles += [plt.Line2D([0], [0], marker="s", color="none", markerfacecolor=color, markersize=5,
-                               label=f"{label}: boundary cells"),
-                    plt.Line2D([0], [0], marker=marker, color="none", markeredgecolor=color, markersize=12,
-                               label=f"{label}: forcing points (n={n_bnd})")]
-        runs.append((_zsmax_lonlat(sfincs_dir, crs), bzs))
-    fig.colorbar(sc, ax=ax, fraction=0.03, pad=0.01, label="COAST-RP RP100 water level (m)")
-    ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.07, 1.0), fontsize=9, borderaxespad=0)
-    draw_panel_letter(ax, "a")
-
-    ax_b = fig.add_subplot(gs[1, 0])
-    ax_c = fig.add_subplot(gs[1, 1], sharey=ax_b)
-    for axp, (zs, bzs), label, letter in zip((ax_b, ax_c), runs, labels, ("b", "c")):
-        _profile_panel(axp, ctx, zs, bzs, letter, title=label)
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
-    print(f"Wrote {out_path}")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tile-id", required=True)
-    parser.add_argument("--base-dir-name", default="validation_sfincs_v5")
-    parser.add_argument("--friction-scale-factor", type=float, default=FRICTION_SCALE_FACTOR_DEFAULT,
-                        help="which friction-sweep point's eikonal raster to compare against")
-    parser.add_argument("--max-outer-iterations", type=int, default=MAX_OUTER_ITERATIONS_DEFAULT)
+    parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
+    parser.add_argument("--friction-scale-factor", type=float, default=None,
+                        help="biggest_disagreement: which friction point's eikonal raster to compare against "
+                             "(default: the config's simulation.flooding.friction_scale_factor)")
     parser.add_argument("--config", default=str(Path(__file__).resolve().parent.parent
                                                  / "snakemake_workflow" / "config" / "config.yml"))
-    parser.add_argument("--figures", nargs="+", choices=FIGURES + COMPARISON_FIGURES, default=FIGURES,
-                        help="which figure(s) to draw (default: the four single-run ones)")
-    parser.add_argument("--compare-base-dir-name", default=None,
-                        help="setup_comparison: the reference run of the same tile (e.g. sfincs_calibration), "
-                             "drawn next to --base-dir-name's run")
+    parser.add_argument("--figures", nargs="+", choices=FIGURES, default=FIGURES,
+                        help="which figure(s) to draw (default: all four)")
     parser.add_argument("--fig-dir", default=None,
                         help="output directory (default: {base-dir-name}/{tile_id}/figures)")
     parser.add_argument("--out-prefix", default=None,
@@ -623,10 +498,10 @@ def main() -> None:
         parser.error("--out-name needs exactly one --figures entry")
     if args.out_name and args.out_prefix:
         parser.error("--out-name and --out-prefix are mutually exclusive")
-    if "setup_comparison" in args.figures and not args.compare_base_dir_name:
-        parser.error("setup_comparison needs --compare-base-dir-name")
 
     root = read_root(Path(args.config))
+    with open(args.config, encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
     tile_dir = root / args.base_dir_name / args.tile_id
     sfincs_dir = tile_dir / "sfincs_model"
     fig_dir = Path(args.fig_dir) if args.fig_dir else tile_dir / "figures"
@@ -639,26 +514,21 @@ def main() -> None:
             return fig_dir / f"{args.out_prefix}_{PREFIXED_FIGURE_NAMES.get(figure, figure)}.png"
         return fig_dir / f"{args.tile_id}_{figure}.png"
 
-    mask2d, transform, crs = _read_sfincs_mask(sfincs_dir)
+    mask2d, transform, crs = read_sfincs_mask(sfincs_dir)
     if "mask" in args.figures:
         plot_mask(mask2d, transform, crs, out_path("mask"),
                   stations_path=sfincs_dir / "matched_boundary_points.gpkg")
     if "boundary_forcing" in args.figures:
         plot_boundary_forcing(mask2d, transform, crs, sfincs_dir, out_path("boundary_forcing"))
     if "biggest_disagreement" in args.figures:
-        plot_biggest_disagreement(tile_dir, out_path("biggest_disagreement"),
-                                  args.friction_scale_factor, args.max_outer_iterations)
-    if "coastrp_forcing" in args.figures or "setup_comparison" in args.figures:
-        with open(args.config, encoding="utf-8") as f:
-            cfg = yaml.safe_load(f)
-        knn, river_code = int(cfg["simulation"]["flooding"]["knn"]), int(cfg["tile_generation"]["river_code"])
+        fsf = args.friction_scale_factor
+        if fsf is None:
+            fsf = float(cfg["simulation"]["flooding"]["friction_scale_factor"])
+        plot_biggest_disagreement(tile_dir, out_path("biggest_disagreement"), fsf)
     if "coastrp_forcing" in args.figures:
-        plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs,
-                             out_path("coastrp_forcing"), knn=knn, river_code=river_code)
-    if "setup_comparison" in args.figures:
-        plot_setup_comparison((root / args.compare_base_dir_name / args.tile_id, tile_dir),
-                              (args.compare_base_dir_name, args.base_dir_name),
-                              out_path("setup_comparison"), knn=knn, river_code=river_code)
+        plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs, out_path("coastrp_forcing"),
+                             knn=int(cfg["simulation"]["flooding"]["knn"]),
+                             river_code=int(cfg["tile_generation"]["river_code"]))
 
 
 if __name__ == "__main__":

@@ -9,18 +9,19 @@ tests added alongside this one): constructing a from-scratch synthetic
 tile would mean faking GEBCO/MDT/COAST-HG catalog entries and a
 tile_geometry.gpkg with real hop_distance/ocean-boundary conventions -
 significant duplicated machinery for something a small REAL tile already
-does correctly and cheaply (tile 1907: ~13 active cells at 120m, ~1.5s
-SFINCS wall-clock). This mirrors the existing house convention (most
+does correctly and cheaply (the smallest finished calibration tile, see
+"Needs" below). This mirrors the existing house convention (most
 `tests/*_validation/` scripts here are real-data validation tools, run by
 hand, not CI-isolated unit tests - see e.g. this session's own
 `sfincs_hydrograph_truncation_validation`).
 
 Needs: the real P:\\ modelling share, a real local SFINCS executable, and
-tile 1907's own already-built prep-stage files (elevation_combined.tif,
-manning_n.tif, matched_boundary_points.gpkg, corrected_hydrographs.csv
-under validation_sfincs/1907/sfincs_model/ - already present from this
-session's own earlier work; run build_boundary_forcing.py's own CLI first
-if starting fresh). Skips (not fails) if either is unavailable.
+one finished tile of the final calibration (FIXTURE_BASE_DIR_NAME): the
+smallest one (fewest active SFINCS cells) whose prep-stage files
+(elevation_combined.tif, manning_n.tif, matched_boundary_points.gpkg,
+corrected_hydrographs.csv) and boundary line exist. Its inputs are COPIED
+into SMOKE_BASE_DIR_NAME and the model is built and run there - the fixture
+tile itself is never touched. Skips (not fails) if anything is unavailable.
 
 Usage:
     python test_sfincs_smoke.py
@@ -28,6 +29,8 @@ Usage:
 
 from __future__ import annotations
 
+import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -42,7 +45,9 @@ from gfm_config import read_root  # noqa: E402
 from run_sfincs_tile import compute_max_inundation  # noqa: E402
 from sfincs_run import run_sfincs_subprocess  # noqa: E402
 
-TILE_ID = "1907"  # smallest of this session's own real test tiles - fast, cheap, well-understood
+FIXTURE_BASE_DIR_NAME = "calibration_roughness_SFINCS"  # read-only source of the fixture tile
+SMOKE_BASE_DIR_NAME = "sfincs_smoke_test"  # where the copy is built and run
+PREP_FILES = ["elevation_combined.tif", "manning_n.tif", "matched_boundary_points.gpkg", "corrected_hydrographs.csv"]
 DEFAULT_SFINCS_EXE = Path(
     r"C:\Users\schlumbe\hydromt_sfincs\delta_model\software\SFINCS_v2.3.0_mt_Faber_release_exe\sfincs.exe"
 )
@@ -56,46 +61,73 @@ class _SilentLog:
         pass
 
 
-def _prereqs_available() -> tuple[Path, Path] | None:
-    """(root, sfincs_exe) if this smoke test can actually run, else None."""
+def _fixture_tile(root: Path) -> str | None:
+    """Smallest finished calibration tile (pre-flight active cell count) with
+    every prep file and its boundary line."""
+    base = root / FIXTURE_BASE_DIR_NAME
+    sizes = []
+    for pf in (base / "boundary_lines" / "preflight").glob("*.json"):
+        rec = json.loads(pf.read_text())
+        if rec.get("ok") and (base / pf.stem / "outputs" / "calibration_run.done").exists():
+            sizes.append((rec["n_active"], pf.stem))
+    for _, t in sorted(sizes):
+        tile = base / t
+        if all((tile / "sfincs_model" / f).exists() for f in PREP_FILES) and (tile / f"boundary_line_{t}.gpkg").exists():
+            return t
+    return None
+
+
+def _prereqs_available() -> tuple[Path, Path, str] | None:
+    """(root, sfincs_exe, tile_id) if this smoke test can actually run, else None."""
     config_path = REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"
-    if not config_path.exists():
+    if not config_path.exists() or not DEFAULT_SFINCS_EXE.exists():
         return None
     try:
         root = read_root(config_path)
     except Exception:
         return None
-    prep_dir = root / "validation_sfincs" / TILE_ID / "sfincs_model"
-    needed = ["elevation_combined.tif", "manning_n.tif", "matched_boundary_points.gpkg", "corrected_hydrographs.csv"]
-    if not all((prep_dir / f).exists() for f in needed):
-        return None
-    if not DEFAULT_SFINCS_EXE.exists():
-        return None
-    return root, DEFAULT_SFINCS_EXE
+    tile_id = _fixture_tile(root)
+    return None if tile_id is None else (root, DEFAULT_SFINCS_EXE, tile_id)
+
+
+def _stage_fixture(root: Path, tile_id: str) -> Path:
+    """Fresh copy of the fixture tile's inputs/, prep files and boundary line
+    under SMOKE_BASE_DIR_NAME; returns the copied boundary line."""
+    src, dst = root / FIXTURE_BASE_DIR_NAME / tile_id, root / SMOKE_BASE_DIR_NAME / tile_id
+    shutil.rmtree(dst, ignore_errors=True)
+    shutil.copytree(src / "inputs", dst / "inputs")
+    (dst / "sfincs_model").mkdir(parents=True)
+    for f in PREP_FILES:
+        shutil.copy2(src / "sfincs_model" / f, dst / "sfincs_model" / f)
+    line = dst / f"boundary_line_{tile_id}.gpkg"
+    shutil.copy2(src / line.name, line)
+    return line
 
 
 def test_build_run_postprocess_produces_plausible_output() -> None:
     print("=== SFINCS smoke test: full build -> run -> postprocess on a real fixture tile ===")
     prereqs = _prereqs_available()
     if prereqs is None:
-        print("SKIP: real P:\\ modelling share, tile 1907's own prep-stage files, and/or the local "
+        print("SKIP: real P:\\ modelling share, a finished calibration_roughness_SFINCS tile, and/or the local "
               "sfincs.exe aren't available in this environment - not a failure, nothing to run against.")
         print()
         return
-    root, sfincs_exe = prereqs
+    root, sfincs_exe, tile_id = prereqs
+    line = _stage_fixture(root, tile_id)
+    print(f"  fixture: tile {tile_id} from {FIXTURE_BASE_DIR_NAME}, copied to {SMOKE_BASE_DIR_NAME}")
 
-    sfincs_dir = build_sfincs_tile(TILE_ID, root)
+    sfincs_dir = build_sfincs_tile(tile_id, root, base_dir_name=SMOKE_BASE_DIR_NAME, boundary_lines_gpkg=line)
     assert sfincs_dir.exists()
     inp_path = sfincs_dir / "sfincs.inp"
     assert inp_path.exists(), "build_sfincs_tile did not produce sfincs.inp"
     print(f"  build: OK, wrote {sfincs_dir}")
 
-    run_sfincs_subprocess(sfincs_exe, sfincs_dir, timeout_s=300.0, log=_SilentLog(), label=f"smoke test tile {TILE_ID}")
+    run_sfincs_subprocess(sfincs_exe, sfincs_dir, timeout_s=300.0, log=_SilentLog(), label=f"smoke test tile {tile_id}")
     map_path = sfincs_dir / "sfincs_map.nc"
     assert map_path.exists(), "SFINCS ran but produced no sfincs_map.nc"
     print("  run: OK, produced sfincs_map.nc")
 
-    land_mask_path = root / "model_outputs" / TILE_ID / "inputs" / "mask.tif"
+    land_mask_path = root / SMOKE_BASE_DIR_NAME / tile_id / "inputs" / "mask.tif"
     hmax, grid_info = compute_max_inundation(sfincs_dir, land_mask_path)
 
     assert hmax.ndim == 2 and hmax.size > 0, hmax.shape
