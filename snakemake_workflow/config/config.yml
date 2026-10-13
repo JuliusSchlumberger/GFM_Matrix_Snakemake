@@ -589,8 +589,8 @@ visualization:
   # followed beyond the SSPs (Nigeria SSP2 reaches +239 % by 2100) and beyond 2100 (AR6
   # SSP5-8.5 p83 passes 1.5 m before 2150; plot_extended_pathways.py).
   growth_rates: # relative to baseline year (2020)
-    min: -0.5
-    max:  3.0
+    min: -0.7   # China/Japan population-decline variants reach about -62 % by 2150
+    max:  3.5   # Nigeria SSP2 + continued trend reaches about +343 % by 2150
     step:  0.1
 
   slr_interp: # interpolated based on run scenarios used for smoothing the curve.
@@ -614,6 +614,13 @@ visualization:
     vmax: 10000000     # shared linear colour scale 0..vmax (people/yr); higher values saturate
     ssp_pathways: false # true: overlay each SSP-RCP's pathway (median SLR x national SSP population) per panel
 
+  ember_country_set: # plot_burning_ember.py: no-adaptation ember panels for a hand-picked set, with each SSP-RCP
+    # (extended_pathways.ssps) pathway to 2100 and its population-variant branches to extended_pathways.to_year
+    countries: [CHN, IDN, BGD, USA, NGA, EGY, BRA, JPN, NLD] # NLD: highest non-Asian EAI after USA/NGA/EGY/BRA
+    ncols: 3
+    vmax: 10000000     # shared linear colour scale 0..vmax (people/yr), as top_countries_ember
+    display: {slr_max_mm: 1500, growth_min: -0.7, growth_max: 3.5} # matrix part shown (pathways -62 to +343 %)
+
   ember_country_selection: # plot_burning_ember.py: no-adaptation ember panels for hand-picked countries of
     # similar EAI magnitude (max 1-2.5 M at 1.5 m SLR / +150 %), one shared colorbar, ordered from the
     # earliest response to SLR to the latest threshold (SLR at which 20 % of the 0-1.5 m rise is reached):
@@ -628,9 +635,9 @@ visualization:
     to_year: 2150      # AR6 SLR trajectories run to 2150; population after 2100 follows the variants below
     ssps: [SSP2, SSP5]
     variants:          # illustrative population continuations from each country's 2100 SSP level (assumptions)
-      stabilise: {mode: constant, label: "stabilises at 2100 level"}
-      trend:     {mode: trend, window: 25, half_life: 50, label: "2075-2100 trend continues, halving every 50 yr"}
-      decline:   {mode: rate, annual: -0.005, label: "declines by 0.5 %/yr"}
+      stabilise: {mode: constant, label: "stabilized"}                           # hold the 2100 level
+      trend:     {mode: trend, window: 25, half_life: 50, label: "continue trend"} # 2075-2100 rate, halving every 50 yr
+      decline:   {mode: rate, annual: -0.005, label: "slow decline"}             # -0.5 %/yr
     strategies: [baseline, protect_SLR_500, avoid_SLR_500, retreat_SLR_500] # growth-matrix labels in the time-series figure
     ember_countries: [NGA, EGY, IND, CHN, JPN, USA]
 

@@ -44,6 +44,8 @@ from matplotlib.lines import Line2D
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
+from pathways import slr_pathway  # noqa: E402
+from population_extension import extend_growth_factors  # noqa: E402
 from visualization import (  # noqa: E402
     load_growth_matrix_csv,
     build_growth_matrix_from_grid,
@@ -171,6 +173,80 @@ def plot_top_countries_ember(
     cb.ax.yaxis.set_major_formatter(plt.FuncFormatter(
         lambda v, _: f"{v / 1e6:g} M" if v >= 1e6 else (f"{v / 1e3:g} k" if v >= 1e3 else f"{v:g}")))
     cb.set_label("Expected annual impact (people)", fontsize=fs + 1)
+    fig.savefig(out_path, dpi=int(viz.get("dpi", 200)), bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Written: {out_path.name}")
+
+
+def plot_country_set_ember(
+    growth_matrix_path: Path, iso_to_name: dict[str, str], viz: dict, out_path: Path,
+    countries: list[str], growth_df, slr_traj_full: pd.DataFrame, ssps: list[str],
+    variants: dict[str, dict], to_year: int = 2150, ncols: int = 3, vmax: float = 1e7,
+    window: dict | None = None, ssp_rcp_codes: dict | None = None,
+) -> None:
+    """No-adaptation ember panels for a hand-picked set of countries (in the
+    given order), one shared linear colour scale 0..`vmax` with a contour every
+    vmax / 10, and each SSP-RCP's pathway: median SLR vs the country's SSP
+    population change, solid to 2100 (circles at 2050 and 2100), then one
+    branch per population continuation variant (src/population_extension.py)
+    to `to_year` (square). Each panel's y-axis covers its own pathways, so a
+    branch beyond the matrix's growth range stays visible (blank background
+    there). `window` crops the matrix (visualization.ember_display keys)."""
+    eai_grid, slr_mm, growth_fracs = load_growth_matrix_csv(growth_matrix_path, window=window)
+    countries = [i for i in countries if i in eai_grid.index]
+    colors = viz.get("ssp_colors") or {}
+    years = np.arange(2020, to_year + 1)
+    i2100 = int(2100 - years[0])
+    slr_paths = {s: slr_pathway(slr_traj_full, f"{s}_p50", years) / 1000.0 for s in ssps
+                 if f"{s}_p50" in slr_traj_full.columns}
+    ext = {v: extend_growth_factors(growth_df, spec, to_year=to_year) for v, spec in variants.items()}
+    styles = dict(zip(variants, ["--", ":", "-."]))
+    halo = [pe.Stroke(linewidth=4.0, foreground="w"), pe.Normal()]
+
+    nrows = int(np.ceil(len(countries) / ncols))
+    fs = 14
+    fig, axes = plt.subplots(nrows, ncols, figsize=(5.4 * ncols + 1.4, 4.5 * nrows + 0.9), sharex=True,
+                             squeeze=False)
+    fig.subplots_adjust(left=0.08, right=0.88, bottom=0.115, top=0.96, wspace=0.2, hspace=0.25)
+    im = None
+    for ax, iso in zip(axes.flat, countries):
+        m = build_growth_matrix_from_grid(eai_grid.loc[[iso]], slr_mm, growth_fracs)
+        im = draw_ember_panel(ax, m, slr_mm, np.array(growth_fracs), cmap=viz.get("cmap_ember", "YlOrRd"),
+                              vmax=vmax, n_contours=10, contour_labels=False, fontsize=fs)
+        y_lo, y_hi = min(growth_fracs) * 100.0, max(growth_fracs) * 100.0
+        for ssp, x in slr_paths.items():
+            c = colors.get(ssp, "k")
+            for v in variants:
+                y = (np.array([interpolate_growth_factor(ext[v], ssp, iso, int(t), 1.0) for t in years]) - 1.0) * 100.0
+                y_lo, y_hi = min(y_lo, y.min()), max(y_hi, y.max())
+                ax.plot(x[i2100:], y[i2100:], linestyle=styles[v], color=c, lw=2.1, zorder=5, path_effects=halo)
+                ax.plot(x[-1], y[-1], "s", ms=5, color=c, mec="w", mew=0.8, zorder=6)
+            ax.plot(x[:i2100 + 1], y[:i2100 + 1], "-", color=c, lw=2.6, zorder=5, path_effects=halo)
+            for yr in (2050, 2100):
+                i = int(yr - years[0])
+                ax.plot(x[i], y[i], "o", ms=6, mfc="w", mec=c, mew=1.8, zorder=7)
+        ax.set_ylim(y_lo - 5, y_hi + 8)
+        ax.set_xlim(0, max(max(slr_mm) / 1000.0, max(p.max() for p in slr_paths.values())))
+        ax.set_title(iso_to_name.get(iso, iso), fontsize=fs + 2)
+    for ax in axes.flat[len(countries):]:
+        ax.set_visible(False)
+    for ax in axes[-1, :]:
+        ax.set_xlabel("Global mean SLR (m)", fontsize=fs)
+        ax.set_xticks([0, 0.5, 1.0, 1.5])
+    for ax in axes[:, 0]:
+        ax.set_ylabel("Population change\nrelative to 2020 (%)", fontsize=fs)
+    handles = [Line2D([], [], color=colors.get(s, "k"), lw=2.3, label=f"{ssp_rcp_label(s, ssp_rcp_codes or {})} to 2100")
+               for s in slr_paths]
+    handles += [Line2D([], [], color="0.3", lw=1.9, ls=styles[v], label=f"after 2100: {spec.get('label', v)}")
+                for v, spec in variants.items()]
+    fig.legend(handles=handles, loc="upper center", ncol=3, fontsize=fs, frameon=False,
+               bbox_to_anchor=(0.48, 0.055))
+    cax = fig.add_axes((0.90, 0.115, 0.015, 0.845))
+    cb = fig.colorbar(im, cax=cax, extend="max")
+    cb.ax.tick_params(labelsize=fs)
+    cb.ax.yaxis.set_major_formatter(plt.FuncFormatter(
+        lambda v, _: f"{v / 1e6:g} M" if v >= 1e6 else (f"{v / 1e3:g} k" if v >= 1e3 else f"{v:g}")))
+    cb.set_label("Expected annual impact, no adaptation (people)", fontsize=fs + 1)
     fig.savefig(out_path, dpi=int(viz.get("dpi", 200)), bbox_inches="tight")
     plt.close(fig)
     print(f"  Written: {out_path.name}")
@@ -318,6 +394,16 @@ def main() -> None:
                                          out_dir / "burning_ember_selection_baseline.png", sel_cfg["countries"],
                                          ncols=int(sel_cfg.get("ncols", 4)),
                                          n_contours=int(sel_cfg.get("n_contours", 5)))
+        set_cfg = viz.get("ember_country_set", {})
+        ext_cfg = viz.get("extended_pathways", {})
+        if set_cfg.get("countries") and growth_df is not None and traj_path and Path(traj_path).exists():
+            plot_country_set_ember(
+                scenario_files["baseline"], iso_to_name, viz, out_dir / "burning_ember_country_set_baseline.png",
+                set_cfg["countries"], growth_df, traj_full, list(ext_cfg.get("ssps", ["SSP2", "SSP5"])),
+                ext_cfg.get("variants") or {"stabilise": {"mode": "constant"}},
+                to_year=int(ext_cfg.get("to_year", 2150)), ncols=int(set_cfg.get("ncols", 3)),
+                vmax=float(set_cfg.get("vmax", 1e7)), window=set_cfg.get("display"),
+                ssp_rcp_codes=viz.get("ssp_rcp_codes", {}))
 
     for scenario_label, growth_matrix_path in scenario_files.items():
         if not growth_matrix_path.exists():

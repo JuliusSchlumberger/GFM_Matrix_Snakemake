@@ -21,6 +21,7 @@ Usage:
 
 import argparse
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -64,6 +65,30 @@ def _output_already_done(output_path: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def _stage_file_locally(src_path: str) -> str:
+    """Copy `src_path` to node-local scratch and return the local copy's
+    path, instead of opening it straight off P:\\.
+
+    Added 2026-10-14: confirmed live that GDAL/OGR's SQLite lock
+    acquisition - needed just to OPEN a GeoPackage, even read-only - can
+    hang indefinitely on a Hydrax compute node reading P:\\ directly, for a
+    single, non-concurrent read (not a lock-contention/concurrency issue -
+    see generate_aqueduct_jobs.py's `_stage_tile_grid_lines` docstring,
+    which fixes the same problem for the shared tile_grid.gpkg). A plain
+    content copy (`shutil.copy2`, no GDAL/SQLite involved) does not hit that
+    lock path and completes normally. Unlike the tile grid - one file,
+    shared by a whole batch, staged once in the sbatch script itself -
+    `boundaries_{scenario}.gpkg` differs per (tile, rp, slr) triple, so it's
+    staged here, per-invocation; caller is responsible for deleting the
+    returned path once done with it.
+    """
+    stage_dir = os.path.join(os.environ.get("TMPDIR", "/tmp"), "gfm_staged_inputs")
+    os.makedirs(stage_dir, exist_ok=True)
+    dst = os.path.join(stage_dir, f"{os.getpid()}_{os.path.basename(src_path)}")
+    retry_transient_io(shutil.copy2, src_path, dst)
+    return dst
 
 
 def main() -> None:
@@ -143,78 +168,92 @@ def main() -> None:
     # boundaries file again; see module docstring for why that was removed).
     seed_rows = seed_cols = seed_values = None
     skip_reason = None
+    local_boundaries_path = None
 
-    if hop_distance == 0:
-        boundaries = retry_transient_io(gpd.read_file, boundaries_path)
-        if boundaries.empty:
-            skip_reason = NO_STATIONS_REASON
-    else:
-        this_geom = this_tile.geometry.iloc[0]
-        candidates = tile_grid[
-            (tile_grid["hop_distance"] < hop_distance)
-            & (tile_grid["tile_id"] != int(tile_id))
-            & tile_grid.geometry.intersects(this_geom)
-        ]
-        available = []
-        for cand_id in candidates["tile_id"]:
-            cand_dem = os.path.join(preprocessing_inputs_dir, str(int(cand_id)), "inputs", "dem.tif")
-            cand_mask = os.path.join(preprocessing_inputs_dir, str(int(cand_id)), "inputs", "mask.tif")
-            cand_waterdepth = os.path.join(
-                model_outputs, str(int(cand_id)), "results", f"waterdepth_{scenario_name}.tif",
-            )
-            # path_ready, not bare os.path.exists (which swallows I/O errors
-            # and returns False without ever retrying) - on the HPC's
-            # network-mounted P:\ share, a transient blip here would
-            # otherwise be silently indistinguishable from "neighbour
-            # genuinely hasn't run yet", converting into a wrongly-confident
-            # real-zero result instead of the correct flooded one.
-            if path_ready(cand_dem) and path_ready(cand_mask) and path_ready(cand_waterdepth):
-                available.append((cand_dem, cand_mask, cand_waterdepth))
-        seed_rows, seed_cols, seed_values = collect_neighbor_wave_seeds(dem_path, available)
-        if len(seed_rows) == 0:
-            skip_reason = NO_UPSTREAM_FLOODING_REASON
-
-    if skip_reason is not None:
-        log_skipped_tile(skipped_dir, tile_id, scenario_name, reason=skip_reason)
-        write_zero_waterdepth(dem_path, output_path)
-        log_run_timing(
-            timings_dir, tile_id, args.return_period, args.waterlevel_name,
-            elapsed_s=time.perf_counter() - start,
-            obstacle_coupling_diagnostics={"outcome": "skip_no_inundation", "skip_reason": skip_reason},
-        )
-        return
-
-    oc_config = flooding_config.get("obstacle_coupling", {})
     try:
-        diagnostics = run_aqueduct_python(
-            dem_path, mask_path, friction_path, output_path,
-            resolution=flooding_config["resolution"], k=flooding_config["knn"],
-            variable=args.waterlevel_name,
-            boundaries_path=None if hop_distance >= 1 else boundaries_path,
-            seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
-            ocean_code=ocean_code, river_code=river_code,
-            obstacle_coupling=oc_config.get("enabled", False),
-            max_outer_iterations=oc_config.get("max_outer_iterations", 3),
-            max_rounds=flooding_config["max_rounds"],
-            outer_convergence_pct=oc_config.get("outer_convergence_pct", 0.01),
-            waterlevel_epsilon_m=flooding_config["waterlevel_epsilon_m"],
-            friction_scale_factor=flooding_config.get("friction_scale_factor", 1.0),
-        )
-    except MemoryError:
-        mark_tile_oom(oom_dir, tile_id, reason="MemoryError in flood_depth_dense - tile too large")
-        log_skipped_tile(skipped_dir, tile_id, scenario_name, reason="MemoryError - tile too large")
-        save_nodata_raster(dem_path, output_path, raster_config)
-        log_run_timing(
-            timings_dir, tile_id, args.return_period, args.waterlevel_name,
-            elapsed_s=time.perf_counter() - start,
-            obstacle_coupling_diagnostics={"outcome": "oom"},
-        )
-    else:
-        log_run_timing(
-            timings_dir, tile_id, args.return_period, args.waterlevel_name,
-            elapsed_s=time.perf_counter() - start,
-            obstacle_coupling_diagnostics={"outcome": "solved", **diagnostics},
-        )
+        if hop_distance == 0:
+            # Staged to node-local scratch, not read straight off P:\ - see
+            # `_stage_file_locally`'s own docstring: GDAL/OGR's SQLite lock
+            # acquisition on opening a gpkg can hang indefinitely on a Hydrax
+            # compute node even for a single, non-concurrent read, while a
+            # plain content copy does not.
+            local_boundaries_path = _stage_file_locally(boundaries_path)
+            boundaries = retry_transient_io(gpd.read_file, local_boundaries_path)
+            if boundaries.empty:
+                skip_reason = NO_STATIONS_REASON
+        else:
+            this_geom = this_tile.geometry.iloc[0]
+            candidates = tile_grid[
+                (tile_grid["hop_distance"] < hop_distance)
+                & (tile_grid["tile_id"] != int(tile_id))
+                & tile_grid.geometry.intersects(this_geom)
+            ]
+            available = []
+            for cand_id in candidates["tile_id"]:
+                cand_dem = os.path.join(preprocessing_inputs_dir, str(int(cand_id)), "inputs", "dem.tif")
+                cand_mask = os.path.join(preprocessing_inputs_dir, str(int(cand_id)), "inputs", "mask.tif")
+                cand_waterdepth = os.path.join(
+                    model_outputs, str(int(cand_id)), "results", f"waterdepth_{scenario_name}.tif",
+                )
+                # path_ready, not bare os.path.exists (which swallows I/O errors
+                # and returns False without ever retrying) - on the HPC's
+                # network-mounted P:\ share, a transient blip here would
+                # otherwise be silently indistinguishable from "neighbour
+                # genuinely hasn't run yet", converting into a wrongly-confident
+                # real-zero result instead of the correct flooded one.
+                if path_ready(cand_dem) and path_ready(cand_mask) and path_ready(cand_waterdepth):
+                    available.append((cand_dem, cand_mask, cand_waterdepth))
+            seed_rows, seed_cols, seed_values = collect_neighbor_wave_seeds(dem_path, available)
+            if len(seed_rows) == 0:
+                skip_reason = NO_UPSTREAM_FLOODING_REASON
+
+        if skip_reason is not None:
+            log_skipped_tile(skipped_dir, tile_id, scenario_name, reason=skip_reason)
+            write_zero_waterdepth(dem_path, output_path)
+            log_run_timing(
+                timings_dir, tile_id, args.return_period, args.waterlevel_name,
+                elapsed_s=time.perf_counter() - start,
+                obstacle_coupling_diagnostics={"outcome": "skip_no_inundation", "skip_reason": skip_reason},
+            )
+            return
+
+        oc_config = flooding_config.get("obstacle_coupling", {})
+        try:
+            diagnostics = run_aqueduct_python(
+                dem_path, mask_path, friction_path, output_path,
+                resolution=flooding_config["resolution"], k=flooding_config["knn"],
+                variable=args.waterlevel_name,
+                boundaries_path=None if hop_distance >= 1 else local_boundaries_path,
+                seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
+                ocean_code=ocean_code, river_code=river_code,
+                obstacle_coupling=oc_config.get("enabled", False),
+                max_outer_iterations=oc_config.get("max_outer_iterations", 3),
+                max_rounds=flooding_config["max_rounds"],
+                outer_convergence_pct=oc_config.get("outer_convergence_pct", 0.01),
+                waterlevel_epsilon_m=flooding_config["waterlevel_epsilon_m"],
+                friction_scale_factor=flooding_config.get("friction_scale_factor", 1.0),
+            )
+        except MemoryError:
+            mark_tile_oom(oom_dir, tile_id, reason="MemoryError in flood_depth_dense - tile too large")
+            log_skipped_tile(skipped_dir, tile_id, scenario_name, reason="MemoryError - tile too large")
+            save_nodata_raster(dem_path, output_path, raster_config)
+            log_run_timing(
+                timings_dir, tile_id, args.return_period, args.waterlevel_name,
+                elapsed_s=time.perf_counter() - start,
+                obstacle_coupling_diagnostics={"outcome": "oom"},
+            )
+        else:
+            log_run_timing(
+                timings_dir, tile_id, args.return_period, args.waterlevel_name,
+                elapsed_s=time.perf_counter() - start,
+                obstacle_coupling_diagnostics={"outcome": "solved", **diagnostics},
+            )
+    finally:
+        if local_boundaries_path is not None:
+            try:
+                os.remove(local_boundaries_path)
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":
