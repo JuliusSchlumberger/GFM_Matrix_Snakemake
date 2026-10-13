@@ -58,6 +58,94 @@ _DEFAULT_MEASURE_COLORS = {
 }
 
 
+# ── Continents ────────────────────────────────────────────────────────────────
+CONTINENTS = ["Africa", "Asia", "Europe", "North America", "South America", "Oceania"]
+
+# ISO-3 codes the exposure outputs use but Natural Earth's lowres country table
+# lacks (small islands/territories, mostly) - Natural Earth's own continent
+# convention: Caribbean and Central America under North America, Pacific
+# islands under Oceania. Open-ocean/Antarctic territories with no population
+# (BVT, HMD, IOT) are left out of every continent.
+_ISO_CONTINENT_OVERRIDES = {
+    **dict.fromkeys(["ABW", "AIA", "ATG", "BES", "BLM", "BMU", "BRB", "CUW", "CYM", "DMA", "GLP", "GRD", "KNA",
+                     "LCA", "MAF", "MSR", "MTQ", "SPM", "SXM", "TCA", "VCT", "VGB", "VIR", "XCL"], "North America"),
+    **dict.fromkeys(["GUF", "SGS"], "South America"),
+    **dict.fromkeys(["ALA", "AND", "FRO", "GGY", "GIB", "IMN", "JEY", "LIE", "MCO", "MLT", "SJM", "SMR", "VAT",
+                     "XKO"], "Europe"),
+    **dict.fromkeys(["COM", "CPV", "MUS", "MYT", "REU", "SHN", "STP", "SYC"], "Africa"),
+    **dict.fromkeys(["BHR", "HKG", "MAC", "MDV", "SGP", "XAD", "XNC", "PIS", "SP-", "XCA"], "Asia"),
+    **dict.fromkeys(["ASM", "CCK", "COK", "CXR", "FSM", "GUM", "KIR", "MHL", "MNP", "NFK", "NIU", "NRU", "PCN",
+                     "PLW", "PYF", "TKL", "TON", "TUV", "UMI", "WLF", "WSM"], "Oceania"),
+}
+
+
+def iso_to_continent(isos) -> dict[str, str]:
+    """{ISO-3: continent} for every ISO in `isos` that belongs to one of
+    CONTINENTS - Natural Earth lowres's own `continent` field, plus
+    _ISO_CONTINENT_OVERRIDES for the codes that table lacks. ISOs with no
+    continent (open ocean, Antarctica, unknown codes) are left out."""
+    import warnings
+
+    import geopandas as gpd
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        world = gpd.read_file(gpd.datasets.get_path("naturalearth_lowres"))
+    lookup = {str(r.iso_a3).strip(): r.continent for r in world.itertuples() if str(r.iso_a3).strip() not in ("-99", "")}
+    lookup.update(_ISO_CONTINENT_OVERRIDES)
+    return {iso: lookup[iso] for iso in isos if lookup.get(iso) in CONTINENTS}
+
+
+def draw_ember_panel(
+    ax: plt.Axes,
+    matrix: np.ndarray,
+    slr_mm: np.ndarray,
+    growth_rates: np.ndarray,
+    cmap: str = "YlOrRd",
+    vmax: float | None = None,
+    n_contours: int = 6,
+    contour_labels: bool = True,
+    fontsize: float = 10,
+    log_vmin: float | None = None,
+    label_fontsize: float | None = None,
+):
+    """The burning-ember heatmap + contours on an existing axis - the
+    scenario-neutral impact matrix only (no SSP trajectories, no SLR
+    uncertainty subplot; see plot_burning_ember for those). Returns the image
+    for a colorbar.
+
+    `log_vmin`: logarithmic colour scale from log_vmin to vmax (values below
+    are drawn at log_vmin) with contours at 1-2-5 steps per decade, instead of
+    the default linear scale from 0 with `n_contours` evenly spaced contours."""
+    slr_x = np.asarray(slr_mm, dtype=float) / 1000.0
+    gr_y = np.asarray(growth_rates, dtype=float) * 100.0
+    vmax_c = vmax if vmax is not None else (float(np.nanmax(matrix)) or 1.0)
+    extent = [slr_x[0], slr_x[-1], gr_y[0], gr_y[-1]]
+    if log_vmin is not None:
+        shown = np.clip(matrix, log_vmin, None)
+        im = ax.imshow(shown, origin="lower", aspect="auto", extent=extent, cmap=cmap,
+                       norm=mcolors.LogNorm(vmin=log_vmin, vmax=vmax_c), interpolation="bilinear")
+        decades = range(int(np.floor(np.log10(log_vmin))), int(np.ceil(np.log10(vmax_c))) + 1)
+        levels = [m * 10.0 ** d for d in decades for m in (1, 2, 5) if log_vmin < m * 10.0 ** d < vmax_c]
+        if levels and np.nanmax(matrix) > levels[0]:
+            ax.contour(slr_x, gr_y, shown, levels=levels, colors="k", linewidths=0.7, alpha=0.6)
+        ax.axhline(0, color="k", linewidth=0.8, linestyle="--", alpha=0.5)
+        ax.tick_params(axis="both", labelsize=max(6, fontsize - 1))
+        return im
+    im = ax.imshow(matrix, origin="lower", aspect="auto", extent=extent,
+                   cmap=cmap, vmin=0, vmax=vmax_c, interpolation="bilinear")
+    levels = np.linspace(0, vmax_c, n_contours + 1)[1:]
+    if np.nanmax(matrix) > levels[0]:
+        cs = ax.contour(slr_x, gr_y, matrix, levels=levels, colors="k", linewidths=0.8, alpha=0.7)
+        if contour_labels:
+            for lbl in ax.clabel(cs, inline=True, fontsize=label_fontsize or max(6, fontsize - 3),
+                                 fmt=lambda v: f"{v / 1e6:g} M" if v >= 1e6 else f"{v / 1e3:g} k"):
+                lbl.set_bbox(dict(facecolor="white", edgecolor="none", alpha=0.7, pad=1))
+    ax.axhline(0, color="k", linewidth=0.8, linestyle="--", alpha=0.5)
+    ax.tick_params(axis="both", labelsize=max(6, fontsize - 1))
+    return im
+
+
 def ssp_rcp_label(ssp: str, ssp_rcp_codes: dict[str, int] | None) -> str:
     """'SSP2' -> 'SSP2-RCP4.5' using the CMIP6 code's last two digits as the
     RCP value (naming convention: ssp245 = SSP2 + RCP4.5, ssp585 = SSP5 +

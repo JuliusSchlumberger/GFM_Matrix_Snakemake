@@ -565,7 +565,8 @@ analysis: # Used by: analysis/run_analysis.py
   # validate_country.py (validation.flood_totals_dir below)
   plot_burning_ember:    true   # impact-matrix (SLR × growth) figures
   plot_adaptation_bars:  false   # grouped bar charts per adaptation strategy
-  plot_timeseries:       true   # EAI along SSP SLR trajectories over time
+  plot_timeseries:       true   # EAI along SSP SLR trajectories over time (global, per country, per continent)
+  plot_tipping_points:   true   # tipping-point figure (visualization.tipping_points)
   plot_world_maps:       false  # world choropleth maps (slow for global runs)
 
   avoid_worker_memory_budget_gb: 4 # number of feasible parallelization stream
@@ -589,6 +590,27 @@ visualization:
   highlight_years: [2050, 2100]
 
   country_eai_vmax: 1000000 # Fixed y-axis / colour-scale cap (EAI, people)
+
+  top_countries_ember: # plot_burning_ember.py: grid of no-adaptation ember panels for the n countries
+    n: 12              # with the highest EAI at rank_slr_mm SLR and today's population
+    rank_slr_mm: 1400
+    ncols: 4
+    vmax: 10000000     # shared linear colour scale 0..vmax (people/yr); higher values saturate
+    ssp_pathways: false # true: overlay each SSP-RCP's pathway (median SLR x national SSP population) per panel
+
+  ember_country_selection: # plot_burning_ember.py: no-adaptation ember panels for hand-picked countries of
+    # similar EAI magnitude (max 1-2.5 M at 1.5 m SLR / +150 %), one shared colorbar, ordered from the
+    # earliest response to SLR to the latest threshold (SLR at which 20 % of the 0-1.5 m rise is reached):
+    countries: [MOZ, CMR, FRA, COL, PRK, ITA, KOR, MEX, GBR, TWN, PAK, RUS]
+    ncols: 4
+    n_contours: 5          # labelled contour lines, evenly spaced up to the shared colour-scale maximum
+
+  tipping_points: # plot_tipping_points.py: when does a country's EAI exceed a fixed number of people?
+    countries: [VNM, NLD, NGA]
+    eai_threshold: 1000000        # people per year
+    per_country_eai_threshold: {} # optional overrides, e.g. {NLD: 100000}
+    design_intensity: SLR_1000    # adaptation design the strategies' isolines use
+    strategies: [baseline, protect, avoid, retreat, protect_avoid] # missing files are skipped
 
   # ── SSP SLR trajectory CSV ────────────────────────────────────────────────
   slr_trajectories_csv: "{processed_inputs_dir}/slr_trajectories_global_median.csv"

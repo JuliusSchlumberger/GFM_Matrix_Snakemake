@@ -6,6 +6,10 @@ compute_exposure_analysis.py: exposure_{label}_ssp.csv, one column per
 population growth factor at file-creation time — no further SLR/growth
 interpolation needed here.
 
+Writes one figure globally, one per country (country/) and one per continent
+(continent/, EAI summed over the continent's countries - Natural Earth's six
+continents via visualization.iso_to_continent).
+
 Usage:
     python snakemake_workflow/analysis/plot_timeseries.py \\
         --config  snakemake_workflow/config/config.yml \\
@@ -22,7 +26,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import load_config, retry_transient_io  # noqa: E402
-from visualization import ssp_rcp_label  # noqa: E402
+from visualization import CONTINENTS, iso_to_continent, ssp_rcp_label  # noqa: E402
 
 
 def _timeseries_figure(
@@ -36,7 +40,7 @@ def _timeseries_figure(
     slr_intensities: list[str],
     dpi: int,
     ssp_rcp_codes: dict[str, int] | None = None,
-    y_max: float = 2_000_000.0,
+    y_max: float | None = 2_000_000.0,
     level_linestyles: list[str] = ("--", ":", "-."),
     baseline_linestyle: str = "-",
 ) -> plt.Figure:
@@ -61,6 +65,7 @@ def _timeseries_figure(
     ssps_avail = [s for s in ssps if any(c.startswith(f"EAI_{s}_") for c in any_df.columns)]
     fig, axes = plt.subplots(1, len(ssps_avail), figsize=(4 * len(ssps_avail) + 2, 5),
                               sharey=True, dpi=dpi)
+    data_max = 0.0  # largest plotted EAI over every panel (for y_max=None)
     if len(ssps_avail) == 1:
         axes = [axes]
 
@@ -78,6 +83,7 @@ def _timeseries_figure(
             if ts_vals:
                 yrs, vals = zip(*ts_vals)
                 series_by_label[label] = pd.Series(vals, index=yrs)
+                data_max = max(data_max, max(vals))
 
         # Group labels by measure (baseline / protect / retreat / avoid /
         # protect_avoid) so multi-intensity measures get a min-max envelope
@@ -111,7 +117,7 @@ def _timeseries_figure(
         ax.set_title(f"Dynamic flood risk under {ssp_rcp_label(ssp, ssp_rcp_codes)}",
                      color=col, fontsize=10)
         ax.set_xlabel("Year", fontsize=9)
-        ax.set_ylim(0, y_max)
+        ax.set_ylim(0, y_max if y_max is not None else 1.05 * data_max or 1.0)
         ax.grid(alpha=0.3)
 
     axes[0].set_ylabel("EAI (people)", fontsize=10)
@@ -170,7 +176,7 @@ def main() -> None:
 
     all_isos = next(iter(eai_by_label.values())).index.tolist()
 
-    def _save(isos, label, fname):
+    def _save(isos, label, fname, y_max=y_max):
         fig = _timeseries_figure(eai_by_label, ssps, years, isos, label,
                                   m_colors, s_colors, slr_intensities, dpi,
                                   ssp_rcp_codes=ssp_rcp_codes, y_max=y_max,
@@ -179,7 +185,9 @@ def main() -> None:
         fig.savefig(fname, bbox_inches="tight")
         plt.close(fig)
 
-    _save(all_isos, "Global", out_dir / "timeseries_global.png")
+    # The fixed country_eai_vmax cap keeps country figures comparable; global
+    # and continent totals are far larger, so those axes scale to their data.
+    _save(all_isos, "Global", out_dir / "timeseries_global.png", y_max=None)
     print("Global done.")
 
     country_dir = out_dir / "country"
@@ -188,15 +196,16 @@ def main() -> None:
         _save([iso], iso, country_dir / f"timeseries_{iso}.png")
     print(f"Per-country done → {country_dir}")
 
-    first_df = next(iter(eai_by_label.values()))
-    if "Region" in first_df.columns:
-        cont_dir = out_dir / "continent"
-        retry_transient_io(cont_dir.mkdir, exist_ok=True)
-        for reg in first_df["Region"].dropna().unique():
-            reg_isos = first_df.index[first_df["Region"] == reg].tolist()
-            safe = reg.replace(" ", "_").replace("/", "-")
-            _save(reg_isos, reg, cont_dir / f"timeseries_{safe}.png")
-        print(f"Per-continent done → {cont_dir}")
+    # One figure per continent: EAI summed over the continent's countries
+    # (visualization.iso_to_continent - Natural Earth's six continents).
+    continent_of = iso_to_continent(all_isos)
+    cont_dir = out_dir / "continent"
+    retry_transient_io(cont_dir.mkdir, exist_ok=True)
+    for continent in CONTINENTS:
+        cont_isos = [iso for iso, c in continent_of.items() if c == continent]
+        if cont_isos:
+            _save(cont_isos, continent, cont_dir / f"timeseries_{continent.replace(' ', '_')}.png", y_max=None)
+    print(f"Per-continent done → {cont_dir}")
 
     print(f"\nAll time series written to: {out_dir}")
 

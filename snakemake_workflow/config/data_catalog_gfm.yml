@@ -411,11 +411,13 @@ ssp_population_growth_factors:
   data_type: DataFrame
   driver: xlsx
   driver_kwargs:
-    sheet_name: "growth_factors"
-    header: 0
-  # Long-format table: columns 'scenario' (SSP), 'region' (country name),
-  # plus one column per year (2020, 2025, …, 2100).  Values are cumulative
-  # growth factors relative to 2020 (2020 always = 1.0).
+    sheet_name: "SSP_scenarios"
+    header: 1
+  # Read by src/population_growth.load_ssp_growth_factors, which computes the
+  # growth factors itself: population per (scenario, region) and year in sheet
+  # 'SSP_scenarios' (2025-2100, million) divided by the 2020 population in
+  # sheet 'historical_data_SSP'. The workbook's own 'growth_factors' /
+  # 'relevant_list' sheets are NOT used: their lookup copied SSP1 into every SSP.
   path: inputs/SSPs/getting_SSP_population_growth_factors.xlsx
   filesystem: local
   meta:
