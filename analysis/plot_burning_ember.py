@@ -29,7 +29,7 @@ Usage:
     python snakemake_workflow/analysis/plot_burning_ember.py \\
         --config  snakemake_workflow/config/config.yml \\
         --expdir  D:/GFM/merged_results/exposure \\
-        [--outdir D:/GFM/figures/burning_ember]
+        [--outdir D:/GFM/figures]
 """
 
 import argparse
@@ -331,9 +331,7 @@ def main() -> None:
     highlight_years = viz.get("highlight_years", [2050, 2100])
 
     exp_dir = Path(args.expdir)
-    out_dir = Path(args.outdir or str(
-        Path(viz.get("output_dir", f"{cfg['paths']['root']}/figures")) / "burning_ember"
-    ))
+    out_dir = Path(args.outdir or viz.get("output_dir", f"{cfg['paths']['root']}/figures"))
 
     # SSP SLR trajectories: median (p50) drives the overlay line; full
     # p17/p50/p83 (at the highlight years only) drives the uncertainty subplot.
@@ -375,10 +373,12 @@ def main() -> None:
 
     country_vmax = float(viz.get("country_eai_vmax", 2_000_000.0))
 
+    figs = viz.get("burning_ember_figures", {})  # which figures to write
+    retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
+
     # ── Top-N countries (no adaptation), one grid figure ─────────────────────
     top_cfg = viz.get("top_countries_ember", {})
-    if scenario_files["baseline"].exists():
-        retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
+    if scenario_files["baseline"].exists() and figs.get("top_countries", False):
         n_top = int(top_cfg.get("n", 12))
         plot_top_countries_ember(
             scenario_files["baseline"], iso_to_name, viz, out_dir / f"burning_ember_top{n_top}_baseline.png",
@@ -388,15 +388,17 @@ def main() -> None:
             slr_traj_full=traj_full if traj_path and Path(traj_path).exists() else None,
             ssps=ssps, ssp_rcp_codes=viz.get("ssp_rcp_codes", {}),
         )
+    if scenario_files["baseline"].exists():
         sel_cfg = viz.get("ember_country_selection", {})
-        if sel_cfg.get("countries"):
+        if sel_cfg.get("countries") and figs.get("selection", False):
             plot_country_selection_ember(scenario_files["baseline"], iso_to_name, viz,
                                          out_dir / "burning_ember_selection_baseline.png", sel_cfg["countries"],
                                          ncols=int(sel_cfg.get("ncols", 4)),
                                          n_contours=int(sel_cfg.get("n_contours", 5)))
         set_cfg = viz.get("ember_country_set", {})
         ext_cfg = viz.get("extended_pathways", {})
-        if set_cfg.get("countries") and growth_df is not None and traj_path and Path(traj_path).exists():
+        if (set_cfg.get("countries") and figs.get("country_set", True) and growth_df is not None
+                and traj_path and Path(traj_path).exists()):
             plot_country_set_ember(
                 scenario_files["baseline"], iso_to_name, viz, out_dir / "burning_ember_country_set_baseline.png",
                 set_cfg["countries"], growth_df, traj_full, list(ext_cfg.get("ssps", ["SSP2", "SSP5"])),
@@ -405,7 +407,8 @@ def main() -> None:
                 vmax=float(set_cfg.get("vmax", 1e7)), window=set_cfg.get("display"),
                 ssp_rcp_codes=viz.get("ssp_rcp_codes", {}))
 
-    for scenario_label, growth_matrix_path in scenario_files.items():
+    # ── Global + per-country ember per strategy / intensity (slow) ────────────
+    for scenario_label, growth_matrix_path in (scenario_files.items() if figs.get("per_scenario", False) else []):
         if not growth_matrix_path.exists():
             print(f"  Skipping {scenario_label}: missing {growth_matrix_path.name}.")
             continue

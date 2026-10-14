@@ -8,18 +8,18 @@ after that from illustrative continuation variants (src/population_extension.py 
 not projections). EAI along a pathway: src/pathways.py (bilinear interpolation; linear
 extrapolation where a pathway leaves the matrix).
 
-Writes to <figures>/extended_pathways/:
-  ember_extended_pathways.png   no-adaptation ember panels (full matrix extent) for
-                                extended_pathways.ember_countries, each SSP's pathway solid to
-                                2100 and branching into one line per population variant after.
-  timeseries_extended.png       EAI 2020-to_year for the world and each continent (rows) and
-                                each SSP (columns), per strategy in extended_pathways.strategies:
-                                one line to 2100, then one per variant with the range shaded.
-  extended_pathways.csv         EAI per (strategy, ISO, SSP, variant, year), every 5 years.
+Writes to --outdir (default: visualization.output_dir):
+  timeseries_extended_continents.png  EAI 2020-to_year per continent (rows, by EAI in 2100) and
+                                      SSP (columns), per strategy in extended_pathways.strategies:
+                                      one line to 2100, then one per variant with the range shaded.
+  extended_pathways.csv               EAI per (strategy, ISO, SSP, variant, year), every 5 years.
+  ember_extended_pathways.png         only with extended_pathways.ember: true - no-adaptation ember
+                                      panels for extended_pathways.ember_countries, each SSP's
+                                      pathway branching into the population variants after 2100.
 
 Usage:
     python analysis/plot_extended_pathways.py --config snakemake_workflow/config/config.yml \\
-        --expdir <merged_results>/exposure [--outdir <figures>/extended_pathways]
+        --expdir <merged_results>/exposure [--outdir <figures>]
 """
 
 import argparse
@@ -84,7 +84,7 @@ def main() -> None:
     variants: dict[str, dict] = ep.get("variants") or {"stabilise": {"mode": "constant"}}
     labels = [l for l in ep.get("strategies", ["baseline"])
               if (Path(args.expdir) / f"exposure_{l}_growth_matrix.csv").exists()]
-    out_dir = Path(args.outdir or Path(viz.get("output_dir", f"{cfg['paths']['root']}/figures")) / "extended_pathways")
+    out_dir = Path(args.outdir or viz.get("output_dir", f"{cfg['paths']['root']}/figures"))
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
     s_colors = viz.get("ssp_colors", {})
     m_colors = viz.get("measure_colors", {})
@@ -128,7 +128,7 @@ def main() -> None:
     i_end = int(LAST_SSP_YEAR - years[0])
 
     # ── ember panels with branching pathways ──────────────────────────────────────────────
-    countries = [c for c in ep.get("ember_countries", []) if c in isos]
+    countries = [c for c in ep.get("ember_countries", []) if c in isos] if ep.get("ember", False) else []
     if countries and "baseline" in grids:
         eai_grid, slr_mm, gfr = grids["baseline"]
         ncols = 3
@@ -176,15 +176,15 @@ def main() -> None:
         plt.close(fig)
         print("Written: ember_extended_pathways.png")
 
-    # ── time series to to_year: world + continents x SSPs ────────────────────────────────
+    # ── time series to to_year: continents (rows, by EAI in 2100) x SSPs ─────────────────
     cont_of = iso_to_continent(isos)
-    groups = {"World": isos, **{c: [i for i, k in cont_of.items() if k == c] for c in CONTINENTS}}
+    groups = {c: [i for i, k in cont_of.items() if k == c] for c in CONTINENTS}
     groups = {g: v for g, v in groups.items() if v}
     sort_label = "baseline" if "baseline" in labels else labels[0]
     end_val = {g: max(sum(eai[(sort_label, i, s, v)][i_end] for i in members) for s in ssps for v in variants)
-               for g, members in groups.items() if g != "World"}
-    order = ["World"] + sorted(end_val, key=end_val.get, reverse=True)
-    fig, axes = plt.subplots(len(order), len(ssps), figsize=(5.2 * len(ssps) + 3.0, 2.6 * len(order) + 0.6),
+               for g, members in groups.items()}
+    order = sorted(end_val, key=end_val.get, reverse=True)
+    fig, axes = plt.subplots(len(order), len(ssps), figsize=(5.6 * len(ssps) + 0.8, 2.2 * len(order) + 0.6),
                              sharex=True, sharey="row", squeeze=False)
     for row, g in zip(axes, order):
         top = 0.0
@@ -202,25 +202,29 @@ def main() -> None:
             ax.axvline(LAST_SSP_YEAR, color="0.4", lw=0.8, ls=":")
             ax.grid(alpha=0.3)
             ax.yaxis.set_major_formatter(plt.FuncFormatter(_people))
-        row[0].set_ylim(0, 1.05 * top or 1.0)
-        row[0].set_ylabel("EAI (people)", fontsize=10)
-        row[0].annotate(g, xy=(0, 0.5), xycoords="axes fraction", xytext=(-62, 0), textcoords="offset points",
-                        rotation=90, ha="center", va="center", fontsize=13, fontweight="bold")
+            ax.yaxis.set_major_locator(plt.MaxNLocator(4))
+            ax.tick_params(labelsize=12)
+        # extra headroom in the first row, which holds the legend in its upper-left corner
+        row[0].set_ylim(0, (1.55 if g == order[0] else 1.05) * top or 1.0)
+        row[0].set_ylabel("EAI (people)", fontsize=12)
+        row[0].annotate(g, xy=(0, 0.5), xycoords="axes fraction", xytext=(-78, 0), textcoords="offset points",
+                        rotation=90, ha="center", va="center", fontsize=15, fontweight="bold")
     for ax, ssp in zip(axes[0], ssps):
-        ax.set_title(ssp_rcp_label(ssp, rcp), fontsize=12)
+        ax.set_title(ssp_rcp_label(ssp, rcp), fontsize=15)
     for ax in axes[-1]:
-        ax.set_xlabel("Year", fontsize=10)
+        ax.set_xlabel("Year", fontsize=13)
         ax.set_xticks(list(range(2025, to_year + 1, 25)))
     fig.tight_layout(rect=(0.03, 0, 1, 1))
     handles = [Patch(color=m_colors.get(l.partition("_SLR_")[0], "#444444"), label=_strategy_name(l)) for l in labels]
     handles += [Line2D([], [], color="0.3", lw=2.0, label=f"to {LAST_SSP_YEAR}: SSP population")]
-    handles += [Line2D([], [], color="0.3", lw=1.8, ls=var_style[v], label=f"population {spec.get('label', v)}")
+    handles += [Line2D([], [], color="0.3", lw=1.8, ls=var_style[v], label=f"after {LAST_SSP_YEAR}: {spec.get('label', v)}")
                 for v, spec in variants.items()]
-    fig.legend(handles=handles, loc="center left", bbox_to_anchor=(1.0, 0.5), fontsize=10, frameon=False,
-               title=f"Strategy / after {LAST_SSP_YEAR}", title_fontsize=10)
-    fig.savefig(out_dir / "timeseries_extended.png", dpi=dpi, bbox_inches="tight")
+    # inside the first panel's upper-left corner, where the series are still low
+    axes[0, 0].legend(handles=handles, loc="upper left", ncol=2, fontsize=10.5, frameon=True, framealpha=0.9,
+                      handlelength=2.2, columnspacing=1.0, borderaxespad=0.3, labelspacing=0.3)
+    fig.savefig(out_dir / "timeseries_extended_continents.png", dpi=dpi, bbox_inches="tight")
     plt.close(fig)
-    print(f"Written: timeseries_extended.png and extended_pathways.csv -> {out_dir}")
+    print(f"Written: timeseries_extended_continents.png and extended_pathways.csv -> {out_dir}")
 
 
 if __name__ == "__main__":

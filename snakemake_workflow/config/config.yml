@@ -572,9 +572,12 @@ analysis: # Used by: analysis/run_analysis.py
   # validate_country.py (validation.flood_totals_dir below)
   plot_burning_ember:    true   # impact-matrix (SLR × growth) figures
   plot_adaptation_bars:  false   # grouped bar charts per adaptation strategy
-  plot_timeseries:       true   # EAI along SSP SLR trajectories over time (global, per country, per continent)
+  plot_timeseries:       false  # EAI along SSP SLR trajectories to 2100 (global, per country, per continent);
+                                # superseded by plot_extended_pathways' continent time series
   plot_tipping_points:   true   # tipping-point figure (visualization.tipping_points)
-  plot_extended_pathways: true  # pathways beyond 2100 through the growth matrices (visualization.extended_pathways)
+  plot_extended_pathways: true  # continent time series to 2150 (visualization.extended_pathways)
+  plot_slr_vs_population: true  # SLR vs population decomposition: waterfalls + scatter (visualization.slr_vs_population)
+  # All figures are written to visualization.output_dir directly (no subdirectories).
   plot_world_maps:       false  # world choropleth maps (slow for global runs)
 
   avoid_worker_memory_budget_gb: 4 # number of feasible parallelization stream
@@ -607,6 +610,12 @@ visualization:
 
   country_eai_vmax: 1000000 # Fixed y-axis / colour-scale cap (EAI, people)
 
+  burning_ember_figures: # plot_burning_ember.py: which figures to write
+    country_set: true     # burning_ember_country_set_baseline.png (ember_country_set, with extended SSP pathways)
+    top_countries: false  # burning_ember_top{n}_baseline.png (top_countries_ember)
+    selection: false      # burning_ember_selection_baseline.png (ember_country_selection)
+    per_scenario: false   # global + per-country ember per strategy/intensity (~200 x 7 figures, slow)
+
   top_countries_ember: # plot_burning_ember.py: grid of no-adaptation ember panels for the n countries
     n: 12              # with the highest EAI at rank_slr_mm SLR and today's population
     rank_slr_mm: 1400
@@ -638,17 +647,28 @@ visualization:
       stabilise: {mode: constant, label: "stabilized"}                           # hold the 2100 level
       trend:     {mode: trend, window: 25, half_life: 50, label: "continue trend"} # 2075-2100 rate, halving every 50 yr
       decline:   {mode: rate, annual: -0.005, label: "slow decline"}             # -0.5 %/yr
-    strategies: [baseline, protect_SLR_500, avoid_SLR_500, retreat_SLR_500] # growth-matrix labels in the time-series figure
+    strategies: [baseline, protect_SLR_500, avoid_SLR_500, retreat_SLR_500, protect_avoid_SLR_500] # growth-matrix
+                       # labels in the continent time series (timeseries_extended_continents.png); missing files skipped
+    ember: false       # true: also ember_extended_pathways.png for ember_countries (superseded by ember_country_set)
     ember_countries: [NGA, EGY, IND, CHN, JPN, USA]
 
+  slr_vs_population: # plot_slr_vs_population.py: no-adaptation EAI change since 2020 split into SLR alone,
+    # population alone and their interaction (waterfalls 2100 and extended_pathways.to_year; scatter 2100)
+    ssps: [SSP2, SSP5]
+    waterfall_n: 20             # countries with the highest EAI in 2100
+    scatter_min_change: 100000  # scatter shows countries whose EAI changes by at least this many people/yr
+    scatter_labels: 18          # name the n countries with the highest EAI in 2100
+
   tipping_points: # plot_tipping_points.py: when does a country's EAI exceed a fixed number of people?
+    to_year: 2150                 # beyond 2100: population follows extended_pathways.variants (first = reference)
+    ssps: [SSP2, SSP5]
     countries: [NGA, EGY, THA]    # all strategies tip by 2100 (at the p83 SLR end): growth-driven,
                                   # delta, and SLR-driven with a shrinking population
     eai_threshold: 500000         # people per year
     per_country_eai_threshold: {EGY: 250000} # optional overrides
     design_intensity: SLR_500     # adaptation design the strategies' isolines use; SLR_1000 is not exceeded
                                   # by 2100 (median SLR <= 0.72 m), so adaptation would never tip
-    strategies: [baseline, protect, avoid, retreat, protect_avoid] # missing files are skipped
+    strategies: [baseline, avoid, protect, retreat, protect_avoid] # rows B, A, P, R, P + A; missing files skipped
 
   # ── SSP SLR trajectory CSV ────────────────────────────────────────────────
   slr_trajectories_csv: "{processed_inputs_dir}/slr_trajectories_global_median.csv"

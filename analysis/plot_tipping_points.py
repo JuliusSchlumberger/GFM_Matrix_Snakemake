@@ -32,7 +32,7 @@ Config (visualization.tipping_points):
 
 Usage:
     python analysis/plot_tipping_points.py --config snakemake_workflow/config/config.yml \\
-        --expdir <merged_results>/exposure [--outdir <figures>/tipping_points]
+        --expdir <merged_results>/exposure [--outdir <figures>]
 """
 
 import argparse
@@ -50,6 +50,7 @@ from matplotlib.lines import Line2D  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pathways import eai_along_pathway, matrix_interpolator, slr_pathway  # noqa: E402
+from population_extension import extend_growth_factors  # noqa: E402
 from population_growth import _build_name_to_iso, interpolate_growth_factor, load_ssp_growth_factors  # noqa: E402
 from visualization import (  # noqa: E402
     _DEFAULT_SLR_COLORS, build_growth_matrix_from_grid, load_growth_matrix_csv,
@@ -57,12 +58,16 @@ from visualization import (  # noqa: E402
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+# right-column row labels (A + R: a future avoid + retreat strategy)
+STRATEGY_ABBREV = {"baseline": "B", "avoid": "A", "protect": "P", "retreat": "R", "protect_avoid": "P + A",
+                   "avoid_retreat": "A + R"}
 STRATEGY_NAMES = {"baseline": "No adaptation", "protect": "Protect", "avoid": "Avoid", "retreat": "Retreat",
                   "protect_avoid": "Protect + Avoid"}
 # isolines: colour is reserved for the SSPs, so strategies differ by line style
 STRATEGY_STYLES = {"baseline": "-", "protect": "--", "avoid": ":", "retreat": "-.",
                    "protect_avoid": (0, (8, 2, 1, 2, 1, 2))}
 YEARS = np.arange(2020, 2101)
+LAST_SSP_YEAR = 2100  # IIASA SSP population projections end here
 
 
 def _growth_matrix_path(exp_dir: Path, strategy: str, design: str) -> Path:
@@ -70,16 +75,16 @@ def _growth_matrix_path(exp_dir: Path, strategy: str, design: str) -> Path:
     return exp_dir / f"exposure_{label}_growth_matrix.csv"
 
 
-def _first_crossing(eai: np.ndarray, threshold: float) -> float | None:
-    """First (fractional) year in YEARS where `eai` reaches `threshold`, or None."""
+def _first_crossing(eai: np.ndarray, threshold: float, years: np.ndarray = YEARS) -> float | None:
+    """First (fractional) year in `years` where `eai` reaches `threshold`, or None."""
     above = np.nonzero(eai >= threshold)[0]
     if len(above) == 0:
         return None
     k = int(above[0])
     if k == 0:
-        return float(YEARS[0])
+        return float(years[0])
     e0, e1 = eai[k - 1], eai[k]
-    return float(YEARS[k - 1] + (threshold - e0) / (e1 - e0))
+    return float(years[k - 1] + (threshold - e0) / (e1 - e0))
 
 
 def main() -> None:
@@ -99,38 +104,47 @@ def main() -> None:
     exp_dir = Path(args.expdir)
     strategies = [s for s in tp.get("strategies", list(STRATEGY_NAMES))
                   if _growth_matrix_path(exp_dir, s, design).exists()]
-    out_dir = Path(args.outdir or Path(viz.get("output_dir", f"{cfg['paths']['root']}/figures")) / "tipping_points")
+    out_dir = Path(args.outdir or viz.get("output_dir", f"{cfg['paths']['root']}/figures"))
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
     s_colors = viz.get("ssp_colors") or _DEFAULT_SLR_COLORS
     ssp_rcp_codes = viz.get("ssp_rcp_codes", {})
 
     traj = load_slr_trajectories(viz["slr_trajectories_csv"])
-    ssps = [s for s in cfg.get("population_growth", {}).get("ssps", list(s_colors))
+    ssps = [s for s in tp.get("ssps", cfg.get("population_growth", {}).get("ssps", list(s_colors)))
             if all(f"{s}_{p}" in traj.columns for p in ("p17", "p50", "p83"))]
-    slr_paths = {(s, p): slr_pathway(traj, f"{s}_{p}", YEARS) for s in ssps for p in ("p17", "p50", "p83")}  # mm
+    to_year = min(int(tp.get("to_year", LAST_SSP_YEAR)), int(traj.index.max()))
+    years = np.arange(2020, to_year + 1)
+    i2100 = int(min(LAST_SSP_YEAR, to_year) - years[0])
+    slr_paths = {(s, p): slr_pathway(traj, f"{s}_{p}", years) for s in ssps for p in ("p17", "p50", "p83")}  # mm
 
     catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
     growth_df = load_ssp_growth_factors(Path(catalog.get_source("ssp_population_growth_factors").path))
+    # population after 2100: the illustrative continuation variants (visualization.extended_pathways)
+    variants = (viz.get("extended_pathways", {}).get("variants") if to_year > LAST_SSP_YEAR else None) \
+        or {"ssp": {"mode": "constant", "label": "SSP"}}
+    ext = {v: extend_growth_factors(growth_df, spec, to_year=to_year) for v, spec in variants.items()}
+    v0 = next(iter(variants))  # reference variant: dot and thick bar
     iso_to_name = {v: k for k, v in _build_name_to_iso().items()}
 
     grids = {s: load_growth_matrix_csv(_growth_matrix_path(exp_dir, s, design)) for s in strategies}
 
     fs = 11
-    fig, axes = plt.subplots(len(countries), 2, figsize=(15, 4.4 * len(countries) + 2.0),
-                             gridspec_kw={"width_ratios": [1.15, 1], "wspace": 0.25, "hspace": 0.35}, squeeze=False)
-    fig.subplots_adjust(top=1 - 0.6 / (4.4 * len(countries) + 2.0), bottom=1.7 / (4.4 * len(countries) + 2.0))
+    height = 4.0 * len(countries) + 1.6
+    fig, axes = plt.subplots(len(countries), 2, figsize=(15, height), sharex="col",
+                             gridspec_kw={"width_ratios": [1.15, 1], "wspace": 0.12, "hspace": 0.05}, squeeze=False)
+    fig.subplots_adjust(left=0.1, right=0.98, top=1 - 0.1 / height, bottom=1.6 / height)
     rows = []
     for r, iso in enumerate(countries):
         thr = thr_by_iso.get(iso, default_thr)
         ax_l, ax_r = axes[r]
-        growth_paths = {s: np.array([interpolate_growth_factor(growth_df, s, iso, int(y), 1.0) for y in YEARS]) - 1.0
-                        for s in ssps}  # fraction
+        growth_paths = {(s, v): np.array([interpolate_growth_factor(ext[v], s, iso, int(y), 1.0) for y in years]) - 1.0
+                        for s in ssps for v in variants}  # fraction
         g_lo = min(-0.5, min(p.min() for p in growth_paths.values()) - 0.05)
         g_hi = max(1.5, max(p.max() for p in growth_paths.values()) + 0.05)
         g_dense = np.linspace(g_lo, g_hi, 121)
 
-        crossings: dict[tuple[str, str], dict[str, float | None]] = {}
+        crossings: dict[tuple[str, str], dict[tuple[str, str], float | None]] = {}
         for k, strat in enumerate(strategies):
             eai_grid, slr_mm, growth_fracs = grids[strat]
             if iso not in eai_grid.index:
@@ -143,79 +157,97 @@ def main() -> None:
                 ax_l.contour(np.array(slr_mm) / 1000.0, g_dense * 100.0, dense, levels=[thr],
                              colors="k", linewidths=1.8, linestyles=[STRATEGY_STYLES.get(strat, "-")])
             for ssp in ssps:
-                years = {}
-                for p in ("p17", "p50", "p83"):
-                    eai = eai_along_pathway(matrix, slr_mm, growth_fracs, slr_paths[(ssp, p)], growth_paths[ssp])
-                    years[p] = _first_crossing(eai, thr)
-                crossings[(strat, ssp)] = years
-                rows.append({"ISO": iso, "threshold": thr, "strategy": strat, "design_intensity": design,
-                             "ssp": ssp, **{f"year_{p}": years[p] for p in ("p17", "p50", "p83")}})
-                if years["p50"] is not None:
-                    t = years["p50"]
-                    ax_l.plot(np.interp(t, YEARS, slr_paths[(ssp, "p50")]) / 1000.0,
-                              np.interp(t, YEARS, growth_paths[ssp]) * 100.0, "o", ms=8,
-                              mfc="w", mec=s_colors.get(ssp, "grey"), mew=2.0, zorder=7)
+                yrs = {}
+                for v in variants:
+                    for p in ("p17", "p50", "p83"):
+                        eai = eai_along_pathway(matrix, slr_mm, growth_fracs, slr_paths[(ssp, p)], growth_paths[(ssp, v)])
+                        yrs[(v, p)] = _first_crossing(eai, thr, years)
+                    rows.append({"ISO": iso, "threshold": thr, "strategy": strat, "design_intensity": design,
+                                 "ssp": ssp, "population_after_2100": v,
+                                 **{f"year_{p}": yrs[(v, p)] for p in ("p17", "p50", "p83")}})
+                    t = yrs[(v, "p50")]
+                    if t is not None and v == v0:  # tipping point on the reference pathway
+                        ax_l.plot(np.interp(t, years, slr_paths[(ssp, "p50")]) / 1000.0,
+                                  np.interp(t, years, growth_paths[(ssp, v)]) * 100.0, "o", ms=8,
+                                  mfc="w", mec=s_colors.get(ssp, "grey"), mew=2.0, zorder=7)
+                crossings[(strat, ssp)] = yrs
 
-        # SSP pathways (median SLR), years marked
+        # SSP pathways (median SLR): solid to 2100, then one branch per population variant
         for ssp in ssps:
+            c = s_colors.get(ssp, "grey")
             x = slr_paths[(ssp, "p50")] / 1000.0
-            y = growth_paths[ssp] * 100.0
-            ax_l.plot(x, y, "-", color=s_colors.get(ssp, "grey"), lw=2.5, zorder=5)
+            y = growth_paths[(ssp, v0)] * 100.0
+            ax_l.plot(x[:i2100 + 1], y[:i2100 + 1], "-", color=c, lw=2.5, zorder=5)
             for yr in (2050, 2100):
-                i = int(yr - YEARS[0])
-                ax_l.plot(x[i], y[i], "s", color=s_colors.get(ssp, "grey"), ms=5, zorder=6)
-            ax_l.annotate("2100", (x[-1], y[-1]), textcoords="offset points", xytext=(4, -10),
-                          fontsize=fs - 3, color=s_colors.get(ssp, "grey"))
+                if yr <= to_year:
+                    i = int(yr - years[0])
+                    ax_l.plot(x[i], y[i], "D", color=c, ms=4.5, zorder=6)
+            if to_year > LAST_SSP_YEAR:  # envelope over the population variants after 2100
+                yv = np.vstack([growth_paths[(ssp, v)][i2100:] for v in variants]) * 100.0
+                ax_l.fill_between(x[i2100:], yv.min(axis=0), yv.max(axis=0), color=c, alpha=0.25, lw=0, zorder=4)
+                ax_l.plot(x[i2100:], yv.min(axis=0), "-", color=c, lw=0.8, zorder=4)
+                ax_l.plot(x[i2100:], yv.max(axis=0), "-", color=c, lw=0.8, zorder=4)
         ax_l.axhline(0, color="k", lw=0.8, ls="--", alpha=0.5)
         ax_l.set_xlim(0, 1.5)
         ax_l.set_ylim(g_lo * 100.0, g_hi * 100.0)
         ax_l.grid(alpha=0.25)
         ax_l.set_ylabel("Population change\nrelative to 2020 (%)", fontsize=fs)
-        ax_l.set_title(f"{iso_to_name.get(iso, iso)}: EAI = {thr:,.0f} people/yr", fontsize=fs + 1, loc="left")
+        ax_l.annotate(iso_to_name.get(iso, iso), xy=(0, 0.5), xycoords="axes fraction", xytext=(-72, 0),
+                      textcoords="offset points", rotation=90, ha="center", va="center", fontsize=fs + 3,
+                      fontweight="bold")
+        ax_l.text(0.98, 0.96, f"tipping point: EAI = {thr:,.0f} people/yr", transform=ax_l.transAxes,
+                  ha="right", va="top", fontsize=fs, bbox=dict(facecolor="white", edgecolor="0.6", alpha=0.9, pad=3))
         if r == len(countries) - 1:
             ax_l.set_xlabel("Global mean sea-level rise (m)", fontsize=fs)
 
         # tipping years: one row per strategy, SSPs offset within the row
         offsets = np.linspace(-0.25, 0.25, len(ssps)) if len(ssps) > 1 else np.zeros(1)
-        x_end = 2100
+        x_end = float(to_year)
         for k, strat in enumerate(strategies):
             for ssp, off in zip(ssps, offsets):
-                years = crossings.get((strat, ssp))
-                if not years:
+                yrs = crossings.get((strat, ssp))
+                if not yrs:
                     continue
                 c = s_colors.get(ssp, "grey")
                 yk = k + off
-                early, late = years["p83"], years["p17"]
-                if early is not None:
-                    ax_r.plot([early, late if late is not None else x_end], [yk, yk], "-", color=c, lw=2.5,
+                # one bar over the whole uncertainty: SLR p17-p83 x population variants after 2100
+                all_y = [t for t in yrs.values() if t is not None]
+                if all_y:
+                    open_end = any(t is None for t in yrs.values())
+                    ax_r.plot([min(all_y), x_end if open_end else max(all_y)], [yk, yk], "-", color=c, lw=2.5,
                               solid_capstyle="butt")
-                    if late is None:
+                    if open_end:
                         ax_r.plot(x_end, yk, ">", color=c, ms=6)
-                if years["p50"] is not None:
-                    ax_r.plot(years["p50"], yk, "o", color=c, ms=7, mec="k", mew=0.6, zorder=5)
-                elif early is None:
+                if yrs[(v0, "p50")] is not None:
+                    ax_r.plot(yrs[(v0, "p50")], yk, "o", color=c, ms=7, mec="k", mew=0.6, zorder=5)
+                elif not all_y:
                     ax_r.plot(x_end, yk, ">", mfc="none", mec=c, ms=7)
+        if to_year > LAST_SSP_YEAR:
+            ax_r.axvline(LAST_SSP_YEAR, color="0.4", lw=0.8, ls=":")
         ax_r.set_yticks(range(len(strategies)))
-        ax_r.set_yticklabels([STRATEGY_NAMES.get(s, s) for s in strategies], fontsize=fs)
+        ax_r.set_yticklabels([STRATEGY_ABBREV.get(s, s) for s in strategies], fontsize=fs + 2, fontweight="bold")
         ax_r.set_ylim(len(strategies) - 0.5, -0.5)
-        ax_r.set_xlim(2020, 2103)
+        ax_r.set_xlim(2020, to_year + 3)
         ax_r.grid(axis="x", alpha=0.3)
-        ax_r.set_title(f"Year EAI first exceeds {thr:,.0f} people/yr", fontsize=fs + 1, loc="left")
         if r == len(countries) - 1:
-            ax_r.set_xlabel("Year", fontsize=fs)
+            ax_r.set_xlabel("Year EAI first exceeds the tipping point", fontsize=fs)
 
+    design_m = f"{int(design.split('_')[1]) / 1000:g} m"
     handles = [Line2D([], [], color="k", lw=1.8, ls=STRATEGY_STYLES.get(s, "-"),
-                      label=f"{STRATEGY_NAMES.get(s, s)} tipping isoline") for s in strategies]
+                      label=f"{STRATEGY_NAMES.get(s, s)} ({STRATEGY_ABBREV.get(s, s)}) tipping isoline"
+                      + ("" if s == "baseline" else f", design {design_m} SLR")) for s in strategies]
     handles += [Line2D([], [], color=s_colors.get(s, "grey"), lw=2.5, label=ssp_rcp_label(s, ssp_rcp_codes))
                 for s in ssps]
-    handles += [Line2D([], [], ls="none", marker="s", color="k", ms=5, label="pathway in 2050 and 2100"),
-                Line2D([], [], ls="none", marker="o", mfc="w", mec="k", mew=2.0, label="tipping point (median SLR)"),
-                Line2D([], [], color="k", lw=2.5, label="tipping year, SLR p17-p83 range"),
-                Line2D([], [], ls="none", marker=">", mfc="none", mec="k", label="not reached by 2100")]
-    fig.legend(handles=handles, loc="lower center", ncol=4, fontsize=fs - 1, frameon=False, bbox_to_anchor=(0.5, 0.0))
-    design_m = f"{int(design.split('_')[1]) / 1000:g} m"
-    fig.suptitle(f"Tipping points: expected annual impact under SSP-RCP scenarios and adaptation strategies "
-                 f"(design for {design_m} SLR)", fontsize=fs + 3, y=1.0)
+    handles += [Line2D([], [], ls="none", marker="D", color="k", ms=4.5, label="pathway in 2050 and 2100"),
+                Line2D([], [], ls="none", marker="o", mfc="w", mec="k", mew=2.0, label="tipping point (median SLR)")]
+    if to_year > LAST_SSP_YEAR:
+        handles += [Line2D([], [], color="k", lw=2.5, label="tipping year range: SLR p17-p83 x population variants"),
+                    Line2D([], [], ls="none", marker="o", color="0.5", mec="k",
+                           label=f"tipping year: median SLR, population {variants[v0].get('label', v0)}")]
+    else:
+        handles += [Line2D([], [], color="k", lw=2.5, label="tipping year, SLR p17-p83 range")]
+    handles += [Line2D([], [], ls="none", marker=">", mfc="none", mec="k", label=f"not reached by {to_year}")]
+    fig.legend(handles=handles, loc="lower center", ncol=3, fontsize=fs - 1, frameon=False, bbox_to_anchor=(0.5, 0.0))
     out_png = out_dir / "tipping_points.png"
     fig.savefig(out_png, dpi=int(viz.get("dpi", 200)), bbox_inches="tight")
     plt.close(fig)

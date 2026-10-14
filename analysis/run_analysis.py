@@ -13,8 +13,11 @@ Analysis switches in config.yml:
   analysis.plot_adaptation_bars — grouped bar comparison per scenario
   analysis.plot_timeseries      — EAI along SSP SLR trajectories over time (global / country / continent)
   analysis.plot_tipping_points  — tipping-point figure (isolines x SSP pathways, tipping years)
-  analysis.plot_extended_pathways — SSP pathways continued beyond 2100 (population variants)
+  analysis.plot_extended_pathways — continent time series to 2150 (population variants after 2100)
+  analysis.plot_slr_vs_population — SLR vs population decomposition (waterfalls + scatter)
   analysis.plot_world_maps      — world choropleth maps (slow for global runs)
+
+All figures are written directly to --figdir (visualization.output_dir), no subdirectories.
 
 Usage:
     python snakemake_workflow/analysis/run_analysis.py \\
@@ -110,10 +113,11 @@ def main() -> None:
     do_timeseries  = sw.get("plot_timeseries",      True)
     do_tipping     = sw.get("plot_tipping_points",  True)
     do_extended    = sw.get("plot_extended_pathways", True)
+    do_slr_pop     = sw.get("plot_slr_vs_population", True)
     do_world_maps  = sw.get("plot_world_maps",      False)
 
     if args.only_exposure:
-        do_ember = do_bars = do_timeseries = do_tipping = do_extended = do_world_maps = False
+        do_ember = do_bars = do_timeseries = do_tipping = do_extended = do_slr_pop = do_world_maps = False
     if args.only_plots:
         do_exposure = False
     if args.skip_exposure:
@@ -157,7 +161,7 @@ def main() -> None:
         success = _run(
             SCRIPTS_DIR / "plot_burning_ember.py",
             cfg_arg + ["--expdir", str(exp_dir),
-                        "--outdir", str(fig_dir / "burning_ember")],
+                        "--outdir", str(fig_dir)],
             "Burning-ember / impact-matrix figures",
             args.fail_fast,
         )
@@ -170,7 +174,7 @@ def main() -> None:
         success = _run(
             SCRIPTS_DIR / "plot_adaptation_bars.py",
             cfg_arg + ["--expdir", str(exp_dir),
-                        "--outdir", str(fig_dir / "adaptation_bars")],
+                        "--outdir", str(fig_dir)],
             "Adaptation strategy bar charts",
             args.fail_fast,
         )
@@ -183,7 +187,7 @@ def main() -> None:
         success = _run(
             SCRIPTS_DIR / "plot_timeseries.py",
             cfg_arg + ["--expdir", str(exp_dir),
-                        "--outdir", str(fig_dir / "timeseries")],
+                        "--outdir", str(fig_dir)],
             "EAI time-series along SSP trajectories",
             args.fail_fast,
         )
@@ -196,7 +200,7 @@ def main() -> None:
         success = _run(
             SCRIPTS_DIR / "plot_tipping_points.py",
             cfg_arg + ["--expdir", str(exp_dir),
-                        "--outdir", str(fig_dir / "tipping_points")],
+                        "--outdir", str(fig_dir)],
             "Tipping-point figure (visualization.tipping_points)",
             args.fail_fast,
         )
@@ -209,7 +213,7 @@ def main() -> None:
         success = _run(
             SCRIPTS_DIR / "plot_extended_pathways.py",
             cfg_arg + ["--expdir", str(exp_dir),
-                        "--outdir", str(fig_dir / "extended_pathways")],
+                        "--outdir", str(fig_dir)],
             "Pathways beyond 2100 (visualization.extended_pathways)",
             args.fail_fast,
         )
@@ -217,12 +221,25 @@ def main() -> None:
     else:
         print("\n  [ SKIP ] Pathways beyond 2100 (analysis.plot_extended_pathways = false)")
 
+    # ── Step 4d: SLR vs population decomposition ──────────────────────────────
+    if do_slr_pop:
+        success = _run(
+            SCRIPTS_DIR / "plot_slr_vs_population.py",
+            cfg_arg + ["--expdir", str(exp_dir),
+                        "--outdir", str(fig_dir)],
+            "SLR vs population: waterfalls + scatter (visualization.slr_vs_population)",
+            args.fail_fast,
+        )
+        results["slr_vs_population"] = success
+    else:
+        print("\n  [ SKIP ] SLR vs population (analysis.plot_slr_vs_population = false)")
+
     # ── Step 5: World maps ────────────────────────────────────────────────────
     if do_world_maps:
         success = _run(
             SCRIPTS_DIR / "plot_world_map.py",
             cfg_arg + ["--expdir", str(exp_dir),
-                        "--outdir", str(fig_dir / "world_maps")],
+                        "--outdir", str(fig_dir)],
             "World choropleth maps",
             args.fail_fast,
         )
