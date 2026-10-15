@@ -164,6 +164,51 @@ def _stage_configfile_lines() -> list[str]:
     ]
 
 
+def _stage_tile_grid_lines() -> list[str]:
+    """Bash function def: copies the tile_grid gpkg to node-local scratch,
+    validated by comparing copied/source byte sizes (not UTF-8/YAML parsing
+    like `_stage_configfile_lines` - a GeoPackage is a binary SQLite file),
+    retrying on failure - see `_stage_configfile_lines`'s own docstring for
+    the matching retry rationale.
+
+    Added 2026-10-15: `snakemake` itself reads `tile_grid.path` via GDAL/OGR
+    at Snakefile-PARSE time (CHUNK_IDS/TILE_IDS are derived from it before
+    any rule even starts - see the Snakefile's own comment), which has
+    SQLite try to acquire an advisory file lock first. Confirmed live
+    (generate_aqueduct_jobs.py's matching `_stage_tile_grid_lines`) that this
+    lock acquisition can hang indefinitely on a Hydrax compute node reading
+    P:\\ directly, even for a single, non-concurrent read - reproduced live
+    as the cause of a `postprocess_*_batch_*.sbatch` job sitting silent for
+    hours right after its own startup banner, with `stage_configfile_locally`
+    alone not enough to prevent it, since that only stages resolved_config.yml
+    itself, not the gpkg path written INSIDE it.
+    """
+    return [
+        "stage_tile_grid_locally() {",
+        '  local src="$1" out_var="$2"',
+        '  local stage_dir="${TMPDIR:-/tmp}/gfm_tile_grid"',
+        '  mkdir -p "$stage_dir"',
+        '  local dst="$stage_dir/tile_grid_${SLURM_JOB_ID:-$$}_$$.gpkg"',
+        "  local attempt=1 max_attempts=8 delay=5",
+        '  local src_size; src_size=$(stat -c%s -- "$src" 2>/dev/null)',
+        '  while [ "$attempt" -le "$max_attempts" ]; do',
+        '    cp -f -- "$src" "$dst" 2>/dev/null',
+        '    local dst_size; dst_size=$(stat -c%s -- "$dst" 2>/dev/null)',
+        '    if [ -n "$dst_size" ] && [ "$dst_size" = "$src_size" ]; then',
+        "      printf -v \"$out_var\" '%s' \"$dst\"",
+        "      return 0",
+        "    fi",
+        '    echo "  [tile-grid-stage retry $attempt/$max_attempts] $src did not copy cleanly - retrying in ${delay}s..." >&2',
+        '    rm -f -- "$dst"',
+        '    sleep "$delay"',
+        "    attempt=$((attempt + 1))",
+        "  done",
+        '  echo "  failed to stage a valid local copy of $src after $max_attempts attempts - giving up." >&2',
+        "  return 1",
+        "}",
+    ]
+
+
 def _build_chunk_grid(tile_gdf: gpd.GeoDataFrame, chunk_size_deg: float) -> gpd.GeoDataFrame:
     """Mirrors the root Snakefile's own _build_chunk_grid exactly."""
     minx, miny, maxx, maxy = tile_gdf.total_bounds
@@ -213,7 +258,7 @@ def _split_by_chunk(
 
 def _write_batches(
     local_jobs_dir: Path, linux_jobs_dir: str, linux_code_root: str, sbatch_cfg: dict,
-    phase_name: str, batches: list[list[str]], configfile_path: str,
+    phase_name: str, batches: list[list[str]], configfile_path: str, tile_grid_path: str,
 ) -> list[str]:
     """Write one sbatch script per batch of targets (plain
     `GFM_CONFIG_PATH=<configfile_path> snakemake --cores N <targets>` call,
@@ -248,10 +293,16 @@ def _write_batches(
             "",
             *_retry_wrapper_lines(),
             *_stage_configfile_lines(),
+            *_stage_tile_grid_lines(),
             "",
             f'cd "{linux_code_root}"',
             f'echo "=== Postprocessing {phase_name} batch {i:03d}: {len(batch_targets)} target(s) ==="',
             f'stage_configfile_locally "{configfile_path}" LOCAL_CONFIGFILE || exit 1',
+            f'stage_tile_grid_locally "{tile_grid_path}" LOCAL_TILE_GRID || exit 1',
+            "python -c 'import sys, yaml; cfg_path, new_path = sys.argv[1], sys.argv[2]; "
+            "cfg = yaml.safe_load(open(cfg_path, encoding=\"utf-8\")); cfg[\"tile_grid\"][\"path\"] = new_path; "
+            "yaml.safe_dump(cfg, open(cfg_path, \"w\", encoding=\"utf-8\"))' "
+            '"$LOCAL_CONFIGFILE" "$LOCAL_TILE_GRID"',
             "",
             (
                 f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
@@ -421,7 +472,7 @@ def main() -> None:
               f"{n_targets} target(s), merge -> exposure grid -> flood fraction per chunk, no phase barriers")
         chunk_scripts = _write_batches(
             local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
-            f"{name_prefix}chunks", _split_by_chunk(targets_by_chunk, chunk_weight, n_nodes), linux_resolved_config,
+            f"{name_prefix}chunks", _split_by_chunk(targets_by_chunk, chunk_weight, n_nodes), linux_resolved_config, linux_config["tile_grid"]["path"],
         ) if n_targets else []
         phases = [("postprocessing (per chunk: merge -> exposure grid -> flood fraction)", chunk_scripts)]
     else:
@@ -436,7 +487,7 @@ def main() -> None:
         print(f"Phase 1 (merge_chunk): {len(phase1_targets)} target(s)")
         phase1_scripts = _write_batches(
             local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
-            f"{name_prefix}merge", _split_evenly(phase1_targets, n_nodes), linux_resolved_config,
+            f"{name_prefix}merge", _split_evenly(phase1_targets, n_nodes), linux_resolved_config, linux_config["tile_grid"]["path"],
         ) if phase1_targets else []
 
         # Phase 2: prepare_exposure_grid_chunk - every chunk (not rp/slr).
@@ -448,7 +499,7 @@ def main() -> None:
               f"(reference scenario: {return_periods[0]}_{baseline_slr})")
         phase2_scripts = _write_batches(
             local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
-            f"{name_prefix}exposure_grid", _split_evenly(phase2_targets, n_nodes), linux_resolved_config,
+            f"{name_prefix}exposure_grid", _split_evenly(phase2_targets, n_nodes), linux_resolved_config, linux_config["tile_grid"]["path"],
         ) if phase2_targets else []
 
         # Phase 3: compute_flood_fraction_chunk - every (chunk, rp, slr).
@@ -456,7 +507,7 @@ def main() -> None:
         print(f"\nPhase 3 (compute_flood_fraction_chunk): {len(phase3_targets)} target(s)")
         phase3_scripts = _write_batches(
             local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
-            f"{name_prefix}flood_fraction", _split_evenly(phase3_targets, n_nodes), linux_resolved_config,
+            f"{name_prefix}flood_fraction", _split_evenly(phase3_targets, n_nodes), linux_resolved_config, linux_config["tile_grid"]["path"],
         ) if phase3_targets else []
         phases = [
             ("phase 1 (merge_chunk)", phase1_scripts),

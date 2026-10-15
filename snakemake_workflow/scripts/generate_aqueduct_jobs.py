@@ -189,6 +189,7 @@ def _append_postprocess_bridge(
     """
     sbatch_cfg = hpc_cfg["sbatch"]  # lightweight - just generates + submits further scripts
     code_root = linux_config["paths"]["code_root"]
+    linux_tile_grid_path = linux_config["tile_grid"]["path"]
     name = "gfm_generate_postprocess_and_dispatch"
     lines = [
         "#!/bin/bash",
@@ -208,8 +209,17 @@ def _append_postprocess_bridge(
         sbatch_cfg["env_activate_cmd"],
         "",
         f'cd "{code_root}"',
+        *_stage_configfile_lines(),
+        *_stage_tile_grid_lines(),
+        f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
+        f'stage_tile_grid_locally "{linux_tile_grid_path}" LOCAL_TILE_GRID || exit 1',
+        "python -c 'import sys, yaml; cfg_path, new_path = sys.argv[1], sys.argv[2]; "
+        "cfg = yaml.safe_load(open(cfg_path, encoding=\"utf-8\")); cfg[\"tile_grid\"][\"path\"] = new_path; "
+        "yaml.safe_dump(cfg, open(cfg_path, \"w\", encoding=\"utf-8\"))' "
+        '"$LOCAL_CONFIGFILE" "$LOCAL_TILE_GRID"',
+        "",
         'echo "=== Generating postprocessing + exposure dispatch ==="',
-        f'python snakemake_workflow/scripts/generate_hpc_postprocess_job.py --config "{linux_resolved_config}"',
+        'python snakemake_workflow/scripts/generate_hpc_postprocess_job.py --config "$LOCAL_CONFIGFILE"',
         "",
         'echo "=== Submitting postprocessing + exposure ==="',
         f'bash "{linux_jobs_dir}/submit_postprocess_and_exposure.sh"',
