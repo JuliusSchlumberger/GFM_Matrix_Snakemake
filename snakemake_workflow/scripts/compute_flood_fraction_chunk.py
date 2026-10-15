@@ -49,7 +49,24 @@ def compute_flood_fraction(
     ff = sum(flooded fine pixels) / n_total_fine_pixels_in_cell. Coarse
     cells inside the tile but entirely outside the domain end up NaN →
     written as this module's own `_NODATA_COARSE`.
+
+    `population_path` can itself be an empty (zero-byte) placeholder -
+    `prepare_exposure_grid_chunk`'s own, deliberate convention for a chunk
+    with zero population coverage (confirmed live 2026-10-16: several
+    remote/unpopulated chunks - e.g. S70E160, S65W050 - produce this on
+    every single regeneration, 100% deterministically, not a corruption or
+    a write race). There is no coarse grid shape to compute anything
+    against in that case (population_path's own raster defines the output
+    grid), so this writes the SAME empty-placeholder convention for
+    `output_path` and returns, rather than crashing - this script
+    previously had no handling for it at all, so any chunk hitting this
+    aborted its ENTIRE Snakemake batch (--cores 1, no -k), silently taking
+    down every OTHER, unrelated target still queued in that same batch too.
     """
+    if Path(population_path).stat().st_size == 0:
+        retry_transient_io(Path(output_path).touch)
+        return
+
     # Step 1: build the exceedance and domain arrays in memory, block by block
     # (single read pass). Previously each block was written to an LZW GeoTIFF
     # in a temp dir and both files were then read back WHOLE for step 2 - no
