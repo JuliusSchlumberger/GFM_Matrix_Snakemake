@@ -151,12 +151,71 @@ def _compute_zsini_array(
     return np.where(ocean, zsini_arr, np.float32(-9999.0))
 
 
-def _create_mask(sf: SfincsModel, tile_gdf: gpd.GeoDataFrame, boundary_lines_gpkg: Path, resolution_m: float) -> None:
+INTERIOR_CORE_FACTOR = 0.75  # interior forcing point: inactive core of radius this x resolution ...
+INTERIOR_RING_FACTOR = 2.0   # ... and waterlevel-boundary cells within this x resolution around it
+TILE_EDGE_BAND_M = 2000.0    # half-width of the boundary band along the line's tile_edge stretches
+
+
+def _tile_edge_band(segments: gpd.GeoDataFrame, tile_geom, crs) -> list:
+    """Flat-ended bands of TILE_EDGE_BAND_M around the line's tile_edge stretches, both as built and
+    moved onto the real (lon/lat) tile edge, in `crs`. Neither the line builder's tile edge nor
+    hydromt's grid border (the SFINCS grid rectangle) is the real edge: both project the tile by its
+    corners only - a straight chord in UTM that sags up to ~1.5 km off a long edge of constant
+    latitude - so the active domain's edge along such a stretch can lie anywhere between them, out
+    of reach of the 1.5-cell band the rest of the line uses (no boundary cells there before).
+    create_boundary only ever marks active-domain EDGE cells, so the wide band adds boundary cells
+    exactly there; flat ends keep it from running on along the tile edge past the stretch."""
+    edge = gpd.GeoSeries([tile_geom.exterior.segmentize(0.002)], crs="EPSG:4326").to_crs(crs).iloc[0]
+    bands = []
+    for g in segments.to_crs(crs).geometry:
+        pts = [edge.interpolate(edge.project(shapely.Point(c))) for c in g.segmentize(100.0).coords]
+        for line in (g, shapely.LineString(pts) if len(pts) >= 2 else None):
+            if line is not None and line.length > 0:
+                bands.append(line.buffer(TILE_EDGE_BAND_M, cap_style="flat"))
+    return bands
+
+
+def _drop_land_boundary(sf: SfincsModel, new_band: gpd.GeoDataFrame, native_mask_path: Path) -> int:
+    """Turn waterlevel-boundary cells inside `new_band` whose centre is land in the tile's native
+    mask back into plain active cells - a boundary cell on land would impose the forcing there and
+    flood it artificially. Only the new bands (tile edge, interior rings) are filtered; the line's own
+    1.5-cell band is left as it always was. Returns the number of cells changed."""
+    da = sf.grid.data["mask"]
+    in_band = da.raster.geometry_mask(new_band, all_touched=True).values
+    m = da.values.copy()
+    cand = (m == 2) & in_band
+    if not cand.any():
+        return 0
+    r, c = np.nonzero(cand)
+    # plain affine maths + pyproj: rasterio.transform.xy / rasterio.warp.transform crash this env
+    # (native DLL delay-load failure 0xc06d007f inside rasterio's GDAL transformer)
+    from pyproj import Transformer
+    x, y = da.raster.transform * (c + 0.5, r + 0.5)
+    lon, lat = Transformer.from_crs(sf.crs, "EPSG:4326", always_xy=True).transform(x, y)
+    with rasterio.open(native_mask_path) as src:
+        nat = src.read(1)
+        col, row = ~src.transform * (np.asarray(lon), np.asarray(lat))
+    rr = np.clip(np.floor(row).astype(int), 0, nat.shape[0] - 1)
+    cc = np.clip(np.floor(col).astype(int), 0, nat.shape[1] - 1)
+    land = nat[rr, cc] != OCEAN_CODE_NATIVE
+    m[r[land], c[land]] = 1
+    sf.grid.set(da.copy(data=m), name="mask")
+    return int(land.sum())
+
+
+OCEAN_CODE_NATIVE = 1  # open water in the tile's native mask.tif (land 0, ocean 1, lake 2, river 3)
+
+
+def _create_mask(sf: SfincsModel, tile_gdf: gpd.GeoDataFrame, boundary_lines_gpkg: Path, resolution_m: float,
+                 interior: gpd.GeoDataFrame | None = None, native_mask_path: Path | None = None) -> None:
     """Active cells + waterlevel boundary cells from the tile's boundary line
     (build_station_boundary_lines.py output): active = the tile minus the
     line's inactive (ocean-side) faces, boundary = the active-domain edge cells
-    along the boundary line (incl. its tile-edge stretches) - the model ends at
-    the line instead of the open-sea tile edge.
+    along the boundary line (incl. its tile-edge stretches, see _tile_edge_band)
+    - the model ends at the line instead of the open-sea tile edge. `interior`
+    (connected_forcing.py points): each gets a small inactive core (excluded
+    explicitly - create_active's all_touched include would fill it back in)
+    with a ring of boundary cells around it.
     """
     # Every polygon goes through make_valid first: the line builder's inactive
     # faces can carry self-touching rings once reprojected, and GEOS then fails
@@ -164,15 +223,33 @@ def _create_mask(sf: SfincsModel, tile_gdf: gpd.GeoDataFrame, boundary_lines_gpk
     # A tile whose line needs no inactive face has no "inactive" layer at all.
     tile_geom = shapely.make_valid(tile_gdf.to_crs("EPSG:4326").geometry.iloc[0])
     active = tile_geom
-    if "inactive" in pyogrio.list_layers(boundary_lines_gpkg)[:, 0]:
+    layers = pyogrio.list_layers(boundary_lines_gpkg)[:, 0]
+    if "inactive" in layers:
         inactive = retry_transient_io(gpd.read_file, boundary_lines_gpkg, layer="inactive").to_crs("EPSG:4326")
         if len(inactive):
             inactive_geom = shapely.make_valid(shapely.union_all(shapely.make_valid(inactive.geometry.values)))
             active = shapely.make_valid(tile_geom.difference(inactive_geom))
-    sf.mask.create_active(include_polygon=gpd.GeoDataFrame(geometry=[active], crs="EPSG:4326"), reset_mask=True)
-    lines = retry_transient_io(gpd.read_file, boundary_lines_gpkg, layer="boundary_line").to_crs(sf.crs)
-    band = gpd.GeoDataFrame(geometry=[shapely.union_all(lines.geometry.values).buffer(1.5 * resolution_m)], crs=sf.crs)
+    band_parts = [g.buffer(1.5 * resolution_m) for g in
+                  retry_transient_io(gpd.read_file, boundary_lines_gpkg, layer="boundary_line").to_crs(sf.crs).geometry]
+    new_parts = []
+    if "segments" in layers:
+        seg = retry_transient_io(gpd.read_file, boundary_lines_gpkg, layer="segments")
+        new_parts += _tile_edge_band(seg[seg["kind"] == "tile_edge"], tile_geom, sf.crs)
+    exclude = None
+    if interior is not None and len(interior):
+        pts = interior.to_crs(sf.crs).geometry
+        exclude = gpd.GeoDataFrame(geometry=list(pts.buffer(INTERIOR_CORE_FACTOR * resolution_m)), crs=sf.crs)
+        new_parts += list(pts.buffer(INTERIOR_RING_FACTOR * resolution_m))
+    sf.mask.create_active(include_polygon=gpd.GeoDataFrame(geometry=[active], crs="EPSG:4326"),
+                          exclude_polygon=exclude, reset_mask=True)
+    band = gpd.GeoDataFrame(geometry=[shapely.union_all(band_parts + new_parts)], crs=sf.crs)
     sf.mask.create_boundary(btype="waterlevel", include_polygon=band, reset_bounds=False, all_touched=True)
+    if new_parts and native_mask_path is not None:
+        new_band = gpd.GeoDataFrame(geometry=[shapely.union_all(new_parts).difference(shapely.union_all(band_parts))],
+                                    crs=sf.crs)
+        n = _drop_land_boundary(sf, new_band, native_mask_path)
+        if n:
+            print(f"      {n} new boundary cell(s) on land (native mask) set back to active")
 
 
 TRUNCATE_WINDOW_HR_DEFAULT = (40.0, 110.0)  # truncation window (h) around COAST-HG's
@@ -217,6 +294,8 @@ def build_sfincs_tile(
     sfincs_dir.mkdir(parents=True, exist_ok=True)
 
     tile_gdf = retry_transient_io(gpd.read_file, tile_dir / "tile_geometry.gpkg")
+    matched_all = retry_transient_io(gpd.read_file, sfincs_dir / "matched_boundary_points.gpkg")
+    interior = matched_all[matched_all["kind"] == "interior"] if "kind" in matched_all.columns else None
 
     # -- local data catalog: elevation.create/roughness.create need catalog-keyed
     # sources, not raw DataArrays --
@@ -250,7 +329,7 @@ def build_sfincs_tile(
     # running diagonally across this tile's rotated UTM grid. all_touched=True
     # includes every cell the line's buffer touches, giving a continuous boundary
     # regardless of grid rotation.
-    _create_mask(sf, tile_gdf, boundary_lines_gpkg, resolution_m)
+    _create_mask(sf, tile_gdf, boundary_lines_gpkg, resolution_m, interior, tile_dir / "mask.tif")
     n_active = int((sf.grid.data["mask"] > 0).sum())
     n_bnd = int((sf.grid.data["mask"] == 2).sum())
     print(f"[2/8] mask: {n_active} active cell(s), {n_bnd} waterlevel-boundary cell(s)")
@@ -302,7 +381,7 @@ def build_sfincs_tile(
     # entries - DataCatalog is parsed once at construction, not re-read live.
     sf = SfincsModel(data_libs=[str(local_catalog_path)], root=str(sfincs_dir), mode="w+")
     sf.grid.create_from_region(region={"geom": tile_gdf}, res=resolution_m, crs="utm", rotated=rotated)
-    _create_mask(sf, tile_gdf, boundary_lines_gpkg, resolution_m)
+    _create_mask(sf, tile_gdf, boundary_lines_gpkg, resolution_m, interior, tile_dir / "mask.tif")
 
     # write_dep_tif=True writes subgrid/dep_subgrid.tif, the fine-resolution DEM
     # run_sfincs_tile.py's own postprocessing needs for downscale_floodmap().

@@ -74,8 +74,11 @@ MASK_COLORS = ["#f5f5f2", "#a8c8e8", "#d62728"]  # inactive, active, boundary
 MASK_LABELS = ["inactive", "active", "waterlevel boundary"]
 
 FIGURES = ["mask", "boundary_forcing", "biggest_disagreement", "coastrp_forcing"]
-NEAREST_MAX_KM = 3.0  # profile panels: comparison point = the coastline cell nearest the station, if this close
-SAME_POINT_MAX_KM = 0.5  # ... and SFINCS is read at its wet cell at that same point, if this close
+NEAREST_MAX_KM = 10.0  # profile panels: comparison point = the coastline cell nearest the station, if this close
+# (COAST-RP stations sit up to ~6 km off the DeltaDTM coastline on wide, shallow mudflat coasts)
+SAME_POINT_MAX_KM = 1.5  # ... and SFINCS is read at its nearest wet cell to that same point, if this close
+# (0.5 km missed the wet cells on many coasts - the comparison point is a 1" coastline cell, often in a mangrove
+# or river-mouth pixel that SFINCS's 120 m cells around it are not all wet at)
 STATION_OCEAN_TOL_M = 2000.0  # profile panels: a station counts as "on ocean" with an ocean pixel this close
 # (same tolerance as build_station_boundary_lines.py's not-open-ocean station filter)
 PREFIXED_FIGURE_NAMES = {"coastrp_forcing": "forcing_comparison"}  # --out-prefix file names
@@ -413,14 +416,37 @@ def _profile_panel(ax, ctx: dict, zsmax_lonlat, bzs, letter: str, title: str | N
             ax.axhline(bzs[:, k + 1].max(), color="#1f4e8c", linestyle=":", linewidth=1,
                        label="SFINCS bnd forcing peaks" if k == 0 else None)
     ax.set_xticks(dist_km)
-    ax.set_xticklabels([f"{st_lon[k]:.2f}E\n{st_lat[k]:.2f}N" for k in idx], rotation=90, fontsize=7)
+    ax.set_xticklabels([f"{st_lon[k]:.2f}E\n{st_lat[k]:.2f}N" for k in idx], rotation=90, fontsize=11)
     ax.set_xlabel("COAST-RP stations on ocean inside the tile, ordered along the coast")
     ax.set_ylabel("water level (m)")
     ax.grid(True, alpha=0.3)
-    ax.legend(fontsize=9, loc="upper right")
+    ax.legend(fontsize=12, loc="best", framealpha=0.9)
     if title:
         ax.set_title(title, fontsize=10)
     draw_panel_letter(ax, letter)
+
+
+def _legend_corner_map(ctx: dict, extra_lon=(), extra_lat=(), box_w: float = 0.55, box_h: float = 0.45) -> str:
+    """Corner of the panel-a map whose box_w x box_h window holds the fewest plotted
+    points (coastline seed cells, stations, boundary cells/forcing points) and is
+    otherwise as uniformly land or water as possible."""
+    b, m = ctx["bounds"], ctx["mask"]
+    lon = np.concatenate([ctx["c_lon"], ctx["st_lon"], np.asarray(extra_lon, float)])
+    lat = np.concatenate([ctx["c_lat"], ctx["st_lat"], np.asarray(extra_lat, float)])
+    fx = (lon - b.left) / (b.right - b.left)
+    fy = (lat - b.bottom) / (b.top - b.bottom)
+    h, w = m.shape
+    best, best_score = "lower right", np.inf
+    for name, (x0, y0) in {"upper left": (0, 1 - box_h), "upper right": (1 - box_w, 1 - box_h),
+                           "lower left": (0, 0), "lower right": (1 - box_w, 0)}.items():
+        n_pts = np.mean((fx >= x0) & (fx <= x0 + box_w) & (fy >= y0) & (fy <= y0 + box_h)) if len(fx) else 0.0
+        r0, r1 = int((1 - y0 - box_h) * h), int((1 - y0) * h)  # mask rows run north -> south
+        c0, c1 = int(x0 * w), int((x0 + box_w) * w)
+        land = float(np.mean(m[r0:r1, c0:c1] == 0)) if r1 > r0 and c1 > c0 else 1.0
+        score = n_pts + 0.05 * min(land, 1 - land)
+        if score < best_score:
+            best, best_score = name, score
+    return best
 
 
 def plot_coastrp_forcing(tile_dir: Path, sfincs_dir: Path, mask2d: np.ndarray, transform: rasterio.Affine,
@@ -431,11 +457,16 @@ def plot_coastrp_forcing(tile_dir: Path, sfincs_dir: Path, mask2d: np.ndarray, t
     station's own level, the eikonal seed level and SFINCS's peak water level
     (zsmax) nearby - i.e. what each model is actually driven by at that
     stretch of coast."""
+    with plt.rc_context({"font.size": 14, "axes.labelsize": 15, "xtick.labelsize": 13, "ytick.labelsize": 13}):
+        _plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs, out_path, knn, river_code)
+
+
+def _plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs, out_path, knn, river_code) -> None:
     ctx = _coastrp_context(tile_dir, knn, river_code)
     level_m = ctx["level_m"]
     vmax = float(np.ceil(level_m.max() * 2) / 2)
     cmap = plt.get_cmap("YlOrRd")
-    fig, axes = plt.subplots(1, 2, figsize=(18, 8.5), gridspec_kw={"width_ratios": [1, 1.25]})
+    fig, axes = plt.subplots(1, 2, figsize=(20, 9), gridspec_kw={"width_ratios": [1, 1.15]})
 
     ax = axes[0]
     _land_sea_background(ax, ctx)
@@ -453,7 +484,15 @@ def plot_coastrp_forcing(tile_dir: Path, sfincs_dir: Path, mask2d: np.ndarray, t
         bnd_lons, bnd_lats = warp_transform(crs, "EPSG:4326", bnd[:, 0], bnd[:, 1])
         ax.scatter(bnd_lons, bnd_lats, s=260, facecolors="none", edgecolors="#1f4e8c", linewidths=2.0,
                    marker="*", zorder=6)
-    fig.colorbar(sc, ax=ax, fraction=0.04, pad=0.02, label="COAST-RP RP100 water level (m)")
+    cb = fig.colorbar(sc, ax=ax, fraction=0.04, pad=0.02, label="COAST-RP RP100 water level (m)")
+    b = ctx["bounds"]
+    map_aspect = (b.right - b.left) * np.cos(np.radians(0.5 * (b.bottom + b.top))) / (b.top - b.bottom)
+    if map_aspect < 1.2:  # tall/narrow map: the legend would be wider than it - put it underneath
+        legend_kw = dict(loc="upper center", bbox_to_anchor=(0.5, -0.1), fontsize=12, frameon=False)
+    else:  # inside, in the corner with the fewest plotted points
+        legend_kw = dict(loc=_legend_corner_map(ctx, np.concatenate([blons, bnd_lons if bnd is not None else []]),
+                                                np.concatenate([blats, bnd_lats if bnd is not None else []])),
+                         fontsize=12, framealpha=0.9)
     ax.legend(handles=[
         plt.Line2D([0], [0], marker="o", color="none", markerfacecolor="#f4a261", markeredgecolor="black",
                    markersize=8, label="COAST-RP station (colour = level)"),
@@ -464,12 +503,18 @@ def plot_coastrp_forcing(tile_dir: Path, sfincs_dir: Path, mask2d: np.ndarray, t
                    label="SFINCS waterlevel-boundary cells"),
         plt.Line2D([0], [0], marker="*", color="none", markeredgecolor="#1f4e8c", markersize=14,
                    label="SFINCS forcing points (sfincs.bnd)"),
-    ], loc="lower right", fontsize=8)
+    ], **legend_kw)
     draw_panel_letter(ax, "a")
 
     _profile_panel(axes[1], ctx, _zsmax_lonlat(sfincs_dir, crs), bzs, "b")
     fig.tight_layout()
-    fig.savefig(out_path, dpi=170)
+    # (b) as high as the aspect-locked map (a) and level with it; the colorbar follows (a)
+    fig.canvas.draw()
+    pa, pb = axes[0].get_position(), axes[1].get_position()
+    axes[1].set_position([pb.x0, pa.y0, pb.width, pa.height])
+    pc = cb.ax.get_position()
+    cb.ax.set_position([pc.x0, pa.y0, pc.width, pa.height])
+    fig.savefig(out_path, dpi=170, bbox_inches="tight", pad_inches=0.2)
     plt.close(fig)
     print(f"Wrote {out_path}")
 

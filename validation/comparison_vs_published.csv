@@ -1,0 +1,25 @@
+study,country_iso,region,metric,ours,published,diff,note,ratio_ours_over_published
+Bates et al. (2023),GBR,wales,CSI,0.638,0.76,-0.122,,0.8394736842105264
+Wing et al. (2024),GBR,wales,CSI,0.638,0.82,-0.18199999999999994,,0.7780487804878049
+Chaudhuri et al. (2026),GBR,severn_estuary,CSI,0.811,0.7,0.1110000000000001,,1.1585714285714288
+Chaudhuri et al. (2026),GBR,menai_strait,CSI,0.768,0.49,0.278,,1.5673469387755103
+Chaudhuri et al. (2026),GBR,firth_of_forth,CSI,0.477,0.75,-0.273,,0.636
+Chaudhuri et al. (2026),CAN,cumberland_basin,CSI,0.007,0.87,-0.863,"Known, already-documented limitation (not a new finding) - data_catalog_validation.yml's own comments attribute Bay of Fundy's near-zero CSI to a COAST-RP/GTSM boundary-forcing limitation capturing the Fundy's extreme tidal resonance, not a pipeline bug.",0.008045977011494253
+Chaudhuri et al. (2026),CAN,petitcodiac,CSI,0.021,0.56,-0.539,"Known, already-documented limitation (not a new finding) - data_catalog_validation.yml's own comments attribute Bay of Fundy's near-zero CSI to a COAST-RP/GTSM boundary-forcing limitation capturing the Fundy's extreme tidal resonance, not a pipeline bug.",0.0375
+Wing et al. (2024),GBR,england,CSI,,0.62,,"No England benchmark dataset exists yet in this repo (checked inputs/validation/ - only Wales/Scotland have NRW/SEPA data) - 'ours' is not yet computable; needs a new Environment Agency (or equivalent) dataset, the same kind of setup San Francisco Bay just went through.",
+Kasmalkar et al. (2024),USA,san_francisco_bay (A_coarsen_to_model_grid),RMSE_all_m,0.3532910747775141,0.138,0.21529107477751408,,2.5600802520109713
+Kasmalkar et al. (2024),USA,san_francisco_bay (A_coarsen_to_model_grid),MAE_all_m,0.0787240663627051,0.017,0.061724066362705096,,4.6308274331003
+Kasmalkar et al. (2024),USA,san_francisco_bay (A_coarsen_to_model_grid),RMSE_flooded_m,0.7717169213578039,0.525,0.24671692135780388,,1.4699369930624835
+Kasmalkar et al. (2024),USA,san_francisco_bay (A_coarsen_to_model_grid),MAE_flooded_m,0.6400669865712632,0.319,0.32106698657126315,,2.006479581728098
+(this model only - no published value given),USA,san_francisco_bay (A_coarsen_to_model_grid),HR,0.6845090986207291,,,,
+(this model only - no published value given),USA,san_francisco_bay (A_coarsen_to_model_grid),FAR,0.5785497086008572,,,,
+(this model only - no published value given),USA,san_francisco_bay (A_coarsen_to_model_grid),CSI,0.3529004856920586,,,,
+(this model only - no published value given),USA,san_francisco_bay (A_coarsen_to_model_grid),bias,1.6241751698599525,,,,
+Kasmalkar et al. (2024),USA,san_francisco_bay (B_refine_model_to_2m),RMSE_all_m,0.3524966537952423,0.138,0.2144966537952423,,2.5543235782263936
+Kasmalkar et al. (2024),USA,san_francisco_bay (B_refine_model_to_2m),MAE_all_m,0.0784437879920005,0.017,0.061443787992000495,,4.614340470117676
+Kasmalkar et al. (2024),USA,san_francisco_bay (B_refine_model_to_2m),RMSE_flooded_m,0.779098391532898,0.525,0.2540983915328979,,1.4839969362531389
+Kasmalkar et al. (2024),USA,san_francisco_bay (B_refine_model_to_2m),MAE_flooded_m,0.6463027596473694,0.319,0.3273027596473694,,2.026027459709622
+(this model only - no published value given),USA,san_francisco_bay (B_refine_model_to_2m),HR,0.7214111823264667,,,,
+(this model only - no published value given),USA,san_francisco_bay (B_refine_model_to_2m),FAR,0.6281150718886017,,,,
+(this model only - no published value given),USA,san_francisco_bay (B_refine_model_to_2m),CSI,0.3251846539585198,,,,
+(this model only - no published value given),USA,san_francisco_bay (B_refine_model_to_2m),bias,1.9398774400192087,,,,

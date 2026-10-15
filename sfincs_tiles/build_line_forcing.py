@@ -39,7 +39,11 @@ HYDROGRAPH_VARIABLE = "hydrograph_average_tide_signal"
 MAX_MATCH_DIST_DEG = 0.5  # nearest COAST-HG station must be this close (COAST-HG is dense along real coastline)
 
 
-def build_line_forcing(lines_gpkg: Path, coast_hg_nc: Path) -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
+def build_line_forcing(lines_gpkg: Path, coast_hg_nc: Path, tile_dir: Path | None = None,
+                       root: Path | None = None) -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
+    """Forcing points + hydrographs: one per used station node on the line ("line"), plus - given
+    tile_dir/root - one per station inside the tile that is not a node but lies by water that stays
+    active in SFINCS ("interior", connected_forcing.py)."""
     st = retry_transient_io(gpd.read_file, lines_gpkg, layer="stations")
     st = st[st["status"] == "used"].reset_index(drop=True)
     if st.empty:
@@ -66,10 +70,23 @@ def build_line_forcing(lines_gpkg: Path, coast_hg_nc: Path) -> tuple[gpd.GeoData
         rows.append({"station": int(r["station"]), "station_index": int(r["station_index"]),
                      "rp100_level_m": float(r["rp100_level_m"]), "coast_hg_station": j,
                      "coast_hg_dist_deg": round(dist_deg, 4), "mdt_offset_m": round(offset, 4),
-                     "node_shift_km": float(r["node_shift_km"]),
+                     "node_shift_km": float(r["node_shift_km"]), "kind": "line",
                      "geometry": gpd.points_from_xy([r["node_lon"]], [r["node_lat"]])[0]})
         print(f"  station {r['station']:>3} -> COAST-HG {j} ({dist_deg:.3f} deg): level {r['rp100_level_m']:.3f} m, "
               f"offset {offset:+.3f} m, node shifted {r['node_shift_km']:.2f} km")
+    if tile_dir is not None and root is not None:
+        from connected_forcing import interior_points
+        inner = interior_points(lines_gpkg, tile_dir, root, np.column_stack([hg_lon, hg_lat]))
+        for _, r in inner.iterrows():
+            series = hg[int(r["coast_hg_station"])].astype(np.float64)
+            offset = float(r["rp100_level_m"]) - float(np.nanmax(series))
+            cols[len(cols)] = series + offset
+            rows.append({"station": int(r["station"]), "station_index": int(r["station_index"]),
+                         "rp100_level_m": float(r["rp100_level_m"]), "coast_hg_station": int(r["coast_hg_station"]),
+                         "coast_hg_dist_deg": float(r["coast_hg_dist_deg"]), "mdt_offset_m": round(offset, 4),
+                         "node_shift_km": 0.0, "kind": "interior", "geometry": r.geometry})
+            print(f"  station {r['station']:>3} (interior) -> COAST-HG {int(r['coast_hg_station'])}: "
+                  f"level {r['rp100_level_m']:.3f} m")
     points = gpd.GeoDataFrame(rows, crs="EPSG:4326")
     elapsed_hr = (times - times[0]).total_seconds() / 3600.0
     hydro = pd.DataFrame(cols, index=times)
@@ -89,10 +106,12 @@ def main() -> None:
     root = read_root(Path(args.config))
     out_dir = root / args.base_dir_name / args.tile_id / "sfincs_model"
     out_dir.mkdir(parents=True, exist_ok=True)
-    points, hydro = build_line_forcing(Path(args.lines_gpkg), root / COAST_HG_NC)
+    points, hydro = build_line_forcing(Path(args.lines_gpkg), root / COAST_HG_NC,
+                                       tile_dir=root / args.base_dir_name / args.tile_id, root=root)
     points.to_file(out_dir / "matched_boundary_points.gpkg", driver="GPKG")
     hydro.to_csv(out_dir / "corrected_hydrographs.csv", index=False)
-    print(f"{len(points)} forcing point(s); peaks {points.rp100_level_m.min():.2f}-{points.rp100_level_m.max():.2f} m")
+    print(f"{len(points)} forcing point(s) ({int((points['kind'] == 'interior').sum())} interior); "
+          f"peaks {points.rp100_level_m.min():.2f}-{points.rp100_level_m.max():.2f} m")
     print(f"Wrote {out_dir / 'matched_boundary_points.gpkg'}")
     print(f"Wrote {out_dir / 'corrected_hydrographs.csv'}")
 

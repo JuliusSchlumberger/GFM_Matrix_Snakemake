@@ -1,4 +1,4 @@
-"""Two 3x3 panels of the worst-matching tiles between EA-bathtub and SFINCS
+"""Two 2x3 panels of the worst-matching tiles between EA-bathtub and SFINCS
 (lowest CSI), split by which model is over-predicting - one panel where
 SFINCS-only area dominates the disagreement, one where EA-bathtub-only area
 dominates. Each panel tile is a local map of the four-way classification
@@ -7,7 +7,7 @@ subgrid resolution - pixel-for-pixel what the CSI metric actually counts.
 
 Tiles are ranked by their CSI at --friction-scale-factor from
 {base}/friction_sweep_per_tile_metrics.csv (compute_friction_sweep_metrics.py).
-Candidate tiles are restricted to MIN_UNION_KM2 km2 of total union area
+Candidate tiles are restricted to at least --min-union-km2 (default 50) km2 of total union area
 (matched + EA-bathtub-only + SFINCS-only, CSI's own denominator), so a
 technically-low CSI from a handful of noisy pixels doesn't crowd out a
 real, substantial disagreement. Like the metrics, the maps count only land
@@ -18,7 +18,7 @@ Needs only rasterio/scipy/matplotlib (sfincs_grid.py reads sfincs.msk directly).
 
 Usage:
     python plot_worst_tiles_panel.py --base-dir-name calibration_roughness_SFINCS --friction-scale-factor 9 \
-        [--n-tiles 9] [--min-union-km2 1.0]
+        [--n-tiles 6] [--min-union-km2 50]
 """
 
 from __future__ import annotations
@@ -120,6 +120,26 @@ def _crop_to_disagreement(cls: np.ma.MaskedArray, pad_frac: float = 0.25) -> np.
     return cls[r0:r1, c0:c1]
 
 
+def _caption_corner(cls: np.ma.MaskedArray, box_w: float = 0.5, box_h: float = 0.25) -> str:
+    """The corner for the caption box that covers the least flooded (matched /
+    EA-bathtub-only / SFINCS-only) area of the displayed (north-up) map; ties go
+    to a corner that is uniformly land or uniformly water. The box is
+    approximated as box_w x box_h of the map."""
+    h, w = cls.shape
+    rh, rw = max(int(h * box_h), 1), max(int(w * box_w), 1)
+    windows = {"upper left": (slice(0, rh), slice(0, rw)), "upper right": (slice(0, rh), slice(w - rw, w)),
+               "lower left": (slice(h - rh, h), slice(0, rw)), "lower right": (slice(h - rh, h), slice(w - rw, w))}
+    vals = cls.filled(-1)  # -1 = water / off-domain
+
+    def score(win) -> float:
+        v = vals[win]
+        wet = np.isin(v, [MATCHED, EIKONAL_ONLY, SFINCS_ONLY]).mean()
+        water = (v == -1).mean()
+        return wet + 0.01 * min(water, 1.0 - water)  # mixed land/water slightly worse than uniform
+
+    return min(windows, key=lambda k: score(windows[k]))
+
+
 def _make_panel(worst, base_dir: Path, out_path: Path, friction_scale_factor: float) -> None:
     ncols = 3
     nrows = int(np.ceil(len(worst) / ncols))
@@ -131,6 +151,7 @@ def _make_panel(worst, base_dir: Path, out_path: Path, friction_scale_factor: fl
         tile_dir = base_dir / str(row.tile_id)
         cls = build_classification(tile_dir, friction_scale_factor)
         ax.set_facecolor(OFF_DOMAIN_COLOR)
+        corner = "upper left"
         if cls is None:
             ax.text(0.5, 0.5, "no subgrid data", ha="center", va="center", transform=ax.transAxes)
         else:
@@ -140,9 +161,11 @@ def _make_panel(worst, base_dir: Path, out_path: Path, friction_scale_factor: fl
                 cls = orient_north_up(cls, src.transform)
             cls = _crop_to_disagreement(cls)
             ax.imshow(cls, cmap=cmap, vmin=0, vmax=3, interpolation="nearest")
+            corner = _caption_corner(cls)
         ax.set_xticks([])
         ax.set_yticks([])
-        draw_caption_box(ax, f"tile {row.tile_id}  CSI={row.csi:.3f}  union={row.union_km2:.2f} km2")
+        draw_caption_box(ax, [f"tile {row.tile_id}", f"CSI = {row.csi:.3f}", f"agree = {row.matched_km2:.1f} km²"],
+                         loc=corner, fontsize=13)
 
     for ax in axes.flat[len(worst):]:
         ax.axis("off")
@@ -150,7 +173,7 @@ def _make_panel(worst, base_dir: Path, out_path: Path, friction_scale_factor: fl
     legend_handles = [Patch(facecolor=c, edgecolor="grey", linewidth=0.5, label=l)
                        for c, l in zip(CATEGORY_COLORS, CATEGORY_LABELS)]
     legend_handles.append(Patch(facecolor=OFF_DOMAIN_COLOR, edgecolor="grey", linewidth=0.5, label=WATER_LABEL))
-    fig.legend(handles=legend_handles, loc="lower center", ncol=5, fontsize=10, bbox_to_anchor=(0.5, -0.02))
+    fig.legend(handles=legend_handles, loc="lower center", ncol=5, fontsize=12, bbox_to_anchor=(0.5, -0.02))
     fig.tight_layout(rect=[0, 0.03, 1, 1])
 
     fig.savefig(out_path, dpi=170, bbox_inches="tight")
@@ -164,13 +187,20 @@ def main() -> None:
     parser.add_argument("--config", default=str(repo_root / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--base-dir-name", required=True)
     parser.add_argument("--friction-scale-factor", type=float, required=True, help="the friction point to rank and plot")
-    parser.add_argument("--n-tiles", type=int, default=9)
-    parser.add_argument("--min-union-km2", type=float, default=1.0,
+    parser.add_argument("--n-tiles", type=int, default=6)
+    parser.add_argument("--min-eikonal-only-km2", type=float, default=50.0,
+                        help="EA-bathtub-over-predicting panel: the EA-bathtub-only area itself must be at least this")
+    parser.add_argument("--min-union-km2", type=float, default=50.0,
                          help="minimum matched+EA-bathtub-only+SFINCS-only area (CSI's own denominator) "
                               "for a tile to be eligible")
+    parser.add_argument("--raster-base-dir-name", default=None,
+                        help="read the per-tile rasters from this base dir instead (e.g. the original study for "
+                             "calibration_roughness_SFINCS_dedup, which holds only the re-derived result JSONs); "
+                             "the maps then show the whole tile, not only its de-duplicated core")
     args = parser.parse_args()
 
     base_dir = read_root(Path(args.config)) / args.base_dir_name
+    raster_dir = read_root(Path(args.config)) / (args.raster_base_dir_name or args.base_dir_name)
     fig_dir = base_dir / "figures"
     fig_dir.mkdir(parents=True, exist_ok=True)
     fsf = args.friction_scale_factor
@@ -186,9 +216,10 @@ def main() -> None:
 
     n = args.n_tiles
     sfincs_over = df[df["eikonal_sfincs_only_km2"] > df["eikonal_only_km2"]].sort_values("csi").head(n)
-    eikonal_over = df[df["eikonal_only_km2"] > df["eikonal_sfincs_only_km2"]].sort_values("csi").head(n)
+    eikonal_over = df[(df["eikonal_only_km2"] > df["eikonal_sfincs_only_km2"])
+                      & (df["eikonal_only_km2"] >= args.min_eikonal_only_km2)].sort_values("csi").head(n)
 
-    cols = ["tile_id", "csi", "union_km2", "eikonal_only_km2", "eikonal_sfincs_only_km2"]
+    cols = ["tile_id", "csi", "union_km2", "matched_km2", "eikonal_only_km2", "eikonal_sfincs_only_km2"]
     print(f"\nWorst {len(sfincs_over)} tile(s), SFINCS over-predicting:")
     print(sfincs_over[cols].to_string(index=False))
     print(f"\nWorst {len(eikonal_over)} tile(s), EA-bathtub over-predicting:")
@@ -202,8 +233,8 @@ def main() -> None:
     selection[["panel", "rank", *cols]].to_csv(selection_path, index=False)
     print(f"Wrote {selection_path}")
 
-    _make_panel(sfincs_over, base_dir, fig_dir / f"worst_tiles_panel_sfincs_overpredicts{sfx}.png", fsf)
-    _make_panel(eikonal_over, base_dir, fig_dir / f"worst_tiles_panel_eikonal_overpredicts{sfx}.png", fsf)
+    _make_panel(sfincs_over, raster_dir, fig_dir / f"worst_tiles_panel_sfincs_overpredicts{sfx}.png", fsf)
+    _make_panel(eikonal_over, raster_dir, fig_dir / f"worst_tiles_panel_eikonal_overpredicts{sfx}.png", fsf)
 
 
 if __name__ == "__main__":

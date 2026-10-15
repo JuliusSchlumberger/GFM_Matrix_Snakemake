@@ -20,6 +20,9 @@ can be rerun at any time on whatever tiles have finished:
 Usage:
     python run_calibration_sweep_analysis.py --base-dir-name calibration_roughness_SFINCS
     python run_calibration_sweep_analysis.py --base-dir-name calibration_roughness_SFINCS --forcing-checks-only
+    # the overlap-corrected (dedup) results - maps and inputs read from the original study:
+    python run_calibration_sweep_analysis.py --base-dir-name calibration_roughness_SFINCS_dedup \\
+        --raster-base-dir-name calibration_roughness_SFINCS
     # a tile subset instead of every tile with a result:
     python run_calibration_sweep_analysis.py --base-dir-name calibration_roughness_SFINCS --tile-ids-file <ids.txt>
 """
@@ -27,6 +30,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -52,30 +56,43 @@ def main() -> None:
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
     parser.add_argument("--tile-ids-file", default=None,
                         help="restrict every step to these tiles (default: every tile with a calibration_result.json)")
-    parser.add_argument("--n-tiles", type=int, default=9, help="worst-tile panel size, forwarded to plot_worst_tiles_panel.py")
-    parser.add_argument("--min-union-km2", type=float, default=1.0, help="forwarded to plot_worst_tiles_panel.py")
+    parser.add_argument("--n-tiles", type=int, default=6, help="worst-tile panel size, forwarded to plot_worst_tiles_panel.py")
+    parser.add_argument("--min-union-km2", type=float, default=50.0, help="forwarded to plot_worst_tiles_panel.py")
     parser.add_argument(
         "--select-by", choices=["CSI", "bias"], default="CSI",
         help="'CSI': highest pooled CSI (default). 'bias': |bias-1| closest to 0 (least over/under-prediction overall).",
     )
     parser.add_argument("--forcing-checks-workers", type=int, default=4,
                         help="step 5: tiles drawn in parallel (one subprocess each)")
+    parser.add_argument("--forcing-checks-worst-only", action="store_true",
+                        help="step 5 only for the tiles of the worst-tile panels (worst_tiles_selection_fsf<X>.csv)")
     parser.add_argument("--forcing-checks-only", action="store_true",
                         help="only step 5 (forcing figures), from the existing pooled + per-tile metrics")
+    parser.add_argument("--raster-base-dir-name", default=None,
+                        help="base dir holding the per-tile rasters/inputs when --base-dir-name only holds result "
+                             "JSONs (calibration_roughness_SFINCS_dedup -> calibration_roughness_SFINCS): steps 3 "
+                             "and 5 read the maps from there, figures still go to --base-dir-name")
     args = parser.parse_args()
 
     python = sys.executable
     root = read_root(Path(args.config))
     common = ["--config", args.config, "--base-dir-name", args.base_dir_name]
     subset = ["--tile-ids-file", args.tile_ids_file] if args.tile_ids_file else []
+    raster = ["--raster-base-dir-name", args.raster_base_dir_name] if args.raster_base_dir_name else []
+    if args.raster_base_dir_name:  # step 4 needs the tiles' lon/lat from the selection metadata
+        meta = root / args.base_dir_name / "tile_selection_metadata.csv"
+        if not meta.exists():
+            shutil.copyfile(root / args.raster_base_dir_name / "tile_selection_metadata.csv", meta)
+            print(f"copied tile_selection_metadata.csv from {args.raster_base_dir_name}")
     if args.forcing_checks_only:
         _forcing_checks(python, args, root, _best_fsf(root, args))
         return
 
     _run([python, str(_THIS_DIR / "compute_friction_sweep_metrics.py"), *common, *subset])
     best_fsf = _best_fsf(root, args)
-    _run([python, str(_THIS_DIR / "plot_worst_tiles_panel.py"), *common, "--friction-scale-factor", f"{best_fsf:g}",
-          "--n-tiles", str(args.n_tiles), "--min-union-km2", str(args.min_union_km2)])
+    _run([python, str(_THIS_DIR / "plot_worst_tiles_panel.py"), *common, *raster,
+          "--friction-scale-factor", f"{best_fsf:g}", "--n-tiles", str(args.n_tiles),
+          "--min-union-km2", str(args.min_union_km2)])
     _run([python, str(_THIS_DIR / "plot_validation_results.py"), *common, *subset,
           "--friction-scale-factor", f"{best_fsf:g}"])
     _forcing_checks(python, args, root, best_fsf)
@@ -115,13 +132,17 @@ def _forcing_checks(python: str, args, root: Path, best_fsf: float) -> None:
     rows = per_tile[per_tile["friction_scale_factor"] == best_fsf].sort_values("tile_id")
     if args.tile_ids_file:
         rows = rows[rows["tile_id"].astype(str).isin(Path(args.tile_ids_file).read_text().split())]
+    if args.forcing_checks_worst_only:  # only the tiles in the worst-tile panels (plot_worst_tiles_panel.py)
+        sel = pd.read_csv(base / "figures" / f"worst_tiles_selection_fsf{best_fsf:g}.csv")
+        rows = rows[rows["tile_id"].isin(sel["tile_id"])]
     rows = list(rows.itertuples())
     figures = ["coastrp_forcing", "boundary_forcing"]
 
     def run_one(row) -> tuple[str, bool]:
         prefix = f"{_eikonal_prediction(row)}_{int(row.tile_id)}"
         cmd = [python, str(_THIS_DIR / "plot_sfincs_tile_diagnostics.py"),
-               "--config", args.config, "--tile-id", str(int(row.tile_id)), "--base-dir-name", args.base_dir_name,
+               "--config", args.config, "--tile-id", str(int(row.tile_id)),
+               "--base-dir-name", args.raster_base_dir_name or args.base_dir_name,
                "--figures", *figures, "--fig-dir", str(out_dir), "--out-prefix", prefix]
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode != 0:

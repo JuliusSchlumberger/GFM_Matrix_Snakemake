@@ -81,7 +81,7 @@ def draw_panel_letter(ax: plt.Axes, letter: str | None) -> None:
     )
 
 
-def draw_caption_box(ax: plt.Axes, lines: list[str] | str, loc: str = "upper left") -> None:
+def draw_caption_box(ax: plt.Axes, lines: list[str] | str, loc: str = "upper left", fontsize: float = 8) -> None:
     """In-axes text box - the one way any map in this codebase conveys
     context (tile ID, CSI, cell counts, what a panel shows, ...) - NEVER an
     `ax.set_title()`/`fig.suptitle()`. No-op on an empty/falsy `lines`, so
@@ -103,7 +103,7 @@ def draw_caption_box(ax: plt.Axes, lines: list[str] | str, loc: str = "upper lef
     }
     x, y, va, ha = coords[loc]
     ax.text(
-        x, y, "\n".join(lines), transform=ax.transAxes, fontsize=8, va=va, ha=ha,
+        x, y, "\n".join(lines), transform=ax.transAxes, fontsize=fontsize, va=va, ha=ha,
         bbox=dict(facecolor="white", alpha=0.85, edgecolor="black", linewidth=0.5, pad=4.0),
     )
 
