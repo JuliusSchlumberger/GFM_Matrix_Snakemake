@@ -73,6 +73,8 @@ Usage:
 """
 
 import argparse
+import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -207,6 +209,31 @@ def _stage_tile_grid_lines() -> list[str]:
         "  return 1",
         "}",
     ]
+
+
+def _stage_file_locally(src_path: str) -> str:
+    """Copy `src_path` to node-local scratch and return the local copy's
+    path, instead of opening it straight off P:\\ - mirrors
+    run_aqueduct_cli.py's own helper of the same name (see its docstring for
+    the full GDAL/SQLite-lock-acquisition rationale).
+
+    Added 2026-10-15: this script's OWN `gpd.read_file(tile_grid.path)` call
+    below hits the identical hang when this whole script runs on a Hydrax
+    compute node (as the postprocessing/exposure dispatch-generation bridge
+    job does). Deliberately does NOT mutate `local_config`/`linux_config`'s
+    own `tile_grid.path` value - only the LOCAL variable used for this one
+    read is swapped; `linux_config["tile_grid"]["path"]` stays the real,
+    stable P:\\ path, since `_write_batches` embeds it into every downstream
+    sbatch script it writes, which run on OTHER nodes later - confirmed live
+    that mutating it here instead (the first attempt at this fix) leaked
+    THIS job's own ephemeral scratch path into those scripts, breaking every
+    one of them once this job ended.
+    """
+    stage_dir = os.path.join(os.environ.get("TMPDIR", "/tmp"), "gfm_staged_inputs")
+    os.makedirs(stage_dir, exist_ok=True)
+    dst = os.path.join(stage_dir, f"{os.getpid()}_{os.path.basename(src_path)}")
+    retry_transient_io(shutil.copy2, src_path, dst)
+    return dst
 
 
 def _build_chunk_grid(tile_gdf: gpd.GeoDataFrame, chunk_size_deg: float) -> gpd.GeoDataFrame:
@@ -380,7 +407,14 @@ def main() -> None:
     # Local view (this machine's own reachable mount) for the tile-grid
     # read - see generate_hpc_preprocess_job.py's own note on this exact
     # point. Linux view for the merged_outputs path embedded into targets.
-    tile_gdf = retry_transient_io(gpd.read_file, local_config["tile_grid"]["path"])
+    _local_tile_grid_path = _stage_file_locally(local_config["tile_grid"]["path"])
+    try:
+        tile_gdf = retry_transient_io(gpd.read_file, _local_tile_grid_path)
+    finally:
+        try:
+            os.remove(_local_tile_grid_path)
+        except OSError:
+            pass
     return_periods = [f"RP{rp}" for rp in local_config["boundary_conditions"]["return_periods"]]
     waterlevel_names = merged_slr_scenarios(local_config["boundary_conditions"], local_config["adaptation"])
     baseline_slr = local_config["protection"]["baseline_waterlevel_name"]

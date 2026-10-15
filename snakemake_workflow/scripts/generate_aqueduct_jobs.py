@@ -189,7 +189,6 @@ def _append_postprocess_bridge(
     """
     sbatch_cfg = hpc_cfg["sbatch"]  # lightweight - just generates + submits further scripts
     code_root = linux_config["paths"]["code_root"]
-    linux_tile_grid_path = linux_config["tile_grid"]["path"]
     name = "gfm_generate_postprocess_and_dispatch"
     lines = [
         "#!/bin/bash",
@@ -210,13 +209,21 @@ def _append_postprocess_bridge(
         "",
         f'cd "{code_root}"',
         *_stage_configfile_lines(),
-        *_stage_tile_grid_lines(),
+        # Deliberately NOT staging tile_grid.path here the way the simulation
+        # dispatch does (generate_wave_dispatch/generate_resume_dispatch) -
+        # this script's own `--config "$LOCAL_CONFIGFILE"` is the SAME file
+        # generate_hpc_postprocess_job.py reads `tile_grid.path` out of to
+        # embed into every downstream postprocess_*_batch_*.sbatch /
+        # exposure_pass*_batch_*.sbatch it writes (see that script's own
+        # `_write_batches` calls). Confirmed live 2026-10-15: mutating
+        # tile_grid.path in THIS file to point at THIS job's own node-local
+        # scratch copy leaks that ephemeral, job-specific path into every
+        # script generated downstream - which then fail every time, since
+        # that path no longer exists once this job ends. That script stages
+        # its own local copy internally in Python instead (see its
+        # `_stage_file_locally`), without ever mutating the config it reads
+        # `tile_grid.path` from.
         f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
-        f'stage_tile_grid_locally "{linux_tile_grid_path}" LOCAL_TILE_GRID || exit 1',
-        "python -c 'import sys, yaml; cfg_path, new_path = sys.argv[1], sys.argv[2]; "
-        "cfg = yaml.safe_load(open(cfg_path, encoding=\"utf-8\")); cfg[\"tile_grid\"][\"path\"] = new_path; "
-        "yaml.safe_dump(cfg, open(cfg_path, \"w\", encoding=\"utf-8\"))' "
-        '"$LOCAL_CONFIGFILE" "$LOCAL_TILE_GRID"',
         "",
         'echo "=== Generating postprocessing + exposure dispatch ==="',
         'python snakemake_workflow/scripts/generate_hpc_postprocess_job.py --config "$LOCAL_CONFIGFILE"',
