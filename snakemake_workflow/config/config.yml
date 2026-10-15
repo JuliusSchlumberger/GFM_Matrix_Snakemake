@@ -451,7 +451,16 @@ hpc:
     # Hydrax uses Environment Modules (Lmod) + conda, not a single module
     # for this custom env - e.g.:
     #   module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm
-    env_activate_cmd: 'module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm'
+    # HDF5_USE_FILE_LOCKING=FALSE (2026-10-15): confirmed live that
+    # prepare_exposure_grid_chunk's geogunit read (inputs/WRI/geogunit_107_all.nc,
+    # a netCDF/HDF5 file via hydromt's DataCatalog) hung for hours on a
+    # Hydrax compute node with zero progress - a separate, well-documented
+    # HDF5-over-NFS file-locking issue (distinct from the GDAL/SQLite one
+    # affecting .gpkg reads, fixed via node-local staging instead - see
+    # generate_aqueduct_jobs.py's _stage_tile_grid_lines). HDF5 only needs
+    # this one env var to skip its own locking entirely for read-only access,
+    # no staging required.
+    env_activate_cmd: 'module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm && export HDF5_USE_FILE_LOCKING=FALSE'
 
   # Per-hop_distance-wave node-count/partition tiers (2026-10-08), for a
   # throughput-driven dispatch of the real global simulation run - overrides

@@ -17,15 +17,23 @@ own run() now calls both plot functions directly at the end, using
 already-in-memory GeoDataFrames - no extra disk read, always in sync with
 whatever tile_grid.path that run just wrote.
 
+Optional switch --mark-no-stations: after the production simulation, also
+write domains_final_no_stations.png - the same map with the domains that were
+skipped for having no COAST-RP water level station within their search box
+(the simulation's skipped_tiles/ markers, aqueduct_runner.NO_STATIONS_REASON)
+drawn on top in light red.
+
 Usage (standalone - e.g. to refresh domains_final.png without re-running
 tile generation):
     python plot_domain_maps.py
     python plot_domain_maps.py --tile-grid path/to/domain_tiles_global.gpkg --out-dir DIR
+    python plot_domain_maps.py --mark-no-stations [--skipped-dir <model_outputs>/skipped_tiles]
 """
 
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import cartopy.crs as ccrs
@@ -41,17 +49,36 @@ COAST_COLOR = "#b8b8b3"
 DOMAIN_COLOR = "#2a78d6"
 INLAND_DOMAIN_COLOR = "#8db9ea"  # hop_distance > 0 (no own ocean edge) - a lighter DOMAIN_COLOR
 DROPPED_COLOR = "#d6572a"
+NO_STATIONS_COLOR = "#ef8a7e"  # light red: coastal domains skipped for having no COAST-RP station
 
 DEFAULT_TILE_GRID = Path(
     r"P:\11212688-004-global-floodmaps\modelling\processed_inputs\mask\domain_tiles_global.gpkg"
 )
 DEFAULT_OUT_DIR = Path(r"P:\11212688-004-global-floodmaps\modelling\processed_inputs\mask")
+DEFAULT_SKIPPED_DIR = Path(r"P:\11212688-004-global-floodmaps\modelling\model_outputs\skipped_tiles")
+
+
+def no_station_tile_ids(skipped_dir: Path) -> set[int]:
+    """Tile ids the production simulation skipped for having no COAST-RP
+    water level station (one skipped_tiles/{tile_id}_{scenario}.txt marker per
+    skipped run; the reason is the same for all scenarios of a tile, so one
+    marker per tile is read)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from aqueduct_runner import NO_STATIONS_REASON
+
+    first: dict[str, Path] = {}
+    for f in sorted(Path(skipped_dir).glob("*.txt")):
+        first.setdefault(f.name.split("_", 1)[0], f)
+    return {int(t) for t, f in first.items() if t.isdigit()
+            and NO_STATIONS_REASON in f.read_text(errors="replace")}
 
 
 def plot_domains_map(gdf: gpd.GeoDataFrame, out_path: Path, color: str, label: str,
-                     inland_color: str | None = None) -> None:
+                     inland_color: str | None = None, highlight: set[int] | None = None,
+                     highlight_color: str = NO_STATIONS_COLOR) -> None:
     """`inland_color`: draw hop_distance > 0 domains in this colour, underneath
-    the hop_distance == 0 ones (`color`) - only if gdf has a hop_distance column."""
+    the hop_distance == 0 ones (`color`) - only if gdf has a hop_distance column.
+    `highlight`: tile ids drawn on top of everything in `highlight_color`."""
     proj = ccrs.EqualEarth()
     fig = plt.figure(figsize=(14, 7.5), facecolor="white")
     ax = plt.axes(projection=proj)
@@ -61,10 +88,14 @@ def plot_domains_map(gdf: gpd.GeoDataFrame, out_path: Path, color: str, label: s
     if inland_color is not None and "hop_distance" in gdf.columns:
         inland = gdf["hop_distance"] > 0
         layers = [(gdf[inland], inland_color, 3), (gdf[~inland], color, 4)]
+    if highlight:
+        marked = gdf["tile_id"].astype(int).isin(highlight)
+        layers = [(sub[~marked.loc[sub.index]], c, z) for sub, c, z in layers] + [(gdf[marked], highlight_color, 5)]
     for sub, c, z in layers:
         if len(sub):
-            ax.add_geometries(sub.geometry, crs=ccrs.PlateCarree(),
-                              facecolor=c, edgecolor=c, linewidth=0.2, alpha=0.75, zorder=z)
+            # highlighted domains get a wider outline so small ones stay visible at global scale
+            ax.add_geometries(sub.geometry, crs=ccrs.PlateCarree(), facecolor=c, edgecolor=c,
+                              linewidth=0.6 if z == 5 else 0.2, alpha=0.9 if z == 5 else 0.75, zorder=z)
     ax.spines["geo"].set_edgecolor(COAST_COLOR)
     ax.spines["geo"].set_linewidth(0.6)
     fig.savefig(out_path, dpi=300, bbox_inches="tight", facecolor="white")
@@ -72,8 +103,18 @@ def plot_domains_map(gdf: gpd.GeoDataFrame, out_path: Path, color: str, label: s
     print(f"Wrote {out_path} ({len(gdf)} domain(s) - {label})")
 
 
-def plot_final_domains_map(final_gdf: gpd.GeoDataFrame, out_dir: Path) -> Path:
+def plot_final_domains_map(final_gdf: gpd.GeoDataFrame, out_dir: Path,
+                           no_station_ids: set[int] | None = None) -> Path:
+    """`no_station_ids`: if given, write domains_final_no_stations.png instead,
+    with those domains in light red on top."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    if no_station_ids:
+        out_path = out_dir / "domains_final_no_stations.png"
+        n = int(final_gdf["tile_id"].astype(int).isin(no_station_ids).sum())
+        plot_domains_map(final_gdf, out_path, DOMAIN_COLOR,
+                         f"final simulation domains, {n} skipped for no COAST-RP station in light red",
+                         inland_color=INLAND_DOMAIN_COLOR, highlight=no_station_ids)
+        return out_path
     out_path = out_dir / "domains_final.png"
     plot_domains_map(final_gdf, out_path, DOMAIN_COLOR, "final simulation domains (hop > 0 lighter)",
                      inland_color=INLAND_DOMAIN_COLOR)
@@ -100,11 +141,20 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tile-grid", default=str(DEFAULT_TILE_GRID))
     parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR))
+    parser.add_argument("--mark-no-stations", action="store_true",
+                        help="write domains_final_no_stations.png: domains skipped for having no COAST-RP "
+                             "station in light red (needs the simulation's skipped_tiles markers)")
+    parser.add_argument("--skipped-dir", default=str(DEFAULT_SKIPPED_DIR),
+                        help="<model_outputs>/skipped_tiles (only with --mark-no-stations)")
     args = parser.parse_args()
 
     final_gdf = gpd.read_file(args.tile_grid)
     print(f"{len(final_gdf)} domain(s) from {args.tile_grid}")
-    plot_final_domains_map(final_gdf, Path(args.out_dir))
+    ids = None
+    if args.mark_no_stations:
+        ids = no_station_tile_ids(Path(args.skipped_dir))
+        print(f"{len(ids)} domain(s) skipped for no COAST-RP station ({args.skipped_dir})")
+    plot_final_domains_map(final_gdf, Path(args.out_dir), no_station_ids=ids)
 
 
 if __name__ == "__main__":
