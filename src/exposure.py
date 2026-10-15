@@ -14,6 +14,7 @@ import rasterio
 
 from config_utils import retry_transient_io
 from protection import GEOGUNIT_INVALID, load_geogunit_ids
+from rasters import _atomic_raster_write
 
 
 def prepare_exposure_grid_chunk(
@@ -52,14 +53,26 @@ def prepare_exposure_grid_chunk(
         retry_transient_io(Path(geogunit_output_path).touch)
         return
 
-    retry_transient_io(pop_da.raster.to_raster, population_output_path, driver="GTiff")
+    # _atomic_raster_write, not pop_da.raster.to_raster directly - confirmed
+    # live (2026-10-15) that a concurrent reader (another dispatch's
+    # compute_flood_fraction_chunk, racing against this chunk's own
+    # (re)computation) can open this path mid-write and get a
+    # "not recognized as a supported file format" RasterioIOError - the
+    # exact corrupted-partial-read failure mode _atomic_raster_write exists
+    # to prevent (see that function's own docstring), just never applied to
+    # this particular writer before.
+    pop_profile = {
+        "driver": "GTiff", "crs": pop_da.raster.crs, "transform": pop_da.raster.transform,
+        "width": pop_da.raster.width, "height": pop_da.raster.height,
+        "count": 1, "dtype": pop_da.dtype, "nodata": pop_da.raster.nodata,
+    }
+    _atomic_raster_write(population_output_path, pop_profile, lambda dst: dst.write(pop_da.values, indexes=1))
 
     geo_ids = load_geogunit_ids(data_catalog, geogunit_source, pop_da)
-    profile = {
+    geo_profile = {
         "driver": "GTiff", "crs": pop_da.raster.crs,
         "transform": pop_da.raster.transform,
         "width": pop_da.raster.width, "height": pop_da.raster.height,
         "count": 1, "dtype": "int32", "nodata": GEOGUNIT_INVALID, "compress": "lzw",
     }
-    with retry_transient_io(rasterio.open, geogunit_output_path, "w", **profile) as dst:
-        dst.write(geo_ids.astype("int32"), 1)
+    _atomic_raster_write(geogunit_output_path, geo_profile, lambda dst: dst.write(geo_ids.astype("int32"), indexes=1))
