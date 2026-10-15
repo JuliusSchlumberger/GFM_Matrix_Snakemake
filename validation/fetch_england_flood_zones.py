@@ -48,14 +48,31 @@ def _tiles(bbox, step):
         x += step
 
 
+def _get_with_retry(url, params, max_attempts=6, delay=10):
+    # The API's own "next" pagination links redirect to a different backend
+    # host (confirmed live: api-k8s-dsp-prod.agrimetrics.co.uk) that hit a
+    # transient DNS resolution failure mid-run - retry rather than let one
+    # flaky page kill the whole tiled fetch (per-tile caching already makes
+    # a full restart safe, but there's no reason to lose an in-progress
+    # tile's own later pages over a passing blip).
+    for attempt in range(1, max_attempts + 1):
+        try:
+            r = requests.get(url, params=params, timeout=60)
+            r.raise_for_status()
+            return r.json()
+        except requests.exceptions.RequestException as e:
+            if attempt == max_attempts:
+                raise
+            print(f"    [retry {attempt}/{max_attempts}] {e.__class__.__name__}: {e} - retrying in {delay}s...", flush=True)
+            time.sleep(delay)
+
+
 def fetch_bbox(bbox, page=2000):
     url = BASE
     params = {"f": "json", "bbox": ",".join(map(str, bbox)), "limit": page}
     parts = []
     while url:
-        r = requests.get(url, params=params, timeout=60)
-        r.raise_for_status()
-        js = r.json()
+        js = _get_with_retry(url, params)
         if js["features"]:
             parts.append(gpd.GeoDataFrame.from_features(js["features"], crs=4326))
         url = next((link["href"] for link in js.get("links", []) if link["rel"] == "next"), None)
@@ -70,6 +87,7 @@ def main() -> None:
     print(f"Fetching England flood zones in {len(tiles)} tile(s) of {TILE_DEG} deg ...", flush=True)
 
     all_parts = []
+    failed_tiles = []
     for i, tile in enumerate(tiles):
         cache_path = f"{CACHE_DIR}/tile_{i:03d}.gpkg"
         if os.path.exists(cache_path):
@@ -77,12 +95,22 @@ def main() -> None:
             print(f"[{i + 1}/{len(tiles)}] {tile}: {len(gdf)} feature(s) (cached)", flush=True)
         else:
             t0 = time.time()
-            gdf = fetch_bbox(tile)
+            try:
+                gdf = fetch_bbox(tile)
+            except requests.exceptions.RequestException as e:
+                print(f"[{i + 1}/{len(tiles)}] {tile}: FAILED after retries ({e.__class__.__name__}) - "
+                      f"continuing, re-run this script afterward to pick it up", flush=True)
+                failed_tiles.append(tile)
+                continue
             if not gdf.empty:
                 gdf.to_file(cache_path, driver="GPKG")
             print(f"[{i + 1}/{len(tiles)}] {tile}: {len(gdf)} feature(s) ({time.time() - t0:.1f}s)", flush=True)
         if not gdf.empty:
             all_parts.append(gdf)
+
+    if failed_tiles:
+        print(f"\n{len(failed_tiles)} tile(s) failed and were skipped: {failed_tiles}", flush=True)
+        print("Re-run this script to retry just those (everything else is cached).", flush=True)
 
     gdf = pd.concat(all_parts, ignore_index=True) if all_parts else gpd.GeoDataFrame()
     print(f"\nTotal features fetched: {len(gdf)}", flush=True)

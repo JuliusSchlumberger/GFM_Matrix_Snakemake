@@ -147,6 +147,10 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_csv(csv_path)
+    if "protection_status" in df.columns:  # deltas protected to >= 100 yr (FLOPROS) are left out
+        excluded = sorted(df.loc[df["protection_status"] == "excluded", "delta_name_inferred"].unique())
+        df = df[df["protection_status"] != "excluded"]
+        print(f"left out {len(excluded)} delta(s) protected to >= 100 yr: {', '.join(excluded) or '-'}")
     traj_df = pd.read_csv(traj_path, index_col="year")
     print(f"{len(df)} row(s) from {csv_path}")
     print(f"SLR trajectory data: {traj_path} (years {traj_df.index.min()}-{traj_df.index.max()})")

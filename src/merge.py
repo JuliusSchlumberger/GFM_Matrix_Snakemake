@@ -17,6 +17,7 @@ flooding".
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -259,9 +260,22 @@ def merge_tile_rasters_chunk(
         "predictor": 2,  # integer predictor - tile_ids are arbitrary integers, not a smooth field
     }
 
+    # Write via same-directory temp files + atomic os.replace at the very
+    # end (2026-10-16) - confirmed live that a process killed mid-write here
+    # (SLURM time limit, node failure/preemption) leaves a truncated file at
+    # the real output_path that Snakemake's own file-exists check treats as
+    # complete forever after, with every downstream reader (compute_flood_fraction_chunk)
+    # crashing on it every single time it's re-attempted - the exact same
+    # failure mode _atomic_raster_write (src/rasters.py) already exists to
+    # prevent, just never applied to this writer (which, unlike that
+    # helper's single dst.write() callback, needs two files open across one
+    # shared block loop, so the same temp+rename pattern is implemented
+    # inline here instead of reusing that function directly).
+    wd_tmp = Path(waterdepth_output_path).with_name(f"{Path(waterdepth_output_path).name}.tmp{os.getpid()}")
+    prov_tmp = Path(provenance_output_path).with_name(f"{Path(provenance_output_path).name}.tmp{os.getpid()}")
     try:
-        with retry_transient_io(rasterio.open, waterdepth_output_path, "w", **wd_profile) as wd_dst, \
-             retry_transient_io(rasterio.open, provenance_output_path, "w", **prov_profile) as prov_dst:
+        with retry_transient_io(rasterio.open, wd_tmp, "w", **wd_profile) as wd_dst, \
+             retry_transient_io(rasterio.open, prov_tmp, "w", **prov_profile) as prov_dst:
             for row_off in range(0, out_h, block_size):
                 block_h = min(block_size, out_h - row_off)
                 for col_off in range(0, out_w, block_size):
@@ -314,6 +328,12 @@ def merge_tile_rasters_chunk(
                     window = Window(col_off, row_off, block_w, block_h)
                     wd_dst.write(merged, 1, window=window)
                     prov_dst.write(best_tile_id, 1, window=window)
+        retry_transient_io(os.replace, wd_tmp, waterdepth_output_path)
+        retry_transient_io(os.replace, prov_tmp, provenance_output_path)
+    except BaseException:
+        wd_tmp.unlink(missing_ok=True)
+        prov_tmp.unlink(missing_ok=True)
+        raise
     finally:
         for tm in tile_metas:
             tm.src.close()

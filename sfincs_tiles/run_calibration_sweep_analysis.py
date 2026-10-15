@@ -11,8 +11,10 @@ can be rerun at any time on whatever tiles have finished:
   4. plot_validation_results.py - extent/depth/agreement figure set and
      metrics_overview_table_fsf<X>.csv (HC-bathtub and EA-bathtub vs SFINCS) at that point.
   5. plot_sfincs_tile_diagnostics.py --figures coastrp_forcing boundary_forcing
-     for EVERY tile scored at that point, --forcing-checks-workers at a time,
-     into figures/forcing_checks/ as
+     for the tiles of the worst-tile panels of step 3 (the --n-tiles worst
+     over- and under-predicting tiles, worst_tiles_selection_fsf<X>.csv) - or,
+     with --forcing-checks-all, for EVERY tile scored at that point -
+     --forcing-checks-workers at a time, into figures/forcing_checks/ as
      {overprediction,underprediction,agreement}_{tile_id}_forcing_comparison.png and
      ..._boundary_forcing.png (eikonal over-/under-predicting relative to SFINCS).
      --forcing-checks-only redoes just this step from the existing metrics.
@@ -20,6 +22,8 @@ can be rerun at any time on whatever tiles have finished:
 Usage:
     python run_calibration_sweep_analysis.py --base-dir-name calibration_roughness_SFINCS
     python run_calibration_sweep_analysis.py --base-dir-name calibration_roughness_SFINCS --forcing-checks-only
+    # forcing figures for every scored tile instead of only the worst ones:
+    python run_calibration_sweep_analysis.py --base-dir-name calibration_roughness_SFINCS --forcing-checks-all
     # the overlap-corrected (dedup) results - maps and inputs read from the original study:
     python run_calibration_sweep_analysis.py --base-dir-name calibration_roughness_SFINCS_dedup \\
         --raster-base-dir-name calibration_roughness_SFINCS
@@ -64,8 +68,9 @@ def main() -> None:
     )
     parser.add_argument("--forcing-checks-workers", type=int, default=4,
                         help="step 5: tiles drawn in parallel (one subprocess each)")
-    parser.add_argument("--forcing-checks-worst-only", action="store_true",
-                        help="step 5 only for the tiles of the worst-tile panels (worst_tiles_selection_fsf<X>.csv)")
+    parser.add_argument("--forcing-checks-all", action="store_true",
+                        help="step 5 for every scored tile (default: only the tiles of the worst-tile panels, "
+                             "worst_tiles_selection_fsf<X>.csv from step 3)")
     parser.add_argument("--forcing-checks-only", action="store_true",
                         help="only step 5 (forcing figures), from the existing pooled + per-tile metrics")
     parser.add_argument("--raster-base-dir-name", default=None,
@@ -120,8 +125,9 @@ def _eikonal_prediction(row) -> str:
 
 
 def _forcing_checks(python: str, args, root: Path, best_fsf: float) -> None:
-    """COAST-RP forcing comparison + boundary forcing figure for EVERY tile scored at the chosen
-    sweep point (friction_sweep_per_tile_metrics.csv) into
+    """COAST-RP forcing comparison + boundary forcing figure for the tiles of the worst-tile panels
+    (worst_tiles_selection_fsf<X>.csv), or with --forcing-checks-all every tile scored at the chosen
+    sweep point (friction_sweep_per_tile_metrics.csv), into
     figures/forcing_checks/, named {over,under}prediction_<tile>_... from the
     eikonal's point of view. --forcing-checks-workers tiles at a time, one
     subprocess each; a failing tile is reported at the end instead of aborting
@@ -132,9 +138,11 @@ def _forcing_checks(python: str, args, root: Path, best_fsf: float) -> None:
     rows = per_tile[per_tile["friction_scale_factor"] == best_fsf].sort_values("tile_id")
     if args.tile_ids_file:
         rows = rows[rows["tile_id"].astype(str).isin(Path(args.tile_ids_file).read_text().split())]
-    if args.forcing_checks_worst_only:  # only the tiles in the worst-tile panels (plot_worst_tiles_panel.py)
-        sel = pd.read_csv(base / "figures" / f"worst_tiles_selection_fsf{best_fsf:g}.csv")
-        rows = rows[rows["tile_id"].isin(sel["tile_id"])]
+    if not args.forcing_checks_all:  # only the tiles in the worst-tile panels (plot_worst_tiles_panel.py)
+        sel_path = base / "figures" / f"worst_tiles_selection_fsf{best_fsf:g}.csv"
+        if not sel_path.exists():
+            raise SystemExit(f"{sel_path} missing - run the full analysis (step 3) first, or use --forcing-checks-all")
+        rows = rows[rows["tile_id"].isin(pd.read_csv(sel_path)["tile_id"])]
     rows = list(rows.itertuples())
     figures = ["coastrp_forcing", "boundary_forcing"]
 

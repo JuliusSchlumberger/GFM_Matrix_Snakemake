@@ -63,6 +63,20 @@ extends beyond the simulated tile footprint would otherwise read an
 artificially low percentage. `pct_delta_covered_by_model` makes that gap
 visible per row.
 
+Flood protection (FLOPROS, 2026-10): each cell of a delta carries the FLOPROS design standard of its
+WRI geogunit_107 unit - `Coastal`, else `Riverine`, else `protection.default_rp` (the same convention
+as the exposure pipeline, `compute_exposure_analysis.py`). Flooding counts only where it is allowed:
+never in cells protected to >= PROTECTION_THRESHOLD_YEARS (100), and in cells below that only if they
+are connected to the sea through other cells below it - an enclosed low-standard area behind a
+high-standard one does not flood either. Decided per cell, not per delta (a delta that is mostly
+protected still floods in its connected low-standard part). Connectivity: 8-connected cells below the
+threshold (land and water alike) that reach open ocean of the DeltaDTM land/sea mask, on the same
+~30 m grid the flood depths are merged on. A delta in which no land cell may flood is EXCLUDED - kept
+in the CSV with `protection_status = "excluded"` and NaN flooded values, left out of the figures.
+`protection_main_rp_years` (the standard covering most of the delta's land) is for reporting only.
+`flooded_area_km2` / `pct_flooded_of_modeled_area` are the protection-adjusted values;
+`flooded_area_km2_unprotected` keeps the old, unadjusted number for comparison.
+
 Usage:
     python compute_delta_flood_extent.py
     python compute_delta_flood_extent.py --scenarios ssp126
@@ -79,13 +93,19 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import rasterio
+from rasterio.enums import Resampling
+from rasterio.warp import reproject
 from rasterio.windows import Window
+from scipy import ndimage
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from config_utils import load_config, retry_transient_io  # noqa: E402
+from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from merge import AQUEDUCT_NODATA, _make_chunk_transform, _open_overlapping_tiles, _tile_id_from_path  # noqa: E402
 from plotting import pixel_area_km2_grid  # noqa: E402
 from validation import tri_domain_mask  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sfincs_tiles"))
+from build_station_boundary_lines import MASK_VRT, OCEAN_CODE  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 DELTAS_PATH = Path(r"P:\11212688-004-global-floodmaps\modelling\inputs\DeltasGlobal\all_deltas.shp")
@@ -93,6 +113,8 @@ RETURN_PERIOD = "RP100"
 SLR_SCENARIOS = ["SLR_0", "SLR_500", "SLR_1000", "SLR_1500", "SLR_2000"]
 SCENARIOS_DEFAULT = ["ssp126", "ssp245"]
 VOLGA_ID = 44  # confirmed zero tile coverage in both scenarios - excluded
+PROTECTION_THRESHOLD_YEARS = 100.0  # areas protected to at least this design RP do not flood
+GEOGUNIT_SOURCE = "geogunit_protection_units"  # catalog key (data_catalog_gfm.yml)
 
 # Best-effort Id -> name, matched by centroid location during planning - see
 # module docstring. NOT authoritative; cross-checked against Id=44 (Volga,
@@ -174,7 +196,64 @@ def merge_in_memory(model_outputs: Path, slr: str, out_w: int, out_h: int, geome
     return np.where(covered, best, np.nan).astype("float32")
 
 
-def score_delta(delta_row, candidate_tiles: list[int], model_outputs: Path) -> dict:
+def _read_mask_on_grid(root: Path, transform, width: int, height: int) -> np.ndarray:
+    """DeltaDTM land/sea mask (0 land, 1 ocean, 2 lake, 3 river) on the merge grid, nearest neighbour.
+    The global VRT has no tiles over open ocean or far inland: a no-data block whose valid neighbouring
+    pixels are mostly ocean is ocean, otherwise land (same rule as build_station_boundary_lines.py)."""
+    with rasterio.open(root / MASK_VRT) as src:
+        nodata = src.nodata if src.nodata is not None else 255
+        arr = np.full((height, width), nodata, dtype="uint8")
+        reproject(rasterio.band(src, 1), arr, dst_transform=transform, dst_crs="EPSG:4326",
+                  resampling=Resampling.nearest, src_nodata=nodata, dst_nodata=nodata)
+    missing = arr == nodata
+    if missing.any():
+        labels, n = ndimage.label(missing)
+        rim = ndimage.binary_dilation(missing) & ~missing
+        lab_rim = ndimage.grey_dilation(labels, size=3) * rim
+        n_rim = ndimage.sum(rim, lab_rim, index=np.arange(1, n + 1))
+        n_ocean = ndimage.sum(rim & (arr == OCEAN_CODE), lab_rim, index=np.arange(1, n + 1))
+        ocean_blocks = np.arange(1, n + 1)[(n_rim > 0) & (n_ocean > 0.5 * n_rim)]
+        arr[missing] = 0
+        arr[np.isin(labels, ocean_blocks)] = OCEAN_CODE
+    return arr
+
+
+def protection_on_grid(prot_inputs: dict, domain: np.ndarray, transform, width: int, height: int) -> dict:
+    """Which merge-grid cells may flood (below PROTECTION_THRESHOLD_YEARS and sea-connected through
+    such cells, all on this ~30 m grid) plus reporting figures over the delta's modeled land."""
+    catalog, rp_by_geogunit = prot_inputs["catalog"], prot_inputs["rp_by_geogunit"]
+    default_rp, root = prot_inputs["default_rp"], prot_inputs["root"]
+    left, top = transform.c, transform.f
+    bbox = [left, top + height * transform.e, left + width * transform.a, top]
+    rp = np.full((height, width), default_rp, dtype="float32")
+    try:
+        geo = catalog.get_rasterdataset(GEOGUNIT_SOURCE, bbox=bbox, variables=["Geogunits"]).squeeze(drop=True)
+        gid = np.full((height, width), -1, dtype="int32")
+        reproject(np.nan_to_num(geo.values.astype("float64"), nan=-1).astype("int32"), gid,
+                  src_transform=geo.raster.transform, src_crs=geo.raster.crs, dst_transform=transform,
+                  dst_crs="EPSG:4326", resampling=Resampling.nearest, src_nodata=-1, dst_nodata=-1)
+        ids, inv = np.unique(gid, return_inverse=True)  # map per unique unit, not per cell
+        mapped = pd.Series(ids).map(rp_by_geogunit).to_numpy(dtype="float64")
+        rp = np.where(np.isnan(mapped), default_rp, mapped)[inv].reshape(height, width).astype("float32")
+        del gid, inv
+    except Exception as e:  # noqa: BLE001 - no geogunit coverage: production's default standard everywhere
+        print(f"    (no geogunit coverage: {e}) - default protection {default_rp:g} yr everywhere", flush=True)
+    ocean = _read_mask_on_grid(root, transform, width, height) == OCEAN_CODE
+    low = rp < PROTECTION_THRESHOLD_YEARS
+    labels, _ = ndimage.label(low | ocean, structure=np.ones((3, 3)))
+    sea_ids = np.unique(labels[ocean])
+    floodable = np.isin(labels, sea_ids[sea_ids > 0]) & low
+    del labels
+    land = domain & ~ocean
+    vals, counts = np.unique(rp[land], return_counts=True)
+    n = max(int(land.sum()), 1)
+    return {"floodable": floodable,
+            "main_rp": float(vals[np.argmax(counts)]) if len(vals) else float("nan"),
+            "pct_protected": 100.0 * float((land & ~low).sum()) / n,
+            "pct_floodable": 100.0 * float((land & floodable).sum()) / n}
+
+
+def score_delta(delta_row, candidate_tiles: list[int], model_outputs: Path, prot_inputs: dict | None = None) -> dict:
     """Per-(scenario, delta): merges every covering tile's own waterdepth
     raster onto one common grid (chunk_bounds = the delta's own bbox),
     in memory, once per SLR magnitude - each real cell is counted exactly
@@ -194,19 +273,23 @@ def score_delta(delta_row, candidate_tiles: list[int], model_outputs: Path) -> d
         zero = {slr: 0.0 for slr in SLR_SCENARIOS}
         return {"n_tiles": 0, "delta_area_km2_modeled": 0.0,
                 "delta_area_km2_shapefile": float(delta_row["Area"]),
-                "pct_delta_covered_by_model": 0.0, "flooded_km2_by_slr": zero}
+                "pct_delta_covered_by_model": 0.0, "flooded_km2_by_slr": zero, "raw_km2_by_slr": dict(zero),
+                "protection": None}
 
     out_transform, out_w, out_h, geometry = _tile_geometry(slr0_rasters, bbox)
 
     per_slr_flooded_km2: dict[str, float] = {}
+    per_slr_raw_km2: dict[str, float] = {}
     n_tiles = len(geometry)
+    floodable = None
+    prot = None
     modeled_km2 = 0.0
     domain = None
     area_grid = None
     for slr in SLR_SCENARIOS:
         depth = merge_in_memory(model_outputs, slr, out_w, out_h, geometry)
         if depth is None:
-            per_slr_flooded_km2[slr] = 0.0
+            per_slr_flooded_km2[slr] = per_slr_raw_km2[slr] = 0.0
             continue
 
         if domain is None:  # SLR-independent (same footprint/grid every SLR) - build once
@@ -217,9 +300,14 @@ def score_delta(delta_row, candidate_tiles: list[int], model_outputs: Path) -> d
             domain = tri_domain_mask(delta_gdf, out_transform, "EPSG:4326", (out_h, out_w)) & covered
             area_grid = pixel_area_km2_grid(out_transform, out_w, out_h)
             modeled_km2 = float((domain * area_grid).sum())
+            if prot_inputs is not None:
+                prot = protection_on_grid(prot_inputs, domain, out_transform, out_w, out_h)
+                floodable = prot.pop("floodable")
 
         wet = (depth > 0) & domain  # depth>0 is already False wherever depth is NaN - no separate NaN guard needed
-        per_slr_flooded_km2[slr] = float((wet * area_grid).sum())
+        per_slr_raw_km2[slr] = float((wet * area_grid).sum())
+        per_slr_flooded_km2[slr] = (float(((wet & floodable) * area_grid).sum()) if floodable is not None
+                                    else per_slr_raw_km2[slr])
 
     shapefile_km2 = float(delta_row["Area"])
     pct_covered = 100.0 * modeled_km2 / shapefile_km2 if shapefile_km2 > 0 else float("nan")
@@ -230,6 +318,8 @@ def score_delta(delta_row, candidate_tiles: list[int], model_outputs: Path) -> d
         "delta_area_km2_shapefile": shapefile_km2,
         "pct_delta_covered_by_model": pct_covered,
         "flooded_km2_by_slr": per_slr_flooded_km2,
+        "raw_km2_by_slr": per_slr_raw_km2,
+        "protection": prot,
     }
 
 
@@ -259,6 +349,17 @@ def main() -> None:
     root = Path(first_cfg["paths"]["root"])
     out_path = Path(args.out) if args.out else root / "deltas_floodmaps" / "delta_flood_extent.csv"
 
+    # FLOPROS protection standards - scenario-independent, computed once per delta
+    prod_cfg = load_config(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml")
+    default_rp = float(prod_cfg.get("protection", {}).get("default_rp", 5.0))
+    catalog = get_data_catalog(_REPO_ROOT / prod_cfg["paths"]["hydromt_data_catalog"], root=prod_cfg["paths"]["root"])
+    flopros = catalog.get_dataframe("flopros_protection_standards")
+    rp_by_geogunit = flopros["Coastal"].fillna(flopros["Riverine"]).fillna(default_rp)
+    rp_by_geogunit.index = rp_by_geogunit.index.astype("int64")
+    prot_inputs = {"catalog": catalog, "rp_by_geogunit": rp_by_geogunit, "default_rp": default_rp, "root": root}
+    print(f"\nFLOPROS protection: coastal, else riverine, else {default_rp:g} yr; cells >= "
+          f"{PROTECTION_THRESHOLD_YEARS:g} yr and enclosed low-standard cells do not flood", flush=True)
+
     rows = []
     t_start = time.time()
     n_deltas = len(deltas)
@@ -274,7 +375,10 @@ def main() -> None:
             print(f"  [{i}/{n_deltas}] delta {delta_id:2d} ({delta_name}): "
                   f"{len(candidate_tiles)} candidate tile(s) - merging...", flush=True)
             t0 = time.time()
-            result = score_delta(delta_row, candidate_tiles, model_outputs)
+            result = score_delta(delta_row, candidate_tiles, model_outputs, prot_inputs)
+            prot = result["protection"] or {"main_rp": float("nan"), "pct_protected": float("nan"),
+                                             "pct_floodable": float("nan")}
+            excluded = prot["pct_floodable"] == 0.0
             elapsed = time.time() - t0
             modeled_km2 = result["delta_area_km2_modeled"]
 
@@ -282,9 +386,14 @@ def main() -> None:
                   f"modeled {modeled_km2:.1f}/{result['delta_area_km2_shapefile']:.1f} km2 "
                   f"({result['pct_delta_covered_by_model']:.1f}% covered) - {elapsed:.1f}s "
                   f"[{(time.time() - t_start) / 60:.1f}min elapsed]", flush=True)
+            print(f"       protection: main {prot['main_rp']:g} yr, {prot['pct_protected']:.1f}% >= "
+                  f"{PROTECTION_THRESHOLD_YEARS:g} yr, {prot['pct_floodable']:.1f}% may flood"
+                  f"{' -> EXCLUDED' if excluded else ''}", flush=True)
 
+            status = ("excluded" if excluded else
+                      "partly_protected" if prot["pct_protected"] > 0 else "unprotected")
             for slr in SLR_SCENARIOS:
-                flooded_km2 = result["flooded_km2_by_slr"][slr]
+                flooded_km2 = float("nan") if excluded else result["flooded_km2_by_slr"][slr]
                 pct_flooded = 100.0 * flooded_km2 / modeled_km2 if modeled_km2 > 0 else float("nan")
                 rows.append({
                     "delta_id": delta_id,
@@ -300,6 +409,11 @@ def main() -> None:
                     "delta_area_km2_shapefile": round(result["delta_area_km2_shapefile"], 4),
                     "pct_delta_covered_by_model": round(result["pct_delta_covered_by_model"], 2),
                     "pct_flooded_of_modeled_area": round(pct_flooded, 4),
+                    "flooded_area_km2_unprotected": round(result["raw_km2_by_slr"][slr], 4),
+                    "protection_main_rp_years": prot["main_rp"],
+                    "pct_area_protected_ge100": round(prot["pct_protected"], 2),
+                    "pct_area_floodable": round(prot["pct_floodable"], 2),
+                    "protection_status": status,
                 })
 
     df = pd.DataFrame(rows)

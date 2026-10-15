@@ -714,6 +714,107 @@ scotland_sepa_coastal_m:
       (2080 high-emissions) layers exist in the same geodatabase but are not yet
       cataloged - a real, already-identified extension, not a data gap.
 
+# -- England (part of GBR) --------------------------------------------------------
+# Environment Agency "Flood Map for Planning: Flood Zones 2 & 3 (Rivers and Sea)",
+# downloaded 2026-10-15/16 via the EA's own OGC API Features endpoint
+# (environment.data.gov.uk/spatialdata/flood-map-for-planning-flood-zones/...),
+# tiled fetch (validation/fetch_england_flood_zones.py - a single full-England
+# bbox request was tried first and never returned even one page; confirmed live
+# that individual ~1deg tiles over dense coastal stretches alone can take 1-3
+# minutes, so a single request over the whole country was never going to finish
+# in a reasonable time). Already pre-filtered client-side to flood_source="sea"
+# and origin="modelled" (excludes river/rainfall-model/recorded variants, not
+# comparable to this model's own pure coastal-storm-surge physics), then split by
+# flood_zone into its own file - no attribute_filter needed here, unlike Wales'
+# single-layer source.
+# country_iso is "GBR" (England has no ISO-3166-1 code of its own) - same
+# mechanism as Wales/Scotland: geogunit_ids=[3364] (confirmed via a direct
+# geogunit_107_all.nc raster sample at known English/Welsh/Scottish/N.Irish
+# coastal points, cross-checked against Wales=3367/Scotland=3366's own
+# already-confirmed values - see the file-header comment above).
+england_ea_floodzone3_sea:
+  data_type: GeoDataFrame
+  driver: vector
+  path: England/fz3_sea_modelled.gpkg
+  crs: 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: England
+    country_iso: GBR
+    geogunit_ids: [3364]
+    hazard_type: coastal
+    return_period: 200   # Flood Zone 3 = >=1-in-200yr (0.5% AEP) high-probability extent -
+    # same convention as Wales Zone 3/Scotland Medium/Norway F2: no exact native model RP
+    # (RP100/RP250 bracket it), see comparison_return_periods.
+    variable: extent
+    coverage: national
+    comparison_return_periods: [100, 250]
+    regions:
+      england: [-6.37, 49.88, 1.77, 55.82]   # real data bounds (EPSG:4326, from this
+      # file's own total_bounds), small pad already included upstream.
+    description: >
+      Environment Agency "Flood Map for Planning" Flood Zone 3 (Rivers and Sea),
+      sea-source, modelled-origin subset only - England's equivalent of Wales'
+      NRW_FLOODZONE_SEAS / Scotland's SEPA coastal extent, covering the entire
+      English coastline.
+    methodology: >
+      EA's own national coastal flood modelling (methodology not independently
+      reviewed here - see known_caveats), undefended extent at Flood Zone 3's
+      0.5% AEP threshold.
+    source_url: https://environment.data.gov.uk/spatialdata/flood-map-for-planning-flood-zones/ogc/features/v1/collections/Flood_Zones_2_3_Rivers_and_Sea/items
+    date_retrieved: "2026-10-16"
+    source_license: Open Government Licence 3.0 (Environment Agency / Defra attribution required)
+    known_caveats: >
+      (1) Return-period mismatch: Zone 3's 0.5% AEP (~200yr) compared against the
+      model's RP100/RP250 bracket, same spirit as Wales/Scotland/Norway - see
+      return_period above. (2) Defences / wave run-up not independently verified
+      for this benchmark's methodology - same caution as every other country.
+      (3) geogunit_ids=[3364] uses the same sub-national masking mechanism as
+      Wales/Scotland - see Wales' own known_caveats point (3) for how the WRI
+      geogunit_107 lookup was derived/verified. (4) Fetched via 63 separate ~1deg
+      tile requests (not one national request - see file-header comment); two
+      transient network failures during download were retried and succeeded, see
+      fetch_england_flood_zones.py's own retry logic if this ever needs re-running.
+
+england_ea_floodzone2_sea:
+  data_type: GeoDataFrame
+  driver: vector
+  path: England/fz2_sea_modelled.gpkg
+  crs: 4326
+  filesystem: local
+  meta:
+    category: flood_hazard_benchmark
+    country: England
+    country_iso: GBR
+    geogunit_ids: [3364]
+    hazard_type: coastal
+    return_period: 1000   # Flood Zone 2 = >=1-in-1000yr (0.1% AEP) medium-probability
+    # extent - matches the model's own native RP1000 exactly, no bracketing needed
+    # (unlike Zone 3 above).
+    variable: extent
+    coverage: national
+    comparison_return_periods: [1000]
+    regions:
+      england: [-6.37, 49.88, 1.77, 55.82]
+    description: >
+      Environment Agency "Flood Map for Planning" Flood Zone 2 (Rivers and Sea),
+      sea-source, modelled-origin subset only - the medium-probability (0.1% AEP)
+      counterpart to england_ea_floodzone3_sea, covering the entire English
+      coastline.
+    methodology: >
+      EA's own national coastal flood modelling (methodology not independently
+      reviewed here - see known_caveats), undefended extent at Flood Zone 2's
+      0.1% AEP threshold.
+    source_url: https://environment.data.gov.uk/spatialdata/flood-map-for-planning-flood-zones/ogc/features/v1/collections/Flood_Zones_2_3_Rivers_and_Sea/items
+    date_retrieved: "2026-10-16"
+    source_license: Open Government Licence 3.0 (Environment Agency / Defra attribution required)
+    known_caveats: >
+      (1) Unlike Zone 3, this is an EXACT native-RP match (RP1000) - no
+      interpolation/bracketing caveat applies. (2) Defences / wave run-up not
+      independently verified - same caution as every other country. (3) Same
+      geogunit_ids=[3364] sub-national masking as england_ea_floodzone3_sea above.
+
 # -- New Brunswick (part of CAN) -------------------------------------------------
 # GeoNB (New Brunswick open data) coastal+inland flood extent shapefiles,
 # downloaded from gnb.ca (see url.txt/read_me.txt), created 2025-03-21, CRS
