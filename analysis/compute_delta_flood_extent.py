@@ -93,6 +93,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import rasterio
+from affine import Affine
 from rasterio.enums import Resampling
 from rasterio.warp import reproject
 from rasterio.windows import Window
@@ -114,6 +115,7 @@ SLR_SCENARIOS = ["SLR_0", "SLR_500", "SLR_1000", "SLR_1500", "SLR_2000"]
 SCENARIOS_DEFAULT = ["ssp126", "ssp245"]
 VOLGA_ID = 44  # confirmed zero tile coverage in both scenarios - excluded
 PROTECTION_THRESHOLD_YEARS = 100.0  # areas protected to at least this design RP do not flood
+CONNECT_PAD_DEG = (0.25, 0.5, 1.0)  # sea-connectivity grid = merge grid + this on every side (first with ocean)
 GEOGUNIT_SOURCE = "geogunit_protection_units"  # catalog key (data_catalog_gfm.yml)
 
 # Best-effort Id -> name, matched by centroid location during planning - see
@@ -218,32 +220,48 @@ def _read_mask_on_grid(root: Path, transform, width: int, height: int) -> np.nda
     return arr
 
 
+def _protection_rp(catalog, rp_by_geogunit: pd.Series, default_rp: float, transform, width: int, height: int):
+    """FLOPROS design RP per cell of the given grid (geogunit unit -> coastal, else riverine, else
+    default_rp; cells without a geogunit unit get default_rp too)."""
+    left, top = transform.c, transform.f
+    bbox = [left, top + height * transform.e, left + width * transform.a, top]
+    try:
+        geo = catalog.get_rasterdataset(GEOGUNIT_SOURCE, bbox=bbox, variables=["Geogunits"]).squeeze(drop=True)
+    except Exception as e:  # noqa: BLE001 - no geogunit coverage: production's default standard everywhere
+        print(f"    (no geogunit coverage: {e}) - default protection {default_rp:g} yr everywhere", flush=True)
+        return np.full((height, width), default_rp, dtype="float32")
+    gid = np.full((height, width), -1, dtype="int32")
+    reproject(np.nan_to_num(geo.values.astype("float64"), nan=-1).astype("int32"), gid,
+              src_transform=geo.raster.transform, src_crs=geo.raster.crs, dst_transform=transform,
+              dst_crs="EPSG:4326", resampling=Resampling.nearest, src_nodata=-1, dst_nodata=-1)
+    ids, inv = np.unique(gid, return_inverse=True)  # map per unique unit, not per cell
+    mapped = pd.Series(ids).map(rp_by_geogunit).to_numpy(dtype="float64")
+    return np.where(np.isnan(mapped), default_rp, mapped)[inv].reshape(height, width).astype("float32")
+
+
 def protection_on_grid(prot_inputs: dict, domain: np.ndarray, transform, width: int, height: int) -> dict:
     """Which merge-grid cells may flood (below PROTECTION_THRESHOLD_YEARS and sea-connected through
     such cells, all on this ~30 m grid) plus reporting figures over the delta's modeled land."""
     catalog, rp_by_geogunit = prot_inputs["catalog"], prot_inputs["rp_by_geogunit"]
     default_rp, root = prot_inputs["default_rp"], prot_inputs["root"]
-    left, top = transform.c, transform.f
-    bbox = [left, top + height * transform.e, left + width * transform.a, top]
-    rp = np.full((height, width), default_rp, dtype="float32")
-    try:
-        geo = catalog.get_rasterdataset(GEOGUNIT_SOURCE, bbox=bbox, variables=["Geogunits"]).squeeze(drop=True)
-        gid = np.full((height, width), -1, dtype="int32")
-        reproject(np.nan_to_num(geo.values.astype("float64"), nan=-1).astype("int32"), gid,
-                  src_transform=geo.raster.transform, src_crs=geo.raster.crs, dst_transform=transform,
-                  dst_crs="EPSG:4326", resampling=Resampling.nearest, src_nodata=-1, dst_nodata=-1)
-        ids, inv = np.unique(gid, return_inverse=True)  # map per unique unit, not per cell
-        mapped = pd.Series(ids).map(rp_by_geogunit).to_numpy(dtype="float64")
-        rp = np.where(np.isnan(mapped), default_rp, mapped)[inv].reshape(height, width).astype("float32")
-        del gid, inv
-    except Exception as e:  # noqa: BLE001 - no geogunit coverage: production's default standard everywhere
-        print(f"    (no geogunit coverage: {e}) - default protection {default_rp:g} yr everywhere", flush=True)
-    ocean = _read_mask_on_grid(root, transform, width, height) == OCEAN_CODE
+    # The sea a delta drains to can lie just outside its bbox (Amur: no ocean cell in it at all), so
+    # connectivity is decided on the grid extended by CONNECT_PAD_DEG on every side - widened until it
+    # holds ocean - and cropped back to the merge grid afterwards.
+    for pad_deg in CONNECT_PAD_DEG:
+        pad = int(round(pad_deg / abs(transform.a)))
+        tr = transform * Affine.translation(-pad, -pad)
+        H, W = height + 2 * pad, width + 2 * pad
+        ocean = _read_mask_on_grid(root, tr, W, H) == OCEAN_CODE
+        if ocean.any():
+            break
+    rp = _protection_rp(catalog, rp_by_geogunit, default_rp, tr, W, H)
     low = rp < PROTECTION_THRESHOLD_YEARS
     labels, _ = ndimage.label(low | ocean, structure=np.ones((3, 3)))
     sea_ids = np.unique(labels[ocean])
-    floodable = np.isin(labels, sea_ids[sea_ids > 0]) & low
+    crop = (slice(pad, pad + height), slice(pad, pad + width))
+    floodable = np.isin(labels[crop], sea_ids[sea_ids > 0]) & low[crop]
     del labels
+    rp, low, ocean = rp[crop], low[crop], ocean[crop]
     land = domain & ~ocean
     vals, counts = np.unique(rp[land], return_counts=True)
     n = max(int(land.sum()), 1)
