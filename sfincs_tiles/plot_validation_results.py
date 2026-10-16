@@ -91,39 +91,41 @@ def plot_depth_correlation(pooled: dict, out_path: Path) -> None:
 
 def plot_depth_category_alignment(pooled: dict, out_path: Path) -> None:
     """Depth-bin confusion-matrix heatmap (0.1-1.5m/0.2m-wide bins, plus a
-    >1.5m catch-all): for cells in a given SFINCS depth bin (rows), what
-    fraction land in each model depth bin (columns), row-normalized to
-    100%. No <0.1m catch-all bin - both axes are wet-thresholded at
-    WET_THRESHOLD_M=0.10m, so that bin is always empty."""
+    >1.5m catch-all), EA-bathtub vs SFINCS only: for cells in a given
+    SFINCS depth bin (rows), what fraction land in each EA-bathtub depth
+    bin (columns), row-normalized to 100%. No <0.1m catch-all bin - both
+    axes are wet-thresholded at WET_THRESHOLD_M=0.10m, so that bin is
+    always empty."""
     labels = _category_bin_labels(DEPTH_CATEGORY_EDGES)[1:]  # drop the <0.1m catch-all label
-    fig, axes = plt.subplots(1, 2, figsize=(11, 5.3))
-    fig.subplots_adjust(left=0.08, right=0.85, top=0.90, bottom=0.22, wspace=0.12)
-    im = None
-    for ax, model, tag in [(axes[0], "eikonal", "a"), (axes[1], "bathtub", "b")]:
-        joint = pooled[model]
-        hist = joint["hist_category"]
-        ax.text(0.0, 1.03, f"{tag})", transform=ax.transAxes, fontsize=13, fontweight="bold", va="bottom")
-        if hist is None or joint["n"] == 0:
-            ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=ax.transAxes)
-            ax.axis("off")
-            continue
-        hist = hist[1:, 1:]  # drop the <0.1m catch-all row/col
-        row_sums = hist.sum(axis=1, keepdims=True)
-        pct = np.divide(hist, row_sums, out=np.zeros_like(hist), where=row_sums > 0) * 100
-        im = ax.imshow(pct, origin="upper", cmap="Blues", vmin=0, vmax=100)
-        ax.set_xticks(range(len(labels)))
-        ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
-        ax.set_yticks(range(len(labels)))
-        ax.set_yticklabels(labels, fontsize=8)
-        ax.set_xlabel(f"{DISPLAY_LABEL[model]} depth bin (m)")
-        ax.set_ylabel("SFINCS depth bin (m)")
-        for i in range(len(labels)):
-            for j in range(len(labels)):
-                if pct[i, j] >= 1:
-                    ax.text(j, i, f"{pct[i, j]:.0f}", ha="center", va="center",
-                            fontsize=7, color="white" if pct[i, j] > 50 else "black")
+    model = "eikonal"
+    fig, ax = plt.subplots(figsize=(6.2, 5.3))
+    fig.subplots_adjust(left=0.15, right=0.80, top=0.95, bottom=0.22)
+    joint = pooled[model]
+    hist = joint["hist_category"]
+    if hist is None or joint["n"] == 0:
+        ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=ax.transAxes)
+        ax.axis("off")
+        fig.savefig(out_path, dpi=170)
+        plt.close(fig)
+        print(f"Wrote {out_path}")
+        return
+    hist = hist[1:, 1:]  # drop the <0.1m catch-all row/col
+    row_sums = hist.sum(axis=1, keepdims=True)
+    pct = np.divide(hist, row_sums, out=np.zeros_like(hist), where=row_sums > 0) * 100
+    im = ax.imshow(pct, origin="upper", cmap="Blues", vmin=0, vmax=100)
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
+    ax.set_yticks(range(len(labels)))
+    ax.set_yticklabels(labels, fontsize=8)
+    ax.set_xlabel(f"{DISPLAY_LABEL[model]} depth bin (m)")
+    ax.set_ylabel("SFINCS depth bin (m)")
+    for i in range(len(labels)):
+        for j in range(len(labels)):
+            if pct[i, j] >= 1:
+                ax.text(j, i, f"{pct[i, j]:.0f}", ha="center", va="center",
+                        fontsize=7, color="white" if pct[i, j] > 50 else "black")
 
-    cax = fig.add_axes((0.87, 0.22, 0.02, 0.68))
+    cax = fig.add_axes((0.83, 0.22, 0.03, 0.73))
     fig.colorbar(im, cax=cax, label="% of SFINCS-bin cells")
     fig.savefig(out_path, dpi=170)
     plt.close(fig)

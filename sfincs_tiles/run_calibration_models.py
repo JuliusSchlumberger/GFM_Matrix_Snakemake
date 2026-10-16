@@ -142,6 +142,20 @@ def subgrid_coastline_mask(mask: np.ndarray, ocean_code: int, river_code: int | 
     return ndimage.binary_dilation(landlike, structure=_STRUCTURE_8) & edge_connected_ocean
 
 
+def solver_inputs(dem: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """(dem, mask) as handed to flood_depth_dense: NODATA_CODE cells become
+    dry land at the 99m sentinel. flood_depth_dense's effective_dem zeroes
+    every non-land cell, so left as-is the no-data frame around the rotated
+    grid is a 0m channel touching the ocean that carries water along the
+    domain border into any below-level land beside it (tile 631: the
+    Gran Bajo de San Julian, cut off from the sea by a 20-30m rim, flooded
+    via the frame). The original mask is still what subgrid_coastline_mask
+    and the seeds use - there the frame marks the domain edge."""
+    nodata = mask == NODATA_CODE
+    return (np.where(nodata, np.float32(99.0), dem).astype(dem.dtype),
+            np.where(nodata, np.int8(LAND_CODE), mask).astype(mask.dtype))
+
+
 def production_seeds(mask, transform, crs, boundaries: gpd.GeoDataFrame, knn: int, river_code: int):
     """(rows, cols, values) on the subgrid's coastline, production weighting."""
     coast = subgrid_coastline_mask(mask, OCEAN_CODE, river_code)
@@ -212,12 +226,13 @@ def main() -> None:
     print(f"tile {args.tile_id}: {len(seed_rows)} coastline seed cell(s), levels "
           f"{seed_values.min():.2f}-{seed_values.max():.2f} m (knn={flooding['knn']}, connected stations)", flush=True)
 
+    solver_dem, solver_mask = solver_inputs(dem, mask)
     diag_path = out_dir / "eikonal_solver_diagnostics.json"
     all_diag = json.loads(diag_path.read_text()) if diag_path.exists() else {}
     for fsf in todo:
         t0 = time.monotonic()
         waterdepth, diagnostics = flood_depth_dense(
-            dem, mask, base_friction * np.float32(fsf), transform,
+            solver_dem, solver_mask, base_friction * np.float32(fsf), transform,
             seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
             ocean_code=OCEAN_CODE, river_code=river_code,
             obstacle_coupling=bool(oc.get("enabled", False)),

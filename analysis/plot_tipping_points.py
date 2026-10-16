@@ -4,18 +4,24 @@ strategy?
 
 One row per country (visualization.tipping_points.countries), two columns:
   - left:  the country's scenario-neutral SLR x population-change space with
-           one tipping isoline per adaptation strategy (EAI = threshold, from
-           each strategy's growth-matrix CSV at the configured design
+           one tipping isoline per adaptation strategy (EAI = threshold,
+           from each strategy's growth-matrix CSV at the configured design
            intensity) and each SSP's pathway through that space (global
-           median SLR vs the country's projected population change). Where a
-           pathway crosses a strategy's isoline, that strategy tips under
-           that scenario - marked with a dot. Colour = SSP throughout,
-           line style = adaptation strategy.
+           median SLR vs the country's projected population change). Where
+           a pathway crosses a strategy's isoline, that strategy tips under
+           that scenario - marked with a marker shaped by strategy
+           (STRATEGY_MARKERS) and coloured by SSP. Line style = adaptation
+           strategy (STRATEGY_STYLES); colour = SSP throughout.
   - right: the year of that crossing per strategy (rows) and SSP (colour):
-           dot = median (p50) SLR pathway, bar = the p17-p83 SLR range (the
-           higher SLR path tips earlier); population change is the SSP's
-           projection in all three. A triangle at the right edge means not
-           reached by 2100 (for the median, or for the p17 end of the bar).
+           marker (same per-strategy shape as the left panel) = median
+           (p50) SLR pathway, bar = the p17-p83 SLR range (the higher SLR
+           path tips earlier); population change is the SSP's projection in
+           all three. A triangle at the right edge means not reached by
+           2100 (for the median, or for the p17 end of the bar).
+
+No legend - STRATEGY_ABBREV/STRATEGY_MARKERS/STRATEGY_STYLES/SSP colours are
+meant to be read directly off the right panel's row labels and the figure
+caption, not re-derived from a legend.
 
 EAI along a pathway is read from the growth matrix by bilinear interpolation
 (linear extrapolation in the population direction where a pathway leaves the
@@ -45,7 +51,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
-from matplotlib.lines import Line2D  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
@@ -53,8 +58,7 @@ from pathways import eai_along_pathway, matrix_interpolator, slr_pathway  # noqa
 from population_extension import extend_growth_factors  # noqa: E402
 from population_growth import _build_name_to_iso, interpolate_growth_factor, load_ssp_growth_factors  # noqa: E402
 from visualization import (  # noqa: E402
-    _DEFAULT_SLR_COLORS, build_growth_matrix_from_grid, load_growth_matrix_csv,
-    load_slr_trajectories, ssp_rcp_label,
+    _DEFAULT_SLR_COLORS, build_growth_matrix_from_grid, load_growth_matrix_csv, load_slr_trajectories,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -66,6 +70,12 @@ STRATEGY_NAMES = {"baseline": "No adaptation", "protect": "Protect", "avoid": "A
 # isolines: colour is reserved for the SSPs, so strategies differ by line style
 STRATEGY_STYLES = {"baseline": "-", "protect": "--", "avoid": ":", "retreat": "-.",
                    "protect_avoid": (0, (8, 2, 1, 2, 1, 2))}
+# tipping-point markers: one shape per strategy (independent of the SSP colour
+# already used for the isolines/pathways), so the SAME marker identifies a
+# strategy's tipping point in both the matrix (left) and the tipping-year
+# panel (right) without having to trace which isoline a dot sits on.
+STRATEGY_MARKERS = {"baseline": "o", "protect": "s", "avoid": "^", "retreat": "D",
+                    "protect_avoid": "P", "avoid_retreat": "X"}
 YEARS = np.arange(2020, 2101)
 LAST_SSP_YEAR = 2100  # IIASA SSP population projections end here
 
@@ -108,7 +118,6 @@ def main() -> None:
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
     s_colors = viz.get("ssp_colors") or _DEFAULT_SLR_COLORS
-    ssp_rcp_codes = viz.get("ssp_rcp_codes", {})
 
     traj = load_slr_trajectories(viz["slr_trajectories_csv"])
     ssps = [s for s in tp.get("ssps", cfg.get("population_growth", {}).get("ssps", list(s_colors)))
@@ -133,7 +142,7 @@ def main() -> None:
     height = 4.0 * len(countries) + 1.6
     fig, axes = plt.subplots(len(countries), 2, figsize=(15, height), sharex="col",
                              gridspec_kw={"width_ratios": [1.15, 1], "wspace": 0.12, "hspace": 0.05}, squeeze=False)
-    fig.subplots_adjust(left=0.1, right=0.98, top=1 - 0.1 / height, bottom=1.6 / height)
+    fig.subplots_adjust(left=0.1, right=0.98, top=1 - 0.1 / height, bottom=0.5 / height)
     rows = []
     for r, iso in enumerate(countries):
         thr = thr_by_iso.get(iso, default_thr)
@@ -168,8 +177,9 @@ def main() -> None:
                     t = yrs[(v, "p50")]
                     if t is not None and v == v0:  # tipping point on the reference pathway
                         ax_l.plot(np.interp(t, years, slr_paths[(ssp, "p50")]) / 1000.0,
-                                  np.interp(t, years, growth_paths[(ssp, v)]) * 100.0, "o", ms=8,
-                                  mfc="w", mec=s_colors.get(ssp, "grey"), mew=2.0, zorder=7)
+                                  np.interp(t, years, growth_paths[(ssp, v)]) * 100.0,
+                                  STRATEGY_MARKERS.get(strat, "o"), ms=14,
+                                  mfc="w", mec=s_colors.get(ssp, "grey"), mew=2.6, zorder=7)
                 crossings[(strat, ssp)] = yrs
 
         # SSP pathways (median SLR): solid to 2100, then one branch per population variant
@@ -178,10 +188,6 @@ def main() -> None:
             x = slr_paths[(ssp, "p50")] / 1000.0
             y = growth_paths[(ssp, v0)] * 100.0
             ax_l.plot(x[:i2100 + 1], y[:i2100 + 1], "-", color=c, lw=2.5, zorder=5)
-            for yr in (2050, 2100):
-                if yr <= to_year:
-                    i = int(yr - years[0])
-                    ax_l.plot(x[i], y[i], "D", color=c, ms=4.5, zorder=6)
             if to_year > LAST_SSP_YEAR:  # envelope over the population variants after 2100
                 yv = np.vstack([growth_paths[(ssp, v)][i2100:] for v in variants]) * 100.0
                 ax_l.fill_between(x[i2100:], yv.min(axis=0), yv.max(axis=0), color=c, alpha=0.25, lw=0, zorder=4)
@@ -217,11 +223,12 @@ def main() -> None:
                     ax_r.plot([min(all_y), x_end if open_end else max(all_y)], [yk, yk], "-", color=c, lw=2.5,
                               solid_capstyle="butt")
                     if open_end:
-                        ax_r.plot(x_end, yk, ">", color=c, ms=6)
+                        ax_r.plot(x_end, yk, ">", color=c, ms=9)
                 if yrs[(v0, "p50")] is not None:
-                    ax_r.plot(yrs[(v0, "p50")], yk, "o", color=c, ms=7, mec="k", mew=0.6, zorder=5)
+                    ax_r.plot(yrs[(v0, "p50")], yk, STRATEGY_MARKERS.get(strat, "o"), color=c, ms=12,
+                              mec="k", mew=0.8, zorder=5)
                 elif not all_y:
-                    ax_r.plot(x_end, yk, ">", mfc="none", mec=c, ms=7)
+                    ax_r.plot(x_end, yk, ">", mfc="none", mec=c, ms=10)
         if to_year > LAST_SSP_YEAR:
             ax_r.axvline(LAST_SSP_YEAR, color="0.4", lw=0.8, ls=":")
         ax_r.set_yticks(range(len(strategies)))
@@ -232,22 +239,6 @@ def main() -> None:
         if r == len(countries) - 1:
             ax_r.set_xlabel("Year EAI first exceeds the tipping point", fontsize=fs)
 
-    design_m = f"{int(design.split('_')[1]) / 1000:g} m"
-    handles = [Line2D([], [], color="k", lw=1.8, ls=STRATEGY_STYLES.get(s, "-"),
-                      label=f"{STRATEGY_NAMES.get(s, s)} ({STRATEGY_ABBREV.get(s, s)}) tipping isoline"
-                      + ("" if s == "baseline" else f", design {design_m} SLR")) for s in strategies]
-    handles += [Line2D([], [], color=s_colors.get(s, "grey"), lw=2.5, label=ssp_rcp_label(s, ssp_rcp_codes))
-                for s in ssps]
-    handles += [Line2D([], [], ls="none", marker="D", color="k", ms=4.5, label="pathway in 2050 and 2100"),
-                Line2D([], [], ls="none", marker="o", mfc="w", mec="k", mew=2.0, label="tipping point (median SLR)")]
-    if to_year > LAST_SSP_YEAR:
-        handles += [Line2D([], [], color="k", lw=2.5, label="tipping year range: SLR p17-p83 x population variants"),
-                    Line2D([], [], ls="none", marker="o", color="0.5", mec="k",
-                           label=f"tipping year: median SLR, population {variants[v0].get('label', v0)}")]
-    else:
-        handles += [Line2D([], [], color="k", lw=2.5, label="tipping year, SLR p17-p83 range")]
-    handles += [Line2D([], [], ls="none", marker=">", mfc="none", mec="k", label=f"not reached by {to_year}")]
-    fig.legend(handles=handles, loc="lower center", ncol=3, fontsize=fs - 1, frameon=False, bbox_to_anchor=(0.5, 0.0))
     out_png = out_dir / "tipping_points.png"
     fig.savefig(out_png, dpi=int(viz.get("dpi", 200)), bbox_inches="tight")
     plt.close(fig)

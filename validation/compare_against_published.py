@@ -26,6 +26,8 @@ import pandas as pd
 
 GBR_METRICS = Path("P:/11212688-004-global-floodmaps/modelling/validation/GBR/metrics_GBR_RP100_SLR_0.csv")
 CAN_METRICS = Path("P:/11212688-004-global-floodmaps/modelling/validation/CAN/metrics_CAN_RP100_SLR_0.csv")
+ENGLAND_FZ3_RESCORE = Path("P:/11212688-004-global-floodmaps/modelling/validation/england_fz3_rescore.csv")
+ENGLAND_FZ2_BAND = Path("P:/11212688-004-global-floodmaps/modelling/validation/GBR/england_fz2_band_result.csv")
 SF_BAY_RESULTS = Path(__file__).resolve().parent / "sf_bay_results.csv"
 
 # Published CSI, per (study, region). Region "wales"/"scotland" (no suffix) is
@@ -48,10 +50,18 @@ NB_CAVEAT = (
     "own comments attribute Bay of Fundy's near-zero CSI to a COAST-RP/GTSM boundary-forcing "
     "limitation capturing the Fundy's extreme tidal resonance, not a pipeline bug."
 )
-ENGLAND_CAVEAT = (
-    "No England benchmark dataset exists yet in this repo (checked inputs/validation/ - only "
-    "Wales/Scotland have NRW/SEPA data) - 'ours' is not yet computable; needs a new Environment "
-    "Agency (or equivalent) dataset, the same kind of setup San Francisco Bay just went through."
+ENGLAND_FZ2_CAVEAT = (
+    "CONFIRMED (2026-10-16, EA Flood Zones Product Description via environment.data.gov.uk FAQ "
+    "778338325): Flood Zone 2 (sea) IS the INCREMENTAL 0.1%-0.5% AEP band (1-in-1000 to 1-in-200), "
+    "not the cumulative 1-in-1000 extent - comparing it against the model's cumulative RP1000 extent "
+    "(what the naive comparison below does) gave bias=26.2x/CSI=0.023, a benchmark-definition "
+    "mismatch, not a real model failure. validate_england_fz2_band.py re-scores against the model's "
+    "own matching incremental band (RP1000 minus RP100 - RP100 is the model's nearest native RP below "
+    "the benchmark's real ~RP200 inner edge) instead: bias drops to a sane 2.4x (confirming the "
+    "cumulative-vs-incremental mismatch was the dominant driver of the 26x figure), but CSI stays low "
+    "(0.020, HR=0.066) - plausibly because a thin coastal band is highly sensitive to small positional "
+    "offsets between model and benchmark, but this is NOT independently confirmed; treat the band "
+    "result as a real, methodologically-sound number, not yet a fully-explained one."
 )
 
 # Kasmalkar et al. (2024) - published San Francisco Bay depth-accuracy.
@@ -64,14 +74,39 @@ KASMALKAR_SF_BAY = {
 def _csi_rows() -> list[dict]:
     gbr_df = pd.read_csv(GBR_METRICS)
     can_df = pd.read_csv(CAN_METRICS)
+    fz3_df = pd.read_csv(ENGLAND_FZ3_RESCORE)
+    fz2_band_df = pd.read_csv(ENGLAND_FZ2_BAND) if ENGLAND_FZ2_BAND.exists() else None
     rows = []
     for study, region, published in PUBLISHED_CSI:
         if region == "england":
-            rows.append({
-                "study": study, "country_iso": "GBR", "region": region, "metric": "CSI",
-                "ours": float("nan"), "published": published, "diff": float("nan"),
-                "note": ENGLAND_CAVEAT,
-            })
+            # England has no exact native-RP match for FZ3 (~200yr, bracketed
+            # RP100/RP250, same as Wales/Scotland) - report both bracket
+            # points against Wing et al.'s single published value. FZ3 comes
+            # from _rescore_england_fz3.py's own output, NOT
+            # multi_rp_summary.csv - that file's own FZ3 rows are from the
+            # pre-correction (sea-only, no estuarine 'river and sea') benchmark
+            # and were never regenerated (the run that would have refreshed
+            # them was killed for stalling/memory-spiking - see
+            # _rescore_england_fz3.py's own docstring). FZ2 is reported as the
+            # model's own incremental RP100-RP1000 band vs the benchmark's own
+            # incremental band (validate_england_fz2_band.py's output), NOT a
+            # naive cumulative-RP1000-vs-benchmark comparison - see
+            # ENGLAND_FZ2_CAVEAT.
+            fz3 = fz3_df[fz3_df["benchmark_key"] == "england_ea_floodzone3_sea"]
+            for _, r in fz3.iterrows():
+                rows.append({
+                    "study": study, "country_iso": "GBR", "region": f"england ({r['return_period']}, FZ3)",
+                    "metric": "CSI", "ours": float(r["CSI"]), "published": published,
+                    "diff": float(r["CSI"]) - published, "note": "",
+                })
+            if fz2_band_df is not None and not fz2_band_df.empty:
+                r = fz2_band_df.iloc[0]
+                rows.append({
+                    "study": study, "country_iso": "GBR",
+                    "region": f"england ({r['band_inner_rp']}-{r['band_outer_rp']} band, FZ2)",
+                    "metric": "CSI", "ours": float(r["CSI"]), "published": published,
+                    "diff": float(r["CSI"]) - published, "note": ENGLAND_FZ2_CAVEAT,
+                })
             continue
         df, iso = (can_df, "CAN") if region in ("cumberland_basin", "petitcodiac") else (gbr_df, "GBR")
         match = df[df["region"] == region]

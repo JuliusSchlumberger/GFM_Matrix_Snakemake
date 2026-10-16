@@ -49,6 +49,7 @@ from visualization import (  # noqa: E402
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 LAST_SSP_YEAR = 2100
 VARIANT_STYLES = ["--", ":", "-."]
+PROJECTION_LINESTYLE = "--"  # timeseries_extended_continents.png's own single "this is a projection" style
 STRATEGY_NAMES = {"baseline": "No adaptation", "protect": "Protect", "avoid": "Avoid", "retreat": "Retreat",
                   "protect_avoid": "Protect + Avoid"}
 
@@ -196,10 +197,9 @@ def main() -> None:
                 ax.plot(years[:i_end + 1], stacked[0, :i_end + 1], "-", color=c, lw=2.0)
                 ax.fill_between(years[i_end:], stacked[:, i_end:].min(axis=0), stacked[:, i_end:].max(axis=0),
                                 color=c, alpha=0.15, lw=0)
-                for v, s in series.items():
-                    ax.plot(years[i_end:], s[i_end:], linestyle=var_style[v], color=c, lw=1.8)
+                for s in series.values():
+                    ax.plot(years[i_end:], s[i_end:], linestyle=PROJECTION_LINESTYLE, color=c, lw=1.8)
                 top = max(top, stacked.max())
-            ax.axvline(LAST_SSP_YEAR, color="0.4", lw=0.8, ls=":")
             ax.grid(alpha=0.3)
             ax.yaxis.set_major_formatter(plt.FuncFormatter(_people))
             ax.yaxis.set_major_locator(plt.MaxNLocator(4))
@@ -217,8 +217,7 @@ def main() -> None:
     fig.tight_layout(rect=(0.03, 0, 1, 1))
     handles = [Patch(color=m_colors.get(l.partition("_SLR_")[0], "#444444"), label=_strategy_name(l)) for l in labels]
     handles += [Line2D([], [], color="0.3", lw=2.0, label=f"to {LAST_SSP_YEAR}: SSP population")]
-    handles += [Line2D([], [], color="0.3", lw=1.8, ls=var_style[v], label=f"after {LAST_SSP_YEAR}: {spec.get('label', v)}")
-                for v, spec in variants.items()]
+    handles += [Line2D([], [], color="0.3", lw=1.8, ls=PROJECTION_LINESTYLE, label=f"after {LAST_SSP_YEAR}: projection")]
     # inside the first panel's upper-left corner, where the series are still low
     axes[0, 0].legend(handles=handles, loc="upper left", ncol=2, fontsize=10.5, frameon=True, framealpha=0.9,
                       handlelength=2.2, columnspacing=1.0, borderaxespad=0.3, labelspacing=0.3)

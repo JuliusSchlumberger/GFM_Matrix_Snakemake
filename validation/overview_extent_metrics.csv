@@ -1,0 +1,18 @@
+Region,HR,FAR,bias,CSI,Published CSI,Note
+Wales (whole) (RP100),0.648,0.022,0.662,0.638,Bates et al. (2023): 0.76; Wing et al. (2024): 0.82,
+Wales (whole) (RP250),0.674,0.024,0.691,0.663,Bates et al. (2023): 0.76; Wing et al. (2024): 0.82,
+Wales - Severn Estuary (RP100),0.819,0.012,0.829,0.811,Chaudhuri et al. (2026): 0.70,
+Wales - Severn Estuary (RP250),0.834,0.014,0.845,0.824,Chaudhuri et al. (2026): 0.70,
+Wales - Menai Strait (RP100),0.776,0.014,0.788,0.768,Chaudhuri et al. (2026): 0.49,
+Wales - Menai Strait (RP250),0.791,0.015,0.803,0.781,Chaudhuri et al. (2026): 0.49,
+Scotland (whole) (RP100),0.546,0.328,0.811,0.431,-,
+Scotland (whole) (RP250),0.572,0.33,0.853,0.446,-,
+Scotland - Firth of Forth (RP100),0.488,0.044,0.511,0.477,Chaudhuri et al. (2026): 0.75,
+Scotland - Firth of Forth (RP250),0.532,0.053,0.562,0.517,Chaudhuri et al. (2026): 0.75,
+New Brunswick - Cumberland Basin,0.007,0.328,0.011,0.007,Chaudhuri et al. (2026): 0.87,"known COAST-RP/GTSM tidal-resonance limitation at the Bay of Fundy head, not a pipeline bug"
+New Brunswick - Petitcodiac,0.021,0.297,0.03,0.021,Chaudhuri et al. (2026): 0.56,"known COAST-RP/GTSM tidal-resonance limitation at the Bay of Fundy head, not a pipeline bug"
+England - Flood Zone 3 (RP100),0.6954689725312395,0.3568398591988895,1.0813309600700285,0.5018313358650902,Wing et al. (2024): 0.62,
+England - Flood Zone 3 (RP250),0.707341170584656,0.3728801107443462,1.127920167584254,0.4979245589851953,Wing et al. (2024): 0.62,
+England - Flood Zone 2 (RP100-RP1000 band),0.0603215478662479,0.9697540872630712,1.9943702275051025,0.0205591503252334,Wing et al. (2024): 0.62,"thin incremental band (0.1-0.5% AEP) - positional sensitivity, not a source-filter issue (see session notes)"
+San Francisco Bay (A_coarsen_to_model_grid),0.6845090986207291,0.5785497086008572,1.6241751698599525,0.3529004856920586,-,
+San Francisco Bay (B_refine_model_to_2m),0.7214111823264667,0.6281150718886017,1.9398774400192087,0.3251846539585198,-,
