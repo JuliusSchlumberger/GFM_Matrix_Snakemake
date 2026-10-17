@@ -43,8 +43,6 @@ tests/                      calibration studies, standalone regression
                               scripts, one-off diagnostic folders (no pytest
                               harness configured anywhere in this repo)
 
-scratch/                    unreferenced one-off scripts, kept for reference only
-
 docs/                       design docs and validation methodology notes
 ```
 

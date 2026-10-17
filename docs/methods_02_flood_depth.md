@@ -221,7 +221,7 @@ itself. Production therefore caps the solve at `max_rounds = 40`. See
 methodology.
 
 **Illustrative example.** Figure 1 is generated directly from the
-production solver code (`docs/generate_eikonal_solver_examples.py`).
+production solver code (`docs/figure_scripts/generate_eikonal_solver_examples.py`).
 Panel (a) shows the four sweeps that make up one round, run individually
 from a single seed at the centre of a small (deliberately coarse, for
 legibility) grid: each mini-panel is the real output of one sweep (one
@@ -316,7 +316,7 @@ not what it computes, so neither affects the convergence criterion, the round
 cap or any calibration result.
 
 Figure 2 is generated from the production `_block_sweep` code
-(`docs/generate_eikonal_solver_examples.py`) on a synthetic domain (not a real
+(`docs/figure_scripts/generate_eikonal_solver_examples.py`) on a synthetic domain (not a real
 tile): uniform open land seeded along its top edge (the "coastline"), with
 one spiral maze of impassable walls in the lower right, the same construction
 as Figure 1b, built at a larger size. A block size of 16 is used for legibility
@@ -413,7 +413,7 @@ example) relative to the flank rows, which have no such shortcut available;
 with obstacle coupling, the ridge is detected and blocked, and depth in
 that band drops to what the honest detour alone would produce. Generated
 directly from the production solver code
-(`docs/generate_eikonal_solver_examples.py`).
+(`docs/figure_scripts/generate_eikonal_solver_examples.py`).
 
 ![Outer loop: obstacle coupling removes a friction-cheap shortcut's spurious depth inflation](eikonal_example_obstacle_coupling.png)
 

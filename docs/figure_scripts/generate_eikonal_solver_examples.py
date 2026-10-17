@@ -25,7 +25,7 @@ overtopped by the real boundary water level; obstacle coupling detects and
 blocks this and re-solves.
 
 Usage:
-    python generate_eikonal_solver_examples.py
+    python docs/figure_scripts/generate_eikonal_solver_examples.py
 """
 
 from __future__ import annotations
@@ -39,13 +39,13 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from affine import Affine
-from matplotlib.colors import LinearSegmentedColormap, ListedColormap
+from matplotlib.colors import ListedColormap
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from eikonal import _block_sweep, _dense_sweep, _ORTHANT_ORDER, solve_eikonal_dense  # noqa: E402
 from flood_model import flood_depth_dense  # noqa: E402
 
-OUT_DIR = Path(__file__).resolve().parent
+OUT_DIR = Path(__file__).resolve().parents[1]  # docs/, where the methods docs embed the PNGs
 
 WATER_COLOR = "#2a78d6"
 LAND_COLOR = "#d8d8d4"

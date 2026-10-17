@@ -13,7 +13,7 @@ No production script plotted this before (confirmed via codebase review).
 Generic over `tile_grid.path`/`simulation.model_outputs`.
 
 Usage:
-    python analysis/plot_waterlevel_by_rp.py --config <config.yml> \\
+    python docs/figure_scripts/plot_waterlevel_by_rp.py --config <config.yml> \\
         [--waterlevel-name SLR_0] [--out <path>]
 """
 
@@ -28,7 +28,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from config_utils import load_config  # noqa: E402
 from rasters import decode_waterlevel_cm  # noqa: E402
 from tiles import load_tile_grid  # noqa: E402

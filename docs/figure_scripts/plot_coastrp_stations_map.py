@@ -10,7 +10,7 @@ the only prior version was a one-off Martinique diagnostic
 `tile_grid.path`/`simulation.model_outputs`, so it works for any region.
 
 Usage:
-    python analysis/plot_coastrp_stations_map.py --config <config.yml> \\
+    python docs/figure_scripts/plot_coastrp_stations_map.py --config <config.yml> \\
         [--return-period RP100] [--waterlevel-name SLR_0] [--out <path>]
 """
 
@@ -29,7 +29,7 @@ from matplotlib.colors import ListedColormap
 from matplotlib.patches import Patch
 from rasterio.windows import from_bounds
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from config_utils import load_config  # noqa: E402
 from map_style import LAND_COLOR, LAND_LABEL, WATER_COLOR, WATER_LABEL, draw_caption_box  # noqa: E402
 from rasters import decode_waterlevel_cm  # noqa: E402

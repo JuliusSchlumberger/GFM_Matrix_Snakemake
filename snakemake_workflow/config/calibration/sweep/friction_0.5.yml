@@ -1,4 +1,0 @@
-# OFAT sweep point - friction_scale_factor 0.5 (default 1.0).
-simulation:
-  flooding:
-    friction_scale_factor: 0.5

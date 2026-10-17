@@ -50,7 +50,8 @@ ocean adjacency as a connector would inflate connected-component size with no
 corresponding physical justification.
 
 Built from, and replaces, the standalone prototype at
-tests/connectivity_tiling_prototype/connectivity_tiling.py - that prototype also
+tests/connectivity_tiling_prototype/connectivity_tiling.py (since removed; see
+git history) - that prototype also
 tried two rejected alternative splitting strategies (balance-aware gap selection,
 morphological pre-smoothing) before the tiered-merge approach shipped here; see
 docs/methods_01_tile_processing_and_waterlevels.md for why they were rejected. Not

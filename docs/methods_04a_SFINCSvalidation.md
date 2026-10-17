@@ -105,7 +105,7 @@ Two stages, chained on Slurm (`generate_calibration_jobs.py`), all jobs on the 4
 - **Bridge** - one job that starts when every stage-1 job has ended: collects the line results, runs the tile selection (+ maps) and submits stage 2.
 - **Stage 2** - 20 jobs over the 1,000 tiles, balanced by an estimated runtime from the pre-flight's active cell count (largest tiles first in every job). Per tile, `run_final_tile.sh`: copy inputs → DEM/mask, elevation, roughness → line forcing → SFINCS model build → bathtub + eikonal sweep → SFINCS run → postprocessing → `calibration_result.json`.
 
-Every step is skipped when its output exists, so a resubmitted tile resumes where it stopped. A tile records its current step in `outputs/calibration_run.step`, its success in `calibration_run.done` and failures in `calibration_run.failed`; `check_calibration_progress.py` reports both stages per job. Two conda environments are called by full interpreter path: `gfm` (eikonal, bathtub, lines, selection) and `hydromt-sfincs-dev` (SFINCS build/postprocessing, pre-flight, comparison).
+Every step is skipped when its output exists, so a resubmitted tile resumes where it stopped. A tile records its current step in `outputs/calibration_run.step`, its success in `calibration_run.done` and failures in `calibration_run.failed`; `check_calibration_progress.py` reports both stages per job. Two conda environments are called by full interpreter path: `gfm` (eikonal, bathtub, lines, selection) and `hydromt-sfincs-dev` (SFINCS build/postprocessing, pre-flight, comparison); their specs are `environment.yml` and `environment_sfincs.yml`.
 
 ## Changes from the earlier studies
 

@@ -746,7 +746,7 @@ Baseline (Phase 0): thailand_bangkok 453 jobs (run_aqueduct 90, extract_boundari
 - **Before pulling this commit on Hydrax**, back up the files there that are about to be untracked (`config_hpc.yml`, any `*_materialized.yml` still needed). A pull deletes files that another clone untracked with `git rm --cached`; restore them afterwards as untracked files (see Q-C).
 - *Verify*: `git status` is clean; the untracked files still exist on disk; `snakemake -n all` equals the baseline.
 
-**Phase 2: Delete unreachable code.** *No `archive/` dir (user, 2026-10-17): every STALE/DUPLICATE item is deleted; git history keeps it.*
+**Phase 2: Delete unreachable code.** ✅ *done 2026-10-17; also removed the empty, unused `src/__init__.py` (STALE in §3). 3 unused imports in the moved figure scripts were fixed early so ruff passes on touched files.* *No `archive/` dir (user, 2026-10-17): every STALE/DUPLICATE item is deleted; git history keeps it.*
 - Delete:
   - `julius_sfincs_code/`, `scratch/`
   - `config/calibration/sweep/`

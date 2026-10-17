@@ -3,7 +3,9 @@ sfincs_run.py -- Shared SFINCS subprocess execution (Popen + threaded
 stdout/stderr forwarding + timeout), used by every rule that executes the
 SFINCS binary. Also holds helpers for hand-crafting a sfincs.inp that
 borrows geometry from a different SFINCS model directory via relative
-paths, used by 13_build_sfincs.py and 14_run_spinup.py.
+paths. Adapted from the basin-scale SFINCS workflow's own sfincs_run.py
+(13_build_sfincs.py / 14_run_spinup.py there), which was vendored here as
+julius_sfincs_code/ until cleanup Phase 2 removed it - see git history.
 
 Paths are written by hand rather than via HydroMT's sf.config.write():
 HydroMT's get_set_file_variable absolutizes file references outside the

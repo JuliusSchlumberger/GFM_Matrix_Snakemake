@@ -8,14 +8,13 @@ review) - every prior land-use figure was a one-off diagnostic. Generic over
 `tile_grid.path`, so it works for any region's config, not just one project.
 
 Usage:
-    python analysis/plot_landuse_map.py --config <config.yml> [--out <path>]
+    python docs/figure_scripts/plot_landuse_map.py --config <config.yml> [--out <path>]
 """
 
 import argparse
 import sys
 from pathlib import Path
 
-import geopandas as gpd
 import matplotlib
 
 matplotlib.use("Agg")
@@ -24,9 +23,9 @@ import numpy as np
 from matplotlib.colors import BoundaryNorm, ListedColormap
 from matplotlib.patches import Patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from config_utils import get_data_catalog, load_config  # noqa: E402
-from map_style import WATER_COLOR, WATER_LABEL, draw_caption_box  # noqa: E402
+from map_style import WATER_COLOR, draw_caption_box  # noqa: E402
 from tiles import load_tile_grid  # noqa: E402
 
 # Coarse Copernicus CGLS-LC100 classes (code, name, color) - the 11 forest
