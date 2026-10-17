@@ -731,7 +731,7 @@ done
 ```
 Baseline (Phase 0): thailand_bangkok 453 jobs (run_aqueduct 90, extract_boundaries 90, merge_chunk 90, compute_flood_fraction_chunk 90, build_mosaic_vrt 45, plot_merged_results 45, prepare_exposure_grid_chunk 2, all 1); bangkok_chao_phraya 455 jobs (merge_chunk 180, compute_flood_fraction_chunk 180, build_mosaic_vrt 45, plot_merged_results 45, prepare_exposure_grid_chunk 4, all 1). After Phase 1 untracks the `*_materialized.yml`, they stay on disk (gitignored), so this check keeps working.
 
-**Phase 0: Tooling only.**
+**Phase 0: Tooling only.** ✅ *done, ce7540e (2026-10-17)*
 - Add `pytest` and `ruff` to `environment.yml`. Add `environment_sfincs.yml` (hydromt-sfincs-dev).
 - Add a minimal `pyproject.toml`:
   - `python_files = ["test_*.py", "validate_*.py"]`, `testpaths = ["tests"]`
@@ -740,7 +740,7 @@ Baseline (Phase 0): thailand_bangkok 453 jobs (run_aqueduct 90, extract_boundari
 - Add `CLAUDE.md` (appendix).
 - *Verify*: `pytest tests -m "not needs_pdrive and not needs_sfincs"` passes. `ruff check .` is reported only, not fixed.
 
-**Phase 1: Untrack generated artifacts.**
+**Phase 1: Untrack generated artifacts.** ✅ *done 2026-10-17 (58 files untracked, `triplet_comparison_CLEAN.csv` deleted). Until Phase 6 adds `materialize_configs.py`, a fresh clone has no `*_materialized.yml`, so copy them from an existing checkout.*
 - `git rm --cached` these: `run_timings.csv`, `sfincs.log`, `batch_logs/`, `preparation/logs/`, `adaptation_validation_output/`, `config_hpc.yml`, all `*_materialized.yml`. Extend `.gitignore`.
 - `git rm` (also deletes the local file) `triplet_comparison_CLEAN.csv`.
 - **Before pulling this commit on Hydrax**, back up the files there that are about to be untracked (`config_hpc.yml`, any `*_materialized.yml` still needed). A pull deletes files that another clone untracked with `git rm --cached`; restore them afterwards as untracked files (see Q-C).
