@@ -39,3 +39,6 @@ sfincs_tiles/*.npy
 *.nc
 .ipynb_checkpoints
 snakemake_workflow/.snakemake/ 
+
+# Cleanup reference outputs (AUDIT.md section 8 baseline)
+.cleanup_baseline/

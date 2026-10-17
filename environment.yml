@@ -69,6 +69,8 @@ dependencies:
   - affine=2.4.0
   - openpyxl=3.1.2                # pandas ExcelWriter engine (tests/build_calibration_report_xlsx.py)
   - tomli=2.0.1                   # TOML fallback for Python <3.11 (no stdlib tomllib) - calibration scripts
+  - pytest=8.4.2                  # test runner (config in pyproject.toml; tests/conftest.py skips P:-drive and hydromt-sfincs tests)
+  - ruff=0.12.0                   # linter (config in pyproject.toml)
   - pip
   - pip:
       # Matches the Snakefile's own min_version("7.0") - NOT >=8.0 (untested
@@ -85,5 +87,5 @@ dependencies:
       # job died in 1-5s at CLI-parser construction, not real work).
       - pulp==2.7.0
 
-# Optional dev tools (lint/type-check, not needed to run the pipeline):
-#   mamba install -n gfm ruff mypy
+# Optional dev tools (type-check, not needed to run the pipeline):
+#   mamba install -n gfm mypy
