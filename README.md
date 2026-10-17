@@ -29,7 +29,7 @@ analysis/                   standalone, NOT part of the Snakemake DAG
   run_analysis.py             exposure/adaptation analysis on the DAG's output
 
 validation/                 standalone, NOT part of the Snakemake DAG
-  run_validation.py           benchmark HR/FAR/CSI comparison (ESP/FRA/NOR)
+  run_validation.py           benchmark HR/FAR/CSI comparison (Wales/Scotland/England, New Brunswick, SF Bay)
 
 snakemake_workflow/         ONLY what Snakemake itself touches
   rules/                     rule definitions (*.smk)
@@ -69,8 +69,9 @@ Four separate things get run, none of them automatically triggering another:
    ```
 4. **Validation** (benchmark HR/FAR/CSI comparison, after the DAG):
    ```
-   python validation/run_validation.py --countries ESP FRA NOR
+   python validation/run_validation.py --countries GBR CAN
    ```
+   SF Bay and England Flood Zone 2/3 run via the standalone scripts in `validation/`.
 
 ## Configuration
 
@@ -92,9 +93,7 @@ sibling file rather than introducing a different import mechanism.
 
 `tests/` holds standalone regression scripts (one per `src/` function under
 test, run directly with `python <script>.py`, plain `assert` statements — no
-pytest configured anywhere in this repo) plus calibration-study tooling/data
-and one-off investigation folders (e.g. `martinique_diagnostics/`,
-`norway_diagnostics/`).
+pytest configured anywhere in this repo) plus calibration-study tooling/data.
 
 ## Further reading
 

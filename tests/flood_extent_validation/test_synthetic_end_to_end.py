@@ -14,7 +14,6 @@ Usage:
     python tests/flood_extent_validation/test_synthetic_end_to_end.py
 """
 
-import math
 import sys
 from pathlib import Path
 
@@ -28,13 +27,11 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from plotting import pixel_area_km2_grid  # noqa: E402
 from validation import (  # noqa: E402
-    BenchmarkSpec,
     benchmark_fraction_from_vector,
     confusion_counts,
     confusion_counts_soft,
     metrics_from_counts,
     model_domain_mask,
-    read_benchmark_raster_fraction,
     wet_mask_from_fraction,
 )
 
@@ -204,72 +201,6 @@ def test_model_domain_mask() -> None:
            list(domain) == [False, True, True, False], f"got {domain}")
 
 
-def test_read_benchmark_raster_fraction_gives_true_coverage() -> None:
-    """read_benchmark_raster_fraction (Denmark's RasterDataset path) must
-    return a real continuous 0-1 coverage fraction (Resampling.average on
-    the native-resolution wet/dry mask) - NOT a degenerate 0/1 "any wet
-    sub-pixel -> whole cell wet" call (the old Resampling.max behaviour,
-    which silently kept Denmark on hard-threshold scoring even after
-    confusion_counts_soft became the one production scoring path for every
-    other benchmark - see that function's own docstring).
-
-    4x4 native-resolution source, downsampled to 1x2 destination cells
-    (left half / right half, each a cell-aligned 2x4 block of 8 native
-    pixels - no partial-overlap ambiguity, so the expected fractions are
-    exact): left block has exactly 2/8 wet, right block exactly 6/8 wet.
-    """
-    print("test_read_benchmark_raster_fraction_gives_true_coverage")
-    import shutil
-    import tempfile
-
-    import hydromt
-    import rasterio
-
-    wet, dry = 0.5, 0.0  # above/below depth_threshold_m=0.1 below
-    depth = np.array([
-        [wet, dry, wet, wet],
-        [wet, dry, wet, wet],
-        [dry, dry, wet, dry],
-        [dry, dry, wet, dry],
-    ], dtype="float32")
-    src_transform = Affine(1.0, 0, 0.0, 0, -1.0, 4.0)  # 4x4 cells, lon[0,4] x lat[0,4]
-
-    # Manual mkdtemp + best-effort rmtree (not tempfile.TemporaryDirectory's own
-    # __exit__ cleanup): rioxarray/rasterio's CachingFileManager can keep the
-    # source file's OS handle open on Windows even after an eager .load(),
-    # which makes TemporaryDirectory's own strict cleanup raise - a real file
-    # handle, not a test bug, so just tolerate it rather than chase it.
-    tmpdir = tempfile.mkdtemp()
-    try:
-        src_path = Path(tmpdir) / "denmark_depth.tif"
-        with rasterio.open(
-            src_path, "w", driver="GTiff", height=4, width=4, count=1,
-            dtype="float32", crs="EPSG:4326", transform=src_transform, nodata=-9999.0,
-        ) as dst:
-            dst.write(depth, 1)
-        da = hydromt.io.open_raster(src_path).load()
-
-        class _StubCatalog:
-            def get_rasterdataset(self, key, bbox=None):
-                return da
-
-        spec = BenchmarkSpec(
-            key="denmark_test", data_type="RasterDataset", country_iso="DNK",
-            hazard_type="coastal", depth_threshold_m=0.1,
-        )
-        dst_transform = Affine(2.0, 0, 0.0, 0, -4.0, 4.0)  # 1 row x 2 cols: left half / right half
-        fraction = read_benchmark_raster_fraction(_StubCatalog(), spec, [0.0, 0.0, 4.0, 4.0], dst_transform, (1, 2))
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
-
-    _check("left block (2/8 wet) == 0.25, not rounded up to 1.0", _close(fraction[0, 0], 0.25),
-           f"got {fraction[0, 0]}")
-    _check("right block (6/8 wet) == 0.75, not rounded up to 1.0", _close(fraction[0, 1], 0.75),
-           f"got {fraction[0, 1]}")
-    _check("fraction is genuinely continuous (not degenerate 0/1 for every cell)",
-           0.0 < fraction[0, 0] < 1.0 and 0.0 < fraction[0, 1] < 1.0, f"got {fraction}")
-
-
 def main() -> None:
     test_fraction_full_cell_aligned()
     test_fraction_partial_cell_supersample_aligned()
@@ -279,7 +210,6 @@ def main() -> None:
     test_area_weighted_matches_pixel_area_grid()
     test_wet_mask_threshold()
     test_model_domain_mask()
-    test_read_benchmark_raster_fraction_gives_true_coverage()
 
     print()
     if _FAILURES:

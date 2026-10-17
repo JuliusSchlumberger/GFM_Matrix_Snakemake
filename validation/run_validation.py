@@ -9,7 +9,7 @@ then concatenates every country's metrics CSV into one cross-country summary.
 Usage:
     python snakemake_workflow/validation/run_validation.py \\
         [--config snakemake_workflow/config/config.yml] \\
-        [--countries ESP FRA] \\
+        [--countries GBR CAN] \\
         [--fail-fast]
 """
 

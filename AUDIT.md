@@ -35,7 +35,7 @@ Read-only audit: the only file written is this one. Uncommitted edits at audit t
 | `snakemake_workflow/config/` | `config.yml` (source of truth), data catalogs, per-study override ymls, **tracked** `*_materialized.yml`, **tracked** `config_hpc.yml`, `calibration/sweep/*.yml` (orphaned) |
 | `preparation/` | Pre-DAG steps run by `run_preparation.py`, manual subset/ingest tools, `logs/` (72k lines of tracked historical logs) |
 | `analysis/` | Post-DAG exposure, pathways and tipping-point figures, plus the deltas deliverable, the Bangkok case study and one-off experiments (mixed concerns) |
-| `validation/` | National-map benchmark validation (ESP/FRA/NOR via `run_validation.py`; GBR/SF Bay via standalone scripts) and tracked result CSVs |
+| `validation/` | National-map benchmark validation: GBR (Wales, Scotland, England) + CAN (New Brunswick) via `run_validation.py`; England FZ2/FZ3 and SF Bay via standalone scripts (scope since 2026-10-17, §9) and tracked result CSVs |
 | `sfincs_tiles/` | SFINCS calibration/validation sub-pipeline (separate env, Hydrax `.sh` drivers) |
 | `calibration_studies/` | Eikonal round-cap / obstacle-coupling sensitivity studies (methods_03) |
 | `julius_sfincs_code/` | Imported external basin-scale SFINCS workflow (reference only, not runnable here) |
@@ -758,7 +758,7 @@ Baseline (Phase 0): thailand_bangkok 453 jobs (run_aqueduct 90, extract_boundari
 - Update the reference in `sfincs_run.py`'s docstring (provenance line for the deleted julius code).
 - *Verify*: `git grep` finds no reference to any deleted or moved path; `python docs/figure_scripts/<each>.py --help`; `pytest`; `snakemake -n all` equals the baseline.
 
-**Phase 2b: Validation scope reduction** (§9; delete only, one commit).
+**Phase 2b: Validation scope reduction** (§9; delete only, one commit). ✅ *done 2026-10-18. Verified: a local GBR+CAN `run_validation.py` on the pre-2b commit vs on the trimmed code gave identical metrics CSVs (GBR 9×35, CAN 3×35, summary 12×35), pixel-identical agreement rasters (8) and byte-identical PNGs (11). The multi-RP summary and England scripts were not re-run (user decision; they share the verified code path). `known_caveats` values reworded (user, 2026-10-17); untracked leftovers under tests/ deleted.*
 - Delete the files: `preparation/convert_norway_stormflo.py`, `tests/norway_diagnostics/`.
 - Delete the catalog entries: the 10 DROP entries in `data_catalog_validation.yml` (§9.2).
 - Delete the code ranges in §9.1:
@@ -911,11 +911,11 @@ That is about 590 of 935 lines removed.
 - **src/validation.py**: `BenchmarkSpec`, `fix_catalog_meta_encoding`, `load_benchmark_spec`, `primary_region_name`, `load_benchmark_full`, `filter_benchmark` (Wales `attribute_filter`), `benchmark_fraction_from_vector`, `wet_mask_from_fraction`, `model_domain_mask`, `permanent_water_mask`, `read_permanent_water_mask`, `load_iso_lookup`, `read_country_mask`, `confusion_counts`, `confusion_counts_soft`, `confusion_counts_tolerant`, `_safe_div`, `metrics_from_counts`, plus `tri_domain_mask` (for analysis).
 - **Subregions**: keep `regions:`, `_blend_regions`, `primary_region_name` and `plot_subregions_grid`. GBR and CAN use them.
 
-### 9.4 Questions (best guess included)
+### 9.4 Questions: answered
 
-1. **Keep the raster-benchmark path** as generic support for a future raster benchmark? *Guess*: delete it. SF Bay is a raster but uses its own script; git history keeps the code.
-2. **Bring SF Bay into the catalog** and `validate_country`, so all 5 regions run from `run_validation.py`? *Guess*: not in this cleanup. Do it later; it would also remove the hard-coded paths in `validate_sf_bay.py:69,96,100`.
-3. **New Brunswick in `multi_rp_summary.csv`.** It has no CAN rows. Is that intended? *Guess*: CAN has only an RP100 benchmark, so the multi-RP summary skips it. Fine.
+1. **Keep the raster-benchmark path?** Deleted in Phase 2b. A non-GeoDataFrame entry now raises `ValueError`.
+2. **Bring SF Bay into the catalog / `run_validation.py`?** Not in this cleanup. It stays standalone, its scripts are untouched by 2b, and it is documented in methods_04b. Its hard-coded single-chunk input is logged in TODO.md, and its paths move to config in Phase 6.
+3. **No CAN rows in `multi_rp_summary.csv`?** By design. `new_brunswick_present_day_1in100yr` has no `comparison_return_periods`, and the multi-RP summary only scores benchmarks that do.
 
 ---
 

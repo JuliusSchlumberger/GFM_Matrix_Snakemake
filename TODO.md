@@ -17,5 +17,33 @@ in-phase.
   If so, the fixture needs a wider ocean region, or the MDT sign should be asserted
   on `info`/`gebco_shifted` before the transition fill. That is a test fix, not a
   sign bug, but confirm that before changing anything.
+- **FZ2 band figures disagree between the tracked CSVs (found in Phase 2b).**
+  The note in `validation/comparison_vs_published.csv` says bias 2.4x and HR 0.066;
+  `validation/overview_extent_metrics.csv` says bias 1.99 and HR 0.060. One of them is
+  stale. Regenerate both (`build_overview_table.py`, `compare_against_published.py`)
+  after the next England FZ2 run and check which is right. methods_04b currently cites
+  only the overview CSV's bias.
+- **England catalog comment is out of date.** The header comment of
+  `england_ea_floodzone3_sea` / `_floodzone2_sea` in `data_catalog_validation.yml` says
+  the data were filtered to `flood_source="sea"` only. `fetch_england_flood_zones.py`
+  later added `river and sea`. Confirm which filter the current `fz*_sea_modelled.gpkg`
+  were built with, then fix the comment.
+- **`validation/validate_sf_bay.py` docstring** refers to `validate_country_depth_raster()`,
+  which doesn't exist. `_rescore_england_fz3.py`'s docstring implies it uses
+  `postprocessing.block_size`, but it hard-codes 8192 px. Both are docstring-only fixes
+  (Phase 4/4b).
+- **`fetch_england_flood_zones.py` and `build_overview_table.py` have no CLI** (no
+  argparse). Any `--help` runs them for real, and fetch writes to P:\. Add argparse in
+  Phase 6, when the hard-coded P:\ paths move to config.
+- **Two console messages disappeared with the partial path.** "flood_totals missing →
+  model_total_wet_km2 NaN" and "No coastal benchmark found for X" were only printed by
+  the deleted `validate_country()`. The national path now prints just "No extent rows
+  produced." Re-add them to the national path if you want them.
 - **Local DAG path lacks the hop-0 boundary-read change (465dd93).** Fixed by
   Phase 5b; then re-run the deltas (AUDIT.md §8 "After the cleanup").
+- **SF Bay validation reads one hard-coded model chunk.** `validation/validate_sf_bay.py:100`
+  points at `merged_results/chunks/waterdepth_N35W125_RP100_SLR_0.tif`. If the Bay domain
+  spans more than that chunk, or the chunk grid changes, part of the Bay is silently not
+  scored. Phase 6 moves the path into config; picking up overlapping chunks automatically
+  (as `validate_country.py` does with `_chunks_overlapping_bbox`) would be a behaviour
+  change, so it's logged here. Bringing SF Bay into `run_validation.py` is deferred (AUDIT.md §9.4 Q2).

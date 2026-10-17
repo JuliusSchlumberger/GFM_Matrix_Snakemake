@@ -2,9 +2,9 @@
 
 Reads the uint8 category raster(s) (0=dry, 1=agree, 2=under, 3=over, nodata=255)
 written by validate_country.py's `_write_agreement_raster` - one per named
-`regions:` entry (see src/validation.py::region_for_point), e.g. Spain's
-`mainland` and `canary_islands` - already priority-reduced (over > under > agree
-> dry) to `validation.plots.resolution_m`.
+`regions:` entry in the benchmark's own `meta.regions`, e.g. Wales' main
+territory plus its `severn_estuary`/`menai_strait` sub-areas - already
+priority-reduced (over > under > agree > dry) to `validation.plots.resolution_m`.
 
 Every region raster found for a country is grouped by which BENCHMARK's own
 `meta.regions` claims it - a country can have more than one benchmark sharing
@@ -17,7 +17,7 @@ severn_estuary/menai_strait) is rendered separately by `plot_subregions_grid`
 - the main map never shows sub-area insets, only the one whole-territory
 domain.
 
-For a benchmark with `meta.comparison_return_periods` set (Norway, Wales,
+For a benchmark with `meta.comparison_return_periods` set (Wales,
 Scotland - each `[100, 250]`), both RPs are drawn as side-by-side subplots in
 ONE figure sharing a y-axis, not two separate files - the output filename
 drops the `{RP}` segment for these benchmarks
@@ -45,14 +45,9 @@ grey, permanent water blue-grey) - the same mask the evaluation domain
 itself excludes, so a cell over permanent water never shows as
 agree/under/over in the first place (outside the domain, written as `dry`).
 
-`--metric depth_agreement` (default: `agreement`) plots the depth-band
-comparison's own category rasters instead (validate_country_depth_bands' -
-same 0/1/2/3/255 codes and priority-reduction, different underlying
-classification rule and legend wording - see validate_country.py).
-
 Usage:
     python snakemake_workflow/validation/plot_agreement_map.py \\
-        --config snakemake_workflow/config/config.yml --country ESP [--metric depth_agreement]
+        --config snakemake_workflow/config/config.yml --country GBR
 """
 
 import argparse
@@ -90,8 +85,7 @@ _CAT_NODATA_DEFAULT = 255
 def _load_region_metrics(metrics_csv: Path, benchmark_key: str | None = None) -> dict[str, dict[str, float]]:
     """Per-region {HR, FAR, CSI, bias, CSI_tol}, from validate_country.py's
     own metrics CSV - region -> metrics dict, empty if the CSV doesn't exist
-    yet or has no `HR` column (depth-band CSVs use `pct_agree`/`pct_under`/
-    `pct_over`/`depth_EB` instead - not read by this helper).
+    yet or has no `HR` column.
 
     `benchmark_key`, when given, filters to that benchmark's own rows before
     building the region->metrics dict - REQUIRED whenever more than one
@@ -222,11 +216,6 @@ _DEFAULT_LEGEND_LABELS = {
     "agree": "Agree (both wet)",
     "under": "Model under-predicts",
     "over": "Model over-predicts",
-}
-_DEPTH_BAND_LEGEND_LABELS = {
-    "agree": "Model depth within benchmark band",
-    "under": "Model under-predicts depth",
-    "over": "Model over-predicts depth",
 }
 
 
@@ -415,9 +404,9 @@ def plot_tile_coverage(
     background_resolution_m: float = 200.0,
 ) -> None:
     """Which production tiles intersect a benchmark's own real extent, for
-    one region (the "primary" one - v.primary_region_name - a country with
-    several small/far regions like France's overseas territories would
-    otherwise need one of these per region for little benefit; the main
+    one region (the "primary" one - v.primary_region_name - a benchmark with
+    several regions would otherwise need one of these per region for
+    little benefit; the main
     territory is what this diagnostic is really for). No title; the
     benchmark extent/tile footprints are drawn over the same land/water
     background every other panel in this module uses (land grey, permanent
@@ -432,8 +421,7 @@ def plot_tile_coverage(
         print(f"    plot_tile_coverage: no benchmark geometry in region bbox {region_bbox} - skipping.")
         return
     # Spatial join, not union_all() + intersects(): some real benchmark files have
-    # individually-invalid geometries (e.g. France's TRI/extent shapefiles - a known
-    # degenerate high-vertex-count record this session already hit elsewhere) that
+    # individually-invalid geometries (e.g. degenerate high-vertex-count records) that
     # raise a GEOS TopologyException under union_all() specifically, even though a
     # per-row intersects() test against each one works fine - sjoin never needs a
     # single combined geometry.
@@ -483,52 +471,11 @@ def plot_tile_coverage(
     plt.close(fig)
 
 
-def plot_unit_csi_dots(
-    units_csv: str | Path,
-    output_path: str | Path,
-    title: str,
-    dpi: int,
-) -> None:
-    """One dot per evaluation unit (validate_country.py's own `unit_rows` -
-    a TRI zone for a "perimeter" study area, a connected flood component
-    for a "segments" one - see units_{benchmark_key}_{RP}_{SLR}.csv's own
-    header / _record_unit's docstring), at that unit's centroid, coloured
-    by its own CSI. Partial-coverage benchmarks only (Spain/France) - this
-    is the per-unit detail a blended region/country number can't show: a
-    handful of well-matched zones averaging out a handful of badly-matched
-    ones into one deceptively middling CSI.
-    """
-    df = pd.read_csv(units_csv)
-    if df.empty:
-        print(f"    plot_unit_csi_dots: {units_csv} has no rows - skipping.")
-        return
-
-    fig, ax = plt.subplots(figsize=(11, 9))
-    sc = ax.scatter(
-        df["lon"], df["lat"], c=df["csi"], cmap="RdYlGn", vmin=0, vmax=1,
-        s=80, edgecolors="black", linewidths=0.6, zorder=2,
-    )
-    for _, row in df.iterrows():
-        if pd.notna(row["csi"]):
-            ax.annotate(
-                f"{row['csi']:.2f}", (row["lon"], row["lat"]), fontsize=7,
-                ha="left", va="bottom", xytext=(3, 3), textcoords="offset points",
-            )
-    fig.colorbar(sc, ax=ax, label="CSI", fraction=0.046)
-    ax.set_xlabel("Longitude")
-    ax.set_ylabel("Latitude")
-    _draw_annotation_box(ax, [title, f"{len(df)} evaluation unit(s), coloured by CSI"])
-    ax.set_aspect("equal")
-    fig.tight_layout()
-    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
-    plt.close(fig)
-
-
 def plot_country(cfg: dict, country_iso: str, metric: str = "agreement") -> None:
     """Every plot this module produces for one country.
 
-    For each benchmark matching `metric` ("agreement" -> `variable: extent`,
-    "depth_agreement" -> `variable: depth`): gathers that benchmark's own
+    For each `variable: extent` benchmark (`metric` is always "agreement" -
+    it only sets the output filename prefix): gathers that benchmark's own
     region rasters across every RP it should be shown at
     (`meta.comparison_return_periods` if set, else just
     `cfg["validation"]["return_period"]`), and plots its main region
@@ -543,10 +490,7 @@ def plot_country(cfg: dict, country_iso: str, metric: str = "agreement") -> None
     `_{benchmark_key}`; a country with only one has no benchmark_key
     segment, unchanged from before per-benchmark grouping existed.
 
-    For `metric == "agreement"` only, also plots tile coverage (every
-    `GeoDataFrame` extent benchmark) and CSI dots (partial-coverage
-    benchmarks with a `units_*.csv` on disk), both at the single global RP
-    only - neither is RP-swept.
+    Also plots tile coverage for every extent benchmark (not RP-swept).
 
     Safe to call once per country regardless of how many RPs a sweep like
     `run_multi_rp_summary.py` has scored - every RP's own rasters are
@@ -559,8 +503,8 @@ def plot_country(cfg: dict, country_iso: str, metric: str = "agreement") -> None
     slr = val_cfg["waterlevel_name"]
     out_dir = Path(val_cfg["output_dir"]) / country_iso
     plots_cfg = val_cfg["plots"]
-    legend_labels = _DEFAULT_LEGEND_LABELS if metric == "agreement" else _DEPTH_BAND_LEGEND_LABELS
-    variable = "extent" if metric == "agreement" else "depth"
+    legend_labels = _DEFAULT_LEGEND_LABELS
+    variable = "extent"
 
     gfm_catalog = None
     try:
@@ -586,7 +530,7 @@ def plot_country(cfg: dict, country_iso: str, metric: str = "agreement") -> None
             return src.width * src.height
 
     for benchmark_key, spec in relevant:
-        rp_ints = spec.comparison_return_periods if (metric == "agreement" and spec.comparison_return_periods) \
+        rp_ints = spec.comparison_return_periods if spec.comparison_return_periods \
             else [int(val_cfg["return_period"][2:])]
         rp_labels = [f"RP{rp}" for rp in rp_ints]
         own_region_names = set(spec.regions.keys()) if spec.regions else {country_iso}
@@ -605,7 +549,7 @@ def plot_country(cfg: dict, country_iso: str, metric: str = "agreement") -> None
             rp_region_rasters[rp_label] = own
             metrics_csv = out_dir / f"metrics_{country_iso}_{rp_label}_{slr}.csv"
             rp_region_metrics[rp_label] = _load_region_metrics(
-                metrics_csv, benchmark_key=benchmark_key if metric == "agreement" else None,
+                metrics_csv, benchmark_key=benchmark_key,
             )
 
         if not rp_region_rasters:
@@ -649,21 +593,9 @@ def plot_country(cfg: dict, country_iso: str, metric: str = "agreement") -> None
             )
             print(f"Written: {subregions_path}")
 
-    if metric != "agreement":
-        return  # tile coverage + CSI dots are extent-path (partial-coverage) diagnostics only
-
     tile_gdf = None  # lazy - only loaded if a benchmark actually needs it
 
     for benchmark_key, spec in relevant:
-        rp = val_cfg["return_period"]
-        if spec.data_type != "GeoDataFrame":
-            continue  # tile coverage needs real benchmark geometry - skips Denmark's RasterDataset
-            # (load_benchmark_full is vector-only); CSI dots (below) are skipped separately,
-            # per-benchmark, by the units_*.csv existence check - national-coverage benchmarks
-            # never write one (_record_unit is a partial-coverage-only concept), so this loop
-            # naturally produces tile-coverage-only (no CSI dots) for Norway/Finland/Wales/
-            # Scotland/New Brunswick, and both for Spain/France.
-
         if tile_gdf is None:
             tile_gdf = retry_transient_io(gpd.read_file, cfg["tile_grid"]["path"])
 
@@ -681,26 +613,15 @@ def plot_country(cfg: dict, country_iso: str, metric: str = "agreement") -> None
                 )
                 print(f"Written: {tile_coverage_path}")
 
-        units_csv = out_dir / f"units_{benchmark_key}_{rp}_{slr}.csv"
-        if units_csv.exists():
-            dots_path = out_dir / f"csi_dots_{country_iso}_{benchmark_key}_{rp}_{slr}.png"
-            plot_unit_csi_dots(
-                units_csv, dots_path,
-                title=f"{country_iso} — {benchmark_key} — per-unit CSI ({rp}, {slr})",
-                dpi=int(plots_cfg["dpi"]),
-            )
-            print(f"Written: {dots_path}")
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
-    parser.add_argument("--country", required=True, help="ISO-3 country code, e.g. ESP")
+    parser.add_argument("--country", required=True, help="ISO-3 country code, e.g. GBR")
     parser.add_argument(
-        "--metric", choices=["agreement", "depth_agreement"], default="agreement",
-        help="'agreement' (default) plots the extent comparison's category rasters "
-             "(validate_country.py's metrics_*.csv); 'depth_agreement' plots the "
-             "depth-band comparison's instead (depth_metrics_*.csv).",
+        "--metric", choices=["agreement"], default="agreement",
+        help="'agreement' (default, only choice) plots the extent comparison's category rasters "
+             "(validate_country.py's metrics_*.csv).",
     )
     args = parser.parse_args()
 

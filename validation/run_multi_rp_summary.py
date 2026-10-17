@@ -1,6 +1,6 @@
 """Multi-return-period country-level summary: for every benchmark with
-`meta.comparison_return_periods` set (e.g. Norway/Wales/Scotland: `[100, 250]`),
-runs the full extent-path scoring (`validate_country`/`validate_country_national_coverage`)
+`meta.comparison_return_periods` set (e.g. Wales/Scotland: `[100, 250]`),
+runs the full national-coverage extent scoring (`validate_country_national_coverage`)
 once per listed RP and writes one tidy row per `(country, benchmark_key, RP)`
 to `{validation.output_dir}/multi_rp_summary.csv` - HR/FAR/CSI/bias/EB only,
 the country-level blended row (`region == "ALL"`, `validate_country.py`'s own
@@ -13,7 +13,7 @@ once, after all its RPs are scored (`plot_agreement_map.plot_country` -
 that function discovers each benchmark's own RPs/rasters itself and combines
 them into one side-by-side figure per benchmark, so this script never calls
 it more than once per country). Without this, RP250's own agreement maps for
-Norway/Wales/Scotland would never exist anywhere, even though RP250's own
+Wales/Scotland would never exist anywhere, even though RP250's own
 category rasters are written by the scoring step above regardless - the
 normal `run_validation.py`/`validate_country.py` + `plot_agreement_map.py`
 pairing only ever produces plots at the single global `validation.return_period`.
@@ -22,15 +22,15 @@ A benchmark with no `comparison_return_periods` configured is scored once,
 at the single global `validation.return_period` - same as every other
 validation entry point. This script does not replace `validate_country.py`/
 `run_validation.py` - it is an ADDITIONAL sweep over RP, for the small
-number of benchmarks that specifically need one (today: Norway, Wales, Scotland).
+number of benchmarks that specifically need one (today: Wales, Scotland).
 
 Every listed RP must be NATIVE - a real merged chunk already on disk
 (`merged_results/chunks/waterdepth_{chunk_id}_{RP}_{SLR}.tif`, i.e. `RP` is
 one of `boundary_conditions.return_periods` in config.yml). This just
 re-runs the existing scoring functions with `validation.return_period`
-overridden - no new code path, same result a manual `--country NOR` run at
+overridden - no new code path, same result a manual `--country GBR` run at
 that RP would give. (2026-10 - an earlier version also accepted a non-native
-RP, e.g. Norway's real ~200yr benchmark class between the model's native
+RP, e.g. a ~200yr benchmark class between the model's native
 RP100/RP250, and log-linear-interpolated model depth to fill the gap -
 removed by user decision: report the model's own real, simulated return
 periods only, not an estimated intermediate one. A non-native RP in
@@ -40,7 +40,7 @@ empty-dataframe handling below.)
 
 Usage:
     python validation/run_multi_rp_summary.py \\
-        --config snakemake_workflow/config/config.yml [--countries NOR]
+        --config snakemake_workflow/config/config.yml [--countries GBR CAN]
 """
 
 import argparse
@@ -57,7 +57,6 @@ from plot_agreement_map import plot_country  # noqa: E402
 from validate_country import (  # noqa: E402
     _BLENDED_REGION,
     _find_benchmark_keys,
-    validate_country,
     validate_country_national_coverage,
 )
 
@@ -107,9 +106,7 @@ def main() -> None:
                 cfg = copy.deepcopy(base_cfg)
                 cfg["validation"]["return_period"] = rp_label
 
-                df_partial = validate_country(country_iso, cfg, gfm_catalog, bench_catalog)
-                df_national = validate_country_national_coverage(country_iso, cfg, gfm_catalog, bench_catalog)
-                df = pd.concat([df_partial, df_national], ignore_index=True)
+                df = validate_country_national_coverage(country_iso, cfg, gfm_catalog, bench_catalog)
                 if df.empty or "benchmark_key" not in df.columns:
                     print(f"  RP{rp}: no rows produced (no chunks/regions had real data) - skipping.")
                     continue

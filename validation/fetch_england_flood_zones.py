@@ -15,9 +15,9 @@ sea'; plain 'river' and 'unknown' remain excluded (not comparable to this
 model's pure coastal-storm-surge physics).
 
 Flood Zone 3 (sea source): >=1-in-200-year (0.5% AEP) annual probability -
-no exact native model RP (model has RP100/RP250, not RP200) - bracket it the
-same way Norway's own ~200yr-class benchmark is bracketed (see
-data_catalog_validation.yml's comparison_return_periods on that entry).
+no exact native model RP (model has RP100/RP250, not RP200) - bracket it with
+RP100/RP250 (see `comparison_return_periods` on england_ea_floodzone3_sea in
+data_catalog_validation.yml).
 Flood Zone 2 (sea source): >=1-in-1000-year (0.1% AEP) - matches the model's
 own native RP1000 exactly, no bracketing needed.
 
