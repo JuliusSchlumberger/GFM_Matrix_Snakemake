@@ -70,8 +70,16 @@ def main() -> None:
     parser.add_argument("--countries", nargs="+", default=None)
     parser.add_argument("--continents", nargs="+", default=CONTINENTS)
     parser.add_argument("--continent-eai-threshold", type=float, default=5_000_000.0)
+    parser.add_argument("--continent-threshold-overrides", nargs="+", default=[],
+                        help="per-continent overrides, e.g. Oceania=300000 (continents are far from uniform in "
+                             "scale - Oceania never reaches even the 1,000,000 default, so its own panel would "
+                             "otherwise always be trivial)")
     parser.add_argument("--to-year", type=int, default=None)
     args = parser.parse_args()
+    continent_thr_overrides = {}
+    for item in args.continent_threshold_overrides:
+        name, _, val = item.partition("=")
+        continent_thr_overrides[name] = float(val)
 
     cfg = load_config(args.config)
     viz = cfg["visualization"]
@@ -155,7 +163,7 @@ def main() -> None:
         members = continent_members[cont]
         if not members:
             continue
-        thr = args.continent_eai_threshold
+        thr = continent_thr_overrides.get(cont, args.continent_eai_threshold)
         eai_by_block = {}
         for strat, design in strategy_designs:
             if (strat, design) not in grids:
