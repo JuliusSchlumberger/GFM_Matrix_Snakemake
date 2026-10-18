@@ -51,6 +51,8 @@ from matplotlib.patches import Patch  # noqa: E402
 from scipy.spatial import ConvexHull  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _common)
+from _common import _people  # noqa: E402
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pathways import eai_along_pathway  # noqa: E402
 from population_extension import extend_growth_factors  # noqa: E402
@@ -63,12 +65,6 @@ from analysis_figures import (  # noqa: E402
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 C_SLR, C_POP, C_INT = "#1f77b4", "#ff7f0e", "#9467bd"
 CONTINENT_COLORS = dict(zip(CONTINENTS, plt.cm.Set2.colors))
-
-
-def _people(v: float, _=None) -> str:
-    a = abs(v)
-    s = f"{a / 1e6:g} M" if a >= 1e6 else (f"{a / 1e3:g} k" if a >= 1e3 else f"{a:g}")
-    return ("-" if v < 0 else "") + s
 
 
 def _decompose(mats, slr_mm, gfr, traj, ext, ssp, iso, year, variant) -> dict:

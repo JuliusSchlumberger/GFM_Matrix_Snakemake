@@ -46,57 +46,15 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import rasterio
-from affine import Affine
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _common)
-from _common import _round_val  # noqa: E402
+from _common import _read_band, _read_band_and_transform, _round_val  # noqa: E402
 from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pipeline_plots import pixel_area_km2_grid  # noqa: E402
 from exposure_analysis import _build_iso_index, _safe, country_sums  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-
-
-def _open_and_read(path: Path, dtype: str, fill):
-    """Open + read band 1 as ONE retryable unit.
-
-    Just wrapping `rasterio.open` in retry_transient_io (the original
-    pattern here, copied from compute_exposure_analysis.py's own
-    _read_band) leaves `.read()` itself unprotected - and `.read()` is
-    exactly where a transient P:\\ hiccup under concurrent load actually
-    surfaces in practice (confirmed live 2026-10-09: DNK's validate_country
-    run crashed with `rasterio.errors.RasterioIOError: ... GetBlockRef
-    failed ... cannot allocate 65536 bytes` raised from inside a block
-    read, not from open()). With --workers now hammering the same network
-    share concurrently (up to 24x on a dedicated HPC node), a single
-    unretried read failure anywhere in tens of thousands of reads would
-    otherwise be far more likely to actually occur - retry the whole
-    open+read, not just the open.
-    """
-    def _do():
-        with rasterio.open(path) as src:
-            arr = src.read(1, masked=True)
-            return arr.filled(fill).astype(dtype), src.transform
-    return retry_transient_io(_do)
-
-
-def _read_band(path: Path, dtype: str, fill) -> np.ndarray:
-    """Read band 1, replacing the file's own nodata with `fill` - same helper as
-    compute_exposure_analysis.py's own _read_band (see that docstring for why a
-    plain `src.read(1)` is not enough - population's nodata sentinel is finite)."""
-    arr, _ = _open_and_read(path, dtype, fill)
-    return arr
-
-
-def _read_band_and_transform(path: Path, dtype: str, fill) -> tuple[np.ndarray, Affine]:
-    """Same as _read_band, plus the file's own transform - one rasterio.open
-    instead of two. Only the population chunk needs its transform (for
-    pixel_area_km2_grid); geogunit/flood-fraction chunks are always read on
-    that same grid (see analysis/compute_exposure_analysis.py's own chunk
-    convention), so re-opening them just for a transform would be redundant."""
-    return _open_and_read(path, dtype, fill)
 
 
 def _process_chunk(

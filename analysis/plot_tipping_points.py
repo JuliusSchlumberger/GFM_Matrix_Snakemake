@@ -54,7 +54,7 @@ import pandas as pd  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _common)
-from _common import _growth_matrix_path  # noqa: E402
+from _common import _first_crossing, _growth_matrix_path  # noqa: E402
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pathways import eai_along_pathway, matrix_interpolator, slr_pathway  # noqa: E402
 from population_extension import extend_growth_factors  # noqa: E402
@@ -80,18 +80,6 @@ STRATEGY_MARKERS = {"baseline": "o", "protect": "s", "avoid": "^", "retreat": "D
                     "protect_avoid": "P", "avoid_retreat": "X"}
 YEARS = np.arange(2020, 2101)
 LAST_SSP_YEAR = 2100  # IIASA SSP population projections end here
-
-
-def _first_crossing(eai: np.ndarray, threshold: float, years: np.ndarray = YEARS) -> float | None:
-    """First (fractional) year in `years` where `eai` reaches `threshold`, or None."""
-    above = np.nonzero(eai >= threshold)[0]
-    if len(above) == 0:
-        return None
-    k = int(above[0])
-    if k == 0:
-        return float(years[0])
-    e0, e1 = eai[k - 1], eai[k]
-    return float(years[k - 1] + (threshold - e0) / (e1 - e0))
 
 
 def main() -> None:

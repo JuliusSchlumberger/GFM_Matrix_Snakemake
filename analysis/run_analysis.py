@@ -32,42 +32,22 @@ Override switches without editing config.yml by passing --skip-* / --only-*:
 """
 
 import argparse
-import subprocess
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import load_config  # noqa: E402
+from step_runner import run_step  # noqa: E402
 
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 PYTHON = sys.executable
 
 
-def _run(
-    script: Path,
-    extra_args: list[str],
-    label: str,
-    fail_fast: bool,
-) -> bool:
-    """Run `script` in a subprocess; return True on success."""
-    cmd = [PYTHON, str(script)] + extra_args
-    print(f"\n{'═' * 60}")
-    print(f"  {label}")
-    print(f"  {' '.join(cmd)}")
-    print(f"{'═' * 60}")
-    t0 = time.time()
-    result = subprocess.run(cmd)
-    elapsed = time.time() - t0
-    if result.returncode != 0:
-        print(f"\n  ✗ FAILED (exit {result.returncode}) after {elapsed:.0f}s — {label}")
-        if fail_fast:
-            print("  Aborting (--fail-fast).")
-            sys.exit(result.returncode)
-        return False
-    print(f"\n  ✓ Done in {elapsed:.0f}s — {label}")
-    return True
+def _run(script: Path, extra_args: list[str], label: str, fail_fast: bool) -> bool:
+    """Run analysis script `script` with `extra_args` via `step_runner.run_step`; True on success."""
+    return run_step([PYTHON, str(script)] + extra_args, label, fail_fast)
 
 
 # Analysis steps, run in this order: (results key, analysis.* config switch, default when the

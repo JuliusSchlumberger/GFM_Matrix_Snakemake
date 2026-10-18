@@ -45,16 +45,6 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
   dropping them also means dropping the `generate_eikonal_jobs` rule's params, which re-triggers
   that rule. Remove together with the rule params when you next regenerate HPC dispatch anyway.
   (The audit's other "unused parameter", `connectivity_tiling`'s `dem_index`, is in fact used.)
-- **Near-duplicate helpers left unmerged in Phase 5d** (they differ in behaviour, so merging
-  would change results or output; unify deliberately if wanted):
-  - `_first_crossing`: compute_tipping_points_summary.py vs plot_tipping_points.py (the latter
-    defaults `years=YEARS`).
-  - `_people`: plot_extended_pathways.py vs plot_slr_vs_population.py (the latter handles
-    negative values with a sign).
-  - `_read_band` / `_read_band_and_transform`: compute_flood_totals.py (via `_open_and_read`)
-    vs analysis/_common.py / compute_bangkok_case_exposure.py.
-  - `_run` (subprocess step runner): analysis/run_analysis.py, validation/run_validation.py,
-    run_delta_floodmaps.py: three different variants (printing, timing, fail-fast handling).
 - **Scenario configs re-materialized 2026-10-18 (your decision): check the result-relevant changes.**
   `materialize_configs.py` rebuilt all 6 `*_materialized.yml` from today's config.yml (old copies:
   `.cleanup_baseline/materialized_backup_2026-10-18/`). Changes that alter results:

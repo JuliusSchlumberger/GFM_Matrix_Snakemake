@@ -73,7 +73,6 @@ Usage:
 """
 
 import argparse
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -102,9 +101,11 @@ _MAX_TARGETS_PER_SNAKEMAKE_CALL = 150
 
 
 def _run(cmd: list[str], env: dict | None = None) -> bool:
-    print(f"\n$ {' '.join(cmd)}", flush=True)
-    result = subprocess.run(cmd, cwd=REPO_ROOT, env=env)
-    return result.returncode == 0
+    """Run `cmd` from the repo root via `step_runner.run_step`; True on success (never exits)."""
+    sys.path.insert(0, str(REPO_ROOT / "src"))
+    from step_runner import run_step
+
+    return run_step(cmd, label=" ".join(cmd[:2]), cwd=REPO_ROOT, env=env)
 
 
 def _chunked(items: list, size: int):

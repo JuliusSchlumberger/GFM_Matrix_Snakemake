@@ -16,22 +16,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import retry_transient_io  # noqa: E402
 
 
-def _read_band(path: Path, dtype: str, fill) -> np.ndarray:
-    """Read band 1, replacing the file's OWN nodata value (whatever it is -
-    population chunks use float32-min, geogunit uses -1, flood_fraction uses
-    -1.0, all different) with `fill`.
-
-    A plain `src.read(1)` does NOT do this. Population's nodata sentinel
-    (-3.4e38, np.finfo(np.float32).min) is a FINITE value, so a naive
-    `~np.isfinite(arr)` cleanup step does not catch it on a raw read -
-    `masked=True` must be used to replace it explicitly, or it corrupts
-    every downstream computation for any chunk containing it.
-    """
-    with retry_transient_io(rasterio.open, path) as src:
-        arr = src.read(1, masked=True)
-        return arr.filled(fill).astype(dtype)
-
-
 def _round_val(val: float) -> float | int:
     """Same magnitude-conditional rounding rule as validate_country.py's _round_row -
     whole integer, except abs(val) < 1 rounds to 2 decimals so a small real
@@ -80,3 +64,43 @@ def _eai_from_interp(interp, slr_path_mm: np.ndarray, growth_path: np.ndarray) -
     6-continent sweep)."""
     pts = np.column_stack([np.asarray(growth_path, float), np.asarray(slr_path_mm, float)])
     return np.clip(interp(pts), 0.0, None)
+
+
+def _read_band_and_transform(path: Path, dtype: str, fill) -> tuple[np.ndarray, "rasterio.Affine"]:
+    """Read band 1 (file nodata -> `fill`, cast to `dtype`) plus the file's transform.
+
+    The file's OWN nodata is replaced via `masked=True` - population's sentinel (-3.4e38,
+    float32-min) is finite, so a plain `src.read(1)` plus an `isfinite` cleanup would not catch
+    it. Open + read are retried as ONE unit (`retry_transient_io`): a transient P:\ hiccup under
+    concurrent load surfaces inside `.read()` (seen live 2026-10-09, `GetBlockRef failed`), not
+    only in `rasterio.open`.
+    """
+    def _do():
+        with rasterio.open(path) as src:
+            arr = src.read(1, masked=True)
+            return arr.filled(fill).astype(dtype), src.transform
+    return retry_transient_io(_do)
+
+
+def _read_band(path: Path, dtype: str, fill) -> np.ndarray:
+    """Read band 1 with the file's nodata replaced by `fill` (see `_read_band_and_transform`)."""
+    return _read_band_and_transform(path, dtype, fill)[0]
+
+
+def _first_crossing(eai: np.ndarray, threshold: float, years: np.ndarray) -> float | None:
+    """First (fractional) year in `years` where `eai` reaches `threshold`, or None."""
+    above = np.nonzero(eai >= threshold)[0]
+    if len(above) == 0:
+        return None
+    k = int(above[0])
+    if k == 0:
+        return float(years[0])
+    e0, e1 = eai[k - 1], eai[k]
+    return float(years[k - 1] + (threshold - e0) / (e1 - e0))
+
+
+def _people(v: float, _=None) -> str:
+    """Axis/label formatter for people counts: 1.2 M, 340 k, 12 (sign kept for negatives)."""
+    a = abs(v)
+    s = f"{a / 1e6:g} M" if a >= 1e6 else (f"{a / 1e3:g} k" if a >= 1e3 else f"{a:g}")
+    return ("-" if v < 0 else "") + s

@@ -37,6 +37,8 @@ from matplotlib.lines import Line2D  # noqa: E402
 from matplotlib.patches import Patch  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _common)
+from _common import _people  # noqa: E402
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pathways import eai_along_pathway, slr_pathway  # noqa: E402
 from population_extension import extend_growth_factors  # noqa: E402
@@ -52,10 +54,6 @@ VARIANT_STYLES = ["--", ":", "-."]
 PROJECTION_LINESTYLE = "--"  # timeseries_extended_continents.png's own single "this is a projection" style
 STRATEGY_NAMES = {"baseline": "No adaptation", "protect": "Protect", "avoid": "Avoid", "retreat": "Retreat",
                   "protect_avoid": "Protect + Avoid"}
-
-
-def _people(v: float, _=None) -> str:
-    return f"{v / 1e6:g} M" if v >= 1e6 else (f"{v / 1e3:g} k" if v >= 1e3 else f"{v:g}")
 
 
 def _nice_vmax(top: float, n: int) -> float:

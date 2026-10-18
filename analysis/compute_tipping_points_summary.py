@@ -59,7 +59,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _common)
-from _common import _eai_from_interp, _growth_matrix_path, _growth_path  # noqa: E402
+from _common import _eai_from_interp, _first_crossing, _growth_matrix_path, _growth_path  # noqa: E402
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pathways import matrix_interpolator, slr_pathway  # noqa: E402
 from population_extension import extend_growth_factors  # noqa: E402
@@ -71,17 +71,6 @@ from analysis_figures import (  # noqa: E402
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 MEASURES = ["protect", "avoid", "retreat", "protect_avoid"]
 LAST_SSP_YEAR = 2100
-
-
-def _first_crossing(eai: np.ndarray, threshold: float, years: np.ndarray) -> float | None:
-    above = np.nonzero(eai >= threshold)[0]
-    if len(above) == 0:
-        return None
-    k = int(above[0])
-    if k == 0:
-        return float(years[0])
-    e0, e1 = eai[k - 1], eai[k]
-    return float(years[k - 1] + (threshold - e0) / (e1 - e0))
 
 
 def _median_crossing(
