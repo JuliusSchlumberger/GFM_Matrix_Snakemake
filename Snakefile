@@ -38,8 +38,6 @@ import sys
 import time
 
 import geopandas as gpd
-import numpy as np
-from shapely.geometry import box as _shapely_box
 from snakemake.utils import min_version
 
 min_version("7.0")
@@ -86,6 +84,7 @@ os.makedirs = _retrying_makedirs
 sys.path.insert(0, os.path.join(workflow.basedir, "src"))
 from aqueduct_runner import estimate_aqueduct_mem_mb  # noqa: E402
 from config_utils import _expand_paths, get_data_catalog, merged_slr_scenarios  # noqa: E402
+from tiles import build_chunk_grid  # noqa: E402
 
 # GFM_CONFIG_PATH lets HPC dispatch scripts point this Snakefile at a
 # fully-materialized, scenario-specific config (calibration/sensitivity
@@ -168,29 +167,10 @@ WATERLEVEL_NAMES = merged_slr_scenarios(config["boundary_conditions"], config["a
 # Changing `merge.chunk_size_deg` in config is all that is required to switch
 # between e.g. 5° and 10° chunks.
 
-def _build_chunk_grid(tile_gdf, chunk_size_deg):
-    minx, miny, maxx, maxy = tile_gdf.total_bounds
-    sz = chunk_size_deg
-    xs = np.arange(np.floor(minx / sz) * sz, np.ceil(maxx / sz) * sz, sz)
-    ys = np.arange(np.floor(miny / sz) * sz, np.ceil(maxy / sz) * sz, sz)
-    rows = []
-    for x in xs:
-        for y in ys:
-            cell = _shapely_box(x, y, x + sz, y + sz)
-            if not tile_gdf.geometry.intersects(cell).any():
-                continue
-            xi, yi = int(round(x)), int(round(y))
-            lat = f"N{yi:02d}" if yi >= 0 else f"S{-yi:02d}"
-            lon = f"E{xi:03d}" if xi >= 0 else f"W{-xi:03d}"
-            rows.append({
-                "chunk_id": f"{lat}{lon}",
-                "bounds": [x, y, x + sz, y + sz],
-                "geometry": cell,
-            })
-    return gpd.GeoDataFrame(rows, crs=tile_gdf.crs)
-
+# Built by src/tiles.py::build_chunk_grid - the single definition shared with
+# the HPC postprocess job generator and check_postprocess_progress.py.
 _chunk_size_deg = config["postprocessing"]["chunk_size_deg"]
-_chunk_grid = _build_chunk_grid(_tile_gdf, _chunk_size_deg)
+_chunk_grid = build_chunk_grid(_tile_gdf, _chunk_size_deg)
 CHUNK_IDS = _chunk_grid["chunk_id"].tolist()
 
 # Fast lookup: chunk_id → [minx, miny, maxx, maxy]

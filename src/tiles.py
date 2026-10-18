@@ -11,6 +11,7 @@ import rasterio
 from affine import Affine
 from rasterio.enums import Resampling
 from rasterio.windows import from_bounds
+from shapely.geometry import box as shapely_box
 
 from config_utils import retry_transient_io
 
@@ -104,6 +105,49 @@ def save_tile_geometry(tile: gpd.GeoDataFrame, output_path: str | Path) -> None:
         Destination file path; written with the GPKG driver.
     """
     retry_transient_io(tile.to_file, output_path, driver="GPKG")
+
+
+def build_chunk_grid(tile_gdf: gpd.GeoDataFrame, chunk_size_deg: float) -> gpd.GeoDataFrame:
+    """Build the postprocessing chunk grid covering the tile grid.
+
+    The single definition of chunk IDs and extents, shared by the Snakefile (local DAG),
+    the HPC postprocess job generator and the postprocess progress monitor, so their chunk
+    IDs can never drift apart. Cells are `chunk_size_deg` squares aligned to multiples of
+    `chunk_size_deg`; only cells that intersect at least one tile are kept. A chunk is named
+    by its south-west corner, e.g. "S10E030" for (lon=30, lat=-10).
+
+    Parameters
+    ----------
+    tile_gdf : geopandas.GeoDataFrame
+        Tile grid (`tile_grid.path`), in degrees.
+    chunk_size_deg : float
+        Chunk edge length in degrees (`postprocessing.chunk_size_deg`).
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        One row per chunk with columns `chunk_id`, `bounds` ([minx, miny, maxx, maxy]) and
+        `geometry` (the chunk box), in `tile_gdf`'s CRS; ordered by x, then y.
+    """
+    minx, miny, maxx, maxy = tile_gdf.total_bounds
+    sz = chunk_size_deg
+    xs = np.arange(np.floor(minx / sz) * sz, np.ceil(maxx / sz) * sz, sz)
+    ys = np.arange(np.floor(miny / sz) * sz, np.ceil(maxy / sz) * sz, sz)
+    rows = []
+    for x in xs:
+        for y in ys:
+            cell = shapely_box(x, y, x + sz, y + sz)
+            if not tile_gdf.geometry.intersects(cell).any():
+                continue
+            xi, yi = int(round(x)), int(round(y))
+            lat = f"N{yi:02d}" if yi >= 0 else f"S{-yi:02d}"
+            lon = f"E{xi:03d}" if xi >= 0 else f"W{-xi:03d}"
+            rows.append({
+                "chunk_id": f"{lat}{lon}",
+                "bounds": [x, y, x + sz, y + sz],
+                "geometry": cell,
+            })
+    return gpd.GeoDataFrame(rows, crs=tile_gdf.crs)
 
 
 def _coord_str(lat: int, lon: int) -> str:

@@ -62,3 +62,7 @@ in-phase.
   both callers (`rules/hpc_dispatch.smk`, `generate_hpc_simulation_jobs.py:178`) but never
   read. The docstring now says "unused". Drop them with the Phase 5c helper consolidation
   or the Phase 7a renames (signature change).
+- **`generate_hpc_postprocess_job.py --help` crashes** (found in Phase 5a, pre-existing at HEAD):
+  argparse raises `TypeError: %d format: a real number is required, not dict` because a
+  `help=` string contains an unescaped `%`. Only `--help` is affected; normal runs parse fine.
+  Fix: escape it as `%%`.

@@ -56,10 +56,8 @@ Snakemake DAG-build cost is cheap (each target's own dependency chain is
 just a handful of per-tile waterdepth files or one other chunk file, not
 the entire domain like generate_aqueduct_jobs' _PREPROCESS_OUTPUTS gate).
 
-Chunk grid construction (_build_chunk_grid) is copied from the root
-Snakefile's own module-level code - it can't be imported directly (the
-Snakefile is not a plain importable module), so this mirrors it exactly;
-if that logic ever changes there, update it here too.
+The chunk grid comes from src/tiles.py::build_chunk_grid, the same function
+the root Snakefile uses, so chunk IDs always match the DAG's.
 
 Uses the same local-view/Linux-view path resolution as
 generate_hpc_preprocess_job.py (config_hpc.yml, if present): the tile grid
@@ -79,15 +77,14 @@ import sys
 from pathlib import Path
 
 import geopandas as gpd
-import numpy as np
 import yaml
-from shapely.geometry import box as shapely_box
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
 from generate_exposure_jobs import generate_exposure_dispatch, generate_exposure_resume_dispatch  # noqa: E402
 from generate_hpc_flood_totals_and_plots_job import write_flood_totals_and_plots_job  # noqa: E402
+from tiles import build_chunk_grid  # noqa: E402
 
 
 def _account_line(sbatch_cfg: dict) -> list[str]:
@@ -235,24 +232,6 @@ def _stage_file_locally(src_path: str) -> str:
     retry_transient_io(shutil.copy2, src_path, dst)
     return dst
 
-
-def _build_chunk_grid(tile_gdf: gpd.GeoDataFrame, chunk_size_deg: float) -> gpd.GeoDataFrame:
-    """Mirrors the root Snakefile's own _build_chunk_grid exactly."""
-    minx, miny, maxx, maxy = tile_gdf.total_bounds
-    sz = chunk_size_deg
-    xs = np.arange(np.floor(minx / sz) * sz, np.ceil(maxx / sz) * sz, sz)
-    ys = np.arange(np.floor(miny / sz) * sz, np.ceil(maxy / sz) * sz, sz)
-    rows = []
-    for x in xs:
-        for y in ys:
-            cell = shapely_box(x, y, x + sz, y + sz)
-            if not tile_gdf.geometry.intersects(cell).any():
-                continue
-            xi, yi = int(round(x)), int(round(y))
-            lat = f"N{yi:02d}" if yi >= 0 else f"S{-yi:02d}"
-            lon = f"E{xi:03d}" if xi >= 0 else f"W{-xi:03d}"
-            rows.append({"chunk_id": f"{lat}{lon}", "geometry": cell})
-    return gpd.GeoDataFrame(rows, crs=tile_gdf.crs)
 
 
 def _split_evenly(targets: list[str], n_nodes: int) -> list[list[str]]:
@@ -432,7 +411,7 @@ def main() -> None:
     baseline_slr = local_config["protection"]["baseline_waterlevel_name"]
 
     chunk_size_deg = local_config["postprocessing"]["chunk_size_deg"]
-    chunk_grid = _build_chunk_grid(tile_gdf, chunk_size_deg)
+    chunk_grid = build_chunk_grid(tile_gdf, chunk_size_deg)
     chunk_ids = chunk_grid["chunk_id"].tolist()
     print(f"{len(chunk_ids)} populated chunk(s) (chunk_size_deg={chunk_size_deg}), "
           f"{len(return_periods)} RPs, {len(waterlevel_names)} SLRs, n_nodes={n_nodes}\n")
