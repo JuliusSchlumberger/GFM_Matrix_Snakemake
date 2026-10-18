@@ -30,7 +30,7 @@ job, "wave 0"/`build_shared_inputs.sbatch`, submitted immediately after
 resolved_config.yml was written; that specific job kept hitting a
 cross-node stale-read of that file on the shared P:\\ mount, identical
 byte/position every time, that not even retries survived - see
-_stage_configfile_lines' docstring. Running it synchronously in the same
+src/hpc_common.py's _stage_configfile_lines docstring. Running it synchronously in the same
 process/machine that just wrote resolved_config.yml removes the network
 round-trip for this step entirely, not just mitigates it). Snakemake locks
 its own working directory by default (one process at a time per
@@ -81,104 +81,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
-
-
-def _account_line(sbatch_cfg: dict) -> list[str]:
-    if sbatch_cfg.get("account"):  # optional - Hydrax jobs don't require one
-        return [f"#SBATCH --account={sbatch_cfg['account']}"]
-    return []
-
-
-def _retry_wrapper_lines() -> list[str]:
-    """Bash function def: retries a `snakemake --configfile ...` invocation
-    on failure - confirmed live 2026-09: a job with NO SLURM dependency
-    (build_shared_inputs.sbatch - submitted essentially instantly after
-    resolved_config.yml is written on the login node, unlike every other
-    generated job, which waits on something first) can hit a cross-node
-    filesystem consistency gap on the shared P:\\ mount and read a
-    corrupted/stale copy of that file (UnicodeDecodeError inside
-    Snakemake's own --configfile loader) - the SAME exact byte at the SAME
-    exact position every time it's happened, ruling out a random race and
-    pointing at cache staleness specifically (very plausibly SMB/CIFS-style
-    client caching on this mount, not NFS). Retrying (rather than a fixed
-    sleep) matches this codebase's own retry_transient_io philosophy -
-    assume transient, retry with backoff, fail loudly only once attempts
-    are genuinely exhausted.
-
-    2026-09-14: staging resolved_config.yml to node-local disk first
-    (_stage_configfile_lines, below) did NOT stop this recurring, which
-    means it isn't necessarily resolved_config.yml at all - the Snakefile
-    itself has `configfile: "snakemake_workflow/config/config.yml"` +
-    a conditional one for config_local.yml, BOTH loaded automatically on
-    every snakemake invocation before --configfile is even merged in, and
-    raw UnicodeDecodeErrors never report which file they came from. Each
-    failed attempt below now dumps a checksum/mtime of every candidate
-    config file, so a recurrence gives real forensic evidence instead of
-    another guess.
-    """
-    return [
-        "run_snakemake_with_retry() {",
-        "  local attempt=1 max_attempts=10 delay=30",
-        '  while [ "$attempt" -le "$max_attempts" ]; do',
-        '    if "$@"; then',
-        "      return 0",
-        "    fi",
-        '    echo "  [retry $attempt/$max_attempts] snakemake invocation failed - retrying in ${delay}s..." >&2',
-        '    echo "  [forensics] candidate config files at time of failure:" >&2',
-        '    sha256sum snakemake_workflow/config/config.yml snakemake_workflow/config/config_local.yml "$LOCAL_CONFIGFILE" >&2 || true',
-        '    stat snakemake_workflow/config/config.yml snakemake_workflow/config/config_local.yml "$LOCAL_CONFIGFILE" >&2 || true',
-        '    sleep "$delay"',
-        "    attempt=$((attempt + 1))",
-        "  done",
-        '  echo "  snakemake invocation failed after $max_attempts attempts - giving up." >&2',
-        "  return 1",
-        "}",
-    ]
-
-
-def _stage_configfile_lines() -> list[str]:
-    """Bash function def: copies a --configfile path to node-local scratch
-    and validates it parses as UTF-8 YAML before use, retrying the CHEAP
-    copy+validate step (not a full snakemake run) on failure.
-
-    Escalation from run_snakemake_with_retry, above - live evidence
-    2026-09-14 showed 5 back-to-back FRESH `snakemake` retries (new
-    process each time, ~75s apart) all hit the IDENTICAL byte/position
-    UnicodeDecodeError reading resolved_config.yml over the shared P:\\
-    mount, while the very same file read completely cleanly from a
-    different client moments later. That rules out a short-lived cross-
-    node race (which retrying the whole snakemake invocation assumed) and
-    points at THIS COMPUTE NODE's own stale/corrupted client-side cache
-    for that specific file - re-running snakemake on the same node
-    against the same P:\\ path just keeps hitting the same bad cache
-    entry. Staging a local copy first isolates the flaky network read to
-    one small, cheap step that can be retried on its own; every
-    subsequent read (Snakemake's own config parse, or
-    generate_hpc_simulation_jobs.py's plain yaml.safe_load) then hits
-    node-local disk instead of the network mount again.
-    """
-    return [
-        "stage_configfile_locally() {",
-        '  local src="$1" out_var="$2"',
-        '  local stage_dir="${TMPDIR:-/tmp}/gfm_resolved_config"',
-        '  mkdir -p "$stage_dir"',
-        '  local dst="$stage_dir/resolved_config_${SLURM_JOB_ID:-$$}_$$.yml"',
-        "  local attempt=1 max_attempts=8 delay=5",
-        '  while [ "$attempt" -le "$max_attempts" ]; do',
-        '    cp -f -- "$src" "$dst" 2>/dev/null',
-        "    if python -c \"import sys, yaml; yaml.safe_load(open(sys.argv[1], encoding='utf-8'))\" \"$dst\" 2>/dev/null; then",
-        "      printf -v \"$out_var\" '%s' \"$dst\"",
-        "      return 0",
-        "    fi",
-        '    echo "  [config-stage retry $attempt/$max_attempts] $src did not copy/parse cleanly - retrying in ${delay}s..." >&2',
-        '    rm -f -- "$dst"',
-        '    sleep "$delay"',
-        "    attempt=$((attempt + 1))",
-        "  done",
-        '  echo "  failed to stage a valid local copy of $src after $max_attempts attempts - giving up." >&2',
-        "  return 1",
-        "}",
-    ]
+from hpc_common import _account_line, _retry_wrapper_lines, _stage_configfile_lines  # noqa: E402
 
 
 def _target_paths(tile_dir: str, return_periods: list[str], waterlevel_names: list[str]) -> list[str]:

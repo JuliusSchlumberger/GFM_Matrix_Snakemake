@@ -62,12 +62,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import load_config, retry_transient_io  # noqa: E402
-
-
-def _account_line(sbatch_cfg: dict) -> list[str]:
-    if sbatch_cfg.get("account"):  # optional - Hydrax jobs don't require one
-        return [f"#SBATCH --account={sbatch_cfg['account']}"]
-    return []
+from hpc_common import _account_line  # noqa: E402
 
 
 def _discover_chunk_ids(flood_frac_dir: Path, chunks_dir: Path) -> list[str]:

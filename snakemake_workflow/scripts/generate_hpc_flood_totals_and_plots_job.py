@@ -36,49 +36,13 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from config_utils import atomic_write, load_config, retry_transient_io  # noqa: E402
+from hpc_common import _account_line, _stage_configfile_lines  # noqa: E402
 
 # Duplicated from generate_hpc_postprocess_job.py (not imported - that module
 # imports write_flood_totals_and_plots_job FROM here to append this phase
 # onto its own chain, so importing back the other way would be circular;
 # same small-helper-duplication convention generate_hpc_preprocess_job.py's
 # own matching helpers already use rather than a shared module).
-
-
-def _account_line(sbatch_cfg: dict) -> list[str]:
-    if sbatch_cfg.get("account"):  # optional - Hydrax jobs don't require one
-        return [f"#SBATCH --account={sbatch_cfg['account']}"]
-    return []
-
-
-def _stage_configfile_lines() -> list[str]:
-    """Bash function def: copies a --configfile path to node-local scratch
-    and validates it parses as UTF-8 YAML before use, retrying the CHEAP
-    copy+validate step on failure - see generate_hpc_postprocess_job.py's
-    matching helper for the full rationale (live evidence 2026-09-14: a
-    node-local stale-cache issue on the shared P:\\ mount that re-running
-    against the same path alone doesn't fix)."""
-    return [
-        "stage_configfile_locally() {",
-        '  local src="$1" out_var="$2"',
-        '  local stage_dir="${TMPDIR:-/tmp}/gfm_resolved_config"',
-        '  mkdir -p "$stage_dir"',
-        '  local dst="$stage_dir/resolved_config_${SLURM_JOB_ID:-$$}_$$.yml"',
-        "  local attempt=1 max_attempts=8 delay=5",
-        '  while [ "$attempt" -le "$max_attempts" ]; do',
-        '    cp -f -- "$src" "$dst" 2>/dev/null',
-        "    if python -c \"import sys, yaml; yaml.safe_load(open(sys.argv[1], encoding='utf-8'))\" \"$dst\" 2>/dev/null; then",
-        "      printf -v \"$out_var\" '%s' \"$dst\"",
-        "      return 0",
-        "    fi",
-        '    echo "  [config-stage retry $attempt/$max_attempts] $src did not copy/parse cleanly - retrying in ${delay}s..." >&2',
-        '    rm -f -- "$dst"',
-        '    sleep "$delay"',
-        "    attempt=$((attempt + 1))",
-        "  done",
-        '  echo "  failed to stage a valid local copy of $src after $max_attempts attempts - giving up." >&2',
-        "  return 1",
-        "}",
-    ]
 
 
 def write_flood_totals_and_plots_job(
