@@ -1,85 +1,16 @@
-"""Calibration run of obstacle-coupling across a representative pool of
-wave-0 tiles. Tile IDs come from `run_sweep_budget_study.py`'s
-`wet_tiles_selected.txt` (that script's sweep=1 result already confirmed
-each of these tiles has real flooding for this scenario - no separate
-dry-check needed here).
+"""Trace obstacle-coupling outer iterations on the wet calibration tiles.
 
-`load_tile()` matches run_sweep_budget_study.py's own conventions:
-current-machine `--config`-driven paths, `knn`/`friction_scale_factor` from
-config.yml, friction scaled in the decode->scale->floor order
-`eikonal_runner.py` actually uses. `BLOCK_FRICTION` matches production's
-real `flood_model.OBSTACLE_BLOCK_FRICTION` (9999.0 - high enough that the
-cost of any path crossing such a cell is unmistakably prohibitive even in
-float32), and `--epsilon` defaults to the fixed
-`simulation.flooding.waterlevel_epsilon_m` config constant, same as
-production's real convergence check.
+Tiles come from run_sweep_budget_study.py's wet_tiles_selected.txt. Writes one
+CSV per tile: an n_outer=0 unblocked baseline, one row per outer iteration
+(static dem > max_waterlevel pre-filter, stop when pct_newly_blocked <
+--outer-convergence-pct), and a status="summary" row splitting flooding removed
+by the static filter alone vs the full outer loop.
 
-This script also applies a reached/unreached guard on the blocking check
-that production itself currently lacks (see
-docs/methods_03_calibration_sensitivity.md §3 for whether that discrepancy
-actually changes any real output). Every cell starts at the eikonal
-solve's own `t=99` ("never reached") sentinel; until the wavefront's
-influence actually reaches a cell, `waterlevel_b <= dem` is trivially true
-(waterlevel=-99 is below virtually any real elevation), so an inner solve
-stopped before it geometrically covers the tile would misclassify "not
-reached yet" as "genuinely can't flood" - and because blocked cells stay
-blocked in every later outer iteration, that error is effectively
-permanent, not something a later iteration corrects. `reached = t[1:, 1:] <
-UNREACHED_SENTINEL` restricts the DYNAMIC (post-solve) blocking check to
-cells the solve has actually touched; `static_blocked` (the free `dem >
-max_waterlevel` filter) is unaffected since it never depends on solve state
-at all. `pct_unreached` is logged per row - the honest answer to "how much
-of the tile do we actually have real information about yet" at any given
-inner-round budget, instead of assuming full coverage.
-
-Per outer iteration, the inner solve runs up to `--inner-max-rounds` full
-rounds (4 sweeps each, Julia's real Gray-code order), stopping early once
-its own round-level max_change drops to/below `--epsilon` - this is the
-standard solve_eikonal_dense(max_rounds=...) semantics, NOT a fixed
-single-round call.
-
-Per-cell change diagnostics for the inner solve's own stopping point,
-computed from the exact elementwise |after - before| diff of the LAST
-round it performed:
-  - pct_cells_still_changing: % of all cells in the tile where that diff
-    exceeds epsilon (relative measure of how "unsettled" the inner solve
-    still is when it stops).
-  - mean/min/max_cell_change: mean/min/max of that diff, over all cells.
-
-An explicit n_outer=0 row is written first for each tile: the plain,
-un-blocked single solve (no static pre-filter, no obstacle_coupling at
-all) - the "no blocking whatsoever" baseline the outer-loop trace is
-compared against. From n_outer=1 onward, both configs still use:
-  - the static dem > max_waterlevel pre-filter.
-  - the tolerant outer-loop stopping criterion: stop once pct_newly_blocked
-    (relative to total tile cells) drops below `--outer-convergence-pct`.
-
-Per outer round (round 0/baseline is the implicit reference for round 1's
-diff, then round N vs round N-1 for N>=2 - matches pct_newly_blocked's own
-existing convention): pct_blocked_cumulative (running total, "basis"),
-pct_newly_blocked (round-over-round delta, "change per round"),
-max_depth_change_abs (max absolute per-cell depth diff vs the previous
-round, whole array), and n_newly_flooded/n_no_longer_flooded (unlike the
-sweep-level report, BOTH directions matter here - re-blocking a cell can
-genuinely un-flood it, that's the entire point of obstacle_coupling).
-Baseline (n_outer=0) has no "previous round" to diff against, so these get
-0 placeholders, same convention as pct_newly_blocked already used.
-
-Each tile's CSV ends with one extra summary row (status="summary") giving
-pct_removed_by_static_filter_alone (comparing n_outer=0 -> n_outer=1) and
-pct_additional_removed_by_full_outer_loop (n_outer=1 -> the final,
-converged row) - the direct answer to "is the free static pre-filter
-already most of the benefit, or does the iterative re-blocking loop matter
-much more."
-
-Output: ONE CSV per tile (not a single combined file), written
-incrementally, in CSV_DIR, plus a shared progress log on stdout.
-
-`--epsilon` defaults to `DEFAULT_OUTER_EPSILON_M` (0.03m, matching
-production's own `simulation.flooding.waterlevel_epsilon_m` exactly) - this
-study characterizes production's real convergence behavior, so it uses
-production's actual threshold. Pass `--epsilon` explicitly for a softened-
-threshold sensitivity variant.
+Each inner solve runs up to --inner-max-rounds rounds (4 sweeps, Julia's
+Gray-code order) with epsilon early exit; BLOCK_FRICTION = 9999.0 as
+flood_model.OBSTACLE_BLOCK_FRICTION. Unlike production, dynamic blocking is
+restricted to cells with t < 99 (reached): unreached cells read as
+waterlevel -99 m and a block is never undone. pct_unreached is logged.
 
 Usage:
     python run_obstacle_coupling_study.py <output_dir> [--config <config.yml>]
@@ -109,35 +40,22 @@ RETURN_PERIOD = "RP100"
 WATERLEVEL_NAME = "SLR_0"
 OCEAN_CODE = 1
 BLOCK_FRICTION = 9999.0  # matches flood_model.OBSTACLE_BLOCK_FRICTION
-DEFAULT_OUTER_EPSILON_M = 0.03  # matches production's own simulation.flooding.waterlevel_epsilon_m
-# - this script's own --epsilon default, not config-driven
-DEFAULT_MAX_OUTER = 15  # explores well beyond production's own max_outer_iterations default,
-# to find where tiles actually stop needing more outer iterations
-DEFAULT_INNER_MAX_ROUNDS = 40  # the sweep-budget calibration study's own conclusion (see
-# docs/methods_03_calibration_sensitivity.md §2): the large majority of tiles either converge
-# or have their flood extent fully frozen by round 40.
-# Neither of the above two is config-driven, matching DEFAULT_OUTER_EPSILON_M above - this
-# calibration study is deliberately exploring beyond production's own current defaults, not
-# reproducing them (pass --max-outer/--inner-max-rounds explicitly to match config.yml instead).
+DEFAULT_OUTER_EPSILON_M = 0.03  # = simulation.flooding.waterlevel_epsilon_m
+DEFAULT_MAX_OUTER = 15  # beyond production's default, to find where tiles stop needing more
+DEFAULT_INNER_MAX_ROUNDS = 40  # methods_03 §2: most tiles converge or freeze extent by round 40
+# Not config-driven on purpose; pass --max-outer/--inner-max-rounds to match config.yml.
 
-# A cell's `t` only ever decreases from the eikonal solve's own unseeded
-# default (99.0, see eikonal.solve_eikonal_dense) once real seed influence
-# reaches it - so any strict decrease is real signal, not noise. See module
-# docstring's "reached/unreached guard" note for why this matters.
+# t only decreases from the unseeded 99.0 (eikonal.solve_eikonal_dense) once seeds reach a cell.
 UNREACHED_SENTINEL = 99.0
 
-# tile_generation.river_code in config.yml - hardcoded here rather than
-# reading config.yml, matching this script's existing ocean_code convention.
-RIVER_CODE = 3
+RIVER_CODE = 3  # tile_generation.river_code
 
-# Fallback for a quick standalone smoke test if no tile_ids are given on
-# the command line - the real study always passes an explicit list read
-# from run_sweep_budget_study.py's wet_tiles_selected.txt (see
-# module docstring).
+# Smoke-test fallback when no --tile-ids are given.
 TILES = [2083, 2514, 1421, 2569, 2858, 2314, 753]
 
 
 def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor: float):
+    """Load a tile's decoded solver inputs and IDW-seeded coastline values."""
     tile_dir = model_outputs / str(tile_id)
     scenario = f"{RETURN_PERIOD}_{WATERLEVEL_NAME}"
     inputs = tile_dir / "inputs"
@@ -146,33 +64,20 @@ def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor
         dem = decode_dem_cm(src.read(1))
         transform = src.transform
     with rasterio.open(inputs / "mask.tif") as src:
-        # int8, not int64: mask only ever holds a handful of small codes,
-        # every downstream use is a plain equality/inequality comparison -
-        # int64 would be 8x more memory than this array ever needs, enough
-        # to OOM on the largest real tiles.
+        # int8: int64 would OOM on the largest tiles.
         mask = src.read(1).astype(np.int8)
     with rasterio.open(inputs / "friction.tif") as src:
         friction = decode_friction_int16(src.read(1))
     boundaries = gpd.read_file(inputs / f"boundaries_{scenario}.gpkg")
 
     dem = effective_dem(dem, mask)
-    # decode -> scale -> floor, matching eikonal_runner.py's own production order exactly
-    # (see run_sweep_budget_study.py's own load_tile() comment for the full reasoning).
+    # decode -> scale -> floor, as in eikonal_runner.
     friction = friction * friction_scale_factor
     friction = np.where(friction > 0, friction, friction.dtype.type(0.001))
     coastline = coastline_mask(mask, ocean_code=OCEAN_CODE, river_code=RIVER_CODE)
     coastline_rows, coastline_cols = np.nonzero(coastline)
 
-    # boundaries.gpkg stores int16-centimetre-encoded water levels
-    # (rasters.encode_waterlevel_cm) - decode before use. This
-    # script's tile list is always drawn from test_sweep_budget_
-    # calibration.py's wet_tiles_selected.txt, which already excludes any
-    # tile with zero COAST-RP stations (that script's own DRY handling) -
-    # so this should never actually be empty in practice. Fail loudly and
-    # clearly here rather than let it crash inside _idw_seed_values'
-    # BallTree construction (zero samples) or station_values.max() below
-    # with a confusing scikit-learn traceback, in case that invariant is
-    # ever violated (e.g. a hand-picked tile_id passed directly on the CLI).
+    # Int16 cm-encoded levels. Zero stations would crash in BallTree; fail clearly.
     station_values = decode_waterlevel_cm(boundaries[WATERLEVEL_NAME].to_numpy())
     if len(station_values) == 0:
         raise ValueError(
@@ -192,17 +97,13 @@ def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor
 
 
 def solve_inner(friction, seed_rows, seed_cols, seed_values, dtype, epsilon, max_rounds):
-    """Up to max_rounds full rounds (4 sweeps each), epsilon early-exit -
-    same semantics as solve_eikonal_dense(max_rounds=...). Also returns
-    exact per-cell change diagnostics from the LAST round performed.
+    """Run up to max_rounds 4-sweep rounds with epsilon early exit.
+
+    Mirrors solve_eikonal_dense(max_rounds=...); also returns per-cell change
+    stats of the last round.
     """
     m, n = friction.shape
-    # t defaults to +99 (waterlevel=-t=-99m), not 0 - matches src/eikonal.py's
-    # solve_eikonal_dense: a cell no seed's influence ever reaches should
-    # read as "never flooded", not "flooded at exactly sea level". This
-    # script reimplements the sweep loop directly (bypassing
-    # solve_eikonal_dense) for per-round instrumentation, so needs the same
-    # sentinel applied here explicitly to stay consistent with production.
+    # Unseeded t=+99 (waterlevel -99 m) = never flooded, as in solve_eikonal_dense.
     t = np.full((m + 1, n + 1), 99.0, dtype=dtype)
     t[seed_rows, seed_cols] = seed_values
     neg_two = dtype.type(-2.0)
@@ -220,9 +121,7 @@ def solve_inner(friction, seed_rows, seed_cols, seed_values, dtype, epsilon, max
         if round_max_change <= epsilon:
             break
 
-    # In-place, native-dtype diff - avoids materializing several extra
-    # float64-upcast full-tile temporaries (was ~4x2.67GB on the largest
-    # tile, enough to OOM even though the sweeps themselves fit in memory).
+    # In-place native-dtype diff: float64 temporaries OOM on the largest tile.
     diff = t[1:, 1:] - prev_domain
     np.abs(diff, out=diff)
     n_cells = diff.size
@@ -237,14 +136,7 @@ def solve_inner(friction, seed_rows, seed_cols, seed_values, dtype, epsilon, max
 
 
 def _full_depth_array(waterlevel, dem, mask, coastline) -> np.ndarray:
-    """Identical math to flood_depth_dense's own non-coupling path, but
-    returns the FULL tile-shaped depth array (zeros where dry) rather than
-    just flooded-cell aggregate stats - needed to diff consecutive rounds
-    cell-by-cell, and computed once here (not duplicated inside
-    _snapshot_from_depth) to avoid a second prune_to_coast_connected pass.
-    Takes the already-computed `waterlevel` array (not `t_b`) so callers can
-    release `t_b` (the dominant allocation) before calling this.
-    """
+    """Return tile-shaped depth (0 where dry), same math as flood_depth_dense without coupling."""
     flood = (waterlevel > dem) & (mask != OCEAN_CODE)
     flood = prune_to_coast_connected(flood, coastline)
     depth = np.zeros_like(dem)
@@ -281,10 +173,7 @@ def _snapshot_from_depth(depth, n_outer, stopped_early, last_max_change, epsilon
 
 
 def _depth_change_metrics(depth_prev: np.ndarray, depth_curr: np.ndarray) -> dict:
-    """Per-round change metrics vs. the previous round - both directions
-    matter here (unlike the sweep-level report): re-blocking a cell can
-    genuinely un-flood it.
-    """
+    """Count both directions: re-blocking a cell can un-flood it."""
     abs_diff = np.abs(depth_curr - depth_prev)
     n_newly_flooded = int(((depth_prev == 0) & (depth_curr > 0)).sum())
     n_no_longer_flooded = int(((depth_prev > 0) & (depth_curr == 0)).sum())
@@ -299,6 +188,7 @@ def run_tile_trace(
     tile_id: int, model_outputs: Path, knn: int, friction_scale_factor: float,
     max_outer: int, inner_max_rounds: int, epsilon: float, outer_convergence_pct: float,
 ) -> list[dict]:
+    """Trace the unblocked baseline and each outer iteration; one row per solve."""
     dem, mask, friction, coastline, seed_rows, seed_cols, initial, max_waterlevel = load_tile(
         tile_id, model_outputs, knn, friction_scale_factor,
     )
@@ -308,25 +198,14 @@ def run_tile_trace(
 
     t0 = time.perf_counter()
 
-    # n_outer=0 baseline: the plain, entirely unblocked solve (no static
-    # pre-filter, no obstacle_coupling at all) - the "no blocking
-    # whatsoever" reference point the rest of this trace is measured
-    # against (see module docstring's summary-row explanation).
+    # n_outer=0 baseline: unblocked solve, no static pre-filter.
     iter_t0 = time.perf_counter()
     t0_b, max_change0, change_stats0 = solve_inner(
         friction, seed_rows, seed_cols, seed_values, dtype, epsilon, inner_max_rounds,
     )
     wl0 = -t0_b[1:, 1:]
-    # pct_unreached here isn't used for any blocking decision (baseline has
-    # none) - logged anyway as a useful standalone diagnostic: how much of
-    # the tile does a plain solve even geometrically cover within
-    # inner_max_rounds, regardless of obstacle_coupling at all.
     pct_unreached0 = 100.0 * float(np.count_nonzero(t0_b[1:, 1:] >= UNREACHED_SENTINEL)) / n_cells
-    # t0_b (the dominant allocation, e.g. ~830MB on the largest tile at
-    # float32) is never needed again once wl0 is extracted - without this,
-    # it stays bound to a local variable (and therefore alive) for the
-    # ENTIRE rest of the tile's outer-loop processing, on top of every
-    # outer iteration's own t_b, enough to OOM on the largest real tiles.
+    # Free t0_b (~830MB float32 on the largest tile) before the outer loop (OOM otherwise).
     del t0_b
     gc.collect()
     prev_depth = _full_depth_array(wl0, dem, mask, coastline)
@@ -338,8 +217,6 @@ def run_tile_trace(
     baseline_snap["n_cells"] = n_cells
     baseline_snap["pct_newly_blocked"] = 0.0
     baseline_snap["pct_blocked_cumulative"] = 0.0
-    # No "previous round" to diff baseline against - 0 placeholders, same
-    # convention as pct_newly_blocked above.
     baseline_snap["max_depth_change_abs"] = 0.0
     baseline_snap["n_newly_flooded"] = 0
     baseline_snap["n_no_longer_flooded"] = 0
@@ -358,27 +235,17 @@ def run_tile_trace(
         )
         iter_elapsed = time.perf_counter() - iter_t0
         wl_b = -t_b[1:, 1:]
-        # Reached/unreached guard (see module docstring): a cell
-        # still at the unseeded sentinel reads as waterlevel~=-99, which is
-        # trivially <= almost any real dem elevation - without this guard,
-        # an inner solve that hasn't geometrically covered the tile yet
-        # would misclassify "not reached yet" as "genuinely can't flood",
-        # and that block is effectively permanent (every later outer
-        # iteration inherits it). static_blocked is unaffected - it's a
-        # pure dem-vs-max_waterlevel decision, never dependent on solve state.
+        # Unreached cells (t=99 sentinel, waterlevel -99 m) must not be blocked:
+        # blocks persist through every later outer iteration.
         reached = t_b[1:, 1:] < UNREACHED_SENTINEL
         pct_unreached = 100.0 * float(np.count_nonzero(~reached)) / n_cells
-        del t_b  # release the dominant allocation now - see baseline's own comment above for why
+        del t_b  # free the dominant allocation before the next solve (OOM otherwise)
         gc.collect()
 
         blocked = ((wl_b <= dem) & reached) | static_blocked
         if prev_blocked is not None:
-            # Monotonic accumulation - mirrors src/flood_model.py's own obstacle_coupling
-            # branch, see that comment for the full story: without this union, `blocked` here
-            # is recomputed from scratch each outer iteration and can LOSE members present in
-            # prev_blocked, letting a previously-walled-off cell's path reopen - producing an
-            # undamped period-2 oscillation (pct_blocked_cumulative alternating between two
-            # fixed values every iteration, never settling).
+            # Monotonic union (as in flood_model): otherwise blocked cells can reopen,
+            # giving an undamped period-2 oscillation.
             blocked = blocked | prev_blocked
         blocked[seed_rows, seed_cols] = False
         depth = _full_depth_array(wl_b, dem, mask, coastline)
@@ -421,11 +288,7 @@ FIELDNAMES = [
 
 
 def build_summary_row(rows: list[dict], tile_id: int) -> dict:
-    """One extra CSV row (status='summary') answering: is the free static
-    dem > max_waterlevel pre-filter (n_outer=0 -> n_outer=1) already most of
-    the benefit, or does the iterative re-blocking outer loop (n_outer=1 ->
-    final/converged) remove meaningfully more flooding beyond that?
-    """
+    """Summarize % of baseline flooding removed by static pre-filter vs full outer loop."""
     baseline = rows[0]  # n_outer=0: no blocking at all
     static_only = rows[1]  # n_outer=1: static pre-filter + one inner solve, zero re-blocking
     final = rows[-1]  # converged (or MAX_OUTER-capped) row
@@ -462,8 +325,6 @@ def main() -> None:
     tiles = args.tile_ids if args.tile_ids else TILES
 
     cfg = load_config(args.config)
-    # cfg["simulation"]["model_outputs"], NOT a hardcoded root/"model_outputs" - see
-    # run_sweep_budget_study.py's own comment on this exact line for why.
     model_outputs = Path(cfg["simulation"]["model_outputs"])
     flooding_cfg = cfg["simulation"]["flooding"]
     knn = int(flooding_cfg["knn"])

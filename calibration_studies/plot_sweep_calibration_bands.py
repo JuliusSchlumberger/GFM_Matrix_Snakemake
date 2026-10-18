@@ -1,46 +1,9 @@
-"""Single 4-panel summary figure for the sweep-budget calibration study
-(see calibration_studies/run_sweep_budget_study.py and
-docs/methods_03_calibration_sensitivity.md §2).
+"""Plot the 4-panel sweep-budget calibration figure (docs/methods_03 §2).
 
-Panels (b)-(d) are median/98th-percentile/min-max bands across the wet
-calibration tiles (`wet_tiles_selected.txt`) that still have a real
-observation at that round, plotted against round. Reads
-run_sweep_budget_study.py's per-SWEEP raw CSVs directly (not
-sweep_convergence_summary.csv, which only has one row per tile) and
-aggregates to per-ROUND values - see _aggregate_to_rounds for the exact
-rule per column. A tile's own trace ends once production's round-level
-early-exit criterion (round_max_change <= epsilon) is satisfied, so the
-number of tiles contributing to a given round's band shrinks at higher
-round numbers as tiles finish - real (raw, unmodified) data throughout,
-no imputation/carry-forward for rounds past a tile's own trace.
-
-Panel (a) is the ECDF of rounds-to-converge, reusing
-plot_sweep_budget_convergence.collect() (restricted to the same wet-tile
-population as (b)-(d)) so both views of the same underlying convergence
-event are in one figure - this is the more direct evidence for the
-max_rounds cutoff itself (fraction of tiles converged by round R), with
-(b)-(d) as supporting context on what the residual/depth/extent actually
-look like at that point.
-
-Panels:
-  (a) ECDF of rounds-to-converge (round_max_change <= epsilon) - fraction
-      of tiles converged by round R.
-  (b) max_change (raw solver residual, sweep_max_change_raw) - solver
-      stability, the exact quantity production's real convergence check
-      uses.
-  (c) max_depth_change_abs (connectivity-pruned) - the actual max depth
-      change within the real flood extent, contrasted against (b) in
-      docs/methods_03_calibration_sensitivity.md's own discussion of why
-      they diverge.
-  (d) newly flooded cells per round (raw counts, not cumulative, not
-      normalized by tile size - log scale).
-
-Runs aggregate_wet_tiles.py's own selection as its first step (folded in
-here so a stale/missing wet_tiles_selected.txt never needs a separate
-manual command first) - rebuilds that file fresh from whatever
-sweep_budget CSVs currently exist, every time this script runs, so the
-figure always reflects the sweep's current state rather than a possibly-
-stale prior selection.
+(a) ECDF of rounds to round_max_change <= epsilon; per-round bands over wet
+tiles of (b) raw solver residual [m], (c) connectivity-pruned max depth change
+[m], (d) newly flooded cells. Tiles drop out once converged; no carry-forward.
+Rebuilds wet_tiles_selected.txt first (overwrites it).
 
 Usage:
     python plot_sweep_calibration_bands.py <sweep_budget_dir> <figures_dir> [--max-rounds 40] [--n-tiles-wanted 500]
@@ -75,14 +38,7 @@ FLOOR_COUNT = 0.2  # log-scale display floor for panel (d)'s raw cell counts
 
 
 def _aggregate_to_rounds(csv_path: Path) -> pd.DataFrame | None:
-    """One row per complete round (4 sweeps) for one tile:
-    round_max_change (max of sweep_max_change_raw - the exact quantity
-    solve_eikonal_dense's own round loop compares to epsilon),
-    round_max_depth_change_abs (max of max_depth_change_abs),
-    round_n_newly_flooded (SUM of n_newly_flooded - a true per-round
-    total, not a max), round_n_inundated (value at the round's LAST sweep
-    - the flooded-cell count as of the end of that round).
-    """
+    # Per 4-sweep round: max of change columns, sum of newly flooded, last n_inundated.
     try:
         df = pd.read_csv(csv_path)
     except pd.errors.EmptyDataError:
@@ -90,7 +46,7 @@ def _aggregate_to_rounds(csv_path: Path) -> pd.DataFrame | None:
     if df.empty or "sweep_max_change_raw" not in df.columns:
         return None
     if len(df) < SWEEPS_PER_ROUND:
-        return None  # dry tile or otherwise too short to form a full round
+        return None  # dry tile
 
     tile_id = int(df["tile"].iloc[0])
     n_rounds = len(df) // SWEEPS_PER_ROUND
@@ -134,7 +90,7 @@ def _plot_cdf(ax, cdf_df: pd.DataFrame, max_rounds: int) -> None:
     n_total = len(cdf_df)
 
     xs = converged["n_rounds_used"].to_numpy()
-    ys = np.arange(1, len(xs) + 1) / n_total  # denominator = ALL tiles, so censored tiles show as the gap to 1.0
+    ys = np.arange(1, len(xs) + 1) / n_total  # censored tiles show as the gap to 1.0
 
     real_max = int(xs.max()) if len(xs) else 1
     censored_x = real_max + max(3, real_max // 5)
@@ -156,14 +112,13 @@ def _plot_cdf(ax, cdf_df: pd.DataFrame, max_rounds: int) -> None:
 
 
 def make_figure(long_df: pd.DataFrame, cdf_df: pd.DataFrame, epsilon: float, max_rounds: int, out_path: Path) -> None:
+    """Draw the 4-panel figure to out_path."""
     fig, axes = plt.subplots(2, 2, figsize=(17, 13))
 
-    # (a) ECDF of rounds-to-converge
     ax = axes[0, 0]
     _plot_cdf(ax, cdf_df, max_rounds)
     ax.set_title("(a)", loc="left", fontweight="bold", fontsize=13)
 
-    # (b) raw solver residual - solver stability
     ax = axes[0, 1]
     _plot_band(ax, _band_stats(long_df, "round_max_change"), "#d62728", "max_change (raw solver residual)", floor=FLOOR)
     ax.axhline(epsilon, color="grey", linestyle=":", linewidth=1, label=f"epsilon ({epsilon}m)")
@@ -175,7 +130,6 @@ def make_figure(long_df: pd.DataFrame, cdf_df: pd.DataFrame, epsilon: float, max
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
-    # (c) max depth change among actually-flooded cells (connectivity-pruned)
     ax = axes[1, 0]
     _plot_band(ax, _band_stats(long_df, "round_max_depth_change_abs"), "#ff7f0e", "max_depth_change_abs (flood extent only)", floor=FLOOR)
     ax.axhline(epsilon, color="grey", linestyle=":", linewidth=1, label=f"epsilon ({epsilon}m)")
@@ -187,7 +141,6 @@ def make_figure(long_df: pd.DataFrame, cdf_df: pd.DataFrame, epsilon: float, max
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
-    # (d) newly flooded cells per round (raw counts, log)
     ax = axes[1, 1]
     _plot_band(ax, _band_stats(long_df, "round_n_newly_flooded"), "#1f77b4", "newly flooded cells", floor=FLOOR_COUNT)
     ax.axvline(max_rounds, color="black", linestyle="--", linewidth=1.3, label=f"max_rounds={max_rounds}")
@@ -241,8 +194,7 @@ def main() -> None:
     n_tiles = long_df["tile"].nunique()
     print(f"{n_tiles} tile(s) with a usable sweep trace, {len(long_df)} tile-round row(s)")
 
-    # Same wet-tile population as long_df, via plot_sweep_budget_convergence's own
-    # tile-convergence detector (full N_COMPLETE_ROUNDS ceiling, not just max_rounds).
+    # Full N_COMPLETE_ROUNDS ceiling, not just max_rounds.
     cdf_df = collect_convergence(sweep_budget_dir, epsilon)
     cdf_df = cdf_df[cdf_df["tile"].isin(tile_ids)]
     print(f"{len(cdf_df)} tile(s) in the CDF panel ({int(cdf_df['converged'].sum())} converged "

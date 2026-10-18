@@ -1,50 +1,9 @@
-"""Generate N independent sbatch scripts (one per node) to run a sweep-budget
-or obstacle-coupling calibration study on Hydrax, each node processing its
-OWN slice of tiles sequentially in one continuous process. Batching tiles
-into one continuous process per node (rather than one SLURM task per tile)
-amortizes per-task dispatch overhead - conda/env setup, Python interpreter
-start, Numba JIT (re-)compile if the on-disk cache isn't warm - once per
-NODE instead of once per TILE, which otherwise dominates for the many tiles
-that only take a fraction of a second to actually compute.
+"""Generate per-node sbatch scripts for a sweep-budget/obstacle-coupling study.
 
-Tiles are distributed by LPT (Longest Processing Time first) greedy
-bin-packing on ESTIMATED cost, not round-robin or a contiguous slice: each
-candidate's pixel count (`area_deg2 * 3600**2` from domain_tiles_global.
-gpkg's own bbox, EPSG:4326 ~1-arcsecond-native DeltaDTM tiles - the SAME
-proxy select_study_candidate_tiles.py already uses/trusts for this) stands in
-for its compute cost, tiles are sorted largest-first, and each one goes to
-whichever node currently has the LOWEST accumulated cost so far - the
-standard, simple, effective heuristic for balanced multiway partitioning
-without needing an exact solve. This directly targets the straggler
-problem a naive split (contiguous OR round-robin) doesn't fully avoid.
-
-The same per-tile pixel-count estimate also drives a real --time estimate
-(not a blanket guess): each node's own worst-case wall-clock time is its
-assigned tiles' total pixel count, converted via an empirically-measured
-rate (RATE_S_PER_MCELL_SWEEP below), times the study's own worst-case sweep
-count per tile (assumes zero early exit ever - a deliberately pessimistic
-bound, since real tiles mostly converge well before their round ceiling).
-Printed per node so the actual --time (or the default) can be judged
-against real numbers instead of guessed - see estimate_worst_case_hours()
-below.
-
-Each node calls the target script ONCE with its full tile-id list (already
-multi-tile-capable via --tile-ids id1 id2 ...) - `set -uo pipefail`, not
-`-e`, matching this repo's established convention, so one tile's failure
-doesn't abort the rest of that node's own slice.
-
-wet_tiles_selected.txt is deliberately NEVER written by these node
-processes (see run_sweep_budget_study.py's own
---write-wet-tiles-summary flag, off by default here) - build it with
-aggregate_wet_tiles.py once every node's CSVs are on disk.
-
-`--study-dir-name` selects which study's own output tree this points at
-(default `calibration_500_tiles`, 2026-10-08 - the current global-
-representativeness study; was `calibration_260_tiles`, the original pilot,
-until that study was fully superseded) - every output path is built from
-this one parameter, so a differently-sized study gets its own separate
-directory rather than overwriting/mixing with another study's candidate
-pool, sweep-budget CSVs, or resolved_config.yml.
+One process per node runs its tile slice sequentially (amortizes env setup and
+Numba JIT). Tiles are LPT bin-packed on pixel count (bbox area_deg2 * 3600**2,
+EPSG:4326 ~1-arcsecond DeltaDTM); --time is a no-early-exit worst case.
+Build wet_tiles_selected.txt afterwards with aggregate_wet_tiles.py.
 
 Usage:
     python generate_calibration_batch_jobs.py sweep_budget
@@ -76,9 +35,7 @@ MEM_DEFAULT = "7G"
 CPUS_PER_TASK_DEFAULT = 1
 GFM_PY_LINUX = hydrax_paths()["GFM_PYTHON"]
 
-# Empirically measured on real tiles spanning 196K-18.9M cells (within ~10% of each other) -
-# used only for a worst-case --time ESTIMATE, not for the bin-packing itself (pixel count alone
-# is enough for balance).
+# Measured on tiles of 196K-18.9M cells (within ~10%); used only for the --time estimate.
 RATE_S_PER_MCELL_SWEEP = 0.05
 
 SWEEPS_PER_ROUND = 4
@@ -87,14 +44,13 @@ SCRIPTS = {
     "sweep_budget": {
         "script_name": "run_sweep_budget_study.py",
         "out_subdir": "sweep_budget",
-        "worst_case_sweeps_per_tile": 100 * SWEEPS_PER_ROUND,  # MAX_ROUNDS_CEILING - zero early exit ever
+        "worst_case_sweeps_per_tile": 100 * SWEEPS_PER_ROUND,  # MAX_ROUNDS_CEILING, no early exit
         "default_tile_ids_file": "candidate_tiles.txt",
     },
     "obstacle_coupling": {
         "script_name": "run_obstacle_coupling_study.py",
         "out_subdir": "obstacle_coupling",
-        # (max_outer+1) solves x inner_max_rounds rounds x 4 sweeps, at this study's own
-        # 15/40 defaults (DEFAULT_MAX_OUTER/DEFAULT_INNER_MAX_ROUNDS) - zero early exit ever.
+        # (max_outer+1) x inner_max_rounds x 4 sweeps at the 15/40 defaults, no early exit.
         "worst_case_sweeps_per_tile": 16 * 40 * SWEEPS_PER_ROUND,
         "default_tile_ids_file": "sweep_budget/wet_tiles_selected.txt",
     },
@@ -102,8 +58,7 @@ SCRIPTS = {
 
 
 def load_pixel_counts(tile_ids: list[str], domain_tiles_path: Path) -> dict[str, float]:
-    """tile_id (str) -> approx_px, same proxy select_study_candidate_tiles.py's
-    own candidate-selection table already prints and trusts for this."""
+    """Map tile_id to approximate pixel count from its bbox (1 arcsecond cells)."""
     gdf = gpd.read_file(domain_tiles_path)
     bounds = gdf.geometry.bounds
     area_deg2 = (bounds["maxx"] - bounds["minx"]) * (bounds["maxy"] - bounds["miny"])
@@ -115,10 +70,7 @@ def load_pixel_counts(tile_ids: list[str], domain_tiles_path: Path) -> dict[str,
 
 
 def lpt_bin_pack(tile_ids: list[str], px_by_tile_id: dict[str, float], n_nodes: int) -> list[list[str]]:
-    """Longest-Processing-Time-first greedy bin packing: sort descending by
-    estimated cost, assign each tile to whichever bucket has the lowest
-    accumulated cost so far. See module docstring for why (vs round-robin
-    or a contiguous slice)."""
+    """Split tiles into n_nodes buckets by LPT greedy bin packing on pixel count."""
     ordered = sorted(tile_ids, key=lambda t: px_by_tile_id[t], reverse=True)
     buckets: list[list[str]] = [[] for _ in range(n_nodes)]
     bucket_cost = [0.0] * n_nodes
@@ -130,15 +82,14 @@ def lpt_bin_pack(tile_ids: list[str], px_by_tile_id: dict[str, float], n_nodes: 
 
 
 def estimate_worst_case_hours(batch_tiles: list[str], px_by_tile_id: dict[str, float], worst_case_sweeps_per_tile: int) -> float:
+    """Estimate a batch's wall-clock hours assuming no early exit."""
     total_px = sum(px_by_tile_id[t] for t in batch_tiles)
     seconds = (total_px / 1e6) * worst_case_sweeps_per_tile * RATE_S_PER_MCELL_SWEEP
     return seconds / 3600.0
 
 
 def hours_to_slurm_time(hours: float) -> str:
-    """e.g. 2.3 -> '0-03:00:00' - rounds UP to the next whole hour (a --time
-    limit shorter than the real worst case defeats the point of estimating
-    it) - SLURM's own D-HH:MM:SS format."""
+    """Format hours as SLURM D-HH:MM:SS, rounded up to a whole hour (2.3 -> 0-03:00:00)."""
     import math
     total_hours = max(1, math.ceil(hours))
     days, rem_hours = divmod(total_hours, 24)
@@ -209,9 +160,7 @@ def main() -> None:
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
     retry_transient_io((study_root_local / spec["out_subdir"]).mkdir, parents=True, exist_ok=True)
 
-    # resolved_config.yml staging pattern (config_hpc.yml is a git-ignored,
-    # Windows-machine-only file - doesn't exist on the HPC side); the earlier job
-    # generators that used it first have since been removed (see git history).
+    # Nodes get the pre-merged Linux-path config so they need no override files.
     resolved_config_path = study_root_local / "resolved_config.yml"
     atomic_write(str(resolved_config_path), lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
     print(f"Wrote {resolved_config_path} (Linux path view, for --config on every node)")

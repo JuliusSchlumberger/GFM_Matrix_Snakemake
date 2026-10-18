@@ -1,14 +1,8 @@
-"""Diagnose implausibly large single-cell residuals (last_max_change still
-several metres after many sweeps/rounds, often with the same few odd
-values recurring across unrelated tiles - too coincidental to be
-"genuinely slow geography", and more likely a numerical artifact).
+"""Diagnose large single-cell eikonal residuals (oscillation vs slow convergence).
 
-For each target tile, replays the obstacle-coupling outer loop's static
-pre-filter + outer-1 inner solve, but with PER-ROUND diagnostics: the
-(row, col) of the single largest-magnitude cell update each round, its
-before/after T value, and the friction/dem context there. If the same cell
-keeps flipping between the same 2 (or few) values round after round, that's
-a genuine oscillation/limit-cycle, not slow convergence.
+Replays the static pre-filter + first outer inner solve and prints the
+largest-update cell per round; one cell flipping between a few values is a
+limit cycle, not slow convergence.
 
 Usage:
     python diagnose_large_residual.py <tile_id> [<tile_id> ...] [--config <config.yml>]
@@ -39,6 +33,7 @@ EPSILON = 0.03  # matches production's simulation.flooding.waterlevel_epsilon_m
 
 
 def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor: float):
+    """Load a tile's decoded solver inputs and IDW-seeded coastline values."""
     tile_dir = model_outputs / str(tile_id)
     scenario = f"{RETURN_PERIOD}_{WATERLEVEL_NAME}"
     inputs = tile_dir / "inputs"
@@ -72,6 +67,7 @@ def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor
 
 
 def diagnose(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor: float, n_rounds=INNER_MAX_ROUNDS):
+    """Run inner sweep rounds and print the largest-update cell per round."""
     print(f"\n=== tile {tile_id} ===", flush=True)
     dem, mask, friction, seed_rows, seed_cols, initial, max_waterlevel = load_tile(
         tile_id, model_outputs, knn, friction_scale_factor,
@@ -120,13 +116,11 @@ def diagnose(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor:
             print(f"  converged at round {r+1} (round_max <= epsilon={EPSILON})", flush=True)
             break
 
-    # Check whether the argmax location repeats (oscillation) vs wanders.
     locs = [(h["row"], h["col"]) for h in history]
     unique_locs = set(locs)
     print(f"  {len(history)} rounds run, {len(unique_locs)} unique argmax location(s): "
           f"{sorted(unique_locs)[:10]}{' ...' if len(unique_locs) > 10 else ''}", flush=True)
     if len(unique_locs) <= 3 and len(history) >= 4:
-        # print the full t-value trajectory at the most common location
         from collections import Counter
         common_loc, count = Counter(locs).most_common(1)[0]
         vals = [h["t_after"] for h in history if (h["row"], h["col"]) == common_loc]
