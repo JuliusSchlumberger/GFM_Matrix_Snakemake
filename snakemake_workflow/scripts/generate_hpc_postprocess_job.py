@@ -147,7 +147,7 @@ def main() -> None:
              "plots pipeline is one single submission from the login node.",
     )
     parser.add_argument("--flood-totals-partition", default="24vcpu")
-    parser.add_argument("--flood-totals-cpus", type=int, default=24)
+    parser.add_argument("--flood-totals-cpus-per-task", "--flood-totals-cpus", dest="flood_totals_cpus", type=int, default=24)
     parser.add_argument("--flood-totals-mem", default="32G")
     args = parser.parse_args()
 

@@ -6,7 +6,7 @@ of existing per-chunk files, so a wide thread pool saturates useful concurrency.
 
 Usage:
     python generate_hpc_flood_totals_and_plots_job.py [--config path/to/config.yml]
-        [--partition 24vcpu] [--cpus 24] [--mem 32G] [--time 1-00:00:00]
+        [--partition 24vcpu] [--cpus-per-task 24] [--mem 32G] [--time 1-00:00:00]
     bash <printed submit command>
 """
 
@@ -86,7 +86,7 @@ def main() -> None:
     default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
     parser.add_argument("--config", default=str(default_config))
     parser.add_argument("--partition", default="24vcpu")
-    parser.add_argument("--cpus", type=int, default=24)
+    parser.add_argument("--cpus-per-task", "--cpus", dest="cpus", type=int, default=24)
     parser.add_argument("--mem", default="32G", help="a guess at this partition's safe ceiling - "
                          "confirm against `sinfo -N -o \"%%N %%P %%m %%c\"` before relying on it "
                          "(see hpc.sbatch.mem's own comment on 1vcpu's real-vs-nominal gap)")
