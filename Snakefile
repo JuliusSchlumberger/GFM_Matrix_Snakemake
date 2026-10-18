@@ -114,7 +114,7 @@ configfile: _CONFIG_PATH
 # storage layouts. Every standalone (non-Snakemake) entry-point script
 # honors this same file via config_utils.load_config(), which mirrors this
 # exact merge-then-expand sequence - keep the two in sync if this ever changes.
-# Skipped when GFM_CONFIG_PATH is set (scenario run): build_run_config.py's
+# Skipped when GFM_CONFIG_PATH is set (scenario run): config_utils.
 # materialize_config() already folds config_local.yml's content into that
 # file, so applying it again here could silently override scenario values.
 _LOCAL_CFG = "snakemake_workflow/config/config_local.yml"

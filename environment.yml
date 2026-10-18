@@ -15,7 +15,7 @@
 # first attempt let mamba's solver pick matplotlib=3.8.4/numpy=1.26.4
 # (both technically within range), which crashed with a native Windows
 # exception (0xc06d007f) inside matplotlib's Bezier/patch rendering
-# (tests/river_mouth_tile_validation's plotting). Pinning matplotlib/numpy
+# (in a since-removed river-mouth tile validation's plotting). Pinning matplotlib/numpy
 # to the exact versions already proven safe elsewhere did NOT fix it, though
 # - the real cause was the BLAS backend: this machine's default mamba solve
 # picks a newer MKL build (2024.2.2) than the proven-working environments
@@ -23,10 +23,7 @@
 # specific numeric path matplotlib's Bezier subdivision hits. `libblas=
 # *openblas` below forces OpenBLAS instead of MKL for every BLAS-linked
 # package (numpy/scipy/etc.), sidestepping MKL-version/CPU sensitivity
-# entirely - confirmed fixed the crash. See snakemake_workflow/memory.md
-# (repo-layout note: memory.md itself still lives under snakemake_workflow/,
-# see that file's own "repo layout" section for the 2026-09 reorg).
-# Mirrors pixi.toml; keep the two in sync.
+# entirely - confirmed fixed the crash.
 #
 # (Replaces a stale, unrelated `name: hydromt-sfincs` environment.yml that
 # was left at this path from an earlier, different setup attempt - 2026-08.)
@@ -67,7 +64,7 @@ dependencies:
   - boule=0.6.0                   # ellipsoid definitions for pyshtools' geoid() call
   - requests=2.31.0               # sync_deltadtm.py downloads
   - affine=2.4.0
-  - openpyxl=3.1.2                # pandas ExcelWriter engine (tests/build_calibration_report_xlsx.py)
+  - openpyxl=3.1.2                # pandas ExcelWriter engine (its only user, a calibration xlsx report script, was removed - see TODO.md)
   - tomli=2.0.1                   # TOML fallback for Python <3.11 (no stdlib tomllib) - calibration scripts
   - pytest=8.4.2                  # test runner (config in pyproject.toml; tests/conftest.py skips P:-drive and hydromt-sfincs tests)
   - ruff=0.12.0                   # linter (config in pyproject.toml)

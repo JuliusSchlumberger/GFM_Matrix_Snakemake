@@ -1,12 +1,9 @@
 """Python port of Aqueduct's flood model (`core/src/core.jl`, `flood_depth`).
 
-`flood_depth_dense` is the production implementation - its fixed-3-sweep
-mode is bit-for-bit identical to real Aqueduct output across 26 real tiles
-spanning ~9M-135M cells each (100.000% Jaccard, 0.0m RMSE/mean-error/
-90th-percentile/max-diff on every one - see `docs/python_vs_julia_qa.md`),
-including two precision details that would otherwise silently diverge from
-Julia: `coastline_mask`'s exact boolean reduction, and the Haversine
-axis-order/unit convention required by scikit-learn vs. the
+`flood_depth_dense` is the production implementation. Two precision details
+keep its fixed-3-sweep mode from silently diverging from Julia:
+`coastline_mask`'s exact boolean reduction, and the Haversine axis-order/unit
+convention required by scikit-learn vs. the
 (internally-consistent) convention `core.jl` uses via `Distances.jl`.
 """
 

@@ -55,11 +55,11 @@ frozen-geometry tile-generation pipeline's own hop-distance/neighbour-
 forcing direction (now src/connectivity_tiling.py::compute_hop_distances)
 as the intended way to give hinterland chunks non-ocean boundary forcing. A
 chunk that can't find a real COAST-RP station now gets an explicit empty
-placeholder (see extract_boundaries.py) rather than being dropped from
+placeholder (see snakemake_workflow/scripts/extract_boundaries.py) rather than being dropped from
 tile_grid.path.
 
 Usage:
-    python snakemake_workflow/preparation/run_preparation.py \\
+    python preparation/run_preparation.py \\
         [STEP ...] [--config  snakemake_workflow/config/config.yml] \\
         [--no-force] [--fail-fast]
 

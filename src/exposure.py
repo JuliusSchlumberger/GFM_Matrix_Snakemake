@@ -3,7 +3,7 @@
 prepare_exposure_grid_chunk caches the population raster and geogunit-ID raster
 (at population's native ~1 km resolution) once per spatial chunk.  All exposure
 analysis is performed downstream at this coarse resolution by the standalone
-scripts in snakemake_workflow/analysis/.
+scripts in analysis/.
 """
 
 from pathlib import Path

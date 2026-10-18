@@ -46,7 +46,7 @@ itself excludes, so a cell over permanent water never shows as
 agree/under/over in the first place (outside the domain, written as `dry`).
 
 Usage:
-    python snakemake_workflow/validation/plot_agreement_map.py \\
+    python validation/plot_agreement_map.py \\
         --config snakemake_workflow/config/config.yml --country GBR
 """
 

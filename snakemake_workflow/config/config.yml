@@ -171,7 +171,8 @@ boundary_conditions:
   # MDT (mean dynamic topography) is always ADDED to COAST-RP storm-tide
   # levels (fixed 2026-09 - was wrongly subtracted; see
   # preparation/prepare_boundary_conditions.py's module docstring and
-  # tests/martinique_diagnostics/ for the real-data investigation), re-
+  # the real-data investigation in tests/martinique_diagnostics/, removed in
+  # e98340a - see git history), re-
   # referencing them from local MSL to the GOCO06s geoid - matching the
   # DEM's own geoid correction above.
   mdt_correction: # Vertical-reference correction for COAST-RP storm-tide levels
@@ -254,11 +255,9 @@ simulation: # Used by: preprocessing rules
 
   # Flood model implementation: src/flood_model.py's flood_depth_dense
   # (dense domain, round-based solve capped at flooding.max_rounds below).
-  # Its fixed-3-sweep mode is validated bit-for-bit identical to the
-  # original Aqueduct/Julia reference implementation across 26 real tiles
-  # spanning ~9M-135M cells each - see docs/python_vs_julia_qa.md. That
-  # fixed-sweep mode remains available on demand (flood_depth_dense's own
-  # `sweep_budget` param), just no longer the default (see max_rounds below).
+  # Its original fixed-3-sweep mode remains available on demand
+  # (flood_depth_dense's own `sweep_budget` param), just no longer the default
+  # (see max_rounds below).
   model_bbox_buffer_arcsec: 3 # Buffer added to tile's previously shaved bbox to ensure thin strip of ocean.
   dem_gap_fill: # land-nodata gap handling: large connected (4-connectivity) group get Nodata value, other IDW-interpolation
     min_hard_fill_component_size: 15 # a missing-land DEM cell is only hard-filled to land_fill_value_m for patches larger than that

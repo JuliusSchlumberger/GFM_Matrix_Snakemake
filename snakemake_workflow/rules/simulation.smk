@@ -8,9 +8,7 @@ rule run_aqueduct:
     clearly linked to the return period and sea level rise scenario used to
     produce it.
 
-    Runs `flood_model.flood_depth_dense` in-process (see `run_aqueduct.py`) -
-    validated bit-for-bit identical to the original Aqueduct/Julia reference
-    implementation across 26 real tiles, see docs/python_vs_julia_qa.md.
+    Runs `flood_model.flood_depth_dense` in-process (see `run_aqueduct.py`).
 
     Multiple tiles run fully concurrently on one machine without issue - the
     only real local constraint is ordinary system memory. This rule's

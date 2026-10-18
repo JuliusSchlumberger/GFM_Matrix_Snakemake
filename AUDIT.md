@@ -417,7 +417,7 @@ The *Reach* column says how a file is reached:
 | methods_04a_SFINCSvalidation.md | 120 | 10-13 | SUPPORT | omits dedup + rerun_*.sh; `sfincs_calibration_bline`, `pct_within_0` not in code |
 | methods_04b_MapsValidation.md | 161 | 10-02 | SUPPORT | OK |
 | sfincs_validation_pipeline_preparation.md | 228 | 09-27 | STALE | 11 referenced scripts deleted in 7b6f7f1 (10-13) |
-| python_vs_julia_qa.md | 215 | 07-30 | STALE | slide notes; cites absent timing files; predates solver changes |
+| python_vs_julia_qa.md | 215 | 07-30 | STALE | deleted in Phase 4 (user decision); its evidence citations in code removed |
 | hydromt_sfincs_bug_*.md (2) | 25/51 | 09-24 | SUPPORT | upstream bug reports |
 | generate_eikonal_solver_examples.py | 471 | 10-08 | SUPPORT | generates eikonal_example_*.png |
 | eikonal_example_{rounds,block_sweep,obstacle_coupling}.png | — | 09-25..10-08 | SUPPORT | generated |
@@ -782,7 +782,7 @@ Baseline (Phase 0): thailand_bangkok 453 jobs (run_aqueduct 90, extract_boundari
 - Remove `plot_adaptation_pathways.py` and `plot_adaptation_bars.py`, plus the `run_analysis.py` step and config switch.
 - *Verify*: `ruff check --select F401,F811,F841` on the touched files; `pytest`; `snakemake -n all`; `python analysis/run_analysis.py --help`.
 
-**Phase 4: Documentation drift** (text only).
+**Phase 4: Documentation drift** (text only). ✅ *done 2026-10-18. Verified by an AST comparison: every changed .py differs from HEAD only in docstrings/comments, apart from one SKIP message string. `docs/python_vs_julia_qa.md` deleted (user, 2026-10-18), and the Python-vs-Julia evidence comments citing it removed from src/eikonal.py, src/flood_model.py, rules/simulation.smk and config.yml (design notes in those sentences kept).*
 - README:
   - layout, including the eikonal-sensitivity and SFINCS-calibration entry points
   - remove the memory.md and martinique references

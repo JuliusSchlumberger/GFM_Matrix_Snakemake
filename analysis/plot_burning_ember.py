@@ -26,7 +26,7 @@ y-tick per highlight year, with SSPs clustered per year via small offsets and
 identified by colour only.
 
 Usage:
-    python snakemake_workflow/analysis/plot_burning_ember.py \\
+    python analysis/plot_burning_ember.py \\
         --config  snakemake_workflow/config/config.yml \\
         --expdir  D:/GFM/merged_results/exposure \\
         [--outdir D:/GFM/figures]

@@ -1,5 +1,5 @@
 """SFINCS grid files read directly (no hydromt_sfincs), so the plotting and
-analysis scripts run under gfm_python_preprocessing:
+analysis scripts run under `gfm` (`gfm_python_preprocessing` on the Windows dev machine):
 
   read_sfincs_mask(sfincs_dir)                        -> (mask2d, transform, crs) of the 120 m grid
   active_on_subgrid(sfincs_dir, sg_shape, sg_transform) -> SFINCS-active cells on the 30 m subgrid

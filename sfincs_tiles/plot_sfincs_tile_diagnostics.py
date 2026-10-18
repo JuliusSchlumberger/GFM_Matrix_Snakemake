@@ -5,7 +5,8 @@ for one built (and ideally run) tile, written to
 Reads `sfincs.msk`/`sfincs.ind` directly as SFINCS's own raw binary format
 (sfincs_grid.read_sfincs_mask) instead of going through `hydromt_sfincs.
 SfincsModel`, so it needs only rasterio/scipy/matplotlib and runs under
-`gfm_python_preprocessing` like every other sfincs_tiles/ plotting script.
+`gfm` (named `gfm_python_preprocessing` on the Windows dev machine) like every
+other sfincs_tiles/ plotting script.
 
 Figures:
   1. {tile_id}_mask.png - SFINCS's own active/inactive/waterlevel-boundary

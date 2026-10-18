@@ -206,9 +206,9 @@ def main() -> None:
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
     retry_transient_io((study_root_local / spec["out_subdir"]).mkdir, parents=True, exist_ok=True)
 
-    # Same resolved_config.yml staging pattern as generate_calibration_array_job.py
-    # (config_hpc.yml is a git-ignored, Windows-machine-only file - doesn't exist on
-    # the HPC side) and generate_v2_batch_jobs.py's own SFINCS-batch precedent.
+    # resolved_config.yml staging pattern (config_hpc.yml is a git-ignored,
+    # Windows-machine-only file - doesn't exist on the HPC side); the earlier job
+    # generators that used it first have since been removed (see git history).
     resolved_config_path = study_root_local / "resolved_config.yml"
     atomic_write(str(resolved_config_path), lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
     print(f"Wrote {resolved_config_path} (Linux path view, for --config on every node)")

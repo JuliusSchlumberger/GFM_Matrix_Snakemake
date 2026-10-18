@@ -15,7 +15,7 @@ Output CSV columns:
   {SSP}_p83   — 83rd-percentile SLR in mm
 
 Usage:
-    python snakemake_workflow/analysis/extract_slr_trajectories.py \\
+    python analysis/extract_slr_trajectories.py \\
         [--config snakemake_workflow/config/config.yml] \\
         [--output D:/GFM/processed_inputs/slr_trajectories_global_median.csv]
 """

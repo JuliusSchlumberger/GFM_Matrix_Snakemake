@@ -7,7 +7,7 @@ isolation, one country's crash doesn't abort the rest unless --fail-fast),
 then concatenates every country's metrics CSV into one cross-country summary.
 
 Usage:
-    python snakemake_workflow/validation/run_validation.py \\
+    python validation/run_validation.py \\
         [--config snakemake_workflow/config/config.yml] \\
         [--countries GBR CAN] \\
         [--fail-fast]

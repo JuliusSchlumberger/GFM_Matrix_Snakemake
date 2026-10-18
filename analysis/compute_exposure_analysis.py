@@ -9,8 +9,8 @@ mosaic of any kind. A single (RP, SLR) flood-fraction grid at global scale is ro
 750M pixels (~6 GB at float64); holding all of them (10 RPs x 10 SLRs = 100 grids) in
 memory at once would require hundreds of GB. Chunk streaming keeps peak memory to about
 one chunk's worth of arrays (~1-2 MB) regardless of how large the study area or how many
-scenarios are configured - see pass1_shares/_stream_eai below and
-snakemake_workflow/memory.md for the derivation.
+scenarios are configured - see pass1_shares/_stream_eai below (the longer
+derivation was in snakemake_workflow/memory.md, removed in e98340a - see git history).
 
 Baseline is treated as exactly "protect" with its design threshold calibrated at SLR_0
 (protection.baseline_waterlevel_name) instead of an adaptation.slr_intensities entry - see

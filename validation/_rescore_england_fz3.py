@@ -22,7 +22,7 @@ uint8 array, ~8.6 GB, BEFORE the block-average reshape's own temporary
 buffers) is big enough on its own to blow past safe memory - a pre-existing
 sizing risk in that shared function for any sufficiently large/unclipped
 chunk, not something specific to this benchmark's feature count. Fixed here
-by processing each chunk in `postprocessing.block_size`-sized row blocks
+by processing each chunk in fixed 8192-px row blocks (not `postprocessing.block_size`, see `block_size` in main)
 (the same block-size convention compute_flood_fraction_chunk.py already uses
 for exactly this reason - see that script's own Step 1 comment), so the
 supersampled array is always bounded to one block's size regardless of how

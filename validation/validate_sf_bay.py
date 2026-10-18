@@ -21,9 +21,8 @@ much finer resolution than the model grid, and the user wants BOTH an
 up-sampled and a down-sampled comparison rather than a single fractional-
 coverage score - that's genuinely different machinery (explicit reprojection
 to one common grid per direction, then plain array-level confusion counts
-and RMSE/MAE), not a variant of the existing soft-fraction path. See
-validate_country_depth_raster() in validate_country.py for the reusable
-version of this pattern (this script is SF Bay's own driver/CLI).
+and RMSE/MAE), not a variant of the existing soft-fraction path; this script
+is SF Bay's own driver/CLI (there is no reusable version in validate_country.py).
 
 Evaluation domain (2026-10-15, revised): NOT the benchmark raster's own
 valid-pixel footprint - confirmed live that CoSMoS depth rasters only carry

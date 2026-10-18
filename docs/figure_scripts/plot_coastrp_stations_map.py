@@ -6,7 +6,7 @@ simulation actually used, not the unfiltered candidate pool).
 
 No production script plotted this before (confirmed via codebase review) -
 the only prior version was a one-off Martinique diagnostic
-(tests/martinique_diagnostics/06_make_figures.py fig1). Generic over
+(tests/martinique_diagnostics/06_make_figures.py fig1, removed in e98340a). Generic over
 `tile_grid.path`/`simulation.model_outputs`, so it works for any region.
 
 Usage:

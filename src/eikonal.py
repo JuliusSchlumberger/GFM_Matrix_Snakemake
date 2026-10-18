@@ -3,13 +3,10 @@
 Ports the numerical method used by Aqueduct's Julia core (`core/src/core.jl`,
 via `Eikonal.jl`'s `FastSweeping`/`sweep!`), operating on the full dense
 raster grid - every cell (land, ocean, lake) participates, via plain
-array-index arithmetic (no neighbor-index tables). Validated bit-for-bit
-identical to real Aqueduct output across 26 real tiles spanning ~9M-135M
-cells each (100.000% Jaccard, 0.0m RMSE/mean-error/90th-percentile/max-diff
-on every one - see `docs/python_vs_julia_qa.md`) - except for
-`solve_eikonal_dense`'s unseeded-cell default, deliberately changed from
-Julia's own t=0 to t=+99 (see that function's own comment) to stop unreached
-cells from silently reading as "flooded at sea level."
+array-index arithmetic (no neighbor-index tables). One deliberate difference
+from Julia: `solve_eikonal_dense`'s unseeded-cell default is t=+99, not t=0
+(see that function's own comment), to stop unreached cells from silently
+reading as "flooded at sea level."
 
 Replicates Eikonal.jl's exact staggered-grid convention (arrival time `t` on
 grid vertices, one larger per axis than the `friction`/cell grid, with each

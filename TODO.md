@@ -47,3 +47,6 @@ in-phase.
   scored. Phase 6 moves the path into config; picking up overlapping chunks automatically
   (as `validate_country.py` does with `_chunks_overlapping_bbox`) would be a behaviour
   change, so it's logged here. Bringing SF Bay into `run_validation.py` is deferred (AUDIT.md §9.4 Q2).
+- **`openpyxl` in environment.yml has no user** (found in Phase 4). Its only consumer,
+  a calibration xlsx report script, was removed earlier; nothing imports openpyxl or
+  calls `to_excel`/`ExcelWriter`. Dropping the pin is an env change, so it's logged here.

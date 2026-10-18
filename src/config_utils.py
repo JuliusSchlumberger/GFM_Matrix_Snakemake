@@ -138,9 +138,8 @@ def _deep_merge(base: dict, override: dict) -> dict:
 def _expand_paths(obj: Any, substitutions: dict[str, str]) -> Any:
     """Recursively substitute {key} placeholders in all string config values.
 
-    Identical logic to the root Snakefile's own `_expand_paths` (kept here
-    too, rather than imported from there, since standalone scripts don't
-    load the Snakefile).
+    The single implementation: the root Snakefile imports this function too,
+    so Snakemake and every standalone script expand paths identically.
     """
     if isinstance(obj, str):
         for key, val in substitutions.items():

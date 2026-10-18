@@ -10,7 +10,7 @@ Uses the WRI geogunit_109 country raster for drawing — no external vector
 shapefile needed.  The geogunit_109->ISO lookup is built once and cached.
 
 Usage:
-    python snakemake_workflow/analysis/plot_world_map.py \\
+    python analysis/plot_world_map.py \\
         --config  snakemake_workflow/config/config.yml \\
         --expdir  D:/GFM/merged_results/exposure \\
         [--outdir D:/GFM/figures/world_maps] \\

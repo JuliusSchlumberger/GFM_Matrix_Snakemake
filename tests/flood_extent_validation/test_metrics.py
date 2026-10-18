@@ -1,9 +1,8 @@
 """Unit tests for validation.metrics_from_counts / validation.confusion_counts
 against hand-computed contingency tables, including every degenerate case.
 
-Plain assert-based script (matches this repo's existing tests/ convention,
-e.g. tests/river_mouth_tile_validation/validate_river_mouth_tiles.py) - no
-pytest dependency anywhere in this repo.
+Plain assert-based script (this repo's tests/ convention): runs standalone with
+`python <script>.py`, and pytest collects it too (pyproject.toml).
 
 Usage:
     python tests/flood_extent_validation/test_metrics.py

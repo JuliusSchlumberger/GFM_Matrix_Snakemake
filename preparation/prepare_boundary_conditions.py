@@ -27,8 +27,8 @@ mean sea level (MSL) to the GOCO06s geoid, matching the DEM's own EGM2008 ->
 GOCO06s geoid correction (vertical_datum_correction in config.yml /
 scripts/extract_dem.py) - DEM and forcing always share one vertical
 reference. MDT is ADDED (storm_tide + MDT), not subtracted (fixed 2026-09 -
-see snakemake_workflow/tests/martinique_diagnostics/ for the real-data
-investigation that found and confirmed this sign error). Physically,
+the real-data investigation that found and confirmed this sign error was
+tests/martinique_diagnostics/, removed in e98340a - see git history). Physically,
 `data_catalog_gfm.yml`'s own documented definition is
 `H_MSL = H_GOCO06s - MDT`, i.e. `H_GOCO06s = H_MSL + MDT` - COAST-RP's
 storm_tide values are MSL-referenced, so converting them into the DEM's

@@ -22,8 +22,8 @@ def _open_mask_tile(path: Path, **open_kwargs):
     """`rasterio.open(path, **open_kwargs)`, retrying briefly on I/O errors
     before giving up.
 
-    merge_tiles.py's per-tile loops (compute_tile_stats_batch,
-    compute_trimmed_geometries) can run for hours over thousands of mask
+    Per-tile loops over the mask tiles (originally the since-removed
+    merge_tiles.py's compute_tile_stats_batch / compute_trimmed_geometries) can run for hours over thousands of mask
     tiles on the P:\\ network share - a single transient SMB hiccup surfaces
     as `rasterio.errors.RasterioIOError` ("No such file or directory") on a
     file that both exists and is reachable moments later, and previously
@@ -52,7 +52,7 @@ def _open_mask_tile(path: Path, **open_kwargs):
 
 
 def load_tile_grid(tile_grid_path: str | Path) -> gpd.GeoDataFrame:
-    """Load the overlapping tile grid produced by `tile_mask_creation.py`."""
+    """Load the tile grid (`tile_grid.path`, built by preparation/build_tile_manifest.py)."""
     return retry_transient_io(gpd.read_file, tile_grid_path)
 
 

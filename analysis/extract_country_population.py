@@ -27,7 +27,7 @@ builds it once.
 Output CSV columns: ISO, total_population_2020.
 
 Usage:
-    python snakemake_workflow/analysis/extract_country_population.py \\
+    python analysis/extract_country_population.py \\
         [--config snakemake_workflow/config/config.yml] \\
         [--output D:/GFM/processed_inputs/country_population_2020.csv]
 """

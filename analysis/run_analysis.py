@@ -19,7 +19,7 @@ Analysis switches in config.yml:
 All figures are written directly to --figdir (visualization.output_dir), no subdirectories.
 
 Usage:
-    python snakemake_workflow/analysis/run_analysis.py \\
+    python analysis/run_analysis.py \\
         [--config  snakemake_workflow/config/config.yml] \\
         [--expdir  D:/GFM/merged_results/exposure] \\
         [--figdir  D:/GFM/figures] \\
