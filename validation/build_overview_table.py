@@ -44,7 +44,7 @@ _REGIONS = [
     ("New Brunswick - Petitcodiac", ("can", "petitcodiac"), False),
 ]
 _NB_NOTE = "known COAST-RP/GTSM tidal-resonance limitation at the Bay of Fundy head, not a pipeline bug"
-_FZ2_NOTE = "thin incremental band (0.1-0.5% AEP) - positional sensitivity, not a source-filter issue (see session notes)"
+_FZ2_NOTE = "thin incremental band (0.1-0.5% AEP) - positional sensitivity, not a source-filter issue"
 def _published(region: str) -> list[tuple[str, float]]:
     return [(study, csi) for study, r, csi in PUBLISHED_CSI if r == region]
 

@@ -108,7 +108,7 @@ def test_unseeded_cells_default_to_never_flooded_sentinel_not_sea_level() -> Non
 
     far_side_waterlevel = waterlevel[:, 8:]
     unreached_dem_m = -5.0
-    would_flood_under_old_bug = far_side_waterlevel > unreached_dem_m
+    would_flood_if_unreached_is_zero = far_side_waterlevel > unreached_dem_m
 
     print(f"  far-side waterlevel range: [{far_side_waterlevel.min():.2f}, {far_side_waterlevel.max():.2f}] m")
     assert np.all(far_side_waterlevel <= -90.0), (
@@ -117,12 +117,12 @@ def test_unseeded_cells_default_to_never_flooded_sentinel_not_sea_level() -> Non
         f"the wall may not be impassable enough for this test's own epsilon/max_rounds, or the "
         f"sentinel default has changed."
     )
-    assert not np.any(would_flood_under_old_bug), (
+    assert not np.any(would_flood_if_unreached_is_zero), (
         "unreached cells would incorrectly read as flooded against a real negative-elevation DEM cell - "
-        "this is exactly the old t=0 default bug."
+        "unreached cells must keep the +99 sentinel, not t=0."
     )
     print(f"PASS: unreached region stays near the +99 sentinel (never reads as flooded against "
-          f"a {unreached_dem_m}m DEM cell) - old t=0 default would have wrongly flooded it")
+          f"a {unreached_dem_m}m DEM cell); a t=0 default would flood it")
     print()
 
 

@@ -422,8 +422,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--no-rotated", dest="rotated", action="store_false",
-        help="use an axis-aligned UTM grid instead of the default rotated grid (2026-10 default flip - "
-             "was unrotated until now, see build_sfincs_tile's own comment)",
+        help="use an axis-aligned UTM grid instead of the default rotated grid",
     )
     args = parser.parse_args()
 

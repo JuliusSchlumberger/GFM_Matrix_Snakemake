@@ -12,7 +12,7 @@ read via the local config; embedded paths use the Linux view (config_hpc.yml).
 
 Usage:
     python generate_hpc_postprocess_job.py [--config path/to/config.yml]
-    bash <printed submit_postprocess.sh path>
+    bash <printed submit_postprocess_and_exposure.sh path>
 """
 
 import argparse

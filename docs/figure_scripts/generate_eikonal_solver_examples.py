@@ -194,7 +194,7 @@ def make_figure_1() -> None:
     fig.savefig(OUT_DIR / "eikonal_example_rounds.png", dpi=170, bbox_inches="tight")
     plt.close(fig)
     print(f"Wrote {OUT_DIR / 'eikonal_example_rounds.png'}")
-    print(f"  max_change by round 40: {max_change_per_round[-1]:.6g} (epsilon={epsilon})")
+    print(f"  max_change by round {rounds_x[-1]}: {max_change_per_round[-1]:.6g} (epsilon={epsilon})")
 
 
 def build_ridge_scenario(n_rows: int = 70, n_cols: int = 110) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
