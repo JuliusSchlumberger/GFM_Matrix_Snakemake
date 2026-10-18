@@ -34,10 +34,6 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
   the data were filtered to `flood_source="sea"` only. `fetch_england_flood_zones.py`
   later added `river and sea`. Confirm which filter the current `fz*_sea_modelled.gpkg`
   were built with, then fix the comment.
-- **`validation/validate_sf_bay.py` docstring** refers to `validate_country_depth_raster()`,
-  which doesn't exist. `_rescore_england_fz3.py`'s docstring implies it uses
-  `postprocessing.block_size`, but it hard-codes 8192 px. Both are docstring-only fixes
-  (Phase 4/4b).
 - **Two console messages disappeared with the partial path.** "flood_totals missing →
   model_total_wet_km2 NaN" and "No coastal benchmark found for X" were only printed by
   the deleted `validate_country()`. The national path now prints just "No extent rows
@@ -58,13 +54,6 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
 - **`openpyxl` in environment.yml has no user** (found in Phase 4). Its only consumer,
   a calibration xlsx report script, was removed earlier; nothing imports openpyxl or
   calls `to_excel`/`ExcelWriter`. Dropping the pin is an env change, so it's logged here.
-- **`src/flood_model.prune_to_coast_connected` docstring describes a "pre-solve candidate
-  mask" use** (found in Phase 4b), but every caller uses it post-solve on the flood mask,
-  and `flood_depth_dense` says the dense solver has no pre-solve candidate step. This is
-  probably a leftover from an older (sparse) solver. Confirm, then trim the docstring.
-- **`src/eikonal_runner.py` module docstring** names `scripts/run_eikonal.py` /
-  `run_eikonal_cli.py`; the real paths are under `snakemake_workflow/scripts/`. Fix it with
-  the Phase 7a renames (these files become `run_eikonal*.py`).
 - **`generate_eikonal_jobs.generate_wave_dispatch` has 3 unused parameters** (`model_outputs`,
   `hop_by_tile`, `raster_config`; docstring says so). Left in place in Phase 7a on purpose:
   dropping them also means dropping the `generate_eikonal_jobs` rule's params, which re-triggers

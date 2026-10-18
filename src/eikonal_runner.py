@@ -1,9 +1,9 @@
 """Functions for running the flood model.
 
-`run_eikonal_python` (in-process, `flood_model.flood_depth_dense`) is
-called from both `scripts/run_eikonal.py` (Snakemake rule) and
-`scripts/run_eikonal_cli.py` (HPC sbatch CLI), which share the helpers here
-so the two entry points can't drift apart.
+`run_tile_scenario` is the per-tile skip/OOM/placeholder/solve logic shared by
+both entry points, `snakemake_workflow/scripts/run_eikonal.py` (Snakemake rule) and
+`snakemake_workflow/scripts/run_eikonal_cli.py` (HPC sbatch CLI), so they can't
+drift apart; it calls `run_eikonal_python` (in-process `flood_model.flood_depth_dense`).
 """
 
 import json

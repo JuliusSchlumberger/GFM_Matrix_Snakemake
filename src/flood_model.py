@@ -120,13 +120,13 @@ def prune_to_coast_connected(region: np.ndarray, coastline: np.ndarray) -> np.nd
     """Keep only the 8-connected components of `region` that touch `coastline`.
 
     This is `core.jl`'s own step 10 (`label_components` + keep components whose
-    label appears under the dilated coastline). Usable both as a provably-exact
-    pre-solve optimization on a candidate mask (any candidate component disconnected
-    from the coast can never contain a coast-connected flood cell either, so
-    discarding it cannot change the final answer - see the plan doc) and, post-solve,
-    as the model's own required step 10. Implemented via `np.isin` against a label
-    array, never per-component index lists - avoiding `component_indices`'s
-    documented OOM cause in `core.jl` regardless of domain size.
+    label appears under the dilated coastline), applied post-solve to the flood mask
+    by `flood_depth_dense` and the calibration studies. (It would also be exact as a
+    pre-solve filter on a candidate mask, since a component disconnected from the coast
+    can never hold a coast-connected flood cell, but no caller uses it that way.)
+    Implemented via `np.isin` against a label array, never per-component index lists -
+    avoiding `component_indices`'s documented OOM cause in `core.jl` regardless of
+    domain size.
 
     Parameters
     ----------
