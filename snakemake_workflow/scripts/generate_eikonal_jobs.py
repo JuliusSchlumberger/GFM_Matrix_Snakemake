@@ -20,7 +20,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import atomic_write, load_config, retry_transient_io  # noqa: E402
-from hpc_common import _stage_configfile_lines, _stage_tile_grid_lines  # noqa: E402
+from hpc_common import _stage_configfile_lines, _stage_tile_grid_lines, sbatch_header  # noqa: E402
 
 
 def _append_postprocess_bridge(
@@ -41,22 +41,7 @@ def _append_postprocess_bridge(
     code_root = linux_config["paths"]["code_root"]
     name = "gfm_generate_postprocess_and_dispatch"
     lines = [
-        "#!/bin/bash",
-        f"#SBATCH --job-name={name}",
-        f"#SBATCH --partition={sbatch_cfg['partition']}",
-    ]
-    if sbatch_cfg.get("account"):
-        lines.append(f"#SBATCH --account={sbatch_cfg['account']}")
-    lines += [
-        f"#SBATCH --time={sbatch_cfg['time']}",
-        f"#SBATCH --mem={sbatch_cfg['mem']}",
-        "#SBATCH --cpus-per-task=1",
-        f"#SBATCH --output={linux_jobs_dir}/logs/{name}_%j.out",
-        f"#SBATCH --error={linux_jobs_dir}/logs/{name}_%j.err",
-        "",
-        "set -euo pipefail",
-        sbatch_cfg["env_activate_cmd"],
-        "",
+        *sbatch_header(name, sbatch_cfg, f"{linux_jobs_dir}/logs", cpus_per_task=1),
         f'cd "{code_root}"',
         *_stage_configfile_lines(),
         # Deliberately NOT staging tile_grid.path here: this config is what
@@ -89,34 +74,24 @@ def _append_postprocess_bridge(
     return submit_lines
 
 
-def generate_wave_dispatch(
-    model_outputs: str,
-    tile_ids: list,
-    hop_by_tile: dict,
-    batches: list,
-    return_periods: list,
-    waterlevel_names: list,
-    raster_config: dict,
+def _write_wave_scripts(
     hpc_cfg: dict,
     base_config_path: Path,
+    batches: list,
     script_paths: list,
     resolved_config_path: str,
     submit_waves_path: str,
-    wave_sbatch_cfg: dict | None = None,
-) -> None:
-    """Write every wave's sbatch scripts + resolved_config.yml + submit_waves.sh.
+    wave_sbatch_cfg: dict | None,
+    name_prefix: str,
+    tiles_per_batch: list[int] | None = None,
+) -> tuple[dict[int, list[str]], Path]:
+    """Write the per-batch sbatch + triples files, resolved_config.yml and the submit script.
 
-    `model_outputs`, `hop_by_tile` and `raster_config` are accepted but unused.
-    `batches` are `(wave, batch_id, tile_ids)` in the same order as `script_paths`.
-    `wave_sbatch_cfg` is a `{wave: sbatch_cfg}` override of `hpc_cfg["sbatch"]`.
+    Shared by the fresh and the resume dispatch, which differ only in how their
+    `(wave, batch_id, [(tile_id, rp, slr), ...])` batches are formed and in the
+    `name_prefix` of the scripts. `tiles_per_batch` only adds a tile count to the
+    progress line. Returns the Linux script paths per wave and the local jobs dir.
     """
-    # Empty-boundary wave-0 jobs are not pre-filtered: run_eikonal_cli.py
-    # checks that inline instead of ~110,000 file reads here.
-    jobs_by_tile: dict[str, list[tuple[str, str]]] = {
-        str(tid): [(rp, slr) for rp in return_periods for slr in waterlevel_names]
-        for tid in tile_ids
-    }
-
     linux_config = load_config(base_config_path, extra_override=base_config_path.parent / "config_hpc.yml")
     linux_batch_runner = f"{linux_config['paths']['code_root']}/snakemake_workflow/scripts/run_simulation_batch.py"
     linux_jobs_dir = linux_config["hpc"]["jobs_dir"]
@@ -137,37 +112,20 @@ def generate_wave_dispatch(
 
     scripts_by_wave: dict[int, list[str]] = {}
 
-    for (wave, batch_id, batch_tiles), script_path in zip(batches, script_paths):
+    for i, ((wave, batch_id, items), script_path) in enumerate(zip(batches, script_paths)):
         sbatch_cfg = wave_sbatch_cfg[wave] if wave_sbatch_cfg and wave in wave_sbatch_cfg else hpc_cfg["sbatch"]
-        name = f"wave{wave}_batch_{batch_id}"
+        name = f"{name_prefix}wave{wave}_batch_{batch_id}"
 
         local_triples_path = Path(script_path).parent / f"{name}_triples.csv"
         linux_triples_path = f"{linux_jobs_dir}/{name}_triples.csv"
-        n_jobs = 0
         with open(local_triples_path, "w", encoding="utf-8", newline="\n") as f:
             writer = csv.writer(f)
-            for tile_id in batch_tiles:
-                for rp, slr in jobs_by_tile[tile_id]:
-                    writer.writerow([tile_id, rp, slr])
-                    n_jobs += 1
+            for tile_id, rp, slr in items:
+                writer.writerow([tile_id, rp, slr])
 
         lines = [
-            "#!/bin/bash",
-            f"#SBATCH --job-name={name}",
-            f"#SBATCH --partition={sbatch_cfg['partition']}",
-        ]
-        if sbatch_cfg.get("account"):  # optional - Hydrax jobs don't require one
-            lines.append(f"#SBATCH --account={sbatch_cfg['account']}")
-        lines += [
-            f"#SBATCH --time={sbatch_cfg['time']}",
-            f"#SBATCH --mem={sbatch_cfg['mem']}",
-            f"#SBATCH --cpus-per-task={sbatch_cfg['cpus_per_task']}",
-            f"#SBATCH --output={linux_jobs_dir}/logs/{name}_%j.out",
-            f"#SBATCH --error={linux_jobs_dir}/logs/{name}_%j.err",
-            "",
-            "set -uo pipefail",  # not -e: one failed (tile,rp,slr) must not abort the rest of this node's batch
-            sbatch_cfg["env_activate_cmd"],
-            "",
+            # not -e: one failed (tile,rp,slr) must not abort the rest of this node's batch
+            *sbatch_header(name, sbatch_cfg, f"{linux_jobs_dir}/logs", errexit=False),
             *_stage_configfile_lines(),
             *_stage_tile_grid_lines(),
             f'FAIL_LOG="{linux_jobs_dir}/logs/{name}_failures.txt"',
@@ -190,8 +148,9 @@ def generate_wave_dispatch(
         with open(script_path, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(lines))
         scripts_by_wave.setdefault(wave, []).append(f"{linux_jobs_dir}/{name}.sbatch")
-        print(f"  wrote {script_path} (wave {wave}, {len(batch_tiles)} tiles, "
-              f"{n_jobs} jobs, {sbatch_cfg['cpus_per_task']}-way concurrent on {sbatch_cfg['partition']})")
+        tiles_note = f"{tiles_per_batch[i]} tiles, " if tiles_per_batch is not None else ""
+        print(f"  wrote {script_path} (wave {wave}, {tiles_note}{len(items)} jobs, "
+              f"{sbatch_cfg['cpus_per_task']}-way concurrent on {sbatch_cfg['partition']})")
 
     # afterany: a failed tile only fails its own hop>=1 neighbours (no output,
     # picked up by --resume), so it must not block the rest of the next wave.
@@ -224,6 +183,42 @@ def generate_wave_dispatch(
 
     with open(submit_waves_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(submit_lines) + "\n")
+    return scripts_by_wave, local_jobs_dir
+
+
+def generate_wave_dispatch(
+    model_outputs: str,
+    tile_ids: list,
+    hop_by_tile: dict,
+    batches: list,
+    return_periods: list,
+    waterlevel_names: list,
+    raster_config: dict,
+    hpc_cfg: dict,
+    base_config_path: Path,
+    script_paths: list,
+    resolved_config_path: str,
+    submit_waves_path: str,
+    wave_sbatch_cfg: dict | None = None,
+) -> None:
+    """Write every wave's sbatch scripts + resolved_config.yml + submit_waves.sh.
+
+    `model_outputs`, `tile_ids`, `hop_by_tile` and `raster_config` are accepted but unused.
+    `batches` are `(wave, batch_id, tile_ids)` in the same order as `script_paths`.
+    `wave_sbatch_cfg` is a `{wave: sbatch_cfg}` override of `hpc_cfg["sbatch"]`.
+    """
+    # Empty-boundary wave-0 jobs are not pre-filtered: run_eikonal_cli.py
+    # checks that inline instead of ~110,000 file reads here.
+    triple_batches = [
+        (wave, batch_id, [(tile_id, rp, slr) for tile_id in batch_tiles
+                          for rp in return_periods for slr in waterlevel_names])
+        for wave, batch_id, batch_tiles in batches
+    ]
+    scripts_by_wave, local_jobs_dir = _write_wave_scripts(
+        hpc_cfg, base_config_path, triple_batches, script_paths, resolved_config_path,
+        submit_waves_path, wave_sbatch_cfg, name_prefix="",
+        tiles_per_batch=[len(batch_tiles) for _, _, batch_tiles in batches],
+    )
 
     n_waves = len(scripts_by_wave)
     n_scripts = sum(len(v) for v in scripts_by_wave.values())
@@ -246,105 +241,10 @@ def generate_resume_dispatch(
     `(tile_id, rp, slr)` triples, re-split evenly across the full node budget.
     Waves with no remaining items are skipped; the dependency chain carries over.
     """
-    linux_config = load_config(base_config_path, extra_override=base_config_path.parent / "config_hpc.yml")
-    linux_batch_runner = f"{linux_config['paths']['code_root']}/snakemake_workflow/scripts/run_simulation_batch.py"
-    linux_jobs_dir = linux_config["hpc"]["jobs_dir"]
-    linux_resolved_config = f"{linux_jobs_dir}/resolved_config.yml"
-    linux_tile_grid_path = linux_config["tile_grid"]["path"]
-
-    # Local config view, not hpc_cfg (see generate_wave_dispatch).
-    local_config = load_config(base_config_path)
-    local_jobs_dir = Path(local_config["hpc"]["jobs_dir"])
-    retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
-    retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
-
-    # atomic_write: see generate_wave_dispatch.
-    atomic_write(resolved_config_path, lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
-
-    scripts_by_wave: dict[int, list[str]] = {}
-
-    for (wave, batch_id, items), script_path in zip(batches, script_paths):
-        sbatch_cfg = wave_sbatch_cfg[wave] if wave_sbatch_cfg and wave in wave_sbatch_cfg else hpc_cfg["sbatch"]
-        name = f"resume_wave{wave}_batch_{batch_id}"
-
-        local_triples_path = Path(script_path).parent / f"{name}_triples.csv"
-        linux_triples_path = f"{linux_jobs_dir}/{name}_triples.csv"
-        with open(local_triples_path, "w", encoding="utf-8", newline="\n") as f:
-            writer = csv.writer(f)
-            for tile_id, rp, slr in items:
-                writer.writerow([tile_id, rp, slr])
-
-        lines = [
-            "#!/bin/bash",
-            f"#SBATCH --job-name={name}",
-            f"#SBATCH --partition={sbatch_cfg['partition']}",
-        ]
-        if sbatch_cfg.get("account"):
-            lines.append(f"#SBATCH --account={sbatch_cfg['account']}")
-        lines += [
-            f"#SBATCH --time={sbatch_cfg['time']}",
-            f"#SBATCH --mem={sbatch_cfg['mem']}",
-            f"#SBATCH --cpus-per-task={sbatch_cfg['cpus_per_task']}",
-            f"#SBATCH --output={linux_jobs_dir}/logs/{name}_%j.out",
-            f"#SBATCH --error={linux_jobs_dir}/logs/{name}_%j.err",
-            "",
-            "set -uo pipefail",
-            sbatch_cfg["env_activate_cmd"],
-            "",
-            *_stage_configfile_lines(),
-            *_stage_tile_grid_lines(),
-            f'FAIL_LOG="{linux_jobs_dir}/logs/{name}_failures.txt"',
-            ': > "$FAIL_LOG"',
-            f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
-            f'stage_tile_grid_locally "{linux_tile_grid_path}" LOCAL_TILE_GRID || exit 1',
-            "python -c 'import sys, yaml; cfg_path, new_path = sys.argv[1], sys.argv[2]; "
-            "cfg = yaml.safe_load(open(cfg_path, encoding=\"utf-8\")); cfg[\"tile_grid\"][\"path\"] = new_path; "
-            "yaml.safe_dump(cfg, open(cfg_path, \"w\", encoding=\"utf-8\"))' "
-            '"$LOCAL_CONFIGFILE" "$LOCAL_TILE_GRID"',
-            "",
-            f'python "{linux_batch_runner}" \\',
-            f'  --triples-file "{linux_triples_path}" \\',
-            '  --config "$LOCAL_CONFIGFILE" \\',
-            f'  --workers {sbatch_cfg["cpus_per_task"]} \\',
-            '  --fail-log "$FAIL_LOG"',
-            "",
-        ]
-
-        with open(script_path, "w", encoding="utf-8", newline="\n") as f:
-            f.write("\n".join(lines))
-        scripts_by_wave.setdefault(wave, []).append(f"{linux_jobs_dir}/{name}.sbatch")
-        print(f"  wrote {script_path} (wave {wave}, {len(items)} jobs, "
-              f"{sbatch_cfg['cpus_per_task']}-way concurrent on {sbatch_cfg['partition']})")
-
-    submit_lines = [
-        "#!/bin/bash",
-        "set -euo pipefail",
-        "",
-        "PREV_IDS=\"\"",
-        "ALL_WAVE_IDS=\"\"",
-    ]
-    for wave in sorted(scripts_by_wave):
-        submit_lines.append(f"\n# wave {wave} ({len(scripts_by_wave[wave])} batch(es))")
-        submit_lines.append("IDS=\"\"")
-        for script in scripts_by_wave[wave]:
-            submit_lines += [
-                'if [ -z "$PREV_IDS" ]; then',
-                f'  JID=$(sbatch --parsable "{script}")',
-                "else",
-                f'  JID=$(sbatch --parsable --dependency=afterany:$PREV_IDS "{script}")',
-                "fi",
-                f'echo "wave {wave}: submitted {script} -> job $JID"',
-                'IDS="${IDS:+$IDS:}$JID"',
-            ]
-        submit_lines.append('PREV_IDS="$IDS"')
-        submit_lines.append('ALL_WAVE_IDS="${ALL_WAVE_IDS:+$ALL_WAVE_IDS:}$IDS"')
-
-    submit_lines = _append_postprocess_bridge(
-        submit_lines, hpc_cfg, linux_config, linux_jobs_dir, local_jobs_dir, linux_resolved_config,
+    scripts_by_wave, local_jobs_dir = _write_wave_scripts(
+        hpc_cfg, base_config_path, batches, script_paths, resolved_config_path,
+        submit_waves_path, wave_sbatch_cfg, name_prefix="resume_",
     )
-
-    with open(submit_waves_path, "w", encoding="utf-8", newline="\n") as f:
-        f.write("\n".join(submit_lines) + "\n")
 
     n_waves = len(scripts_by_wave)
     n_scripts = sum(len(v) for v in scripts_by_wave.values())
