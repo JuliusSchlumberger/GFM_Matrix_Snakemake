@@ -98,6 +98,17 @@ def load_benchmark_full(catalog, spec: BenchmarkSpec) -> gpd.GeoDataFrame:
     return filter_benchmark(gdf, spec)
 
 
+def load_benchmark_4326(catalog, spec: BenchmarkSpec) -> gpd.GeoDataFrame:
+    """Load a vector benchmark with `load_benchmark_full` and reproject it to EPSG:4326.
+
+    The model grid is EPSG:4326; an empty result is returned as loaded.
+    """
+    gdf = load_benchmark_full(catalog, spec)
+    if not gdf.empty and (gdf.crs is None or gdf.crs.to_epsg() != 4326):
+        gdf = gdf.to_crs(4326)
+    return gdf
+
+
 def filter_benchmark(gdf: gpd.GeoDataFrame, spec: BenchmarkSpec) -> gpd.GeoDataFrame:
     """Keep only the rows matching `spec.attribute_filter` in an already-loaded benchmark."""
     if gdf.empty:
@@ -242,6 +253,30 @@ def read_country_mask(
     if not target_ids:
         return np.zeros(out_shape, dtype=bool)
     return np.isin(geo_ids, target_ids)
+
+
+def window_scoring_domain(
+    gfm_catalog, permanent_water_source: str, permanent_water_codes,
+    geogunit_source: str, iso_lookup: dict[int, str], country_iso: str,
+    bbox: list[float], out_transform: Affine, model_domain: np.ndarray,
+    geogunit_ids: list[int] | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return (in_scope, domain_mask) for one EPSG:4326 model window.
+
+    in_scope = not permanent water and inside the country (`country_iso` or
+    `geogunit_ids`, see read_country_mask), so a region bbox overlapping
+    neighbouring territory does not score its flooding as false positives;
+    domain_mask = `model_domain & in_scope`.
+    """
+    water_mask = read_permanent_water_mask(
+        gfm_catalog, permanent_water_source, permanent_water_codes, bbox, out_transform, model_domain.shape,
+    )
+    in_country = read_country_mask(
+        gfm_catalog, geogunit_source, iso_lookup, country_iso, bbox, out_transform, model_domain.shape,
+        geogunit_ids=geogunit_ids,
+    )
+    in_scope = ~water_mask & in_country
+    return in_scope, model_domain & in_scope
 
 
 # ── Metrics ───────────────────────────────────────────────────────────────

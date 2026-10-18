@@ -241,12 +241,10 @@ def validate_country_national_coverage(
             )
         print(f"  National-coverage benchmark: {benchmark_key} ({spec.data_type})")
 
-        full_gdf = v.load_benchmark_full(bench_catalog, spec)
+        full_gdf = v.load_benchmark_4326(bench_catalog, spec)
         if full_gdf.empty:
             print(f"    {benchmark_key}: empty after filtering - skipping.")
             continue
-        if full_gdf.crs is None or full_gdf.crs.to_epsg() != 4326:
-            full_gdf = full_gdf.to_crs(4326)
         full_sindex = full_gdf.sindex
 
         acc: dict[str, dict[str, float]] = defaultdict(_new_acc)
@@ -296,18 +294,11 @@ def validate_country_national_coverage(
                 # Scoring uses the soft `fraction`; the thresholded mask is display only.
                 benchmark_wet_display = v.wet_mask_from_fraction(fraction, wet_fraction)
 
-                water_mask = v.read_permanent_water_mask(
-                    gfm_catalog, permanent_water_source, permanent_water_codes, bbox, out_transform, depth.shape,
-                )
-                not_water = ~water_mask
-                # region_bbox can overlap neighbouring territory, whose flooding would
-                # otherwise count as false positives.
-                in_country = v.read_country_mask(
-                    gfm_catalog, geogunit_source, iso_lookup, country_iso, bbox, out_transform, depth.shape,
+                not_water, domain_mask = v.window_scoring_domain(
+                    gfm_catalog, permanent_water_source, permanent_water_codes, geogunit_source,
+                    iso_lookup, country_iso, bbox, out_transform, model_domain,
                     geogunit_ids=spec.geogunit_ids,
                 )
-                not_water = not_water & in_country
-                domain_mask = model_domain & not_water
 
                 area_km2 = pixel_area_km2_grid(out_transform, depth.shape[1], depth.shape[0])
                 benchmark_wet_km2_total[region] += float((fraction * area_km2 * not_water).sum())
