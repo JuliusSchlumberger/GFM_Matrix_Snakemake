@@ -27,7 +27,7 @@ from rasterio.warp import Resampling, reproject
 from shapely.geometry import box
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io, return_period_years  # noqa: E402
+from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pipeline_plots import pixel_area_km2_grid  # noqa: E402
 from tiles import load_tile_grid  # noqa: E402
 import validation as v  # noqa: E402
@@ -62,8 +62,7 @@ def _read_flood_totals(flood_totals_dir: Path, country_iso: str, rp: str, slr: s
     if not csv_path.exists():
         return float("nan"), float("nan")
     df = pd.read_csv(csv_path)
-    # return_period is "RP100" (or a plain int in older files).
-    row = df[(df["return_period"].map(return_period_years) == return_period_years(rp)) & (df["waterlevel_name"] == slr)]
+    row = df[(df["return_period"] == rp) & (df["waterlevel_name"] == slr)]
     if row.empty:
         return float("nan"), float("nan")
     r = row.iloc[0]

@@ -26,7 +26,7 @@ def main() -> None:
     args = parser.parse_args()
 
     df = pd.read_csv(args.exposure_csv)
-    df["return_period"] = df["return_period"].map(return_period_years)  # "RP100" or an older int column
+    df["return_period"] = df["return_period"].map(return_period_years)  # "RP100" -> 100
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 

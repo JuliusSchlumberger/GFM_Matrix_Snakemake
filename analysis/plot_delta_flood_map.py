@@ -112,8 +112,6 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_csv(csv_path)
-    if "waterlevel_name" not in df.columns:  # older CSVs name the SLR level column slr_scenario
-        df = df.rename(columns={"slr_scenario": "waterlevel_name"})
     print(f"{len(df)} row(s) from {csv_path}")
 
     for ssp_scenario in sorted(df["ssp_scenario"].unique()):

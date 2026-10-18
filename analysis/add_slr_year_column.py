@@ -1,7 +1,7 @@
 """Add the year each row's SLR magnitude is reached to the delta flood-extent CSV.
 
 Year = first year the `ssp_scenario` median AR6 trajectory (mm, relative to 2020;
-from extract_slr_trajectories.py) reaches the row's `waterlevel_name` (`slr_scenario` in older CSVs). Inverted with
+from extract_slr_trajectories.py) reaches the row's `waterlevel_name`. Inverted with
 np.interp, valid because median trajectories increase monotonically. Targets beyond
 the 2150 end of the data are NaN, not clamped (ssp126/ssp245 medians top out at
 632/870 mm, so their SLR_1000+ rows are NaN).
@@ -45,9 +45,7 @@ def year_for_slr(traj_df: pd.DataFrame, ssp_scenario: str, target_mm: float, ssp
 def add_year_column(df: pd.DataFrame, traj_df: pd.DataFrame, ssp_rcp_codes: dict[str, int]) -> pd.DataFrame:
     """Return a copy of `df` with a `year_slr_reached_median` column."""
     df = df.copy()
-    # The file is rewritten in place, so an older CSV keeps its own column name.
-    slr_col = "waterlevel_name" if "waterlevel_name" in df.columns else "slr_scenario"
-    target_mm = df[slr_col].str.split("_").str[1].astype(float)
+    target_mm = df["waterlevel_name"].str.split("_").str[1].astype(float)
     df["year_slr_reached_median"] = [
         year_for_slr(traj_df, ssp, mm, ssp_rcp_codes)
         for ssp, mm in zip(df["ssp_scenario"], target_mm)

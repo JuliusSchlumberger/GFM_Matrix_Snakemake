@@ -111,8 +111,6 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_csv(csv_path)
-    if "waterlevel_name" not in df.columns:  # older CSVs name the SLR level column slr_scenario
-        df = df.rename(columns={"slr_scenario": "waterlevel_name"})
     traj_df = pd.read_csv(traj_path, index_col="year")
     print(f"{len(df)} row(s) from {csv_path}")
     print(f"SLR trajectory data: {traj_path} (years {traj_df.index.min()}-{traj_df.index.max()})")

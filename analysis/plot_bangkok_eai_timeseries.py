@@ -44,7 +44,7 @@ def main() -> None:
     slr_order = [f"SLR_{mm}" for mm in slr_mm_values]
 
     df = pd.read_csv(args.exposure_csv)
-    df["return_period"] = df["return_period"].map(return_period_years)  # "RP100" or an older int column
+    df["return_period"] = df["return_period"].map(return_period_years)  # "RP100" -> 100
 
     # Trapezoidal integration over 1/RP; columns must follow slr_mm_values order.
     eai_by_slr = {}
