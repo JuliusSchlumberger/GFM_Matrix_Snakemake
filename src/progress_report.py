@@ -1,7 +1,7 @@
 """Text progress bar and ``--watch`` loop shared by the top-level check_*_progress.py monitors.
 
 The monitors only count files on the shared output tree (read-only) and print one
-report, or reprint it on an interval while a Hydrax batch runs.
+report, or reprint it on an interval while a cluster batch runs.
 """
 
 import time

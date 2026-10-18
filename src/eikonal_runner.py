@@ -148,7 +148,7 @@ OOM_PREMARKED_REASON = "tile too large (out-of-memory on a previous return perio
 
 
 def _stage_file_locally(src_path: str) -> str:
-    # On Hydrax, GDAL's SQLite lock to open a GeoPackage on P:\ can hang
+    # On cluster compute nodes, GDAL's SQLite lock on a GeoPackage on the shared data root can hang
     # indefinitely; a plain copy avoids it. Caller deletes the copy.
     stage_dir = os.path.join(os.environ.get("TMPDIR", "/tmp"), "gfm_staged_inputs")
     os.makedirs(stage_dir, exist_ok=True)
@@ -227,7 +227,7 @@ def run_tile_scenario(
                 cand_waterdepth = os.path.join(
                     model_outputs, str(int(cand_id)), "results", f"waterdepth_{scenario_name}.tif",
                 )
-                # path_ready: os.path.exists would read a P:\ blip as "not run yet".
+                # path_ready: os.path.exists would read a shared-mount blip as "not run yet".
                 cand_missing = [p for p in (cand_dem, cand_mask, cand_waterdepth) if not path_ready(p)]
                 if cand_missing:
                     missing += cand_missing

@@ -13,7 +13,7 @@ from hydromt.log import setuplog
 _T = TypeVar("_T")
 
 # RasterioIOError is an OSError, but fiona DriverError and pyogrio
-# DataSourceError are not, though both are raised for transient P:\ blips.
+# DataSourceError are not, though both are raised for transient blips on the shared data root.
 _TRANSIENT_IO_EXCEPTION_TYPES: list[type[BaseException]] = [FileNotFoundError, OSError]
 try:
     from fiona.errors import DriverError as _FionaDriverError
@@ -31,7 +31,7 @@ _TRANSIENT_IO_EXCEPTIONS = tuple(_TRANSIENT_IO_EXCEPTION_TYPES)
 def retry_transient_io(fn: Callable[..., _T], *args, retries: int = 4, delay_s: float = 5.0, **kwargs) -> _T:
     """Call ``fn(*args, **kwargs)``, retrying on transient I/O errors.
 
-    SMB blips on the P:\\ share raise errors for files that exist; none of
+    SMB blips on the shared data root (``paths.root``) raise errors for files that exist; none of
     rasterio/fiona/geopandas/xarray retry. A truly missing file still raises
     after `retries` attempts (`delay_s` seconds apart).
     """
@@ -80,7 +80,7 @@ def atomic_write(
 def path_ready(path: str | Path) -> bool:
     """Check whether `path` exists, retrying transient I/O errors first.
 
-    ``os.path.exists()`` swallows OSError, so a P:\\ blip would read as
+    ``os.path.exists()`` swallows OSError, so a shared-mount blip would read as
     missing; for hop>=1 neighbour seeding that writes a false all-dry result.
     """
     try:

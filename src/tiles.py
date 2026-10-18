@@ -18,7 +18,7 @@ _RASTER_OPEN_RETRY_DELAY_S = 5.0
 
 
 def _open_mask_tile(path: Path, **open_kwargs):
-    # Retries transient P:\ SMB blips (RasterioIOError on files that exist).
+    # Retries transient SMB blips on the shared data root (RasterioIOError on files that exist).
     last_err = None
     for attempt in range(1, _RASTER_OPEN_RETRIES + 1):
         try:

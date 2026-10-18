@@ -97,7 +97,7 @@ def read_targets_lines(var: str, targets_file: str) -> list[str]:
 
 
 def _retry_wrapper_lines() -> list[str]:
-    """Bash fn retrying snakemake: P: share reads can hit stale caches (UnicodeDecodeError).
+    """Bash fn retrying snakemake: shared data root reads can hit stale caches (UnicodeDecodeError).
 
     Each failure dumps checksum/mtime of the candidate config files for forensics.
     """
@@ -124,7 +124,7 @@ def _retry_wrapper_lines() -> list[str]:
 def _stage_configfile_lines() -> list[str]:
     """Bash fn staging a --configfile to node-local disk, validated as UTF-8 YAML.
 
-    A compute node's stale P: share cache can corrupt the same file on every retry, so
+    A compute node's stale shared-mount cache can corrupt the same file on every retry, so
     only the cheap copy+parse step is retried and later reads hit local disk.
     """
     return [
@@ -154,8 +154,8 @@ def _stage_configfile_lines() -> list[str]:
 def _stage_tile_grid_lines() -> list[str]:
     """Bash fn staging the tile_grid gpkg to node-local disk, validated by byte size.
 
-    GDAL/SQLite's advisory lock on a gpkg read directly from the P: share can hang
-    indefinitely on Hydrax compute nodes; a plain `cp` never takes that lock.
+    GDAL/SQLite's advisory lock on a gpkg read directly from the shared data root can hang
+    indefinitely on cluster compute nodes; a plain `cp` never takes that lock.
     """
     return [
         "stage_tile_grid_locally() {",
