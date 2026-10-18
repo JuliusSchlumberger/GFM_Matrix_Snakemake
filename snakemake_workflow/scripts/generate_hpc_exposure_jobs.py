@@ -19,7 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import load_config, retry_transient_io  # noqa: E402
-from hpc_common import _account_line  # noqa: E402
+from hpc_common import sbatch_header  # noqa: E402
 
 
 def _discover_chunk_ids(flood_frac_dir: Path, chunks_dir: Path) -> list[str]:
@@ -32,6 +32,53 @@ def _discover_chunk_ids(flood_frac_dir: Path, chunks_dir: Path) -> list[str]:
         if (chunks_dir / f"exposure_population_grid_{cid}.tif").exists()
         and (chunks_dir / f"exposure_population_grid_{cid}.tif").stat().st_size > 0
     ]
+
+
+def _job_header(name: str, sbatch_cfg: dict, linux_jobs_dir: str, linux_code_root: str) -> list[str]:
+    """Return an exposure job's sbatch header followed by the cd into the code root."""
+    return [*sbatch_header(name, sbatch_cfg, f"{linux_jobs_dir}/logs"), f'cd "{linux_code_root}"']
+
+
+def _write_pass_script(
+    pass_no: int,
+    batch_id: str,
+    *,
+    local_jobs_dir: Path,
+    linux_jobs_dir: str,
+    linux_code_root: str,
+    linux_config_path: str,
+    linux_shares_path: str,
+    sbatch_cfg: dict,
+    resume: bool,
+) -> str:
+    """Write `exposure_pass{pass_no}_batch_{batch_id}.sbatch` and return its Linux path.
+
+    Pass 1 writes the batch's share JSON; pass 2 reads the reduced shares and
+    writes the batch's EAI pickle. `resume` only marks the log banner.
+    """
+    linux_scripts_dir = f"{linux_code_root}/snakemake_workflow/scripts"
+    chunks_file = f"{linux_jobs_dir}/batch_{batch_id}_chunks.txt"
+    name = f"exposure_pass{pass_no}_batch_{batch_id}"
+    if pass_no == 1:
+        command = (
+            f'python "{linux_scripts_dir}/run_exposure_pass1.py" --config "{linux_config_path}" '
+            f'--chunks-file "{chunks_file}" --out "{linux_jobs_dir}/pass1_batch_{batch_id}.json"'
+        )
+    else:
+        command = (
+            f'python "{linux_scripts_dir}/run_exposure_pass2.py" --config "{linux_config_path}" '
+            f'--chunks-file "{chunks_file}" --shares "{linux_shares_path}" '
+            f'--out "{linux_jobs_dir}/pass2_batch_{batch_id}.pkl"'
+        )
+    banner = f"Exposure pass {pass_no}{' (resume)' if resume else ''}, batch {batch_id}"
+    lines = _job_header(name, sbatch_cfg, linux_jobs_dir, linux_code_root) + [
+        f'echo "=== {banner} ==="',
+        command,
+        "",
+    ]
+    with open(local_jobs_dir / f"{name}.sbatch", "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines))
+    return f"{linux_jobs_dir}/{name}.sbatch"
 
 
 def generate_exposure_dispatch(
@@ -79,62 +126,21 @@ def generate_exposure_dispatch(
             f.write("\n".join(batch_chunks) + "\n")
 
     sbatch_cfg = hpc_cfg["sbatch"]
-
-    def _job_header(name: str) -> list[str]:
-        return [
-            "#!/bin/bash",
-            f"#SBATCH --job-name={name}",
-            f"#SBATCH --partition={sbatch_cfg['partition']}",
-            *_account_line(sbatch_cfg),
-            f"#SBATCH --time={sbatch_cfg['time']}",
-            f"#SBATCH --mem={sbatch_cfg['mem']}",
-            f"#SBATCH --cpus-per-task={sbatch_cfg['cpus_per_task']}",
-            f"#SBATCH --output={linux_jobs_dir}/logs/{name}_%j.out",
-            f"#SBATCH --error={linux_jobs_dir}/logs/{name}_%j.err",
-            "",
-            "set -euo pipefail",
-            sbatch_cfg["env_activate_cmd"],
-            "",
-            f'cd "{linux_code_root}"',
-        ]
+    pass_kw = dict(
+        local_jobs_dir=local_jobs_dir, linux_jobs_dir=linux_jobs_dir, linux_code_root=linux_code_root,
+        linux_config_path=linux_config_path, linux_shares_path=linux_shares_path,
+        sbatch_cfg=sbatch_cfg, resume=False,
+    )
 
     pass1_script_paths = []
     pass2_script_paths = []
     for batch_id in batch_ids:
-        chunks_file = f"{linux_jobs_dir}/batch_{batch_id}_chunks.txt"
-
-        name1 = f"exposure_pass1_batch_{batch_id}"
-        lines1 = _job_header(name1) + [
-            f'echo "=== Exposure pass 1, batch {batch_id} ==="',
-            (
-                f'python "{linux_scripts_dir}/run_exposure_pass1.py" --config "{linux_config_path}" '
-                f'--chunks-file "{chunks_file}" --out "{linux_jobs_dir}/pass1_batch_{batch_id}.json"'
-            ),
-            "",
-        ]
-        p1_path = local_jobs_dir / f"{name1}.sbatch"
-        with open(p1_path, "w", encoding="utf-8", newline="\n") as f:
-            f.write("\n".join(lines1))
-        pass1_script_paths.append(f"{linux_jobs_dir}/{name1}.sbatch")
-
-        name2 = f"exposure_pass2_batch_{batch_id}"
-        lines2 = _job_header(name2) + [
-            f'echo "=== Exposure pass 2, batch {batch_id} ==="',
-            (
-                f'python "{linux_scripts_dir}/run_exposure_pass2.py" --config "{linux_config_path}" '
-                f'--chunks-file "{chunks_file}" --shares "{linux_shares_path}" '
-                f'--out "{linux_jobs_dir}/pass2_batch_{batch_id}.pkl"'
-            ),
-            "",
-        ]
-        p2_path = local_jobs_dir / f"{name2}.sbatch"
-        with open(p2_path, "w", encoding="utf-8", newline="\n") as f:
-            f.write("\n".join(lines2))
-        pass2_script_paths.append(f"{linux_jobs_dir}/{name2}.sbatch")
+        pass1_script_paths.append(_write_pass_script(1, batch_id, **pass_kw))
+        pass2_script_paths.append(_write_pass_script(2, batch_id, **pass_kw))
 
     print(f"  wrote {n_batches} pass1 + {n_batches} pass2 batch script(s) to {local_jobs_dir}")
 
-    reduce_shares_lines = _job_header("exposure_reduce_shares") + [
+    reduce_shares_lines = _job_header("exposure_reduce_shares", sbatch_cfg, linux_jobs_dir, linux_code_root) + [
         'echo "=== Reducing pass-1 shares ==="',
         (
             f'python "{linux_scripts_dir}/reduce_exposure_shares.py" '
@@ -147,7 +153,7 @@ def generate_exposure_dispatch(
         f.write("\n".join(reduce_shares_lines))
     print(f"  wrote {reduce_shares_path}")
 
-    reduce_write_lines = _job_header("exposure_reduce_write") + [
+    reduce_write_lines = _job_header("exposure_reduce_write", sbatch_cfg, linux_jobs_dir, linux_code_root) + [
         'echo "=== Reducing pass-2 results and writing exposure CSVs ==="',
         (
             f'python "{linux_scripts_dir}/reduce_exposure_write.py" --config "{linux_config_path}" '
@@ -224,7 +230,6 @@ def generate_exposure_resume_dispatch(
     local_jobs_dir = Path(local_config["hpc"]["jobs_dir"]) / "exposure"
     linux_jobs_dir = f"{linux_config['hpc']['jobs_dir']}/exposure"
     linux_code_root = linux_config["paths"]["code_root"]
-    linux_scripts_dir = f"{linux_code_root}/snakemake_workflow/scripts"
     # resolved_config.yml so a scenario dispatch's own config reaches these jobs.
     linux_config_path = f"{linux_config['hpc']['jobs_dir']}/resolved_config.yml"
     linux_outdir = f"{linux_config['postprocessing']['merged_outputs']}/exposure"
@@ -242,23 +247,11 @@ def generate_exposure_resume_dispatch(
             "Run a fresh dispatch first."
         )
 
-    def _job_header(name: str) -> list[str]:
-        return [
-            "#!/bin/bash",
-            f"#SBATCH --job-name={name}",
-            f"#SBATCH --partition={sbatch_cfg['partition']}",
-            *_account_line(sbatch_cfg),
-            f"#SBATCH --time={sbatch_cfg['time']}",
-            f"#SBATCH --mem={sbatch_cfg['mem']}",
-            f"#SBATCH --cpus-per-task={sbatch_cfg['cpus_per_task']}",
-            f"#SBATCH --output={linux_jobs_dir}/logs/{name}_%j.out",
-            f"#SBATCH --error={linux_jobs_dir}/logs/{name}_%j.err",
-            "",
-            "set -euo pipefail",
-            sbatch_cfg["env_activate_cmd"],
-            "",
-            f'cd "{linux_code_root}"',
-        ]
+    pass_kw = dict(
+        local_jobs_dir=local_jobs_dir, linux_jobs_dir=linux_jobs_dir, linux_code_root=linux_code_root,
+        linux_config_path=linux_config_path, linux_shares_path=linux_shares_path,
+        sbatch_cfg=sbatch_cfg, resume=True,
+    )
 
     missing_pass1 = [bid for bid in batch_ids if not (local_jobs_dir / f"pass1_batch_{bid}.json").exists()]
     missing_pass2 = [bid for bid in batch_ids if not (local_jobs_dir / f"pass2_batch_{bid}.pkl").exists()]
@@ -270,19 +263,7 @@ def generate_exposure_resume_dispatch(
     submit_lines.append("\n# exposure analysis resume: pass 1 (shares) - only missing batches")
     submit_lines.append('PASS1_IDS=""')
     for bid in missing_pass1:
-        chunks_file = f"{linux_jobs_dir}/batch_{bid}_chunks.txt"
-        name1 = f"exposure_pass1_batch_{bid}"
-        lines1 = _job_header(name1) + [
-            f'echo "=== Exposure pass 1 (resume), batch {bid} ==="',
-            (
-                f'python "{linux_scripts_dir}/run_exposure_pass1.py" --config "{linux_config_path}" '
-                f'--chunks-file "{chunks_file}" --out "{linux_jobs_dir}/pass1_batch_{bid}.json"'
-            ),
-            "",
-        ]
-        with open(local_jobs_dir / f"{name1}.sbatch", "w", encoding="utf-8", newline="\n") as f:
-            f.write("\n".join(lines1))
-        script = f"{linux_jobs_dir}/{name1}.sbatch"
+        script = _write_pass_script(1, bid, **pass_kw)
         if prev_ids_expr:
             submit_lines.append(f'JID=$(sbatch --parsable --dependency=afterany:{prev_ids_expr} "{script}")')
         else:
@@ -307,20 +288,7 @@ def generate_exposure_resume_dispatch(
     submit_lines.append("\n# exposure analysis resume: pass 2 (EAI) - only missing batches")
     submit_lines.append('PASS2_IDS=""')
     for bid in missing_pass2:
-        chunks_file = f"{linux_jobs_dir}/batch_{bid}_chunks.txt"
-        name2 = f"exposure_pass2_batch_{bid}"
-        lines2 = _job_header(name2) + [
-            f'echo "=== Exposure pass 2 (resume), batch {bid} ==="',
-            (
-                f'python "{linux_scripts_dir}/run_exposure_pass2.py" --config "{linux_config_path}" '
-                f'--chunks-file "{chunks_file}" --shares "{linux_shares_path}" '
-                f'--out "{linux_jobs_dir}/pass2_batch_{bid}.pkl"'
-            ),
-            "",
-        ]
-        with open(local_jobs_dir / f"{name2}.sbatch", "w", encoding="utf-8", newline="\n") as f:
-            f.write("\n".join(lines2))
-        script = f"{linux_jobs_dir}/{name2}.sbatch"
+        script = _write_pass_script(2, bid, **pass_kw)
         submit_lines += [
             f'JID=$(sbatch --parsable --dependency=afterany:$SHARES_JID "{script}")',
             f'echo "submitted {script} -> job $JID"',
