@@ -40,7 +40,7 @@ from tiles import build_chunk_grid  # noqa: E402
 
 
 def _stage_file_locally(src_path: str) -> str:
-    # Node-local copy: reading off P: from a Hydrax compute node can hang on the
+    # Node-local copy: reading off the shared data root from a cluster compute node can hang on the
     # GDAL/SQLite lock. Only this read is redirected; linux_config's
     # tile_grid.path must stay the real path since downstream scripts embed it.
     stage_dir = os.path.join(os.environ.get("TMPDIR", "/tmp"), "gfm_staged_inputs")
@@ -170,7 +170,7 @@ def main() -> None:
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
 
     # Only written if missing (standalone use); atomic_write because another
-    # node reading over P: right after a non-atomic write can see a partial file.
+    # node reading over the shared mount right after a non-atomic write can see a partial file.
     resolved_config_path = local_jobs_dir / "resolved_config.yml"
     if not resolved_config_path.exists():
         atomic_write(resolved_config_path, lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
@@ -225,7 +225,7 @@ def main() -> None:
     }
 
     if args.resume:
-        # One glob per flat output directory: per-target exists() over P: is a
+        # One glob per flat output directory: per-target exists() over the shared mount is a
         # network round-trip each (77,000+ targets).
         chunks_dir_local = Path(local_merged) / "chunks"
         flood_frac_dir_local = chunks_dir_local / "flood_fraction"
@@ -343,7 +343,7 @@ def main() -> None:
     tail = "" if args.no_flood_totals_and_plots else " -> flood totals -> plots"
     print(f"\nDone. {len(phases)} postprocessing phase(s) + exposure analysis{tail}, "
           f"{n_total_scripts}+ sbatch script(s) written to {local_jobs_dir}")
-    print(f"Submit on Hydrax with: bash {linux_jobs_dir}/{submit_name}")
+    print(f"Submit on the cluster with: bash {linux_jobs_dir}/{submit_name}")
     print(f"(This one call submits the ENTIRE remaining pipeline - postprocessing -> exposure "
           f"analysis{tail} - all at once; SLURM's own --dependency=afterany chain handles the timing.)")
 

@@ -5,7 +5,7 @@ once. Each eikonal solve is single-threaded numba, so N workers on N cpus is not
 oversubscription. A failed triple is logged to --fail-log and does not abort the
 batch.
 
---timeout-min: a P:\\ mount hang on a compute node can block run_eikonal_cli.py's
+--timeout-min: a shared-mount hang on a compute node can block run_eikonal_cli.py's
 first `open(args.config)` indefinitely without raising (so retry_transient_io
 cannot help); the timeout turns that into a logged failure that the next resume
 dispatch retries.
@@ -43,7 +43,7 @@ def _run_one(python_exe: str, config_path: str, tile_id: str, rp: str, slr: str,
         elapsed = time.time() - t0
         out = (exc.stdout or b"").decode("utf-8", "replace").strip() if isinstance(exc.stdout, bytes) else (exc.stdout or "").strip()
         return (tile_id, rp, slr, -1, elapsed, out,
-                f"TIMEOUT after {timeout_s:.0f}s (likely a hung P:\\ read on this node - see module docstring)")
+                f"TIMEOUT after {timeout_s:.0f}s (likely a hung shared-mount read on this node - see module docstring)")
 
 
 def main() -> None:

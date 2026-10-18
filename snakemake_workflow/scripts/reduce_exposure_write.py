@@ -7,7 +7,7 @@ Usage:
     python reduce_exposure_write.py --config path/to/config.yml \\
         --parts-glob ".../exposure/pass2_batch_*.pkl" \\
         --shares .../exposure/shares_by_intensity.json \\
-        --out-dir D:/GFM/merged_results/exposure
+        --out-dir <merged_results>/exposure
 """
 
 import argparse

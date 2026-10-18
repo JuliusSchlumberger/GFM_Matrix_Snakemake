@@ -4,7 +4,7 @@
 # ── DATA CATALOGS ─────────────────────────────────────────────────────────────
 paths:
   # `root` (data + outputs) and `code_root` (repo checkout) have no default here: set them in
-  # config_local.yml (copy config_local.yml.example) or, on Hydrax, config_hpc.yml.
+  # config_local.yml (copy config_local.yml.example) or, on the cluster, config_hpc.yml.
 
   hydromt_data_catalog: "snakemake_workflow/config/data_catalog_gfm.yml" # relative to the code root
 
@@ -216,7 +216,7 @@ hpc:
   sbatch:
     partition: ""                                     # "" omits #SBATCH --partition (cluster default)
     account: ""                                       # optional; "" omits #SBATCH --account
-    # days-hours:minutes:seconds. Mandatory: an unset Hydrax job gets a 1-minute default and is killed.
+    # days-hours:minutes:seconds. Mandatory: the cluster may default an unset time to 1 minute and kill the job.
     time: "1-00:00:00"
     mem: ""
     # Simulation: tiles solved concurrently per node (single-threaded numba solves).

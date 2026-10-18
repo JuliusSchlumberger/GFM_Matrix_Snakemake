@@ -101,7 +101,7 @@ def main() -> None:
         local_config, linux_config, args.partition, args.cpus_per_task, args.mem, args.time,
     )
     print(f"Wrote {script_path}")
-    print(f"Submit on Hydrax with: sbatch {linux_script_path}")
+    print(f"Submit on the cluster with: sbatch {linux_script_path}")
 
 
 if __name__ == "__main__":

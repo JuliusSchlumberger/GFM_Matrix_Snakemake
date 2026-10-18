@@ -24,7 +24,7 @@ adaptation:
   slr_intensities: []
 
 # All tiles are hop 0 (no cross-tile dependency), so preprocess+simulate run fused per batch
-# (generate_hpc_preprocess_job.py --calibration --fuse), all on 1vcpu nodes.
+# (generate_hpc_preprocess_job.py --calibration --fuse), all on `hpc.sbatch.partition` nodes.
 # 9 h is an accepted-risk budget: worst case (no early exit, 1500 round-equivalents/tile) is
 # ~0.75 h preprocessing + ~14.1 h simulation on 30 cores, but most tiles converge far earlier.
 # A time-limit kill is safe to resubmit (jobs pass --rerun-incomplete).

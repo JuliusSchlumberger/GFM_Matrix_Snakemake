@@ -111,13 +111,13 @@ def main() -> None:
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
 
     # Referenced via GFM_CONFIG_PATH so compute nodes see this --config, not the
-    # default config.yml. atomic_write: another node reading over P: right after
+    # default config.yml. atomic_write: another node reading over the shared mount right after
     # a non-atomic write can see a partial file (UnicodeDecodeError).
     resolved_config_path = local_jobs_dir / "resolved_config.yml"
     atomic_write(resolved_config_path, lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
     linux_resolved_config = f"{linux_jobs_dir}/resolved_config.yml"
 
-    # Local view: linux_config's "/p/..." path only works embedded in sbatch
+    # Local view: linux_config's absolute Linux path only works embedded in sbatch
     # scripts, not opened from Windows.
     tile_gdf = retry_transient_io(gpd.read_file, local_config["tile_grid"]["path"])
     return_periods = [f"RP{rp}" for rp in linux_config["boundary_conditions"]["return_periods"]]
@@ -341,7 +341,7 @@ def main() -> None:
             print(f"  removed stale {stale_submit} (leftover from a prior generation of a different kind)")
 
     if hpc_cfg.get("single_preprocess_job", False):
-        node_summary = "single 1vcpu job, no batching - hpc.single_preprocess_job"
+        node_summary = "single hpc.sbatch job, no batching - hpc.single_preprocess_job"
     else:
         node_summary = f"{n_batches} nodes, {n_nodes} total budget"
     if args.fuse:
@@ -359,7 +359,7 @@ def main() -> None:
             f"\nDone. 1 synchronous shared-inputs build + {len(batch_script_paths)} preprocessing batch(es) "
             f"({node_summary}) + 1 dispatch job written to {local_jobs_dir}"
         )
-    print(f"Submit on Hydrax with: bash {linux_jobs_dir}/{submit_script_name}")
+    print(f"Submit on the cluster with: bash {linux_jobs_dir}/{submit_script_name}")
 
 
 if __name__ == "__main__":

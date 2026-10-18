@@ -23,8 +23,8 @@ Four stages:
 4. **Exposure analysis** — Snakemake/SLURM, on top of postprocessing's output.
 
 Stage 1 can run either on your local preprocessing machine (as below) or as
-one more Hydrax job that also submits stage 2 for you — see "Bundling
-preprocessing + dispatch into one Hydrax job" below. Stages 3 and 4 can
+one more cluster job that also submits stage 2 for you — see "Bundling
+preprocessing + dispatch into cluster jobs" below. Stages 3 and 4 can
 likewise run manually (as documented below) or automatically once every
 simulation wave finishes — `submit_waves.sh` ends with one more job,
 gated `--dependency=afterany` on every wave's job ids, that generates and
@@ -60,9 +60,9 @@ the way through to exposure analysis unattended, once
 
    Optionally, `hpc.wave_tiers` overrides `n_nodes`/`sbatch` per
    hop_distance wave (see config.yml's own comment on that key) — e.g. a
-   big, heavily-parallel `24vcpu` allocation for hop_distance=0 (by far the
+   big, heavily-parallel many-cpu allocation for hop_distance=0 (by far the
    most tiles) and a smaller one for hop=1/2, falling back to a plain
-   uncapped `1vcpu`-per-tile allocation for every later wave. Read only by
+   uncapped one-cpu-per-tile allocation for every later wave. Read only by
    the standalone `generate_hpc_simulation_jobs.py` CLI, not by
    `hpc_dispatch.smk`'s own Snakemake-rule entry point.
 
@@ -107,10 +107,10 @@ from can only be known once its neighbour has actually run. A wave-0 tile
 without boundary stations, or a hop≥1 tile whose neighbours end up dry, is
 resolved live, at run time, into a real-zero result (see step 2).
 
-### Bundling preprocessing + dispatch into Hydrax jobs
+### Bundling preprocessing + dispatch into cluster jobs
 
 Instead of running step 1 locally, generate sbatch scripts that run
-preprocessing directly on Hydrax — every tile's target files split evenly
+preprocessing directly on the cluster — every tile's target files split evenly
 across up to `hpc.n_nodes` PARALLEL nodes (no size-class split), since
 preprocessing has no wave/hop_distance ordering constraint (every tile's
 DEM/mask/friction/boundaries are independent of every other tile) — then,
@@ -148,11 +148,11 @@ is either one Snakemake invocation across many tiles or one monolithic
 dispatch step, and if it
 fails there's nothing sensible to chain into. Each Snakemake call is only
 retried as a whole (`run_snakemake_with_retry`, up to 10 attempts) against
-transient P:\ read errors.
+transient read errors on the shared data root (`paths.root`).
 
 Can be generated from either machine: from the local Windows box (writing
-scripts meant for Hydrax, same `config_hpc.yml`-based dual path resolution
-as `generate_eikonal_jobs.py`), or run natively ON Hydrax itself, in which
+scripts meant for the cluster, same `config_hpc.yml`-based dual path resolution
+as `generate_eikonal_jobs.py`), or run natively ON the cluster itself, in which
 case `config_hpc.yml` and `config_local.yml` point at the same paths.
 
 ## 2. Submit to SLURM
@@ -182,7 +182,7 @@ python {code_root}/snakemake_workflow/scripts/run_eikonal_cli.py \
     --tile-id <id> --return-period <RP..> --waterlevel-name <SLR_..>
 ```
 
-Every read on the HPC side that touches the shared P:\ mount (dem/mask/
+Every read on the HPC side that touches the shared `paths.root` mount (dem/mask/
 friction/boundaries, and a hop≥1 job's neighbour dem/mask/waterdepth) is
 retried on transient I/O errors (`config_utils.retry_transient_io`), and
 neighbour-availability checks use `config_utils.path_ready` rather than bare

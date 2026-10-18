@@ -99,14 +99,14 @@ def _write_wave_scripts(
     linux_tile_grid_path = linux_config["tile_grid"]["path"]
 
     # local_jobs_dir MUST come from the local config: the caller may pass the
-    # Linux hpc_cfg, whose "/p/..." jobs_dir silently parses as a
+    # Linux hpc_cfg, whose absolute Linux jobs_dir silently parses as a
     # drive-relative WindowsPath and writes to the wrong location.
     local_config = load_config(base_config_path)
     local_jobs_dir = Path(local_config["hpc"]["jobs_dir"])
     retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
 
-    # atomic_write: a compute node reading this over P: right after a
+    # atomic_write: a compute node reading this over the shared mount right after a
     # non-atomic write can see a partial file (UnicodeDecodeError).
     atomic_write(resolved_config_path, lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
 
@@ -136,7 +136,7 @@ def _write_wave_scripts(
             "python -c 'import sys, yaml; cfg_path, new_path = sys.argv[1], sys.argv[2]; "
             "cfg = yaml.safe_load(open(cfg_path, encoding=\"utf-8\")); cfg[\"tile_grid\"][\"path\"] = new_path; "
             "yaml.safe_dump(cfg, open(cfg_path, \"w\", encoding=\"utf-8\"))' "
-            # Unchecked, a failed rewrite would silently read the tile grid off P:\ again.
+            # Unchecked, a failed rewrite would silently read the tile grid off the shared data root again.
             '"$LOCAL_CONFIGFILE" "$LOCAL_TILE_GRID" || exit 1',
             "",
             f'python "{linux_batch_runner}" \\',

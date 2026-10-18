@@ -323,7 +323,7 @@ def main() -> None:
         with open(submit_script_path, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(submit_lines) + "\n")
         linux_jobs_dir = f"{linux_config['hpc']['jobs_dir']}/exposure"
-        print(f"\nSubmit on Hydrax with: bash {linux_jobs_dir}/submit_resume_exposure_analysis.sh")
+        print(f"\nSubmit on the cluster with: bash {linux_jobs_dir}/submit_resume_exposure_analysis.sh")
         return
 
     config_path = Path(args.config)
@@ -348,7 +348,7 @@ def main() -> None:
         f.write("\n".join(submit_lines) + "\n")
 
     linux_jobs_dir = f"{linux_config['hpc']['jobs_dir']}/exposure"
-    print(f"\nSubmit on Hydrax with: bash {linux_jobs_dir}/submit_exposure_analysis.sh")
+    print(f"\nSubmit on the cluster with: bash {linux_jobs_dir}/submit_exposure_analysis.sh")
 
 
 if __name__ == "__main__":

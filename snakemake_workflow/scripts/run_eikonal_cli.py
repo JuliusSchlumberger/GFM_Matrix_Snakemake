@@ -83,7 +83,7 @@ def main() -> None:
         tile_grid_path=tile_grid_path, raster_config=raster_config, flooding_config=flooding_config,
         ocean_code=ocean_code, river_code=river_code,
         # Staged to node-local scratch: GDAL/OGR's SQLite lock on a gpkg can
-        # hang indefinitely on P:\ from a Hydrax compute node.
+        # hang indefinitely on the shared data root from a cluster compute node.
         stage_boundaries=True,
     )
     # elapsed = this whole invocation.
