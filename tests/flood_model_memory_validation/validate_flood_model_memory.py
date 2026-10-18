@@ -29,7 +29,7 @@ def test_mask_is_cast_to_int8_not_left_at_default_dtype() -> None:
     print()
 
 
-def test_round_based_solve_converges_within_max_rounds_on_a_real_shaped_domain() -> None:
+def test_round_based_solve_converges_in_more_than_one_round() -> None:
     """Converge (max_change <= epsilon) within max_rounds, using more than 1 round."""
     print("=== solve_eikonal_dense: round-based mode converges within max_rounds on a non-trivial domain ===")
     rng = np.random.default_rng(1)
@@ -62,7 +62,7 @@ def test_round_based_solve_converges_within_max_rounds_on_a_real_shaped_domain()
 
 def main() -> None:
     test_mask_is_cast_to_int8_not_left_at_default_dtype()
-    test_round_based_solve_converges_within_max_rounds_on_a_real_shaped_domain()
+    test_round_based_solve_converges_in_more_than_one_round()
     print("All flood_model.py memory/convergence validation checks passed.")
 
 

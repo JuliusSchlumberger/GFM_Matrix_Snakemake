@@ -71,7 +71,7 @@ def test_reproject_nearest_is_upsample_only_no_blending() -> None:
     print()
 
 
-def test_reproject_nearest_transform_matches_scaled_source() -> None:
+def test_reproject_nearest_fills_misaligned_target_grid() -> None:
     print("=== _reproject_nearest_to_grid: exact-grid contract (no partial-pixel misalignment) ===")
     tmpdir = Path(tempfile.mkdtemp(prefix="subgrid_nearest_grid_test_"))
     try:
@@ -86,7 +86,7 @@ def test_reproject_nearest_transform_matches_scaled_source() -> None:
         assert out.shape == (4, 4)
         finite = out[np.isfinite(out)]
         assert finite.size > 0 and np.all(finite == 7.0)
-        print("PASS: reprojection runs correctly for both aligned and misaligned target grids")
+        print("PASS: reprojection runs correctly for a misaligned target grid")
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
     print()
@@ -124,7 +124,7 @@ def test_validate_subgrid_params_accepts_production_defaults() -> None:
 
 def main() -> None:
     test_reproject_nearest_is_upsample_only_no_blending()
-    test_reproject_nearest_transform_matches_scaled_source()
+    test_reproject_nearest_fills_misaligned_target_grid()
     test_validate_subgrid_params_rejects_odd_nr_pixels()
     test_validate_subgrid_params_rejects_non_positive()
     test_validate_subgrid_params_accepts_production_defaults()

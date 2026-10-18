@@ -58,7 +58,7 @@ def test_large_tile_unaffected_by_floor() -> None:
     print()
 
 
-def test_zero_min_size_matches_old_behaviour() -> None:
+def test_zero_min_size_is_plain_bbox_plus_buffer() -> None:
     print("=== min_search_size_deg=0.0: plain bbox+buffer selection, no minimum search size ===")
     tile = _tile((0.0, 0.0, 1.0, 1.0))
     station_in = _stations([(1.4, 0.5)])
@@ -74,7 +74,7 @@ def test_zero_min_size_matches_old_behaviour() -> None:
 def main() -> None:
     test_min_size_floor_kicks_in_for_tiny_tile()
     test_large_tile_unaffected_by_floor()
-    test_zero_min_size_matches_old_behaviour()
+    test_zero_min_size_is_plain_bbox_plus_buffer()
     print("All station-search validation checks passed.")
 
 
