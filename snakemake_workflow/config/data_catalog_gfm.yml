@@ -282,24 +282,6 @@ geogunit_country_units:
     paper_ref: Ward et al. (2020), Aqueduct Floods Methodology, World Resources Institute
       Technical Note.
 
-geogunit_country_list:
-  data_type: DataFrame
-  driver: xlsx
-  driver_kwargs:
-    index_col: 0
-    header: 0
-  path: inputs/WRI/geogunit_109_all_list.xlsx
-  filesystem: local
-  meta:
-    category: socioeconomic
-    description: >
-      Attribute table for geogunit_109: country name, ISO-3 code and WRI region per
-      ID. Not read by any code at present.
-    source_author: WRI Aqueduct Floods
-    source_url: https://www.wri.org/aqueduct
-    source_version: Aqueduct Floods (2020)
-    source_license: CC-BY-4.0 (WRI open data, attribution to WRI)
-
 flopros_protection_standards:
   data_type: DataFrame
   driver: xlsx
@@ -388,8 +370,8 @@ lu_to_roughness_lookup:
     category: lookup_table
     description: >
       Manning's n per Copernicus LC100 class (land_use), 23 rows, codes 0-200,
-      from HEC-RAS guidance adjusted for GFM. The code column is named
-      copernicus_worldcover but holds LC100 codes, not ESA WorldCover codes.
+      from HEC-RAS guidance adjusted for GFM. The column name copernicus_worldcover
+      is a label only (src/rasters.py indexes by it); its values are LC100 codes.
     source_author: GFM project, values from HEC-RAS (USACE) guidance
     source_url: https://www.hec.usace.army.mil/confluence/rasdocs/r2dum/latest/developing-a-terrain-model-and-geospatial-layers/creating-land-cover-mannings-n-values-and-impervious-layers
     source_version: project table
