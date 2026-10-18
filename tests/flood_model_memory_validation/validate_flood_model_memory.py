@@ -9,8 +9,8 @@ found during 2026-08 obstacle-coupling calibration on large real tiles:
   - the round-based eikonal solve (the default since 2026-08, replacing a
     fixed 3-sweep budget) must actually CONVERGE within max_rounds for a
     real, moderately complex domain - previously only checked by two
-    calibration scripts (test_obstacle_coupling_calibration.py,
-    test_sweep_budget_calibration.py) that need real tile data unavailable
+    calibration scripts (run_obstacle_coupling_study.py,
+    run_sweep_budget_study.py) that need real tile data unavailable
     on this machine (D:/GFM) and, more importantly, only ever printed
     diagnostics rather than asserting anything.
 

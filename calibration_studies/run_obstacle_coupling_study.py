@@ -1,10 +1,10 @@
 """Calibration run of obstacle-coupling across a representative pool of
-wave-0 tiles. Tile IDs come from `test_sweep_budget_calibration.py`'s
+wave-0 tiles. Tile IDs come from `run_sweep_budget_study.py`'s
 `wet_tiles_selected.txt` (that script's sweep=1 result already confirmed
 each of these tiles has real flooding for this scenario - no separate
 dry-check needed here).
 
-`load_tile()` matches test_sweep_budget_calibration.py's own conventions:
+`load_tile()` matches run_sweep_budget_study.py's own conventions:
 current-machine `--config`-driven paths, `knn`/`friction_scale_factor` from
 config.yml, friction scaled in the decode->scale->floor order
 `eikonal_runner.py` actually uses. `BLOCK_FRICTION` matches production's
@@ -82,7 +82,7 @@ production's actual threshold. Pass `--epsilon` explicitly for a softened-
 threshold sensitivity variant.
 
 Usage:
-    python test_obstacle_coupling_calibration.py <output_dir> [--config <config.yml>]
+    python run_obstacle_coupling_study.py <output_dir> [--config <config.yml>]
         [--tile-ids id [id ...]] [--max-outer N] [--inner-max-rounds N] [--epsilon M]
 """
 import argparse
@@ -100,7 +100,7 @@ import rasterio
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import load_config  # noqa: E402
 from eikonal import _ORTHANT_ORDER, _dense_sweep  # noqa: E402
-from flood_extent import effective_dem  # noqa: E402
+from flood_model import effective_dem  # noqa: E402
 from flood_model import _idw_seed_values, coastline_mask, prune_to_coast_connected  # noqa: E402
 from rasters import decode_dem_cm, decode_friction_int16, decode_waterlevel_cm  # noqa: E402
 
@@ -132,7 +132,7 @@ RIVER_CODE = 3
 
 # Fallback for a quick standalone smoke test if no tile_ids are given on
 # the command line - the real study always passes an explicit list read
-# from test_sweep_budget_calibration.py's wet_tiles_selected.txt (see
+# from run_sweep_budget_study.py's wet_tiles_selected.txt (see
 # module docstring).
 TILES = [2083, 2514, 1421, 2569, 2858, 2314, 753]
 
@@ -157,7 +157,7 @@ def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor
 
     dem = effective_dem(dem, mask)
     # decode -> scale -> floor, matching eikonal_runner.py's own production order exactly
-    # (see test_sweep_budget_calibration.py's own load_tile() comment for the full reasoning).
+    # (see run_sweep_budget_study.py's own load_tile() comment for the full reasoning).
     friction = friction * friction_scale_factor
     friction = np.where(friction > 0, friction, friction.dtype.type(0.001))
     coastline = coastline_mask(mask, ocean_code=OCEAN_CODE, river_code=RIVER_CODE)
@@ -177,7 +177,7 @@ def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor
     if len(station_values) == 0:
         raise ValueError(
             f"tile {tile_id} has zero boundary stations - should have been excluded "
-            "from wet_tiles_selected.txt by test_sweep_budget_calibration.py"
+            "from wet_tiles_selected.txt by run_sweep_budget_study.py"
         )
 
     stations_lonlat = np.column_stack(
@@ -463,7 +463,7 @@ def main() -> None:
 
     cfg = load_config(args.config)
     # cfg["simulation"]["model_outputs"], NOT a hardcoded root/"model_outputs" - see
-    # test_sweep_budget_calibration.py's own comment on this exact line for why.
+    # run_sweep_budget_study.py's own comment on this exact line for why.
     model_outputs = Path(cfg["simulation"]["model_outputs"])
     flooding_cfg = cfg["simulation"]["flooding"]
     knn = int(flooding_cfg["knn"])

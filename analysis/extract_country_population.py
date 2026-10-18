@@ -10,7 +10,7 @@ region codes, not a continuous field - grid misalignment between the
 WorldPop and WRI products is handled automatically, not assumed away).
 
 Unlike the exposure pipeline's own exposure_population_grid_{chunk_id}.tif
-(prepare_exposure_grid_chunk() in src/exposure.py), which is clipped to each
+(prepare_exposure_grid_chunk() in src/exposure_grid.py), which is clipped to each
 chunk's flood-simulation bbox (its own real connectivity-derived footprint,
 plus an explicit coastal buffer for hop=0 domains only - see
 src/connectivity_tiling.py's module docstring), this reads the population raster's
@@ -42,7 +42,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from protection import load_geogunit_ids  # noqa: E402
-from visualization import build_geo109_to_iso_lookup  # noqa: E402
+from analysis_figures import build_geo109_to_iso_lookup  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 

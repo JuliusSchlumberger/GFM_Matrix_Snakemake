@@ -47,11 +47,11 @@ from pathlib import Path
 import geopandas as gpd
 from shapely.geometry import box as shapely_box
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import get_data_catalog, load_config  # noqa: E402
 from tiles import load_tile_grid  # noqa: E402
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 
 GROUPS = {
     # 2026-10-08: GBR currently only has Wales/Scotland coastal benchmark entries

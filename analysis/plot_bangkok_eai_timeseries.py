@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import get_data_catalog, load_config, merged_slr_scenarios  # noqa: E402
 from exposure_analysis import _trapezoid_eai, resolve_ssp_scenario_eai  # noqa: E402
 from population_growth import load_ssp_growth_factors  # noqa: E402
-from visualization import load_slr_trajectories, ssp_rcp_label  # noqa: E402
+from analysis_figures import load_slr_trajectories, ssp_rcp_label  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _CASE_ISO = "THA"  # no sub-national growth projection exists - national factor applies, see module docstring

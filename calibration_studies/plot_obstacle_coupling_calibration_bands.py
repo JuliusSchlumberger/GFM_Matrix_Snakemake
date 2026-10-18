@@ -1,12 +1,12 @@
 """Single 2-panel summary figure for the obstacle-coupling calibration
-study (see calibration_studies/test_obstacle_coupling_calibration.py and
+study (see calibration_studies/run_obstacle_coupling_study.py and
 docs/methods_03_calibration_sensitivity.md §3): each panel is a
 median/2nd/98th-percentile/min-max band across the wet calibration tiles
 that still have a real observation at that outer iteration, plotted
 against outer iteration, with a vertical line at `max_outer_iterations`
 marking the production cap that was actually chosen.
 
-Reads test_obstacle_coupling_calibration.py's per-tile raw CSVs directly:
+Reads run_obstacle_coupling_study.py's per-tile raw CSVs directly:
 the n_outer=0 baseline row and one row per outer iteration actually run
 (status="ok"). A tile's own trace ends once outer_convergence_pct is
 satisfied, so the number of tiles contributing to a given outer

@@ -10,7 +10,7 @@ import rasterio
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import retry_transient_io  # noqa: E402
-from plotting import cached_land_polygons, compute_flood_area_km2, plot_raster_with_coastlines  # noqa: E402
+from pipeline_plots import cached_land_polygons, compute_flood_area_km2, plot_raster_with_coastlines  # noqa: E402
 
 pp_cfg = snakemake.params.pp_cfg  # noqa: F821
 plot_cfg = pp_cfg["plots"]

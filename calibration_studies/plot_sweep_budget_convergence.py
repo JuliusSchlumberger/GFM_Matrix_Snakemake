@@ -19,7 +19,7 @@ from pathlib import Path
 import pandas as pd
 
 SWEEPS_PER_ROUND = 4
-N_COMPLETE_ROUNDS = 100  # matches test_sweep_budget_calibration.py's own MAX_ROUNDS_CEILING - the
+N_COMPLETE_ROUNDS = 100  # matches run_sweep_budget_study.py's own MAX_ROUNDS_CEILING - the
 # true ceiling every tile's trace is capped at
 
 

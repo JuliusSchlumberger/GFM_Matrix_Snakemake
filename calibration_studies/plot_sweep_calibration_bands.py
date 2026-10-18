@@ -1,11 +1,11 @@
 """Single 4-panel summary figure for the sweep-budget calibration study
-(see calibration_studies/test_sweep_budget_calibration.py and
+(see calibration_studies/run_sweep_budget_study.py and
 docs/methods_03_calibration_sensitivity.md §2).
 
 Panels (b)-(d) are median/98th-percentile/min-max bands across the wet
 calibration tiles (`wet_tiles_selected.txt`) that still have a real
 observation at that round, plotted against round. Reads
-test_sweep_budget_calibration.py's per-SWEEP raw CSVs directly (not
+run_sweep_budget_study.py's per-SWEEP raw CSVs directly (not
 sweep_convergence_summary.csv, which only has one row per tile) and
 aggregates to per-ROUND values - see _aggregate_to_rounds for the exact
 rule per column. A tile's own trace ends once production's round-level

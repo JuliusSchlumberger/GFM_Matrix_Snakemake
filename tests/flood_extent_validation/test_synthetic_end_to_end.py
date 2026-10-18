@@ -25,7 +25,7 @@ from shapely.geometry import box as shapely_box
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from plotting import pixel_area_km2_grid  # noqa: E402
+from pipeline_plots import pixel_area_km2_grid  # noqa: E402
 from validation import (  # noqa: E402
     benchmark_fraction_from_vector,
     confusion_counts,

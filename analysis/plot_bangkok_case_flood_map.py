@@ -3,7 +3,7 @@ per SLR scenario, case polygon outlined on every panel. Reads the merged
 per-(RP,SLR) VRTs the Snakemake postprocess target already writes
 (merged_results/waterdepth_RP100_{SLR}.vrt), windowed to the case
 polygon's own bbox (+ a small buffer for context) - adapts
-src/plotting.py::plot_raster_with_coastlines's own windowed-read/colorbar
+src/pipeline_plots.py::plot_raster_with_coastlines's own windowed-read/colorbar
 idiom (that function saves one whole figure per call, not a subplot, so
 its internals are reproduced here instead of calling it directly).
 

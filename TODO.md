@@ -116,3 +116,11 @@ in-phase.
 - **`check_preprocess_progress.py` still counts `aqueduct_*.toml` files** per tile: Julia-era Aqueduct
   TOML configs that no current code writes, so that column always reports 0 of N. Not renamed in
   Phase 7a (it is a file-name pattern on disk). Remove the TOML column or point it at a real output.
+- **Phase 7b renamed modules and scripts** (src/plotting -> pipeline_plots, visualization ->
+  analysis_figures, exposure -> exposure_grid, flood_extent folded into flood_model,
+  validation.tri_domain_mask -> rasters.polygon_domain_mask, validation/_rescore_england_fz3 ->
+  rescore_england_fz3, calibration_studies test_*_calibration -> run_*_study and
+  select_calibration_tiles -> select_study_candidate_tiles, scripts/calibration/select_country_tiles
+  -> preparation/select_country_tiles). Code outside this repo that imports the old module names
+  (notebooks, personal scripts) needs the same rename. Calibration-study sbatch files generated
+  before the rename call the old script names: regenerate them with generate_calibration_batch_jobs.py.

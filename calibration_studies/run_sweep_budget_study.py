@@ -1,7 +1,7 @@
 """Calibration run of the production, non-obstacle-coupling sweep count
 (`flood_model.flood_depth_dense`'s `sweep_budget`/round-based `max_rounds`),
 across a representative pool of wave-0 tiles. Tile IDs come from
-`select_calibration_tiles.py`'s `candidate_tiles.txt`.
+`select_study_candidate_tiles.py`'s `candidate_tiles.txt`.
 
 For each tile, seeds exactly like production (`coastline_mask` +
 `_idw_seed_values`), then runs ONE continuous sequence of individual
@@ -47,7 +47,7 @@ dry tiles" is implemented: the candidate pool is deliberately
 over-provisioned beyond the number of wet tiles actually wanted, and this
 script writes `wet_tiles_selected.txt` (the first N_TILES_WANTED
 confirmed-wet tile_ids, in the order given) for
-`test_obstacle_coupling_calibration.py` to consume directly.
+`run_obstacle_coupling_study.py` to consume directly.
 
 At each sweep, compares the full tile-shaped depth array (zeros where dry)
 to the previous sweep's (sweep 1 compared against an implicit all-dry
@@ -66,7 +66,7 @@ Output: ONE CSV per tile, written incrementally, in CSV_DIR, plus a shared
 progress log on stdout.
 
 Usage:
-    python test_sweep_budget_calibration.py <output_dir> [--config <config.yml>] [--tile-ids id [id ...]]
+    python run_sweep_budget_study.py <output_dir> [--config <config.yml>] [--tile-ids id [id ...]]
 """
 import argparse
 import csv
@@ -82,7 +82,7 @@ import rasterio
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import load_config  # noqa: E402
 from eikonal import _ORTHANT_ORDER, _dense_sweep  # noqa: E402
-from flood_extent import effective_dem  # noqa: E402
+from flood_model import effective_dem  # noqa: E402
 from flood_model import _idw_seed_values, coastline_mask, prune_to_coast_connected  # noqa: E402
 from rasters import decode_dem_cm, decode_friction_int16, decode_waterlevel_cm  # noqa: E402
 
@@ -91,7 +91,7 @@ RETURN_PERIOD = "RP100"
 WATERLEVEL_NAME = "SLR_0"
 
 # tile_generation.river_code / ocean_code in config.yml - hardcoded here,
-# matching test_obstacle_coupling_calibration.py's own convention.
+# matching run_obstacle_coupling_study.py's own convention.
 OCEAN_CODE = 1
 RIVER_CODE = 3
 
@@ -391,7 +391,7 @@ def main() -> None:
         print(f"{len(selected)}/{n_tiles_wanted} wet tiles selected, written to {wet_file}")
         if len(selected) < n_tiles_wanted:
             print(f"WARNING: only found {len(selected)} wet tiles out of {len(tiles)} candidates - "
-                  f"need more candidates from select_calibration_tiles.py", flush=True)
+                  f"need more candidates from select_study_candidate_tiles.py", flush=True)
 
 
 if __name__ == "__main__":

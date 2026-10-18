@@ -29,7 +29,7 @@ supersampled array is always bounded to one block's size regardless of how
 large the parent chunk is.
 
 Usage:
-    python validation/_rescore_england_fz3.py --config snakemake_workflow/config/config.yml
+    python validation/rescore_england_fz3.py --config snakemake_workflow/config/config.yml
 """
 
 import argparse
@@ -43,7 +43,7 @@ from shapely.geometry import box
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io  # noqa: E402
-from plotting import pixel_area_km2_grid  # noqa: E402
+from pipeline_plots import pixel_area_km2_grid  # noqa: E402
 import validation as v  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))

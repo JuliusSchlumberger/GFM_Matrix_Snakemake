@@ -46,7 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pathways import slr_pathway  # noqa: E402
 from population_extension import extend_growth_factors  # noqa: E402
-from visualization import (  # noqa: E402
+from analysis_figures import (  # noqa: E402
     load_growth_matrix_csv,
     build_growth_matrix_from_grid,
     draw_ember_panel,

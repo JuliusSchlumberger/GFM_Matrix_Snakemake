@@ -83,7 +83,7 @@ def _csi_rows(gbr_metrics: Path, can_metrics: Path, england_fz3_rescore: Path, e
     can_metrics : Path
         ``metrics_CAN_RP100_SLR_0.csv`` from ``validate_country.py``.
     england_fz3_rescore : Path
-        ``england_fz3_rescore.csv`` from ``_rescore_england_fz3.py``.
+        ``england_fz3_rescore.csv`` from ``rescore_england_fz3.py``.
     england_fz2_band : Path
         ``england_fz2_band_result.csv`` from ``validate_england_fz2_band.py``.
 
@@ -102,12 +102,12 @@ def _csi_rows(gbr_metrics: Path, can_metrics: Path, england_fz3_rescore: Path, e
             # England has no exact native-RP match for FZ3 (~200yr, bracketed
             # RP100/RP250, same as Wales/Scotland) - report both bracket
             # points against Wing et al.'s single published value. FZ3 comes
-            # from _rescore_england_fz3.py's own output, NOT
+            # from rescore_england_fz3.py's own output, NOT
             # multi_rp_summary.csv - that file's own FZ3 rows are from the
             # pre-correction (sea-only, no estuarine 'river and sea') benchmark
             # and were never regenerated (the run that would have refreshed
             # them was killed for stalling/memory-spiking - see
-            # _rescore_england_fz3.py's own docstring). FZ2 is reported as the
+            # rescore_england_fz3.py's own docstring). FZ2 is reported as the
             # model's own incremental RP100-RP1000 band vs the benchmark's own
             # incremental band (validate_england_fz2_band.py's output), NOT a
             # naive cumulative-RP1000-vs-benchmark comparison - see

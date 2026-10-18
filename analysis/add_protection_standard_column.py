@@ -19,7 +19,7 @@ delta-level reporting figure, not an input to any threshold logic here.
 Per delta: the geogunit raster is read clipped to the delta's own bbox
 (`DataCatalog.get_rasterdataset(..., bbox=...)`), the delta's real polygon
 is rasterized onto THAT raster's own native grid with
-`validation.tri_domain_mask` (same reusable building block
+`validation.polygon_domain_mask` (same reusable building block
 `compute_delta_flood_extent.py` already uses for the flood-extent mask),
 and the MAX of `coastal_rp` across every distinct geogunit ID touching the
 polygon is taken. A delta with no resolvable geogunit coverage (offshore
@@ -49,7 +49,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
-from validation import tri_domain_mask  # noqa: E402
+from rasters import polygon_domain_mask  # noqa: E402
 
 from compute_delta_flood_extent import VOLGA_ID  # noqa: E402  (sibling script - reuse, avoid re-duplicating exclusion)
 
@@ -76,7 +76,7 @@ def max_coastal_protection_for_delta(delta_geometry, catalog, coastal_rp: pd.Ser
         valid &= geo_arr != nodata
 
     gdf_single = gpd.GeoDataFrame({"geometry": [delta_geometry]}, crs="EPSG:4326")
-    domain = tri_domain_mask(gdf_single, geo_da.raster.transform, geo_da.raster.crs, geo_arr.shape)
+    domain = polygon_domain_mask(gdf_single, geo_da.raster.transform, geo_da.raster.crs, geo_arr.shape)
 
     ids = np.unique(geo_arr[valid & domain].astype("int32"))
     if ids.size == 0:

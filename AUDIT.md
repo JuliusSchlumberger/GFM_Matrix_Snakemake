@@ -819,7 +819,7 @@ Baseline (Phase 0): thailand_bangkok 453 jobs (run_aqueduct 90, extract_boundari
   - `run_pipeline.py` → `run_eikonal_dag.py` (A).
   - Unify `generate_hpc_*_job(s)` naming; `generate_exposure_jobs` → `generate_hpc_exposure_jobs`.
   - *Verify*: `git grep -i aqueduct` shows only provenance and the deprecation fallback; `pytest`; `snakemake -n all` job counts equal the baseline (then D: `--list-code-changes`, and `--touch` if needed); the generated sbatch files differ from the baseline only in the renamed script names.
-- **7b. Other renames.**
+- **7b. Other renames.** ✅ *done 2026-10-18 (all items listed below; `generate_hpc_*` singular/plural not unified). Verified: 38 of 46 changed .py files are pure renames by AST; the other 8 are the intended moves (flood_model fold, polygon_domain_mask move + its 4 importers, select_country_tiles path depth), with the moved definitions AST-identical to the originals. All 22 src modules import; every touched CLI passes --help; ruff, pytest (66), dry runs clean.*
   - `src/flood_extent.py` folds into `flood_model.py`.
   - `src/validation.tri_domain_mask` → `polygon_domain_mask`, probably moved to `rasters.py`. It is a generic polygon-to-raster mask, used by the deltas and Bangkok analysis, not by validation.
   - `_rescore_england_fz3.py` → `rescore_england_fz3.py`.

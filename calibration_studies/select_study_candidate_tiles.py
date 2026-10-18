@@ -32,14 +32,14 @@ free side-effect of the other.
 Picks N candidates total - more than the final tile count actually needed,
 since some candidates will turn out to have zero flooding for this scenario
 and get dropped by the calibration scripts themselves (see
-test_sweep_budget_calibration.py's dry-tile handling) - this is deliberately
+run_sweep_budget_study.py's dry-tile handling) - this is deliberately
 just a candidate POOL, not the final list.
 
 Writes candidate_tiles.txt (one tile_id per line, in bin then percentile-rank
 order) to the given output directory, and prints a summary table.
 
 Usage:
-    python select_calibration_tiles.py <output_dir> [n_candidates]
+    python select_study_candidate_tiles.py <output_dir> [n_candidates]
 """
 import argparse
 import math

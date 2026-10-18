@@ -111,8 +111,8 @@ from scipy import ndimage
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from merge import EIKONAL_NODATA, _make_chunk_transform, _open_overlapping_tiles, _tile_id_from_path  # noqa: E402
-from plotting import pixel_area_km2_grid  # noqa: E402
-from validation import tri_domain_mask  # noqa: E402
+from pipeline_plots import pixel_area_km2_grid  # noqa: E402
+from rasters import polygon_domain_mask  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sfincs_tiles"))
 from build_station_boundary_lines import MASK_VRT, OCEAN_CODE  # noqa: E402
@@ -353,7 +353,7 @@ def score_delta(delta_row, candidate_tiles: list[int], model_outputs: Path, prot
             # sentinel is NaN, and NaN != NaN is always True in numpy, so an equality
             # check would silently treat every uncovered cell as "covered".
             covered = ~np.isnan(depth)
-            domain = tri_domain_mask(delta_gdf, out_transform, "EPSG:4326", (out_h, out_w)) & covered
+            domain = polygon_domain_mask(delta_gdf, out_transform, "EPSG:4326", (out_h, out_w)) & covered
             area_grid = pixel_area_km2_grid(out_transform, out_w, out_h)
             modeled_km2 = float((domain * area_grid).sum())
             if prot_inputs is not None:

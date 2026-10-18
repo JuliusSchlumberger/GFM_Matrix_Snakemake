@@ -24,7 +24,7 @@ import rasterio
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import load_config  # noqa: E402
 from eikonal import _ORTHANT_ORDER, _dense_sweep  # noqa: E402
-from flood_extent import effective_dem  # noqa: E402
+from flood_model import effective_dem  # noqa: E402
 from flood_model import _idw_seed_values, coastline_mask  # noqa: E402
 from rasters import decode_dem_cm, decode_friction_int16, decode_waterlevel_cm  # noqa: E402
 

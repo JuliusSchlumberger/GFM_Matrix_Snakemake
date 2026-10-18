@@ -345,44 +345,6 @@ def model_domain_mask(depth: np.ndarray, nodata: float = -9999.0) -> np.ndarray:
     return depth != nodata
 
 
-def tri_domain_mask(
-    perimeter_gdf: gpd.GeoDataFrame, dst_transform: Affine, dst_crs, dst_shape: tuple[int, int],
-) -> np.ndarray:
-    """Rasterize a "perimeter" study area into an evaluation-domain mask.
-
-    Rasterizes the perimeter polygon(s) exactly as given (point-in-polygon
-    containment, `all_touched=False`), with no buffer: an official study-area
-    perimeter IS the agency's own study design, so there is nothing a buffer would be
-    compensating for. `perimeter_gdf` should already be filtered to the zones
-    relevant to the caller; this function does no filtering of its own.
-
-    Parameters
-    ----------
-    perimeter_gdf : geopandas.GeoDataFrame
-        Study-area perimeter polygon(s).
-    dst_transform : affine.Affine
-        Affine transform of the destination grid.
-    dst_crs
-        CRS of the destination grid.
-    dst_shape : tuple[int, int]
-        ``(height, width)`` of the destination grid.
-
-    Returns
-    -------
-    numpy.ndarray
-        Boolean array of shape `dst_shape`; True inside the perimeter.
-    """
-    if dst_crs is not None and perimeter_gdf.crs is not None and perimeter_gdf.crs != dst_crs:
-        perimeter_gdf = perimeter_gdf.to_crs(dst_crs)
-    geoms = [g for g in perimeter_gdf.geometry if g is not None and not g.is_empty]
-    if not geoms:
-        return np.zeros(dst_shape, dtype=bool)
-    return rasterize(
-        [(g, 1) for g in geoms], out_shape=dst_shape, transform=dst_transform,
-        fill=0, dtype="uint8", all_touched=False,
-    ).astype(bool)
-
-
 def permanent_water_mask(land_use: np.ndarray, exclude_codes: tuple[int, ...]) -> np.ndarray:
     """Mark cells that are permanent water (rivers/lakes/sea) per a categorical land-use grid.
 

@@ -16,7 +16,7 @@ The functions here are organized in three layers:
 
 Usage (standalone, after the Snakemake pipeline has completed):
 
-    from visualization import (
+    from analysis_figures import (
         load_growth_matrix_csv,
         build_growth_matrix_from_grid,
         plot_burning_ember,

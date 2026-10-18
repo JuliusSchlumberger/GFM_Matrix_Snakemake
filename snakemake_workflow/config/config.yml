@@ -316,7 +316,7 @@ simulation: # Used by: preprocessing rules
     # each outer iteration's inner solve when obstacle_coupling is enabled
     # (below) - not obstacle_coupling-specific, hence top-level here rather
     # than nested under it. 40 rounds: the sweep-budget calibration study's
-    # conclusion (calibration_studies/test_sweep_budget_calibration.py, see
+    # conclusion (calibration_studies/run_sweep_budget_study.py, see
     # docs/methods_03_calibration_sensitivity.md §2) - 58.5% of tiles
     # strictly converge by round 40, and of the ones that don't, 97.8%
     # already have their flood extent (depth>0 cells) fully frozen by then

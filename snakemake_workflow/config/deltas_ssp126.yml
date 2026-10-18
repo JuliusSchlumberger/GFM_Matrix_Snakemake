@@ -36,7 +36,7 @@ simulation:
     # Reverted to production's own default (4), 2026-10 - briefly set to 5
     # based on a sample-bounded production-run byproduct signal, before the
     # real obstacle-coupling calibration study (calibration_500_tiles,
-    # test_obstacle_coupling_calibration.py) actually ran and confirmed 4
+    # run_obstacle_coupling_study.py) actually ran and confirmed 4
     # is sufficient. No override needed here any more - inherits config.yml's
     # own simulation.flooding.obstacle_coupling.max_outer_iterations: 4.
   model_outputs: "{root}/deltas_floodmaps/ssp126/model_outputs"

@@ -17,7 +17,37 @@ from scipy import ndimage
 from sklearn.neighbors import BallTree
 
 from eikonal import solve_eikonal_dense
-from flood_extent import effective_dem
+
+
+# Effective elevation (formerly src/flood_model.py, folded in during cleanup Phase 7b).
+# Mirrors core.jl's run-time preprocessing (`dem[.!landmask] .= 0.0`) rather than trusting
+# dem.tif's raw values: rasters.extract_dem only fills cells that are nodata in the DEM
+# SOURCE, so a river/lake/ocean cell with a real DeltaDTM elevation keeps it in dem.tif.
+LAND_CODE = 0
+
+
+def effective_dem(dem: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Zero out elevation on non-land cells, mirroring core.jl's run-time preprocessing.
+
+    Every non-land cell (ocean, lake, river) is treated as elevation 0.0 regardless of
+    what value is stored in dem.tif for it, matching core.jl's `dem[.!landmask] .= 0.0`
+    (needed because `rasters.extract_dem` only fills DEM-source nodata, so a water-body
+    cell can still carry a real DeltaDTM elevation that core.jl zeroes anyway).
+
+    Parameters
+    ----------
+    dem : np.ndarray
+        Elevation raster (metres), same shape as `mask`.
+    mask : np.ndarray
+        Land/water code raster (0=land, 1=ocean, 2=lake, 3=river); any non-land code is
+        zeroed.
+
+    Returns
+    -------
+    np.ndarray
+        Elevation array with the same dtype as `dem`, non-land cells set to 0.0.
+    """
+    return np.where(mask == LAND_CODE, dem, dem.dtype.type(0.0))
 
 EARTH_RADIUS_M = 6_371_000.0
 _STRUCTURE_8 = np.ones((3, 3), dtype=bool)

@@ -55,7 +55,7 @@ from config_utils import get_data_catalog, load_config, retry_transient_io  # no
 from pathways import eai_along_pathway  # noqa: E402
 from population_extension import extend_growth_factors  # noqa: E402
 from population_growth import _build_name_to_iso, interpolate_growth_factor, load_ssp_growth_factors  # noqa: E402
-from visualization import (  # noqa: E402
+from analysis_figures import (  # noqa: E402
     CONTINENTS, build_growth_matrix_from_grid, iso_to_continent, load_growth_matrix_csv, load_slr_trajectories,
     ssp_rcp_label,
 )

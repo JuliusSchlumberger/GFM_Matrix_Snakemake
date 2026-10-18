@@ -36,8 +36,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _comm
 from _common import _read_band, _round_val  # noqa: E402
 from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
 from exposure_analysis import _safe  # noqa: E402
-from plotting import pixel_area_km2_grid  # noqa: E402
-from validation import tri_domain_mask  # noqa: E402
+from pipeline_plots import pixel_area_km2_grid  # noqa: E402
+from rasters import polygon_domain_mask  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -99,7 +99,7 @@ def main() -> None:
         pop[~np.isfinite(pop)] = 0.0
         height, width = pop.shape
 
-        mask = tri_domain_mask(case_poly, transform, "EPSG:4326", (height, width))
+        mask = polygon_domain_mask(case_poly, transform, "EPSG:4326", (height, width))
         if not mask.any():
             continue
         chunks_with_overlap += 1

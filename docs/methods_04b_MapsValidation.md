@@ -92,7 +92,7 @@ Output: one row per `(country, benchmark_key, return_period)` in `{validation.ou
 
 `fetch_england_flood_zones.py` downloads the EA "Flood Map for Planning: Flood Zones 2 & 3 (Rivers and Sea)" via its OGC API in ~1° tiles (a single national request never returned), keeping modelled-origin features with `flood_source` `sea` or `river and sea` (the estuarine/tidal-river class); plain `river` and `unknown` are excluded. The output is split by zone into the files behind `england_ea_floodzone3_sea` and `england_ea_floodzone2_sea`.
 
-### Flood Zone 3 rescore — `_rescore_england_fz3.py`
+### Flood Zone 3 rescore — `rescore_england_fz3.py`
 
 Re-scores FZ3 at the RP100/RP250 bracket only — the same two numbers `run_multi_rp_summary.py` would give, by a narrower path. It exists because the full GBR multi-RP run failed on memory/runtime once the FZ3 layer became much denser (73,821 features after adding `river and sea`): loading all GBR benchmarks at once, and supersampling a full un-clipped 5° chunk in one array, both exceeded safe memory. The script loops chunk by chunk in fixed 8192-px row blocks (its own constant, not `postprocessing.block_size`) so the supersampled array stays bounded, and scores with the same `confusion_counts_soft`. Writes `{validation.output_dir}/england_fz3_rescore.csv`.
 
@@ -114,7 +114,7 @@ Each direction gives plain confusion counts (HR, FAR, CSI, bias) at `primary_thr
 ## Reporting tables
 
 - `compare_against_published.py` → `validation/comparison_vs_published.csv`: our CSI per (sub-)region against Bates et al. (2023), Wing et al. (2024) and Chaudhuri et al. (2026), and SF Bay RMSE/MAE against Kasmalkar et al. (2024). Published values are transcribed, not re-derived.
-- `build_overview_table.py` → `validation/overview_extent_metrics.csv` (HR/FAR/bias/CSI per region, with published CSI) and `validation/overview_sf_bay_depth.csv` (SF Bay RMSE/MAE, both directions). No new scoring — reshapes the outputs of `validate_country.py`, `_rescore_england_fz3.py`, `validate_england_fz2_band.py` and `validate_sf_bay.py`.
+- `build_overview_table.py` → `validation/overview_extent_metrics.csv` (HR/FAR/bias/CSI per region, with published CSI) and `validation/overview_sf_bay_depth.csv` (SF Bay RMSE/MAE, both directions). No new scoring — reshapes the outputs of `validate_country.py`, `rescore_england_fz3.py`, `validate_england_fz2_band.py` and `validate_sf_bay.py`.
 
 ## Orchestration and plots
 
@@ -141,7 +141,7 @@ Each direction gives plain confusion counts (HR, FAR, CSI, bias) at `primary_thr
 |---|---|---|---|---|
 | Wales (GBR) | NRW Flood Zone 3 (sea), 0.5% AEP (~1-in-200) | RP100, RP250 | `wales_nrw_floodzone_seas` | `severn_estuary`, `menai_strait` |
 | Scotland (GBR) | SEPA coastal extent, Medium likelihood, present day (~1-in-200) | RP100, RP250 | `scotland_sepa_coastal_m` | `firth_of_forth` |
-| England FZ3 (GBR) | EA Flood Zone 3 (sea + river-and-sea), ≥0.5% AEP | RP100, RP250 | `england_ea_floodzone3_sea`; `_rescore_england_fz3.py` | — |
+| England FZ3 (GBR) | EA Flood Zone 3 (sea + river-and-sea), ≥0.5% AEP | RP100, RP250 | `england_ea_floodzone3_sea`; `rescore_england_fz3.py` | — |
 | England FZ2 (GBR) | EA Flood Zone 2, incremental 0.1-0.5% AEP band | RP1000 minus RP100 | `england_ea_floodzone2_sea`; `validate_england_fz2_band.py` | — |
 | New Brunswick (CAN) | GeoNB present-day 1-in-100 (combined inland + coastal) | RP100 | `new_brunswick_present_day_1in100yr` | `cumberland_basin`, `petitcodiac` |
 | San Francisco Bay (USA) | USGS CoSMoS depth, RP100, no SLR | RP100 | no catalog entry; `build_sf_bay_benchmark_mosaic.py` + `validate_sf_bay.py` | — |

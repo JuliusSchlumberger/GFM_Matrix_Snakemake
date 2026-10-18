@@ -1,6 +1,6 @@
 """Single figure for the sweep-budget calibration study: wall-clock time vs.
 number of sweep rounds, coloured by tile size (see
-calibration_studies/test_sweep_budget_calibration.py and
+calibration_studies/run_sweep_budget_study.py and
 docs/methods_03_calibration_sensitivity.md section 2) - the companion to
 plot_sweep_calibration_bands.py's own round-indexed BAND panels, this one
 shows each tile as its own point instead of a pooled band, with tile size

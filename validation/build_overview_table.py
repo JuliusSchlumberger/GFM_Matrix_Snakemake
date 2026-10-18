@@ -4,7 +4,7 @@ San-Francisco-Bay-only table with RMSE/MAE (all-pixels and flooded-pixels,
 both comparison directions) against Kasmalkar et al. (2024).
 
 Reuses every number already computed by validate_country.py (GBR/CAN
-metrics_*.csv), _rescore_england_fz3.py, validate_england_fz2_band.py and
+metrics_*.csv), rescore_england_fz3.py, validate_england_fz2_band.py and
 validate_sf_bay.py - no new scoring, just reshaped for reporting. See
 compare_against_published.py for the long/tidy equivalent this draws the
 same underlying numbers from (published values transcribed from the user,
@@ -75,7 +75,7 @@ def build_extent_table(
     can_metrics : Path
         ``metrics_CAN_RP100_SLR_0.csv`` from ``validate_country.py``.
     england_fz3_rescore : Path
-        ``england_fz3_rescore.csv`` from ``_rescore_england_fz3.py``.
+        ``england_fz3_rescore.csv`` from ``rescore_england_fz3.py``.
     england_fz2_band : Path
         ``england_fz2_band_result.csv`` from ``validate_england_fz2_band.py``.
 

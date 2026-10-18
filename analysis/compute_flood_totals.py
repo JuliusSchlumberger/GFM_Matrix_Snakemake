@@ -53,7 +53,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _common)
 from _common import _round_val  # noqa: E402
 from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io  # noqa: E402
-from plotting import pixel_area_km2_grid  # noqa: E402
+from pipeline_plots import pixel_area_km2_grid  # noqa: E402
 from exposure_analysis import _build_iso_index, _safe, country_sums  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]

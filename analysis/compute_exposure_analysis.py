@@ -115,7 +115,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _comm
 from _common import _read_band  # noqa: E402
 from config_utils import get_data_catalog, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
 from population_growth import load_ssp_growth_factors, interpolate_growth_factor  # noqa: E402
-from visualization import load_slr_trajectories  # noqa: E402
+from analysis_figures import load_slr_trajectories  # noqa: E402
 from exposure_analysis import (                                 # noqa: E402
     build_adapt_protection_fraction,
     protect_exposure_grid,

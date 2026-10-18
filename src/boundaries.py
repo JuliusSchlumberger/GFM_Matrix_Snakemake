@@ -13,7 +13,7 @@ from scipy import ndimage
 from shapely.geometry import box
 
 from config_utils import retry_transient_io
-from flood_extent import effective_dem
+from flood_model import effective_dem
 from merge import EIKONAL_NODATA, decode_waterdepth_array
 from rasters import decode_dem_cm, encode_waterlevel_cm
 from tiles import _scan_mask_dir, mosaic_water_fraction_downsampled
