@@ -1,7 +1,4 @@
-# Values pinned for the `deltas_ssp126` scenario (2026-10-18): what its existing outputs were
-# computed with, before config.yml's defaults moved on. Merged by
-# snakemake_workflow/scripts/materialize_configs.py AFTER deltas_ssp126.yml.
-# Delete a key here to let the scenario follow config.yml again (then re-run it).
+# Values the existing deltas_ssp126 outputs were computed with; merged after deltas_ssp126.yml by materialize_configs.py. Delete a key to follow config.yml (then re-run).
 analysis: {plot_timeseries: true}
 population_growth:
   output_years: [2025, 2030, 2035, 2040, 2045, 2050, 2060, 2075, 2100]

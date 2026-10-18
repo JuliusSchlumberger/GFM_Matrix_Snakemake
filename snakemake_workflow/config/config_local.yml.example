@@ -1,18 +1,13 @@
 # Machine-local configuration overrides for GFM.
 #
-# Copy this file to config_local.yml (git-ignored) in this directory and fill in
-# the values for your machine. Only include the keys you need to override -
-# everything else is inherited from config.yml. Snakemake and every standalone
-# script (via src/config_utils.load_config) load it automatically if it exists.
-#
-# On HPC (Hydrax) use config_hpc.yml instead (copy config_hpc.yml.example).
+# Copy to config_local.yml (git-ignored) in this directory; only include keys to override.
+# Loaded automatically by Snakemake and every script (src/config_utils.load_config).
+# On HPC (Hydrax) use config_hpc.yml instead.
 
 paths:
-  # Root directory for all project data and model outputs. Every path in
-  # config.yml that contains {root} resolves to this value.
+  # Every {root} path in config.yml resolves to this.
   root: "P:/11212688-004-global-floodmaps/modelling"   # <- your data root
 
-  # Root of this repository clone.
   code_root: "C:/path/to/GFM_Matrix_Snakemake"          # <- your checkout
 
   # Optional: local SFINCS executable for tests/sfincs_synthetic_end_to_end/test_sfincs_smoke.py

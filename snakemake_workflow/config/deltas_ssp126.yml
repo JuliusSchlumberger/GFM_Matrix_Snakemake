@@ -1,40 +1,14 @@
-# Global-deltas flood hazard maps, RCP2.6-equivalent scenario (ssp126),
-# RP100, all 5 production SLR magnitudes, 2026-10.
-#
-# 203 tiles (48 of 49 deltas in inputs/DeltasGlobal/all_deltas.shp matched
-# at least one production tile within a 0.5deg bbox buffer - see
-# preparation/build_delta_tile_subset.py. The 49th, Id=44 (Volga delta,
-# draining into the landlocked Caspian Sea), has NO production tile
-# coverage anywhere within 2deg - the Caspian is never coded ocean_code in
-# DeltaDTM's mask, so this pipeline's COAST-RP-based forcing has no real
-# station data there; tile_generation never produced a domain for it. Out
-# of scope for this deliverable under the current forcing scheme.
-#
-# friction_scale_factor=9.0 per explicit user request.
-#
-# Fully isolated from BOTH production AND the sibling ssp245 run (own
-# model_outputs -> own preprocessing_inputs_dir by default, see
-# run_eikonal_cli.py's `preprocessing_inputs_dir or model_outputs`
-# fallback - own WL_scenarios, own merged_results/figures) - built fresh
-# rather than reusing any existing production boundary-condition data, per
-# explicit user decision, even though ssp245 happens to be production's
-# own default slr_projection.
-#
-# Layered on top of config.yml + config_local.yml via
-# src/config_utils.py::materialize_config.
+# Global-deltas flood hazard maps, ssp126, RP100, all 5 SLR levels: 203 tiles covering 48 of 49
+# deltas (preparation/build_delta_tile_subset.py). Volga (Id=44) has no tile: the Caspian is not
+# ocean in DeltaDTM's mask, so there is no COAST-RP forcing. Fully isolated outputs and its own
+# WL_scenarios (not shared with production or deltas_ssp245).
 
 tile_grid:
   path: "{processed_inputs_dir}/mask/deltas_global_tiles.gpkg"
 
 simulation:
   flooding:
-    friction_scale_factor: 9.0  # the value its existing outputs were computed with (production config.yml: 12.0)
-    # Reverted to production's own default (4), 2026-10 - briefly set to 5
-    # based on a sample-bounded production-run byproduct signal, before the
-    # real obstacle-coupling calibration study (calibration_500_tiles,
-    # run_obstacle_coupling_study.py) actually ran and confirmed 4
-    # is sufficient. No override needed here any more - inherits config.yml's
-    # own simulation.flooding.obstacle_coupling.max_outer_iterations: 4.
+    friction_scale_factor: 9.0  # computed with 9.0 (config.yml: 12.0)
   model_outputs: "{root}/deltas_floodmaps/ssp126/model_outputs"
 
 postprocessing:
@@ -48,30 +22,14 @@ boundary_conditions:
   waterlevel_nc_dir: "{root}/deltas_floodmaps/ssp126/WL_scenarios"
   return_periods: [100]
 
-# REQUIRED, not decorative - merged_waterlevel_names() unions this with
-# boundary_conditions.waterlevel_names; leaving it unset would silently pull
-# in config.yml's own SLR_500 adaptation intensity.
+# Must be set: merged_waterlevel_names() unions it with waterlevel_names, so leaving it unset
+# would add config.yml's adaptation SLR levels.
 adaptation:
   slr_intensities: []
 
-# HPC dispatch (2026-10, new - this run was local-only via run_delta_floodmaps.py
-# until now). 8 nodes, all on hpc.sbatch (1vcpu) - user direction ("16
-# 1vcpus... 8 per ssp"), matching calibration_500_tiles's own "most tiles
-# fit on 1vcpu anyway" call (2026-10-08: confirmed generally true and made
-# the production default - see config.yml's own comment on hpc.sbatch; the
-# old small/large RAM-aware split this used to force off via
-# large_tile_pixel_threshold no longer exists at all). Generate with
-# generate_hpc_preprocess_job.py --calibration (NOT --fuse - this tile set
-# spans multiple hop_distance waves, unlike calibration_500_tiles/
-# sfincs_calibration's hop=0-only pools, so the real cross-wave dependency
-# --fuse's own assertion guards against is NOT satisfied here; --calibration
-# alone still correctly honors this scenario config end-to-end for the
-# wave-dispatch phase, unlike the default path's hardcoded-to-production
-# base_config_path bug).
+# Generate with generate_hpc_preprocess_job.py --calibration (the default path's wave dispatch
+# uses production's base config), NOT --fuse: the tiles span several hop_distance waves.
 hpc:
   n_nodes: 8
-  # NOT scenario-isolated by default (fixed "{root}/model_outputs/hpc_jobs"
-  # regardless of simulation.model_outputs) - isolate explicitly, same tree
-  # as everything else this run owns (see calibration_500_tiles.yml's own
-  # identical note on this exact trap).
+  # jobs_dir defaults to production's model_outputs/hpc_jobs; isolate it.
   jobs_dir: "{root}/deltas_floodmaps/ssp126/model_outputs/hpc_jobs"
