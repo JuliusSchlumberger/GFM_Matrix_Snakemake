@@ -34,7 +34,7 @@ def test_edge_connected_ocean_flagged() -> None:
 
 
 def test_isolated_interior_speckle_excluded() -> None:
-    print("=== isolated interior ocean-coded speckle, NOT touching the array edge -> excluded (the bug fix) ===")
+    print("=== isolated interior ocean-coded speckle, NOT touching the array edge -> excluded ===")
     mask = np.array([
         [LAND, LAND, LAND, LAND, LAND],
         [LAND, LAND, LAND, LAND, LAND],
@@ -44,15 +44,15 @@ def test_isolated_interior_speckle_excluded() -> None:
     ])
     result = fm.coastline_mask(mask, ocean_code=OCEAN)
     assert not result.any(), result.astype(int)
-    print("PASS: isolated interior speckle correctly excluded (old formula would have flagged it - it's ocean adjacent to land)")
+    print("PASS: isolated interior speckle correctly excluded (a plain land-dilation formula would flag it - it's ocean adjacent to land)")
 
     # A plain land-dilation formula must flag (2,2), so the case is not vacuous.
     old_formula = np.zeros_like(mask, dtype=bool)
     from scipy import ndimage
     dilated_land = ndimage.binary_dilation(mask == LAND, structure=np.ones((3, 3), dtype=bool))
     old_formula = dilated_land & (mask == OCEAN)
-    assert old_formula[2, 2], "test setup error: old formula should flag (2,2)"
-    print("PASS: confirmed old land-only-dilation formula would have incorrectly flagged (2,2) as coastline")
+    assert old_formula[2, 2], "test setup error: plain land-dilation formula should flag (2,2)"
+    print("PASS: confirmed a plain land-only-dilation formula would incorrectly flag (2,2) as coastline")
     print()
 
 

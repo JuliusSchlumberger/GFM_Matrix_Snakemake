@@ -117,7 +117,7 @@ def main() -> None:
     parser.add_argument(
         "--extra-args", default="",
         help="extra CLI args forwarded verbatim to each node's script call, e.g. '--epsilon 0.03' "
-             "or '--max-outer 5 --inner-max-rounds 12' to reproduce production's own defaults",
+             "or '--max-outer 4 --inner-max-rounds 40' to reproduce production's config.yml values",
     )
     args = parser.parse_args()
 

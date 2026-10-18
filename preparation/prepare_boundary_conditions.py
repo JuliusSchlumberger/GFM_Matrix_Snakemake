@@ -417,7 +417,7 @@ def run(config: dict, force: bool = True) -> None:
 
 if __name__ == "__main__":
     sys.exit(
-        "prepare_boundary_conditions.py is no longer a standalone entry point.\n"
+        "prepare_boundary_conditions.py is not a standalone entry point.\n"
         "Run it via: python run_preparation.py boundary_conditions\n"
         "See run_preparation.py --help for the full list of steps."
     )

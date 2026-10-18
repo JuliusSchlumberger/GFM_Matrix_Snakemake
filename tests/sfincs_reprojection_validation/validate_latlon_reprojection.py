@@ -45,7 +45,7 @@ def test_reprojected_pixel_is_latitude_corrected_not_square() -> None:
 
         assert not np.isclose(dx_deg, dy_deg, rtol=0.02), (
             f"output pixel is square in degrees (dx_deg={dx_deg}, dy_deg={dy_deg}) - "
-            "this is exactly the un-fixed bug: calculate_default_transform()'s own default "
+            "calculate_default_transform()'s own default "
             "resolution guess was used instead of the latitude-corrected one."
         )
         assert np.isclose(ratio, expected_ratio, rtol=0.05), (

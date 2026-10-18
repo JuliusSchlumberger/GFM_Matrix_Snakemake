@@ -234,7 +234,7 @@ def run(config: dict) -> None:
 
 if __name__ == "__main__":
     sys.exit(
-        "build_tile_manifest.py is no longer a standalone entry point.\n"
+        "build_tile_manifest.py is not a standalone entry point.\n"
         "Run it via: python run_preparation.py tile_generation\n"
         "See run_preparation.py --help for the full list of steps."
     )

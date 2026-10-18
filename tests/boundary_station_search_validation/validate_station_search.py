@@ -59,7 +59,7 @@ def test_large_tile_unaffected_by_floor() -> None:
 
 
 def test_zero_min_size_matches_old_behaviour() -> None:
-    print("=== min_search_size_deg=0.0: identical to the pre-2026-08 bbox+buffer-only behaviour ===")
+    print("=== min_search_size_deg=0.0: plain bbox+buffer selection, no minimum search size ===")
     tile = _tile((0.0, 0.0, 1.0, 1.0))
     station_in = _stations([(1.4, 0.5)])
     station_out = _stations([(1.6, 0.5)])

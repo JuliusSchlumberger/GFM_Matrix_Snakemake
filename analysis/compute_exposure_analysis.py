@@ -922,8 +922,8 @@ def main() -> None:
         f"{len(ssps)} SSPs x {len(output_years)} years = {len(ssp_tasks)} SSP tasks, plus "
         f"{len(avoid_units)} units x {len(growth_pct_labels)} growth rates = "
         f"{len(growth_tasks)} scenario-neutral tasks ({n_tasks} total). "
-        f"Per-worker payload is now file paths + small dicts (not full grids), "
-        f"budget {budget_gb:.1f} GiB no longer constrains worker count -> {n_workers} worker process(es)…"
+        f"Per-worker payload is file paths + small dicts (not full grids), so "
+        f"budget {budget_gb:.1f} GiB does not constrain worker count -> {n_workers} worker process(es)…"
     )
 
     ssp_results: dict[tuple, list[pd.Series]] = {u: [] for u in avoid_units}

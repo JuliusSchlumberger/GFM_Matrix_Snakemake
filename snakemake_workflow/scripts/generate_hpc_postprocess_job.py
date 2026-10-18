@@ -147,7 +147,7 @@ def main() -> None:
         "--no-flood-totals-and-plots", action="store_true",
         help="don't append the flood_totals_and_plots phase (compute_flood_totals.py + "
              "run_analysis.py --only-plots) onto the end of this chain - by default it IS "
-             "appended (2026-10-13), gated --dependency=afterany on exposure analysis's own "
+             "appended, gated --dependency=afterany on exposure analysis's own "
              "final reduce_write job, so the full postprocessing -> exposure -> flood-totals -> "
              "plots pipeline is one single submission from the login node.",
     )

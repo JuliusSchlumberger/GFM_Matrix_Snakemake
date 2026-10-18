@@ -49,8 +49,8 @@ def test_decode_friction_int16_preserves_float32_no_silent_promotion() -> None:
     decoded = decode_friction_int16(friction_int16)
 
     assert decoded.dtype == np.float32, (
-        f"decode_friction_int16 returned {decoded.dtype}, expected float32 - this is exactly the "
-        f"regression that doubled peak memory of every flood solve (solve_eikonal_dense inherits "
+        f"decode_friction_int16 returned {decoded.dtype}, expected float32 - float64 here "
+        f"doubles peak memory of every flood solve (solve_eikonal_dense inherits "
         f"this dtype for its dominant array allocation, `t`)."
     )
     expected = friction_int16.astype(np.float64) / 1_000_000.0
