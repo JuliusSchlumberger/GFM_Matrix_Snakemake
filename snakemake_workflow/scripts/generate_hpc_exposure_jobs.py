@@ -21,17 +21,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from config_utils import load_config, retry_transient_io  # noqa: E402
 from hpc_common import sbatch_header  # noqa: E402
 
-
-def _discover_chunk_ids(flood_frac_dir: Path, chunks_dir: Path) -> list[str]:
-    all_chunk_ids = sorted(set(
-        p.stem.split("_RP")[0].replace("flood_fraction_", "")
-        for p in flood_frac_dir.glob("flood_fraction_*.tif")
-    ))
-    return [
-        cid for cid in all_chunk_ids
-        if (chunks_dir / f"exposure_population_grid_{cid}.tif").exists()
-        and (chunks_dir / f"exposure_population_grid_{cid}.tif").stat().st_size > 0
-    ]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "analysis"))
+from _common import discover_chunk_ids  # noqa: E402
 
 
 def _job_header(name: str, sbatch_cfg: dict, linux_jobs_dir: str, linux_code_root: str) -> list[str]:
@@ -341,7 +332,7 @@ def main() -> None:
 
     # Local view: the chunk glob must run against this machine's mount.
     merged_dir = Path(local_config["postprocessing"]["merged_outputs"])
-    chunk_ids = _discover_chunk_ids(merged_dir / "chunks" / "flood_fraction", merged_dir / "chunks")
+    chunk_ids, _ = discover_chunk_ids(merged_dir / "chunks" / "flood_fraction", merged_dir / "chunks")
     if not chunk_ids:
         raise SystemExit(f"No populated chunk files found under {merged_dir}/chunks - run postprocessing first.")
 
