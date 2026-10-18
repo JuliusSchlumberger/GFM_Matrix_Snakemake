@@ -77,7 +77,7 @@ def fetch_bbox(bbox, page=2000):
 
 
 def _read_cached_tile(cache_path: str, local_scratch: str) -> gpd.GeoDataFrame:
-    # SQLite's many small random reads are very slow over the P:\ network share;
+    # SQLite's many small random reads are very slow over a network share;
     # a bulk copy to local disk first is much faster.
     local_path = os.path.join(local_scratch, "tile.gpkg")
     shutil.copy2(cache_path, local_path)
