@@ -2,11 +2,11 @@
 
 Writes {base}/boundary_lines/preflight/{tile_id}.json. Only tiles whose line is
 suitable are checked unless --all. A pre-flight that raised is recorded with
-"exception": true (ok=False) and retried under --skip-done. Runs under hydromt-sfincs-dev.
+"exception": true (ok=False) and retried under --skip-existing. Runs under hydromt-sfincs-dev.
 
 Usage:
     python preflight_sfincs_mask.py --config <config.yml> --base-dir-name calibration_roughness_SFINCS \\
-        --tiles-dir-name model_outputs --tile-ids-file tiles_000.txt [--skip-done]
+        --tiles-dir-name model_outputs --tile-ids-file tiles_000.txt [--skip-existing]
 """
 
 from __future__ import annotations
@@ -61,19 +61,20 @@ def preflight_tile(tile_id: str, tiles_root: Path, lines_dir: Path, resolution_m
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
-    parser.add_argument("--base-dir-name", required=True)
-    parser.add_argument("--tiles-dir-name", default=None, help="where the tile dirs live (default: --base-dir-name)")
+    parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
+    parser.add_argument("--tiles-dir-name", default="model_outputs",
+                        help="where the tile dirs (with inputs/) live, under paths.root (default: model_outputs)")
     parser.add_argument("--tile-ids", nargs="*", default=[])
     parser.add_argument("--tile-ids-file", default=None)
     parser.add_argument("--resolution-m", type=float, default=MAIN_RES_M_DEFAULT)
     parser.add_argument("--all", action="store_true", help="also check tiles whose line is not suitable")
-    parser.add_argument("--skip-done", action="store_true",
+    parser.add_argument("--skip-existing", "--skip-done", dest="skip_done", action="store_true",
                         help="skip tiles that already have a record (not one whose pre-flight raised)")
     args = parser.parse_args()
 
     root = read_root(Path(args.config))
     lines_dir = root / args.base_dir_name / "boundary_lines"
-    tiles_root = root / (args.tiles_dir_name or args.base_dir_name)
+    tiles_root = root / args.tiles_dir_name
     out_dir = lines_dir / "preflight"
     out_dir.mkdir(parents=True, exist_ok=True)
     ids = list(args.tile_ids)

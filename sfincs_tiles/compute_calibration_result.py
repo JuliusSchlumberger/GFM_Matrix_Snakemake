@@ -166,7 +166,7 @@ def compute_result(tile_dir: Path, fsfs: list[float], flooding: dict, river_code
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
-    parser.add_argument("--base-dir-name", required=True)
+    parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
     parser.add_argument("--tile-id", required=True)
     parser.add_argument("--friction-scale-factors", type=float, nargs="+", default=list(FRICTION_SCALE_FACTORS))
     args = parser.parse_args()

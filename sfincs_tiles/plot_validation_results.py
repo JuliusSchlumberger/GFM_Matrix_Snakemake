@@ -295,7 +295,7 @@ def main() -> None:
     repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(repo_root / "snakemake_workflow" / "config" / "config.yml"))
-    parser.add_argument("--base-dir-name", required=True)
+    parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
     parser.add_argument("--friction-scale-factor", type=float, required=True, help="the eikonal friction point to plot")
     parser.add_argument("--tile-ids-file", default=None, help="restrict to these tiles (default: every tile with a result)")
     args = parser.parse_args()

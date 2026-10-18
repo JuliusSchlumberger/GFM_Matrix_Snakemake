@@ -7,7 +7,7 @@ hand-edit; kept unless --overwrite), figures/ or figures_unsuitable/, status/*.j
 
 Usage:
     python build_station_boundary_lines.py [--tile-ids 841 2905 | --sample 30] [--workers 8]
-    python build_station_boundary_lines.py --tile-ids-file tiles_000.txt --overwrite --skip-done   # one HPC job
+    python build_station_boundary_lines.py --tile-ids-file tiles_000.txt --overwrite --skip-existing   # one HPC job
     python build_station_boundary_lines.py --summarize
     (HPC jobs: generate_calibration_jobs.py stage1)
 """
@@ -239,7 +239,7 @@ def _status_path(out_dir: Path, tile_id) -> Path:
 
 
 def _write_status(out_dir: Path, row: dict) -> None:
-    # atomic: many jobs write at once and --skip-done reads them
+    # atomic: many jobs write at once and --skip-existing reads them
     path = _status_path(out_dir, row["tile_id"])
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f".tmp{os.getpid()}")
@@ -351,7 +351,7 @@ def main() -> None:
     parser.add_argument("--tiles-dir-name", default="model_outputs",
                         help="where the tile dirs (with inputs/) live, under paths.root (default: model_outputs)")
     parser.add_argument("--overwrite", action="store_true", help="rebuild existing {tile_id}.gpkg (loses hand edits)")
-    parser.add_argument("--skip-done", action="store_true",
+    parser.add_argument("--skip-existing", "--skip-done", dest="skip_done", action="store_true",
                         help="skip tiles that already have a status file (not an error one) - resume a run")
     parser.add_argument("--plot", choices=["suitable", "all", "none"], default="all",
                         help="which tiles get the inspection figure - suitable ones go to figures/, "
@@ -388,7 +388,7 @@ def main() -> None:
             return p.exists() and not json.loads(p.read_text())["status"].startswith("error")
         n0 = len(tile_dirs)
         tile_dirs = [d for d in tile_dirs if not done(d)]
-        print(f"--skip-done: {n0 - len(tile_dirs)} tile(s) already done")
+        print(f"--skip-existing: {n0 - len(tile_dirs)} tile(s) already done")
     print(f"{len(tile_dirs)} tile(s) -> {out_dir}", flush=True)
 
     jobs = [(root, d, out_dir, buffer_deg, args.overwrite, args.plot, min_size_deg) for d in tile_dirs]
@@ -399,7 +399,7 @@ def main() -> None:
     print("(collect every job's results with: --summarize)")
     n_err = sum(str(r["status"]).startswith("error") for r in rows)
     if n_err:
-        print(f"{n_err} tile(s) errored (status/<tile_id>.json has the traceback; rerun with --skip-done)")
+        print(f"{n_err} tile(s) errored (status/<tile_id>.json has the traceback; rerun with --skip-existing)")
         sys.exit(1)
 
 

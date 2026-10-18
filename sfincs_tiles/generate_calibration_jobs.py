@@ -81,9 +81,9 @@ def cmd_stage1(args) -> None:
             f"# {n} candidate tile(s): screen -> boundary lines -> SFINCS mask pre-flight",
             f"{GFM_PY} select_calibration_tiles.py screen {common} --tile-ids-file {shard} --out-ids {screened} || exit 1",
             f"{GFM_PY} build_station_boundary_lines.py {common} --tiles-dir-name model_outputs "
-            f"--tile-ids-file {screened} --workers 4 --skip-done --plot all",
+            f"--tile-ids-file {screened} --workers 4 --skip-existing --plot all",
             f"{HYDROMT_PY} preflight_sfincs_mask.py {common} --tiles-dir-name model_outputs "
-            f"--tile-ids-file {screened} --skip-done",
+            f"--tile-ids-file {screened} --skip-existing",
             ""]
         (jobs_dir / f"{name}.sbatch").write_text("\n".join(lines), newline="\n")
 

@@ -92,7 +92,7 @@ def build_line_forcing(lines_gpkg: Path, coast_hg_nc: Path, tile_dir: Path | Non
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tile-id", required=True)
-    parser.add_argument("--base-dir-name", required=True)
+    parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
     parser.add_argument("--lines-gpkg", required=True)
     parser.add_argument("--config", default=str(Path(__file__).resolve().parents[1]
                                                  / "snakemake_workflow" / "config" / "config.yml"))
