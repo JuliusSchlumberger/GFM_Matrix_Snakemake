@@ -1,6 +1,4 @@
-"""Cache one (return_period, waterlevel_name) scenario's global water-level
-stations once, as a lightweight pre-parsed GeoPackage - see
-rules/preprocessing.smk's cache_waterlevel_stations docstring for why."""
+"""Cache one scenario's global water-level stations as a pre-parsed GeoPackage."""
 
 import sys
 from pathlib import Path

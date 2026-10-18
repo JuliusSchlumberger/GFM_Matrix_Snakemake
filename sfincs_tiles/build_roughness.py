@@ -1,9 +1,7 @@
-"""Decodes a tile's friction.tif into a real Manning's n GeoTIFF for SFINCS.
+"""Decode a tile's friction.tif into a real Manning's n GeoTIFF for SFINCS.
 
 friction.tif stores Manning's n / 100 (decoded via /1_000_000, see
-src/rasters.py::decode_friction_int16), not a real Manning's n value.
-SFINCS's roughness.create() expects real Manning's n (~0.01-0.15), so this
-multiplies the decoded value back up by 100.
+src/rasters.py::decode_friction_int16); SFINCS roughness.create() expects real n (~0.01-0.15).
 """
 
 from __future__ import annotations
@@ -19,40 +17,16 @@ from retry_io import retry_transient_io  # noqa: E402
 
 FRICTION_SCALE = 1_000_000
 
-# Envelope for real Manning's n (open water ~0.02 to dense forest/urban
-# ~0.15-0.2), wider than the ~0.01-0.15 typically expected, to catch a
-# unit-conversion bug rather than reject unusual land cover: missing the
-# *100 fix above yields values ~100x too small, applying it twice yields
-# values ~100x too large.
+# Real n spans ~0.02 (open water) to ~0.15-0.2 (forest/urban); the wider envelope
+# catches a missed or doubled *100 conversion (~100x off), not unusual land cover.
 MANNING_N_MIN = 0.001
 MANNING_N_MAX = 1.0
 
 
 def build_manning_n(friction_path: Path, out_path: Path) -> tuple[float, float]:
-    """Decode a tile's friction.tif into a real Manning's n GeoTIFF for SFINCS.
+    """Write friction.tif as float32 Manning's n (NaN nodata); return finite min/max.
 
-    Converts the int16-encoded Manning's n/100 values back to real Manning's
-    n by multiplying by 100, checks the result against a physically-
-    plausible envelope (catches a missed or doubled unit conversion), and
-    writes a float32 GeoTIFF with NaN nodata.
-
-    Parameters
-    ----------
-    friction_path : Path
-        Input friction.tif (int16, Manning's n/100 encoding).
-    out_path : Path
-        Output path for the decoded float32 Manning's n GeoTIFF; parent
-        directories are created if they don't exist.
-
-    Returns
-    -------
-    tuple[float, float]
-        Min and max finite Manning's n values written.
-
-    Raises
-    ------
-    ValueError
-        If any finite decoded value falls outside [MANNING_N_MIN, MANNING_N_MAX].
+    Raises ValueError if any value falls outside [MANNING_N_MIN, MANNING_N_MAX].
     """
     with retry_transient_io(rasterio.open, friction_path) as src:
         friction_int16 = src.read(1)
@@ -95,7 +69,6 @@ if __name__ == "__main__":
     from gfm_config import read_root
 
     root = read_root(Path(args.config))
-    # Reads from the tile's working copy, not model_outputs/ directly.
     tile_dir = root / args.base_dir_name / args.tile_id / "inputs"
     out_path = root / args.base_dir_name / args.tile_id / "sfincs_model" / "manning_n.tif"
 

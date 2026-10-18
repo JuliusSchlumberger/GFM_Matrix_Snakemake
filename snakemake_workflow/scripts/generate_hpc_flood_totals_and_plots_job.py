@@ -1,26 +1,8 @@
-"""Generate a single HPC sbatch script that runs compute_flood_totals.py
-(parallelized via its own --workers, 2026-10-09) followed by the enabled
-analysis.plot_* steps (run_analysis.py --only-plots --skip-flood-totals),
-on one node.
+"""Generate one single-node sbatch script for compute_flood_totals.py + analysis plots.
 
-Why a single node rather than the multi-node phase-barrier dispatch
-generate_hpc_postprocess_job.py/generate_hpc_exposure_jobs.py use: both steps
-here are reading many small per-chunk files that already exist (flood
-fraction / population / geogunit chunks, already produced by the completed
-postprocess + exposure-analysis dispatch) - the work is I/O-wait bound, not
-compute-bound, so a wide thread pool on ONE node (compute_flood_totals.py's
-own --workers, matching run_simulation_batch.py's established reasoning for
-why N concurrent I/O-bound workers on an N-cpu node is a real use of the
-allocation) already saturates the useful concurrency; splitting this across
-multiple nodes would just add SLURM queueing/dependency overhead for no
-real speedup, unlike simulation/postprocessing's own genuinely CPU-bound,
-much larger workloads.
-
-Both steps run in the SAME job (sequential, no SLURM dependency chain
-needed) since compute_flood_totals.py must finish before run_analysis.py's
-plot steps can read its output for validate_country.py integration (not
-actually a dependency of the plots used here, but it's cheap and clean to
-keep them in one job rather than two).
+Runs compute_flood_totals.py (--workers) then run_analysis.py --only-plots
+--skip-flood-totals in one job. One node suffices: the work is I/O-bound reads
+of existing per-chunk files, so a wide thread pool saturates useful concurrency.
 
 Usage:
     python generate_hpc_flood_totals_and_plots_job.py [--config path/to/config.yml]
@@ -38,12 +20,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from config_utils import atomic_write, load_config, retry_transient_io  # noqa: E402
 from hpc_common import _account_line, _stage_configfile_lines  # noqa: E402
 
-# Duplicated from generate_hpc_postprocess_job.py (not imported - that module
-# imports write_flood_totals_and_plots_job FROM here to append this phase
-# onto its own chain, so importing back the other way would be circular;
-# same small-helper-duplication convention generate_hpc_preprocess_job.py's
-# own matching helpers already use rather than a shared module).
-
 
 def write_flood_totals_and_plots_job(
     local_config: dict, linux_config: dict,
@@ -51,36 +27,9 @@ def write_flood_totals_and_plots_job(
 ) -> tuple[Path, str]:
     """Write the flood_totals_and_plots.sbatch script, without submitting it.
 
-    Runs compute_flood_totals.py followed by run_analysis.py --only-plots
-    --skip-flood-totals on a single node (see module docstring for why one
-    node rather than a multi-node phase-barrier dispatch). The caller decides
-    whether to submit it standalone or append it onto an existing chain (see
-    generate_hpc_postprocess_job.py's use of this for the latter). Reuses an
-    existing resolved_config.yml under `hpc.jobs_dir` if one is already there.
-
-    Parameters
-    ----------
-    local_config : dict
-        Config resolved against the local (this-machine) path view.
-    linux_config : dict
-        Config resolved against the Linux/HPC path view, used for every path
-        embedded into the generated sbatch script.
-    partition : str, optional
-        SLURM partition to request, by default "24vcpu".
-    cpus : int, optional
-        CPUs per task, also passed to compute_flood_totals.py's `--workers`,
-        by default 24.
-    mem : str, optional
-        SLURM memory request, by default "32G".
-    time : str or None, optional
-        SLURM time limit; defaults to `hpc.sbatch.time` from the config when
-        None.
-
-    Returns
-    -------
-    tuple[Path, str]
-        The local script path and the corresponding Linux path, for a caller
-        to reference in a generated `sbatch` line.
+    `cpus` is also passed as compute_flood_totals.py's --workers; `time=None`
+    uses hpc.sbatch.time. Reuses an existing resolved_config.yml in hpc.jobs_dir.
+    Returns the local script path and its Linux path.
     """
     local_jobs_dir = Path(local_config["hpc"]["jobs_dir"])
     linux_jobs_dir = linux_config["hpc"]["jobs_dir"]
@@ -95,10 +44,7 @@ def write_flood_totals_and_plots_job(
     retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
 
-    # Reused if generate_hpc_postprocess_job.py already wrote one for this
-    # same hpc.jobs_dir (it has, for a completed postprocess dispatch) -
-    # same resolved config either way (merged_outputs etc. don't depend on
-    # which script generated it), so no reason to duplicate it.
+    # Reuse generate_hpc_postprocess_job.py's resolved_config.yml if present.
     resolved_config_path = local_jobs_dir / "resolved_config.yml"
     if not resolved_config_path.exists():
         atomic_write(resolved_config_path, lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
@@ -144,11 +90,7 @@ def write_flood_totals_and_plots_job(
 
 
 def main() -> None:
-    """Parse CLI arguments and write the flood-totals-and-plots sbatch script.
-
-    Prints the written script's local path and the ``sbatch`` command to
-    submit it on Hydrax.
-    """
+    """Write the flood-totals-and-plots sbatch script and print the submit command."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
     parser.add_argument("--config", default=str(default_config))

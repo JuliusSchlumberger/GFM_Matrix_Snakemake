@@ -1,13 +1,6 @@
-"""Regenerates dem.tif and mask.tif for one tile using the current
-production DEM-extraction logic (src/rasters.py's extract_dem/
-extract_dem_mask), overwriting the copy in {tile}/inputs/ in place.
+"""Regenerate one tile's inputs/dem.tif and mask.tif in place with rasters.extract_dem*.
 
-Calls extract_dem/extract_dem_mask directly (plain functions with no
-Snakemake coupling), using model_bbox.json for the tile's bbox and the
-same data catalog / dem_gap_fill config production itself uses.
-
-Needs the "gfm" env (config_utils.py needs hydromt 0.9.3), not
-hydromt-sfincs-dev.
+Needs the "gfm" env (config_utils.py needs hydromt 0.9.3), not hydromt-sfincs-dev.
 
 Usage:
     python regenerate_dem_mask.py --tile-id 1454 --base-dir-name calibration_roughness_SFINCS
@@ -29,24 +22,7 @@ from retry_io import retry_transient_io  # noqa: E402
 
 
 def regenerate_dem_mask(tile_id: str, root: Path, base_dir_name: str, config: dict) -> None:
-    """Rebuild and overwrite a tile's dem.tif and mask.tif with the current production DEM-extraction logic.
-
-    Reads the tile's bbox from model_bbox.json and the same data catalog and
-    dem_gap_fill config production uses, then overwrites the tile's existing
-    inputs/dem.tif and inputs/mask.tif in place.
-
-    Parameters
-    ----------
-    tile_id : str
-        Tile identifier, used to locate `{base_dir_name}/{tile_id}/inputs/`.
-    root : Path
-        Pipeline data root (paths.root from config).
-    base_dir_name : str
-        Name of the output root directory under `root` containing the tile.
-    config : dict
-        Loaded pipeline config (paths, simulation.dem_gap_fill,
-        vertical_datum_correction, raster_format).
-    """
+    """Overwrite a tile's inputs/dem.tif and mask.tif, using its model_bbox.json and production config."""
     tile_inputs_dir = root / base_dir_name / tile_id / "inputs"
     with open(tile_inputs_dir / "model_bbox.json") as f:
         bbox = json.load(f)
@@ -82,7 +58,6 @@ def regenerate_dem_mask(tile_id: str, root: Path, base_dir_name: str, config: di
 
 
 def main() -> None:
-    """Parse CLI arguments, load the config, and regenerate one tile's dem.tif and mask.tif."""
     _repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tile-id", required=True)

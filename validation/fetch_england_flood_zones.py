@@ -1,30 +1,9 @@
-"""Download the Environment Agency's "Flood Map for Planning: Flood Zones 2
-& 3 (Rivers and Sea)" dataset for England, filtered to the coastal-relevant,
-modelled-origin subset this framework's coastal validation needs, and save
-it alongside Wales/Scotland's own downloaded benchmarks.
+"""Download England's EA Flood Zones 2 & 3, filtered to modelled coastal sources.
 
-`flood_source` is a free-text field, not a clean sea/river enum (confirmed
-2026-10-16 by sampling a real cached tile: 'river', 'sea', 'river and sea',
-'unknown' all occur) - 'river and sea' is the estuarine/tidal-river class,
-genuinely coastal (tidally/storm-surge driven) even though it also carries
-fluvial influence. An earlier version of this script filtered to
-flood_source=='sea' only, which silently dropped every estuary/tidal-river
-reach - exactly the stretches a coastal model's own boundary forcing would
-plausibly flood too. Fixed 2026-10-16 (user-caught) to also keep 'river and
-sea'; plain 'river' and 'unknown' remain excluded (not comparable to this
-model's pure coastal-storm-surge physics).
-
-Flood Zone 3 (sea source): >=1-in-200-year (0.5% AEP) annual probability -
-no exact native model RP (model has RP100/RP250, not RP200) - bracket it with
-RP100/RP250 (see `comparison_return_periods` on england_ea_floodzone3_sea in
-data_catalog_validation.yml).
-Flood Zone 2 (sea source): >=1-in-1000-year (0.1% AEP) - matches the model's
-own native RP1000 exactly, no bracketing needed.
-
-England's real coastal extent (not all of GBR - Wales/Scotland have their
-own separate agencies/datasets) is restricted at validate_country.py's own
-scoring time via geogunit_ids, same mechanism as Wales(3367)/Scotland(3366);
-this script's own bbox is deliberately generous (doesn't need to be exact).
+Keeps flood_source 'sea' and 'river and sea' (estuarine/tidal-river, surge-driven);
+drops 'river' and 'unknown'. FZ3: >=1-in-200yr (0.5% AEP), bracketed by RP100/RP250.
+FZ2: >=1-in-1000yr (0.1% AEP). The bbox is generous; validate_country.py restricts
+to England via geogunit_ids.
 
 Usage:
     python validation/fetch_england_flood_zones.py [--config path/to/config.yml]
@@ -51,10 +30,10 @@ BASE = (
     "https://environment.data.gov.uk/spatialdata/flood-map-for-planning-flood-zones/"
     "ogc/features/v1/collections/Flood_Zones_2_3_Rivers_and_Sea/items"
 )
-# England's real extent (lon/lat, CRS84) - generous, geogunit_ids does the real restriction.
+# lon/lat, CRS84
 ENGLAND_BBOX = (-6.5, 49.8, 2.0, 55.9)
-TILE_DEG = 1.0  # smaller per-request bbox - easier on the server, clear incremental progress
-_SEA_SOURCES = ["sea", "river and sea"]  # see module docstring - excludes plain "river"/"unknown"
+TILE_DEG = 1.0
+_SEA_SOURCES = ["sea", "river and sea"]
 
 
 def _tiles(bbox, step):
@@ -69,12 +48,8 @@ def _tiles(bbox, step):
 
 
 def _get_with_retry(url, params, max_attempts=6, delay=10):
-    # The API's own "next" pagination links redirect to a different backend
-    # host (confirmed live: api-k8s-dsp-prod.agrimetrics.co.uk) that hit a
-    # transient DNS resolution failure mid-run - retry rather than let one
-    # flaky page kill the whole tiled fetch (per-tile caching already makes
-    # a full restart safe, but there's no reason to lose an in-progress
-    # tile's own later pages over a passing blip).
+    # "next" pagination links redirect to another backend host
+    # (api-k8s-dsp-prod.agrimetrics.co.uk) with transient DNS failures.
     for attempt in range(1, max_attempts + 1):
         try:
             r = requests.get(url, params=params, timeout=60)
@@ -88,6 +63,7 @@ def _get_with_retry(url, params, max_attempts=6, delay=10):
 
 
 def fetch_bbox(bbox, page=2000):
+    """Fetch all features in a lon/lat bbox, following pagination."""
     url = BASE
     params = {"f": "json", "bbox": ",".join(map(str, bbox)), "limit": page}
     parts = []
@@ -101,16 +77,8 @@ def fetch_bbox(bbox, page=2000):
 
 
 def _read_cached_tile(cache_path: str, local_scratch: str) -> gpd.GeoDataFrame:
-    """Read a cached tile via a LOCAL staged copy, not a direct P:\\ open.
-
-    Confirmed 2026-10-16: reading these GeoPackages (several are 100-450 MB)
-    directly off the P:\\ network share took over 2 hours to get through
-    46/63 tiles before being killed - the same GDAL/SQLite-over-network-share
-    pattern diagnosed earlier this session on Hydrax (SQLite does many small
-    random reads, each paying a full network round trip; a plain bulk byte
-    copy does not hit that path). Staging via shutil.copy2 first, then
-    reading the local copy, is the same fix that solved it there.
-    """
+    # SQLite's many small random reads are very slow over the P:\ network share;
+    # a bulk copy to local disk first is much faster.
     local_path = os.path.join(local_scratch, "tile.gpkg")
     shutil.copy2(cache_path, local_path)
     try:
@@ -120,15 +88,9 @@ def _read_cached_tile(cache_path: str, local_scratch: str) -> gpd.GeoDataFrame:
 
 
 def main(out_dir: str, cache_dir: str) -> None:
-    """Fetch, filter, and write England's coastal-relevant flood zones.
+    """Fetch, filter and write the per-zone GeoPackages.
 
-    Parameters
-    ----------
-    out_dir : str
-        Directory the filtered per-zone GeoPackages are written to.
-    cache_dir : str
-        Directory used to cache each tile's raw (unfiltered) download, so a
-        re-run only has to fetch tiles that failed or are missing.
+    Raw tiles are cached unfiltered in `cache_dir`; a re-run fetches only missing ones.
     """
     os.makedirs(cache_dir, exist_ok=True)
 
@@ -154,12 +116,9 @@ def main(out_dir: str, cache_dir: str) -> None:
                     failed_tiles.append(tile)
                     continue
                 if not gdf.empty:
-                    gdf.to_file(cache_path, driver="GPKG")  # raw/unfiltered - stays reusable for any future filter change
+                    gdf.to_file(cache_path, driver="GPKG")
                 print(f"[{i + 1}/{len(tiles)}] {tile}: {len(gdf)} feature(s) ({time.time() - t0:.1f}s)", flush=True)
-            # Filter to the coastal-relevant subset HERE, before accumulating -
-            # keeps memory bounded to the small filtered subset instead of the
-            # full ~4GB national raw dataset (confirmed 2026-10-16: holding the
-            # raw concatenation grew one process to >10GB RSS).
+            # Filter per tile: the raw national dataset (~4GB) grows RSS past 10GB.
             if not gdf.empty:
                 gdf = gdf[gdf["flood_source"].isin(_SEA_SOURCES) & (gdf["origin"] == "modelled")]
             if not gdf.empty:

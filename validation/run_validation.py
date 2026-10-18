@@ -1,10 +1,7 @@
-"""Single entry point for the full coastal flood-extent validation pipeline.
+"""Run validate_country.py + plot_agreement_map.py per country, then summarize.
 
-Discovers every country with a coastal benchmark in the validation catalog,
-runs validate_country.py + plot_agreement_map.py for each (one subprocess
-per step, mirroring analysis/run_analysis.py's own pattern - module
-isolation, one country's crash doesn't abort the rest unless --fail-fast),
-then concatenates every country's metrics CSV into one cross-country summary.
+Each step is a subprocess, so one country's crash does not abort the rest unless
+--fail-fast.
 
 Usage:
     python validation/run_validation.py \\
@@ -31,11 +28,6 @@ PYTHON = sys.executable
 
 
 def _discover_countries(cfg: dict) -> list[str]:
-    """Every distinct country_iso with at least one hazard_type=='coastal' benchmark.
-
-    Scans the whole catalog rather than a hardcoded country list (plan doc
-    §5.2) - matches validate_country.py's own `_find_benchmark_keys`.
-    """
     val_cfg = cfg["validation"]
     catalog = get_data_catalog(_REPO_ROOT / val_cfg["benchmark_catalog"], root=val_cfg["benchmark_root"])
     fix_catalog_meta_encoding(catalog, _REPO_ROOT / val_cfg["benchmark_catalog"])
@@ -48,17 +40,13 @@ def _discover_countries(cfg: dict) -> list[str]:
 
 
 def _run(cmd: list[str], label: str, fail_fast: bool) -> bool:
-    """Run `cmd` via `step_runner.run_step`; True on success."""
     return run_step(cmd, label, fail_fast)
 
 
 def main() -> None:
-    """Parse CLI arguments and run validate_country.py + plot_agreement_map.py for every country.
+    """Validate every country and write the cross-country summary CSV.
 
-    Discovers countries from the benchmark catalog when ``--countries`` is omitted, runs both
-    steps per country as subprocesses (one country's crash doesn't abort the rest unless
-    ``--fail-fast``), then concatenates every country's metrics CSV into one cross-country
-    summary CSV. Exits with status 1 if no countries are found or any step failed.
+    Exits with status 1 if no countries are found or any step failed.
     """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     _default_cfg = str(SCRIPTS_DIR.parent / "snakemake_workflow" / "config" / "config.yml")
@@ -104,7 +92,6 @@ def main() -> None:
             )
             results[f"{country}_plot"] = ok_plot
 
-    # ── Cross-country summary ───────────────────────────────────────────────
     frames = []
     for country in countries:
         csv_path = Path(val_cfg["output_dir"]) / country / f"metrics_{country}_{rp}_{slr}.csv"

@@ -1,16 +1,7 @@
 """Compute the coarse-resolution flood fraction for one (chunk, RP, SLR) scenario.
 
-Reads the fine-resolution merged waterdepth chunk, applies the binary flood
-threshold (depth > exceedance_threshold_m), and immediately average-pools the
-result to the population raster's native ~1 km resolution.
-
-Output: a tiny float32 raster (one value per ~1 km² population cell) where
-each value is the fraction of fine model pixels in that cell that are
-flooded.  Values are in [0, 1]; nodata = -1.0.
-
-This is the only spatial output needed downstream — the fine waterdepth raster
-is no longer required after this step (marked temp() in postprocessing.smk and
-deleted automatically by Snakemake).
+Fraction of fine pixels with depth > exceedance_threshold_m per ~1 km population
+cell; float32 in [0, 1], nodata = -1.0.
 """
 
 import sys
@@ -37,42 +28,15 @@ def compute_flood_fraction(
 ) -> None:
     """Write a coarse flood-fraction raster from a fine waterdepth chunk.
 
-    Thresholds the fine raster (depth > threshold_m) block-by-block into an
-    exceedance array and a domain mask, then hands both to
-    `rasters.average_pool_to_grid` for the area-weighted reprojection to
-    `population_path`'s coarse grid (ff = sum(flooded fine pixels) /
-    n_total_fine_pixels_in_cell). Values are in [0, 1]; nodata is -1.0. If
-    `population_path` is itself an empty (zero-byte) placeholder - the
-    convention for a chunk with zero population coverage - writes the same
-    empty-placeholder convention to `output_path` instead of crashing.
-
-    Parameters
-    ----------
-    waterdepth_path : str or Path
-        Fine-resolution merged waterdepth raster for this (chunk, RP, SLR) scenario.
-    population_path : str or Path
-        Population raster defining the coarse output grid; may be an empty
-        placeholder for a chunk with no population coverage.
-    threshold_m : float
-        Flood-depth threshold in meters; pixels with depth > threshold_m are flooded.
-    output_path : str or Path
-        Where the coarse float32 flood-fraction raster is written.
-    block_size : int
-        Block edge length (pixels) for processing the fine raster memory-safely.
+    ff = sum(flooded fine pixels) / n_total_fine_pixels_in_cell on
+    `population_path`'s grid (rasters.average_pool_to_grid). A zero-byte
+    `population_path` (chunk without population coverage) yields a zero-byte
+    placeholder output. `threshold_m` is in metres.
     """
     if Path(population_path).stat().st_size == 0:
         retry_transient_io(Path(output_path).touch)
         return
 
-    # Step 1: build the exceedance and domain arrays in memory, block by block
-    # (single read pass). Previously each block was written to an LZW GeoTIFF
-    # in a temp dir and both files were then read back WHOLE for step 2 - no
-    # memory saved, just an extra compress/decompress of ~2 full-size float32
-    # rasters per job. Filling the arrays directly gives average_pool_to_grid
-    # the exact same values (LZW is lossless; 1/0/_NODATA_FINE are exact in
-    # float32) with the exact same transform/CRS (the temp files copied both
-    # from the waterdepth chunk's own profile) - bit-identical output,
-    # verified on all 90 thailand_bangkok (chunk, RP, SLR) scenarios.
     with retry_transient_io(rasterio.open, waterdepth_path) as wd:
         src_transform, src_crs = wd.transform, wd.crs
         exc_arr = np.empty((wd.height, wd.width), dtype="float32")  # binary exceedance, nodata preserved
@@ -87,41 +51,21 @@ def compute_flood_fraction(
                     np.isfinite(depth) if wd.nodata is None
                     else (depth != wd.nodata)
                 )
-                # valid-but-dry pixels MUST be 0.0, never _NODATA_FINE -
-                # average_pool_to_grid's numerator contract (see its
-                # own docstring in src/rasters.py) requires nodata to
-                # mean ONLY "outside the domain"; marking dry pixels
-                # as nodata too silently drops them from Pass A's
-                # average instead of counting them as non-flooded,
-                # inflating ff for any partially-flooded coarse cell
-                # (confirmed on a real synthetic case, 2026-09: a
-                # true fraction of 0.25 came out as 0.75 - not a
-                # small error, and it scales with the domain/flood
-                # ratio, so it's worse for less-flooded cells).
+                # Valid-but-dry pixels MUST be 0.0, not nodata: average_pool_to_grid
+                # treats nodata as "outside the domain", which would drop dry
+                # pixels and inflate ff (e.g. a true 0.25 came out as 0.75).
                 exc_arr[row_off:row_off + bh, col_off:col_off + bw] = np.where(
                     valid, np.where(depth > threshold_m, 1.0, 0.0), _NODATA_FINE
                 ).astype("float32")
                 dom_arr[row_off:row_off + bh, col_off:col_off + bw] = np.where(valid, 1.0, 0.0).astype("float32")
 
-    # Step 2: reproject both rasters to the coarse population grid.
-    # Population grid metadata read directly via rasterio (no
-    # xarray/rioxarray) since only height/width/transform/crs are
-    # needed; profiling showed the xarray-backend-plugin-discovery
-    # machinery (`load_raster`'s `xr.open_dataarray`, even with
-    # `engine=` given explicitly) costs ~4s of pure import/reflection
-    # overhead per process, unrelated to this raster's actual (tiny)
-    # size - a real cost repeated on every one of this rule's many
-    # fresh-process invocations. This part IS verified safe (metadata
-    # only, no resampling/masking logic touched).
+    # Plain rasterio, not xarray: backend-plugin discovery costs ~4 s per process.
     with rasterio.open(population_path) as pop_src:
         out_h, out_w = pop_src.height, pop_src.width
         dst_transform, dst_crs = pop_src.transform, pop_src.crs
 
-    # ff = A × B = sum(flooded) / n_total (average_pool_to_grid's own
-    # "numerator"/"domain" split, extracted from this function's
-    # original inline two-pass logic - src/rasters.py::average_pool_to_grid
-    # for the shared implementation and why the two reproject() calls
-    # must stay separate).
+    # ff = sum(flooded) / n_total; see average_pool_to_grid for why its two
+    # reproject() calls must stay separate.
     frac = average_pool_to_grid(
         numerator=exc_arr, domain=dom_arr,
         src_transform=src_transform, src_crs=src_crs,
@@ -129,7 +73,6 @@ def compute_flood_fraction(
         numerator_nodata=_NODATA_FINE,
     )
 
-    # Step 3: write coarse output
     out_frac = np.where(np.isnan(frac), _NODATA_COARSE, frac).astype("float32")
     coarse_profile = {
         "driver": "GTiff", "crs": dst_crs,
@@ -142,7 +85,6 @@ def compute_flood_fraction(
         dst.write(out_frac, 1)
 
 
-# ── Snakemake entry point ─────────────────────────────────────────────────────
 compute_flood_fraction(
     waterdepth_path=snakemake.input.waterdepth,          # noqa: F821
     population_path=snakemake.input.population,          # noqa: F821

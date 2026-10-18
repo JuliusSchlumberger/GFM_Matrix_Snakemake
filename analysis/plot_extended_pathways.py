@@ -1,21 +1,10 @@
-"""SSP pathways continued beyond 2100 through the scenario-neutral growth matrices.
+"""Plot SSP pathways continued beyond 2100 through the scenario-neutral growth matrices.
 
-The growth matrices (exposure_*_growth_matrix.csv) give EAI for any combination of global SLR
-and population change, independent of any scenario. This script follows each SSP-RCP pathway
-through them up to visualization.extended_pathways.to_year (default 2150): SLR from the AR6
-trajectories (median, which run to 2150), population from the IIASA SSP projections to 2100 and
-after that from illustrative continuation variants (src/population_extension.py - assumptions,
-not projections). EAI along a pathway: src/pathways.py (bilinear interpolation; linear
-extrapolation where a pathway leaves the matrix).
-
-Writes to --outdir (default: visualization.output_dir):
-  timeseries_extended_continents.png  EAI 2020-to_year per continent (rows, by EAI in 2100) and
-                                      SSP (columns), per strategy in extended_pathways.strategies:
-                                      one line to 2100, then one per variant with the range shaded.
-  extended_pathways.csv               EAI per (strategy, ISO, SSP, variant, year), every 5 years.
-  ember_extended_pathways.png         only with extended_pathways.ember: true - no-adaptation ember
-                                      panels for extended_pathways.ember_countries, each SSP's
-                                      pathway branching into the population variants after 2100.
+SLR: AR6 median trajectories (to 2150). Population: IIASA SSP projections to 2100, then
+illustrative continuation variants (src/population_extension.py; assumptions, not
+projections). EAI along a pathway: src/pathways.py (bilinear interpolation, linear
+extrapolation outside the matrix). extended_pathways.csv holds EAI every 5 years;
+ember_extended_pathways.png only with extended_pathways.ember: true.
 
 Usage:
     python analysis/plot_extended_pathways.py --config snakemake_workflow/config/config.yml \\
@@ -37,7 +26,7 @@ from matplotlib.lines import Line2D  # noqa: E402
 from matplotlib.patches import Patch  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _common)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import _people  # noqa: E402
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pathways import eai_along_pathway, slr_pathway  # noqa: E402
@@ -51,13 +40,12 @@ from analysis_figures import (  # noqa: E402
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 LAST_SSP_YEAR = 2100
 VARIANT_STYLES = ["--", ":", "-."]
-PROJECTION_LINESTYLE = "--"  # timeseries_extended_continents.png's own single "this is a projection" style
+PROJECTION_LINESTYLE = "--"
 STRATEGY_NAMES = {"baseline": "No adaptation", "protect": "Protect", "avoid": "Avoid", "retreat": "Retreat",
                   "protect_avoid": "Protect + Avoid"}
 
 
 def _nice_vmax(top: float, n: int) -> float:
-    """Smallest n x (1, 2, 2.5 or 5 x 10^k) >= top, so n evenly spaced contours fall on round values."""
     raw = max(top, 1.0) / n
     mag = 10.0 ** np.floor(np.log10(raw))
     return n * min(k * mag for k in (1, 2, 2.5, 5, 10) if k * mag >= raw)
@@ -69,13 +57,7 @@ def _strategy_name(label: str) -> str:
 
 
 def main() -> None:
-    """Parse CLI arguments and plot SSP pathways continued beyond 2100 through the growth matrices.
-
-    Follows each strategy's SSP-RCP pathway through the scenario-neutral growth matrices up
-    to extended_pathways.to_year, using illustrative population continuations after 2100.
-    Writes timeseries_extended_continents.png and extended_pathways.csv (and, if
-    extended_pathways.ember is set, ember_extended_pathways.png) to --outdir.
-    """
+    """Write extended_pathways.csv and the extended-pathway figures to --outdir."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_*_growth_matrix.csv files")
@@ -116,7 +98,6 @@ def main() -> None:
         g = growth_ext[variant]
         return np.array([interpolate_growth_factor(g, ssp, iso, int(y), 1.0) for y in years]) - 1.0
 
-    # EAI along every (strategy, country, SSP, variant) pathway
     eai: dict[tuple[str, str, str, str], np.ndarray] = {}
     for label in labels:
         eai_grid, slr_mm, gfr = grids[label]
@@ -133,7 +114,6 @@ def main() -> None:
     var_style = {v: VARIANT_STYLES[k % len(VARIANT_STYLES)] for k, v in enumerate(variants)}
     i_end = int(LAST_SSP_YEAR - years[0])
 
-    # ── ember panels with branching pathways ──────────────────────────────────────────────
     countries = [c for c in ep.get("ember_countries", []) if c in isos] if ep.get("ember", False) else []
     if countries and "baseline" in grids:
         eai_grid, slr_mm, gfr = grids["baseline"]
@@ -182,7 +162,7 @@ def main() -> None:
         plt.close(fig)
         print("Written: ember_extended_pathways.png")
 
-    # ── time series to to_year: continents (rows, by EAI in 2100) x SSPs ─────────────────
+    # Continent rows ordered by EAI in 2100.
     cont_of = iso_to_continent(isos)
     groups = {c: [i for i, k in cont_of.items() if k == c] for c in CONTINENTS}
     groups = {g: v for g, v in groups.items() if v}
@@ -209,7 +189,7 @@ def main() -> None:
             ax.yaxis.set_major_formatter(plt.FuncFormatter(_people))
             ax.yaxis.set_major_locator(plt.MaxNLocator(4))
             ax.tick_params(labelsize=12)
-        # extra headroom in the first row, which holds the legend in its upper-left corner
+        # Headroom for the legend in the first row.
         row[0].set_ylim(0, (1.55 if g == order[0] else 1.05) * top or 1.0)
         row[0].set_ylabel("EAI (people)", fontsize=12)
         row[0].annotate(g, xy=(0, 0.5), xycoords="axes fraction", xytext=(-78, 0), textcoords="offset points",
@@ -223,7 +203,6 @@ def main() -> None:
     handles = [Patch(color=m_colors.get(l.partition("_SLR_")[0], "#444444"), label=_strategy_name(l)) for l in labels]
     handles += [Line2D([], [], color="0.3", lw=2.0, label=f"to {LAST_SSP_YEAR}: SSP population")]
     handles += [Line2D([], [], color="0.3", lw=1.8, ls=PROJECTION_LINESTYLE, label=f"after {LAST_SSP_YEAR}: projection")]
-    # inside the first panel's upper-left corner, where the series are still low
     axes[0, 0].legend(handles=handles, loc="upper left", ncol=2, fontsize=10.5, frameon=True, framealpha=0.9,
                       handlelength=2.2, columnspacing=1.0, borderaxespad=0.3, labelspacing=0.3)
     fig.savefig(out_dir / "timeseries_extended_continents.png", dpi=dpi, bbox_inches="tight")

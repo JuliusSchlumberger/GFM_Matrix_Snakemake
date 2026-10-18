@@ -1,20 +1,11 @@
-"""Interior forcing points: COAST-RP stations inside the tile that are NOT a node of the boundary line
-(dropped while building it - closed bay, dangling line, shortcut, irrelevant, not open ocean, unlinked)
-but lie by water that stays active in SFINCS. Without them such water (a lagoon, a bay behind a
-shortcut, an archipelago the line gave up on) is forced only from the line's nodes further out,
-not by its own stations.
+"""Interior forcing points: off-line COAST-RP stations by water that stays active in SFINCS.
 
-Rule (along every boundary, like the eikonal's own seeding): each such station becomes a forcing
-point at the nearest open-water pixel of the tile's native mask (within STATION_OCEAN_TOL_M), with
-  - level: the station's own COAST-RP RP100 level (MDT-corrected, as for the line's nodes);
-  - hydrograph shape: the nearest COAST-HG station that is hydrologically connected to it - in the
-    same 8-connected ocean water body of the DeltaDTM mask over the production station search box
-    (build_station_boundary_lines._search_box / _read_mask_window); a COAST-HG station at the
-    station's own position (they share most positions) is taken directly.
-Stations closer than LINE_CLEARANCE_M to the boundary line are left out (forced by the line already),
-as are stations in the line's inactive (sea-side) faces. build_sfincs_tile.py makes a small inactive
-core at each point with a ring of waterlevel-boundary cells around it (same construction as the line:
-inactive on one side, boundary cells along it).
+Without them a lagoon, a bay behind a shortcut or an archipelago the line gave
+up on is forced only from line nodes further out. Each station is snapped to the
+nearest open-water pixel of the native mask; level = its own MDT-corrected
+COAST-RP RP100 level; hydrograph = nearest COAST-HG station in the same
+8-connected DeltaDTM ocean body over the production station search box.
+build_sfincs_tile.py rings each point's small inactive core with boundary cells.
 """
 
 from __future__ import annotations
@@ -40,7 +31,6 @@ SEARCH_BUFFER_DEG, SEARCH_MIN_SIZE_DEG = 1.0, 2.0  # production station search b
 
 
 def _snap_to_ocean(lon: float, lat: float, mask: np.ndarray, transform) -> tuple[float, float] | None:
-    """Centre of the nearest ocean pixel of the native mask within STATION_OCEAN_TOL_M, or None."""
     px_m = abs(transform.e) * 110570.0
     w = int(np.ceil(STATION_OCEAN_TOL_M / px_m))
     r, c = rasterio.transform.rowcol(transform, lon, lat)
@@ -58,7 +48,6 @@ def _snap_to_ocean(lon: float, lat: float, mask: np.ndarray, transform) -> tuple
 
 
 def _components(root: Path, tile: gpd.GeoDataFrame):
-    """(labels, transform) of the 8-connected ocean water bodies over the station search box."""
     bounds = bsl._search_box(tile, SEARCH_BUFFER_DEG, SEARCH_MIN_SIZE_DEG)
     mask, tr = bsl._read_mask_window(root / bsl.MASK_VRT, bounds)
     labels, _ = ndimage.label(mask == bsl.OCEAN_CODE, structure=np.ones((3, 3)))
@@ -66,7 +55,6 @@ def _components(root: Path, tile: gpd.GeoDataFrame):
 
 
 def _label_at(labels, tr, lon, lat, r_px: int) -> int:
-    """Label of the nearest ocean pixel within r_px of (lon, lat), 0 if none."""
     r, c = rasterio.transform.rowcol(tr, lon, lat)
     h, w = labels.shape
     if not (0 <= r < h and 0 <= c < w):
@@ -81,31 +69,10 @@ def _label_at(labels, tr, lon, lat, r_px: int) -> int:
 
 
 def interior_points(lines_gpkg: Path, tile_dir: Path, root: Path, hg_xy: np.ndarray) -> gpd.GeoDataFrame:
-    """Find interior forcing points: stations not on the boundary line but by water
-    that stays active in SFINCS.
+    """Return the interior forcing points (EPSG:4326) with their matched COAST-HG station.
 
-    Applies the module's rules (ocean snap within STATION_OCEAN_TOL_M, line
-    clearance, hydrological connectivity via the DeltaDTM mask) to every
-    candidate station and returns the surviving points with their matched
-    COAST-HG hydrograph station.
-
-    Parameters
-    ----------
-    lines_gpkg : Path
-        build_station_boundary_lines.py output (stations/boundary_line/inactive layers).
-    tile_dir : Path
-        Tile's base directory (containing inputs/, with tile_geometry.gpkg and mask.tif).
-    root : Path
-        Config root directory (for the production station search box mask).
-    hg_xy : numpy.ndarray
-        COAST-HG station (lon, lat) coordinates, shape (n_stations, 2).
-
-    Returns
-    -------
-    geopandas.GeoDataFrame
-        Interior points (EPSG:4326) with columns station, station_index,
-        rp100_level_m, coast_hg_station, coast_hg_dist_deg, kind="interior";
-        empty (same columns, no rows) if none qualify.
+    Skips stations in the line's inactive (sea-side) faces or within
+    LINE_CLEARANCE_M of the line. `hg_xy` is COAST-HG (lon, lat), shape (n, 2).
     """
     cols = ["station", "station_index", "rp100_level_m", "coast_hg_station", "coast_hg_dist_deg", "kind"]
     empty = gpd.GeoDataFrame({c: [] for c in cols}, geometry=[], crs="EPSG:4326")
@@ -135,7 +102,7 @@ def interior_points(lines_gpkg: Path, tile_dir: Path, root: Path, hg_xy: np.ndar
         if gpd.GeoSeries([pt], crs="EPSG:4326").to_crs(utm).iloc[0].distance(line_utm) < LINE_CLEARANCE_M:
             continue
         d, j = tree.query([r.geometry.x, r.geometry.y])
-        if d > SAME_POSITION_DEG:  # nearest COAST-HG station in the same water body (search box)
+        if d > SAME_POSITION_DEG:  # COAST-RP and COAST-HG share most positions; else match by water body
             if labels is None:
                 labels, ltr = _components(root, tile)
             r_px = int(np.ceil(STATION_OCEAN_TOL_M / (abs(ltr.e) * 110570.0)))

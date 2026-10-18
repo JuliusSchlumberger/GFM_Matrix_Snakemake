@@ -1,14 +1,7 @@
-"""Branch coverage for `eikonal_runner.run_tile_scenario`, the per-tile logic shared by
-both production entry points (snakemake_workflow/scripts/run_eikonal.py and
-run_eikonal_cli.py).
+"""Cover every outcome of eikonal_runner.run_tile_scenario on synthetic tiles.
 
-Fully synthetic: tiny dem/mask/friction rasters in the real int16 on-disk conventions plus
-boundaries GeoPackages and a tile grid, covering every outcome: hop-0 solve, hop-0 with no
-stations, hop-1 seeded from an overlapping wave-0 tile, OOM pre-marked, and a MemoryError
-during the solve. Also checks that `stage_boundaries=True` cleans up its scratch copy.
-
-Plain assert-based script (this repo's tests/ convention): runs standalone with
-`python tests/eikonal_runner_validation/validate_run_tile_scenario.py`; pytest collects it.
+Outcomes: hop-0 solve, no stations, hop-1 seeded from wave 0, OOM pre-marked,
+MemoryError during the solve; also staged-boundaries cleanup.
 """
 
 import os

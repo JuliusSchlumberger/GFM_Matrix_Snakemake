@@ -1,49 +1,21 @@
-"""San Francisco Bay flood-depth validation against USGS CoSMoS (RP100,
-no SLR / "existing conditions", W100/SLR000), at TWO resolutions:
+"""Validate SF Bay flood depth against USGS CoSMoS (RP100, SLR000) at two grids.
 
-  A) "coarsen" - the CoSMoS depth mosaic (2m, EPSG:26910) averaged onto the
-     model's own native grid (~30m, EPSG:4326) - apples-to-apples at model
-     resolution.
-  B) "refine" - the model's own depth output bilinear-resampled onto
-     CoSMoS's native 2m grid - apples-to-apples at benchmark resolution.
+A) "coarsen": CoSMoS 2m EPSG:26910 depth averaged onto the model grid (~30m, EPSG:4326).
+B) "refine": model depth bilinear-resampled onto the CoSMoS 2m grid.
+Each gives HT/FAR/CSI/bias at primary_threshold_m and RMSE/MAE (m) over the whole
+domain and over benchmark-wet pixels only.
 
-At each resolution, computes the standard confusion-matrix metrics (CSI,
-HT/POD, FAR, bias) at the model's own primary_threshold_m wet-cell
-threshold, PLUS continuous-depth RMSE/MAE - both over the whole evaluation
-domain and restricted to benchmark-flooded pixels only (where the ground-
-truth CoSMoS data itself shows wet - the depth-accuracy question is only
-meaningful where there's real flooding to compare against).
+Domain: union of the 9 counties' rectangular raster extents
+(sf_bay_county_bbox_union.gpkg). CoSMoS only has values inside the flood extent,
+so its nodata inside the union counts as dry (depth 0). Permanent water is
+excluded: CoSMoS depth includes Bay bathymetry.
 
-Unlike every other benchmark in validate_country.py (vector or categorical-
-raster hazard extent, scored via the soft/fractional-coverage machinery in
-src/validation.py), CoSMoS's SF Bay product is a continuous DEPTH raster at
-much finer resolution than the model grid, and the user wants BOTH an
-up-sampled and a down-sampled comparison rather than a single fractional-
-coverage score - that's genuinely different machinery (explicit reprojection
-to one common grid per direction, then plain array-level confusion counts
-and RMSE/MAE), not a variant of the existing soft-fraction path; this script
-is SF Bay's own driver/CLI (there is no reusable version in validate_country.py).
-
-Evaluation domain (2026-10-15, revised): NOT the benchmark raster's own
-valid-pixel footprint - confirmed live that CoSMoS depth rasters only carry
-a value WITHIN the mapped flood extent itself (nodata means "outside the
-hazard zone", not "assessed, dry"), so that footprint is ~100% benchmark-wet
-by construction and makes FAR/bias vacuous (no real dry ground to test a
-false alarm against). The domain is instead the UNION of all 9 counties'
-own RECTANGULAR raster extents (sf_bay_county_bbox_union.gpkg, built by
-build_sf_bay_benchmark_mosaic.py's sibling step) - each county's modeled
-coastal-zone footprint, confirmed far larger (2500-9700 km^2 each) than the
-flood extent alone. CoSMoS nodata WITHIN this union is now correctly
-treated as "modeled, found dry" (depth=0), not excluded - this is what
-actually gives FAR/bias real negative-space to measure against. Permanent
-water (DeltaDTM land/ocean/lake/river mask, validation.permanent_water_source)
-is still excluded from the domain entirely at both resolutions, same as
-every other benchmark - CoSMoS's depth values include the Bay's own real
-bathymetric depth, not just new flood depth, and scoring that as "model
-under-prediction" would be meaningless.
+Writes, on the model grid (A), the agreement raster (validate_country.py's codes) and the
+model-minus-CoSMoS depth difference (m), plus the metrics CSV, to --out-dir
+(default {validation.output_dir}/USA). Plot them with plot_sf_bay.py.
 
 Usage:
-    python validation/validate_sf_bay.py [--config path/to/config.yml] [--out-csv path.csv]
+    python validation/validate_sf_bay.py [--config path/to/config.yml] [--out-dir DIR] [--out-csv path.csv]
 """
 
 from __future__ import annotations
@@ -63,30 +35,12 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))  # validation/ (for _chunks)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _chunks import _chunks_overlapping_bbox, _mosaic_read  # noqa: E402
+from validate_country import _CAT_AGREE, _CAT_DRY, _CAT_OVER, _CAT_UNDER  # noqa: E402
 
 
 def _rasterize_surveyed_domain(surveyed_domain_path: Path, out_transform, out_shape, out_crs) -> np.ndarray:
-    """Rasterize the surveyed-domain polygon(s) onto the given output grid.
-
-    Parameters
-    ----------
-    surveyed_domain_path : Path
-        Path to the surveyed-domain vector file (e.g. the 9-county bbox
-        union gpkg).
-    out_transform : affine.Affine
-        Affine transform of the destination grid.
-    out_shape : tuple[int, int]
-        Shape (rows, cols) of the destination grid.
-    out_crs : rasterio.crs.CRS
-        CRS of the destination grid.
-
-    Returns
-    -------
-    np.ndarray
-        Boolean mask, True inside the surveyed domain.
-    """
     gdf = gpd.read_file(surveyed_domain_path).to_crs(out_crs)
     return rasterize(
         [(geom, 1) for geom in gdf.geometry], out_shape=out_shape,
@@ -95,34 +49,44 @@ def _rasterize_surveyed_domain(surveyed_domain_path: Path, out_transform, out_sh
 
 
 def _permanent_water_mask_lean(land_use: np.ndarray, exclude_codes) -> np.ndarray:
-    """Same semantics as src/validation.py's permanent_water_mask, but avoids
-    np.isin's internal temporary arrays - at the SF Bay 2m grid's ~1.7 billion
-    pixels, np.isin's own machinery (built for an arbitrary-length second
-    array, overkill for 3 known codes) was enough to exhaust available memory
-    on its own, on top of the several other full-resolution arrays already
-    live at that point."""
+    """Like validation.permanent_water_mask without np.isin, which runs out of memory at 2m."""
     out = np.zeros(land_use.shape, dtype=bool)
     for code in exclude_codes:
         out |= land_use == code
     return out
 
 NODATA_SENTINEL = -9999.0
-# SF Bay bbox (EPSG:4326) - same footprint the v2.1 sfb_fldhazd benchmark covers.
+# EPSG:4326, footprint of the v2.1 sfb_fldhazd benchmark.
 BAY_BBOX_4326 = (-122.64, 37.40, -121.88, 38.28)
+OUTPUT_TAG = "USA_sf_bay_RP100_SLR_0"
+AGREEMENT_NODATA = 255
+
+
+def _write_model_grid_outputs(out_dir: Path, model_depth, bench_depth, model_wet, bench_wet, domain, transform, crs) -> None:
+    """Write agreement categories and model-minus-CoSMoS depth (m) on the model grid.
+
+    The depth difference is NaN where both are dry, so the map shows the background there.
+    """
+    retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
+    agreement = np.full(domain.shape, AGREEMENT_NODATA, dtype="uint8")
+    agreement[domain] = _CAT_DRY
+    agreement[domain & model_wet & bench_wet] = _CAT_AGREE
+    agreement[domain & ~model_wet & bench_wet] = _CAT_UNDER
+    agreement[domain & model_wet & ~bench_wet] = _CAT_OVER
+    diff = np.where(domain & (model_wet | bench_wet), model_depth - bench_depth, np.nan).astype("float32")
+    base = {"driver": "GTiff", "count": 1, "crs": crs, "transform": transform,
+            "width": domain.shape[1], "height": domain.shape[0], "compress": "lzw"}
+    for name, arr, extra in (
+        ("agreement", agreement, {"dtype": "uint8", "nodata": AGREEMENT_NODATA}),
+        ("depth_diff", diff, {"dtype": "float32", "nodata": float("nan")}),
+    ):
+        path = out_dir / f"{name}_{OUTPUT_TAG}.tif"
+        with retry_transient_io(rasterio.open, path, "w", **base, **extra) as dst:
+            dst.write(arr, 1)
+        print(f"wrote {path}")
 
 
 def _read_model_bay(chunk_paths: list[Path], bbox):
-    """Read the model's merged waterdepth over `bbox` (EPSG:4326) from every overlapping chunk.
-
-    One chunk (the case for SF Bay with 5deg chunks): a windowed read, exactly as before.
-    Several chunks (smaller chunk_size_deg, or a bbox across a chunk edge): mosaicked with
-    validation/_chunks._mosaic_read, the same path validate_country.py uses.
-
-    Returns
-    -------
-    tuple
-        (depth_m float64, transform, crs, nodata).
-    """
     if not chunk_paths:
         raise FileNotFoundError(f"no merged waterdepth chunk overlaps the SF Bay bbox {bbox}")
     if len(chunk_paths) == 1:
@@ -134,7 +98,6 @@ def _read_model_bay(chunk_paths: list[Path], bbox):
 
 
 def _read_model_window(path: Path, bbox):
-    """Windowed-read the model chunk to `bbox` (EPSG:4326), return (depth_m, transform, crs, nodata)."""
     with rasterio.open(path) as src:
         window = rasterio.windows.from_bounds(*bbox, transform=src.transform)
         window = window.round_offsets().round_lengths()
@@ -156,8 +119,7 @@ def _read_benchmark_full(path: Path):
 
 
 def _permanent_water_on_grid(gfm_catalog, permanent_water_source, permanent_water_codes, bbox, out_transform, out_shape, out_crs):
-    """Like src/validation.py's read_permanent_water_mask, but with a caller-chosen dst_crs
-    (that function hardcodes EPSG:4326, which doesn't fit this script's EPSG:26910 2m grid)."""
+    """Like validation.read_permanent_water_mask, which hardcodes EPSG:4326, for any CRS."""
     try:
         lu_da = retry_transient_io(gfm_catalog.get_rasterdataset, permanent_water_source, bbox=bbox).squeeze(drop=True)
     except Exception:
@@ -206,7 +168,11 @@ def _depth_error_metrics(model_depth: np.ndarray, bench_depth: np.ndarray, domai
     }
 
 
-def validate_sf_bay(config_path: str, threshold_m: float | None = None) -> dict[str, dict]:
+def validate_sf_bay(config_path: str, threshold_m: float | None = None, out_dir: Path | None = None) -> dict[str, dict]:
+    """Score both directions; `threshold_m` defaults to validation.primary_threshold_m.
+
+    With `out_dir`, also writes the model-grid rasters (_write_model_grid_outputs).
+    """
     cfg = load_config(Path(config_path))
     val_cfg = cfg["validation"]
     threshold_m = threshold_m if threshold_m is not None else val_cfg["primary_threshold_m"]
@@ -232,7 +198,6 @@ def validate_sf_bay(config_path: str, threshold_m: float | None = None) -> dict[
 
     results: dict[str, dict] = {}
 
-    # ── Direction A: benchmark averaged ("coarsened") onto the model's own grid ──
     bench_on_model = np.full(model_shape_native, NODATA_SENTINEL, dtype="float64")
     reproject(
         source=bench_depth_2m, destination=bench_on_model,
@@ -246,8 +211,7 @@ def validate_sf_bay(config_path: str, threshold_m: float | None = None) -> dict[
         list(BAY_BBOX_4326), model_transform_native, model_shape_native, model_crs,
     )
     surveyed_a = _rasterize_surveyed_domain(surveyed_domain_path, model_transform_native, model_shape_native, model_crs)
-    # Within the surveyed footprint, CoSMoS nodata means "modeled, found dry" - fill it
-    # as a real 0.0 depth rather than excluding it, so it can register as a TN or FP.
+    # CoSMoS nodata inside the surveyed domain = modeled dry.
     bench_on_model = np.where((bench_on_model == NODATA_SENTINEL) & surveyed_a, 0.0, bench_on_model)
     domain_a = (model_depth_native != NODATA_SENTINEL) & surveyed_a & ~water_on_model
     model_wet_a = model_depth_native > threshold_m
@@ -257,8 +221,10 @@ def validate_sf_bay(config_path: str, threshold_m: float | None = None) -> dict[
         **_confusion_metrics(model_wet_a, bench_wet_a, domain_a),
         **_depth_error_metrics(model_depth_native, bench_on_model, domain_a, bench_wet_a),
     }
+    if out_dir is not None:
+        _write_model_grid_outputs(Path(out_dir), model_depth_native, bench_on_model, model_wet_a, bench_wet_a,
+                                  domain_a, model_transform_native, model_crs)
 
-    # ── Direction B: model bilinear-resampled ("refined") onto the benchmark's 2m grid ──
     model_on_2m = np.full(bench_shape_2m, NODATA_SENTINEL, dtype="float32")
     reproject(
         source=model_depth_native, destination=model_on_2m,
@@ -286,18 +252,25 @@ def validate_sf_bay(config_path: str, threshold_m: float | None = None) -> dict[
 
 
 def main() -> None:
+    """Print the SF Bay results; write rasters + metrics to --out-dir, optionally --out-csv."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
+    parser.add_argument("--out-dir", default=None, help="default: {validation.output_dir}/USA")
     parser.add_argument("--out-csv", default=None)
     args = parser.parse_args()
 
-    results = validate_sf_bay(args.config)
+    out_dir = Path(args.out_dir) if args.out_dir else Path(load_config(Path(args.config))["validation"]["output_dir"]) / "USA"
+    results = validate_sf_bay(args.config, out_dir=out_dir)
 
     import pandas as pd
     df = pd.DataFrame(results).T
     pd.set_option("display.width", 160)
     pd.set_option("display.max_columns", 20)
     print(df.to_string())
+
+    metrics_path = out_dir / f"metrics_{OUTPUT_TAG}.csv"
+    df.to_csv(metrics_path)
+    print(f"\nwrote {metrics_path}")
 
     if args.out_csv:
         df.to_csv(args.out_csv)

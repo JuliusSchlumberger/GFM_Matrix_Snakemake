@@ -10,10 +10,7 @@
 # station data there; tile_generation never produced a domain for it. Out
 # of scope for this deliverable under the current forcing scheme.
 #
-# friction_scale_factor=9.0 (0.3x production's 30.0) per explicit user
-# request - the friction-sweep's own best-CSI finding against SFINCS
-# (CSI=0.8012, bias=0.9877, validation_sfincs_v5, 2026-10-03), applied here
-# the same way the Wales/Scotland friction9 re-run used it.
+# friction_scale_factor=9.0 per explicit user request.
 #
 # Fully isolated from BOTH production AND the sibling ssp245 run (own
 # model_outputs -> own preprocessing_inputs_dir by default, see
@@ -24,8 +21,7 @@
 # own default slr_scenario.
 #
 # Layered on top of config.yml + config_local.yml via
-# src/config_utils.py::materialize_config, same pattern as
-# gbr_wales_scotland_friction9.yml / thailand_bangkok.yml.
+# src/config_utils.py::materialize_config.
 
 tile_grid:
   path: "{processed_inputs_dir}/mask/deltas_global_tiles.gpkg"
@@ -54,8 +50,7 @@ boundary_conditions:
 
 # REQUIRED, not decorative - merged_slr_scenarios() unions this with
 # boundary_conditions.slr_scenarios; leaving it unset would silently pull
-# in config.yml's own SLR_500 adaptation intensity (same trap documented in
-# gbr_wales_scotland_friction9.yml).
+# in config.yml's own SLR_500 adaptation intensity.
 adaptation:
   slr_intensities: []
 

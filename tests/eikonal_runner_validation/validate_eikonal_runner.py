@@ -1,20 +1,4 @@
-"""End-to-end smoke test for `eikonal_runner.run_eikonal_python` - the
-shared function BOTH real production entry points (scripts/run_eikonal.py,
-the Snakemake rule, and scripts/run_eikonal_cli.py, the standalone HPC
-CLI) call, and which had zero tests of its own before this (per this
-session's own eikonal-pipeline test-coverage stocktake).
-
-Fully synthetic: builds tiny dem.tif/mask.tif/friction.tif in the exact
-real on-disk int16 conventions (via rasters.py's own encoders, not a
-hand-rolled approximation of them) plus a boundaries.gpkg, runs the real
-function against them, and checks it produces a real, decodable
-waterdepth_*.tif and sane diagnostics - the "did I break the actual
-production entry point" check equivalent to the SFINCS pipeline's own
-`sfincs_synthetic_end_to_end` test.
-
-Usage:
-    python validate_eikonal_runner.py
-"""
+"""Smoke-test eikonal_runner.run_eikonal_python on a synthetic int16-encoded tile."""
 
 import shutil
 import sys
@@ -53,9 +37,9 @@ def test_run_eikonal_python_end_to_end_on_synthetic_tile() -> None:
 
         dem_m = np.full((m, n), 3.0, dtype=np.float64)
         mask = np.zeros((m, n), dtype=np.uint8)
-        mask[:, :3] = 1  # ocean strip on the left
-        dem_m = np.where(mask == 1, 0.0, dem_m)  # ocean cells at 0m, matching real extract_dem convention
-        friction = np.full((m, n), 0.0005, dtype=np.float64)  # Manning's n/100, realistic magnitude
+        mask[:, :3] = 1
+        dem_m = np.where(mask == 1, 0.0, dem_m)  # ocean at 0 m, as extract_dem writes it
+        friction = np.full((m, n), 0.0005, dtype=np.float64)  # Manning's n/100
 
         dem_path = tmpdir / "dem.tif"
         mask_path = tmpdir / "mask.tif"
@@ -64,7 +48,6 @@ def test_run_eikonal_python_end_to_end_on_synthetic_tile() -> None:
         _write_int16_raster(mask_path, mask.astype(np.int16), transform)
         _write_int16_raster(friction_path, encode_friction_int16(friction), transform)
 
-        # One boundary station just off the ocean strip, a real storm-tide-like water level.
         boundaries_gdf = gpd.GeoDataFrame(
             {"SLR_0": encode_waterlevel_cm(np.array([1.2]))},
             geometry=[Point(10.0002, 49.9985)],
@@ -102,17 +85,11 @@ def test_run_eikonal_python_end_to_end_on_synthetic_tile() -> None:
 
 
 def test_run_eikonal_python_friction_scale_factor_is_applied() -> None:
-    """`friction_scale_factor` (calibration-sweep knob, default 1.0 no-op) -
-    a value > 1.0 makes propagation more expensive, so a station that
-    reaches inland at factor=1.0 should flood fewer (or equal) cells at a
-    much higher factor - a real, directional sanity check that the
-    multiplier is actually wired into the solve, not silently dropped."""
+    """A higher friction_scale_factor must flood fewer cells (eikonal monotonicity)."""
     print("=== run_eikonal_python: friction_scale_factor actually changes the result ===")
     tmpdir = Path(tempfile.mkdtemp(prefix="eikonal_runner_scale_test_"))
     try:
-        # A long, gently-rising-inland domain (not a small flat one) - numerically
-        # confirmed (see conversation) to give friction a real, measurable effect on
-        # how far inland the flood reaches, rather than everything flooding regardless.
+        # Long, gently rising domain: on a small flat one everything floods regardless.
         m, n = 15, 60
         transform = Affine(0.0003, 0, 10.0, 0, -0.0003, 50.0)
         dem_m = np.tile(np.linspace(0.5, 3.0, n), (m, 1)).astype(np.float64)
@@ -148,7 +125,7 @@ def test_run_eikonal_python_friction_scale_factor_is_applied() -> None:
                 return decode_waterdepth_cm(src.read(1))
 
         wd_normal = run(1.0)
-        wd_expensive = run(200.0)  # friction 200x higher -> propagation should reach much less far
+        wd_expensive = run(200.0)
 
         n_flooded_normal = int((wd_normal > 0).sum())
         n_flooded_expensive = int((wd_expensive > 0).sum())

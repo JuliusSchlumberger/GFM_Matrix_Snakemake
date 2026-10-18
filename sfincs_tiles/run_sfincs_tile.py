@@ -1,10 +1,7 @@
-"""Runs a built SFINCS model (build_sfincs_tile.py's own output) and
-postprocesses it: max inundation depth + max flood extent, reprojected to
-EPSG:4326 to match the eikonal model's own `waterdepth_{RP}_{SLR}.tif`
-global-grid convention.
+"""Run a built SFINCS tile model and write max depth + extent in EPSG:4326, as the eikonal does.
 
 Run under the hydromt-sfincs-dev env:
-    C:\\Users\\schlumbe\\AppData\\Local\\miniforge3\\envs\\hydromt-sfincs-dev\\python.exe run_sfincs_tile.py --tile-id 1907 --sfincs-exe <path>
+    python run_sfincs_tile.py --tile-id 1907 --sfincs-exe <path>
 """
 
 from __future__ import annotations
@@ -30,9 +27,7 @@ from sfincs_run import run_sfincs_subprocess  # noqa: E402
 
 
 class _SimpleLog:
-    """No-op logger: run_sfincs_subprocess already prints every forwarded
-    line to stderr itself; a log object that also prints here would double
-    every SFINCS output line."""
+    """No-op logger: run_sfincs_subprocess already prints each SFINCS line to stderr."""
 
     def info(self, msg):
         pass
@@ -42,7 +37,6 @@ class _SimpleLog:
 
 
 def _mask_polygon_wgs84(mask_path: Path, code: int) -> gpd.GeoDataFrame:
-    """Vectorize mask.tif's cells of one class (`code`, e.g. 0 = land) into polygons (EPSG:4326)."""
     with retry_transient_io(rasterio.open, mask_path) as src:
         mask = src.read(1)
         transform = src.transform
@@ -54,15 +48,8 @@ def _mask_polygon_wgs84(mask_path: Path, code: int) -> gpd.GeoDataFrame:
 
 
 def _apply_land_mask_doublecheck(hmax: np.ndarray, transform, crs, land_mask_path: Path) -> np.ndarray:
-    """Second, independent land check on top of `downscale_floodmap()`'s own
-    `gdf_mask`: reprojects `land_mask_path` directly onto `hmax`'s own fine
-    grid (nearest-neighbour) and requires both checks to agree a cell is
-    land before it counts, masking every other cell to NaN.
-
-    `gdf_mask`'s own polygon-vs-raster rasterization at the coastline can
-    let a small number of edge cells slip through as land; this raster-vs-
-    raster check has no such vector/raster boundary to disagree about.
-    """
+    # downscale_floodmap's polygon gdf_mask can let coastline edge cells slip through as
+    # land; this raster-vs-raster (nearest) check has no vector/raster boundary to disagree on.
     with retry_transient_io(rasterio.open, land_mask_path) as src:
         land_on_subgrid = np.empty(hmax.shape, dtype=np.float64)
         reproject(
@@ -75,34 +62,11 @@ def _apply_land_mask_doublecheck(hmax: np.ndarray, transform, crs, land_mask_pat
 
 
 def compute_max_inundation(sfincs_dir: Path, land_mask_path: Path) -> tuple[np.ndarray, dict]:
-    """Compute max flood depth on the model's fine subgrid resolution.
+    """Downscale zsmax onto the subgrid DEM; return depth (m, NaN off land) and its grid.
 
-    Downscales the coarse-grid zsmax onto the real fine-resolution subgrid
-    DEM via hydromt_sfincs's own downscale_floodmap() utility. `land_mask_path`
-    is vectorised into a land-only polygon passed as its gdf_mask (excluding
-    ocean/lake/river cells), and independently reprojected onto the fine
-    grid and intersected with that result as a doublecheck (see
-    `_apply_land_mask_doublecheck`).
-
-    Parameters
-    ----------
-    sfincs_dir : Path
-        SFINCS model/output directory (sfincs_map.nc, subgrid/dep_subgrid.tif).
-    land_mask_path : Path
-        Tile's native mask.tif (EPSG:4326; land=0/ocean/lake/river).
-
-    Returns
-    -------
-    tuple[numpy.ndarray, dict]
-        Max flood depth in metres (NaN off land) on the fine subgrid, and
-        a dict with its "transform" and "crs".
-
-    Raises
-    ------
-    FileNotFoundError
-        If the SFINCS map output or the subgrid DEM is missing.
-    KeyError
-        If 'zsmax' is not in the SFINCS output.
+    `land_mask_path` is the tile's native mask.tif (EPSG:4326, land=0), applied
+    both as downscale_floodmap's gdf_mask and as a raster doublecheck.
+    Side effect: writes sfincs_dir/hmax_subgrid.tif.
     """
     map_path = sfincs_dir / "sfincs_map.nc"
     if not map_path.exists():
@@ -116,11 +80,8 @@ def compute_max_inundation(sfincs_dir: Path, land_mask_path: Path) -> tuple[np.n
             "resolution DEM to downscale onto."
         )
 
-    # Not a raw xr.open_dataset(map_path): SFINCS's own sfincs_map.nc stores zsmax
-    # on its native staggered (n, m) index dims with x/y as 2D coordinate arrays,
-    # which hydromt's own raster accessor (needed by downscale_floodmap()) can't
-    # recognize as spatial dims. SfincsOutput.read_map_file() translates this
-    # staggered format into a proper regular-grid DataArray.
+    # Not xr.open_dataset: sfincs_map.nc stores zsmax on staggered (n, m) dims with 2D x/y,
+    # which hydromt's raster accessor (needed by downscale_floodmap) can't recognize.
     sf_out = SfincsModel(root=str(sfincs_dir), mode="r")
     retry_transient_io(sf_out.output.read)
     if "zsmax" not in sf_out.output.data:
@@ -151,34 +112,12 @@ def compute_max_inundation(sfincs_dir: Path, land_mask_path: Path) -> tuple[np.n
 
 
 def reproject_to_4326(arr: np.ndarray, transform, crs, out_path: Path, nodata: float = -9999.0) -> None:
-    """Reproject a raster array to EPSG:4326 and write it as a GeoTIFF.
-
-    Computes the destination resolution per axis from the source's own
-    isotropic metre resolution at its centre latitude (so the reprojected
-    grid is square in real ground distance, not just in degrees), then
-    bilinearly resamples onto it.
-
-    Parameters
-    ----------
-    arr : numpy.ndarray
-        Source array (NaN treated as nodata).
-    transform : affine.Affine
-        Source raster transform.
-    crs : rasterio.crs.CRS or str
-        Source CRS (projected, metric).
-    out_path : Path
-        Output GeoTIFF path; parent directories are created if needed.
-    nodata : float, default -9999.0
-        Nodata value written to the output (and used for NaN in `arr`).
-    """
+    """Bilinearly reproject a metric-CRS array (NaN = nodata) to an EPSG:4326 GeoTIFF."""
     dst_crs = "EPSG:4326"
     src_bounds = rasterio.transform.array_bounds(arr.shape[0], arr.shape[1], transform)
 
-    # Explicit latitude-corrected target resolution, not calculate_default_transform()'s
-    # own default guess: a UTM source's isotropic metre resolution converted to degrees
-    # is square in real ground distance only at the equator, so degrees are computed
-    # separately per axis from the tile's own centre latitude and passed explicitly as
-    # calculate_default_transform()'s own `resolution` argument.
+    # Per-axis degrees at the tile's centre latitude keep cells square in ground distance;
+    # calculate_default_transform's own guess is square only at the equator.
     src_res_m = abs(transform.a)
     center_x = (src_bounds[0] + src_bounds[2]) / 2.0
     center_y = (src_bounds[1] + src_bounds[3]) / 2.0
@@ -209,8 +148,6 @@ def reproject_to_4326(arr: np.ndarray, transform, crs, out_path: Path, nodata: f
 
 
 def main() -> None:
-    """Parse CLI arguments, run (or skip) SFINCS for one tile, and write its
-    max inundation depth and flood extent as EPSG:4326 GeoTIFFs."""
     _repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tile-id", required=True)
@@ -231,9 +168,7 @@ def main() -> None:
     root = read_root(Path(args.config))
     sfincs_dir = root / args.base_dir_name / args.tile_id / "sfincs_model"
     out_dir = root / args.base_dir_name / args.tile_id / "outputs"
-    # Reads from the tile's working copy, not model_outputs/ directly: the SFINCS
-    # model is built from base_dir_name's own mask.tif, so the land-mask doublecheck
-    # here must use the same one.
+    # The model is built from base_dir_name's mask.tif, so the doublecheck must use that one.
     land_mask_path = root / args.base_dir_name / args.tile_id / "inputs" / "mask.tif"
 
     if args.skip_run:

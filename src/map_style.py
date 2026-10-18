@@ -1,59 +1,34 @@
-"""Shared visual style for every flood-extent agreement / inundation map in
-this codebase - `validation/plot_agreement_map.py` (model-vs-benchmark,
-`src/validation.py`'s own confusion_counts_soft) and `sfincs_tiles/*.py`
-(model-vs-model: eikonal-vs-SFINCS). Land/water background colors, the
-agree/first-only/second-only category palette, and the panel-lettering
-convention are centralized here so every spatial map in the repo looks the
-same regardless of which comparison produced it or which rendering path
-(a DeltaDTM permanent-water raster mask, a per-tile `mog` land/ocean/
-waterbody mask, cartopy's own Natural Earth land feature) built its
-land/water background - this module does not try to unify the background
-DATA sources, which genuinely differ per caller's own available inputs,
-only the COLORS, LABELS, and lettering every caller draws with.
+"""Shared colours, labels and panel lettering for flood-extent agreement maps.
 
-Category semantics: `AGREE_COLOR` is always "both sides agree this cell is
-wet". `A_ONLY_COLOR`/`B_ONLY_COLOR` are a fixed, direction-free pair - which
-real-world meaning they take (benchmark validation's "model under-predicts"/
-"model over-predicts", or an eikonal-vs-SFINCS comparison's "SFINCS only"/
-"eikonal only") is the caller's own choice of label text, not a different
-color. Pick a consistent A/B convention per comparison type and keep it
-(e.g. always A=the physics reference when comparing two models) so the same
-color means the same thing across every plot of that comparison type.
+AGREE = both sides wet. A_ONLY/B_ONLY are direction-free; keep one A/B convention
+per comparison type (e.g. A = the physics reference) so colours mean the same.
 """
 
 import matplotlib.pyplot as plt
 
-# Land grey / permanent-water blue-grey - distinct from AGREE/A_ONLY/B_ONLY
-# below so the background is never mistaken for a 4th category.
+# Background colours distinct from the category palette.
 LAND_COLOR = "#cfcfcf"
 WATER_COLOR = "#aec6d8"
 
-AGREE_COLOR = "#4daf4a"    # green - ColorBrewer Set1, distinguishable under
-A_ONLY_COLOR = "#377eb8"   # common colour-vision deficiencies - the same
-B_ONLY_COLOR = "#e41a1c"   # 3 hues validation/plot_agreement_map.py already
-# used before this module existed (config.yml's own validation.plots.agreement_colors
-# mirrors these exact values) - kept as the one fixed palette every category
-# map in the repo now draws from, rather than each module picking its own.
+# ColorBrewer Set1 (colour-vision-deficiency safe); mirrored by config.yml
+# validation.plots.agreement_colors.
+AGREE_COLOR = "#4daf4a"
+A_ONLY_COLOR = "#377eb8"
+B_ONLY_COLOR = "#e41a1c"
 
 LAND_LABEL = "Land"
 WATER_LABEL = "Permanent water"
 
 
 def orient_north_up(arr, transform):
-    """Return `arr` (rows x cols [x bands]) flipped so row 0 is north and
-    column 0 is west, for display with imshow's default origin="upper".
+    """Flip `arr` so row 0 is north and column 0 is west, for imshow origin="upper".
 
-    SFINCS subgrid rasters (hmax_subgrid.tif, the eikonal/bathtub rasters
-    written on the same grid) are stored south-up - positive y step, row 0
-    at the southern edge - so imshow without this shows them mirrored
-    north-south. Decides from the transform's own row/column direction
-    vectors, so it is a no-op for ordinary north-up rasters. A rotated grid
-    (non-zero transform.b/.d) keeps its small rotation; use the real cell
-    corners (pcolormesh) where exact geometry matters.
+    SFINCS subgrid rasters are stored south-up (positive y step). Rotated grids
+    keep their rotation; use pcolormesh where exact geometry matters.
     """
-    import numpy as np  # local: this module otherwise needs only matplotlib
+    import numpy as np
 
-    row_step_north = transform.e  # y change per row (cos-dominated for small rotations)
+    row_step_north = transform.e
     col_step_east = transform.a
     if row_step_north > 0:
         arr = np.flip(arr, axis=0)
@@ -63,14 +38,9 @@ def orient_north_up(arr, transform):
 
 
 def draw_panel_letter(ax: plt.Axes, letter: str | None) -> None:
-    """'(a)'/'(b)'/... drawn just OUTSIDE the axes (above its top-left
-    corner, axes-fraction y > 1) - a bare letter, never inside the data
-    area and NEVER baked into a title. No map in this codebase has a
-    title or suptitle - a panel that needs a real caption uses
-    `draw_caption_box` (an in-axes text box) instead, never
-    `ax.set_title`/`fig.suptitle`. No-op if `letter` is falsy, so callers
-    can pass `None` unconditionally for a single-panel figure that needs
-    no letter at all.
+    """Draw '(letter)' just above the axes' top-left corner; no-op if falsy.
+
+    Maps never use titles; captions go in `draw_caption_box`.
     """
     if not letter:
         return
@@ -81,14 +51,9 @@ def draw_panel_letter(ax: plt.Axes, letter: str | None) -> None:
 
 
 def draw_caption_box(ax: plt.Axes, lines: list[str] | str, loc: str = "upper left", fontsize: float = 8) -> None:
-    """In-axes text box - the one way any map in this codebase conveys
-    context (tile ID, CSI, cell counts, what a panel shows, ...) - NEVER an
-    `ax.set_title()`/`fig.suptitle()`. No-op on an empty/falsy `lines`, so
-    callers can pass "nothing to show" unconditionally.
+    """Draw an in-axes caption box (maps never use titles); no-op if `lines` is falsy.
 
-    `loc` is one of "upper left" (default, pairs naturally with
-    `draw_panel_letter`'s own top-left corner), "upper right", "lower left",
-    "lower right".
+    `loc`: "upper left", "upper right", "lower left" or "lower right".
     """
     if not lines:
         return

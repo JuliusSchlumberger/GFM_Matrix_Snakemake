@@ -1,12 +1,4 @@
-"""Unit tests for validation.metrics_from_counts / validation.confusion_counts
-against hand-computed contingency tables, including every degenerate case.
-
-Plain assert-based script (this repo's tests/ convention): runs standalone with
-`python <script>.py`, and pytest collects it too (pyproject.toml).
-
-Usage:
-    python tests/flood_extent_validation/test_metrics.py
-"""
+"""Test validation contingency metrics against hand-computed tables and 0/0 cases."""
 
 import math
 import sys
@@ -34,9 +26,7 @@ def _is_nan(x: float) -> bool:
 
 
 def test_hand_computed_contingency_table() -> None:
-    """The plan doc's own §3 probe numbers, as a regression fixture:
-    TP=3954, FP=9382, FN=38 -> HR=0.990, FAR=0.704, CSI=0.296, EB=0.996 (FP/FN=247).
-    """
+    """TP=3954, FP=9382, FN=38 -> HR=0.990, FAR=0.704, CSI=0.296, EB=0.996 (FP/FN=247)."""
     print("test_hand_computed_contingency_table")
     m = metrics_from_counts(tp=3954, fp=9382, fn=38, tn=0)
     _check("HR ~= 0.990", math.isclose(m["HR"], 0.990, abs_tol=5e-4), f"got {m['HR']}")
@@ -65,7 +55,6 @@ def test_eb_exactly_half_when_fp_equals_fn() -> None:
 
 
 def test_no_benchmark_wet() -> None:
-    """No benchmark-wet area at all in the domain: HR/CSI's TP+FN denominator is 0."""
     print("test_no_benchmark_wet")
     m = metrics_from_counts(tp=0, fp=25, fn=0, tn=100)
     _check("HR is NaN, not 0 (0/0)", _is_nan(m["HR"]), f"got {m['HR']}")
@@ -76,7 +65,6 @@ def test_no_benchmark_wet() -> None:
 
 
 def test_no_model_wet() -> None:
-    """Model predicts nothing wet at all: FAR's TP+FP denominator is 0."""
     print("test_no_model_wet")
     m = metrics_from_counts(tp=0, fp=0, fn=40, tn=100)
     _check("HR == 0.0", m["HR"] == 0.0)
@@ -88,7 +76,6 @@ def test_no_model_wet() -> None:
 
 
 def test_completely_empty_domain() -> None:
-    """Every count is zero - every ratio must be NaN, none may silently read as 0."""
     print("test_completely_empty_domain")
     m = metrics_from_counts(tp=0, fp=0, fn=0, tn=0)
     for key, val in m.items():
@@ -96,22 +83,17 @@ def test_completely_empty_domain() -> None:
 
 
 def test_confusion_counts_area_weighted() -> None:
-    """A small synthetic grid with a known, hand-countable overlap - confirms
-    confusion_counts' area-weighting (weight != 1 everywhere) is a real
-    elementwise multiply-then-sum, not accidentally cell-counting."""
     print("test_confusion_counts_area_weighted")
-    #        col: 0    1    2    3
     model = np.array([True, True, False, False])
     bench = np.array([True, False, True, False])
     domain = np.array([True, True, True, True])
-    weight = np.array([2.0, 3.0, 5.0, 7.0])  # e.g. km2 per cell
+    weight = np.array([2.0, 3.0, 5.0, 7.0])
     tp, fp, fn, tn = confusion_counts(model, bench, domain, weight)
     _check("tp == 2.0 (col 0: model&bench)", tp == 2.0, f"got {tp}")
     _check("fp == 3.0 (col 1: model&~bench)", fp == 3.0, f"got {fp}")
     _check("fn == 5.0 (col 2: ~model&bench)", fn == 5.0, f"got {fn}")
     _check("tn == 7.0 (col 3: ~model&~bench)", tn == 7.0, f"got {tn}")
 
-    # Restricting the domain excludes a cell from every count, weighted or not.
     domain_partial = np.array([True, True, True, False])
     tp2, fp2, fn2, tn2 = confusion_counts(model, bench, domain_partial, weight)
     _check("tn == 0.0 when the tn cell is outside the domain", tn2 == 0.0, f"got {tn2}")
@@ -120,21 +102,7 @@ def test_confusion_counts_area_weighted() -> None:
 
 
 def test_confusion_counts_tolerant_forgives_only_adjacent_disagreement() -> None:
-    """One-row synthetic grid, hand-traced, for v.confusion_counts_tolerant:
-
-        idx:        0    1    2    3    4    5    6    7    8
-        model_wet:  T    T    F    F    F    F    T    F    F
-        bench_wet:  F    T    T    F    F    F    F    F    T
-
-    Strict (tolerance_cells=0): tp={1}, fp={0,6}, fn={2,8}, tn={3,4,5,7}.
-    idx0's fp sits right next to idx1/2's real benchmark-wet cells - a
-    textbook "same boundary, one pixel off" disagreement - while idx6's fp
-    and idx8's fn each sit alone, with no opposite-type cell within one
-    pixel. A correct tolerant check forgives idx0 and idx2 only, leaving
-    idx6/idx8 as real (unforgiven) disagreement - confirming the mechanism
-    discriminates "boundary noise" from "isolated, unexplained mismatch"
-    rather than forgiving everything within reach.
-    """
+    """Forgive only one-pixel boundary mismatches (idx0 fp, idx2 fn), not isolated ones (6, 8)."""
     print("test_confusion_counts_tolerant_forgives_only_adjacent_disagreement")
     model_wet = np.array([[True, True, False, False, False, False, True, False, False]])
     bench_wet = np.array([[False, True, True, False, False, False, False, False, True]])

@@ -1,12 +1,7 @@
-"""Final reduce + write step of the chunk-partitioned exposure pipeline.
+"""Sum pass-2 exposure batches and write the File 1/2/3 exposure CSVs.
 
-Sums every pass-2 batch's partial per-task EAI DataFrames across all batches
-(`.add(fill_value=0.0)` - the exact same reduction _stream_eai already
-relies on chunk-to-chunk, applied batch-to-batch here), then writes every
-File 1/2/3 CSV via write_exposure_outputs. See
-analysis/compute_exposure_analysis.py's module docstring for the full
-design - this produces the same output files
-analysis/compute_exposure_analysis.py's single-machine main() would.
+Partial per-task EAI DataFrames are combined with `.add(fill_value=0.0)`;
+the output matches analysis/compute_exposure_analysis.py's single-machine main().
 
 Usage:
     python reduce_exposure_write.py --config path/to/config.yml \\
@@ -34,14 +29,7 @@ from compute_exposure_analysis import (  # noqa: E402
 
 
 def main() -> None:
-    """Parse CLI arguments and write the final merged exposure CSVs.
-
-    Sums every pass-2 batch's partial per-task EAI DataFrames matched by
-    ``--parts-glob`` (``.add(fill_value=0.0)``, chunk-to-chunk added
-    batch-to-batch), then writes the File 1/2/3 CSVs to ``--outdir`` via
-    ``write_exposure_outputs``. Raises ``SystemExit`` if no part files match
-    the glob.
-    """
+    """Write the final merged exposure CSVs."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--parts-glob", required=True, help="glob pattern matching every pass-2 batch's output pickle")

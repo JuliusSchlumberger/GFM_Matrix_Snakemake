@@ -40,7 +40,7 @@ with a vertical line at production's `max_rounds`; a tile's own trace ends
 once it round-converges, so the sample each band is computed from shrinks
 at higher round numbers - real data throughout, no carried-forward values
 past a tile's own trace) - `calibration_studies/plot_sweep_time_vs_size.py`
-(2026-10-08, single figure, `sweep_time_vs_size.png` - real wall-clock
+(single figure, `sweep_time_vs_size.png` - real wall-clock
 seconds-to-converge vs. tile size in native cells, log-log, with a power-law
 fit over the converged population for HPC capacity-planning estimates;
 unlike the 4-panel figure above, uses the FULL tile population, not just the

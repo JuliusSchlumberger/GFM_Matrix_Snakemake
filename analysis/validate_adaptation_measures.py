@@ -1,49 +1,7 @@
-"""Synthetic sense-check of the baseline/protect/avoid/retreat/protect + avoid exposure formulas.
+"""Sense-check the production adaptation exposure formulas on a synthetic 100x100 grid.
 
-Not part of the Snakemake DAG or run_analysis.py - a standalone diagnostic
-that runs the REAL production formulas from src/exposure_analysis.py
-(protect_exposure_grid, compute_retreat_capacity/compute_retreat,
-compute_avoid_redirected/compute_avoid) against a small synthetic 100x100
-grid instead of real pipeline outputs, so the adaptation measures' relative
-behaviour can be checked quickly without a full run.
-
-Grid setup
-----------
-One fixed exposure/population grid (E0) and one sequence of flood-fraction
-grids, one per synthetic "severity" level (mapped directly onto the ember
-plot's SLR axis - no return-period dimension: EAI is simplified to the
-adaptation formula's output for that single representative severity level,
-skipping the real pipeline's trapezoidal RP integration). The whole grid is
-treated as a single "country" (a constant geo_ids array + a 1-entry
-iso_lookup) so compute_retreat/compute_avoid's real country-redistribution
-logic runs unmodified.
-
-Flood-fraction generation is a seeded cellular-automaton-style contagion
-process: at each more-severe step, already-wet cells' flood_fraction grows
-multiplicatively (capped at 1.0), and each dry cell 4-connected to a wet
-cell gets a fixed probability of activating. A bigger wet frontier yields
-proportionally more new activations the next step, compounding both cell
-count and per-cell value into roughly exponential growth in total flooded
-extent.
-
-Output: 15 burning-ember plots - columns = baseline/protect/
-avoid/retreat/protect + avoid, rows = three "modes" describing which axis of the
-(severity x growth) EAI matrix is actually left free to vary:
-  - SLR driven:        growth_factor forced to 1.0 for every row (both of
-                        avoid's growth-dependent terms - organic-growth and
-                        redirected-growth - use max(0, growth_factor - 1),
-                        so they vanish here: avoid should collapse onto
-                        baseline and protect + avoid onto protect exactly).
-  - Population driven: severity forced to the level-0 (mostly dry) grid for
-                        every column; only growth varies.
-  - Mixed drivers:      both vary for real, the closest analogue to
-                        production behaviour.
-plot_burning_ember() itself is reused unmodified for the 15 individual
-diagnostic PNGs (one call per panel, with EAI numbers). The same 15 matrices
-are also drawn as one conceptual manuscript figure, validation_grid_5x3.png
-/.pdf (plot_conceptual_grid): rows Population / SLR / Combination driven,
-columns No adaptation / Protect / Avoid / Retreat / Protect + Avoid, one shared colour scale,
-no numbers on axes or contours.
+Standalone diagnostic (not in the DAG). EAI is the formula output at one severity
+level per SLR step (no RP integration); the whole grid is one "country".
 
 Usage:
     python analysis/validate_adaptation_measures.py
@@ -77,38 +35,18 @@ N_SEVERITY = 7
 SLR_MM = np.linspace(0, 1500, N_SEVERITY)
 GROWTH_RATES = np.arange(-0.5, 1.5 + 1e-9, 0.1)
 
-# Design/protection standard: a flood_fraction cutoff applied inside the
-# DESIGN ZONE only - the cells already flooded at severity DESIGN_LEVEL (the
-# SLR the adaptation is designed for); every other cell has no design
-# floodplain (0). A stand-in for the real pipeline's
-# build_adapt_protection_fraction map, which is likewise non-zero only where
-# the design event floods. Must sit above INITIAL_WET_VALUE and inside the
-# SEED_WET_RANGE - see their comments for why.
-# 0.50 (was 0.20, 2026-10-13): high enough that protection visibly removes a
-# share of the flooding in every mode, so protect reads as distinct from baseline.
-# Zone-limited (was uniform over the whole grid, 2026-10-13): with a uniform
-# design floodplain every dry inland cell also counted as 50 % floodplain, so
-# avoid/retreat moved people into cells no safer than the ones they left and
-# protect + avoid was hardly distinguishable from protect.
+# Flood-fraction cutoff inside the design zone only (cells wet at DESIGN_LEVEL), 0 elsewhere,
+# like build_adapt_protection_fraction. Must exceed INITIAL_WET_VALUE and lie inside
+# SEED_WET_RANGE; a uniform (not zone-limited) floodplain would make avoid/retreat move people
+# into cells no safer than the ones they left.
 DESIGN_STANDARD = 0.50
 DESIGN_LEVEL = 4  # severity level (SLR_MM[4] = 1 m) the design zone is taken from
 
-# Flood-fraction contagion parameters (see module docstring).
-# SEED_WET_RANGE is the level-0 seed patch's starting flood fraction, a
-# gradient across the patch (high at the coast edge, low inland): the part
-# above DESIGN_STANDARD is established flooding that protection cannot stop,
-# which gives "Population driven" (severity pinned to level 0) a non-zero
-# protect/avoid/retreat signal; the part below it is protected, so protect
-# is lower than baseline there too (with one uniform seed value either all of
-# it or none of it would be protected).
-# INITIAL_WET_VALUE (< DESIGN_STANDARD) is what a cell newly reached by the
-# contagion frontier starts at: below standard, so a freshly-flooded cell
-# needs a few growth steps before it breaches protection - this is what
-# makes protect/avoid/retreat diverge from baseline at low-to-mid severity
-# and converge again as severity climbs (once most of the domain has had
-# time to grow past the standard), instead of exactly tracking baseline at
-# every severity level the way a self-referential threshold (e.g. "0.7x
-# this same cell's own level-0 value") would.
+# Contagion: each step wet cells grow x WET_GROWTH_FACTOR (cap 1.0) and 4-connected dry neighbours
+# activate with ACTIVATION_PROB, giving roughly exponential growth of flooded extent.
+# The seed gradient straddles DESIGN_STANDARD so "Population driven" (level 0) has both
+# unstoppable and protected flooding. New cells start below standard, so measures diverge from
+# baseline at low-to-mid severity and converge again as cells grow past it.
 SEED_WET_RANGE = (0.80, 0.20)  # seed patch flood fraction, first to last column
 INITIAL_WET_VALUE = 0.12
 ACTIVATION_PROB = 0.30     # per-step chance a dry neighbour of a wet cell activates
@@ -117,28 +55,25 @@ WET_GROWTH_FACTOR = 1.3    # per-step multiplicative growth of already-wet cells
 MEASURES = ["baseline", "protect", "avoid", "retreat", "protect_avoid"]
 MODES = ["SLR driven", "Population driven", "Mixed drivers"]
 
-# Conceptual manuscript figure (validation_grid_5x3.png/.pdf): row order and labels.
 FIGURE_ROWS = [("Population driven", "Population driven"), ("SLR driven", "SLR driven"),
                ("Mixed drivers", "Combination driven")]
 FIGURE_COLUMNS = {"baseline": "No adaptation", "protect": "Protect", "avoid": "Avoid", "retreat": "Retreat",
                   "protect_avoid": "Protect + Avoid"}
 
-# Single-"country" bookkeeping: the whole grid is one region, so
-# compute_retreat/compute_avoid's real redistribution logic (which sums and
-# redistributes within each country) pools across the entire grid.
+# One "country": retreat/avoid redistribution pools across the whole grid.
 _GEO_IDS = np.zeros((GRID_SIZE, GRID_SIZE), dtype="int32")
 _ISO_LOOKUP = {0: "SYN"}
 
 
 def generate_population(rng: np.random.Generator) -> np.ndarray:
-    """Fixed synthetic exposure/population grid, reused by every panel."""
+    """Generate the fixed lognormal population grid shared by every panel."""
     return rng.lognormal(mean=3.0, sigma=1.0, size=(GRID_SIZE, GRID_SIZE))
 
 
 def generate_flood_fraction_sequence(rng: np.random.Generator) -> list[np.ndarray]:
-    """One flood_fraction grid per severity level, via seeded contagion growth."""
+    """Generate one flood-fraction grid per severity level by seeded contagion."""
     ff = np.zeros((GRID_SIZE, GRID_SIZE), dtype="float64")
-    ff[GRID_SIZE // 2 - 3 : GRID_SIZE // 2 + 3, 0:5] = np.linspace(*SEED_WET_RANGE, 5)  # seed patch, gradient
+    ff[GRID_SIZE // 2 - 3 : GRID_SIZE // 2 + 3, 0:5] = np.linspace(*SEED_WET_RANGE, 5)
 
     structure = ndimage.generate_binary_structure(2, 1)  # 4-connectivity
     sequence = [ff.copy()]
@@ -155,8 +90,7 @@ def generate_flood_fraction_sequence(rng: np.random.Generator) -> list[np.ndarra
 
 
 def design_grid(ff_sequence: list[np.ndarray]) -> np.ndarray:
-    """Adaptation design flood fraction: DESIGN_STANDARD inside the design
-    zone (cells flooded at severity DESIGN_LEVEL), 0 elsewhere."""
+    """Return DESIGN_STANDARD where wet at DESIGN_LEVEL, else 0."""
     return np.where(ff_sequence[DESIGN_LEVEL] > 0, DESIGN_STANDARD, 0.0)
 
 
@@ -166,17 +100,12 @@ def compute_eai_matrix(
     ff_sequence: list[np.ndarray],
     population: np.ndarray,
 ) -> np.ndarray:
-    """(n_growth, n_severity) global EAI matrix for one (measure, mode) panel.
+    """Compute the (n_growth, n_severity) EAI matrix for one (measure, mode) panel.
 
-    baseline/protect/retreat are exactly linear in population growth (the
-    design-threshold comparison never depends on population), so their EAI
-    is computed once per severity level at growth_factor=1 and scaled
-    afterward - mirrors apply_growth_rates_to_eai's production shortcut.
-    avoid and protect + avoid are genuinely non-linear in growth
-    (compute_avoid_redirected), so they're recomputed at every (severity,
-    growth) cell directly. They share compute_avoid and differ only in the
-    existing population's protection: avoid keeps baseline's (here: none),
-    protect + avoid gets the design standard.
+    baseline/protect/retreat are linear in growth, so they are scaled from
+    growth 1; avoid/protect + avoid are non-linear and recomputed per cell.
+    SLR driven: growth 1 everywhere, so avoid == baseline, protect + avoid == protect.
+    Population driven: severity pinned to level 0.
     """
     n_growth = len(GROWTH_RATES)
     matrix = np.zeros((n_growth, N_SEVERITY))
@@ -190,17 +119,12 @@ def compute_eai_matrix(
     if measure == "retreat":
         eff_pop = compute_retreat_capacity(apf_grid, population, _GEO_IDS, _ISO_LOOKUP)
 
-    # SLR driven forces growth_factor == 1 for every row - this is also what
-    # makes compute_avoid_redirected's max(0, growth_factor - 1) term vanish,
-    # so avoid should collapse onto baseline's and protect + avoid onto
-    # protect's numbers in that mode.
     if mode == "SLR driven":
         growth_factors = np.ones(n_growth)
     else:
         growth_factors = 1.0 + GROWTH_RATES
 
     for s in range(N_SEVERITY):
-        # Population driven pins severity to the level-0 (mostly dry) grid.
         ff_col = ff_sequence[0] if mode == "Population driven" else ff_sequence[s]
 
         if measure in ("baseline", "protect"):
@@ -210,7 +134,7 @@ def compute_eai_matrix(
             eai0 = compute_retreat(ff_col, apf_grid, eff_pop).sum()
             matrix[:, s] = eai0 * growth_factors
         elif measure in ("avoid", "protect_avoid"):
-            # avoid: existing population keeps baseline's protection (none here)
+            # avoid: existing population keeps baseline protection (none here)
             existing = np.zeros((GRID_SIZE, GRID_SIZE)) if measure == "avoid" else None
             for gi, gf in enumerate(growth_factors):
                 redirected = compute_avoid_redirected(
@@ -226,11 +150,7 @@ def plot_conceptual_grid(
     matrices: dict[tuple[str, str], np.ndarray], out_path: Path,
     vmin: float, vcenter: float, vmax: float, n_contours: int = 9,
 ) -> None:
-    """The 15 panels as one manuscript figure: rows = drivers (FIGURE_ROWS),
-    columns = measures (FIGURE_COLUMNS), one shared diverging colour scale
-    (same norm as the per-panel figures), unlabelled contour lines, no
-    numbers on any axis - only the zero-population-change line is marked.
-    Written as .png (300 dpi) and .pdf."""
+    """Plot all 15 panels as one unnumbered manuscript figure (.png and .pdf)."""
     import matplotlib.colors as mcolors
 
     slr_x = SLR_MM / 1000.0
@@ -299,12 +219,7 @@ def main() -> None:
         for measure in MEASURES:
             matrices[(mode, measure)] = compute_eai_matrix(measure, mode, ff_sequence, population)
 
-    # One global vmax/colour scale across all 15 panels, so absolute EAI is
-    # directly comparable across modes and measures, not just within a row.
-    # Contour LEVELS are placed independently per panel (contour_vmax below)
-    # so a panel whose own range is much smaller than the global vmax still
-    # gets a full, evenly-spaced set of contour lines describing its own
-    # shape, instead of most levels falling outside its data.
+    # Shared colour scale across panels; contour levels per panel (contour_vmax).
     global_vmax = 1500.0
     print(f"\nGlobal vmax (shared colour scale): {global_vmax:,.0f}")
 
@@ -333,8 +248,6 @@ def main() -> None:
             print(f"  {mode} / {measure} <= baseline: {status}")
     print("  ALL PASS" if all_ok else "  SOME INVARIANTS VIOLATED - see above")
 
-    # Without population growth avoid only keeps today's protection (== baseline)
-    # and protect + avoid only raises it (== protect): their growth terms vanish.
     print("\nInvariant: at growth <= 0, avoid == baseline and protect + avoid == protect:")
     no_growth = GROWTH_RATES <= 1e-9
     for mode in MODES:
@@ -347,13 +260,7 @@ def main() -> None:
             print(f"  {mode} / {measure} == {ref}: {'OK' if ok else f'VIOLATED (max rel diff {rel:.2%})'}")
     print("  ALL PASS" if all_ok else "  SOME INVARIANTS VIOLATED - see above")
 
-    # One shared diverging colour scale (vmin/vcenter/vmax), used identically
-    # on all 15 panels - not just recomputed per panel - so every panel maps
-    # a given EAI value to the exact same colour. vmin/vcenter come from
-    # "Population driven" (the row this scale was designed for: growth is
-    # its only driver, so its own low end and its own growth=0% reference
-    # are the most meaningful anchors); vmax is the same global_vmax already
-    # shared by the plain colour scale.
+    # vmin/vcenter anchored on "Population driven" (growth is its only driver).
     zero_growth_idx = int(np.argmin(np.abs(GROWTH_RATES)))
     pop_driven_matrices = [matrices[("Population driven", m)] for m in MEASURES]
     diverging_vmin = min(float(m.min()) for m in pop_driven_matrices)
@@ -375,16 +282,13 @@ def main() -> None:
                 n_contours=9, fontsize=13,
                 diverging_center=diverging_center,
                 diverging_vmin=diverging_vmin,
-                # contour levels run from diverging_center up: a panel lying wholly
-                # below the centre (e.g. Population driven retreat) gets none
+                # levels start at diverging_center; panels wholly below it get none
                 contour_vmax=max(float(matrix.max()), diverging_center * 1.05),
             )
             fig.savefig(out_path, bbox_inches="tight")
             plt.close(fig)
             print(f"  wrote {out_path.name}")
 
-    # All 15 panels as one conceptual manuscript figure (same colour scale as
-    # the individual panels above, no numbers on the axes or contours).
     plot_conceptual_grid(matrices, out_dir / "validation_grid_5x3.png",
                          vmin=diverging_vmin, vcenter=diverging_center, vmax=global_vmax)
 

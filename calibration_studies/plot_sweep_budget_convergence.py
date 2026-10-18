@@ -1,15 +1,7 @@
-"""Shared tile-convergence detector for the sweep-budget calibration study,
-reused by plot_sweep_calibration_bands.py's panel (a) (ECDF of
-rounds-to-converge - see that script's own docstring for the full figure
-this feeds into).
+"""Detect per-tile round convergence from sweep-budget per-sweep traces.
 
-Reconstructs round-level convergence from the continuous per-SWEEP trace
-already collected (`sweep_max_change_raw` - `_dense_sweep`'s own return
-value, the same raw per-cell update magnitude `solve_eikonal_dense`'s round
-loop maxes over each 4-sweep group and compares to epsilon) - no second,
-separate round-based solve needed. A tile whose round_max_change never
-drops to/below epsilon within N_COMPLETE_ROUNDS rounds is treated as
-not converged (right-censored).
+A round converges when the max of its 4 sweep_max_change_raw values <= epsilon,
+as in solve_eikonal_dense; no convergence within N_COMPLETE_ROUNDS is right-censored.
 """
 
 from __future__ import annotations
@@ -19,19 +11,18 @@ from pathlib import Path
 import pandas as pd
 
 SWEEPS_PER_ROUND = 4
-N_COMPLETE_ROUNDS = 100  # matches run_sweep_budget_study.py's own MAX_ROUNDS_CEILING - the
-# true ceiling every tile's trace is capped at
+N_COMPLETE_ROUNDS = 100  # = run_sweep_budget_study.MAX_ROUNDS_CEILING
 
 
 def _tile_convergence(csv_path: Path, epsilon: float) -> dict | None:
     try:
         df = pd.read_csv(csv_path)
     except pd.errors.EmptyDataError:
-        return None  # a tile the run is still writing right now (header not flushed yet) - not an error
+        return None  # still being written
     if df.empty or "sweep_max_change_raw" not in df.columns:
         return None
     if len(df) < SWEEPS_PER_ROUND:
-        return None  # dry tile (1 row) or otherwise too short to form a full round
+        return None  # dry tile (1 row)
 
     n_cells = int(df["n_cells"].iloc[0])
     tile_id = int(df["tile"].iloc[0])
@@ -60,6 +51,7 @@ def _tile_convergence(csv_path: Path, epsilon: float) -> dict | None:
 
 
 def collect(sweep_budget_dir: Path, epsilon: float) -> pd.DataFrame:
+    """Return one convergence record per readable wet tile CSV."""
     records = []
     csvs = sorted(sweep_budget_dir.glob("*.csv"))
     for p in csvs:

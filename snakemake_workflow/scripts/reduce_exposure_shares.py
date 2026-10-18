@@ -1,12 +1,8 @@
-"""Reduce step between pass 1 and pass 2 of the chunk-partitioned exposure pipeline.
+"""Reduce pass-1 exposure batches into global per-country shares before pass 2.
 
-Sums every pass-1 batch's raw per-country (amount, capacity) totals across
-all batches (plain float addition - associative, see
-compute_exposure_analysis.pass1_shares_all_intensities' docstring), then
-finalizes each (slr_intensity, country)'s share = amount / capacity (only
-where capacity > 0, matching pass1_shares' own condition). Must complete
-before any pass-2 batch starts - retreat/avoid tasks need this FINAL,
-globally-reduced share, not any single batch's partial contribution.
+Sums every batch's (amount, capacity) per (slr_intensity, country), then
+share = amount / capacity where capacity > 0. Must finish before any pass-2
+batch starts: retreat/avoid tasks need the globally-reduced share.
 
 Usage:
     python reduce_exposure_shares.py \\
@@ -21,13 +17,7 @@ from pathlib import Path
 
 
 def main() -> None:
-    """Parse CLI arguments and write the globally-reduced per-country shares.
-
-    Sums every pass-1 batch's raw (amount, capacity) totals matched by
-    ``--parts-glob``, then writes each (slr_intensity, iso) share =
-    amount / capacity (skipping entries where capacity is 0) as JSON to
-    ``--out``. Raises ``SystemExit`` if no part files match the glob.
-    """
+    """Write the globally-reduced per-country shares as JSON."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--parts-glob", required=True, help="glob pattern matching every pass-1 batch's output JSON")
     parser.add_argument("--out", required=True)

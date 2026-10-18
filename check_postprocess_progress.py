@@ -1,23 +1,6 @@
-"""Report postprocessing + exposure-analysis progress - no Snakemake
-invocation needed, safe to run anytime (including while an HPC run is in
-progress) since it only reads, never writes.
+"""Report postprocessing + exposure-analysis progress per phase (read-only).
 
-Covers the full submit_postprocess_and_exposure.sh chain (see
-generate_hpc_postprocess_job.py):
-  postprocessing phase 1  merge_chunk
-  postprocessing phase 2  prepare_exposure_grid_chunk
-  postprocessing phase 3  compute_flood_fraction_chunk
-  exposure analysis       pass 1 (shares) -> reduce_shares -> pass 2 (EAI) -> reduce_write
-
-Each phase is reported separately (not just one flat total) since the whole
-chain is phase-gated: a phase sitting at 0% really does mean "hasn't started
-yet, waiting on the previous phase's SLURM dependency barrier", not "stuck".
-
-Uses one directory glob per phase, not one stat() call per expected file -
-postprocessing's chunk outputs all live in a handful of FLAT directories
-(one file per chunk/scenario, not one subdirectory per chunk the way
-simulation's per-tile results/ dirs work), so a single glob() count is cheap
-regardless of total file count (tens of thousands at real scale).
+Phases are SLURM-dependency gated: 0% means "waiting", not "stuck".
 
 Usage:
     python check_postprocess_progress.py [--config path/to/config.yml] [--watch SECONDS]

@@ -1,10 +1,4 @@
-"""Progress of the final SFINCS calibration chain (generate_calibration_jobs.py).
-
-Stage 1, per shard (candidates/shard_NNN.txt): screened / line built (status json)
-/ suitable / pre-flight done / pre-flight ok.
-Bridge: whether tile_ids.txt + hpc_jobs_stage2/ exist yet.
-Stage 2, per job (hpc_jobs_stage2/tiles_NNN.txt): done / failed / running (with
-the step from outputs/calibration_run.step) / pending.
+"""Report progress of the SFINCS calibration chain (generate_calibration_jobs.py).
 
 Usage:
     python check_calibration_progress.py [--base-dir-name calibration_roughness_SFINCS] [--list-failed] [--watch 600]
@@ -34,6 +28,7 @@ def _json(p: Path) -> dict | None:
 
 
 def stage1(base: Path) -> None:
+    """Print stage-1 counts per candidate shard."""
     shards = sorted((base / "candidates").glob("shard_*.txt"))
     if not shards:
         print("stage 1: no candidate shards yet")
@@ -55,6 +50,7 @@ def stage1(base: Path) -> None:
 
 
 def stage2(base: Path, list_failed: bool) -> None:
+    """Print stage-2 done/failed/running/pending counts per job file."""
     jobs = sorted((base / "hpc_jobs_stage2").glob("tiles_*.txt"))
     print(f"\nbridge: tile_ids.txt {'present (' + str(len(_ids(base / 'tile_ids.txt'))) + ' tiles)' if (base / 'tile_ids.txt').exists() else 'not yet'}, "
           f"stage-2 jobs {'written (' + str(len(jobs)) + ')' if jobs else 'not yet'}")

@@ -1,33 +1,9 @@
-"""Split an OOM'd tile into two smaller, overlapping sub-tiles.
+"""Split an out-of-memory tile into two overlapping sub-tiles.
 
-The flood solve's memory cost is dominated by tile pixel count, so a tile
-that runs out of memory is unlikely to ever succeed at its current size.
-Splitting it into two overlapping halves and re-running the normal pipeline
-on those instead is cheaper than trying to make the solve itself more
-memory-efficient.
-
-Tile ID scheme (2026-08, fixed - see below): `tile_grid.path`'s tile_ids are
-plain sequential integers (src/connectivity_tiling.assign_tile_id), not the
-retired `parent_5deg_id*10+quadrant_id` scheme this module originally
-assumed - a split child's id is now simply one more than the current global
-maximum tile_id (`max(tile_grid["tile_id"]) + 1`), which is trivially
-collision-free (every existing tile_id is smaller) and, since child ids are
-assigned in increasing order as splits happen, always sorts to the end of a
-tile_id-ordered job list - the same property run_eikonal_dag.py's --batch
-handling relies on, just no longer expressed as a digit-encoding trick.
-Split depth is tracked in its own `split_depth` GeoDataFrame column (0 for
-an original tile) instead of being inferred from the id's digits, since
-sequential ids carry no such structure to exploit - see split_depth() below.
-
-FIXED 2026-08: this module's original digit-encoding/`parent_grid`-column
-design predated the fixed-DeltaDTM-tile-chunking tile-generation rewrite
-(the now-retired 13-stage pipeline, replaced 2026-10 by
-src/connectivity_tiling.py) and was never updated for it, which would have
-crashed the first real OOM-split (`row["parent_grid"]` KeyError - that
-column doesn't exist in the current schema) and, even past that, silently
-produced colliding tile_ids (new sequential tile_ids can land anywhere,
-including on digits 4-9 the old scheme assumed were reserved for splits).
-Found via code review, not a real production incident.
+Solve memory scales with pixel count, so an OOM tile is split rather than retried.
+Child ids are `max(tile_id) + 1` onward: collision-free and sorting after all
+existing tiles (run_eikonal_dag.py --batch relies on this). Depth is tracked in
+the `split_depth` column (0 = original tile).
 """
 
 import shutil
@@ -45,12 +21,7 @@ from tiles import load_tile_grid
 
 
 def split_depth(tile_grid: gpd.GeoDataFrame, tile_id: int) -> int:
-    """Number of times `tile_id` has already been split - read from the
-    tile grid's own `split_depth` column (0 for an original, never-split
-    tile). Defaults to 0 if the column doesn't exist yet (a tile grid
-    written before any split ever happened, or before this column existed)
-    rather than requiring a fresh tile_generation run first.
-    """
+    """Return how often `tile_id` has been split (0 if no `split_depth` column)."""
     if "split_depth" not in tile_grid.columns:
         return 0
     row = tile_grid.loc[tile_grid["tile_id"] == tile_id]
@@ -63,12 +34,10 @@ def split_depth(tile_grid: gpd.GeoDataFrame, tile_id: int) -> int:
 def build_split_candidates(
     geom: Polygon, fraction: float,
 ) -> dict[str, tuple[Polygon, Polygon]]:
-    """Build the two candidate ways to split `geom` into overlapping halves.
+    """Return {"lat": (south, north), "lon": (west, east)} overlapping halves of `geom`.
 
-    `fraction` (e.g. 2/3) is the share of the axis each half spans, so the
-    overlap in the middle is `2*fraction - 1` of that axis's extent.
-
-    Returns {"lat": (south, north), "lon": (west, east)}.
+    `fraction` (e.g. 2/3) is each half's share of the axis; overlap is
+    `2*fraction - 1` of the extent.
     """
     minx, miny, maxx, maxy = geom.bounds
     H = maxy - miny
@@ -81,9 +50,10 @@ def build_split_candidates(
 
 
 def count_land_pixels(mask_path: str | Path, bounds: tuple[float, float, float, float]) -> int:
-    """Count land/lake/river pixels (mask value in {0, 2, 3}) within `bounds`
-    of the per-tile mask.tif produced by extract_dem_mask. Out-of-raster
-    reads are treated as ocean (non-land), the conservative default."""
+    """Count land/lake/river pixels (mask in {0, 2, 3}) within `bounds`.
+
+    Out-of-raster reads count as ocean.
+    """
     minx, miny, maxx, maxy = bounds
     with retry_transient_io(rasterio.open, mask_path) as src:
         window = from_bounds(minx, miny, maxx, maxy, src.transform)
@@ -94,8 +64,7 @@ def count_land_pixels(mask_path: str | Path, bounds: tuple[float, float, float, 
 def choose_split(
     geom: Polygon, mask_path: str | Path, fraction: float,
 ) -> tuple[str, Polygon, Polygon]:
-    """Pick the split axis that best balances land coverage between the two
-    halves, never choosing an axis where either half has zero land.
+    """Pick the split axis that best balances land between halves.
 
     Returns (axis_name, half_a, half_b). Raises ValueError only in the
     pathological case where every candidate axis produces a zero-land half
@@ -111,8 +80,6 @@ def choose_split(
     if valid:
         best_axis = min(valid, key=lambda axis: abs(valid[axis][0] - valid[axis][1]))
     else:
-        # Pathological tile shape: every axis leaves one half with no land.
-        # Fall back to whichever axis is least bad (largest minimum half-count).
         best_axis = max(scored, key=lambda axis: min(scored[axis]))
         print(
             f"  WARNING: no split axis keeps land on both halves (land counts: {scored}); "
@@ -128,11 +95,7 @@ def split_tile(
     model_outputs_dir: str | Path,
     fraction: float,
 ) -> tuple[int, int]:
-    """Split `tile_id` into two overlapping children, updating tile_grid_path
-    and removing the failed tile's stale outputs/markers.
-
-    Returns the two new child tile_ids.
-    """
+    """Split `tile_id` into two children; rewrites the tile grid and deletes its outputs."""
     tile_grid_path = Path(tile_grid_path)
     model_outputs_dir = Path(model_outputs_dir)
 
@@ -156,14 +119,8 @@ def split_tile(
     next_id = int(tile_grid["tile_id"].max()) + 1
     child_a_id, child_b_id = next_id, next_id + 1
 
-    # hop_distance is inherited from the parent, not recomputed - a split child is
-    # geometrically a sub-region of the parent, so the same ocean-distance/forcing-
-    # source classification applies. Fixed 2026-10: previously omitted entirely,
-    # leaving it NaN on every split child - run_eikonal.py/run_eikonal_cli.py both
-    # do `int(this_tile["hop_distance"].iloc[0])`, which raises on NaN, so this would
-    # crash the moment any hop_distance>=1 tile needed OOM-splitting (found via code
-    # review during the connectivity-tiling migration, not a real production
-    # incident yet).
+    # Children inherit hop_distance (a sub-region keeps the parent's forcing
+    # classification); the runners int() it, so it must not be NaN.
     parent_hop_distance = row["hop_distance"]
     new_rows = gpd.GeoDataFrame(
         [
@@ -179,7 +136,6 @@ def split_tile(
     )
     retry_transient_io(gpd.GeoDataFrame(updated, crs=tile_grid.crs).to_file, tile_grid_path, driver="GPKG")
 
-    # Remove the failed tile's stale outputs so nothing downstream references it.
     shutil.rmtree(model_outputs_dir / str(tile_id), ignore_errors=True)
     (model_outputs_dir / "oom_tiles" / f"{tile_id}.txt").unlink(missing_ok=True)
     for f in (model_outputs_dir / "skipped_tiles").glob(f"{tile_id}_*.txt"):

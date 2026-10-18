@@ -1,42 +1,10 @@
-"""Pick a candidate pool of wave-0 tiles spanning both the full size range
-AND a wide geographic spread, for the obstacle-coupling/sweep-budget
-calibration studies.
+"""Pick calibration candidate tiles stratified by size and geography.
 
-Candidates are selected from the FULL hop=0 population regardless of
-whether model_outputs/<id>/inputs/dem.tif already exists for this tile yet
-- a fresh tile-grid regeneration can leave model_outputs/ entirely empty,
-so requiring existing outputs would find zero candidates right after one.
-The readiness check is still computed and reported as an informational
-count (see `n_ready` in the printed summary), just not used to exclude
-candidates - preprocess the selected list afterward (e.g. via an isolated
-tile_grid subset with its own model_outputs) rather than relying on it
-already existing.
-
-Bbox area in deg2 is an exact-up-to-clipping proxy for pixel count here
-(DeltaDTM tiles are native EPSG:4326 at ~1 arcsecond, so pixel count =
-area_deg2 * 3600**2 regardless of latitude - no cos(lat) correction needed
-since what matters is compute cost, not physical area). Restricted to
-hop_distance == 0 (wave-0) tiles - obstacle_coupling isn't usable with
-explicit seed cells (hop>=1) yet.
-
-Geographic stratification: tiles are first binned into a coarse lon/lat grid
-(GEO_BIN_DEG per side), then each occupied bin gets a candidate quota
-proportional to sqrt(bin tile count) - dampens a few dense archipelago-heavy
-bins from crowding out sparser coastlines, while still giving genuinely
-tile-rich regions more representation than a one-tile bin. Within each bin,
-candidates are picked at evenly-spaced percentiles of THAT bin's own area
-distribution (same percentile-grid logic as the original single-axis
-version), so both size and location vary together rather than one being a
-free side-effect of the other.
-
-Picks N candidates total - more than the final tile count actually needed,
-since some candidates will turn out to have zero flooding for this scenario
-and get dropped by the calibration scripts themselves (see
-run_sweep_budget_study.py's dry-tile handling) - this is deliberately
-just a candidate POOL, not the final list.
-
-Writes candidate_tiles.txt (one tile_id per line, in bin then percentile-rank
-order) to the given output directory, and prints a summary table.
+Wave-0 (hop_distance == 0) only: obstacle_coupling does not support explicit
+seed cells. Existing model_outputs are not required. Pixel count = bbox
+area_deg2 * 3600**2 (EPSG:4326, ~1 arcsecond; no cos(lat), compute cost not
+area). Quota per GEO_BIN_DEG lon/lat bin ~ sqrt(bin tile count); within a bin,
+evenly spaced area percentiles. Over-provisioned for dry tiles.
 
 Usage:
     python select_study_candidate_tiles.py <output_dir> [n_candidates]
@@ -54,13 +22,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import load_config  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_N_CANDIDATES = 575  # ~1.15x the 500 wanted - overprovisions for tiles that turn out
-# dry at sweep 1 and get dropped by the calibration scripts themselves (see module docstring)
-GEO_BIN_DEG = 20.0  # lon/lat grid cell size for geographic stratification
+DEFAULT_N_CANDIDATES = 575  # ~1.15x the 500 wanted, for tiles dry at sweep 1
+GEO_BIN_DEG = 20.0
 
 
 def select_candidates(n_candidates: int, domain_tiles_path: Path, model_outputs_root: Path) -> list[tuple[int, str, float, float]]:
-    """Returns [(tile_id, geo_bin, percentile_within_bin, area_deg2), ...]."""
+    """Return [(tile_id, geo_bin, percentile_within_bin, area_deg2), ...]."""
     gdf = gpd.read_file(domain_tiles_path)
     wave0 = gdf[gdf["hop_distance"] == 0].copy()
     n_ready = int(wave0["tile_id"].apply(lambda t: (model_outputs_root / str(int(t)) / "inputs" / "dem.tif").is_file()).sum())
@@ -79,7 +46,7 @@ def select_candidates(n_candidates: int, domain_tiles_path: Path, model_outputs_
     for _, row in wave0.iterrows():
         bins[row["geo_bin"]].append(row)
 
-    # Quota per bin proportional to sqrt(bin size), rounded, at least 1 per bin.
+    # sqrt damps dense archipelago bins crowding out sparse coastlines.
     weights = {b: math.sqrt(len(rows)) for b, rows in bins.items()}
     total_weight = sum(weights.values())
     quotas = {b: max(1, round(n_candidates * w / total_weight)) for b, w in weights.items()}

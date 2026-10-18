@@ -1,21 +1,9 @@
 #!/bin/bash
-# Rerun part of the final calibration (calibration_roughness_SFINCS) in place on Hydrax, after
-# syncing the code to $GFM_CODE_ROOT. Replaces rerun_eikonal_calibration.sh and
-# rerun_sfincs_calibration.sh (both kept as thin wrappers around this script).
-#
-#   --part eikonal  after a change to the eikonal side (run_calibration_models.py /
-#                   src/flood_model.py). Per selected tile (tile_ids.txt) removes the
-#                   done/failed/step markers plus every eikonal_on_subgrid_waterdepth_*_fsf*.tif
-#                   and eikonal_solver_diagnostics.json; run_final_tile.sh then reruns only the
-#                   eikonal sweep -> calibration_result.json. Submits the stage-2 jobs, then
-#                   (POST=1) one post job (afterany) that runs compute_calibration_result_dedup.py
-#                   and run_calibration_sweep_analysis.py for both base directories.
-#   --part sfincs   after a change to the SFINCS forcing/mask code (build_line_forcing.py,
-#                   build_sfincs_tile.py, connected_forcing.py). Removes the markers and
-#                   sfincs.inp, so run_final_tile.sh rebuilds line forcing -> SFINCS model ->
-#                   SFINCS run -> postprocessing -> calibration_result.json. Run the dedup and the
-#                   sweep analysis by hand afterwards.
-#
+# Rerun part of the final calibration in place on Hydrax, after syncing the code to $GFM_CODE_ROOT.
+#   --part eikonal  deletes markers + eikonal rasters, reruns only the eikonal sweep; POST=1 adds an
+#                   afterany job running the dedup and the sweep analysis for both base dirs.
+#   --part sfincs   deletes markers + sfincs.inp, rebuilds forcing -> SFINCS model/run -> result;
+#                   run the dedup and the sweep analysis by hand afterwards.
 # Usage:
 #   bash sfincs_tiles/rerun_calibration.sh --part eikonal        # reset + 20 jobs + post job
 #   N_JOBS=40 bash sfincs_tiles/rerun_calibration.sh --part eikonal
@@ -79,7 +67,7 @@ if [ "$PART" = "eikonal" ]; then
   fi
   echo "reset $n tile(s), removed $n_rasters eikonal raster(s) ($n_missing listed without a tile directory)"
 
-  # SFINCS is skipped (sfincs_map.nc/hmax_subgrid.tif exist): only the eikonal sweep + result JSON
+  # SFINCS outputs exist, so run_final_tile.sh skips SFINCS: estimate only the eikonal sweep.
   cd "$CODE"
   JOBS="$BASE/hpc_jobs_stage2"
   rm -f "$JOBS"/final_*.sbatch "$JOBS"/tiles_*.txt  # stale job files of an earlier run would be submitted below
@@ -146,7 +134,7 @@ else
   fi
   echo "reset $n tile(s) ($n_missing listed without a tile directory)"
 
-  # the eikonal sweep is skipped per friction factor (rasters exist), so its time estimate is ~0
+  # Eikonal rasters exist, so the sweep is skipped: its time estimate is ~0.
   cd "$CODE"
   "$GFM_PY" generate_calibration_jobs.py stage2 --config "$BASE/resolved_config.yml" \
       --base-dir-name "$BASE_DIR_NAME" --n-jobs "$N_JOBS" --eikonal-min-per-mcell 1 --submit

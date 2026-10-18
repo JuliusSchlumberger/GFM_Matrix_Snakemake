@@ -1,69 +1,15 @@
-"""Generate HPC sbatch scripts that run preprocessing across hpc.n_nodes
-PARALLEL nodes, then - once every node's batch has finished - one more job
-that runs `snakemake generate_eikonal_jobs` (wave sbatch generation) and
-submits submit_waves.sh itself. So a full run (preprocessing AND
-simulation) can be launched from a single driver script, with preprocessing
-itself spread across the same number of nodes as the simulation waves use.
+"""Generate HPC sbatch scripts for preprocessing across hpc.n_nodes parallel nodes.
 
-Preprocessing has no wave/hop_distance ordering constraint (every tile's
-DEM/mask/friction/boundaries are independent of every other tile) - unlike
-simulation, where hop>=1 tiles must wait for their neighbours. So instead of
-one monolithic `snakemake generate_eikonal_jobs --cores N` run on a single
-node, this splits every tile's target files evenly across up to hpc.n_nodes
-batches, writes one `snakemake --cores N <explicit target file list>`
-sbatch script per batch, and submits all of them with NO dependency between
-them (fully parallel) - then submits ONE more job with
-`--dependency=afterany:<every batch job id>` that runs generate_eikonal_jobs
-(fast, since every preprocessing output already exists by then) and chains
-into submit_waves.sh. This is the exact same afterany-join-multiple-jobs
-pattern generate_eikonal_jobs.py's own submit_waves.sh already uses between
-simulation waves - just one more phase in front of wave 0.
+Tile targets are split into independent `snakemake --nolock` batches, followed by
+one afterany job that generates and submits the simulation waves.
+submit_preprocess_and_dispatch.sh first builds every shared, tile-independent
+output (geoid-offset raster, cached station GeoPackages) synchronously on the
+machine that wrote resolved_config.yml: --nolock is only safe once those exist.
+Target paths mirror preprocessing.smk's templates.
 
-Before any batch is submitted, submit_preprocess_and_dispatch.sh itself
-builds every shared, tile-independent output this DAG has
-(`compute_geoid_offset_raster`'s single file, PLUS
-`cache_waterlevel_stations`'s one cached GeoPackage per (return_period,
-waterlevel_name) scenario, 2026-08 - unlike every other rule, which is
-per-tile) SYNCHRONOUSLY, in the same shell, before calling `sbatch` on
-anything (2026-09-14 - previously this was its own zero-dependency sbatch
-job, "wave 0"/`build_shared_inputs.sbatch`, submitted immediately after
-resolved_config.yml was written; that specific job kept hitting a
-cross-node stale-read of that file on the shared P:\\ mount, identical
-byte/position every time, that not even retries survived - see
-src/hpc_common.py's _stage_configfile_lines docstring. Running it synchronously in the same
-process/machine that just wrote resolved_config.yml removes the network
-round-trip for this step entirely, not just mitigates it). Snakemake locks
-its own working directory by default (one process at a time per
-directory), so N concurrent `snakemake` invocations from the same
-code_root would otherwise fail with LockException the instant a second
-one starts - every batch's `snakemake` call therefore passes `--nolock`,
-safe ONLY because the shared build above has already completed by the
-time any batch is submitted, eliminating every real write-write race
-`--nolock` would otherwise leave unprotected.
-
-Target file paths are reconstructed directly (not via `rules.X.output.Y`
-references, since this is a standalone script, not a Snakemake `script:`)
-using the exact same path templates preprocessing.smk's rules declare -
-mirrors the same approach generate_eikonal_jobs.py already uses for its
-own local-view boundaries check.
-
-Uses the same local-view/Linux-view path resolution as
-generate_eikonal_jobs.py (config_hpc.yml, if present), so it can be run
-either from the Windows preprocessing machine (writing scripts meant for
-Hydrax) or natively ON Hydrax (config_hpc.yml unnecessary in that case).
-
---calibration --fuse (2026-10, new): for a calibration-subset run where
-EVERY tile is hop_distance==0 (asserted - see --fuse's own help text),
-collapses preprocessing and simulate into one sbatch script per batch
-(preprocess this batch's tiles, then immediately simulate the same tiles,
-on the same node) instead of the normal two-phase design. The two-phase
-design's whole purpose is letting hop>=1 simulate wait for lower-hop
-neighbours that may land on a DIFFERENT node's batch - a hop=0-only study
-has no such cross-tile dependency at all, so that phase-2
-generate-then-dispatch step and its cross-node afterany wait buy nothing
-and only add idle time. Writes submit_fused_batches.sh instead of
-submit_preprocess_and_dispatch.sh (and removes whichever of the two is
-stale from a previous generation against the same jobs_dir).
+--calibration --fuse: when EVERY tile is hop_distance==0, each batch preprocesses
+then simulates its own tiles (no cross-node dependency); writes
+submit_fused_batches.sh instead.
 
 Usage:
     python generate_hpc_preprocess_job.py [--config path/to/config.yml]
@@ -93,25 +39,11 @@ def _target_paths(tile_dir: str, return_periods: list[str], waterlevel_names: li
 
 
 def _simulate_target_paths(tile_dir: str, return_periods: list[str], waterlevel_names: list[str]) -> list[str]:
-    """Same per-tile target shape as `_target_paths`, but for `run_eikonal`'s
-    own `results/waterdepth_*.tif` outputs rather than preprocessing's
-    `inputs/*` - used only by the `--calibration --fuse` path below, where a
-    batch's preprocessing and simulate targets are built the same way and
-    run back to back in one sbatch script.
-    """
     return [f"{tile_dir}/results/waterdepth_{rp}_{slr}.tif" for rp in return_periods for slr in waterlevel_names]
 
 
 def main() -> None:
-    """Run this script: generate (and print how to submit) the HPC preprocessing dispatch.
-
-    Writes resolved_config.yml, one preprocessing sbatch script per node batch
-    (plus its `*_targets.txt` target-file list), and a submit script that
-    builds every shared input synchronously, submits the batches in parallel,
-    then - unless `--fuse` or `--preprocess-only` - submits one more job that
-    generates and submits the simulation waves. See module docstring and
-    --calibration/--fuse/--preprocess-only help text for the mode variants.
-    """
+    """Generate (and print how to submit) the HPC preprocessing dispatch."""
     parser = argparse.ArgumentParser(description=__doc__)
     default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
     parser.add_argument("--config", default=str(default_config))
@@ -170,11 +102,7 @@ def main() -> None:
     linux_jobs_dir = linux_config["hpc"]["jobs_dir"]
     linux_code_root = linux_config["paths"]["code_root"]
     linux_model_outputs = linux_config["simulation"]["model_outputs"]
-    # Preprocessing TARGETS (this script only ever builds inputs/, never
-    # results/) live here - defaults to model_outputs (no-op for production)
-    # but a scenario config (e.g. the ESP/FRA/NOR calibration sweep) can
-    # point it at a group-shared directory instead - see preprocessing.smk's
-    # own comment for the full rationale.
+    # Preprocessing targets (inputs/ only); see preprocessing.smk.
     linux_preprocessing_inputs_dir = linux_config["simulation"].get("preprocessing_inputs_dir") or linux_model_outputs
     hpc_cfg = linux_config["hpc"]
     n_nodes = hpc_cfg["n_nodes"]
@@ -182,39 +110,15 @@ def main() -> None:
     retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
 
-    # Written once here and referenced (via GFM_CONFIG_PATH) by every snakemake
-    # invocation this script generates - without this, a compute node
-    # re-parsing the Snakefile from a bare `snakemake ...` call falls back to
-    # its own default config.yml, silently ignoring whatever --config this
-    # script itself was given (a scenario config, when --config points at
-    # one - see generate_eikonal_jobs.py's generate_wave_dispatch, which
-    # already does the same thing for the simulation phase).
-    #
-    # atomic_write (temp file + os.replace), NOT a plain open()+write -
-    # confirmed live 2026-09: a SLURM job on a different compute node reading
-    # this over the shared P:\ network filesystem moments after it's written
-    # can otherwise see a partial/garbled file (UnicodeDecodeError on a
-    # mid-write or stale-cache read) - build_shared_inputs.sbatch hit exactly
-    # this, while a later read of the same file (~5min on, after more of the
-    # pipeline had run) succeeded. Same latent bug already existed in
-    # generate_eikonal_jobs.py's own resolved_config.yml write - fixed
-    # there too, not just here.
+    # Referenced via GFM_CONFIG_PATH so compute nodes see this --config, not the
+    # default config.yml. atomic_write: another node reading over P: right after
+    # a non-atomic write can see a partial file (UnicodeDecodeError).
     resolved_config_path = local_jobs_dir / "resolved_config.yml"
     atomic_write(resolved_config_path, lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
     linux_resolved_config = f"{linux_jobs_dir}/resolved_config.yml"
 
-    # Local view (this machine's own reachable mount), not linux_config's -
-    # a genuine pre-existing bug, found 2026-08-10 while testing the
-    # shared-targets change below: linux_config's path is a Linux-style
-    # string (e.g. /p/...) meant to be EMBEDDED into generated sbatch
-    # scripts, not actually opened by whichever machine happens to run this
-    # generator - reading it directly fails outright when generated from
-    # Windows (fiona.errors.DriverError, no such path on Windows). Local and
-    # Linux views point at the same underlying shared storage, so the DATA
-    # read is identical regardless of which config's path string opens it -
-    # only the STRING form embedded into sbatch scripts below needs to be
-    # the Linux one. Same fix already applied in generate_hpc_exposure_jobs.py's
-    # own chunk discovery for the identical reason.
+    # Local view: linux_config's "/p/..." path only works embedded in sbatch
+    # scripts, not opened from Windows.
     tile_gdf = retry_transient_io(gpd.read_file, local_config["tile_grid"]["path"])
     return_periods = [f"RP{rp}" for rp in linux_config["boundary_conditions"]["return_periods"]]
     waterlevel_names = merged_slr_scenarios(linux_config["boundary_conditions"], linux_config["adaptation"])
@@ -231,14 +135,7 @@ def main() -> None:
                 f"two-phase --calibration dispatch instead."
             )
 
-    # Every shared, non-tile-specific output this DAG has - the geoid-offset
-    # raster (one file total) PLUS one cached water-level-station GeoPackage
-    # per (return_period, waterlevel_name) scenario (cache_waterlevel_stations,
-    # 2026-08 - see that rule's own docstring in preprocessing.smk). Both
-    # classes need the SAME build-before-any-batch-starts treatment: a
-    # --nolock batch racing a concurrent WRITE to either would hit the same
-    # corruption risk compute_geoid_offset_raster's own phase-0 build already
-    # exists to prevent - see module docstring.
+    # Shared, non-tile outputs: must be built before any --nolock batch starts.
     linux_shared_targets = [linux_config["vertical_datum_correction"]["offset_raster_path"]]
     linux_stations_cache_dir = f"{linux_config['paths']['processed_inputs_dir']}/WL_scenarios_cache"
     for rp in return_periods:
@@ -252,17 +149,8 @@ def main() -> None:
 
     all_tiles = sorted(tile_gdf["tile_id"].astype(int).astype(str).tolist(), key=int)
 
-    # hpc.single_preprocess_job (default False, production unaffected):
-    # collapse EVERY tile into ONE job on hpc.sbatch (1vcpu, --cores 1, no
-    # parallelization at all) instead of splitting across n_nodes batches.
-    # Appropriate at calibration scale, NOT production scale - observed live
-    # 2026-09: real preprocessing compute time for a ~78-tile calibration
-    # domain is minutes, while SLURM queue wait time for each separately-
-    # submitted job was, at times, HOURS (`(Priority)` pending, even after
-    # halving batch count via n_nodes) - submitting ONE job gets ONE ticket
-    # in the scheduler's queue instead of several, trading away cross-node
-    # parallelism that buys nothing at this scale anyway since queue wait
-    # dominates.
+    # hpc.single_preprocess_job: one job for all tiles; at calibration scale
+    # SLURM queue wait (hours) dominates minutes of compute.
     if hpc_cfg.get("single_preprocess_job", False):
         n_batches = 1
         batches = [("000", all_tiles)]
@@ -290,18 +178,12 @@ def main() -> None:
             for p in _target_paths(f"{linux_preprocessing_inputs_dir}/{tile_id}", return_periods, waterlevel_names)
         ]
 
-        # Target list written to its own file (thousands of paths per
-        # batch) and expanded at runtime via $(cat ...), rather than
-        # inlining every path as a literal CLI argument in the sbatch
-        # script body - keeps the script itself short and diffable.
+        # Targets in a file expanded via $(cat ...), keeping the script short.
         targets_path = local_jobs_dir / f"{name}_targets.txt"
         with open(targets_path, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(targets) + "\n")
 
-        # --fuse only: this SAME batch's simulate targets, written and
-        # appended to the same sbatch script right after the preprocess
-        # snakemake call below - see --fuse's own help text for why this is
-        # safe (every tile is hop_distance==0, asserted above).
+        # --fuse: this batch's simulate targets (all tiles hop_distance==0).
         if args.fuse:
             simulate_targets = [
                 p for tile_id in batch_tiles
@@ -332,24 +214,9 @@ def main() -> None:
             f'echo "=== Preprocessing batch {batch_id}: {len(batch_tiles)} tiles ==="',
             f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
             "",
-            # Hard pre-flight check, not just a submission-order convention:
-            # --nolock (above) is only safe because submit_preprocess_and_
-            # dispatch.sh itself builds EVERY shared, non-tile-specific
-            # output this DAG has (geoid-offset raster + every cached
-            # water-level-station GeoPackage - see linux_shared_targets
-            # above) SYNCHRONOUSLY, before submitting any batch - see module
-            # docstring. That safety currently depends entirely on every
-            # batch actually being submitted via submit_preprocess_and_
-            # dispatch.sh; a batch launched by hand (or an old/stale sbatch
-            # script re-submitted directly, without that shared build having
-            # run first) skips that ordering silently and could race a
-            # shared build with --nolock disabling Snakemake's own
-            # protection. This turns that into a loud, immediate,
-            # unambiguous failure instead of an intermittent LockException or
-            # (worse) silent corruption of a shared file - confirmed this is
-            # a real failure mode, not hypothetical: exactly this happened on
-            # 2026-08-08 (job 243423/243440 - LockException from a batch that
-            # started before the shared build had run).
+            # Pre-flight: --nolock is only safe if the shared build ran first; a
+            # hand-submitted batch would otherwise race it (LockException or a
+            # corrupted shared file).
             'while IFS= read -r shared_target; do',
             '    if [ ! -f "$shared_target" ]; then',
             '        echo "ERROR: shared preprocessing input not found: $shared_target" >&2',
@@ -386,26 +253,10 @@ def main() -> None:
         batch_script_paths.append(f"{linux_jobs_dir}/{name}.sbatch")
         print(f"  wrote {script_path} ({len(batch_tiles)} tiles, {len(targets)} target files)")
 
-    # Phase 2 (skipped entirely under --fuse - each batch above already ran
-    # its own simulate step, so there is nothing left to generate/dispatch):
-    # once every preprocessing batch above has finished, generate the wave
-    # sbatch scripts (fast - every input already exists) and submit them.
-    # Lightweight (just calls snakemake + a shell script), so it uses
-    # hpc.sbatch (the smaller of the two) rather than needing its own
-    # dedicated config.
-    #
-    # --calibration routes this through generate_hpc_simulation_jobs.py
-    # instead of `snakemake generate_eikonal_jobs` - the latter's own
-    # base_config_path (hpc_dispatch.smk) is a hardcoded literal path to
-    # production config.yml, NOT derived from GFM_CONFIG_PATH, so
-    # resolved_config.yml (and therefore every solver parameter +
-    # tile_grid.path baked into it) would silently revert to production
-    # defaults for a scenario run - see this script's own module
-    # docstring / --calibration's help text. The default (non-calibration)
-    # path still sets GFM_CONFIG_PATH below for whatever partial effect it
-    # has (live in-memory Snakemake params - tile_ids, return_periods,
-    # batches - DO correctly reflect it; resolved_config.yml does not, a
-    # known, documented gap for that path only).
+    # Phase 2 (not under --fuse): generate and submit the wave scripts.
+    # --calibration uses generate_hpc_simulation_jobs.py because
+    # `snakemake generate_eikonal_jobs` builds resolved_config.yml from a
+    # hardcoded production config.yml path, ignoring GFM_CONFIG_PATH.
     dispatch_script_path = None
     if not args.fuse and not args.preprocess_only:
         if args.calibration:
@@ -452,16 +303,8 @@ def main() -> None:
             f.write("\n".join(dispatch_lines))
         print(f"  wrote {dispatch_script_path}")
 
-    # Master driver: build every shared, tile-independent input SYNCHRONOUSLY
-    # first, right here in this script (see module docstring, 2026-09-14 -
-    # this used to be its own zero-dependency sbatch job; running it inline
-    # instead means the machine that just wrote resolved_config.yml is the
-    # SAME machine that reads it back, removing the cross-node network-mount
-    # read that job kept failing on). Only once that has genuinely finished
-    # does this submit every preprocessing batch (still fully parallel
-    # amongst themselves - no dependency between them, none needed since
-    # shared inputs are now guaranteed to already exist), then the dispatch
-    # job depending on ALL batches via afterany.
+    # Build shared inputs synchronously here (same machine that wrote
+    # resolved_config.yml), then submit batches, then the afterany dispatch job.
     shared_cfg = hpc_cfg["sbatch"]
     submit_lines = [
         "#!/bin/bash",
@@ -490,13 +333,7 @@ def main() -> None:
             'IDS="${IDS:+$IDS:}$JID"',
         ]
     if args.fuse or args.preprocess_only:
-        # No dispatch job at all. --fuse: every batch above already runs
-        # preprocess THEN simulate for its own tiles, nothing left to chain.
-        # --preprocess-only: there is no simulate step wanted at all for
-        # this call site, by design (see --preprocess-only's own help text).
-        # Remove a stale dispatch script from a previous two-phase
-        # generation against this same jobs_dir, so it can't be submitted
-        # by mistake.
+        # No dispatch job; remove a stale one so it cannot be submitted by mistake.
         stale_dispatch = local_jobs_dir / "generate_jobs_and_dispatch.sbatch"
         if stale_dispatch.exists():
             stale_dispatch.unlink()
@@ -513,10 +350,7 @@ def main() -> None:
     submit_script_path = local_jobs_dir / submit_script_name
     with open(submit_script_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(submit_lines) + "\n")
-    # Remove stale submit script(s) of the OTHER kind(s) from a previous
-    # generation against this same jobs_dir (fused / preprocess-only /
-    # two-phase each write under their own name, above) - only one should
-    # exist at a time.
+    # Only one kind of submit script should exist per jobs_dir.
     all_submit_names = {"submit_fused_batches.sh", "submit_preprocess_batches.sh", "submit_preprocess_and_dispatch.sh"}
     for other_name in all_submit_names - {submit_script_name}:
         stale_submit = local_jobs_dir / other_name

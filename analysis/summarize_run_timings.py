@@ -1,16 +1,10 @@
-"""Summarise the per-run timing records of the main simulation (EA-bathtub runs).
+"""Summarise the per-run timing JSONs of the main (EA-bathtub) simulation.
 
-Every run (tile, return period, SLR scenario) writes
-<model_outputs>/run_timings/{tile_id}_{return_period}_{waterlevel_name}.json with its wall-clock
-seconds (`elapsed_s`, src/eikonal_runner.log_run_timing) and, for the HPC path, an `outcome`
-("solved", "skip_*", "oom"). This script reads them all and prints:
-  - number of runs and tiles, by outcome
-  - total computational hours (sum of elapsed_s over all runs)
-  - seconds per run (mean / median / p95), all runs and solved runs only
-  - seconds per domain (= tile: sum over its runs; mean / median / p95)
-and writes the per-run table to --csv if given.
+Reads <model_outputs>/run_timings/*.json (`elapsed_s` wall-clock seconds from
+eikonal_runner.log_run_timing; `outcome` on the HPC path, default "solved") and prints
+run counts by outcome, total compute hours, and seconds per run and per tile.
 
-Run it where the files are (Hydrax) - ~200k small files are slow over a network share:
+Run it on Hydrax - ~200k small files are slow over a network share:
     python analysis/summarize_run_timings.py --dir <model_outputs>/run_timings [--csv timings.csv]
 """
 

@@ -1,9 +1,9 @@
-"""Geometry core of the SFINCS station boundary lines (see build_station_boundary_lines.py).
+"""Geometry core of the SFINCS station boundary lines (CLI: build_station_boundary_lines.py).
 
-Coastline tracing, station linking, extension, conflict resolution and the domain
-check, plus the tuning constants they share. Split out of
-build_station_boundary_lines.py (cleanup, 2026-10-18) as a pure move: every function
-and constant is unchanged; that module re-exports the names other modules use.
+Coastline tracing, station linking, line extension and the active/inactive domain split.
+Stations off open ocean or in bays closed at BAY_CLOSE_M are dropped; nodes move
+MIN_OFFSHORE_M out to sea. A tile still in conflict after a straight-first rebuild is
+unsuitable for SFINCS without hand edits.
 """
 
 from __future__ import annotations
@@ -23,36 +23,36 @@ from shapely.geometry import LineString, MultiLineString, Point, shape
 from shapely.ops import linemerge, substring, unary_union
 
 OCEAN_CODE = 1
-TILE_STATIONS_GPKG = "inputs/boundaries_RP100_SLR_0.gpkg"  # the tile's own production station selection
+TILE_STATIONS_GPKG = "inputs/boundaries_RP100_SLR_0.gpkg"
 COAST_HG_NC = "inputs/COAST_HG/COAST-HG_RP100.nc"
 MAX_HG_MATCH_DEG = 0.5  # same backstop build_line_forcing.py uses
-MIN_FORCING_STATIONS = 2  # a tile needs this many used stations with a COAST-HG hydrograph
+MIN_FORCING_STATIONS = 2  # used stations with a COAST-HG hydrograph a tile needs
 MASK_VRT = "inputs/DeltaDTM_masks/deltadtm_mask.vrt"
-MAX_MASK_PX = 3000            # coastline traced on the mask decimated to at most this many px per side
-MIN_OCEAN_AREA_KM2 = 0.5      # drop ocean specks (misclassified pixels) from the coastline
-CANDIDATE_NEIGHBOURS = 5      # each station is only ever linked to one of its 5 nearest stations
-COAST_SNAP_M = 10_000.0       # both stations must be this close to the coastline piece that is copied
-RUGGED_RATIO = 1.5            # coastline link longer than this x the straight distance: rugged, go straight
-COAST_LONG_RATIO = 3.0        # flagged fallback: coastline path this many x the straight distance
-MAX_STRAIGHT_M = 60_000.0     # never a straight link between stations further apart
-LAND_CROSSING_TOL_M = 100.0   # a link "crosses land" above this much length inside the eroded land
-SEAWARD_OFFSETS_M = (500.0, 1000.0, 2000.0, 4000.0)  # extra seaward shift, tried in order after d = 0
-MIN_OFFSHORE_M = 1000.0       # boundary lines stay ~this far out at sea: nodes moved out, coastline shifted
-MAX_NODE_SHIFT_M = 5000.0     # a station's node is moved out to sea by at most this
+MAX_MASK_PX = 3000            # mask decimated to at most this many px per side
+MIN_OCEAN_AREA_KM2 = 0.5
+CANDIDATE_NEIGHBOURS = 5
+COAST_SNAP_M = 10_000.0       # max station distance to the coastline piece that is copied
+RUGGED_RATIO = 1.5            # coastline link > this x straight distance: rugged, go straight
+COAST_LONG_RATIO = 3.0
+MAX_STRAIGHT_M = 60_000.0
+LAND_CROSSING_TOL_M = 100.0
+SEAWARD_OFFSETS_M = (500.0, 1000.0, 2000.0, 4000.0)  # tried in order after d = 0
+MIN_OFFSHORE_M = 1000.0       # boundary lines stay ~this far out at sea
+MAX_NODE_SHIFT_M = 5000.0
 LAND_CLEARANCE_M = 700.0      # a link "crosses land" once it comes closer to land than this
-SHORTCUT_RATIO = 1.5          # final scan: boundary between two stations > this x a clear straight link
-MAX_SHORTCUT_M = 40_000.0     # ... of at most this length: replaced by that link
-UNTANGLE_WINDOW = 4           # final scan: 2-opt over up to this many consecutive stations
-EDGE_MIN_M = 2000.0           # tile-edge fallback: stretches shorter than this ignored
+SHORTCUT_RATIO = 1.5          # boundary > this x a clear straight link (<= MAX_SHORTCUT_M): shortcut
+MAX_SHORTCUT_M = 40_000.0
+UNTANGLE_WINDOW = 4
+EDGE_MIN_M = 2000.0
 RAMP_FACTOR = 3.0             # a station's offset from the coastline fades out over 3x that offset
-STATION_OCEAN_TOL_M = 2000.0  # station further than this from open ocean: dropped
-BAY_CLOSE_M = 2000.0          # ocean shrunk by this closes bays with a mouth < ~2x this; stations
-OPEN_OCEAN_MIN_KM2 = 1000.0   # an ocean water body this large (or touching the search edge) is open ocean
-RELEVANCE_TOL_M = 1000.0      # in-tile station further than this from the active/inactive interface: dropped
+STATION_OCEAN_TOL_M = 2000.0
+BAY_CLOSE_M = 2000.0          # ocean shrunk by this closes bays with a mouth < ~2x this
+OPEN_OCEAN_MIN_KM2 = 1000.0   # this large or touching the search edge: open ocean
+RELEVANCE_TOL_M = 1000.0      # max distance of an in-tile station from the active/inactive interface
 MAX_RELEVANCE_ROUNDS = 3
-EXTENSION_OVERSHOOT_M = 2000.0  # an extended line end continues this far past the tile edge
-CONFLICT_LAND_FRAC = 0.02     # > 2 % of the tile's land in inactive faces: conflict
-CONFLICT_OCEAN_FRAC = 0.5     # > 50 % of the tile's ocean in active faces: conflict (sea not closed off)
+EXTENSION_OVERSHOOT_M = 2000.0
+CONFLICT_LAND_FRAC = 0.02     # fraction of tile land in inactive faces
+CONFLICT_OCEAN_FRAC = 0.5     # fraction of tile ocean in active faces (sea not closed off)
 SEGMENT_KINDS = {"coastline": "#d62728", "coastline_offset": "#ff7f0e", "straight": "#2ca02c",
                  "straight_offset": "#17becf", "shortcut": "#e377c2", "tile_edge": "#000000",
                  "extension": "#9467bd",
@@ -75,9 +75,8 @@ def _read_mask_window(vrt: Path, bounds: tuple[float, float, float, float]):
                        boundless=True, fill_value=nodata)
         wt = src.window_transform(window)
         transform = wt * wt.scale(window.width / out_shape[1], window.height / out_shape[0])
-    # The VRT has no tiles over open ocean or far inland: a no-data block whose
-    # valid neighbouring pixels are mostly ocean is ocean, otherwise land -
-    # never a fake coastline along a block edge.
+    # The VRT has no tiles over open ocean or far inland: a no-data block is ocean
+    # if its valid rim is mostly ocean, else land - no fake coastline at block edges.
     missing = arr == nodata
     if missing.any():
         labels, n = ndimage.label(missing)
@@ -93,10 +92,8 @@ def _read_mask_window(vrt: Path, bounds: tuple[float, float, float, float]):
 
 
 def _ring_pieces(ocean_geom, area_utm, simplify_m: float, edge_m: float) -> list[LineString]:
-    """Coastline pieces of `ocean_geom`: its rings, simplified, minus the
-    area's own outer edge. One ring at a time: merging all rings' lines
-    together would split them wherever two rings touch at a pixel corner (a
-    junction linemerge stops at)."""
+    # One ring at a time: merging all rings would split them where two rings touch
+    # at a pixel corner (a junction linemerge stops at).
     edge = area_utm.exterior.buffer(edge_m)
     pieces = []
     for poly in shapely.get_parts(ocean_geom):
@@ -116,22 +113,10 @@ def _ring_pieces(ocean_geom, area_utm, simplify_m: float, edge_m: float) -> list
 
 
 class Coast:
-    """Ocean/land polygons (UTM) of the search area, coastline pieces at the
-    real coast (offset 0) and at seaward offsets (the edge of the ocean
-    polygon shrunk by d - narrow bays close by themselves), cached per d.
+    """Ocean/land polygons (UTM) of the search area and coastline pieces per seaward offset.
 
-    Parameters
-    ----------
-    mask : np.ndarray
-        Land/ocean mask read from the DeltaDTM VRT (OCEAN_CODE marks ocean).
-    transform : affine.Affine
-        Pixel-to-CRS (lon/lat) transform of `mask`.
-    area_utm : shapely.Polygon
-        Search-area bounding box, in `utm_crs`.
-    utm_crs : pyproj.CRS
-        UTM CRS the polygons and coastline pieces are built in.
-    pixel_m : float
-        Approximate mask pixel size in metres, used to size buffers.
+    The offset-d coastline is the edge of the ocean shrunk by d, so narrow bays close
+    by themselves. `transform` maps `mask` pixels to lon/lat; `area_utm` is in `utm_crs`.
     """
 
     def __init__(self, mask: np.ndarray, transform, area_utm, utm_crs, pixel_m: float):
@@ -143,10 +128,7 @@ class Coast:
         ocean_utm = ocean_utm[ocean_utm.area >= MIN_OCEAN_AREA_KM2 * 1e6]
         self.ocean = (unary_union(list(ocean_utm)).buffer(0).intersection(area_utm) if len(ocean_utm)
                       else shapely.Polygon())
-        # stations sit on the coast and the coastline is simplified to ~1 px, so
-        # a link only "crosses land" once it is clearly inside it
-        # "land" for the crossing test: the land grown by LAND_CLEARANCE_M, so a
-        # link that clears it stays that far out at sea (name kept from when it was eroded)
+        # land grown (not eroded) by LAND_CLEARANCE_M: a link that clears it stays that far out at sea
         self.land_eroded = area_utm.difference(self.ocean).buffer(LAND_CLEARANCE_M)
         shapely.prepare(self.land_eroded)
         shapely.prepare(self.ocean)
@@ -166,9 +148,7 @@ class Coast:
         return self._eroded[offset_m]
 
     def open_eroded(self, offset_m: float):
-        """Parts of the ocean shrunk by offset_m that are still open ocean
-        (touch the search area's edge or are large) - bays whose mouth closed
-        at this offset drop out."""
+        """Return the ocean shrunk by offset_m minus bays whose mouth closed at that offset."""
         edge = self.area_utm.exterior.buffer(offset_m + 2 * self.pixel_m)
         parts = [g for g in shapely.get_parts(self.eroded(offset_m))
                  if g.area >= OPEN_OCEAN_MIN_KM2 * 1e6 or g.intersects(edge)]
@@ -182,11 +162,11 @@ class Coast:
         return self._pieces[offset_m]
 
     def crosses_land(self, line: LineString, stations: tuple[Point, ...] = (), min_ramp_m: float = 1000.0) -> bool:
-        """More than LAND_CROSSING_TOL_M of `line` inside the (eroded) land,
-        ignoring the approach to each station that sits inland itself - the
-        stretch over which _coast_path fades that station's offset in
-        (RAMP_FACTOR x its distance from the coastline, at least min_ramp_m,
-        + 300 m) has to cross land anyway."""
+        """Return True if more than LAND_CROSSING_TOL_M of `line` lies in `land_eroded`.
+
+        The ramp (RAMP_FACTOR x coastline distance, >= min_ramp_m, + 300 m) next to a
+        station that itself sits on land is ignored: it has to cross land anyway.
+        """
         if self.land_eroded.is_empty or not self.land_eroded.intersects(line):
             return False
         if not hasattr(self, "_coast_lines"):
@@ -199,12 +179,8 @@ class Coast:
 
 
 def _coast_path(pa: Point, pb: Point, pieces: list[LineString], min_ramp_m: float = 1000.0):
-    """Coastline between pa and pb, shifted to start/end exactly at them, or
-    None if they are not both near one coastline piece. Each station's offset
-    from the coastline fades out over RAMP_FACTOR x that offset (at least
-    min_ramp_m) from its end - in between the path stays on the coastline,
-    instead of the whole path being dragged towards a station that sits a
-    bit inland or offshore."""
+    # Each station's offset from the coastline fades out over RAMP_FACTOR x that offset
+    # (>= min_ramp_m), so an off-coast station does not drag the whole path with it.
     if not pieces:
         return None
     da = np.array([g.distance(pa) for g in pieces])
@@ -216,7 +192,7 @@ def _coast_path(pa: Point, pb: Point, pieces: list[LineString], min_ramp_m: floa
     sa, sb = line.project(pa), line.project(pb)
     lo, hi = sorted((sa, sb))
     path = substring(line, lo, hi)
-    if line.is_ring and line.length - (hi - lo) < hi - lo:  # the other way round the ring is shorter
+    if line.is_ring and line.length - (hi - lo) < hi - lo:
         parts = [g for g in (substring(line, hi, line.length), substring(line, 0, lo))
                  if g.geom_type == "LineString" and g.length > 0]  # a part ending on the ring's start is a point
         path = linemerge(parts) if len(parts) > 1 else (parts[0] if parts else LineString())
@@ -239,8 +215,6 @@ def _coast_path(pa: Point, pb: Point, pieces: list[LineString], min_ramp_m: floa
 
 
 def _offset_straight(pa: Point, pb: Point, offset_m: float, coast: Coast, ramp_m: float) -> LineString:
-    """Straight pa-pb, shifted offset_m to the sea side in between, fading
-    back to the stations over ramp_m at both ends."""
     a, b = np.asarray(pa.coords[0]), np.asarray(pb.coords[0])
     length = float(np.hypot(*(b - a)))
     if offset_m == 0 or length == 0:
@@ -248,7 +222,6 @@ def _offset_straight(pa: Point, pb: Point, offset_m: float, coast: Coast, ramp_m
     u = (b - a) / length
     n = np.array([-u[1], u[0]])
     mid = 0.5 * (a + b)
-    # sea side: the side whose shifted midpoint is at sea (else the one crossing less land)
     sides = [(coast.ocean.contains(Point(mid + sgn * offset_m * n)),
               -LineString([a + sgn * offset_m * n, b + sgn * offset_m * n]).intersection(coast.land_eroded).length,
               sgn) for sgn in (1.0, -1.0)]
@@ -260,11 +233,8 @@ def _offset_straight(pa: Point, pb: Point, offset_m: float, coast: Coast, ramp_m
 
 
 def _link_geometry(pa: Point, pb: Point, dist: float, coast: Coast, straight_first: bool = False):
-    """(geometry, kind, offset_m) for one link, or None if there is none.
-    For d = 0, then SEAWARD_OFFSETS_M: a coastline path (not rugged) and a
-    straight line, each shifted d seaward; the first that clears the land
-    wins - at each d the coastline first, or the straight line first with
-    straight_first (bay mouths instead of following into bays)."""
+    # Per offset d: coastline path (if not rugged) then straight line (reversed with
+    # straight_first, which crosses bay mouths); the first that clears the land wins.
     ends = (pa, pb)
     coast0 = None
     for offset in (0.0, *SEAWARD_OFFSETS_M):
@@ -282,8 +252,7 @@ def _link_geometry(pa: Point, pb: Point, dist: float, coast: Coast, straight_fir
         for geom, kind in options:
             if not coast.crosses_land(geom, ends, min_ramp_m=ramp):
                 return geom, kind, offset
-    # no straight line clears the land at any offset (e.g. round an island's
-    # tip): accept a clear coastline path up to COAST_LONG_RATIO after all
+    # nothing clears the land (e.g. round an island's tip): accept a clear coastline up to COAST_LONG_RATIO
     for offset in (0.0, *SEAWARD_OFFSETS_M):
         ramp = max(2 * offset, 1000.0)
         path = _coast_path(pa, pb, coast.pieces(MIN_OFFSHORE_M + offset), min_ramp_m=ramp)
@@ -297,10 +266,8 @@ def _link_geometry(pa: Point, pb: Point, dist: float, coast: Coast, straight_fir
 
 def _link_stations(xy_all: np.ndarray, ids: list[int], coast: Coast, straight_first: bool = False,
                    cache: dict | None = None) -> list[dict]:
-    """Links between the stations `ids` (global indices into xy_all): every
-    candidate pair's link first, then cheapest (shortest geometry, flagged
-    last) first; each station gets at most two links, no loops (except a
-    ring around an island). Link geometries are cached across calls."""
+    # Greedy, shortest first (flagged kinds last): <= 2 links per station, no loops
+    # except a ring around an island. `ids` index xy_all.
     cache = {} if cache is None else cache
     n = len(ids)
     if n < 2:
@@ -332,23 +299,20 @@ def _link_stations(xy_all: np.ndarray, ids: list[int], coast: Coast, straight_fi
         if degree[a] >= 2 or degree[b] >= 2:
             continue
         if find(a) == find(b) and not _closes_island(links, find, a, geom, coast):
-            continue  # no loops - except a ring around an island
+            continue
         links.append({"station_a": a, "station_b": b, "kind": kind, "seaward_offset_m": offset,
                       "straight_km": dist / 1000, "length_km": geom.length / 1000, "geometry": geom})
         degree[a] += 1
         degree[b] += 1
         parent[find(a)] = find(b)
-    for l in links:  # local -> global station numbers
+    for l in links:
         l["station_a"], l["station_b"] = ids[l["station_a"]], ids[l["station_b"]]
     return links
 
 
 def _extend_open_ends(links: list[dict], xy_all: np.ndarray, coast: Coast, tile_utm) -> tuple[list[dict], list, int, list]:
-    """Extensions for line ends inside the tile: along the (seaward-offset)
-    coastline, away from the neighbouring station, until EXTENSION_OVERSHOOT_M
-    past the tile edge. Returns (extension links, the parts with BOTH ends
-    stuck inside the tile - no boundary at all, dropped by the caller -, the
-    number of other ends that could not be extended - an open-end conflict)."""
+    # Returns (extensions, parts with BOTH ends stuck in the tile, n other unextendable
+    # ends - an open-end conflict, parts with one stuck end).
     merged = _merge_lines(links)
     if merged is None:
         return [], [], 0, []
@@ -389,7 +353,7 @@ def _extension(end: Point, nb: Point, coast: Coast, tile_utm):
             continue
         dists = [g.distance(end) for g in pieces]
         line = pieces[int(np.argmin(dists))]
-        if min(dists) > COAST_SNAP_M or line.is_closed:  # an island ring cannot lead out of the tile
+        if min(dists) > COAST_SNAP_M or line.is_closed:
             continue
         s0, sn = line.project(end), line.project(nb)
         if sn < s0:
@@ -402,7 +366,7 @@ def _extension(end: Point, nb: Point, coast: Coast, tile_utm):
         exits = [sub.project(q) for q in shapely.get_parts(sub.intersection(tile_utm.exterior))]
         exits = [e for e in exits if e > 1.0]
         if not exits:
-            continue  # this coastline never leaves the tile
+            continue
         sub = substring(sub, 0, min(min(exits) + EXTENSION_OVERSHOOT_M, sub.length))
         if sub.length > RUGGED_RATIO * max(end.distance(Point(sub.coords[-1])), 1.0):
             continue  # follows the coast into a bay
@@ -415,8 +379,7 @@ def _extension(end: Point, nb: Point, coast: Coast, tile_utm):
         geom = LineString(xy)
         if not coast.crosses_land(geom, (end,), min_ramp_m=max(2 * offset, 1000.0)):
             return geom, offset
-    # straight on, in the direction the line arrives at this end
-    u = np.subtract(end.coords[0], nb.coords[0])
+    u =np.subtract(end.coords[0], nb.coords[0])
     if np.hypot(*u) == 0:
         return None
     u = u / np.hypot(*u)
@@ -432,12 +395,10 @@ def _extension(end: Point, nb: Point, coast: Coast, tile_utm):
 
 
 def _irrelevant_stations(ids: list[int], xy_all: np.ndarray, split: dict, tile_utm) -> list[int]:
-    """In-tile stations further than RELEVANCE_TOL_M from the active/inactive
-    interface (empty if the tile has no interface at all)."""
     if split["inactive"].is_empty or split["active"].is_empty:
         return []
     if split["land_inactive_frac"] > CONFLICT_LAND_FRAC:
-        return []  # a split that already puts land on the ocean side is no basis to judge stations by
+        return []  # a split putting land on the ocean side is no basis to judge stations by
     interface = split["inactive"].boundary.difference(tile_utm.exterior.buffer(5.0))
     if interface.is_empty:
         return []
@@ -446,9 +407,7 @@ def _irrelevant_stations(ids: list[int], xy_all: np.ndarray, split: dict, tile_u
         pt = Point(xy_all[i])
         if not tile_utm.contains(pt) or interface.distance(pt) <= RELEVANCE_TOL_M:
             continue
-        # out at sea on the inactive side: irrelevant; on the active side only
-        # if it is not next to open sea still leaking in (then the lines are
-        # what is wrong, not the station)
+        # active side: keep if next to leaking open sea (then the lines are wrong, not the station)
         if split["inactive"].contains(pt) or split["ocean_active"].distance(pt) > RELEVANCE_TOL_M:
             out.append(i)
     return out
@@ -456,14 +415,11 @@ def _irrelevant_stations(ids: list[int], xy_all: np.ndarray, split: dict, tile_u
 
 def _build_lines(xy_all: np.ndarray, ids: list[int], coast: Coast, tile_utm, straight_first: bool,
                  cache: dict, retry_open: bool = True) -> dict:
-    """Link, extend open ends, split the tile, drop irrelevant stations and
-    repeat (up to MAX_RELEVANCE_ROUNDS)."""
     ids, dropped, dangling = list(ids), [], []
     for round_ in range(MAX_RELEVANCE_ROUNDS + 1):
         links = _link_stations(xy_all, ids, coast, straight_first, cache)
         extensions, stuck_parts, n_open, open_parts = _extend_open_ends(links, xy_all, coast, tile_utm)
         if stuck_parts and round_ < MAX_RELEVANCE_ROUNDS:
-            # a line with both ends stuck inside the tile is no boundary: drop it, rebuild
             gone = [i for i in ids if any(p.distance(Point(xy_all[i])) < 1.0 for p in stuck_parts)]
             dangling += gone
             ids = [i for i in ids if i not in gone]
@@ -480,8 +436,7 @@ def _build_lines(xy_all: np.ndarray, ids: list[int], coast: Coast, tile_utm, str
               "dropped": dropped, "dangling": dangling, "n_conflicts": n_conflicts,
               "score": (n_conflicts, split["land_inactive_frac"] + split["ocean_active_frac"])}
     if n_open and retry_open:
-        # a line with one end stuck: either a real boundary missing its last
-        # bit, or a chain inside a wide bay - try without it, keep the better
+        # one stuck end: a real boundary missing its last bit, or a chain inside a wide bay
         gone = [i for i in ids if any(p.distance(Point(xy_all[i])) < 1.0 for p in open_parts)]
         alt = _build_lines(xy_all, [i for i in ids if i not in gone], coast, tile_utm, straight_first, cache,
                            retry_open=False)
@@ -493,13 +448,12 @@ def _build_lines(xy_all: np.ndarray, ids: list[int], coast: Coast, tile_utm, str
 
 
 def _chains(station_links: list[dict]) -> list[tuple[list[int], bool]]:
-    """(station sequence, is_closed) per connected chain of station links."""
     adj: dict[int, list[int]] = {}
     for l in station_links:
         adj.setdefault(l["station_a"], []).append(l["station_b"])
         adj.setdefault(l["station_b"], []).append(l["station_a"])
     seen, chains = set(), []
-    for start in sorted(adj, key=lambda k: len(adj[k])):  # path ends (degree 1) first
+    for start in sorted(adj, key=lambda k: len(adj[k])):
         if start in seen:
             continue
         seq, prev, cur = [start], None, start
@@ -531,7 +485,6 @@ def _link_record(a: int, b: int, xy_all: np.ndarray, geom, kind: str, offset: fl
 
 
 def _untangle(seq: list[int], cost) -> list[int]:
-    """2-opt over windows of up to UNTANGLE_WINDOW consecutive stations."""
     improved = True
     while improved:
         improved = False
@@ -546,9 +499,6 @@ def _untangle(seq: list[int], cost) -> list[int]:
 
 
 def _shortcuts(seq: list[int], seg_len, xy_all: np.ndarray, coast: Coast) -> tuple[list[int], dict, list[int]]:
-    """Repeatedly replace the stretch between two stations whose boundary is
-    > SHORTCUT_RATIO x a clear straight link (<= MAX_SHORTCUT_M) by that link.
-    Returns (new sequence, {(a, b): (geom, offset)} shortcut links, skipped stations)."""
     special: dict = {}
     skipped: list[int] = []
     for _ in range(50):
@@ -579,8 +529,6 @@ def _shortcuts(seq: list[int], seg_len, xy_all: np.ndarray, coast: Coast) -> tup
 
 
 def _finalize(result: dict, xy_all: np.ndarray, coast: Coast, tile_utm, straight_first: bool, cache: dict) -> dict:
-    """Final scan of the built lines: untangle, then shortcuts; extensions and
-    the domain split are redone on the result."""
     station_links = [l for l in result["links"] if l["station_b"] >= 0]
     lookup = {(min(l["station_a"], l["station_b"]), max(l["station_a"], l["station_b"])): l for l in station_links}
 
@@ -619,10 +567,7 @@ def _finalize(result: dict, xy_all: np.ndarray, coast: Coast, tile_utm, straight
 
 
 def _edge_fallback(links: list[dict], split: dict, tile_utm, coast: Coast) -> list[dict]:
-    """Tile-edge stretches still running through open sea on the active side
-    after all other rules (no station lines close that sea off): those
-    stretches become boundary lines themselves, unless shorter than
-    EDGE_MIN_M (e.g. the ~1 km strip where a line crosses the tile edge)."""
+    # EDGE_MIN_M skips e.g. the ~1 km strip where a line crosses the tile edge
     active_sea = split["active"].intersection(coast.open_ocean)
     if active_sea.is_empty:
         return []
@@ -635,7 +580,6 @@ def _edge_fallback(links: list[dict], split: dict, tile_utm, coast: Coast) -> li
 
 
 def _closes_island(links: list[dict], find, a: int, geom: LineString, coast: Coast) -> bool:
-    """Does closing a's chain with `geom` make a ring around mostly land?"""
     root = find(a)
     chain = [l["geometry"] for l in links if find(l["station_a"]) == root] + [geom]
     ring = linemerge(chain)
@@ -644,21 +588,16 @@ def _closes_island(links: list[dict], find, a: int, geom: LineString, coast: Coa
     poly = shapely.Polygon(ring.coords).buffer(0)
     if poly.area == 0 or poly.difference(coast.ocean).area <= 0.5 * poly.area:
         return False
-    # an island: the land pieces the ring touches lie (almost) entirely inside
-    # it - a loop cutting off part of the mainland/a peninsula is no island
+    # island: touched land lies >= 80 % inside the ring (not a cut-off peninsula)
     touched = [coast.land_parts[i] for i in coast.land_tree.query(poly, predicate="intersects")]
     touched_area = sum(p.area for p in touched)
     return touched_area > 0 and sum(p.intersection(poly).area for p in touched) >= 0.8 * touched_area
 
 
 def _domain_split(lines, tile_utm, coast: Coast) -> dict:
-    """Faces of the tile cut by the boundary lines; mostly-ocean faces are
-    inactive. Returns the inactive/active polygons and the conflict areas."""
-    # Split the whole search area, not just the tile: whether sea left on the
-    # active side inside the tile is a closed-off bay or open sea leaking in
-    # past a line end is decided outside the tile. Line ends inside the area
-    # are carried straight on to its edge (for this split only), so a line
-    # that just stops does not let the sea flow round its end.
+    # Split the whole search area: whether active sea in the tile is a closed bay or
+    # open sea leaking past a line end is decided outside it. Open ends are carried
+    # straight to the area edge (this split only) so the sea cannot flow round them.
     area = coast.area_utm
     tile_ocean = tile_utm.intersection(coast.ocean)
     tile_land = tile_utm.difference(coast.ocean)
@@ -672,8 +611,7 @@ def _domain_split(lines, tile_utm, coast: Coast) -> dict:
         (inactive if f.intersection(coast.ocean).area >= 0.5 * f.area else active).append(f)
     inactive_area = unary_union(inactive) if inactive else shapely.Polygon()
     active_area = unary_union(active) if active else shapely.Polygon()
-    # sea left active is only a problem where it is open sea (reaches the
-    # search area's edge); a bay/lagoon closed off behind a line is meant to be active
+    # only active sea reaching the area edge is a leak; a closed-off bay is meant to be active
     area_edge = area.exterior.buffer(10.0)
     leaking = [g for g in shapely.get_parts(active_area.intersection(coast.ocean)) if g.intersects(area_edge)]
     inactive_u = inactive_area.intersection(tile_utm)
@@ -691,7 +629,6 @@ def _domain_split(lines, tile_utm, coast: Coast) -> dict:
 
 
 def _rays_to_edge(lines, area) -> list[LineString]:
-    """Straight continuations of every open line end inside `area` to its edge."""
     rays = []
     for part in lines.geoms:
         if part.is_closed or part.length == 0:
@@ -722,9 +659,7 @@ def _merge_lines(links: list[dict]):
 
 
 def _search_box(tile: gpd.GeoDataFrame, buffer_deg: float, min_size_deg: float) -> tuple:
-    """Production's station search box (boundaries.select_stations_for_tile):
-    the envelope of the tile bbox + buffer_deg and a min_size_deg box centred
-    on the tile."""
+    # mirrors boundaries.select_stations_for_tile
     minx, miny, maxx, maxy = tile.total_bounds
     cx, cy, half = (minx + maxx) / 2, (miny + maxy) / 2, min_size_deg / 2
     return (min(minx - buffer_deg, cx - half), max(min(miny - buffer_deg, cy - half), -89.0),
@@ -732,9 +667,7 @@ def _search_box(tile: gpd.GeoDataFrame, buffer_deg: float, min_size_deg: float) 
 
 
 def _tile_stations(tile_dir: Path) -> gpd.GeoDataFrame:
-    """The tile's own pre-selected COAST-RP stations (production's
-    boundaries_RP100_SLR_0.gpkg: search box + ocean-connectivity filter,
-    MDT-corrected, int16 cm)."""
+    # production's selection (search box + ocean connectivity), MDT-corrected, int16 cm
     st = gpd.read_file(tile_dir / TILE_STATIONS_GPKG).to_crs("EPSG:4326").reset_index(drop=True)
     level = st["SLR_0"].to_numpy(dtype=np.float64) / 100.0
     return gpd.GeoDataFrame({"station_index": np.arange(len(st)), "rp100_level_m": level},
@@ -745,7 +678,6 @@ _HG_XY = {}
 
 
 def _n_with_coast_hg(root: Path, lonlat: np.ndarray) -> int:
-    """How many of these stations have a COAST-HG hydrograph within MAX_HG_MATCH_DEG."""
     if "xy" not in _HG_XY:
         with xr.open_dataset(root / COAST_HG_NC) as ds:
             _HG_XY["xy"] = np.column_stack([ds.station_x_coordinate.values, ds.station_y_coordinate.values])
@@ -757,8 +689,7 @@ def _n_with_coast_hg(root: Path, lonlat: np.ndarray) -> int:
 
 
 def _clean(geom):
-    """Valid, single-type geometry for writing (make_valid can return a
-    GeometryCollection with stray points/lines next to the polygons)."""
+    # make_valid can return a GeometryCollection with stray points/lines
     geom = shapely.make_valid(geom)
     if geom.geom_type == "GeometryCollection":
         parts = [g for g in shapely.get_parts(geom) if g.geom_type in ("Polygon", "MultiPolygon")]

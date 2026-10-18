@@ -1,10 +1,8 @@
-# ── Root path ─────────────────────────────────────────────────────────────────
-# HydroMT prepends a root to every relative `path:` entry. There is no `root:` in
-# this file: every loader passes config["paths"]["root"] explicitly
-# (src/config_utils.get_data_catalog(..., root=...)). Paths that are already
-# absolute (e.g. entries under GCFM_UU\raw_data below) are left untouched.
-
-# ──────────────────────────────────────────────────────────────────────────────
+# GFM input data catalog. Relative `path:` entries are resolved against
+# config["paths"]["root"], passed explicitly by src/config_utils.get_data_catalog.
+#
+# Every entry's `meta` carries: category, description, source_author, source_url,
+# source_version, source_license and, where one exists, paper_ref / paper_doi.
 
 coast_rp:
   data_type: GeoDataset
@@ -19,38 +17,26 @@ coast_rp:
   meta:
     category: ocean
     description: >
-      COAST-RP (COastal dAtaset of Storm Tide Return Periods) — a global dataset
-      of extreme total water levels (storm surge + tide) at discrete GTSM coastal
-      output stations. Extratropical surges are simulated with Deltares D-Flow FM
-      (GTSMv3) forced by ERA5 reanalysis (1979–2018); tropical cyclone surges are
-      from the STORM synthetic-track dataset (10 000 years, present climate).
-      The two are probabilistically combined with tidal levels and return periods
-      are computed empirically, giving storm-tide levels for return periods of
-      1, 2, 5, 10, 25, 50, 100, 250, 500 and 1000 years at ~23 000 coastal
-      stations globally. Water levels are referenced to local mean sea level (MSL).
-      After preprocessing, Antarctic stations (lat < −60°) are removed, leaving
-      ~22 670 stations. Used as the base storm-tide forcing in
-      prepare_boundary_conditions.py, with SLR fingerprints (see
-      ipcc_ar6_slr_projections) added on top. MDT correction (local MSL ->
-      GOCO06s, via `mdt_cnes_cls22` below) is always applied
-      (boundary_conditions.mdt_correction in config.yml), matching the DEM's
-      own EGM2008 -> GOCO06s geoid correction (see `deltadtm` below and
-      vertical_datum_correction in config.yml) so forcing and terrain share
-      one vertical reference.
-    paper_doi: 10.1038/s43247-021-00204-9
-    paper_ref: >
-      Dullaart et al. (2021), Accounting for tropical cyclones more than doubles
-      the global population exposed to low-probability coastal flooding,
-      Commun. Earth Environ. 2, 135.
-    source_author: Job C.M. Dullaart, IVM – Vrije Universiteit Amsterdam
-    source_license: CC-BY-4.0
+      COAST-RP: extreme total water levels (storm surge + tide) at ~23,000 GTSM
+      coastal output stations for return periods 1, 2, 5, 10, 25, 50, 100, 250,
+      500 and 1000 years. Extratropical surges from GTSMv3 (D-Flow FM) forced by
+      ERA5 (1979-2018); tropical-cyclone surges from STORM synthetic tracks
+      (10,000 years, present climate); combined probabilistically with tides.
+      Stations south of -60 deg are dropped (~22,670 remain). Base storm-tide
+      forcing in prepare_boundary_conditions.py, with AR6 SLR fingerprints
+      (ipcc_ar6_slr_projections) added on top.
+    vertical_reference: Local mean sea level at source. Converted to the GOCO06s
+      geoid by ADDING the MDT (H_GOCO06s = H_MSL + MDT, mdt_cnes_cls22), so forcing
+      and the geoid-corrected DEM (deltadtm) share one vertical reference.
+    source_author: J.C.M. Dullaart et al., IVM - Vrije Universiteit Amsterdam
     source_url: https://doi.org/10.4121/uuid:210b66a1-9c82-4e0b-9f4a-8eb15deebb44
     source_version: "1.0"
-    model_version: "Deltares D-Flow FM v1.2.63.64757"
-    vertical_reference: Local mean sea level (MSL) as measured, corrected to
-      the GOCO06s geoid via MDT subtraction (boundary_conditions.mdt_correction)
-      before use, to match the DEM's own GOCO06s-referenced elevations (see
-      `deltadtm`).
+    source_license: CC-BY-4.0
+    model_version: Deltares D-Flow FM v1.2.63.64757
+    paper_ref: Dullaart et al. (2021), Accounting for tropical cyclones more than
+      doubles the global population exposed to low-probability coastal flooding,
+      Commun. Earth Environ. 2, 135.
+    paper_doi: 10.1038/s43247-021-00204-9
 
 coast_hg:
   data_type: GeoDataset
@@ -65,106 +51,73 @@ coast_hg:
   meta:
     category: ocean
     description: >
-      COAST-HG (COastal dAtaset of Storm Tide HydroGraphs) - a global dataset of
-      RP100 storm-tide HYDROGRAPHS (full time-varying shape, not just the peak
-      level) at the same GTSM coastal output stations as `coast_rp` above,
-      generated via the HGRAPHER method (Dullaart et al., IVM - VU Amsterdam -
-      same research group as coast_rp; this is a companion dataset, not an
-      independent source). Intended for quasi-hydrodynamic (SFINCS) tile
-      modelling as an alternative to this pipeline's existing static-water-level
-      (planar/bathtub-via-eikonal) approach - a hydrograph lets a dynamic model
-      see the storm's actual rise/fall shape rather than only its peak.
-      23,226 stations, 894 timesteps at 10-minute spacing (~6.2 days spanning
-      the synthetic storm event). Two variants per station:
-      `hydrograph_average_tide_signal` (average high-tide conditions) and
-      `hydrograph_spring_tide_signal` (spring-tide conditions) - same RP100
-      storm surge, combined with two different tidal-phase assumptions. Values
-      are water level in metres; vertical reference not yet independently
-      confirmed for this dataset specifically (see known_caveats).
-    source_author: J.C.M. Dullaart, S. Muis, H. de Moel, P.J. Ward, D. Eilander,
-      J.C.J.H. Aerts - IVM, Vrije Universiteit Amsterdam
-    source_license: https://doi.org/10.4121/21270948.v2
-    source_url: <to confirm - README ships no DOI/URL, only a contact email
-      (job.dullaart@vu.nl); coast_rp's own paper/DOI above is the closest
-      citable reference for the underlying CoDEC/COAST-RP source data, but
-      HGRAPHER itself is a distinct, unconfirmed further reference>
-    source_version: "1.0"
-    date_created: "2022-10-05"  # per the file's own date_created attribute
+      COAST-HG: RP100 storm-tide hydrographs (full time series, not only the peak)
+      at the GTSM stations of coast_rp, from the HGRAPHER method. 23,226 stations,
+      894 time steps at 10 min (~6.2 days). Two variables:
+      hydrograph_average_tide_signal and hydrograph_spring_tide_signal (same RP100
+      surge, two tidal phases); water level in m. Forcing shape for the SFINCS
+      tiles (sfincs_tiles/build_line_forcing.py).
+    vertical_reference: Local mean sea level (no MDT). build_line_forcing shifts
+      each hydrograph by boundary_value - hydrograph_max, using the MDT-corrected
+      coast_rp RP100 level, so only the shape is taken from COAST-HG.
     known_caveats: >
-      (1) RP100 ONLY - unlike coast_rp's 10 return periods, this dataset has no
-      per-return-period axis at all (one hydrograph SHAPE per station, framed
-      as representative of "a" 1-in-100-year event, not one shape per RP).
-      (2) The `time` coordinate is a real datetime64 axis but starts at an
-      arbitrary reference (2000-01-01), NOT the real date of any actual storm -
-      only ELAPSED time within the synthetic hydrograph is meaningful, do not
-      join or compare it against any real calendar date. (3) Station count
-      (23,226) has not been cross-checked row-for-row against coast_rp's own
-      station set (~23,000 raw, ~22,670 after this pipeline's Antarctic-latitude
-      filter, see coast_rp above) - both are described as the same underlying
-      GTSM network and counts are consistent with that, but exact index/row
-      alignment (same station_id at the same row) is NOT yet confirmed and
-      should be checked directly (e.g. by comparing station_id/lon/lat, not
-      assumed from row position) before joining anything to coast_rp by index.
-      (4) Vertical reference (local MSL vs. already-geoid-corrected) not yet
-      independently confirmed for this dataset the way coast_rp's own MDT
-      correction requirement was - check before using these hydrographs as an
-      absolute water-level forcing rather than a relative shape.
+      (1) RP100 only: one hydrograph shape per station, no return-period axis.
+      (2) The time axis starts at an arbitrary 2000-01-01; only elapsed time is
+      meaningful. (3) Rows are not aligned with coast_rp's station rows; stations
+      are matched by distance (build_line_forcing.MAX_MATCH_DIST_DEG), not by index.
+    source_author: J.C.M. Dullaart, S. Muis, D. Eilander, J.C.J.H. Aerts, H. de Moel,
+      P.J. Ward - IVM, Vrije Universiteit Amsterdam
+    source_url: https://doi.org/10.4121/21270948.v2
+    source_version: "2 (4TU.ResearchData, 2023-05-22)"
+    source_license: CC-BY-4.0
+    paper_ref: Dullaart et al. (2023), Enabling dynamic modelling of coastal flooding
+      by defining storm tide hydrographs, Nat. Hazards Earth Syst. Sci. 23, 1847-1862.
+    paper_doi: 10.5194/nhess-23-1847-2023
 
 ipcc_ar6_slr_projections:
   data_type: GeoDataset
   driver: netcdf
+  # Directory root: files are {confidence}_confidence/{scenario}/total_{scenario}_{confidence}_confidence_values.nc
   path: inputs/SLR/ar6-regional-confidence/regional/confidence_output_files
   crs: 4326
   filesystem: local
   meta:
     category: ocean
     description: >
-      IPCC Sixth Assessment Report (AR6) regional sea-level projections produced
-      with the Framework for Assessment of Changes To Sea-level (FACTS).
-      The catalog path points to the confidence_output_files root directory;
-      the actual NetCDF files are organised as
-      {confidence}_confidence/{scenario}/total_{scenario}_{confidence}_confidence_values.nc
-      and are loaded by combining the scenario and confidence-level choices.
-      Each file contains median, 5th- and 95th-percentile sea-level change
-      (in mm) relative to 1995–2014 baseline at tide-gauge locations and a
-      global 1°×1° grid, for all SSP scenarios and decades up to 2150.
-      Used in prepare_boundary_conditions.py to derive spatially-varying SLR
-      fingerprints that are added to COAST-RP storm-tide levels.
-    paper_doi: 10.5281/zenodo.5914709
-    paper_ref: Garner et al. (2021), IPCC AR6 Sea Level Projections, v20210809
-    source_author: G. G. Garner et al. / IPCC AR6 WG1; FACTS model
-    source_license: CC-BY-4.0
+      IPCC AR6 regional sea-level projections (FACTS), from ar6-regional-confidence.zip:
+      quantiles of sea-level change (mm, relative to 1995-2014) at tide gauges and
+      on a 1x1 deg grid, per SSP and decade to 2150. prepare_boundary_conditions.py
+      derives the spatial SLR fingerprints added to COAST-RP levels.
+    source_author: G.G. Garner, T. Hermans, R.E. Kopp, A.B.A. Slangen et al. / IPCC AR6 WG1
     source_url: https://zenodo.org/records/5914710
     source_version: "20210809"
-    citation_required: >
-      Cite (1) Fox-Kemper et al. (2021), IPCC AR6 WG1 Ch. 9; (2) Garner et al.
-      (in prep.), FACTS, Geosci. Model Dev.; and (3) the dataset itself
-      (Garner et al. 2021, v20210809, https://doi.org/10.5281/zenodo.5914709).
+    source_license: CC-BY-4.0
+    paper_ref: Garner et al. (2021), IPCC AR6 Sea Level Projections, Version 20210809;
+      Fox-Kemper et al. (2021), Ocean, Cryosphere and Sea Level Change, IPCC AR6 WG1 Ch. 9.
+    paper_doi: 10.5281/zenodo.5914709
 
 ipcc_ar6_slr_wg1_csv:
   data_type: DataFrame
   driver: csv
-  # Directory root, not a single file - analysis/extract_slr_trajectories.py
-  # reads inputs/SLR/SLR_{code}_wg1.csv per SSP/RCP code (code from
-  # visualization.ssp_rcp_codes, e.g. SLR_126_wg1.csv for SSP1-RCP2.6)
-  # directly with pandas, not through HydroMT's own DataFrame reader - same
-  # directory-root pattern as ipcc_ar6_slr_projections above (see that
-  # entry's `.gfc` sibling comment near the bottom of this file for why
-  # data_type/driver exist here only so the catalog parser accepts the entry).
+  # Directory root: analysis/extract_slr_trajectories.py reads SLR_{code}_wg1.csv
+  # per code (visualization.ssp_rcp_codes) with pandas; data_type/driver only
+  # satisfy the catalog parser.
   path: inputs/SLR
   filesystem: local
   meta:
     category: ocean
     description: >
-      Global-mean sea-level-rise percentile trajectories, one CSV per
-      SSP/RCP scenario code (SLR_{code}_wg1.csv), each year-indexed with
-      p17/p50/p83 percentile columns (metres, likely IPCC AR6 WG1 global-mean
-      SLR projections - confirm exact source/citation before citing
-      externally, unlike the regional ipcc_ar6_slr_projections entry above
-      whose provenance is already verified). Used by
-      analysis/extract_slr_trajectories.py to build the combined trajectory
-      CSV consumed by the burning-ember/timeseries plots
-      (visualization.slr_trajectories_csv).
+      Global-mean sea-level-rise trajectories, one CSV per SSP/RCP code
+      (SLR_{code}_wg1.csv), year-indexed with p17/p50/p83 columns in metres,
+      taken from the global projections of the same AR6 record (ar6.zip) as
+      ipcc_ar6_slr_projections. Feeds visualization.slr_trajectories_csv via
+      analysis/extract_slr_trajectories.py.
+    source_author: G.G. Garner, T. Hermans, R.E. Kopp, A.B.A. Slangen et al. / IPCC AR6 WG1
+    source_url: https://zenodo.org/records/5914710
+    source_version: "20210809"
+    source_license: CC-BY-4.0
+    paper_ref: Garner et al. (2021), IPCC AR6 Sea Level Projections, Version 20210809.
+    paper_doi: 10.5281/zenodo.5914709
 
 deltadtm:
   data_type: RasterDataset
@@ -176,31 +129,20 @@ deltadtm:
   meta:
     category: topography
     description: >
-      DeltaDTM — a global coastal digital terrain model derived by fusing
-      ICESat-2 lidar altimetry with TanDEM-X and SRTM to correct for
-      vegetation- and building-induced height bias in low-lying coastal and
-      deltaic terrain. Covers global coastlines at ~1 arc-second (~30 m)
-      resolution. Distributed as a VRT mosaic of per-tile GeoTIFF files.
-      The tiles in use (`DeltaDTM_v1_1_*.tif`, downloaded from
-      4TU.ResearchData by sync_deltadtm.py) are the original v1.0/v1.1
-      release, referenced to the EGM2008 geoid. scripts/extract_dem.py
-      always applies the EGM2008 -> GOCO06s geoid correction on top (see
-      vertical_datum_correction in config.yml, src/vertical_datum.py),
-      re-referencing the DEM to the same GOCO06s geoid that COAST-RP's own
-      MDT correction (boundary_conditions.mdt_correction, see `coast_rp`
-      above) re-references the storm-tide forcing to - so DEM and forcing
-      always share one vertical reference.
-    paper_doi: 10.5194/essd-16-2343-2024  # original DeltaDTM v1.0 (Pronk et al. 2024)
-    paper_ref: >
-      Pronk et al. (2024), Earth Syst. Sci. Data 16, 2343–2360.
-    source_author: Deltares / TU Delft
-    source_license: CC-BY-4.0
-    source_url: https://data.4tu.nl/datasets/1da2e70f-6c4d-4b03-86bd-b53e789cc629
-    source_version: v1.1 (EGM2008-referenced)
-    vertical_datum: EGM2008 geoid at source; corrected to GOCO06s by
-      scripts/extract_dem.py before use - see description
+      DeltaDTM: global coastal digital terrain model (ICESat-2 + TanDEM-X/SRTM,
+      vegetation and building bias removed), ~1 arcsec (~30 m), as a VRT over the
+      DeltaDTM_v1_1_*.tif tiles (preparation/sync_deltadtm.py). extract_dem.py
+      applies the EGM2008 -> GOCO06s geoid correction (src/vertical_datum.py).
+    vertical_reference: EGM2008 geoid at source; corrected to GOCO06s before use.
     pixel_size_arcsec: 1
     nodata_value: -9999
+    source_author: M. Pronk et al., Deltares / TU Delft
+    source_url: https://doi.org/10.4121/21997565
+    source_version: v1.1
+    source_license: CC-BY-4.0
+    paper_ref: Pronk et al. (2024), DeltaDTM - a global coastal digital terrain model,
+      Earth Syst. Sci. Data 16, 2343-2360.
+    paper_doi: 10.5194/essd-16-2343-2024
 
 deltadtm_mask:
   data_type: RasterDataset
@@ -212,28 +154,20 @@ deltadtm_mask:
   meta:
     category: topography
     description: >
-      Land/ocean/lake/river classification mask for DeltaDTM, co-registered to
-      the DeltaDTM pixel grid, derived from ESA WorldCover (~10m) at DeltaDTM
-      production time. Categorical, NOT a binary validity mask (corrected
-      2026-09 - the previous description here had this inverted): 0 = land
-      (where a real DeltaDTM elevation exists), 1 = ocean, 2 = lake, 3 =
-      river; 255 = nodata (outside DeltaDTM coverage - DeltaDTM is a coastal-
-      only product, see tile_generation.ocean_code/river_code in config.yml,
-      confirmed against real tiles 2026-09: 0-valued cells are 100% DEM-valid,
-      1/2/3-valued cells 0% DEM-valid). Used during preprocessing to restrict
-      each tile's flood-model domain to cells with valid DEM data (ocean_code/
-      river_code in config.yml), and by validation.read_permanent_water_mask
-      as the default permanent-water exclusion source for flood-extent
-      validation (validation.permanent_water_source, 2026-09) - a real,
-      measured resolution improvement over the coarser 100m Copernicus
-      land_use for this purpose.
-    paper_doi: 10.5194/essd-16-2343-2024
-    paper_ref: Pronk et al. (2024), Earth Syst. Sci. Data 16, 2343–2360
-    source_author: Deltares / TU Delft
-    source_url: https://doi.org/10.5281/zenodo.7296982
-    pixel_size_arcsec: "1 (Y, constant) x 1-5 (X, latitude-tiered - see preparation/build_deltadtm_vrt.py's
-      own module docstring for the real per-band-of-latitude values, confirmed against real tiles 2026-09)"
+      DeltaDTM land/water classification on the DeltaDTM grid (mask_tiles.zip of
+      the DeltaDTM release): 0 = land (DEM valid), 1 = ocean, 2 = lake, 3 = river,
+      255 = outside DeltaDTM coverage. Restricts each tile's flood domain
+      (tile_generation.ocean_code / river_code) and is the default permanent-water
+      mask for validation (validation.permanent_water_source).
+    pixel_size_arcsec: 1 in y; 1-5 in x, coarsening with latitude (preparation/build_deltadtm_vrt.py)
     nodata_value: 255
+    source_author: M. Pronk et al., Deltares / TU Delft
+    source_url: https://doi.org/10.4121/21997565
+    source_version: v1.1
+    source_license: CC-BY-4.0
+    paper_ref: Pronk et al. (2024), DeltaDTM - a global coastal digital terrain model,
+      Earth Syst. Sci. Data 16, 2343-2360.
+    paper_doi: 10.5194/essd-16-2343-2024
 
 gebco:
   data_type: RasterDataset
@@ -245,39 +179,27 @@ gebco:
   meta:
     category: topography
     description: >
-      GEBCO 2026 Grid - global bathymetry (ocean) + land topography on one
-      continuous 15 arc-second grid (SRTM15+ V2.8 base, augmented with
-      regional multibeam compilations from the four Seabed 2030 Regional
-      Centers). int16 metres, positive above / negative below sea level.
-      NOT used by the eikonal GFM model (which needs no real bathymetry at
-      all - effective_dem forces every ocean/lake/river cell to elevation
-      0.0 at solve time, see src/flood_model.py) - added 2026-09 solely for
-      the SFINCS quasi-hydrodynamic first pass (sfincs_tiles/), which needs
-      real depth-below-sea-level for its shallow-water solve. Referenced to
-      local Mean Sea Level (per GEBCO's own metadata - "assuming all of them
-      to be referred to Mean Sea Level"), NOT the GOCO06s geoid deltadtm/
-      coast_rp use - sfincs_tiles' own DEM-build step applies the same MDT
-      correction (mdt_cnes_cls22 below) used for the boundary forcing to
-      reconcile this before merging with DeltaDTM land elevation. Built into
-      one VRT mosaic (sfincs_tiles/build_gebco_vrt.py) from 8 whole-globe
-      quadrant GeoTIFFs - see that script for the real build/verification.
-    source_author: GEBCO Compilation Group / Nippon Foundation-GEBCO Seabed 2030 Project
-    source_url: https://www.gebco.net/data-products/gridded-bathymetry-data
-    source_version: "2026"
-    source_license: <to confirm - see GEBCO_Grid_terms_of_use.pdf alongside the downloaded tiles>
+      GEBCO_2026 Grid: global bathymetry and land topography on a 15 arcsec grid,
+      int16 m, positive up. Used by extract_dem.py (offshore reclassification and
+      DeltaDTM coverage gaps) and by the SFINCS tiles (sfincs_tiles/build_elevation.py)
+      for depth below sea level. One VRT over 8 quadrant GeoTIFFs
+      (sfincs_tiles/build_gebco_vrt.py).
+    vertical_reference: Mean sea level as distributed; sfincs_tiles adds the MDT
+      (same convention as coast_rp) before merging with DeltaDTM.
+    known_caveats: >
+      GEBCO gives no vertical accuracy and no single datum (sources assumed to be
+      MSL); nearshore and intertidal areas are the least reliable.
     pixel_size_arcsec: 15
     nodata_value: -32767
-    vertical_reference: Local Mean Sea Level as distributed - NOT geoid-corrected at the
-      source; sfincs_tiles applies MDT correction (ADD, same sign convention as coast_rp's
-      own boundary correction) before merging with DeltaDTM, not corrected in this raw form.
-    known_caveats: >
-      GEBCO's own documentation notes it does not provide vertical accuracy or a single
-      consistent reference datum (assembled from heterogeneous sources, all assumed
-      referred to MSL) - real accuracy varies by region and input source, and nearshore/
-      intertidal areas specifically are the least reliable (satellite-altimetry-derived
-      regions break down at fine nearshore/tidal scale). Treat SFINCS results very close to
-      shore with appropriate caution; not a substitute for real nearshore surveyed
-      bathymetry where that matters.
+    source_author: GEBCO Bathymetric Compilation Group 2026 / Nippon Foundation-GEBCO Seabed 2030
+    source_url: https://www.gebco.net/data-products-gridded-bathymetry-data/gebco2026-grid
+    source_version: "2026"
+    source_license: Public domain, attribution required, no implied endorsement
+      (GEBCO Grid terms of use)
+    paper_ref: GEBCO Bathymetric Compilation Group 2026 (2026), The GEBCO_2026 Grid - a
+      continuous terrain model for oceans and land at 15 arc-second intervals, NERC EDS
+      British Oceanographic Data Centre NOC.
+    paper_doi: 10.5285/4f68d5c7-45eb-f999-e063-7086abc036fa
 
 land_polygons:
   data_type: GeoDataFrame
@@ -288,26 +210,14 @@ land_polygons:
   meta:
     category: geography
     description: >
-      OpenStreetMap land polygons (osmdata.openstreetmap.de "land-polygons-
-      split" product, 873,381 features) — a global vector dataset of land
-      masses derived from the OpenStreetMap coastline. Re-acquired 2026-10
-      (the previous inputs/OSM_Coastlines/land_polygons.gpkg copy had been
-      deleted and the plotting code paths that used it switched to
-      src/pipeline_plots.py's land_polygons_from_deltadtm_mask instead - see that
-      function's docstring) specifically so preparation/
-      fix_ocean_mask_with_osm_land.py can use real, ground-truth coastline
-      geometry to correct DeltaDTM mask misclassification: DeltaDTM's mask
-      regularly codes inland water (wide river confluences, aquaculture
-      ponds/paddies, thermokarst lakes) as ocean_code even far from any
-      real coast (confirmed directly on the Nakhon Sawan, Thailand
-      four-river confluence, 2026-10) - a cell strictly inside an OSM land
-      polygon can never be real open ocean, regardless of which DeltaDTM
-      mask sub-code it carries, since OSM's land/sea boundary IS the
-      coastline by construction.
+      OpenStreetMap land polygons ("land-polygons-split", 873,381 features).
+      preparation/fix_ocean_mask_with_osm_land.py uses them to recode DeltaDTM mask
+      cells coded as ocean that lie inside an OSM land polygon (inland water such as
+      wide river confluences, aquaculture ponds and thermokarst lakes).
     source_author: OpenStreetMap contributors
-    source_license: ODbL 1.0 (https://opendatacommons.org/licenses/odbl/)
     source_url: https://osmdata.openstreetmap.de/data/land-polygons.html
     source_version: "2026-10-04"
+    source_license: ODbL-1.0
 
 land_use:
   data_type: RasterDataset
@@ -315,73 +225,62 @@ land_use:
   path: inputs/Copernicus/Copernicus_LandUse.tif
   crs: 4326
   filesystem: local
+  nodata: 255
   meta:
     category: land_use
     description: >
-      Copernicus Global Land Service — Land Cover 100 m, Collection 3,
-      Epoch 2019 (reference year). Discrete classification layer with 23
-      land-cover classes, derived from PROBA-V observations (2017-04 to
-      2020-03). Used to assign Manning's n roughness coefficients to each
-      model cell via the lu_to_roughness_lookup table.
-    paper_doi: 10.3390/rs12061044
-    paper_ref: Buchhorn et al. (2020), Remote Sensing 12(6), 1044
-    source_author: Dr. Marcel Buchhorn, VITO NV
-    source_license: Copernicus Service information 2020
-    source_url: https://land.copernicus.eu/global/products/lc
-    source_version: v3.0.1
+      Copernicus Global Land Service Land Cover 100 m (LC100), Collection 3, epoch
+      2019 discrete classification (PROBA-V, 2017-04 to 2020-03), 23 classes;
+      coverage -60 to 80 deg N. Mapped to Manning's n via lu_to_roughness_lookup.
+      Not ESA WorldCover.
     pixel_size_m: 100
     nodata_value: 255
+    source_author: M. Buchhorn et al., VITO NV
+    source_url: https://doi.org/10.5281/zenodo.3939050
+    source_version: v3.0.1
+    source_license: Copernicus Global Land Service data policy (free and open, attribution
+      "Copernicus Service information 2020")
+    paper_ref: Buchhorn et al. (2020), Copernicus Global Land Cover Layers - Collection 2,
+      Remote Sensing 12(6), 1044.
+    paper_doi: 10.3390/rs12061044
 
 geogunit_protection_units:
   data_type: RasterDataset
   driver: netcdf
-  # (global, ~30 arcsec / ~1 km resolution, EPSG:4326, variable "Geogunits",
-  # _FillValue -9999).
   path: inputs/WRI/geogunit_107_all.nc
   crs: 4326
   filesystem: local
   meta:
     category: socioeconomic
     description: >
-      WRI/Aqueduct geographic unit IDs ("geogunit_107") - a sub-national
-      regional zoning at ~30 arc-second (~1 km) global resolution. Used to
-      assign each pixel a FLOPROS coastal flood protection standard via
-      `flopros_protection_standards`.
-    source_author: WRI Aqueduct Global Flood Analyzer (floods.wri.org)
-    source_url: http://floods.wri.org/
+      WRI Aqueduct Floods sub-national geographic unit IDs (geogunit_107), ~30 arcsec,
+      variable "Geogunits", fill -9999. Assigns each cell a FLOPROS protection
+      standard (flopros_protection_standards) and masks benchmark territories in
+      validation (geogunit_ids).
+    source_author: WRI Aqueduct Floods
+    source_url: https://www.wri.org/aqueduct
+    source_version: Aqueduct Floods (2020)
+    source_license: CC-BY-4.0 (WRI open data, attribution to WRI)
+    paper_ref: Ward et al. (2020), Aqueduct Floods Methodology, World Resources Institute
+      Technical Note.
 
 geogunit_country_units:
   data_type: RasterDataset
   driver: netcdf
-  # Country-level WRI geogunit raster ("geogunit_109"), same resolution as
-  # geogunit_107 but with 109 country aggregates instead of sub-national units.
-  # Used for country-level visualisation (world choropleth maps).
   path: inputs/WRI/geogunit_109_all.nc
   crs: 4326
   filesystem: local
   meta:
     category: socioeconomic
     description: >
-      WRI/Aqueduct country-level geographic unit IDs ("geogunit_109") at ~30
-      arc-second global resolution.  Used to aggregate sub-national exposure
-      statistics to country level for world-map visualisations.
-    source_author: WRI Aqueduct Global Flood Analyzer (floods.wri.org)
-    source_url: http://floods.wri.org/
-
-geogunit_country_list:
-  data_type: DataFrame
-  driver: xlsx
-  driver_kwargs:
-    index_col: 0
-    header: 0
-  # Lookup table: geogunit_109 ID → country name / ISO / region metadata.
-  path: inputs/WRI/geogunit_109_all_list.xlsx
-  filesystem: local
-  meta:
-    category: socioeconomic
-    description: >
-      Attribute table for the geogunit_109 country raster — links each
-      geogunit_109 ID to its country name, ISO-3 code, and WRI region.
+      WRI Aqueduct Floods country-level unit IDs (geogunit_109), same grid as
+      geogunit_107. Aggregates exposure to countries for the world maps.
+    source_author: WRI Aqueduct Floods
+    source_url: https://www.wri.org/aqueduct
+    source_version: Aqueduct Floods (2020)
+    source_license: CC-BY-4.0 (WRI open data, attribution to WRI)
+    paper_ref: Ward et al. (2020), Aqueduct Floods Methodology, World Resources Institute
+      Technical Note.
 
 flopros_protection_standards:
   data_type: DataFrame
@@ -389,18 +288,25 @@ flopros_protection_standards:
   driver_kwargs:
     index_col: 0
     header: 0
-  # (index "FID_Aque" = geogunit_107 ID, columns "ISO", "Riverine", "Coastal" -
-  # design protection return periods in years; only "Coastal" is used here).
+  # Index "FID_Aque" = geogunit_107 ID; columns "ISO", "Riverine", "Coastal" (years).
   path: inputs/protection_levels/FLOPROS_NL_geogunit_107.xlsx
   filesystem: local
   meta:
     category: socioeconomic
     description: >
-      FLOPROS (FLOod PROtection Standards) flood defense standards per
-      geogunit_107 region, expressed as design return periods (years).
-    paper_ref: >
-      Tiggeloven, T., de Moel, H., Winsemius, H. C., Eilander, D., Erkens, G., Gebremedhin, E., Diaz Loaiza, A., Kuzma, S., Luo, T., Iceland, C., Bouwman, A., van Huijstee, J., Ligtvoet, W., and Ward, P. J.: Global-scale benefit–cost analysis of coastal flood adaptation to different flood risk drivers using structural measures, Nat. Hazards Earth Syst. Sci., 20, 1025–1044 
+      FLOPROS flood protection standards per geogunit_107 unit, as design return
+      periods (years), with the coastal standards of Tiggeloven et al. (2020).
+      The exposure analysis uses "Coastal"; the delta and protection-column scripts
+      fall back to "Riverine" where "Coastal" is missing.
+    source_author: P. Scussolini et al. (FLOPROS); T. Tiggeloven et al. (coastal update)
     source_url: https://doi.org/10.5194/nhess-20-1025-2020
+    source_version: FLOPROS with coastal standards of Tiggeloven et al. (2020)
+    source_license: CC-BY-4.0 (published with the papers)
+    paper_ref: Scussolini et al. (2016), FLOPROS - an evolving global database of flood
+      protection standards, Nat. Hazards Earth Syst. Sci. 16, 1049-1061; Tiggeloven et al.
+      (2020), Global-scale benefit-cost analysis of coastal flood adaptation to different
+      flood risk drivers using structural measures, Nat. Hazards Earth Syst. Sci. 20, 1025-1044.
+    paper_doi: 10.5194/nhess-16-1049-2016; 10.5194/nhess-20-1025-2020
 
 ssp_population_growth_factors:
   data_type: DataFrame
@@ -408,38 +314,51 @@ ssp_population_growth_factors:
   driver_kwargs:
     sheet_name: "SSP_scenarios"
     header: 1
-  # Read by src/population_growth.load_ssp_growth_factors, which computes the
-  # growth factors itself: population per (scenario, region) and year in sheet
-  # 'SSP_scenarios' (2025-2100, million) divided by the 2020 population in
-  # sheet 'historical_data_SSP'. The workbook's own 'growth_factors' /
-  # 'relevant_list' sheets are NOT used: their lookup copied SSP1 into every SSP.
+  # src/population_growth.load_ssp_growth_factors divides population per (scenario,
+  # region, year) in 'SSP_scenarios' by the 2020 value in 'historical_data_SSP'. The
+  # 'growth_factors' / 'relevant_list' sheets are not used: their lookup copied SSP1
+  # into every SSP.
   path: inputs/SSPs/getting_SSP_population_growth_factors.xlsx
   filesystem: local
   meta:
     category: socioeconomic
     description: >
-      SSP-scenario population growth factors per country, relative to the
-      2020 baseline.  Based on the UN SSP population projections (5-year
-      grid, 2020–2100, 201 countries, SSP1–SSP5).
+      SSP1-SSP5 population projections per country (million, 5-year steps
+      2020-2100, 201 countries), model "IIASA-WiC POP 2025", exported from the SSP
+      Scenario Explorer. Growth factors are relative to 2020.
+    source_author: IIASA / Wittgenstein Centre for Demography and Global Human Capital
+    source_url: https://ssp.apps.ece.iiasa.ac.at/
+    source_version: IIASA-WiC POP 2025 (SSP update 2024/2025)
+    source_license: SSP database licence (CC-BY-4.0-based; cite and link the database
+      instead of redistributing substantial parts)
+    paper_ref: K.C. et al. (2024), Updating the Shared Socioeconomic Pathways (SSPs) Global
+      Population and Human Capital Projections, IIASA Working Paper WP-24-003.
+    paper_doi: https://pure.iiasa.ac.at/19487
 
 population:
   data_type: RasterDataset
   driver: raster
-  # (global, ~30 arcsec / ~1 km resolution, EPSG:4326, lat -60..84, nodata
-  # -99999 - only settled cells carry a value). A count per cell, not a
-  # density - downstream code must not nearest/bilinear-resample this onto a
-  # finer grid without inflating totals; see src/exposure_grid.py module docstring.
+  # A count per cell, not a density: do not nearest/bilinear-resample onto a finer
+  # grid (inflates totals), see src/exposure_grid.py.
   path: inputs/exposure/global_pop_2020_CN_1km_R2025A_UA_v1.tif
   crs: 4326
   filesystem: local
+  nodata: -99999
   meta:
     category: socioeconomic
     description: >
-      WorldPop global population count, ~1 km resolution, year 2020. Used to
-      estimate population exposed to coastal flooding beyond the baseline
-      protection height (src/exposure_grid.py).
-    source_author: Bondarenko M., Priyatikanto R., Tejedor-Garavito N., Zhang W., McKeen T., Cunningham A., Woods T., Hilton J., Cihan D., Nosatiuk B., Brinkhoff T., Tatem A., Sorichetta A.. 2025. The spatial distribution of population in 2015-2030 at a resolution of 30 arc (approximately 1km at the equator) R2025A version v1. Global Demographic Data Project - Funded by The Bill and Melinda Gates Foundation (INV-045237). WorldPop - School of Geography and Environmental Science, University of Southampton.
+      WorldPop global population count for 2020, 30 arcsec (~1 km), lat -60 to 84;
+      only settled cells carry a value. Exposure input (src/exposure_grid.py).
+    nodata_value: -99999
+    source_author: M. Bondarenko, R. Priyatikanto, N. Tejedor-Garavito et al., WorldPop,
+      University of Southampton
     source_url: https://hub.worldpop.org/doi/10.5258/SOTON/WP00845
+    source_version: R2025A v1
+    source_license: CC-BY-4.0
+    paper_ref: Bondarenko et al. (2025), The spatial distribution of population in
+      2015-2030 at a resolution of 30 arc (approximately 1km at the equator), R2025A v1,
+      WorldPop, University of Southampton.
+    paper_doi: 10.5258/SOTON/WP00845
 
 lu_to_roughness_lookup:
   data_type: DataFrame
@@ -450,32 +369,27 @@ lu_to_roughness_lookup:
   meta:
     category: lookup_table
     description: >
-      Lookup table mapping Copernicus Land Cover 100 m class codes
-      (copernicus_worldcover) to Manning's n roughness coefficients for
-      use in hydrodynamic modelling. Values are taken from published
-      guidance (HEC-RAS documentation) and adjusted for the GFM use case.
-      One row per Copernicus class (23 classes, codes 0–200).
-    source_url: >
-      https://www.hec.usace.army.mil/confluence/rasdocs/r2dum/latest/
-      developing-a-terrain-model-and-geospatial-layers/
-      creating-land-cover-mannings-n-values-and-impervious-layers
+      Manning's n per Copernicus LC100 class (land_use), 23 rows, codes 0-200,
+      from HEC-RAS guidance adjusted for GFM. The column name copernicus_worldcover
+      is a label only (src/rasters.py indexes by it); its values are LC100 codes.
+    source_author: GFM project, values from HEC-RAS (USACE) guidance
+    source_url: https://www.hec.usace.army.mil/confluence/rasdocs/r2dum/latest/developing-a-terrain-model-and-geospatial-layers/creating-land-cover-mannings-n-values-and-impervious-layers
+    source_version: project table
+    source_license: project-internal (HEC-RAS documentation is US public domain)
     fields:
       - name: copernicus_worldcover
         type: Integer
-        description: Copernicus Land Cover class code (e.g. 0, 20, 30, …, 200).
+        description: Copernicus LC100 class code (0, 20, 30, ..., 200).
       - name: lu_name
         type: String
-        description: Human-readable land cover class name.
+        description: Land cover class name.
       - name: manning_n
         type: Real
-        description: Manning's n roughness coefficient for hydrodynamic flow resistance.
+        description: Manning's n roughness coefficient.
 
-# .gfc (ICGEM spherical-harmonic coefficient) files are read directly by
-# pyshtools in src/vertical_datum.compute_geoid_offset_grid, never through
-# HydroMT's own typed readers - data_type/driver below exist only so the
-# catalog parser accepts the entry (HydroMT requires both, plus `path` not
-# `file_path`) and so `catalog.get_source(...).path` resolves correctly;
-# they are not indicative of how the file is actually read.
+# .gfc (ICGEM spherical-harmonic coefficients) are read by pyshtools in
+# src/vertical_datum.compute_geoid_offset_grid; data_type/driver only satisfy the
+# catalog parser so get_source(...).path resolves.
 goco06s:
   data_type: DataFrame
   driver: csv
@@ -484,16 +398,17 @@ goco06s:
   meta:
     category: geodesy
     description: >
-      GOCO06s combined gravity field model (satellite-only, degree/order 300).
-      Used to compute the GOCO06s geoid undulation N_GOCO06s - the common
-      vertical datum this project always converts DeltaDTM (from EGM2008)
-      and COAST-RP (from local MSL, via MDT) onto (vertical_datum_correction
-      / boundary_conditions.mdt_correction in config.yml).
-      Download from the ICGEM Table of Models: http://icgem.gfz-potsdam.de/home
-    paper_ref: >
-      Kvas et al. (2021), GOCO06s — A satellite-only gravity field model,
-      Earth Syst. Sci. Data 13(1), 99–118.
+      GOCO06s satellite-only gravity field model, degree/order 300. Defines the
+      GOCO06s geoid that DeltaDTM (from EGM2008) and COAST-RP (from local MSL via
+      MDT) are both converted to.
     max_degree: 300
+    source_author: GOCO consortium (A. Kvas, T. Mayer-Guerr et al.)
+    source_url: https://doi.org/10.5880/ICGEM.2019.002
+    source_version: GOCO06s
+    source_license: CC-BY-4.0
+    paper_ref: Kvas et al. (2021), GOCO06s - a satellite-only global gravity field model,
+      Earth Syst. Sci. Data 13, 99-118.
+    paper_doi: 10.5194/essd-13-99-2021
 
 egm2008_geoid:
   data_type: DataFrame
@@ -503,23 +418,19 @@ egm2008_geoid:
   meta:
     category: geodesy
     description: >
-      EGM2008 Earth Gravitational Model (degree/order 2190). Used to compute
-      the N_EGM2008 geoid undulation for the EGM2008 -> GOCO06s DEM datum
-      correction (src/vertical_datum.py, applied by
-      scripts/extract_dem.py) to the original, EGM2008-referenced
-      DeltaDTM release (see `deltadtm` below).
-      Download from the ICGEM Table of Models: http://icgem.gfz-potsdam.de/home
-    paper_ref: >
-      Pavlis et al. (2012), The development and evaluation of the Earth
+      EGM2008 Earth Gravitational Model, degree/order 2190 (truncated to GOCO06s'
+      degree in use). Gives N_EGM2008 for the EGM2008 -> GOCO06s DEM correction
+      (src/vertical_datum.py, applied by extract_dem.py).
+    source_author: N.K. Pavlis et al., US National Geospatial-Intelligence Agency (NGA)
+    source_url: https://icgem.gfz.de/tom_longtime
+    source_version: EGM2008
+    source_license: NGA public release, distribution unlimited
+    paper_ref: Pavlis et al. (2012), The development and evaluation of the Earth
       Gravitational Model 2008 (EGM2008), J. Geophys. Res. 117, B04406.
+    paper_doi: 10.1029/2011JB008916
 
-# Used by prepare_boundary_conditions.compute_mdt_correction (always applied
-# - see boundary_conditions.mdt_correction in config.yml).
-# "Aviso" (not "AVISO"): the on-disk directory is mixed-case - Windows/SMB is
-# case-insensitive so a mismatched "AVISO" here still resolved fine from this
-# repo's own Windows preprocessing machine, but Hydrax's Linux mount of the
-# same P:\ share is case-sensitive and raised a persistent (non-transient)
-# FileNotFoundError for every retry (confirmed live 2026-09-23).
+# The on-disk directory is "Aviso" (mixed case); Hydrax's Linux mount of P:\ is
+# case-sensitive.
 mdt_cnes_cls22:
   data_type: GeoDataset
   driver: netcdf
@@ -529,16 +440,17 @@ mdt_cnes_cls22:
   meta:
     category: ocean
     description: >
-      Mean Dynamic Topography CNES-CLS22 from AVISO (HYBRID-CNES-CLS2022).
-      Gives the time-mean sea-surface height above the GOCO06s geoid [m].
-      Subtracting MDT from a GOCO06s-referenced DEM converts it to
-      orthometric heights above local Mean Sea Level (MSL):
-      H_MSL = H_GOCO06s - MDT. MDT is defined over ocean only.
-      Download from AVISO+ (https://www.aviso.altimetry.fr) - requires a
-      free account.
-    paper_ref: >
-      CNES-CLS22 MDT, AVISO+ altimetry data centre,
-      https://doi.org/10.24400/527896/a01-2021.001
+      Mean dynamic topography CNES-CLS22 (hybrid), mean 1993-2012 sea-surface height
+      above the GOCO06s geoid, 1/8 deg, ocean only. H_MSL = H_GOCO06s - MDT;
+      COAST-RP and GEBCO levels are converted with H_GOCO06s = H_MSL + MDT
+      (prepare_boundary_conditions.compute_mdt_correction, sfincs_tiles/mdt.py).
     variable_mdt_units: m
     variable_mdt_sign_convention: positive upward (sea surface above geoid)
-
+    source_author: S. Jousset, S. Mulet, E. Greiner et al., CLS / CNES (AVISO+)
+    source_url: https://www.aviso.altimetry.fr/en/data/products/auxiliary-products/mdt/mdt-global-cnes-cls.html
+    source_version: CNES-CLS22
+    source_license: AVISO+ licence agreement, standard product (free, registration required)
+    paper_ref: Jousset et al. (2026), New global mean dynamic topography CNES-CLS-22
+      combining drifters, hydrography profiles and high frequency radar data,
+      Earth Syst. Sci. Data 18, 2285-2303.
+    paper_doi: 10.24400/527896/a01-2023.003 (product); 10.5194/essd-18-2285-2026 (paper)

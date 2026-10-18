@@ -17,27 +17,10 @@ def load_geogunit_ids(
     geogunit_source: str,
     reference: xr.DataArray,
 ) -> np.ndarray:
-    """Reproject WRI geogunit IDs onto `reference`'s grid.
+    """Nearest-neighbour reproject WRI geogunit IDs (categorical) onto `reference`.
 
-    Uses nearest-neighbour reprojection, since geogunit IDs are categorical
-    region codes rather than a continuous field that could be interpolated.
-
-    Parameters
-    ----------
-    data_catalog : hydromt.DataCatalog
-        Catalog used to fetch the geogunit source raster.
-    geogunit_source : str
-        Name of the geogunit dataset in `data_catalog` (must expose a
-        "Geogunits" variable).
-    reference : xr.DataArray
-        Grid (CRS, bounds, resolution) to reproject the geogunit IDs onto.
-
-    Returns
-    -------
-    np.ndarray
-        (height, width) int32 array of geogunit IDs on `reference`'s grid.
-        Cells with no resolvable geogunit (nodata, NaN, or outside source
-        coverage) are set to `GEOGUNIT_INVALID` (-1).
+    `geogunit_source` must expose a "Geogunits" variable. Returns int32; unresolvable
+    cells are `GEOGUNIT_INVALID` (-1).
     """
     bbox = list(reference.raster.bounds)
     da_geo = data_catalog.get_rasterdataset(geogunit_source, bbox=bbox, variables=["Geogunits"])

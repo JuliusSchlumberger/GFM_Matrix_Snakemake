@@ -1,22 +1,7 @@
-"""Evaluate a small, HAND-SPECIFIED set of adaptation pathway sequences
-(not the full 324-chain enumeration compute_adaptation_pathways.py produces)
-against every country/continent, for one SSP.
+"""Evaluate a hand-specified set of adaptation pathway sequences for one SSP.
 
-Exists because the user's requested sequences include two 4-stage chains,
-beyond compute_adaptation_pathways.py's --max-stages=3 cap, so they're not
-in its output CSVs (which only store final outcomes for the chains actually
-enumerated, not the raw per-block EAI(t) curves needed to evaluate a new
-one). Building block EAI(t) curves (baseline + 8 measure/design blocks, per
-entity) is the expensive step shared with that script - see
-src/analysis_figures.py::build_growth_matrix_from_grid's own docstring for a
-real fix applied there 2026-10-16 (a double Python-level MultiIndex-scalar-
-lookup loop replaced with a vectorized unstack - confirmed bit-identical,
-~10x faster per call) that makes this now take low minutes, not the ~1 hour
-compute_adaptation_pathways.py's own run needed before that fix existed.
-
-Writes --outdir/custom_pathways_{ssp}.csv: one row per (entity, sequence),
-with each stage's own switch year and the final outcome - same schema
-spirit as compute_adaptation_pathways.py's chain rows.
+Covers 4-stage chains beyond compute_adaptation_pathways.py's --max-stages=3 cap.
+Writes --outdir/custom_pathways_{ssp}.csv, one row per (entity, sequence).
 
 Usage:
     python analysis/compute_custom_pathways.py --config snakemake_workflow/config/config.yml \\
@@ -48,11 +33,8 @@ from analysis_figures import (  # noqa: E402
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 LAST_SSP_YEAR = 2100
 
-# The 4 user-specified sequences (measure, design) - "s"/"l" = SLR_500/SLR_1000.
-# Sequence D's own last stage was written "avoid + protect (l) + retreat (l)" -
-# read as protect_avoid_large THEN retreat_large (the same "> retreat (l)"
-# final stage every other sequence but C ends on), not a single combined
-# measure - flagged explicitly to the user, not assumed silently.
+# D's last stage "avoid + protect (l) + retreat (l)" is read as protect_avoid_large then
+# retreat_large, not one combined measure.
 CUSTOM_SEQUENCES: dict[str, list[tuple[str, str]]] = {
     "A": [("avoid", "SLR_500"), ("avoid", "SLR_1000"), ("protect_avoid", "SLR_1000"), ("retreat", "SLR_1000")],
     "B": [("protect", "SLR_500"), ("protect", "SLR_1000"), ("retreat", "SLR_1000")],
@@ -72,7 +54,7 @@ def main() -> None:
     parser.add_argument("--continent-eai-threshold", type=float, default=5_000_000.0)
     parser.add_argument("--continent-threshold-overrides", nargs="+", default=[],
                         help="per-continent overrides, e.g. Oceania=300000 (continents are far from uniform in "
-                             "scale - Oceania never reaches even the 1,000,000 default, so its own panel would "
+                             "scale - Oceania never reaches even the --continent-eai-threshold default, so its own panel would "
                              "otherwise always be trivial)")
     parser.add_argument("--to-year", type=int, default=None)
     args = parser.parse_args()
@@ -136,7 +118,6 @@ def main() -> None:
 
     all_rows = []
 
-    # ── Countries ────────────────────────────────────────────────────────────
     for iso in countries:
         thr = thr_by_iso.get(iso, default_thr)
         eai_by_block = {}
@@ -153,7 +134,6 @@ def main() -> None:
         all_rows += rows_for_entity(iso, "country", thr, eai_by_block)
         print(f"  {iso}: done", flush=True)
 
-    # ── Continents ───────────────────────────────────────────────────────────
     baseline_grid, _, _ = grids[("baseline", None)]
     all_isos = baseline_grid.index.tolist()
     cont_of = iso_to_continent(all_isos)

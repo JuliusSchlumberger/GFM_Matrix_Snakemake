@@ -1,32 +1,9 @@
-"""Fast, memory-safe re-score of England Flood Zone 3 (RP100/RP250 bracket)
-only - NOT a replacement for run_multi_rp_summary.py, a narrower path to the
-same two numbers after the benchmark was corrected (2026-10-16) to include
-estuarine 'river and sea' features alongside pure 'sea' ones (see
-fetch_england_flood_zones.py's own docstring).
+"""Re-score England Flood Zone 3 (RP100/RP250 bracket) in bounded memory.
 
-Three earlier attempts at just re-running run_multi_rp_summary.py --countries
-GBR all failed on this machine: (1) the full run (scoring + plotting) stalled
-for 3+ hours with CPU going nearly flat, almost certainly inside
-plot_country() rendering the now much denser (73,821-feature) FZ3 vector
-layer; (2) a version that skipped plotting but still called
-validate_country_national_coverage directly (which loads and holds ALL of
-Wales+Scotland+England-FZ2+England-FZ3 - ~180k combined features - in memory
-at once) spiked to 14GB RSS; (3) a version mirroring
-validate_england_fz2_band.py's per-chunk (but NOT per-block) loop also
-spiked, this time to 16GB, on whichever chunk happens to be large/dense
-enough that `benchmark_fraction_from_vector`'s supersampled rasterize array
-(`out_shape*supersample` in each dimension - confirmed in src/validation.py:
-at this model's working resolution, a full un-clipped 5deg postprocessing
-chunk can be ~18,500x18,500 px, and at supersample=5 that is a ~92,500x92,500
-uint8 array, ~8.6 GB, BEFORE the block-average reshape's own temporary
-buffers) is big enough on its own to blow past safe memory - a pre-existing
-sizing risk in that shared function for any sufficiently large/unclipped
-chunk, not something specific to this benchmark's feature count. Fixed here
-by processing each chunk in fixed 8192-px row blocks (not `postprocessing.block_size`, see `block_size` in main)
-(the same block-size convention compute_flood_fraction_chunk.py already uses
-for exactly this reason - see that script's own Step 1 comment), so the
-supersampled array is always bounded to one block's size regardless of how
-large the parent chunk is.
+A narrower, memory-safe path than run_multi_rp_summary.py. Chunks are scored in
+8192-px blocks because `benchmark_fraction_from_vector` rasterizes at
+out_shape*supersample per side: a full 5deg chunk (~18,500 px) at supersample=5
+needs a ~8.6 GB uint8 array.
 
 Usage:
     python validation/rescore_england_fz3.py --config snakemake_workflow/config/config.yml
@@ -60,15 +37,8 @@ def _score_one_rp(rp, slr, cfg, gfm_catalog, bench_catalog, spec, full_gdf, full
     primary_threshold_m = float(val_cfg["primary_threshold_m"])
     supersample = int(val_cfg["benchmark_supersample"])
     pp_chunk_deg = float(cfg["postprocessing"]["chunk_size_deg"])
-    # NOT cfg["postprocessing"]["block_size"] (2048) - that value is tuned for
-    # raster-WRITE memory, unrelated to this script's own supersampled-
-    # rasterize cost. 2048 keeps the fine array tiny (~105MB at supersample=5)
-    # but confirmed too slow in practice: hundreds of blocks/chunk, each
-    # paying its own read_permanent_water_mask/read_country_mask catalog-read
-    # overhead, stretched a single rescore past 3 hours. 8192 keeps the fine
-    # array at ~1.7GB (8192*5=40960 per side) - still far below the 14-16GB
-    # spikes that forced a kill with no blocking at all - while cutting the
-    # block count by ~16x.
+    # Not postprocessing.block_size (2048, tuned for raster writes): per-block catalog
+    # reads make 2048 too slow. 8192 keeps the supersampled array at ~1.7GB.
     block_size = 8192
     merged_chunks_dir = Path(cfg["postprocessing"]["merged_outputs"]) / "chunks"
     permanent_water_source = val_cfg["permanent_water_source"]
@@ -92,11 +62,6 @@ def _score_one_rp(rp, slr, cfg, gfm_catalog, bench_catalog, spec, full_gdf, full
                 continue
             chunk_has_data = False
 
-            # Row-block the chunk's own window (same block_size convention as
-            # compute_flood_fraction_chunk.py's Step 1) - bounds the
-            # supersampled rasterize array in benchmark_fraction_from_vector
-            # to one block's size regardless of how large this chunk's own
-            # window is (see module docstring).
             for row_off in range(0, chunk_window.height, block_size):
                 bh = min(block_size, chunk_window.height - row_off)
                 for col_off in range(0, chunk_window.width, block_size):
@@ -163,6 +128,7 @@ def _score_one_rp(rp, slr, cfg, gfm_catalog, bench_catalog, spec, full_gdf, full
 
 
 def main() -> None:
+    """Score FZ3 at RP100/RP250 and write england_fz3_rescore.csv."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     args = parser.parse_args()

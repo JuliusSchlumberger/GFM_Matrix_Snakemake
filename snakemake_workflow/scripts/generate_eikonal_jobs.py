@@ -1,64 +1,14 @@
 """Generate per-wave sbatch scripts to run the flood solver in parallel on HPC.
 
-The actual generation logic lives in `generate_wave_dispatch()` below, shared
-by two entry points:
-  - `rule generate_eikonal_jobs` (hpc_dispatch.smk) - runs this as a
-    Snakemake `script:`, gated on `input: _PREPROCESS_OUTPUTS` (every
-    preprocessing output across the whole domain), so it only starts once
-    Snakemake has verified that full dependency list - slow over a network
-    mount at real scale (confirmed live 2026-08-10: multi-hour DAG build for
-    ~2578 tiles x ~45 scenarios each).
-  - `scripts/generate_hpc_simulation_jobs.py` (2026-08, new) - a standalone
-    CLI that computes the same wave/batch partition directly from the tile
-    grid, with NO Snakemake DAG/dependency check at all - for regenerating
-    wave scripts quickly (e.g. after an hpc.n_nodes change) without waiting
-    through that DAG build again. It's the caller's own responsibility to
-    know preprocessing is actually done first (e.g. via
-    check_preprocess_progress.py) - unlike the Snakemake path, this one
-    does not verify it.
+`generate_wave_dispatch()` is shared by rule generate_eikonal_jobs (gated on all
+preprocessing outputs) and generate_hpc_simulation_jobs.py (no DAG check; the
+caller must know preprocessing is done). Sbatch scripts and resolved_config.yml
+embed the Linux-expanded config (config_hpc.yml).
 
-Does two path resolutions side by side, since it runs on the local
-preprocessing machine but writes instructions meant for a Linux HPC:
-  - `model_outputs` (this machine's own, already-expanded view) - currently
-    only used to build sbatch script paths locally.
-  - `config_utils.load_config(..., extra_override="config_hpc.yml")` is
-    loaded separately to get the Linux-expanded view (model_outputs,
-    code_root) embedded into the generated sbatch scripts and
-    resolved_config.yml - see config_hpc.yml.example.
-
-Every (tile, rp, slr) combo - wave-0 and hop_distance>=1 alike - is included
-in the generated sbatch scripts unconditionally; NEITHER is pre-filtered at
-generation time (2026-08 - wave-0 empty-boundaries jobs used to be resolved
-here, reading every wave-0 tile's boundaries file to check `.empty` before
-writing the sbatch scripts; removed as a needless ~110,000-file-read,
-~90min pass on a real production grid - see run_eikonal_cli.py's own
-docstring for where that check now lives instead, inline with the read it
-needs anyway). Hop_distance >= 1 tiles were NEVER pre-excludable this way to
-begin with: whether a hinterland tile has any upstream flooding to seed
-from can only be known once its lower-hop neighbour has actually run
-(run_eikonal_cli.py discovers "no seeds yet" live and writes its own
-zero-waterdepth result) - pre-filtering them here on a same-run-as-wave-0
-basis would incorrectly exclude every hop>=1 tile, since a hinterland tile
-has no nearby boundary stations by definition. This is also why waves must
-be submitted as SLURM dependency barriers (see submit_waves.sh below): a
-hop>=1 job started before its neighbour's job has finished would read
-"no neighbour output yet" as "no flooding", not as "not run yet".
-
-`batches` (built in hpc_dispatch.smk / generate_hpc_simulation_jobs.py from
-the tile grid's hop_distance column) already carries the full (wave,
-batch_id, tile_ids) partition - this script turns each batch into one
-sbatch script (using hpc.sbatch, or a wave-specific override from
-hpc.wave_tiers - see generate_wave_dispatch's own docstring on
-wave_sbatch_cfg) and groups them into submit_waves.sh's per-wave dependency
-chain.
-
-Each sbatch script's own tiles run CONCURRENTLY, up to that batch's
-cpus_per_task, via run_simulation_batch.py (2026-10-08) - NOT sequentially
-in a bash loop (the pre-2026-10-08 behaviour, which never actually used
-cpus_per_task for simulation throughput - see hpc.md's old comment on this).
-A companion `{batch_name}_triples.csv` (tile_id, return_period,
-waterlevel_name rows) is written alongside each sbatch script for that
-runner to read.
+Every (tile, rp, slr) is included unconditionally: whether a hop>=1 tile has
+upstream flooding is only known once its lower-hop neighbour ran, which is why
+waves are SLURM dependency barriers. Each batch's tiles run concurrently up to
+cpus_per_task via run_simulation_batch.py, reading `{batch_name}_triples.csv`.
 """
 
 import csv
@@ -81,27 +31,11 @@ def _append_postprocess_bridge(
     local_jobs_dir: Path,
     linux_resolved_config: str,
 ) -> list[str]:
-    """Append one more phase to submit_lines: once ALL simulation waves are
-    done ($ALL_WAVE_IDS), generate + submit the postprocessing+exposure
-    dispatch - the same afterany-join pattern already used between
-    preprocessing and simulation (generate_hpc_preprocess_job.py's own
-    generate_jobs_and_dispatch.sbatch), applied one phase further out. Does
-    NOT write submit_lines to disk - caller writes once at the end.
+    """Append the postprocessing+exposure bridge job after all waves (afterany).
 
-    `linux_resolved_config` MUST be threaded into generate_hpc_postprocess_job.py's
-    own --config - found live 2026-09-14: without it, that script's own
-    --config defaults to production's plain config.yml, so a calibration/
-    scenario run silently computes PRODUCTION-SCALE postprocessing (real
-    example: 851 chunks/9 RPs/5 SLRs instead of a ~78-tile/1 RP/1 SLR
-    calibration domain) and writes it to production's own hpc.jobs_dir
-    instead of the calibration-isolated one - then the actual submission
-    step fails outright (this script's own bash call below looks for
-    submit_postprocess_and_exposure.sh under the CALIBRATION jobs_dir,
-    which was never written, since generate_hpc_postprocess_job.py wrote it
-    under production's jobs_dir instead) - so nothing catastrophic gets
-    submitted, but postprocessing/exposure/validation silently never run
-    for the scenario at all, with no obvious error pointing at the real
-    cause.
+    `linux_resolved_config` MUST be passed to generate_hpc_postprocess_job.py's
+    --config: otherwise it defaults to production config.yml and a scenario run
+    silently computes production-scale postprocessing in production's jobs_dir.
     """
     sbatch_cfg = hpc_cfg["sbatch"]  # lightweight - just generates + submits further scripts
     code_root = linux_config["paths"]["code_root"]
@@ -125,20 +59,9 @@ def _append_postprocess_bridge(
         "",
         f'cd "{code_root}"',
         *_stage_configfile_lines(),
-        # Deliberately NOT staging tile_grid.path here the way the simulation
-        # dispatch does (generate_wave_dispatch/generate_resume_dispatch) -
-        # this script's own `--config "$LOCAL_CONFIGFILE"` is the SAME file
-        # generate_hpc_postprocess_job.py reads `tile_grid.path` out of to
-        # embed into every downstream postprocess_*_batch_*.sbatch /
-        # exposure_pass*_batch_*.sbatch it writes (see that script's own
-        # `_write_batches` calls). Confirmed live 2026-10-15: mutating
-        # tile_grid.path in THIS file to point at THIS job's own node-local
-        # scratch copy leaks that ephemeral, job-specific path into every
-        # script generated downstream - which then fail every time, since
-        # that path no longer exists once this job ends. That script stages
-        # its own local copy internally in Python instead (see its
-        # `_stage_file_locally`), without ever mutating the config it reads
-        # `tile_grid.path` from.
+        # Deliberately NOT staging tile_grid.path here: this config is what
+        # generate_hpc_postprocess_job.py embeds into downstream scripts, so a
+        # node-local scratch path would leak into them and fail once this job ends.
         f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
         "",
         'echo "=== Generating postprocessing + exposure dispatch ==="',
@@ -183,106 +106,41 @@ def generate_wave_dispatch(
 ) -> None:
     """Write every wave's sbatch scripts + resolved_config.yml + submit_waves.sh.
 
-    One `run_simulation_batch.py`-driven sbatch script per (wave, batch_id,
-    tile_ids) entry in `batches`, plus that batch's `{name}_triples.csv` of
-    (tile_id, rp, slr) rows, then a `submit_waves.sh` chaining every wave via
-    SLURM `afterany` dependencies and appending the postprocessing+exposure
-    bridge.
-
-    Parameters
-    ----------
-    model_outputs : str
-        Accepted but unused in this function's body.
-    tile_ids : list
-        Tile IDs to generate jobs for; combined with `return_periods` and
-        `waterlevel_names` into every (tile, rp, slr) combo.
-    hop_by_tile : dict
-        Accepted but unused in this function's body.
-    batches : list
-        `(wave, batch_id, tile_ids)` entries, in the same order as `script_paths`.
-    return_periods : list
-        Return-period names included in every tile's job set.
-    waterlevel_names : list
-        SLR/waterlevel scenario names included in every tile's job set.
-    raster_config : dict
-        Accepted but unused in this function's body.
-    hpc_cfg : dict
-        HPC config; `hpc_cfg["sbatch"]` is the default per-wave SLURM allocation.
-    base_config_path : Path
-        Base config.yml path, used to load both the local and Linux-expanded
-        (config_hpc.yml) views.
-    script_paths : list
-        Output sbatch script path per `batches` entry, same order.
-    resolved_config_path : str
-        Where the Linux-expanded config is written (YAML) for the sbatch scripts
-        to stage and read.
-    submit_waves_path : str
-        Where the generated submit_waves.sh is written.
-    wave_sbatch_cfg : dict or None, optional
-        `{wave: sbatch_cfg}` override of `hpc_cfg["sbatch"]` for specific waves
-        (e.g. a bigger node tier for hop_distance=0); `None` uses
-        `hpc_cfg["sbatch"]` uniformly for every wave.
+    `model_outputs`, `hop_by_tile` and `raster_config` are accepted but unused.
+    `batches` are `(wave, batch_id, tile_ids)` in the same order as `script_paths`.
+    `wave_sbatch_cfg` is a `{wave: sbatch_cfg}` override of `hpc_cfg["sbatch"]`.
     """
-    # Every (tile, rp, slr) combo is included unconditionally - wave-0 jobs
-    # whose boundaries turn out empty are no longer pre-filtered here (2026-08
-    # - this used to re-read every wave-0 tile's boundaries file at
-    # generation time just to check .empty, ~110,000 individual file reads
-    # on a real production grid, ~90min, for no benefit over letting
-    # run_eikonal_cli.py check it inline as part of the read it needs
-    # anyway for a real, non-empty scenario - see that script's own
-    # docstring, and run_eikonal.py, which already worked this way).
+    # Empty-boundary wave-0 jobs are not pre-filtered: run_eikonal_cli.py
+    # checks that inline instead of ~110,000 file reads here.
     jobs_by_tile: dict[str, list[tuple[str, str]]] = {
         str(tid): [(rp, slr) for rp in return_periods for slr in waterlevel_names]
         for tid in tile_ids
     }
 
-    # ── Linux view: fully Linux-expanded config, for the sbatch scripts ─────────
     linux_config = load_config(base_config_path, extra_override=base_config_path.parent / "config_hpc.yml")
     linux_batch_runner = f"{linux_config['paths']['code_root']}/snakemake_workflow/scripts/run_simulation_batch.py"
     linux_jobs_dir = linux_config["hpc"]["jobs_dir"]
     linux_resolved_config = f"{linux_jobs_dir}/resolved_config.yml"
     linux_tile_grid_path = linux_config["tile_grid"]["path"]
 
-    # ── Local view: THIS machine's own reachable mount - local_jobs_dir MUST
-    # come from this, NOT from the `hpc_cfg` parameter, whose "jobs_dir" the
-    # caller may have taken from the LINUX view - confirmed live
-    # 2026-09-15: generate_hpc_simulation_jobs.py passes
-    # hpc_cfg=linux_config["hpc"], so `Path(hpc_cfg["jobs_dir"])` here
-    # silently parses a Linux-style "/p/..." string as a drive-relative
-    # WindowsPath - the write still "succeeds" (even f".exists()" on it
-    # returns True) with zero errors anywhere, just at the wrong location
-    # entirely (e.g. C:\p\... instead of P:\...). This stayed completely
-    # latent because the wave scripts written below use `script_paths`
-    # (caller-supplied, already correct) rather than local_jobs_dir -
-    # _append_postprocess_bridge's own script write was the first thing to
-    # actually depend on local_jobs_dir being right.
+    # local_jobs_dir MUST come from the local config: the caller may pass the
+    # Linux hpc_cfg, whose "/p/..." jobs_dir silently parses as a
+    # drive-relative WindowsPath and writes to the wrong location.
     local_config = load_config(base_config_path)
     local_jobs_dir = Path(local_config["hpc"]["jobs_dir"])
     retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
 
-    # atomic_write, not a plain open()+write - confirmed live 2026-09: a
-    # SLURM job on a different compute node reading this over the shared
-    # P:\ network filesystem moments after a non-atomic write can see a
-    # partial/garbled file (UnicodeDecodeError on a mid-write or
-    # stale-cache read) - see generate_hpc_preprocess_job.py's matching fix.
+    # atomic_write: a compute node reading this over P: right after a
+    # non-atomic write can see a partial file (UnicodeDecodeError).
     atomic_write(resolved_config_path, lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
 
-    # ── Write one sbatch script per (wave, batch), in the same order as
-    #    script_paths (caller built both from the same `batches` list, so
-    #    the order always matches).
     scripts_by_wave: dict[int, list[str]] = {}
 
     for (wave, batch_id, batch_tiles), script_path in zip(batches, script_paths):
         sbatch_cfg = wave_sbatch_cfg[wave] if wave_sbatch_cfg and wave in wave_sbatch_cfg else hpc_cfg["sbatch"]
         name = f"wave{wave}_batch_{batch_id}"
 
-        # One (tile_id, rp, slr) CSV row per job in this batch - run_simulation_batch.py's
-        # own --triples-file, CONCURRENTLY up to this batch's cpus_per_task (2026-10-08,
-        # replacing the old sequential bash run_job loop, which never actually used
-        # cpus_per_task for simulation throughput - see this function's own docstring on
-        # wave_sbatch_cfg). A worthwhile node allocation (cpus_per_task > 1, e.g. a 24vcpu
-        # tier) is otherwise pure waste if every tile still runs one at a time.
         local_triples_path = Path(script_path).parent / f"{name}_triples.csv"
         linux_triples_path = f"{linux_jobs_dir}/{name}_triples.csv"
         n_jobs = 0
@@ -335,11 +193,8 @@ def generate_wave_dispatch(
         print(f"  wrote {script_path} (wave {wave}, {len(batch_tiles)} tiles, "
               f"{n_jobs} jobs, {sbatch_cfg['cpus_per_task']}-way concurrent on {sbatch_cfg['partition']})")
 
-    # ── submit_waves.sh: submits every wave to SLURM in order, each wave
-    #    depending on EVERY job in the previous wave (afterany - a wave starts
-    #    once its predecessor has finished, success or failure, since a failed
-    #    tile there just means that tile's neighbours fall back to a real-zero
-    #    result, not that the whole wave should be blocked).
+    # afterany: a failed tile only makes its neighbours fall back to a real-zero
+    # result, so it must not block the next wave.
     submit_lines = [
         "#!/bin/bash",
         "set -euo pipefail",
@@ -385,36 +240,11 @@ def generate_resume_dispatch(
     submit_waves_path: str,
     wave_sbatch_cfg: dict | None = None,
 ) -> None:
-    """Write sbatch scripts for a RESUME/rebalance dispatch (2026-08, new).
+    """Write sbatch scripts for a resume/rebalance dispatch.
 
-    Unlike `generate_wave_dispatch` (whole-tile-per-batch), each entry in
-    `batches` here is `(wave, batch_id, items)` where `items` is a flat list
-    of individual `(tile_id, rp, slr)` triples, re-split evenly across the
-    full node budget regardless of original batch boundaries - this lets a
-    rebalance recover from batches that finished early and went idle. A wave
-    with zero remaining items is skipped (no key in `scripts_by_wave`), so
-    submit_waves.sh's dependency chain carries forward to the next wave that
-    genuinely has work.
-
-    Parameters
-    ----------
-    hpc_cfg : dict
-        HPC config; `hpc_cfg["sbatch"]` is the default per-wave SLURM allocation.
-    base_config_path : Path
-        Base config.yml path, used to load both the local and Linux-expanded
-        (config_hpc.yml) views.
-    batches : list
-        `(wave, batch_id, items)` entries, in the same order as `script_paths`.
-    script_paths : list
-        Output sbatch script path per `batches` entry, same order.
-    resolved_config_path : str
-        Where the Linux-expanded config is written (YAML) for the sbatch scripts
-        to stage and read.
-    submit_waves_path : str
-        Where the generated submit_waves.sh is written.
-    wave_sbatch_cfg : dict or None, optional
-        `{wave: sbatch_cfg}` override of `hpc_cfg["sbatch"]` for specific waves;
-        see `generate_wave_dispatch`. `None` uses `hpc_cfg["sbatch"]` uniformly.
+    Each `batches` entry is `(wave, batch_id, items)` with `items` a flat list of
+    `(tile_id, rp, slr)` triples, re-split evenly across the full node budget.
+    Waves with no remaining items are skipped; the dependency chain carries over.
     """
     linux_config = load_config(base_config_path, extra_override=base_config_path.parent / "config_hpc.yml")
     linux_batch_runner = f"{linux_config['paths']['code_root']}/snakemake_workflow/scripts/run_simulation_batch.py"
@@ -422,19 +252,13 @@ def generate_resume_dispatch(
     linux_resolved_config = f"{linux_jobs_dir}/resolved_config.yml"
     linux_tile_grid_path = linux_config["tile_grid"]["path"]
 
-    # See generate_wave_dispatch's own comment - local_jobs_dir must come
-    # from a freshly-loaded LOCAL config view, not the `hpc_cfg` parameter
-    # (the caller may have passed the LINUX view's hpc_cfg).
+    # Local config view, not hpc_cfg (see generate_wave_dispatch).
     local_config = load_config(base_config_path)
     local_jobs_dir = Path(local_config["hpc"]["jobs_dir"])
     retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
 
-    # atomic_write, not a plain open()+write - confirmed live 2026-09: a
-    # SLURM job on a different compute node reading this over the shared
-    # P:\ network filesystem moments after a non-atomic write can see a
-    # partial/garbled file (UnicodeDecodeError on a mid-write or
-    # stale-cache read) - see generate_hpc_preprocess_job.py's matching fix.
+    # atomic_write: see generate_wave_dispatch.
     atomic_write(resolved_config_path, lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
 
     scripts_by_wave: dict[int, list[str]] = {}
@@ -531,7 +355,6 @@ def generate_resume_dispatch(
     )
 
 
-# ── Snakemake entry point (rule generate_eikonal_jobs, hpc_dispatch.smk) ──
 if "snakemake" in dir():
     generate_wave_dispatch(
         model_outputs=snakemake.params.model_outputs,  # noqa: F821

@@ -1,13 +1,8 @@
-"""World choropleth maps of EAI at selected (SSP, year) snapshots.
+"""Plot world choropleth maps of EAI at selected (SSP, year) snapshots.
 
-Reads File 3 (exposure_{label}_ssp.csv) from compute_exposure_analysis.py -
-one column per (SSP, year), already resolved to that SSP's real projected
-SLR and population growth factor at file-creation time, so this reflects
-real SSP population growth. Avoid is included too, since File 3 exists for
-it (unlike File 1).
-
-Uses the WRI geogunit_109 country raster for drawing — no external vector
-shapefile needed.  The geogunit_109->ISO lookup is built once and cached.
+Reads exposure_{label}_ssp.csv from compute_exposure_analysis.py (EAI already resolved to
+each SSP's SLR and population growth). Countries are drawn from the WRI geogunit_109
+raster; the geogunit_109->ISO lookup is cached in the output dir.
 
 Usage:
     python analysis/plot_world_map.py \\
@@ -55,7 +50,6 @@ def main() -> None:
     dpi = int(viz.get("dpi", 200))
     cmap = viz.get("cmap_ember", "YlOrRd")
 
-    # Geogunit_109 -> ISO lookup (built once, cached)
     geo109_nc = f"{cfg['paths']['root']}/inputs/WRI/geogunit_109_all.nc"
     geo107_nc = f"{cfg['paths']['root']}/inputs/WRI/geogunit_107_all.nc"
     flopros_xlsx = f"{cfg['paths']['root']}/inputs/protection_levels/FLOPROS_NL_geogunit_107.xlsx"
@@ -81,7 +75,7 @@ def main() -> None:
         print(f"No exposure_*_ssp.csv files found in {exp_dir}")
         sys.exit(0)
 
-    # Compute global vmax for consistent colour scale
+    # Shared vmax across all maps for a consistent colour scale.
     global_vmax = 0.0
     for eai_df in eai_by_label.values():
         for ssp in args.ssps:
@@ -90,7 +84,6 @@ def main() -> None:
                 if col in eai_df.columns:
                     global_vmax = max(global_vmax, float(eai_df[col].max()))
 
-    # Generate maps
     for label, eai_df in eai_by_label.items():
         for ssp in args.ssps:
             for yr in args.years:

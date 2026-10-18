@@ -1,16 +1,6 @@
-"""Water-level-vs-return-period curve for a tile-grid region's real COAST-RP
-boundary forcing, one SLR scenario, built from the per-tile
-`boundaries_{RP}_{SLR}.gpkg` files `extract_boundaries.py` writes during
-preprocessing. Shows the median and min/max range across every station
-actually used, across all `boundary_conditions.return_periods`.
+"""Plot COAST-RP boundary water level vs return period for one SLR scenario.
 
-A statistical chart, not a spatial map - keeps a normal title, matching the
-rest of the codebase's existing split between spatial land/water maps (no
-titles, src/map_style.py) and plain statistical charts (titles kept, e.g.
-sfincs_tiles/plot_validation_results.py's histograms/scatter plots).
-
-No production script plotted this before (confirmed via codebase review).
-Generic over `tile_grid.path`/`simulation.model_outputs`.
+Median and min/max across the stations in the per-tile `boundaries_{RP}_{SLR}.gpkg`.
 
 Usage:
     python docs/figure_scripts/plot_waterlevel_by_rp.py --config <config.yml> \\

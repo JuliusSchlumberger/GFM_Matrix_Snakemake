@@ -1,44 +1,16 @@
-"""Adaptation pathway sequences: starting from "do nothing" (baseline), when
-does each possible CHAIN of adaptation measures first fail to hold EAI below
-a threshold out to --to-year - and which chains succeed all the way through?
+"""Evaluate adaptation-pathway chains: when does each chain of measures tip?
 
-This is the Dynamic Adaptive Policy Pathways idea (Haasnoot et al. 2013):
-a measure holds until its own EAI tips past the threshold, at which point you
-switch to the next measure in the chain - either escalating the SAME measure
-family to a larger design intensity (protect@SLR_500 -> protect@SLR_1000) or
-switching to a different family entirely (avoid -> protect -> retreat). A
-chain "succeeds" if its final stage's EAI never reaches the threshold again
-before --to-year.
+Dynamic Adaptive Policy Pathways (Haasnoot et al. 2013): a measure holds until its EAI
+reaches the threshold, then the chain switches to the next block. Blocks are 4 measures
+x 2 designs (SLR_500="small", SLR_1000="large"); a chain is up to --max-stages distinct
+blocks, never using a family's large design before its small one (324 chains for 3
+stages). A chain succeeds if a stage's EAI never re-crosses before --to-year. The
+SLR/population trajectory is measure-independent, so one EAI(t) curve per block is
+reused. Single representative pathway per SSP: p50 SLR, first population variant.
+Entities whose baseline never tips are reported as "no_adaptation_needed".
 
-Mechanically this is cheap once the inputs exist: the real (SLR(t),
-population%(t)) trajectory for a given SSP does NOT depend on which measure
-is active (adaptation changes the EAI RESPONSE to that trajectory, not the
-trajectory itself) - see compute_tipping_points_summary.py's own docstring
-for the same point. So each measure-design "block" has ONE EAI(t) curve per
-(entity, ssp), computed once; evaluating any chain is just walking those
-precomputed curves forward from the previous stage's switch year. Unlike
-compute_tipping_points_summary.py, this script uses a single representative
-pathway per SSP (p50 SLR, the reference population-continuation variant) -
-the standard convention for an adaptation-pathways diagram (one chosen
-trajectory, not the full uncertainty envelope); the envelope could be added
-later as alternate branches if needed.
-
-Building blocks: 4 measures (avoid/protect/retreat/protect_avoid) x 2 design
-intensities (SLR_500="small", SLR_1000="large") = 8 blocks. A chain is any
-ordering of up to --max-stages DISTINCT blocks, with the one real constraint
-that if a chain uses BOTH intensities of the same measure family, the small
-one must come first (no downgrading). All 324 such chains (8 + 52 + 264 for
-lengths 1/2/3) are evaluated for every entity where baseline itself actually
-tips before --to-year - an entity where baseline never tips doesn't need a
-pathway at all (reported separately, not enumerated).
-
-Writes two CSVs to --outdir (default: visualization.output_dir):
-  pathways_countries.csv
-  pathways_continents.csv
-Columns: entity, entity_type, ssp, threshold, baseline_tip_year, chain
-         (readable, e.g. "avoid_small > protect_large"), stage_years (one
-         switch year per stage, ';'-separated), outcome
-         ("success_by_stage_N" or "fails"), final_tip_year (only if "fails").
+Writes pathways_countries.csv and pathways_continents.csv to --outdir (default:
+visualization.output_dir); `stage_years` is ';'-separated, one switch year per stage.
 
 Usage:
     python analysis/compute_adaptation_pathways.py --config snakemake_workflow/config/config.yml \\
@@ -55,7 +27,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _common)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import _eai_from_interp, _growth_matrix_path, _growth_path  # noqa: E402
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pathways import matrix_interpolator, slr_pathway  # noqa: E402
@@ -72,11 +44,6 @@ LAST_SSP_YEAR = 2100
 
 
 def _first_crossing_after(eai: np.ndarray, threshold: float, years: np.ndarray, start_year: float) -> float | None:
-    """First (fractional) year >= start_year where `eai` reaches `threshold`,
-    or None. Reduces to the plain "first crossing from the start" case when
-    start_year == years[0] (interpolates between the sample just before the
-    crossing and the crossing sample itself, same convention throughout this
-    pipeline's other first-crossing helpers)."""
     start_idx = int(np.searchsorted(years, start_year, side="left"))
     if start_idx >= len(years):
         return None
@@ -91,9 +58,6 @@ def _first_crossing_after(eai: np.ndarray, threshold: float, years: np.ndarray, 
 
 
 def _all_chains(blocks: list[tuple[str, str]], max_stages: int) -> list[tuple[tuple[str, str], ...]]:
-    """Every ordering of 1..max_stages DISTINCT blocks, keeping each measure
-    family's own SLR_500 before its SLR_1000 whenever a chain uses both -
-    see module docstring."""
     chains = []
     for n in range(1, max_stages + 1):
         for combo in itertools.combinations(blocks, n):
@@ -118,11 +82,6 @@ def _evaluate_chain(
     chain: tuple[tuple[str, str], ...], eai_by_block: dict[tuple[str, str], np.ndarray],
     threshold: float, years: np.ndarray, start_year: float, to_year: int,
 ) -> tuple[str, list[float], str | None]:
-    """Walk `chain` stage by stage from `start_year`. Returns (outcome,
-    stage_years, final_tip_year_label) - outcome is "success_by_stage_N" (1-
-    indexed) the first time a stage's own EAI never re-crosses `threshold`
-    before `to_year`, else "fails" after exhausting every stage in the
-    chain (final_tip_year_label is the last stage's own crossing year)."""
     t = start_year
     stage_years = []
     for i, block in enumerate(chain, start=1):
@@ -201,7 +160,6 @@ def main() -> None:
                            "outcome": outcome, "final_tip_year": final_tip})
         return out
 
-    # ── Countries ────────────────────────────────────────────────────────────
     country_rows = []
     for iso in countries:
         thr = thr_by_iso.get(iso, default_thr)
@@ -220,7 +178,6 @@ def main() -> None:
         country_rows += rows_for_entity(iso, "country", thr, eai_by_ssp)
         print(f"  {iso}: done", flush=True)
 
-    # ── Continents ───────────────────────────────────────────────────────────
     baseline_grid, _, _ = grids[("baseline", None)]
     all_isos = baseline_grid.index.tolist()
     cont_of = iso_to_continent(all_isos)

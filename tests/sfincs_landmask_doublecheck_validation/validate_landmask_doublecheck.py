@@ -1,21 +1,7 @@
-"""Validate run_sfincs_tile.py's second, independent land-mask check
-(`_apply_land_mask_doublecheck`) - the fix for a real, confirmed leak
-(2026-09, tile 1907's first subgrid run): `downscale_floodmap()`'s own
-`gdf_mask` (a vectorized land polygon) let a small number of genuinely-
-ocean cells slip through at the coastline, due to vector/raster
-rasterization edge effects right at the boundary. The fix reprojects the
-tile's own native mask.tif directly onto the output grid (nearest-
-neighbour, no vectorization step at all) and requires BOTH checks to agree
-a cell is land.
+"""Test run_sfincs_tile._apply_land_mask_doublecheck (native mask.tif, nearest).
 
-This test constructs a synthetic case that reproduces the exact failure
-mode: an `hmax` array with a "flooded" value sitting on a subgrid cell that
-sits right on a native-mask ocean/land boundary - the kind of cell a
-polygon rasterization is most likely to misclassify - and confirms the
-raster-vs-raster doublecheck masks it out.
-
-Usage:
-    python validate_landmask_doublecheck.py
+downscale_floodmap's vector gdf_mask leaks ocean cells at the coastline through
+rasterization edge effects; both checks must agree a cell is land.
 """
 
 import shutil
@@ -44,23 +30,16 @@ def _write_mask_raster(path: Path, mask: np.ndarray, transform: Affine) -> None:
 
 
 def test_doublecheck_masks_out_ocean_cell_gdf_mask_missed() -> None:
-    """gdf_mask's own leak lets a real ocean cell keep a positive hmax
-    value - the doublecheck must NaN it out once the native mask says
-    ocean (code 1) there, regardless of what gdf_mask already allowed."""
     print("=== _apply_land_mask_doublecheck: masks a gdf_mask-leaked ocean cell ===")
     tmpdir = Path(tempfile.mkdtemp(prefix="landmask_doublecheck_test_"))
     try:
-        # 4x4 output grid (hmax); left column ocean(1), right 3 columns land(0)
-        # in the NATIVE mask - one deliberately "leaked" flooded value sits at
-        # (1, 0), squarely in the ocean column, as if gdf_mask's own boundary
-        # rasterization had wrongly let it through.
         transform = Affine(0.0001, 0, 10.0, 0, -0.0001, 50.0)
         hmax = np.full((4, 4), np.nan, dtype=np.float32)
-        hmax[1, 0] = 9.77  # the leaked cell (mirrors the real tile-1907 magnitude)
-        hmax[2, 2] = 0.62  # a genuine, real land-side flood value
+        hmax[1, 0] = 9.77  # leaked ocean cell
+        hmax[2, 2] = 0.62
 
-        native_mask = np.zeros((4, 4), dtype=np.float32)  # default land (0)
-        native_mask[:, 0] = 1.0  # left column: real ocean
+        native_mask = np.zeros((4, 4), dtype=np.float32)
+        native_mask[:, 0] = 1.0  # ocean
 
         mask_path = tmpdir / "mask.tif"
         _write_mask_raster(mask_path, native_mask, transform)
@@ -77,14 +56,12 @@ def test_doublecheck_masks_out_ocean_cell_gdf_mask_missed() -> None:
 
 
 def test_doublecheck_preserves_all_dry_input() -> None:
-    """An all-NaN hmax (nothing flooded anywhere) must stay all-NaN - the
-    doublecheck should never CREATE a flood value, only ever remove one."""
     print("=== _apply_land_mask_doublecheck: never introduces flooding ===")
     tmpdir = Path(tempfile.mkdtemp(prefix="landmask_doublecheck_dry_test_"))
     try:
         transform = Affine(0.0001, 0, 10.0, 0, -0.0001, 50.0)
         hmax = np.full((3, 3), np.nan, dtype=np.float32)
-        native_mask = np.zeros((3, 3), dtype=np.float32)  # all land
+        native_mask = np.zeros((3, 3), dtype=np.float32)
         mask_path = tmpdir / "mask.tif"
         _write_mask_raster(mask_path, native_mask, transform)
 

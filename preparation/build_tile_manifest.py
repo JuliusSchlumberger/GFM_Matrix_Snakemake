@@ -1,55 +1,12 @@
-"""Build the connectivity-first domain manifest -> tile_grid.path (2026-10).
+"""Build the connectivity-first domain manifest (tile_grid.path).
 
-Replaces the old 13-stage greedy-covering pipeline (build_chunks/reduce_overlap/
-filter_and_shave_chunks/.../compute_run_order - fully retired and removed, 2026-10)
-with src/connectivity_tiling.py's connectivity-first method - see
-that module's docstring for the phases and docs/methods_01_tile_processing_and_
-waterlevels.md section 3 for the full conceptual design, the "why this is correct"
-argument, and real global validation numbers.
-
-Frozen geometry DAG: depends only on the DeltaDTM mask, elevation, and
-tile_generation.elev_threshold_m - never on scenario (Coast-RP station VALUES,
-SLR, return period). Each tile gets its own boundary-condition stations directly
-(extract_boundaries.py), same as before.
-
-Stages, in order (each delegates to src/connectivity_tiling.py):
-  0. load_raw_tile_index       - one 1x1deg polygon per real DeltaDTM mask tile.
-  1. build_connectivity_graph  - floodable-LAND-only tile adjacency.
-  2. connected_components      - plain union-find.
-  3. split_component_to_budget - per component, budget-aware recursive split
-                                  (checkpointed - see below).
-  4. merge_small_domains_tiered - post-hoc merge of undersized domains.
-  5. compute_hop_distances     - BFS from real ocean-touching domains; drops
-                                  any domain with no path to ocean in its own
-                                  component.
-  6. pad_hop0_domains_bbox     - explicit coastal buffer, hop=0 domains only.
-  Final: assign_tile_id        - writes tile_grid.path.
-
-Output: tile_grid.path (tile_id/hop_distance/geometry, plus split_reason/
-component_id/approx_cells_M as harmless extra diagnostic columns - nothing
-downstream is column-position-sensitive). `tile_id` is assigned by hop_distance-
-ascending run order, same spirit as the old pipeline's `compute_run_order`.
-
-Intermediate output: one GeoPackage per stage (00_raw_tile_index.gpkg through
-04_tile_grid_final.gpkg) is always written straight into tile_grid.path's own
-directory - not a "debug" extra, lets every intermediate shape be inspected in
-QGIS, not just the final tile_grid.path output. Also writes a 50-bin histogram
-of each final domain's native (1 arcsecond) pixel count - the eikonal solver's OOM risk
-is dominated by tile pixel count (see src/tile_split.py's own docstring).
-
-Checkpointed: Phase 3 is by far the most expensive stage (a real global run:
-~1.2h out of ~5.3h total, dominated by per-component raster reads), so every
-component's result is appended to tile_generation_phase3_checkpoint.jsonl
-(in the same directory) immediately after that component finishes, including
-an explicit marker line even for a component that produces zero domains (a
-pure-ocean/ice singleton tile) - without that marker, a zero-domain component
-would look indistinguishable from "not yet processed" on resume and get
-silently, harmlessly redone. Re-running `run()` after any interruption
-automatically resumes from whatever's already checkpointed; delete the
-checkpoint file to force a clean re-run.
-
-Not a standalone entry point - exposes `run(config)`, called from
-run_preparation.py (`python run_preparation.py tile_generation`).
+Entry point: run(config), via `python run_preparation.py tile_generation`.
+Stages are in src/connectivity_tiling.py; design in docs/methods_01 section 3.
+Scenario-independent: depends only on the DeltaDTM mask, elevation and
+tile_generation.elev_threshold_m. tile_id is assigned in hop_distance-ascending
+run order. Phase 3 (~1.2 h of ~5.3 h globally) checkpoints each component,
+with a marker line even for zero-domain components so resume skips them;
+delete the checkpoint to force a clean run.
 """
 
 import json
@@ -102,9 +59,7 @@ def _domains_to_gdf(domains: list[Domain]) -> gpd.GeoDataFrame:
 
 
 def _load_checkpoint(checkpoint_path: Path) -> tuple[list[Domain], set[int]]:
-    """Returns (domains already on disk, component_ids already done). See
-    this module's own docstring for why done_ids is built from BOTH domain
-    records and the unconditional per-component marker record."""
+    # done_ids includes zero-domain components via their "component_done" marker.
     if not checkpoint_path.exists():
         return [], set()
     domains: list[Domain] = []
@@ -134,12 +89,7 @@ def _append_checkpoint(checkpoint_path: Path, domains: list[Domain], component_i
 
 
 def _write_size_histogram(final: gpd.GeoDataFrame, path: Path) -> None:
-    """50-bin histogram of each final domain's approximate native (1
-    arcsecond) pixel count - a direct proxy for the eikonal solver's OOM risk, which
-    is dominated by tile pixel count (see src/tile_split.py's own
-    docstring). Log-scale y-axis since domain sizes span orders of
-    magnitude.
-    """
+    """Plot native (1 arcsecond) pixel counts per domain, the solver's OOM-risk proxy."""
     n_cells = []
     for geom in final.geometry:
         minx, miny, maxx, maxy = geom.bounds
@@ -164,25 +114,10 @@ def _write_size_histogram(final: gpd.GeoDataFrame, path: Path) -> None:
 
 
 def run(config: dict) -> None:
-    """Build the connectivity-first tile/domain manifest and write tile_grid.path.
+    """Build the connectivity-first domain manifest and write tile_grid.path.
 
-    Runs the full pipeline (load_raw_tile_index, build_connectivity_graph,
-    connected_components, split_component_to_budget, merge_small_domains_tiered,
-    compute_hop_distances, pad_hop0_domains_bbox, assign_tile_id - see module
-    docstring) via src/connectivity_tiling.py. Phase 3 (splitting) is
-    checkpointed and resumes automatically from
-    tile_generation_phase3_checkpoint.jsonl in the output directory. Writes the
-    final tile grid plus one intermediate GeoPackage per phase, a domain-size
-    histogram PNG, and the final-domains/dropped-unreachable methods maps, all
-    into the output path's own directory.
-
-    Parameters
-    ----------
-    config : dict
-        Parsed config.yml. Uses ``config["tile_generation"]`` (ConnectivityConfig
-        fields), ``config["tile_grid"]["path"]`` (output GeoPackage path),
-        ``config["paths"]`` (data catalog root), and the DeltaDTM mask/DEM
-        catalog entries.
+    Also writes per-phase GeoPackages, a size histogram and methods maps next to
+    it. Phase 3 resumes from tile_generation_phase3_checkpoint.jsonl.
     """
     tg_cfg = config["tile_generation"]
     output_path = Path(config["tile_grid"]["path"])
@@ -215,24 +150,20 @@ def run(config: dict) -> None:
         coastal_buffer_km=tg_cfg["coastal_buffer_km"],
     )
 
-    # ---- Phase 0: raw tile index --------------------------------------------
     print("Phase 0: load_raw_tile_index", flush=True)
     sub = load_raw_tile_index(mask_dir)
     print(f"  {len(sub)} raw DeltaDTM tiles", flush=True)
     _write_intermediate(sub, "00_raw_tile_index.gpkg")
 
-    # ---- Phase 1: connectivity graph ----------------------------------------
     print("\nPhase 1: build_connectivity_graph", flush=True)
     t0 = time.time()
     edges = build_connectivity_graph(sub, mask_index, dem_index, cfg)
     print(f"  {len(edges)} floodable-land connection(s), t={time.time() - t0:.0f}s", flush=True)
 
-    # ---- Phase 2: connected components --------------------------------------
     clusters = connected_components(len(sub), edges)
     sizes = sorted(((len(members), root_idx) for root_idx, members in clusters.items()), reverse=True)
     print(f"Phase 2: {len(sizes)} connected component(s)", flush=True)
 
-    # ---- Phase 3: budget-aware splitting, per component, checkpointed ------
     intermediate_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_path = intermediate_dir / "tile_generation_phase3_checkpoint.jsonl"
     all_domains, done_ids = _load_checkpoint(checkpoint_path)
@@ -263,14 +194,12 @@ def run(config: dict) -> None:
           f"t={time.time() - t_phase3:.0f}s", flush=True)
     _write_intermediate(_domains_to_gdf(all_domains), "01_domains_presplit.gpkg")
 
-    # ---- Phase 4: post-hoc merge of undersized domains ----------------------
     merged = merge_small_domains_tiered(
         all_domains, cfg.merge_trigger_cells, cfg.preferred_ceiling_cells, cfg.hard_ceiling_cells,
     )
     print(f"Phase 4 merge: {len(all_domains)} -> {len(merged)} domain(s)", flush=True)
     _write_intermediate(_domains_to_gdf(merged), "02_domains_merged.gpkg")
 
-    # ---- Phase 5: hop-distance BFS, drop unreachable ------------------------
     hop, unreachable = compute_hop_distances(merged, mask_index, dem_index, cfg)
     n_hop0 = sum(1 for h in hop if h == 0)
     print(f"Phase 5 hop-distance: hop=0 {n_hop0}/{len(merged)}, unreachable (dropped) {len(unreachable)}", flush=True)
@@ -280,7 +209,6 @@ def run(config: dict) -> None:
     final_domains = [d for i, d in enumerate(merged) if i not in unreachable_set]
     final_hop = [h for i, h in enumerate(hop) if i not in unreachable_set]
 
-    # ---- Phase 6: coastal buffer pad, hop=0 domains only --------------------
     padded_domains, n_capped = pad_hop0_domains_bbox(
         final_domains, final_hop, cfg.coastal_buffer_km, cfg.hard_ceiling_cells,
     )
@@ -288,7 +216,6 @@ def run(config: dict) -> None:
         print(f"Phase 6 coastal pad: {n_capped} hop=0 domain(s) left unpadded "
               f"(padding would exceed the hard ceiling)", flush=True)
 
-    # ---- Final: assign tile_id, write tile_grid.path ------------------------
     final_gdf = assign_tile_id(padded_domains, final_hop)
     retry_transient_io(final_gdf.to_file, output_path, driver="GPKG")
     print(f"\nWrote {len(final_gdf)} domains to {output_path}", flush=True)
@@ -299,9 +226,6 @@ def run(config: dict) -> None:
     print(f"Wrote domain-size histogram -> {histogram_path}")
     print(f"Intermediate per-phase GeoPackages written to {intermediate_dir}")
 
-    # ---- Methods-figure maps (2026-10-07): folded in here so they're always
-    # in sync with whatever this run just wrote - no extra disk read, uses the
-    # already-in-memory final_gdf/dropped-unreachable domains directly. ----
     plot_final_domains_map(final_gdf, intermediate_dir)
     if unreachable:
         dropped_gdf = _domains_to_gdf([merged[i] for i in unreachable])
@@ -310,7 +234,7 @@ def run(config: dict) -> None:
 
 if __name__ == "__main__":
     sys.exit(
-        "build_tile_manifest.py is no longer a standalone entry point.\n"
+        "build_tile_manifest.py is not a standalone entry point.\n"
         "Run it via: python run_preparation.py tile_generation\n"
         "See run_preparation.py --help for the full list of steps."
     )

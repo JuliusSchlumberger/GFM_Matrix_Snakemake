@@ -1,103 +1,12 @@
-"""Run all five flood-exposure scenarios (baseline, protect, retreat, avoid, protect + avoid) globally.
+"""Compute baseline/protect/retreat/avoid/protect+avoid flood exposure globally.
 
-Reads coarse flood-fraction rasters produced by compute_flood_fraction_chunk and the
-pre-computed per-chunk population and geogunit rasters, and runs exposure analysis at
-~1 km population-grid resolution.
-
-Every chunk is read directly, one at a time ("chunk streaming") - there is no global
-mosaic of any kind. A single (RP, SLR) flood-fraction grid at global scale is roughly
-750M pixels (~6 GB at float64); holding all of them (10 RPs x 10 SLRs = 100 grids) in
-memory at once would require hundreds of GB. Chunk streaming keeps peak memory to about
-one chunk's worth of arrays (~1-2 MB) regardless of how large the study area or how many
-scenarios are configured - see pass1_shares/_stream_eai below (the longer
-derivation was in snakemake_workflow/memory.md, removed in e98340a - see git history).
-
-Baseline is treated as exactly "protect" with its design threshold calibrated at SLR_0
-(protection.baseline_waterlevel_name) instead of an adaptation.slr_intensities entry - see
-exposure_analysis.protect_exposure_grid for why. It therefore has its own base EAI curve
-and File 1/2/3 outputs, same as protect/retreat.
-
-Three CSVs per scenario (baseline, protect_{slr_int}, retreat_{slr_int}):
-  File 1 - exposure_{label}_base.csv
-      Per-country EAI at each discrete MODELLED SLR scenario, 2020 population,
-      no growth applied. The basis the other two files derive from.
-  File 2 - exposure_{label}_growth_matrix.csv
-      File 1 linearly interpolated onto the dense visualization.slr_interp
-      grid, then scaled by the scenario-neutral visualization.growth_rates
-      axis (same factor for every ISO) - feeds plot_burning_ember.py's
-      background heatmap. Exact for baseline/protect/retreat (exposure is
-      linear in a uniform population scaling).
-  File 3 - exposure_{label}_ssp.csv
-      One column per (SSP, year): File 1 linearly interpolated to that SSP's
-      real projected SLR at that year (from visualization.slr_trajectories_csv,
-      itself linearly interpolated between modelled trajectory years), scaled
-      by that country's real SSP/year population growth factor - feeds
-      plot_timeseries.py, already fully resolved (no further interpolation
-      needed downstream).
-
-Avoid and protect + avoid (AVOID_VARIANTS) have no growth-free base curve
-(their "redirected growth" term is inherently growth-dependent), so they only
-get File 2 and File 3 (exposure_{variant}_{slr_int}_growth_matrix.csv /
-_ssp.csv), each genuinely recomputed per growth-rate/SSP-year rather than
-derived from a shared File 1 - see _avoid_growth_matrix_worker_task /
-_avoid_ssp_worker_task. The two variants differ only in the protection the
-EXISTING population gets (exposure_analysis.compute_avoid): avoid keeps the
-baseline protection (it only steers growth out of the design floodplain, so
-it equals baseline at growth <= 0); protect + avoid raises it to the design
-standard as well (equals protect at growth <= 0).
+Streams per-chunk flood-fraction, population and geogunit rasters one chunk at a
+time (no global mosaic) at ~1 km population-grid resolution.
 
 Usage:
     python compute_exposure_analysis.py \\
         [--config snakemake_workflow/config/config.yml] \\
         --outdir D:/GFM/merged_results/exposure
-
-── Chunk-partitioned HPC pipeline (2026-08) ───────────────────────────────────
-main() above is the single-machine path: baseline/protect/retreat run
-sequentially, avoid's ~150+ (slr_intensity x SSP x year) / (slr_intensity x
-growth_rate) tasks are parallelized across worker PROCESSES via
-ProcessPoolExecutor, each task independently re-streaming every chunk from
-disk. That per-task re-streaming is the actual bottleneck at scale - with N
-tasks it re-reads every chunk file N times (~150-180x on a real config),
-and every task's exposure_fn recomputes build_adapt_protection_fraction (and,
-for avoid, apply_country_shares/scatter_country_values) once per (RP, SLR)
-key even though none of it depends on which key is current.
-
-The functions below (build_exposure_tasks/pass1_shares_all_intensities/
-pass2_all_tasks/write_exposure_outputs, driven by the CLI scripts
-scripts/run_exposure_pass1.py, scripts/reduce_exposure_shares.py,
-scripts/run_exposure_pass2.py, scripts/reduce_exposure_write.py, and the HPC
-job generator scripts/generate_hpc_exposure_jobs.py) invert that: PARTITION
-CHUNKS (not tasks) across SLURM nodes, and within each chunk read do EVERY
-task's contribution in one pass, hoisting each design-intensity's `apf`
-(and each task's `cap`/`redirected`/`g`) out of the per-key loop so it's
-computed once per (chunk, design_intensity) / (chunk, task) instead of once
-per (chunk, task, RP, SLR key). This still requires two chunk-streaming
-passes, not one - apply_country_shares needs retreat/avoid's per-country
-share value ALREADY SUMMED OVER EVERY CHUNK before any chunk's own EAI
-contribution can be computed (this dependency already existed in main()'s
-own pass1_shares-before-_stream_eai ordering; it is not new here) - but two
-passes over chunks regardless of task count is a large win over one pass
-per task: Pass 1 (pass1_shares_all_intensities, one job per chunk batch)
-accumulates retreat/avoid's raw per-(slr_intensity, country) (amount,
-capacity) sums for every slr_intensity in a single read-through;
-reduce_exposure_shares.py sums those across every batch (plain float
-addition - associative) and divides to the final share. Pass 2
-(pass2_all_tasks, one job per chunk batch, same chunk batches reused) then
-computes EVERY task's (baseline/protect/retreat/avoid) chunk_eai from that
-one read-through; reduce_exposure_write.py sums each task's partial
-DataFrame across batches (`.add(fill_value=0.0)` - the exact same reduction
-_stream_eai already relies on chunk-to-chunk, applied batch-to-batch here)
-and writes the same File 1/2/3 CSVs main() would, via write_exposure_outputs
-(which just reorganizes _write_base_scenario_files'/_maybe_write_avoid's
-existing post-stream logic around the task list's own metadata instead of
-main()'s inline loops - no exposure-math changes, this is purely an
-orchestration/read-count change).
-
-main()'s own single-machine path is untouched by any of this - the two
-paths are independent, sharing only the lower-level building blocks
-(_load_chunk, compute_country_eai, protect_exposure_grid, compute_retreat,
-compute_avoid, apply_country_shares, scatter_country_values,
-build_adapt_protection_fraction) both already used.
 """
 
 import argparse
@@ -111,7 +20,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _common)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import _read_band  # noqa: E402
 from config_utils import get_data_catalog, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
 from population_growth import load_ssp_growth_factors, interpolate_growth_factor  # noqa: E402
@@ -136,41 +45,27 @@ from exposure_analysis import (                                 # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# Avoid-family strategies: output/task label -> whether the existing
-# population keeps the BASELINE protection (True: avoid) or gets the
-# adaptation design protection (False: protect + avoid). See compute_avoid.
+# label -> existing population keeps BASELINE protection (True: avoid, equals
+# baseline at growth <= 0) or gets the design protection (False: protect + avoid,
+# equals protect at growth <= 0).
 AVOID_VARIANTS: dict[str, bool] = {"avoid": True, "protect_avoid": False}
 
 
 def _slr_mm(slr_name: str) -> int:
-    """Parse SLR scenario name to millimetres (e.g. 'SLR_250' → 250)."""
     return int(slr_name.split("_")[1])
 
 
-# ── Chunk streaming ────────────────────────────────────────────────────────────
-# Every chunk is read directly from its own small (~600x600 px) GeoTIFF - no
-# global mosaic. This is what makes peak memory independent of study-area size
-# and (RP, SLR) scenario count: at any moment, at most one chunk's arrays are
-# resident, whether processing 13 chunks or 1400+.
+# Chunks (~600x600 px GeoTIFFs) are read one at a time, never mosaicked: a
+# global (RP, SLR) grid is ~750M px (~6 GB float64), 100 of them would need
+# hundreds of GB; streaming keeps peak memory at one chunk (~1-2 MB).
 
 @dataclass
 class ChunkData:
-    """One chunk's loaded, nodata-cleaned rasters plus its country-index arrays.
+    """Hold one chunk's nodata-cleaned rasters plus its country-index arrays.
 
-    Attributes
-    ----------
-    cid : str
-        Chunk id (matches the `_{cid}` suffix of its source GeoTIFFs).
-    pop : np.ndarray
-        Population grid (float64, people per cell), nodata filled with 0.0.
-    geo : np.ndarray
-        Geogunit id grid (int32), nodata/invalid cells filled with -1.
-    ff : dict[tuple[int, str], np.ndarray]
-        Flood-fraction grid (float64, 0-1, `_safe()`-cleaned) per available
-        (return_period, slr_scenario) key; missing/empty files are omitted.
-    iso_index : tuple[list[str], np.ndarray, np.ndarray]
-        `(iso_list, iso_idx, cell_idx)` from `_build_iso_index(geo, iso_lookup)`,
-        used for fast per-country aggregation.
+    pop: people per cell (nodata -> 0.0); geo: geogunit id (nodata -> -1);
+    ff: flood fraction 0-1 per available (return_period, slr_scenario), missing
+    files omitted; iso_index: `(iso_list, iso_idx, cell_idx)` from _build_iso_index.
     """
 
     cid: str
@@ -188,13 +83,8 @@ def _load_chunk(
     slr_scenarios: list[str],
     iso_lookup: dict[int, str],
 ) -> ChunkData:
-    """Load one chunk's population, geogunit, and available flood-fraction rasters.
-
-    Each raster's nodata is replaced with a fill value (population: 0.0;
-    geogunit: GEOGUNIT_INVALID/-1; flood_fraction: -1.0, then _safe()).
-    """
     pop = _read_band(chunks_dir / f"exposure_population_grid_{cid}.tif", "float64", 0.0)
-    pop[~np.isfinite(pop)] = 0.0  # defensive: catch any genuine NaN too
+    pop[~np.isfinite(pop)] = 0.0
 
     geo = _read_band(chunks_dir / f"exposure_geogunit_grid_{cid}.tif", "int32", -1)
     geo[geo < 0] = -1
@@ -219,41 +109,12 @@ def pass1_shares(
     rp_applied: dict[int, int],
     iso_lookup: dict[int, str],
 ) -> dict[str, float]:
-    """Stream every chunk once to compute retreat's per-country redistribution share
-    for one adaptation slr_intensity: `share[iso] = Σ(apf·population) / Σ(1-apf)`.
+    """Compute retreat's per-country share `Σ(apf·population) / Σ(1-apf)`.
 
-    `retreating = apf*population` (no growth) is identical for retreat and the
-    growth-independent part of avoid — since a growth factor is always a
-    per-country scalar, `avoiding_sum[iso] = retreating_sum[iso] * max(0, g-1)`
-    (see compute_avoid_redirected's docstring). So this single streaming pass,
-    run once per slr_intensity, is reused for BOTH retreat and every avoid task
-    at that intensity — avoid tasks only need a cheap per-country scalar
-    multiply on top of this result, not their own chunk-streaming pass.
-
-    Parameters
-    ----------
-    chunk_ids : list[str]
-        Chunk ids to stream.
-    chunks_dir : Path
-        Directory holding the per-chunk population/geogunit GeoTIFFs.
-    flood_frac_dir : Path
-        Directory holding the per-chunk flood-fraction GeoTIFFs.
-    return_periods : list[int]
-        Return periods (years) to read flood-fraction grids for.
-    slr_scenarios : list[str]
-        SLR scenario names to read flood-fraction grids for.
-    slr_int : str
-        Adaptation slr_intensity to compute the design protection fraction for.
-    rp_applied : dict[int, int]
-        Geogunit id -> applied (FLOPROS-snapped) return period.
-    iso_lookup : dict[int, str]
-        Geogunit id -> ISO code.
-
-    Returns
-    -------
-    dict[str, float]
-        Per-country redistribution share (`amount / capacity`); countries with
-        zero capacity are omitted.
+    Also reused by every avoid task at this intensity, since growth is a
+    per-country scalar: `avoiding_sum[iso] = retreating_sum[iso] * max(0, g-1)`.
+    rp_applied: geogunit id -> FLOPROS-snapped return period (years).
+    Countries with zero capacity are omitted.
     """
     amt_total: dict[str, float] = {}
     cap_total: dict[str, float] = {}
@@ -279,15 +140,7 @@ def _stream_eai(
     iso_lookup: dict[int, str],
     exposure_fn,
 ) -> pd.DataFrame:
-    """Stream every chunk once, compute `exposure_fn(chunk, ff)` for every (RP, SLR)
-    pair, aggregate to per-country EAI, and sum across chunks.
-
-    Exact, not an approximation: `_trapezoid_eai` is linear (fixed integration
-    weights, independent of the exposure values), so
-    `Σ_chunks trapezoid(chunk_grid) == trapezoid(Σ_chunks chunk_grid)` - summing
-    per-chunk `compute_country_eai` DataFrames gives the same result as
-    computing EAI on a single global grid would.
-    """
+    # Exact: _trapezoid_eai has fixed weights, so Σ_chunks trapezoid == trapezoid(Σ_chunks).
     total = pd.DataFrame()
     for cid in chunk_ids:
         c = _load_chunk(cid, chunks_dir, flood_frac_dir, return_periods, slr_scenarios, iso_lookup)
@@ -300,7 +153,6 @@ def _stream_eai(
 
 
 def _scenario_done(label: str, out_dir: Path, expect_ssp: bool) -> bool:
-    """Whether a scenario's File 1/2(/3) already exist in out_dir."""
     required = [out_dir / f"exposure_{label}_base.csv", out_dir / f"exposure_{label}_growth_matrix.csv"]
     if expect_ssp:
         required.append(out_dir / f"exposure_{label}_ssp.csv")
@@ -308,7 +160,6 @@ def _scenario_done(label: str, out_dir: Path, expect_ssp: bool) -> bool:
 
 
 def _avoid_done(variant: str, slr_int: str, out_dir: Path, expect_ssp: bool) -> bool:
-    """Whether an avoid-variant slr_intensity's File 2(/3) already exist in out_dir."""
     required = [out_dir / f"exposure_{variant}_{slr_int}_growth_matrix.csv"]
     if expect_ssp:
         required.append(out_dir / f"exposure_{variant}_{slr_int}_ssp.csv")
@@ -320,7 +171,15 @@ def _write_base_scenario_files(
     slr_mm_sorted: list[float], slr_interp_mm: np.ndarray, growth_rates: np.ndarray,
     growth_df, ssps: list[str], output_years: list[int], slr_traj,
 ) -> None:
-    """Write File 1 (base), File 2 (growth matrix), File 3 (ssp) for one scenario."""
+    """Write File 1 (base), File 2 (growth matrix), File 3 (ssp) for one scenario.
+
+    File 1: per-country EAI at each modelled SLR, 2020 population, no growth.
+    File 2: File 1 linearly interpolated onto visualization.slr_interp, scaled by
+    the uniform visualization.growth_rates axis (exact: exposure is linear in a
+    uniform population scaling). File 3: File 1 interpolated to each SSP's p50 SLR
+    at each year, scaled by that country's SSP/year growth factor.
+    Baseline is protect with its design threshold at protection.baseline_waterlevel_name.
+    """
     eai.to_csv(out_dir / f"exposure_{label}_base.csv")
     print(f"  Written: exposure_{label}_base.csv")
 
@@ -339,13 +198,9 @@ def _write_base_scenario_files(
         print(f"  Skipping exposure_{label}_ssp.csv: no SSP growth factors or SLR trajectory available.")
 
 
-# ── AVOID worker process ──────────────────────────────────────────────────────
-# Every (slr_intensity, SSP, year) / (slr_intensity, growth_rate) combination is
-# an independent unit of work, parallelized across worker processes. The shared
-# payload sent to each worker via the pool initializer is tiny (chunk file
-# paths + small dicts, not multi-GB arrays) - each worker reads chunk files
-# itself as it streams through them, exactly like the main process does for
-# baseline/protect/retreat.
+# Avoid has no growth-free File 1 (redirected growth is growth-dependent), so
+# each (variant, slr_int, SSP, year) / (variant, slr_int, growth) is recomputed
+# in a worker process; workers receive only paths + small dicts.
 
 _AVOID_CTX: dict = {}
 
@@ -364,7 +219,6 @@ def _init_avoid_worker(
     slr_traj: "pd.DataFrame | None",
     slr_baseline: str = "SLR_0",
 ) -> None:
-    """ProcessPoolExecutor initializer: stash the shared (now tiny) read-only inputs."""
     _AVOID_CTX.update(
         slr_baseline=slr_baseline,
         chunk_ids=chunk_ids,
@@ -386,13 +240,7 @@ def _avoid_exposure_fn(
     growth_by_iso: dict[str, float], redirected_share: dict[str, float],
     existing_pf: "np.ndarray | None" = None,
 ) -> np.ndarray:
-    """Shared per-chunk avoid / protect + avoid exposure computation for one (RP, SLR) grid.
-
-    `growth_by_iso`/`redirected_share` are per-country dicts, scattered onto
-    this chunk's small grid via the existing `scatter_country_values`/
-    `apply_country_shares` helpers. `existing_pf`: the existing population's
-    protection (baseline grid for avoid, None = design grid for protect + avoid).
-    """
+    # existing_pf: baseline protection for avoid, None (= design apf) for protect + avoid.
     iso_list, iso_idx, cell_idx = chunk.iso_index
     g = scatter_country_values(growth_by_iso, iso_list, iso_idx, cell_idx, chunk.geo.shape, default=1.0)
     cap = np.maximum(0.0, 1.0 - apf)
@@ -401,7 +249,6 @@ def _avoid_exposure_fn(
 
 
 def _avoid_apf_pair(c: ChunkData, variant: str, slr_int: str) -> tuple[np.ndarray, "np.ndarray | None"]:
-    """(design apf, existing population's protection or None) for one avoid variant."""
     ctx = _AVOID_CTX
     apf = build_adapt_protection_fraction(c.ff, ctx["return_periods"], slr_int, ctx["rp_applied"], c.geo)
     if not AVOID_VARIANTS[variant]:
@@ -412,7 +259,6 @@ def _avoid_apf_pair(c: ChunkData, variant: str, slr_int: str) -> tuple[np.ndarra
 def _avoid_ssp_worker_task(
     variant: str, slr_int: str, share_retreat: dict[str, float], ssp: str, yr: int,
 ) -> tuple[str, str, str, int, "pd.Series | None"]:
-    """Compute one (variant, slr_intensity, SSP, year) avoid / protect + avoid EAI value (File 3)."""
     ctx = _AVOID_CTX
     growth_df = ctx["growth_df"]
     slr_traj = ctx["slr_traj"]
@@ -452,7 +298,6 @@ def _avoid_ssp_worker_task(
 def _avoid_growth_matrix_worker_task(
     variant: str, slr_int: str, share_retreat: dict[str, float], g_pct: int,
 ) -> tuple[str, str, int, pd.DataFrame]:
-    """Compute one (variant, slr_intensity, growth_rate) scenario-neutral avoid / protect + avoid EAI slice (File 2)."""
     ctx = _AVOID_CTX
     growth_factor = 1.0 + g_pct / 100.0
     share_avoid = {iso: v * max(0.0, growth_factor - 1.0) for iso, v in share_retreat.items()}
@@ -471,26 +316,16 @@ def _avoid_growth_matrix_worker_task(
     return variant, slr_int, g_pct, dense
 
 
-# ── Chunk-partitioned HPC pipeline ─────────────────────────────────────────────
-# See this module's own docstring for the full design. Nothing below touches
-# main() or its helpers above - these are additive, sharing only the
-# lower-level building blocks main() already imports/uses.
+# Chunk-partitioned HPC pipeline (scripts/run_exposure_pass1.py,
+# reduce_exposure_shares.py, run_exposure_pass2.py, reduce_exposure_write.py).
+# Chunks, not tasks, are partitioned across nodes and every task is evaluated
+# per chunk read. Two passes are needed: retreat/avoid shares must be summed
+# over ALL chunks before any chunk's EAI can be computed.
 
 def discover_chunk_ids(cfg: dict) -> list[str]:
-    """Every populated chunk_id with flood-fraction output on disk - same
-    discovery + filter logic main() uses (ocean/unpopulated chunks have
-    zero-byte population placeholder files and contribute zero exposure).
+    """Return sorted populated chunk ids that have flood-fraction output.
 
-    Parameters
-    ----------
-    cfg : dict
-        Loaded config; must provide `postprocessing.merged_outputs`.
-
-    Returns
-    -------
-    list[str]
-        Sorted chunk ids with both flood-fraction output and a non-empty
-        population GeoTIFF.
+    Ocean/unpopulated chunks have zero-byte population placeholders and are dropped.
     """
     merged_dir = Path(cfg["postprocessing"]["merged_outputs"])
     flood_frac_dir = merged_dir / "chunks" / "flood_fraction"
@@ -508,44 +343,11 @@ def discover_chunk_ids(cfg: dict) -> list[str]:
 
 @dataclass
 class AnalysisContext:
-    """Config-derived setup shared by build_exposure_tasks/pass1/pass2/write -
-    nothing here depends on chunk data, so it's loaded once per job (one
-    small FLOPROS/SSP-growth-factor/SLR-trajectory read) rather than once per
-    chunk. Mirrors main()'s own setup; kept as a separate function (not a
-    main() refactor) so the single-machine path is unaffected.
+    """Hold config-derived setup shared by the HPC pass1/pass2/write steps.
 
-    Attributes
-    ----------
-    return_periods : list[int]
-        Return periods (years) to process.
-    slr_scenarios : list[str]
-        All modelled SLR scenario names.
-    slr_mm_sorted : list[float]
-        `slr_scenarios`' SLR values in millimetres, parallel ordering.
-    slr_baseline : str
-        Baseline SLR scenario name (protection.baseline_waterlevel_name).
-    slr_intensities : list[str]
-        Adaptation design slr_intensity names (adaptation.slr_intensities).
-    ssps : list[str]
-        SSP scenario names to resolve File 3 for.
-    output_years : list[int]
-        Years to resolve File 3 for.
-    growth_rates : np.ndarray
-        Scenario-neutral growth-rate axis (fraction, e.g. -0.5 to 1.5) for File 2.
-    slr_interp_mm : np.ndarray
-        Dense SLR grid (mm) File 2 is interpolated onto.
-    growth_df : pd.DataFrame or None
-        SSP population growth factors, or None if unavailable (File 3 skipped).
-    slr_traj : pd.DataFrame or None
-        SSP SLR trajectories (median), or None if unavailable (File 3 skipped).
-    rp_applied : dict[int, int]
-        Geogunit id -> applied (FLOPROS-snapped) return period.
-    iso_lookup : dict[int, str]
-        Geogunit id -> ISO code.
-    chunks_dir : Path
-        Directory holding the per-chunk population/geogunit GeoTIFFs.
-    flood_frac_dir : Path
-        Directory holding the per-chunk flood-fraction GeoTIFFs.
+    slr_mm_sorted: SLR in mm, parallel to slr_scenarios. growth_rates: fraction
+    (e.g. -0.5 to 1.5). slr_traj: SSP median SLR trajectories. growth_df/slr_traj
+    None -> File 3 skipped. rp_applied: geogunit id -> FLOPROS-snapped RP.
     """
     return_periods: list[int]
     slr_scenarios: list[str]
@@ -565,22 +367,7 @@ class AnalysisContext:
 
 
 def load_analysis_context(cfg: dict) -> AnalysisContext:
-    """Load everything build_exposure_tasks/pass1/pass2/write need, straight
-    from config - same reads main()'s own setup does, factored out here so
-    every HPC batch job (which runs this once per job, not once per chunk)
-    stays in sync with main() by construction instead of by copy-paste.
-
-    Parameters
-    ----------
-    cfg : dict
-        Loaded config (boundary_conditions, adaptation, population_growth,
-        protection, visualization, paths, postprocessing sections).
-
-    Returns
-    -------
-    AnalysisContext
-        Fully populated analysis context for this run.
-    """
+    """Build the AnalysisContext from config (mirrors main()'s setup)."""
     bc = cfg["boundary_conditions"]
     adapt_cfg = cfg.get("adaptation", {})
     pg_cfg = cfg.get("population_growth", {})
@@ -648,82 +435,32 @@ def load_analysis_context(cfg: dict) -> AnalysisContext:
 
 @dataclass
 class ExposureTask:
-    """One independent unit of exposure-EAI computation. `key` is unique
-    across the whole task list - used both as pass2_all_tasks' accumulator
-    dict key and as the CSV-writing lookup key in write_exposure_outputs.
-    Only the fields relevant to `kind` are populated; the rest stay None.
+    """Describe one exposure-EAI task; fields not relevant to `kind` stay None.
 
-    Attributes
-    ----------
-    key : str
-        Unique task id (used as accumulator/lookup key).
-    kind : str
-        One of "baseline", "protect", "retreat", "avoid_ssp", "avoid_growth".
-    design_intensity : str
-        Adaptation slr_intensity this task's protection is designed to
-        (slr_baseline for "baseline").
-    slr_int : str or None
-        Same as design_intensity for protect/retreat/avoid tasks.
-    variant : str or None
-        AVOID_VARIANTS key ("avoid" / "protect_avoid"); avoid_* only.
-    existing_intensity : str or None
-        Existing population's protection intensity; avoid_* only
-        (slr_baseline for "avoid", None = design_intensity for "protect_avoid").
-    share_retreat : dict or None
-        Per-country retreat redistribution share; retreat only.
-    growth_by_iso : dict or None
-        Per-country growth factor; avoid_* only.
-    redirected_share : dict or None
-        Per-country redirected-growth share; avoid_* only.
-    ssp : str or None
-        SSP scenario name; avoid_ssp only.
-    year : int or None
-        Output year; avoid_ssp only.
-    g_pct : int or None
-        Scenario-neutral growth rate in percent; avoid_growth only.
+    existing_intensity: slr_baseline for "avoid", None (= design_intensity) for
+    "protect_avoid". g_pct: growth rate in percent.
     """
     key: str
     kind: str  # "baseline" | "protect" | "retreat" | "avoid_ssp" | "avoid_growth"
-    design_intensity: str  # slr_baseline for "baseline", else the task's own slr_int
-    slr_int: str | None = None            # protect/retreat/avoid (== design_intensity for these)
-    variant: str | None = None            # avoid_* only: an AVOID_VARIANTS key ("avoid" / "protect_avoid")
-    existing_intensity: str | None = None  # avoid_* only: existing population's protection intensity
-                                           # (slr_baseline for "avoid", None = design_intensity)
-    share_retreat: dict | None = None     # retreat only
-    growth_by_iso: dict | None = None     # avoid only
-    redirected_share: dict | None = None  # avoid only
-    ssp: str | None = None                # avoid_ssp only
-    year: int | None = None               # avoid_ssp only
-    g_pct: int | None = None              # avoid_growth only
+    design_intensity: str  # slr_baseline for "baseline"
+    slr_int: str | None = None
+    variant: str | None = None
+    existing_intensity: str | None = None
+    share_retreat: dict | None = None
+    growth_by_iso: dict | None = None
+    redirected_share: dict | None = None
+    ssp: str | None = None
+    year: int | None = None
+    g_pct: int | None = None
 
 
 def build_exposure_tasks(
     ctx: AnalysisContext, shares_by_intensity: dict[str, dict[str, float]],
 ) -> list[ExposureTask]:
-    """Enumerate the full independent task list - the same tasks main()
-    computes (baseline / protect_* / retreat_* / {avoid,protect_avoid}_*_ssp_* / _growth_*),
-    up front rather than looped inline, so pass2_all_tasks (and each HPC batch
-    job) can work through the identical list against its own chunk subset.
+    """Enumerate every baseline/protect/retreat/avoid_ssp/avoid_growth task.
 
-    `shares_by_intensity` must already be the FINAL, globally-reduced
-    per-country share (pass1's output summed across every chunk/batch, not a
-    single batch's partial contribution) - see pass1_shares_all_intensities/
-    reduce_exposure_shares.py. Passing a partial share here would silently
-    produce wrong retreat/avoid EAI, not an error - apply_country_shares has
-    no way to tell a partial sum from a real one.
-
-    Parameters
-    ----------
-    ctx : AnalysisContext
-        Config-derived analysis setup.
-    shares_by_intensity : dict[str, dict[str, float]]
-        Per-slr_intensity, per-country retreat redistribution share (final,
-        globally-reduced, not a partial batch sum).
-
-    Returns
-    -------
-    list[ExposureTask]
-        Every independent baseline/protect/retreat/avoid_ssp/avoid_growth task.
+    `shares_by_intensity` must be the FINAL, globally-reduced share; a partial
+    batch sum silently gives wrong retreat/avoid EAI.
     """
     tasks: list[ExposureTask] = [
         ExposureTask(key="baseline", kind="baseline", design_intensity=ctx.slr_baseline),
@@ -750,11 +487,7 @@ def build_exposure_tasks(
             share_retreat = shares_by_intensity.get(slr_int, {})
 
             if ctx.growth_df is not None and ctx.slr_traj is not None:
-                # iso_lookup maps every geogunit to its ISO - thousands of entries
-                # but only ~200 distinct ISOs. interpolate_growth_factor is a pure
-                # function of (ssp, iso, year), so evaluating it once per distinct
-                # ISO (in first-occurrence order, as the former per-geogunit dict
-                # comprehension's keys were) gives the identical dict.
+                # Thousands of geogunits but ~200 ISOs; first-occurrence order kept.
                 unique_isos = list(dict.fromkeys(ctx.iso_lookup.values()))
                 for ssp in available_ssps:
                     for yr in ctx.output_years:
@@ -789,20 +522,9 @@ def build_exposure_tasks(
 
 
 def _chunk_is_populated(chunks_dir: Path, cid: str) -> bool:
-    """Whether this chunk's population grid is a real (non-empty) file.
-
-    prepare_exposure_grid_chunk writes a zero-byte placeholder for a chunk
-    with no population coverage (pure ocean/buffer) - _load_chunk's
-    rasterio.open would raise on that, not return zeros. main()'s own
-    discover_chunk_ids filters these out up front via the same check; the
-    chunk-partitioned pass1/pass2 functions need the same guard inline
-    (2026-08-15) since their caller may now be handed an UNFILTERED
-    chunk_ids list - e.g. generate_hpc_postprocess_job.py's combined
-    postprocessing+exposure dispatch, which plans the exposure batches from
-    the tile-grid-derived chunk list before postprocessing has actually run
-    and produced the real population files to filter against.
-    """
-    p = chunks_dir / f"exposure_population_grid_{cid}.tif"
+    # Zero-byte placeholders (ocean chunks) make rasterio.open raise; HPC callers
+    # may pass an unfiltered list planned before postprocessing ran.
+    p =chunks_dir / f"exposure_population_grid_{cid}.tif"
     return p.exists() and p.stat().st_size > 0
 
 
@@ -816,49 +538,14 @@ def pass1_shares_all_intensities(
     rp_applied: dict[int, int],
     iso_lookup: dict[int, str],
 ) -> dict[str, dict[str, tuple[float, float]]]:
-    """Pass 1 of the chunk-partitioned pipeline: stream this batch's chunks
-    ONCE, accumulating retreat/avoid's per-country (amount, capacity) raw
-    sums for EVERY slr_intensity in the same pass - generalises pass1_shares
-    above (which does one slr_intensity per full chunk-streaming pass) to
-    every intensity per chunk-streaming pass instead.
+    """Accumulate per-country (amount, capacity) raw sums for every slr_intensity.
 
-    Returns RAW (amount, capacity) sums, not yet divided into a share -
-    reduce_exposure_shares.py sums these across every batch (plain float
-    addition - associative, same reasoning as country_sums' own docstring)
-    before doing the final divide, so no batch needs any other batch's
-    result to produce its own partial output.
-
-    Parameters
-    ----------
-    chunk_ids : list[str]
-        This batch's chunk ids to stream.
-    chunks_dir : Path
-        Directory holding the per-chunk population/geogunit GeoTIFFs.
-    flood_frac_dir : Path
-        Directory holding the per-chunk flood-fraction GeoTIFFs.
-    return_periods : list[int]
-        Return periods (years) to read flood-fraction grids for.
-    slr_scenarios : list[str]
-        All modelled SLR scenario names (used to filter which flood-fraction
-        files are actually needed).
-    slr_intensities : list[str]
-        Adaptation design slr_intensities to accumulate shares for.
-    rp_applied : dict[int, int]
-        Geogunit id -> applied (FLOPROS-snapped) return period.
-    iso_lookup : dict[int, str]
-        Geogunit id -> ISO code.
-
-    Returns
-    -------
-    dict[str, dict[str, tuple[float, float]]]
-        Per slr_intensity, per-country `(amount, capacity)` raw sums for this
-        batch only.
+    Pass 1 of the HPC pipeline. Sums are not divided: reduce_exposure_shares.py
+    adds them across batches before the final divide.
     """
     amt_total: dict[str, dict[str, float]] = {si: {} for si in slr_intensities}
     cap_total: dict[str, dict[str, float]] = {si: {} for si in slr_intensities}
-    # build_adapt_protection_fraction only ever reads ff[(rp, slr_int)] for the
-    # design intensities, so only those SLR levels' flood-fraction files are
-    # loaded (e.g. 27 of 45 files per chunk) - every value used is unchanged.
+    # build_adapt_protection_fraction only reads ff[(rp, slr_int)] at design intensities.
     needed_slr = [slr for slr in slr_scenarios if slr in set(slr_intensities)]
     for cid in chunk_ids:
         if not _chunk_is_populated(chunks_dir, cid):
@@ -889,63 +576,13 @@ def pass2_all_tasks(
     iso_lookup: dict[int, str],
     tasks: list[ExposureTask],
 ) -> dict[str, pd.DataFrame]:
-    """Pass 2 of the chunk-partitioned pipeline: stream this batch's chunks
-    ONCE, computing every task's per-chunk EAI contribution and accumulating
-    to per-country running totals - generalises _stream_eai (which does one
-    task per full chunk-streaming pass) to every task in `tasks` per pass.
+    """Compute every task's partial per-country EAI for this batch of chunks.
 
-    Per chunk, each distinct design_intensity's `apf` is computed once (via
-    apf_cache) and reused across every task that shares it, rather than once
-    per (task, RP, SLR) key as main()'s own exposure_fn closures do - this is
-    the redundant-recompute fix described in this module's docstring, most
-    impactful for avoid since it has by far the most tasks per design
-    intensity. `cap`/`redirected`/`g` are still computed once per (chunk,
-    task) - not shareable across tasks like `apf` is, since they depend on
-    each task's own share_retreat/growth_by_iso/redirected_share - but that
-    alone still collapses their previous once-per-(task, RP, SLR-key) cost
-    to once-per-task.
-
-    Only the cells that can contribute are evaluated (2026-10-09, bit-
-    identical to the former full-grid version - verified on thailand_bangkok):
-      - compute_country_eai only ever sums `grid.ravel()[cell_idx]` (cells
-        with a country), so every input is gathered to those cells first and
-        the same elementwise formulas (protect_exposure_grid/compute_retreat/
-        compute_avoid, unchanged) run on 1-D arrays - identical per-cell
-        values. apply_country_shares/scatter_country_values are inlined as
-        their own cell formulas (`cap * share[iso_idx]`, `values[iso_idx]`).
-      - per (design intensity, existing-population intensity), cells where
-        NO scenario's ff exceeds either protection contribute exactly 0 to
-        every task sharing that pair (protect: the np.where else-branch;
-        retreat: max(0, ff - apf) == 0; avoid / protect + avoid: their
-        `exposed`/`exceeds` masks), so they are dropped too. np.bincount adds weights
-        per country sequentially in cell order from +0.0; the kept cells
-        keep their order and exact zeros never change a sum.
-    See compute_country_eai_from_cells.
-
-    Parameters
-    ----------
-    chunk_ids : list[str]
-        This batch's chunk ids to stream.
-    chunks_dir : Path
-        Directory holding the per-chunk population/geogunit GeoTIFFs.
-    flood_frac_dir : Path
-        Directory holding the per-chunk flood-fraction GeoTIFFs.
-    return_periods : list[int]
-        Return periods (years) to read flood-fraction grids for.
-    slr_scenarios : list[str]
-        SLR scenario names to read flood-fraction grids for.
-    rp_applied : dict[int, int]
-        Geogunit id -> applied (FLOPROS-snapped) return period.
-    iso_lookup : dict[int, str]
-        Geogunit id -> ISO code.
-    tasks : list[ExposureTask]
-        Every task to evaluate against this batch's chunks.
-
-    Returns
-    -------
-    dict[str, pd.DataFrame]
-        Per task key, this batch's partial per-country EAI-vs-(RP, SLR)
-        DataFrame, to be summed with other batches' partials.
+    Pass 2 of the HPC pipeline; partials are summed across batches. Only cells
+    with a country are evaluated, and per (design, existing) intensity pair,
+    cells where no scenario's ff exceeds either protection are dropped: they
+    contribute exactly 0 to every task, and np.bincount keeps cell order, so
+    results are bit-identical to the full-grid computation.
     """
     totals: dict[str, pd.DataFrame] = {}
     for cid in chunk_ids:
@@ -955,7 +592,6 @@ def pass2_all_tasks(
         iso_list, iso_idx, cell_idx = c.iso_index
         pop_cells = c.pop.ravel()[cell_idx]
         ff_cells = {key: ff.ravel()[cell_idx] for key, ff in c.ff.items()}
-        # intensity -> apf at the country cells (shared by design and existing-population use)
         apf_cache: dict[str, np.ndarray] = {}
 
         def _apf_cells(intensity: str) -> np.ndarray:
@@ -965,7 +601,6 @@ def pass2_all_tasks(
                 ).ravel()[cell_idx]
             return apf_cache[intensity]
 
-        # (design intensity, existing intensity) -> (kept cells' iso_idx, pop, apf, existing pf, ff per key)
         sub_cache: dict[tuple, tuple] = {}
 
         for task in tasks:
@@ -1014,24 +649,7 @@ def write_exposure_outputs(
     results: dict[str, pd.DataFrame],
     out_dir: Path,
 ) -> None:
-    """Write every File 1/2/3 CSV from a finished (fully chunk-summed)
-    per-task EAI-vs-SLR DataFrame - the same post-streaming logic
-    main()/_write_base_scenario_files/_maybe_write_avoid already use, driven
-    by the task list's own metadata instead of main()'s inline loops. No new
-    exposure math - this only reorganizes existing post-processing.
-
-    Parameters
-    ----------
-    ctx : AnalysisContext
-        Config-derived analysis setup.
-    tasks : list[ExposureTask]
-        Every task that was computed (same list build_exposure_tasks returned).
-    results : dict[str, pd.DataFrame]
-        Per task key, the final (fully chunk-summed) per-country EAI-vs-(RP,
-        SLR) DataFrame.
-    out_dir : Path
-        Directory the File 1/2/3 CSVs are written to (created if missing).
-    """
+    """Write every File 1/2/3 CSV from fully chunk-summed per-task EAI results."""
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
     expect_ssp = ctx.growth_df is not None and ctx.slr_traj is not None
 
@@ -1046,7 +664,6 @@ def write_exposure_outputs(
             ctx.growth_df, ctx.ssps, ctx.output_years, ctx.slr_traj,
         )
 
-    # ── Avoid / protect + avoid: group by (variant, slr_int), mirroring main()'s _maybe_write_avoid ──
     for variant in AVOID_VARIANTS:
         for slr_int in ctx.slr_intensities:
             ssp_series: list[pd.Series] = []
@@ -1093,15 +710,7 @@ def write_exposure_outputs(
 
 
 def main() -> None:
-    """Parse CLI arguments and run the single-machine exposure pipeline, writing
-    baseline/protect/retreat/avoid/protect+avoid File 1/2/3 CSVs to --outdir.
-
-    Streams every populated chunk chunk-by-chunk (no global mosaic) for
-    baseline/protect/retreat; avoid/protect+avoid's many (slr_intensity x
-    SSP x year) / (slr_intensity x growth_rate) tasks run in parallel worker
-    processes. With --skip-existing, a scenario/intensity whose output CSVs
-    already exist in --outdir is left untouched rather than recomputed.
-    """
+    """Run the single-machine exposure pipeline, writing all CSVs to --outdir."""
     _default_cfg = str(Path(__file__).resolve().parents[1] / "snakemake_workflow" / "config" / "config.yml")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=_default_cfg)
@@ -1135,9 +744,7 @@ def main() -> None:
     ssps = pg_cfg.get("ssps", ["SSP1", "SSP2", "SSP3", "SSP5"])
     output_years = [int(y) for y in pg_cfg.get("output_years", [2030, 2050, 2100])]
 
-    # Scenario-neutral growth-rate axis for the burning-ember background
-    # (same config the plot's y-axis uses) - -50% to +150% by default, applied
-    # uniformly (not per-country like SSP factors) to every ISO/SLR cell.
+    # Uniform (not per-country) growth axis, shared with the burning-ember y-axis.
     gr_cfg = viz.get("growth_rates", {})
     growth_rates = np.arange(
         float(gr_cfg.get("min", -0.5)),
@@ -1145,10 +752,7 @@ def main() -> None:
         float(gr_cfg.get("step", 0.1)),
     )
 
-    # Dense SLR grid (mm) File 2 (growth matrix) is interpolated onto -
-    # linearly, from the discrete modelled SLR scenarios (sea level, and EAI
-    # along with it, is assumed to change linearly between two modelled
-    # steps).
+    # EAI is assumed linear in SLR between modelled steps.
     si_cfg = viz.get("slr_interp", {})
     slr_interp_mm = np.linspace(
         float(si_cfg.get("min_mm", 0)),
@@ -1156,8 +760,6 @@ def main() -> None:
         int(si_cfg.get("n_points", 100)),
     )
 
-    # SSP SLR trajectories (median/p50), needed to resolve File 3's
-    # per-(SSP,year) values to a single real SLR at file-creation time.
     traj_path = viz.get("slr_trajectories_csv", "")
     slr_traj = None
     if traj_path and Path(traj_path).exists():
@@ -1173,7 +775,6 @@ def main() -> None:
     out_dir = Path(args.outdir)
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
-    # ── Discover chunks and restrict to those with valid population data ─────
     all_chunk_ids = sorted(set(
         p.stem.split("_RP")[0].replace("flood_fraction_", "")
         for p in flood_frac_dir.glob("flood_fraction_*.tif")
@@ -1182,8 +783,7 @@ def main() -> None:
         print(f"ERROR: no flood fraction files in {flood_frac_dir}")
         sys.exit(1)
 
-    # Only use chunks with non-empty population files. Ocean/unpopulated chunks
-    # have zero-byte placeholder files and contribute zero exposure.
+    # Ocean/unpopulated chunks have zero-byte placeholder population files.
     chunk_ids = [
         cid for cid in all_chunk_ids
         if (chunks_dir / f"exposure_population_grid_{cid}.tif").exists()
@@ -1198,10 +798,9 @@ def main() -> None:
     print(f"Using {len(chunk_ids)} populated chunks, {len(return_periods)} RPs, {len(slr_scenarios)} SLR scenarios.")
     print("Processing chunk-by-chunk (no global mosaic) - peak memory stays flat regardless of study-area size.")
 
-    # ── FLOPROS: per-geogunit RP_applied and ISO lookup (tiny, geogunit-indexed) ──
     print("Loading FLOPROS protection standards…")
     catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
-    flopros = catalog.get_dataframe("flopros_protection_standards")  # catalog key (data_catalog_gfm.yml)
+    flopros = catalog.get_dataframe("flopros_protection_standards")
     coastal_rp = flopros["Coastal"].fillna(flopros["Riverine"]).fillna(default_rp)
 
     def _snap_rp(flopros_rp: float) -> int:
@@ -1214,16 +813,14 @@ def main() -> None:
         if pd.notna(row.get("ISO"))
     }
 
-    # ── SSP growth factors ────────────────────────────────────────────────────
     print("Loading SSP growth factors…")
-    xlsx_path = Path(catalog.get_source("ssp_population_growth_factors").path)  # catalog key (data_catalog_gfm.yml)
+    xlsx_path = Path(catalog.get_source("ssp_population_growth_factors").path)
     growth_df = load_ssp_growth_factors(xlsx_path) if xlsx_path.exists() else None
     if growth_df is None:
         print("  WARNING: SSP growth factors not found; File 3 (*_ssp.csv) will be skipped.")
 
     expect_ssp = growth_df is not None and slr_traj is not None
 
-    # ── Baseline ──────────────────────────────────────────────────────────────
     if args.skip_existing and _scenario_done("baseline", out_dir, expect_ssp):
         print("\nSkipping BASELINE exposure (--skip-existing, files already present).")
     else:
@@ -1241,7 +838,6 @@ def main() -> None:
             growth_df, ssps, output_years, slr_traj,
         )
 
-    # ── Protect ───────────────────────────────────────────────────────────────
     for slr_int in slr_intensities:
         label = f"protect_{slr_int}"
         if args.skip_existing and _scenario_done(label, out_dir, expect_ssp):
@@ -1261,10 +857,7 @@ def main() -> None:
             growth_df, ssps, output_years, slr_traj,
         )
 
-    # ── Retreat ───────────────────────────────────────────────────────────────
-    # share_retreat depends only on this slr_int's design grid, not on (rp, slr)
-    # or growth - computed once via pass1_shares and reused across retreat's own
-    # pass 2 below AND every avoid task at this intensity (see Avoid section).
+    # share_retreat depends only on the design grid; reused by every avoid task.
     shares_by_intensity: dict[str, dict[str, float]] = {}
     for slr_int in slr_intensities:
         label = f"retreat_{slr_int}"
@@ -1295,12 +888,7 @@ def main() -> None:
             growth_df, ssps, output_years, slr_traj,
         )
 
-    # ── Avoid / protect + avoid ───────────────────────────────────────────────
-    # Every (variant, slr_intensity, SSP, year) / (variant, slr_intensity,
-    # growth_rate) combination is independent - parallelized across worker
-    # processes. Each worker's payload is tiny (chunk paths + small dicts, not
-    # multi-GB arrays), so worker count is effectively unconstrained by memory
-    # in practice; avoid_worker_memory_budget_gb is kept for reference only.
+    # avoid_worker_memory_budget_gb is informational: worker payloads are tiny.
     avoid_units = [(v, s) for v in AVOID_VARIANTS for s in slr_intensities]
     if args.skip_existing:
         done_units = [u for u in avoid_units if _avoid_done(*u, out_dir, expect_ssp)]
@@ -1308,14 +896,8 @@ def main() -> None:
             print(f"  Skipping {v.upper()} exposure ({s}) (--skip-existing, files already present).")
         avoid_units = [u for u in avoid_units if u not in done_units]
 
-    # Only enqueue tasks for ssps that actually have a trajectory column -
-    # _avoid_ssp_worker_task returns None for any ssp not in slr_traj.columns
-    # (same check, duplicated here), and expected_ssp/_maybe_write_avoid below
-    # need every enqueued task to eventually contribute a result. If ssp_tasks
-    # included ssps with no trajectory data (e.g. population_growth.ssps has
-    # SSP3 but slr_trajectories_csv only covers SSP1/SSP2/SSP5), expected_ssp
-    # would never be reached and no avoid CSV would ever be written for that
-    # slr_intensity.
+    # An SSP without a trajectory column would never reach expected_ssp, so no
+    # avoid CSV would be written for that slr_intensity.
     available_ssps = [s for s in ssps if slr_traj is not None and s in slr_traj.columns]
     missing_ssps = [s for s in ssps if s not in available_ssps]
     if missing_ssps:
@@ -1340,8 +922,8 @@ def main() -> None:
         f"{len(ssps)} SSPs x {len(output_years)} years = {len(ssp_tasks)} SSP tasks, plus "
         f"{len(avoid_units)} units x {len(growth_pct_labels)} growth rates = "
         f"{len(growth_tasks)} scenario-neutral tasks ({n_tasks} total). "
-        f"Per-worker payload is now file paths + small dicts (not full grids), "
-        f"budget {budget_gb:.1f} GiB no longer constrains worker count -> {n_workers} worker process(es)…"
+        f"Per-worker payload is file paths + small dicts (not full grids), so "
+        f"budget {budget_gb:.1f} GiB does not constrain worker count -> {n_workers} worker process(es)…"
     )
 
     ssp_results: dict[tuple, list[pd.Series]] = {u: [] for u in avoid_units}

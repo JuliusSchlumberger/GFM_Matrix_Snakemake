@@ -1,21 +1,8 @@
-"""Validate the MDT (Mean Dynamic Topography) sign convention on both sides
-of the SFINCS pipeline that apply it:
-  - build_elevation.py::build_combined_elevation - ADDS MDT to GEBCO
-    bathymetry (H_GOCO06s = H_MSL + MDT, per mdt.py's own module docstring,
-    "fixed 2026-09 after a real, confirmed sign-error investigation").
-  - build_line_forcing.py::build_line_forcing - the empirical
-    `mdt_offset = boundary_value_m - hydrograph_max_m`, which recovers the
-    same real-world MDT correction indirectly (the COAST-RP station level
-    already carries it; COAST-HG's raw hydrograph doesn't).
+"""Pin the MDT (Mean Dynamic Topography) sign in the SFINCS elevation and forcing.
 
-Both are exactly the kind of geodetic sign convention that's easy to flip
-by accident and hard to notice visually (a flipped sign DOUBLES the error
-instead of cancelling it, but a coastline elevation/forcing plot can still
-"look plausible" either way) - this test locks in the correct sign with a
-known, deliberately non-zero synthetic MDT value.
-
-Usage:
-    python validate_mdt_sign.py
+Elevation: H_GOCO06s = H_MSL (GEBCO) + MDT. Forcing: mdt_offset =
+boundary_value_m - hydrograph_max_m (COAST-RP levels carry MDT, raw COAST-HG
+does not). A flipped sign doubles the error yet still looks plausible.
 """
 
 import shutil
@@ -48,32 +35,29 @@ def _write_raster(path: Path, arr: np.ndarray, dtype: str, nodata, transform, cr
 
 
 def test_elevation_mdt_is_added_not_subtracted() -> None:
-    """A KNOWN, deliberately non-zero MDT value must be ADDED to GEBCO's raw
-    bathymetry - a flipped sign would produce `gebco - mdt_m` instead."""
     print("=== build_combined_elevation: MDT is ADDED to GEBCO, not subtracted ===")
     tmpdir = Path(tempfile.mkdtemp(prefix="mdt_sign_elevation_test_"))
     try:
         transform = rasterio.Affine(0.0003, 0, 10.0, 0, -0.0003, 50.0)
-        # Wide enough that the checked ocean cell (column 0) lies beyond build_elevation's
-        # GEBCO_COAST_CLIP_M (200 m) coastal-transition band: inside it, GEBCO is replaced by an
-        # interpolation from the land edge, so a 4x4 grid never saw GEBCO + MDT at all.
-        shape = (4, 24)  # ~21.5 m cells at 50N -> column 0 is ~430 m from the first land column
+        # Column 0 must lie beyond the GEBCO_COAST_CLIP_M (200 m) band, where GEBCO is
+        # replaced by interpolation from land: ~21.5 m cells at 50N -> ~430 m from land.
+        shape = (4, 24)
 
-        dem_cm = np.full(shape, 500, dtype=np.int16)  # 5.00 m land everywhere by default
+        dem_cm = np.full(shape, 500, dtype=np.int16)
         dem_path = tmpdir / "dem.tif"
         _write_raster(dem_path, dem_cm, "int16", -9999, transform)
 
         mask = np.zeros(shape, dtype=np.float32)
-        mask[:, :20] = 1.0  # left 20 columns: ocean
+        mask[:, :20] = 1.0
         mask_path = tmpdir / "mask.tif"
         _write_raster(mask_path, mask, "float32", None, transform)
 
-        gebco_bathy_m = -20.0  # known raw (local-MSL) GEBCO value
+        gebco_bathy_m = -20.0  # local MSL
         gebco_arr = np.full(shape, gebco_bathy_m, dtype=np.float32)
         gebco_path = tmpdir / "gebco.tif"
         _write_raster(gebco_path, gebco_arr, "float32", np.nan, transform)
 
-        known_mdt_m = 0.4336  # deliberately non-zero, matches the real magnitude seen live on tile 691
+        known_mdt_m = 0.4336  # magnitude seen on tile 691
         mdt_arr = np.full((10, 10), known_mdt_m, dtype=np.float64)
         mdt_path = tmpdir / "mdt.nc"
         mdt_da = xr.DataArray(
@@ -85,11 +69,11 @@ def test_elevation_mdt_is_added_not_subtracted() -> None:
 
         combined, info = build_combined_elevation(
             dem_path, mask_path, gebco_path, mdt_path,
-            min_bathymetry_m=-50.0,  # generous floor - not what this test is checking
+            min_bathymetry_m=-50.0,
         )
 
         assert np.isclose(info["mdt_m"], known_mdt_m, atol=1e-6), info["mdt_m"]
-        ocean_value = combined[0, 0]  # left column is ocean
+        ocean_value = combined[0, 0]
         expected_added = gebco_bathy_m + known_mdt_m
         expected_subtracted = gebco_bathy_m - known_mdt_m
         assert np.isclose(ocean_value, expected_added, atol=1e-3), (
@@ -107,16 +91,13 @@ def test_elevation_mdt_is_added_not_subtracted() -> None:
 
 
 def test_hydrograph_mdt_offset_recovers_known_boundary_value() -> None:
-    """The empirical offset (`boundary_val - hg_max`) must make the
-    corrected hydrograph's own peak land EXACTLY on the known boundary
-    value - by construction, so this is really checking the offset is
-    ADDED (not subtracted) when building the corrected series."""
+    """The offset must be added to the series, so its peak equals the boundary value."""
     print("=== build_line_forcing: mdt_offset correctly recovers the boundary value ===")
     tmpdir = Path(tempfile.mkdtemp(prefix="mdt_sign_hydrograph_test_"))
     try:
         station_lon, station_lat = 10.0, 50.0
         n_time = 5
-        hg_raw = np.array([0.1, 0.3, 0.9, 0.4, 0.1])  # raw hydrograph, local-MSL, no MDT, peak 0.9
+        hg_raw = np.array([0.1, 0.3, 0.9, 0.4, 0.1])  # local MSL, no MDT
 
         ds = xr.Dataset(
             {
@@ -131,8 +112,7 @@ def test_hydrograph_mdt_offset_recovers_known_boundary_value() -> None:
         coast_hg_path = tmpdir / "coast_hg.nc"
         ds.to_netcdf(coast_hg_path)
 
-        known_boundary_val_m = 1.35  # deliberately != hg_raw.max() (0.9), by a known, non-zero amount
-        # the boundary line's stations layer (build_station_boundary_lines.py), one used station
+        known_boundary_val_m = 1.35
         stations = gpd.GeoDataFrame(
             {"station": [0], "station_index": [0], "status": ["used"], "rp100_level_m": [known_boundary_val_m],
              "node_lon": [station_lon + 0.01], "node_lat": [station_lat], "node_shift_km": [0.7]},

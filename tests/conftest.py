@@ -1,16 +1,8 @@
-"""pytest wiring for the standalone regression scripts under tests/.
+"""Mark and filter the standalone tests/ scripts for pytest.
 
-Every script here still runs on its own (`python <script>.py`); this file only
-tells pytest which ones need something the current environment may not have:
-
-- `tests/sfincs_*` import sfincs_tiles/ modules that need hydromt_sfincs
-  2.x, which lives in the separate hydromt-sfincs-dev env
-  (environment_sfincs.yml). They are marked `needs_sfincs` and not collected
-  at all without hydromt_sfincs 2.x, since importing them would fail at
-  collection time.
-- Tests that read the real P:\\ share are marked `needs_pdrive`. They already
-  print SKIP and return when the data is absent, so the marker is for
-  selection (`-m "not needs_pdrive"`), not for skipping.
+`tests/sfincs_*` need hydromt_sfincs 2.x (hydromt-sfincs-dev env) and are not
+collected without it. `needs_pdrive` tests self-skip when P:\\ is absent; the
+marker is only for selection (`-m "not needs_pdrive"`).
 """
 
 from __future__ import annotations

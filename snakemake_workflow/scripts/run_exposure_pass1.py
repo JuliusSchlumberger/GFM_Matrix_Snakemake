@@ -1,10 +1,7 @@
-"""HPC batch worker: pass 1 of the chunk-partitioned exposure pipeline.
+"""HPC batch worker: exposure pass 1 (raw per-country retreat/avoid sums).
 
-Streams this batch's chunk subset ONCE, accumulating retreat/avoid's raw
-per-country (amount, capacity) sums for every slr_intensity. See
-analysis/compute_exposure_analysis.py's module docstring and
-pass1_shares_all_intensities for the full design - this must complete (and
-be reduced by reduce_exposure_shares.py) before any pass-2 batch starts.
+Accumulates (amount, capacity) per slr_intensity for this batch's chunks; must be
+reduced by reduce_exposure_shares.py before any pass-2 batch starts.
 
 Usage:
     python run_exposure_pass1.py --config path/to/config.yml \\
@@ -24,14 +21,7 @@ from compute_exposure_analysis import load_analysis_context, pass1_shares_all_in
 
 
 def main() -> None:
-    """Parse CLI arguments and run pass 1 for this batch's chunk subset.
-
-    Loads the config and chunk list, accumulates raw per-country
-    (amount, capacity) sums for every slr_intensity via
-    ``pass1_shares_all_intensities``, and atomically writes the result as
-    JSON to ``--out`` so a ``--resume`` dispatch can trust the file's mere
-    existence as "this batch is done".
-    """
+    """Run pass 1 for this batch's chunk subset and write the sums as JSON."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--chunks-file", required=True, help="one chunk_id per line")
@@ -52,10 +42,7 @@ def main() -> None:
 
     out_path = Path(args.out)
     retry_transient_io(out_path.parent.mkdir, parents=True, exist_ok=True)
-    # Atomic (temp file + os.replace) - a --resume dispatch trusts this
-    # file's mere existence as "this batch is done"; a truncated file from
-    # a killed job must never appear at this exact path (see
-    # config_utils.atomic_write's own docstring).
+    # Atomic: a --resume dispatch treats the file's existence as "batch done".
     atomic_write(out_path, lambda f: json.dump(raw, f), mode="w", encoding="utf-8")
     print(f"Written: {out_path}")
 

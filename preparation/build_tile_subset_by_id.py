@@ -1,13 +1,4 @@
-"""Filter the production tile_grid (domain_tiles_global.gpkg) down to an
-explicit list of tile_ids, read one-per-line from a text file - e.g.
-select_calibration_tiles.py's own candidate_tiles.txt.
-
-Generic, reusable utility: unlike preparation/build_delta_tile_subset.py
-(which selects by spatial intersection against named AOI polygons), this
-one selects by exact tile_id membership - the right tool whenever the set
-of tiles to isolate is already known by id (a calibration candidate pool,
-a hand-picked debugging subset, etc.) rather than needing to be derived
-spatially.
+"""Filter the tile_grid to tile_ids listed one per line in a text file.
 
 Usage:
     python preparation/build_tile_subset_by_id.py <tile_ids_file> <out_path>
@@ -25,6 +16,7 @@ REPO = Path(__file__).resolve().parent.parent
 
 
 def build_tile_subset_by_id(tile_ids_file: Path, out_path: Path, config_path: str | Path | None = None) -> gpd.GeoDataFrame:
+    """Write and return the tile_grid rows whose tile_id is in tile_ids_file."""
     config_path = config_path or REPO / "snakemake_workflow" / "config" / "config.yml"
     cfg = load_config(config_path)
     tile_grid_path = Path(cfg["tile_grid"]["path"])

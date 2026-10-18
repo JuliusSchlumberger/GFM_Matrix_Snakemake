@@ -1,12 +1,6 @@
-"""Builds gebco.vrt from the 8 GEBCO 2026 quadrant GeoTIFFs in
-inputs/gebco_2026_geotiff/, with relative (portable) source references.
-Verifies every source tile actually made it into the VRT, since
-gdal.BuildVRT() can silently drop one.
+"""Build gebco.vrt from the 8 GEBCO 2026 quadrant GeoTIFFs, with relative sources.
 
-Not part of the main production preparation pipeline - GEBCO is only used
-by sfincs_tiles/, never by the eikonal model.
-
-Safe/idempotent to re-run any time after more GEBCO tiles are added.
+GEBCO is used only by sfincs_tiles/, never by the eikonal model. Idempotent.
 
 Usage:
     python sfincs_tiles/build_gebco_vrt.py [--config <gfm config.yml>]
@@ -24,6 +18,7 @@ from config_utils import load_config, retry_transient_io  # noqa: E402
 
 
 def build_gebco_vrt(tile_dir: Path, out_vrt: Path) -> None:
+    """Build out_vrt from the GEBCO tiles in tile_dir; raise if any source is missing."""
     tif_paths = sorted(tile_dir.glob("gebco_*_geotiff.tif"))
     if not tif_paths:
         raise FileNotFoundError(f"No GEBCO quadrant tiles found in {tile_dir}")
@@ -37,8 +32,7 @@ def build_gebco_vrt(tile_dir: Path, out_vrt: Path) -> None:
 
     gdal.PushErrorHandler(_collect_warning)
     try:
-        # GEBCO quadrants share one uniform native resolution (15 arcsec);
-        # no outputBounds/xRes/yRes pinning needed.
+        # Quadrants share one native resolution (15 arcsec): no xRes/yRes pinning.
         ds = retry_transient_io(
             gdal.BuildVRT,
             str(out_vrt), [str(p) for p in tif_paths],
@@ -58,8 +52,7 @@ def build_gebco_vrt(tile_dir: Path, out_vrt: Path) -> None:
     if not out_vrt.exists():
         raise RuntimeError(f"gdal.BuildVRT produced no output at {out_vrt}")
 
-    # Verify every source tile made it in - gdal.BuildVRT can silently drop
-    # a source it fails to open instead of raising.
+    # gdal.BuildVRT can silently drop a source it fails to open instead of raising.
     import xml.etree.ElementTree as ET
 
     tree = retry_transient_io(ET.parse, out_vrt)
@@ -77,8 +70,6 @@ def build_gebco_vrt(tile_dir: Path, out_vrt: Path) -> None:
             "until fixed (re-run this script - transient P: share failures are the usual cause)."
         )
 
-    # Rewrite each <SourceFilename> to a bare relative filename with
-    # relativeToVRT="1".
     for el in tree.getroot().iter("SourceFilename"):
         el.text = Path(el.text.replace("\\", "/")).name
         el.set("relativeToVRT", "1")

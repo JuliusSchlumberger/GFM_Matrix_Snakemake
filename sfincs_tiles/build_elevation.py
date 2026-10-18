@@ -1,16 +1,6 @@
-"""Builds the combined elevation surface for one tile's SFINCS model:
-DeltaDTM on land, MDT-corrected GEBCO on sea, on dem.tif's own native
-EPSG:4326 grid, before any UTM reprojection.
+"""Build one tile's SFINCS elevation: DeltaDTM on land, MDT-corrected GEBCO at sea.
 
-Kept separate from model_outputs/{tile_id}/inputs/dem.tif, which the
-eikonal model reads instead.
-
-Lake/river cells (mask==3/2) have no real DeltaDTM elevation data
-(upstream extract_dem.py flat-fills them to 0.0m). Their elevation is
-re-derived here from nearby valid land data, smoothed with a rolling
-minimum along the water body (see LAKE_RIVER_SMOOTH_WINDOW_M) so a single
-bank can't locally bridge across a channel, then floored at
-LAKE_RIVER_MIN_ELEVATION_M.
+On dem.tif's native EPSG:4326 grid; the eikonal model reads dem.tif instead.
 """
 
 from __future__ import annotations
@@ -34,43 +24,30 @@ LAKE_CODE = 2
 RIVER_CODE = 3
 
 
-MIN_BATHYMETRY_M = -10.0  # ocean elevation floor: storm-tide/surge forcing never
-# reaches this deep, so deeper bathymetry only widens the solver's elevation range
-# and shrinks the CFL-stable timestep.
+# Storm surge never reaches deeper; deeper bathymetry only shrinks the CFL timestep.
+MIN_BATHYMETRY_M = -10.0
 
-MAX_OCEAN_ELEVATION_M = 0.0  # ocean elevation ceiling: GEBCO's coarse (~450m)
-# resolution can produce spurious dry-land-height spikes near the GEBCO/DeltaDTM
-# transition. gebco_corrected is MDT-corrected into DeltaDTM's own GOCO06s frame,
-# so a flat sea reads as ~0m there; anything above that is an artifact, clamped at 0m.
+# GEBCO is MDT-corrected into DeltaDTM's GOCO06s frame, where a flat sea is ~0 m; higher
+# values are spikes from GEBCO's ~450 m resolution at the DeltaDTM transition.
+MAX_OCEAN_ELEVATION_M = 0.0
 
-LAKE_RIVER_MIN_ELEVATION_M = 0.0  # floor for lake/river elevation: a below-sea-level
-# channel would need to physically fill that volume before SFINCS sees it overflow
-# onto land, an effect eikonal's own flattened (0m) lakes/rivers don't model.
+# A below-sea-level channel would have to fill before SFINCS overflows onto land,
+# which the eikonal's flattened (0 m) lakes/rivers do not model.
+LAKE_RIVER_MIN_ELEVATION_M = 0.0
 
-LAND_MIN_ELEVATION_M = -15.0  # hydromt_sfincs's own subgrid table builder
-# (subgrid.py::subgrid_v_table, zvolmin hardcoded to -20.0 in components/grid/
-# subgrid.py) clamps any subgrid pixel below -20m to exactly -20m. Since flood
-# depth is computed as simulated water level minus the unclamped elevation_combined.tif
-# value, an unfloored land cell below that clamp produces a spurious flood. Floored
-# 5m above the clamp for margin (this operates on whole dem.tif pixels, coarser than
-# the subgrid pixels the clamp itself applies to). Applied to all land cells
-# (mask==LAND_CODE), not just lake/river.
+# hydromt_sfincs subgrid_v_table clamps subgrid pixels below zvolmin = -20 m, while depth
+# uses the unclamped elevation: unfloored land there floods spuriously. 5 m margin
+# (applies to whole dem.tif pixels); all land cells, not just lake/river.
+LAND_MIN_ELEVATION_M = -15.0
 
-LAKE_RIVER_INTERP_MAX_SEARCH_DISTANCE_PX = 200  # rasterio.fill.fillnodata's search
-# radius (pixels) for the nearest-valid-land-neighbour fill; generous, since wide
-# rivers/large lakes can be far from the nearest bank pixel. Cells it can't reach
-# fall back to LAKE_RIVER_MIN_ELEVATION_M via the final floor below.
+# fillnodata search radius (px); unreached cells fall back to LAKE_RIVER_MIN_ELEVATION_M.
+LAKE_RIVER_INTERP_MAX_SEARCH_DISTANCE_PX = 200
 
-GEBCO_COAST_CLIP_M = 200.0  # distance (m) from the nearest land cell within which
-# GEBCO's own ocean elevation is discarded and interpolated instead - see
-# _fill_coastal_transition_elevation's own docstring.
+GEBCO_COAST_CLIP_M = 200.0  # GEBCO discarded and interpolated within this of land
+GEBCO_COAST_CLIP_MAX_SEARCH_DISTANCE_PX = 50  # margin over the ~7 px (200 m / ~30 m) gap
 
-GEBCO_COAST_CLIP_MAX_SEARCH_DISTANCE_PX = 50  # margin over GEBCO_COAST_CLIP_M's own
-# ~200m / ~30m-per-pixel = ~7px gap width.
-
-LAKE_RIVER_SMOOTH_WINDOW_M = 500.0  # 2D spatial minimum-filter window (not
-# channel-direction-aware): ensures no local bank/rim peak exceeds its own
-# neighbourhood's lowest point, so it can't block flood propagation along the channel.
+# 2D minimum filter (not channel-direction-aware), so no bank peak blocks propagation.
+LAKE_RIVER_SMOOTH_WINDOW_M = 500.0
 
 
 def _fill_lake_river_elevation(
@@ -78,9 +55,7 @@ def _fill_lake_river_elevation(
     interp_max_search_distance_px: float = LAKE_RIVER_INTERP_MAX_SEARCH_DISTANCE_PX,
     smooth_window_m: float = LAKE_RIVER_SMOOTH_WINDOW_M,
 ) -> np.ndarray:
-    """Re-derives lake/river elevation from nearby valid land cells, then smooths it
-    with a rolling minimum along the water body. Returns dem_m unchanged outside
-    lake/river cells."""
+    # extract_dem.py flat-fills lake/river to 0.0 m: no real DeltaDTM data there
     land = mask == LAND_CODE
     lake_river = (mask == LAKE_CODE) | (mask == RIVER_CODE)
     if not lake_river.any():
@@ -92,7 +67,6 @@ def _fill_lake_river_elevation(
         fill_source, mask=valid_mask, max_search_distance=interp_max_search_distance_px,
     )
 
-    # per-axis metre resolution at this tile's latitude
     px_w_m = abs(transform.a) * 111320.0 * np.cos(np.radians(lat_deg))
     px_h_m = abs(transform.e) * 110540.0
     win_px = max(1, round(smooth_window_m / max(min(px_w_m, px_h_m), 1e-6)))
@@ -106,15 +80,8 @@ def _fill_coastal_transition_elevation(
     clip_m: float = GEBCO_COAST_CLIP_M,
     interp_max_search_distance_px: float = GEBCO_COAST_CLIP_MAX_SEARCH_DISTANCE_PX,
 ) -> tuple[np.ndarray, dict]:
-    """Discards GEBCO's own ocean elevation within `clip_m` of the nearest land
-    cell and interpolates across that gap from the land edge and the nearest
-    real GEBCO value beyond it. Returns (corrected ocean elevation, diagnostics).
-
-    GEBCO's ~450m native resolution means the nearest real sample to a given
-    coastline stretch can already be a clamped-deep value (MIN_BATHYMETRY_M)
-    with no real sample between it and the coast, so bilinear reprojection
-    alone can't produce a gradual approach to shore.
-    """
+    # At ~450 m the nearest GEBCO sample can already be clamped at MIN_BATHYMETRY_M,
+    # so bilinear alone gives no gradual approach to shore.
     if not ocean.any():
         return gebco_corrected, {"n_coastal_transition_cells": 0}
 
@@ -149,54 +116,13 @@ def build_combined_elevation(
     lake_river_min_elevation_m: float = LAKE_RIVER_MIN_ELEVATION_M,
     land_min_elevation_m: float = LAND_MIN_ELEVATION_M,
 ) -> tuple[np.ndarray, dict]:
-    """Build the combined elevation surface for one tile on dem.tif's own grid: DeltaDTM on land, MDT-corrected GEBCO on sea.
+    """Return the combined elevation (m) on dem.tif's grid plus diagnostics.
 
-    Land cells use DeltaDTM's dem.tif value, floored at ``land_min_elevation_m``
-    (see LAND_MIN_ELEVATION_M). Lake/river cells are re-derived from nearby valid
-    land data (see _fill_lake_river_elevation, LAKE_RIVER_SMOOTH_WINDOW_M), floored
-    at ``lake_river_min_elevation_m``. Ocean cells use GEBCO's bathymetry,
-    reprojected onto this grid and corrected by adding the local MDT
-    (H_GOCO06s = H_MSL + MDT, see mdt.py) so both halves of the merged surface
-    share DeltaDTM's GOCO06s reference, then clipped to [``min_bathymetry_m``,
-    ``max_ocean_elevation_m``] (default -10 to 0 m).
-
-    Parameters
-    ----------
-    dem_path : Path
-        Path to the tile's dem.tif (int16, centimetres, DeltaDTM).
-    mask_path : Path
-        Path to the tile's mask.tif, pixel-identical grid to `dem_path`.
-    gebco_path : Path
-        Path to the GEBCO bathymetry raster.
-    mdt_path : Path
-        Path to the MDT raster (see mdt.py).
-    mdt_variable : str, optional
-        Variable name in the MDT dataset, by default "mdt".
-    mdt_fallback_deg : float, optional
-        Search radius (degrees) for a valid MDT value near the tile centroid,
-        by default 3.0.
-    min_bathymetry_m : float, optional
-        Ocean elevation floor (m), by default MIN_BATHYMETRY_M (-10.0).
-    max_ocean_elevation_m : float, optional
-        Ocean elevation ceiling (m), by default MAX_OCEAN_ELEVATION_M (0.0).
-    lake_river_min_elevation_m : float, optional
-        Lake/river elevation floor (m), by default LAKE_RIVER_MIN_ELEVATION_M (0.0).
-    land_min_elevation_m : float, optional
-        Land elevation floor (m), by default LAND_MIN_ELEVATION_M (-15.0).
-
-    Returns
-    -------
-    tuple[np.ndarray, dict]
-        Combined elevation array (m, float) on dem.tif's grid, and a diagnostics
-        dict (profile, transform, crs, mdt_m, and per-category cell/floor/ceiling
-        counts).
-
-    Raises
-    ------
-    ValueError
-        If mask.tif's shape does not match dem.tif's, if the tile has no ocean
-        cells, or if no valid MDT value is found within `mdt_fallback_deg` of the
-        centroid.
+    dem.tif is int16 cm (DeltaDTM); mask.tif must be pixel-identical. GEBCO gets the
+    local MDT added (H_GOCO06s = H_MSL + MDT, see mdt.py) so both halves share DeltaDTM's
+    GOCO06s reference, then is clipped to [min_bathymetry_m, max_ocean_elevation_m].
+    `mdt_fallback_deg` is the search radius (deg) for a valid MDT near the centroid.
+    Raises ValueError on a grid mismatch, no ocean cells, or no valid MDT.
     """
     with retry_transient_io(rasterio.open, dem_path) as src:
         dem_cm = src.read(1)
@@ -218,12 +144,8 @@ def build_combined_elevation(
     if not ocean.any():
         raise ValueError("No ocean cells (mask==1) in this tile - nothing for GEBCO to fill in")
 
-    # Reproject GEBCO onto this tile's exact grid using bilinear, not nearest:
-    # GEBCO's 15 arc-sec native resolution (~450m) is far coarser than these ~30m
-    # tiles, so nearest-neighbour would replicate a single sample across many
-    # pixels, producing a hard artificial cliff where it meets DeltaDTM's finer
-    # land detail. Bilinear blends neighbouring GEBCO samples into a gradual
-    # approach to the coast instead.
+    # Bilinear: GEBCO's 15" (~450 m) under ~30 m pixels would, with nearest, leave a
+    # hard artificial cliff against DeltaDTM.
     with retry_transient_io(rasterio.open, gebco_path) as src:
         gebco_arr = np.empty(shape, dtype=np.float64)
         reproject(
@@ -234,8 +156,7 @@ def build_combined_elevation(
             resampling=Resampling.bilinear,
         )
 
-    # MDT lookup at the tile's centroid (MDT varies smoothly over tens of km),
-    # applied as a uniform additive correction to every ocean cell.
+    # one centroid MDT for the whole tile: MDT varies smoothly over tens of km
     cx, cy = (bounds.left + bounds.right) / 2.0, (bounds.bottom + bounds.top) / 2.0
     mdt_lookup = mdt_lookup_fn(mdt_path, mdt_variable, mdt_fallback_deg)
     mdt_m = mdt_lookup(cx, cy)
@@ -270,7 +191,7 @@ def build_combined_elevation(
 
 
 def main() -> None:
-    """Parse CLI arguments, build the combined elevation surface for one tile, print summary statistics, and write elevation_combined.tif."""
+    """Build and write elevation_combined.tif for one tile."""
     import argparse
 
     _repo_root = Path(__file__).resolve().parent.parent
@@ -286,8 +207,6 @@ def main() -> None:
     root = read_root(Path(args.config))
     catalog_path = _repo_root / "snakemake_workflow" / "config" / "data_catalog_gfm.yml"
 
-    # Reads from the tile's working copy (base_dir_name/inputs/), not
-    # model_outputs/ directly.
     tile_dir = root / args.base_dir_name / args.tile_id / "inputs"
     gebco_path = resolve_catalog_path(catalog_path, root, "gebco")
     mdt_path = resolve_catalog_path(catalog_path, root, "mdt_cnes_cls22")

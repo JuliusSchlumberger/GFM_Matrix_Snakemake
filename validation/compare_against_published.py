@@ -1,17 +1,7 @@
-"""Consolidate this model's own validation output against two published
-benchmark studies:
+"""Compare our validation metrics against published studies as a long/tidy CSV.
 
-  Chaudhuri et al. (2026) - per-sub-region CSI for Wales/Scotland/New
-    Brunswick, from validate_country.py's own metrics_{ISO}_{RP}_{SLR}.csv
-    (severn_estuary, menai_strait, firth_of_forth, cumberland_basin,
-    petitcodiac - see data_catalog_validation.yml's own `regions:` blocks).
-  Kasmalkar et al. (2024) - San Francisco Bay depth-accuracy (RMSE/MAE, all
-    pixels and flooded-pixels-only), from validate_sf_bay.py's own
-    sf_bay_results.csv (both the "coarsen to model grid" and "refine to 2m"
-    directions - see that script's own docstring).
-
-Published numbers below are transcribed from the user directly (2026-10-15),
-not re-derived from either paper - if either paper is revised, update here.
+CSI vs Bates et al. (2023), Wing et al. (2024), Chaudhuri et al. (2026); SF Bay
+RMSE/MAE vs Kasmalkar et al. (2024). Published values are transcribed, not re-derived.
 
 Usage:
     python validation/compare_against_published.py [--config path/to/config.yml] [--out-csv path.csv]
@@ -32,11 +22,7 @@ from config_utils import load_config  # noqa: E402
 
 SF_BAY_RESULTS = Path(__file__).resolve().parent / "sf_bay_results.csv"
 
-# Published CSI, per (study, region). Region "wales"/"scotland" (no suffix) is
-# the WHOLE-TERRITORY row; the named sub-regions are Chaudhuri et al.'s own
-# study-area subsets within each territory (see data_catalog_validation.yml's
-# `regions:` blocks). One region can have more than one published study to
-# compare against (Wales as a whole: both Bates et al. and Wing et al.).
+# "wales"/"england" = whole territory; other regions are Chaudhuri et al.'s study areas.
 PUBLISHED_CSI = [
     ("Bates et al. (2023)", "wales", 0.76),
     ("Wing et al. (2024)", "wales", 0.82),
@@ -66,7 +52,6 @@ ENGLAND_FZ2_CAVEAT = (
     "result as a real, methodologically-sound number, not yet a fully-explained one."
 )
 
-# Kasmalkar et al. (2024) - published San Francisco Bay depth-accuracy.
 KASMALKAR_SF_BAY = {
     "RMSE_all_m": 0.138, "MAE_all_m": 0.017,
     "RMSE_flooded_m": 0.525, "MAE_flooded_m": 0.319,
@@ -74,24 +59,6 @@ KASMALKAR_SF_BAY = {
 
 
 def _csi_rows(gbr_metrics: Path, can_metrics: Path, england_fz3_rescore: Path, england_fz2_band: Path) -> list[dict]:
-    """Build the per-(study, region) CSI comparison rows.
-
-    Parameters
-    ----------
-    gbr_metrics : Path
-        ``metrics_GBR_RP100_SLR_0.csv`` from ``validate_country.py``.
-    can_metrics : Path
-        ``metrics_CAN_RP100_SLR_0.csv`` from ``validate_country.py``.
-    england_fz3_rescore : Path
-        ``england_fz3_rescore.csv`` from ``rescore_england_fz3.py``.
-    england_fz2_band : Path
-        ``england_fz2_band_result.csv`` from ``validate_england_fz2_band.py``.
-
-    Returns
-    -------
-    list of dict
-        One row per (study, region) CSI comparison.
-    """
     gbr_df = pd.read_csv(gbr_metrics)
     can_df = pd.read_csv(can_metrics)
     fz3_df = pd.read_csv(england_fz3_rescore)
@@ -99,19 +66,9 @@ def _csi_rows(gbr_metrics: Path, can_metrics: Path, england_fz3_rescore: Path, e
     rows = []
     for study, region, published in PUBLISHED_CSI:
         if region == "england":
-            # England has no exact native-RP match for FZ3 (~200yr, bracketed
-            # RP100/RP250, same as Wales/Scotland) - report both bracket
-            # points against Wing et al.'s single published value. FZ3 comes
-            # from rescore_england_fz3.py's own output, NOT
-            # multi_rp_summary.csv - that file's own FZ3 rows are from the
-            # pre-correction (sea-only, no estuarine 'river and sea') benchmark
-            # and were never regenerated (the run that would have refreshed
-            # them was killed for stalling/memory-spiking - see
-            # rescore_england_fz3.py's own docstring). FZ2 is reported as the
-            # model's own incremental RP100-RP1000 band vs the benchmark's own
-            # incremental band (validate_england_fz2_band.py's output), NOT a
-            # naive cumulative-RP1000-vs-benchmark comparison - see
-            # ENGLAND_FZ2_CAVEAT.
+            # FZ3 (~200yr) is bracketed by RP100/RP250; both reported. FZ3 comes from
+            # rescore_england_fz3.py: multi_rp_summary.csv FZ3 rows use the stale
+            # sea-only benchmark. FZ2 is the incremental RP100-RP1000 band.
             fz3 = fz3_df[fz3_df["benchmark_key"] == "england_ea_floodzone3_sea"]
             for _, r in fz3.iterrows():
                 rows.append({
@@ -157,9 +114,6 @@ def _sf_bay_rows() -> list[dict]:
                 "diff": ours - published,
                 "note": "",
             })
-        # HR/FAR/CSI/bias - no published counterpart given, reported as this
-        # model's own confusion-matrix result at the honest surveyed-area
-        # domain (see validate_sf_bay.py's own domain-construction note).
         for metric, col in [("HR", "HT"), ("FAR", "FAR"), ("CSI", "CSI"), ("bias", "bias")]:
             rows.append({
                 "study": "(this model only - no published value given)",
@@ -175,18 +129,7 @@ def _sf_bay_rows() -> list[dict]:
 
 
 def main(config_path: str | Path | None = None, out_csv: str | Path | None = None) -> None:
-    """Build, print, and write the published-comparison table.
-
-    Parameters
-    ----------
-    config_path : str, Path, or None, optional
-        Path to config.yml, used to resolve the GBR/CAN/England input CSVs
-        under ``validation.output_dir``. Defaults to this repo's
-        ``snakemake_workflow/config/config.yml``.
-    out_csv : str, Path, or None, optional
-        Destination for the comparison CSV. Defaults to
-        ``comparison_vs_published.csv`` next to this script.
-    """
+    """Print and write the published-comparison table."""
     cfg = load_config(config_path or _REPO_ROOT / "snakemake_workflow" / "config" / "config.yml")
     validation_dir = Path(cfg["validation"]["output_dir"])
     gbr_metrics = validation_dir / "GBR" / "metrics_GBR_RP100_SLR_0.csv"

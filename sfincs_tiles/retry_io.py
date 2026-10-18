@@ -1,10 +1,4 @@
-"""Retry wrapper for transient FileNotFoundError/OSError on the P:\\ SMB
-share.
-
-Duplicated from config_utils.retry_transient_io rather than imported:
-config_utils's `from hydromt.log import setuplog` import fails under the
-hydromt-sfincs-dev environment sfincs_tiles/ scripts run in.
-"""
+"""Retry wrapper for transient FileNotFoundError/OSError on the P:\\ SMB share."""
 
 from __future__ import annotations
 
@@ -14,11 +8,10 @@ from typing import Callable, TypeVar
 _T = TypeVar("_T")
 
 
-# Twin of src/config_utils.py's retry_transient_io (sfincs_tiles/ can't import src/ in hydromt-sfincs-dev: src/config_utils
-# needs hydromt 0.9). Pinned by tests/metric_parity_validation/validate_sfincs_src_parity.py.
+# Twin of src/config_utils.py's retry_transient_io: hydromt-sfincs-dev can't import src/
+# (src/config_utils needs hydromt 0.9). Pinned by tests/metric_parity_validation/validate_sfincs_src_parity.py.
 def retry_transient_io(fn: Callable[..., _T], *args, retries: int = 4, delay_s: float = 5.0, **kwargs) -> _T:
-    """Calls `fn(*args, **kwargs)`, retrying on FileNotFoundError/OSError up
-    to `retries` times before raising."""
+    """Call `fn`, retrying on FileNotFoundError/OSError up to `retries` times before raising."""
     last_err = None
     for attempt in range(1, retries + 1):
         try:

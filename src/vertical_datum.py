@@ -1,33 +1,12 @@
 """EGM2008 -> GOCO06s vertical datum correction for the DeltaDTM DEM.
 
-DeltaDTM's original release (4TU.ResearchData, Pronk et al. 2024) is
-referenced to the EGM2008 geoid. GOCO06s is the geoid the AVISO MDT
-(`mdt_cnes_cls22`) - and therefore the water-level MDT correction in
-preparation/prepare_boundary_conditions.py - are expressed relative to.
-Converting the DEM from EGM2008 to GOCO06s directly (a pure geoid-to-geoid
-shift, smooth at spherical-harmonic degree ~300 and computed once globally)
-avoids extrapolating MDT across land, which is what the alternative
-pre-corrected release (`*_GOCO06s_MDT`-suffixed tiles, hosted on the WUR
-YODA vault) does.
-
-Applied PER MODEL TILE, folded into rasters.extract_dem's own clip step
-(rule extract_dem in preprocessing.smk) - not as a separate whole-tile
-correction pass over the raw DeltaDTM release. The expensive part (the
-spherical-harmonic geoid synthesis, ~12s) is therefore computed exactly
-once, by the one-time rule compute_geoid_offset_raster, and cached to a
-small GeoTIFF (`write_geoid_offset_raster`); every per-tile extract_dem job
-then just reprojects a tiny window of that cached raster onto its own DEM
-grid (`sample_geoid_offset`) - cheap, and correct because the offset field
-itself is smooth at DEM (arc-second) scale, so resampling it is lossless
-for this purpose.
-
-Method ported from GCFM_UU/workflow/scripts/05a_get_elevation.py and
-src/raster.compute_geoid_offset_arr: EGM2008 is truncated to GOCO06s's own
-maximum spherical-harmonic degree before synthesis so both grids share the
-same spectral bandwidth; the per-pixel offset N_EGM2008 - N_GOCO06s is
-ADDED to every valid DEM pixel. Unlike 05a_get_elevation.py's separate GEBCO
-correction, no MDT term is ever applied here - this module only performs
-the geoid conversion.
+DeltaDTM (Pronk et al. 2024) is referenced to EGM2008; the AVISO MDT
+(`mdt_cnes_cls22`) used for water levels is relative to GOCO06s. A pure
+geoid-to-geoid shift avoids extrapolating MDT across land. EGM2008 is truncated
+to GOCO06s's max spherical-harmonic degree; the offset N_EGM2008 - N_GOCO06s (m)
+is ADDED to valid DEM pixels. No MDT term is applied here. Method ported from
+GCFM_UU 05a_get_elevation.py. The global offset is computed once and cached;
+per-tile resampling is valid because the field is smooth at arc-second scale.
 """
 
 from __future__ import annotations
@@ -46,31 +25,11 @@ from config_utils import retry_transient_io
 def compute_geoid_offset_grid(
     goco06s_gfc: str | Path, egm2008_gfc: str | Path,
 ) -> tuple[np.ndarray, Affine, str]:
-    """Compute the global per-pixel geoid offset N_EGM2008 - N_GOCO06s.
+    """Compute the global geoid offset N_EGM2008 - N_GOCO06s in metres.
 
-    Requires the `pyshtools` and `boule` packages (conda-forge). Returns a
-    global, north-up, float32 grid (lon in -180..180) at GOCO06s's own
-    native spherical-harmonic resolution - reprojected onto each DEM tile's
-    much finer grid by `sample_geoid_offset` below, since the offset field
-    itself is smooth at DEM (arc-second) scale.
-
-    Parameters
-    ----------
-    goco06s_gfc : str or Path
-        Path to GOCO06s.gfc (ICGEM format).
-    egm2008_gfc : str or Path
-        Path to EGM2008.gfc (ICGEM format).
-
-    Returns
-    -------
-    tuple of (numpy.ndarray, Affine, str)
-        ``(offset_arr, transform, crs)``, where ``offset_arr`` is the offset
-        grid in metres.
-
-    Raises
-    ------
-    ImportError
-        If `pyshtools` or `boule` is not installed.
+    Inputs are ICGEM .gfc files. Returns `(offset, transform, crs)`: a north-up
+    float32 grid, lon -180..180, at GOCO06s's native resolution. Raises
+    ImportError without `pyshtools` / `boule`.
     """
     try:
         import pyshtools as pysh
@@ -93,11 +52,8 @@ def compute_geoid_offset_grid(
     lmax = goco.lmax
     egm_trunc = egm.pad(lmax)
 
-    # pyshtools>=4.14's SHGravCoeffs.geoid() accepts a convenience
-    # `ellipsoid=` kwarg that unpacks a boule.Ellipsoid itself; the
-    # installed 4.12.2 predates that and still takes the four normal-
-    # gravity-field parameters individually (potref/a/f/omega), so they're
-    # pulled off `wgs84` explicitly here instead - same values either way.
+    # pyshtools 4.12 has no `ellipsoid=` kwarg; pass the WGS84 normal-gravity
+    # parameters individually.
     wgs84 = _boule.WGS84
     geoid_kwargs = dict(
         potref=wgs84.reference_normal_gravity_potential,
@@ -118,8 +74,7 @@ def compute_geoid_offset_grid(
     lats = da_goco[lat_dim].values
     lons = da_goco[lon_dim].values
 
-    # pyshtools grids run 0..360 deg longitude - roll to -180..180 so the
-    # offset lines up with the DEM tiles' own -180..180 convention.
+    # pyshtools grids run 0..360 deg longitude; DEM tiles use -180..180.
     half = len(lons) // 2
     offset = np.roll(offset, -half, axis=1)
     lons = np.concatenate([lons[half:] - 360.0, lons[:half]])
@@ -135,23 +90,7 @@ def compute_geoid_offset_grid(
 def write_geoid_offset_raster(
     goco06s_gfc: str | Path, egm2008_gfc: str | Path, out_path: str | Path,
 ) -> None:
-    """Compute the global geoid offset once and cache it as a small GeoTIFF.
-
-    Called by the one-time Snakemake rule `compute_geoid_offset_raster`
-    (preprocessing.smk) - every per-tile `extract_dem` job then reads this
-    cached raster via `sample_geoid_offset` instead of resynthesizing the
-    spherical harmonics itself.
-
-    Parameters
-    ----------
-    goco06s_gfc : str or Path
-        Path to GOCO06s.gfc (ICGEM format).
-    egm2008_gfc : str or Path
-        Path to EGM2008.gfc (ICGEM format).
-    out_path : str or Path
-        Destination path for the cached offset GeoTIFF; parent directories
-        are created if they do not already exist.
-    """
+    """Compute the global geoid offset once and cache it as a GeoTIFF."""
     offset_arr, transform, crs = compute_geoid_offset_grid(goco06s_gfc, egm2008_gfc)
 
     retry_transient_io(Path(out_path).parent.mkdir, parents=True, exist_ok=True)
@@ -172,32 +111,7 @@ def sample_geoid_offset(
     dst_height: int,
     dst_width: int,
 ) -> np.ndarray:
-    """Reproject the cached global geoid-offset raster onto an arbitrary grid.
-
-    Used by rasters.extract_dem to sample the offset onto a single tile's
-    own DEM clip window (cheap - just a small bilinear resample of an
-    already-computed, already-cached global field).
-
-    Parameters
-    ----------
-    offset_raster_path : str or Path
-        Path to the cached global geoid-offset GeoTIFF (as written by
-        `write_geoid_offset_raster`).
-    dst_transform : Affine
-        Affine transform of the destination grid.
-    dst_crs : rasterio CRS or compatible
-        Coordinate reference system of the destination grid.
-    dst_height : int
-        Number of rows in the destination grid.
-    dst_width : int
-        Number of columns in the destination grid.
-
-    Returns
-    -------
-    numpy.ndarray
-        Float32 array of shape (dst_height, dst_width): the offset, in
-        metres, resampled onto the destination grid.
-    """
+    """Bilinearly resample the cached geoid offset (metres) onto a destination grid."""
     with retry_transient_io(rasterio.open, offset_raster_path) as src:
         offset_on_dst = np.empty((dst_height, dst_width), dtype=np.float32)
         reproject(

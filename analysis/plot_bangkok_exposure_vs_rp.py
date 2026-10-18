@@ -1,7 +1,6 @@
-"""Bangkok / Chao Phraya case study: exposed-population-vs-return-period
-curve, one line per SLR scenario. Reads
-analysis/compute_bangkok_case_exposure.py's own output CSV - no raster I/O
-here, this is a pure plotting script.
+"""Plot Bangkok / Chao Phraya exposed population vs return period per SLR scenario.
+
+Reads compute_bangkok_case_exposure.py's CSV.
 
 Usage:
     python plot_bangkok_exposure_vs_rp.py \\

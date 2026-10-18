@@ -21,11 +21,8 @@ scenario_label = f"{return_period}, {waterlevel_name}"
 with retry_transient_io(rasterio.open, snakemake.input.waterdepth) as src:  # noqa: F821
     bounds = src.bounds
 
-# Land-polygon background, from the project's own DeltaDTM mask - the
-# external OSM land_polygons dataset this used to read is retired
-# (2026-10-02, this project no longer uses OSM data). Identical for every
-# scenario of a study (same mosaic extent), so computed once and cached next
-# to the plots - see plotting.cached_land_polygons.
+# Land-polygon background from the DeltaDTM mask; identical for every scenario
+# of a study, so cached next to the plots.
 coastlines = cached_land_polygons(  # noqa: F821
     snakemake.params.data_catalog_root, tuple(bounds),  # noqa: F821
     cache_dir=Path(snakemake.output.waterdepth_plot).parent / ".land_polygons_cache",  # noqa: F821

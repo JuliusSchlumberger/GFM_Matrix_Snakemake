@@ -1,48 +1,12 @@
-"""Per-country coastal flood-extent validation driver.
+"""Score one country's national-coverage coastal benchmarks against model output.
 
-For one country, finds every applicable coastal benchmark in the validation
-catalog and scores it against production model output. Every supported
-benchmark is a national-coverage (`coverage: "national"`, the source assessed
-the ENTIRE coastline - Scotland, Wales, England, New Brunswick), extent,
-vector (GeoDataFrame) benchmark, scored by
-`validate_country_national_coverage()`'s per-postprocessing-chunk path - see
-that function's own docstring.
+Soft confusion matrix (`v.confusion_counts_soft`) at validation.primary_threshold_m,
+per `meta.regions` bbox, plus a blended "ALL" row. CSI_tol/HR_tol/FAR_tol
+(`validation.coastline_tolerance_cells`) are a boundary-registration diagnostic
+only, read next to pct_disagreement_forgiven. Design: docs/methods_04b_MapsValidation.md.
 
-Scoring itself is the soft/continuous confusion matrix throughout
-(`v.confusion_counts_soft`) at a single config-driven threshold
-(`validation.primary_threshold_m`) - no threshold sweep, no population
-weighting (removed 2026-10 - not needed by this pipeline).
-
-Every region row also carries a tolerant-confusion diagnostic (CSI_tol/
-HR_tol/FAR_tol, `v.confusion_counts_tolerant`, `validation.coastline_tolerance_cells`
-cells) alongside the strict CSI/HR/FAR - NOT a substitute for them, never
-used for any decision this pipeline makes on its own. It answers "how much
-of the strict disagreement sits right next to a cell where model and
-benchmark actually agree" (a small-scale boundary-registration effect, e.g.
-the permanent-water-mask-vs-benchmark-coastline mismatch described in
-methods_04b_MapsValidation.md's caveats), reported together with
-pct_disagreement_forgiven so the size of the effect is always visible next
-to the number it's explaining, not hidden behind it. Applies uniformly to
-every benchmark - it is a generic registration check, not a per-country
-special case.
-
-The benchmark's catalog entry defines `meta.regions: {name: [minx,miny,maxx,maxy]}`
-(required for national coverage); each region is scored separately (e.g. Scotland's
-`scotland` vs `firth_of_forth`) and metrics are reported/plotted per region
-instead of blended into one national row. `_blend_regions` additionally folds
-every region into one country-level row (auto-detecting whether the regions are a
-disjoint partition - summed - or a nested whole-territory + sub-area set, like Wales/
-Scotland/New Brunswick - the whole-territory region's own numbers ARE the total, not
-re-summed with its nested sub-areas, which would double-count them).
-
-Writes:
-  {validation.output_dir}/{country}/metrics_{country}_{RP}_{SLR}.csv
-  {validation.output_dir}/{country}/agreement_{country}_{region}_{RP}_{SLR}.tif (one per region)
-    (plots.resolution_m, priority-reduced: over > under > agree > dry -
-    see _write_agreement_raster)
-
-See docs/methods_04b_MapsValidation.md for the current design; src/validation.py
-for the stateless computational building blocks this file just orchestrates.
+Writes metrics_{ISO}_{RP}_{SLR}.csv and agreement_{ISO}_{region}_{RP}_{SLR}.tif
+per region under {validation.output_dir}/{ISO}/.
 
 Usage:
     python validation/validate_country.py \\
@@ -68,7 +32,7 @@ from pipeline_plots import pixel_area_km2_grid  # noqa: E402
 from tiles import load_tile_grid  # noqa: E402
 import validation as v  # noqa: E402
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))  # validation/ (for _chunks)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _chunks import (  # noqa: E402
     _chunks_overlapping_bbox,
     _mosaic_read,
@@ -77,48 +41,22 @@ from _chunks import (  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# Agreement-category codes, ordered so Resampling.max correctly implements
-# a "priority: over > under > agree > dry" rule when a display raster does
-# need coarsening (_write_agreement_raster, whole-country-scale regions
-# only) - the highest code present in a coarse cell wins.
+# Ordered so Resampling.max gives priority over > under > agree > dry when coarsening.
 _CAT_DRY = 0
 _CAT_AGREE = 1
 _CAT_UNDER = 2
 _CAT_OVER = 3
 
-# _write_agreement_raster's own native-vs-coarsened resolution cutoff (pixels,
-# either dimension) - every sub-region today (Wales/Scotland/New Brunswick's
-# own nested sub-areas) is well
-# under this at the model's native 30m resolution (a few hundred to ~1000px
-# across), so stays at native resolution; a whole-country region (e.g.
-# Scotland mainland) is thousands of px across at 30m and falls back to
-# `plots.resolution_m` instead. See that function's own docstring for why
-# this matters (MAX-resampling a coarsened category raster visually
-# overstates disagreement - confirmed on Firth of Forth).
+# Regions larger than this (px, either side) are coarsened to plots.resolution_m;
+# sub-regions stay native because MAX-resampling overstates disagreement.
 _AGREEMENT_RASTER_MAX_DIM_PX = 2500
 
 
 def _read_flood_totals(flood_totals_dir: Path, country_iso: str, rp: str, slr: str) -> tuple[float, float]:
-    """Country-wide total flooded area (km2) + exposed population for (rp, slr),
-    at the single fixed exposure threshold (exposure.exceedance_threshold_m) -
-    read from analysis/compute_flood_totals.py's precomputed
-    flood_totals_{country}.csv (analysis.compute_flood_totals switch), rather than
-    re-derived from raw depth here.
+    """Country-wide flooded km2 and exposed population from flood_totals_{ISO}.csv.
 
-    Addresses caveats doc §1.2: a benchmark region only ever sees its own
-    local window, so it understates how much the model floods/exposes across the
-    WHOLE country. compute_flood_totals.py already computes this correctly and
-    cheaply (same WRI geogunit + FLOPROS ISO lookup used for exposure aggregation
-    - exact country membership, not a `regions:` bbox needing its own mask) as
-    part of the general analysis pipeline, streamed once for every country at
-    once - re-deriving it per validation run from raw depth chunks would just
-    duplicate that work far more slowly and with a bbox-approximated country
-    boundary. Country-wide, not per-region: every region-row of this country's
-    metrics CSV gets the SAME two values.
-
-    Returns (NaN, NaN), never a silent 0.0, if the CSV or the matching (rp, slr)
-    row doesn't exist yet - most likely because analysis/run_analysis.py hasn't
-    been (re-)run since this feature was added.
+    Uses analysis/compute_flood_totals.py output at exposure.exceedance_threshold_m.
+    Returns (NaN, NaN) if the CSV or the (rp, slr) row is missing.
     """
     csv_path = flood_totals_dir / f"flood_totals_{country_iso}.csv"
     if not csv_path.exists():
@@ -133,34 +71,8 @@ def _read_flood_totals(flood_totals_dir: Path, country_iso: str, rp: str, slr: s
 
 
 def _round_row(row: dict) -> dict:
-    """Round the CSV's numeric columns to a sane display precision.
-
-    Area (km²), population, and cell counts round to whole numbers - the
-    model's own resolution (~30-50m, plan doc §2.1/§7.1) and the underlying
-    population/benchmark data don't support the 15 significant digits raw
-    float64 arithmetic produces (e.g. `1657.027066374921` km²), and
-    reporting that many is actively misleading about the real precision of
-    these estimates. EXCEPT: a value with `abs() < 1` rounds to 2 decimals
-    instead of a bare integer, so a real (if small) nonzero quantity - e.g.
-    `benchmark_wet_outside_model_domain_km2 = 0.34` - doesn't silently
-    round away to `0` and read as "none" when it's actually "a little."
-
-    Ratio metrics (HR/FAR/CSI/EB/EB_ratio/bias, the pop_* ratios, and the
-    outside-domain %) are proportions, not counts - rounding THOSE to whole
-    numbers would destroy virtually all their information (0.93 vs 0.0 read
-    identically as "1" vs "0"), so they always keep 3 decimal places
-    instead (matching this script's own console summary), regardless of
-    magnitude.
-
-    CSI_tol/HR_tol/FAR_tol (v.confusion_counts_tolerant) are a diagnostic
-    companion to CSI/HR/FAR, not a substitute - always read them next to
-    pct_disagreement_forgiven (how much of the STRICT disagreement the
-    tolerance check actually excused): a high CSI_tol with a high
-    pct_disagreement_forgiven means "mostly boundary-registration noise,"
-    the same CSI_tol with a low pct_disagreement_forgiven would be
-    suspicious (shouldn't happen by construction - see that function's own
-    docstring - but the column is there so it's checkable, not assumed).
-    """
+    # Areas: integers (precision beyond the ~30m grid is spurious), but 2 decimals
+    # below 1 so small nonzero values do not read as 0. Ratios: 3 decimals.
     int_cols = (
         "tp_km2", "fp_km2", "fn_km2", "tn_km2",
         "benchmark_wet_km2", "model_wet_km2", "benchmark_wet_outside_model_domain_km2",
@@ -176,7 +88,7 @@ def _round_row(row: dict) -> dict:
     out = dict(row)
     for col in int_cols:
         val = out.get(col)
-        if val is not None and val == val:  # NaN != NaN - leave NaN as-is
+        if val is not None and val == val:  # skip NaN
             out[col] = round(val, 2) if abs(val) < 1 else int(round(val))
     for col in ratio_cols:
         if col in out and out[col] == out[col]:
@@ -188,22 +100,12 @@ def _new_acc() -> dict[str, float]:
     return {
         "tp_km2": 0.0, "fp_km2": 0.0, "fn_km2": 0.0, "tn_km2": 0.0,
         "tp_cells": 0, "fp_cells": 0, "fn_cells": 0, "tn_cells": 0,
-        # Tolerant confusion matrix (v.confusion_counts_tolerant) - a
-        # diagnostic companion to the tp/fp/fn/tn above, never a substitute.
-        # See _round_row's own CSI_tol/pct_disagreement_forgiven comment.
         "tp_tol_km2": 0.0, "fp_tol_km2": 0.0, "fn_tol_km2": 0.0, "tn_tol_km2": 0.0,
         "fp_forgiven_km2": 0.0, "fn_forgiven_km2": 0.0,
     }
 
 
 def _find_benchmark_keys(catalog, country_iso: str) -> list[str]:
-    """Every catalog entry whose meta.country_iso matches and hazard_type == 'coastal'.
-
-    Scans the whole catalog rather than a hardcoded per-country key list -
-    adding a new country/dataset is a catalog entry, not a code change
-    (plan doc §5.2). `catalog.sources` is a plain dict (confirmed against
-    this repo's installed hydromt version, 2026-09).
-    """
     keys = []
     for key in catalog.sources.keys():
         meta = catalog.get_source(key).meta or {}
@@ -212,38 +114,13 @@ def _find_benchmark_keys(catalog, country_iso: str) -> list[str]:
     return sorted(keys)
 
 
-_BLENDED_REGION = "ALL"  # country-level blended row's own region label, from _blend_regions
+_BLENDED_REGION = "ALL"
 
 
 def _blend_regions(rows: list[dict], regions_spec: dict[str, list[float]] | None) -> dict | None:
-    """One country-level row, folding every region row in `rows` (all sharing
-    the same benchmark_key/return_period/waterlevel_name - callers group by
-    that first) into a single total - "region pooling" (2026-09 through
-    2026-10: left to the consumer, see methods_04b_MapsValidation.md's own
-    former note to that effect) is now part of the pipeline itself.
-
-    Two region-partition shapes are supported and need different
-    handling, auto-detected by bbox containment (no new catalog field):
-
-    - DISJOINT partition (no bbox contains all the others - e.g. a mainland
-      plus separate islands): every
-      region covers genuinely separate ground, so summing tp/fp/fn/tn
-      across all of them and recomputing HR/FAR/CSI/bias from the pooled
-      sums gives a real country-wide number.
-    - NESTED whole-territory + sub-area(s) (Wales wales+severn_estuary+
-      menai_strait, Scotland scotland+firth_of_forth, New Brunswick
-      new_brunswick+cumberland_basin+petitcodiac): a sub-area's bbox sits
-      entirely inside the whole-territory bbox and is independently
-      re-scored over the same ground (see each catalog entry's own
-      known_caveats) - summing would double-count the sub-area's cells.
-      The bbox that CONTAINS every sibling's bbox is the whole-territory
-      region; its own row already IS the country total, used as-is.
-
-    Returns None if `rows` is empty (nothing to blend) or there is only one
-    region row already (blending a single row would just be a relabeled
-    copy of it - not useful, and ambiguous with the real "ALL" semantics
-    once a country legitimately has only one region).
-    """
+    # Rows share one benchmark/RP/SLR. If one region bbox contains all others (nested
+    # whole territory + sub-areas), its row is the total; else the regions are
+    # disjoint and counts are summed. None for <= 1 row.
     if len(rows) <= 1:
         return None
 
@@ -295,8 +172,8 @@ def _blend_regions(rows: list[dict], regions_spec: dict[str, list[float]] | None
         "benchmark_wet_outside_model_domain_km2": sum(
             r.get("benchmark_wet_outside_model_domain_km2", 0.0) for r in rows
         ),
-        "benchmark_wet_outside_model_domain_pct": float("nan"),  # not a meaningful sum - see per-region rows
-        "model_total_wet_km2": first.get("model_total_wet_km2", float("nan")),  # already country-wide, not per-region
+        "benchmark_wet_outside_model_domain_pct": float("nan"),
+        "model_total_wet_km2": first.get("model_total_wet_km2", float("nan")),  # already country-wide
         "HR": metrics["HR"], "FAR": metrics["FAR"], "CSI": metrics["CSI"],
         "EB": metrics["EB"], "EB_ratio": metrics["EB_ratio"], "bias": metrics["bias"],
         "tp_tol_km2": tp_tol, "fp_tol_km2": fp_tol, "fn_tol_km2": fn_tol, "tn_tol_km2": tn_tol,
@@ -313,39 +190,13 @@ def validate_country_national_coverage(
     bench_catalog,
     read_tiles_directly: bool = False,
 ) -> pd.DataFrame:
-    """Score every national-coverage coastal benchmark for one country, per postprocessing chunk.
+    """Score every national-coverage coastal benchmark for one country, chunk by chunk.
 
-    A "national coverage" benchmark (``coverage != "partial"``) assessed its entire coastline, so
-    a model-wet cell anywhere in the model's domain outside the benchmark polygon is an
-    unambiguous false positive - there is no unsurveyed region to protect with a buffer/merge
-    step. Processing goes chunk-by-chunk rather than clustering the whole benchmark into one
-    evaluation polygon, which previously overflowed memory (a 65.9 GiB allocation crash) on a
-    long national coastline. The domain is the model's own domain, masked to `country_iso`'s
-    territory (or `spec.geogunit_ids`) so that flooding outside a region's bounding box is never
-    misscored as a false positive.
-
-    Parameters
-    ----------
-    country_iso : str
-        ISO-3 country code to validate.
-    cfg : dict
-        Loaded pipeline config; uses the `validation`, `postprocessing`, `simulation` and
-        `tile_grid` sections.
-    gfm_catalog : hydromt data catalog
-        Catalog for model-side sources (permanent water mask, geogunit/ISO lookup).
-    bench_catalog : hydromt data catalog
-        Catalog holding the benchmark specs and geometries.
-    read_tiles_directly : bool, default False
-        Read model depth from production's per-tile result rasters instead of `merge_chunk`'s
-        merged chunks - for an ad hoc tile subset that was never run through `merge_chunk`
-        (see `_tile_paths_overlapping_bbox`).
-
-    Returns
-    -------
-    pandas.DataFrame
-        One row per scored region plus one blended country-level row (region ``"ALL"``) when a
-        benchmark has multiple regions; empty if no national-coverage extent benchmark exists
-        for this country. Also writes one agreement raster per region as a side effect.
+    The benchmark assessed the whole coastline, so model-wet cells outside its polygons
+    are false positives. The domain is the model domain minus permanent water, masked to
+    the country (or `spec.geogunit_ids`). Scoring per chunk bounds memory on long
+    coastlines. `read_tiles_directly` reads per-tile results instead of merged chunks.
+    Side effect: writes one agreement raster per region.
     """
     val_cfg = cfg["validation"]
     rp = val_cfg["return_period"]
@@ -390,8 +241,6 @@ def validate_country_national_coverage(
             )
         print(f"  National-coverage benchmark: {benchmark_key} ({spec.data_type})")
 
-        # The WHOLE benchmark is loaded upfront to build a spatial index for
-        # per-chunk candidate queries.
         full_gdf = v.load_benchmark_full(bench_catalog, spec)
         if full_gdf.empty:
             print(f"    {benchmark_key}: empty after filtering - skipping.")
@@ -409,12 +258,6 @@ def validate_country_national_coverage(
         n_chunks_total = 0
 
         for region, region_bbox in spec.regions.items():
-            # Each piece is one (depth, out_transform) to score - either one
-            # per overlapping merge_chunk file (windowed to region_bbox,
-            # since a chunk can hold multiple named regions, see comment
-            # below) or, read_tiles_directly, a single mosaic read spanning
-            # the whole region_bbox directly from production's per-tile
-            # results (see this function's own docstring).
             pieces: list[tuple[np.ndarray, Affine]] = []
             if read_tiles_directly:
                 tile_paths = _tile_paths_overlapping_bbox(region_bbox, tile_grid, model_outputs, rp, slr)
@@ -427,16 +270,8 @@ def validate_country_national_coverage(
                 n_chunks_total += len(chunk_paths)
                 for chunk_path in chunk_paths:
                     with retry_transient_io(rasterio.open, chunk_path) as src:
-                        # Window the read to region_bbox ∩ this chunk's own bounds - a
-                        # chunk is a fixed 5deg cell that can contain MULTIPLE named
-                        # regions (e.g. Wales' severn_estuary and menai_strait both
-                        # fall in the same chunk), so reading the whole chunk here
-                        # would evaluate the SAME data for every region sharing it
-                        # (confirmed 2026-09-30: produced byte-identical metrics for
-                        # two genuinely different, ~150km-apart Welsh regions before
-                        # this fix). region_bbox is a rectangle, not real geometry, so
-                        # this still relies on read_country_mask below to exclude any
-                        # non-target territory within the window.
+                        # A chunk can hold several regions; window to region_bbox so each
+                        # region scores its own data.
                         window = rasterio.windows.from_bounds(*region_bbox, transform=src.transform)
                         window = window.intersection(rasterio.windows.Window(0, 0, src.width, src.height))
                         window = window.round_offsets().round_lengths()
@@ -458,21 +293,15 @@ def validate_country_national_coverage(
                 fraction = v.benchmark_fraction_from_vector(
                     chunk_bench_gdf, out_transform, "EPSG:4326", depth.shape, supersample=supersample,
                 )
-                # Scoring uses `fraction` directly (confusion_counts_soft) -
-                # never thresholded into a binary wet/dry call.
-                # benchmark_wet_display is ONLY for the agreement-map
-                # category raster below (one discrete colour per cell) - it
-                # plays no part in any number in the metrics CSV.
+                # Scoring uses the soft `fraction`; the thresholded mask is display only.
                 benchmark_wet_display = v.wet_mask_from_fraction(fraction, wet_fraction)
 
                 water_mask = v.read_permanent_water_mask(
                     gfm_catalog, permanent_water_source, permanent_water_codes, bbox, out_transform, depth.shape,
                 )
                 not_water = ~water_mask
-                # region_bbox is a rectangle, not the benchmark's own real coastline - it can
-                # genuinely overlap neighbouring territory, whose own real GFM-modelled
-                # flooding would otherwise be scored as a false positive. There is no
-                # equivalent guardrail here without it.
+                # region_bbox can overlap neighbouring territory, whose flooding would
+                # otherwise count as false positives.
                 in_country = v.read_country_mask(
                     gfm_catalog, geogunit_source, iso_lookup, country_iso, bbox, out_transform, depth.shape,
                     geogunit_ids=spec.geogunit_ids,
@@ -495,8 +324,7 @@ def validate_country_national_coverage(
                 a["fp_km2"] += fp
                 a["fn_km2"] += fn
                 a["tn_km2"] += tn
-                # "cells" columns are soft/effective counts (float,
-                # fraction-weighted) too.
+                # Cell counts are fraction-weighted (float).
                 tp_c, fp_c, fn_c, tn_c = v.confusion_counts_soft(
                     model_wet, fraction, domain_mask, np.ones_like(area_km2),
                 )
@@ -513,8 +341,6 @@ def validate_country_national_coverage(
                 a["fp_forgiven_km2"] += tol["fp_forgiven"]
                 a["fn_forgiven_km2"] += tol["fn_forgiven"]
 
-                # Display only - benchmark_wet_display's own threshold plays
-                # no part in the scoring above.
                 chunk_agreement = np.full(depth.shape, _CAT_DRY, dtype="uint8")
                 chunk_agreement[domain_mask & model_wet & ~benchmark_wet_display] = _CAT_OVER
                 chunk_agreement[domain_mask & ~model_wet & benchmark_wet_display] = _CAT_UNDER
@@ -578,38 +404,8 @@ def _write_agreement_raster(
     region_name: str,
     metric: str = "agreement",
 ) -> None:
-    """Mosaic one region's native-resolution agreement category
-    grids into one raster - at the model's own NATIVE resolution when the
-    region is small enough for that to stay a tractable file size/pixel
-    count (every nested sub-area like Wales'
-    menai_strait/severn_estuary or Scotland's firth_of_forth), falling back
-    to the coarser `plots.resolution_m` (with MAX resampling on the
-    category codes - dry(0) < agree(1) < under(2) < over(3), so MAX
-    implements "priority: over > under > agree > dry") only for a
-    whole-country-scale region where native resolution would make the
-    raster impractically large (e.g. Scotland's own mainland, hundreds of
-    km across).
-
-    2026-10: downsampling to `plots.resolution_m` UNCONDITIONALLY, as this
-    function used to, visually overstates disagreement on a close-up panel
-    - MAX-resampling the category codes means a single native cell inside a
-    coarse output cell (at 200m vs. the model's own 30m, one output cell
-    covers ~44 native cells) paints the WHOLE coarse cell with that single
-    cell's own category, so one real, small, isolated patch of
-    over-/under-prediction visually balloons to the size of the coarse
-    cell - confirmed directly on Firth of Forth. This never affected the
-    real CSI/HR/FAR numbers (computed earlier, from the native-resolution
-    depth/fraction grids, never from this downsampled display raster) - it
-    was purely a visualization artifact.
-
-    `metric` is the output filename prefix (default "agreement").
-
-    One raster PER REGION, not one combined per country - a country's named
-    regions can be far apart, so mosaicking them into one array would mean a huge, mostly-empty
-    raster spanning the gap between them. plot_agreement_map.py reads all of a
-    country's per-region rasters and shows the largest as the main map, the
-    rest as small inset panels.
-    """
+    # Display only: metrics come from the native grids. Native resolution unless the
+    # region exceeds _AGREEMENT_RASTER_MAX_DIM_PX, then plots.resolution_m with MAX.
     if not agreement_pieces:
         return
     val_cfg = cfg["validation"]
@@ -620,11 +416,11 @@ def _write_agreement_raster(
     maxx = max(b[2] for b in all_bounds)
     maxy = max(b[3] for b in all_bounds)
 
-    native_res_deg = abs(agreement_pieces[0][1].a)  # every piece shares the same native (model) grid resolution
+    native_res_deg = abs(agreement_pieces[0][1].a)  # all pieces share the model grid
     native_w = (maxx - minx) / native_res_deg
     native_h = (maxy - miny) / native_res_deg
     if max(native_w, native_h) <= _AGREEMENT_RASTER_MAX_DIM_PX:
-        res_deg = native_res_deg  # small enough region - no coarsening, no priority-max artifact at all
+        res_deg = native_res_deg
     else:
         res_deg = float(val_cfg["plots"]["resolution_m"]) / (111.32 * 1000.0)
 
@@ -657,14 +453,7 @@ def _write_agreement_raster(
 
 
 def main() -> None:
-    """Parse CLI arguments, score one country's benchmarks, and write its metrics CSV.
-
-    Runs `validate_country_national_coverage` for the given country, writes
-    ``{output_dir}/{country}/metrics_{country}_{rp}_{slr}.csv`` (and one agreement raster per
-    region, as a side effect of that call), and prints the blended or per-region
-    HR/FAR/CSI/CSI_tol summary to the console. Prints a notice and does nothing else if no
-    extent rows are produced.
-    """
+    """Score one country, write its metrics CSV and print the summary."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--country", required=True, help="ISO-3 country code, e.g. GBR")
@@ -712,10 +501,6 @@ def main() -> None:
         atomic_write(out_path, lambda f: df.to_csv(f, index=False), mode="w", encoding="utf-8", newline="")
         print(f"\nMetrics written: {out_path} ({len(df)} row(s))")
 
-        # One row per region already (no more threshold_m/domain dimensions to
-        # dedup across - single config-driven threshold, one well-justified
-        # domain per benchmark). Print the blended country-level row
-        # (_BLENDED_REGION, "ALL") where one exists, else every region row.
         has_blended = df["region"].eq(_BLENDED_REGION)
         printed = df[has_blended] if has_blended.any() else df
         for _, row in printed.iterrows():

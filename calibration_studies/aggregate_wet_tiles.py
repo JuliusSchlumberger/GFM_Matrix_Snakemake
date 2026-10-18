@@ -1,22 +1,7 @@
-"""Builds wet_tiles_selected.txt from a sweep_budget output directory's
-per-tile CSVs, post-hoc. This is the counterpart to
-run_sweep_budget_study.py's own sequential-run write of that file,
-which is skipped when the script runs as one tile per call (concurrent
-single-tile HPC tasks all writing "the" same file would race - see that
-script's own main() comment).
+"""Build wet_tiles_selected.txt from a sweep_budget dir's per-tile CSVs.
 
-A tile is "wet" iff its CSV has more than 1 row - the trace loop writes
-exactly 1 row and stops immediately when sweep 1 shows zero flooding (see
-run_tile_sweep_trace's own dry-tile handling), so row count alone
-distinguishes dry (1 row) from wet (>1 row) without re-deriving n_inundated
-from the CSV content itself. A 0-byte/unreadable CSV means that task never
-started or is still running - treated as "not yet known", not dry.
-
-`aggregate_wet_tiles()` is also imported directly by
-plot_sweep_calibration_bands.py, which runs this as its own first step
-rather than requiring a separate manual invocation first - this script
-remains usable standalone too (e.g. to just check wet-tile counts without
-plotting).
+Wet = CSV has >1 row (the trace writes 1 row and stops on a dry tile); an
+empty/unreadable CSV is a task not yet finished, not dry.
 
 Usage:
     python aggregate_wet_tiles.py <sweep_budget_dir> [--n-tiles-wanted 500]
@@ -31,9 +16,7 @@ import pandas as pd
 
 
 def aggregate_wet_tiles(sweep_budget_dir: Path, n_tiles_wanted: int) -> list[int]:
-    """Scans every *.csv in sweep_budget_dir, writes the first n_tiles_wanted
-    wet tile_ids (CSV mtime order) to wet_tiles_selected.txt, and returns
-    that same selected list."""
+    """Write and return the first n_tiles_wanted wet tile ids (CSV mtime order)."""
     csvs = sorted(sweep_budget_dir.glob("*.csv"), key=lambda p: p.stat().st_mtime)
 
     wet_tiles: list[int] = []

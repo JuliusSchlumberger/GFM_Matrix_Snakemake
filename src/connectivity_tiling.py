@@ -1,61 +1,11 @@
-"""Connectivity-first domain construction for the global flood-modeling pipeline.
+"""Build connectivity-first flood-simulation domains from the DeltaDTM tile index.
 
-Production implementation (2026-10) of the method documented in full in
-docs/methods_01_tile_processing_and_waterlevels.md section 3 - read that for the
-conceptual design, the "why this is correct" argument, and real validation
-numbers (a full-world run: 4,504 final domains, median 24.8M cells, hop-distance
-chains up to depth 10, 114 domains correctly dropped as unreachable). This
-module's docstrings below cover implementation detail only.
-
-Supersedes the old 13-stage greedy-covering pipeline (build_chunks/reduce_overlap/
-filter_and_shave_chunks/.../compute_run_order - fully retired and removed, 2026-10)
-whose per-tile independent shave decisions could silently erode the overlap meant
-to preserve flood connectivity across a chunk boundary. This method instead
-derives every domain boundary from the real
-floodable-land connectivity structure of the terrain itself: a boundary is placed
-only where no floodable connectivity crosses it at all, or where a bounded,
-explicit overlap compensates for cutting through content that IS connected - never
-from an independent, local, per-tile judgment call.
-
-Phases (orchestrated by preparation/build_tile_manifest.py, not in this module):
-  0. Raw 1x1deg DeltaDTM tile index (`load_raw_tile_index`, thin wrapper over
-     `build_tile_index` below - filename-parsed only, no raster read).
-  1. Tile-adjacency graph, edged by real floodable-LAND connectivity only, never
-     ocean (`build_connectivity_graph`) - see the module-level rationale below.
-  2. Connected components over that graph (`connected_components`, plain
-     union-find).
-  3. Budget-aware recursive splitting of each component into rectangular domains
-     (`split_component_to_budget`/`_split_window`): no split if the component's
-     trimmed bbox already fits the budget; prefer a genuine internal gap (free -
-     no real content crosses it); only fall back to a forced geometric cut (the
-     one place a bounded, explicit overlap is introduced) when no gap exists.
-  4. Post-hoc size-based merging of undersized domains within one component
-     (`merge_small_domains_tiered`) - a connectivity-preserving union of bboxes,
-     never crosses a component boundary.
-  5. Hop-distance BFS (`compute_hop_distances`), scoped within one component_id
-     only - a domain with real ocean access is hop=0 (self-forced, exactly
-     production's own hop_distance==0 rule); every other domain's hop_distance is
-     its BFS distance to the nearest ocean-touching domain in its own component.
-     A domain with no path to ocean within its own component is unreachable and
-     must be dropped before simulation.
-  6. Coastal buffer pad (`pad_hop0_domains_bbox`), hop=0 domains only - see that
-     function's own docstring for why this is scoped to hop=0 and run strictly
-     after Phase 5, not before.
-
-Phase 1's "ocean is never a connector" design choice: a tile's exposure to open
-ocean is already fully represented through its own direct coastal boundary forcing
-(Phase 5); two separate stretches of coastline being geographically adjacent is not
-evidence that flooding in one could propagate overland into the other. Treating
-ocean adjacency as a connector would inflate connected-component size with no
-corresponding physical justification.
-
-Built from, and replaces, the standalone prototype at
-tests/connectivity_tiling_prototype/connectivity_tiling.py (since removed; see
-git history) - that prototype also
-tried two rejected alternative splitting strategies (balance-aware gap selection,
-morphological pre-smoothing) before the tiered-merge approach shipped here; see
-docs/methods_01_tile_processing_and_waterlevels.md for why they were rejected. Not
-carried into this production module.
+Method: docs/methods_01_tile_processing_and_waterlevels.md section 3; orchestrated by
+preparation/build_tile_manifest.py. Domain boundaries fall only where no floodable land
+connectivity crosses, or where a forced cut adds a bounded explicit overlap. Phases:
+0 tile index, 1 floodable-land adjacency graph (ocean is never a connector: coastal
+exposure is handled by each domain's own boundary forcing), 2 connected components,
+3 budget-aware splitting, 4 tiered merging, 5 hop-distance BFS, 6 hop=0 coastal pad.
 """
 
 from __future__ import annotations
@@ -77,49 +27,17 @@ from shapely.geometry import box
 from config_utils import retry_transient_io
 from tiles import _clamp_window, _coord_str, _degree_tiles_for_bbox, _open_mask_tile
 
-_DEG_TO_NATIVE_PX = 3600.0  # DeltaDTM's own 1 arcsec native resolution - independent of latitude
-# (confirmed: native cell count = lon_extent_deg*3600 * lat_extent_deg*3600)
+_DEG_TO_NATIVE_PX = 3600.0  # DeltaDTM 1 arcsec, independent of latitude
 _KM_PER_DEG = 111.32
-_M_PER_DEG = 111_320.0  # equatorial approximation, matches tiles.py's own constant - used by
-# _mosaic_nearest_coarse below (metres, not km, unlike _KM_PER_DEG above)
+_M_PER_DEG = 111_320.0  # equatorial approximation, matches tiles.py
 
 
 @dataclass
 class ConnectivityConfig:
-    """Tunable parameters threaded through every phase of this pipeline.
+    """Tunable parameters shared by all phases (from `tile_generation.*` config).
 
-    Most fields are read from the pipeline config (`tile_generation.*`) by
-    `build_tile_manifest.py`; one instance is shared across all phases.
-
-    Attributes
-    ----------
-    elev_threshold_m : float
-        Elevation (m) below which land counts as floodable, for connectivity checks.
-    ocean_code : int
-        Mask code for ocean pixels.
-    coarse_resolution_m : float
-        Resolution (m) for Phase 3's gap-finding/trim read.
-    strip_resolution_m : float
-        Resolution (m) for Phase 1's edge-connectivity check.
-    strip_width_deg : float
-        Width (degrees) of the edge-connectivity strip on each side of a tile border.
-    budget_cells : float
-        Target native (~30m) cell count per domain; Phase 3 splits above this.
-    min_split_gap_coarse_cells : int
-        Minimum width (coarse cells) of a natural gap Phase 3 will split on.
-    overlap_target_km : float
-        Overlap width (km) introduced by a forced split when no natural gap exists.
-    merge_trigger_cells : float
-        Native cell count below which a domain is a Phase 4 merge candidate.
-    preferred_ceiling_cells : float
-        Tier-1 merge target cell count in Phase 4.
-    hard_ceiling_cells : float
-        Tier-2 merge cap / absolute cap on domain cell count.
-    coastal_buffer_km : float
-        Phase 6 pad width (km), applied to hop=0 domains only.
-    water_codes : tuple of int
-        Mask codes treated as water/non-floodable; set to `(ocean_code,)` by
-        `__post_init__` if left empty.
+    Cell counts are native ~30 m (1 arcsec) cells. `water_codes` defaults to
+    `(ocean_code,)`.
     """
 
     elev_threshold_m: float
@@ -141,14 +59,7 @@ class ConnectivityConfig:
             self.water_codes = (self.ocean_code,)
 
 
-# ---------------------------------------------------------------------------
-# Phase 0 - tile index (filenames only, no raster data read). Moved in from
-# the now-deleted src/tile_chunking.py (2026-10) - that module used to hold
-# the retired 13-stage greedy-covering pipeline too (see this file's own
-# module docstring); once that pipeline was gone, all that was left in it
-# were these few shared primitives this module already imported, so there
-# was no reason to keep them in a separate file.
-# ---------------------------------------------------------------------------
+# Phase 0 - tile index (filenames only, no raster data read)
 
 _COORD_RE = re.compile(r"([NS])(\d{2})([EW])(\d{3})")
 
@@ -162,22 +73,9 @@ def _parse_coord_from_filename(name: str) -> tuple[int, int] | None:
 
 
 def build_tile_index(mask_dir: Path) -> gpd.GeoDataFrame:
-    """Build one 1x1deg polygon per real DeltaDTM mask tile file in `mask_dir`.
+    """Build one 1x1deg EPSG:4326 box per DeltaDTM mask tile file in `mask_dir`.
 
-    Parsed purely from filenames (the {NS}{lat:02d}{EW}{lon:03d} SW-corner
-    coordinate token, same convention as tiles.py's `_scan_mask_dir`/
-    `_coord_str`) - no raster data is read at all.
-
-    Parameters
-    ----------
-    mask_dir : Path
-        Directory to scan for `*.tif` DeltaDTM mask tile files.
-
-    Returns
-    -------
-    gpd.GeoDataFrame
-        One row per tile found, with columns `coord`, `lat`, `lon`, `geometry`
-        (a 1x1deg box), CRS EPSG:4326.
+    Parsed from the {NS}{lat:02d}{EW}{lon:03d} SW-corner filename token only.
     """
     rows = []
     for path in mask_dir.glob("*.tif"):
@@ -194,64 +92,16 @@ def build_tile_index(mask_dir: Path) -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame(rows, geometry="geometry", crs="EPSG:4326")
 
 
-# ---------------------------------------------------------------------------
-# Shared coarse mosaic reader - every phase of this module goes through this.
-# ---------------------------------------------------------------------------
-
 def _mosaic_nearest_coarse(
     bbox: tuple[float, float, float, float], mask_index: dict, dem_index: dict | None, resolution_m: float,
     allowed_coords: set[str] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, Affine] | None:
-    """Direct-to-coarse mosaic of mask+dem, BOTH via nearest-neighbour
-    resampling - same per-source-tile read loop as tiles.mosaic_mask_dem_
-    coarse, but nearest (not MIN) for elevation too. mosaic_mask_dem_coarse's
-    MIN-for-elevation is a deliberate, biased-low choice for a different
-    question ("does any low pocket exist in this coarse cell") - it would
-    systematically UNDER-count how much of a cell is above the threshold.
-    This gives unbiased point SAMPLES of the true native distribution
-    instead, suitable for estimating a fraction. `dem_index=None` skips
-    the elevation read entirely (only the mask is needed by some callers).
-
-    `allowed_coords`, if given, restricts which degree-tiles within `bbox`
-    are actually read - any coord not in the set is skipped exactly like a
-    missing mask file (left at the default nodata fill), regardless of
-    whether a real tile exists there. Default (None) is unrestricted,
-    unchanged behaviour for every existing caller. Added for Phase 3
-    (split_component_to_budget): a connected component's bounding-box
-    rectangle can enclose far more tiles than its real members (e.g. a
-    continent-scale component's bbox - confirmed on real worldwide data,
-    2026-10 - can geometrically contain thousands of degree-cells against a
-    few hundred real members), and reading every one of them is both slow
-    (far more file opens than the component actually needs) and a latent
-    correctness risk: real floodable land belonging to a DIFFERENT,
-    Phase-1-unconnected component could otherwise be swept into this
-    component's `keep` mask purely because its bbox happens to enclose it
-    geographically, contradicting the whole method's core guarantee that
-    nothing crosses a component boundary without reason.
-
-    Opens every source tile with `OVERVIEW_LEVEL="NONE"` (forcing the base
-    full-resolution layer) - confirmed necessary, not cosmetic, 2026-10:
-    DeltaDTM mask tiles carry embedded GDAL overview pyramids, and at least
-    one real tile's overviews contain mask value 1 (ocean_code) at pixels
-    where the true base-resolution data has NO ocean_code cell anywhere
-    (verified directly against DeltaDTM_v1_1_N15E100.tif - base-resolution
-    full read: {0, 2, 3} only; its own level-0/level-1 overviews: also
-    contain 1). rasterio's windowed `read(..., out_shape=..., resampling=
-    Resampling.nearest)` silently lets GDAL substitute a matching overview
-    as the read source for a large decimation factor (an internal GDAL
-    performance optimization, not controlled by the `resampling=` argument,
-    which only governs how pixels are picked FROM whichever layer GDAL
-    chose) - so without this override, "nearest" picks a real pixel, but
-    from an already-corrupted overview, not the native grid. The overviews
-    were evidently built with an averaging-type resampler over categorical
-    codes (0=land/2=lake averages to exactly 1=ocean_code) - invalid for
-    this data regardless of which GDAL step produced them. This was traced
-    from a real, data-grounded false positive during the connectivity-
-    first migration - a domain over the Nakhon Sawan, Thailand river
-    confluence was marked hop_distance=0 (self-forced, i.e. "touches
-    ocean") purely from this artifact; the true base-resolution mask has
-    no ocean_code there at all.
-    """
+    # Nearest (not MIN, unlike tiles.mosaic_mask_dem_coarse) for elevation too, giving
+    # unbiased samples for fraction estimates. `allowed_coords` restricts reads to a
+    # component's member tiles so land from another, unconnected component inside the
+    # same bbox is never swept in. OVERVIEW_LEVEL="NONE" is required: DeltaDTM mask
+    # overviews were built with an averaging resampler over categorical codes
+    # (land 0 / lake 2 -> ocean 1), and GDAL silently reads them for large decimation.
     minx, miny, maxx, maxy = bbox
     px_deg = resolution_m / _M_PER_DEG
     out_width = max(1, round((maxx - minx) / px_deg))
@@ -302,14 +152,7 @@ def _mosaic_nearest_coarse(
     return mask_out, dem_out, transform
 
 
-# ---------------------------------------------------------------------------
-# Phase 3's natural-gap search (_split_window, below)
-# ---------------------------------------------------------------------------
-
 def _contiguous_true_runs(arr_1d: np.ndarray, max_extent: int | None = None) -> list[tuple[int, int]]:
-    """Maximal contiguous (start, end) index runs of True, inclusive - each
-    further split into sub-runs of at most `max_extent` if given.
-    """
     runs = []
     start = None
     for i, v in enumerate(arr_1d):
@@ -333,12 +176,7 @@ def _contiguous_true_runs(arr_1d: np.ndarray, max_extent: int | None = None) -> 
 
 
 def _first_interior_gap(mask_1d: np.ndarray, min_len: int) -> tuple[int, int] | None:
-    """First (start, end) inclusive run of True in `mask_1d` at least
-    `min_len` long, EXCLUDING any run touching either edge of `mask_1d`
-    (that's ordinary trimmable margin, already handled by the tight-bbox
-    step - not a genuine interior gap). Reuses `_contiguous_true_runs`
-    rather than a new scan.
-    """
+    # Runs touching either edge are trimmable margin, not interior gaps.
     n = len(mask_1d)
     for start, end in _contiguous_true_runs(mask_1d):
         if start > 0 and end < n - 1 and (end - start + 1) >= min_len:
@@ -347,48 +185,17 @@ def _first_interior_gap(mask_1d: np.ndarray, min_len: int) -> tuple[int, int] | 
 
 
 def load_raw_tile_index(mask_dir: Path) -> gpd.GeoDataFrame:
-    """Load the raw tile index (Phase 0): thin wrapper over `build_tile_index`.
-
-    Parameters
-    ----------
-    mask_dir : Path
-        Directory to scan for `*.tif` DeltaDTM mask tile files.
-
-    Returns
-    -------
-    gpd.GeoDataFrame
-        One 1x1deg polygon per real DeltaDTM mask tile, index reset to a
-        plain 0..n-1 range.
-    """
+    """Load the Phase 0 tile index with a 0..n-1 index."""
     return build_tile_index(mask_dir).reset_index(drop=True)
 
 
 def build_connectivity_graph(
     sub: gpd.GeoDataFrame, mask_index: dict, dem_index: dict, cfg: ConnectivityConfig,
 ) -> list[tuple[int, int]]:
-    """Build Phase 1's tile-adjacency graph from real floodable-land connectivity.
+    """Return `(i, j)` row pairs of adjacent tiles with floodable land across the border.
 
-    An edge is added between two adjacent tiles only where floodable land (not
-    nodata, not water, below `cfg.elev_threshold_m`) is present on BOTH sides
-    of the shared border, checked via a thin strip on each side - cheap,
-    bounded cost. Ocean is deliberately never a connector (see module docstring).
-
-    Parameters
-    ----------
-    sub : gpd.GeoDataFrame
-        Tile index (as from `build_tile_index`), with `lat`/`lon`/`geometry` columns.
-    mask_index : dict
-        ``{coord_str: Path}`` mapping to DeltaDTM mask tiles.
-    dem_index : dict
-        ``{coord_str: Path}`` mapping to DeltaDTM elevation tiles.
-    cfg : ConnectivityConfig
-        Pipeline configuration (uses `strip_width_deg`, `strip_resolution_m`,
-        `elev_threshold_m`).
-
-    Returns
-    -------
-    list of tuple of int
-        ``(i, j)`` pairs of row indices into `sub` that are connected.
+    Floodable = mask land with valid elevation < `cfg.elev_threshold_m`, required in a
+    `cfg.strip_width_deg` strip on BOTH sides. Ocean is never a connector.
     """
     lat_lon_to_idx = {(row.lat, row.lon): i for i, row in sub.iterrows()}
 
@@ -423,20 +230,7 @@ def build_connectivity_graph(
 
 
 def connected_components(n: int, edges: list[tuple[int, int]]) -> dict[int, list[int]]:
-    """Group tile indices into connected components (Phase 2), via plain union-find.
-
-    Parameters
-    ----------
-    n : int
-        Number of tiles (nodes), indexed 0..n-1.
-    edges : list of tuple of int
-        ``(i, j)`` pairs of connected tile indices, as from `build_connectivity_graph`.
-
-    Returns
-    -------
-    dict
-        ``{root_idx: [member indices]}`` - one entry per connected component.
-    """
+    """Group tile indices into connected components as ``{root: [members]}``."""
     parent = list(range(n))
 
     def find(x):
@@ -461,33 +255,16 @@ def connected_components(n: int, edges: list[tuple[int, int]]) -> dict[int, list
 
 @dataclass
 class Domain:
-    """One rectangular flood-simulation domain produced by the tiling pipeline.
+    """One rectangular flood-simulation domain.
 
-    Attributes
-    ----------
-    bbox : tuple of float
-        ``(minx, miny, maxx, maxy)`` in degrees (EPSG:4326).
-    split_reason : str
-        How this domain was produced: one of ``"no_split_needed"``,
-        ``"natural_gap"``, ``"forced"``, ``"merged"``.
-    approx_native_cells : float
-        Approximate native-resolution (~30m, DeltaDTM 1 arcsec) cell count of `bbox`.
-    component_id : int
-        Phase-2 connected component this domain came from; -1 means not yet
-        assigned. Two different components are never hydraulically connected
-        by construction, so hop-ordering and merging must stay within one
-        component_id.
+    `component_id` -1 means unassigned. Components are never hydraulically connected,
+    so hop ordering and merging stay within one component_id.
     """
 
     bbox: tuple[float, float, float, float]  # (minx, miny, maxx, maxy), degrees
     split_reason: str                        # "no_split_needed" | "natural_gap" | "forced" | "merged"
     approx_native_cells: float
-    component_id: int = -1                   # which Phase-2 connected component this came from -
-    # -1 means "not yet assigned" (set by the caller right after
-    # split_component_to_budget returns). Two different components are NEVER
-    # hydraulically connected by construction, so hop-ordering and merging must
-    # both stay within one component_id - see compute_hop_distances and
-    # merge_small_domains_tiered.
+    component_id: int = -1
 
 
 def _native_cells(bbox: tuple[float, float, float, float]) -> float:
@@ -496,18 +273,7 @@ def _native_cells(bbox: tuple[float, float, float, float]) -> float:
 
 
 def bbox_to_polygon(bbox: tuple[float, float, float, float]):
-    """Convert a bbox tuple to a shapely polygon.
-
-    Parameters
-    ----------
-    bbox : tuple of float
-        ``(minx, miny, maxx, maxy)``.
-
-    Returns
-    -------
-    shapely.geometry.Polygon
-        Rectangular polygon for `bbox`.
-    """
+    """Convert a ``(minx, miny, maxx, maxy)`` bbox to a shapely box."""
     return box(*bbox)
 
 
@@ -516,43 +282,12 @@ def split_component_to_budget(
     mask_index: dict, dem_index: dict, cfg: ConnectivityConfig,
     depth: int = 0, max_depth: int = 25, member_coords: set[str] | None = None,
 ) -> list[Domain]:
-    """Recursively split one connected component's bbox into budget-sized domains.
+    """Recursively split one component's bbox into domains under `cfg.budget_cells`.
 
-    Phase 3. Builds a coarse floodability grid over `cluster_bbox`, trims to real
-    content (a coarse cell is dropped only if ALL its samples are nodata or
-    `cfg.water_codes` - never because of elevation/floodability alone), then
-    recursively splits only if still over `cfg.budget_cells`, preferring a
-    genuine internal gap over a forced geometric cut.
-
-    `member_coords` restricts the mosaic read to this component's real Phase-2
-    member tiles rather than every tile inside `cluster_bbox`'s bounding
-    rectangle - without it, land from a different, unconnected component could
-    be swept into this component's `keep` mask just because it falls inside the
-    same rectangle (see `_mosaic_nearest_coarse`). Always pass it in production.
-
-    Parameters
-    ----------
-    cluster_bbox : tuple of float
-        ``(minx, miny, maxx, maxy)`` in degrees, the component's bounding box.
-    mask_index : dict
-        ``{coord_str: Path}`` mapping to DeltaDTM mask tiles.
-    dem_index : dict
-        ``{coord_str: Path}`` mapping to DeltaDTM elevation tiles.
-    cfg : ConnectivityConfig
-        Pipeline configuration.
-    depth : int, optional
-        Current recursion depth (default 0).
-    max_depth : int, optional
-        Maximum recursion depth before forcing a leaf (default 25).
-    member_coords : set of str, optional
-        This component's real Phase-2 member tile coords; restricts the mosaic
-        read to just those tiles. Optional only for ad hoc callers.
-
-    Returns
-    -------
-    list of Domain
-        Leaf domains covering `cluster_bbox`'s real content, each at or under
-        `cfg.budget_cells` where possible.
+    Trims to content (a coarse cell is dropped only if all samples are nodata or
+    `cfg.water_codes`, never for elevation alone), then prefers an interior gap of
+    >= `cfg.min_split_gap_coarse_cells` over a forced cut with `cfg.overlap_target_km`
+    overlap. Always pass `member_coords` in production (see `_mosaic_nearest_coarse`).
     """
     result = _mosaic_nearest_coarse(
         cluster_bbox, mask_index, dem_index, cfg.coarse_resolution_m, allowed_coords=member_coords,
@@ -563,7 +298,7 @@ def split_component_to_budget(
     dem_valid = dem_samples != -9999.0
     is_water = np.isin(mask_samples, cfg.water_codes)
     is_nodata_or_water = is_water | ~dem_valid
-    keep = ~is_nodata_or_water  # keep unless nodata/water
+    keep = ~is_nodata_or_water
 
     return _split_window(keep, transform, 0, keep.shape[0] - 1, 0, keep.shape[1] - 1, cfg, depth, max_depth)
 
@@ -609,7 +344,6 @@ def _split_window(
                 d.split_reason = "natural_gap"
         return left + right
 
-    # No natural gap - forced geometric split, longer axis, bounded overlap.
     height, width = r1 - r0 + 1, c1 - c0 + 1
     overlap_deg = cfg.overlap_target_km / _KM_PER_DEG
     coarse_deg = cfg.coarse_resolution_m / 111_320.0
@@ -631,9 +365,7 @@ def _split_window(
     return pieces
 
 
-# ---------------------------------------------------------------------------
 # Phase 4 - post-hoc size-based merging
-# ---------------------------------------------------------------------------
 
 def _union_bbox(a, b):
     return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
@@ -648,9 +380,6 @@ def _bbox_distance(a, b):
 def _merge_small_domains_tiered_one_component(
     working: list[Domain], min_size_cells: float, preferred_ceiling: float, hard_ceiling: float,
 ) -> list[Domain]:
-    """Core tiered-merge loop, scoped to domains that are ALREADY known to
-    share one component_id - see merge_small_domains_tiered for why this
-    scoping is split out, and for the tier-1/tier-2 rationale."""
     excluded: set[int] = set()
     while True:
         candidates_idx = [i for i, d in enumerate(working) if d.approx_native_cells < min_size_cells and i not in excluded]
@@ -662,12 +391,10 @@ def _merge_small_domains_tiered_one_component(
             excluded.add(i)
             continue
 
-        # Tier 1: nearest neighbour whose merge stays under preferred_ceiling.
         preferred = [j for j in others if _native_cells(_union_bbox(working[i].bbox, working[j].bbox)) <= preferred_ceiling]
         if preferred:
             j = min(preferred, key=lambda k: _bbox_distance(working[i].bbox, working[k].bbox))
         else:
-            # Tier 2: best (smallest resulting size) neighbour under hard_ceiling.
             under_hard = [j for j in others if _native_cells(_union_bbox(working[i].bbox, working[j].bbox)) <= hard_ceiling]
             if not under_hard:
                 excluded.add(i)
@@ -688,33 +415,11 @@ def _merge_small_domains_tiered_one_component(
 def merge_small_domains_tiered(
     domains: list[Domain], min_size_cells: float, preferred_ceiling: float, hard_ceiling: float,
 ) -> list[Domain]:
-    """Merge undersized domains within each component (Phase 4), two-tier by size.
+    """Merge domains below `min_size_cells` within each component, two-tier by size.
 
-    For each too-small domain, prefers the nearest neighbour whose merge stays
-    under `preferred_ceiling` (keeps results centred near the ideal band, not
-    just under the hard max); only if no neighbour qualifies does it fall back
-    to the best neighbour under `hard_ceiling`, so an isolated small domain with
-    only large neighbours still gets absorbed. Partitions by `component_id`
-    first and merges each component independently - confirmed necessary at
-    world scale (2026-10): a flat loop over every domain regardless of
-    component made an O(n^2) cost indistinguishable from a hang. Prints
-    progress per component as its merge pass finishes.
-
-    Parameters
-    ----------
-    domains : list of Domain
-        Domains to merge, from any number of components.
-    min_size_cells : float
-        Native cell count below which a domain is a merge candidate.
-    preferred_ceiling : float
-        Tier-1 merge target: prefer a neighbour whose merge stays under this.
-    hard_ceiling : float
-        Tier-2 merge cap: the fallback neighbour must stay under this.
-
-    Returns
-    -------
-    list of Domain
-        Domains after merging, across all components.
+    Tier 1: nearest neighbour whose union stays <= `preferred_ceiling`; tier 2: the
+    neighbour giving the smallest union <= `hard_ceiling`. Merging per component
+    avoids an O(n^2) loop over all domains worldwide.
     """
     by_component: dict[int, list[Domain]] = {}
     for d in domains:
@@ -736,16 +441,9 @@ def merge_small_domains_tiered(
     return result
 
 
-# ---------------------------------------------------------------------------
-# Phase 5 - hop-distance BFS, scoped within one component_id only (see
-# module docstring)
-# ---------------------------------------------------------------------------
+# Phase 5 - hop-distance BFS within one component_id
 
 def _domain_touches_ocean(bbox: tuple[float, float, float, float], mask_index: dict, dem_index: dict, cfg: ConnectivityConfig) -> bool:
-    """Real ocean touch check - same coarse read as everything else here,
-    never a native-resolution read. `dem_index` is accepted but unused
-    (shared helper signature with _mosaic_nearest_coarse) - only the mask
-    band matters for this check."""
     result = _mosaic_nearest_coarse(bbox, mask_index, dem_index, cfg.coarse_resolution_m)
     if result is None:
         return False
@@ -754,9 +452,7 @@ def _domain_touches_ocean(bbox: tuple[float, float, float, float], mask_index: d
 
 
 def _bbox_touches(a: tuple[float, float, float, float], b: tuple[float, float, float, float], tol_deg: float = 1e-6) -> bool:
-    """True if two bboxes touch or overlap (shared edge counts, not just
-    interior overlap) - `tol_deg` absorbs floating-point edge cases from
-    the coarse-grid-cell-boundary arithmetic earlier phases use."""
+    # tol_deg absorbs float error from coarse-cell boundary arithmetic.
     ax0, ay0, ax1, ay1 = a
     bx0, by0, bx1, by1 = b
     return not (ax1 + tol_deg < bx0 or bx1 + tol_deg < ax0 or ay1 + tol_deg < by0 or by1 + tol_deg < ay0)
@@ -767,32 +463,9 @@ def compute_hop_distances(
 ) -> tuple[list[int | None], list[int]]:
     """Compute each domain's BFS hop distance to the nearest ocean-touching domain.
 
-    Phase 5. A domain that touches real ocean is hop=0 (self-forced); every
-    other domain's hop_distance is its BFS distance to the nearest hop=0
-    domain within its own component_id - adjacency is checked only between
-    domains sharing a component_id, which makes cross-component hop-seeding
-    structurally impossible, not just rare. A domain with no path to ocean
-    within its own component is unreachable and must be dropped before
-    simulation.
-
-    Parameters
-    ----------
-    domains : list of Domain
-        Domains to check, from any number of components.
-    mask_index : dict
-        ``{coord_str: Path}`` mapping to DeltaDTM mask tiles.
-    dem_index : dict
-        ``{coord_str: Path}`` mapping to DeltaDTM elevation tiles (forwarded to
-        the shared mosaic reader; unused by the ocean check itself).
-    cfg : ConnectivityConfig
-        Pipeline configuration (uses `coarse_resolution_m`, `ocean_code`).
-
-    Returns
-    -------
-    tuple of (list of int or None, list of int)
-        ``(hop, unreachable)``: `hop` is the hop distance per domain, aligned
-        to `domains`, `None` for unreachable; `unreachable` lists the indices
-        into `domains` with no path to ocean.
+    Ocean-touching domains are hop=0; adjacency (touching bboxes) only links domains
+    of the same component_id. Returns ``(hop, unreachable)``: `hop` is None for
+    domains with no path to ocean, which must be dropped before simulation.
     """
     n = len(domains)
     print(f"  compute_hop_distances: checking ocean adjacency for {n} domain(s)...", flush=True)
@@ -839,42 +512,16 @@ def compute_hop_distances(
     return hop, unreachable
 
 
-# ---------------------------------------------------------------------------
 # Phase 6 - coastal buffer pad, hop=0 domains only
-# ---------------------------------------------------------------------------
 
 def pad_hop0_domains_bbox(
     domains: list[Domain], hop: list[int | None], buffer_km: float, hard_ceiling_cells: float,
 ) -> tuple[list[Domain], int]:
-    """Pad hop_distance==0 domains outward with an explicit coastal buffer.
+    """Pad hop=0 domains by `buffer_km` per side unless that exceeds `hard_ceiling_cells`.
 
-    Phase 6. Must run strictly after `compute_hop_distances`: only hop=0
-    domains need an explicit minimum-ocean-margin (they're self-forced
-    directly from the open coast, where a headland cutting too close to the
-    edge would matter; hop>=1 hinterland domains are forced from an
-    already-simulated neighbour's wave, with no analogous concern). Padding
-    cannot change a domain's hop_distance (it still touches ocean), so no
-    re-derivation of hop_distance/adjacency is needed afterward.
-
-    Parameters
-    ----------
-    domains : list of Domain
-        Domains to (selectively) pad.
-    hop : list of int or None
-        Hop distance per domain, aligned to `domains` (as from
-        `compute_hop_distances`).
-    buffer_km : float
-        Outward padding width (km) applied to each side of a hop=0 domain's bbox.
-    hard_ceiling_cells : float
-        Maximum native cell count a padded domain may reach; padding that
-        would exceed it is skipped for that domain.
-
-    Returns
-    -------
-    tuple of (list of Domain, int)
-        ``(padded domains, n_capped)``: new domain list aligned to `domains`;
-        count of hop=0 domains left unpadded because padding would have
-        exceeded `hard_ceiling_cells`.
+    Run after `compute_hop_distances`: only domains forced from the open coast need
+    an ocean margin, and padding cannot change hop distance. Returns
+    ``(domains, n_capped)``, `n_capped` = hop=0 domains left unpadded.
     """
     buffer_deg = buffer_km / _KM_PER_DEG
     n_capped = 0
@@ -897,28 +544,7 @@ def pad_hop0_domains_bbox(
 
 
 def assign_tile_id(domains: list[Domain], hop: list[int]) -> gpd.GeoDataFrame:
-    """Assign sequential tile_id and build the final GeoDataFrame (final step).
-
-    Rows are ordered by hop_distance ascending (wave-0 first) then
-    component_id, stable tie-break on original order otherwise - preserves the
-    old schema's "hop_distance correlates with run order" spirit. Keeps
-    split_reason/component_id/approx_cells_M as extra diagnostic columns
-    (harmless; useful for QA).
-
-    Parameters
-    ----------
-    domains : list of Domain
-        Final domains to assign ids to.
-    hop : list of int
-        Hop distance per domain, aligned to `domains`.
-
-    Returns
-    -------
-    gpd.GeoDataFrame
-        Columns ``tile_id``, ``hop_distance``, ``split_reason``,
-        ``component_id``, ``approx_cells_M``, ``geometry`` (EPSG:4326); this is
-        what gets written to `tile_grid.path`.
-    """
+    """Number domains by (hop_distance, component_id) and build the tile-grid GeoDataFrame."""
     gdf = gpd.GeoDataFrame(
         {
             "hop_distance": hop,

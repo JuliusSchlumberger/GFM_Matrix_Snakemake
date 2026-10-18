@@ -1,25 +1,8 @@
-"""HPC chain for the final SFINCS calibration (calibration_roughness_SFINCS).
+"""Write the SFINCS calibration's HPC chain (calibration_roughness_SFINCS).
 
-  stage1  (run locally) - writes {base}/resolved_config.yml (Linux path view),
-          the candidate pool + shards (select_calibration_tiles.py pool) and
-            hpc_jobs_stage1/stage1_NNN.sbatch  x --n-jobs (default 10, 4vcpu):
-                screen -> boundary lines (4 workers) -> SFINCS mask pre-flight
-                for that shard's candidates
-            hpc_jobs_stage1/bridge.sbatch (afterany on all stage-1 jobs):
-                line summary -> tile selection (+ maps) -> `stage2 --submit`
-            hpc_jobs_stage1/submit_chain.sh - submits all of the above with the
-                dependency wired; run it on Hydrax.
-  stage2  (run by the bridge job, or by hand) - spreads {base}/tile_ids.txt
-          (tiles without outputs/calibration_run.done) over --n-jobs (default 20,
-          4vcpu) jobs, longest-processing-time-first on an estimate from the
-          pre-flight's active cell count, and writes
-            hpc_jobs_stage2/final_NNN.sbatch + tiles_NNN.txt + submit_all.sh;
-          --submit also submits them.
-
-Per-tile estimate (stage 2): --overhead-min (inputs, elevation/roughness, model
-build incl. subgrid table, postprocessing) + active cells (M) x
-(--sfincs-min-per-mcell + --eikonal-min-per-mcell). SFINCS: p90 of the bline
-runs (550 tiles) was 12.5 min per million active cells at 4 threads.
+stage1 (local): candidate shards + per-shard screen/boundary-line/pre-flight jobs
+and a bridge job (afterany) that selects tiles and runs `stage2 --submit`.
+stage2: spreads unfinished tiles over jobs, longest-processing-time-first.
 
 Usage:
     python generate_calibration_jobs.py stage1            # then on Hydrax: bash .../hpc_jobs_stage1/submit_chain.sh
@@ -58,18 +41,10 @@ def _sbatch_header(name: str, partition: str, cpus: int, mem: str, hours: int, l
 
 
 def cmd_stage1(args) -> None:
-    """Write the stage-1 sbatch jobs, the bridge job, and submit_chain.sh.
+    """Write the stage-1 sbatch jobs, the bridge job and submit_chain.sh.
 
-    Resolves the config to a Linux path view, generates the candidate pool and
-    shards via select_calibration_tiles.py, and writes one sbatch script per shard
-    (screen -> boundary lines -> SFINCS mask pre-flight) plus a bridge job that runs
-    the line summary, tile selection and submits stage 2.
-
-    Parameters
-    ----------
-    args : argparse.Namespace
-        Parsed CLI arguments (config, base_dir_name, n_jobs, partition, mem,
-        stage1_hours, n_tiles, stage2_jobs).
+    Side effects: writes {base}/resolved_config.yml (Linux path view) and runs
+    ``select_calibration_tiles.py pool``.
     """
     import yaml
 
@@ -127,19 +102,10 @@ def cmd_stage1(args) -> None:
 
 
 def cmd_stage2(args) -> None:
-    """Write the stage-2 final-run sbatch jobs, and submit them if requested.
+    """Write the stage-2 sbatch jobs for unfinished tiles; submit them with --submit.
 
-    Distributes tiles without a `calibration_run.done` marker over `--n-jobs` jobs
-    using longest-processing-time-first on a per-tile runtime estimate derived from
-    the pre-flight active-cell count, then writes one sbatch script and tile list
-    per job plus submit_all.sh.
-
-    Parameters
-    ----------
-    args : argparse.Namespace
-        Parsed CLI arguments (config, base_dir_name, n_jobs, partition, mem,
-        overhead_min, sfincs_min_per_mcell, eikonal_min_per_mcell, time_margin,
-        submit).
+    Per-tile minutes = overhead_min + active Mcells (pre-flight) x
+    (sfincs_min_per_mcell + eikonal_min_per_mcell).
     """
     root = read_root(Path(args.config))
     base = root / args.base_dir_name
@@ -197,7 +163,6 @@ def cmd_stage2(args) -> None:
 
 
 def main() -> None:
-    """Parse CLI arguments and dispatch to `cmd_stage1` or `cmd_stage2`."""
     repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", choices=["stage1", "stage2"])
@@ -209,8 +174,8 @@ def main() -> None:
     parser.add_argument("--partition", default="4vcpu")
     parser.add_argument("--mem", default="30G")
     parser.add_argument("--stage1-hours", type=int, default=24)
-    parser.add_argument("--overhead-min", type=float, default=35.0)
-    parser.add_argument("--sfincs-min-per-mcell", type=float, default=12.5)
+    parser.add_argument("--overhead-min", type=float, default=35.0)  # inputs, model build + subgrid, postprocessing
+    parser.add_argument("--sfincs-min-per-mcell", type=float, default=12.5)  # p90 over 550 SFINCS runs, 4 threads
     parser.add_argument("--eikonal-min-per-mcell", type=float, default=10.0,
                         help="all 10 friction points together, per million active SFINCS cells (rough)")
     parser.add_argument("--time-margin", type=float, default=1.5)

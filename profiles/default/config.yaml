@@ -1,0 +1,3 @@
+# Workflow profile Snakemake loads automatically (Snakefile directory). Script/rule
+# code edits must not re-run finished outputs; logic changes need outputs removed.
+rerun-triggers: [mtime, params, input, software-env]

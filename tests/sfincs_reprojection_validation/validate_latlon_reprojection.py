@@ -1,23 +1,7 @@
-"""Validate run_sfincs_tile.py's `reproject_to_4326` latitude-corrected
-target resolution - the fix for a real, confirmed bug (2026-09, comparing
-tile 1573 against eikonal): letting `calculate_default_transform()` pick
-its own degree resolution from a projected (UTM, isotropic-METRE) source
-produces a grid that's SQUARE IN DEGREES, which is NOT square in real
-ground distance except at the equator. At tile 1573 (~55 deg N), a true
-30x30m UTM subgrid reprojected out to ~29 x ~50m in real ground distance
-under the old (uncorrected) behaviour - inflating flooded-AREA comparisons
-against the eikonal model's own (correctly latitude-corrected) grid by
-~1.6x despite an almost identical flooded CELL COUNT. Not a physical model
-disagreement, a reprojection resolution bug.
+"""Test reproject_to_4326's latitude-corrected resolution: dx_deg/dy_deg = 1/cos(lat).
 
-This test reprojects a small synthetic UTM array at a known, clearly
-non-equatorial latitude and asserts the resulting EPSG:4326 pixel is
-anisotropic in degrees (dx_deg != dy_deg, matching the expected
-1/cos(lat) ratio) - not square, which is what the old, uncorrected
-behaviour produced.
-
-Usage:
-    python validate_latlon_reprojection.py
+calculate_default_transform's square-in-degrees grid is not square on the ground:
+30 m UTM at ~55 N became ~29 x ~50 m, inflating flooded area ~1.6x.
 """
 
 import shutil
@@ -39,15 +23,8 @@ def test_reprojected_pixel_is_latitude_corrected_not_square() -> None:
     print("=== reproject_to_4326: output pixel is anisotropic in degrees at non-equatorial latitude ===")
     tmpdir = Path(tempfile.mkdtemp(prefix="latlon_reprojection_test_"))
     try:
-        # A small array in UTM zone 33N (EPSG:32633), which at its own
-        # tile-1573-like ~55 deg N centre latitude, should have real column
-        # spacing (longitude direction) SHRUNK relative to row spacing
-        # (latitude direction) once reprojected to degrees - a 30x30m true
-        # UTM pixel is NOT the same number of degrees in each direction there.
         res_m = 30.0
-        # UTM 33N easting/northing roughly corresponding to ~55 deg N (chosen
-        # to land near tile 1573's own real location for a realistic check).
-        transform = Affine(res_m, 0, 500000.0, 0, -res_m, 6096000.0)  # ~55.0 deg N at this northing
+        transform = Affine(res_m, 0, 500000.0, 0, -res_m, 6096000.0)  # UTM 33N, ~55.0 deg N
         arr = np.ones((20, 20), dtype=np.float32)
         out_path = tmpdir / "reprojected.tif"
 
@@ -61,14 +38,14 @@ def test_reprojected_pixel_is_latitude_corrected_not_square() -> None:
         dx_deg = abs(out_transform.a)
         dy_deg = abs(out_transform.e)
         ratio = dx_deg / dy_deg
-        expected_ratio = 1.0 / np.cos(np.radians(55.0))  # ~1.74 at 55 deg N
+        expected_ratio = 1.0 / np.cos(np.radians(55.0))
 
         print(f"  dx_deg={dx_deg:.8f}, dy_deg={dy_deg:.8f}, ratio(dx/dy)={ratio:.4f}, "
               f"expected~{expected_ratio:.4f} (1/cos(55 deg))")
 
         assert not np.isclose(dx_deg, dy_deg, rtol=0.02), (
             f"output pixel is square in degrees (dx_deg={dx_deg}, dy_deg={dy_deg}) - "
-            "this is exactly the un-fixed bug: calculate_default_transform()'s own default "
+            "calculate_default_transform()'s own default "
             "resolution guess was used instead of the latitude-corrected one."
         )
         assert np.isclose(ratio, expected_ratio, rtol=0.05), (
@@ -83,15 +60,12 @@ def test_reprojected_pixel_is_latitude_corrected_not_square() -> None:
 
 
 def test_reprojected_pixel_near_equator_is_nearly_square() -> None:
-    """Sanity check on the other end: near the equator, cos(lat)~1, so the
-    anisotropy correction should be small (ratio~1) - confirms the fix
-    doesn't OVER-correct at low latitude, only where it's real."""
+    """Near the equator cos(lat) ~ 1, so the correction must not over-correct (ratio ~ 1)."""
     print("=== reproject_to_4326: near-equator output pixel stays nearly square ===")
     tmpdir = Path(tempfile.mkdtemp(prefix="latlon_reprojection_equator_test_"))
     try:
         res_m = 30.0
-        # UTM 32N near the equator (~7 deg N, tile-1907-like).
-        transform = Affine(res_m, 0, 500000.0, 0, -res_m, 774000.0)
+        transform = Affine(res_m, 0, 500000.0, 0, -res_m, 774000.0)  # UTM 32N, ~7 deg N
         arr = np.ones((20, 20), dtype=np.float32)
         out_path = tmpdir / "reprojected_equator.tif"
 

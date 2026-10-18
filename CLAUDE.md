@@ -47,14 +47,15 @@ adaptation analysis and benchmark validation. A separate SFINCS sub-pipeline
 
 ## Commands
 - Dry run: never on the full DAG (it is split into parallel HPC jobs; a full local `-n all`
-  does not finish). Use the two subset configs instead, via
-  `GFM_CONFIG_PATH=snakemake_workflow/config/{thailand_bangkok,bangkok_chao_phraya}_materialized.yml`
-  `snakemake -n all --cores 1` (~10 s each). Baselines: `.cleanup_baseline/snakemake_n_all_*_remat.txt`
-  (configs re-materialized 2026-10-18; the older `*.txt` predate that).
+  does not finish). Use the subset config instead, via
+  `GFM_CONFIG_PATH=snakemake_workflow/config/bangkok_chao_phraya_materialized.yml`
+  `snakemake -n all --cores 1` (~10 s). Baseline: `.cleanup_baseline/snakemake_n_all_bangkok_chao_phraya_profile.txt`.
+- `profiles/default/config.yaml` (auto-loaded) sets `rerun-triggers: [mtime, params, input, software-env]`:
+  code/comment edits never re-run outputs. A real logic change needs its outputs removed or re-run explicitly.
 - Local run: `python run_eikonal_dag.py`  or  `snakemake all --cores 4 --resources mem_mb=8000`
 - Tests: `pytest -m "not needs_pdrive"` in `gfm` (sfincs_* tests are skipped automatically);
   `pytest tests/sfincs_* -m "not needs_pdrive"` in `hydromt-sfincs-dev`.
-- Lint: `ruff check <files you touched>` must pass; `ruff check .` is not clean yet.
+- Lint: `ruff check .` must stay clean.
 - Progress monitors (`check_*_progress.py`, `sfincs_tiles/check_calibration_progress.py`):
   the user runs these themselves, usually on Hydrax. Give the command, don't run it.
 
@@ -72,12 +73,42 @@ Never write to, move, or delete anything on P:\ or the model output directories.
 ## Conventions
 - The per-tile solve lives in `src/eikonal_runner.run_tile_scenario`; `run_eikonal.py`
   (Snakemake) and `run_eikonal_cli.py` (HPC) are thin wrappers - change behaviour there, not in them.
-- Rich module docstrings explaining *why*; match the surrounding comment density.
-  Public functions/classes in core modules use NumPy-style docstrings (short: what + why).
+- Docstrings and comments follow the documentation standard below.
 - Stale code and one-off diagnostics are deleted (git history keeps them), not archived.
 
-## Ongoing cleanup
-`AUDIT.md` holds the repo audit, the user's final decisions (§7, §9) and the phased
-plan (§8). Execute one phase at a time, behaviour-preserving; log real changes that
-come up in `TODO.md` instead of making them. `.cleanup_baseline/` (gitignored) holds
-the pre-cleanup reference outputs that later phases are verified against.
+## Documentation standard
+
+Documentation is for future readers of the code, not a record of this session.
+
+- Never write change history into code or docs: no "previously", "updated to",
+  "now handles", "refactored", "fixed", phase/step references, or dates.
+  Git is the changelog. If a summary of changes is needed, put it in the
+  commit message or say it in chat.
+- Docstrings: one summary line in the imperative, max ~80 chars. Add further
+  lines ONLY for things not inferable from the signature: units, datums and
+  sign conventions, assumptions, valid ranges, the equation or paper the
+  function implements, non-obvious side effects or failure modes.
+- No Parameters/Returns sections that only repeat the type hints. Document a
+  parameter only when its name and type do not make it obvious.
+- No docstrings on private helpers, trivial wrappers, dunder methods, or tests
+  unless a non-obvious assumption is involved.
+- Inline comments explain WHY, never WHAT. Delete comments that paraphrase the
+  code. Keep comments that encode a physical/numerical assumption or a
+  reference.
+- Module docstring: one or two lines on purpose and main entry point. No file
+  listings, no author/date headers.
+- README per package: purpose, how to run, key config options. Target under
+  40 lines. Top-level README: under 120 lines. No feature lists, no "overview"
+  prose that repeats the directory names.
+- Do not create new .md files (NOTES, SUMMARY, CHANGES, DESIGN, etc.) unless
+  asked. Report in chat instead.
+- Prefer self-explanatory names over comments. If a comment is needed to
+  explain a name, rename.
+- When unsure whether to document something: leave it out. Missing docs are
+  cheap to add; noise is expensive to remove.
+
+## Cleanup state
+`AUDIT.md` describes the current repo state, the rules for changes, the verification
+toolkit and the areas still to sweep. Changes stay behaviour-preserving; real
+(result-changing) issues go to `TODO.md` instead of being made. `.cleanup_baseline/`
+(gitignored) holds reference outputs and local test outputs.

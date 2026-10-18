@@ -1,26 +1,7 @@
-"""Single figure for the sweep-budget calibration study: wall-clock time vs.
-number of sweep rounds, coloured by tile size (see
-calibration_studies/run_sweep_budget_study.py and
-docs/methods_03_calibration_sensitivity.md section 2) - the companion to
-plot_sweep_calibration_bands.py's own round-indexed BAND panels, this one
-shows each tile as its own point instead of a pooled band, with tile size
-(native cell count) as the third dimension via colour.
+"""Plot per-tile sweep wall-clock time vs rounds, coloured by tile size.
 
-Reuses plot_sweep_budget_convergence.collect() directly - no new data
-collection, that function already extracts exactly (n_cells, n_rounds_used,
-time_to_converge_s, converged) per tile from the same raw per-tile sweep
-CSVs the round-based figure reads. Unlike plot_sweep_calibration_bands.py,
-this does NOT restrict to the wet-tile subset (aggregate_wet_tiles.py) -
-wall-clock cost is real for a dry tile too, and narrowing to only wet tiles
-would bias the picture.
-
-A tile that never converges within N_COMPLETE_ROUNDS (right-censored, same
-population the ECDF panel flags) is plotted as a distinct marker (triangle,
-vs. a converged tile's circle) at its own (n_rounds_available, elapsed time
-so far) - a real data point, not an extrapolation, just not a true
-"rounds-to-converge" value.
-
-No fitted trend line - raw per-tile points only.
+Not restricted to wet tiles. Non-converged tiles are triangles at
+(n_rounds_available, elapsed time so far), not extrapolated.
 
 Usage:
     python plot_sweep_time_vs_size.py <sweep_budget_dir> <figures_dir> [--epsilon 0.03]
@@ -47,6 +28,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def make_figure(df: pd.DataFrame, epsilon: float, out_path: Path) -> None:
+    """Draw the scatter figure to out_path."""
     converged = df[df["converged"]]
     censored = df[~df["converged"]]
     vmin, vmax = df["n_cells"].min() / 1e6, df["n_cells"].max() / 1e6
@@ -103,12 +85,7 @@ def main() -> None:
     print(f"{len(df)} tile(s) with a usable sweep trace "
           f"({int(df['converged'].sum())} converged within {N_COMPLETE_ROUNDS} rounds)")
 
-    # Censored tiles have no real time_to_converge_s (None) - use their own
-    # elapsed time through n_rounds_available instead, a real data point.
-    # _tile_convergence doesn't return that elapsed time directly for the
-    # censored case, so re-derive it the same way: cum_time_s at the last
-    # available round's last sweep. Cheap to redo here (one extra read per
-    # censored tile only).
+    # Censored tiles: use elapsed cum_time_s at the last available round instead.
     if (~df["converged"]).any():
         def _censored_elapsed(row) -> float:
             csv_path = sweep_budget_dir / f"{int(row['tile'])}.csv"

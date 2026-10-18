@@ -17,8 +17,7 @@
 # Inputs (dem/mask/friction/boundaries) for all 9 tiles already exist in
 # production's own model_outputs - copied verbatim into this study's own
 # isolated model_outputs rather than regenerated, per Marjolijn's own
-# request. Full production scenario grid (no RP/SLR restriction, same
-# choice thailand_bangkok.yml already made): 9 return periods x 5 SLR
+# request. Full production scenario grid (no RP/SLR restriction): 9 return periods x 5 SLR
 # scenarios, simulated in two sequential waves (hop_distance=0 tiles fully
 # complete before hop_distance=1 tiles start - a hidden runtime dependency,
 # not encoded in Snakemake's own DAG, see run_eikonal_cli.py's

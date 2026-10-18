@@ -1,34 +1,8 @@
-"""Run the Snakemake DAG, automatically splitting any tile that runs out of
-memory in the eikonal solve into two smaller, overlapping sub-tiles and retrying.
+"""Run Snakemake, splitting out-of-memory tiles into overlapping halves and retrying.
 
-The eikonal runner's OOM handling (see src/eikonal_runner.py) never fails the
-Snakemake rule itself - a tile that runs out of memory gets marked
-(model_outputs/oom_tiles/{tile_id}.txt) and every scenario for it gets an
-all-nodata placeholder waterdepth raster instead, so `snakemake` always
-exits 0 for this reason. This script is the retry loop around that: run
-snakemake to completion, scan model_outputs/oom_tiles/ for markers
-belonging to tiles still present in tile_grid.path, split each one
-(src/tile_split.split_tile - picks whichever axis best balances land
-coverage between the two halves; it also deletes the OOM'd tile's stale
-model_outputs directory, removes its OOM/skip markers, and updates
-tile_grid.path with the two new child tile_ids), then re-run snakemake so
-it regenerates the full input chain for the new tile_ids from scratch
-(chunk membership and every per-tile preprocessing rule are recomputed
-fresh from tile_grid.path on every invocation - no other cache needs
-updating). Repeats up to tile_split.max_retries times. A tile is only
-split up to tile_split.max_depth times; beyond that it's left with the
-existing give-up/nodata-placeholder behaviour and a warning is printed.
-
-This is deliberately simple: each snakemake invocation runs to normal
-completion before the next OOM scan, rather than watching/interrupting a
-live run. That means a tile which OOMs early in a long run sits with its
-nodata placeholder until that invocation finishes - acceptable for the
-same reason a fresh invocation is cheap (Snakemake skips everything already
-built) and avoids the complexity of managing a live subprocess.
-
-This does not replace `snakemake` for other targets/flags - it always runs
-the `all` target (or --target) with `--resources mem_mb=<mem_mb>`, matching
-the documented manual invocation.
+OOM tiles get a marker and nodata placeholders (snakemake still exits 0). After each
+run, marked live tiles are split (up to tile_split.max_depth) and snakemake is rerun,
+up to tile_split.max_retries times.
 
 Usage:
     python run_eikonal_dag.py \\
@@ -50,13 +24,6 @@ from tile_split import split_depth, split_tile  # noqa: E402
 
 
 def _discover_oom_tiles(model_outputs_dir: Path, current_tile_ids: set[int]) -> list[int]:
-    """OOM marker tile_ids that are still live in the current tile_grid.
-
-    A marker can be stale if a previous retry-loop iteration already split
-    that tile_id out of tile_grid.path (the marker file itself is deleted by
-    split_tile, but this guards against any left over from outside this
-    script, e.g. a manual snakemake run).
-    """
     oom_dir = model_outputs_dir / "oom_tiles"
     if not oom_dir.exists():
         return []
@@ -120,30 +87,10 @@ def main() -> None:
             "snakemake", args.target,
             "--cores", str(args.cores),
             "--resources", f"mem_mb={args.mem_mb}",
-            # Deliberately NOT --configfile: the Snakefile already loads
-            # config.yml, then config_local.yml if present, via its own
-            # internal `configfile:` directives (in that order, so
-            # config_local.yml's overrides - e.g. paths.root - correctly win).
-            # Passing --configfile config.yml here too does NOT just
-            # confirm/no-op that - Snakemake treats a CLI-supplied configfile
-            # as additional config layered on AFTER the Snakefile's own
-            # directives, so it re-applies config.yml's base values (e.g.
-            # paths.root: D:/GFM) on top of config_local.yml's override,
-            # silently reverting it for the whole run. Confirmed directly:
-            # the same DAG build fails with a D:/GFM DriverError when
-            # --configfile is passed and succeeds without it. args.config is
-            # still used above for this script's OWN reading of tile_split/
-            # model_outputs settings - it just isn't forwarded to snakemake.
-            # Restrict rerun-triggering to file-timestamp staleness only
-            # (Snakemake's classic Make-like behaviour), NOT rule code/params/
-            # input-signature changes too (Snakemake's default since 7.8).
-            # Without this, any edit to a rule's params:/input:/script body -
-            # even a docstring/comment-only change with no behavioural effect -
-            # marks every tile that ever used that rule as stale, cascading
-            # into re-running already-completed (expensive) eikonal
-            # simulations for every downstream job. Trade-off: a genuine
-            # rule-logic change now needs its outputs manually deleted/
-            # touched to force a rerun - it's no longer auto-detected.
+            # No --configfile: a CLI configfile is layered after the Snakefile's
+            # config_local.yml and would revert its overrides (e.g. paths.root).
+            # mtime-only rerun triggers: code/params edits must not re-run
+            # finished eikonal solves; real logic changes need outputs touched.
             "--rerun-triggers", "mtime",
             "--latency-wait", str(args.latency_wait),
         ]

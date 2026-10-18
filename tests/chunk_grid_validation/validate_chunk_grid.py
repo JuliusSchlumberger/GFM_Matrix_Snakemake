@@ -1,12 +1,7 @@
-"""Regression checks for src/tiles.py::build_chunk_grid.
+"""Pin the chunk ID, alignment and empty-cell rules of tiles.build_chunk_grid.
 
-The chunk grid is the one definition of chunk IDs shared by the Snakefile (local DAG),
-snakemake_workflow/scripts/generate_hpc_postprocess_job.py (HPC) and
-check_postprocess_progress.py - a change here silently renames every merged chunk, so the
-naming, alignment and empty-cell rules are pinned down on synthetic tiles.
-
-Plain assert-based script (this repo's tests/ convention): runs standalone with
-`python tests/chunk_grid_validation/validate_chunk_grid.py`, and pytest collects it too.
+Chunk IDs are shared by the Snakefile, the HPC postprocess jobs and the progress
+checks; a change silently renames every merged chunk on disk.
 """
 
 import sys
@@ -24,7 +19,6 @@ def _tiles(*boxes):
 
 
 def test_ids_name_south_west_corner_in_all_hemispheres():
-    # One tile per quadrant around (0, 0), each inside a single 5-degree cell.
     grid = build_chunk_grid(_tiles((1, 1, 2, 2), (-4, 1, -3, 2), (1, -4, 2, -3), (-4, -4, -3, -3)), 5)
     assert sorted(grid["chunk_id"]) == ["N00E000", "N00W005", "S05E000", "S05W005"], grid["chunk_id"].tolist()
     print("PASS: chunk IDs name the south-west corner (N/S lat 2 digits, E/W lon 3 digits)")
@@ -40,7 +34,6 @@ def test_cells_align_to_chunk_size_and_bounds_match_geometry():
 
 
 def test_cells_without_tiles_are_skipped():
-    # Two tiles 20 degrees apart: the bbox spans 5 cells along x, only the 2 occupied ones are kept.
     grid = build_chunk_grid(_tiles((0.5, 0.5, 1.0, 1.0), (20.5, 0.5, 21.0, 1.0)), 5)
     assert grid["chunk_id"].tolist() == ["N00E000", "N00E020"], grid["chunk_id"].tolist()
     print("PASS: cells that intersect no tile are dropped")
@@ -53,7 +46,6 @@ def test_tile_spanning_cells_yields_every_cell_in_x_then_y_order():
 
 
 def test_point_lookup_matches_grid_ids():
-    # validation/_chunks._postprocess_chunk_id must name a point's chunk exactly as build_chunk_grid does.
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "validation"))
     import numpy as np
     from _chunks import _postprocess_chunk_id
@@ -61,7 +53,7 @@ def test_point_lookup_matches_grid_ids():
     for lon, lat in rng.uniform([-179.9, -79.9], [179.9, 79.9], size=(500, 2)):
         grid = build_chunk_grid(_tiles((lon - 0.01, lat - 0.01, lon + 0.01, lat + 0.01)), 5)
         cell = grid[grid.geometry.contains(box(lon - 0.001, lat - 0.001, lon + 0.001, lat + 0.001))]
-        if len(cell) == 1:  # skip points within 0.01 deg of a cell edge (tile spans 2 cells)
+        if len(cell) == 1:  # points near a cell edge span 2 cells
             assert _postprocess_chunk_id(lon, lat, 5) == cell["chunk_id"].iloc[0], (lon, lat)
     print("PASS: point-to-chunk lookup (validation/_chunks) agrees with build_chunk_grid IDs")
 

@@ -1,9 +1,4 @@
-"""validation/validate_sf_bay._read_model_bay: one chunk -> windowed read, several -> mosaic.
-
-Synthetic: two adjacent 1-degree "chunk" rasters with different constant depths and a bbox
-straddling their shared edge, plus the single-chunk case. Plain assert-based script (this
-repo's tests/ convention); pytest collects it.
-"""
+"""Test validate_sf_bay._read_model_bay: one chunk -> windowed read, several -> mosaic."""
 
 import sys
 import tempfile
@@ -19,7 +14,7 @@ import validate_sf_bay as sfb  # noqa: E402
 
 
 def _chunk(path: Path, west: float, value: float) -> None:
-    res = 0.01  # 100 x 100 px per 1-degree chunk
+    res = 0.01
     with rasterio.open(path, "w", driver="GTiff", dtype="float32", count=1, height=100, width=100,
                        transform=Affine(res, 0, west, 0, -res, 38.0), crs="EPSG:4326", nodata=-9999.0) as dst:
         dst.write(np.full((100, 100), value, dtype="float32"), 1)

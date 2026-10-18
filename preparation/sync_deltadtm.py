@@ -1,37 +1,7 @@
-"""
-Download DeltaDTM v1.1 tiles from 4TU.ResearchData and sort them into the
-DEM/mask tile directories the rest of the pipeline expects — the parent
-directories of the `deltadtm` / `deltadtm_mask` sources in
-data_catalog_gfm.yml (e.g. src/connectivity_tiling.py and extract_dem.py
-both read individual tile files from those same directories, next to the
-`deltadtm.vrt` / `deltadtm_mask.vrt` mosaics).
+"""Download DeltaDTM v1.1 tiles from 4TU.ResearchData into the catalog's tile dirs.
 
-Tiles only - this script does NOT build either VRT mosaic itself (that used
-to happen here; see build_deltadtm_vrt.py, a separate preparation step run
-after this one - `python run_preparation.py sync_deltadtm build_deltadtm_vrt`,
-or just run_preparation.py with no args, since both are enabled by default).
-Splitting it out lets the VRT step be re-run on its own, cheaply (seconds,
-no network) any time the mosaic needs rebuilding, without re-downloading
-tiles - and it's what actually fixed a real bug: this script used to
-download 4TU's own pre-built DEM VRT and patch its <SourceFilename> entries
-to this machine's LOCAL ABSOLUTE tile paths, which only resolves on the
-exact machine that patched it - it broke every DeltaDTM read on the Linux
-HPC side (confirmed directly: 27 of 31 HPC preprocessing jobs failed on
-2026-08-08 from exactly this). build_deltadtm_vrt.py builds both VRTs with
-portable RELATIVE source paths instead, the same way this script's own
-mask-VRT step always did (see that script's docstring for the full story).
-
-HOW TO GET THE URLS:
-Go to https://data.4tu.nl/datasets/1da2e70f-6c4d-4b03-86bd-b53e789cc629
-For each file below, right-click its download button/link -> "Copy Link Address"
-and paste it into the dict below. They look like:
-https://data.4tu.nl/file/1da2e70f-6c4d-4b03-86bd-b53e789cc629/<file-uuid>
-
-Only fill in the continents you actually need -- leave others as None
-and they'll be skipped.
-
-Not a standalone entry point - exposes `run(config)`, called from
-run_preparation.py (`python run_preparation.py sync_deltadtm`).
+Entry point: run(config), via `python run_preparation.py sync_deltadtm`.
+Tiles only; VRT mosaics are built by build_deltadtm_vrt.py.
 """
 
 import sys
@@ -46,10 +16,8 @@ from config_utils import get_data_catalog, retry_transient_io  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# ---------------------------------------------------------------------------
-# 1) FILL IN YOUR COPIED LINKS HERE
-# ---------------------------------------------------------------------------
-
+# Copied from https://data.4tu.nl/datasets/1da2e70f-6c4d-4b03-86bd-b53e789cc629
+# (right-click each download link -> Copy Link Address); None skips a continent.
 DEM_ZIP_URLS = {
     "Africa": "https://data.4tu.nl/file/1da2e70f-6c4d-4b03-86bd-b53e789cc629/22ffa027-184b-4f67-9979-c182f3dfb1ab",
     "Antarctica": "https://data.4tu.nl/file/1da2e70f-6c4d-4b03-86bd-b53e789cc629/ca957a40-34fa-41eb-b101-e45d1ccbd890",
@@ -63,27 +31,12 @@ DEM_ZIP_URLS = {
 
 MASK_ZIP_URL = "https://data.4tu.nl/file/1da2e70f-6c4d-4b03-86bd-b53e789cc629/bfe0fbc1-fdf3-40d0-a62c-adc58bfd9478"  # mask_tiles.zip
 
-# ---------------------------------------------------------------------------
-# 2) CORE FUNCTIONS -- shouldn't need to touch below this line
-# ---------------------------------------------------------------------------
-
 
 def download_file(url: str, dest_path: Path, chunk_size: int = 1024 * 1024) -> None:
-    """Stream a large file to disk with progress reporting, resuming if partially present.
-
-    Parameters
-    ----------
-    url : str
-        URL to download from.
-    dest_path : Path
-        Local path to write the downloaded file to; parent directories are
-        created if missing.
-    chunk_size : int, optional
-        Download chunk size in bytes (default 1 MiB).
-    """
+    """Stream a file to disk with progress; skip if already complete (Content-Length)."""
     retry_transient_io(dest_path.parent.mkdir, parents=True, exist_ok=True)
 
-    # Skip if already fully downloaded (best-effort check via Content-Length)
+    # Best-effort completeness check via Content-Length.
     head = requests.head(url, allow_redirects=True, timeout=30)
     expected_size = int(head.headers.get("Content-Length", 0))
     if dest_path.exists() and expected_size and dest_path.stat().st_size == expected_size:
@@ -103,35 +56,21 @@ def download_file(url: str, dest_path: Path, chunk_size: int = 1024 * 1024) -> N
                     if total:
                         pct = downloaded / total * 100
                         print(f"\r    {downloaded / 1e9:.2f} / {total / 1e9:.2f} GB ({pct:.1f}%)", end="")
-        print()  # newline after progress
+        print()
 
 
 def extract_tifs(zip_path: Path, out_dir: Path) -> int:
-    """Extract every .tif file inside a zip (ignoring subfolder structure) into out_dir.
-
-    Parameters
-    ----------
-    zip_path : Path
-        Path to the source zip archive.
-    out_dir : Path
-        Directory to extract .tif files into; created if missing. Files
-        already present there are skipped.
-
-    Returns
-    -------
-    int
-        Number of .tif files newly extracted.
-    """
+    """Extract new .tif files from a zip into out_dir, flattened; return the count."""
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
     count = 0
     with zipfile.ZipFile(zip_path, "r") as zf:
         for member in zf.namelist():
             if not member.lower().endswith(".tif"):
                 continue
-            filename = Path(member).name  # flatten any subfolder structure
+            filename = Path(member).name
             target = out_dir / filename
             if target.exists():
-                continue  # skip if already extracted (e.g. re-running the script)
+                continue
             with zf.open(member) as src, open(target, "wb") as dst:
                 dst.write(src.read())
             count += 1
@@ -139,40 +78,18 @@ def extract_tifs(zip_path: Path, out_dir: Path) -> int:
 
 
 def extraction_marker_path(out_dir: Path, name: str) -> Path:
-    """Path to the "already extracted" marker for zip `name` in `out_dir`.
+    """Return the "already extracted" marker path for zip name in out_dir.
 
-    Needed because `download_file`'s own already-downloaded check compares
-    against the local .zip, which no longer exists once
-    delete_zip_after_extract has removed it - without a separate marker,
-    every re-run would re-download a continent's multi-GB zip purely to
-    re-extract .tif files that are already all there (extract_tifs already
-    skips per-file, but that doesn't avoid the download itself).
-
-    Parameters
-    ----------
-    out_dir : Path
-        Directory the zip's contents were extracted into.
-    name : str
-        Name of the zip (e.g. a continent name, or "mask_tiles").
-
-    Returns
-    -------
-    Path
-        Path to the marker file (its existence is not checked here).
+    Needed because download_file's size check fails once the zip is deleted,
+    which would re-download multi-GB zips on every run.
     """
     return out_dir / f"{name}.extracted"
 
 
 def _try_delete(path: Path, attempts: int = 5, delay_s: float = 2.0) -> bool:
-    """Best-effort delete, retrying briefly on PermissionError.
+    """Delete path, retrying on PermissionError; return False instead of raising.
 
-    Windows can transiently hold a lock on a just-closed file (e.g. Defender/
-    endpoint AV real-time-scanning a freshly downloaded/extracted zip) for a
-    second or two after the `zipfile.ZipFile` context manager has released
-    it. Returns False (rather than raising) once attempts are exhausted, so
-    a lock that outlasts the retries costs disk space, not the whole
-    preparation run - extraction has already succeeded and the `.extracted`
-    marker is already written by the time this is called.
+    Windows AV can briefly lock a just-closed zip; a lingering lock costs only disk.
     """
     for attempt in range(1, attempts + 1):
         try:
@@ -188,27 +105,7 @@ def _try_delete(path: Path, attempts: int = 5, delay_s: float = 2.0) -> bool:
 def process_zip(
     name: str, url: str, zip_download_dir: Path, out_dir: Path, delete_zip_after_extract: bool,
 ) -> None:
-    """Download one zip (unless already extracted) and extract its .tif files.
-
-    Skips the download entirely if the extraction marker for `name` already
-    exists. Writes the marker after extracting, and optionally deletes the
-    downloaded zip afterward.
-
-    Parameters
-    ----------
-    name : str
-        Name of this zip (continent name, or "mask_tiles"); used for the
-        download filename and the extraction marker.
-    url : str
-        URL to download the zip from; if falsy, this zip is skipped
-        entirely.
-    zip_download_dir : Path
-        Directory to download the zip into.
-    out_dir : Path
-        Directory to extract .tif files into.
-    delete_zip_after_extract : bool
-        If True, delete the downloaded zip after extraction succeeds.
-    """
+    """Download one zip unless its extraction marker exists, then extract its .tifs."""
     if not url:
         print(f"Skipping {name} (no URL provided)")
         return
@@ -237,28 +134,10 @@ def process_zip(
 
 
 def run(config: dict) -> None:
-    """Download DeltaDTM DEM/mask tiles and extract them into the data catalog's tile dirs.
-
-    Resolves the DEM/mask output directories from the hydromt data catalog,
-    downloads each continent's DEM zip (`DEM_ZIP_URLS`) and the mask zip
-    (`MASK_ZIP_URL`), and extracts their .tif files in place; already-
-    extracted zips are skipped (see `process_zip`).
-
-    Parameters
-    ----------
-    config : dict
-        Full pipeline config; must contain `sync_deltadtm.zip_download_dir`,
-        optional `sync_deltadtm.delete_zips_after_extract`, and
-        `paths.hydromt_data_catalog` / `paths.root`.
-    """
+    """Download DeltaDTM DEM/mask tile zips and extract them into the catalog's tile dirs."""
     sync_cfg = config["sync_deltadtm"]
 
-    # DEM/mask tiles land next to the `deltadtm`/`deltadtm_mask` VRT mosaics
-    # in data_catalog_gfm.yml — the same directories src/connectivity_tiling.py
-    # already reads individual tile files from, so nothing downstream needs
-    # to know this script ran. The VRT mosaics themselves are built
-    # separately, by build_deltadtm_vrt.py (run_preparation.py's next step)
-    # - see this module's own docstring for why that's a separate step now.
+    # Tiles go next to the deltadtm/deltadtm_mask VRTs, where downstream reads them.
     catalog = get_data_catalog(
         _REPO_ROOT / config["paths"]["hydromt_data_catalog"], root=config["paths"]["root"]
     )

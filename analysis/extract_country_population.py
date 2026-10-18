@@ -1,30 +1,9 @@
-"""Extract total 2020 population per country from the WorldPop raster.
+"""Extract total 2020 population per country from the full WorldPop raster.
 
-Sums the FULL, unclipped WorldPop population raster (`population` catalog
-source) per country, using the WRI geogunit_109 country-unit raster
-(`geogunit_country_units`) for pixel attribution - resolved the same way
-prepare_exposure_grid_chunk()/protection.load_geogunit_ids() already resolve
-geogunit IDs everywhere else in this pipeline (nearest-neighbour
-reproject_like onto the population grid, since geogunit IDs are categorical
-region codes, not a continuous field - grid misalignment between the
-WorldPop and WRI products is handled automatically, not assumed away).
-
-Unlike the exposure pipeline's own exposure_population_grid_{chunk_id}.tif
-(prepare_exposure_grid_chunk() in src/exposure_grid.py), which is clipped to each
-chunk's flood-simulation bbox (its own real connectivity-derived footprint,
-plus an explicit coastal buffer for hop=0 domains only - see
-src/connectivity_tiling.py's module docstring), this reads the population raster's
-FULL global extent in latitude bands, so it can serve as a true
-country-population denominator for "% of population exposed" figures
-(analysis/plot_burning_ember.py, analysis/plot_timeseries.py) - not just
-"% of the modeled coastal buffer".
-
-Country attribution reuses visualization.build_geo109_to_iso_lookup - the
-same geogunit_109 ID -> ISO-3 lookup plot_world_map.py already builds for
-its choropleths - and shares its cache file so whichever script runs first
-builds it once.
-
-Output CSV columns: ISO, total_population_2020.
+Unlike the chunk-clipped exposure population grids, this covers the full global
+extent, so it serves as the country denominator for "% of population exposed".
+Pixels are attributed via the WRI geogunit_109 raster (nearest-neighbour onto the
+population grid) and the geo109->ISO lookup cached with plot_world_map.py.
 
 Usage:
     python analysis/extract_country_population.py \\
@@ -46,18 +25,12 @@ from analysis_figures import build_geo109_to_iso_lookup  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# WorldPop's own documented coverage (data_catalog_gfm.yml: "lat -72..84"),
-# with a small buffer either side.
+# WorldPop coverage (lat -72..84) plus a small buffer.
 _GLOBAL_LAT_RANGE = (-75.0, 85.0)
 
 
 def _geo109_iso_lookup(catalog, cfg: dict, viz: dict) -> dict[int, str]:
-    """Reuse plot_world_map.py's cached geo109->ISO lookup if present, else build+cache it there.
-
-    Same cache path plot_world_map.py itself writes to (out_dir /
-    "geo109_iso_lookup.csv" under its --outdir, default {output_dir}/world_maps)
-    - whichever of the two scripts runs first builds it, the other reuses it.
-    """
+    """Load the geo109->ISO lookup from plot_world_map.py's cache, else build and cache it."""
     out_dir = Path(viz.get("output_dir", f"{cfg['paths']['root']}/figures")) / "world_maps"
     cache_path = out_dir / "geo109_iso_lookup.csv"
     if cache_path.exists():
@@ -80,16 +53,11 @@ def _geo109_iso_lookup(catalog, cfg: dict, viz: dict) -> dict[int, str]:
 def sum_population_by_iso(
     catalog, geo109_to_iso: dict[int, str], row_band_deg: float = 5.0,
 ) -> tuple[dict[str, float], int, float]:
-    """Zonal-sum the FULL population raster per geogunit_109 ID, then per ISO.
+    """Zonal-sum the full population raster per geogunit_109 ID, then per ISO.
 
-    Reads the population raster in latitude bands (row_band_deg wide) via
-    the data catalog, bounding memory on the full ~1km global raster - every
-    pixel's population is summed exactly (never spatially subsampled, unlike
-    the coarser geo109->ISO ID lookup itself, where subsampling only affects
-    a majority vote over already country-sized units).
-
-    Returns (pop_by_iso, n_dropped_ids, dropped_population) - dropped =
-    geo109 IDs present in the raster with no ISO mapping (ocean/unassigned).
+    Read in `row_band_deg` latitude bands to bound memory; every pixel is summed (no
+    subsampling). Returns (pop_by_iso, n_dropped_ids, dropped_population), where dropped
+    IDs have no ISO mapping (ocean/unassigned).
     """
     lat_min, lat_max = _GLOBAL_LAT_RANGE
     totals: dict[int, float] = {}
@@ -113,16 +81,12 @@ def sum_population_by_iso(
             pop[pop == nodata] = 0.0
         pop[~np.isfinite(pop)] = 0.0
 
-        # Nearest-neighbour reproject onto pop_da's own grid - same helper
-        # (and same alignment-safety guarantee) prepare_exposure_grid_chunk
-        # already relies on for every chunk's own geogunit attribution.
+        # Nearest-neighbour: geogunit IDs are categorical.
         geo_ids = load_geogunit_ids(catalog, "geogunit_country_units", pop_da)
 
         ids_flat = geo_ids.ravel().astype("int64")
         pop_flat = pop.ravel()
-        # geogunit ID 0 = no country (same convention as
-        # visualization.build_geo109_to_iso_lookup's own "> 0" mask);
-        # load_geogunit_ids' own GEOGUNIT_INVALID sentinel (-1) is excluded too.
+        # ID 0 = no country; -1 = GEOGUNIT_INVALID.
         valid = ids_flat > 0
         if np.any(valid):
             band_sums = np.bincount(ids_flat[valid], weights=pop_flat[valid])

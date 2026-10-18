@@ -1,20 +1,7 @@
-"""Bangkok / Chao Phraya case study: flood-depth map at RP=100, one panel
-per SLR scenario, case polygon outlined on every panel. Reads the merged
-per-(RP,SLR) VRTs the Snakemake postprocess target already writes
-(merged_results/waterdepth_RP100_{SLR}.vrt), windowed to the case
-polygon's own bbox (+ a small buffer for context) - adapts
-src/pipeline_plots.py::plot_raster_with_coastlines's own windowed-read/colorbar
-idiom (that function saves one whole figure per call, not a subplot, so
-its internals are reproduced here instead of calling it directly).
+"""Plot Bangkok / Chao Phraya flood depth at one RP, one panel per SLR scenario.
 
-Background: the project's own `land_use` catalog entry (Copernicus Global
-Land Cover 100m, data_catalog_gfm.yml) rather than a flat land/water fill -
-Marjolijn asked for real land-use context. The raw layer has 23 classes
-(see inputs/Copernicus/lu_to_roughness_lookup.csv for the full code->name
-table) - too many to read as background texture, so _CATEGORY_LUT collapses
-them to 5: forest, built-up, cultivated land, bare/sparse land, water
-(Marjolijn's own grouping). No legend - purely visual context underneath
-the flood-depth overlay.
+Reads the merged waterdepth_{RP}_{SLR}.vrt windowed to the case polygon bbox, over a
+Copernicus land-use background collapsed from 23 classes to 5.
 
 Usage:
     python plot_bangkok_case_flood_map.py \\
@@ -41,20 +28,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import get_data_catalog, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_BUFFER_DEG = 0.15  # context margin around the case polygon's own bbox
+_BUFFER_DEG = 0.15
 
-# Copernicus Land Cover 100m class codes (inputs/Copernicus/
-# lu_to_roughness_lookup.csv) collapsed to 5 broad categories for
-# background texture - code 0 ("No data") is left unmapped -> masked out.
+# Copernicus Land Cover 100m codes (inputs/Copernicus/lu_to_roughness_lookup.csv)
+# collapsed to 5 categories; unmapped codes (0 = "No data") are masked.
 _CATEGORY_NAMES = ["Forest", "Built-up", "Cultivated land", "Bare / sparse land", "Water"]
-# Representative-but-distinguishable: forest green, brick-red urban, warm
-# cropland gold, a cooler/grayer taupe for bare land (so it doesn't read as
-# "pale cropland"), and a steeper blue than the waterdepth Blues colormap's
-# own pale low end so "Water" land-use doesn't get lost next to dry/shallow
-# flooded cells.
+# Water is darker than the low end of the depth colormap so it stays distinguishable.
 _CATEGORY_COLORS = ["#2d6a4f", "#b23a2e", "#d9a441", "#a69484", "#3d7ea6"]
 _CODE_TO_CATEGORY = {
-    # Forest - every closed/open forest variant.
+    # Closed/open forest
     111: 0, 112: 0, 113: 0, 114: 0, 115: 0, 116: 0,
     121: 0, 122: 0, 123: 0, 124: 0, 125: 0, 126: 0,
     50: 1,   # Built-up
@@ -65,9 +47,6 @@ _CODE_TO_CATEGORY = {
 
 
 def _read_land_use_categories(catalog_path: Path, root: str, bounds: tuple[float, float, float, float]) -> np.ndarray:
-    """Windowed read of the land_use raster, remapped from its 23 raw
-    Copernicus class codes to the 5 _CATEGORY_NAMES indices via
-    _CODE_TO_CATEGORY (masked where unmapped, i.e. code 0/"No data")."""
     catalog = get_data_catalog(catalog_path, root=root)
     land_use_path = catalog.get_source("land_use").path
     with retry_transient_io(rasterio.open, land_use_path) as src:
@@ -126,12 +105,7 @@ def main() -> None:
             data = src.read(1, window=window, boundless=True, fill_value=src.nodata or 0.0)
             nodata = src.nodata
 
-        # Mask BOTH true nodata and zero-depth (dry) cells - not just nodata -
-        # so the land-use background actually shows through dry land, not
-        # just outside the raster's own data extent. Dry land is the vast
-        # majority of any panel; leaving it opaque at Blues(0) (near-white,
-        # but NOT transparent) previously hid the land-use layer underneath
-        # almost everywhere.
+        # Mask dry cells too, else Blues(0) hides the land-use background.
         dry_or_nodata = (data <= 0) if nodata is None else ((data == nodata) | (data <= 0))
         masked = np.ma.masked_array(data, mask=dry_or_nodata)
         extent = (bounds[0], bounds[2], bounds[1], bounds[3])
@@ -150,11 +124,7 @@ def main() -> None:
     axes[0].set_ylabel("Latitude")
     fig.suptitle(f"Bangkok / Chao Phraya case study: flood depth at {args.return_period}", y=0.98)
 
-    # Explicit margins + dedicated axes for both the colorbar (vertical,
-    # right of the last panel) and the land-use legend (below all panels) -
-    # not fig.colorbar(..., ax=axes) + tight_layout(), which placed the
-    # colorbar ON TOP of the panels instead of in reserved space (tight_layout
-    # doesn't know about axes/legends added after the subplots are laid out).
+    # Explicit margins: tight_layout ignores the colorbar/legend added afterwards.
     fig.subplots_adjust(left=0.05, right=0.90, top=0.88, bottom=0.2, wspace=0.08)
     if image is not None:
         fig.colorbar(image, ax=axes[-1], label="Water depth (m)", orientation="vertical",

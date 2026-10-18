@@ -1,30 +1,8 @@
-"""Single 2-panel summary figure for the obstacle-coupling calibration
-study (see calibration_studies/run_obstacle_coupling_study.py and
-docs/methods_03_calibration_sensitivity.md §3): each panel is a
-median/2nd/98th-percentile/min-max band across the wet calibration tiles
-that still have a real observation at that outer iteration, plotted
-against outer iteration, with a vertical line at `max_outer_iterations`
-marking the production cap that was actually chosen.
+"""Plot the obstacle-coupling calibration figure (docs/methods_03 §3).
 
-Reads run_obstacle_coupling_study.py's per-tile raw CSVs directly:
-the n_outer=0 baseline row and one row per outer iteration actually run
-(status="ok"). A tile's own trace ends once outer_convergence_pct is
-satisfied, so the number of tiles contributing to a given outer
-iteration's band shrinks at higher iteration numbers as tiles finish -
-real (raw, unmodified) data throughout, no imputation/carry-forward for
-iterations past a tile's own trace.
-
-Panels:
-  (a) converged-vs-still-active tile counts per outer iteration: a stacked
-      bar per iteration splitting all tiles into those that already
-      satisfied outer_convergence_pct and stopped by that iteration vs
-      those still actively iterating past it - the discrete-count version
-      of the shrinking sample size behind every band in this figure.
-  (b) pct_newly_blocked (the literal outer-loop stopping-criterion metric -
-      % of the tile's cells newly blocked this iteration) vs outer
-      iteration, log scale, with a horizontal reference line at
-      outer_convergence_pct - shows how tiles approach/cross the actual
-      cutoff, not just an absolute cell count.
+(a) converged vs still-active tiles per outer iteration; (b) pct_newly_blocked
+(% of tile cells) band vs outer iteration. Tiles drop out once converged; no
+carry-forward.
 
 Usage:
     python plot_obstacle_coupling_calibration_bands.py <obstacle_coupling_dir> <figures_dir> [--max-outer-iterations 3]
@@ -52,11 +30,7 @@ FLOOR_PCT = 1e-4  # log-scale display floor for panel (b)'s pct_newly_blocked
 
 
 def _load_tile_trace(csv_path: Path) -> pd.DataFrame | None:
-    """Per-iteration rows (n_outer >= 1) for one tile: tile id, outer
-    iteration, and pct_newly_blocked (the literal outer-loop stopping-
-    criterion metric). A tile's own baseline (n_outer=0, no blocking at
-    all) must show some flooding for the tile to be included - matches
-    every other figure drawn from this same calibration-tile pool."""
+    # Tiles whose n_outer=0 baseline is dry are excluded.
     try:
         df = pd.read_csv(csv_path)
     except pd.errors.EmptyDataError:
@@ -97,10 +71,6 @@ def _plot_band(ax, s: pd.DataFrame, color: str, label: str, floor: float | None 
 
 
 def _plot_convergence_bars(ax, final_iter: pd.Series, x_max: int) -> None:
-    """Stacked bar per outer iteration x: tiles already converged and
-    stopped by x (final_iter <= x) vs tiles still actively iterating past x
-    (final_iter > x) - the discrete-count version of the shrinking sample
-    size behind every band in this figure."""
     n_tiles = len(final_iter)
     xs = np.arange(1, x_max + 1)
     converged = np.array([(final_iter <= x).sum() for x in xs])
@@ -113,6 +83,7 @@ def _plot_convergence_bars(ax, final_iter: pd.Series, x_max: int) -> None:
 
 def make_figure(long_df: pd.DataFrame, max_outer_iterations: int, outer_convergence_pct: float,
                  x_max: int, out_path: Path) -> None:
+    """Draw the 2-panel figure to out_path."""
     fig, axes = plt.subplots(1, 2, figsize=(17, 7.5))
 
     ax = axes[0]
