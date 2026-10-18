@@ -37,7 +37,7 @@ _RP_OUTER = "RP1000"
 
 
 def main() -> None:
-    """Score the FZ2 band and write england_fz2_band_result.csv."""
+    """Score the FZ2 band and write metrics_GBR_england_ea_floodzone2_sea_RP100-RP1000_{SLR}.csv."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     args = parser.parse_args()
@@ -130,17 +130,23 @@ def main() -> None:
         f"  HR={metrics['HR']:.3f}  FAR={metrics['FAR']:.3f}  CSI={metrics['CSI']:.3f}  bias={metrics['bias']:.3f}"
     )
 
-    out_dir = Path(val_cfg["output_dir"]) / _COUNTRY_ISO
-    retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
-    out_path = out_dir / "england_fz2_band_result.csv"
     row = {
         "benchmark_key": _BENCHMARK_KEY, "region": region,
         "band_inner_rp": _RP_INNER, "band_outer_rp": _RP_OUTER,
         "model_band_km2": model_band_km2, "benchmark_wet_km2": benchmark_wet_km2,
         "HR": metrics["HR"], "FAR": metrics["FAR"], "CSI": metrics["CSI"], "bias": metrics["bias"],
     }
+    write_result(row, val_cfg["output_dir"], slr)
+
+
+def write_result(row: dict, output_dir: str | Path, slr: str) -> Path:
+    """Write the band row to its standalone metrics CSV; the RP part is "RP100-RP1000"."""
+    out_path = v.standalone_metrics_path(output_dir, _COUNTRY_ISO, _BENCHMARK_KEY,
+                                         f"{row['band_inner_rp']}-{row['band_outer_rp']}", slr)
+    retry_transient_io(out_path.parent.mkdir, parents=True, exist_ok=True)
     atomic_write(out_path, lambda f: pd.DataFrame([row]).to_csv(f, index=False), mode="w", encoding="utf-8", newline="")
     print(f"  wrote {out_path}")
+    return out_path
 
 
 if __name__ == "__main__":

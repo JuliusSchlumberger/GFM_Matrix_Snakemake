@@ -123,7 +123,7 @@ def _score_one_rp(rp, slr, cfg, gfm_catalog, bench_catalog, spec, full_gdf, full
 
 
 def main() -> None:
-    """Score FZ3 at RP100/RP250 and write england_fz3_rescore.csv."""
+    """Score FZ3 at RP100/RP250; write metrics_GBR_england_ea_floodzone3_sea_{RP}_{SLR}.csv per RP."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     args = parser.parse_args()
@@ -152,11 +152,20 @@ def main() -> None:
     if not rows:
         print("No rows produced - nothing written.")
         return
+    write_results(rows, val_cfg["output_dir"])
 
-    out_path = Path(val_cfg["output_dir"]) / "england_fz3_rescore.csv"
-    retry_transient_io(out_path.parent.mkdir, parents=True, exist_ok=True)
-    atomic_write(out_path, lambda f: pd.DataFrame(rows).to_csv(f, index=False), mode="w", encoding="utf-8", newline="")
-    print(f"\nwrote {out_path}")
+
+def write_results(rows: list[dict], output_dir: str | Path) -> list[Path]:
+    """Write each RP's row to its own standalone metrics CSV (see validation.standalone_metrics_path)."""
+    paths = []
+    for row in rows:
+        out_path = v.standalone_metrics_path(output_dir, _COUNTRY_ISO, _BENCHMARK_KEY, row["return_period"], row["waterlevel_name"])
+        retry_transient_io(out_path.parent.mkdir, parents=True, exist_ok=True)
+        atomic_write(out_path, lambda f, row=row: pd.DataFrame([row]).to_csv(f, index=False),
+                     mode="w", encoding="utf-8", newline="")
+        print(f"wrote {out_path}")
+        paths.append(out_path)
+    return paths
 
 
 if __name__ == "__main__":

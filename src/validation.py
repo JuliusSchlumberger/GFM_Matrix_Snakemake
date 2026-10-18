@@ -46,6 +46,17 @@ class BenchmarkSpec:
     comparison_return_periods: list[int] | None = None
 
 
+def standalone_metrics_path(output_dir: str | Path, country_iso: str, benchmark: str, rp: str, slr: str) -> Path:
+    """Path of a standalone scorer's result CSV.
+
+    ``{output_dir}/{ISO}/metrics_{ISO}_{benchmark}_{RP}_{SLR}.csv``, next to
+    validate_country.py's ``metrics_{ISO}_{RP}_{SLR}.csv``; the benchmark part keeps
+    the scorers (rescore_england_fz3, validate_england_fz2_band, validate_sf_bay)
+    from colliding with it and with each other. `rp` may be a band ("RP100-RP1000").
+    """
+    return Path(output_dir) / country_iso / f"metrics_{country_iso}_{benchmark}_{rp}_{slr}.csv"
+
+
 def fix_catalog_meta_encoding(catalog, yml_path: str | Path) -> None:
     """Re-read `yml_path` as UTF-8 and patch each loaded source's `meta` in place.
 

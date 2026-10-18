@@ -21,14 +21,19 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 from config_utils import load_config  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from compare_against_published import KASMALKAR_SF_BAY, PUBLISHED_CSI  # noqa: E402
+from compare_against_published import (  # noqa: E402
+    KASMALKAR_SF_BAY,
+    PUBLISHED_CSI,
+    england_fz2_band_path,
+    england_fz3_results,
+    sf_bay_results_path,
+)
 
-SF_BAY_RESULTS = Path(__file__).resolve().parent / "sf_bay_results.csv"
 OUT_DIR = Path(__file__).resolve().parent
 
 # (label, (source, region), ranged). ranged=True: the benchmark's native
 # ~200yr RP is bracketed by RP100/RP250, so one row per RP. New Brunswick has no RP250
-# run. England comes from its rescore files: metrics_GBR_*.csv "england" rows are stale.
+# run. England comes from its rescore files: metrics_GBR_{RP}_{SLR}.csv "england" rows are stale.
 _REGIONS = [
     ("Wales (whole)", ("gbr", "wales"), True),
     ("Wales - Severn Estuary", ("gbr", "severn_estuary"), True),
@@ -52,15 +57,14 @@ def _fmt_published(pairs: list[tuple[str, float]]) -> str:
 
 def build_extent_table(
     gbr_metrics_rp100: Path, gbr_metrics_rp250: Path, can_metrics: Path,
-    england_fz3_rescore: Path, england_fz2_band: Path,
+    fz3: pd.DataFrame, england_fz2_band: Path, sf_bay_csv: Path,
 ) -> pd.DataFrame:
     """Build the HR/FAR/bias/CSI (ours) + published-CSI table, one row per region/RP."""
     gbr_rp100 = pd.read_csv(gbr_metrics_rp100).set_index("region")
     gbr_rp250 = pd.read_csv(gbr_metrics_rp250).set_index("region")
     can = pd.read_csv(can_metrics).set_index("region")
-    fz3 = pd.read_csv(england_fz3_rescore)
     fz2 = pd.read_csv(england_fz2_band)
-    sf_bay = pd.read_csv(SF_BAY_RESULTS, index_col=0)
+    sf_bay = pd.read_csv(sf_bay_csv, index_col=0)
 
     rows = []
     for label, (src, region), ranged in _REGIONS:
@@ -105,9 +109,9 @@ def build_extent_table(
     return pd.DataFrame(rows)
 
 
-def build_sf_bay_depth_table() -> pd.DataFrame:
+def build_sf_bay_depth_table(sf_bay_csv: Path) -> pd.DataFrame:
     """Build the SF Bay RMSE/MAE (m) table against Kasmalkar et al. (2024)."""
-    sf_bay = pd.read_csv(SF_BAY_RESULTS, index_col=0)
+    sf_bay = pd.read_csv(sf_bay_csv, index_col=0)
     published = KASMALKAR_SF_BAY
     rows = []
     for direction in sf_bay.index:
@@ -126,17 +130,19 @@ def main(config_path: str | Path | None = None) -> None:
     """Print both overview tables and write them as CSV next to this script."""
     cfg = load_config(config_path or _REPO_ROOT / "snakemake_workflow" / "config" / "config.yml")
     validation_dir = Path(cfg["validation"]["output_dir"])
+    slr = cfg["validation"]["waterlevel_name"]
     gbr_metrics_rp100 = validation_dir / "GBR" / "metrics_GBR_RP100_SLR_0.csv"
     gbr_metrics_rp250 = validation_dir / "GBR" / "metrics_GBR_RP250_SLR_0.csv"
     can_metrics = validation_dir / "CAN" / "metrics_CAN_RP100_SLR_0.csv"
-    england_fz3_rescore = validation_dir / "england_fz3_rescore.csv"
-    england_fz2_band = validation_dir / "GBR" / "england_fz2_band_result.csv"
+    fz3 = england_fz3_results(validation_dir, slr)
+    england_fz2_band = england_fz2_band_path(validation_dir, slr)
+    sf_bay_csv = sf_bay_results_path(validation_dir, slr)
 
     pd.set_option("display.width", 220)
     pd.set_option("display.max_colwidth", 60)
 
     extent_df = build_extent_table(
-        gbr_metrics_rp100, gbr_metrics_rp250, can_metrics, england_fz3_rescore, england_fz2_band,
+        gbr_metrics_rp100, gbr_metrics_rp250, can_metrics, fz3, england_fz2_band, sf_bay_csv,
     )
     print("=== HR / FAR / bias / CSI (ours), CSI (published where available) ===")
     print(extent_df.drop(columns="Note").round(3).to_string(index=False))
@@ -149,7 +155,7 @@ def main(config_path: str | Path | None = None) -> None:
     extent_df.to_csv(extent_out, index=False)
     print(f"\nwrote {extent_out}")
 
-    sf_bay_df = build_sf_bay_depth_table()
+    sf_bay_df = build_sf_bay_depth_table(sf_bay_csv)
     print("\n=== San Francisco Bay depth accuracy (RMSE/MAE, m) ===")
     print(sf_bay_df.round(3).to_string(index=False))
     sf_bay_out = OUT_DIR / "overview_sf_bay_depth.csv"

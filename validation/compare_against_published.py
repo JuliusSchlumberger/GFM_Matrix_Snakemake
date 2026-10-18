@@ -18,9 +18,16 @@ import pandas as pd
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from config_utils import load_config  # noqa: E402
+from config_utils import load_config, return_period_years  # noqa: E402
+import validation as v  # noqa: E402
 
+# Older result locations, read when the standalone_metrics_path file is absent.
 SF_BAY_RESULTS = Path(__file__).resolve().parent / "sf_bay_results.csv"
+_OLD_FZ3_RESCORE = "england_fz3_rescore.csv"  # under validation.output_dir
+_OLD_FZ2_BAND = "GBR/england_fz2_band_result.csv"
+FZ3_KEY = "england_ea_floodzone3_sea"
+FZ2_KEY = "england_ea_floodzone2_sea"
+FZ2_BAND = "RP100-RP1000"
 
 # "wales"/"england" = whole territory; other regions are Chaudhuri et al.'s study areas.
 PUBLISHED_CSI = [
@@ -50,10 +57,31 @@ KASMALKAR_SF_BAY = {
 }
 
 
-def _csi_rows(gbr_metrics: Path, can_metrics: Path, england_fz3_rescore: Path, england_fz2_band: Path) -> list[dict]:
+def england_fz3_results(validation_dir: Path, slr: str) -> pd.DataFrame:
+    """rescore_england_fz3.py's rows, RP ascending: its per-RP metrics CSVs, else the older single CSV."""
+    paths = [p for p in (Path(validation_dir) / "GBR").glob(f"metrics_GBR_{FZ3_KEY}_RP*_{slr}.csv")
+             if "-" not in p.stem]
+    if not paths:
+        return pd.read_csv(Path(validation_dir) / _OLD_FZ3_RESCORE)
+    df = pd.concat([pd.read_csv(p) for p in paths], ignore_index=True)
+    return df.sort_values("return_period", key=lambda s: s.map(return_period_years)).reset_index(drop=True)
+
+
+def england_fz2_band_path(validation_dir: Path, slr: str) -> Path:
+    """validate_england_fz2_band.py's result CSV: the metrics_* file, else the older name."""
+    new = v.standalone_metrics_path(validation_dir, "GBR", FZ2_KEY, FZ2_BAND, slr)
+    return new if new.exists() else Path(validation_dir) / _OLD_FZ2_BAND
+
+
+def sf_bay_results_path(validation_dir: Path, slr: str) -> Path:
+    """validate_sf_bay.py's metrics CSV, else the older validation/sf_bay_results.csv copy."""
+    new = v.standalone_metrics_path(validation_dir, "USA", "sf_bay", "RP100", slr)
+    return new if new.exists() else SF_BAY_RESULTS
+
+
+def _csi_rows(gbr_metrics: Path, can_metrics: Path, fz3_df: pd.DataFrame, england_fz2_band: Path) -> list[dict]:
     gbr_df = pd.read_csv(gbr_metrics)
     can_df = pd.read_csv(can_metrics)
-    fz3_df = pd.read_csv(england_fz3_rescore)
     fz2_band_df = pd.read_csv(england_fz2_band) if england_fz2_band.exists() else None
     rows = []
     for study, region, published in PUBLISHED_CSI:
@@ -90,8 +118,8 @@ def _csi_rows(gbr_metrics: Path, can_metrics: Path, england_fz3_rescore: Path, e
     return rows
 
 
-def _sf_bay_rows() -> list[dict]:
-    df = pd.read_csv(SF_BAY_RESULTS, index_col=0)
+def _sf_bay_rows(sf_bay_csv: Path) -> list[dict]:
+    df = pd.read_csv(sf_bay_csv, index_col=0)
     rows = []
     for direction in df.index:
         for metric, published in KASMALKAR_SF_BAY.items():
@@ -124,14 +152,16 @@ def main(config_path: str | Path | None = None, out_csv: str | Path | None = Non
     """Print and write the published-comparison table."""
     cfg = load_config(config_path or _REPO_ROOT / "snakemake_workflow" / "config" / "config.yml")
     validation_dir = Path(cfg["validation"]["output_dir"])
+    slr = cfg["validation"]["waterlevel_name"]
     gbr_metrics = validation_dir / "GBR" / "metrics_GBR_RP100_SLR_0.csv"
     can_metrics = validation_dir / "CAN" / "metrics_CAN_RP100_SLR_0.csv"
-    england_fz3_rescore = validation_dir / "england_fz3_rescore.csv"
-    england_fz2_band = validation_dir / "GBR" / "england_fz2_band_result.csv"
+    fz3_df = england_fz3_results(validation_dir, slr)
+    england_fz2_band = england_fz2_band_path(validation_dir, slr)
+    sf_bay_csv = sf_bay_results_path(validation_dir, slr)
     if out_csv is None:
         out_csv = Path(__file__).resolve().parent / "comparison_vs_published.csv"
 
-    df = pd.DataFrame(_csi_rows(gbr_metrics, can_metrics, england_fz3_rescore, england_fz2_band) + _sf_bay_rows())
+    df = pd.DataFrame(_csi_rows(gbr_metrics, can_metrics, fz3_df, england_fz2_band) + _sf_bay_rows(sf_bay_csv))
     df["ratio_ours_over_published"] = df["ours"] / df["published"]
 
     pd.set_option("display.width", 200)
