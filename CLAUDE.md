@@ -13,7 +13,7 @@ adaptation analysis and benchmark validation. A separate SFINCS sub-pipeline
 - `Snakefile`: targets `preprocess`, `simulate`, `postprocess`, `all`.
   Rules in `snakemake_workflow/rules/`, rule scripts in `snakemake_workflow/scripts/`.
 - HPC/SLURM: `snakemake_workflow/scripts/generate_hpc_{preprocess,postprocess}_job.py`,
-  `generate_hpc_simulation_jobs.py` (see `snakemake_workflow/hpc.md`).
+  `generate_hpc_simulation_jobs.py` (see `docs/hpc.md`).
 - `analysis/run_analysis.py`: exposure/adaptation figures (HPC exposure jobs also
   import `analysis/compute_exposure_analysis.py`).
 - `validation/run_validation.py`: eikonal vs national hazard maps (soft-scored HR/FAR/CSI).

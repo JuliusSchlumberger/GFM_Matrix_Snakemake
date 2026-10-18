@@ -1,159 +1,110 @@
-# GFM — Global Flood Model
+# GFM - Global Flood Model
 
-A tile-based coastal flood model pipeline, extending Deltares' Aqueduct Coastal
-Flooding methodology to global scale. For every tile in a global tile grid it
-prepares DEM/mask/friction/water-level-boundary inputs, runs a Fast Sweeping
-Method eikonal flood solver per (tile, return period, sea-level-rise
-scenario), merges results into spatial chunks, and runs exposure/adaptation
-and benchmark-validation analyses on top. A separate sub-pipeline
-(`sfincs_tiles/`) calibrates/validates the eikonal solver against SFINCS.
+GFM maps coastal flood hazard and exposure worldwide. It extends the Aqueduct coastal-flooding
+method (Deltares) to a global tile grid: for each coastal DeltaDTM tile it prepares elevation,
+land/water mask, friction and storm-tide boundary inputs, solves a friction-weighted eikonal
+equation (fast-sweeping method) for flood depth per return period and sea-level-rise level,
+merges the tiles into 5-degree chunks, and derives population exposure, adaptation pathways and
+validation scores against national flood maps. A separate sub-pipeline calibrates the eikonal
+friction against the hydrodynamic model SFINCS.
 
-## Repo layout
+![Fast-sweeping eikonal solver: flood depth after successive sweep rounds](docs/eikonal_example_rounds.png)
 
-The Snakemake DAG covers preprocessing → simulation → postprocessing; the
-other folders are standalone pipelines that share the same library code:
+## What it produces
+
+| Output | Resolution | Location (`<data_root>` = `paths.root`) |
+|---|---|---|
+| Flood depth per tile and per 5° chunk | ~30 m (1 arcsec, DeltaDTM grid) | `<data_root>/model_outputs/`, `<data_root>/merged_results/chunks/` |
+| Flood fraction on the population grid | ~1 km (30 arcsec) | `<data_root>/merged_results/chunks/flood_fraction/` |
+| Exposed population and expected annual impact | country / WRI geographic unit | `<data_root>/merged_results/exposure/` |
+| Adaptation pathways, tipping points, figures | country / continent / global | `<data_root>/figures/` |
+| Validation scores (HR, FAR, CSI, bias) | per benchmark region | `<data_root>/validation/` |
+
+Scenarios: return periods 2, 5, 10, 25, 50, 100, 250, 500 and 1000 years; sea-level-rise levels
+0, 0.5, 1.0, 1.5 and 2.0 m on top of present-day storm tide (COAST-RP), with spatial fingerprints
+from the IPCC AR6 projections (`boundary_conditions.slr_projection`, default SSP2-4.5).
+Population change follows the SSP projections to 2100.
+
+## Quick start
+
+The pipeline reads the input datasets listed in [docs/data.md](docs/data.md) from one data root
+(several TB for the global grid). No scenario runs without them; there is no bundled sample data.
+The unit tests run without data.
 
 ```
-Snakefile                  entry point for the Snakemake DAG
-run_eikonal_dag.py            wraps `snakemake` with an OOM-retry loop
-check_{preprocess,simulation,postprocess}_progress.py
-                            read-only progress monitors
-run_delta_floodmaps.py     global-deltas deliverable (ssp126/ssp245 configs)
-run_bangkok_case_study.bat  local case-study launcher
-
-src/                       shared library, imported by everything below
-                            (sys.path.insert, not a pip-installed package)
-
-preparation/               run_preparation.py: builds the tile grid +
-                            boundary-condition inputs the DAG reads, run first
-
-analysis/                  run_analysis.py: exposure/adaptation analysis and
-                            figures. Not a Snakemake rule target, but the HPC
-                            exposure jobs import compute_exposure_analysis.py
-                            and the HPC flood-totals job runs
-                            compute_flood_totals.py + run_analysis.py
-
-validation/                run_validation.py: HR/FAR/CSI vs national hazard
-                            maps (Wales/Scotland/England, New Brunswick);
-                            England FZ2/FZ3 and SF Bay via standalone scripts
-
-sfincs_tiles/              eikonal vs SFINCS calibration/validation (Hydrax):
-                            generate_calibration_jobs.py stage1|stage2,
-                            rerun_calibration.sh --part eikonal|sfincs;
-                            run_final_tile.sh is the per-tile SLURM worker
-
-calibration_studies/       eikonal solver sensitivity (inner sweep rounds /
-                            outer obstacle-coupling iterations):
-                            generate_calibration_batch_jobs.py
-                            sweep_budget|obstacle_coupling (docs/methods_03)
-
-snakemake_workflow/
-  rules/                     rule definitions (*.smk)
-  scripts/                   the rules' `script:` targets, plus HPC/SLURM job
-                              generators and their payloads (generate_hpc_*,
-                              run_exposure_pass1/2, reduce_exposure_*) and a
-                              few manual tools
-  config/                    config.yml (single source of truth), subset
-                              configs, data catalogs
-  hpc.md                     HPC/SLURM setup and dispatch
-
-tests/                     pytest suite (regression scripts, also runnable
-                            standalone)
-docs/                      methods docs; figure_scripts/ holds the standalone
-                            scripts that make their figures
-
-environment.yml            `gfm` env (main pipeline)
-environment_sfincs.yml     `hydromt-sfincs-dev` env (SFINCS build/run only)
-pyproject.toml             pytest + ruff config only (not a package)
-TODO.md, AUDIT.md          ongoing cleanup: audit, plan, deferred changes
+git clone <repo_url> gfm && cd gfm
+conda env create -f environment.yml          # creates the `gfm` env
+conda activate gfm
+cp snakemake_workflow/config/config_local.yml.example snakemake_workflow/config/config_local.yml
+#   set paths.root (<data_root>) and paths.code_root (this checkout)
+pytest -m "not needs_data"                   # checks the install, no data needed
 ```
 
-## Environments
+With the data in place, the smallest real scenario is the Bangkok / Chao Phraya case study
+(9 tiles, all return periods and sea-level-rise levels). Its tile subset and the hop ordering
+are described in [docs/running.md](docs/running.md):
 
-- `gfm` (`environment.yml`): everything — DAG, preparation, analysis,
-  validation, and all plotting. On the Windows dev machine the same env is
-  named `gfm_python_preprocessing` (outdated name); on Hydrax it is `gfm`.
-- `hydromt-sfincs-dev` (`environment_sfincs.yml`): `sfincs_tiles/` model
-  build/run only. Its matplotlib crashes on `savefig`, so run the
-  `sfincs_tiles/` plotting scripts in `gfm`.
-
-## Running things
-
-Four separate things get run, none of them automatically triggering another:
-
-1. **Preparation** (once, before the DAG, and whenever DeltaDTM/boundary
-   inputs change):
-   ```
-   python preparation/run_preparation.py [STEP...] [--config snakemake_workflow/config/config.yml]
-   ```
-2. **The Snakemake DAG** (preprocessing → simulation → postprocessing):
-   ```
-   python run_eikonal_dag.py
-   # or directly:
-   snakemake all --cores 4 --resources mem_mb=8000
-   ```
-   The full grid runs on HPC as split jobs (see `snakemake_workflow/hpc.md`).
-   Monitor with `check_preprocess_progress.py` / `check_simulation_progress.py`
-   / `check_postprocess_progress.py` (read-only, safe to run anytime).
-3. **Analysis** (exposure/adaptation, after the DAG):
-   ```
-   python analysis/run_analysis.py
-   ```
-4. **Validation** (benchmark HR/FAR/CSI comparison, after the DAG):
-   ```
-   python validation/run_validation.py --countries GBR CAN
-   ```
-   SF Bay and England Flood Zone 2/3 run via the standalone scripts in `validation/`.
-
-**Dry runs:** never `snakemake -n all` on the full grid locally (the DAG is
-split into HPC jobs and a full local dry run does not finish). Use a subset
-config instead:
 ```
-GFM_CONFIG_PATH=snakemake_workflow/config/bangkok_chao_phraya_materialized.yml snakemake -n all --cores 1
+python preparation/run_preparation.py        # global inputs, once
+python snakemake_workflow/scripts/materialize_configs.py bangkok_chao_phraya
+export GFM_CONFIG_PATH=snakemake_workflow/config/bangkok_chao_phraya_materialized.yml
+snakemake preprocess --cores 4
+snakemake simulate --cores 4                 # hop-0 tiles must finish first: rerun until complete
+snakemake postprocess --cores 4
+python analysis/run_analysis.py --config $GFM_CONFIG_PATH
 ```
-`profiles/default/config.yaml` (loaded automatically) limits rerun triggers to
-mtime, params, input and software-env: editing a script never re-runs finished outputs.
+
+The full global grid runs on a SLURM cluster: [docs/hpc.md](docs/hpc.md).
+
+## Repository layout
+
+| Directory | Contents |
+|---|---|
+| `src/` | shared library: tiling, eikonal solver, merging, exposure, validation |
+| `preparation/` | global inputs: tile grid, boundary conditions, DeltaDTM mosaics |
+| `snakemake_workflow/` | Snakemake rules and scripts, configs, HPC job generators |
+| `analysis/` | exposure, adaptation pathways, figures, delta case study |
+| `validation/` | comparison with national flood maps and the SF Bay benchmark |
+| `sfincs_tiles/` | SFINCS calibration of the eikonal friction (cluster) |
+| `calibration_studies/` | solver sensitivity studies (sweep budget, obstacle coupling) |
+| `tests/` | pytest suites |
+| `docs/` | methods, data, install, running and HPC guides |
+| `profiles/` | Snakemake profile loaded by default |
 
 ## Configuration
 
-`snakemake_workflow/config/config.yml` is the single source of truth for
-every pipeline above (not just the Snakemake DAG). `paths.root` and
-`paths.code_root` have no default: set them in
-`snakemake_workflow/config/config_local.yml` (gitignored, auto-loaded; copy
-`config_local.yml.example`) - every entry point stops with a clear error if
-`paths.root` is missing. Never put per-machine values in the committed `config.yml`.
-`*_materialized.yml` are generated/untracked: never hand-edit them (rebuild with
-`snakemake_workflow/scripts/materialize_configs.py`). The HPC generators also need
-the gitignored site files `snakemake_workflow/config/config_hpc.yml` and
-`sfincs_tiles/site_env.sh`: copy `config_hpc.example.yml` / `site_env.example.sh`
-(worked Hydrax example) and fill in your cluster's values.
+Settings are layered; later files override earlier ones:
 
-## Import convention
+1. `snakemake_workflow/config/config.yml`: every pipeline setting (tracked).
+2. `config_local.yml`: this machine's `paths.root` and `paths.code_root` (gitignored; copy the
+   `.example`).
+3. `<scenario>.yml` plus `<scenario>_pins.yml` (values a scenario's existing outputs were
+   computed with), merged into `<scenario>_materialized.yml` by
+   `snakemake_workflow/scripts/materialize_configs.py` and selected with `GFM_CONFIG_PATH`.
+4. On a cluster: `config_hpc.yml` and `sfincs_tiles/site_env.sh` (gitignored; copy
+   `config_hpc.example.yml` and `site_env.example.sh`) hold the cluster paths, partitions and
+   environment activation.
 
-Every entry point uses `sys.path.insert(0, ...)` to reach `src/` (and, where
-relevant, `analysis/`) — this is a flat script layout, not an installable
-Python package. If you add a new script, follow the existing pattern in a
-sibling file rather than introducing a different import mechanism.
+`profiles/default/config.yaml` makes Snakemake re-run a job only when its inputs, parameters or
+software environment change, not when a script is edited.
 
-## Tests
+## Documentation
 
-```
-pytest -m "not needs_data"                      # in gfm
-pytest tests/sfincs_* -m "not needs_data"       # in hydromt-sfincs-dev
-```
-`tests/conftest.py` skips the `tests/sfincs_*` tests unless hydromt_sfincs
-2.x is installed. Each script still runs standalone with `python <script>.py`.
+- [docs/install.md](docs/install.md): environments (`gfm`, `hydromt-sfincs-dev`) and tests
+- [docs/data.md](docs/data.md): input datasets, versions, sources, licences and access
+- [docs/running.md](docs/running.md): preparation, the Snakemake DAG, analysis, validation
+- [docs/hpc.md](docs/hpc.md): running on a SLURM cluster
+- Methods: [tile processing and water levels](docs/methods_01_tile_processing_and_waterlevels.md),
+  [flood depth](docs/methods_02_flood_depth.md),
+  [calibration sensitivity](docs/methods_03_calibration_sensitivity.md),
+  [SFINCS validation](docs/methods_04a_SFINCSvalidation.md),
+  [national map validation](docs/methods_04b_MapsValidation.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md), [CITATION.cff](CITATION.cff), [LICENSE](LICENSE)
 
-## Further reading
+## Citation and licence
 
-- `docs/methods_01_tile_processing_and_waterlevels.md` — the data-preparation
-  pipeline (elevation/water mask, tiling, water-level boundaries).
-- `docs/methods_02_flood_depth.md` — the friction-weighted eikonal flood-solver
-  methodology.
-- `docs/methods_03_calibration_sensitivity.md` — sensitivity studies for the
-  inner-loop round cap and outer obstacle-coupling iterations.
-- `docs/methods_04a_SFINCSvalidation.md` — SFINCS calibration and validation
-  of the eikonal model.
-- `docs/methods_04b_MapsValidation.md` — validation against official national
-  flood hazard maps.
-- `snakemake_workflow/hpc.md` — HPC/SLURM setup and dispatch.
+Cite the software with [CITATION.cff](CITATION.cff); a DOI will be added at the first release.
+
+The code is released under the [MIT licence](LICENSE). Documentation, figures and model outputs
+are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Input datasets
+keep their own licences ([docs/data.md](docs/data.md)).
