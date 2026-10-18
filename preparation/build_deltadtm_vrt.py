@@ -1,8 +1,8 @@
 """Build the DeltaDTM DEM/mask VRT mosaics with relative (portable) source paths.
 
 Entry point: run(config), via `python run_preparation.py build_deltadtm_vrt`.
-gdal.BuildVRT silently skips sources it transiently fails to open on the P:\
-share (warning only, random per run) and mixes absolute/relative paths. So the
+gdal.BuildVRT silently skips sources it transiently fails to open on the shared
+data root (warning only, random per run) and mixes absolute/relative paths. So the
 grid is pinned from filenames, missing tiles are retried in shrinking rounds plus
 single-tile retries, the build hard-fails on any unrecovered tile, and sources
 are rewritten relative and verified.
@@ -83,7 +83,7 @@ def _assert_all_relative(vrt_path: Path) -> None:
 def _rewrite_sources_relative(tree: ET.ElementTree) -> None:
     """Set every <SourceFilename> to a bare filename with relativeToVRT="1".
 
-    BuildVRT's own relative-path detection mixes "0"/"1" on the flaky P:\ share;
+    BuildVRT's own relative-path detection mixes "0"/"1" on a flaky network share;
     valid because tile_dir == dest_path.parent in run().
     """
     for src in tree.getroot().iter("SourceFilename"):
