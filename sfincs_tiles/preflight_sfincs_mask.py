@@ -1,7 +1,8 @@
 """Check that a tile's SFINCS grid + mask builds from its boundary line, before selection.
 
 Writes {base}/boundary_lines/preflight/{tile_id}.json. Only tiles whose line is
-suitable are checked unless --all. Runs under hydromt-sfincs-dev.
+suitable are checked unless --all. A pre-flight that raised is recorded with
+"exception": true (ok=False) and retried under --skip-done. Runs under hydromt-sfincs-dev.
 
 Usage:
     python preflight_sfincs_mask.py --config <config.yml> --base-dir-name calibration_roughness_SFINCS \\
@@ -66,7 +67,8 @@ def main() -> None:
     parser.add_argument("--tile-ids-file", default=None)
     parser.add_argument("--resolution-m", type=float, default=MAIN_RES_M_DEFAULT)
     parser.add_argument("--all", action="store_true", help="also check tiles whose line is not suitable")
-    parser.add_argument("--skip-done", action="store_true")
+    parser.add_argument("--skip-done", action="store_true",
+                        help="skip tiles that already have a record (not one whose pre-flight raised)")
     args = parser.parse_args()
 
     root = read_root(Path(args.config))
@@ -82,8 +84,10 @@ def main() -> None:
     for k, tile_id in enumerate(ids, 1):
         out = out_dir / f"{tile_id}.json"
         if args.skip_done and out.exists():
-            n_ok += json.loads(out.read_text())["ok"]
-            continue
+            prev = json.loads(out.read_text())
+            if not prev.get("exception"):  # a pre-flight that raised is retried
+                n_ok += prev["ok"]
+                continue
         status_path = lines_dir / "status" / f"{tile_id}.json"
         status = json.loads(status_path.read_text()) if status_path.exists() else {}
         if not args.all and not status.get("suitable", False):
@@ -94,7 +98,7 @@ def main() -> None:
                 row = preflight_tile(tile_id, tiles_root, lines_dir, args.resolution_m)
             except Exception as e:  # noqa: BLE001 - recorded per tile, the job goes on
                 row = {"tile_id": int(tile_id), "ok": False, "n_active": 0, "n_boundary": 0,
-                       "error": f"{type(e).__name__}: {e}"[:500]}
+                       "error": f"{type(e).__name__}: {e}"[:500], "exception": True}
                 traceback.print_exc()
         out.write_text(json.dumps(row))
         n_ok += row["ok"]
