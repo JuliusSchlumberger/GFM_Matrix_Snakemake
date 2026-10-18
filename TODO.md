@@ -13,8 +13,8 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
 1. **Review / merge `cleanup`** into `main` (one commit per phase, `git log main..cleanup`).
 2. **Before pulling on Hydrax:** back up any `*_materialized.yml` there - a pull deletes files
    that Phase 1 untracked; restore afterwards. (`config_hpc.yml` is tracked again since 2026-10-18.)
-3. **On Hydrax after pulling:** regenerate any HPC job files written before Phase 7a/7b (they call
-   old script names); then `DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part eikonal`.
+3. **On Hydrax after pulling:** `DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part eikonal`.
+   (Stale job files: done 2026-10-18 from Windows, see the Phase 7a/7b notes below.)
 4. **Snakemake "code changed" flags** (renamed rules/scripts): clear once with `snakemake --touch`
    on the configs whose outputs exist (writes Snakemake metadata next to P:\ outputs).
 5. **Decide:** re-materialize the scenario configs or not (item below); the `mdt_sign` test fixture;
@@ -49,9 +49,8 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
   `STUDY_ROOT` (case-study data on P:\), and `tests/sfincs_synthetic_end_to_end/test_sfincs_smoke.py`'s
   default SFINCS exe path (the test SKIPs when it's absent).
 - **Phase 7a renamed aqueduct -> eikonal** (files, rules, functions, config key). After pulling on
-  Hydrax: (1) **regenerate any HPC job files written before the rename** that haven't run yet -
-  they call `run_aqueduct_cli.py` / `snakemake generate_aqueduct_jobs`, which no longer exist
-  (rerun the `generate_hpc_*` / `generate_eikonal_jobs` step); (2) item D: Snakemake will flag
+  Hydrax: (1) job files - checked 2026-10-18: no file in `model_outputs/hpc_jobs` calls the old
+  names, nothing to regenerate; (2) item D: Snakemake will flag
   locally produced outputs of the renamed rule/scripts as "code changed" - outputs are unchanged,
   clear it with `snakemake --touch` (or run with `--rerun-triggers mtime params input software-env`).
   `simulation.aqueduct_mem_estimate` was renamed `eikonal_mem_estimate`; rules/simulation.smk still
@@ -64,5 +63,7 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
   rescore_england_fz3, calibration_studies test_*_calibration -> run_*_study and
   select_calibration_tiles -> select_study_candidate_tiles, scripts/calibration/select_country_tiles
   -> preparation/select_country_tiles). Code outside this repo that imports the old module names
-  (notebooks, personal scripts) needs the same rename. Calibration-study sbatch files generated
-  before the rename call the old script names: regenerate them with generate_calibration_batch_jobs.py.
+  (notebooks, personal scripts) needs the same rename. The 60 calibration-study sbatch files in
+  `calibration_500_tiles/hpc_jobs` (2026-10-05) were fixed in place on 2026-10-18: only the script path
+  was rewritten (`tests/test_<study>_calibration.py` -> `calibration_studies/run_<study>_study.py`, same
+  CLI); batches, --time and resolved_config.yml are as they ran. Backup: `.cleanup_baseline/calib500_hpc_jobs_backup/`.
