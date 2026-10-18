@@ -4,6 +4,7 @@ from pathlib import Path
 
 import hydromt
 import rasterio
+from hydromt.exceptions import NoDataException
 
 from config_utils import retry_transient_io
 from protection import GEOGUNIT_INVALID, load_geogunit_ids
@@ -28,9 +29,13 @@ def prepare_exposure_grid_chunk(
     with retry_transient_io(rasterio.open, reference_path) as ref:
         bbox = list(ref.bounds)
 
+    # Only "no coverage" yields the placeholder; any other read error fails the job,
+    # since a placeholder counts as done and is never rerun.
     try:
-        pop_da = data_catalog.get_rasterdataset(population_source, bbox=bbox).squeeze(drop=True)
-    except Exception:
+        pop_da = retry_transient_io(
+            data_catalog.get_rasterdataset, population_source, bbox=bbox
+        ).squeeze(drop=True)
+    except NoDataException:
         pop_da = None
 
     if pop_da is None or pop_da.size == 0:
