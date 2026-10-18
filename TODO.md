@@ -66,9 +66,3 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
   -> preparation/select_country_tiles). Code outside this repo that imports the old module names
   (notebooks, personal scripts) needs the same rename. Calibration-study sbatch files generated
   before the rename call the old script names: regenerate them with generate_calibration_batch_jobs.py.
-- **`sfincs_tiles/build_station_boundary_lines.py` (1254 lines) was not split in Phase 7c** on
-  purpose: 38 tightly coupled functions sharing 35 module constants, 7 importers (partly via
-  `bsl.<name>` attribute access), no tests, and no way to run SFINCS stage 1 end to end locally
-  (needs P:\ data + Hydrax). A split would be unverifiable. If wanted later: first add a
-  regression test that builds boundary lines for 1-2 stored tiles and compares the output gpkg,
-  then split (lines / conflict resolution / plotting / CLI), keeping re-exports for `bsl.X` users.
