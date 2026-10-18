@@ -55,7 +55,7 @@ def main() -> None:
                              "invocation below, e.g. --batch 3/20 (see snakemake --help for the "
                              "underlying <i>/<n> format) - splits the DAG into a smaller slice per "
                              "invocation the same way as the standalone preprocess batch runner, "
-                             "for the same reason (faster DAG builds on P:\\). Split-child tile_ids "
+                             "for the same reason (faster DAG builds on the shared data root). Split-child tile_ids "
                              "(src/tile_split.py: always one more than the current global max "
                              "tile_id) are always numerically larger than any original tile_id, so "
                              "they sort to the end of the (tile_id-ordered) job list and land in the "
@@ -65,7 +65,7 @@ def main() -> None:
                              "earlier ones.")
     parser.add_argument("--latency-wait", type=int, default=60,
                         help="forwarded to snakemake's own --latency-wait (default: 60s, vs "
-                             "Snakemake's own default of 5s). On P:\\ a job can finish writing its "
+                             "Snakemake's own default of 5s). On the shared data root a job can finish writing its "
                              "output and that file still not be visible to Snakemake's process "
                              "within 5s, raising a MissingOutputException for an output that IS "
                              "there and correct - not a real failure, just needs more patience.")

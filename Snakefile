@@ -15,7 +15,7 @@ from snakemake.utils import min_version
 min_version("7.0")
 
 # Patch os.makedirs to retry FileNotFoundError: a momentary SMB drop makes the
-# P:\ share vanish ([WinError 3]) and Snakemake's own output-dir creation does not
+# shared data root vanish ([WinError 3]) and Snakemake's own output-dir creation does not
 # retry. Path.mkdir() is not covered.
 _ORIGINAL_MAKEDIRS = os.makedirs
 
