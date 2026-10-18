@@ -51,16 +51,25 @@ def retry_transient_io(fn: Callable[..., _T], *args, retries: int = 4, delay_s: 
     raise last_err
 
 
-def atomic_write(output_path: str | Path, write_fn: Callable[[Any], None], mode: str = "w", **open_kwargs) -> None:
+def atomic_write(
+    output_path: str | Path,
+    write_fn: Callable[[Any], None],
+    mode: str = "w",
+    opener: Callable[..., Any] = open,
+    **open_kwargs,
+) -> None:
     """Write a file atomically via a temp file + ``os.replace``.
 
     A killed job never leaves a truncated file that resumable pipelines would
-    treat as complete. ``write_fn(f)`` receives the open temp-file handle.
+    treat as complete. ``write_fn(f)`` receives the handle returned by
+    ``opener(tmp_path, mode, **open_kwargs)`` (a context manager; ``open`` by
+    default, e.g. ``rasterio.open`` for rasters). The PID suffix of the temp
+    file keeps concurrent writers off each other's temp file.
     """
     output_path = Path(output_path)
     tmp_path = output_path.with_name(f"{output_path.name}.tmp{os.getpid()}")
     try:
-        with retry_transient_io(open, tmp_path, mode, **open_kwargs) as f:
+        with retry_transient_io(opener, tmp_path, mode, **open_kwargs) as f:
             write_fn(f)
         retry_transient_io(os.replace, tmp_path, output_path)
     except BaseException:
