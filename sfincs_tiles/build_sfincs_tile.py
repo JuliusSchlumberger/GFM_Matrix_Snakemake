@@ -102,11 +102,11 @@ def _reproject_nearest_to_grid(src_path: Path, dst_transform, dst_crs, dst_shape
 
 def _compute_zsini_array(
     native_mask_path: Path, station_x: np.ndarray, station_y: np.ndarray, station_values: np.ndarray,
-    grid_coords: xr.DataArray, dst_transform, dst_crs, dst_shape: tuple[int, int],
+    dst_transform, dst_crs, dst_shape: tuple[int, int],
 ) -> np.ndarray:
     # Non-ocean cells get -9999.0 (SFINCS: dry at bed level), else inland land would start
-    # flooded. Cell centres come from the rotation-aware `dst_transform`: on a rotated grid
-    # grid_coords' x/y are pixel indices. `grid_coords` is unused.
+    # flooded. Cell centres come from the rotation-aware `dst_transform`, not the grid's
+    # x/y coordinates: on a rotated grid those are pixel indices.
     rows, cols = np.indices(dst_shape)
     xx, yy = dst_transform * (cols + 0.5, rows + 0.5)
     zsini_arr = idw_interpolate_to_grid(station_x, station_y, station_values, xx, yy).astype(np.float32)
@@ -371,7 +371,7 @@ def build_sfincs_tile(
     first_vals = hydrographs[station_cols].iloc[0].to_numpy(dtype=np.float64)
     zsini_arr = _compute_zsini_array(
         tile_dir / "mask.tif", station_x, station_y, first_vals,
-        grid_coords, main_transform, main_crs, (main_height, main_width),
+        main_transform, main_crs, (main_height, main_width),
     )
 
     zsini_da = xr.DataArray(zsini_arr, dims=grid_coords.dims, coords=grid_coords.coords)

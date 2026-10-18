@@ -443,8 +443,9 @@ def merge_small_domains_tiered(
 
 # Phase 5 - hop-distance BFS within one component_id
 
-def _domain_touches_ocean(bbox: tuple[float, float, float, float], mask_index: dict, dem_index: dict, cfg: ConnectivityConfig) -> bool:
-    result = _mosaic_nearest_coarse(bbox, mask_index, dem_index, cfg.coarse_resolution_m)
+def _domain_touches_ocean(bbox: tuple[float, float, float, float], mask_index: dict, cfg: ConnectivityConfig) -> bool:
+    # Only the mask decides ocean contact, so no DEM tiles are read (dem_index=None).
+    result = _mosaic_nearest_coarse(bbox, mask_index, None, cfg.coarse_resolution_m)
     if result is None:
         return False
     mask_samples, _dem_samples, _transform = result
@@ -459,7 +460,7 @@ def _bbox_touches(a: tuple[float, float, float, float], b: tuple[float, float, f
 
 
 def compute_hop_distances(
-    domains: list[Domain], mask_index: dict, dem_index: dict, cfg: ConnectivityConfig,
+    domains: list[Domain], mask_index: dict, cfg: ConnectivityConfig,
 ) -> tuple[list[int | None], list[int]]:
     """Compute each domain's BFS hop distance to the nearest ocean-touching domain.
 
@@ -472,7 +473,7 @@ def compute_hop_distances(
     t0 = time.time()
     touches_ocean = []
     for i, d in enumerate(domains):
-        touches_ocean.append(_domain_touches_ocean(d.bbox, mask_index, dem_index, cfg))
+        touches_ocean.append(_domain_touches_ocean(d.bbox, mask_index, cfg))
         if (i + 1) % 250 == 0 or (i + 1) == n:
             elapsed = time.time() - t0
             rate = (i + 1) / elapsed if elapsed > 0 else 0
