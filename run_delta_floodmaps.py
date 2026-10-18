@@ -2,8 +2,8 @@
 
 Stages per scenario: boundary_conditions, preprocess, simulate, postprocess, with
 GFM_CONFIG_PATH = deltas_{scenario}_materialized.yml. simulate runs in ascending
-hop_distance waves: a hop>=1 tile whose lower-hop neighbours are not yet done is
-permanently zeroed as "no upstream flooding". A failing stage stops its scenario.
+hop_distance waves: a hop>=1 tile whose lower-hop neighbours are not yet done
+fails without output. A failing stage stops its scenario.
 
 Usage:
     python run_delta_floodmaps.py                          # both scenarios, all stages

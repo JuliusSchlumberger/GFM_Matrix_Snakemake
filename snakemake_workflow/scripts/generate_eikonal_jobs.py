@@ -193,8 +193,8 @@ def generate_wave_dispatch(
         print(f"  wrote {script_path} (wave {wave}, {len(batch_tiles)} tiles, "
               f"{n_jobs} jobs, {sbatch_cfg['cpus_per_task']}-way concurrent on {sbatch_cfg['partition']})")
 
-    # afterany: a failed tile only makes its neighbours fall back to a real-zero
-    # result, so it must not block the next wave.
+    # afterany: a failed tile only fails its own hop>=1 neighbours (no output,
+    # picked up by --resume), so it must not block the rest of the next wave.
     submit_lines = [
         "#!/bin/bash",
         "set -euo pipefail",
