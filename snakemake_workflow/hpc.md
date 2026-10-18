@@ -243,10 +243,15 @@ plotting — no different from a fully-local run.
 
 - The `run_eikonal` rule remains the right choice for a small
   local/debug run, no SLURM involved.
-- Re-running `generate_eikonal_jobs` after changing `hpc.n_nodes` won't
-  regenerate scripts on its own (Snakemake sees the old outputs as already
-  present) — delete `model_outputs/hpc_jobs/` first, or use `--forcerun
-  generate_eikonal_jobs`.
+- Changing `hpc.n_nodes` (or anything else under `hpc:`) does regenerate the
+  scripts: the whole `hpc` section and the batch split are params of
+  `generate_eikonal_jobs`, and the default profile's `rerun-triggers`
+  include `params` (a different batch count also adds missing script
+  outputs). Scripts of batches that no longer exist stay in
+  `model_outputs/hpc_jobs/` but are not in the new `submit_waves.sh`; delete
+  the directory first for a clean listing. Without Snakemake metadata for
+  the old outputs (e.g. a fresh checkout) the params trigger cannot fire:
+  use `--forcerun generate_eikonal_jobs`.
 - `submit_waves.sh` uses `afterany`, not `afterok` — a wave starts once its
   predecessor has finished regardless of individual job failures: a
   failed tile only fails its downstream neighbours for that scenario (they
