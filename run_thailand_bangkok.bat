@@ -13,9 +13,12 @@ REM
 REM Side-project scoped - not part of the core maintained pipeline. Safe to
 REM delete once this project is done.
 
-set "PYTHON=C:\Users\schlumbe\AppData\Local\miniforge3\envs\gfm_python_preprocessing\python.exe"
-set "SNAKEMAKE=C:\Users\schlumbe\AppData\Local\miniforge3\envs\gfm_python_preprocessing\Scripts\snakemake.exe"
-set "CFG=C:\Users\schlumbe\GFM_Matrix_Snakemake\snakemake_workflow\config\thailand_bangkok_materialized.yml"
+REM Conda env with the pipeline (`gfm`; named gfm_python_preprocessing on this machine).
+REM Override by setting GFM_ENV before running this file.
+if not defined GFM_ENV set "GFM_ENV=%LOCALAPPDATA%\miniforge3\envs\gfm_python_preprocessing"
+set "PYTHON=%GFM_ENV%\python.exe"
+set "SNAKEMAKE=%GFM_ENV%\Scripts\snakemake.exe"
+set "CFG=%~dp0snakemake_workflow\config\thailand_bangkok_materialized.yml"
 set "CORES=4"
 set "MEM_MB=24000"
 set "GFM_CONFIG_PATH=%CFG%"

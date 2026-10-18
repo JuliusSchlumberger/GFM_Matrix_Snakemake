@@ -118,7 +118,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sfincs_tiles"))
 from build_station_boundary_lines import MASK_VRT, OCEAN_CODE  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-DELTAS_PATH = Path(r"P:\11212688-004-global-floodmaps\modelling\inputs\DeltasGlobal\all_deltas.shp")
 RETURN_PERIOD = "RP100"
 SLR_SCENARIOS = ["SLR_0", "SLR_500", "SLR_1000", "SLR_1500", "SLR_2000"]
 SCENARIOS_DEFAULT = ["ssp126", "ssp245"]
@@ -419,7 +418,11 @@ def main() -> None:
     parser.add_argument("--delta-ids", nargs="+", type=int, default=None, help="only these delta Ids (testing)")
     args = parser.parse_args()
 
-    deltas = retry_transient_io(gpd.read_file, DELTAS_PATH)
+    # FLOPROS protection standards - scenario-independent, computed once per delta. Loaded up front
+    # (not just at point of first use below) since the deltas shapefile path also comes from here.
+    prod_cfg = load_config(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml")
+
+    deltas = retry_transient_io(gpd.read_file, Path(prod_cfg["paths"]["deltas_shapefile"]))
     deltas = deltas[deltas["Id"] != VOLGA_ID].reset_index(drop=True)
     if args.delta_ids:
         deltas = deltas[deltas["Id"].isin(args.delta_ids)].reset_index(drop=True)
@@ -440,8 +443,6 @@ def main() -> None:
     root = Path(first_cfg["paths"]["root"])
     out_path = Path(args.out) if args.out else root / "deltas_floodmaps" / "delta_flood_extent.csv"
 
-    # FLOPROS protection standards - scenario-independent, computed once per delta
-    prod_cfg = load_config(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml")
     default_rp = float(prod_cfg.get("protection", {}).get("default_rp", 5.0))
     catalog = get_data_catalog(_REPO_ROOT / prod_cfg["paths"]["hydromt_data_catalog"], root=prod_cfg["paths"]["root"])
     flopros = catalog.get_dataframe("flopros_protection_standards")

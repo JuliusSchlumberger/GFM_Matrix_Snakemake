@@ -63,14 +63,28 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 
-SURVEYED_DOMAIN_PATH = Path(
-    "P:/11212688-004-global-floodmaps/modelling/inputs/validation/California/"
-    "flooding/sf_bay_county_bbox_union.gpkg"
-)
 
+def _rasterize_surveyed_domain(surveyed_domain_path: Path, out_transform, out_shape, out_crs) -> np.ndarray:
+    """Rasterize the surveyed-domain polygon(s) onto the given output grid.
 
-def _rasterize_surveyed_domain(out_transform, out_shape, out_crs) -> np.ndarray:
-    gdf = gpd.read_file(SURVEYED_DOMAIN_PATH).to_crs(out_crs)
+    Parameters
+    ----------
+    surveyed_domain_path : Path
+        Path to the surveyed-domain vector file (e.g. the 9-county bbox
+        union gpkg).
+    out_transform : affine.Affine
+        Affine transform of the destination grid.
+    out_shape : tuple[int, int]
+        Shape (rows, cols) of the destination grid.
+    out_crs : rasterio.crs.CRS
+        CRS of the destination grid.
+
+    Returns
+    -------
+    np.ndarray
+        Boolean mask, True inside the surveyed domain.
+    """
+    gdf = gpd.read_file(surveyed_domain_path).to_crs(out_crs)
     return rasterize(
         [(geom, 1) for geom in gdf.geometry], out_shape=out_shape,
         transform=out_transform, fill=0, dtype="uint8",
@@ -90,13 +104,6 @@ def _permanent_water_mask_lean(land_use: np.ndarray, exclude_codes) -> np.ndarra
     return out
 
 NODATA_SENTINEL = -9999.0
-BENCHMARK_PATH = Path(
-    "P:/11212688-004-global-floodmaps/modelling/inputs/validation/California/"
-    "flooding/sf_bay_flddepth_slr000_w100_mosaic.tif"
-)
-MODEL_CHUNK_PATH = Path(
-    "P:/11212688-004-global-floodmaps/modelling/merged_results/chunks/waterdepth_N35W125_RP100_SLR_0.tif"
-)
 # SF Bay bbox (EPSG:4326) - same footprint the v2.1 sfb_fldhazd benchmark covers.
 BAY_BBOX_4326 = (-122.64, 37.40, -121.88, 38.28)
 
@@ -182,10 +189,15 @@ def validate_sf_bay(config_path: str, threshold_m: float | None = None) -> dict[
     permanent_water_source = val_cfg["permanent_water_source"]
     permanent_water_codes = val_cfg["permanent_water_codes"]
 
-    bench_depth_2m, bench_transform_2m, bench_crs_2m = _read_benchmark_full(BENCHMARK_PATH)
+    benchmark_root = Path(val_cfg["benchmark_root"])
+    surveyed_domain_path = benchmark_root / "California" / "flooding" / "sf_bay_county_bbox_union.gpkg"
+    benchmark_path = benchmark_root / "California" / "flooding" / "sf_bay_flddepth_slr000_w100_mosaic.tif"
+    model_chunk_path = Path(cfg["postprocessing"]["merged_outputs"]) / "chunks" / "waterdepth_N35W125_RP100_SLR_0.tif"
+
+    bench_depth_2m, bench_transform_2m, bench_crs_2m = _read_benchmark_full(benchmark_path)
     bench_shape_2m = bench_depth_2m.shape
 
-    model_depth_native, model_transform_native, model_crs, model_nodata = _read_model_window(MODEL_CHUNK_PATH, BAY_BBOX_4326)
+    model_depth_native, model_transform_native, model_crs, model_nodata = _read_model_window(model_chunk_path, BAY_BBOX_4326)
     model_shape_native = model_depth_native.shape
     model_valid_native = model_depth_native != model_nodata if model_nodata is not None else np.isfinite(model_depth_native)
     model_depth_native = np.where(model_valid_native, model_depth_native, NODATA_SENTINEL)
@@ -205,7 +217,7 @@ def validate_sf_bay(config_path: str, threshold_m: float | None = None) -> dict[
         gfm_catalog, permanent_water_source, permanent_water_codes,
         list(BAY_BBOX_4326), model_transform_native, model_shape_native, model_crs,
     )
-    surveyed_a = _rasterize_surveyed_domain(model_transform_native, model_shape_native, model_crs)
+    surveyed_a = _rasterize_surveyed_domain(surveyed_domain_path, model_transform_native, model_shape_native, model_crs)
     # Within the surveyed footprint, CoSMoS nodata means "modeled, found dry" - fill it
     # as a real 0.0 depth rather than excluding it, so it can register as a TN or FP.
     bench_on_model = np.where((bench_on_model == NODATA_SENTINEL) & surveyed_a, 0.0, bench_on_model)
@@ -231,7 +243,7 @@ def validate_sf_bay(config_path: str, threshold_m: float | None = None) -> dict[
         gfm_catalog, permanent_water_source, permanent_water_codes,
         list(BAY_BBOX_4326), bench_transform_2m, bench_shape_2m, bench_crs_2m,
     )
-    surveyed_b = _rasterize_surveyed_domain(bench_transform_2m, bench_shape_2m, bench_crs_2m)
+    surveyed_b = _rasterize_surveyed_domain(surveyed_domain_path, bench_transform_2m, bench_shape_2m, bench_crs_2m)
     bench_depth_2m = np.where((bench_depth_2m == NODATA_SENTINEL) & surveyed_b, 0.0, bench_depth_2m)
     domain_b = (model_on_2m != NODATA_SENTINEL) & surveyed_b & ~water_on_2m
     model_wet_b = model_on_2m > threshold_m

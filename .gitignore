@@ -44,8 +44,8 @@ snakemake_workflow/.snakemake/
 
 # Generated / machine-specific config (cleanup Phase 1, AUDIT.md Q7/Q8).
 # config_hpc.yml: copy from config_hpc.yml.example. *_materialized.yml: written
-# by build_delta_run_configs.py / prepare_delta_design_runs.py (a generic
-# materialize_configs.py replaces them in Phase 6).
+# by snakemake_workflow/scripts/materialize_configs.py (deltas_design: by
+# analysis/prepare_delta_design_runs.py).
 snakemake_workflow/config/config_hpc.yml
 snakemake_workflow/config/*_materialized.yml
 

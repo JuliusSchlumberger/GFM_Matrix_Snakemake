@@ -44,7 +44,7 @@ from config_utils import get_data_catalog, load_config, retry_transient_io  # no
 from validation import tri_domain_mask  # noqa: E402
 
 from compute_delta_flood_extent import (  # noqa: E402
-    DELTA_NAME_INFERRED, DELTAS_PATH, GEOGUNIT_SOURCE, PROTECTION_THRESHOLD_YEARS, VOLGA_ID, build_tile_delta_join,
+    DELTA_NAME_INFERRED, GEOGUNIT_SOURCE, PROTECTION_THRESHOLD_YEARS, VOLGA_ID, build_tile_delta_join,
     snap_rp,
 )
 
@@ -101,7 +101,7 @@ def main() -> None:
     rp_by_geogunit = flopros["Coastal"].fillna(flopros["Riverine"]).fillna(default_rp)
     rp_by_geogunit.index = rp_by_geogunit.index.astype("int64")
 
-    deltas = retry_transient_io(gpd.read_file, DELTAS_PATH)
+    deltas = retry_transient_io(gpd.read_file, Path(prod["paths"]["deltas_shapefile"]))
     deltas = deltas[deltas["Id"] != VOLGA_ID].reset_index(drop=True)
     rows = []
     for _, d in deltas.iterrows():

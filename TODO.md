@@ -81,3 +81,25 @@ in-phase.
     vs analysis/_common.py / compute_bangkok_case_exposure.py.
   - `_run` (subprocess step runner): analysis/run_analysis.py, validation/run_validation.py,
     run_delta_floodmaps.py: three different variants (printing, timing, fail-fast handling).
+- **Materialized scenario configs are older snapshots than config.yml** (found in Phase 6).
+  `snakemake_workflow/scripts/materialize_configs.py` (new; replaces build_delta_run_configs.py)
+  rebuilds `<name>_materialized.yml` from `config.yml` + `config_local.yml` + `<name>.yml`, but a
+  fresh build differs from the files on disk (39-65 keys each), because config.yml changed after
+  they were written. Examples: bangkok_chao_phraya/thailand_bangkok `adaptation.slr_intensities`
+  lose SLR_1500; gbr_wales_scotland_friction9 `hpc.n_nodes` 35 -> 40; analysis switches;
+  removed/added hpc keys. I did NOT overwrite them (that would change what those scenarios run).
+  Decide per scenario whether to re-materialize (`python snakemake_workflow/scripts/materialize_configs.py <name>`);
+  to inspect first: `... --out-dir <tmp>` and diff. A fresh clone gets the new-config version.
+- **Hydrax: check the shell-driver changes once after pulling Phase 6** (I could only test them
+  locally against a fake tile tree with fake sbatch/python, where both branches matched the old
+  behaviour). All Hydrax paths now live in `sfincs_tiles/hydrax_env.sh` (same values as before,
+  overridable via GFM_DATA_ROOT / GFM_CODE_ROOT / GFM_PYTHON / GFM_SFINCS_PYTHON). The two rerun
+  scripts are merged into `sfincs_tiles/rerun_calibration.sh --part eikonal|sfincs`; the old names
+  still work as wrappers. Suggested check: `DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part eikonal`.
+- **`config.yml` default paths left as they are** (`paths.root: D:/GFM`, `code_root:
+  C:/Users/Schlu005/GFM`): changing them could break a machine that relies on them without a
+  config_local.yml. New `config_local.yml.example` documents the override. Replace the defaults
+  with neutral placeholders if no machine uses them.
+- **Remaining machine-specific paths not moved to config** (deliberately): `run_bangkok_case_study.bat`'s
+  `STUDY_ROOT` (case-study data on P:\), and `tests/sfincs_synthetic_end_to_end/test_sfincs_smoke.py`'s
+  default SFINCS exe path (the test SKIPs when it's absent).

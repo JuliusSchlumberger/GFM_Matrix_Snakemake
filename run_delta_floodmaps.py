@@ -84,7 +84,7 @@ CONFIG_DIR = REPO_ROOT / "snakemake_workflow" / "config"
 ALL_SCENARIOS = ["ssp126", "ssp245"]
 # "design": the design-event floods at SLR_0 for the FLOPROS-protected deltas only (protection-failure
 # reference for compute_delta_flood_extent.py) - its config deltas_design_materialized.yml is written by
-# analysis/prepare_delta_design_runs.py, not build_delta_run_configs.py. Not part of the default run.
+# analysis/prepare_delta_design_runs.py, not materialize_configs.py. Not part of the default run.
 EXTRA_SCENARIOS = ["design"]
 ALL_STAGES = ["boundary_conditions", "preprocess", "simulate", "postprocess"]
 
@@ -163,7 +163,7 @@ def run_scenario(scenario: str, cores: int, mem_mb: int | None, stages: list[str
         raise FileNotFoundError(
             f"{materialized} does not exist - run "
             + ("analysis/prepare_delta_design_runs.py" if scenario in EXTRA_SCENARIOS
-               else "snakemake_workflow/scripts/build_delta_run_configs.py") + " first."
+               else f"snakemake_workflow/scripts/materialize_configs.py deltas_{scenario}") + " first."
         )
 
     env = os.environ.copy()

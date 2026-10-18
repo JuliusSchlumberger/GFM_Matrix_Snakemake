@@ -51,7 +51,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from validation import tri_domain_mask  # noqa: E402
 
-from compute_delta_flood_extent import DELTAS_PATH, VOLGA_ID  # noqa: E402  (sibling script - reuse, avoid re-duplicating path/exclusion)
+from compute_delta_flood_extent import VOLGA_ID  # noqa: E402  (sibling script - reuse, avoid re-duplicating exclusion)
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 GEOGUNIT_SOURCE = "geogunit_protection_units"  # catalog key (data_catalog_gfm.yml)
@@ -101,7 +101,7 @@ def main() -> None:
     df = pd.read_csv(csv_path)
     print(f"{len(df)} row(s) from {csv_path}")
 
-    deltas = retry_transient_io(gpd.read_file, DELTAS_PATH)
+    deltas = retry_transient_io(gpd.read_file, Path(cfg["paths"]["deltas_shapefile"]))
     deltas = deltas[deltas["Id"] != VOLGA_ID].reset_index(drop=True)
 
     catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])

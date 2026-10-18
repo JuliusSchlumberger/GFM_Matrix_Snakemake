@@ -37,12 +37,14 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from gfm_config import read_root  # noqa: E402
+from gfm_config import hydrax_paths, read_root  # noqa: E402
 
-LINUX_DATA_ROOT = "/p/11212688-004-global-floodmaps/modelling"
-LINUX_CODE_ROOT = "/u/schlumbe/gfm_code"
-GFM_PY = "/u/schlumbe/.conda/envs/gfm/bin/python"
-HYDROMT_PY = "/u/schlumbe/.conda/envs/hydromt-sfincs-dev/bin/python"
+# Hydrax paths: single definition in hydrax_env.sh (env-overridable), shared with the shell drivers.
+_HX = hydrax_paths()
+LINUX_DATA_ROOT = _HX["GFM_DATA_ROOT"]
+LINUX_CODE_ROOT = _HX["GFM_CODE_ROOT"]
+GFM_PY = _HX["GFM_PYTHON"]
+HYDROMT_PY = _HX["GFM_SFINCS_PYTHON"]
 DONE_MARKER = "calibration_run.done"
 FALLBACK_MCELLS = 2.0  # tile without a pre-flight record
 

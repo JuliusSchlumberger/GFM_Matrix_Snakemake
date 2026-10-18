@@ -27,17 +27,25 @@ scoring time via geogunit_ids, same mechanism as Wales(3367)/Scotland(3366);
 this script's own bbox is deliberately generous (doesn't need to be exact).
 
 Usage:
-    python validation/fetch_england_flood_zones.py
+    python validation/fetch_england_flood_zones.py [--config path/to/config.yml]
 """
 
+import argparse
 import os
 import shutil
+import sys
 import tempfile
 import time
+from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
 import requests
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_REPO_ROOT / "src"))
+
+from config_utils import load_config  # noqa: E402
 
 BASE = (
     "https://environment.data.gov.uk/spatialdata/flood-map-for-planning-flood-zones/"
@@ -46,8 +54,6 @@ BASE = (
 # England's real extent (lon/lat, CRS84) - generous, geogunit_ids does the real restriction.
 ENGLAND_BBOX = (-6.5, 49.8, 2.0, 55.9)
 TILE_DEG = 1.0  # smaller per-request bbox - easier on the server, clear incremental progress
-OUT_DIR = "P:/11212688-004-global-floodmaps/modelling/inputs/validation/England"
-CACHE_DIR = f"{OUT_DIR}/_tile_cache"
 _SEA_SOURCES = ["sea", "river and sea"]  # see module docstring - excludes plain "river"/"unknown"
 
 
@@ -113,8 +119,18 @@ def _read_cached_tile(cache_path: str, local_scratch: str) -> gpd.GeoDataFrame:
         os.remove(local_path)
 
 
-def main() -> None:
-    os.makedirs(CACHE_DIR, exist_ok=True)
+def main(out_dir: str, cache_dir: str) -> None:
+    """Fetch, filter, and write England's coastal-relevant flood zones.
+
+    Parameters
+    ----------
+    out_dir : str
+        Directory the filtered per-zone GeoPackages are written to.
+    cache_dir : str
+        Directory used to cache each tile's raw (unfiltered) download, so a
+        re-run only has to fetch tiles that failed or are missing.
+    """
+    os.makedirs(cache_dir, exist_ok=True)
 
     tiles = list(_tiles(ENGLAND_BBOX, TILE_DEG))
     print(f"Fetching England flood zones in {len(tiles)} tile(s) of {TILE_DEG} deg ...", flush=True)
@@ -123,7 +139,7 @@ def main() -> None:
     failed_tiles = []
     with tempfile.TemporaryDirectory(prefix="england_fz_") as local_scratch:
         for i, tile in enumerate(tiles):
-            cache_path = f"{CACHE_DIR}/tile_{i:03d}.gpkg"
+            cache_path = f"{cache_dir}/tile_{i:03d}.gpkg"
             if os.path.exists(cache_path):
                 t0 = time.time()
                 gdf = _read_cached_tile(cache_path, local_scratch)
@@ -161,10 +177,21 @@ def main() -> None:
 
     for zone, name in [("FZ3", "fz3_sea_modelled"), ("FZ2", "fz2_sea_modelled")]:
         subset = gdf[gdf["flood_zone"] == zone].drop_duplicates(subset="geometry")
-        out_path = f"{OUT_DIR}/{name}.gpkg"
+        out_path = f"{out_dir}/{name}.gpkg"
         subset.to_file(out_path, driver="GPKG")
         print(f"wrote {out_path}: {len(subset)} feature(s)", flush=True)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument(
+        "--config",
+        default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"),
+        help="Path to config.yml (merged with the machine's config_local.yml).",
+    )
+    args = parser.parse_args()
+
+    cfg = load_config(Path(args.config))
+    _out_dir = f"{cfg['validation']['benchmark_root']}/England"
+    _cache_dir = f"{_out_dir}/_tile_cache"
+    main(_out_dir, _cache_dir)

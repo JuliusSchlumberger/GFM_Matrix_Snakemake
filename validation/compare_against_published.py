@@ -14,20 +14,22 @@ Published numbers below are transcribed from the user directly (2026-10-15),
 not re-derived from either paper - if either paper is revised, update here.
 
 Usage:
-    python validation/compare_against_published.py [--out-csv path.csv]
+    python validation/compare_against_published.py [--config path/to/config.yml] [--out-csv path.csv]
 """
 
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import pandas as pd
 
-GBR_METRICS = Path("P:/11212688-004-global-floodmaps/modelling/validation/GBR/metrics_GBR_RP100_SLR_0.csv")
-CAN_METRICS = Path("P:/11212688-004-global-floodmaps/modelling/validation/CAN/metrics_CAN_RP100_SLR_0.csv")
-ENGLAND_FZ3_RESCORE = Path("P:/11212688-004-global-floodmaps/modelling/validation/england_fz3_rescore.csv")
-ENGLAND_FZ2_BAND = Path("P:/11212688-004-global-floodmaps/modelling/validation/GBR/england_fz2_band_result.csv")
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_REPO_ROOT / "src"))
+
+from config_utils import load_config  # noqa: E402
+
 SF_BAY_RESULTS = Path(__file__).resolve().parent / "sf_bay_results.csv"
 
 # Published CSI, per (study, region). Region "wales"/"scotland" (no suffix) is
@@ -71,11 +73,29 @@ KASMALKAR_SF_BAY = {
 }
 
 
-def _csi_rows() -> list[dict]:
-    gbr_df = pd.read_csv(GBR_METRICS)
-    can_df = pd.read_csv(CAN_METRICS)
-    fz3_df = pd.read_csv(ENGLAND_FZ3_RESCORE)
-    fz2_band_df = pd.read_csv(ENGLAND_FZ2_BAND) if ENGLAND_FZ2_BAND.exists() else None
+def _csi_rows(gbr_metrics: Path, can_metrics: Path, england_fz3_rescore: Path, england_fz2_band: Path) -> list[dict]:
+    """Build the per-(study, region) CSI comparison rows.
+
+    Parameters
+    ----------
+    gbr_metrics : Path
+        ``metrics_GBR_RP100_SLR_0.csv`` from ``validate_country.py``.
+    can_metrics : Path
+        ``metrics_CAN_RP100_SLR_0.csv`` from ``validate_country.py``.
+    england_fz3_rescore : Path
+        ``england_fz3_rescore.csv`` from ``_rescore_england_fz3.py``.
+    england_fz2_band : Path
+        ``england_fz2_band_result.csv`` from ``validate_england_fz2_band.py``.
+
+    Returns
+    -------
+    list of dict
+        One row per (study, region) CSI comparison.
+    """
+    gbr_df = pd.read_csv(gbr_metrics)
+    can_df = pd.read_csv(can_metrics)
+    fz3_df = pd.read_csv(england_fz3_rescore)
+    fz2_band_df = pd.read_csv(england_fz2_band) if england_fz2_band.exists() else None
     rows = []
     for study, region, published in PUBLISHED_CSI:
         if region == "england":
@@ -154,21 +174,42 @@ def _sf_bay_rows() -> list[dict]:
     return rows
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--out-csv", default=str(Path(__file__).resolve().parent / "comparison_vs_published.csv"))
-    args = parser.parse_args()
+def main(config_path: str | Path | None = None, out_csv: str | Path | None = None) -> None:
+    """Build, print, and write the published-comparison table.
 
-    df = pd.DataFrame(_csi_rows() + _sf_bay_rows())
+    Parameters
+    ----------
+    config_path : str, Path, or None, optional
+        Path to config.yml, used to resolve the GBR/CAN/England input CSVs
+        under ``validation.output_dir``. Defaults to this repo's
+        ``snakemake_workflow/config/config.yml``.
+    out_csv : str, Path, or None, optional
+        Destination for the comparison CSV. Defaults to
+        ``comparison_vs_published.csv`` next to this script.
+    """
+    cfg = load_config(config_path or _REPO_ROOT / "snakemake_workflow" / "config" / "config.yml")
+    validation_dir = Path(cfg["validation"]["output_dir"])
+    gbr_metrics = validation_dir / "GBR" / "metrics_GBR_RP100_SLR_0.csv"
+    can_metrics = validation_dir / "CAN" / "metrics_CAN_RP100_SLR_0.csv"
+    england_fz3_rescore = validation_dir / "england_fz3_rescore.csv"
+    england_fz2_band = validation_dir / "GBR" / "england_fz2_band_result.csv"
+    if out_csv is None:
+        out_csv = Path(__file__).resolve().parent / "comparison_vs_published.csv"
+
+    df = pd.DataFrame(_csi_rows(gbr_metrics, can_metrics, england_fz3_rescore, england_fz2_band) + _sf_bay_rows())
     df["ratio_ours_over_published"] = df["ours"] / df["published"]
 
     pd.set_option("display.width", 200)
     pd.set_option("display.max_colwidth", 80)
     print(df.drop(columns="note").to_string(index=False))
 
-    df.to_csv(args.out_csv, index=False)
-    print(f"\nwrote {args.out_csv}")
+    df.to_csv(out_csv, index=False)
+    print(f"\nwrote {out_csv}")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
+    parser.add_argument("--out-csv", default=str(Path(__file__).resolve().parent / "comparison_vs_published.csv"))
+    args = parser.parse_args()
+    main(config_path=args.config, out_csv=args.out_csv)

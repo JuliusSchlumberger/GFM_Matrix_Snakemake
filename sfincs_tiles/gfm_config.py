@@ -73,3 +73,29 @@ def resolve_catalog_path(catalog_path: Path, root: Path, source_name: str) -> Pa
     if source_name not in catalog:
         raise KeyError(f"{source_name!r} not found in {catalog_path}")
     return Path(root) / catalog[source_name]["path"]
+
+
+_HYDRAX_ENV = Path(__file__).resolve().parent / "hydrax_env.sh"
+
+
+def hydrax_paths() -> dict[str, str]:
+    """Return the Hydrax paths defined in ``sfincs_tiles/hydrax_env.sh``.
+
+    That file is the single definition shared by the shell drivers (which `source` it) and the
+    Python job generators (which call this). Same semantics as bash's ``${NAME:-default}``: an
+    environment variable that is set and non-empty overrides the file's default.
+
+    Returns
+    -------
+    dict of str to str
+        ``GFM_DATA_ROOT``, ``GFM_CODE_ROOT``, ``GFM_PYTHON`` and ``GFM_SFINCS_PYTHON``.
+    """
+    import os
+    import re
+
+    out = {}
+    for line in _HYDRAX_ENV.read_text(encoding="utf-8").splitlines():
+        m = re.fullmatch(r'(\w+)="\$\{(\w+):-(.*)\}"', line.strip())
+        if m and m.group(1) == m.group(2):
+            out[m.group(1)] = os.environ.get(m.group(1)) or m.group(3)
+    return out

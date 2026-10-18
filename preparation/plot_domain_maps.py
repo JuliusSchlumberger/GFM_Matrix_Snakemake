@@ -44,18 +44,17 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from config_utils import load_config  # noqa: E402
+
+REPO = Path(__file__).resolve().parents[1]
+
 LAND_COLOR = "#d8d8d4"
 COAST_COLOR = "#b8b8b3"
 DOMAIN_COLOR = "#2a78d6"
 INLAND_DOMAIN_COLOR = "#8db9ea"  # hop_distance > 0 (no own ocean edge) - a lighter DOMAIN_COLOR
 DROPPED_COLOR = "#d6572a"
 NO_STATIONS_COLOR = "#ef8a7e"  # light red: coastal domains skipped for having no COAST-RP station
-
-DEFAULT_TILE_GRID = Path(
-    r"P:\11212688-004-global-floodmaps\modelling\processed_inputs\mask\domain_tiles_global.gpkg"
-)
-DEFAULT_OUT_DIR = Path(r"P:\11212688-004-global-floodmaps\modelling\processed_inputs\mask")
-DEFAULT_SKIPPED_DIR = Path(r"P:\11212688-004-global-floodmaps\modelling\model_outputs\skipped_tiles")
 
 
 def no_station_tile_ids(skipped_dir: Path) -> set[int]:
@@ -139,22 +138,30 @@ def plot_dropped_unreachable_map(dropped_gdf: gpd.GeoDataFrame, out_dir: Path) -
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--tile-grid", default=str(DEFAULT_TILE_GRID))
-    parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR))
+    parser.add_argument("--config", default=str(REPO / "snakemake_workflow" / "config" / "config.yml"))
+    parser.add_argument("--tile-grid", default=None, help="defaults to tile_grid.path from --config")
+    parser.add_argument("--out-dir", default=None,
+                        help="defaults to <processed_inputs_dir>/mask from --config")
     parser.add_argument("--mark-no-stations", action="store_true",
                         help="write domains_final_no_stations.png: domains skipped for having no COAST-RP "
                              "station in light red (needs the simulation's skipped_tiles markers)")
-    parser.add_argument("--skipped-dir", default=str(DEFAULT_SKIPPED_DIR),
-                        help="<model_outputs>/skipped_tiles (only with --mark-no-stations)")
+    parser.add_argument("--skipped-dir", default=None,
+                        help="<model_outputs>/skipped_tiles (only with --mark-no-stations); defaults to "
+                             "simulation.model_outputs/skipped_tiles from --config")
     args = parser.parse_args()
 
-    final_gdf = gpd.read_file(args.tile_grid)
-    print(f"{len(final_gdf)} domain(s) from {args.tile_grid}")
+    cfg = load_config(args.config)
+    tile_grid = args.tile_grid or cfg["tile_grid"]["path"]
+    out_dir = args.out_dir or str(Path(cfg["paths"]["processed_inputs_dir"]) / "mask")
+    skipped_dir = args.skipped_dir or str(Path(cfg["simulation"]["model_outputs"]) / "skipped_tiles")
+
+    final_gdf = gpd.read_file(tile_grid)
+    print(f"{len(final_gdf)} domain(s) from {tile_grid}")
     ids = None
     if args.mark_no_stations:
-        ids = no_station_tile_ids(Path(args.skipped_dir))
-        print(f"{len(ids)} domain(s) skipped for no COAST-RP station ({args.skipped_dir})")
-    plot_final_domains_map(final_gdf, Path(args.out_dir), no_station_ids=ids)
+        ids = no_station_tile_ids(Path(skipped_dir))
+        print(f"{len(ids)} domain(s) skipped for no COAST-RP station ({skipped_dir})")
+    plot_final_domains_map(final_gdf, Path(out_dir), no_station_ids=ids)
 
 
 if __name__ == "__main__":

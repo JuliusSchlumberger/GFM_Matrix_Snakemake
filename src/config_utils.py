@@ -256,7 +256,7 @@ def materialize_config(
     """Deep-merge config.yml + config_local.yml (if present) + `overrides`.
 
     Builds a real, standalone scenario config file, e.g.
-    ``scripts/build_delta_run_configs.py``'s per-scenario configs. Each entry
+    ``snakemake_workflow/scripts/materialize_configs.py``'s per-scenario configs. Each entry
     in `overrides` is either a path to a YAML file (merged in list order,
     missing ones silently skipped - same convention as `load_config`'s
     `extra_override`) or a plain dict, merged in directly - letting a caller

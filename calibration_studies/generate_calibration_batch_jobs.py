@@ -65,13 +65,16 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import atomic_write, load_config, retry_transient_io  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sfincs_tiles"))
+from gfm_config import hydrax_paths  # noqa: E402  (Hydrax python path: sfincs_tiles/hydrax_env.sh)
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 N_NODES_DEFAULT = 30
 PARTITION_DEFAULT = "1vcpu"
 MEM_DEFAULT = "7G"
 CPUS_PER_TASK_DEFAULT = 1
-GFM_PY_LINUX = "/u/schlumbe/.conda/envs/gfm/bin/python"
+GFM_PY_LINUX = hydrax_paths()["GFM_PYTHON"]
 
 # Empirically measured on real tiles spanning 196K-18.9M cells (within ~10% of each other) -
 # used only for a worst-case --time ESTIMATE, not for the bin-packing itself (pixel count alone

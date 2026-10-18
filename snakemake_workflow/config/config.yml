@@ -12,6 +12,7 @@ paths:
   hydromt_data_catalog: "snakemake_workflow/config/data_catalog_gfm.yml" # relative to the code root
 
   processed_inputs_dir: "{root}/processed_inputs" # # Directory for prepare_boundary_conditions.py's intermediate files
+  deltas_shapefile: "{root}/inputs/DeltasGlobal/all_deltas.shp" # global delta polygons - deltas deliverable (analysis/compute_delta_flood_extent.py & co, preparation/build_delta_tile_subset.py)
 # ── SYNC DELTADTM ──────────────────────────────────────────────────────────────
 sync_deltadtm:  # Used by: preparation/sync_deltadtm.py.
   zip_download_dir: "{root}/inputs/DeltaDTM/_zips" # Temp directory for the downloaded .zip archives
