@@ -148,6 +148,7 @@ def main() -> None:
     print(f"\nDone: {n_ok}/{len(jobs)} tile(s) written to {out_base_dir}, {len(failed)} failed.")
     if failed:
         print("Failed tiles:", ", ".join(t for t, _ in failed[:40]) + (" ..." if len(failed) > 40 else ""))
+        sys.exit(1)
 
 
 if __name__ == "__main__":
