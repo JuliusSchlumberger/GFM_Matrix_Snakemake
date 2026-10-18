@@ -24,21 +24,18 @@ import time
 import traceback
 from pathlib import Path
 
-import geopandas as gpd
 import numpy as np
-import rasterio
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import load_config  # noqa: E402
 from eikonal import _ORTHANT_ORDER, _dense_sweep  # noqa: E402
-from flood_model import OBSTACLE_BLOCK_FRICTION as BLOCK_FRICTION, effective_dem  # noqa: E402
-from flood_model import _idw_seed_values, coastline_mask, prune_to_coast_connected  # noqa: E402
-from rasters import decode_dem_cm, decode_friction_int16, decode_waterlevel_cm  # noqa: E402
+from flood_model import OBSTACLE_BLOCK_FRICTION as BLOCK_FRICTION  # noqa: E402
+from flood_model import prune_to_coast_connected  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from run_sweep_budget_study import OCEAN_CODE, TILES, load_tile  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-RETURN_PERIOD = "RP100"
-WATERLEVEL_NAME = "SLR_0"
-OCEAN_CODE = 1
 DEFAULT_OUTER_EPSILON_M = 0.03  # = simulation.flooding.waterlevel_epsilon_m
 DEFAULT_MAX_OUTER = 15  # beyond production's default, to find where tiles stop needing more
 DEFAULT_INNER_MAX_ROUNDS = 40  # methods_03 §2: most tiles converge or freeze extent by round 40
@@ -46,53 +43,6 @@ DEFAULT_INNER_MAX_ROUNDS = 40  # methods_03 §2: most tiles converge or freeze e
 
 # t only decreases from the unseeded 99.0 (eikonal.solve_eikonal_dense) once seeds reach a cell.
 UNREACHED_SENTINEL = 99.0
-
-RIVER_CODE = 3  # tile_generation.river_code
-
-# Smoke-test fallback when no --tile-ids are given.
-TILES = [2083, 2514, 1421, 2569, 2858, 2314, 753]
-
-
-def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor: float):
-    """Load a tile's decoded solver inputs and IDW-seeded coastline values."""
-    tile_dir = model_outputs / str(tile_id)
-    scenario = f"{RETURN_PERIOD}_{WATERLEVEL_NAME}"
-    inputs = tile_dir / "inputs"
-
-    with rasterio.open(inputs / "dem.tif") as src:
-        dem = decode_dem_cm(src.read(1))
-        transform = src.transform
-    with rasterio.open(inputs / "mask.tif") as src:
-        # int8: int64 would OOM on the largest tiles.
-        mask = src.read(1).astype(np.int8)
-    with rasterio.open(inputs / "friction.tif") as src:
-        friction = decode_friction_int16(src.read(1))
-    boundaries = gpd.read_file(inputs / f"boundaries_{scenario}.gpkg")
-
-    dem = effective_dem(dem, mask)
-    # decode -> scale -> floor, as in eikonal_runner.
-    friction = friction * friction_scale_factor
-    friction = np.where(friction > 0, friction, friction.dtype.type(0.001))
-    coastline = coastline_mask(mask, ocean_code=OCEAN_CODE, river_code=RIVER_CODE)
-    coastline_rows, coastline_cols = np.nonzero(coastline)
-
-    # Int16 cm-encoded levels. Zero stations would crash in BallTree; fail clearly.
-    station_values = decode_waterlevel_cm(boundaries[WATERLEVEL_NAME].to_numpy())
-    if len(station_values) == 0:
-        raise ValueError(
-            f"tile {tile_id} has zero boundary stations - should have been excluded "
-            "from wet_tiles_selected.txt by run_sweep_budget_study.py"
-        )
-
-    stations_lonlat = np.column_stack(
-        [boundaries.geometry.x.to_numpy(), boundaries.geometry.y.to_numpy()]
-    )
-    initial = _idw_seed_values(
-        coastline_rows, coastline_cols, transform, stations_lonlat, station_values,
-        min(knn, len(station_values)), mask, OCEAN_CODE,
-    )
-    max_waterlevel = float(station_values.max())
-    return dem, mask, friction, coastline, coastline_rows, coastline_cols, initial, max_waterlevel
 
 
 def solve_inner(friction, seed_rows, seed_cols, seed_values, dtype, epsilon, max_rounds):
@@ -189,7 +139,7 @@ def run_tile_trace(
 ) -> list[dict]:
     """Trace the unblocked baseline and each outer iteration; one row per solve."""
     dem, mask, friction, coastline, seed_rows, seed_cols, initial, max_waterlevel = load_tile(
-        tile_id, model_outputs, knn, friction_scale_factor,
+        tile_id, model_outputs, knn, friction_scale_factor, on_no_stations="raise",
     )
     seed_values = -initial
     dtype = friction.dtype
