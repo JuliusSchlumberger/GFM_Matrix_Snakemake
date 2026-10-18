@@ -1,15 +1,7 @@
-"""Final overview table: this model's own HR/FAR/bias/CSI per region/benchmark,
-alongside each published study's CSI where one exists - plus a second,
-San-Francisco-Bay-only table with RMSE/MAE (all-pixels and flooded-pixels,
-both comparison directions) against Kasmalkar et al. (2024).
+"""Build overview tables of our HR/FAR/bias/CSI next to published CSI per region.
 
-Reuses every number already computed by validate_country.py (GBR/CAN
-metrics_*.csv), rescore_england_fz3.py, validate_england_fz2_band.py and
-validate_sf_bay.py - no new scoring, just reshaped for reporting. See
-compare_against_published.py for the long/tidy equivalent this draws the
-same underlying numbers from (published values transcribed from the user,
-2026-10-15/16 - update PUBLISHED_CSI/KASMALKAR_SF_BAY if either paper is
-revised).
+Also writes a SF Bay RMSE/MAE table against Kasmalkar et al. (2024). Only reshapes
+CSVs written by the other validation scripts; no new scoring.
 
 Usage:
     python validation/build_overview_table.py [--config path/to/config.yml]
@@ -31,15 +23,9 @@ from config_utils import load_config  # noqa: E402
 SF_BAY_RESULTS = Path(__file__).resolve().parent / "sf_bay_results.csv"
 OUT_DIR = Path(__file__).resolve().parent
 
-# (label, lookup, published, ranged) - lookup is (source_df_key, region_value).
-# ranged=True regions have a native RP100/RP250 bracket (same ~200yr-vs-
-# native-RP mismatch as England's Flood Zone 3 - see data_catalog_validation.yml's
-# own comparison_return_periods on each of these benchmarks) and get TWO rows,
-# one per RP, same convention as England's own FZ3 rows below. New Brunswick's
-# benchmark has no comparison_return_periods configured (no RP250 run exists),
-# so it stays single-RP100. England itself is built separately from its own
-# dedicated rescore files - see compare_against_published.py's own note on why
-# metrics_GBR_*.csv's "england" rows are stale.
+# (label, (source, region), published, ranged). ranged=True: the benchmark's native
+# ~200yr RP is bracketed by RP100/RP250, so one row per RP. New Brunswick has no RP250
+# run. England comes from its rescore files: metrics_GBR_*.csv "england" rows are stale.
 _REGIONS = [
     ("Wales (whole)", ("gbr", "wales"), [("Bates et al. (2023)", 0.76), ("Wing et al. (2024)", 0.82)], True),
     ("Wales - Severn Estuary", ("gbr", "severn_estuary"), [("Chaudhuri et al. (2026)", 0.70)], True),
@@ -64,27 +50,7 @@ def build_extent_table(
     gbr_metrics_rp100: Path, gbr_metrics_rp250: Path, can_metrics: Path,
     england_fz3_rescore: Path, england_fz2_band: Path,
 ) -> pd.DataFrame:
-    """Build the HR/FAR/bias/CSI (ours) + published-CSI overview table.
-
-    Parameters
-    ----------
-    gbr_metrics_rp100 : Path
-        ``metrics_GBR_RP100_SLR_0.csv`` from ``validate_country.py``.
-    gbr_metrics_rp250 : Path
-        ``metrics_GBR_RP250_SLR_0.csv`` from ``validate_country.py``.
-    can_metrics : Path
-        ``metrics_CAN_RP100_SLR_0.csv`` from ``validate_country.py``.
-    england_fz3_rescore : Path
-        ``england_fz3_rescore.csv`` from ``rescore_england_fz3.py``.
-    england_fz2_band : Path
-        ``england_fz2_band_result.csv`` from ``validate_england_fz2_band.py``.
-
-    Returns
-    -------
-    pd.DataFrame
-        One row per region (per RP for ranged regions), with HR/FAR/bias/CSI,
-        formatted published CSI, and any caveat note.
-    """
+    """Build the HR/FAR/bias/CSI (ours) + published-CSI table, one row per region/RP."""
     gbr_rp100 = pd.read_csv(gbr_metrics_rp100).set_index("region")
     gbr_rp250 = pd.read_csv(gbr_metrics_rp250).set_index("region")
     can = pd.read_csv(can_metrics).set_index("region")
@@ -135,6 +101,7 @@ def build_extent_table(
 
 
 def build_sf_bay_depth_table() -> pd.DataFrame:
+    """Build the SF Bay RMSE/MAE (m) table against Kasmalkar et al. (2024)."""
     sf_bay = pd.read_csv(SF_BAY_RESULTS, index_col=0)
     published = {"RMSE_all_m": 0.138, "MAE_all_m": 0.017, "RMSE_flooded_m": 0.525, "MAE_flooded_m": 0.319}
     rows = []
@@ -151,15 +118,7 @@ def build_sf_bay_depth_table() -> pd.DataFrame:
 
 
 def main(config_path: str | Path | None = None) -> None:
-    """Build and print/write both overview tables.
-
-    Parameters
-    ----------
-    config_path : str, Path, or None, optional
-        Path to config.yml, used to resolve the GBR/CAN/England input CSVs
-        under ``validation.output_dir``. Defaults to this repo's
-        ``snakemake_workflow/config/config.yml``.
-    """
+    """Print both overview tables and write them as CSV next to this script."""
     cfg = load_config(config_path or _REPO_ROOT / "snakemake_workflow" / "config" / "config.yml")
     validation_dir = Path(cfg["validation"]["output_dir"])
     gbr_metrics_rp100 = validation_dir / "GBR" / "metrics_GBR_RP100_SLR_0.csv"

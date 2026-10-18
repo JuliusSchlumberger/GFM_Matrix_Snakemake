@@ -1,15 +1,8 @@
-"""One-off: mosaic the 9 Bay Area counties' CoSMoS flood-depth rasters
-(San Francisco, Alameda, Contra Costa, Marin, Napa, San Mateo, Santa Clara,
-Solano, Sonoma - all RP100/no-SLR, v2.1, EPSG:26910, 2m, int32 centimeters,
-nodata -9999) into one Bay-wide depth raster in METERS (float32), for
-validate_sf_bay.py.
+"""Mosaic the 9 Bay Area counties' CoSMoS depth rasters into one raster in meters.
 
-CoSMoS flood-depth values are documented in centimeters (confirmed via the
-depth distribution: median ~1.8m, max ~19m is only physically plausible as
-cm, not m, for a raster that also includes open Bay water depth, not just
-new overland flooding - this benchmark was never meant to be depth-above-
-ground only, see validate_sf_bay.py's own permanent-water exclusion for how
-that's handled before scoring).
+Input: CoSMoS v2.1, RP100/no-SLR, EPSG:26910, 2m, int32 centimeters, nodata -9999.
+Output: float32 meters, NaN nodata. Includes open Bay water depth, not only overland
+flooding; validate_sf_bay.py excludes permanent water before scoring.
 
 Usage:
     python validation/build_sf_bay_benchmark_mosaic.py [--config path/to/config.yml]
@@ -35,23 +28,7 @@ COUNTIES = [
 
 
 def main(src_dir: Path | None = None, out_path: Path | None = None, config_path: str | Path | None = None) -> None:
-    """Mosaic the 9 Bay Area counties' CoSMoS rasters into one Bay-wide depth raster.
-
-    Parameters
-    ----------
-    src_dir : Path or None, optional
-        Directory holding the per-county ``county_<name>_flddepth_slr000_w100.tif``
-        rasters. If None, resolved from config as
-        ``validation.benchmark_root/California/flooding/v2.1``.
-    out_path : Path or None, optional
-        Destination path for the mosaicked output raster. If None, resolved
-        from config as
-        ``validation.benchmark_root/California/flooding/sf_bay_flddepth_slr000_w100_mosaic.tif``.
-    config_path : str, Path, or None, optional
-        Path to config.yml, used to resolve `src_dir`/`out_path` when either
-        is not given. Defaults to this repo's
-        ``snakemake_workflow/config/config.yml``.
-    """
+    """Mosaic the county rasters; paths default to ``validation.benchmark_root``."""
     if src_dir is None or out_path is None:
         cfg = load_config(config_path or _REPO_ROOT / "snakemake_workflow" / "config" / "config.yml")
         benchmark_root = Path(cfg["validation"]["benchmark_root"])
@@ -65,9 +42,8 @@ def main(src_dir: Path | None = None, out_path: Path | None = None, config_path:
     if missing:
         raise FileNotFoundError(f"missing county rasters: {missing}")
 
-    # Crop to the actual SF Bay extent (not each county's full extent, which
-    # reaches far inland) - EPSG:26910 bounds of v2.1's sfb_fldhazd_slr100_w100.shp,
-    # padded ~1km, confirmed this matches the real Bay footprint when checked earlier.
+    # Counties reach far inland; crop to EPSG:26910 bounds of v2.1's
+    # sfb_fldhazd_slr100_w100.shp, padded ~1km.
     bay_bounds = (530000.0, 4139000.0, 599500.0, 4238000.0)
 
     srcs = [rasterio.open(p) for p in paths]
@@ -78,7 +54,7 @@ def main(src_dir: Path | None = None, out_path: Path | None = None, config_path:
     for s in srcs:
         s.close()
 
-    mosaic_cm = mosaic_cm[0]  # single band
+    mosaic_cm = mosaic_cm[0]
     valid = mosaic_cm != -9999
     mosaic_m = np.full(mosaic_cm.shape, np.nan, dtype="float32")
     mosaic_m[valid] = mosaic_cm[valid].astype("float32") / 100.0

@@ -1,27 +1,9 @@
-"""England Flood Zone 2 band comparison.
+"""Score England Flood Zone 2 against the model's incremental RP100-RP1000 band.
 
-EA's own Flood Zones Product Description (confirmed 2026-10-16 via
-WebSearch of environment.data.gov.uk/support/faqs/778338325) defines
-Flood Zone 2 (sea) as the INCREMENTAL 0.1%-0.5% AEP band (1-in-1000 to
-1-in-200 annual probability), i.e. land between the Zone 3 (~1-in-200)
-outline and the 1-in-1000 outline - NOT the cumulative extent out to
-1-in-1000. The normal `england_ea_floodzone2_sea` catalog entry
-(`comparison_return_periods: [1000]`, scored by the ordinary
-validate_country_national_coverage path) compares this thin benchmark band
-against the model's FULL CUMULATIVE RP1000 extent, which is why that
-comparison gives CSI=0.023/bias=26.2x (see ENGLAND_FZ2_CAVEAT in
-compare_against_published.py) - a benchmark-definition mismatch, not a
-real model failure. This script tests that theory directly, by building
-the model's OWN matching incremental band - wet at RP1000 AND NOT wet at
-RP100 (RP100 is the model's nearest native return period below the
-benchmark's own ~RP200 inner edge; RP200 itself is not a native scenario)
-- and re-scoring against the SAME Flood Zone 2 benchmark polygons.
-
-Intentionally a standalone script, not a new general-purpose code path in
-validate_country.py: every other benchmark in the catalog is a plain
-single-RP or bracketed-RP (comparison_return_periods) comparison;
-subtracting two RPs' own wet masks before scoring is a genuine one-off
-need unique to this single benchmark's own band semantics.
+EA defines FZ2 (sea) as the incremental 0.1%-0.5% AEP band (1-in-1000 to
+1-in-200; environment.data.gov.uk/support/faqs/778338325), not the cumulative
+1-in-1000 extent. The model band is wet at RP1000 and not wet at RP100, the
+nearest native RP below the ~RP200 inner edge.
 
 Usage:
     python validation/validate_england_fz2_band.py --config snakemake_workflow/config/config.yml
@@ -50,11 +32,12 @@ from _chunks import _chunks_overlapping_bbox  # noqa: E402
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _BENCHMARK_KEY = "england_ea_floodzone2_sea"
 _COUNTRY_ISO = "GBR"
-_RP_INNER = "RP100"   # model's nearest native RP below the benchmark's real ~RP200 inner edge
-_RP_OUTER = "RP1000"  # exact native match for the benchmark's own outer edge
+_RP_INNER = "RP100"
+_RP_OUTER = "RP1000"
 
 
 def main() -> None:
+    """Score the FZ2 band and write england_fz2_band_result.csv."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     args = parser.parse_args()
@@ -93,7 +76,7 @@ def main() -> None:
     n_processed = 0
 
     for outer_path in outer_paths:
-        chunk_id = outer_path.name.split("_")[1]  # waterdepth_{chunk_id}_{RP}_{SLR}.tif
+        chunk_id = outer_path.name.split("_")[1]
         inner_path = merged_chunks_dir / f"waterdepth_{chunk_id}_{_RP_INNER}_{slr}.tif"
         if not inner_path.exists():
             print(f"  {chunk_id}: missing {_RP_INNER} chunk - skipped.")
@@ -135,7 +118,7 @@ def main() -> None:
 
         wet_outer = model_domain & (depth_outer > primary_threshold_m) & not_water
         wet_inner = model_domain & (depth_inner > primary_threshold_m) & not_water
-        model_band = wet_outer & ~wet_inner  # the model's own ~RP200-to-RP1000 incremental band
+        model_band = wet_outer & ~wet_inner
 
         area_km2 = pixel_area_km2_grid(out_transform, depth_outer.shape[1], depth_outer.shape[0])
         model_band_km2 += float((model_band * area_km2).sum())
