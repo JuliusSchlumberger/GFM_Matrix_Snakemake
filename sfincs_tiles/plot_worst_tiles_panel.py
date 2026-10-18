@@ -6,7 +6,7 @@ disagreement. Needs only rasterio/scipy/matplotlib.
 
 Usage:
     python plot_worst_tiles_panel.py --base-dir-name calibration_roughness_SFINCS --friction-scale-factor 12 \
-        [--n-tiles 6] [--min-union-km2 50]
+        [--n-panel-tiles 6] [--min-union-km2 50]
 """
 
 from __future__ import annotations
@@ -163,9 +163,9 @@ def main() -> None:
     repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(repo_root / "snakemake_workflow" / "config" / "config.yml"))
-    parser.add_argument("--base-dir-name", required=True)
+    parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
     parser.add_argument("--friction-scale-factor", type=float, required=True, help="the friction point to rank and plot")
-    parser.add_argument("--n-tiles", type=int, default=6)
+    parser.add_argument("--n-panel-tiles", "--n-tiles", dest="n_tiles", type=int, default=6, help="tiles in the panel")
     parser.add_argument("--min-eikonal-only-km2", type=float, default=50.0,
                         help="EA-bathtub-over-predicting panel: the EA-bathtub-only area itself must be at least this")
     parser.add_argument("--min-union-km2", type=float, default=50.0,
