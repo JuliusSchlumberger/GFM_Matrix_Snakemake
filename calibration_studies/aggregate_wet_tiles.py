@@ -1,7 +1,9 @@
 """Build wet_tiles_selected.txt from a sweep_budget dir's per-tile CSVs.
 
 Wet = CSV has >1 row (the trace writes 1 row and stops on a dry tile); an
-empty/unreadable CSV is a task not yet finished, not dry.
+empty/unreadable CSV is a task not yet finished, not dry. A CSV with a
+`status == "error: ..."` row is a tile whose solve failed: counted and listed
+separately, neither wet nor dry, so a failure never silently shrinks the pool.
 
 Usage:
     python aggregate_wet_tiles.py <sweep_budget_dir> [--n-tiles-wanted 500]
@@ -22,6 +24,7 @@ def aggregate_wet_tiles(sweep_budget_dir: Path, n_tiles_wanted: int) -> list[int
     wet_tiles: list[int] = []
     n_dry = 0
     n_unreadable = 0
+    errored_tiles: list[int] = []
     for p in csvs:
         try:
             df = pd.read_csv(p)
@@ -31,12 +34,18 @@ def aggregate_wet_tiles(sweep_budget_dir: Path, n_tiles_wanted: int) -> list[int
         if df.empty:
             n_unreadable += 1
             continue
-        if len(df) > 1:
+        if "status" in df.columns and df["status"].astype(str).str.startswith("error").any():
+            errored_tiles.append(int(df["tile"].iloc[0]))
+        elif len(df) > 1:
             wet_tiles.append(int(df["tile"].iloc[0]))
         else:
             n_dry += 1
 
-    print(f"{len(csvs)} CSV(s) found: {len(wet_tiles)} wet, {n_dry} dry, {n_unreadable} unreadable/still-running")
+    print(f"{len(csvs)} CSV(s) found: {len(wet_tiles)} wet, {n_dry} dry, {len(errored_tiles)} errored, "
+          f"{n_unreadable} unreadable/still-running")
+    if errored_tiles:
+        print(f"WARNING: {len(errored_tiles)} tile(s) errored (status 'error' row in their CSV), "
+              f"not counted as wet or dry: {errored_tiles}")
 
     selected = wet_tiles[:n_tiles_wanted]
     wet_file = sweep_budget_dir / "wet_tiles_selected.txt"

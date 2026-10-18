@@ -256,6 +256,7 @@ def main() -> None:
           f"n_tiles_wanted={n_tiles_wanted}", flush=True)
 
     wet_tiles: list[int] = []
+    errored_tiles: list[int] = []
 
     for tile_id in tiles:
         print(f"=== tile {tile_id} ===", flush=True)
@@ -292,6 +293,7 @@ def main() -> None:
                 err_row["tile"] = tile_id
                 err_row["status"] = f"error: {exc}"
                 writer.writerow(err_row)
+                errored_tiles.append(tile_id)
 
         if len(wet_tiles) >= n_tiles_wanted:
             print(f"\n{n_tiles_wanted} wet tiles found - stopping early, "
@@ -299,6 +301,9 @@ def main() -> None:
             break
 
     print(f"\nDone. Per-tile CSVs written to {out_dir}")
+    if errored_tiles:
+        print(f"WARNING: {len(errored_tiles)} tile(s) errored (status 'error' row, neither wet nor dry): "
+              f"{errored_tiles}", flush=True)
     # Off by default: parallel processes would race on this file (use aggregate_wet_tiles.py).
     if args.write_wet_tiles_summary:
         selected = wet_tiles[:n_tiles_wanted]
