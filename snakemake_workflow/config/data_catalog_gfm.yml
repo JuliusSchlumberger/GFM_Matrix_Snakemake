@@ -2,7 +2,7 @@
 # config["paths"]["root"], passed explicitly by src/config_utils.get_data_catalog.
 #
 # Every entry's `meta` carries: category, description, source_author, source_url,
-# source_version, source_license and, where one exists, paper_ref / paper_doi.
+# source_version, source_license, source_access and, where one exists, paper_ref / paper_doi.
 
 coast_rp:
   data_type: GeoDataset
@@ -30,6 +30,7 @@ coast_rp:
       and the geoid-corrected DEM (deltadtm) share one vertical reference.
     source_author: J.C.M. Dullaart et al., IVM - Vrije Universiteit Amsterdam
     source_url: https://doi.org/10.4121/uuid:210b66a1-9c82-4e0b-9f4a-8eb15deebb44
+    source_access: open download
     source_version: "1.0"
     source_license: CC-BY-4.0
     model_version: Deltares D-Flow FM v1.2.63.64757
@@ -68,6 +69,7 @@ coast_hg:
     source_author: J.C.M. Dullaart, S. Muis, D. Eilander, J.C.J.H. Aerts, H. de Moel,
       P.J. Ward - IVM, Vrije Universiteit Amsterdam
     source_url: https://doi.org/10.4121/21270948.v2
+    source_access: open download
     source_version: "2 (4TU.ResearchData, 2023-05-22)"
     source_license: CC-BY-4.0
     paper_ref: Dullaart et al. (2023), Enabling dynamic modelling of coastal flooding
@@ -90,6 +92,7 @@ ipcc_ar6_slr_projections:
       derives the spatial SLR fingerprints added to COAST-RP levels.
     source_author: G.G. Garner, T. Hermans, R.E. Kopp, A.B.A. Slangen et al. / IPCC AR6 WG1
     source_url: https://zenodo.org/records/5914710
+    source_access: open download
     source_version: "20210809"
     source_license: CC-BY-4.0
     paper_ref: Garner et al. (2021), IPCC AR6 Sea Level Projections, Version 20210809;
@@ -114,6 +117,7 @@ ipcc_ar6_slr_wg1_csv:
       analysis/extract_slr_trajectories.py.
     source_author: G.G. Garner, T. Hermans, R.E. Kopp, A.B.A. Slangen et al. / IPCC AR6 WG1
     source_url: https://zenodo.org/records/5914710
+    source_access: open download
     source_version: "20210809"
     source_license: CC-BY-4.0
     paper_ref: Garner et al. (2021), IPCC AR6 Sea Level Projections, Version 20210809.
@@ -138,6 +142,7 @@ deltadtm:
     nodata_value: -9999
     source_author: M. Pronk et al., Deltares / TU Delft
     source_url: https://doi.org/10.4121/21997565
+    source_access: open download
     source_version: v1.1
     source_license: CC-BY-4.0
     paper_ref: Pronk et al. (2024), DeltaDTM - a global coastal digital terrain model,
@@ -163,6 +168,7 @@ deltadtm_mask:
     nodata_value: 255
     source_author: M. Pronk et al., Deltares / TU Delft
     source_url: https://doi.org/10.4121/21997565
+    source_access: open download
     source_version: v1.1
     source_license: CC-BY-4.0
     paper_ref: Pronk et al. (2024), DeltaDTM - a global coastal digital terrain model,
@@ -193,6 +199,7 @@ gebco:
     nodata_value: -32767
     source_author: GEBCO Bathymetric Compilation Group 2026 / Nippon Foundation-GEBCO Seabed 2030
     source_url: https://www.gebco.net/data-products-gridded-bathymetry-data/gebco2026-grid
+    source_access: open download
     source_version: "2026"
     source_license: Public domain, attribution required, no implied endorsement
       (GEBCO Grid terms of use)
@@ -216,6 +223,7 @@ land_polygons:
       wide river confluences, aquaculture ponds and thermokarst lakes).
     source_author: OpenStreetMap contributors
     source_url: https://osmdata.openstreetmap.de/data/land-polygons.html
+    source_access: open download
     source_version: "2026-10-04"
     source_license: ODbL-1.0
 
@@ -237,6 +245,7 @@ land_use:
     nodata_value: 255
     source_author: M. Buchhorn et al., VITO NV
     source_url: https://doi.org/10.5281/zenodo.3939050
+    source_access: open download
     source_version: v3.0.1
     source_license: Copernicus Global Land Service data policy (free and open, attribution
       "Copernicus Service information 2020")
@@ -259,6 +268,7 @@ geogunit_protection_units:
       validation (geogunit_ids).
     source_author: WRI Aqueduct Floods
     source_url: https://www.wri.org/aqueduct
+    source_access: open download
     source_version: Aqueduct Floods (2020)
     source_license: CC-BY-4.0 (WRI open data, attribution to WRI)
     paper_ref: Ward et al. (2020), Aqueduct Floods Methodology, World Resources Institute
@@ -277,6 +287,7 @@ geogunit_country_units:
       geogunit_107. Aggregates exposure to countries for the world maps.
     source_author: WRI Aqueduct Floods
     source_url: https://www.wri.org/aqueduct
+    source_access: open download
     source_version: Aqueduct Floods (2020)
     source_license: CC-BY-4.0 (WRI open data, attribution to WRI)
     paper_ref: Ward et al. (2020), Aqueduct Floods Methodology, World Resources Institute
@@ -300,6 +311,7 @@ flopros_protection_standards:
       fall back to "Riverine" where "Coastal" is missing.
     source_author: P. Scussolini et al. (FLOPROS); T. Tiggeloven et al. (coastal update)
     source_url: https://doi.org/10.5194/nhess-20-1025-2020
+    source_access: open download
     source_version: FLOPROS with coastal standards of Tiggeloven et al. (2020)
     source_license: CC-BY-4.0 (published with the papers)
     paper_ref: Scussolini et al. (2016), FLOPROS - an evolving global database of flood
@@ -328,6 +340,7 @@ ssp_population_growth_factors:
       Scenario Explorer. Growth factors are relative to 2020.
     source_author: IIASA / Wittgenstein Centre for Demography and Global Human Capital
     source_url: https://ssp.apps.ece.iiasa.ac.at/
+    source_access: free registration (IIASA SSP Scenario Explorer)
     source_version: IIASA-WiC POP 2025 (SSP update 2024/2025)
     source_license: SSP database licence (CC-BY-4.0-based; cite and link the database
       instead of redistributing substantial parts)
@@ -353,6 +366,7 @@ population:
     source_author: M. Bondarenko, R. Priyatikanto, N. Tejedor-Garavito et al., WorldPop,
       University of Southampton
     source_url: https://hub.worldpop.org/doi/10.5258/SOTON/WP00845
+    source_access: open download
     source_version: R2025A v1
     source_license: CC-BY-4.0
     paper_ref: Bondarenko et al. (2025), The spatial distribution of population in
@@ -374,6 +388,7 @@ lu_to_roughness_lookup:
       is a label only (src/rasters.py indexes by it); its values are LC100 codes.
     source_author: GFM project, values from HEC-RAS (USACE) guidance
     source_url: https://www.hec.usace.army.mil/confluence/rasdocs/r2dum/latest/developing-a-terrain-model-and-geospatial-layers/creating-land-cover-mannings-n-values-and-impervious-layers
+    source_access: project table (values from public-domain HEC-RAS guidance)
     source_version: project table
     source_license: project-internal (HEC-RAS documentation is US public domain)
     fields:
@@ -404,6 +419,7 @@ goco06s:
     max_degree: 300
     source_author: GOCO consortium (A. Kvas, T. Mayer-Guerr et al.)
     source_url: https://doi.org/10.5880/ICGEM.2019.002
+    source_access: open download
     source_version: GOCO06s
     source_license: CC-BY-4.0
     paper_ref: Kvas et al. (2021), GOCO06s - a satellite-only global gravity field model,
@@ -423,6 +439,7 @@ egm2008_geoid:
       (src/vertical_datum.py, applied by extract_dem.py).
     source_author: N.K. Pavlis et al., US National Geospatial-Intelligence Agency (NGA)
     source_url: https://icgem.gfz.de/tom_longtime
+    source_access: open download
     source_version: EGM2008
     source_license: NGA public release, distribution unlimited
     paper_ref: Pavlis et al. (2012), The development and evaluation of the Earth
@@ -447,6 +464,7 @@ mdt_cnes_cls22:
     variable_mdt_sign_convention: positive upward (sea surface above geoid)
     source_author: S. Jousset, S. Mulet, E. Greiner et al., CLS / CNES (AVISO+)
     source_url: https://www.aviso.altimetry.fr/en/data/products/auxiliary-products/mdt/mdt-global-cnes-cls.html
+    source_access: free registration (AVISO+ account)
     source_version: CNES-CLS22
     source_license: AVISO+ licence agreement, standard product (free, registration required)
     paper_ref: Jousset et al. (2026), New global mean dynamic topography CNES-CLS-22

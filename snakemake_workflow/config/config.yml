@@ -203,7 +203,7 @@ simulation: # Used by: preprocessing rules
 # Used by: rule generate_eikonal_jobs (rules/hpc_dispatch.smk) / scripts/generate_eikonal_jobs.py.
 # A hop_distance>=1 tile is seeded from a lower-hop neighbour's output, so tiles are grouped by
 # wave, then split into node batches; submit_waves.sh submits each wave with a SLURM
-# `--dependency=afterany` barrier on all prior waves. See snakemake_workflow/hpc.md.
+# `--dependency=afterany` barrier on all prior waves. See docs/hpc.md.
 # `sbatch` is shared by simulation and preprocessing batching; for preprocessing its
 # cpus_per_task is also the `snakemake --cores` value (1 = fully serial).
 hpc:

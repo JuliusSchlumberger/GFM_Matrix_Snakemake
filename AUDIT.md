@@ -140,7 +140,7 @@ Not yet systematically checked:
    scripts, `.smk` files, shell drivers and generated job text.
 2. **Config keys:** keys in `config.yml` / scenario configs that no code reads, and
    keys read in code with a `.get(..., default)` that hides a missing setting.
-3. **Docs vs code:** README.md, `snakemake_workflow/hpc.md`, `docs/methods_*.md`
+3. **Docs vs code:** README.md, `docs/hpc.md`, `docs/methods_*.md`
    (commands, file names, defaults, numbers) against the current code and config.
    The trim covered docstrings and comments, not these files.
 4. **String literals:** argparse help, print/log messages and generated sbatch text

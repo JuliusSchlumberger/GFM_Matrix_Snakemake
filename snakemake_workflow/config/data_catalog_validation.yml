@@ -48,6 +48,7 @@ wales_nrw_floodzone_seas:
       under-prediction. (3) Defences and wave run-up treatment not reviewed.
     source_author: Natural Resources Wales
     source_url: https://datamap.gov.wales/layers/inspire-nrw:NRW_FLOODZONE_SEAS
+    source_access: OGC API / WFS download
     source_version: "2024-05-23 (last update)"
     date_retrieved: "2026-09-30"
     source_license: Open Government Licence v3.0; attribution "Contains Natural Resources
@@ -87,6 +88,7 @@ scotland_sepa_coastal_m:
       High, Low and Medium + CC layers are in the same geodatabase.
     source_author: Scottish Environment Protection Agency (SEPA)
     source_url: https://www.data.gov.uk/dataset/17637b84-e6ae-4ca0-98d9-83ab4a1997fd/coastal-flood-maps-frm-fh-coastal-extent-m401
+    source_access: open download
     source_version: v3_0
     date_retrieved: "2026-10-01"
     source_license: Open Government Licence v3.0 (SEPA attribution, see Guidance
@@ -123,6 +125,7 @@ england_ea_floodzone3_sea:
       treatment not reviewed.
     source_author: Environment Agency
     source_url: https://environment.data.gov.uk/spatialdata/flood-map-for-planning-flood-zones/ogc/features/v1/collections/Flood_Zones_2_3_Rivers_and_Sea/items
+    source_access: OGC API / WFS download
     source_version: Flood Map for Planning, Flood Zones 2 and 3 (Rivers and Sea)
     date_retrieved: "2026-10-16"
     source_license: Open Government Licence v3.0 (Environment Agency / Defra attribution)
@@ -158,6 +161,7 @@ england_ea_floodzone2_sea:
       not reviewed.
     source_author: Environment Agency
     source_url: https://environment.data.gov.uk/spatialdata/flood-map-for-planning-flood-zones/ogc/features/v1/collections/Flood_Zones_2_3_Rivers_and_Sea/items
+    source_access: OGC API / WFS download
     source_version: Flood Map for Planning, Flood Zones 2 and 3 (Rivers and Sea)
     date_retrieved: "2026-10-16"
     source_license: Open Government Licence v3.0 (Environment Agency / Defra attribution)
@@ -200,6 +204,7 @@ new_brunswick_present_day_1in100yr:
       (4) Defences and wave run-up treatment not reviewed.
     source_author: Government of New Brunswick (GeoNB)
     source_url: https://www.gnb.ca/en/campaign/geonb/data-catalogue/flood-extent.html
+    source_access: open download
     source_version: "2025-03-21"
     date_retrieved: "2026-10-01"
     source_license: GeoNB Open Data Licence

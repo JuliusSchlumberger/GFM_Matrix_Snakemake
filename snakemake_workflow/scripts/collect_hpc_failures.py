@@ -108,7 +108,7 @@ def main() -> None:
     if counts.get("job_error", 0):
         print(
             f"\n{counts['job_error']} job_error row(s) need investigating and re-running "
-            "(retry with run_eikonal_cli.py directly - see hpc.md step 2)."
+            "(retry with run_eikonal_cli.py directly - see docs/hpc.md)."
         )
 
 

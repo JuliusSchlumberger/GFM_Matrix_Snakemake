@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "GFM - Global Flood Model"
+authors:
+  - family-names: Schlumberger
+    given-names: Julius
+    # affiliation: <affiliation>
+    # orcid: https://orcid.org/<orcid>
+version: "0.0.0"  # set at release
+# doi: to be added
+license: MIT
+# repository-code: <repo_url>
