@@ -14,6 +14,8 @@ from typing import Callable, TypeVar
 _T = TypeVar("_T")
 
 
+# Twin of src/config_utils.py's retry_transient_io (sfincs_tiles/ can't import src/ in hydromt-sfincs-dev: src/config_utils
+# needs hydromt 0.9). Pinned by tests/metric_parity_validation/validate_sfincs_src_parity.py.
 def retry_transient_io(fn: Callable[..., _T], *args, retries: int = 4, delay_s: float = 5.0, **kwargs) -> _T:
     """Calls `fn(*args, **kwargs)`, retrying on FileNotFoundError/OSError up
     to `retries` times before raising."""

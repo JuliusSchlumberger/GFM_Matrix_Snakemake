@@ -205,6 +205,8 @@ def prune_to_ocean_connected(
     return np.isin(labels, list(touching))
 
 
+# Twin of src/validation.py's confusion_counts / metrics_from_counts (sfincs_tiles/ can't import src/ in hydromt-sfincs-dev: src/config_utils
+# needs hydromt 0.9). Pinned by tests/metric_parity_validation/validate_sfincs_src_parity.py.
 def confusion_counts(
     model_wet: np.ndarray, benchmark_wet: np.ndarray, domain_mask: np.ndarray, weight: np.ndarray,
 ) -> tuple[float, float, float]:

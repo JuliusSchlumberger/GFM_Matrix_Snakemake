@@ -49,6 +49,8 @@ WATERDEPTH_SCALE = 100.0  # waterdepth rasters are int16 cm
 WATERDEPTH_NODATA_INT16 = 32767
 
 
+# Twin of src/rasters.py's decode_waterdepth_cm (+ WATERDEPTH_* constants) (sfincs_tiles/ can't import src/ in hydromt-sfincs-dev: src/config_utils
+# needs hydromt 0.9). Pinned by tests/metric_parity_validation/validate_sfincs_src_parity.py.
 def decode_waterdepth_cm(path: Path):
     """Decode an int16-cm waterdepth raster into metres with NaN for dry/nodata.
 
