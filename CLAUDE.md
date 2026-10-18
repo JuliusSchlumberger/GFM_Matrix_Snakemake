@@ -49,8 +49,9 @@ adaptation analysis and benchmark validation. A separate SFINCS sub-pipeline
 - Dry run: never on the full DAG (it is split into parallel HPC jobs; a full local `-n all`
   does not finish). Use the two subset configs instead, via
   `GFM_CONFIG_PATH=snakemake_workflow/config/{thailand_bangkok,bangkok_chao_phraya}_materialized.yml`
-  `snakemake -n all --cores 1` (~10 s each). Baselines: `.cleanup_baseline/snakemake_n_all_*_remat.txt`
-  (configs re-materialized 2026-10-18; the older `*.txt` predate that).
+  `snakemake -n all --cores 1` (~10 s each). Baselines: `.cleanup_baseline/snakemake_n_all_*_profile.txt`.
+- `profiles/default/config.yaml` (auto-loaded) sets `rerun-triggers: [mtime, params, input, software-env]`:
+  code/comment edits never re-run outputs. A real logic change needs its outputs removed or re-run explicitly.
 - Local run: `python run_eikonal_dag.py`  or  `snakemake all --cores 4 --resources mem_mb=8000`
 - Tests: `pytest -m "not needs_pdrive"` in `gfm` (sfincs_* tests are skipped automatically);
   `pytest tests/sfincs_* -m "not needs_pdrive"` in `hydromt-sfincs-dev`.
