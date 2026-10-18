@@ -1,7 +1,7 @@
 """Test SFINCS water_level.create() with UTM forcing locations at the antimeridian.
 
 With EPSG:4326 locations, rotated-grid cell polygons near +-180 deg reproject to
-invalid geometry (GEOS "side location conflict"). Uses tile 1359; skips without P:.
+invalid geometry (GEOS "side location conflict"). Uses tile 1359; skips without its files under `paths.root`.
 """
 
 import shutil

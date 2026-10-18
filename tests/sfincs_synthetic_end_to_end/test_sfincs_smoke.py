@@ -1,9 +1,9 @@
 """Smoke-test SFINCS build -> run -> postprocess on the smallest finished calibration tile.
 
-Needs P:\\, a local sfincs.exe (`paths.sfincs_exe` in config_local.yml) and a finished
+Needs the data root (`paths.root`), a local sfincs.exe (`paths.sfincs_exe` in config_local.yml) and a finished
 FIXTURE_BASE_DIR_NAME tile; skips otherwise. The fixture is only read: its build inputs
 are copied into a local temp dir (pytest's tmp_path) and the model is built and run
-there, never on P:\\.
+there, never under the data root.
 """
 
 from __future__ import annotations
@@ -94,11 +94,11 @@ def test_build_run_postprocess_produces_plausible_output(tmp_dir: Path) -> None:
     print("=== SFINCS smoke test: full build -> run -> postprocess on a real fixture tile ===")
     prereqs = _prereqs_available()
     if prereqs is None:
-        pytest.skip("real P:\\ modelling share, a finished calibration_roughness_SFINCS tile, and/or the local "
+        pytest.skip("the data root (paths.root), a finished calibration_roughness_SFINCS tile, and/or the local "
                     "sfincs.exe (paths.sfincs_exe in config_local.yml) aren't available in this environment")
     root, sfincs_exe, tile_id = prereqs
     # build_sfincs_tile only touches <root>/<base_dir_name>/<tile_id>/{inputs,sfincs_model},
-    # so a local stage root keeps every write off P:\.
+    # so a local stage root keeps every write off the data root.
     stage_root = tmp_dir
     line = _stage_fixture(root, tile_id, stage_root)
     print(f"  fixture: tile {tile_id} from {FIXTURE_BASE_DIR_NAME}, copied to {stage_root / SMOKE_BASE_DIR_NAME}")

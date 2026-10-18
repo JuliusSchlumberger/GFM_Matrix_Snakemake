@@ -5,7 +5,7 @@ window would be silently truncated away. Skips when no built tiles are on disk.
 
 Usage:
     python validate_truncation_window.py
-    python validate_truncation_window.py --root "P:\\...\\modelling"
+    python validate_truncation_window.py --root "<data_root>"
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "sfincs_tiles"))
 
 from build_sfincs_tile import TRUNCATE_WINDOW_HR_DEFAULT  # noqa: E402
+from gfm_config import read_root  # noqa: E402
 
 BASE_DIR_NAME = "calibration_roughness_SFINCS"
 
@@ -53,10 +54,10 @@ def check_peak_within_window(csv_path: Path, window_hr: tuple[float, float]) -> 
 def test_all_available_tiles_peak_within_truncation_window(root: Path | None = None) -> None:
     print("=== TRUNCATE_WINDOW_HR_DEFAULT: real on-disk hydrographs peak inside the window ===")
     if root is None:
-        candidates = [
-            Path(r"P:\11212688-004-global-floodmaps\modelling"),
-        ]
-        root = next((c for c in candidates if c.exists()), None)
+        try:
+            root = read_root(REPO_ROOT / "snakemake_workflow" / "config" / "config.yml")
+        except Exception:
+            root = None
 
     if root is None or not (root / BASE_DIR_NAME).exists():
         pytest.skip(f"no {BASE_DIR_NAME}/ data available at the expected root - "
@@ -93,7 +94,7 @@ def test_all_available_tiles_peak_within_truncation_window(root: Path | None = N
 def main() -> None:
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", default=None, help="modelling root (default: auto-detect the real P:\\ share)")
+    parser.add_argument("--root", default=None, help="data root (default: paths.root from config.yml)")
     args = parser.parse_args()
     try:
         test_all_available_tiles_peak_within_truncation_window(Path(args.root) if args.root else None)
