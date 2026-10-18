@@ -228,7 +228,7 @@ def main() -> None:
     parser.add_argument(
         "--resume", action="store_true",
         help="rebalance only the still-missing targets across the full node budget per phase "
-             "(skipping any phase that's already 100% done), instead of a fresh dispatch. "
+             "(skipping any phase that's already 100%% done), instead of a fresh dispatch. "
              "Cancel the original dispatch's still-running jobs FIRST - see "
              "generate_hpc_simulation_jobs.py's own --resume docstring for why (same reasoning: "
              "a stale batch racing a new one over the same still-incomplete targets would redo "

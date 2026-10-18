@@ -70,10 +70,6 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
   dropping them also means dropping the `generate_eikonal_jobs` rule's params, which re-triggers
   that rule. Remove together with the rule params when you next regenerate HPC dispatch anyway.
   (The audit's other "unused parameter", `connectivity_tiling`'s `dem_index`, is in fact used.)
-- **`generate_hpc_postprocess_job.py --help` crashes** (found in Phase 5a, pre-existing at HEAD):
-  argparse raises `TypeError: %d format: a real number is required, not dict` because a
-  `help=` string contains an unescaped `%`. Only `--help` is affected; normal runs parse fine.
-  Fix: escape it as `%%`.
 - **Near-duplicate helpers left unmerged in Phase 5d** (they differ in behaviour, so merging
   would change results or output; unify deliberately if wanted):
   - `_first_crossing`: compute_tipping_points_summary.py vs plot_tipping_points.py (the latter
