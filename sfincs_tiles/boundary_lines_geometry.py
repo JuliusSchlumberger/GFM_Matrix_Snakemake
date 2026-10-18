@@ -128,9 +128,9 @@ class Coast:
         ocean_utm = ocean_utm[ocean_utm.area >= MIN_OCEAN_AREA_KM2 * 1e6]
         self.ocean = (unary_union(list(ocean_utm)).buffer(0).intersection(area_utm) if len(ocean_utm)
                       else shapely.Polygon())
-        # land grown (not eroded) by LAND_CLEARANCE_M: a link that clears it stays that far out at sea
-        self.land_eroded = area_utm.difference(self.ocean).buffer(LAND_CLEARANCE_M)
-        shapely.prepare(self.land_eroded)
+        # land grown by LAND_CLEARANCE_M: a link that clears it stays that far out at sea
+        self.land_buffered = area_utm.difference(self.ocean).buffer(LAND_CLEARANCE_M)
+        shapely.prepare(self.land_buffered)
         shapely.prepare(self.ocean)
         edge = area_utm.exterior.buffer(2 * pixel_m)
         open_parts = [g for g in shapely.get_parts(self.ocean)
@@ -162,20 +162,20 @@ class Coast:
         return self._pieces[offset_m]
 
     def crosses_land(self, line: LineString, stations: tuple[Point, ...] = (), min_ramp_m: float = 1000.0) -> bool:
-        """Return True if more than LAND_CROSSING_TOL_M of `line` lies in `land_eroded`.
+        """Return True if more than LAND_CROSSING_TOL_M of `line` lies in `land_buffered`.
 
         The ramp (RAMP_FACTOR x coastline distance, >= min_ramp_m, + 300 m) next to a
         station that itself sits on land is ignored: it has to cross land anyway.
         """
-        if self.land_eroded.is_empty or not self.land_eroded.intersects(line):
+        if self.land_buffered.is_empty or not self.land_buffered.intersects(line):
             return False
         if not hasattr(self, "_coast_lines"):
             self._coast_lines = MultiLineString(self.pieces(0.0)) if self.pieces(0.0) else None
         for p in stations:
-            if self._coast_lines is not None and self.land_eroded.contains(p):
+            if self._coast_lines is not None and self.land_buffered.contains(p):
                 ramp = max(RAMP_FACTOR * self._coast_lines.distance(p), min_ramp_m)
                 line = line.difference(p.buffer(ramp + 300.0))
-        return line.intersection(self.land_eroded).length > LAND_CROSSING_TOL_M
+        return line.intersection(self.land_buffered).length > LAND_CROSSING_TOL_M
 
 
 def _coast_path(pa: Point, pb: Point, pieces: list[LineString], min_ramp_m: float = 1000.0):
@@ -223,7 +223,7 @@ def _offset_straight(pa: Point, pb: Point, offset_m: float, coast: Coast, ramp_m
     n = np.array([-u[1], u[0]])
     mid = 0.5 * (a + b)
     sides = [(coast.ocean.contains(Point(mid + sgn * offset_m * n)),
-              -LineString([a + sgn * offset_m * n, b + sgn * offset_m * n]).intersection(coast.land_eroded).length,
+              -LineString([a + sgn * offset_m * n, b + sgn * offset_m * n]).intersection(coast.land_buffered).length,
               sgn) for sgn in (1.0, -1.0)]
     sgn = max(sides)[2]
     ramp = min(ramp_m, length / 3)
