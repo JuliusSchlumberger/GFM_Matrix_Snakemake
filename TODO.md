@@ -40,10 +40,56 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
   and `tests/eikonal_kernel_validation`; `generate_hpc_postprocess_job.py` Usage names
   `submit_postprocess.sh` (writes `submit_postprocess_and_exposure.sh`); `generate_eikonal_solver_examples.py`
   prints "by round 40" for a 15-round loop; `build_overview_table._FZ2_NOTE` says "see session notes".
-- `tests/sfincs_subgrid_nearest_validation`: `test_reproject_nearest_transform_matches_scaled_source`
-  tests a misaligned target - name does not match.
 - Git history holds ~1 GB of `sfincs_tiles/tile306_*.npy` / `tile1669_*.npy` (commit c0f84d6,
   2026-09-23; up to 97 MB each, GitHub warns on push). Removing them needs a history rewrite.
+
+## Left from the final sweep (SWEEP.md, 2026-10-18)
+
+Real issues not applied (not approved, or skipped because they change results):
+- Geogunit read errors in `analysis/add_protection_standard_column.py:37-40`,
+  `analysis/prepare_delta_design_runs.py:46-50`, `analysis/compute_delta_flood_extent.py:155-159`
+  are treated as "no FLOPROS coverage" (NaN / no design runs / default_rp). Fix: catch only
+  hydromt's NoDataException and retry the read (same as exposure_grid / validation now do).
+- Config keys `boundary_conditions.slr_scenario` (SSP-RCP code) and `slr_scenarios` (SLR levels)
+  keep their names: renaming re-triggers 25 jobs on bangkok_chao_phraya (455 -> 480) because the
+  whole section is a rule param. config.yml now documents both. Rename only together with a
+  planned re-run.
+- `calibration_studies/run_sweep_budget_study.py` + `aggregate_wet_tiles.py`: a tile whose solve
+  errored is counted as dry (`len(df) <= 1`); count `status == error` rows separately.
+- `preparation/prepare_boundary_conditions.py` `_load_mdt` / `_nearest_valid_grid` are copied in
+  `sfincs_tiles/mdt.py` (separate env) without a parity test; add an MDT case to
+  `tests/metric_parity_validation/validate_sfincs_src_parity.py`.
+- Analysis `.get(key, default)` defaults drifted from config.yml values (ssps, output_years,
+  growth_rates, design_intensity, ...; full list in SWEEP.md section 2). They never fire because
+  the keys exist; align them or switch to `[]`.
+- Docs: `docs/methods_03` says 537 wet tiles in section 2 and "the 500 tiles section 2 confirmed
+  wet" in section 3; `docs/methods_04a:52` says "below -18 m" while `LAND_MIN_ELEVATION_M = -15.0`
+  and the clamp is -20 m; `snakemake_workflow/hpc.md` (~line 250) says changing `hpc.n_nodes`
+  does not regenerate job scripts, but the `params` rerun trigger probably does (unverified).
+
+Side effects of the applied fixes to know about:
+- hop>=1 triples with a missing neighbour output now fail without writing output. A local
+  multi-hop `snakemake simulate` / `run_eikonal_dag.py` can fail when Snakemake schedules a hop-1
+  tile before its neighbours (the rule does not declare neighbour inputs); rerun, or run wave by
+  wave like run_delta_floodmaps.py. HPC waves: failed neighbours fail their downstream tiles,
+  `--resume` re-runs both.
+- `rerun_calibration.sh` post job: `compute_calibration_result_dedup.py` now exits 1 on any failed
+  tile, and the post job stops there (`|| exit 1`), so the non-dedup sweep analysis is skipped too.
+  Consider running the non-dedup analysis before the dedup.
+- Screen / pre-flight error records already cached on P:\ from earlier runs are not recognised as
+  errors and are still reused unless `--overwrite` is passed.
+- SF Bay in the overview/compare tables now comes from `{validation.output_dir}/USA/metrics_USA_sf_bay_RP100_SLR_0.csv`;
+  its values differ from the tracked `validation/sf_bay_results.csv` in the 4th decimal.
+- `P:\...\modelling\sfincs_smoke_test\` is no longer used by the smoke test; delete it by hand if wanted.
+- Re-materialize scenario configs on other machines after pulling (new config.yml keys).
+
+Aliases kept for old names (drop once nothing uses them; list in the commit messages of
+9b7140d..cb27bc1): `--outdir`, `--figdir`, `--output`, `--out-csv`, `--dir`, `--threads`,
+`--tiles` (fix_ocean_mask), `--skip-done`, `--no-force`, `--max-outer`, `--inner-max-rounds`,
+`--cpus`, `--flood-totals-cpus`, `--n-tiles` (plots), the positional forms of the calibration
+scripts and build_tile_subset_by_id.py (src/cli_args.py), the delta CSV column `slr_scenario`,
+int `return_period` values, and the old standalone validation result paths
+(`england_fz3_rescore.csv`, `GBR/england_fz2_band_result.csv`, `validation/sf_bay_results.csv`).
 
 ## Open
 

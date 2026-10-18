@@ -95,7 +95,7 @@ hydromt 1.x cannot import `src/config_utils`).
 |---|---|---|
 | Lint | `python -m ruff check .` | clean |
 | Tests (gfm) | `python -m pytest -q -m "not needs_pdrive" tests` | 68 passed |
-| Tests (sfincs) | in hydromt-sfincs-dev: `python -m pytest -q -m "not needs_pdrive" tests/sfincs_*` (without `-m`, the smoke test rebuilds `P:\...\sfincs_smoke_test`) | 17 passed without `-m` (count with `-m` not yet re-measured) |
+| Tests (sfincs) | in hydromt-sfincs-dev: `python -m pytest -q -m "not needs_pdrive" tests/sfincs_*` | 14 passed, 3 deselected (the P:\-reading tests; they write only under pytest tmp dirs) |
 | Dry run | `GFM_CONFIG_PATH=snakemake_workflow/config/bangkok_chao_phraya_materialized.yml snakemake -n all --cores 1` | 455 jobs, matches `.cleanup_baseline/snakemake_n_all_bangkok_chao_phraya_profile.txt` |
 
 The dry-run job count depends on `profiles/default/config.yaml`
@@ -129,7 +129,7 @@ Small code issues already logged (fix only with the user's go-ahead):
   `connectivity_tiling._domain_touches_ocean`.
 - Misnomer `boundary_lines_geometry.land_eroded` (holds land grown outward).
 - String literals with history or stale claims (argparse help, assert messages,
-  one Usage line, one print), and one test whose name does not match its check.
+  one Usage line, one print).
 - `rules/simulation.smk` fallback to the old `aqueduct_mem_estimate` key.
 - Lookup column `copernicus_worldcover` holds Copernicus LC100 codes (label only).
 
