@@ -18,7 +18,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from config_utils import atomic_write, load_config, retry_transient_io  # noqa: E402
-from hpc_common import _account_line, _stage_configfile_lines  # noqa: E402
+from hpc_common import _stage_configfile_lines, sbatch_header  # noqa: E402
 
 
 def write_flood_totals_and_plots_job(
@@ -52,19 +52,7 @@ def write_flood_totals_and_plots_job(
 
     name = "flood_totals_and_plots"
     lines = [
-        "#!/bin/bash",
-        f"#SBATCH --job-name={name}",
-        f"#SBATCH --partition={sbatch_cfg['partition']}",
-        *_account_line(sbatch_cfg),
-        f"#SBATCH --time={sbatch_cfg['time']}",
-        f"#SBATCH --mem={sbatch_cfg['mem']}",
-        f"#SBATCH --cpus-per-task={sbatch_cfg['cpus_per_task']}",
-        f"#SBATCH --output={linux_jobs_dir}/logs/{name}_%j.out",
-        f"#SBATCH --error={linux_jobs_dir}/logs/{name}_%j.err",
-        "",
-        "set -euo pipefail",
-        sbatch_cfg["env_activate_cmd"],
-        "",
+        *sbatch_header(name, sbatch_cfg, f"{linux_jobs_dir}/logs"),
         *_stage_configfile_lines(),
         "",
         f'cd "{linux_code_root}"',

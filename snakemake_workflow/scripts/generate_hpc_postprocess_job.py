@@ -27,7 +27,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
-from hpc_common import _account_line, _retry_wrapper_lines, _stage_configfile_lines, _stage_tile_grid_lines  # noqa: E402
+from hpc_common import _retry_wrapper_lines, _stage_configfile_lines, _stage_tile_grid_lines, sbatch_header  # noqa: E402
 from generate_hpc_exposure_jobs import generate_exposure_dispatch, generate_exposure_resume_dispatch  # noqa: E402
 from generate_hpc_flood_totals_and_plots_job import write_flood_totals_and_plots_job  # noqa: E402
 from tiles import build_chunk_grid  # noqa: E402
@@ -85,19 +85,7 @@ def _write_batches(
             f.write("\n".join(batch_targets) + "\n")
 
         lines = [
-            "#!/bin/bash",
-            f"#SBATCH --job-name={name}",
-            f"#SBATCH --partition={sbatch_cfg['partition']}",
-            *_account_line(sbatch_cfg),
-            f"#SBATCH --time={sbatch_cfg['time']}",
-            f"#SBATCH --mem={sbatch_cfg['mem']}",
-            f"#SBATCH --cpus-per-task={sbatch_cfg['cpus_per_task']}",
-            f"#SBATCH --output={linux_jobs_dir}/logs/{name}_%j.out",
-            f"#SBATCH --error={linux_jobs_dir}/logs/{name}_%j.err",
-            "",
-            "set -euo pipefail",
-            sbatch_cfg["env_activate_cmd"],
-            "",
+            *sbatch_header(name, sbatch_cfg, f"{linux_jobs_dir}/logs"),
             *_retry_wrapper_lines(),
             *_stage_configfile_lines(),
             *_stage_tile_grid_lines(),

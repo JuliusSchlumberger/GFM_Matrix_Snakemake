@@ -9,6 +9,60 @@ def _account_line(sbatch_cfg: dict) -> list[str]:
     return []
 
 
+def sbatch_header(
+    name: str,
+    sbatch_cfg: dict,
+    log_dir: str,
+    *,
+    cpus_per_task: int | None = None,
+    log_name: str | None = None,
+    errexit: bool = True,
+) -> list[str]:
+    """Return a job script's shebang, #SBATCH block, shell options and env activation.
+
+    One builder for every gfm-env generator, so their headers cannot drift.
+
+    Parameters
+    ----------
+    name : str
+        SLURM job name.
+    sbatch_cfg : dict
+        An `hpc.sbatch`-shaped dict (partition, account, time, mem,
+        cpus_per_task, env_activate_cmd); an empty account omits --account.
+    log_dir : str
+        Linux directory of the `{log_name}_%j.out/.err` files.
+    cpus_per_task : int, optional
+        Overrides `sbatch_cfg["cpus_per_task"]` (1 for light dispatch jobs).
+    log_name : str, optional
+        Log file stem; defaults to `name`.
+    errexit : bool
+        False writes `set -uo pipefail` instead of `set -euo pipefail`, for
+        scripts whose later commands must run after an earlier one failed.
+
+    Returns
+    -------
+    list of str
+        Lines ending with a blank line after the env activation.
+    """
+    cpus = sbatch_cfg["cpus_per_task"] if cpus_per_task is None else cpus_per_task
+    log_name = name if log_name is None else log_name
+    return [
+        "#!/bin/bash",
+        f"#SBATCH --job-name={name}",
+        f"#SBATCH --partition={sbatch_cfg['partition']}",
+        *_account_line(sbatch_cfg),
+        f"#SBATCH --time={sbatch_cfg['time']}",
+        f"#SBATCH --mem={sbatch_cfg['mem']}",
+        f"#SBATCH --cpus-per-task={cpus}",
+        f"#SBATCH --output={log_dir}/{log_name}_%j.out",
+        f"#SBATCH --error={log_dir}/{log_name}_%j.err",
+        "",
+        "set -euo pipefail" if errexit else "set -uo pipefail",
+        sbatch_cfg["env_activate_cmd"],
+        "",
+    ]
+
+
 def _retry_wrapper_lines() -> list[str]:
     """Bash fn retrying snakemake: P: share reads can hit stale caches (UnicodeDecodeError).
 

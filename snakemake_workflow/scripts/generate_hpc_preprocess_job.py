@@ -27,7 +27,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
-from hpc_common import _account_line, _retry_wrapper_lines, _stage_configfile_lines  # noqa: E402
+from hpc_common import _retry_wrapper_lines, _stage_configfile_lines, sbatch_header  # noqa: E402
 
 
 def _target_paths(tile_dir: str, return_periods: list[str], waterlevel_names: list[str]) -> list[str]:
@@ -194,19 +194,7 @@ def main() -> None:
                 f.write("\n".join(simulate_targets) + "\n")
 
         lines = [
-            "#!/bin/bash",
-            f"#SBATCH --job-name={name}",
-            f"#SBATCH --partition={sbatch_cfg['partition']}",
-            *_account_line(sbatch_cfg),
-            f"#SBATCH --time={sbatch_cfg['time']}",
-            f"#SBATCH --mem={sbatch_cfg['mem']}",
-            f"#SBATCH --cpus-per-task={sbatch_cfg['cpus_per_task']}",
-            f"#SBATCH --output={linux_jobs_dir}/logs/{name}_%j.out",
-            f"#SBATCH --error={linux_jobs_dir}/logs/{name}_%j.err",
-            "",
-            "set -euo pipefail",
-            sbatch_cfg["env_activate_cmd"],
-            "",
+            *sbatch_header(name, sbatch_cfg, f"{linux_jobs_dir}/logs"),
             *_retry_wrapper_lines(),
             *_stage_configfile_lines(),
             "",
@@ -273,19 +261,10 @@ def main() -> None:
 
         dispatch_cfg = hpc_cfg["sbatch"]
         dispatch_lines = [
-            "#!/bin/bash",
-            "#SBATCH --job-name=gfm_generate_jobs_and_dispatch",
-            f"#SBATCH --partition={dispatch_cfg['partition']}",
-            *_account_line(dispatch_cfg),
-            f"#SBATCH --time={dispatch_cfg['time']}",
-            f"#SBATCH --mem={dispatch_cfg['mem']}",
-            "#SBATCH --cpus-per-task=1",
-            f"#SBATCH --output={linux_jobs_dir}/logs/generate_jobs_and_dispatch_%j.out",
-            f"#SBATCH --error={linux_jobs_dir}/logs/generate_jobs_and_dispatch_%j.err",
-            "",
-            "set -euo pipefail",
-            dispatch_cfg["env_activate_cmd"],
-            "",
+            *sbatch_header(
+                "gfm_generate_jobs_and_dispatch", dispatch_cfg, f"{linux_jobs_dir}/logs",
+                cpus_per_task=1, log_name="generate_jobs_and_dispatch",
+            ),
             *_retry_wrapper_lines(),  # only used by the non-calibration snakemake branch below; harmless if unused
             *_stage_configfile_lines(),
             "",
