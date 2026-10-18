@@ -100,15 +100,15 @@ if [ "$PART" = "eikonal" ]; then
 #SBATCH --output=$JOBS/logs/cal_post_eikonal_%j.out
 #SBATCH --error=$JOBS/logs/cal_post_eikonal_%j.err
 
-# No -e: the progress report and the first analysis must not stop the rest; the dedup,
-# which the second analysis reads, ends the job when it fails.
+# No -e: the progress report and the non-dedup analysis must not stop the rest; they run
+# before the dedup, which the dedup analysis reads and which ends the job when it fails.
 set -uo pipefail
 unset PROJ_LIB PROJ_DATA GDAL_DATA
 cd "$CODE" || exit 1
 "$GFM_PY" check_calibration_progress.py --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME"
+"$GFM_PY" run_calibration_sweep_analysis.py --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME"
 "$HYDROMT_PY" compute_calibration_result_dedup.py --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \\
     --out-dir-name "$DEDUP_DIR_NAME" --workers 4 || exit 1
-"$GFM_PY" run_calibration_sweep_analysis.py --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME"
 "$GFM_PY" run_calibration_sweep_analysis.py --config "$CONFIG" --base-dir-name "$DEDUP_DIR_NAME" \\
     --raster-base-dir-name "$BASE_DIR_NAME"
 EOF
