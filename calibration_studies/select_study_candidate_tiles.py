@@ -7,7 +7,9 @@ area). Quota per GEO_BIN_DEG lon/lat bin ~ sqrt(bin tile count); within a bin,
 evenly spaced area percentiles. Over-provisioned for dry tiles.
 
 Usage:
-    python select_study_candidate_tiles.py <output_dir> [n_candidates]
+    python select_study_candidate_tiles.py --out-dir <output_dir> [--n-candidates N]
+
+The positional form `<output_dir> [n_candidates]` is still accepted.
 """
 import argparse
 import math
@@ -19,6 +21,7 @@ import geopandas as gpd
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from cli_args import add_option_with_positional, require  # noqa: E402
 from config_utils import load_config  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -71,10 +74,14 @@ def select_candidates(n_candidates: int, domain_tiles_path: Path, model_outputs_
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("out_dir")
-    parser.add_argument("n_candidates", type=int, nargs="?", default=DEFAULT_N_CANDIDATES)
+    add_option_with_positional(parser, "--out-dir", "out_dir")
+    add_option_with_positional(parser, "--n-candidates", "n_candidates", type=int,
+                               help=f"default: {DEFAULT_N_CANDIDATES}")
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     args = parser.parse_args()
+    require(parser, args, "out_dir", "--out-dir")
+    if args.n_candidates is None:
+        args.n_candidates = DEFAULT_N_CANDIDATES
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

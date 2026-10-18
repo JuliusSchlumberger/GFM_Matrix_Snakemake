@@ -5,7 +5,9 @@ largest-update cell per round; one cell flipping between a few values is a
 limit cycle, not slow convergence.
 
 Usage:
-    python diagnose_large_residual.py <tile_id> [<tile_id> ...] [--config <config.yml>]
+    python diagnose_large_residual.py --tile-ids <tile_id> [<tile_id> ...] [--config <config.yml>]
+
+The tile ids are also accepted positionally.
 """
 import argparse
 import sys
@@ -14,6 +16,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from cli_args import add_option_with_positional, require  # noqa: E402
 from config_utils import load_config  # noqa: E402
 from eikonal import _ORTHANT_ORDER, _dense_sweep  # noqa: E402
 from flood_model import OBSTACLE_BLOCK_FRICTION as BLOCK_FRICTION  # noqa: E402
@@ -96,9 +99,10 @@ def diagnose(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("tile_ids", type=int, nargs="+")
+    add_option_with_positional(parser, "--tile-ids", "tile_ids", nargs="+", type=int)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     args = parser.parse_args()
+    require(parser, args, "tile_ids", "--tile-ids")
 
     cfg = load_config(args.config)
     model_outputs = Path(cfg["simulation"]["model_outputs"])

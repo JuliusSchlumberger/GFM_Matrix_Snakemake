@@ -6,15 +6,19 @@ CSV per tile: an n_outer=0 unblocked baseline, one row per outer iteration
 --outer-convergence-pct), and a status="summary" row splitting flooding removed
 by the static filter alone vs the full outer loop.
 
-Each inner solve runs up to --inner-max-rounds rounds (4 sweeps, Julia's
+Each inner solve runs up to --max-rounds rounds (4 sweeps, Julia's
 Gray-code order) with epsilon early exit; blocking uses
 flood_model.OBSTACLE_BLOCK_FRICTION. Unlike production, dynamic blocking is
 restricted to cells with t < 99 (reached): unreached cells read as
 waterlevel -99 m and a block is never undone. pct_unreached is logged.
 
 Usage:
-    python run_obstacle_coupling_study.py <output_dir> [--config <config.yml>]
-        [--tile-ids id [id ...]] [--max-outer N] [--inner-max-rounds N] [--epsilon M]
+    python run_obstacle_coupling_study.py --out-dir <output_dir> [--config <config.yml>]
+        [--tile-ids id [id ...]] [--max-outer-iterations N] [--max-rounds N] [--epsilon M]
+
+The flag names mirror the config keys (obstacle_coupling.max_outer_iterations,
+flooding.max_rounds); the older --max-outer / --inner-max-rounds and a positional
+<output_dir> are still accepted.
 """
 import argparse
 import csv
@@ -27,6 +31,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from cli_args import add_option_with_positional, require  # noqa: E402
 from config_utils import load_config  # noqa: E402
 from eikonal import _ORTHANT_ORDER, _dense_sweep  # noqa: E402
 from flood_model import OBSTACLE_BLOCK_FRICTION as BLOCK_FRICTION  # noqa: E402
@@ -39,7 +44,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTER_EPSILON_M = 0.03  # = simulation.flooding.waterlevel_epsilon_m
 DEFAULT_MAX_OUTER = 15  # beyond production's default, to find where tiles stop needing more
 DEFAULT_INNER_MAX_ROUNDS = 40  # methods_03 §2: most tiles converge or freeze extent by round 40
-# Not config-driven on purpose; pass --max-outer/--inner-max-rounds to match config.yml.
+# Not config-driven on purpose; pass --max-outer-iterations/--max-rounds to match config.yml.
 
 # t only decreases from the unseeded 99.0 (eikonal.solve_eikonal_dense) once seeds reach a cell.
 UNREACHED_SENTINEL = 99.0
@@ -260,14 +265,15 @@ def build_summary_row(rows: list[dict], tile_id: int) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("out_dir")
+    add_option_with_positional(parser, "--out-dir", "out_dir")
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--tile-ids", type=int, nargs="*", default=None)
-    parser.add_argument("--max-outer", type=int, default=None, help=f"default: {DEFAULT_MAX_OUTER} (production uses config simulation.flooding.obstacle_coupling.max_outer_iterations)")
-    parser.add_argument("--inner-max-rounds", type=int, default=None, help=f"default: {DEFAULT_INNER_MAX_ROUNDS} (production uses config simulation.flooding.max_rounds)")
+    parser.add_argument("--max-outer-iterations", "--max-outer", dest="max_outer", type=int, default=None, help=f"default: {DEFAULT_MAX_OUTER} (production uses config simulation.flooding.obstacle_coupling.max_outer_iterations)")
+    parser.add_argument("--max-rounds", "--inner-max-rounds", dest="inner_max_rounds", type=int, default=None, help=f"default: {DEFAULT_INNER_MAX_ROUNDS} (production uses config simulation.flooding.max_rounds)")
     parser.add_argument("--epsilon", type=float, default=None, help=f"default: {DEFAULT_OUTER_EPSILON_M} (matches production's own config simulation.flooding.waterlevel_epsilon_m)")
     parser.add_argument("--outer-convergence-pct", type=float, default=None, help="default: config simulation.flooding.obstacle_coupling.outer_convergence_pct")
     args = parser.parse_args()
+    require(parser, args, "out_dir", "--out-dir")
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

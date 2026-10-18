@@ -1,7 +1,9 @@
 """Filter the tile_grid to tile_ids listed one per line in a text file.
 
 Usage:
-    python preparation/build_tile_subset_by_id.py <tile_ids_file> <out_path>
+    python preparation/build_tile_subset_by_id.py --tile-ids-file <tile_ids_file> --out <out_path>
+
+Both are also accepted positionally (`<tile_ids_file> <out_path>`).
 """
 
 import sys
@@ -10,6 +12,7 @@ from pathlib import Path
 import geopandas as gpd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from cli_args import add_option_with_positional, require  # noqa: E402
 from config_utils import load_config, retry_transient_io  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
@@ -40,8 +43,10 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("tile_ids_file")
-    parser.add_argument("out_path")
+    add_option_with_positional(parser, "--tile-ids-file", "tile_ids_file")
+    add_option_with_positional(parser, "--out", "out_path")
     parser.add_argument("--config", default=None)
     args = parser.parse_args()
+    require(parser, args, "tile_ids_file", "--tile-ids-file")
+    require(parser, args, "out_path", "--out")
     build_tile_subset_by_id(Path(args.tile_ids_file), Path(args.out_path), args.config)
