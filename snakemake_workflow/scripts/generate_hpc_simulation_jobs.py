@@ -121,7 +121,6 @@ def main() -> None:
         print()
 
         generate_wave_dispatch(
-            tile_ids=tile_ids,
             batches=batches,
             return_periods=return_periods,
             waterlevel_names=waterlevel_names,

@@ -189,7 +189,6 @@ def _write_wave_scripts(
 
 
 def generate_wave_dispatch(
-    tile_ids: list,
     batches: list,
     return_periods: list,
     waterlevel_names: list,
@@ -202,7 +201,6 @@ def generate_wave_dispatch(
 ) -> None:
     """Write every wave's sbatch scripts + resolved_config.yml + submit_waves.sh.
 
-    `tile_ids` is accepted but unused.
     `batches` are `(wave, batch_id, tile_ids)` in the same order as `script_paths`.
     `wave_sbatch_cfg` is a `{wave: sbatch_cfg}` override of `hpc_cfg["sbatch"]`.
     """
@@ -256,7 +254,6 @@ def generate_resume_dispatch(
 
 if "snakemake" in dir():
     generate_wave_dispatch(
-        tile_ids=snakemake.params.tile_ids,  # noqa: F821
         batches=snakemake.params.batches,  # noqa: F821
         return_periods=snakemake.params.return_periods,  # noqa: F821
         waterlevel_names=snakemake.params.waterlevel_names,  # noqa: F821

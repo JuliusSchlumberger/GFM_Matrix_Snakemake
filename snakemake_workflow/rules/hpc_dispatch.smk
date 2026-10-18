@@ -50,7 +50,6 @@ rule generate_eikonal_jobs:
         # resolved_config.yml, so a scenario --configfile has no effect there.
         # Calibration runs bypass this rule (generate_hpc_simulation_jobs.py).
         base_config_path=os.path.join(workflow.basedir, "snakemake_workflow", "config", "config.yml"),
-        tile_ids=TILE_IDS,
         batches=_HPC_BATCHES,
         return_periods=RETURN_PERIODS,
         waterlevel_names=WATERLEVEL_NAMES,

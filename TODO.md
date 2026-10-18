@@ -58,7 +58,6 @@ import renamed modules (pipeline_plots, analysis_figures, exposure_grid, ...) ne
   `snakemake simulate` / `run_eikonal_dag.py` can therefore fail when Snakemake schedules a hop-1
   tile before its neighbours (the rule does not declare neighbour inputs); rerun, or run wave by
   wave as `run_delta_floodmaps.py` does.
-- `generate_eikonal_jobs.generate_wave_dispatch` still takes an unused `tile_ids` parameter.
 
 ## Git history rewrite (after the merge)
 
