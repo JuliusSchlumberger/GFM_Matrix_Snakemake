@@ -802,7 +802,6 @@ def main() -> None:
             growth_df, ssps, output_years, slr_traj,
         )
 
-    # avoid_worker_memory_budget_gb is informational: worker payloads are tiny.
     avoid_units = [(v, s) for v in AVOID_VARIANTS for s in slr_intensities]
     if args.skip_existing:
         done_units = [u for u in avoid_units if _avoid_done(*u, out_dir, expect_ssp)]
@@ -829,15 +828,13 @@ def main() -> None:
         for g_pct in growth_pct_labels
     ]
     n_tasks = len(ssp_tasks) + len(growth_tasks)
-    budget_gb = float(cfg["analysis"]["avoid_worker_memory_budget_gb"])
     n_workers = max(1, min(os.cpu_count() or 1, max(n_tasks, 1)))
     print(
         f"\nComputing AVOID / PROTECT + AVOID exposure: {len(avoid_units)} (variant, slr_intensity) units x "
         f"{len(ssps)} SSPs x {len(output_years)} years = {len(ssp_tasks)} SSP tasks, plus "
         f"{len(avoid_units)} units x {len(growth_pct_labels)} growth rates = "
         f"{len(growth_tasks)} scenario-neutral tasks ({n_tasks} total). "
-        f"Per-worker payload is file paths + small dicts (not full grids), so "
-        f"budget {budget_gb:.1f} GiB does not constrain worker count -> {n_workers} worker process(es)…"
+        f"-> {n_workers} worker process(es)…"
     )
 
     ssp_results: dict[tuple, list[pd.Series]] = {u: [] for u in avoid_units}

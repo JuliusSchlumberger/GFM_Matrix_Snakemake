@@ -5,40 +5,28 @@ the code is done; what remains needs you, Hydrax or P:\.
 
 ## Next steps
 
-1. **Review and merge `cleanup` into `main`** (`git log main..cleanup`).
-2. **Before pulling on Hydrax:** back up the `*_materialized.yml` files there (a pull removes
-   files that are now untracked); restore them afterwards.
-3. **After pulling, on every machine:** re-materialize the scenario configs
-   (`python snakemake_workflow/scripts/materialize_configs.py`). Config keys were renamed:
-   `boundary_conditions.slr_scenario` -> `slr_projection`, `slr_scenarios` -> `waterlevel_names`;
-   configs with the old keys now fail with KeyError. `deltas_design_materialized.yml` is written
-   by `analysis/prepare_delta_design_runs.py` (it still has the old keys and the removed
-   `aqueduct_mem_estimate`): regenerate it before the next delta design run.
-4. **On Hydrax:** `DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part eikonal` once, to check the
+1. **Merge the latest `cleanup` commits into `main`** (the earlier merge is done; `git log origin/main..cleanup`).
+2. **On Hydrax:** back up the `*_materialized.yml` files in `~/gfm_code/snakemake_workflow/config/`,
+   `git pull` on `main`, then `python snakemake_workflow/scripts/materialize_configs.py` (the checkout
+   is under /u, not on P:, so it cannot be done from Windows). Configs with the old keys
+   `slr_scenario` / `slr_scenarios` fail with KeyError.
+3. **On Hydrax:** `DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part eikonal` once, to check the
    shell drivers (only tested locally with stubbed sbatch/python). Paths live in
    `sfincs_tiles/hydrax_env.sh`; keep its roots in sync with `config_hpc.yml`.
-5. **Hydrax `gfm` env:** `mamba install -n gfm pytest=8.4.2 ruff=0.12.0`.
-6. **Local `config_local.yml`:** delete the leftover `paths.aqueduct_root` line (unused). This
-   machine has `paths.sfincs_exe` set for the SFINCS smoke test; add it on other machines if wanted.
-7. **P:\ cleanup:** `modelling/sfincs_smoke_test/` is no longer used (the smoke test now builds in a
-   temp folder); delete it if you like. When calibration stage 1 runs again, pass `--overwrite`
-   so screen / pre-flight error records cached by earlier runs are recomputed.
+4. **Hydrax `gfm` env:** `mamba install -n gfm pytest=8.4.2 ruff=0.12.0`.
+5. **P:\ cleanup:** `modelling/sfincs_smoke_test/` is no longer used; delete it if you like. When
+   calibration stage 1 runs again, pass `--overwrite` so screen / pre-flight error records cached by
+   earlier runs are recomputed.
 
-## Before reusing existing outputs
+Done on 2026-10-18 (outputs regenerated with the new code, values identical to the previous files;
+old copies in `.cleanup_baseline/p_backup_regen/`): flood totals (Hydrax job), Bangkok case exposure,
+delta flood extent + SLR-year column, delta design selection and `deltas_design_materialized.yml`,
+England FZ3 / FZ2 metrics, calibration_500_tiles batch jobs, the validation summary tables, and the
+materialized configs on this machine. The 2026-10-15 production `resolved_config.yml` was moved to
+`model_outputs/hpc_jobs/resolved_config_2026-10-15.yml`.
 
-Old formats are no longer accepted; regenerate before the next step that reads them:
-- `merged_results/exposure/flood_totals/flood_totals_*.csv` (int `return_period`): `analysis/compute_flood_totals.py`.
-- `bangkok_chao_phraya/merged_results/exposure/bangkok_case_exposure.csv`: `analysis/compute_bangkok_case_exposure.py`.
-- `deltas_floodmaps/delta_flood_extent.csv` (column `slr_scenario`): `analysis/compute_delta_flood_extent.py`,
-  then `analysis/add_slr_year_column.py`.
-- England FZ3 / FZ2 results (now `{validation.output_dir}/GBR/metrics_GBR_england_ea_floodzone{3,2}_sea_*.csv`):
-  `validation/rescore_england_fz3.py` and `validation/validate_england_fz2_band.py`, before
-  `compare_against_published.py` / `build_overview_table.py`.
-- Calibration-study batch jobs in `calibration_500_tiles/hpc_jobs/` pass the output dir
-  positionally: regenerate with `calibration_studies/generate_calibration_batch_jobs.py` before
-  resubmitting.
-- Snakemake: the config-key rename re-triggers `cache_waterlevel_stations`, `extract_boundaries` and
-  `run_eikonal` the next time a scenario runs (+25 jobs for bangkok_chao_phraya). Accepted.
+Snakemake: the config-key rename re-triggers `cache_waterlevel_stations`, `extract_boundaries` and
+`run_eikonal` the next time a scenario runs (+25 jobs for bangkok_chao_phraya). Accepted.
 
 Renamed CLI flags (old spellings now rejected): `--outdir` -> `--out-dir`, `--figdir` -> `--fig-dir`,
 `--output` / `--out-csv` -> `--out`, `--dir` -> `--timings-dir`, `--threads` -> `--workers`,

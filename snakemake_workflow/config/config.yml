@@ -1,166 +1,91 @@
-# Configuration for the GFM eikonal preprocessing & simulation workflow.
-# Parameters are grouped by pipeline stage. 
+# Configuration for the GFM eikonal preprocessing & simulation workflow, grouped by pipeline stage.
 
 
 # ── DATA CATALOGS ─────────────────────────────────────────────────────────────
 paths:
-  # Machine-specific: `root` (data + outputs) and `code_root` (repo checkout) have NO default
-  # here. Set them in config_local.yml (git-ignored; copy config_local.yml.example) or, for
-  # Hydrax, config_hpc.yml. Every {root}/{code_root} placeholder below resolves from those.
+  # `root` (data + outputs) and `code_root` (repo checkout) have no default here: set them in
+  # config_local.yml (copy config_local.yml.example) or, on Hydrax, config_hpc.yml.
 
   hydromt_data_catalog: "snakemake_workflow/config/data_catalog_gfm.yml" # relative to the code root
 
-  processed_inputs_dir: "{root}/processed_inputs" # # Directory for prepare_boundary_conditions.py's intermediate files
-  deltas_shapefile: "{root}/inputs/DeltasGlobal/all_deltas.shp" # global delta polygons - deltas deliverable (analysis/compute_delta_flood_extent.py & co, preparation/build_delta_tile_subset.py)
+  processed_inputs_dir: "{root}/processed_inputs" # intermediate files of prepare_boundary_conditions.py
+  deltas_shapefile: "{root}/inputs/DeltasGlobal/all_deltas.shp" # global delta polygons (deltas deliverable)
 # ── SYNC DELTADTM ──────────────────────────────────────────────────────────────
 sync_deltadtm:  # Used by: preparation/sync_deltadtm.py.
-  zip_download_dir: "{root}/inputs/DeltaDTM/_zips" # Temp directory for the downloaded .zip archives
+  zip_download_dir: "{root}/inputs/DeltaDTM/_zips" # temp directory for the downloaded .zip archives
   delete_zips_after_extract: true
 
 # ── VERTICAL DATUM CORRECTION (DEM) ─────────────────────────────────────────────
-# DEM elevations are always geoid-corrected EGM2008 -> GOCO06s (see
-# src/vertical_datum.py), matching the MDT-corrected COAST-RP forcing below.
+# DEM elevations are geoid-corrected EGM2008 -> GOCO06s (src/vertical_datum.py), matching the
+# MDT-corrected COAST-RP forcing below.
 vertical_datum_correction: # Used by: rules compute_geoid_offset_raster / extract_dem
   offset_raster_path: "{root}/inputs/ICGM/geoid_offset_egm2008_goco06s.tif"
 
 # ── PREPARATION PIPELINE SWITCHES ─────────────────────────────────────────────
 preparation: # Used by: preparation/run_preparation.py
   sync_deltadtm:       true   # download DeltaDTM DEM/mask tiles from 4TU.ResearchData
-  fix_ocean_mask:      true   # correct ocean_code mask misclassification against real OSM
-  # land polygons, IN PLACE on the per-tile mask .tif files, before the VRT mosaic is built
-  # over them (preparation/fix_ocean_mask_with_osm_land.py) - see that script's docstring
-  build_deltadtm_vrt:  true   # build deltadtm.vrt / deltadtm_mask.vrt from those tiles,
-  # with portable RELATIVE source paths (preparation/build_deltadtm_vrt.py) - separate
-  # from sync_deltadtm so the mosaics can be rebuilt on their own, cheaply, without
-  # re-downloading tiles
+  fix_ocean_mask:      true   # correct ocean_code misclassification against OSM land polygons,
+  # IN PLACE on the per-tile mask .tif files, before the VRT mosaic is built
+  build_deltadtm_vrt:  true   # build deltadtm.vrt / deltadtm_mask.vrt (relative source paths);
+  # separate from sync_deltadtm so the mosaics can be rebuilt without re-downloading
   tile_generation:     true   # build the connectivity-first domain manifest -> tile_grid.path
-  # (REPLACES tile_mask_creation/select_tiles/merge_tiles, the adaptive parent/child
-  # pipeline that replaced them, and the 13-stage greedy-covering/shave pipeline that
-  # replaced THAT in turn - see src/connectivity_tiling.py and
-  # docs/methods_01_tile_processing_and_waterlevels.md section 3)
   boundary_conditions: true   # COAST-RP + SLR fingerprint scenario NetCDFs
 
-# ── TILE GENERATION (connectivity-first domain construction, 2026-10 -
-# REPLACES the 13-stage greedy-covering/shave pipeline, itself gone now) ──
-# See src/connectivity_tiling.py for the actual algorithms and
-# docs/methods_01_tile_processing_and_waterlevels.md section 3 for the full
-# design/reasoning and real global validation numbers. Frozen geometry DAG:
-# this whole section only depends on the mask, DEM and elev_threshold_m -
-# never on scenario (Coast-RP station VALUES, SLR, RP) - so the tile
-# manifest is computed once and frozen. Each tile gets its own
-# boundary-condition stations directly at simulation time
-# (extract_boundaries.py), so nothing here feeds a separate forcing-context
-# computation.
-#
-# Known scope change vs. the old pipeline: there is no equivalent of the old
-# exposure filter (filter_and_shave_chunks used to drop any chunk with zero
-# WorldPop population anywhere in it) - this method can produce domains over
-# genuinely uninhabited floodable land (e.g. Arctic/Antarctic tundra) that
-# the old pipeline would have dropped. Not yet revisited; flagged here
-# rather than silently decided.
+# ── TILE GENERATION (connectivity-first domains) ──────────────────────────────
+# Algorithms: src/connectivity_tiling.py; design: docs/methods_01_tile_processing_and_waterlevels.md §3.
+# Depends only on mask, DEM and elev_threshold_m (never on scenario), so the manifest is
+# computed once and frozen.
+# Unlike the exposure filter of earlier tilings, domains over uninhabited floodable land
+# (e.g. Arctic tundra) are kept.
 tile_generation:
-  elev_threshold_m: 30 # DeltaDTM's own <=30m real validity envelope. floodable =
-  # valid DEM AND elevation < this; land with NO valid DEM reading does NOT
-  # count as floodable. No plausible SLR+return-period combination approaches
-  # this value (consistent with the pre-existing land_fill_value_m=99m
-  # sentinel's own stated reasoning).
-  ocean_code: 1 # mask value treated as "ocean" - the only code Phase 1's
-  # connectivity graph treats as a non-connector, and the only code Phase 5's
-  # ocean-touch check looks for. Deliberately NOT lake(2)/river(3), matching
-  # flood_model._idw_seed_values' own ocean_code=1 convention - inland water
-  # stays "keep"-able land-equivalent for Phase 3's trim step, only open
-  # ocean is excluded.
-  river_code: 3 # mask value treated as "river" - NOT used by this module
-  # itself (the old pipeline's river-mouth marking is retired), but still a
-  # live, load-bearing constant read directly by run_eikonal.py/
-  # run_eikonal_cli.py - kept here.
+  elev_threshold_m: 30 # floodable = valid DEM AND elevation < this (DeltaDTM's <=30m validity
+  # envelope); land without a valid DEM reading is not floodable
+  ocean_code: 1 # mask value treated as ocean (non-connector in Phase 1, ocean-touch check in
+  # Phase 5); lake(2)/river(3) deliberately stay land-equivalent, as in flood_model._idw_seed_values
+  river_code: 3 # mask value treated as river; read by run_eikonal.py / run_eikonal_cli.py
 
-  coarse_resolution_m: 500 # standard working resolution for every coarse
-  # (non-native) read in this pipeline: Phase 1's edge-connectivity check,
-  # Phase 3's trim/split grid, and Phase 5's ocean-touch check - deliberately
-  # the SAME value everywhere rather than near-duplicate parameters.
+  coarse_resolution_m: 500 # resolution of every coarse read (Phase 1 edge check, Phase 3 trim/split
+  # grid, Phase 5 ocean-touch check)
 
   # --- Phase 1 (build_connectivity_graph) ---
-  strip_resolution_m: 500 # resolution of the thin cross-border strip read
-  # when checking whether real floodable land touches across a shared tile
-  # edge - same value as coarse_resolution_m by default, kept separate since
-  # it's conceptually a different check (edge connectivity, not interior
-  # content).
-  strip_width_deg: 0.02 # ~2km - width of that cross-border strip on each
-  # side of the shared edge. Cheap, bounded-cost check.
+  strip_resolution_m: 500 # resolution of the cross-border strip read for edge connectivity
+  strip_width_deg: 0.02 # ~2 km strip width on each side of a shared edge
 
   # --- Phase 3 (split_component_to_budget) ---
-  budget_cells: 25_000_000 # split target, in native (~30m) cells - a
-  # component's trimmed bbox is recursively split until every piece is at or
-  # under this. Tuned against real Southeast Asia/Europe data to land a
-  # majority of domains in the 20-30M ideal band (2026-10) - NOT the same
-  # thing as hard_ceiling_cells below, which bounds the LATER merge step.
-  min_split_gap_coarse_cells: 10 # minimum width (in coarse_resolution_m
-  # cells, ~5km at the default 500m) of a contiguous all-non-floodable
-  # interior row/column band before Phase 3 treats it as a genuine natural
-  # gap worth splitting on for free, rather than falling through to a forced
-  # geometric cut. This is the value actually used to validate the method on
-  # real Southeast Asia/Europe/world-scale data (2026-10) - NOT the old
-  # pipeline's own very differently-tuned shave-era value (60, ~30km) for a
-  # completely different splitting algorithm; that tuning history doesn't
-  # carry over.
-  overlap_target_km: 20 # bounded overlap width duplicated on both sides of a
-  # FORCED split (used only when no natural gap exists) - the one place a
-  # synthetic seam is introduced, always compensated by this explicit margin.
+  budget_cells: 25_000_000 # split target in native (~30 m) cells; tuned so most domains land in
+  # the 20-30M band. Not hard_ceiling_cells, which bounds the later merge
+  min_split_gap_coarse_cells: 10 # min width (coarse cells, ~5 km at 500 m) of an all-non-floodable
+  # band to split on as a natural gap instead of a forced geometric cut
+  overlap_target_km: 20 # overlap duplicated on both sides of a FORCED split (no natural gap)
 
-  # --- Phase 4 (merge_small_domains_tiered) - two-tier post-hoc merge of
-  # undersized domains, never crossing a component boundary ---
-  merge_trigger_cells: 20_000_000 # a domain below this size is a merge
-  # candidate.
-  preferred_ceiling_cells: 30_000_000 # tier 1: prefer the nearest same-
-  # component neighbour whose merge result stays under this (keeps the
-  # typical result centred near the ideal band).
-  hard_ceiling_cells: 100_000_000 # tier 2 (last resort) / absolute cap -
-  # also the ceiling Phase 6's coastal pad below must never push a domain
-  # past.
+  # --- Phase 4 (merge_small_domains_tiered): merges never cross a component boundary ---
+  merge_trigger_cells: 20_000_000 # domains below this are merge candidates
+  preferred_ceiling_cells: 30_000_000 # tier 1: nearest same-component neighbour whose merge stays under this
+  hard_ceiling_cells: 100_000_000 # tier 2 / absolute cap; the Phase 6 pad must not exceed it either
 
-  # --- Phase 6 (pad_hop0_domains_bbox) - explicit coastal buffer, hop=0
-  # domains only (see that function's own docstring for why hop=0-only and
-  # why it runs strictly after Phase 5's hop-distance BFS) ---
-  coastal_buffer_km: 20 # outward pad applied to every hop_distance==0
-  # domain's bbox, on each side, restoring an explicit minimum-ocean-margin
-  # guarantee around a coastal nose/headland (Phase 3's own trim only gives
-  # an IMPLICIT buffer - see the pad function's docstring) - same order of
-  # magnitude as overlap_target_km above.
+  # --- Phase 6 (pad_hop0_domains_bbox): coastal buffer, hop=0 domains only ---
+  coastal_buffer_km: 20 # outward bbox pad per side, guaranteeing a minimum ocean margin
 
-  # Intermediate per-phase GeoPackages (00_raw_tile_index.gpkg through
-  # 04_tile_grid_final.gpkg, numbered to match build_tile_manifest.py's own
-  # docstring phase list) plus the Phase 3 resume checkpoint
-  # (tile_generation_phase3_checkpoint.jsonl) are always written straight
-  # into tile_grid.path's own directory (processed_inputs/mask/, no
-  # subdirectory) - cheap relative to the raster I/O-heavy phases
-  # themselves, and the checkpoint is load-bearing (Phase 3's resilience
-  # mechanism), not optional, so there is no flag to turn either off.
+  # Per-phase GeoPackages (00_raw_tile_index.gpkg .. 04_tile_grid_final.gpkg) and the Phase 3
+  # resume checkpoint (tile_generation_phase3_checkpoint.jsonl) are always written next to
+  # tile_grid.path; the checkpoint is required for resuming, so there is no flag to disable them.
 
-# ── TILE GRID (final manifest location - read by run_preparation.py's
-# tile_generation step AND everything downstream: Snakefile, extract_tile_geometry) ──
+# ── TILE GRID (final manifest; read by run_preparation.py and everything downstream) ──
 tile_grid:
-  path: "{processed_inputs_dir}/mask/domain_tiles_global.gpkg" # Note this is both target of the preparation pipeline and
-  # starting point for simulation run. "global" matches reality - the underlying DeltaDTM mask/DEM data (and every
-  # tile-generation algorithm there's been) have never been region-restricted. A COMPUTED tile-generation output
-  # (like the intermediate per-phase GeoPackages written alongside it), not raw synced source data, so it belongs under
-  # processed_inputs like every other derived preparation artifact. Migrated 2026-10 to the connectivity-first
-  # method's output (src/connectivity_tiling.py) - the pre-migration file was kept as
-  # domain_tiles_global_pre_connectivity_migration.gpkg alongside it.
+  path: "{processed_inputs_dir}/mask/domain_tiles_global.gpkg" # output of preparation, input of simulation
 
 
 # ── TILE SPLITTING (OOM RECOVERY) ───────────────────────────────────────────────
 tile_split: # Used by: run_eikonal_dag.py to split OOM tiles and re-run Snakemake.
-  fraction: 0.667 # Each half spans this fraction of the parent tile's extent
-  max_depth: 2 # Maximum number of times a single original tile may be recursively split
-  max_retries: 5 # Maximum number of Snakemake runs (initial + reruns after splitting) per run_eikonal_dag.py call
+  fraction: 0.667 # each half spans this fraction of the parent tile's extent
+  max_depth: 2 # max times a single original tile may be recursively split
+  max_retries: 5 # max Snakemake runs (initial + reruns after splitting) per run_eikonal_dag.py call
 
 
 # ── BOUNDARY CONDITIONS ───────────────────────────────────────────────────────
-# Used by: prepare_boundary_conditions.py (generates scenario files),
-#          extract_boundaries.py (loads per-tile stations from those files).
+# Used by: prepare_boundary_conditions.py (scenario files), extract_boundaries.py (per-tile stations).
 boundary_conditions:
-  waterlevel_nc_dir: "{processed_inputs_dir}/WL_scenarios" # Directory for water level scenario files
+  waterlevel_nc_dir: "{processed_inputs_dir}/WL_scenarios"
 
   # IPCC AR6 regional SLR projection (SSP-RCP code) and confidence level used to
   # build the SLR fingerprints. Not an SLR level: those are waterlevel_names below.
@@ -168,21 +93,16 @@ boundary_conditions:
   confidence_level: "medium" # options: low/medium
   coastrp_min_lat: -60  # exclude antarctic stations (no exposure)
 
-  # MDT (mean dynamic topography) is always ADDED to COAST-RP storm-tide
-  # levels (fixed 2026-09 - was wrongly subtracted; see
-  # preparation/prepare_boundary_conditions.py's module docstring and
-  # the real-data investigation in tests/martinique_diagnostics/, removed in
-  # e98340a - see git history), re-
-  # referencing them from local MSL to the GOCO06s geoid - matching the
-  # DEM's own geoid correction above.
-  mdt_correction: # Vertical-reference correction for COAST-RP storm-tide levels
+  # MDT is ADDED to COAST-RP storm-tide levels, re-referencing them from local MSL to the
+  # GOCO06s geoid (matching the DEM correction above); see prepare_boundary_conditions.py.
+  mdt_correction:
     mdt_variable: "mdt"
     fallback_search_deg: 3.0
 
   # Return-period convention: RP lists (this one and every other RP list) are
   # plain ints (years); a single scalar RP key (validation.return_period) is the
   # "RP100" wildcard form, as are the return_period columns of every output CSV.
-  return_periods: # Coast-RP return periods (wildcards) to simulate flood exposure fore
+  return_periods:
     # - 1
     - 2
     - 5
@@ -201,47 +121,21 @@ boundary_conditions:
     - "SLR_1500"
     - "SLR_2000"
 
-  station_search_buffer_deg: 1.0 # extract_boundaries.py: buffer (degrees) around a tile's bbox to search for Coast-RP stations
-  station_search_min_size_deg: 2.0 # extract_boundaries.py (boundaries.select_stations_for_tile): minimum
-  # search-box width/height (degrees), centred on the tile - the ACTUAL search box is whichever is larger
-  # per dimension, "bbox + station_search_buffer_deg" or this. Many chunks are now very small
-  # (post-2026-08 dedup/split, now also the connectivity-first split/merge - see src/connectivity_tiling.py), so this guarantees a station search always covers
-  # a reasonable area regardless of chunk size, rather than relying on station_search_buffer_deg alone
-  # (which happens to give >=2deg today only because it's 1.0 - a coincidence, not a guarantee, if that
-  # value is ever tuned down for large chunks). First-pass estimate, not validated against real data.
-  connectivity_resolution_m: 500 # extract_boundaries.py: coarse cell size (metres) for the
-  # ocean-connectivity station filter (filter_stations_by_ocean_connectivity) - deliberately
-  # much coarser than DeltaDTM's native ~30m so a multi-degree search window stays tractable.
-  connectivity_water_fraction_threshold: 0.5 # extract_boundaries.py: minimum fraction of a
-  # coarse cell's underlying native pixels that must be ocean (mask==1 only, not
-  # lake/river) for the cell to count as water for the connectivity filter above.
+  station_search_buffer_deg: 1.0 # buffer (deg) around a tile's bbox to search for COAST-RP stations
+  station_search_min_size_deg: 2.0 # min search-box width/height (deg), centred on the tile; the box
+  # used is the larger of this and bbox + station_search_buffer_deg per dimension. Unvalidated estimate
+  connectivity_resolution_m: 500 # coarse cell size (m) of the ocean-connectivity station filter
+  connectivity_water_fraction_threshold: 0.5 # min ocean fraction (mask==1 only) of a coarse cell's
+  # native pixels for it to count as water in that filter
   nc_filename_template: "COAST-RP_EWL_{return_period}_{waterlevel_name}.nc"
   nc_variable_template: "COAST-RP_EWL_{return_period}_{waterlevel_name}"
   station_x_var: "station_x_coordinate"
   station_y_var: "station_y_coordinate"
 
-  # RETIRED (2026-08): connectivity_forcing (straight-line-IDW along-water
-  # boundary forcing) and the along-water Dijkstra-graph design before it -
-  # never validated beyond a regional subset, superseded by the frozen-
-  # geometry tile-generation pipeline's own hop-distance/neighbour-forcing
-  # direction (src/connectivity_tiling.py's compute_hop_distances, 2026-10 -
-  # was src/tile_chunking.py's compute_run_order before the connectivity-
-  # first migration) as the intended way to give hinterland tiles non-ocean
-  # boundary forcing.
-
-  # NOT IMPLEMENTED - inter-tile boundary propagation for hinterland
-  # (hop>=1) tiles: a hop>=1 tile doesn't need its own ocean edge, and COULD
-  # draw extra virtual stations from an already-simulated, strictly-lower-
-  # hop neighbour's own results - but picking WHICH points needs the
-  # neighbour's actual simulated output (only the very few genuinely wet
-  # cells within the overlap are useful), so it can only happen AFTER that
-  # neighbour's own run, in a step that doesn't exist yet. A tile-
-  # generation-time precompute (candidate point locations from frozen
-  # geometry alone) was tried and rejected: real overlaps can span up to
-  # hundreds of km, not thin border strips, so any fixed grid resolution
-  # produces a huge, mostly-dry-land point count.
-  # boundaries.sample_waterlevel_at_points (the raster point-lookup
-  # primitive) already exists, ready for whenever this gets built.
+  # Not implemented: hop>=1 tiles drawing extra virtual stations from a lower-hop neighbour's
+  # simulated wet cells in the overlap. Needs the neighbour's results, so it must run after that
+  # neighbour; a precompute from frozen geometry was rejected (overlaps span up to hundreds of km).
+  # boundaries.sample_waterlevel_at_points is the point-lookup primitive for it.
 
 # ── RASTER FORMAT ──────────────────────────────────────────────────────────────
 raster_format:
@@ -253,260 +147,109 @@ raster_format:
 
 # ── FLOOD SIMULATION ──────────────────────────────────────────────────────────
 simulation: # Used by: preprocessing rules
-  model_outputs: "{root}/model_outputs"  # directory where per-tile "{tile_id}/inputs" and
-  # "{tile_id}/results" are created
+  model_outputs: "{root}/model_outputs"  # per-tile "{tile_id}/inputs" and "{tile_id}/results"
   preprocessing_inputs_dir: null # when set, per-tile preprocessing inputs are read/written there instead of model_outputs
 
-  # Flood model implementation: src/flood_model.py's flood_depth_dense
-  # (dense domain, round-based solve capped at flooding.max_rounds below).
-  # Its original fixed-3-sweep mode remains available on demand
-  # (flood_depth_dense's own `sweep_budget` param), just no longer the default
-  # (see max_rounds below).
-  model_bbox_buffer_arcsec: 3 # Buffer added to tile's previously shaved bbox to ensure thin strip of ocean.
-  dem_gap_fill: # land-nodata gap handling: large connected (4-connectivity) group get Nodata value, other IDW-interpolation
-    min_hard_fill_component_size: 15 # a missing-land DEM cell is only hard-filled to land_fill_value_m for patches larger than that
+  # Solver: src/flood_model.py flood_depth_dense (round-based, capped at flooding.max_rounds).
+  model_bbox_buffer_arcsec: 3 # buffer around the tile bbox to ensure a thin strip of ocean
+  dem_gap_fill: # missing-land DEM cells: large 4-connected gaps are hard-filled, the rest IDW-interpolated
+    min_hard_fill_component_size: 15 # gaps larger than this (cells) are hard-filled to land_fill_value_m
     interp_max_search_distance: 100
     interp_smoothing_iterations: 0
-    # Elevation (m) written for large missing-land DEM gaps. 99m (not the
-    # historical 9999m) - comfortably above DeltaDTM's real <=30m validity
-    # envelope (so it still reads as implausibly-high, never-floods terrain)
-    # while fitting the int16-centimetre DEM encoding (src/rasters.py's
-    # DEM_NODATA_M/DEM_SCALE) - 9999m would overflow int16 at cm scale by ~30x.
+    # Elevation (m) for hard-filled gaps: above DeltaDTM's <=30 m envelope (never floods) yet
+    # within the int16-centimetre DEM encoding (src/rasters.py DEM_SCALE); 9999 m would overflow.
     land_fill_value_m: 99
 
-  flooding: # Flood model parameters.
+  flooding:
     resolution: 30       # output raster resolution in metres
     knn: 15              # number of nearest water level stations used
     # Default Manning's n roughness (÷ 100) for cells with no land use class.
     default_friction: 0.002
-    # Runtime multiplier applied to the (already land-use-derived, already
-    # decoded) friction raster - not baked into compute_friction.py's own
-    # preprocessing output, so the expensive land-use-derived raster is
-    # computed once and reused by every sweep combination that varies a
-    # different parameter.
-    #
-    # NOT a free empirical tuning knob - most of this number is a REQUIRED
-    # unit correction, not calibration. friction (Manning's_n/100) is a
-    # per-METRE resistance rate, but src/eikonal.py's discretisation has no
-    # distance term at all - it uses whatever value it's given directly as
-    # the cost of ONE grid step, whatever that step's real size is. DeltaDTM's
-    # native grid step is ~30m, so the solver needs friction*30 to correctly
-    # represent "per metre" in the first place; friction_scale_factor=1 is
-    # NOT a meaningful "unscaled" baseline, it's just wrong by a factor of 30
-    # with no physical interpretation. See docs/methods_02_flood_depth.md
-    # section 2.1 for the full derivation (including how this was confused
-    # for pure literature/empirical tuning before, and corrected 2026-10-07).
-    #
-    # Production's actual value (12.0) = 30 (the mandatory grid-resolution
-    # correction above) x 0.4 (a further calibration factor, from comparing
-    # the eikonal solver directly against real SFINCS runs on the smoothed-
-    # forcing boundary data - P:/.../calibration_roughness_SFINCS's own
-    # friction_sweep_pooled_metrics.csv, 1000 tiles, 2026-10-13): fsf=12.0
-    # beats fsf=9.0 (the previous default, 2026-10-07-2026-10-13) on BOTH
-    # metrics - CSI 0.7428 vs 0.7320, and bias 1.053 vs 1.209 (much closer to
-    # the unbiased 1.0) - not just a narrower CSI win, a clearly better fit
-    # on the metric that matters most for a global product (systematic
-    # over/under-prediction).
+    # Runtime multiplier on the decoded friction raster (n/100), not baked into compute_friction.py.
+    # Not a free tuning knob: friction is a per-metre rate but src/eikonal.py uses it as the cost
+    # of one grid step, so ~30 (DeltaDTM grid step in m) is a required unit correction and 1 is
+    # wrong. 12.0 = 30 x 0.4 calibration against SFINCS (1000 tiles: CSI 0.743, bias 1.05 vs
+    # CSI 0.732, bias 1.21 at 9.0). See docs/methods_02_flood_depth.md §2.1.
     friction_scale_factor: 12.0
 
-    # Caps the eikonal solve's round-based mode (4 individual directional
-    # sweeps per round, each round checked for early-exit convergence - see
-    # src/eikonal.py's solve_eikonal_dense and src/flood_model.py's
-    # flood_depth_dense). Used by both the non-coupling single solve and
-    # each outer iteration's inner solve when obstacle_coupling is enabled
-    # (below) - not obstacle_coupling-specific, hence top-level here rather
-    # than nested under it. 40 rounds: the sweep-budget calibration study's
-    # conclusion (calibration_studies/run_sweep_budget_study.py, see
-    # docs/methods_03_calibration_sensitivity.md §2) - 58.5% of tiles
-    # strictly converge by round 40, and of the ones that don't, 97.8%
-    # already have their flood extent (depth>0 cells) fully frozen by then
-    # too (the residual is a small number of cells' depth still settling,
-    # not genuinely unconverged extent). The old fixed-sweep_budget=3 mode
-    # (real Aqueduct/Julia's own bit-exact-validated behaviour) remains
-    # available via flood_depth_dense's own `sweep_budget` parameter, just
-    # no longer the default.
+    # Max rounds (4 directional sweeps each, early exit on convergence) per solve, also per inner
+    # solve under obstacle_coupling. 40: sweep-budget study (docs/methods_03_calibration_sensitivity.md
+    # §2): 58.5% of tiles converge by round 40, and 97.8% of the rest have a frozen flood extent.
+    # The fixed 3-sweep mode stays available via flood_depth_dense's `sweep_budget`.
     max_rounds: 40
 
-    # Round-level early-exit convergence threshold (metres) for the
-    # round-based solve above - a round stops the solve early once its max
-    # per-cell waterlevel change drops to/below this. Used by both the
-    # non-coupling single solve and each outer iteration's inner solve when
-    # obstacle_coupling is enabled (below). 0.03m sits well below the 0.1m
-    # decision-relevant flood/no-flood depth threshold, so tightening/
-    # loosening this trades convergence precision against sweep count
-    # directly - see src/flood_model.py's WATERLEVEL_EPSILON_M comment.
+    # Early-exit threshold (m) on a round's max per-cell waterlevel change; well below the 0.1 m
+    # flood/no-flood threshold (see flood_model.WATERLEVEL_EPSILON_M).
     waterlevel_epsilon_m: 0.03
 
-    # Mitigates a structural weakness Fast Sweeping shares with cost-distance
-    # flood models (Kasmalkar et al. 2024's "Flow-Tub" critique): a
-    # friction-cheap shortcut through terrain higher than the
-    # locally-attenuated water level can produce an illegitimate high
-    # potential value beyond it. When enabled, blocks such cells
-    # (friction -> 9999) and re-solves in an outer loop instead of a single
-    # solve - see src/flood_model.py's flood_depth_dense docstring for the
-    # full algorithm and monotonicity/termination argument. Enabled by
-    # default - validated on both the wave-0 (real boundary stations) and
-    # hop>=1 (explicit seed cells) paths; see that docstring.
+    # Blocks friction-cheap shortcuts through terrain higher than the attenuated water level
+    # (Kasmalkar et al. 2024 "Flow-Tub" critique) by setting friction -> 9999 and re-solving in an
+    # outer loop; algorithm in flood_model.flood_depth_dense.
     obstacle_coupling:
       enabled: true
-      # 4: the obstacle-coupling calibration study's conclusion (see
-      # docs/methods_03_calibration_sensitivity.md §3), with the blocked-cell
-      # set accumulated monotonically across outer iterations (see
-      # flood_model.py's own `blocked = blocked | prev_blocked` comment) -
-      # without that, most non-converging tiles oscillate indefinitely
-      # rather than settle. With it: all 500/500 tiles run to full
-      # convergence within 4 outer iterations - 370 at the earliest
-      # mathematically possible point (outer=2), 123 at outer=3, 7 at
-      # outer=4. "n outer iterations" counts inner solves performed, not
-      # blocking rounds applied to the output - a tile that stops at solve
-      # k only ever had (k-1) rounds of
-      # dynamic blocking baked into its returned flood map (solve k's own
-      # blocking decision is discarded once its delta is found negligible;
-      # see methods_03_calibration_sensitivity.md §3 for the full reasoning).
+      # 4: obstacle-coupling study (docs/methods_03_calibration_sensitivity.md §3), with blocked cells
+      # accumulated across iterations: 500/500 tiles converge within 4 (370 at 2, 123 at 3, 7 at 4).
+      # Counts inner solves; a tile stopping at solve k has k-1 blocking rounds in its output.
       max_outer_iterations: 4
       outer_convergence_pct: 0.01  # stop early once < this % of the tile's cells are newly blocked in an outer iteration
 
-  # Peak-memory estimate for run_eikonal's `resources: mem_mb` (replaces the
-  # old aqueduct_runs=1 serialization - see eikonal_runner.
-  # estimate_eikonal_mem_mb). Calibrated from 7 real tiles; deliberately
-  # generous given real per-tile variance beyond pixel count alone. Retune
-  # from production telemetry if jobs are consistently over/under-budgeted.
+  # Peak-memory estimate for run_eikonal's `resources: mem_mb` (eikonal_runner.estimate_eikonal_mem_mb).
+  # Calibrated on 7 tiles, deliberately generous; retune from production telemetry.
   eikonal_mem_estimate:
     base_mb: 1000
     bytes_per_pixel: 80
 
 # ── HPC DISPATCH ────────────────────────────────────────────────────────────────
-# Used by: rule generate_eikonal_jobs (rules/hpc_dispatch.smk) /
-# scripts/generate_eikonal_jobs.py. Wave-based hinterland forcing
-# (src/connectivity_tiling.compute_hop_distances's hop_distance column) means a
-# hop_distance>=1 tile is seeded from a strictly-lower-hop_distance
-# neighbour's own output for the same scenario, so tiles are grouped by wave
-# FIRST and split into node batches within each wave - this rule generates
-# one sbatch script per (wave, node batch) once preprocessing is done, plus
-# a submit_waves.sh driver that submits wave 0, then each later wave with a
-# SLURM `--dependency=afterany:<every prior-wave job id>` barrier so a
-# hop>=1 job never starts before its neighbour's job has finished. The user
-# runs submit_waves.sh manually and later runs postprocessing manually once
-# results land. Requires snakemake_workflow/config/config_hpc.yml (tracked,
-# Hydrax values; copy config_hpc.yml.example for another cluster) pointing
-# paths.root/code_root at the Linux HPC mount of this same shared storage.
-#
-# Within each wave (simulation) / on its own (preprocessing), tiles are
-# ALSO split by estimated size (2026-08): Hydrax's regular partitions all
-# scale RAM at a fixed 8GB/vCPU (1vcpu=8GB, 4vcpu=32GB, 16vcpu=128GB, ...).
-# `sbatch` is shared by BOTH simulation batching (hpc_dispatch.smk) AND
-# preprocessing batching (generate_hpc_preprocess_job.py) - there is no
-# separate preprocessing-only config; a preprocessing batch's `cpus_per_task`
-# (passed to `snakemake --cores`) determines its actual Snakemake-level
-# parallelism, not just its SLURM allocation size, so a `cpus_per_task: 1`
-# partition means preprocessing on that batch's tiles runs fully serial, not
-# just one simulation tile at a time.
-#
-# NOTE (2026-10-08): this used to also route tiles above a pixel-count
-# threshold to a separate, bigger-RAM `sbatch_large` partition - a real need
-# under the OLD (pre-2026-10) greedy-covering tiling pipeline, which could
-# produce much larger domains. The connectivity-first pipeline's own
-# hard_ceiling_cells (tile_generation.hard_ceiling_cells, 100,000,000) caps
-# every tile's size directly, and a live check against the real production
-# grid (domain_tiles_global.gpkg, 4504 tiles) confirmed only one tile exceeds
-# eikonal_mem_estimate's 1vcpu-node ceiling (~87M px) at all (95.08M px,
-# tile 2569, hop_distance=0 - safely absorbed by hpc.wave_tiers' shared
-# 168GB/24-way pool for that wave, not an isolated 1vcpu allocation) - so the
-# large/small split, `sbatch_large`, and every "size_class" branch that read
-# it (hpc_dispatch.smk, generate_hpc_simulation_jobs.py,
-# generate_hpc_preprocess_job.py, generate_eikonal_jobs.py,
-# check_simulation_progress.py's --by-size) were removed as dead weight from
-# a retired pipeline generation, not a currently-needed safeguard.
+# Used by: rule generate_eikonal_jobs (rules/hpc_dispatch.smk) / scripts/generate_eikonal_jobs.py.
+# A hop_distance>=1 tile is seeded from a lower-hop neighbour's output, so tiles are grouped by
+# wave, then split into node batches; submit_waves.sh submits each wave with a SLURM
+# `--dependency=afterany` barrier on all prior waves. See snakemake_workflow/hpc.md.
+# `sbatch` is shared by simulation and preprocessing batching; for preprocessing its
+# cpus_per_task is also the `snakemake --cores` value (1 = fully serial).
 hpc:
-  n_nodes: 40                                        # a SHARED budget across
-  # every batch per wave, split evenly by tile count (see hpc_dispatch.smk's own batch-splitting logic)
+  n_nodes: 40                                        # shared budget across
+  # every batch per wave, split evenly by tile count
   jobs_dir: "{root}/model_outputs/hpc_jobs"           # generated sbatch scripts, resolved_config.yml, submit_waves.sh, logs/
   single_preprocess_job: false # true: generate_hpc_preprocess_job.py writes one job for all tiles instead of node batches
   sbatch:
-    # Deltares Hydrax partitions: 1vcpu/4vcpu/16vcpu/24vcpu/60vcpu (regular),
-    # 44vcpu, gpu, test (30 min cap, quick smoke-test before a real run).
-    # Responsible-use ceiling is ~240 cores across the vcpu partitions AT
-    # ONCE - n_nodes x cpus_per_task, per wave, should stay under that.
+    # Hydrax partitions: 1vcpu/4vcpu/16vcpu/24vcpu/60vcpu (8 GB/vCPU), 44vcpu, gpu, test (30 min cap).
+    # Responsible use: ~240 cores at once, so n_nodes x cpus_per_task per wave should stay under that.
     partition: 1vcpu
-    account: ""                                       # optional - Hydrax jobs don't require one; leave "" to omit #SBATCH --account
-    # days-hours:minutes:seconds, e.g. "1-00:00:00". MANDATORY - an unset
-    # Hydrax job silently gets a 1-MINUTE default and is killed at that
-    # point regardless of progress. Estimate conservatively (a job is hard-
-    # killed at this limit, finished or not) but not wastefully high.
+    account: ""                                       # optional; "" omits #SBATCH --account
+    # days-hours:minutes:seconds. Mandatory: an unset Hydrax job gets a 1-minute default and is killed.
     time: "1-00:00:00"
-    # 1vcpu nodes report 7950MB usable (`sinfo -N -o "%N %P %m %c"`), NOT
-    # the nominal 8192MB (8GB) - requesting the full nominal amount fails
-    # with "Memory specification can not be satisfied". Stay safely under
-    # the real ceiling, not the marketing number.
+    # 1vcpu nodes have 7950 MB usable, not 8192; requesting 8G fails.
     mem: "7G"
-    # For simulation batches: this IS the real concurrency each node runs -
-    # run_simulation_batch.py (2026-10-08) runs up to this many tiles' solves
-    # at once via a thread pool (each eikonal solve is single-threaded numba,
-    # so N concurrent solves on an N-cpu node is a genuine use of the
-    # allocation, not oversubscription - see that script's own docstring).
-    # For preprocessing batches (generate_hpc_preprocess_job.py): this IS
-    # also the real `snakemake --cores N` parallelism for that batch - 1
-    # means fully serial preprocessing. Bump this up if throughput matters
-    # more than minimal per-node footprint.
+    # Simulation: tiles solved concurrently per node (single-threaded numba solves).
+    # Preprocessing: `snakemake --cores` for the batch.
     cpus_per_task: 1
-    # Hydrax uses Environment Modules (Lmod) + conda, not a single module
-    # for this custom env - e.g.:
-    #   module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm
-    # HDF5_USE_FILE_LOCKING=FALSE (2026-10-15): confirmed live that
-    # prepare_exposure_grid_chunk's geogunit read (inputs/WRI/geogunit_107_all.nc,
-    # a netCDF/HDF5 file via hydromt's DataCatalog) hung for hours on a
-    # Hydrax compute node with zero progress - a separate, well-documented
-    # HDF5-over-NFS file-locking issue (distinct from the GDAL/SQLite one
-    # affecting .gpkg reads, fixed via node-local staging instead - see
-    # generate_eikonal_jobs.py's _stage_tile_grid_lines). HDF5 only needs
-    # this one env var to skip its own locking entirely for read-only access,
-    # no staging required.
+    # HDF5_USE_FILE_LOCKING=FALSE: HDF5 reads (e.g. geogunit .nc) hang on Hydrax NFS otherwise.
     env_activate_cmd: 'module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm && export HDF5_USE_FILE_LOCKING=FALSE'
 
-  # Per-hop_distance-wave node-count/partition tiers (2026-10-08), for a
-  # throughput-driven dispatch of the real global simulation run - overrides
-  # the uniform hpc.n_nodes/hpc.sbatch choice above. Read only by the
-  # standalone generate_hpc_simulation_jobs.py CLI, not by hpc_dispatch.smk's
-  # own Snakemake-rule entry point, which still uses the uniform
-  # n_nodes/sbatch behaviour unchanged.
-  #
-  # Matched by each wave's own hop_distance against every tier's `hops`
-  # list, in order - the FIRST match wins. A tier's own `n_nodes: null`
-  # means uncapped - one 1vcpu node per tile in that wave (never more nodes
-  # than tiles, same as every tile-capped wave already behaves once node
-  # count exceeds tile count). `hops: null` is a catch-all, matching any
-  # hop_distance no earlier tier already claimed - MUST be last.
-  #
-  # This specific node split (6x24vcpu for hop=0's 3761 tiles, 2x24vcpu for
-  # hop=1/2's 462+139, everything else one-1vcpu-per-tile) was sized against
-  # a real measured ~3.6min/solve average (48-tile GBR/New Brunswick
-  # country-validation run, 2026-10-07). `time:` budgets below were
-  # re-sized 2026-10-08 for the ~6x solver speedup from src/eikonal.py's
-  # block-sweep + loop-order + early-out optimizations (same measured
-  # baseline / 6 =~ 0.6min/solve) - ask for the current wall-clock estimate
-  # before reusing either the node split or these time budgets for a
-  # differently-shaped tile grid or a further solver change.
+  # Per-hop_distance-wave node/partition tiers; override n_nodes/sbatch above, read only by
+  # generate_hpc_simulation_jobs.py (not hpc_dispatch.smk). First tier whose `hops` contains the
+  # wave's hop_distance wins; `n_nodes: null` = one node per tile; `hops: null` is the catch-all
+  # and MUST be last. Sized for ~0.6 min/solve and the 4504-tile grid (hop 0: 3761 tiles,
+  # hop 1/2: 462+139); re-estimate before reusing for another grid or solver change.
   wave_tiers:
     - hops: [0]
       n_nodes: 6
       partition: "24vcpu"
       cpus_per_task: 24
-      mem: "168G"           # 7G/vcpu, same headroom ratio as sbatch: above (7/8 of the nominal 8G/vcpu)
-      time: "0-16:00:00"    # user direction, 2026-10-08 (~12h worst-case estimate (627 tiles/batch x 45 scenarios / 24-way / ~0.6min) + margin)
+      mem: "168G"           # 7G/vcpu, same headroom ratio as sbatch: above
+      time: "0-16:00:00"    # ~12h worst case (627 tiles/batch x 45 scenarios / 24-way / ~0.6min) + margin
     - hops: [1, 2]
       n_nodes: 2
       partition: "24vcpu"
       cpus_per_task: 24
       mem: "168G"
-      time: "0-04:00:00"    # user direction, 2026-10-08 - close to the ~4.4h worst-case estimate (hop=1's own
-      # batches, the larger of the two) with little margin; re-check if hop=1's own batch sizing changes
+      time: "0-04:00:00"    # ~4.4h worst case (hop=1 batches), little margin
     - hops: null
-      n_nodes: null         # uncapped - one 1vcpu node per tile (hop_distance 3..10 today)
+      n_nodes: null         # one 1vcpu node per tile
       partition: "1vcpu"
       cpus_per_task: 1
       mem: "7G"
-      time: "0-01:00:00"    # user direction, 2026-10-08 (~27min worst-case estimate (one tile's own 45
-      # scenarios, serial, ~0.6min each) + margin)
+      time: "0-01:00:00"    # ~27min worst case (45 scenarios serial, ~0.6min each) + margin
 
 
 # ── POSTPROCESSING ────────────────────────────────────────────────────────────
@@ -516,14 +259,12 @@ hpc:
 postprocessing:
   # Root directory for combined (multi-tile) rasters, VRTs and plots.
   merged_outputs: "{root}/merged_results"
-  chunk_size_deg: 5 # Spatial chunk size (degrees) used to partition the study area for merging.
-  block_size: 2048 # Side length (pixels) of the write blocks used inside each chunk.
+  chunk_size_deg: 5 # spatial chunk size (degrees) for merging
+  block_size: 2048 # side length (pixels) of the write blocks inside each chunk
 
-  # Visualisation parameters for all postprocessing plots.
   plots:
     enabled: true # to plot merged maps (plot_merged_results)
 
-    # Output resolution (DPI) for all saved plot images.
     dpi: 300
     merged_resolution_arcsec: 120  # 120" ≈ 3.7 km at the equator
     waterdepth_cmap: "Blues"
@@ -533,7 +274,7 @@ postprocessing:
 
 # ── COASTAL PROTECTION BASELINE ────────────────────────────────────────────────
 protection: # Used by: analysis/compute_exposure_analysis.py
-  baseline_waterlevel_name: "SLR_0" # Reference SLR for which protection standard ensure protection
+  baseline_waterlevel_name: "SLR_0" # SLR level at which the protection standard holds
   default_rp: 5 # minimum protection level assumed where no FLOPROS protection standards are available
 
 exposure: # Used by: scripts/prepare_exposure_grid_chunk.py
@@ -542,7 +283,7 @@ exposure: # Used by: scripts/prepare_exposure_grid_chunk.py
 
 # ── ADAPTATION MEASURES ────────────────────────────────────────────────────────
 adaptation: # Used by: analysis/compute_exposure_analysis.py
-  slr_intensities: # Protection against certain amount of SLR
+  slr_intensities: # SLR amount the measures are designed for
     - "SLR_500"
     - "SLR_1000"
     # - "SLR_1500"   # dropped: beyond the 2100 SLR range (median <= 0.72 m, p83 ~1 m), so it never tips
@@ -554,9 +295,8 @@ population_growth: # Used by: analysis/compute_exposure_analysis.py
     - SSP2
     # - SSP3
     - SSP5
-  # Years for which to produce output columns (5-year grid; intermediate
-  # years are linearly interpolated from the 5-year data in the Excel file).
-  output_years: # every 5-year step of the IIASA projections, so time series show when a design is exceeded
+  # Output years (5-year grid of the IIASA projections; intermediate years linearly interpolated).
+  output_years:
     - 2025
     - 2030
     - 2035
@@ -577,11 +317,10 @@ population_growth: # Used by: analysis/compute_exposure_analysis.py
 # ── ANALYSIS PIPELINE SWITCHES ────────────────────────────────────────────────
 analysis: # Used by: analysis/run_analysis.py
   compute_exposure:      true   # baseline / protect / retreat / avoid / protect_avoid EAI CSVs
-  compute_flood_totals:  true   # per-country total flooded area/exposed population per (RP, SLR),
-  # no protection/adaptation applied - consumed by flood_extent_validation's
-  # validate_country.py (validation.flood_totals_dir below)
+  compute_flood_totals:  true   # per-country flooded area/exposed population per (RP, SLR), no
+  # protection/adaptation; read by validate_country.py (validation.flood_totals_dir)
   plot_burning_ember:    true   # impact-matrix (SLR × growth) figures
-  plot_timeseries:       false  # EAI along SSP SLR trajectories to 2100 (global, per country, per continent);
+  plot_timeseries:       false  # EAI along SSP SLR trajectories to 2100;
                                 # superseded by plot_extended_pathways' continent time series
   plot_tipping_points:   true   # tipping-point figure (visualization.tipping_points)
   plot_extended_pathways: true  # continent time series to 2150 (visualization.extended_pathways)
@@ -589,12 +328,11 @@ analysis: # Used by: analysis/run_analysis.py
   # All figures are written to visualization.output_dir directly (no subdirectories).
   plot_world_maps:       false  # world choropleth maps (slow for global runs)
 
-  avoid_worker_memory_budget_gb: 4 # number of feasible parallelization stream
 
 
 # ── VISUALISATION ─────────────────────────────────────────────────────────────
 visualization:
-  output_dir: "{root}/figures" # Output directory for all generated figures.
+  output_dir: "{root}/figures"
 
   # ── Burning-ember ────────────────────────────────────────
   # The growth matrices span a wider space than the ember figures show, so pathways can be
@@ -605,10 +343,10 @@ visualization:
     max:  3.5   # Nigeria SSP2 + continued trend reaches about +343 % by 2150
     step:  0.1
 
-  slr_interp: # interpolated based on run scenarios used for smoothing the curve.
+  slr_interp: # SLR axis interpolated between the modelled levels to smooth the curves
     min_mm:   0
     max_mm: 2000   # highest modelled SLR level (boundary_conditions.waterlevel_names)
-    n_points: 133  # ~15 mm spacing, as before
+    n_points: 133  # ~15 mm spacing
 
   ember_display: # plot_burning_ember.py: window of the growth matrix shown in the ember figures
     slr_max_mm: 1500
@@ -689,17 +427,16 @@ visualization:
   # ── Chart aesthetics ──────────────────────────────────────────────────────
   dpi: 200
   cmap_ember: "YlOrRd"
-  n_ember_contours: 6 # Number of labelled EAI contour lines drawn on the burning-ember heatmap.
+  n_ember_contours: 6 # labelled EAI contour lines on the burning-ember heatmap
 
   # ── Figure sizes (inches) ─────────────────────────────────────────────────
   ember_figsize: [8, 7]
   world_map_figsize: [14, 7]
 
   # ── World map ──────────────────────────────────────────────────────────────
-  # (min_lat, max_lat) displayed on world choropleth maps.
-  world_map_lat_range: [-60, 85]
-  world_map_downsample: 4 # Read every Nth geogunit_109 pixel row/col to reduce memory and draw time.
-  geo109_subsample: 10 # Read every Nth pixel when building the geogunit_109 -> ISO lookup table (one-time).
+  world_map_lat_range: [-60, 85] # (min_lat, max_lat)
+  world_map_downsample: 4 # read every Nth geogunit_109 pixel row/col
+  geo109_subsample: 10 # read every Nth pixel when building the geogunit_109 -> ISO lookup (one-time)
 
   # ── SSP–RCP pairings ─────────────────────────────────────────────────────
   ssp_rcp_codes:
@@ -708,10 +445,10 @@ visualization:
     SSP5: 585
 
   ssp_colors:
-    SSP1: "#1f77b4"   # blue
-    SSP2: "#2ca02c"   # green
-    # SSP3: "#ff7f0e"   # orange
-    SSP5: "#d62728"   # red
+    SSP1: "#1f77b4"
+    SSP2: "#2ca02c"
+    # SSP3: "#ff7f0e"
+    SSP5: "#d62728"
 
   measure_colors:
     baseline: "#7f7f7f"
@@ -720,81 +457,41 @@ visualization:
     avoid:    "#2ca02c"
     protect_avoid: "#17becf"
 
-  level_linestyles: ["--", ":", "-."] # plot_timeseries.py:
-  baseline_linestyle: "-" # plot_timeseries.py:
+  level_linestyles: ["--", ":", "-."] # plot_timeseries.py
+  baseline_linestyle: "-" # plot_timeseries.py
 
 # ── COASTAL FLOOD-EXTENT VALIDATION ─────────────────────────────────────────────
 # Used by: validation/validate_country.py, validation/run_validation.py.
-# See docs/methods_04b_MapsValidation.md for the full design.
+# See docs/methods_04b_MapsValidation.md.
 validation:
   benchmark_catalog: "snakemake_workflow/config/data_catalog_validation.yml"
   benchmark_root: "{root}/inputs/validation" # NOT the GFM catalog's own {root}
   output_dir: "{root}/validation"
   return_period: "RP100" # scalar RP: "RP100" wildcard form (see boundary_conditions.return_periods)
   waterlevel_name: "SLR_0"
-  primary_threshold_m: 0.01 # the single model wet-cell threshold scoring uses everywhere - the
-  # model's own depth classification, a separate question from the benchmark's own coverage
-  # fraction (never thresholded for scoring at all). Deliberately NOT exposure.exceedance_threshold_m
-  # (still 0.10, a different purpose - flood-protection/damage accounting, not extent comparison) -
-  # a real, measured sensitivity check (GBR Wales/Scotland, 0.10/0.05/0.01m) found CSI/HR improving
-  # smoothly and monotonically all the way down to 0.01m with no noise or reversal, despite 0.01m
-  # being below the eikonal solver's own convergence tolerance (simulation.flooding.waterlevel_epsilon_m,
-  # 0.03m) - the "pure flood extent, any real depth counts" comparison this enables is more faithful
-  # to what the benchmark maps themselves represent (a binary flood/no-flood extent, not a
-  # depth-threshold policy choice) than reusing the exposure pipeline's own accounting threshold.
-  coastline_tolerance_cells: 1 # v.confusion_counts_tolerant's own dilation radius (pixels, on the
-  # model's native 30m grid - simulation.flooding.resolution) - a DIAGNOSTIC CSI_tol/HR_tol/FAR_tol
-  # reported alongside (never instead of) the strict CSI/HR/FAR, answering how much of the strict
-  # disagreement sits right next to a cell where model and benchmark actually agree (e.g. the
-  # permanent-water-mask-vs-benchmark-coastline mismatch - methods_04b_MapsValidation.md's own
-  # caveat). 1 cell (30m) matches the real registration-scale evidence already measured for this
-  # exact caveat (vertical-datum horizontal shift ~2m; DeltaDTM mask native
-  # resolution ~25-31m - both sub-pixel-to-one-pixel) - NOT tuned upward to make CSI_tol
-  # look better. Raise only with a real measured reason, and always read it next to
-  # pct_disagreement_forgiven (how much of the disagreement the tolerance actually excused) rather
-  # than CSI_tol alone - see confusion_counts_tolerant's own docstring for the full guard rationale.
+  primary_threshold_m: 0.01 # model wet-cell depth threshold for scoring. Deliberately not
+  # exposure.exceedance_threshold_m (0.10, damage accounting): CSI/HR improve monotonically down
+  # to 0.01 m (Wales/Scotland test, 0.10/0.05/0.01 m), and the benchmarks are binary extents
+  coastline_tolerance_cells: 1 # dilation radius (30 m model pixels) of the DIAGNOSTIC CSI_tol/HR_tol/
+  # FAR_tol, reported next to the strict scores. 1 cell matches the measured registration scale
+  # (datum shift ~2 m, DeltaDTM mask ~25-31 m); do not raise without a measured reason, and read
+  # it with pct_disagreement_forgiven (see validation.confusion_counts_tolerant)
   benchmark_supersample: 5 # rasterisation supersampling factor per model pixel
-  benchmark_wet_fraction: 0.5 # DISPLAY ONLY (the agreement-map category raster's own coverage-
-  # fraction cutoff - one discrete colour per cell needs a yes/no wet call). Scoring itself
-  # (validation.confusion_counts_soft, 2026-09-30) weights tp/fp/fn/tn by the real coverage
-  # fraction directly instead of thresholding it first, after a sensitivity sweep across
-  # benchmarks (single-tile spot-checks, tau in [0,1]) found the optimal threshold diverges
-  # by benchmark with no consistent winner - see src/validation.py's own confusion_counts_soft
-  # docstring for the full account.
-  permanent_water_source: "deltadtm_mask" # data_catalog_gfm.yml key - DeltaDTM's own native-
-  # resolution land/ocean/lake/river mask (~25-31m ground cell, 4-8x finer in area than
-  # Copernicus land_use's ~100m; measured comparison 2026-09). Switched from
-  # "land_use" (Copernicus Global Land Cover, still a valid catalog entry, just no longer the
-  # default here) - real measured improvement (coastal-strip masking loss 45.7%->30.1% within
-  # 240m of shore) but NOT a full fix: ~1/3 of the original loss was genuine
-  # coarse-cell aliasing (now eliminated), the rest is a waterline-DEFINITION disagreement
-  # (DeltaDTM/ESA WorldCover's optical water edge vs. a benchmark's own surveyed coastline) that
-  # no 30m-resolution mask can resolve - see methods_04b_MapsValidation.md's own caveats section
-  # for the full breakdown, and coastline_tolerance_cells above for a diagnostic (not a fix). Was called
-  # `landuse_source` before this switch - renamed since that name became misleading once it no
-  # longer necessarily points at a land-use product.
-  permanent_water_codes: [1, 2, 3] # DeltaDTM mask codes to exclude (1=ocean, 2=lake, 3=river -
-  # 0=land, 255=nodata/outside DeltaDTM coverage; confirmed against real tiles 2026-09 - see
-  # data_catalog_gfm.yml's own deltadtm_mask entry). Copernicus land_use's own codes were
-  # [80, 200] (permanent water bodies / open sea) - NOT interchangeable with these, update both
-  # keys together if ever switching permanent_water_source back.
-  geogunit_source: "geogunit_protection_units" # data_catalog_gfm.yml key (WRI geogunit_107) -
-  # used ONLY by validate_country_national_coverage (validation.read_country_mask) to restrict
-  # a national-coverage benchmark's rectangular region bbox down to cells that actually belong
-  # to that country - a bbox generous enough to cover a country's own latitude/longitude range
-  # can genuinely overlap real neighbouring-country territory (e.g. a coastal bbox reaching
-  # across a border or a narrow strait), whose own real GFM-modelled flooding would otherwise
-  # be scored as a false positive against the benchmark.
+  benchmark_wet_fraction: 0.5 # DISPLAY ONLY: wet cutoff for the agreement-map categories. Scoring
+  # (validation.confusion_counts_soft) weights by the coverage fraction instead of thresholding,
+  # since the optimal threshold differs by benchmark
+  permanent_water_source: "deltadtm_mask" # data_catalog_gfm.yml key; DeltaDTM's ~25-31 m mask, finer
+  # than Copernicus land_use (~100 m): coastal-strip masking loss within 240 m of shore 45.7% -> 30.1%.
+  # The remainder is a waterline-definition mismatch (methods_04b_MapsValidation.md caveats)
+  permanent_water_codes: [1, 2, 3] # DeltaDTM mask codes excluded (1=ocean, 2=lake, 3=river;
+  # 0=land, 255=nodata). Copernicus land_use would need [80, 200]: change both keys together
+  geogunit_source: "geogunit_protection_units" # data_catalog_gfm.yml key (WRI geogunit_107); used
+  # only by validate_country_national_coverage to clip a region bbox to the country's own cells, so
+  # neighbouring-country flooding is not scored as false positive
   iso_lookup_source: "flopros_protection_standards" # data_catalog_gfm.yml key - geogunit_107-ID-indexed, "ISO" column
-  flood_totals_dir: "{root}/merged_results/exposure/flood_totals" # written by
-  # analysis/compute_flood_totals.py (analysis.compute_flood_totals switch) - one
-  # flood_totals_{ISO}.csv per country, country-wide (not per-region) total flooded
-  # area/exposed population per (RP, SLR), no protection/adaptation applied. Read
-  # by validate_country.py for the model_total_wet_km2 column
-  # (mitigates caveats doc §1.2 - see that file for why a country-wide total, not
-  # just a benchmark cluster's own local window, matters). Must match
-  # run_analysis.py's own exposure output dir (default "{merged_outputs}/exposure")
-  # plus "/flood_totals" if that script's --out-dir is ever overridden from its default.
+  flood_totals_dir: "{root}/merged_results/exposure/flood_totals" # flood_totals_{ISO}.csv from
+  # analysis/compute_flood_totals.py, read for model_total_wet_km2. Must match run_analysis.py's
+  # exposure output dir + "/flood_totals" if its --out-dir is overridden
   plots:
     resolution_m: 200
     dpi: 300

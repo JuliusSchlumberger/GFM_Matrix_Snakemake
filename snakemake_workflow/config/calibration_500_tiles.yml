@@ -1,106 +1,36 @@
-# ~500-tile global-representativeness calibration study - the current
-# sweep-budget/obstacle-coupling calibration population, run at a larger
-# scale than the original 260-tile pilot study after the connectivity-first
-# tile-grid migration superseded its tile numbering entirely.
-#
-# 571 candidate tiles (stratified by size AND geography - see
-# calibration_studies/select_study_candidate_tiles.py), selected from the FULL
-# hop_distance==0 population of the current grid regardless of whether
-# model_outputs already exists for them (see that script's own docstring).
-# Final wet-tile count (target ~500) comes from
-# calibration_studies/aggregate_wet_tiles.py after the sweep-budget study
-# runs - dry candidates get dropped, same as the original study.
-#
-# Isolated preprocessing (own model_outputs) - NOT production's shared
-# model_outputs, so this never risks colliding with or being overwritten by
-# unrelated production work. Boundary conditions (COAST-RP + SLR fingerprints) ARE shared with
-# production - those are scenario-only artifacts, never tile-geometry-
-# dependent, so production's existing waterlevel_nc_dir is safely reusable
-# as-is (unlike tile_grid.path, nothing about the tile-grid migration
-# invalidates it).
+# ~500-tile calibration population for the sweep-budget / obstacle-coupling studies
+# (docs/methods_03_calibration_sensitivity.md). 571 hop_distance==0 candidates stratified by size
+# and geography (calibration_studies/select_study_candidate_tiles.py); dry tiles are dropped by
+# calibration_studies/aggregate_wet_tiles.py. Own model_outputs; boundary conditions are shared
+# with production (they do not depend on tile geometry).
 
 tile_grid:
   path: "{root}/calibration_500_tiles/calibration_500_tiles_grid.gpkg"
 
 simulation:
   model_outputs: "{root}/calibration_500_tiles/model_outputs"
-  # This study's whole purpose: probe convergence at ceilings well above
-  # production's defaults (flooding.max_rounds: 40, obstacle_coupling.
-  # max_outer_iterations: 4, config.yml) - these were missing from this
-  # override entirely until now, which silently left every generated job
-  # running production's defaults instead (2026-10, caught before
-  # submission - see hpc.sbatch's time-budget comment below for the real
-  # cost implication of this fix).
+  # Ceilings well above production (max_rounds 40, max_outer_iterations 4) to probe convergence.
   flooding:
     max_rounds: 100
     obstacle_coupling:
       max_outer_iterations: 15
 
-# Single representative scenario per tile (2026-10, user direction) - a
-# calibration/representativeness study needs one real solve per tile, not
-# production's full ~10 RP x 5 SLR grid (which would be ~28,500 solves
-# across 571 tiles instead of 571). slr_intensities REQUIRED, not
-# decorative - merged_waterlevel_names() unions it with boundary_conditions.
-# waterlevel_names; leaving it unset would silently pull in config.yml's own
-# SLR_500 adaptation intensity.
+# One scenario per tile. slr_intensities must be set: merged_waterlevel_names() unions it with
+# waterlevel_names, so leaving it unset would add config.yml's adaptation SLR levels.
 boundary_conditions:
   return_periods: [100]
   waterlevel_names: ["SLR_0"]
 adaptation:
   slr_intensities: []
 
-# All 571 tiles are hop_distance==0 (confirmed), so this is a single-wave
-# study with NO cross-tile dependency at all for simulate (a hop=0 tile's
-# own simulate step only needs its own preprocessing, never another
-# tile's output) - run via generate_hpc_preprocess_job.py --calibration
-# --fuse (2026-10), which collapses preprocess+simulate into ONE sbatch
-# script per batch (run sequentially on the same node) instead of the
-# normal two-phase design, since the phase-2 cross-node afterany wait that
-# design exists for protects a dependency this study doesn't have.
-#
-# All nodes 1vcpu: every tile
-# runs on hpc.sbatch (2026-10-08: the old small/large RAM-aware split,
-# hpc.sbatch_large, and large_tile_pixel_threshold were removed entirely -
-# a real need under the OLD, pre-2026-10 greedy-covering tiling pipeline,
-# not the connectivity-first one this study's tiles come from, which caps
-# every tile's size directly via hard_ceiling_cells - see config.yml's own
-# comment on hpc.sbatch for the numbers that confirmed this).
-#
-# Time budget - 9h, 30 nodes (user direction, 2026-10, after seeing the
-# corrected worst-case math below - a deliberate accepted-risk choice, not
-# a guarantee of zero truncation). Real measured/estimated worst case,
-# using the ACTUAL ceilings above (max_rounds=100, max_outer_iterations=15
-# -> 1,500 worst-case round-equivalents per tile, NOT the 160 production's
-# defaults give - a 9.4x difference caught only after noticing these
-# overrides were missing entirely, see simulation.flooding's own comment):
-# preprocessing ~142.5 core-seconds/tile (measured on the 400-tile delta
-# run) -> 571 tiles / 30 cores ~= 0.75h; simulate worst-case (zero early
-# exit at either loop level, the 0.05s/Mcell/sweep rate
-# run_sweep_budget_study.py's own study measured and confirmed,
-# scaled by the 9.4x ceiling ratio above) on this candidate pool's real
-# total pixel count (~20.7 billion px) -> ~14.1h worst case on 30 cores.
-# Combined worst case ~14.9h > this 9h budget - STILL not a guarantee every
-# batch finishes in one shot. Accepted because (a) the original 260-tile
-# calibration study found the vast majority of tiles converge far short of
-# even the OLD, lower ceiling (58.7% by round 40 alone; only 2% of tiles
-# ever needed a 4th outer iteration) - the true worst case assumes every
-# single tile in a batch is a rare non-converging outlier, which is
-# unlikely in practice even though this study specifically exists to find
-# such outliers; and (b) it is safe to just resubmit past regardless: every
-# snakemake call below now also passes --rerun-incomplete (2026-10
-# addition, matching the exact fix already applied to run_delta_floodmaps.py
-# for the identical failure mode), so Snakemake treats whatever a time-
-# limit kill left mid-write as safely redoable rather than refusing with
-# IncompleteFilesException - just re-submit the same batch script and it
-# picks up only the still-missing targets, same as any other rerun.
+# All tiles are hop 0 (no cross-tile dependency), so preprocess+simulate run fused per batch
+# (generate_hpc_preprocess_job.py --calibration --fuse), all on 1vcpu nodes.
+# 9 h is an accepted-risk budget: worst case (no early exit, 1500 round-equivalents/tile) is
+# ~0.75 h preprocessing + ~14.1 h simulation on 30 cores, but most tiles converge far earlier.
+# A time-limit kill is safe to resubmit (jobs pass --rerun-incomplete).
 hpc:
   n_nodes: 30
-  # hpc.jobs_dir is NOT scenario-isolated by default (it's a fixed
-  # "{root}/model_outputs/hpc_jobs" regardless of simulation.model_outputs) -
-  # confirmed the hard way: the first run of generate_hpc_preprocess_job.py
-  # against this config wrote its sbatch scripts straight into PRODUCTION's
-  # own model_outputs/hpc_jobs before this override was added. Isolate it
-  # explicitly, same tree as everything else this study owns.
+  # jobs_dir defaults to production's model_outputs/hpc_jobs; isolate it.
   jobs_dir: "{root}/calibration_500_tiles/model_outputs/hpc_jobs"
   sbatch:
     time: "0-09:00:00"

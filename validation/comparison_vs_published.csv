@@ -4,24 +4,24 @@ Wing et al. (2024),GBR,wales,CSI,0.638,0.82,-0.18199999999999994,,0.778048780487
 Chaudhuri et al. (2026),GBR,severn_estuary,CSI,0.811,0.7,0.1110000000000001,,1.1585714285714288
 Chaudhuri et al. (2026),GBR,menai_strait,CSI,0.768,0.49,0.278,,1.5673469387755103
 Chaudhuri et al. (2026),GBR,firth_of_forth,CSI,0.477,0.75,-0.273,,0.636
-Chaudhuri et al. (2026),CAN,cumberland_basin,CSI,0.007,0.87,-0.863,"Known, already-documented limitation (not a new finding) - data_catalog_validation.yml's own comments attribute Bay of Fundy's near-zero CSI to a COAST-RP/GTSM boundary-forcing limitation capturing the Fundy's extreme tidal resonance, not a pipeline bug.",0.008045977011494253
-Chaudhuri et al. (2026),CAN,petitcodiac,CSI,0.021,0.56,-0.539,"Known, already-documented limitation (not a new finding) - data_catalog_validation.yml's own comments attribute Bay of Fundy's near-zero CSI to a COAST-RP/GTSM boundary-forcing limitation capturing the Fundy's extreme tidal resonance, not a pipeline bug.",0.0375
+Chaudhuri et al. (2026),CAN,cumberland_basin,CSI,0.007,0.87,-0.863,"Known limitation: the COAST-RP/GTSM boundary forcing does not capture the Bay of Fundy's extreme tidal resonance; the near-zero CSI here is attributed to that, not to a pipeline bug.",0.008045977011494253
+Chaudhuri et al. (2026),CAN,petitcodiac,CSI,0.021,0.56,-0.539,"Known limitation: the COAST-RP/GTSM boundary forcing does not capture the Bay of Fundy's extreme tidal resonance; the near-zero CSI here is attributed to that, not to a pipeline bug.",0.0375
 Wing et al. (2024),GBR,"england (RP100, FZ3)",CSI,0.5018313358650902,0.62,-0.11816866413490978,,0.8094053804275648
 Wing et al. (2024),GBR,"england (RP250, FZ3)",CSI,0.4979245589851953,0.62,-0.12207544101480472,,0.8031041273954762
-Wing et al. (2024),GBR,"england (RP100-RP1000 band, FZ2)",CSI,0.0205591503252334,0.62,-0.5994408496747666,"CONFIRMED (2026-10-16, EA Flood Zones Product Description via environment.data.gov.uk FAQ 778338325): Flood Zone 2 (sea) IS the INCREMENTAL 0.1%-0.5% AEP band (1-in-1000 to 1-in-200), not the cumulative 1-in-1000 extent - comparing it against the model's cumulative RP1000 extent (what the naive comparison below does) gave bias=26.2x/CSI=0.023, a benchmark-definition mismatch, not a real model failure. validate_england_fz2_band.py re-scores against the model's own matching incremental band (RP1000 minus RP100 - RP100 is the model's nearest native RP below the benchmark's real ~RP200 inner edge) instead: bias drops to a sane 2.0x (confirming the cumulative-vs-incremental mismatch was the dominant driver of the 26x figure), but CSI stays low (0.021, HR=0.060; benchmark re-fetched 2026-10-16 with flood_source 'sea' + 'river and sea') - plausibly because a thin coastal band is highly sensitive to small positional offsets between model and benchmark, but this is NOT independently confirmed; treat the band result as a real, methodologically-sound number, not yet a fully-explained one.",0.03315991987940871
-Kasmalkar et al. (2024),USA,san_francisco_bay (A_coarsen_to_model_grid),RMSE_all_m,0.3532910747775141,0.138,0.21529107477751408,,2.5600802520109713
-Kasmalkar et al. (2024),USA,san_francisco_bay (A_coarsen_to_model_grid),MAE_all_m,0.0787240663627051,0.017,0.061724066362705096,,4.6308274331003
-Kasmalkar et al. (2024),USA,san_francisco_bay (A_coarsen_to_model_grid),RMSE_flooded_m,0.7717169213578039,0.525,0.24671692135780388,,1.4699369930624835
-Kasmalkar et al. (2024),USA,san_francisco_bay (A_coarsen_to_model_grid),MAE_flooded_m,0.6400669865712632,0.319,0.32106698657126315,,2.006479581728098
-(this model only - no published value given),USA,san_francisco_bay (A_coarsen_to_model_grid),HR,0.6845090986207291,,,,
-(this model only - no published value given),USA,san_francisco_bay (A_coarsen_to_model_grid),FAR,0.5785497086008572,,,,
-(this model only - no published value given),USA,san_francisco_bay (A_coarsen_to_model_grid),CSI,0.3529004856920586,,,,
-(this model only - no published value given),USA,san_francisco_bay (A_coarsen_to_model_grid),bias,1.6241751698599525,,,,
-Kasmalkar et al. (2024),USA,san_francisco_bay (B_refine_model_to_2m),RMSE_all_m,0.3524966537952423,0.138,0.2144966537952423,,2.5543235782263936
-Kasmalkar et al. (2024),USA,san_francisco_bay (B_refine_model_to_2m),MAE_all_m,0.0784437879920005,0.017,0.061443787992000495,,4.614340470117676
-Kasmalkar et al. (2024),USA,san_francisco_bay (B_refine_model_to_2m),RMSE_flooded_m,0.779098391532898,0.525,0.2540983915328979,,1.4839969362531389
-Kasmalkar et al. (2024),USA,san_francisco_bay (B_refine_model_to_2m),MAE_flooded_m,0.6463027596473694,0.319,0.3273027596473694,,2.026027459709622
-(this model only - no published value given),USA,san_francisco_bay (B_refine_model_to_2m),HR,0.7214111823264667,,,,
-(this model only - no published value given),USA,san_francisco_bay (B_refine_model_to_2m),FAR,0.6281150718886017,,,,
-(this model only - no published value given),USA,san_francisco_bay (B_refine_model_to_2m),CSI,0.3251846539585198,,,,
-(this model only - no published value given),USA,san_francisco_bay (B_refine_model_to_2m),bias,1.9398774400192087,,,,
+Wing et al. (2024),GBR,"england (RP100-RP1000 band, FZ2)",CSI,0.0205591503252334,0.62,-0.5994408496747666,"Flood Zone 2 (sea) is the incremental 0.1%-0.5% AEP band (1-in-1000 to 1-in-200), not the cumulative 1-in-1000 extent, so it is compared against the model's RP1000-minus-RP100 band (RP100 is the nearest native RP below the ~RP200 inner edge). CSI stays low, plausibly because a thin band is highly sensitive to small positional offsets between model and benchmark.",0.03315991987940871
+Kasmalkar et al. (2024),USA,san_francisco_bay (A_coarsen_to_model_grid),RMSE_all_m,0.3532733242215622,0.138,0.2152733242215622,,2.559951624793929
+Kasmalkar et al. (2024),USA,san_francisco_bay (A_coarsen_to_model_grid),MAE_all_m,0.0787192835719228,0.017,0.0617192835719228,,4.630546092466047
+Kasmalkar et al. (2024),USA,san_francisco_bay (A_coarsen_to_model_grid),RMSE_flooded_m,0.77155895632509,0.525,0.24655895632508995,,1.4696361072858857
+Kasmalkar et al. (2024),USA,san_francisco_bay (A_coarsen_to_model_grid),MAE_flooded_m,0.6399931106756828,0.319,0.32099311067568276,,2.0062479958485353
+(this model only - no published value given),USA,san_francisco_bay (A_coarsen_to_model_grid),HR,0.6845653459491425,,,,
+(this model only - no published value given),USA,san_francisco_bay (A_coarsen_to_model_grid),FAR,0.5785271097875461,,,,
+(this model only - no published value given),USA,san_francisco_bay (A_coarsen_to_model_grid),CSI,0.3529312817234868,,,,
+(this model only - no published value given),USA,san_francisco_bay (A_coarsen_to_model_grid),bias,1.6242215379595832,,,,
+Kasmalkar et al. (2024),USA,san_francisco_bay (B_refine_model_to_2m),RMSE_all_m,0.3524913191795349,0.138,0.2144913191795349,,2.5542849215908325
+Kasmalkar et al. (2024),USA,san_francisco_bay (B_refine_model_to_2m),MAE_all_m,0.0784414187073707,0.017,0.0614414187073707,,4.61420110043357
+Kasmalkar et al. (2024),USA,san_francisco_bay (B_refine_model_to_2m),RMSE_flooded_m,0.7790071964263916,0.525,0.2540071964263916,,1.4838232312883648
+Kasmalkar et al. (2024),USA,san_francisco_bay (B_refine_model_to_2m),MAE_flooded_m,0.646256148815155,0.319,0.327256148815155,,2.025881344248135
+(this model only - no published value given),USA,san_francisco_bay (B_refine_model_to_2m),HR,0.7214194876671848,,,,
+(this model only - no published value given),USA,san_francisco_bay (B_refine_model_to_2m),FAR,0.6281021964639864,,,,
+(this model only - no published value given),USA,san_francisco_bay (B_refine_model_to_2m),CSI,0.325196186283798,,,,
+(this model only - no published value given),USA,san_francisco_bay (B_refine_model_to_2m),bias,1.9398326120991043,,,,
