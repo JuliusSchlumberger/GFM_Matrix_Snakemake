@@ -30,6 +30,7 @@ from _common import _read_band, _read_band_and_transform, _round_val, discover_c
 from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pipeline_plots import pixel_area_km2_grid  # noqa: E402
 from exposure_analysis import _build_iso_index, _safe, country_sums  # noqa: E402
+from validation import load_iso_lookup  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -105,11 +106,7 @@ def main() -> None:
 
     print("Loading FLOPROS ISO lookup…")
     catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
-    flopros = catalog.get_dataframe("flopros_protection_standards")
-    iso_lookup = {
-        int(gid): str(row["ISO"]) for gid, row in flopros.iterrows()
-        if pd.notna(row.get("ISO"))
-    }
+    iso_lookup = load_iso_lookup(catalog, "flopros_protection_standards")
 
     totals: dict[str, dict[tuple[int, str], dict[str, float]]] = defaultdict(dict)
 
