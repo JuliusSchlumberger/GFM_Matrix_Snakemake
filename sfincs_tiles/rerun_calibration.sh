@@ -53,9 +53,10 @@ if [ "$PART" = "eikonal" ]; then
       continue
     fi
     out="$BASE/$t/outputs"
+    n=$((n + 1))
+    [ -d "$out" ] || continue  # never ran: nothing to reset (find would fail and abort under -e)
     k=$(find "$out" -maxdepth 1 -name 'eikonal_on_subgrid_waterdepth_*_fsf*.tif' 2>/dev/null | wc -l)
     n_rasters=$((n_rasters + k))
-    n=$((n + 1))
     [ "$DRY_RUN" = "1" ] && continue
     rm -f "$out/calibration_run.done" "$out/calibration_run.failed" "$out/calibration_run.step" \
           "$out"/eikonal_on_subgrid_waterdepth_*_fsf*.tif "$out/eikonal_solver_diagnostics.json"
@@ -74,8 +75,15 @@ if [ "$PART" = "eikonal" ]; then
   "$GFM_PY" generate_calibration_jobs.py stage2 --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
       --n-jobs "$N_JOBS" --sfincs-min-per-mcell 0 --overhead-min 5
 
+  shopt -s nullglob
+  sbatches=("$JOBS"/final_*.sbatch)
+  shopt -u nullglob
+  if [ "${#sbatches[@]}" -eq 0 ]; then
+    echo "no final_*.sbatch written in $JOBS (nothing to rerun?) - nothing submitted"
+    exit 0
+  fi
   ids=()
-  for f in "$JOBS"/final_*.sbatch; do
+  for f in "${sbatches[@]}"; do
     ids+=("$(sbatch --parsable "$f")")
   done
   echo "submitted ${#ids[@]} eikonal rerun job(s): ${ids[*]}"
@@ -92,15 +100,17 @@ if [ "$PART" = "eikonal" ]; then
 #SBATCH --output=$JOBS/logs/cal_post_eikonal_%j.out
 #SBATCH --error=$JOBS/logs/cal_post_eikonal_%j.err
 
+# No -e: the progress report and the first analysis must not stop the rest; the dedup,
+# which the second analysis reads, ends the job when it fails.
 set -uo pipefail
 unset PROJ_LIB PROJ_DATA GDAL_DATA
-cd $CODE || exit 1
-$GFM_PY check_calibration_progress.py --config $CONFIG --base-dir-name $BASE_DIR_NAME
-$HYDROMT_PY compute_calibration_result_dedup.py --config $CONFIG --base-dir-name $BASE_DIR_NAME \\
-    --out-dir-name $DEDUP_DIR_NAME --workers 4 || exit 1
-$GFM_PY run_calibration_sweep_analysis.py --config $CONFIG --base-dir-name $BASE_DIR_NAME
-$GFM_PY run_calibration_sweep_analysis.py --config $CONFIG --base-dir-name $DEDUP_DIR_NAME \\
-    --raster-base-dir-name $BASE_DIR_NAME
+cd "$CODE" || exit 1
+"$GFM_PY" check_calibration_progress.py --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME"
+"$HYDROMT_PY" compute_calibration_result_dedup.py --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \\
+    --out-dir-name "$DEDUP_DIR_NAME" --workers 4 || exit 1
+"$GFM_PY" run_calibration_sweep_analysis.py --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME"
+"$GFM_PY" run_calibration_sweep_analysis.py --config "$CONFIG" --base-dir-name "$DEDUP_DIR_NAME" \\
+    --raster-base-dir-name "$BASE_DIR_NAME"
 EOF
     dep=$(IFS=:; echo "${ids[*]}")
     pid=$(sbatch --parsable --dependency=afterany:"$dep" "$post")
