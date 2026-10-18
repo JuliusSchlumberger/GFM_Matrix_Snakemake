@@ -5,7 +5,7 @@ threshold (depth > exceedance_threshold_m), and immediately average-pools the
 result to the population raster's native ~1 km resolution.
 
 Output: a tiny float32 raster (one value per ~1 km² population cell) where
-each value is the fraction of fine Aqueduct pixels in that cell that are
+each value is the fraction of fine model pixels in that cell that are
 flooded.  Values are in [0, 1]; nodata = -1.0.
 
 This is the only spatial output needed downstream — the fine waterdepth raster

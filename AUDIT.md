@@ -812,7 +812,7 @@ Baseline (Phase 0): thailand_bangkok 453 jobs (run_aqueduct 90, extract_boundari
 - *Verify*: `git grep -nE '[A-Z]:[\\/](Users|GFM)|/p/1121|/u/schlumbe'` returns only `*.example` and docs; `snakemake -n all` equals the baseline; `DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part eikonal` on Hydrax (you run this).
 
 **Phase 7: Renames and structural tidy.**
-- **7a. aqueduct → eikonal.** Covers about 260 mentions in 50 files, excluding logs and provenance mentions.
+- **7a. aqueduct → eikonal.** ✅ *done 2026-10-18. Files: eikonal_runner.py, run_eikonal(_cli).py, generate_eikonal_jobs.py, run_eikonal_dag.py, generate_hpc_exposure_jobs.py, tests/eikonal_runner_validation/. Rules run_eikonal / generate_eikonal_jobs; `run_eikonal_python`, `estimate_eikonal_mem_mb`, `EIKONAL_NODATA`; config `eikonal_mem_estimate` (old key still read as fallback); `{aqueduct_root}` removed. Provenance mentions (external Aqueduct model, WRI Aqueduct data) kept. Verified: AST of every .py equals HEAD with the rename map applied (docstrings aside), except 2 message strings and the aqueduct_root removal; ruff, pytest (66), --help, dry run (run_aqueduct 90 -> run_eikonal 90). generate_hpc_*_job(s) singular/plural left as is (only generate_exposure_jobs renamed). Hydrax follow-ups in TODO.md.* Covers about 260 mentions in 50 files, excluding logs and provenance mentions.
   - Modules: `aqueduct_runner.py` → `eikonal_runner.py`, `run_aqueduct{,_cli}.py` → `run_eikonal{,_cli}.py`, `generate_aqueduct_jobs.py` → `generate_eikonal_jobs.py`.
   - Rules: `run_aqueduct` → `run_eikonal`, `generate_aqueduct_jobs` → `generate_eikonal_jobs`.
   - Config keys, with fallback (C).

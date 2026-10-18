@@ -1,18 +1,18 @@
-"""Rules for running the Aqueduct flood model."""
+"""Rules for running the eikonal flood model."""
 
 
-rule run_aqueduct:
+rule run_eikonal:
     """Run the flood model for a single tile, return period and SLR scenario.
 
     The output filename includes `{return_period}_{waterlevel_name}` so it is
     clearly linked to the return period and sea level rise scenario used to
     produce it.
 
-    Runs `flood_model.flood_depth_dense` in-process (see `run_aqueduct.py`).
+    Runs `flood_model.flood_depth_dense` in-process (see `run_eikonal.py`).
 
     Multiple tiles run fully concurrently on one machine without issue - the
     only real local constraint is ordinary system memory. This rule's
-    `mem_mb` resource (see `aqueduct_runner.estimate_aqueduct_mem_mb`) lets
+    `mem_mb` resource (see `eikonal_runner.estimate_eikonal_mem_mb`) lets
     Snakemake's own scheduler run many small tiles concurrently while
     throttling around large ones, bounded by `--resources mem_mb=<N>` on
     the command line (`<N>` should leave headroom below total system RAM
@@ -20,13 +20,13 @@ rule run_aqueduct:
 
     Wave-based hinterland forcing (2026-08, hop_distance now computed by
     `connectivity_tiling.compute_hop_distances`): `tile_grid_path`'s `hop_distance`
-    column tells `run_aqueduct.py` which
+    column tells `run_eikonal.py` which
     of two forcing paths a tile uses. `hop_distance == 0` (wave-0, has its
     own real ocean edge): the existing COAST-RP/IDW path - if `boundaries`
     has no stations at all (see `boundaries.select_stations_for_tile`),
     the solve is skipped and a real all-ZERO `waterdepth` is written directly
     (a confidently-computed "definitely dry" result, not an unknown - see
-    `aqueduct_runner.write_zero_waterdepth` for why this differs from the
+    `eikonal_runner.write_zero_waterdepth` for why this differs from the
     OOM case below). `hop_distance >= 1` (hinterland, no ocean edge of its
     own): seeded directly from non-zero cells of already-simulated,
     strictly-lower-`hop_distance` overlapping tile(s)' own output for the
@@ -38,7 +38,7 @@ rule run_aqueduct:
     If the solve raises `MemoryError` - a rare, tile-size-driven failure, or
     from `mem_mb` under-estimating concurrent memory pressure - the tile is
     marked in `model_outputs/oom_tiles/{tile_id}.txt` and this job's output
-    falls back to an all-`AQUEDUCT_NODATA` placeholder instead - a genuine
+    falls back to an all-`EIKONAL_NODATA` placeholder instead - a genuine
     unknown ("not computed", unlike the confidently-zero fallbacks above -
     still logged to `skipped_tiles/` the same way) so `merge_results` ignores
     this tile rather than treating it as a real dry result. Once marked, all other
@@ -49,7 +49,7 @@ rule run_aqueduct:
     `n_scenarios_per_tile` (i.e. this was the last scenario for that tile);
     if so it scans model_outputs/ once and prints a running tally of tiles
     simulated/OOM'd/no-stations/still-running across the whole tile grid
-    (see aqueduct_runner.print_simulation_progress) - a milestone per tile,
+    (see eikonal_runner.print_simulation_progress) - a milestone per tile,
     not per job, to keep the O(n_tiles) scan infrequent.
 
     """
@@ -75,18 +75,20 @@ rule run_aqueduct:
         # Reused from tile_generation.* (2026-08 - same values already used at
         # tile-generation time, e.g. for wet/dry classification) rather than a
         # near-duplicate simulation-scoped config surface - see
-        # flood_model.coastline_mask / run_aqueduct.py's hop_distance branching.
+        # flood_model.coastline_mask / run_eikonal.py's hop_distance branching.
         ocean_code=config["tile_generation"]["ocean_code"],
         river_code=config["tile_generation"]["river_code"],
         n_scenarios_per_tile=len(RETURN_PERIODS) * len(WATERLEVEL_NAMES),
         flooding_config=config["simulation"]["flooding"],
     resources:
-        # A deliberately generous upper bound (see aqueduct_mem_estimate in
+        # A deliberately generous upper bound (see eikonal_mem_estimate in
         # config.yml) - a concurrency-throttling estimate, not a correctness
         # concern; only effect of over-estimating is somewhat fewer
         # concurrent jobs than strictly necessary.
-        mem_mb=lambda wildcards, input: estimate_aqueduct_mem_mb(
-            input.dem, config["simulation"]["aqueduct_mem_estimate"]
+        mem_mb=lambda wildcards, input: estimate_eikonal_mem_mb(
+            input.dem,
+            # Configs materialized/resolved before 2026-10-18 still use the old key name.
+            config["simulation"].get("eikonal_mem_estimate") or config["simulation"]["aqueduct_mem_estimate"],
         ),
     script:
-        "../scripts/run_aqueduct.py"
+        "../scripts/run_eikonal.py"

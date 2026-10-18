@@ -6,8 +6,8 @@ one "failed" bucket:
 
   - JOB ERRORS: the (tile_id, return_period, waterlevel_name) lines
     appended by each generated sbatch script's `run_job()` wrapper (see
-    generate_aqueduct_jobs.py) to `{jobs_dir}/logs/wave*_batch_*_failures.
-    txt` when `run_aqueduct_cli.py` exits non-zero - a genuine, unresolved
+    generate_eikonal_jobs.py) to `{jobs_dir}/logs/wave*_batch_*_failures.
+    txt` when `run_eikonal_cli.py` exits non-zero - a genuine, unresolved
     unknown (crash, timeout, bad input) that needs investigating and
     re-running. `run_job()` already logs the failure and moves on to the
     next job in its batch instead of aborting (`set -uo pipefail`, not
@@ -68,7 +68,7 @@ def collect_job_errors(jobs_dir: Path) -> list[dict]:
                 "tile_id": tile_id,
                 "return_period": return_period,
                 "waterlevel_name": waterlevel_name,
-                "detail": "non-zero exit from run_aqueduct_cli.py",
+                "detail": "non-zero exit from run_eikonal_cli.py",
                 "source": str(fail_file.relative_to(jobs_dir)),
             })
     return rows
@@ -125,7 +125,7 @@ def main() -> None:
     if counts.get("job_error", 0):
         print(
             f"\n{counts['job_error']} job_error row(s) need investigating and re-running "
-            "(retry with run_aqueduct_cli.py directly - see hpc.md step 2)."
+            "(retry with run_eikonal_cli.py directly - see hpc.md step 2)."
         )
 
 

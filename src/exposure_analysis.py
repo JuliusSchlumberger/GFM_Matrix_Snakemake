@@ -786,7 +786,7 @@ def interpolate_eai_linear(
 ) -> pd.DataFrame:
     """Linearly interpolate per-ISO EAI from discrete simulated SLR levels to a dense grid.
 
-    Aqueduct is only ever run at the discrete SLR scenarios
+    The eikonal model is only ever run at the discrete SLR scenarios
     (boundary_conditions.slr_scenarios + adaptation.slr_intensities); this
     linearly interpolates each country's EAI-vs-SLR curve (already computed
     at those discrete levels, e.g. by compute_country_eai) to fill in the

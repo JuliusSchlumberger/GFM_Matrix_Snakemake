@@ -15,7 +15,7 @@ other folders are standalone pipelines that share the same library code:
 
 ```
 Snakefile                  entry point for the Snakemake DAG
-run_pipeline.py            wraps `snakemake` with an OOM-retry loop
+run_eikonal_dag.py            wraps `snakemake` with an OOM-retry loop
 check_{preprocess,simulation,postprocess}_progress.py
                             read-only progress monitors
 run_delta_floodmaps.py     global-deltas deliverable (ssp126/ssp245 configs)
@@ -89,7 +89,7 @@ Four separate things get run, none of them automatically triggering another:
    ```
 2. **The Snakemake DAG** (preprocessing → simulation → postprocessing):
    ```
-   python run_pipeline.py
+   python run_eikonal_dag.py
    # or directly:
    snakemake all --cores 4 --resources mem_mb=8000
    ```

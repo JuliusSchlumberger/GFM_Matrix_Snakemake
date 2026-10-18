@@ -39,8 +39,8 @@ in-phase.
   model_total_wet_km2 NaN" and "No coastal benchmark found for X" were only printed by
   the deleted `validate_country()`. The national path now prints just "No extent rows
   produced." Re-add them to the national path if you want them.
-- **Snakemake "code has changed" on locally produced simulation outputs** (Phase 5b): `run_aqueduct.py`
-  was rewritten into a thin wrapper, so e.g. bangkok_chao_phraya's 405 run_aqueduct outputs dry-run as
+- **Snakemake "code has changed" on locally produced simulation outputs** (Phase 5b): `run_eikonal.py`
+  was rewritten into a thin wrapper, so e.g. bangkok_chao_phraya's 405 run_eikonal outputs dry-run as
   "Code has changed since last execution" (with `--rerun-triggers mtime params input software-env`
   there is nothing to do, so inputs and outputs are untouched). Clear it once after the cleanup (item D,
   with the Phase 7a renames) via `snakemake --touch` - it writes Snakemake metadata next to P:\ outputs.
@@ -59,14 +59,14 @@ in-phase.
   mask" use** (found in Phase 4b), but every caller uses it post-solve on the flood mask,
   and `flood_depth_dense` says the dense solver has no pre-solve candidate step. This is
   probably a leftover from an older (sparse) solver. Confirm, then trim the docstring.
-- **`src/aqueduct_runner.py` module docstring** names `scripts/run_aqueduct.py` /
-  `run_aqueduct_cli.py`; the real paths are under `snakemake_workflow/scripts/`. Fix it with
+- **`src/eikonal_runner.py` module docstring** names `scripts/run_eikonal.py` /
+  `run_eikonal_cli.py`; the real paths are under `snakemake_workflow/scripts/`. Fix it with
   the Phase 7a renames (these files become `run_eikonal*.py`).
-- **`generate_aqueduct_jobs.generate_wave_dispatch` has 3 unused parameters** (found in
-  Phase 4b): `model_outputs`, `hop_by_tile` and `raster_config` are accepted and passed by
-  both callers (`rules/hpc_dispatch.smk`, `generate_hpc_simulation_jobs.py:178`) but never
-  read. The docstring now says "unused". Drop them with the Phase 5c helper consolidation
-  or the Phase 7a renames (signature change).
+- **`generate_eikonal_jobs.generate_wave_dispatch` has 3 unused parameters** (`model_outputs`,
+  `hop_by_tile`, `raster_config`; docstring says so). Left in place in Phase 7a on purpose:
+  dropping them also means dropping the `generate_eikonal_jobs` rule's params, which re-triggers
+  that rule. Remove together with the rule params when you next regenerate HPC dispatch anyway.
+  (The audit's other "unused parameter", `connectivity_tiling`'s `dem_index`, is in fact used.)
 - **`generate_hpc_postprocess_job.py --help` crashes** (found in Phase 5a, pre-existing at HEAD):
   argparse raises `TypeError: %d format: a real number is required, not dict` because a
   `help=` string contains an unescaped `%`. Only `--help` is affected; normal runs parse fine.
@@ -103,3 +103,16 @@ in-phase.
 - **Remaining machine-specific paths not moved to config** (deliberately): `run_bangkok_case_study.bat`'s
   `STUDY_ROOT` (case-study data on P:\), and `tests/sfincs_synthetic_end_to_end/test_sfincs_smoke.py`'s
   default SFINCS exe path (the test SKIPs when it's absent).
+- **Phase 7a renamed aqueduct -> eikonal** (files, rules, functions, config key). After pulling on
+  Hydrax: (1) **regenerate any HPC job files written before the rename** that haven't run yet -
+  they call `run_aqueduct_cli.py` / `snakemake generate_aqueduct_jobs`, which no longer exist
+  (rerun the `generate_hpc_*` / `generate_eikonal_jobs` step); (2) item D: Snakemake will flag
+  locally produced outputs of the renamed rule/scripts as "code changed" - outputs are unchanged,
+  clear it with `snakemake --touch` (or run with `--rerun-triggers mtime params input software-env`).
+  `simulation.aqueduct_mem_estimate` was renamed `eikonal_mem_estimate`; rules/simulation.smk still
+  falls back to the old key for configs materialized/resolved before the rename - drop the fallback
+  once those are regenerated. `paths.aqueduct_root` was removed (no config used `{aqueduct_root}`);
+  the leftover line in your local config_local.yml is harmless, delete it by hand.
+- **`check_preprocess_progress.py` still counts `aqueduct_*.toml` files** per tile: Julia-era Aqueduct
+  TOML configs that no current code writes, so that column always reports 0 of N. Not renamed in
+  Phase 7a (it is a file-name pattern on disk). Remove the TOML column or point it at a real output.

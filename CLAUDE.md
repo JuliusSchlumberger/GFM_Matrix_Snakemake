@@ -50,7 +50,7 @@ adaptation analysis and benchmark validation. A separate SFINCS sub-pipeline
   does not finish). Use the two subset configs instead, via
   `GFM_CONFIG_PATH=snakemake_workflow/config/{thailand_bangkok,bangkok_chao_phraya}_materialized.yml`
   `snakemake -n all --cores 1` (~10 s each; see AUDIT.md §8 for the baseline job counts).
-- Local run: `python run_pipeline.py`  or  `snakemake all --cores 4 --resources mem_mb=8000`
+- Local run: `python run_eikonal_dag.py`  or  `snakemake all --cores 4 --resources mem_mb=8000`
 - Tests: `pytest -m "not needs_pdrive"` in `gfm` (sfincs_* tests are skipped automatically);
   `pytest tests/sfincs_* -m "not needs_pdrive"` in `hydromt-sfincs-dev`.
 - Lint: `ruff check <files you touched>` must pass; `ruff check .` is not clean yet.
@@ -69,8 +69,8 @@ Never write to, move, or delete anything on P:\ or the model output directories.
 - `sfincs_tiles/` while a Hydrax batch is running (ask whether one is).
 
 ## Conventions
-- Keep `run_aqueduct.py` (local) and `run_aqueduct_cli.py` (HPC) behaviourally identical
-  until they are unified.
+- The per-tile solve lives in `src/eikonal_runner.run_tile_scenario`; `run_eikonal.py`
+  (Snakemake) and `run_eikonal_cli.py` (HPC) are thin wrappers - change behaviour there, not in them.
 - Rich module docstrings explaining *why*; match the surrounding comment density.
   Public functions/classes in core modules use NumPy-style docstrings (short: what + why).
 - Stale code and one-off diagnostics are deleted (git history keeps them), not archived.

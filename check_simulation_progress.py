@@ -5,7 +5,7 @@ reads, never writes.
 
 A tile's own results/ dir gets exactly one waterdepth_{rp}_{slr}.tif per
 scenario regardless of HOW that scenario finished (real solve, confidently-
-zero skip, or OOM/nodata placeholder - see aqueduct_runner.
+zero skip, or OOM/nodata placeholder - see eikonal_runner.
 tile_output_complete's own docstring), so counting these files is a
 complete, coarse-grained progress signal.
 
@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
-from aqueduct_runner import oom_marker_path  # noqa: E402
+from eikonal_runner import oom_marker_path  # noqa: E402
 from config_utils import load_config, merged_slr_scenarios  # noqa: E402
 from tiles import load_tile_grid  # noqa: E402
 

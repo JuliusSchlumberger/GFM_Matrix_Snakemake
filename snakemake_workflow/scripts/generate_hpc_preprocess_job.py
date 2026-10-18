@@ -1,6 +1,6 @@
 """Generate HPC sbatch scripts that run preprocessing across hpc.n_nodes
 PARALLEL nodes, then - once every node's batch has finished - one more job
-that runs `snakemake generate_aqueduct_jobs` (wave sbatch generation) and
+that runs `snakemake generate_eikonal_jobs` (wave sbatch generation) and
 submits submit_waves.sh itself. So a full run (preprocessing AND
 simulation) can be launched from a single driver script, with preprocessing
 itself spread across the same number of nodes as the simulation waves use.
@@ -8,15 +8,15 @@ itself spread across the same number of nodes as the simulation waves use.
 Preprocessing has no wave/hop_distance ordering constraint (every tile's
 DEM/mask/friction/boundaries are independent of every other tile) - unlike
 simulation, where hop>=1 tiles must wait for their neighbours. So instead of
-one monolithic `snakemake generate_aqueduct_jobs --cores N` run on a single
+one monolithic `snakemake generate_eikonal_jobs --cores N` run on a single
 node, this splits every tile's target files evenly across up to hpc.n_nodes
 batches, writes one `snakemake --cores N <explicit target file list>`
 sbatch script per batch, and submits all of them with NO dependency between
 them (fully parallel) - then submits ONE more job with
-`--dependency=afterany:<every batch job id>` that runs generate_aqueduct_jobs
+`--dependency=afterany:<every batch job id>` that runs generate_eikonal_jobs
 (fast, since every preprocessing output already exists by then) and chains
 into submit_waves.sh. This is the exact same afterany-join-multiple-jobs
-pattern generate_aqueduct_jobs.py's own submit_waves.sh already uses between
+pattern generate_eikonal_jobs.py's own submit_waves.sh already uses between
 simulation waves - just one more phase in front of wave 0.
 
 Before any batch is submitted, submit_preprocess_and_dispatch.sh itself
@@ -44,11 +44,11 @@ time any batch is submitted, eliminating every real write-write race
 Target file paths are reconstructed directly (not via `rules.X.output.Y`
 references, since this is a standalone script, not a Snakemake `script:`)
 using the exact same path templates preprocessing.smk's rules declare -
-mirrors the same approach generate_aqueduct_jobs.py already uses for its
+mirrors the same approach generate_eikonal_jobs.py already uses for its
 own local-view boundaries check.
 
 Uses the same local-view/Linux-view path resolution as
-generate_aqueduct_jobs.py (config_hpc.yml, if present), so it can be run
+generate_eikonal_jobs.py (config_hpc.yml, if present), so it can be run
 either from the Windows preprocessing machine (writing scripts meant for
 Hydrax) or natively ON Hydrax (config_hpc.yml unnecessary in that case).
 
@@ -93,7 +93,7 @@ def _target_paths(tile_dir: str, return_periods: list[str], waterlevel_names: li
 
 
 def _simulate_target_paths(tile_dir: str, return_periods: list[str], waterlevel_names: list[str]) -> list[str]:
-    """Same per-tile target shape as `_target_paths`, but for `run_aqueduct`'s
+    """Same per-tile target shape as `_target_paths`, but for `run_eikonal`'s
     own `results/waterdepth_*.tif` outputs rather than preprocessing's
     `inputs/*` - used only by the `--calibration --fuse` path below, where a
     batch's preprocessing and simulate targets are built the same way and
@@ -118,11 +118,11 @@ def main() -> None:
     parser.add_argument(
         "--calibration", action="store_true",
         help="use generate_hpc_simulation_jobs.py directly for the post-preprocessing "
-             "wave-dispatch phase instead of `snakemake generate_aqueduct_jobs` - skips "
+             "wave-dispatch phase instead of `snakemake generate_eikonal_jobs` - skips "
              "Snakemake's own full-DAG preprocessing-output verification (safe here: this "
              "phase only runs after submit_preprocess_and_dispatch.sh's own afterany chain "
              "already guarantees every preprocessing batch above finished), and - unlike "
-             "`rule generate_aqueduct_jobs`, whose own base_config_path is a hardcoded "
+             "`rule generate_eikonal_jobs`, whose own base_config_path is a hardcoded "
              "literal path to production config.yml regardless of --configfile (see "
              "hpc_dispatch.smk) - correctly honors a scenario --config end to end. "
              "Appropriate at calibration-subset scale, where the full-DAG build's "
@@ -147,10 +147,10 @@ def main() -> None:
     parser.add_argument(
         "--preprocess-only", action="store_true",
         help="skip phase 2 (generate+dispatch simulate waves) entirely - no "
-             "`generate_aqueduct_jobs`/`generate_hpc_simulation_jobs.py` call, no dispatch "
+             "`generate_eikonal_jobs`/`generate_hpc_simulation_jobs.py` call, no dispatch "
              "sbatch, no afterany chain. For call sites that only need preprocessing "
-             "outputs (dem/mask/friction/boundaries) and never intend to run aqueduct's "
-             "own flood solve at all - e.g. building shared model_outputs/ inputs for a "
+             "outputs (dem/mask/friction/boundaries) and never intend to run the eikonal "
+             "flood solve at all - e.g. building shared model_outputs/ inputs for a "
              "downstream pipeline (SFINCS) that reads them directly and has its own, "
              "separate run/dispatch mechanism. Mutually exclusive with --fuse (nothing to "
              "fuse simulate into). Writes submit_preprocess_batches.sh instead of "
@@ -187,7 +187,7 @@ def main() -> None:
     # re-parsing the Snakefile from a bare `snakemake ...` call falls back to
     # its own default config.yml, silently ignoring whatever --config this
     # script itself was given (a scenario config, when --config points at
-    # one - see generate_aqueduct_jobs.py's generate_wave_dispatch, which
+    # one - see generate_eikonal_jobs.py's generate_wave_dispatch, which
     # already does the same thing for the simulation phase).
     #
     # atomic_write (temp file + os.replace), NOT a plain open()+write -
@@ -197,7 +197,7 @@ def main() -> None:
     # mid-write or stale-cache read) - build_shared_inputs.sbatch hit exactly
     # this, while a later read of the same file (~5min on, after more of the
     # pipeline had run) succeeded. Same latent bug already existed in
-    # generate_aqueduct_jobs.py's own resolved_config.yml write - fixed
+    # generate_eikonal_jobs.py's own resolved_config.yml write - fixed
     # there too, not just here.
     resolved_config_path = local_jobs_dir / "resolved_config.yml"
     atomic_write(resolved_config_path, lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
@@ -213,7 +213,7 @@ def main() -> None:
     # Linux views point at the same underlying shared storage, so the DATA
     # read is identical regardless of which config's path string opens it -
     # only the STRING form embedded into sbatch scripts below needs to be
-    # the Linux one. Same fix already applied in generate_exposure_jobs.py's
+    # the Linux one. Same fix already applied in generate_hpc_exposure_jobs.py's
     # own chunk discovery for the identical reason.
     tile_gdf = retry_transient_io(gpd.read_file, local_config["tile_grid"]["path"])
     return_periods = [f"RP{rp}" for rp in linux_config["boundary_conditions"]["return_periods"]]
@@ -395,7 +395,7 @@ def main() -> None:
     # dedicated config.
     #
     # --calibration routes this through generate_hpc_simulation_jobs.py
-    # instead of `snakemake generate_aqueduct_jobs` - the latter's own
+    # instead of `snakemake generate_eikonal_jobs` - the latter's own
     # base_config_path (hpc_dispatch.smk) is a hardcoded literal path to
     # production config.yml, NOT derived from GFM_CONFIG_PATH, so
     # resolved_config.yml (and therefore every solver parameter +
@@ -416,7 +416,7 @@ def main() -> None:
         else:
             generate_call = (
                 'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
-                'snakemake generate_aqueduct_jobs --cores 1 --nolock '
+                'snakemake generate_eikonal_jobs --cores 1 --nolock '
                 '--rerun-triggers=mtime'
             )
 

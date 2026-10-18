@@ -53,7 +53,7 @@ def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor
     boundaries = gpd.read_file(inputs / f"boundaries_{scenario}.gpkg")
 
     dem = effective_dem(dem, mask)
-    # decode -> scale -> floor, matching aqueduct_runner.py's production order.
+    # decode -> scale -> floor, matching eikonal_runner.py's production order.
     friction = friction * friction_scale_factor
     friction = np.where(friction > 0, friction, friction.dtype.type(0.001))
     coastline = coastline_mask(mask, ocean_code=OCEAN_CODE, river_code=RIVER_CODE)

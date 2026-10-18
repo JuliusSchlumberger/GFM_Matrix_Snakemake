@@ -14,7 +14,7 @@ from shapely.geometry import box
 
 from config_utils import retry_transient_io
 from flood_extent import effective_dem
-from merge import AQUEDUCT_NODATA, decode_waterdepth_array
+from merge import EIKONAL_NODATA, decode_waterdepth_array
 from rasters import decode_dem_cm, encode_waterlevel_cm
 from tiles import _scan_mask_dir, mosaic_water_fraction_downsampled
 
@@ -45,7 +45,7 @@ def load_waterlevel_stations(nc_path: str | Path, variable: str, x_var: str, y_v
         Stations with a `column_name` column (plain float64 metres - see
         `save_boundary_points` for the int16-centimetre encoding used on disk,
         matching DEM/friction/waterdepth's convention) and point geometries in
-        EPSG:4326. Stations with a NaN water level are dropped, since the Aqueduct
+        EPSG:4326. Stations with a NaN water level are dropped, since the eikonal
         flood model cannot handle missing boundary values.
     """
     with retry_transient_io(xr.open_dataset, nc_path) as ds:
@@ -72,7 +72,7 @@ def select_stations_for_tile(
     Also enforces a minimum search-area floor centred on the tile, since a domain's
     own bbox (src/connectivity_tiling.py) is NOT uniformly padded and small chunks
     (post drop_redundant_chunks/split_oversized_chunks) need an explicit floor so a
-    shrinking buffer_deg can never silently starve the candidate pool Aqueduct's
+    shrinking buffer_deg can never silently starve the candidate pool the eikonal solver's
     k-nearest-neighbour IDW interpolation draws from. The area actually used is the
     ENVELOPE of "bbox + buffer_deg" and "min_search_size_deg centred on the tile" -
     whichever is larger per dimension.
@@ -221,7 +221,7 @@ def save_boundary_points(stations: gpd.GeoDataFrame, output_path: str | Path, co
     Encodes `column_name` (the water level column - see `load_waterlevel_stations`)
     to int16 centimetres before writing (`rasters.encode_waterlevel_cm`), matching
     the precision convention DEM/friction/waterdepth already use on disk. A caller
-    reading this file back for computation (`aqueduct_runner.run_aqueduct_python`)
+    reading this file back for computation (`eikonal_runner.run_eikonal_python`)
     must decode it with `rasters.decode_waterlevel_cm` before use.
 
     Parameters
@@ -321,7 +321,7 @@ def collect_neighbor_wave_seeds(
                 )
             source_depth = decode_waterdepth_array(wd_src.read(1, window=window))
 
-        wet_rows, wet_cols = np.nonzero((source_depth != AQUEDUCT_NODATA) & (source_depth > 0))
+        wet_rows, wet_cols = np.nonzero((source_depth != EIKONAL_NODATA) & (source_depth > 0))
         if len(wet_rows) == 0:
             continue
 

@@ -19,7 +19,7 @@ For each scenario, runs in order:
 
 Hop-wave ordering (2026-10, real bug found live on this run): a hop>=1
 tile's neighbour-seeding read (`collect_neighbor_wave_seeds`, via
-run_aqueduct.py's `path_ready()` check on each lower-hop candidate's own
+run_eikonal.py's `path_ready()` check on each lower-hop candidate's own
 waterdepth output) treats a candidate that simply hasn't been simulated
 YET identically to one that will never exist - both just get omitted from
 `available`, and if every candidate is omitted the tile is marked
@@ -34,7 +34,7 @@ were genuine. Fixed by running `simulate` in explicit hop_distance waves
 (ascending), each wave's full target list given directly to `snakemake`
 and blocked on until that whole wave finishes, before the next wave's
 targets are even requested - same ordering guarantee production's HPC
-`generate_aqueduct_jobs`/`submit_waves.sh` already gives via SLURM
+`generate_eikonal_jobs`/`submit_waves.sh` already gives via SLURM
 `--dependency=afterany` chains, just as sequential local Snakemake calls
 instead of sequential sbatch submissions. This also makes the
 graceful-degradation omission trustworthy for small, spatially-restricted

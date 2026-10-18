@@ -2,11 +2,11 @@
 prepare_exposure_grid_chunk -> compute_flood_fraction_chunk) across
 hpc.n_nodes PARALLEL nodes - the postprocessing-side counterpart to
 generate_hpc_preprocess_job.py, filling the gap between the simulation
-dispatch and the exposure-analysis dispatch (generate_exposure_jobs.py).
+dispatch and the exposure-analysis dispatch (generate_hpc_exposure_jobs.py).
 
 Also plans and appends the exposure-analysis dispatch onto the SAME
 submission (submit_postprocess_and_exposure.sh) via
-generate_exposure_jobs.generate_exposure_dispatch, so the whole remaining
+generate_hpc_exposure_jobs.generate_exposure_dispatch, so the whole remaining
 pipeline - postprocessing then exposure analysis - is submitted in one
 call, with exposure analysis's own first phase gated on afterany of
 postprocessing's last phase. See generate_exposure_dispatch's own
@@ -51,10 +51,10 @@ output shared across every chunk, so there is no write-write race for
 Each batch is a plain `snakemake --cores N --nolock --rerun-triggers=mtime
 <target files>` call, the exact same pattern generate_hpc_preprocess_job.py
 already uses successfully for preprocessing - not a new standalone CLI
-script (unlike run_aqueduct_cli.py for simulation), since these rules'
+script (unlike run_eikonal_cli.py for simulation), since these rules'
 Snakemake DAG-build cost is cheap (each target's own dependency chain is
 just a handful of per-tile waterdepth files or one other chunk file, not
-the entire domain like generate_aqueduct_jobs' _PREPROCESS_OUTPUTS gate).
+the entire domain like generate_eikonal_jobs' _PREPROCESS_OUTPUTS gate).
 
 The chunk grid comes from src/tiles.py::build_chunk_grid, the same function
 the root Snakefile uses, so chunk IDs always match the DAG's.
@@ -83,7 +83,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
 from hpc_common import _account_line, _retry_wrapper_lines, _stage_configfile_lines, _stage_tile_grid_lines  # noqa: E402
-from generate_exposure_jobs import generate_exposure_dispatch, generate_exposure_resume_dispatch  # noqa: E402
+from generate_hpc_exposure_jobs import generate_exposure_dispatch, generate_exposure_resume_dispatch  # noqa: E402
 from generate_hpc_flood_totals_and_plots_job import write_flood_totals_and_plots_job  # noqa: E402
 from tiles import build_chunk_grid  # noqa: E402
 
@@ -91,7 +91,7 @@ from tiles import build_chunk_grid  # noqa: E402
 def _stage_file_locally(src_path: str) -> str:
     """Copy `src_path` to node-local scratch and return the local copy's
     path, instead of opening it straight off P:\\ - mirrors
-    run_aqueduct_cli.py's own helper of the same name (see its docstring for
+    run_eikonal_cli.py's own helper of the same name (see its docstring for
     the full GDAL/SQLite-lock-acquisition rationale).
 
     Added 2026-10-15: this script's OWN `gpd.read_file(tile_grid.path)` call
@@ -428,7 +428,7 @@ def main() -> None:
     # with ZERO batches (resume mode, already 100% done) is skipped
     # entirely - PREV_IDS then correctly carries forward from the last
     # phase that DID have batches, same "skip empty phase" pattern
-    # generate_aqueduct_jobs.generate_resume_dispatch already uses.
+    # generate_eikonal_jobs.generate_resume_dispatch already uses.
     submit_lines = ["#!/bin/bash", "set -euo pipefail", "", 'PREV_IDS=""']
     for phase_label, scripts in phases:
         if not scripts:
@@ -451,7 +451,7 @@ def main() -> None:
     # continuing the afterany chain from postprocessing's own job IDs
     # ($PREV_IDS, empty string if every postprocessing phase was already
     # done) rather than writing a separate script - see
-    # generate_exposure_jobs.py's own module docstring for why this stays
+    # generate_hpc_exposure_jobs.py's own module docstring for why this stays
     # one synchronous, upfront submission. In resume mode, use the
     # matching exposure resume/fresh path depending on whether exposure
     # batches were ever generated before (batch_*_chunks.txt existing under

@@ -19,7 +19,7 @@ processes multi-region countries, not a new pattern.
 
 The resulting "core" set is then expanded to its full hop_distance
 transitive closure using EXACTLY the same neighbour-candidate query
-run_aqueduct.py/run_aqueduct_cli.py use at runtime, repeated to a fixed
+run_eikonal.py/run_eikonal_cli.py use at runtime, repeated to a fixed
 point - a hop>=1 (hinterland) tile is seeded at runtime from its own
 lower-hop neighbours' already-written output, a dependency invisible to
 Snakemake's own DAG (see rules/simulation.smk's docstring), so a subset run

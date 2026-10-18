@@ -1,8 +1,8 @@
 """Functions for running the flood model.
 
-`run_aqueduct_python` (in-process, `flood_model.flood_depth_dense`) is
-called from both `scripts/run_aqueduct.py` (Snakemake rule) and
-`scripts/run_aqueduct_cli.py` (HPC sbatch CLI), which share the helpers here
+`run_eikonal_python` (in-process, `flood_model.flood_depth_dense`) is
+called from both `scripts/run_eikonal.py` (Snakemake rule) and
+`scripts/run_eikonal_cli.py` (HPC sbatch CLI), which share the helpers here
 so the two entry points can't drift apart.
 """
 
@@ -31,7 +31,7 @@ from rasters import (
 from tiles import load_tile_grid
 
 
-def run_aqueduct_python(
+def run_eikonal_python(
     dem_path: str | Path,
     mask_path: str | Path,
     friction_path: str | Path,
@@ -156,13 +156,13 @@ def run_aqueduct_python(
     return diagnostics
 
 
-def estimate_aqueduct_mem_mb(dem_path: str | Path, mem_estimate_cfg: dict[str, Any]) -> int:
+def estimate_eikonal_mem_mb(dem_path: str | Path, mem_estimate_cfg: dict[str, Any]) -> int:
     """Conservative peak-memory estimate (MB) for running the flood solve on one tile.
 
     Calibrated from 7 real tiles spanning 2.2M-140M DEM pixels (peak working
     set 800-7500MB); pixel count alone isn't an exact predictor (two tiles
     with near-identical pixel counts differed by ~900MB, likely flood-extent
-    complexity), so this is deliberately generous. Used as run_aqueduct's
+    complexity), so this is deliberately generous. Used as run_eikonal's
     `resources: mem_mb` so Snakemake throttles concurrent jobs to fit a
     `--resources mem_mb=N` budget.
 
@@ -172,7 +172,7 @@ def estimate_aqueduct_mem_mb(dem_path: str | Path, mem_estimate_cfg: dict[str, A
         Path to the tile's DEM raster; opened for width/height metadata
         only, not a full raster load.
     mem_estimate_cfg : dict of str to Any
-        `simulation.aqueduct_mem_estimate` config section, with keys
+        `simulation.eikonal_mem_estimate` config section, with keys
         `base_mb` and `bytes_per_pixel`.
 
     Returns
@@ -246,7 +246,7 @@ def mark_tile_oom(log_dir: str | Path, tile_id: str, reason: str) -> None:
 
 
 def log_skipped_tile(log_dir: str | Path, tile_id: str, scenario_name: str, reason: str) -> None:
-    """Record that a tile/scenario was skipped instead of being run through Aqueduct.
+    """Record that a tile/scenario was skipped instead of being run through the eikonal solver.
 
     Writes one marker file per (tile_id, scenario_name) to `log_dir`, named
     `{tile_id}_{scenario_name}.txt`, so that skipped tiles can later be
@@ -270,13 +270,13 @@ def log_skipped_tile(log_dir: str | Path, tile_id: str, scenario_name: str, reas
     (log_dir / f"{tile_id}_{scenario_name}.txt").write_text(reason)
 
 
-# Substring written into a skipped_tiles/ marker by run_aqueduct.py's
+# Substring written into a skipped_tiles/ marker by run_eikonal.py's
 # `boundaries.empty` branch - distinguishes a tile with no water level
 # boundary stations (never eligible to run, not a failure) from an
 # OOM-driven skip when scanning skipped_tiles/ after the fact.
 NO_STATIONS_REASON = "no water level boundary stations within tile"
 
-# Substring written into a skipped_tiles/ marker by run_aqueduct.py's
+# Substring written into a skipped_tiles/ marker by run_eikonal.py's
 # hop_distance >= 1 branch when boundaries.collect_neighbor_wave_seeds
 # finds no seed cells at all (2026-08 - no overlapping earlier-wave
 # neighbour available yet, none overlap, or none have any flooding in the
@@ -350,8 +350,8 @@ def run_tile_scenario(
 ) -> dict[str, Any]:
     """Solve, skip or placeholder one (tile, return period, SLR scenario) and write its raster.
 
-    The shared per-tile logic of both entry points, `run_aqueduct.py` (Snakemake rule) and
-    `run_aqueduct_cli.py` (HPC sbatch CLI), so they cannot drift apart. In order:
+    The shared per-tile logic of both entry points, `run_eikonal.py` (Snakemake rule) and
+    `run_eikonal_cli.py` (HPC sbatch CLI), so they cannot drift apart. In order:
 
     - Tile pre-marked OOM: nodata placeholder (`save_nodata_raster`), skip marker.
     - Forcing: a hop-0 tile reads its own `boundaries_path` stations; a hop>=1 tile collects
@@ -359,7 +359,7 @@ def run_tile_scenario(
       (`boundaries.collect_neighbor_wave_seeds`). A neighbour whose output does not exist
       yet counts as "no flooding there". No stations / no seeds: zero-depth raster, skip
       marker.
-    - Otherwise the real solve (`run_aqueduct_python`); a MemoryError marks the tile OOM for
+    - Otherwise the real solve (`run_eikonal_python`); a MemoryError marks the tile OOM for
       all its later scenarios and writes a nodata placeholder instead.
 
     Run-timing records are left to the caller: the two entry points record them differently.
@@ -399,7 +399,7 @@ def run_tile_scenario(
     -------
     dict
         `{"outcome": "oom_premarked"}`, `{"outcome": "skip_no_inundation", "skip_reason": ...}`,
-        `{"outcome": "oom"}`, or `{"outcome": "solved", "diagnostics": <run_aqueduct_python's
+        `{"outcome": "oom"}`, or `{"outcome": "solved", "diagnostics": <run_eikonal_python's
         dict>, "solve_elapsed_s": <seconds spent in the solve>}`.
     """
     scenario_name = f"{return_period}_{waterlevel_name}"
@@ -462,7 +462,7 @@ def run_tile_scenario(
         oc_config = flooding_config.get("obstacle_coupling", {})
         start = time.perf_counter()
         try:
-            diagnostics = run_aqueduct_python(
+            diagnostics = run_eikonal_python(
                 dem_path, mask_path, friction_path, output_path,
                 resolution=flooding_config["resolution"], k=flooding_config["knn"],
                 variable=waterlevel_name,
@@ -494,7 +494,7 @@ def tile_output_complete(model_outputs_dir: str | Path, tile_id: int | str, n_sc
     """Return True once every (return_period, waterlevel_name) output for `tile_id` is written.
 
     Counts `waterdepth_*.tif` files in the tile's results dir, written by
-    every branch in run_aqueduct.py (genuine run, OOM fallback, no-stations
+    every branch in run_eikonal.py (genuine run, OOM fallback, no-stations
     skip, or no-upstream-flooding skip), so this is agnostic to *how* each
     scenario finished.
 
@@ -576,13 +576,13 @@ def log_run_timing(
         The run's `waterlevel_name` wildcard value.
     elapsed_s : float
         Wall-clock seconds for this invocation. For a genuine solve called
-        from `run_aqueduct.py` this covers only `run_aqueduct_python`
-        itself; `run_aqueduct_cli.py` instead times its entire invocation
+        from `run_eikonal.py` this covers only `run_eikonal_python`
+        itself; `run_eikonal_cli.py` instead times its entire invocation
         from argument parsing onward.
     obstacle_coupling_diagnostics : dict or None, optional
-        For a genuine solve, the diagnostics dict `run_aqueduct_python`
+        For a genuine solve, the diagnostics dict `run_eikonal_python`
         returned, merged directly into the record. For a skip/OOM call
-        from `run_aqueduct_cli.py`, a small dict of its own instead, e.g.
+        from `run_eikonal_cli.py`, a small dict of its own instead, e.g.
         `{"outcome": "skip_no_inundation", "skip_reason": ...}` or
         `{"outcome": "oom"}`.
     """
@@ -609,7 +609,7 @@ def print_simulation_progress(
     """Print a running tally of tile outcomes across the whole tile grid.
 
     Only meaningful once called for a tile that just finished all its
-    scenarios (see run_aqueduct.py). Cheap per call, but still O(n_tiles),
+    scenarios (see run_eikonal.py). Cheap per call, but still O(n_tiles),
     so callers should trigger it only on that per-tile milestone, not on
     every job.
 

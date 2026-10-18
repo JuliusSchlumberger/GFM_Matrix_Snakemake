@@ -110,7 +110,7 @@ from scipy import ndimage
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
-from merge import AQUEDUCT_NODATA, _make_chunk_transform, _open_overlapping_tiles, _tile_id_from_path  # noqa: E402
+from merge import EIKONAL_NODATA, _make_chunk_transform, _open_overlapping_tiles, _tile_id_from_path  # noqa: E402
 from plotting import pixel_area_km2_grid  # noqa: E402
 from validation import tri_domain_mask  # noqa: E402
 
@@ -210,7 +210,7 @@ def merge_in_memory(model_outputs: Path, slr: str, out_w: int, out_h: int, geome
         any_found = True
         with rasterio.open(path) as src:
             patch = src.read(1, window=Window(src_c0, src_r0, n_cols, n_rows)).astype("float64")
-        valid = patch < AQUEDUCT_NODATA
+        valid = patch < EIKONAL_NODATA
         sl = (slice(row_off, row_off + n_rows), slice(col_off, col_off + n_cols))
         sub_best = best[sl]
         wins = valid & (patch > sub_best)

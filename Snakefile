@@ -1,4 +1,4 @@
-"""GFM Aqueduct preprocessing & simulation workflow.
+"""GFM eikonal preprocessing & simulation workflow.
 
 For every tile in the fixed-DeltaDTM-tile domain manifest (`tile_grid.path`,
 built by `preparation/run_preparation.py` — see `preparation/build_tile_manifest.py`
@@ -6,7 +6,7 @@ and `src/connectivity_tiling.py` for how it's derived from DeltaDTM coverage,
 floodability, and real floodable-land connectivity to open water), this workflow
 preprocesses the DEM, DEM-validity mask, friction and water level boundary
 inputs for each (return period, sea level rise scenario) combination, and
-runs the Aqueduct flood model for every (tile, return_period,
+runs the eikonal flood model for every (tile, return_period,
 waterlevel_name) combination.
 
 All fixed parameters are defined in `snakemake_workflow/config/config.yml`.
@@ -22,13 +22,13 @@ All chunks are mosaicked into a GDAL VRT for plotting.
 
 Targets:
     preprocess:  generate all per-tile, per-scenario model inputs.
-    simulate:    run the Aqueduct flood model for all tiles and SLR scenarios.
+    simulate:    run the eikonal flood model for all tiles and SLR scenarios.
     postprocess: merge per-tile results into combined rasters and plots.
     all:         preprocess + simulate + postprocess (the default target).
 
 Run with e.g. `snakemake all --cores 4 --resources mem_mb=8000` — the
-`mem_mb` resource lets Snakemake run several Aqueduct instances concurrently
-while staying within a memory budget (see `run_aqueduct`'s docstring in
+`mem_mb` resource lets Snakemake run several eikonal solves concurrently
+while staying within a memory budget (see `run_eikonal`'s docstring in
 simulation.smk); set `<mem_mb>` to leave headroom below total system RAM for
 the OS and other processes, e.g. ~80% of physical RAM.
 """
@@ -82,7 +82,7 @@ def _retrying_makedirs(name, mode=0o777, exist_ok=False, _retries=5, _delay_s=15
 os.makedirs = _retrying_makedirs
 
 sys.path.insert(0, os.path.join(workflow.basedir, "src"))
-from aqueduct_runner import estimate_aqueduct_mem_mb  # noqa: E402
+from eikonal_runner import estimate_eikonal_mem_mb  # noqa: E402
 from config_utils import _expand_paths, get_data_catalog, merged_slr_scenarios  # noqa: E402
 from tiles import build_chunk_grid  # noqa: E402
 
@@ -98,7 +98,7 @@ from tiles import build_chunk_grid  # noqa: E402
 # Workflow.configfile()'s directive handler both looked correct and both
 # fire identically regardless of -n/dry-run). Meanwhile every PLAIN-PYTHON
 # config read in this codebase (config_utils.load_config, used by
-# run_aqueduct_cli.py/generate_hpc_simulation_jobs.py's own --config flag)
+# run_eikonal_cli.py/generate_hpc_simulation_jobs.py's own --config flag)
 # has never once failed - so this routes new HPC dispatch through the
 # Workflow's own `configfile:` directive instead of --configfile, a
 # genuinely different code path, rather than continuing to chase an
@@ -109,7 +109,7 @@ configfile: _CONFIG_PATH
 # Machine-local overrides (git-ignored, optional).  Create
 # snakemake_workflow/config/config_local.yml to override any key without
 # touching the committed config.yml — most commonly `paths.root`,
-# `paths.code_root`, and `paths.aqueduct_root` for machines with different
+# and `paths.code_root` for machines with different
 # storage layouts. Every standalone (non-Snakemake) entry-point script
 # honors this same file via config_utils.load_config(), which mirrors this
 # exact merge-then-expand sequence - keep the two in sync if this ever changes.
@@ -121,16 +121,15 @@ if "GFM_CONFIG_PATH" not in os.environ and os.path.exists(_LOCAL_CFG):
     configfile: _LOCAL_CFG
 
 
-# Expand {root} / {code_root} / {aqueduct_root} throughout the whole config so
-# every rule and script receives absolute paths without knowing about the
-# substitution scheme. aqueduct_root defaults to code_root, so it only needs
-# to be set explicitly when the Aqueduct build lives somewhere else.
+# Expand {root} / {code_root} throughout the whole config so every rule and
+# script receives absolute paths without knowing about the substitution scheme.
+# (`{aqueduct_root}`, for the old external Aqueduct build, was dropped 2026-10-18:
+# no config value used it.)
 _PATH_SUBS = {
     "root": config["paths"].get("root", ""),
     "code_root": config["paths"].get("code_root", config["paths"].get("root", "")),
-    "aqueduct_root": config["paths"].get("aqueduct_root", config["paths"].get("code_root", config["paths"].get("root", ""))),
 }
-# processed_inputs_dir itself needs root/code_root/aqueduct_root expanded
+# processed_inputs_dir itself needs root/code_root expanded
 # first (it's declared as "{root}/processed_inputs"), so it's added as a
 # second substitution pass rather than the single dict above - any config
 # value using "{processed_inputs_dir}" (e.g. boundary_conditions.
@@ -197,7 +196,7 @@ def waterdepth_tiles_for_chunk(wildcards):
     forces Snakemake to resolve the producing rule via regex matching against
     every rule's output pattern instead of a direct object reference. On
     Windows, os.path.join produces backslash-joined paths that do not
-    textually match run_aqueduct's (forward-slash, `{root}`-substituted)
+    textually match run_eikonal's (forward-slash, `{root}`-substituted)
     declared output pattern for that regex match - every OTHER cross-rule
     dependency in this Snakefile uses `rules.X.output.Y` (no regex matching
     ever needed) so never hits this.
@@ -241,11 +240,11 @@ _PREPROCESS_OUTPUTS = (
 )
 
 _SIMULATION_OUTPUTS = expand(
-    rules.run_aqueduct.output.waterdepth,
+    rules.run_eikonal.output.waterdepth,
     tile_id=TILE_IDS, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES,
 )
 
-# generate_aqueduct_jobs (HPC dispatch) needs _PREPROCESS_OUTPUTS, so this
+# generate_eikonal_jobs (HPC dispatch) needs _PREPROCESS_OUTPUTS, so this
 # include comes after it's defined above, unlike the other rule files.
 include: "snakemake_workflow/rules/hpc_dispatch.smk"
 
@@ -278,7 +277,7 @@ rule preprocess:
 
 
 rule simulate:
-    """Run the Aqueduct flood model for all tiles, return periods and SLR scenarios."""
+    """Run the eikonal flood model for all tiles, return periods and SLR scenarios."""
     input:
         _SIMULATION_OUTPUTS,
 

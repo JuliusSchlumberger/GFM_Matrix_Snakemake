@@ -127,7 +127,7 @@ def path_ready(path: str | Path) -> bool:
     ``False``, so a momentary P:\\ blip looks identical to a genuinely
     missing file and no retry is ever triggered. Used to check whether a
     lower-hop neighbour tile's output already exists before seeding a
-    hinterland tile from it (``run_aqueduct.py``'s hop>=1 branch); silently
+    hinterland tile from it (``run_eikonal.py``'s hop>=1 branch); silently
     treating a blip as "no neighbour output yet" there would write a
     wrongly-confident real-zero result instead of the correct flooded one.
     Goes through ``os.stat``, which does raise, so it can use the same
@@ -190,7 +190,7 @@ def load_config(config_path: str | Path, extra_override: str | Path | None = Non
     """Load config.yml the same way the root Snakefile does, for standalone scripts.
 
     Every entry-point script under preparation/, analysis/, and
-    run_pipeline.py should load its config through this function instead of
+    run_eikonal_dag.py should load its config through this function instead of
     a bare ``yaml.safe_load(open(...))``, so a machine-local override in a
     git-ignored ``config_local.yml`` sibling (honored by ``snakemake`` itself
     via the Snakefile's own ``configfile:`` layering) is not silently
@@ -200,7 +200,7 @@ def load_config(config_path: str | Path, extra_override: str | Path | None = Non
     Looks for ``config_local.yml`` next to `config_path` and, if present,
     deep-merges it on top of the base config, then merges `extra_override`
     (if given and it exists) on top of that, before expanding
-    ``{root}``/``{code_root}``/``{aqueduct_root}``/``{processed_inputs_dir}``
+    ``{root}``/``{code_root}``/``{processed_inputs_dir}``
     throughout the whole merged result - so every value read back out is
     already a real, absolute path.
 
@@ -211,7 +211,7 @@ def load_config(config_path: str | Path, extra_override: str | Path | None = Non
     extra_override : str, Path, or None, optional
         Path to a second git-ignored override file, merged on top of
         config_local.yml (if any) before expansion - e.g. ``config_hpc.yml``,
-        which points ``paths.root``/``aqueduct_root`` at a Linux HPC mount
+        which points ``paths.root``/``code_root`` at a Linux HPC mount
         instead of the local machine's paths. Ignored if it doesn't exist.
 
     Returns
@@ -236,9 +236,8 @@ def load_config(config_path: str | Path, extra_override: str | Path | None = Non
 
     root = config["paths"].get("root", "")
     code_root = config["paths"].get("code_root", root)
-    aqueduct_root = config["paths"].get("aqueduct_root", code_root)
-    subs = {"root": root, "code_root": code_root, "aqueduct_root": aqueduct_root}
-    # processed_inputs_dir itself needs root/code_root/aqueduct_root expanded
+    subs = {"root": root, "code_root": code_root}
+    # processed_inputs_dir itself needs root/code_root expanded
     # first (it's declared as "{root}/processed_inputs") before it can be
     # used as a substitution value in turn - mirrors the root Snakefile's own
     # two-pass expansion (see its _PATH_SUBS comment) so standalone scripts

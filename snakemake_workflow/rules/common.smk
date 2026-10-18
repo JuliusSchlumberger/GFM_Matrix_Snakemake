@@ -1,4 +1,4 @@
-"""Shared setup for the GFM Aqueduct Snakemake workflow."""
+"""Shared setup for the GFM eikonal Snakemake workflow."""
 
 
 wildcard_constraints:

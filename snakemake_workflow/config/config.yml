@@ -1,4 +1,4 @@
-# Configuration for the GFM Aqueduct preprocessing & simulation workflow.
+# Configuration for the GFM eikonal preprocessing & simulation workflow.
 # Parameters are grouped by pipeline stage. 
 
 
@@ -73,8 +73,8 @@ tile_generation:
   # ocean is excluded.
   river_code: 3 # mask value treated as "river" - NOT used by this module
   # itself (the old pipeline's river-mouth marking is retired), but still a
-  # live, load-bearing constant read directly by run_aqueduct.py/
-  # run_aqueduct_cli.py - kept here.
+  # live, load-bearing constant read directly by run_eikonal.py/
+  # run_eikonal_cli.py - kept here.
 
   coarse_resolution_m: 500 # standard working resolution for every coarse
   # (non-native) read in this pipeline: Phase 1's edge-connectivity check,
@@ -151,7 +151,7 @@ tile_grid:
 
 
 # ── TILE SPLITTING (OOM RECOVERY) ───────────────────────────────────────────────
-tile_split: # Used by: run_pipeline.py to split OOM tiles and re-run Snakemake.
+tile_split: # Used by: run_eikonal_dag.py to split OOM tiles and re-run Snakemake.
   fraction: 0.667 # Each half spans this fraction of the parent tile's extent
   max_depth: 2 # Maximum number of times a single original tile may be recursively split
   max_retries: 5 # Maximum number of times a single original tile may be recursively split
@@ -366,18 +366,18 @@ simulation: # Used by: preprocessing rules
       max_outer_iterations: 4
       outer_convergence_pct: 0.01  # stop early once < this % of the tile's cells are newly blocked in an outer iteration
 
-  # Peak-memory estimate for run_aqueduct's `resources: mem_mb` (replaces the
-  # old aqueduct_runs=1 serialization - see aqueduct_runner.
-  # estimate_aqueduct_mem_mb). Calibrated from 7 real tiles; deliberately
+  # Peak-memory estimate for run_eikonal's `resources: mem_mb` (replaces the
+  # old aqueduct_runs=1 serialization - see eikonal_runner.
+  # estimate_eikonal_mem_mb). Calibrated from 7 real tiles; deliberately
   # generous given real per-tile variance beyond pixel count alone. Retune
   # from production telemetry if jobs are consistently over/under-budgeted.
-  aqueduct_mem_estimate:
+  eikonal_mem_estimate:
     base_mb: 1000
     bytes_per_pixel: 80
 
 # ── HPC DISPATCH ────────────────────────────────────────────────────────────────
-# Used by: rule generate_aqueduct_jobs (rules/hpc_dispatch.smk) /
-# scripts/generate_aqueduct_jobs.py. Wave-based hinterland forcing
+# Used by: rule generate_eikonal_jobs (rules/hpc_dispatch.smk) /
+# scripts/generate_eikonal_jobs.py. Wave-based hinterland forcing
 # (src/connectivity_tiling.compute_hop_distances's hop_distance column) means a
 # hop_distance>=1 tile is seeded from a strictly-lower-hop_distance
 # neighbour's own output for the same scenario, so tiles are grouped by wave
@@ -409,12 +409,12 @@ simulation: # Used by: preprocessing rules
 # hard_ceiling_cells (tile_generation.hard_ceiling_cells, 100,000,000) caps
 # every tile's size directly, and a live check against the real production
 # grid (domain_tiles_global.gpkg, 4504 tiles) confirmed only one tile exceeds
-# aqueduct_mem_estimate's 1vcpu-node ceiling (~87M px) at all (95.08M px,
+# eikonal_mem_estimate's 1vcpu-node ceiling (~87M px) at all (95.08M px,
 # tile 2569, hop_distance=0 - safely absorbed by hpc.wave_tiers' shared
 # 168GB/24-way pool for that wave, not an isolated 1vcpu allocation) - so the
 # large/small split, `sbatch_large`, and every "size_class" branch that read
 # it (hpc_dispatch.smk, generate_hpc_simulation_jobs.py,
-# generate_hpc_preprocess_job.py, generate_aqueduct_jobs.py,
+# generate_hpc_preprocess_job.py, generate_eikonal_jobs.py,
 # check_simulation_progress.py's --by-size) were removed as dead weight from
 # a retired pipeline generation, not a currently-needed safeguard.
 hpc:
@@ -457,7 +457,7 @@ hpc:
     # Hydrax compute node with zero progress - a separate, well-documented
     # HDF5-over-NFS file-locking issue (distinct from the GDAL/SQLite one
     # affecting .gpkg reads, fixed via node-local staging instead - see
-    # generate_aqueduct_jobs.py's _stage_tile_grid_lines). HDF5 only needs
+    # generate_eikonal_jobs.py's _stage_tile_grid_lines). HDF5 only needs
     # this one env var to skip its own locking entirely for read-only access,
     # no staging required.
     env_activate_cmd: 'module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm && export HDF5_USE_FILE_LOCKING=FALSE'

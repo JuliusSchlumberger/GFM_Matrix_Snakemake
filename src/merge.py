@@ -10,8 +10,8 @@ The merge strategy is:
   - For each chunk, tile files are kept open but data is read block by block
     inside the write loop — only the current block's data is ever in RAM.
 
-AQUEDUCT_NODATA (`np.finfo(np.float32).max`) is the sentinel written by the
-Aqueduct model for cells it did not compute.  `0.0` means "computed, no
+EIKONAL_NODATA (`np.finfo(np.float32).max`) is the sentinel written by the
+eikonal model for cells it did not compute.  `0.0` means "computed, no
 flooding".
 """
 
@@ -29,12 +29,12 @@ from affine import Affine
 from config_utils import retry_transient_io
 from rasterio.windows import Window
 
-AQUEDUCT_NODATA = np.finfo(np.float32).max
+EIKONAL_NODATA = np.finfo(np.float32).max
 
-# int16 counterpart of AQUEDUCT_NODATA, for per-tile waterdepth rasters (see
+# int16 counterpart of EIKONAL_NODATA, for per-tile waterdepth rasters (see
 # rasters.encode_waterdepth_cm/WATERDEPTH_NODATA_INT16). Every read in this
 # module decodes int16 tiles to this module's existing float32+
-# AQUEDUCT_NODATA convention immediately, before any of the merge/overlap-
+# EIKONAL_NODATA convention immediately, before any of the merge/overlap-
 # correction arithmetic below - none of that arithmetic needs to think in
 # int16-centimetres.
 WATERDEPTH_NODATA_INT16 = np.iinfo(np.int16).max
@@ -59,16 +59,16 @@ def decode_waterdepth_array(raw: np.ndarray) -> np.ndarray:
     -------
     np.ndarray
         float32 array in metres. Cells equal to ``WATERDEPTH_NODATA_INT16`` in
-        ``raw`` are set to ``AQUEDUCT_NODATA`` (not covered/computed by the tile).
+        ``raw`` are set to ``EIKONAL_NODATA`` (not covered/computed by the tile).
     """
     patch = raw.astype(np.float32) / WATERDEPTH_SCALE
-    patch[raw == WATERDEPTH_NODATA_INT16] = AQUEDUCT_NODATA
+    patch[raw == WATERDEPTH_NODATA_INT16] = EIKONAL_NODATA
     return patch
 
 
 def _read_waterdepth_patch(src: rasterio.DatasetReader, window: Window) -> np.ndarray:
     """Read one tile's waterdepth patch, decoded to float32 metres with
-    AQUEDUCT_NODATA marking cells the tile didn't cover/compute.
+    EIKONAL_NODATA marking cells the tile didn't cover/compute.
     """
     raw = src.read(1, window=window, boundless=True, fill_value=WATERDEPTH_NODATA_INT16)
     return decode_waterdepth_array(raw)
@@ -322,7 +322,7 @@ def merge_tile_rasters_chunk(
                         bc0 = out_c0 - col_off
                         bc1 = out_c1 - col_off
 
-                        valid = patch < AQUEDUCT_NODATA
+                        valid = patch < EIKONAL_NODATA
                         sub_best = best_depth[br0:br1, bc0:bc1]
                         sub_id = best_tile_id[br0:br1, bc0:bc1]
                         depth64 = patch.astype("float64")

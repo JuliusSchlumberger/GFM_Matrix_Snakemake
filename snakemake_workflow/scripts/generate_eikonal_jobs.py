@@ -2,7 +2,7 @@
 
 The actual generation logic lives in `generate_wave_dispatch()` below, shared
 by two entry points:
-  - `rule generate_aqueduct_jobs` (hpc_dispatch.smk) - runs this as a
+  - `rule generate_eikonal_jobs` (hpc_dispatch.smk) - runs this as a
     Snakemake `script:`, gated on `input: _PREPROCESS_OUTPUTS` (every
     preprocessing output across the whole domain), so it only starts once
     Snakemake has verified that full dependency list - slow over a network
@@ -31,12 +31,12 @@ in the generated sbatch scripts unconditionally; NEITHER is pre-filtered at
 generation time (2026-08 - wave-0 empty-boundaries jobs used to be resolved
 here, reading every wave-0 tile's boundaries file to check `.empty` before
 writing the sbatch scripts; removed as a needless ~110,000-file-read,
-~90min pass on a real production grid - see run_aqueduct_cli.py's own
+~90min pass on a real production grid - see run_eikonal_cli.py's own
 docstring for where that check now lives instead, inline with the read it
 needs anyway). Hop_distance >= 1 tiles were NEVER pre-excludable this way to
 begin with: whether a hinterland tile has any upstream flooding to seed
 from can only be known once its lower-hop neighbour has actually run
-(run_aqueduct_cli.py discovers "no seeds yet" live and writes its own
+(run_eikonal_cli.py discovers "no seeds yet" live and writes its own
 zero-waterdepth result) - pre-filtering them here on a same-run-as-wave-0
 basis would incorrectly exclude every hop>=1 tile, since a hinterland tile
 has no nearby boundary stations by definition. This is also why waves must
@@ -228,9 +228,9 @@ def generate_wave_dispatch(
     # - this used to re-read every wave-0 tile's boundaries file at
     # generation time just to check .empty, ~110,000 individual file reads
     # on a real production grid, ~90min, for no benefit over letting
-    # run_aqueduct_cli.py check it inline as part of the read it needs
+    # run_eikonal_cli.py check it inline as part of the read it needs
     # anyway for a real, non-empty scenario - see that script's own
-    # docstring, and run_aqueduct.py, which already worked this way).
+    # docstring, and run_eikonal.py, which already worked this way).
     jobs_by_tile: dict[str, list[tuple[str, str]]] = {
         str(tid): [(rp, slr) for rp in return_periods for slr in waterlevel_names]
         for tid in tile_ids
@@ -531,7 +531,7 @@ def generate_resume_dispatch(
     )
 
 
-# ── Snakemake entry point (rule generate_aqueduct_jobs, hpc_dispatch.smk) ──
+# ── Snakemake entry point (rule generate_eikonal_jobs, hpc_dispatch.smk) ──
 if "snakemake" in dir():
     generate_wave_dispatch(
         model_outputs=snakemake.params.model_outputs,  # noqa: F821

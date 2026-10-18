@@ -1,4 +1,4 @@
-"""Exposure-grid preparation for the GFM Aqueduct postprocessing pipeline.
+"""Exposure-grid preparation for the GFM postprocessing pipeline.
 
 prepare_exposure_grid_chunk caches the population raster and geogunit-ID raster
 (at population's native ~1 km resolution) once per spatial chunk.  All exposure

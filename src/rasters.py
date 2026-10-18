@@ -22,7 +22,7 @@ from scipy import ndimage
 
 from config_utils import retry_transient_io
 
-from merge import AQUEDUCT_NODATA
+from merge import EIKONAL_NODATA
 
 # ── Integer raster encodings (I/O optimization - see conversation 2026-08-01) ──
 #
@@ -46,7 +46,7 @@ FRICTION_SCALE = 1_000_000
 
 # Water depth output: real flood depths never approach int16's ceiling in
 # cm, so the max representable value doubles as an unambiguous "not
-# computed" sentinel (the int16 counterpart to merge.AQUEDUCT_NODATA, which
+# computed" sentinel (the int16 counterpart to merge.EIKONAL_NODATA, which
 # is sized for float32 and does not fit in int16).
 WATERDEPTH_SCALE = 100  # cm per metre
 WATERDEPTH_NODATA_INT16 = np.iinfo(np.int16).max  # 32767
@@ -190,7 +190,7 @@ def encode_waterdepth_cm(waterdepth_m: np.ndarray) -> np.ndarray:
 def decode_waterdepth_cm(waterdepth_int16: np.ndarray) -> np.ndarray:
     """Decode an int16-centimetre water-depth raster to float32 metres.
 
-    `WATERDEPTH_NODATA_INT16` cells are mapped to `merge.AQUEDUCT_NODATA` so
+    `WATERDEPTH_NODATA_INT16` cells are mapped to `merge.EIKONAL_NODATA` so
     the existing float32 merge/overlap-correction pipeline needs no changes.
 
     Parameters
@@ -201,11 +201,11 @@ def decode_waterdepth_cm(waterdepth_int16: np.ndarray) -> np.ndarray:
     Returns
     -------
     np.ndarray
-        Water depth in metres, as float32, with `merge.AQUEDUCT_NODATA`
+        Water depth in metres, as float32, with `merge.EIKONAL_NODATA`
         where not computed.
     """
     decoded = waterdepth_int16.astype(np.float32) / WATERDEPTH_SCALE
-    decoded[waterdepth_int16 == WATERDEPTH_NODATA_INT16] = AQUEDUCT_NODATA
+    decoded[waterdepth_int16 == WATERDEPTH_NODATA_INT16] = EIKONAL_NODATA
     return decoded
 
 
@@ -909,7 +909,7 @@ def _atomic_raster_write(output_path: str | Path, profile: dict[str, Any], write
     was there before, or nothing) or it's the complete, valid result -
     there is no partially-written state visible at that path, ever.
 
-    `run_aqueduct_cli.py`'s own `_output_already_done` check already
+    `run_eikonal_cli.py`'s own `_output_already_done` check already
     treats a truncated file as "not done" (it tries to actually read it),
     so a hard kill was already safe in the sense that the work would get
     correctly redone rather than silently accepted as complete - this is
@@ -983,7 +983,7 @@ def save_raster(
     predictor = 1 if np.dtype(dtype).kind in "iu" else raster_config["predictor"]
     # Snakemake auto-creates an output:'s parent directory before running a
     # rule's script - but this function is also called from
-    # scripts/run_aqueduct_cli.py, a plain standalone CLI (not a Snakemake
+    # scripts/run_eikonal_cli.py, a plain standalone CLI (not a Snakemake
     # script:), which gets no such help. Explicit here so every caller is
     # correct regardless of how it's invoked - found live 2026-08-10 (real
     # HPC run: RasterioIOError "No such file or directory" writing
@@ -1012,8 +1012,8 @@ def save_nodata_raster(reference_path: str | Path, output_path: str | Path, rast
     """Write an all-nodata waterdepth raster on the same grid as `reference_path`.
 
     Used as a placeholder `waterdepth` output for tiles that are skipped
-    instead of being run through Aqueduct (see
-    `aqueduct_runner.log_skipped_tile`). Filled with `WATERDEPTH_NODATA_INT16`
+    instead of being run through the eikonal solver (see
+    `eikonal_runner.log_skipped_tile`). Filled with `WATERDEPTH_NODATA_INT16`
     so `merge.merge_tile_rasters_chunk` ignores this tile entirely when
     merging results. Writes via a temp file + atomic rename (see
     `_atomic_raster_write`), and creates `output_path`'s parent directory if
@@ -1043,7 +1043,7 @@ def save_nodata_raster(reference_path: str | Path, output_path: str | Path, rast
     )
     data = np.full((profile["height"], profile["width"]), WATERDEPTH_NODATA_INT16, dtype="int16")
     # See save_raster's own comment on why mkdir is needed here (called from
-    # the standalone run_aqueduct_cli.py, not just Snakemake rules), and
+    # the standalone run_eikonal_cli.py, not just Snakemake rules), and
     # _atomic_raster_write's own docstring for why the write itself goes
     # through a temp file + atomic replace.
     retry_transient_io(Path(output_path).parent.mkdir, parents=True, exist_ok=True)
@@ -1094,7 +1094,7 @@ def save_waterdepth_raster(
         "height": height,
     }
     # See save_raster's own comment on why mkdir is needed here (called from
-    # the standalone run_aqueduct_cli.py, not just Snakemake rules) - this
+    # the standalone run_eikonal_cli.py, not just Snakemake rules) - this
     # is the exact call site that hit the real 2026-08-10 HPC failure - and
     # _atomic_raster_write's own docstring for why the write itself goes
     # through a temp file + atomic replace (2026-08-11: protects against a

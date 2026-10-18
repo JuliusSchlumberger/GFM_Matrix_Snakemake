@@ -8,7 +8,7 @@
   - _compute_dem_gap_fill's stray-nodata routing (an all-nodata-window tile
     used to leak a raw -9999 sentinel into encode_dem_cm and crash).
   - save_waterdepth_raster creating its own output directory (broke live
-    on 2026-08-10 HPC run: run_aqueduct_cli.py, unlike Snakemake, never
+    on 2026-08-10 HPC run: run_eikonal_cli.py, unlike Snakemake, never
     got its results/ dir auto-created).
   - average_pool_to_grid's closed-form correctness (the two-separate-
     reproject-calls structure this locks in - packing numerator/domain as
@@ -217,7 +217,7 @@ def test_relabel_small_isolated_ocean_patches_keeps_large_component() -> None:
 
 
 def test_save_waterdepth_raster_creates_missing_output_directory() -> None:
-    """Real, live HPC failure (2026-08-10): run_aqueduct_cli.py (a plain
+    """Real, live HPC failure (2026-08-10): run_eikonal_cli.py (a plain
     standalone CLI, not a Snakemake rule with automatic output-dir
     creation) crashed with RasterioIOError writing waterdepth_*.tif because
     results/ had never been created for that tile."""

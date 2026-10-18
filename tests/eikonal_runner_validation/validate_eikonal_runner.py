@@ -1,6 +1,6 @@
-"""End-to-end smoke test for `aqueduct_runner.run_aqueduct_python` - the
-shared function BOTH real production entry points (scripts/run_aqueduct.py,
-the Snakemake rule, and scripts/run_aqueduct_cli.py, the standalone HPC
+"""End-to-end smoke test for `eikonal_runner.run_eikonal_python` - the
+shared function BOTH real production entry points (scripts/run_eikonal.py,
+the Snakemake rule, and scripts/run_eikonal_cli.py, the standalone HPC
 CLI) call, and which had zero tests of its own before this (per this
 session's own eikonal-pipeline test-coverage stocktake).
 
@@ -13,7 +13,7 @@ production entry point" check equivalent to the SFINCS pipeline's own
 `sfincs_synthetic_end_to_end` test.
 
 Usage:
-    python validate_aqueduct_runner.py
+    python validate_eikonal_runner.py
 """
 
 import shutil
@@ -30,7 +30,7 @@ from shapely.geometry import Point
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from aqueduct_runner import run_aqueduct_python  # noqa: E402
+from eikonal_runner import run_eikonal_python  # noqa: E402
 from rasters import decode_waterdepth_cm, encode_dem_cm, encode_friction_int16, encode_waterlevel_cm  # noqa: E402
 
 
@@ -44,9 +44,9 @@ def _write_int16_raster(path: Path, encoded: np.ndarray, transform: Affine, noda
         dst.write(encoded.astype(np.int16), 1)
 
 
-def test_run_aqueduct_python_end_to_end_on_synthetic_tile() -> None:
-    print("=== run_aqueduct_python: full synthetic tile, real on-disk encoding conventions ===")
-    tmpdir = Path(tempfile.mkdtemp(prefix="aqueduct_runner_test_"))
+def test_run_eikonal_python_end_to_end_on_synthetic_tile() -> None:
+    print("=== run_eikonal_python: full synthetic tile, real on-disk encoding conventions ===")
+    tmpdir = Path(tempfile.mkdtemp(prefix="eikonal_runner_test_"))
     try:
         m, n = 10, 12
         transform = Affine(0.0003, 0, 10.0, 0, -0.0003, 50.0)
@@ -75,14 +75,14 @@ def test_run_aqueduct_python_end_to_end_on_synthetic_tile() -> None:
 
         output_path = tmpdir / "waterdepth_RP100_SLR_0.tif"
 
-        diagnostics = run_aqueduct_python(
+        diagnostics = run_eikonal_python(
             dem_path, mask_path, friction_path, output_path,
             resolution=30.0, k=5, variable="SLR_0",
             boundaries_path=boundaries_path,
             ocean_code=1, river_code=None,
         )
 
-        assert output_path.exists(), "run_aqueduct_python did not write an output raster"
+        assert output_path.exists(), "run_eikonal_python did not write an output raster"
         assert diagnostics["obstacle_coupling"] is False
 
         with rasterio.open(output_path) as src:
@@ -95,20 +95,20 @@ def test_run_aqueduct_python_end_to_end_on_synthetic_tile() -> None:
 
         print(f"  wrote {output_path}: {int((waterdepth > 0).sum())} flooded cell(s) of {waterdepth.size}, "
               f"max depth {finite.max():.3f} m")
-        print("PASS: run_aqueduct_python completed end to end with a decodable, bounded, plausible result")
+        print("PASS: run_eikonal_python completed end to end with a decodable, bounded, plausible result")
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
     print()
 
 
-def test_run_aqueduct_python_friction_scale_factor_is_applied() -> None:
+def test_run_eikonal_python_friction_scale_factor_is_applied() -> None:
     """`friction_scale_factor` (calibration-sweep knob, default 1.0 no-op) -
     a value > 1.0 makes propagation more expensive, so a station that
     reaches inland at factor=1.0 should flood fewer (or equal) cells at a
     much higher factor - a real, directional sanity check that the
     multiplier is actually wired into the solve, not silently dropped."""
-    print("=== run_aqueduct_python: friction_scale_factor actually changes the result ===")
-    tmpdir = Path(tempfile.mkdtemp(prefix="aqueduct_runner_scale_test_"))
+    print("=== run_eikonal_python: friction_scale_factor actually changes the result ===")
+    tmpdir = Path(tempfile.mkdtemp(prefix="eikonal_runner_scale_test_"))
     try:
         # A long, gently-rising-inland domain (not a small flat one) - numerically
         # confirmed (see conversation) to give friction a real, measurable effect on
@@ -138,7 +138,7 @@ def test_run_aqueduct_python_friction_scale_factor_is_applied() -> None:
 
         def run(scale_factor: float) -> np.ndarray:
             out_path = tmpdir / f"waterdepth_scale_{scale_factor}.tif"
-            run_aqueduct_python(
+            run_eikonal_python(
                 dem_path, mask_path, friction_path, out_path,
                 resolution=30.0, k=5, variable="SLR_0",
                 boundaries_path=boundaries_path, ocean_code=1,
@@ -167,9 +167,9 @@ def test_run_aqueduct_python_friction_scale_factor_is_applied() -> None:
 
 
 def main() -> None:
-    test_run_aqueduct_python_end_to_end_on_synthetic_tile()
-    test_run_aqueduct_python_friction_scale_factor_is_applied()
-    print("All aqueduct_runner.py validation checks passed.")
+    test_run_eikonal_python_end_to_end_on_synthetic_tile()
+    test_run_eikonal_python_friction_scale_factor_is_applied()
+    print("All eikonal_runner.py validation checks passed.")
 
 
 if __name__ == "__main__":

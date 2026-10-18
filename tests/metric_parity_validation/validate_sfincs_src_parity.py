@@ -8,7 +8,7 @@ copies of a few src/ helpers. This test pins them to the originals so they canno
   `src/validation.confusion_counts` / `metrics_from_counts` (the SFINCS copy reports the hit
   rate as `HT`, src as `HR`; it omits `tn`/`EB`/`EB_ratio`).
 - `sfincs_tiles/calibration_paths.decode_waterdepth_cm` (path -> NaN for nodata) vs
-  `src/rasters.decode_waterdepth_cm` (array -> `AQUEDUCT_NODATA` for nodata).
+  `src/rasters.decode_waterdepth_cm` (array -> `EIKONAL_NODATA` for nodata).
 - `sfincs_tiles/retry_io.retry_transient_io` vs `src/config_utils.retry_transient_io` (the
   SFINCS copy catches plain `OSError`; src catches a curated tuple that includes it).
 
@@ -32,7 +32,7 @@ import flood_agreement as sf_agree  # noqa: E402
 import rasters  # noqa: E402
 import retry_io as sf_retry  # noqa: E402
 import validation as src_val  # noqa: E402
-from merge import AQUEDUCT_NODATA  # noqa: E402
+from merge import EIKONAL_NODATA  # noqa: E402
 
 
 def _same(a: float, b: float) -> bool:
@@ -71,9 +71,9 @@ def test_waterdepth_decoding_matches() -> None:
         sf_depth = sf_paths.decode_waterdepth_cm(p)[0]
     src_depth = rasters.decode_waterdepth_cm(enc)
     nodata = enc == rasters.WATERDEPTH_NODATA_INT16
-    assert np.isnan(sf_depth[nodata]).all() and (src_depth[nodata] == AQUEDUCT_NODATA).all()
+    assert np.isnan(sf_depth[nodata]).all() and (src_depth[nodata] == EIKONAL_NODATA).all()
     assert np.array_equal(sf_depth[~nodata], src_depth[~nodata])
-    print("PASS: waterdepth decoding identical (nodata: NaN vs AQUEDUCT_NODATA, both non-wet)")
+    print("PASS: waterdepth decoding identical (nodata: NaN vs EIKONAL_NODATA, both non-wet)")
 
 
 def test_retry_semantics_match() -> None:

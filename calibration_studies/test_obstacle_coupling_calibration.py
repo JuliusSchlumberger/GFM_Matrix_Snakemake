@@ -7,7 +7,7 @@ dry-check needed here).
 `load_tile()` matches test_sweep_budget_calibration.py's own conventions:
 current-machine `--config`-driven paths, `knn`/`friction_scale_factor` from
 config.yml, friction scaled in the decode->scale->floor order
-`aqueduct_runner.py` actually uses. `BLOCK_FRICTION` matches production's
+`eikonal_runner.py` actually uses. `BLOCK_FRICTION` matches production's
 real `flood_model.OBSTACLE_BLOCK_FRICTION` (9999.0 - high enough that the
 cost of any path crossing such a cell is unmistakably prohibitive even in
 float32), and `--epsilon` defaults to the fixed
@@ -156,7 +156,7 @@ def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor
     boundaries = gpd.read_file(inputs / f"boundaries_{scenario}.gpkg")
 
     dem = effective_dem(dem, mask)
-    # decode -> scale -> floor, matching aqueduct_runner.py's own production order exactly
+    # decode -> scale -> floor, matching eikonal_runner.py's own production order exactly
     # (see test_sweep_budget_calibration.py's own load_tile() comment for the full reasoning).
     friction = friction * friction_scale_factor
     friction = np.where(friction > 0, friction, friction.dtype.type(0.001))

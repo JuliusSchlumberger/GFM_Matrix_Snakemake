@@ -2,7 +2,7 @@
 with NO Snakemake DAG/dependency check at all - the simulation-side
 counterpart to generate_hpc_preprocess_job.py.
 
-`rule generate_aqueduct_jobs` (hpc_dispatch.smk) is gated on `input:
+`rule generate_eikonal_jobs` (hpc_dispatch.smk) is gated on `input:
 _PREPROCESS_OUTPUTS` - every preprocessing output across the WHOLE domain
 (~2578 tiles x ~45 scenarios each) - so Snakemake has to verify that entire
 dependency list before this rule can even start, which is genuinely slow
@@ -15,7 +15,7 @@ concurrent nodes from 40 to 20) does not need to re-pay that cost every
 time. This script computes the exact same (wave, batch_id, tile_ids)
 partition hpc_dispatch.smk does, directly from the tile grid, and
 calls the SAME generate_wave_dispatch() function
-scripts/generate_aqueduct_jobs.py's Snakemake path uses - one implementation,
+scripts/generate_eikonal_jobs.py's Snakemake path uses - one implementation,
 two entry points, so they can't drift apart.
 
 This does NOT verify preprocessing is actually complete (unlike the
@@ -35,7 +35,7 @@ read specifically must use the local view.
 tile's results/ dir once to find which (rp, slr) scenarios are still
 missing, then re-batches ONLY that remaining work - flat (tile, rp, slr)
 items, not whole tiles - evenly across the full hpc.n_nodes budget again
-(scripts/generate_aqueduct_jobs.py's generate_resume_dispatch). This is for
+(scripts/generate_eikonal_jobs.py's generate_resume_dispatch). This is for
 rebalancing a wave whose ORIGINAL batches finished their own (uneven) tile
 lists at different times and went idle one by one, silently shrinking
 effective parallelism (found live 2026-08-11: 5 of wave 0's 17 small
@@ -49,7 +49,7 @@ from the ORIGINAL dispatch for the same wave(s) first** (e.g. `scancel
 <jobids>` from `squeue`). The remaining-work scan is a snapshot; if the old
 batches keep running alongside newly-submitted resume batches, both can
 pick up the same still-incomplete item and redo it concurrently for as long
-as both stay alive - run_aqueduct_cli.py's own idempotency check
+as both stay alive - run_eikonal_cli.py's own idempotency check
 (_output_already_done) only prevents redoing work that has ALREADY finished
 and been written, not work still in flight in another job.
 
@@ -68,7 +68,7 @@ import geopandas as gpd
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
-from generate_aqueduct_jobs import generate_resume_dispatch, generate_wave_dispatch  # noqa: E402
+from generate_eikonal_jobs import generate_resume_dispatch, generate_wave_dispatch  # noqa: E402
 
 
 def _resolve_wave_tier(hop: int, wave_tiers: list[dict]) -> dict:

@@ -17,7 +17,7 @@
 #
 # Fully isolated from BOTH production AND the sibling ssp245 run (own
 # model_outputs -> own preprocessing_inputs_dir by default, see
-# run_aqueduct_cli.py's `preprocessing_inputs_dir or model_outputs`
+# run_eikonal_cli.py's `preprocessing_inputs_dir or model_outputs`
 # fallback - own WL_scenarios, own merged_results/figures) - built fresh
 # rather than reusing any existing production boundary-condition data, per
 # explicit user decision, even though ssp245 happens to be production's

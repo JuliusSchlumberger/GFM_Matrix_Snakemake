@@ -5,7 +5,7 @@ CHUNKS, not individual scenario/adaptation tasks, are the partitioning unit).
 
 The actual generation logic lives in `generate_exposure_dispatch()`, shared
 by two entry points:
-  - `main()` below (`python generate_exposure_jobs.py`) - standalone use,
+  - `main()` below (`python generate_hpc_exposure_jobs.py`) - standalone use,
     e.g. regenerating/resuming the exposure dispatch after postprocessing
     has already run on its own. Discovers chunk_ids by globbing real
     flood_fraction files (same filter compute_exposure_analysis.py's own
@@ -51,7 +51,7 @@ mount the CURRENT machine sees) uses the local config, not the Linux one,
 so this works correctly regardless of which machine generates the scripts.
 
 Usage:
-    python generate_exposure_jobs.py [--config path/to/config.yml]
+    python generate_hpc_exposure_jobs.py [--config path/to/config.yml]
     bash <printed submit_exposure_analysis.sh path>
 """
 

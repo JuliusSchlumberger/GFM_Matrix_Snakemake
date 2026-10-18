@@ -1,7 +1,7 @@
 """Run the Snakemake DAG, automatically splitting any tile that runs out of
-memory in Aqueduct into two smaller, overlapping sub-tiles and retrying.
+memory in the eikonal solve into two smaller, overlapping sub-tiles and retrying.
 
-Aqueduct's OOM handling (see src/aqueduct_runner.py) never fails the
+The eikonal runner's OOM handling (see src/eikonal_runner.py) never fails the
 Snakemake rule itself - a tile that runs out of memory gets marked
 (model_outputs/oom_tiles/{tile_id}.txt) and every scenario for it gets an
 all-nodata placeholder waterdepth raster instead, so `snakemake` always
@@ -31,7 +31,7 @@ the `all` target (or --target) with `--resources mem_mb=<mem_mb>`, matching
 the documented manual invocation.
 
 Usage:
-    python run_pipeline.py \\
+    python run_eikonal_dag.py \\
         [--config snakemake_workflow/config/config.yml] \\
         [--cores 1] \\
         [--mem-mb 8000] \\
@@ -140,7 +140,7 @@ def main() -> None:
             # Without this, any edit to a rule's params:/input:/script body -
             # even a docstring/comment-only change with no behavioural effect -
             # marks every tile that ever used that rule as stale, cascading
-            # into re-running already-completed (expensive) Aqueduct
+            # into re-running already-completed (expensive) eikonal
             # simulations for every downstream job. Trade-off: a genuine
             # rule-logic change now needs its outputs manually deleted/
             # touched to force a rerun - it's no longer auto-detected.

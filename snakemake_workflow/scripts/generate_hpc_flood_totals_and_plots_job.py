@@ -4,7 +4,7 @@ analysis.plot_* steps (run_analysis.py --only-plots --skip-flood-totals),
 on one node.
 
 Why a single node rather than the multi-node phase-barrier dispatch
-generate_hpc_postprocess_job.py/generate_exposure_jobs.py use: both steps
+generate_hpc_postprocess_job.py/generate_hpc_exposure_jobs.py use: both steps
 here are reading many small per-chunk files that already exist (flood
 fraction / population / geogunit chunks, already produced by the completed
 postprocess + exposure-analysis dispatch) - the work is I/O-wait bound, not

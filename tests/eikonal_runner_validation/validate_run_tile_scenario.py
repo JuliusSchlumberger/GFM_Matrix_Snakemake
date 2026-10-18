@@ -1,6 +1,6 @@
-"""Branch coverage for `aqueduct_runner.run_tile_scenario`, the per-tile logic shared by
-both production entry points (snakemake_workflow/scripts/run_aqueduct.py and
-run_aqueduct_cli.py).
+"""Branch coverage for `eikonal_runner.run_tile_scenario`, the per-tile logic shared by
+both production entry points (snakemake_workflow/scripts/run_eikonal.py and
+run_eikonal_cli.py).
 
 Fully synthetic: tiny dem/mask/friction rasters in the real int16 on-disk conventions plus
 boundaries GeoPackages and a tile grid, covering every outcome: hop-0 solve, hop-0 with no
@@ -8,7 +8,7 @@ stations, hop-1 seeded from an overlapping wave-0 tile, OOM pre-marked, and a Me
 during the solve. Also checks that `stage_boundaries=True` cleans up its scratch copy.
 
 Plain assert-based script (this repo's tests/ convention): runs standalone with
-`python tests/aqueduct_runner_validation/validate_run_tile_scenario.py`; pytest collects it.
+`python tests/eikonal_runner_validation/validate_run_tile_scenario.py`; pytest collects it.
 """
 
 import os
@@ -23,8 +23,8 @@ from affine import Affine
 from shapely.geometry import Point, box
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-import aqueduct_runner  # noqa: E402
-from aqueduct_runner import (  # noqa: E402
+import eikonal_runner  # noqa: E402
+from eikonal_runner import (  # noqa: E402
     NO_STATIONS_REASON,
     OOM_PREMARKED_REASON,
     mark_tile_oom,
@@ -122,14 +122,14 @@ def test_all_outcomes() -> None:
         assert (root / "mo" / "skipped_tiles" / f"2_{SCN}.txt").read_text() == OOM_PREMARKED_REASON
         print("PASS: OOM-premarked tile -> nodata placeholder + skip reason")
 
-        original = aqueduct_runner.run_aqueduct_python
+        original = eikonal_runner.run_eikonal_python
         def _oom(*a, **k):
             raise MemoryError
-        aqueduct_runner.run_aqueduct_python = _oom
+        eikonal_runner.run_eikonal_python = _oom
         try:
             res, arr = _run(root, 4)
         finally:
-            aqueduct_runner.run_aqueduct_python = original
+            eikonal_runner.run_eikonal_python = original
         assert res == {"outcome": "oom"}, res
         assert (arr == WATERDEPTH_NODATA_INT16).all()
         assert (root / "mo" / "oom_tiles" / "4.txt").exists(), "MemoryError must mark the tile OOM"

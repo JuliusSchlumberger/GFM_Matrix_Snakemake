@@ -35,7 +35,7 @@ tile's own CSV actually contains, never a hardcoded row count).
 
 load_tile() reads `knn` from `config.yml`'s `simulation.flooding.knn` and
 applies `simulation.flooding.friction_scale_factor` in the same
-decode -> scale -> floor order as `aqueduct_runner.py`
+decode -> scale -> floor order as `eikonal_runner.py`
 (`friction = friction * friction_scale_factor` BEFORE the `friction > 0`
 floor), so results are directly comparable to what production actually
 runs.
@@ -133,7 +133,7 @@ def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor
     boundaries = gpd.read_file(inputs / f"boundaries_{scenario}.gpkg")
 
     dem = effective_dem(dem, mask)
-    # decode -> scale -> floor, matching aqueduct_runner.py's own production order exactly
+    # decode -> scale -> floor, matching eikonal_runner.py's own production order exactly
     # (friction_scale_factor applied BEFORE the zero/negative floor, so a genuinely
     # zero-friction cell always floors to a flat 0.001 regardless of the scale factor,
     # while every real friction value gets scaled first) - see module docstring.

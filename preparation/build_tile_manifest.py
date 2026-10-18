@@ -34,7 +34,7 @@ Intermediate output: one GeoPackage per stage (00_raw_tile_index.gpkg through
 04_tile_grid_final.gpkg) is always written straight into tile_grid.path's own
 directory - not a "debug" extra, lets every intermediate shape be inspected in
 QGIS, not just the final tile_grid.path output. Also writes a 50-bin histogram
-of each final domain's native (1 arcsecond) pixel count - Aqueduct's OOM risk
+of each final domain's native (1 arcsecond) pixel count - the eikonal solver's OOM risk
 is dominated by tile pixel count (see src/tile_split.py's own docstring).
 
 Checkpointed: Phase 3 is by far the most expensive stage (a real global run:
@@ -135,7 +135,7 @@ def _append_checkpoint(checkpoint_path: Path, domains: list[Domain], component_i
 
 def _write_size_histogram(final: gpd.GeoDataFrame, path: Path) -> None:
     """50-bin histogram of each final domain's approximate native (1
-    arcsecond) pixel count - a direct proxy for Aqueduct's OOM risk, which
+    arcsecond) pixel count - a direct proxy for the eikonal solver's OOM risk, which
     is dominated by tile pixel count (see src/tile_split.py's own
     docstring). Log-scale y-axis since domain sizes span orders of
     magnitude.

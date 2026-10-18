@@ -66,7 +66,7 @@ The functions below (build_exposure_tasks/pass1_shares_all_intensities/
 pass2_all_tasks/write_exposure_outputs, driven by the CLI scripts
 scripts/run_exposure_pass1.py, scripts/reduce_exposure_shares.py,
 scripts/run_exposure_pass2.py, scripts/reduce_exposure_write.py, and the HPC
-job generator scripts/generate_exposure_jobs.py) invert that: PARTITION
+job generator scripts/generate_hpc_exposure_jobs.py) invert that: PARTITION
 CHUNKS (not tasks) across SLURM nodes, and within each chunk read do EVERY
 task's contribution in one pass, hoisting each design-intensity's `apf`
 (and each task's `cap`/`redirected`/`g`) out of the per-key loop so it's

@@ -20,7 +20,7 @@ whatever tile_grid.path that run just wrote.
 Optional switch --mark-no-stations: after the production simulation, also
 write domains_final_no_stations.png - the same map with the domains that were
 skipped for having no COAST-RP water level station within their search box
-(the simulation's skipped_tiles/ markers, aqueduct_runner.NO_STATIONS_REASON)
+(the simulation's skipped_tiles/ markers, eikonal_runner.NO_STATIONS_REASON)
 drawn on top in light red.
 
 Usage (standalone - e.g. to refresh domains_final.png without re-running
@@ -63,7 +63,7 @@ def no_station_tile_ids(skipped_dir: Path) -> set[int]:
     skipped run; the reason is the same for all scenarios of a tile, so one
     marker per tile is read)."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-    from aqueduct_runner import NO_STATIONS_REASON
+    from eikonal_runner import NO_STATIONS_REASON
 
     first: dict[str, Path] = {}
     for f in sorted(Path(skipped_dir).glob("*.txt")):

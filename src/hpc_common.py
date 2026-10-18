@@ -1,8 +1,8 @@
 """Shared sbatch-script building blocks for the HPC/SLURM job generators.
 
 Each function returns lines (or a single line) of bash to splice into a generated sbatch
-script. They were copy-pasted, identically, into generate_aqueduct_jobs.py,
-generate_exposure_jobs.py, generate_hpc_flood_totals_and_plots_job.py,
+script. They were copy-pasted, identically, into generate_eikonal_jobs.py,
+generate_hpc_exposure_jobs.py, generate_hpc_flood_totals_and_plots_job.py,
 generate_hpc_postprocess_job.py and generate_hpc_preprocess_job.py (in
 snakemake_workflow/scripts/); this is now the single definition, so the generated scripts
 cannot drift apart. Pure string builders: no I/O.

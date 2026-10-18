@@ -1,9 +1,9 @@
 """Run the flood model for a single tile, return period and SLR scenario.
 
-Runs `flood_model.flood_depth_dense` in-process (`run_aqueduct_python`,
+Runs `flood_model.flood_depth_dense` in-process (`run_eikonal_python`,
 round-based solve capped at `simulation.flooding.max_rounds`). See
-`aqueduct_runner.run_tile_scenario` for the per-tile logic shared with
-`run_aqueduct_cli.py` (the HPC/sbatch entry point); this script only adds the
+`eikonal_runner.run_tile_scenario` for the per-tile logic shared with
+`run_eikonal_cli.py` (the HPC/sbatch entry point); this script only adds the
 Snakemake wiring, its run-timing record and the per-tile progress line.
 
 Wave-based hinterland forcing (2026-08): a tile's own `hop_distance`
@@ -12,7 +12,7 @@ forcing paths is used - see the `hop_distance` branch in `run_tile_scenario` and
 `rules/simulation.smk`'s own rule docstring for the full picture. Locally,
 Snakemake's own DAG guarantees a hop>=1 tile's lower-hop neighbours are
 already simulated before this script runs for it; on HPC, the equivalent
-guarantee comes from `generate_aqueduct_jobs`'s per-wave SLURM dependency
+guarantee comes from `generate_eikonal_jobs`'s per-wave SLURM dependency
 barriers (see `hpc.md`) - either way, a genuinely not-yet-computed
 neighbour is treated exactly like "no flooding there" (same real-zero
 fallback as truly having no upstream flooding).
@@ -24,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from aqueduct_runner import (  # noqa: E402
+from eikonal_runner import (  # noqa: E402
     log_run_timing,
     print_simulation_progress,
     run_tile_scenario,
