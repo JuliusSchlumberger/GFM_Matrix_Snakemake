@@ -21,10 +21,6 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 from config_utils import load_config, return_period_years  # noqa: E402
 import validation as v  # noqa: E402
 
-# Older result locations, read when the standalone_metrics_path file is absent.
-SF_BAY_RESULTS = Path(__file__).resolve().parent / "sf_bay_results.csv"
-_OLD_FZ3_RESCORE = "england_fz3_rescore.csv"  # under validation.output_dir
-_OLD_FZ2_BAND = "GBR/england_fz2_band_result.csv"
 FZ3_KEY = "england_ea_floodzone3_sea"
 FZ2_KEY = "england_ea_floodzone2_sea"
 FZ2_BAND = "RP100-RP1000"
@@ -58,25 +54,25 @@ KASMALKAR_SF_BAY = {
 
 
 def england_fz3_results(validation_dir: Path, slr: str) -> pd.DataFrame:
-    """rescore_england_fz3.py's rows, RP ascending: its per-RP metrics CSVs, else the older single CSV."""
+    """rescore_england_fz3.py's rows from its per-RP metrics CSVs, RP ascending."""
     paths = [p for p in (Path(validation_dir) / "GBR").glob(f"metrics_GBR_{FZ3_KEY}_RP*_{slr}.csv")
              if "-" not in p.stem]
     if not paths:
-        return pd.read_csv(Path(validation_dir) / _OLD_FZ3_RESCORE)
+        raise FileNotFoundError(
+            f"no {Path(validation_dir) / 'GBR'}/metrics_GBR_{FZ3_KEY}_RP*_{slr}.csv; run validation/rescore_england_fz3.py"
+        )
     df = pd.concat([pd.read_csv(p) for p in paths], ignore_index=True)
     return df.sort_values("return_period", key=lambda s: s.map(return_period_years)).reset_index(drop=True)
 
 
 def england_fz2_band_path(validation_dir: Path, slr: str) -> Path:
-    """validate_england_fz2_band.py's result CSV: the metrics_* file, else the older name."""
-    new = v.standalone_metrics_path(validation_dir, "GBR", FZ2_KEY, FZ2_BAND, slr)
-    return new if new.exists() else Path(validation_dir) / _OLD_FZ2_BAND
+    """validate_england_fz2_band.py's result CSV."""
+    return v.standalone_metrics_path(validation_dir, "GBR", FZ2_KEY, FZ2_BAND, slr)
 
 
 def sf_bay_results_path(validation_dir: Path, slr: str) -> Path:
-    """validate_sf_bay.py's metrics CSV, else the older validation/sf_bay_results.csv copy."""
-    new = v.standalone_metrics_path(validation_dir, "USA", "sf_bay", "RP100", slr)
-    return new if new.exists() else SF_BAY_RESULTS
+    """validate_sf_bay.py's metrics CSV."""
+    return v.standalone_metrics_path(validation_dir, "USA", "sf_bay", "RP100", slr)
 
 
 def _csi_rows(gbr_metrics: Path, can_metrics: Path, fz3_df: pd.DataFrame, england_fz2_band: Path) -> list[dict]:

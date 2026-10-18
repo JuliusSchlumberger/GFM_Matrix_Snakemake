@@ -136,7 +136,7 @@ def _confusion_metrics(model_wet: np.ndarray, bench_wet: np.ndarray, domain: np.
     fn = float((~model_wet & bench_wet & d).sum())
     tn = float((~model_wet & ~bench_wet & d).sum())
     m = v.metrics_from_counts(tp, fp, fn, tn)
-    # Output column is HT (hit rate), as in sf_bay_results.csv; validation.py calls it HR.
+    # Output column is HT (hit rate); validation.py calls it HR.
     return {"n_domain_px": int(d.sum()), "tp": tp, "fp": fp, "fn": fn, "tn": tn,
             "HT": m["HR"], "FAR": m["FAR"], "CSI": m["CSI"], "bias": m["bias"]}
 
