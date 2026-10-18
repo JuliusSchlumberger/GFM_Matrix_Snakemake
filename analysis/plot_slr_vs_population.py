@@ -328,19 +328,19 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    viz = cfg.get("visualization", {})
-    sv = viz.get("slr_vs_population", {})
-    ep = viz.get("extended_pathways", {})
-    ssps = list(sv.get("ssps", ["SSP2", "SSP5"]))
-    n_top = int(sv.get("waterfall_n", 20))
-    min_change = float(sv.get("scatter_min_change", 1e5))
-    n_labels = int(sv.get("scatter_labels", 25))
-    to_year = int(ep.get("to_year", 2150))
+    viz = cfg["visualization"]
+    sv = viz["slr_vs_population"]
+    ep = viz["extended_pathways"]
+    ssps = list(sv["ssps"])
+    n_top = int(sv["waterfall_n"])
+    min_change = float(sv["scatter_min_change"])
+    n_labels = int(sv["scatter_labels"])
+    to_year = int(ep["to_year"])
     variants: dict[str, dict] = ep.get("variants") or {"stabilise": {"mode": "constant"}}
     v0 = next(iter(variants))
-    rcp = viz.get("ssp_rcp_codes", {})
-    dpi = int(viz.get("dpi", 200))
-    out_dir = Path(args.outdir or viz.get("output_dir", f"{cfg['paths']['root']}/figures"))
+    rcp = viz["ssp_rcp_codes"]
+    dpi = int(viz["dpi"])
+    out_dir = Path(args.outdir or viz["output_dir"])
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
     catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])

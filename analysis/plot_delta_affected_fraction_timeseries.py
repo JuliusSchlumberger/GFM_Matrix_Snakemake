@@ -27,8 +27,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import load_config  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-SSP_COLORS_DEFAULT = {"SSP1": "#1f77b4", "SSP2": "#2ca02c", "SSP5": "#d62728"}
-SSP_RCP_CODES_DEFAULT = {"SSP1": 126, "SSP2": 245, "SSP5": 585}
 TRAJECTORY_START_YEAR = 2020
 TRAJECTORY_END_YEAR = 2150  # last year of the AR6 trajectory CSV
 
@@ -106,11 +104,9 @@ def main() -> None:
 
     cfg = load_config(args.config)
     root = Path(cfg["paths"]["root"])
-    viz = cfg.get("visualization", {})
+    viz = cfg["visualization"]
     csv_path = Path(args.csv) if args.csv else root / "deltas_floodmaps" / "delta_flood_extent.csv"
-    traj_path = Path(args.slr_trajectories_csv) if args.slr_trajectories_csv else Path(
-        viz.get("slr_trajectories_csv", root / "processed_inputs" / "slr_trajectories_global_median.csv")
-    )
+    traj_path = Path(args.slr_trajectories_csv) if args.slr_trajectories_csv else Path(viz["slr_trajectories_csv"])
     out_path = Path(args.out) if args.out else root / "deltas_floodmaps" / "figures" / "delta_affected_fraction_timeseries.png"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -121,8 +117,8 @@ def main() -> None:
     print(f"{len(df)} row(s) from {csv_path}")
     print(f"SLR trajectory data: {traj_path} (years {traj_df.index.min()}-{traj_df.index.max()})")
 
-    ssp_colors = viz.get("ssp_colors", SSP_COLORS_DEFAULT)
-    ssp_rcp_codes = viz.get("ssp_rcp_codes", SSP_RCP_CODES_DEFAULT)
+    ssp_colors = viz["ssp_colors"]
+    ssp_rcp_codes = viz["ssp_rcp_codes"]
 
     plot_affected_fraction_timeseries(df, traj_df, ssp_colors, ssp_rcp_codes, out_path)
 

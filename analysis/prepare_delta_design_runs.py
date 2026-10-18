@@ -83,7 +83,7 @@ def main() -> None:
     base = yaml.safe_load(open(args.base_config, encoding="utf-8"))
     cfg = load_config(args.base_config)
     prod = load_config(_CONFIG_DIR / "config.yml")
-    default_rp = float(prod.get("protection", {}).get("default_rp", 5.0))
+    default_rp = float(prod["protection"]["default_rp"])
     catalog = get_data_catalog(_REPO_ROOT / prod["paths"]["hydromt_data_catalog"], root=prod["paths"]["root"])
     flopros = catalog.get_dataframe("flopros_protection_standards")
     rp_by_geogunit = flopros["Coastal"].fillna(flopros["Riverine"]).fillna(default_rp)
@@ -127,7 +127,7 @@ def main() -> None:
                                      "waterlevel_nc_dir": "{root}/deltas_floodmaps/design/WL_scenarios"}
     design["simulation"] = {**base["simulation"], "model_outputs": "{root}/deltas_floodmaps/design/model_outputs"}
     design["postprocessing"] = {**base["postprocessing"], "merged_outputs": "{root}/deltas_floodmaps/design/merged_results"}
-    design["hpc"] = {**base.get("hpc", {}), "jobs_dir": "{root}/deltas_floodmaps/design/model_outputs/hpc_jobs"}
+    design["hpc"] = {**base["hpc"], "jobs_dir": "{root}/deltas_floodmaps/design/model_outputs/hpc_jobs"}
     if "visualization" in base:
         design["visualization"] = {**base["visualization"], "output_dir": "{root}/deltas_floodmaps/design/figures"}
     out_cfg = _CONFIG_DIR / "deltas_design_materialized.yml"

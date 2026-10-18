@@ -69,16 +69,11 @@ def main() -> None:
 
     cfg = load_config(args.config)
 
-    viz = cfg.get("visualization", {})
+    viz = cfg["visualization"]
 
     if args.output is None:
-        args.output = viz.get(
-            "slr_trajectories_csv",
-            f"{cfg['paths']['root']}/processed_inputs/slr_trajectories_global_median.csv",
-        )
-    ssp_rcp_codes: dict[str, int] = viz.get("ssp_rcp_codes", {
-        "SSP1": 126, "SSP2": 245, "SSP5": 585,
-    })
+        args.output = viz["slr_trajectories_csv"]
+    ssp_rcp_codes: dict[str, int] = viz["ssp_rcp_codes"]
     catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
     slr_csv_dir = Path(catalog.get_source("ipcc_ar6_slr_wg1_csv").path)
 

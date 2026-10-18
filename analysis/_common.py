@@ -143,17 +143,17 @@ def load_pathway_setup(args) -> PathwaySetup:
 
     cfg = load_config(args.config)
     viz = cfg["visualization"]
-    tp = viz.get("tipping_points", {})
+    tp = viz["tipping_points"]
     exp_dir = Path(args.expdir)
-    out_dir = Path(args.outdir or viz.get("output_dir", f"{cfg['paths']['root']}/figures"))
+    out_dir = Path(args.outdir or viz["output_dir"])
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
-    countries = args.countries or tp.get("countries", ["VNM", "NLD", "NGA"])
-    default_thr = float(tp.get("eai_threshold", 1_000_000))
+    countries = args.countries or tp["countries"]
+    default_thr = float(tp["eai_threshold"])
     thr_by_iso = {k: float(v) for k, v in (tp.get("per_country_eai_threshold") or {}).items()}
-    to_year = args.to_year or int(tp.get("to_year", LAST_SSP_YEAR))
-    ssps = list(tp.get("ssps", cfg.get("population_growth", {}).get("ssps", ["SSP2", "SSP5"])))
-    designs = list(cfg.get("adaptation", {}).get("slr_intensities", ["SLR_500", "SLR_1000"]))
+    to_year = args.to_year or int(tp["to_year"])
+    ssps = list(tp["ssps"])
+    designs = list(cfg["adaptation"]["slr_intensities"])
 
     traj = load_slr_trajectories(viz["slr_trajectories_csv"])
     ssps = [s for s in ssps if all(f"{s}_{p}" in traj.columns for p in ("p17", "p50", "p83"))]
@@ -162,7 +162,7 @@ def load_pathway_setup(args) -> PathwaySetup:
     repo_root = Path(__file__).resolve().parents[1]
     catalog = get_data_catalog(repo_root / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
     growth_df = load_ssp_growth_factors(Path(catalog.get_source("ssp_population_growth_factors").path))
-    variants = (viz.get("extended_pathways", {}).get("variants") if to_year > LAST_SSP_YEAR else None) \
+    variants = (viz["extended_pathways"].get("variants") if to_year > LAST_SSP_YEAR else None) \
         or {"ssp": {"mode": "constant", "label": "SSP"}}
     return PathwaySetup(
         cfg=cfg, viz=viz, tp=tp, exp_dir=exp_dir, out_dir=out_dir, countries=countries,

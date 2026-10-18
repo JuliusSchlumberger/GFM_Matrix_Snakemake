@@ -351,39 +351,39 @@ class AnalysisContext:
 def load_analysis_context(cfg: dict) -> AnalysisContext:
     """Build the AnalysisContext from config (shared by main() and the HPC steps)."""
     bc = cfg["boundary_conditions"]
-    adapt_cfg = cfg.get("adaptation", {})
-    pg_cfg = cfg.get("population_growth", {})
-    prot_cfg = cfg.get("protection", {})
-    viz = cfg.get("visualization", {})
+    adapt_cfg = cfg["adaptation"]
+    pg_cfg = cfg["population_growth"]
+    prot_cfg = cfg["protection"]
+    viz = cfg["visualization"]
 
     return_periods = bc["return_periods"]
     slr_scenarios = merged_slr_scenarios(bc, adapt_cfg)
     slr_mm_sorted = [float(_slr_mm(s)) for s in slr_scenarios]
-    slr_baseline = prot_cfg.get("baseline_waterlevel_name", "SLR_0")
-    slr_intensities = adapt_cfg.get("slr_intensities", [])
-    default_rp = float(prot_cfg.get("default_rp", 5.0))
+    slr_baseline = prot_cfg["baseline_waterlevel_name"]
+    slr_intensities = adapt_cfg["slr_intensities"]
+    default_rp = float(prot_cfg["default_rp"])
     sorted_rps = sorted(return_periods)
 
-    ssps = pg_cfg.get("ssps", ["SSP1", "SSP2", "SSP3", "SSP5"])
-    output_years = [int(y) for y in pg_cfg.get("output_years", [2030, 2050, 2100])]
+    ssps = pg_cfg["ssps"]
+    output_years = [int(y) for y in pg_cfg["output_years"]]
 
     # Uniform (not per-country) growth axis, shared with the burning-ember y-axis.
-    gr_cfg = viz.get("growth_rates", {})
+    gr_cfg = viz["growth_rates"]
     growth_rates = np.arange(
-        float(gr_cfg.get("min", -0.5)),
-        float(gr_cfg.get("max", 1.5)) + float(gr_cfg.get("step", 0.1)) / 2,
-        float(gr_cfg.get("step", 0.1)),
+        float(gr_cfg["min"]),
+        float(gr_cfg["max"]) + float(gr_cfg["step"]) / 2,
+        float(gr_cfg["step"]),
     )
 
     # EAI is assumed linear in SLR between modelled steps.
-    si_cfg = viz.get("slr_interp", {})
+    si_cfg = viz["slr_interp"]
     slr_interp_mm = np.linspace(
-        float(si_cfg.get("min_mm", 0)),
-        float(si_cfg.get("max_mm", max(slr_mm_sorted))),
-        int(si_cfg.get("n_points", 100)),
+        float(si_cfg["min_mm"]),
+        float(si_cfg["max_mm"]),
+        int(si_cfg["n_points"]),
     )
 
-    traj_path = viz.get("slr_trajectories_csv", "")
+    traj_path = viz["slr_trajectories_csv"]
     slr_traj = None
     if traj_path and Path(traj_path).exists():
         traj_full = load_slr_trajectories(traj_path)
@@ -711,7 +711,7 @@ def main() -> None:
     rp_applied, iso_lookup = ctx.rp_applied, ctx.iso_lookup
     chunks_dir, flood_frac_dir = ctx.chunks_dir, ctx.flood_frac_dir
     if slr_traj is None:
-        traj_path = cfg.get("visualization", {}).get("slr_trajectories_csv", "")
+        traj_path = cfg["visualization"]["slr_trajectories_csv"]
         print(f"  WARNING: SLR trajectories not found at {traj_path}; File 3 (*_ssp.csv) will be skipped.")
     if growth_df is None:
         print("  WARNING: SSP growth factors not found; File 3 (*_ssp.csv) will be skipped.")
@@ -829,7 +829,7 @@ def main() -> None:
         for g_pct in growth_pct_labels
     ]
     n_tasks = len(ssp_tasks) + len(growth_tasks)
-    budget_gb = float(cfg.get("analysis", {}).get("avoid_worker_memory_budget_gb", 8))
+    budget_gb = float(cfg["analysis"]["avoid_worker_memory_budget_gb"])
     n_workers = max(1, min(os.cpu_count() or 1, max(n_tasks, 1)))
     print(
         f"\nComputing AVOID / PROTECT + AVOID exposure: {len(avoid_units)} (variant, slr_intensity) units x "

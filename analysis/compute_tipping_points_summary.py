@@ -75,7 +75,7 @@ def main() -> None:
     exp_dir, out_dir, countries, to_year, years = st.exp_dir, st.out_dir, st.countries, st.to_year, st.years
     default_thr, thr_by_iso, variants = st.default_thr, st.thr_by_iso, st.variants
     ssps, designs = st.ssps, st.designs
-    strategies = [s for s in st.tp.get("strategies", ["baseline"] + MEASURES)
+    strategies = [s for s in st.tp["strategies"]
                   if s == "baseline" or s in MEASURES]
     slr_paths = {(s, p): slr_pathway(st.traj, f"{s}_{p}", years) for s in ssps for p in ("p17", "p50", "p83")}
 

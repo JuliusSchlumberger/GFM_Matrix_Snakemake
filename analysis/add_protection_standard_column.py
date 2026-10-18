@@ -68,7 +68,7 @@ def main() -> None:
     cfg = load_config(args.config)
     root = Path(cfg["paths"]["root"])
     csv_path = Path(args.csv) if args.csv else root / "deltas_floodmaps" / "delta_flood_extent.csv"
-    default_rp = float(cfg.get("protection", {}).get("default_rp", 5.0))
+    default_rp = float(cfg["protection"]["default_rp"])
 
     df = pd.read_csv(csv_path)
     print(f"{len(df)} row(s) from {csv_path}")

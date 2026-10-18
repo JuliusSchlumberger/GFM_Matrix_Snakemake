@@ -32,7 +32,7 @@ _GLOBAL_LAT_RANGE = (-75.0, 85.0)
 
 def _geo109_iso_lookup(catalog, cfg: dict, viz: dict) -> dict[int, str]:
     """Load the geo109->ISO lookup from plot_world_map.py's cache, else build and cache it."""
-    out_dir = Path(viz.get("output_dir", f"{cfg['paths']['root']}/figures")) / "world_maps"
+    out_dir = Path(viz["output_dir"]) / "world_maps"
     cache_path = out_dir / "geo109_iso_lookup.csv"
     if cache_path.exists():
         print(f"  Reusing cached geo109->ISO lookup: {cache_path}")
@@ -44,7 +44,7 @@ def _geo109_iso_lookup(catalog, cfg: dict, viz: dict) -> dict[int, str]:
     geo107_nc = Path(catalog.get_source("geogunit_protection_units").path)
     flopros_xlsx = Path(catalog.get_source("flopros_protection_standards").path)
     lookup = build_geo109_to_iso_lookup(
-        geo109_nc, geo107_nc, flopros_xlsx, subsample=int(viz.get("geo109_subsample", 10)),
+        geo109_nc, geo107_nc, flopros_xlsx, subsample=int(viz["geo109_subsample"]),
     )
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
     pd.DataFrame({"ISO": lookup}).to_csv(cache_path)
@@ -124,12 +124,10 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    viz = cfg.get("visualization", {})
+    viz = cfg["visualization"]
 
-    out_path = Path(args.output or viz.get(
-        "country_population_csv", f"{cfg['paths']['root']}/processed_inputs/country_population_2020.csv",
-    ))
-    row_band_deg = float(viz.get("population_extract_row_band_deg", 5.0))
+    out_path = Path(args.output or viz["country_population_csv"])
+    row_band_deg = float(viz["population_extract_row_band_deg"])
 
     catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
     geo109_to_iso = _geo109_iso_lookup(catalog, cfg, viz)

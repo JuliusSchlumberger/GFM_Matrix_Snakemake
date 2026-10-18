@@ -24,7 +24,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import load_config, retry_transient_io  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-SSP_RCP_CODES_DEFAULT = {"SSP1": 126, "SSP2": 245, "SSP5": 585}
 
 
 def year_for_slr(traj_df: pd.DataFrame, ssp_scenario: str, target_mm: float, ssp_rcp_codes: dict[str, int]) -> float:
@@ -67,11 +66,9 @@ def main() -> None:
     cfg = load_config(args.config)
     root = Path(cfg["paths"]["root"])
     csv_path = Path(args.csv) if args.csv else root / "deltas_floodmaps" / "delta_flood_extent.csv"
-    viz = cfg.get("visualization", {})
-    traj_path = Path(args.slr_trajectories_csv) if args.slr_trajectories_csv else Path(
-        viz.get("slr_trajectories_csv", root / "processed_inputs" / "slr_trajectories_global_median.csv")
-    )
-    ssp_rcp_codes = viz.get("ssp_rcp_codes", SSP_RCP_CODES_DEFAULT)
+    viz = cfg["visualization"]
+    traj_path = Path(args.slr_trajectories_csv) if args.slr_trajectories_csv else Path(viz["slr_trajectories_csv"])
+    ssp_rcp_codes = viz["ssp_rcp_codes"]
 
     df = pd.read_csv(csv_path)
     traj_df = pd.read_csv(traj_path, index_col="year")

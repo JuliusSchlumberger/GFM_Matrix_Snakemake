@@ -56,7 +56,7 @@ def main() -> None:
     print("EAI-vs-SLR (discrete, simulated points):")
     print(eai_df.to_string())
 
-    traj_path = viz.get("slr_trajectories_csv", "")
+    traj_path = viz["slr_trajectories_csv"]
     traj_full = load_slr_trajectories(traj_path)
     p50_cols = {c: c.replace("_p50", "") for c in traj_full.columns if c.endswith("_p50")}
     slr_traj = traj_full[list(p50_cols)].rename(columns=p50_cols)
@@ -72,8 +72,8 @@ def main() -> None:
     out_dir = Path(args.outdir) if args.outdir else Path(viz["output_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    ssp_colors = viz.get("ssp_colors", {})
-    ssp_rcp_codes = viz.get("ssp_rcp_codes", {})
+    ssp_colors = viz["ssp_colors"]
+    ssp_rcp_codes = viz["ssp_rcp_codes"]
     ssps_avail = [s for s in ssps if any(c.startswith(f"EAI_{s}_") for c in resolved.columns)]
 
     fig, axes = plt.subplots(1, len(ssps_avail), figsize=(4 * len(ssps_avail) + 2, 5), sharey=True)

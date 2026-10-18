@@ -116,7 +116,7 @@ def plot_top_countries_ember(
     fig.subplots_adjust(left=0.07, right=0.88, bottom=0.08, top=0.95, wspace=0.08, hspace=0.25)
     im = None
     for ax, iso in zip(axes.flat, top):
-        im = draw_ember_panel(ax, matrices[iso], slr_mm, np.array(growth_fracs), cmap=viz.get("cmap_ember", "YlOrRd"),
+        im = draw_ember_panel(ax, matrices[iso], slr_mm, np.array(growth_fracs), cmap=viz["cmap_ember"],
                               vmax=vmax, n_contours=10, contour_labels=False, fontsize=fs)
         ax.set_title(iso_to_name.get(iso, iso), fontsize=fs + 1)
         if paths:
@@ -140,7 +140,7 @@ def plot_top_countries_ember(
     cb.ax.yaxis.set_major_formatter(plt.FuncFormatter(
         lambda v, _: f"{v / 1e6:g} M" if v >= 1e6 else (f"{v / 1e3:g} k" if v >= 1e3 else f"{v:g}")))
     cb.set_label("Expected annual impact (people)", fontsize=fs + 1)
-    fig.savefig(out_path, dpi=int(viz.get("dpi", 200)), bbox_inches="tight")
+    fig.savefig(out_path, dpi=int(viz["dpi"]), bbox_inches="tight")
     plt.close(fig)
     print(f"  Written: {out_path.name}")
 
@@ -176,7 +176,7 @@ def plot_country_set_ember(
     im = None
     for ax, iso in zip(axes.flat, countries):
         m = build_growth_matrix_from_grid(eai_grid.loc[[iso]], slr_mm, growth_fracs)
-        im = draw_ember_panel(ax, m, slr_mm, np.array(growth_fracs), cmap=viz.get("cmap_ember", "YlOrRd"),
+        im = draw_ember_panel(ax, m, slr_mm, np.array(growth_fracs), cmap=viz["cmap_ember"],
                               vmax=vmax, n_contours=10, contour_labels=False, fontsize=fs)
         y_lo, y_hi = min(growth_fracs) * 100.0, max(growth_fracs) * 100.0
         for ssp, x in slr_paths.items():
@@ -212,7 +212,7 @@ def plot_country_set_ember(
     cb.ax.yaxis.set_major_formatter(plt.FuncFormatter(
         lambda v, _: f"{v / 1e6:g} M" if v >= 1e6 else (f"{v / 1e3:g} k" if v >= 1e3 else f"{v:g}")))
     cb.set_label("Expected annual impact, no adaptation (people)", fontsize=fs + 1)
-    fig.savefig(out_path, dpi=int(viz.get("dpi", 200)), bbox_inches="tight")
+    fig.savefig(out_path, dpi=int(viz["dpi"]), bbox_inches="tight")
     plt.close(fig)
     print(f"  Written: {out_path.name}")
 
@@ -239,7 +239,7 @@ def plot_country_selection_ember(
     fig.subplots_adjust(left=0.07, right=0.88, bottom=0.08, top=0.95, wspace=0.12, hspace=0.25)
     im = None
     for ax, iso in zip(axes.flat, countries):
-        im = draw_ember_panel(ax, matrices[iso], slr_mm, np.array(growth_fracs), cmap=viz.get("cmap_ember", "YlOrRd"),
+        im = draw_ember_panel(ax, matrices[iso], slr_mm, np.array(growth_fracs), cmap=viz["cmap_ember"],
                               vmax=vmax, n_contours=n_contours, contour_labels=True, fontsize=fs, label_fontsize=11)
         ax.set_title(iso_to_name.get(iso, iso), fontsize=fs + 1)
     for ax in axes.flat[len(countries):]:
@@ -255,7 +255,7 @@ def plot_country_selection_ember(
     cb.ax.yaxis.set_major_formatter(plt.FuncFormatter(
         lambda v, _: f"{v / 1e6:g} M" if v >= 1e6 else (f"{v / 1e3:g} k" if v >= 1e3 else f"{v:g}")))
     cb.set_label("Expected annual impact (people)", fontsize=fs + 1)
-    fig.savefig(out_path, dpi=int(viz.get("dpi", 200)), bbox_inches="tight")
+    fig.savefig(out_path, dpi=int(viz["dpi"]), bbox_inches="tight")
     plt.close(fig)
     print(f"  Written: {out_path.name}")
 
@@ -268,10 +268,10 @@ def _make_ember(
         matrix, slr_mm, growth_rates, title=title,
         slr_trajectories=slr_traj, ssp_growth=ssp_growth_series,
         slr_uncertainty=slr_uncertainty,
-        cmap=viz.get("cmap_ember", "YlOrRd"), vmax=vmax, dpi=dpi,
-        figsize=tuple(viz.get("ember_figsize", (8, 6))),
+        cmap=viz["cmap_ember"], vmax=vmax, dpi=dpi,
+        figsize=tuple(viz["ember_figsize"]),
         ssp_colors=viz.get("ssp_colors"), highlight_years=highlight_years,
-        n_contours=int(viz.get("n_ember_contours", 6)),
+        n_contours=int(viz["n_ember_contours"]),
     )
     fig.savefig(outpath, bbox_inches="tight")
     plt.close(fig)
@@ -287,19 +287,19 @@ def main() -> None:
 
     cfg = load_config(args.config)
 
-    viz = cfg.get("visualization", {})
-    adapt_cfg = cfg.get("adaptation", {})
-    pg_cfg = cfg.get("population_growth", {})
+    viz = cfg["visualization"]
+    adapt_cfg = cfg["adaptation"]
+    pg_cfg = cfg["population_growth"]
 
-    slr_intensities = adapt_cfg.get("slr_intensities", [])
-    ssps = pg_cfg.get("ssps", ["SSP1", "SSP2", "SSP3", "SSP5"])
-    highlight_years = viz.get("highlight_years", [2050, 2100])
+    slr_intensities = adapt_cfg["slr_intensities"]
+    ssps = pg_cfg["ssps"]
+    highlight_years = viz["highlight_years"]
 
     exp_dir = Path(args.expdir)
-    out_dir = Path(args.outdir or viz.get("output_dir", f"{cfg['paths']['root']}/figures"))
+    out_dir = Path(args.outdir or viz["output_dir"])
 
     # p50 drives the overlay line; p17/p50/p83 the uncertainty subplot.
-    traj_path = viz.get("slr_trajectories_csv", "")
+    traj_path = viz["slr_trajectories_csv"]
     slr_traj = None
     slr_uncertainty: dict[str, pd.DataFrame] = {}
     if traj_path and Path(traj_path).exists():
@@ -317,7 +317,7 @@ def main() -> None:
     xlsx_path = Path(catalog.get_source("ssp_population_growth_factors").path)
     growth_df = load_ssp_growth_factors(xlsx_path) if xlsx_path.exists() else None
 
-    dpi = int(viz.get("dpi", 200))
+    dpi = int(viz["dpi"])
 
     iso_to_name = {v: k for k, v in _build_name_to_iso().items()}
 
@@ -330,42 +330,42 @@ def main() -> None:
             if p.exists():
                 scenario_files[f"{meas}_{slr_int}"] = p
 
-    country_vmax = float(viz.get("country_eai_vmax", 2_000_000.0))
+    country_vmax = float(viz["country_eai_vmax"])
 
-    figs = viz.get("burning_ember_figures", {})
+    figs = viz["burning_ember_figures"]
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
-    top_cfg = viz.get("top_countries_ember", {})
-    if scenario_files["baseline"].exists() and figs.get("top_countries", False):
-        n_top = int(top_cfg.get("n", 12))
+    top_cfg = viz["top_countries_ember"]
+    if scenario_files["baseline"].exists() and figs["top_countries"]:
+        n_top = int(top_cfg["n"])
         plot_top_countries_ember(
             scenario_files["baseline"], iso_to_name, viz, out_dir / f"burning_ember_top{n_top}_baseline.png",
-            n=n_top, ncols=int(top_cfg.get("ncols", 4)), vmax=float(top_cfg.get("vmax", 1e7)),
-            rank_slr_mm=float(top_cfg.get("rank_slr_mm", 1400)),
-            growth_df=growth_df if top_cfg.get("ssp_pathways", True) else None,
+            n=n_top, ncols=int(top_cfg["ncols"]), vmax=float(top_cfg["vmax"]),
+            rank_slr_mm=float(top_cfg["rank_slr_mm"]),
+            growth_df=growth_df if top_cfg["ssp_pathways"] else None,
             slr_traj_full=traj_full if traj_path and Path(traj_path).exists() else None,
-            ssps=ssps, ssp_rcp_codes=viz.get("ssp_rcp_codes", {}),
+            ssps=ssps, ssp_rcp_codes=viz["ssp_rcp_codes"],
         )
     if scenario_files["baseline"].exists():
-        sel_cfg = viz.get("ember_country_selection", {})
-        if sel_cfg.get("countries") and figs.get("selection", False):
+        sel_cfg = viz["ember_country_selection"]
+        if sel_cfg.get("countries") and figs["selection"]:
             plot_country_selection_ember(scenario_files["baseline"], iso_to_name, viz,
                                          out_dir / "burning_ember_selection_baseline.png", sel_cfg["countries"],
-                                         ncols=int(sel_cfg.get("ncols", 4)),
-                                         n_contours=int(sel_cfg.get("n_contours", 5)))
-        set_cfg = viz.get("ember_country_set", {})
-        ext_cfg = viz.get("extended_pathways", {})
-        if (set_cfg.get("countries") and figs.get("country_set", True) and growth_df is not None
+                                         ncols=int(sel_cfg["ncols"]),
+                                         n_contours=int(sel_cfg["n_contours"]))
+        set_cfg = viz["ember_country_set"]
+        ext_cfg = viz["extended_pathways"]
+        if (set_cfg.get("countries") and figs["country_set"] and growth_df is not None
                 and traj_path and Path(traj_path).exists()):
             plot_country_set_ember(
                 scenario_files["baseline"], iso_to_name, viz, out_dir / "burning_ember_country_set_baseline.png",
-                set_cfg["countries"], growth_df, traj_full, list(ext_cfg.get("ssps", ["SSP2", "SSP5"])),
+                set_cfg["countries"], growth_df, traj_full, list(ext_cfg["ssps"]),
                 ext_cfg.get("variants") or {"stabilise": {"mode": "constant"}},
-                to_year=int(ext_cfg.get("to_year", 2150)), ncols=int(set_cfg.get("ncols", 3)),
-                vmax=float(set_cfg.get("vmax", 1e7)), window=set_cfg.get("display"),
-                ssp_rcp_codes=viz.get("ssp_rcp_codes", {}))
+                to_year=int(ext_cfg["to_year"]), ncols=int(set_cfg["ncols"]),
+                vmax=float(set_cfg["vmax"]), window=set_cfg.get("display"),
+                ssp_rcp_codes=viz["ssp_rcp_codes"])
 
-    for scenario_label, growth_matrix_path in (scenario_files.items() if figs.get("per_scenario", False) else []):
+    for scenario_label, growth_matrix_path in (scenario_files.items() if figs["per_scenario"] else []):
         if not growth_matrix_path.exists():
             print(f"  Skipping {scenario_label}: missing {growth_matrix_path.name}.")
             continue

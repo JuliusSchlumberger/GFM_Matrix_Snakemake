@@ -189,27 +189,27 @@ def main() -> None:
 
     cfg = load_config(args.config)
 
-    viz = cfg.get("visualization", {})
-    pg_cfg = cfg.get("population_growth", {})
-    adapt_cfg = cfg.get("adaptation", {})
+    viz = cfg["visualization"]
+    pg_cfg = cfg["population_growth"]
+    adapt_cfg = cfg["adaptation"]
 
-    ssps = pg_cfg.get("ssps", ["SSP1", "SSP2", "SSP3", "SSP5"])
-    years = [int(y) for y in pg_cfg.get("output_years", list(range(2025, 2105, 5)))]
-    slr_intensities = adapt_cfg.get("slr_intensities", [])
+    ssps = pg_cfg["ssps"]
+    years = [int(y) for y in pg_cfg["output_years"]]
+    slr_intensities = adapt_cfg["slr_intensities"]
 
     exp_dir = Path(args.expdir)
     out_dir = Path(args.outdir or str(
-        Path(viz.get("output_dir", f"{cfg['paths']['root']}/figures")) / "timeseries"
+        Path(viz["output_dir"]) / "timeseries"
     ))
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
-    dpi = int(viz.get("dpi", 200))
-    m_colors = viz.get("measure_colors", {})
-    s_colors = viz.get("ssp_colors", {})
-    ssp_rcp_codes = viz.get("ssp_rcp_codes", {})
-    y_max = float(viz.get("country_eai_vmax", 2_000_000.0))
-    level_linestyles = viz.get("level_linestyles", ["--", ":", "-."])
-    baseline_linestyle = viz.get("baseline_linestyle", "-")
+    dpi = int(viz["dpi"])
+    m_colors = viz["measure_colors"]
+    s_colors = viz["ssp_colors"]
+    ssp_rcp_codes = viz["ssp_rcp_codes"]
+    y_max = float(viz["country_eai_vmax"])
+    level_linestyles = viz["level_linestyles"]
+    baseline_linestyle = viz["baseline_linestyle"]
 
     eai_by_label: dict[str, pd.DataFrame] = {}
     for csv_path in sorted(exp_dir.glob("exposure_*_ssp.csv")):
@@ -250,8 +250,8 @@ def main() -> None:
             _save(cont_isos, continent, cont_dir / f"timeseries_{continent.replace(' ', '_')}.png", y_max=None)
     print(f"Per-continent done → {cont_dir}")
 
-    ov_cfg = viz.get("timeseries_overview", {})
-    ov_ssps = [s for s in ov_cfg.get("ssps", ["SSP2", "SSP5"]) if s in ssps]
+    ov_cfg = viz["timeseries_overview"]
+    ov_ssps = [s for s in ov_cfg["ssps"] if s in ssps]
     if ov_ssps:
         fig = _continent_overview_figure(
             eai_by_label, {c: [i for i, k in continent_of.items() if k == c] for c in CONTINENTS},

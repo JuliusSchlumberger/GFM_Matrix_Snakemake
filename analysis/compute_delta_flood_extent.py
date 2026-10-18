@@ -338,7 +338,7 @@ def main() -> None:
     root = Path(first_cfg["paths"]["root"])
     out_path = Path(args.out) if args.out else root / "deltas_floodmaps" / "delta_flood_extent.csv"
 
-    default_rp = float(prod_cfg.get("protection", {}).get("default_rp", 5.0))
+    default_rp = float(prod_cfg["protection"]["default_rp"])
     catalog = get_data_catalog(_REPO_ROOT / prod_cfg["paths"]["hydromt_data_catalog"], root=prod_cfg["paths"]["root"])
     flopros = catalog.get_dataframe("flopros_protection_standards")
     rp_by_geogunit = flopros["Coastal"].fillna(flopros["Riverine"]).fillna(default_rp)

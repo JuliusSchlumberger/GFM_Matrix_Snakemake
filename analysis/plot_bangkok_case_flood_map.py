@@ -76,8 +76,8 @@ def main() -> None:
     slr_order = sorted(slr_order, key=lambda s: int(s.split("_")[1]))
 
     plots_cfg = cfg["postprocessing"]["plots"]
-    cmap = plots_cfg.get("waterdepth_cmap", "Blues")
-    vmax_m = float(plots_cfg.get("waterdepth_vmax_m", 10.0))
+    cmap = plots_cfg["waterdepth_cmap"]
+    vmax_m = float(plots_cfg["waterdepth_vmax_m"])
 
     merged_dir = Path(cfg["postprocessing"]["merged_outputs"])
     out_dir = Path(args.outdir) if args.outdir else Path(cfg["visualization"]["output_dir"])

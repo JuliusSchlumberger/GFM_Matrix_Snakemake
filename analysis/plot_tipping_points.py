@@ -45,8 +45,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 # "A + R": a future avoid + retreat strategy
 STRATEGY_ABBREV = {"baseline": "B", "avoid": "A", "protect": "P", "retreat": "R", "protect_avoid": "P + A",
                    "avoid_retreat": "A + R"}
-STRATEGY_NAMES = {"baseline": "No adaptation", "protect": "Protect", "avoid": "Avoid", "retreat": "Retreat",
-                  "protect_avoid": "Protect + Avoid"}
 # Colour is reserved for SSPs, so strategies differ by line style / marker.
 STRATEGY_STYLES = {"baseline": "-", "protect": "--", "avoid": ":", "retreat": "-.",
                    "protect_avoid": (0, (8, 2, 1, 2, 1, 2))}
@@ -64,31 +62,31 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    viz = cfg.get("visualization", {})
-    tp = viz.get("tipping_points", {})
-    countries = tp.get("countries", ["VNM", "NLD", "NGA"])
-    default_thr = float(tp.get("eai_threshold", 1_000_000))
+    viz = cfg["visualization"]
+    tp = viz["tipping_points"]
+    countries = tp["countries"]
+    default_thr = float(tp["eai_threshold"])
     thr_by_iso = {k: float(v) for k, v in (tp.get("per_country_eai_threshold") or {}).items()}
-    design = tp.get("design_intensity", "SLR_1000")
+    design = tp["design_intensity"]
     exp_dir = Path(args.expdir)
-    strategies = [s for s in tp.get("strategies", list(STRATEGY_NAMES))
+    strategies = [s for s in tp["strategies"]
                   if _growth_matrix_path(exp_dir, s, design).exists()]
-    out_dir = Path(args.outdir or viz.get("output_dir", f"{cfg['paths']['root']}/figures"))
+    out_dir = Path(args.outdir or viz["output_dir"])
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
     s_colors = viz.get("ssp_colors") or _DEFAULT_SLR_COLORS
 
     traj = load_slr_trajectories(viz["slr_trajectories_csv"])
-    ssps = [s for s in tp.get("ssps", cfg.get("population_growth", {}).get("ssps", list(s_colors)))
+    ssps = [s for s in tp["ssps"]
             if all(f"{s}_{p}" in traj.columns for p in ("p17", "p50", "p83"))]
-    to_year = min(int(tp.get("to_year", LAST_SSP_YEAR)), int(traj.index.max()))
+    to_year = min(int(tp["to_year"]), int(traj.index.max()))
     years = np.arange(2020, to_year + 1)
     i2100 = int(min(LAST_SSP_YEAR, to_year) - years[0])
     slr_paths = {(s, p): slr_pathway(traj, f"{s}_{p}", years) for s in ssps for p in ("p17", "p50", "p83")}  # mm
 
     catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
     growth_df = load_ssp_growth_factors(Path(catalog.get_source("ssp_population_growth_factors").path))
-    variants = (viz.get("extended_pathways", {}).get("variants") if to_year > LAST_SSP_YEAR else None) \
+    variants = (viz["extended_pathways"].get("variants") if to_year > LAST_SSP_YEAR else None) \
         or {"ssp": {"mode": "constant", "label": "SSP"}}
     ext = {v: extend_growth_factors(growth_df, spec, to_year=to_year) for v, spec in variants.items()}
     v0 = next(iter(variants))  # reference variant for the markers
@@ -196,7 +194,7 @@ def main() -> None:
             ax_r.set_xlabel("Year EAI first exceeds the tipping point", fontsize=fs)
 
     out_png = out_dir / "tipping_points.png"
-    fig.savefig(out_png, dpi=int(viz.get("dpi", 200)), bbox_inches="tight")
+    fig.savefig(out_png, dpi=int(viz["dpi"]), bbox_inches="tight")
     plt.close(fig)
     pd.DataFrame(rows).to_csv(out_dir / "tipping_points.csv", index=False)
     print(f"Written: {out_png} and tipping_points.csv")
