@@ -41,7 +41,7 @@ Selection runs on the HPC as stage 1 of the pipeline (`select_calibration_tiles.
 | pre-flight | the SFINCS grid + mask builds from the line with ≥ 1 boundary cell (`preflight_sfincs_mask.py`) | 2,088 |
 | sample | spatially stratified: round-robin over shuffled 15° lon/lat bins, seed 0 | **1,000** |
 
-As in the earlier `sfincs_calibration` study, no size, river-fraction, ocean-fraction or latitude filter is applied. The funnel is recorded per candidate in `candidates/candidate_funnel.csv`; the selection in `tile_ids.txt`, `tile_selection_metadata.csv` and `tile_selection.gpkg`; `figures/tile_selection_map.png` maps every candidate by funnel stage and `figures/tile_selection_histograms.png` compares the selected, eligible and screened populations.
+No size, river-fraction, ocean-fraction or latitude filter is applied. The funnel is recorded per candidate in `candidates/candidate_funnel.csv`; the selection in `tile_ids.txt`, `tile_selection_metadata.csv` and `tile_selection.gpkg`; `figures/tile_selection_map.png` maps every candidate by funnel stage and `figures/tile_selection_histograms.png` compares the selected, eligible and screened populations.
 
 ## Building each tile's SFINCS model
 
@@ -111,14 +111,7 @@ Two stages, chained on Slurm (`generate_calibration_jobs.py`), all jobs on the 4
 
 Every step is skipped when its output exists, so a resubmitted tile resumes where it stopped. A tile records its current step in `outputs/calibration_run.step`, its success in `calibration_run.done` and failures in `calibration_run.failed`; `check_calibration_progress.py` reports both stages per job.
 
-Two drivers redo part of the run in place after a code change, relying on this skip logic: per selected tile they delete the done/failed/step markers (which re-queues the tile) plus the artefacts to be redone, then write and submit the stage-2 jobs via `generate_calibration_jobs.py stage2`. `rerun_eikonal_calibration.sh` (eikonal-side changes) deletes the `eikonal_on_subgrid_waterdepth_*_fsf*.tif` rasters and `eikonal_solver_diagnostics.json`, so only the eikonal sweep and `calibration_result.json` are redone; a post job (after all stage-2 jobs) then runs `compute_calibration_result_dedup.py` and the analysis on both base directories. `rerun_sfincs_calibration.sh` (forcing/mask changes) deletes `sfincs.inp`, so line forcing → SFINCS model build → SFINCS run → postprocessing → `calibration_result.json` are redone; the dedup and the two analyses are then run by hand. Two conda environments are called by full interpreter path: `gfm` (eikonal, bathtub, lines, selection) and `hydromt-sfincs-dev` (SFINCS build/postprocessing, pre-flight, comparison); their specs are `environment.yml` and `environment_sfincs.yml`.
-
-## Changes from the earlier studies
-
-The names below are the earlier studies' output directories on the P:\ share - history, not produced by the current code.
-
-- **`validation_sfincs` v1-v6:** tiles filtered by size, river fraction, ocean fraction (≥ 5 %) and latitude (|lat| ≤ 55°); SFINCS forced along the open-sea tile edge from the k nearest stations; eikonal seeded by planar IDW over all coastline-adjacent ocean cells; the fsf sweep run as a separate step. Superseded.
-- **`sfincs_calibration`** (1,126 tiles, hop 0, stratified, no other filters): same open-sea forcing, later resampled to points every 25 km along the boundary; this exposed the tidal amplification described above. A follow-up study, **`sfincs_calibration_bline`**, re-ran 573 of its tiles with the boundary line and confirmed that the overshoot disappears; the final pipeline adopts it, with stations from the tile's production selection instead of every COAST-RP station within 0.5°, and the production eikonal coastline and station weighting instead of planar IDW.
+`rerun_calibration.sh` redoes part of the run in place after a code change, relying on this skip logic: per selected tile it deletes the done/failed/step markers (which re-queues the tile) plus the artefacts to be redone, then write and submit the stage-2 jobs via `generate_calibration_jobs.py stage2`. `--part eikonal` (eikonal-side changes) deletes the `eikonal_on_subgrid_waterdepth_*_fsf*.tif` rasters and `eikonal_solver_diagnostics.json`, so only the eikonal sweep and `calibration_result.json` are redone; a post job (after all stage-2 jobs) then runs `compute_calibration_result_dedup.py` and the analysis on both base directories. `--part sfincs` (forcing/mask changes) deletes `sfincs.inp`, so line forcing → SFINCS model build → SFINCS run → postprocessing → `calibration_result.json` are redone; the dedup and the two analyses are then run by hand. Two conda environments are called by full interpreter path: `gfm` (eikonal, bathtub, lines, selection) and `hydromt-sfincs-dev` (SFINCS build/postprocessing, pre-flight, comparison); their specs are `environment.yml` and `environment_sfincs.yml`.
 
 ## Structural limitations (not bugs)
 

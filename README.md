@@ -111,6 +111,8 @@ config instead:
 ```
 GFM_CONFIG_PATH=snakemake_workflow/config/bangkok_chao_phraya_materialized.yml snakemake -n all --cores 1
 ```
+`profiles/default/config.yaml` (loaded automatically) limits rerun triggers to
+mtime, params, input and software-env: editing a script never re-runs finished outputs.
 
 ## Configuration
 

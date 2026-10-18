@@ -74,12 +74,8 @@ eikonal solver directly against real SFINCS runs, see
 the best match at **0.4× the grid-resolution-corrected baseline**, i.e.
 `friction_scale_factor = 30 × 0.4 = 12.0` - production's actual default
 (`P:/.../calibration_roughness_SFINCS/friction_sweep_pooled_metrics.csv`,
-1000 tiles against the smoothed-forcing SFINCS boundary data, 2026-10-13:
-CSI=0.7428, bias=1.053, both better than the previous 0.3×/fsf=9.0 default's
-CSI=0.7320, bias=1.209 - a clearly better bias fit, not just a narrower CSI
-win. Supersedes the earlier `validation_sfincs_v5` pilot, 2026-10-03,
-CSI=0.80/bias=0.99 at fsf=9.0 - that was against the PRE-smoothed-forcing
-boundary data, not directly comparable 1:1 to this sweep).
+1000 tiles: CSI=0.7428, bias=1.053 at fsf=12.0 vs CSI=0.7320, bias=1.209 at
+fsf=9.0 - a clearly better bias fit, not just a narrower CSI win).
 The resulting real-world attenuation rate at this production value is
 roughly `n(x) × 4` m/km (the full, uncalibrated ×30 baseline gives `n(x) ×
 10` m/km, which happens to land in the ~0.1-1.2 m/km range reported for

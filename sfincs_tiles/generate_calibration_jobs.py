@@ -175,7 +175,7 @@ def main() -> None:
     parser.add_argument("--mem", default="30G")
     parser.add_argument("--stage1-hours", type=int, default=24)
     parser.add_argument("--overhead-min", type=float, default=35.0)  # inputs, model build + subgrid, postprocessing
-    parser.add_argument("--sfincs-min-per-mcell", type=float, default=12.5)  # p90 of 550 bline runs, 4 threads
+    parser.add_argument("--sfincs-min-per-mcell", type=float, default=12.5)  # p90 over 550 SFINCS runs, 4 threads
     parser.add_argument("--eikonal-min-per-mcell", type=float, default=10.0,
                         help="all 10 friction points together, per million active SFINCS cells (rough)")
     parser.add_argument("--time-margin", type=float, default=1.5)
