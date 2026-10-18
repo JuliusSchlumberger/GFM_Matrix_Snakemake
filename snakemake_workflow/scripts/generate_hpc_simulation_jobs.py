@@ -121,13 +121,10 @@ def main() -> None:
         print()
 
         generate_wave_dispatch(
-            model_outputs=str(model_outputs),
             tile_ids=tile_ids,
-            hop_by_tile=hop_by_tile,
             batches=batches,
             return_periods=return_periods,
             waterlevel_names=waterlevel_names,
-            raster_config=local_config["raster_format"],
             hpc_cfg=hpc_cfg,
             base_config_path=config_path,
             script_paths=script_paths,

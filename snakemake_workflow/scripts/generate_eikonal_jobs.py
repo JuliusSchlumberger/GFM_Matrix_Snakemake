@@ -189,13 +189,10 @@ def _write_wave_scripts(
 
 
 def generate_wave_dispatch(
-    model_outputs: str,
     tile_ids: list,
-    hop_by_tile: dict,
     batches: list,
     return_periods: list,
     waterlevel_names: list,
-    raster_config: dict,
     hpc_cfg: dict,
     base_config_path: Path,
     script_paths: list,
@@ -205,7 +202,7 @@ def generate_wave_dispatch(
 ) -> None:
     """Write every wave's sbatch scripts + resolved_config.yml + submit_waves.sh.
 
-    `model_outputs`, `tile_ids`, `hop_by_tile` and `raster_config` are accepted but unused.
+    `tile_ids` is accepted but unused.
     `batches` are `(wave, batch_id, tile_ids)` in the same order as `script_paths`.
     `wave_sbatch_cfg` is a `{wave: sbatch_cfg}` override of `hpc_cfg["sbatch"]`.
     """
@@ -259,13 +256,10 @@ def generate_resume_dispatch(
 
 if "snakemake" in dir():
     generate_wave_dispatch(
-        model_outputs=snakemake.params.model_outputs,  # noqa: F821
         tile_ids=snakemake.params.tile_ids,  # noqa: F821
-        hop_by_tile=snakemake.params.hop_by_tile,  # noqa: F821
         batches=snakemake.params.batches,  # noqa: F821
         return_periods=snakemake.params.return_periods,  # noqa: F821
         waterlevel_names=snakemake.params.waterlevel_names,  # noqa: F821
-        raster_config=snakemake.params.raster_config,  # noqa: F821
         hpc_cfg=snakemake.params.hpc_cfg,  # noqa: F821
         base_config_path=Path(snakemake.params.base_config_path),  # noqa: F821
         script_paths=snakemake.output.scripts,  # noqa: F821
