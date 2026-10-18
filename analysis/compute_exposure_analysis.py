@@ -21,7 +21,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import _read_band  # noqa: E402
+from _common import _chunk_is_populated, _read_band, discover_chunk_ids  # noqa: E402
 from config_utils import get_data_catalog, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
 from population_growth import load_ssp_growth_factors, interpolate_growth_factor  # noqa: E402
 from analysis_figures import load_slr_trajectories  # noqa: E402
@@ -322,25 +322,6 @@ def _avoid_growth_matrix_worker_task(
 # per chunk read. Two passes are needed: retreat/avoid shares must be summed
 # over ALL chunks before any chunk's EAI can be computed.
 
-def discover_chunk_ids(cfg: dict) -> list[str]:
-    """Return sorted populated chunk ids that have flood-fraction output.
-
-    Ocean/unpopulated chunks have zero-byte population placeholders and are dropped.
-    """
-    merged_dir = Path(cfg["postprocessing"]["merged_outputs"])
-    flood_frac_dir = merged_dir / "chunks" / "flood_fraction"
-    chunks_dir = merged_dir / "chunks"
-    all_chunk_ids = sorted(set(
-        p.stem.split("_RP")[0].replace("flood_fraction_", "")
-        for p in flood_frac_dir.glob("flood_fraction_*.tif")
-    ))
-    return [
-        cid for cid in all_chunk_ids
-        if (chunks_dir / f"exposure_population_grid_{cid}.tif").exists()
-        and (chunks_dir / f"exposure_population_grid_{cid}.tif").stat().st_size > 0
-    ]
-
-
 @dataclass
 class AnalysisContext:
     """Hold config-derived setup shared by the HPC pass1/pass2/write steps.
@@ -519,13 +500,6 @@ def build_exposure_tasks(
                     g_pct=g_pct,
                 ))
     return tasks
-
-
-def _chunk_is_populated(chunks_dir: Path, cid: str) -> bool:
-    # Zero-byte placeholders (ocean chunks) make rasterio.open raise; HPC callers
-    # may pass an unfiltered list planned before postprocessing ran.
-    p =chunks_dir / f"exposure_population_grid_{cid}.tif"
-    return p.exists() and p.stat().st_size > 0
 
 
 def pass1_shares_all_intensities(
@@ -775,20 +749,11 @@ def main() -> None:
     out_dir = Path(args.outdir)
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
-    all_chunk_ids = sorted(set(
-        p.stem.split("_RP")[0].replace("flood_fraction_", "")
-        for p in flood_frac_dir.glob("flood_fraction_*.tif")
-    ))
+    # Ocean/unpopulated chunks have zero-byte placeholder population files.
+    chunk_ids, all_chunk_ids = discover_chunk_ids(flood_frac_dir, chunks_dir)
     if not all_chunk_ids:
         print(f"ERROR: no flood fraction files in {flood_frac_dir}")
         sys.exit(1)
-
-    # Ocean/unpopulated chunks have zero-byte placeholder population files.
-    chunk_ids = [
-        cid for cid in all_chunk_ids
-        if (chunks_dir / f"exposure_population_grid_{cid}.tif").exists()
-        and (chunks_dir / f"exposure_population_grid_{cid}.tif").stat().st_size > 0
-    ]
     if not chunk_ids:
         print("ERROR: no population chunk files found — run the Snakemake postprocess target first.")
         sys.exit(1)

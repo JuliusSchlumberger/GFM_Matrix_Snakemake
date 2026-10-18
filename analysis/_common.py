@@ -44,6 +44,28 @@ def _eai_from_interp(interp, slr_path_mm: np.ndarray, growth_path: np.ndarray) -
     return np.clip(interp(pts), 0.0, None)
 
 
+def _chunk_is_populated(chunks_dir: Path, cid: str) -> bool:
+    # Zero-byte placeholders (ocean chunks) make rasterio.open raise; HPC callers
+    # may pass an unfiltered list planned before postprocessing ran.
+    p = chunks_dir / f"exposure_population_grid_{cid}.tif"
+    return p.exists() and p.stat().st_size > 0
+
+
+def discover_chunk_ids(flood_frac_dir: Path, chunks_dir: Path) -> tuple[list[str], list[str]]:
+    """Return ``(populated_ids, all_ids)`` for the chunks with flood-fraction output.
+
+    `all_ids` (sorted) are parsed from ``flood_fraction_<cid>_RP*.tif`` names;
+    `populated_ids` drops chunks whose population grid is missing or a zero-byte
+    placeholder (ocean/unpopulated). Both are returned so callers can tell "no
+    flood fraction yet" from "nothing populated" with a single directory glob.
+    """
+    all_ids = sorted(set(
+        p.stem.split("_RP")[0].replace("flood_fraction_", "")
+        for p in flood_frac_dir.glob("flood_fraction_*.tif")
+    ))
+    return [cid for cid in all_ids if _chunk_is_populated(chunks_dir, cid)], all_ids
+
+
 def _read_band_and_transform(path: Path, dtype: str, fill) -> tuple[np.ndarray, "rasterio.Affine"]:
     """Read band 1 (file nodata -> `fill`, cast to `dtype`) plus the file's transform.
 

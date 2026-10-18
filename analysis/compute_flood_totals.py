@@ -26,7 +26,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import _read_band, _read_band_and_transform, _round_val  # noqa: E402
+from _common import _read_band, _read_band_and_transform, _round_val, discover_chunk_ids  # noqa: E402
 from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pipeline_plots import pixel_area_km2_grid  # noqa: E402
 from exposure_analysis import _build_iso_index, _safe, country_sums  # noqa: E402
@@ -94,19 +94,10 @@ def main() -> None:
     out_dir = Path(args.outdir) / "flood_totals"
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
-    all_chunk_ids = sorted(set(
-        p.stem.split("_RP")[0].replace("flood_fraction_", "")
-        for p in flood_frac_dir.glob("flood_fraction_*.tif")
-    ))
+    chunk_ids, all_chunk_ids = discover_chunk_ids(flood_frac_dir, chunks_dir)
     if not all_chunk_ids:
         print(f"ERROR: no flood fraction files in {flood_frac_dir}")
         sys.exit(1)
-
-    chunk_ids = [
-        cid for cid in all_chunk_ids
-        if (chunks_dir / f"exposure_population_grid_{cid}.tif").exists()
-        and (chunks_dir / f"exposure_population_grid_{cid}.tif").stat().st_size > 0
-    ]
     if not chunk_ids:
         print("ERROR: no population chunk files found — run the Snakemake postprocess target first.")
         sys.exit(1)
