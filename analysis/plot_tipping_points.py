@@ -52,7 +52,6 @@ STRATEGY_STYLES = {"baseline": "-", "protect": "--", "avoid": ":", "retreat": "-
                    "protect_avoid": (0, (8, 2, 1, 2, 1, 2))}
 STRATEGY_MARKERS = {"baseline": "o", "protect": "s", "avoid": "^", "retreat": "D",
                     "protect_avoid": "P", "avoid_retreat": "X"}
-YEARS = np.arange(2020, 2101)
 LAST_SSP_YEAR = 2100  # end of IIASA SSP population projections
 
 

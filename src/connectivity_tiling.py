@@ -96,7 +96,7 @@ def _mosaic_nearest_coarse(
     bbox: tuple[float, float, float, float], mask_index: dict, dem_index: dict | None, resolution_m: float,
     allowed_coords: set[str] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, Affine] | None:
-    # Nearest (not MIN, unlike tiles.mosaic_mask_dem_coarse) for elevation too, giving
+    # Nearest (not a MIN pool) for elevation too, giving
     # unbiased samples for fraction estimates. `allowed_coords` restricts reads to a
     # component's member tiles so land from another, unconnected component inside the
     # same bbox is never swept in. OVERVIEW_LEVEL="NONE" is required: DeltaDTM mask

@@ -27,7 +27,6 @@ from merge import EIKONAL_NODATA
 # 99 m gap-fill sentinel sits above any real value and inside int16's range.
 DEM_SCALE = 100  # cm per metre
 DEM_NODATA_M = 99.0
-DEM_NODATA_INT16 = int(DEM_NODATA_M * DEM_SCALE)  # 9900
 
 # Friction (Manning's n / 100) spans ~0.0001-0.0012; x1e6 keeps n's 2 significant
 # digits with ~27x headroom below int16's max.
