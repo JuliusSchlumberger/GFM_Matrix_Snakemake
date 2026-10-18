@@ -1,66 +1,9 @@
-"""Run the global-deltas flood hazard map deliverable locally, for one or
-both scenarios (ssp126 = RCP2.6-equivalent, ssp245 = RCP4.5-equivalent),
-at friction_scale_factor=9.0, RP100, all 5 production SLR magnitudes, over
-the 400-tile delta subset (48 of 49 deltas - rebuilt 2026-10 against the
-connectivity-first production grid; see
-preparation/build_delta_tile_subset.py and
-snakemake_workflow/config/deltas_ssp126.yml for the full rationale).
+"""Run the global-deltas flood hazard maps locally (ssp126 / ssp245, RP100, 400 tiles).
 
-For each scenario, runs in order:
-  1. preparation/run_preparation.py boundary_conditions - builds that
-     scenario's own SLR fingerprint NetCDFs into its isolated
-     waterlevel_nc_dir (never touches production's or the other
-     scenario's boundary-condition data).
-  2. snakemake preprocess  - DEM/mask/friction/boundary extraction for the
-     400 delta tiles.
-  3. simulate (hop-wave-ordered, NOT a single blanket `snakemake simulate`
-     call - see run_simulate_stage()) - RP100 x 5 SLR magnitudes x 400 tiles.
-  4. snakemake postprocess - merge/mosaic per-tile results.
-
-Hop-wave ordering (2026-10, real bug found live on this run): a hop>=1
-tile's neighbour-seeding read (`collect_neighbor_wave_seeds`, via
-run_eikonal.py's `path_ready()` check on each lower-hop candidate's own
-waterdepth output) treats a candidate that simply hasn't been simulated
-YET identically to one that will never exist - both just get omitted from
-`available`, and if every candidate is omitted the tile is marked
-"no upstream flooding" and gets a PERMANENT zero-waterdepth output
-(Snakemake then considers it done and never revisits it). A single blanket
-`snakemake simulate --cores N` call lets the scheduler freely interleave
-hop=0 and hop>=1 jobs, so this is a real race, not a rare edge case -
-verified live: 3 of 7 "no upstream flooding" skips on the ssp126 run were
-confirmed false negatives (the real neighbour finished minutes to hours
-AFTER the dependent tile had already been wrongly zeroed out), the other 4
-were genuine. Fixed by running `simulate` in explicit hop_distance waves
-(ascending), each wave's full target list given directly to `snakemake`
-and blocked on until that whole wave finishes, before the next wave's
-targets are even requested - same ordering guarantee production's HPC
-`generate_eikonal_jobs`/`submit_waves.sh` already gives via SLURM
-`--dependency=afterany` chains, just as sequential local Snakemake calls
-instead of sequential sbatch submissions. This also makes the
-graceful-degradation omission trustworthy for small, spatially-restricted
-runs like this one: a hop=1 tile whose real hop=0 neighbour simply isn't
-part of this delta's 400-tile subset at all (out of scope, not merely
-not-yet-run) will, by the time its own wave starts, have waited for every
-hop=0 tile that COULD exist in this run to finish - so "still missing"
-then genuinely means "not in this run", and the resulting silent
-no-upstream-flooding skip is correct, by design, not a race artifact.
-
-Each Snakemake call is run with GFM_CONFIG_PATH pointed at that scenario's
-materialized config (snakemake_workflow/config/deltas_{scenario}_
-materialized.yml) - same mechanism the Wales/Scotland friction9 run used,
-NOT --configfile (see Snakefile's own comment on why). Every stage call
-also passes `--rerun-incomplete` - if a run is ever interrupted (crash,
-Ctrl+C, a killed background process) mid-job, Snakemake's own metadata
-correctly flags whatever was actively being written at that moment as
-incomplete and refuses to trust it; this flag tells it to just redo THOSE
-specific targets, not everything, rather than requiring a manual
-`snakemake --rerun-incomplete` afterward.
-
-Subprocess output streams straight to this console (not captured) so you
-see exactly what a manual run would show. Stops immediately on the first
-failing stage for a scenario (the remaining stages for that scenario
-would read incomplete/missing inputs) - that scenario is marked FAILED in
-the final summary, and any OTHER scenario already queued still runs.
+Stages per scenario: boundary_conditions, preprocess, simulate, postprocess, with
+GFM_CONFIG_PATH = deltas_{scenario}_materialized.yml. simulate runs in ascending
+hop_distance waves: a hop>=1 tile whose lower-hop neighbours are not yet done is
+permanently zeroed as "no upstream flooding". A failing stage stops its scenario.
 
 Usage:
     python run_delta_floodmaps.py                          # both scenarios, all stages
@@ -81,27 +24,16 @@ REPO_ROOT = Path(__file__).resolve().parent
 CONFIG_DIR = REPO_ROOT / "snakemake_workflow" / "config"
 
 ALL_SCENARIOS = ["ssp126", "ssp245"]
-# "design": the design-event floods at SLR_0 for the FLOPROS-protected deltas only (protection-failure
-# reference for compute_delta_flood_extent.py) - its config deltas_design_materialized.yml is written by
-# analysis/prepare_delta_design_runs.py, not materialize_configs.py. Not part of the default run.
+# "design": SLR_0 design-event floods for FLOPROS-protected deltas; config written by
+# analysis/prepare_delta_design_runs.py.
 EXTRA_SCENARIOS = ["design"]
 ALL_STAGES = ["boundary_conditions", "preprocess", "simulate", "postprocess"]
 
-# Per-snakemake-invocation cap on explicit target paths within one hop wave,
-# purely to stay under Windows' ~32,767-char CreateProcess command-line
-# limit (subprocess.run with a list goes straight to CreateProcess, no
-# shell, so this is a hard ceiling, not a style choice) - a single hop=0
-# wave on the full 400-tile subset can have up to ~2,000 targets (400 tiles
-# x 5 SLR). 150 targets x ~130 chars/path stays comfortably under that
-# limit with room for the base `snakemake --cores ... --resources ...`
-# prefix. Chunking has no correctness implications - every chunk belongs to
-# the SAME wave, so there is no ordering requirement between chunks, only
-# between waves (see run_simulate_stage's docstring).
+# Keeps each call under Windows' ~32,767-char CreateProcess limit (~130 chars/path).
 _MAX_TARGETS_PER_SNAKEMAKE_CALL = 150
 
 
 def _run(cmd: list[str], env: dict | None = None) -> bool:
-    """Run `cmd` from the repo root via `step_runner.run_step`; True on success (never exits)."""
     sys.path.insert(0, str(REPO_ROOT / "src"))
     from step_runner import run_step
 
@@ -114,16 +46,9 @@ def _chunked(items: list, size: int):
 
 
 def run_simulate_stage(materialized: Path, cores: int, mem_mb: int | None, env: dict) -> bool:
-    """Run the `simulate` stage in ascending hop_distance waves, blocking on
-    each wave's full completion before the next wave's targets are even
-    requested to snakemake - see this module's docstring for why (a real,
-    confirmed-live bug: a single blanket `snakemake simulate` call lets
-    hop>=1 jobs race their own lower-hop neighbours and wrongly self-zero).
+    """Run `simulate` wave by wave in ascending hop_distance, blocking per wave.
 
-    Reads tile_grid/return_periods/SLR scenarios/model_outputs the same way
-    the Snakefile itself does, so the per-wave target lists exactly match
-    what `rule simulate`'s blanket _SIMULATION_OUTPUTS would have built -
-    this just splits that same flat list by hop_distance and sequences it.
+    Targets match the Snakefile's _SIMULATION_OUTPUTS, split by hop_distance.
     """
     sys.path.insert(0, str(REPO_ROOT / "src"))
     import geopandas as gpd

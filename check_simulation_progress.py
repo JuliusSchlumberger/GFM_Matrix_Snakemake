@@ -1,18 +1,7 @@
-"""Report simulation progress by counting waterdepth_*.tif files per tile,
-broken down by wave (hop_distance) - no Snakemake invocation needed, safe to
-run anytime (including while an HPC run is in progress) since it only
-reads, never writes.
+"""Report simulation progress per wave (hop_distance) from waterdepth files (read-only).
 
-A tile's own results/ dir gets exactly one waterdepth_{rp}_{slr}.tif per
-scenario regardless of HOW that scenario finished (real solve, confidently-
-zero skip, or OOM/nodata placeholder - see eikonal_runner.
-tile_output_complete's own docstring), so counting these files is a
-complete, coarse-grained progress signal.
-
-Broken down per wave (not just a single flat total) because waves run
-strictly sequentially - a wave with 0% done really does mean "hasn't
-started yet, waiting on the previous wave's SLURM dependency barrier", not
-"stuck".
+Every finished scenario writes one waterdepth tif (solve, zero-skip or OOM
+placeholder). Waves run sequentially: 0% means "waiting", not "stuck".
 
 Usage:
     python check_simulation_progress.py [--config path/to/config.yml] [--watch SECONDS]

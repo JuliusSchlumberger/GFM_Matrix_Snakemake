@@ -1,17 +1,4 @@
-"""Report preprocessing progress across the tile grid by counting which
-per-tile output files already exist on disk - no Snakemake invocation
-needed, safe to run anytime (including while an HPC run is in progress)
-since it only reads, never writes.
-
-Preprocessing produces several files per tile, roughly in this order:
-    tile_geometry.gpkg  (extract_tile_geometry)
-    model_bbox.json      (compute_model_bbox)
-    dem.tif, mask.tif, friction.tif   (extract_dem / extract_dem_mask / compute_friction - roughly parallel)
-    boundaries_{RP}_{SLR}.gpkg   (extract_boundaries - one per return_period x waterlevel_name)
-
-Counting each gives a rough per-stage progress picture, not just a single
-"done/not done" per tile - e.g. many tiles with a DEM but no boundaries yet
-tells you the run is mid-way through extract_dem-family rules, not stuck.
+"""Report preprocessing progress by counting per-tile input files (read-only).
 
 Usage:
     python check_preprocess_progress.py [--config path/to/config.yml] [--watch SECONDS]

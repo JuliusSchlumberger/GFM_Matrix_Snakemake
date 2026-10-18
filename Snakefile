@@ -1,36 +1,8 @@
-"""GFM eikonal preprocessing & simulation workflow.
+"""GFM eikonal workflow: preprocess, simulate and merge per tile and scenario.
 
-For every tile in the fixed-DeltaDTM-tile domain manifest (`tile_grid.path`,
-built by `preparation/run_preparation.py` — see `preparation/build_tile_manifest.py`
-and `src/connectivity_tiling.py` for how it's derived from DeltaDTM coverage,
-floodability, and real floodable-land connectivity to open water), this workflow
-preprocesses the DEM, DEM-validity mask, friction and water level boundary
-inputs for each (return period, sea level rise scenario) combination, and
-runs the eikonal flood model for every (tile, return_period,
-waterlevel_name) combination.
-
-All fixed parameters are defined in `snakemake_workflow/config/config.yml`.
-`TILE_IDS` is the static list of `tile_id` values read from
-`paths.tile_grid` at parse time — run `preparation/run_preparation.py`
-beforehand to build and filter the tile grid down to tiles with DEM
-coverage.
-
-The postprocessing stage partitions the study area into spatial chunks of size
-`postprocessing.chunk_size_deg` degrees.  Each chunk is merged independently
-so only the handful of tiles that overlap a chunk are ever read together.
-All chunks are mosaicked into a GDAL VRT for plotting.
-
-Targets:
-    preprocess:  generate all per-tile, per-scenario model inputs.
-    simulate:    run the eikonal flood model for all tiles and SLR scenarios.
-    postprocess: merge per-tile results into combined rasters and plots.
-    all:         preprocess + simulate + postprocess (the default target).
-
-Run with e.g. `snakemake all --cores 4 --resources mem_mb=8000` — the
-`mem_mb` resource lets Snakemake run several eikonal solves concurrently
-while staying within a memory budget (see `run_eikonal`'s docstring in
-simulation.smk); set `<mem_mb>` to leave headroom below total system RAM for
-the OS and other processes, e.g. ~80% of physical RAM.
+Run `preparation/run_preparation.py` first (builds the tile grid). Targets:
+preprocess, simulate, postprocess, all. E.g. `snakemake all --cores 4
+--resources mem_mb=8000`; set mem_mb to ~80% of physical RAM.
 """
 
 import os
@@ -42,23 +14,9 @@ from snakemake.utils import min_version
 
 min_version("7.0")
 
-# Monkey-patch os.makedirs to retry on a transient FileNotFoundError before
-# any job runs. Snakemake's own io.py calls os.makedirs(dir, exist_ok=True)
-# directly (not through pathlib) to prepare each job's output directory
-# before running it - with model_outputs living on the P:\ network share, a
-# momentary SMB drop (idle-session timeout, brief network blip) makes the
-# whole drive briefly vanish from Windows' perspective, surfacing as
-# `FileNotFoundError: [WinError 3] ... 'P:/'` even though the path is fine
-# moments later. Snakemake doesn't retry this itself, so one blip anywhere
-# in a multi-hour run previously aborted the whole invocation. Patching the
-# shared os module here (rather than editing Snakemake's installed package,
-# which would be wiped out by any env rebuild or Snakemake upgrade) makes
-# every os.makedirs call in the process retry-safe, including Snakemake's
-# own internals - `os.makedirs`'s own leaf-level `mkdir(name, mode)` call
-# resolves against `os`'s module globals at call time, so this is visible
-# to every caller already holding a reference to the `os` module (anything
-# using `Path.mkdir()` instead has its own separate code path and is NOT
-# covered by this patch).
+# Patch os.makedirs to retry FileNotFoundError: a momentary SMB drop makes the
+# P:\ share vanish ([WinError 3]) and Snakemake's own output-dir creation does not
+# retry. Path.mkdir() is not covered.
 _ORIGINAL_MAKEDIRS = os.makedirs
 
 
@@ -86,101 +44,50 @@ from eikonal_runner import estimate_eikonal_mem_mb  # noqa: E402
 from config_utils import _expand_paths, get_data_catalog, merged_slr_scenarios  # noqa: E402
 from tiles import build_chunk_grid  # noqa: E402
 
-# GFM_CONFIG_PATH lets HPC dispatch scripts point this Snakefile at a
-# fully-materialized, scenario-specific config (calibration/sensitivity
-# runs) WITHOUT going through Snakemake's own --configfile CLI merging.
-# 2026-09-14: added after --configfile exhibited a reproducible failure
-# (dry-run succeeded, real execution failed, identical byte/position every
-# time) reading resolved_config.yml, that survived atomic writes, node-
-# local staging, and a widened retry window - the actual mechanism was
-# never root-caused even after reading through Snakemake's own config-
-# loading source (__init__.py's CLI configfiles loop AND
-# Workflow.configfile()'s directive handler both looked correct and both
-# fire identically regardless of -n/dry-run). Meanwhile every PLAIN-PYTHON
-# config read in this codebase (config_utils.load_config, used by
-# run_eikonal_cli.py/generate_hpc_simulation_jobs.py's own --config flag)
-# has never once failed - so this routes new HPC dispatch through the
-# Workflow's own `configfile:` directive instead of --configfile, a
-# genuinely different code path, rather than continuing to chase an
-# unexplained failure in the CLI one.
+# GFM_CONFIG_PATH selects a materialized scenario config via the `configfile:`
+# directive instead of --configfile, which failed reproducibly (unexplained) on HPC.
 _CONFIG_PATH = os.environ.get("GFM_CONFIG_PATH", "snakemake_workflow/config/config.yml")
 configfile: _CONFIG_PATH
 
-# Machine-local overrides (git-ignored, optional).  Create
-# snakemake_workflow/config/config_local.yml to override any key without
-# touching the committed config.yml — most commonly `paths.root`,
-# and `paths.code_root` for machines with different
-# storage layouts. Every standalone (non-Snakemake) entry-point script
-# honors this same file via config_utils.load_config(), which mirrors this
-# exact merge-then-expand sequence - keep the two in sync if this ever changes.
-# Skipped when GFM_CONFIG_PATH is set (scenario run): config_utils.
-# materialize_config() already folds config_local.yml's content into that
-# file, so applying it again here could silently override scenario values.
+# Machine-local overrides; keep in sync with config_utils.load_config(). Skipped
+# with GFM_CONFIG_PATH: materialize_config() already folded it in, and reapplying
+# could override scenario values.
 _LOCAL_CFG = "snakemake_workflow/config/config_local.yml"
 if "GFM_CONFIG_PATH" not in os.environ and os.path.exists(_LOCAL_CFG):
     configfile: _LOCAL_CFG
 
 
-# Expand {root} / {code_root} throughout the whole config so every rule and
-# script receives absolute paths without knowing about the substitution scheme.
-# (`{aqueduct_root}`, for the old external Aqueduct build, was dropped 2026-10-18:
-# no config value used it.)
 if not config["paths"].get("root"):
     raise ValueError("paths.root is not set - create snakemake_workflow/config/config_local.yml (copy config_local.yml.example) or pass a config that sets it (config_hpc.yml / a materialized scenario config)")
 _PATH_SUBS = {
     "root": config["paths"]["root"],
     "code_root": config["paths"].get("code_root", config["paths"].get("root", "")),
 }
-# processed_inputs_dir itself needs root/code_root expanded
-# first (it's declared as "{root}/processed_inputs"), so it's added as a
-# second substitution pass rather than the single dict above - any config
-# value using "{processed_inputs_dir}" (e.g. boundary_conditions.
-# waterlevel_nc_dir) needs this to resolve to a real path at all.
+# processed_inputs_dir is itself "{root}/...", so it is expanded first.
 _PATH_SUBS["processed_inputs_dir"] = _expand_paths(config["paths"]["processed_inputs_dir"], _PATH_SUBS)
 config = _expand_paths(config, _PATH_SUBS)
 
 
-# ── Tile list (read once; also used to build the chunk grid below) ───────────
 _tile_gdf = gpd.read_file(config["tile_grid"]["path"])
 _tile_gdf["tile_id"] = _tile_gdf["tile_id"].astype(str)
 TILE_IDS = sorted(_tile_gdf["tile_id"].astype(int).tolist())
 RETURN_PERIODS = [f"RP{rp}" for rp in config["boundary_conditions"]["return_periods"]]
 
-# Full set of SLR scenarios to simulate: union of the base scenario list and
-# the adaptation design intensities (config["adaptation"]["slr_intensities"] -
-# the SLR levels used as the protection standard for adaptation measures),
-# deduplicated AND numerically sorted - see config_utils.merged_slr_scenarios
-# for why the sort isn't just cosmetic (exposure-analysis callers feed these
-# values positionally into np.interp/pchip_interpolate, which need a
-# strictly increasing sequence). This used to be reimplemented inline here
-# without the sort - harmless only because boundary_conditions.slr_scenarios
-# already happened to be both sorted and a superset of every adaptation
-# intensity; silently wrong the moment that stops being true. Now the same
-# shared function prepare_boundary_conditions.py already uses to generate
-# these scenarios' actual NetCDF files, so the two can no longer drift.
+# Base SLR scenarios + adaptation design intensities, sorted (np.interp needs
+# increasing values).
 WATERLEVEL_NAMES = merged_slr_scenarios(config["boundary_conditions"], config["adaptation"])
 
 
-# ── Chunk grid (derived from tile_grid extent + chunk_size_deg) ──────────────
-# Each chunk is identified by the N/S latitude and E/W longitude of its
-# south-west corner, e.g. "S10E030" for the chunk at (lon=30°, lat=-10°).
-# The grid is built programmatically — no external gpkg file needed.
-# Changing `merge.chunk_size_deg` in config is all that is required to switch
-# between e.g. 5° and 10° chunks.
-
-# Built by src/tiles.py::build_chunk_grid - the single definition shared with
-# the HPC postprocess job generator and check_postprocess_progress.py.
+# Chunk ids name the south-west corner, e.g. "S10E030" = (lon=30°, lat=-10°).
 _chunk_size_deg = config["postprocessing"]["chunk_size_deg"]
 _chunk_grid = build_chunk_grid(_tile_gdf, _chunk_size_deg)
 CHUNK_IDS = _chunk_grid["chunk_id"].tolist()
 
-# Fast lookup: chunk_id → [minx, miny, maxx, maxy]
 _chunk_bounds_dict = {
     row["chunk_id"]: row["bounds"]
     for _, row in _chunk_grid.iterrows()
 }
 
-# Fast lookup: chunk_id → [tile_id, ...]
 _chunk_tile_lookup = {
     row["chunk_id"]: _tile_gdf.loc[
         _tile_gdf.geometry.intersects(row["geometry"]), "tile_id"
@@ -190,18 +97,10 @@ _chunk_tile_lookup = {
 
 
 def waterdepth_tiles_for_chunk(wildcards):
-    """Return the waterdepth tile paths for a given chunk_id + return_period + waterlevel_name.
+    """Return the waterdepth tile paths for a chunk and scenario.
 
-    Built with explicit "/"-joins, NOT os.path.join: this is the one place in
-    the whole Snakefile where a rule's input is a plain list of path STRINGS
-    (from a data-dependent lookup, not a `rules.X.output.Y` reference), which
-    forces Snakemake to resolve the producing rule via regex matching against
-    every rule's output pattern instead of a direct object reference. On
-    Windows, os.path.join produces backslash-joined paths that do not
-    textually match run_eikonal's (forward-slash, `{root}`-substituted)
-    declared output pattern for that regex match - every OTHER cross-rule
-    dependency in this Snakefile uses `rules.X.output.Y` (no regex matching
-    ever needed) so never hits this.
+    Joined with "/", not os.path.join: plain path strings are matched against
+    run_eikonal's forward-slash output pattern, which backslashes break on Windows.
     """
     tile_ids = _chunk_tile_lookup[wildcards.chunk_id]
     model_outputs = config["simulation"]["model_outputs"]
@@ -214,11 +113,8 @@ def waterdepth_tiles_for_chunk(wildcards):
 _PROTECTION_BASELINE_SLR = config["protection"]["baseline_waterlevel_name"]
 
 
-# ── DeltaDTM vertical datum correction (rules compute_geoid_offset_raster /
-#    extract_dem in preprocessing.smk) ── the data catalog is resolved once
-#    at parse time, same as _tile_gdf above, so those rules' input:/output:
-#    can reference concrete .gfc paths rather than re-querying the catalog
-#    per invocation. Always applied (EGM2008 -> GOCO06s), no toggle.
+# Resolved at parse time so the geoid rules can reference concrete .gfc paths.
+# The EGM2008 -> GOCO06s correction is always applied.
 _data_catalog = get_data_catalog(
     os.path.join(workflow.basedir, config["paths"]["hydromt_data_catalog"]), root=config["paths"]["root"]
 )
@@ -246,21 +142,14 @@ _SIMULATION_OUTPUTS = expand(
     tile_id=TILE_IDS, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES,
 )
 
-# generate_eikonal_jobs (HPC dispatch) needs _PREPROCESS_OUTPUTS, so this
-# include comes after it's defined above, unlike the other rule files.
+# Must follow _PREPROCESS_OUTPUTS, which generate_eikonal_jobs uses.
 include: "snakemake_workflow/rules/hpc_dispatch.smk"
 
 _plot_cfg = config["postprocessing"]["plots"]
 _plotting_enabled = _plot_cfg["enabled"]
 
-# Primary postprocessing outputs:
-#   - per-chunk coarse flood-fraction rasters (all RP × SLR × chunks)
-#     → consumed by standalone compute_exposure_analysis.py
-#   - VRT mosaic and plot (optional, for diagnostics)
-# The fine-resolution waterdepth raster is marked temp() in merge_chunk (and
-# auto-deleted once compute_flood_fraction_chunk completes) ONLY when
-# postprocessing.plots.enabled is false - see merge_chunk's own docstring in
-# postprocessing.smk for why it must persist when plots are on.
+# The fine merged waterdepth raster is temp() only when plots are disabled
+# (see merge_chunk).
 _POSTPROCESS_OUTPUTS = expand(
     rules.compute_flood_fraction_chunk.output.flood_fraction,
     chunk_id=CHUNK_IDS, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES,
@@ -285,12 +174,12 @@ rule simulate:
 
 
 rule postprocess:
-    """Merge per-tile results into combined, multi-tile rasters and plot them, for all return periods and SLR scenarios."""
+    """Merge per-tile results into chunk rasters and plots."""
     input:
         _POSTPROCESS_OUTPUTS,
 
 
 rule all:
-    """Run the full workflow: preprocessing, simulation and postprocessing for all tiles, return periods and SLR scenarios."""
+    """Run preprocessing, simulation and postprocessing."""
     input:
         _PREPROCESS_OUTPUTS + _SIMULATION_OUTPUTS + _POSTPROCESS_OUTPUTS,
