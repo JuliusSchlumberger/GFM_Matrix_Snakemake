@@ -163,6 +163,37 @@ def permanent_water_mask(land_use: np.ndarray, exclude_codes: tuple[int, ...]) -
     return np.isin(land_use, np.asarray(exclude_codes))
 
 
+def _read_categorical_on_grid(
+    gfm_catalog, source: str, bbox: list[float], out_transform: Affine, out_shape: tuple[int, int],
+    dst_crs="EPSG:4326", dtype: str = "float64", variables: list[str] | None = None,
+) -> np.ndarray | None:
+    """Read a categorical catalog raster, nearest-reprojected onto a target grid.
+
+    `bbox` is the EPSG:4326 read extent. Cells without a source value are -1;
+    returns None on read failure or an empty source. `dtype` float32 halves
+    memory on very large grids (SF Bay at 2 m).
+    """
+    read_kwargs = {"bbox": bbox}
+    if variables is not None:
+        read_kwargs["variables"] = variables
+    try:
+        da = retry_transient_io(gfm_catalog.get_rasterdataset, source, **read_kwargs).squeeze(drop=True)
+    except Exception:
+        return None
+    if da is None or da.size == 0:
+        return None
+
+    dst = np.full(out_shape, -1.0, dtype=dtype)
+    reproject(
+        source=da.values.astype(dtype), destination=dst,
+        src_transform=da.raster.transform, src_crs=da.raster.crs,
+        dst_transform=out_transform, dst_crs=dst_crs,
+        src_nodata=da.raster.nodata, dst_nodata=-1.0,
+        resampling=Resampling.nearest,
+    )
+    return dst
+
+
 def read_permanent_water_mask(
     gfm_catalog, permanent_water_source: str, permanent_water_codes,
     bbox: list[float], out_transform: Affine, out_shape: tuple[int, int],
@@ -172,25 +203,9 @@ def read_permanent_water_mask(
     Source: DeltaDTM mask (~25-31 m) or Copernicus land use (~100 m), always
     coarser than the model grid. Returns all-False on read failure or empty source.
     """
-    try:
-        lu_da = retry_transient_io(
-            gfm_catalog.get_rasterdataset, permanent_water_source, bbox=bbox,
-        ).squeeze(drop=True)
-    except Exception:
+    dst = _read_categorical_on_grid(gfm_catalog, permanent_water_source, bbox, out_transform, out_shape)
+    if dst is None:
         return np.zeros(out_shape, dtype=bool)
-    if lu_da is None or lu_da.size == 0:
-        return np.zeros(out_shape, dtype=bool)
-
-    lu_arr = lu_da.values.astype("float64")
-    lu_nodata = lu_da.raster.nodata
-    dst = np.full(out_shape, -1.0, dtype="float64")
-    reproject(
-        source=lu_arr, destination=dst,
-        src_transform=lu_da.raster.transform, src_crs=lu_da.raster.crs,
-        dst_transform=out_transform, dst_crs="EPSG:4326",
-        src_nodata=lu_nodata, dst_nodata=-1.0,
-        resampling=Resampling.nearest,
-    )
     return permanent_water_mask(dst, tuple(permanent_water_codes))
 
 
@@ -213,25 +228,11 @@ def read_country_mask(
     Keeps a rectangular bbox from scoring neighbouring countries' flooding as
     false positives. Nearest reprojection; all-False on read failure.
     """
-    try:
-        geo_da = retry_transient_io(
-            gfm_catalog.get_rasterdataset, geogunit_source, bbox=bbox, variables=["Geogunits"],
-        ).squeeze(drop=True)
-    except Exception:
-        return np.zeros(out_shape, dtype=bool)
-    if geo_da is None or geo_da.size == 0:
-        return np.zeros(out_shape, dtype=bool)
-
-    geo_arr = geo_da.values.astype("float64")
-    geo_nodata = geo_da.raster.nodata
-    dst = np.full(out_shape, -1.0, dtype="float64")
-    reproject(
-        source=geo_arr, destination=dst,
-        src_transform=geo_da.raster.transform, src_crs=geo_da.raster.crs,
-        dst_transform=out_transform, dst_crs="EPSG:4326",
-        src_nodata=geo_nodata, dst_nodata=-1.0,
-        resampling=Resampling.nearest,
+    dst = _read_categorical_on_grid(
+        gfm_catalog, geogunit_source, bbox, out_transform, out_shape, variables=["Geogunits"],
     )
+    if dst is None:
+        return np.zeros(out_shape, dtype=bool)
     geo_ids = dst.astype("int32")
     target_ids = list(geogunit_ids) if geogunit_ids else [
         gid for gid, iso in iso_lookup.items() if iso == country_iso

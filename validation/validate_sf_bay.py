@@ -34,6 +34,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
+import validation as v  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _chunks import _chunks_overlapping_bbox, _mosaic_read  # noqa: E402
@@ -119,23 +120,12 @@ def _read_benchmark_full(path: Path):
 
 
 def _permanent_water_on_grid(gfm_catalog, permanent_water_source, permanent_water_codes, bbox, out_transform, out_shape, out_crs):
-    """Like validation.read_permanent_water_mask, which hardcodes EPSG:4326, for any CRS."""
-    try:
-        lu_da = retry_transient_io(gfm_catalog.get_rasterdataset, permanent_water_source, bbox=bbox).squeeze(drop=True)
-    except Exception:
-        return np.zeros(out_shape, dtype=bool)
-    if lu_da is None or lu_da.size == 0:
-        return np.zeros(out_shape, dtype=bool)
-    lu_arr = lu_da.values.astype("float32")
-    lu_nodata = lu_da.raster.nodata
-    dst = np.full(out_shape, -1.0, dtype="float32")
-    reproject(
-        source=lu_arr, destination=dst,
-        src_transform=lu_da.raster.transform, src_crs=lu_da.raster.crs,
-        dst_transform=out_transform, dst_crs=out_crs,
-        src_nodata=lu_nodata, dst_nodata=-1.0,
-        resampling=Resampling.nearest,
+    """Like validation.read_permanent_water_mask, which hardcodes EPSG:4326, for any CRS (float32, lean mask)."""
+    dst = v._read_categorical_on_grid(
+        gfm_catalog, permanent_water_source, bbox, out_transform, out_shape, dst_crs=out_crs, dtype="float32",
     )
+    if dst is None:
+        return np.zeros(out_shape, dtype=bool)
     return _permanent_water_mask_lean(dst, tuple(permanent_water_codes))
 
 
