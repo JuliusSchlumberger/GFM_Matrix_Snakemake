@@ -397,7 +397,7 @@ def main() -> None:
                     "centroid_lon": round(float(delta_row["centroid_lon"]), 4),
                     "centroid_lat": round(float(delta_row["centroid_lat"]), 4),
                     "ssp_scenario": scenario,
-                    "slr_scenario": slr,
+                    "waterlevel_name": slr,
                     "return_period": RETURN_PERIOD,
                     "n_tiles": result["n_tiles"],
                     "flooded_area_km2": round(flooded_km2, 4),

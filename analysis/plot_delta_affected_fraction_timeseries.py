@@ -68,7 +68,7 @@ def plot_affected_fraction_timeseries(
         slr_mm_of_year = np.interp(year_grid, traj_years, traj_mm)
 
         sub = df[df["ssp_scenario"] == ssp].copy()
-        sub["slr_mm"] = sub["slr_scenario"].str.split("_").str[1].astype(float)
+        sub["slr_mm"] = sub["waterlevel_name"].str.split("_").str[1].astype(float)
 
         pct_curves = []
         for delta_id, grp in sub.groupby("delta_id"):
@@ -115,6 +115,8 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_csv(csv_path)
+    if "waterlevel_name" not in df.columns:  # older CSVs name the SLR level column slr_scenario
+        df = df.rename(columns={"slr_scenario": "waterlevel_name"})
     traj_df = pd.read_csv(traj_path, index_col="year")
     print(f"{len(df)} row(s) from {csv_path}")
     print(f"SLR trajectory data: {traj_path} (years {traj_df.index.min()}-{traj_df.index.max()})")
