@@ -2,7 +2,7 @@
 
 Inputs: build_elevation.py, build_roughness.py, build_station_boundary_lines.py and
 build_line_forcing.py outputs. Runs in hydromt-sfincs-dev:
-    C:\\Users\\schlumbe\\AppData\\Local\\miniforge3\\envs\\hydromt-sfincs-dev\\python.exe build_sfincs_tile.py --tile-id 1907
+    <sfincs_python> build_sfincs_tile.py --tile-id 1907
 """
 
 from __future__ import annotations

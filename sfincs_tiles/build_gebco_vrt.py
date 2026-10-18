@@ -67,7 +67,7 @@ def build_gebco_vrt(tile_dir: Path, out_vrt: Path) -> None:
         raise RuntimeError(
             f"{out_vrt} is missing {len(missing)}/{len(tif_paths)} source tile(s) after "
             f"building - gdal.BuildVRT silently dropped: {missing}. Do not use this VRT "
-            "until fixed (re-run this script - transient P: share failures are the usual cause)."
+            "until fixed (re-run this script - transient shared-data-root I/O failures are the usual cause)."
         )
 
     for el in tree.getroot().iter("SourceFilename"):

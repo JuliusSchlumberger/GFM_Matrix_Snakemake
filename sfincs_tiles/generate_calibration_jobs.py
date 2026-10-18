@@ -5,7 +5,7 @@ and a bridge job (afterany) that selects tiles and runs `stage2 --submit`.
 stage2: spreads unfinished tiles over jobs, longest-processing-time-first.
 
 Usage:
-    python generate_calibration_jobs.py stage1            # then on Hydrax: bash .../hpc_jobs_stage1/submit_chain.sh
+    python generate_calibration_jobs.py stage1            # then on the cluster: bash .../hpc_jobs_stage1/submit_chain.sh
     python generate_calibration_jobs.py stage2 --submit   # what the bridge job runs
 
 Job resources: hpc.calibration_sbatch (config_hpc.yml); roots and pythons: site_env.sh.
@@ -121,7 +121,7 @@ def cmd_stage1(args) -> None:
                'echo "stage 1: ${ids[*]}"', 'echo "bridge (selection + stage-2 submission): $bridge"', ""]
     (jobs_dir / "submit_chain.sh").write_text("\n".join(submit), newline="\n")
     print(f"wrote {jobs_dir}: {len(names)} stage-1 job(s) + bridge\n"
-          f"submit on Hydrax with: bash {ljobs}/submit_chain.sh")
+          f"Submit on the cluster with: bash {ljobs}/submit_chain.sh")
 
 
 def cmd_stage2(args) -> None:

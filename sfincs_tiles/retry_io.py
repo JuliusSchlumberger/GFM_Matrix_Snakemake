@@ -1,4 +1,4 @@
-"""Retry wrapper for transient FileNotFoundError/OSError on the P:\\ SMB share."""
+"""Retry wrapper for transient FileNotFoundError/OSError on the shared data root (`paths.root`)."""
 
 from __future__ import annotations
 

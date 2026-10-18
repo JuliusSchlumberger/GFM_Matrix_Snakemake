@@ -1,5 +1,5 @@
 #!/bin/bash
-# Rerun part of the final calibration in place on Hydrax, after syncing the code to $GFM_CODE_ROOT.
+# Rerun part of the final calibration in place on the cluster, after syncing the code to $GFM_CODE_ROOT.
 #   --part eikonal  deletes markers + eikonal rasters, reruns only the eikonal sweep; POST=1 adds an
 #                   afterany job running the dedup and the sweep analysis for both base dirs.
 #   --part sfincs   deletes markers + sfincs.inp, rebuilds forcing -> SFINCS model/run -> result;
