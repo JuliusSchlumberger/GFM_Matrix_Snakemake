@@ -11,7 +11,7 @@ Writes {outdir}/flood_totals/flood_totals_{ISO}.csv.
 Usage:
     python compute_flood_totals.py \\
         [--config snakemake_workflow/config/config.yml] \\
-        --out-dir D:/GFM/merged_results/exposure
+        --out-dir <merged_results>/exposure
 """
 
 import argparse
@@ -123,7 +123,7 @@ def main() -> None:
             try:
                 chunk_totals = fut.result()
             except Exception as exc:
-                # A persistent P:\ failure must not discard hours of completed chunks.
+                # A persistent shared-data-root failure must not discard hours of completed chunks.
                 print(f"  [FAILED] chunk {cid}: {type(exc).__name__}: {exc}", flush=True)
                 failed_chunks.append(cid)
                 continue

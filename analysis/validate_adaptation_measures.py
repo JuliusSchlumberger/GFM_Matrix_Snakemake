@@ -5,7 +5,7 @@ level per SLR step (no RP integration); the whole grid is one "country".
 
 Usage:
     python analysis/validate_adaptation_measures.py
-        [--out-dir D:/GFM/figures/validation]
+        [--out-dir <figures>/validation]
 """
 
 import argparse

@@ -6,8 +6,8 @@ factors + slr_trajectories_csv (p50 lines, p17-p83 uncertainty subplot).
 Usage:
     python analysis/plot_burning_ember.py \\
         --config  snakemake_workflow/config/config.yml \\
-        --expdir  D:/GFM/merged_results/exposure \\
-        [--out-dir D:/GFM/figures]
+        --expdir  <merged_results>/exposure \\
+        [--out-dir <figures>]
 """
 
 import argparse

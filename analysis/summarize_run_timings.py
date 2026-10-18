@@ -4,7 +4,7 @@ Reads <model_outputs>/run_timings/*.json (`elapsed_s` wall-clock seconds from
 eikonal_runner.log_run_timing; `outcome` on the HPC path, default "solved") and prints
 run counts by outcome, total compute hours, and seconds per run and per tile.
 
-Run it on Hydrax - ~200k small files are slow over a network share:
+Run it on the cluster - ~200k small files are slow over a network share:
     python analysis/summarize_run_timings.py --timings-dir <model_outputs>/run_timings [--csv timings.csv]
 """
 

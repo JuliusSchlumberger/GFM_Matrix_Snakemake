@@ -6,10 +6,10 @@ Copernicus land-use background collapsed from 23 classes to 5.
 Usage:
     python plot_bangkok_case_flood_map.py \\
         --config snakemake_workflow/config/bangkok_chao_phraya_materialized.yml \\
-        --case-polygon-gpkg P:/.../bangkok_chao_phraya/bangkok_chao_phraya_domain.gpkg \\
+        --case-polygon-gpkg <data_root>/bangkok_chao_phraya/bangkok_chao_phraya_domain.gpkg \\
         --case-polygon-layer bangkok_tile \\
         --return-period RP100 \\
-        --out-dir P:/.../bangkok_chao_phraya/figures
+        --out-dir <data_root>/bangkok_chao_phraya/figures
 """
 
 import argparse

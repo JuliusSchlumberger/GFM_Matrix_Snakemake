@@ -8,7 +8,7 @@ population grid) and the geo109->ISO lookup cached with plot_world_map.py.
 Usage:
     python analysis/extract_country_population.py \\
         [--config snakemake_workflow/config/config.yml] \\
-        [--out D:/GFM/processed_inputs/country_population_2020.csv]
+        [--out <processed_inputs>/country_population_2020.csv]
 """
 
 import argparse

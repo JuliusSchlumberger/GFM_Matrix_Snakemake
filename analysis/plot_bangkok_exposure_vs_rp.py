@@ -4,8 +4,8 @@ Reads compute_bangkok_case_exposure.py's CSV.
 
 Usage:
     python plot_bangkok_exposure_vs_rp.py \\
-        --exposure-csv P:/.../bangkok_chao_phraya/merged_results/exposure/bangkok_case_exposure.csv \\
-        --out-dir P:/.../bangkok_chao_phraya/figures
+        --exposure-csv <data_root>/bangkok_chao_phraya/merged_results/exposure/bangkok_case_exposure.csv \\
+        --out-dir <data_root>/bangkok_chao_phraya/figures
 """
 
 import argparse

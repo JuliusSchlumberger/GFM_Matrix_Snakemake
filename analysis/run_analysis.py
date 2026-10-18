@@ -9,8 +9,8 @@ figures go directly into --fig-dir.
 Usage:
     python analysis/run_analysis.py \\
         [--config  snakemake_workflow/config/config.yml] \\
-        [--expdir  D:/GFM/merged_results/exposure] \\
-        [--fig-dir D:/GFM/figures] \\
+        [--expdir  <merged_results>/exposure] \\
+        [--fig-dir <figures>] \\
         [--fail-fast] [--only-exposure | --only-plots] [--skip-world-maps]
 """
 

@@ -6,7 +6,7 @@ time (no global mosaic) at ~1 km population-grid resolution.
 Usage:
     python compute_exposure_analysis.py \\
         [--config snakemake_workflow/config/config.yml] \\
-        --out-dir D:/GFM/merged_results/exposure
+        --out-dir <merged_results>/exposure
 """
 
 import argparse

@@ -6,8 +6,8 @@ by Thailand's national growth factor.
 Usage:
     python plot_bangkok_eai_timeseries.py \\
         --config snakemake_workflow/config/bangkok_chao_phraya_materialized.yml \\
-        --exposure-csv P:/.../bangkok_chao_phraya/merged_results/exposure/bangkok_case_exposure.csv \\
-        --out-dir P:/.../bangkok_chao_phraya/figures
+        --exposure-csv <data_root>/bangkok_chao_phraya/merged_results/exposure/bangkok_case_exposure.csv \\
+        --out-dir <data_root>/bangkok_chao_phraya/figures
 """
 
 import argparse

@@ -7,9 +7,9 @@ population is uniform within each population-grid cell.
 Usage:
     python compute_bangkok_case_exposure.py \\
         --config snakemake_workflow/config/bangkok_chao_phraya_materialized.yml \\
-        --case-polygon-gpkg P:/.../bangkok_chao_phraya/bangkok_chao_phraya_domain.gpkg \\
+        --case-polygon-gpkg <data_root>/bangkok_chao_phraya/bangkok_chao_phraya_domain.gpkg \\
         --case-polygon-layer bangkok_tile \\
-        --out-dir P:/.../bangkok_chao_phraya/merged_results/exposure
+        --out-dir <data_root>/bangkok_chao_phraya/merged_results/exposure
 """
 
 import argparse

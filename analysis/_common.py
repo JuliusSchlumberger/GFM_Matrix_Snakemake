@@ -73,8 +73,8 @@ def _read_band_and_transform(path: Path, dtype: str, fill) -> tuple[np.ndarray, 
     """Read band 1 (file nodata -> `fill`, cast to `dtype`) plus the file's transform.
 
     `masked=True` is required: population's nodata (-3.4e38, float32-min) is finite.
-    Open + read are retried as one unit since transient P:\ errors (`GetBlockRef failed`)
-    surface inside `.read()`.
+    Open + read are retried as one unit since transient errors on the shared data root
+    (`GetBlockRef failed`) surface inside `.read()`.
     """
     def _do():
         with rasterio.open(path) as src:

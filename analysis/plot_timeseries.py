@@ -5,8 +5,8 @@ Reads exposure_*_ssp.csv (File 3), already resolved to each SSP's SLR and growth
 Usage:
     python analysis/plot_timeseries.py \\
         --config  snakemake_workflow/config/config.yml \\
-        --expdir  D:/GFM/merged_results/exposure \\
-        [--out-dir D:/GFM/figures/timeseries]
+        --expdir  <merged_results>/exposure \\
+        [--out-dir <figures>/timeseries]
 """
 
 import argparse

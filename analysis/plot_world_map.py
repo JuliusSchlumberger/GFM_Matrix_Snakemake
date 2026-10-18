@@ -7,8 +7,8 @@ raster; the geogunit_109->ISO lookup is cached in the output dir.
 Usage:
     python analysis/plot_world_map.py \\
         --config  snakemake_workflow/config/config.yml \\
-        --expdir  D:/GFM/merged_results/exposure \\
-        [--out-dir D:/GFM/figures/world_maps] \\
+        --expdir  <merged_results>/exposure \\
+        [--out-dir <figures>/world_maps] \\
         [--years 2050 2100] \\
         [--ssps  SSP1 SSP2 SSP5]
 """
