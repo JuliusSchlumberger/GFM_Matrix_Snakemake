@@ -23,7 +23,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import _read_band, _read_band_and_transform, _round_val, discover_chunk_ids  # noqa: E402
-from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
+from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io, return_period_label  # noqa: E402
 from exposure_analysis import _safe  # noqa: E402
 from pipeline_plots import pixel_area_km2_grid  # noqa: E402
 from rasters import polygon_domain_mask  # noqa: E402
@@ -102,7 +102,7 @@ def main() -> None:
 
     rows = [
         {
-            "return_period": rp, "waterlevel_name": slr,
+            "return_period": return_period_label(rp), "waterlevel_name": slr,
             "flooded_km2": _round_val(v["flooded_km2"]),
             "flooded_pct_of_polygon": _round_val(100.0 * v["flooded_km2"] / polygon_area_km2),
             "exposed_population": _round_val(v["exposed_population"]),

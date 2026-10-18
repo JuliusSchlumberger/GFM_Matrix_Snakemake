@@ -211,3 +211,22 @@ def merged_slr_scenarios(bc_cfg: dict, adapt_cfg: dict) -> list[str]:
     """
     names = list(dict.fromkeys(bc_cfg["slr_scenarios"] + adapt_cfg.get("slr_intensities", [])))
     return sorted(names, key=lambda s: int(s.split("_")[1]))
+
+
+def return_period_label(rp: int | str) -> str:
+    """Return the "RP100" form of a return period given as 100, "100" or "RP100".
+
+    "RP100" (the Snakemake `return_period` wildcard) is what every output CSV's
+    `return_period` column holds; config lists hold plain ints.
+    """
+    return f"RP{return_period_years(rp)}"
+
+
+def return_period_years(rp: int | str) -> int:
+    """Return the integer years of a return period given as 100, "100" or "RP100".
+
+    Readers use it so that CSVs written with an int `return_period` column (older
+    outputs) and with the "RP100" form read the same.
+    """
+    s = str(rp).strip().upper()
+    return int(s[2:] if s.startswith("RP") else float(s))

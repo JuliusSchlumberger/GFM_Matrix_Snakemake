@@ -27,7 +27,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import _read_band, _read_band_and_transform, _round_val, discover_chunk_ids  # noqa: E402
-from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io  # noqa: E402
+from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io, return_period_label  # noqa: E402
 from pipeline_plots import pixel_area_km2_grid  # noqa: E402
 from exposure_analysis import _build_iso_index, _safe, country_sums  # noqa: E402
 from validation import load_iso_lookup  # noqa: E402
@@ -148,7 +148,7 @@ def main() -> None:
     for iso, by_key in sorted(totals.items()):
         rows = [
             {
-                "iso": iso, "return_period": rp, "waterlevel_name": slr,
+                "iso": iso, "return_period": return_period_label(rp), "waterlevel_name": slr,
                 "total_wet_km2": _round_val(v["total_wet_km2"]),
                 "total_exposed_pop": _round_val(v["total_exposed_pop"]),
             }

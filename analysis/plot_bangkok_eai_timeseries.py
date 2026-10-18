@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from config_utils import get_data_catalog, load_config, merged_slr_scenarios  # noqa: E402
+from config_utils import get_data_catalog, load_config, merged_slr_scenarios, return_period_years  # noqa: E402
 from exposure_analysis import _trapezoid_eai, resolve_ssp_scenario_eai  # noqa: E402
 from population_growth import load_ssp_growth_factors  # noqa: E402
 from analysis_figures import load_slr_trajectories, ssp_rcp_label  # noqa: E402
@@ -44,6 +44,7 @@ def main() -> None:
     slr_order = [f"SLR_{mm}" for mm in slr_mm_values]
 
     df = pd.read_csv(args.exposure_csv)
+    df["return_period"] = df["return_period"].map(return_period_years)  # "RP100" or an older int column
 
     # Trapezoidal integration over 1/RP; columns must follow slr_mm_values order.
     eai_by_slr = {}

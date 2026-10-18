@@ -9,10 +9,14 @@ Usage:
 """
 
 import argparse
+import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from config_utils import return_period_years  # noqa: E402
 
 
 def main() -> None:
@@ -22,6 +26,7 @@ def main() -> None:
     args = parser.parse_args()
 
     df = pd.read_csv(args.exposure_csv)
+    df["return_period"] = df["return_period"].map(return_period_years)  # "RP100" or an older int column
     out_dir = Path(args.outdir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
