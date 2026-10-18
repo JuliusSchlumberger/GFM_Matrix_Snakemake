@@ -4,6 +4,23 @@ The cleanup phases (AUDIT.md §8) are behaviour-preserving. Anything that needs
 a real (behaviour- or result-changing) fix is logged here instead of being done
 in-phase.
 
+## Start here (status 2026-10-18)
+
+All cleanup phases (AUDIT.md section 8, Phases 0-7) are done on branch `cleanup` and pushed; nothing
+is merged into `main` yet. Each phase was verified locally (ruff, pytest, subset dry runs, and
+AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for you:
+
+1. **Review / merge `cleanup`** into `main` (one commit per phase, `git log main..cleanup`).
+2. **Before pulling on Hydrax:** back up the now-untracked `config_hpc.yml` (and any
+   `*_materialized.yml` there) - a pull deletes files that Phase 1 untracked; restore afterwards.
+3. **On Hydrax after pulling:** regenerate any HPC job files written before Phase 7a/7b (they call
+   old script names); then `DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part eikonal`.
+4. **Snakemake "code changed" flags** (renamed rules/scripts): clear once with `snakemake --touch`
+   on the configs whose outputs exist (writes Snakemake metadata next to P:\ outputs).
+5. **Decide:** re-materialize the scenario configs or not (item below); the `mdt_sign` test fixture;
+   the near-duplicates left in Phase 5d.
+6. Hydrax `gfm` env: `mamba install -n gfm pytest=8.4.2 ruff=0.12.0` (Phase 0 tooling).
+
 ## Open
 
 - **`tests/sfincs_mdt_sign_validation/validate_mdt_sign.py` fails (found in Phase 0, 2026-10-17).**
