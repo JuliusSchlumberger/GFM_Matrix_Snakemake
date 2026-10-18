@@ -10,8 +10,12 @@ Domain: union of the 9 counties' rectangular raster extents
 so its nodata inside the union counts as dry (depth 0). Permanent water is
 excluded: CoSMoS depth includes Bay bathymetry.
 
+Writes, on the model grid (A), the agreement raster (validate_country.py's codes) and the
+model-minus-CoSMoS depth difference (m), plus the metrics CSV, to --out-dir
+(default {validation.output_dir}/USA). Plot them with plot_sf_bay.py.
+
 Usage:
-    python validation/validate_sf_bay.py [--config path/to/config.yml] [--out-csv path.csv]
+    python validation/validate_sf_bay.py [--config path/to/config.yml] [--out-dir DIR] [--out-csv path.csv]
 """
 
 from __future__ import annotations
@@ -33,6 +37,7 @@ from config_utils import get_data_catalog, load_config, retry_transient_io  # no
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _chunks import _chunks_overlapping_bbox, _mosaic_read  # noqa: E402
+from validate_country import _CAT_AGREE, _CAT_DRY, _CAT_OVER, _CAT_UNDER  # noqa: E402
 
 
 def _rasterize_surveyed_domain(surveyed_domain_path: Path, out_transform, out_shape, out_crs) -> np.ndarray:
@@ -53,6 +58,32 @@ def _permanent_water_mask_lean(land_use: np.ndarray, exclude_codes) -> np.ndarra
 NODATA_SENTINEL = -9999.0
 # EPSG:4326, footprint of the v2.1 sfb_fldhazd benchmark.
 BAY_BBOX_4326 = (-122.64, 37.40, -121.88, 38.28)
+OUTPUT_TAG = "USA_sf_bay_RP100_SLR_0"
+AGREEMENT_NODATA = 255
+
+
+def _write_model_grid_outputs(out_dir: Path, model_depth, bench_depth, model_wet, bench_wet, domain, transform, crs) -> None:
+    """Write agreement categories and model-minus-CoSMoS depth (m) on the model grid.
+
+    The depth difference is NaN where both are dry, so the map shows the background there.
+    """
+    retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
+    agreement = np.full(domain.shape, AGREEMENT_NODATA, dtype="uint8")
+    agreement[domain] = _CAT_DRY
+    agreement[domain & model_wet & bench_wet] = _CAT_AGREE
+    agreement[domain & ~model_wet & bench_wet] = _CAT_UNDER
+    agreement[domain & model_wet & ~bench_wet] = _CAT_OVER
+    diff = np.where(domain & (model_wet | bench_wet), model_depth - bench_depth, np.nan).astype("float32")
+    base = {"driver": "GTiff", "count": 1, "crs": crs, "transform": transform,
+            "width": domain.shape[1], "height": domain.shape[0], "compress": "lzw"}
+    for name, arr, extra in (
+        ("agreement", agreement, {"dtype": "uint8", "nodata": AGREEMENT_NODATA}),
+        ("depth_diff", diff, {"dtype": "float32", "nodata": float("nan")}),
+    ):
+        path = out_dir / f"{name}_{OUTPUT_TAG}.tif"
+        with retry_transient_io(rasterio.open, path, "w", **base, **extra) as dst:
+            dst.write(arr, 1)
+        print(f"wrote {path}")
 
 
 def _read_model_bay(chunk_paths: list[Path], bbox):
@@ -137,8 +168,11 @@ def _depth_error_metrics(model_depth: np.ndarray, bench_depth: np.ndarray, domai
     }
 
 
-def validate_sf_bay(config_path: str, threshold_m: float | None = None) -> dict[str, dict]:
-    """Score both directions; `threshold_m` defaults to validation.primary_threshold_m."""
+def validate_sf_bay(config_path: str, threshold_m: float | None = None, out_dir: Path | None = None) -> dict[str, dict]:
+    """Score both directions; `threshold_m` defaults to validation.primary_threshold_m.
+
+    With `out_dir`, also writes the model-grid rasters (_write_model_grid_outputs).
+    """
     cfg = load_config(Path(config_path))
     val_cfg = cfg["validation"]
     threshold_m = threshold_m if threshold_m is not None else val_cfg["primary_threshold_m"]
@@ -187,6 +221,9 @@ def validate_sf_bay(config_path: str, threshold_m: float | None = None) -> dict[
         **_confusion_metrics(model_wet_a, bench_wet_a, domain_a),
         **_depth_error_metrics(model_depth_native, bench_on_model, domain_a, bench_wet_a),
     }
+    if out_dir is not None:
+        _write_model_grid_outputs(Path(out_dir), model_depth_native, bench_on_model, model_wet_a, bench_wet_a,
+                                  domain_a, model_transform_native, model_crs)
 
     model_on_2m = np.full(bench_shape_2m, NODATA_SENTINEL, dtype="float32")
     reproject(
@@ -215,19 +252,25 @@ def validate_sf_bay(config_path: str, threshold_m: float | None = None) -> dict[
 
 
 def main() -> None:
-    """Print the SF Bay results and optionally write them to --out-csv."""
+    """Print the SF Bay results; write rasters + metrics to --out-dir, optionally --out-csv."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
+    parser.add_argument("--out-dir", default=None, help="default: {validation.output_dir}/USA")
     parser.add_argument("--out-csv", default=None)
     args = parser.parse_args()
 
-    results = validate_sf_bay(args.config)
+    out_dir = Path(args.out_dir) if args.out_dir else Path(load_config(Path(args.config))["validation"]["output_dir"]) / "USA"
+    results = validate_sf_bay(args.config, out_dir=out_dir)
 
     import pandas as pd
     df = pd.DataFrame(results).T
     pd.set_option("display.width", 160)
     pd.set_option("display.max_columns", 20)
     print(df.to_string())
+
+    metrics_path = out_dir / f"metrics_{OUTPUT_TAG}.csv"
+    df.to_csv(metrics_path)
+    print(f"\nwrote {metrics_path}")
 
     if args.out_csv:
         df.to_csv(args.out_csv)

@@ -109,7 +109,9 @@ Standalone because CoSMoS is a continuous DEPTH raster much finer than the model
 - **A) coarsen** — CoSMoS depth averaged onto the model's native grid (~30m, EPSG:4326).
 - **B) refine** — model depth bilinear-resampled onto CoSMoS's 2m grid.
 
-Each direction gives plain confusion counts (HR, FAR, CSI, bias) at `primary_threshold_m` plus RMSE/MAE over the whole domain and over benchmark-flooded pixels only. Evaluation domain is the union of the 9 counties' rectangular raster extents (`sf_bay_county_bbox_union.gpkg`), not the raster's valid-pixel footprint: CoSMoS only carries values inside the mapped flood extent, so its footprint is ~100% wet by construction and would make FAR/bias vacuous. CoSMoS nodata inside the union is treated as "modelled, dry". Permanent water is excluded as everywhere else (CoSMoS depths include the Bay's own bathymetric depth). Results: `validation/sf_bay_results.csv`.
+Each direction gives plain confusion counts (HR, FAR, CSI, bias) at `primary_threshold_m` plus RMSE/MAE over the whole domain and over benchmark-flooded pixels only. Evaluation domain is the union of the 9 counties' rectangular raster extents (`sf_bay_county_bbox_union.gpkg`), not the raster's valid-pixel footprint: CoSMoS only carries values inside the mapped flood extent, so its footprint is ~100% wet by construction and would make FAR/bias vacuous. CoSMoS nodata inside the union is treated as "modelled, dry". Permanent water is excluded as everywhere else (CoSMoS depths include the Bay's own bathymetric depth). Results: `validation/sf_bay_results.csv` (with `--out-csv`).
+
+On grid A the script also writes, to `{validation.output_dir}/USA/`, `agreement_USA_sf_bay_RP100_SLR_0.tif` (the country rasters' codes: 0 dry, 1 agree, 2 under, 3 over; 255 outside the domain), `depth_diff_USA_sf_bay_RP100_SLR_0.tif` (model minus CoSMoS, m, NaN outside the domain and where both are dry) and `metrics_USA_sf_bay_RP100_SLR_0.csv`. `plot_sf_bay.py` maps both rasters (same colours, background and metrics box as `plot_agreement_map.py`; depth difference on a symmetric ±`--diff-range-m` scale, default 1 m).
 
 ## Reporting tables
 
