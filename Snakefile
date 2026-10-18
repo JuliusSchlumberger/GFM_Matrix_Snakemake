@@ -41,7 +41,7 @@ os.makedirs = _retrying_makedirs
 
 sys.path.insert(0, os.path.join(workflow.basedir, "src"))
 from eikonal_runner import estimate_eikonal_mem_mb  # noqa: E402
-from config_utils import _expand_paths, get_data_catalog, merged_slr_scenarios  # noqa: E402
+from config_utils import _expand_paths, get_data_catalog, merged_waterlevel_names  # noqa: E402
 from tiles import build_chunk_grid  # noqa: E402
 
 # GFM_CONFIG_PATH selects a materialized scenario config via the `configfile:`
@@ -75,7 +75,7 @@ RETURN_PERIODS = [f"RP{rp}" for rp in config["boundary_conditions"]["return_peri
 
 # Base SLR scenarios + adaptation design intensities, sorted (np.interp needs
 # increasing values).
-WATERLEVEL_NAMES = merged_slr_scenarios(config["boundary_conditions"], config["adaptation"])
+WATERLEVEL_NAMES = merged_waterlevel_names(config["boundary_conditions"], config["adaptation"])
 
 
 # Chunk ids name the south-west corner, e.g. "S10E030" = (lon=30°, lat=-10°).

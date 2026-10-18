@@ -23,7 +23,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import _read_band, _read_band_and_transform, _round_val, discover_chunk_ids  # noqa: E402
-from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io, return_period_label  # noqa: E402
+from config_utils import atomic_write, load_config, merged_waterlevel_names, retry_transient_io, return_period_label  # noqa: E402
 from exposure_analysis import _safe  # noqa: E402
 from pipeline_plots import pixel_area_km2_grid  # noqa: E402
 from rasters import polygon_domain_mask  # noqa: E402
@@ -43,7 +43,7 @@ def main() -> None:
     cfg = load_config(args.config)
     bc = cfg["boundary_conditions"]
     return_periods = bc["return_periods"]
-    slr_scenarios = merged_slr_scenarios(bc, cfg["adaptation"])
+    slr_scenarios = merged_waterlevel_names(bc, cfg["adaptation"])
 
     merged_dir = Path(cfg["postprocessing"]["merged_outputs"])
     flood_frac_dir = merged_dir / "chunks" / "flood_fraction"

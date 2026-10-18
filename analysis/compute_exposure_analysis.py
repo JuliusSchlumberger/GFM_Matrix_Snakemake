@@ -22,7 +22,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import _chunk_is_populated, _read_band, discover_chunk_ids  # noqa: E402
-from config_utils import get_data_catalog, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
+from config_utils import get_data_catalog, load_config, merged_waterlevel_names, retry_transient_io  # noqa: E402
 from population_growth import load_ssp_growth_factors, interpolate_growth_factor  # noqa: E402
 from validation import load_iso_lookup  # noqa: E402
 from analysis_figures import load_slr_trajectories  # noqa: E402
@@ -281,7 +281,7 @@ def _avoid_ssp_worker_task(
 
     avoid_eai = _stream_eai(
         ctx["chunk_ids"], ctx["chunks_dir"], ctx["flood_frac_dir"],
-        ctx["return_periods"], ctx["slr_scenarios"], ctx["iso_lookup"], exposure_fn,
+        ctx["return_periods"], ctx["waterlevel_names"], ctx["iso_lookup"], exposure_fn,
     )
 
     traj_years = slr_traj.index.to_numpy(dtype=float)
@@ -310,7 +310,7 @@ def _avoid_growth_matrix_worker_task(
 
     avoid_eai = _stream_eai(
         ctx["chunk_ids"], ctx["chunks_dir"], ctx["flood_frac_dir"],
-        ctx["return_periods"], ctx["slr_scenarios"], ctx["iso_lookup"], exposure_fn,
+        ctx["return_periods"], ctx["waterlevel_names"], ctx["iso_lookup"], exposure_fn,
     )
     dense = interpolate_eai_linear(avoid_eai, ctx["slr_mm_sorted"], ctx["slr_interp_mm"])
     dense.columns = [f"EAI_{c}_g{g_pct}" for c in dense.columns]
@@ -357,7 +357,7 @@ def load_analysis_context(cfg: dict) -> AnalysisContext:
     viz = cfg["visualization"]
 
     return_periods = bc["return_periods"]
-    slr_scenarios = merged_slr_scenarios(bc, adapt_cfg)
+    slr_scenarios = merged_waterlevel_names(bc, adapt_cfg)
     slr_mm_sorted = [float(_slr_mm(s)) for s in slr_scenarios]
     slr_baseline = prot_cfg["baseline_waterlevel_name"]
     slr_intensities = adapt_cfg["slr_intensities"]

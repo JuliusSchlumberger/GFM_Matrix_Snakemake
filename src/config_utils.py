@@ -203,13 +203,13 @@ def get_data_catalog(
     return catalog
 
 
-def merged_slr_scenarios(bc_cfg: dict, adapt_cfg: dict) -> list[str]:
-    """Union of boundary_conditions.slr_scenarios and adaptation.slr_intensities.
+def merged_waterlevel_names(bc_cfg: dict, adapt_cfg: dict) -> list[str]:
+    """Union of boundary_conditions.waterlevel_names and adaptation.slr_intensities.
 
     Names are "SLR_<mm>", sorted ascending by mm: callers feed them to
     np.interp/pchip_interpolate, which need strictly increasing x.
     """
-    names = list(dict.fromkeys(bc_cfg["slr_scenarios"] + adapt_cfg.get("slr_intensities", [])))
+    names = list(dict.fromkeys(bc_cfg["waterlevel_names"] + adapt_cfg.get("slr_intensities", [])))
     return sorted(names, key=lambda s: int(s.split("_")[1]))
 
 

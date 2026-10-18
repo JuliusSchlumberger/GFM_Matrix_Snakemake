@@ -26,7 +26,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
+from config_utils import atomic_write, load_config, merged_waterlevel_names, retry_transient_io  # noqa: E402
 from hpc_common import _retry_wrapper_lines, _stage_configfile_lines, read_targets_lines, sbatch_header  # noqa: E402
 
 
@@ -121,7 +121,7 @@ def main() -> None:
     # scripts, not opened from Windows.
     tile_gdf = retry_transient_io(gpd.read_file, local_config["tile_grid"]["path"])
     return_periods = [f"RP{rp}" for rp in linux_config["boundary_conditions"]["return_periods"]]
-    waterlevel_names = merged_slr_scenarios(linux_config["boundary_conditions"], linux_config["adaptation"])
+    waterlevel_names = merged_waterlevel_names(linux_config["boundary_conditions"], linux_config["adaptation"])
 
     if args.fuse:
         non_wave0 = tile_gdf.loc[tile_gdf["hop_distance"] != 0, "tile_id"].tolist()

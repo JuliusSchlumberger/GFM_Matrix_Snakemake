@@ -23,7 +23,7 @@ import geopandas as gpd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from config_utils import load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
+from config_utils import load_config, merged_waterlevel_names, retry_transient_io  # noqa: E402
 from generate_eikonal_jobs import generate_resume_dispatch, generate_wave_dispatch  # noqa: E402
 
 
@@ -66,7 +66,7 @@ def main() -> None:
     tile_ids = tile_gdf["tile_id"].astype(int).tolist()
     hop_by_tile = {str(tid): int(hop) for tid, hop in zip(tile_gdf["tile_id"], tile_gdf["hop_distance"])}
     return_periods = [f"RP{rp}" for rp in local_config["boundary_conditions"]["return_periods"]]
-    waterlevel_names = merged_slr_scenarios(local_config["boundary_conditions"], local_config["adaptation"])
+    waterlevel_names = merged_waterlevel_names(local_config["boundary_conditions"], local_config["adaptation"])
 
     hpc_waves: dict[int, list[str]] = {}
     for tid in tile_ids:

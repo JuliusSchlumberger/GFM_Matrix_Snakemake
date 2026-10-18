@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
-from config_utils import load_config, merged_slr_scenarios  # noqa: E402
+from config_utils import load_config, merged_waterlevel_names  # noqa: E402
 from progress_report import progress_bar, run_report  # noqa: E402
 from tiles import build_chunk_grid, load_tile_grid  # noqa: E402
 
@@ -38,7 +38,7 @@ def main() -> None:
     n_chunks = len(chunk_ids)
 
     bc_cfg = cfg["boundary_conditions"]
-    waterlevel_names = merged_slr_scenarios(bc_cfg, cfg["adaptation"])
+    waterlevel_names = merged_waterlevel_names(bc_cfg, cfg["adaptation"])
     n_scenarios_per_chunk = len(bc_cfg["return_periods"]) * len(waterlevel_names)
 
     merged_dir = Path(cfg["postprocessing"]["merged_outputs"])

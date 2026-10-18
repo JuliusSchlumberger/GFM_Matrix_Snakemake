@@ -128,7 +128,7 @@ def main() -> None:
     design["tile_grid"] = {**base["tile_grid"], "path": base["tile_grid"]["path"].replace(
         "deltas_global_tiles.gpkg", "deltas_design_tiles.gpkg")}
     design["boundary_conditions"] = {**base["boundary_conditions"], "return_periods": rps_to_run,
-                                     "slr_scenarios": ["SLR_0"],
+                                     "waterlevel_names": ["SLR_0"],
                                      "waterlevel_nc_dir": "{root}/deltas_floodmaps/design/WL_scenarios"}
     design["simulation"] = {**base["simulation"], "model_outputs": "{root}/deltas_floodmaps/design/model_outputs"}
     design["postprocessing"] = {**base["postprocessing"], "merged_outputs": "{root}/deltas_floodmaps/design/merged_results"}

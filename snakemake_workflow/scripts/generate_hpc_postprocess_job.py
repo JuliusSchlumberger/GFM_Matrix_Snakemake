@@ -26,7 +26,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
+from config_utils import atomic_write, load_config, merged_waterlevel_names, retry_transient_io  # noqa: E402
 from hpc_common import (  # noqa: E402
     _retry_wrapper_lines,
     _stage_configfile_lines,
@@ -182,7 +182,7 @@ def main() -> None:
         except OSError:
             pass
     return_periods = [f"RP{rp}" for rp in local_config["boundary_conditions"]["return_periods"]]
-    waterlevel_names = merged_slr_scenarios(local_config["boundary_conditions"], local_config["adaptation"])
+    waterlevel_names = merged_waterlevel_names(local_config["boundary_conditions"], local_config["adaptation"])
     baseline_slr = local_config["protection"]["baseline_waterlevel_name"]
 
     chunk_size_deg = local_config["postprocessing"]["chunk_size_deg"]

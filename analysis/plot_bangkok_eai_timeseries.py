@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from config_utils import get_data_catalog, load_config, merged_slr_scenarios, return_period_years  # noqa: E402
+from config_utils import get_data_catalog, load_config, merged_waterlevel_names, return_period_years  # noqa: E402
 from exposure_analysis import _trapezoid_eai, resolve_ssp_scenario_eai  # noqa: E402
 from population_growth import load_ssp_growth_factors  # noqa: E402
 from analysis_figures import load_slr_trajectories, ssp_rcp_label  # noqa: E402
@@ -39,7 +39,7 @@ def main() -> None:
     viz = cfg["visualization"]
     bc = cfg["boundary_conditions"]
     return_periods = bc["return_periods"]
-    slr_scenarios = merged_slr_scenarios(bc, cfg["adaptation"])
+    slr_scenarios = merged_waterlevel_names(bc, cfg["adaptation"])
     slr_mm_values = sorted(int(s.split("_")[1]) for s in slr_scenarios)
     slr_order = [f"SLR_{mm}" for mm in slr_mm_values]
 

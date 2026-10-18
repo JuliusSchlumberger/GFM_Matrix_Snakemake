@@ -87,7 +87,7 @@ def main() -> None:
     cfg = load_config(args.config)
     bc = cfg["boundary_conditions"]
     return_periods = bc["return_periods"]
-    slr_scenarios = bc["slr_scenarios"]
+    slr_scenarios = bc["waterlevel_names"]
 
     merged_dir = Path(cfg["postprocessing"]["merged_outputs"])
     flood_frac_dir = merged_dir / "chunks" / "flood_fraction"

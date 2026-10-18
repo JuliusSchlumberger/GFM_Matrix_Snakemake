@@ -25,7 +25,7 @@ from matplotlib.patches import Patch
 from rasterio.windows import from_bounds
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from config_utils import get_data_catalog, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
+from config_utils import get_data_catalog, load_config, merged_waterlevel_names, retry_transient_io  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _BUFFER_DEG = 0.15
@@ -72,7 +72,7 @@ def main() -> None:
 
     cfg = load_config(args.config)
     bc = cfg["boundary_conditions"]
-    slr_order = merged_slr_scenarios(bc, cfg["adaptation"])
+    slr_order = merged_waterlevel_names(bc, cfg["adaptation"])
     slr_order = sorted(slr_order, key=lambda s: int(s.split("_")[1]))
 
     plots_cfg = cfg["postprocessing"]["plots"]

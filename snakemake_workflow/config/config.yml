@@ -162,12 +162,9 @@ tile_split: # Used by: run_eikonal_dag.py to split OOM tiles and re-run Snakemak
 boundary_conditions:
   waterlevel_nc_dir: "{processed_inputs_dir}/WL_scenarios" # Directory for water level scenario files
 
-  # IPCC AR6 regional SLR projection scenario/confidence level used to build
-  # the SLR fingerprints. slr_scenario is the SSP-RCP projection CODE, not an SLR
-  # level (those are slr_scenarios below / the waterlevel_name wildcard). The key
-  # keeps its name: this whole section is a Snakemake rule param (bc_cfg), so a
-  # renamed key would re-trigger every cache_waterlevel_stations/extract_boundaries job.
-  slr_scenario: "ssp245" # options: slr_scenario ssp126/ssp245/ssp585
+  # IPCC AR6 regional SLR projection (SSP-RCP code) and confidence level used to
+  # build the SLR fingerprints. Not an SLR level: those are waterlevel_names below.
+  slr_projection: "ssp245" # options: ssp126/ssp245/ssp585
   confidence_level: "medium" # options: low/medium
   coastrp_min_lat: -60  # exclude antarctic stations (no exposure)
 
@@ -197,7 +194,7 @@ boundary_conditions:
     - 500
     - 1000
 
-  slr_scenarios: # SLR levels "SLR_<mm>" = the waterlevel_name wildcard values (key name kept, see slr_scenario)
+  waterlevel_names: # SLR levels "SLR_<mm>" = the waterlevel_name wildcard values
     - "SLR_0"
     - "SLR_500"
     - "SLR_1000"
@@ -610,7 +607,7 @@ visualization:
 
   slr_interp: # interpolated based on run scenarios used for smoothing the curve.
     min_mm:   0
-    max_mm: 2000   # highest modelled SLR scenario (boundary_conditions.slr_scenarios)
+    max_mm: 2000   # highest modelled SLR level (boundary_conditions.waterlevel_names)
     n_points: 133  # ~15 mm spacing, as before
 
   ember_display: # plot_burning_ember.py: window of the growth matrix shown in the ember figures
