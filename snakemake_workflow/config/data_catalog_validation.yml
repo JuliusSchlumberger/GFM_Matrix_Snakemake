@@ -193,9 +193,11 @@ scotland_sepa_coastal_m:
 # bbox request was tried first and never returned even one page; confirmed live
 # that individual ~1deg tiles over dense coastal stretches alone can take 1-3
 # minutes, so a single request over the whole country was never going to finish
-# in a reasonable time). Already pre-filtered client-side to flood_source="sea"
-# and origin="modelled" (excludes river/rainfall-model/recorded variants, not
-# comparable to this model's own pure coastal-storm-surge physics), then split by
+# in a reasonable time). Already pre-filtered client-side to flood_source in
+# {"sea", "river and sea"} (the latter is the estuarine/tidal-river class; an
+# earlier sea-only download wrongly dropped every estuary) and origin="modelled"
+# (excludes plain river/rainfall-model/recorded variants, not comparable to this
+# model's own pure coastal-storm-surge physics), then split by
 # flood_zone into its own file - no attribute_filter needed here, unlike Wales'
 # single-layer source.
 # country_iso is "GBR" (England has no ISO-3166-1 code of its own) - same

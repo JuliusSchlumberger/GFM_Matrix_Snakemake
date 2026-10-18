@@ -23,17 +23,6 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
 
 ## Open
 
-- **FZ2 band figures disagree between the tracked CSVs (found in Phase 2b).**
-  The note in `validation/comparison_vs_published.csv` says bias 2.4x and HR 0.066;
-  `validation/overview_extent_metrics.csv` says bias 1.99 and HR 0.060. One of them is
-  stale. Regenerate both (`build_overview_table.py`, `compare_against_published.py`)
-  after the next England FZ2 run and check which is right. methods_04b currently cites
-  only the overview CSV's bias.
-- **England catalog comment is out of date.** The header comment of
-  `england_ea_floodzone3_sea` / `_floodzone2_sea` in `data_catalog_validation.yml` says
-  the data were filtered to `flood_source="sea"` only. `fetch_england_flood_zones.py`
-  later added `river and sea`. Confirm which filter the current `fz*_sea_modelled.gpkg`
-  were built with, then fix the comment.
 - **Two console messages disappeared with the partial path.** "flood_totals missing →
   model_total_wet_km2 NaN" and "No coastal benchmark found for X" were only printed by
   the deleted `validate_country()`. The national path now prints just "No extent rows
@@ -51,9 +40,6 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
   scored. Phase 6 moves the path into config; picking up overlapping chunks automatically
   (as `validate_country.py` does with `_chunks_overlapping_bbox`) would be a behaviour
   change, so it's logged here. Bringing SF Bay into `run_validation.py` is deferred (AUDIT.md §9.4 Q2).
-- **`openpyxl` in environment.yml has no user** (found in Phase 4). Its only consumer,
-  a calibration xlsx report script, was removed earlier; nothing imports openpyxl or
-  calls `to_excel`/`ExcelWriter`. Dropping the pin is an env change, so it's logged here.
 - **`generate_eikonal_jobs.generate_wave_dispatch` has 3 unused parameters** (`model_outputs`,
   `hop_by_tile`, `raster_config`; docstring says so). Left in place in Phase 7a on purpose:
   dropping them also means dropping the `generate_eikonal_jobs` rule's params, which re-triggers

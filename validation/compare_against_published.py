@@ -59,9 +59,9 @@ ENGLAND_FZ2_CAVEAT = (
     "(what the naive comparison below does) gave bias=26.2x/CSI=0.023, a benchmark-definition "
     "mismatch, not a real model failure. validate_england_fz2_band.py re-scores against the model's "
     "own matching incremental band (RP1000 minus RP100 - RP100 is the model's nearest native RP below "
-    "the benchmark's real ~RP200 inner edge) instead: bias drops to a sane 2.4x (confirming the "
+    "the benchmark's real ~RP200 inner edge) instead: bias drops to a sane 2.0x (confirming the "
     "cumulative-vs-incremental mismatch was the dominant driver of the 26x figure), but CSI stays low "
-    "(0.020, HR=0.066) - plausibly because a thin coastal band is highly sensitive to small positional "
+    "(0.021, HR=0.060; benchmark re-fetched 2026-10-16 with flood_source 'sea' + 'river and sea') - plausibly because a thin coastal band is highly sensitive to small positional "
     "offsets between model and benchmark, but this is NOT independently confirmed; treat the band "
     "result as a real, methodologically-sound number, not yet a fully-explained one."
 )
