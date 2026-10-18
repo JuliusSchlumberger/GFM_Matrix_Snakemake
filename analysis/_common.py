@@ -1,6 +1,7 @@
 """Helpers shared by several analysis/ scripts."""
 
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +10,8 @@ import rasterio
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import retry_transient_io  # noqa: E402
+
+LAST_SSP_YEAR = 2100  # end of the IIASA SSP population projections
 
 
 def _round_val(val: float) -> float | int:
@@ -100,3 +103,79 @@ def _people(v: float, _=None) -> str:
     a = abs(v)
     s = f"{a / 1e6:g} M" if a >= 1e6 else (f"{a / 1e3:g} k" if a >= 1e3 else f"{a:g}")
     return ("-" if v < 0 else "") + s
+
+
+@dataclass
+class PathwaySetup:
+    """Hold the config/CLI-derived inputs shared by the pathway/tipping-point scripts.
+
+    thr_by_iso: per-country EAI thresholds overriding `default_thr` (people/year).
+    ssps: configured SSPs that have p17/p50/p83 columns in `traj`. variants: post-2100
+    population variants (a single constant "ssp" variant unless `to_year` > 2100).
+    """
+    cfg: dict
+    viz: dict
+    tp: dict
+    exp_dir: Path
+    out_dir: Path
+    countries: list[str]
+    default_thr: float
+    thr_by_iso: dict[str, float]
+    to_year: int
+    ssps: list[str]
+    designs: list[str]
+    traj: pd.DataFrame
+    years: np.ndarray
+    growth_df: pd.DataFrame
+    variants: dict
+
+
+def load_pathway_setup(args) -> PathwaySetup:
+    """Build the PathwaySetup from parsed CLI args (`config`, `expdir`, `outdir`, `countries`, `to_year`).
+
+    Creates `out_dir`.
+    """
+    # Imported here, not at module level: analysis_figures pulls in matplotlib, and
+    # the light helpers above (discover_chunk_ids) are also used by job generators.
+    from analysis_figures import load_slr_trajectories
+    from config_utils import get_data_catalog, load_config
+    from population_growth import load_ssp_growth_factors
+
+    cfg = load_config(args.config)
+    viz = cfg["visualization"]
+    tp = viz.get("tipping_points", {})
+    exp_dir = Path(args.expdir)
+    out_dir = Path(args.outdir or viz.get("output_dir", f"{cfg['paths']['root']}/figures"))
+    retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
+
+    countries = args.countries or tp.get("countries", ["VNM", "NLD", "NGA"])
+    default_thr = float(tp.get("eai_threshold", 1_000_000))
+    thr_by_iso = {k: float(v) for k, v in (tp.get("per_country_eai_threshold") or {}).items()}
+    to_year = args.to_year or int(tp.get("to_year", LAST_SSP_YEAR))
+    ssps = list(tp.get("ssps", cfg.get("population_growth", {}).get("ssps", ["SSP2", "SSP5"])))
+    designs = list(cfg.get("adaptation", {}).get("slr_intensities", ["SLR_500", "SLR_1000"]))
+
+    traj = load_slr_trajectories(viz["slr_trajectories_csv"])
+    ssps = [s for s in ssps if all(f"{s}_{p}" in traj.columns for p in ("p17", "p50", "p83"))]
+    years = np.arange(2020, to_year + 1)
+
+    repo_root = Path(__file__).resolve().parents[1]
+    catalog = get_data_catalog(repo_root / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
+    growth_df = load_ssp_growth_factors(Path(catalog.get_source("ssp_population_growth_factors").path))
+    variants = (viz.get("extended_pathways", {}).get("variants") if to_year > LAST_SSP_YEAR else None) \
+        or {"ssp": {"mode": "constant", "label": "SSP"}}
+    return PathwaySetup(
+        cfg=cfg, viz=viz, tp=tp, exp_dir=exp_dir, out_dir=out_dir, countries=countries,
+        default_thr=default_thr, thr_by_iso=thr_by_iso, to_year=to_year, ssps=ssps, designs=designs,
+        traj=traj, years=years, growth_df=growth_df, variants=variants,
+    )
+
+
+def _country_interpolator(grid: tuple[pd.DataFrame, list[float], list[float]], iso: str):
+    """EAI(growth, SLR) interpolator for one country from a load_growth_matrix_csv result."""
+    from analysis_figures import build_growth_matrix_from_grid
+    from pathways import matrix_interpolator
+
+    eai_grid, slr_mm, growth_fracs = grid
+    return matrix_interpolator(build_growth_matrix_from_grid(eai_grid.loc[[iso]], slr_mm, growth_fracs),
+                               slr_mm, growth_fracs)
