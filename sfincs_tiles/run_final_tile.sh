@@ -8,7 +8,7 @@
 set -uo pipefail
 unset PROJ_LIB PROJ_DATA GDAL_DATA
 
-TILE_ID="$1"
+TILE_ID="${1:?usage: run_final_tile.sh <tile_id>}"
 BASE_DIR_NAME="${BASE_DIR_NAME:-calibration_roughness_SFINCS}"
 SFINCS_THREADS="${SFINCS_THREADS:-4}"
 
