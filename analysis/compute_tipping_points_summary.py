@@ -1,48 +1,14 @@
-"""Median tipping year per strategy / adaptation design intensity / SSP, for
-hand-picked countries and for every continent - a tabular companion to
-plot_tipping_points.py's own figure, not a replacement for it.
+"""Tabulate the median tipping year per strategy / design / SSP for countries and continents.
 
-"Median tipping year" here means: across the full uncertainty envelope this
-pipeline already carries for every pathway - 3 global-SLR percentiles
-(p17/p50/p83) x 3 population-after-2100 continuation variants
-(visualization.extended_pathways.variants) = 9 (SLR, population) pathway
-samples per (entity, strategy, design, ssp) - the MEDIAN of the 9 individual
-crossing years. A sample that never reaches the threshold by --to-year is
-treated as "beyond the horizon" (+inf) for the purpose of the median: if
-fewer than 5 of the 9 samples ever cross, the reported median is itself
-">--to-year", not a numeric average of only the samples that happened to
-cross (which would silently bias the estimate toward "early", since it would
-quietly ignore every sample that never tipped at all).
+Median over 9 pathway samples (SLR p17/p50/p83 x 3 post-2100 population variants),
+right-censored: non-crossing samples count as +inf, so if fewer than 5 of 9 cross the
+median is ">{to_year}" rather than a mean of the early crossers. Continent EAI is the
+sum of member-country EAI time series (each on its own population path), not of their
+growth matrices. --continent-eai-threshold (default 5,000,000) is an arbitrary round
+starting point larger than the per-country default, not a finding.
 
-Earlier exploratory inspection reported a few cells as "NaN" where the real
-answer was "not reached by 2150" - traced to a formatting bug in a scratch
-script (pandas silently turned a Python `None` into `np.nan` when building
-a DataFrame; the script's own formatter only checked `is not None`, so NaN
-fell through as the literal string "nan"). The actual EAI-along-pathway
-computation (src/pathways.py) was never wrong - confirmed directly: for every
-one of the 9 samples flagged this way, eai_along_pathway's own output had
-ZERO NaNs end to end; `first_crossing` correctly returned None because the
-pathway's EAI genuinely never reached the threshold inside the matrix's own
-population/SLR range. This script's own median-with-inf-censoring handles
-that case explicitly instead of ever formatting a raw float, so it cannot
-reproduce that class of bug.
-
-Continent EAI is the SUM of its member countries' own EAI-along-pathway time
-series (each country keeps its own real SSP population trajectory - growth
-matrices are NOT summed directly, since the x/y axes mean a different real
-population path per country) - same aggregation plot_extended_pathways.py
-already uses, via visualization.iso_to_continent. --continent-eai-threshold
-defaults to 5,000,000 - a deliberately larger round number than the
-per-country default (500,000), reflecting that a continent's total EAI is
-naturally far higher; there is no principled "correct" value here, so treat
-the default as a starting point, not a finding, and override it with
---continent-eai-threshold if a region-specific number matters more.
-
-Writes two CSVs to --outdir (default: visualization.output_dir):
-  tipping_points_countries_median.csv
-  tipping_points_continents_median.csv
-Columns: entity, entity_type, threshold, strategy, design_intensity, ssp,
-         n_samples_reached (of 9), median_tip_year (int, or ">{to_year}").
+Writes tipping_points_{countries,continents}_median.csv to --outdir (default:
+visualization.output_dir).
 
 Usage:
     python analysis/compute_tipping_points_summary.py --config snakemake_workflow/config/config.yml \\
@@ -58,7 +24,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _common)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import _eai_from_interp, _first_crossing, _growth_matrix_path, _growth_path  # noqa: E402
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pathways import matrix_interpolator, slr_pathway  # noqa: E402
@@ -76,10 +42,6 @@ LAST_SSP_YEAR = 2100
 def _median_crossing(
     samples: list[float | None], to_year: int,
 ) -> tuple[str, int]:
-    """Median of `samples` (one crossing year, or None, per uncertainty
-    sample), right-censored at `to_year` - see module docstring. Returns
-    (label, n_reached); label is either an integer-year string or
-    f">{to_year}"."""
     censored = [s if s is not None else np.inf for s in samples]
     n_reached = sum(s is not None for s in samples)
     med = float(np.median(censored))
@@ -139,7 +101,6 @@ def main() -> None:
         or {"ssp": {"mode": "constant", "label": "SSP"}}
     ext = {v: extend_growth_factors(growth_df, spec, to_year=to_year) for v, spec in variants.items()}
 
-    # (strategy, design) pairs actually present on disk - None design for baseline.
     strategy_designs: list[tuple[str, str | None]] = [("baseline", None)]
     for meas in strategies:
         if meas == "baseline":
@@ -150,7 +111,6 @@ def main() -> None:
 
     grids = {(s, d): load_growth_matrix_csv(_growth_matrix_path(exp_dir, s, d)) for s, d in strategy_designs}
 
-    # ── Countries ────────────────────────────────────────────────────────────
     country_rows = []
     for iso in countries:
         thr = thr_by_iso.get(iso, default_thr)
@@ -171,11 +131,7 @@ def main() -> None:
                 })
         print(f"  {iso}: done", flush=True)
 
-    # ── Continents ───────────────────────────────────────────────────────────
-    # Member-country set is shared across every strategy/design (a country
-    # missing from one grid is rare - avoid/protect/etc. cover the same
-    # countries baseline does) - resolved once per continent for speed and
-    # to keep "n_countries_included" meaningful/comparable across rows.
+    # Members resolved once from the baseline grid; measure grids cover the same countries.
     baseline_grid, _, _ = grids[("baseline", None)]
     all_isos = baseline_grid.index.tolist()
     cont_of = iso_to_continent(all_isos)

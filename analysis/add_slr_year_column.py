@@ -1,28 +1,10 @@
-"""Adds a `year` column to `compute_delta_flood_extent.py`'s own output CSV:
-the year at which each row's `ssp_scenario` median AR6 SLR trajectory first
-reaches that row's own `slr_scenario` magnitude (relative to a 2020
-baseline) - i.e. "under ssp126, when does global SLR reach 0.5m?".
+"""Add the year each row's SLR magnitude is reached to the delta flood-extent CSV.
 
-Reads the ALREADY-PROCESSED trajectory CSV `extract_slr_trajectories.py`
-writes (`visualization.slr_trajectories_csv`, confirmed present on disk -
-no need to regenerate it), reusing that script's own `{SSP}_p50`-in-mm
-convention directly rather than re-deriving anything from the raw AR6 files.
-
-This is a standalone enrichment step, not folded into
-`compute_delta_flood_extent.py` itself - re-running that script's own
-expensive per-delta raster merge just to add one derived column would be
-wasteful; this reads/writes the CSV only.
-
-Reverse lookup (SLR magnitude -> year) is `np.interp` on the trajectory's
-own (year, SLR) points, SWAPPED from the forward (year -> SLR) direction
-the rest of the codebase uses (e.g. compute_exposure_analysis.py) - valid
-because AR6 median SLR trajectories are monotonically increasing in time.
-Explicitly NaN's (never silently clamps) any row whose target SLR exceeds
-the trajectory's own last data point (2150) - a real, expected case: under
-ssp126/ssp245 MEDIAN, SLR never reaches 1.0m within the dataset's own
-2020-2150 range (ssp126 tops out at 632mm, ssp245 at 870mm by 2150), so
-every SLR_1000/SLR_1500/SLR_2000 row under either scenario gets NaN here,
-not a silently-wrong clamped year.
+Year = first year the `ssp_scenario` median AR6 trajectory (mm, relative to 2020;
+from extract_slr_trajectories.py) reaches the row's `slr_scenario`. Inverted with
+np.interp, valid because median trajectories increase monotonically. Targets beyond
+the 2150 end of the data are NaN, not clamped (ssp126/ssp245 medians top out at
+632/870 mm, so their SLR_1000+ rows are NaN).
 
 Usage:
     python add_slr_year_column.py
@@ -46,9 +28,7 @@ SSP_RCP_CODES_DEFAULT = {"SSP1": 126, "SSP2": 245, "SSP5": 585}
 
 
 def year_for_slr(traj_df: pd.DataFrame, ssp_scenario: str, target_mm: float, ssp_rcp_codes: dict[str, int]) -> float:
-    """Year at which `ssp_scenario`'s median AR6 trajectory first reaches
-    `target_mm` (mm, relative to 2020) - NaN if that's beyond the
-    trajectory's own last data point (out of range, not silently clamped)."""
+    """Return the year the median trajectory reaches `target_mm` (mm, rel. 2020), or NaN."""
     code = int(ssp_scenario.replace("ssp", ""))
     matches = [label for label, c in ssp_rcp_codes.items() if c == code]
     if not matches:
@@ -64,6 +44,7 @@ def year_for_slr(traj_df: pd.DataFrame, ssp_scenario: str, target_mm: float, ssp
 
 
 def add_year_column(df: pd.DataFrame, traj_df: pd.DataFrame, ssp_rcp_codes: dict[str, int]) -> pd.DataFrame:
+    """Return a copy of `df` with a `year_slr_reached_median` column."""
     df = df.copy()
     target_mm = df["slr_scenario"].str.split("_").str[1].astype(float)
     df["year_slr_reached_median"] = [

@@ -1,35 +1,6 @@
-"""Relative importance of sea-level rise and population change for the no-adaptation EAI.
+"""Split the change in no-adaptation EAI into SLR, population and interaction terms.
 
-Without adaptation, EAI = E(SLR) * P: E is the EAI at today's population (the growth
-matrix's 0 % row, src/pathways.py - linear extrapolation beyond the matrix) and P the
-population factor relative to 2020 (IIASA SSP projections to 2100; after 2100 the
-visualization.extended_pathways.variants continuations). The change since 2020 splits exactly:
-    SLR alone          (E1 - E0) * P0
-    population alone   (P1 - P0) * E0
-    interaction        (E1 - E0) * (P1 - P0)   new people in areas that only flood with SLR
-Sea level follows the median AR6 trajectory of the SSP-RCP.
-
-Writes to --outdir (config visualization.slr_vs_population):
-  slr_vs_population_waterfall_{SSP}_2100.png       per country (top n by EAI in 2100): EAI 2020
-                                                   -> + SLR alone -> + population alone ->
-                                                   + interaction, whisker = SLR p17-p83
-  slr_vs_population_waterfall_{SSP}_{to_year}.png  same countries/order/x-axis, reference
-                                                   population variant, band = range across the
-                                                   population variants
-  slr_vs_population_scatter_{SSPs}_2100.png        one figure, one subplot per SSP (panel
-                                                   labels (a)/(b)): countries whose EAI changes
-                                                   by at least scatter_min_change: SLR part
-                                                   (x, log) vs population part (y, symmetric
-                                                   log, signed), interaction split equally;
-                                                   marker size = EAI 2100, colour = continent
-  slr_vs_population_scatter_envelope_2100.png      single panel, the scatter_labels highest-EAI
-                                                   countries only: dot position = SSP2 median;
-                                                   dot size = EAI(2100) range across every SSP
-                                                   (all configured, not just the 2 above) x SLR
-                                                   p17/p83 combination; shaded convex hull around
-                                                   each dot = that same combination's spread in
-                                                   (SLR part, population part) space
-  slr_vs_population_{SSP}.csv                      every country, 2100 and each to_year variant
+Writes waterfall and scatter figures plus one CSV per SSP (visualization.slr_vs_population).
 
 Usage:
     python analysis/plot_slr_vs_population.py --config snakemake_workflow/config/config.yml \\
@@ -51,7 +22,7 @@ from matplotlib.patches import Patch  # noqa: E402
 from scipy.spatial import ConvexHull  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _common)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import _people  # noqa: E402
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pathways import eai_along_pathway  # noqa: E402
@@ -68,10 +39,14 @@ CONTINENT_COLORS = dict(zip(CONTINENTS, plt.cm.Set2.colors))
 
 
 def _decompose(mats, slr_mm, gfr, traj, ext, ssp, iso, year, variant) -> dict:
+    # EAI = E(SLR) * P, E = EAI at today's population (growth-matrix 0 % row, linearly
+    # extrapolated beyond it), P = population factor vs 2020 (IIASA SSP to 2100, then the
+    # extended_pathways variants), SLR = median AR6 trajectory. Exact split since 2020:
+    # SLR (E1-E0)*P0, population (P1-P0)*E0, interaction (E1-E0)*(P1-P0).
     t = traj.index.to_numpy(float)
     s = {p: float(np.interp(year, t, traj[f"{ssp}_{p}"].to_numpy(float))) for p in ("p17", "p50", "p83")}
 
-    def E(s_mm):  # EAI at today's population for global SLR s_mm
+    def E(s_mm):
         return float(eai_along_pathway(mats[iso], slr_mm, gfr, [s_mm], [0.0])[0])
 
     p1 = interpolate_growth_factor(ext[variant], ssp, iso, year, 1.0)
@@ -134,10 +109,7 @@ def _waterfall(ref, central, band, top, names, ssp, rcp, year, to_year, variants
     print(f"  Written: {out_path.name}")
 
 
-# _scatter_panel/_scatter_envelope's figures grew (wider AND taller, same box_aspect=2
-# proportions) so every one of their own fontsize= literals is scaled up by this factor
-# too - otherwise the fonts shrink relative to the now-bigger plot box, which is exactly
-# what happened when only figsize grew the first time this was tried.
+# Scales both the scatter figsizes and their fontsizes, so text keeps its size relative to the box.
 FONT_SCALE = 1.5
 
 
@@ -147,8 +119,6 @@ def _ratio_lines(ax, lo, hi, linthresh=1e4):
         xs = xx[k * xx >= linthresh]  # only where the y-axis is logarithmic (straight lines there)
         for sign in (1, -1):
             ax.plot(xs, sign * k * xs, color="0.6", lw=0.9, ls=ls, zorder=1)
-        # "population = SLR" misnamed the axes (both are EAI-change quantities, not
-        # population/SLR themselves) - "r = <slope>" is just the ratio these lines plot.
         ax.annotate(f"r = {k:g}", (xs[len(xs) // 3], k * xs[len(xs) // 3]),
                     xytext=(0, 4), textcoords="offset points", fontsize=9 * FONT_SCALE, color="0.45",
                     ha="center", va="bottom")
@@ -156,7 +126,7 @@ def _ratio_lines(ax, lo, hi, linthresh=1e4):
 
 def _filter_scatter(ref, continent, min_change):
     d = ref.copy()
-    # two-part split for two axes: the interaction shared equally between the drivers
+    # interaction shared equally between the two drivers
     d["slr_part"] = d.slr_alone + d.interaction / 2
     d["pop_part"] = d.pop_alone + d.interaction / 2
     d = d[((d.EAI_end - d.EAI_2020).abs() >= min_change) & (d.slr_part > 0)]
@@ -183,11 +153,7 @@ def _scatter_panel(ax, d, names, top_labels, size_max, panel_label, show_ylabel,
         r = d.loc[iso]
         ax.annotate(names.get(iso, iso), (r.slr_part, r.pop_part), xytext=(6, 5 if r.pop_part >= 0 else -11),
                     textcoords="offset points", fontsize=9.5 * FONT_SCALE, zorder=4)
-    # same transform (symlog, same linthresh) on both axes, x starting at 0 (not mirrored
-    # negative - this data's slr_part is always positive) and y spanning -M to M. A
-    # square box (x length == y length) is requested over a 2x-taller one (which would
-    # match pixels-per-unit exactly, since y's -M..M span is twice x's 0..M span) - x is
-    # not allowed to be the shorter side.
+    # slr_part is always > 0, so x spans 0..M and y -M..M; square box rather than equal units.
     ax.set_xscale("symlog", linthresh=linthresh)
     ax.set_yscale("symlog", linthresh=linthresh)
     ax.set_xlim(0, M)
@@ -196,7 +162,6 @@ def _scatter_panel(ax, d, names, top_labels, size_max, panel_label, show_ylabel,
     ax.xaxis.set_major_formatter(plt.FuncFormatter(_people))
     ax.yaxis.set_major_formatter(plt.FuncFormatter(_people))
     ax.tick_params(axis="both", labelsize=10 * FONT_SCALE)
-    # panel letter sits outside the axes box (upper-left), not over the data
     ax.text(-0.09, 1.03, panel_label, transform=ax.transAxes, ha="left", va="bottom",
             fontsize=16 * FONT_SCALE, fontweight="bold", clip_on=False)
     ax.set_xlabel("Change in EAI due to sea-level rise, 2020-2100 (people)", fontsize=12 * FONT_SCALE)
@@ -206,9 +171,7 @@ def _scatter_panel(ax, d, names, top_labels, size_max, panel_label, show_ylabel,
 
 
 def _scatter_figure(refs, names, continent, ssps, min_change, n_labels, out_path, dpi):
-    # a single shared country SET for both panels - the union of whichever countries
-    # qualify (|change in EAI| >= min_change) under EITHER scenario - not two
-    # independently-thresholded, slightly different sets (previously 40 vs 46).
+    # One shared country set: those qualifying under ANY scenario.
     qualifying = {ssp: _filter_scatter(refs[ssp], continent, min_change) for ssp in ssps}
     non_empty = [d for d in qualifying.values() if not d.empty]
     if not non_empty:
@@ -223,19 +186,12 @@ def _scatter_figure(refs, names, continent, ssps, min_change, n_labels, out_path
         dd["continent"] = [continent.get(i, "Other") for i in dd.index]
         panels[ssp] = dd
     size_max = max(d.EAI_end.max() for d in panels.values())
-    # labelled countries are also a single shared set (the union of each scenario's own
-    # top n_labels by EAI_end) so both panels' labels are directly comparable.
     top_labels = sorted(set().union(
         *(set(d.EAI_end.sort_values(ascending=False).index[:n_labels]) for d in panels.values())))
     linthresh = 1e4
     M = max(max(d.slr_part.max(), d.pop_part.abs().max()) for d in panels.values()) * 1.3
 
     panel_labels = ["(a)", "(b)", "(c)", "(d)"]
-    # box_aspect=2 ties the drawn box's height to 2x its own width - widening the figure
-    # without also growing its height just adds blank margin, the box itself doesn't
-    # grow (that was the previous, wrong attempt here). Scaling BOTH dimensions by
-    # FONT_SCALE grows the box for real, and every fontsize= in _scatter_panel/
-    # _ratio_lines is scaled by that same factor so text doesn't shrink relative to it.
     fig, axes = plt.subplots(1, len(ssps), figsize=(9 * len(ssps) * FONT_SCALE, 9.5 * FONT_SCALE),
                              sharex=True, sharey=True)
     axes = np.atleast_1d(axes)
@@ -251,8 +207,6 @@ def _scatter_figure(refs, names, continent, ssps, min_change, n_labels, out_path
     h_size = [Line2D([], [], ls="none", marker="o", color="0.75", mec="k",
                      ms=np.sqrt(30 + 420 * np.sqrt(v / size_max)), label=f"EAI 2100 = {_people(v)}")
               for v in ref_sizes]
-    # anchored to the right panel's own axes (not a fig-level location) so it sits right
-    # next to it instead of leaving a large gap to the figure's outer edge.
     axes[-1].legend(handles=h_cont + h_size, loc="center left", bbox_to_anchor=(1.02, 0.5),
                     fontsize=10 * FONT_SCALE, frameon=False, labelspacing=1.1)
     fig.tight_layout()
@@ -262,8 +216,6 @@ def _scatter_figure(refs, names, continent, ssps, min_change, n_labels, out_path
 
 
 def _envelope_points(mats, slr_mm, gfr, traj, ext, iso, year, variant, ssps) -> list[tuple[float, float, float]]:
-    """(slr_part, pop_part, EAI_end) for every (ssp, SLR percentile) combination -
-    the raw point cloud a country's uncertainty envelope is built from."""
     t = traj.index.to_numpy(float)
 
     def E(s_mm):
@@ -284,14 +236,8 @@ def _envelope_points(mats, slr_mm, gfr, traj, ext, iso, year, variant, ssps) -> 
 
 def _scatter_envelope(ref_by_ssp, mats, slr_mm, gfr, traj, ext, variant, names, continent,
                       ref_ssp, env_ssps, rcp, n_labels, out_path, dpi):
-    """Separate, single-panel figure for the n_labels highest-EAI countries (ranked by
-    ref_ssp's own EAI 2100). Shape = convex hull over every (env_ssps x SLR p17/p50/p83)
-    combination's own (slr_part, pop_part) - each env_ssps entry is a full SSP-RCP pairing
-    (e.g. SSP2-RCP4.5) with its OWN SLR p17-p83 range, not one SLR band shared across
-    scenarios. Two dots per country (a "dumbbell"), not one: the lower- and upper-bound
-    EAI(2100) points within that same combination set, each sized like the main scatter's
-    own EAI-2100 size encoding (so the two dots' size difference IS the uncertainty, not
-    a separately-computed range number on a single dot)."""
+    # Top n_labels by ref_ssp EAI 2100. Hull over every (env_ssps x SLR p17/p50/p83) point, each
+    # SSP with its own SLR band; dumbbell = lowest- and highest-EAI(2100) points, sized by EAI.
     ref = ref_by_ssp[ref_ssp].copy()
     ref["slr_part"] = ref.slr_alone + ref.interaction / 2
     ref["pop_part"] = ref.pop_alone + ref.interaction / 2
@@ -317,8 +263,6 @@ def _scatter_envelope(ref_by_ssp, mats, slr_mm, gfr, traj, ext, variant, names, 
     def _msize(eai):
         return 30 + 420 * np.sqrt(max(eai, 0.0) / eai_max)
 
-    # both dimensions scaled by FONT_SCALE (same 2:3 ratio as the original 10x15) - see
-    # _scatter_figure for why box_aspect requires growing both, not just width.
     fig, ax = plt.subplots(figsize=(12 * FONT_SCALE, 12.5 * FONT_SCALE))
     M = max(max(xy[:, 0].max(), np.abs(xy[:, 1]).max()) for xy in envelopes.values()) * 1.3
     _ratio_lines(ax, linthresh / 5, M, linthresh)
@@ -340,12 +284,10 @@ def _scatter_envelope(ref_by_ssp, mats, slr_mm, gfr, traj, ext, variant, names, 
             ax.scatter([lx], [ly], s=_msize(le), color=color, edgecolor="k", lw=0.5, alpha=0.85, zorder=5)
             ax.scatter([ux], [uy], s=_msize(ue), color=color, edgecolor="k", lw=0.5, alpha=0.95, zorder=5)
     for iso in d.index:
-        ux, uy, _ = upper_pt[iso]  # label anchored at the larger (upper-bound) dot
+        ux, uy, _ = upper_pt[iso]
         ax.annotate(names.get(iso, iso), (ux, uy), xytext=(6, 5 if uy >= 0 else -11),
                     textcoords="offset points", fontsize=9.5 * FONT_SCALE, zorder=6)
 
-    # same transform on both axes, x starting at 0, y spanning -M to M, square box - see
-    # _scatter_panel for the full rationale.
     ax.set_xscale("symlog", linthresh=linthresh)
     ax.set_yscale("symlog", linthresh=linthresh)
     ax.set_xlim(0, M)
@@ -366,9 +308,6 @@ def _scatter_envelope(ref_by_ssp, mats, slr_mm, gfr, traj, ext, variant, names, 
               for v in ref_sizes]
     h_dumbbell = [Line2D([], [], color="0.4", lw=1.1, marker="o", mfc="0.75", mec="k", ms=7,
                         label="lower-bound to upper-bound EAI 2100\n(across env., dot size = that point's own EAI)")]
-    # each env_ssps entry is already a full SSP-RCP pairing with its OWN SLR p17-p83
-    # range (SSP2-RCP4.5's band differs from SSP5-RCP8.5's) - not one shared SLR band
-    # applied uniformly across scenario choices.
     scen_label = " & ".join(ssp_rcp_label(s, rcp) for s in env_ssps)
     h_shape = [Patch(facecolor="0.6", alpha=0.3, edgecolor="0.6",
                      label=f"envelope: {scen_label}\n(each with its own SLR p17-p83 range)")]
@@ -381,13 +320,7 @@ def _scatter_envelope(ref_by_ssp, mats, slr_mm, gfr, traj, ext, variant, names, 
 
 
 def main() -> None:
-    """Parse CLI arguments and plot the SLR-vs-population decomposition of no-adaptation EAI.
-
-    For each configured SSP, decomposes the change in EAI 2020-2100 (and extended years)
-    into SLR-alone, population-alone and interaction terms, then writes per-country
-    waterfall plots, cross-country scatter plots and the top-N envelope scatter, plus one
-    CSV per SSP, to --outdir.
-    """
+    """Write the decomposition CSVs, waterfalls and scatter figures to --outdir."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_baseline_growth_matrix.csv")
@@ -442,14 +375,10 @@ def main() -> None:
             _waterfall(ref, central, band, top, names, ssp, rcp, yr, to_year, variants, v0, xmax,
                        out_dir / f"slr_vs_population_waterfall_{ssp}_{yr}.png", dpi)
 
-    # 19, not scatter_labels (18): SSP2's and SSP5's own top-18-by-EAI lists turned out
-    # nearly identical (confirmed 2026-10) - one extra slot keeps the shared label set
-    # from dropping a country that only narrowly missed either scenario's own top 18.
+    # +1: keeps a country that narrowly missed one scenario's top list in the shared label set.
     _scatter_figure(refs_by_ssp, names, continent, ssps, min_change, n_labels + 1,
                     out_dir / f"slr_vs_population_scatter_{'_'.join(ssps)}_2100.png", dpi)
 
-    # just the 2 configured SSPs (not SSP1 too) - each SSP here already carries its own
-    # RCP (SSP2-RCP4.5, SSP5-RCP8.5), so this is 2 full SSP-RCP combinations, not 3.
     env_ssps = ssps
     ref_ssp = "SSP2" if "SSP2" in refs_by_ssp else ssps[0]
     _scatter_envelope(refs_by_ssp, mats, slr_mm, gfr, traj, ext, v0, names, continent,

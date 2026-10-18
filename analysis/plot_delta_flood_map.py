@@ -1,21 +1,7 @@
-"""World map of named river deltas as points, colored by % of each delta's
-modeled area flooded - one figure per ssp_scenario, with 5 subplots (one per
-slr_scenario, left to right in increasing SLR magnitude) from
-`compute_delta_flood_extent.py`'s own output CSV.
+"""Map river deltas colored by % of modeled area flooded, one figure per ssp_scenario.
 
-Adapts `sfincs_tiles/plot_validation_results.py`'s `plot_tile_agreement_map`
-(EqualEarth + cartopy LAND feature + continuous scatter + colorbar), with:
-`cmap="YlOrRd"` instead of `"RdYlGn"` since percent flooded is a monotonic
-severity metric (0% = no flooding, 100% = fully flooded), not a
-bounded-at-a-midpoint one like CSI; ocean left WHITE (no facecolor fill)
-rather than filled with WATER_COLOR - same fix already applied to
-sfincs_tiles/plot_no_coastrp_tiles.py's own locator inset (that script was removed in 7b6f7f1): only an actual
-raster MASK gets the water color, a world map's plain background does not.
-
-Combined into one multi-panel figure per ssp (5 SLR subplots + one shared
-colorbar) rather than 10 separate single-panel PNGs. No per-panel caption
-box - each subplot is instead labeled (a)/(b)/... at its top-left corner,
-outside the axes, carrying the SLR magnitude directly (e.g. "(a) SLR +0.0 m").
+One panel per slr_scenario from compute_delta_flood_extent.py's CSV. Ocean is left
+white; water color is reserved for raster masks.
 
 Usage:
     python plot_delta_flood_map.py
@@ -46,8 +32,8 @@ from map_style import LAND_COLOR  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 COAST_COLOR = "#b8b8b3"
-PROTECTED_COLOR = "#8c8c8c"  # deltas where FLOPROS protection (>= 100 yr, not failed) keeps all land dry
-FAILED_EDGE = "#222222"  # deltas where a >= 100 yr protection class has failed at this SLR
+PROTECTED_COLOR = "#8c8c8c"  # FLOPROS protection >= 100 yr, not failed: all land dry
+FAILED_EDGE = "#222222"  # a >= 100 yr protection class fails at this SLR
 
 
 def _slr_label(slr_scenario: str) -> str:
@@ -56,6 +42,7 @@ def _slr_label(slr_scenario: str) -> str:
 
 
 def plot_delta_flood_map(df: pd.DataFrame, ssp_scenario: str, out_path: Path) -> None:
+    """Plot one ssp_scenario's delta points, one EqualEarth panel per slr_scenario."""
     sub_ssp = df[df["ssp_scenario"] == ssp_scenario]
     slr_scenarios = sorted(sub_ssp["slr_scenario"].unique(), key=lambda s: int(s.split("_")[1]))
 

@@ -1,14 +1,7 @@
-"""Bangkok / Chao Phraya case study: expected-annual-impact (EAI, people)
-time series, one panel per SSP/RCP scenario (SSP1/SSP2/SSP5).
+"""Plot the Bangkok / Chao Phraya EAI (people) time series, one panel per SSP.
 
-Reuses production's own generic EAI machinery unmodified:
-src/exposure_analysis.py::_trapezoid_eai (RP-return-period integration) and
-::resolve_ssp_scenario_eai (SLR-trajectory + population-growth resolution).
-There is no sub-national SSP population-growth projection anywhere in this
-codebase - this necessarily scales the local case-polygon exposure by
-Thailand's own national growth factor (same approximation production
-already applies uniformly within every country, just applied here at
-sub-national scale).
+No sub-national SSP growth projection exists, so the case-polygon exposure is scaled
+by Thailand's national growth factor.
 
 Usage:
     python plot_bangkok_eai_timeseries.py \\
@@ -31,7 +24,7 @@ from population_growth import load_ssp_growth_factors  # noqa: E402
 from analysis_figures import load_slr_trajectories, ssp_rcp_label  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_CASE_ISO = "THA"  # no sub-national growth projection exists - national factor applies, see module docstring
+_CASE_ISO = "THA"
 
 
 def main() -> None:
@@ -52,8 +45,7 @@ def main() -> None:
 
     df = pd.read_csv(args.exposure_csv)
 
-    # One EAI value per SLR scenario (trapezoidal integration over 1/RP),
-    # in ascending-SLR column order to match slr_mm_values.
+    # Trapezoidal integration over 1/RP; columns must follow slr_mm_values order.
     eai_by_slr = {}
     for slr in slr_order:
         sub = df[df["waterlevel_name"] == slr].set_index("return_period").reindex(return_periods)

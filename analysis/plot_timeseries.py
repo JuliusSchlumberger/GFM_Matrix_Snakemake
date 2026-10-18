@@ -1,16 +1,6 @@
-"""Time-series of EAI along SSP sea-level-rise trajectories.
+"""Plot EAI time series along SSP trajectories (global, per country, per continent).
 
-Reads the pre-resolved per-scenario "ssp" files (File 3) from
-compute_exposure_analysis.py: exposure_{label}_ssp.csv, one column per
-(SSP, year) already resolved to that SSP's real projected SLR and
-population growth factor at file-creation time — no further SLR/growth
-interpolation needed here.
-
-Writes one figure globally, one per country (country/) and one per continent
-(continent/, EAI summed over the continent's countries - Natural Earth's six
-continents via visualization.iso_to_continent), plus one overview of all
-continents for the SSPs in visualization.timeseries_overview.ssps
-(continent/timeseries_continents_overview.png).
+Reads exposure_*_ssp.csv (File 3), already resolved to each SSP's SLR and growth.
 
 Usage:
     python analysis/plot_timeseries.py \\
@@ -42,9 +32,6 @@ def _draw_panel(
     level_linestyles=("--", ":", "-."),
     baseline_linestyle: str = "-",
 ) -> float:
-    """Draw one SSP's EAI time series (summed over `entity_isos`) into `ax`:
-    one line per label plus a min-max envelope per multi-intensity measure.
-    Returns the largest plotted value (for autoscaling)."""
     level_rank = {level: i for i, level in enumerate(slr_intensities)}
     data_max = 0.0
     series_by_label: dict[str, pd.Series] = {}
@@ -61,11 +48,7 @@ def _draw_panel(
             series_by_label[label] = pd.Series(vals, index=yrs)
             data_max = max(data_max, max(vals))
 
-    # Group labels by measure (baseline / protect / retreat / avoid /
-    # protect_avoid) so multi-intensity measures get a min-max envelope
-    # across their SLR_250/500/1000 variants, in addition to each
-    # individual line. The measure is everything before "_SLR_" (a plain
-    # split("_")[0] would file protect_avoid_SLR_500 under protect).
+    # Partition on "_SLR_", not split("_"), so protect_avoid is not filed under protect.
     labels_by_measure: dict[str, list[str]] = {}
     for label in series_by_label:
         labels_by_measure.setdefault(label.partition("_SLR_")[0], []).append(label)
@@ -81,9 +64,7 @@ def _draw_panel(
             rank = level_rank.get(intensity)
             ls = level_linestyles[rank % len(level_linestyles)] if rank is not None else baseline_linestyle
             s = series_by_label[label]
-            # Marker at every actual data point (population_growth.output_years),
-            # so the line segments read as straight connectors between computed
-            # years - the configured years need not be evenly spaced.
+            # Markers show the computed output_years, which need not be evenly spaced.
             ax.plot(s.index, s.to_numpy(), linestyle=ls, linewidth=2, color=mc,
                     marker="o", markersize=4, markeredgewidth=0,
                     alpha=0.85, label=label, zorder=2)
@@ -105,26 +86,13 @@ def _timeseries_figure(
     level_linestyles: list[str] = ("--", ":", "-."),
     baseline_linestyle: str = "-",
 ) -> plt.Figure:
-    """One figure: one sub-panel per SSP, one line + intensity envelope per measure.
-
-    Color encodes the adaptation measure (baseline/protect/retreat/avoid/protect_avoid,
-    via measure_colors) - one fixed color per measure. Linestyle encodes
-    protection level: each measure's intensity variants (e.g.
-    protect_SLR_250/500/1000) are ranked by their position in
-    `slr_intensities` (never by the literal SLR value string, so which
-    numeric intensity counts as "protection level 1/2/3" can change in
-    config without touching this code) and assigned one of
-    `level_linestyles` in that order, cycling if more levels are configured
-    than styles listed (visualization.level_linestyles). Besides the
-    individual lines, a shaded min-to-max envelope spans each measure's
-    variants at each year. baseline has no intensity variant, so it's a
-    single solid line (visualization.baseline_linestyle).
-    """
+    # Colour = measure; linestyle = rank of the intensity in slr_intensities (cycling
+    # level_linestyles); shaded band = min-max over a measure's intensities.
     any_df = next(iter(eai_by_label.values()))
     ssps_avail = [s for s in ssps if any(c.startswith(f"EAI_{s}_") for c in any_df.columns)]
     fig, axes = plt.subplots(1, len(ssps_avail), figsize=(4 * len(ssps_avail) + 2, 5),
                               sharey=True, dpi=dpi)
-    data_max = 0.0  # largest plotted EAI over every panel (for y_max=None)
+    data_max = 0.0
     if len(ssps_avail) == 1:
         axes = [axes]
 
@@ -142,10 +110,6 @@ def _timeseries_figure(
     axes[0].set_ylabel("EAI (people)", fontsize=10)
     handles, labels = axes[0].get_legend_handles_labels()
     if handles:
-        # Below the panels, not the top-left corner: with a fixed y_max the
-        # real data often only fills the bottom fraction of each panel, so a
-        # top-left legend would overlap the y-axis tick labels and the first
-        # panel's title.
         fig.legend(handles, labels, loc="upper center", fontsize=8,
                    bbox_to_anchor=(0.5, 0.02), ncol=5)
     fig.suptitle(entity_label, fontsize=13, y=1.02)
@@ -165,12 +129,7 @@ def _continent_overview_figure(
     level_linestyles=("--", ":", "-."),
     baseline_linestyle: str = "-",
 ) -> plt.Figure:
-    """All continents in one figure: one row per continent, sorted by
-    no-adaptation EAI in the last year (largest over `ssps`) from highest to
-    lowest, one column per SSP in `ssps`; the panels of a row share a y-axis
-    scaled to that continent's data. Same lines and styles as
-    _timeseries_figure. Continent names run vertically left of each row, the
-    legend sits right of the panels."""
+    # Rows sorted by no-adaptation EAI in the last year (max over ssps), descending.
     last = max(years)
 
     def _end_baseline(isos: list[str]) -> float:
@@ -221,6 +180,7 @@ def _continent_overview_figure(
 
 
 def main() -> None:
+    """Write the global, per-country, per-continent and overview time-series figures."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True)
@@ -271,8 +231,7 @@ def main() -> None:
         fig.savefig(fname, bbox_inches="tight")
         plt.close(fig)
 
-    # The fixed country_eai_vmax cap keeps country figures comparable; global
-    # and continent totals are far larger, so those axes scale to their data.
+    # Fixed cap keeps country figures comparable; global/continent axes scale to their data.
     _save(all_isos, "Global", out_dir / "timeseries_global.png", y_max=None)
     print("Global done.")
 
@@ -282,8 +241,6 @@ def main() -> None:
         _save([iso], iso, country_dir / f"timeseries_{iso}.png")
     print(f"Per-country done → {country_dir}")
 
-    # One figure per continent: EAI summed over the continent's countries
-    # (visualization.iso_to_continent - Natural Earth's six continents).
     continent_of = iso_to_continent(all_isos)
     cont_dir = out_dir / "continent"
     retry_transient_io(cont_dir.mkdir, exist_ok=True)
@@ -293,7 +250,6 @@ def main() -> None:
             _save(cont_isos, continent, cont_dir / f"timeseries_{continent.replace(' ', '_')}.png", y_max=None)
     print(f"Per-continent done → {cont_dir}")
 
-    # All continents in one figure, restricted to visualization.timeseries_overview.ssps.
     ov_cfg = viz.get("timeseries_overview", {})
     ov_ssps = [s for s in ov_cfg.get("ssps", ["SSP2", "SSP5"]) if s in ssps]
     if ov_ssps:

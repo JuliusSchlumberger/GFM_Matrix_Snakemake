@@ -1,36 +1,10 @@
-"""Adds a `max_coastal_protection_standard_years` column to
-`compute_delta_flood_extent.py`'s own output CSV: the maximum FLOPROS
-coastal design return period (years) among the WRI geogunit_107 units
-intersecting each delta's real polygon - i.e. "what's the best-protected
-point inside this delta, by design standard?".
+"""Add `max_coastal_protection_standard_years` to the delta flood-extent CSV.
 
-Reuses the same FLOPROS / geogunit_107 protection-standard data source
-already used by the exposure pipeline (`compute_exposure_analysis.py`,
-`compute_flood_totals.py`): `flopros_protection_standards` (Tiggeloven et
-al. 2020 design return periods, per geogunit, `Coastal` column with
-`Riverine` fallback - same convention those scripts already use) joined
-against the `geogunit_protection_units` raster (WRI geogunit_107 IDs, ~30
-arcsec, EPSG:4326). Unlike `compute_exposure_analysis.py`'s own use of this
-same table (which SNAPS each value to the nearest simulated return period,
-for picking which simulated RP counts as "protected" in its EAI
-calculation), this column reports the RAW FLOPROS design standard - a
-delta-level reporting figure, not an input to any threshold logic here.
-
-Per delta: the geogunit raster is read clipped to the delta's own bbox
-(`DataCatalog.get_rasterdataset(..., bbox=...)`), the delta's real polygon
-is rasterized onto THAT raster's own native grid with
-`validation.polygon_domain_mask` (same reusable building block
-`compute_delta_flood_extent.py` already uses for the flood-extent mask),
-and the MAX of `coastal_rp` across every distinct geogunit ID touching the
-polygon is taken. A delta with no resolvable geogunit coverage (offshore
-polygon slivers, data gaps) gets NaN here - never silently defaulted to 0
-or `default_rp`, which would misrepresent "no data" as "no protection".
-
-This is a standalone enrichment step, matching `add_slr_year_column.py`'s
-own convention (reads/writes the CSV only; not wired into the Snakemake
-DAG, since neither this script nor `compute_delta_flood_extent.py` nor
-`add_slr_year_column.py` are Snakemake rules today - all three are run
-manually, in sequence, after the HPC postprocess stage finishes).
+Value per delta: max raw FLOPROS coastal design RP (years; Tiggeloven et al. 2020,
+`Coastal` with `Riverine` fallback) over the WRI geogunit_107 units (~30 arcsec,
+EPSG:4326) intersecting the delta polygon. Unlike the exposure pipeline, the RP is not
+snapped to a simulated RP. NaN where no geogunit resolves (no data != no protection).
+Run manually after compute_delta_flood_extent.py.
 
 Usage:
     python add_protection_standard_column.py
@@ -51,16 +25,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from rasters import polygon_domain_mask  # noqa: E402
 
-from compute_delta_flood_extent import VOLGA_ID  # noqa: E402  (sibling script - reuse, avoid re-duplicating exclusion)
+from compute_delta_flood_extent import VOLGA_ID  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-GEOGUNIT_SOURCE = "geogunit_protection_units"  # catalog key (data_catalog_gfm.yml)
+GEOGUNIT_SOURCE = "geogunit_protection_units"
 
 
 def max_coastal_protection_for_delta(delta_geometry, catalog, coastal_rp: pd.Series) -> float:
-    """Max FLOPROS coastal design RP (years) among geogunits intersecting
-    `delta_geometry`. NaN if no geogunit resolves within the delta's own
-    polygon (not silently defaulted - see module docstring)."""
+    """Return the max FLOPROS coastal design RP (years) over intersecting geogunits, or NaN."""
     bbox = list(delta_geometry.bounds)
     try:
         geo_da = catalog.get_rasterdataset(GEOGUNIT_SOURCE, bbox=bbox, variables=["Geogunits"]).squeeze(drop=True)

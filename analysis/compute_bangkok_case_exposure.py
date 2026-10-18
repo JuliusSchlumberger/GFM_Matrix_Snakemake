@@ -1,17 +1,8 @@
-"""Case-polygon-scoped flooded area + exposed population for the Bangkok /
-Chao Phraya case study, per (RP, SLR) - modeled directly on
-analysis/compute_flood_totals.py's own chunk-streaming approach (same
-flood_fraction_{chunk}_{RP}_{SLR}.tif + exposure_population_grid_{chunk}.tif
-chunk artifacts the normal Snakemake postprocess target produces), but
-scoped to an arbitrary case polygon instead of a WRI-geogunit country.
+"""Compute flooded area and exposed population inside a case polygon per (RP, SLR).
 
-"Exposure equally distributed inside the exposure grid" (Marjolijn's own
-assumption) is already production's own standing one: flood_fraction is
-itself population-grid-cell-averaged (src/rasters.py::average_pool_to_grid,
-run by compute_flood_fraction_chunk.py), so exposed_population = ff * pop
-already assumes uniform distribution of each population cell's count
-across however much of that cell the fine flood mask covers - reused
-as-is, nothing new to compute for that assumption.
+Streams the postprocess chunk outputs like compute_flood_totals.py, but scoped to the
+Bangkok / Chao Phraya case polygon. exposed_population = flood_fraction * pop assumes
+population is uniform within each population-grid cell.
 
 Usage:
     python compute_bangkok_case_exposure.py \\
@@ -30,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _common)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import _read_band, _read_band_and_transform, _round_val  # noqa: E402
 from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
 from exposure_analysis import _safe  # noqa: E402
@@ -80,7 +71,6 @@ def main() -> None:
         sys.exit(1)
     print(f"Using {len(chunk_ids)} chunk(s), {len(return_periods)} RPs, {len(slr_scenarios)} SLR scenarios.")
 
-    # totals[(rp, slr)] = {"flooded_km2": ..., "exposed_population": ...}
     totals: dict[tuple[int, str], dict[str, float]] = {}
     polygon_area_km2 = 0.0
     chunks_with_overlap = 0

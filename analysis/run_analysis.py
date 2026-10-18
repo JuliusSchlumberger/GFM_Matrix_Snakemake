@@ -1,34 +1,17 @@
-"""Single entry point for the full post-simulation analysis pipeline.
+"""Run the post-simulation analysis pipeline steps enabled by config.yml analysis.*.
 
-Reads config.yml to decide which steps to run (analysis.* switches) and
-calls each downstream script in sequence.  Each step runs in its own Python
-subprocess so modules are properly isolated and crashes in one step do not
-abort subsequent steps (unless --fail-fast is set).
-
-Analysis switches in config.yml:
-  analysis.compute_exposure     — baseline / protect / retreat / avoid / protect + avoid EAI CSVs
-  analysis.compute_flood_totals — per-country total flooded area/exposed population per (RP, SLR),
-                                   no protection/adaptation applied - consumed by flood_extent_validation
-  analysis.plot_burning_ember   — impact-matrix (SLR × growth) figures
-  analysis.plot_timeseries      — EAI along SSP SLR trajectories over time (global / country / continent)
-  analysis.plot_tipping_points  — tipping-point figure (isolines x SSP pathways, tipping years)
-  analysis.plot_extended_pathways — continent time series to 2150 (population variants after 2100)
-  analysis.plot_slr_vs_population — SLR vs population decomposition (waterfalls + scatter)
-  analysis.plot_world_maps      — world choropleth maps (slow for global runs)
-
-All figures are written directly to --figdir (visualization.output_dir), no subdirectories.
+Each step runs in its own subprocess, so a crash does not abort later steps unless
+--fail-fast. Switches: compute_exposure, compute_flood_totals (raw per-country totals for
+flood_extent_validation), plot_burning_ember, plot_timeseries, plot_tipping_points,
+plot_extended_pathways, plot_slr_vs_population, plot_world_maps (slow globally). All
+figures go directly into --figdir.
 
 Usage:
     python analysis/run_analysis.py \\
         [--config  snakemake_workflow/config/config.yml] \\
         [--expdir  D:/GFM/merged_results/exposure] \\
         [--figdir  D:/GFM/figures] \\
-        [--fail-fast]
-
-Override switches without editing config.yml by passing --skip-* / --only-*:
-    --only-exposure          run only the exposure calculation
-    --only-plots             run only the plots (all enabled plot types)
-    --skip-world-maps        skip world maps even if enabled in config
+        [--fail-fast] [--only-exposure | --only-plots] [--skip-world-maps]
 """
 
 import argparse
@@ -46,13 +29,11 @@ PYTHON = sys.executable
 
 
 def _run(script: Path, extra_args: list[str], label: str, fail_fast: bool) -> bool:
-    """Run analysis script `script` with `extra_args` via `step_runner.run_step`; True on success."""
     return run_step([PYTHON, str(script)] + extra_args, label, fail_fast)
 
 
-# Analysis steps, run in this order: (results key, analysis.* config switch, default when the
-# switch is absent, script, kind, title, skip label). kind "compute" scripts get
-# --outdir <expdir>; kind "plot" scripts get --expdir <expdir> --outdir <figdir>.
+# (results key, analysis.* switch, default if absent, script, kind, title, skip label), in run
+# order. "compute" gets --outdir <expdir>; "plot" gets --expdir <expdir> --outdir <figdir>.
 _STEPS = [
     ("exposure", "compute_exposure", True, "compute_exposure_analysis.py", "compute",
      "Exposure analysis (baseline / protect / retreat / avoid / protect + avoid)", "Exposure analysis"),
@@ -74,13 +55,7 @@ _STEPS = [
 
 
 def main() -> None:
-    """Parse CLI arguments and run the enabled post-simulation analysis steps in sequence.
-
-    Each step (exposure, flood totals, and the plot scripts) runs in its own
-    subprocess per config.yml's ``analysis.*`` switches, overridable via the
-    ``--only-*``/``--skip-*`` flags; a failed step aborts the rest only if
-    ``--fail-fast`` is set. Exits with status 1 if any step failed.
-    """
+    """Run the enabled analysis steps; exit 1 if any step failed."""
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     _default_cfg = str(SCRIPTS_DIR.parent / "snakemake_workflow" / "config" / "config.yml")
@@ -92,7 +67,6 @@ def main() -> None:
                         help="figures root directory (default: visualization.output_dir)")
     parser.add_argument("--fail-fast", action="store_true",
                         help="abort on first failed step")
-    # Convenience overrides
     parser.add_argument("--only-exposure",    action="store_true")
     parser.add_argument("--only-plots",       action="store_true")
     parser.add_argument("--skip-exposure",    action="store_true")
@@ -112,10 +86,9 @@ def main() -> None:
     exp_dir = Path(args.expdir or f"{merged_out}/exposure")
     fig_dir = Path(args.figdir or viz.get("output_dir", f"{cfg['paths']['root']}/figures"))
 
-    # ── Resolve which steps to run from config + CLI overrides ────────────────
     sw = cfg.get("analysis", {})
     enabled = {key: sw.get(switch, default) for key, switch, default, *_ in _STEPS}
-    if args.only_exposure:  # plots off; exposure and flood totals keep their config switch
+    if args.only_exposure:  # flood totals keep their config switch
         for key, _sw, _d, _script, kind, *_ in _STEPS:
             if kind == "plot":
                 enabled[key] = False
@@ -138,7 +111,6 @@ def main() -> None:
         io_args = ["--outdir", str(exp_dir)] if kind == "compute" else ["--expdir", str(exp_dir), "--outdir", str(fig_dir)]
         results[key] = _run(SCRIPTS_DIR / script, cfg_arg + io_args, title, args.fail_fast)
 
-    # ── Summary ───────────────────────────────────────────────────────────────
     total = time.time() - t_start
     print(f"\n{'═' * 60}")
     print(f"  Analysis pipeline complete  ({total / 60:.1f} min)")

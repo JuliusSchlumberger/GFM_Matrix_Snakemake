@@ -1,25 +1,14 @@
-"""Set up the extra delta simulations the protection-failure rule needs: for every delta that is (partly)
-protected to >= PROTECTION_THRESHOLD_YEARS by FLOPROS, the flood of its design event(s) at today's sea
-level (SLR_0). compute_delta_flood_extent.py then counts a protection as failed once the delta's RP100
-flood at a higher sea level covers more of the area protected to that standard than the design event
-did at SLR_0 (same idea as the main pipeline's baseline protection, compute_exposure_analysis.py, with
-the delta-wide flooded area as the proxy instead of 1 km flood fractions).
+"""Set up the SLR_0 design-event delta runs the protection-failure rule needs.
 
-Design RP per protected area: its FLOPROS standard (Coastal, else Riverine, else protection.default_rp)
-floored to the nearest simulated COAST-RP return period at or below it (100/250/500/1000; anything
-above 1000 -> 1000) - compute_delta_flood_extent.snap_rp. RP100 at SLR_0 already exists in
-the delta runs, so only the design RPs above 100 are simulated here.
-
-Writes
-  {processed_inputs}/mask/deltas_design_tiles.gpkg   tiles of the selected deltas plus, for every
-                                                    hop>=1 tile, its lower-hop neighbours (recursively)
-                                                    - the tiles it takes its boundary water levels from
-  snakemake_workflow/config/deltas_design_materialized.yml
-                                                    deltas_ssp245_materialized.yml (so every model
-                                                    setting is identical to the delta runs) with only
-                                                    tile_grid, return periods (design RPs), sea level
-                                                    (SLR_0 only) and the output folders changed
-  {root}/deltas_floodmaps/design/design_rps_by_delta.csv
+For every delta (partly) protected to >= PROTECTION_THRESHOLD_YEARS by FLOPROS, simulate its
+design event(s) at SLR_0. compute_delta_flood_extent.py counts a protection as failed once
+the RP100 flood at higher SLR covers more of the protected area than the design event did
+at SLR_0 (delta-wide flooded area as proxy for the 1 km flood fractions of the main
+pipeline). Design RP: FLOPROS Coastal, else Riverine, else protection.default_rp, floored
+to a simulated COAST-RP (100/250/500/1000; >1000 -> 1000). RP100 at SLR_0 already exists,
+so only design RPs above 100 are run. The generated deltas_design_materialized.yml copies
+deltas_ssp245_materialized.yml, changing only tiles (selected deltas plus their lower-hop
+neighbours, recursively), RPs, SLR_0 and output folders.
 
 Then run the simulations with
     python run_delta_floodmaps.py --scenarios design --stages boundary_conditions preprocess simulate
@@ -68,8 +57,7 @@ def design_rps_for_delta(delta_geometry, catalog, rp_by_geogunit: pd.Series, def
 
 
 def with_upstream_neighbours(tile_grid: gpd.GeoDataFrame, tile_ids: set[int]) -> set[int]:
-    """`tile_ids` plus, recursively, every lower-hop tile intersecting a hop>=1 tile already in the set
-    (the neighbours a hop>=1 tile seeds its water levels from)."""
+    """Add, recursively, the lower-hop tiles each hop>=1 tile takes its water levels from."""
     grid = tile_grid.set_index("tile_id")
     out, todo = set(tile_ids), list(tile_ids)
     while todo:
@@ -117,7 +105,6 @@ def main() -> None:
 
     tile_grid = retry_transient_io(gpd.read_file, Path(cfg["tile_grid"]["path"]))
     tile_grid["tile_id"] = tile_grid["tile_id"].astype(int)
-    # deltas whose classes are all RP100 need no extra run (RP100 SLR_0 exists already)
     to_run = sel[sel["design_rps"].map(lambda s: any(int(r) > 100 for r in s.split()))]
     joined = build_tile_delta_join(tile_grid.to_crs(deltas.crs), deltas[deltas["Id"].isin(to_run["delta_id"])])
     direct = {int(t) for ts in joined.values() for t in ts}

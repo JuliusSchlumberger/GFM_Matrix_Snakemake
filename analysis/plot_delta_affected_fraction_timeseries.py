@@ -1,43 +1,10 @@
-"""Temporal development of % flooded area across all deltas, one subplot per
-ssp_scenario - from `compute_delta_flood_extent.py`'s own output CSV, combined
-with the real AR6 median SLR trajectory (`visualization.slr_trajectories_csv`).
+"""Plot % flooded delta area over time, one panel per ssp_scenario.
 
-Layout follows `analysis/plot_timeseries.py`'s own established convention
-(`1 x n_ssp` subplots, per-panel SSP-colored title, one shared legend below
-all panels) - see that script for the precedent this adapts. `sharex=True`
-and `sharey=True`: since the flood simulation forces a fixed global-mean SLR
-magnitude regardless of ssp_scenario, `pct_flooded_of_modeled_area` for a
-given slr_scenario is identical across ssp panels - the ONLY ssp-dependent
-quantity is which year that magnitude lands on (via each ssp's own AR6
-trajectory). With independent (unshared) x-axes, each panel autoscales to
-its own year range and hides that real difference in rate; sharing the axis
-makes it visible instead.
-
-Double-interpolation, no extrapolation needed:
-  1. year -> SLR magnitude (mm), via `np.interp` on the real AR6 median
-     trajectory's own decadal points (2020-2150) - never extrapolated,
-     since every year we plot (<=2150) is within the trajectory's own
-     range.
-  2. SLR magnitude -> pct_flooded, via `np.interp` on each delta's own 5
-     REAL simulated flood-extent points (SLR_0/500/1000/1500/2000 mm,
-     already in the CSV, identical across ssp_scenario - see above). Valid
-     without extrapolation too: under the median trajectory neither ssp
-     exceeds ~870mm by 2150, well inside the simulated 0-2000mm range.
-Chaining these two real interpolations gives a smooth, fully-real
-pct_flooded(year) curve for every delta out to 2150 - an earlier version of
-this script instead linearly extrapolated pct-vs-year from just the
-SLR_0->SLR_500 slope once year_slr_reached_median ran out (NaN beyond
-SLR_500 - see add_slr_year_column.py's own docstring), which is strictly
-worse: it ignores the real SLR_1000/1500 simulated points and assumes a
-straight-line pct/SLR relationship instead of actually interpolating it.
-
-Colour choice: with 48 deltas and no existing per-delta palette anywhere in
-this codebase, drawing 48 distinct hues would be the exact anti-pattern
-`map_style.py`'s own categorical-palette convention warns against (a
-palette this big always degenerates to indistinguishable colours). Instead
-every delta's own line is drawn thin and semi-transparent in the panel's
-own SSP color (a standard "spaghetti plot" - the overlapping density itself
-shows the spread), with a single bold median-across-deltas line on top.
+pct_flooded(year) chains two interpolations without extrapolation: year -> SLR (mm)
+on the AR6 median trajectory (2020-2150), then SLR -> pct_flooded on each delta's
+simulated SLR_0..2000 points (medians stay below ~870 mm by 2150). pct_flooded per SLR
+is SSP-independent; only the year differs, so x and y axes are shared to show the rate
+difference. 48 deltas: thin per-delta lines plus a bold median, not 48 hues.
 
 Usage:
     python plot_delta_affected_fraction_timeseries.py
@@ -63,7 +30,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 SSP_COLORS_DEFAULT = {"SSP1": "#1f77b4", "SSP2": "#2ca02c", "SSP5": "#d62728"}
 SSP_RCP_CODES_DEFAULT = {"SSP1": 126, "SSP2": 245, "SSP5": 585}
 TRAJECTORY_START_YEAR = 2020
-TRAJECTORY_END_YEAR = 2150  # last year in slr_trajectories_global_median.csv
+TRAJECTORY_END_YEAR = 2150  # last year of the AR6 trajectory CSV
 
 
 def _ssp_label(ssp_scenario: str, ssp_rcp_codes: dict) -> str | None:
@@ -85,6 +52,7 @@ def _rcp_suffix(ssp_scenario: str, ssp_rcp_codes: dict) -> str:
 def plot_affected_fraction_timeseries(
     df: pd.DataFrame, traj_df: pd.DataFrame, ssp_colors: dict, ssp_rcp_codes: dict, out_path: Path,
 ) -> None:
+    """Plot per-delta pct_flooded(year) curves plus the cross-delta median, per SSP panel."""
     ssp_scenarios = sorted(df["ssp_scenario"].unique())
     year_grid = np.linspace(TRAJECTORY_START_YEAR, TRAJECTORY_END_YEAR, 261)
     traj_years = traj_df.index.to_numpy(dtype=float)

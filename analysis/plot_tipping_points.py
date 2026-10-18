@@ -1,33 +1,11 @@
-"""Tipping-point figure: when does a country's expected annual impact (EAI)
-exceed a fixed number of people, under each SSP-RCP scenario and adaptation
-strategy?
+"""Plot when each country's EAI exceeds a fixed number of people, per SSP and strategy.
 
-One row per country (visualization.tipping_points.countries), two columns:
-  - left:  the country's scenario-neutral SLR x population-change space with
-           one tipping isoline per adaptation strategy (EAI = threshold,
-           from each strategy's growth-matrix CSV at the configured design
-           intensity) and each SSP's pathway through that space (global
-           median SLR vs the country's projected population change). Where
-           a pathway crosses a strategy's isoline, that strategy tips under
-           that scenario - marked with a marker shaped by strategy
-           (STRATEGY_MARKERS) and coloured by SSP. Line style = adaptation
-           strategy (STRATEGY_STYLES); colour = SSP throughout.
-  - right: the year of that crossing per strategy (rows) and SSP (colour):
-           marker (same per-strategy shape as the left panel) = median
-           (p50) SLR pathway, bar = the p17-p83 SLR range (the higher SLR
-           path tips earlier); population change is the SSP's projection in
-           all three. A triangle at the right edge means not reached by
-           2100 (for the median, or for the p17 end of the bar).
-
-No legend - STRATEGY_ABBREV/STRATEGY_MARKERS/STRATEGY_STYLES/SSP colours are
-meant to be read directly off the right panel's row labels and the figure
-caption, not re-derived from a legend.
-
-EAI along a pathway is read from the growth matrix by bilinear interpolation
-(linear extrapolation in the population direction where a pathway leaves the
-matrix's growth range; the isolines are drawn on the same extended grid).
-Writes tipping_points.png and tipping_points.csv (every tipping year) to
---outdir.
+Per country: left, the SLR x population-change space with one EAI = threshold isoline per
+strategy (line style) and each SSP's median pathway (colour); right, the crossing year per
+strategy, marker = p50 SLR on the reference population variant, bar = SLR p17-p83 range,
+">" at the right edge = not reached by to_year. EAI along a pathway: bilinear
+interpolation, linearly extrapolated in the population direction outside the matrix.
+No legend by design (read off row labels and caption).
 
 Config (visualization.tipping_points):
     countries:                [VNM, NLD, NGA]
@@ -53,7 +31,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _common)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import _first_crossing, _growth_matrix_path  # noqa: E402
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pathways import eai_along_pathway, matrix_interpolator, slr_pathway  # noqa: E402
@@ -64,32 +42,22 @@ from analysis_figures import (  # noqa: E402
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-# right-column row labels (A + R: a future avoid + retreat strategy)
+# "A + R": a future avoid + retreat strategy
 STRATEGY_ABBREV = {"baseline": "B", "avoid": "A", "protect": "P", "retreat": "R", "protect_avoid": "P + A",
                    "avoid_retreat": "A + R"}
 STRATEGY_NAMES = {"baseline": "No adaptation", "protect": "Protect", "avoid": "Avoid", "retreat": "Retreat",
                   "protect_avoid": "Protect + Avoid"}
-# isolines: colour is reserved for the SSPs, so strategies differ by line style
+# Colour is reserved for SSPs, so strategies differ by line style / marker.
 STRATEGY_STYLES = {"baseline": "-", "protect": "--", "avoid": ":", "retreat": "-.",
                    "protect_avoid": (0, (8, 2, 1, 2, 1, 2))}
-# tipping-point markers: one shape per strategy (independent of the SSP colour
-# already used for the isolines/pathways), so the SAME marker identifies a
-# strategy's tipping point in both the matrix (left) and the tipping-year
-# panel (right) without having to trace which isoline a dot sits on.
 STRATEGY_MARKERS = {"baseline": "o", "protect": "s", "avoid": "^", "retreat": "D",
                     "protect_avoid": "P", "avoid_retreat": "X"}
 YEARS = np.arange(2020, 2101)
-LAST_SSP_YEAR = 2100  # IIASA SSP population projections end here
+LAST_SSP_YEAR = 2100  # end of IIASA SSP population projections
 
 
 def main() -> None:
-    """Parse CLI arguments and plot each country's adaptation tipping points by scenario.
-
-    For every country in visualization.tipping_points.countries, draws a two-panel figure:
-    the SLR-vs-population tipping isolines per adaptation strategy with each SSP's pathway
-    overlaid, and the year each strategy's EAI first crosses the configured threshold.
-    Writes tipping_points.png and tipping_points.csv (every tipping year) to --outdir.
-    """
+    """Write tipping_points.png and tipping_points.csv to --outdir."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_*_growth_matrix.csv files")
@@ -121,11 +89,10 @@ def main() -> None:
 
     catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
     growth_df = load_ssp_growth_factors(Path(catalog.get_source("ssp_population_growth_factors").path))
-    # population after 2100: the illustrative continuation variants (visualization.extended_pathways)
     variants = (viz.get("extended_pathways", {}).get("variants") if to_year > LAST_SSP_YEAR else None) \
         or {"ssp": {"mode": "constant", "label": "SSP"}}
     ext = {v: extend_growth_factors(growth_df, spec, to_year=to_year) for v, spec in variants.items()}
-    v0 = next(iter(variants))  # reference variant: dot and thick bar
+    v0 = next(iter(variants))  # reference variant for the markers
     iso_to_name = {v: k for k, v in _build_name_to_iso().items()}
 
     grids = {s: load_growth_matrix_csv(_growth_matrix_path(exp_dir, s, design)) for s in strategies}
@@ -167,20 +134,19 @@ def main() -> None:
                                  "ssp": ssp, "population_after_2100": v,
                                  **{f"year_{p}": yrs[(v, p)] for p in ("p17", "p50", "p83")}})
                     t = yrs[(v, "p50")]
-                    if t is not None and v == v0:  # tipping point on the reference pathway
+                    if t is not None and v == v0:
                         ax_l.plot(np.interp(t, years, slr_paths[(ssp, "p50")]) / 1000.0,
                                   np.interp(t, years, growth_paths[(ssp, v)]) * 100.0,
                                   STRATEGY_MARKERS.get(strat, "o"), ms=14,
                                   mfc="w", mec=s_colors.get(ssp, "grey"), mew=2.6, zorder=7)
                 crossings[(strat, ssp)] = yrs
 
-        # SSP pathways (median SLR): solid to 2100, then one branch per population variant
         for ssp in ssps:
             c = s_colors.get(ssp, "grey")
             x = slr_paths[(ssp, "p50")] / 1000.0
             y = growth_paths[(ssp, v0)] * 100.0
             ax_l.plot(x[:i2100 + 1], y[:i2100 + 1], "-", color=c, lw=2.5, zorder=5)
-            if to_year > LAST_SSP_YEAR:  # envelope over the population variants after 2100
+            if to_year > LAST_SSP_YEAR:
                 yv = np.vstack([growth_paths[(ssp, v)][i2100:] for v in variants]) * 100.0
                 ax_l.fill_between(x[i2100:], yv.min(axis=0), yv.max(axis=0), color=c, alpha=0.25, lw=0, zorder=4)
                 ax_l.plot(x[i2100:], yv.min(axis=0), "-", color=c, lw=0.8, zorder=4)
@@ -198,7 +164,6 @@ def main() -> None:
         if r == len(countries) - 1:
             ax_l.set_xlabel("Global mean sea-level rise (m)", fontsize=fs)
 
-        # tipping years: one row per strategy, SSPs offset within the row
         offsets = np.linspace(-0.25, 0.25, len(ssps)) if len(ssps) > 1 else np.zeros(1)
         x_end = float(to_year)
         for k, strat in enumerate(strategies):
@@ -208,7 +173,7 @@ def main() -> None:
                     continue
                 c = s_colors.get(ssp, "grey")
                 yk = k + off
-                # one bar over the whole uncertainty: SLR p17-p83 x population variants after 2100
+                # Bar spans SLR p17-p83 x all population variants.
                 all_y = [t for t in yrs.values() if t is not None]
                 if all_y:
                     open_end = any(t is None for t in yrs.values())

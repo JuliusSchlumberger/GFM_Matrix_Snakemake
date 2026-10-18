@@ -1,18 +1,7 @@
-"""Extract global-mean SLR trajectories from pre-computed per-SSP CSV files.
+"""Extract global-mean AR6 SLR trajectories (mm, relative to 2020) per SSP.
 
-Reads the SLR_{code}_wg1.csv files in the `ipcc_ar6_slr_wg1_csv` catalog
-source's directory, normalises each series so the 2020 value is zero, and
-writes a combined CSV with one column per SSP (median p50) plus optional
-uncertainty bands (p17, p83).
-
-The SSP->RCP-code mapping is read from `visualization.ssp_rcp_codes` in
-config.yml (e.g. SSP1->126, SSP2->245, SSP5->585).
-
-Output CSV columns:
-  year        — integer year
-  {SSP}_p17   — 17th-percentile SLR in mm (relative to 2020 baseline)
-  {SSP}_p50   — median SLR in mm
-  {SSP}_p83   — 83rd-percentile SLR in mm
+Reads SLR_{code}_wg1.csv from the `ipcc_ar6_slr_wg1_csv` source, with codes from
+visualization.ssp_rcp_codes, and writes columns {SSP}_p17/_p50/_p83 indexed by year.
 
 Usage:
     python analysis/extract_slr_trajectories.py \\
@@ -33,21 +22,16 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_slr_csv(csv_path: Path) -> pd.DataFrame:
-    """Read one SLR_XXX_wg1.csv file.
+    """Read one SLR_XXX_wg1.csv as p17/p50/p83 in mm, relative to 2020.
 
-    Expected format:
-        index column: years (integer)
-        data columns: '0.17', '0.5', '0.83'  — percentile SLR in metres
-                      (some files may include more percentiles; we keep those three).
-
-    Returns a DataFrame indexed by year with columns p17, p50, p83 in millimetres,
-    normalised so the 2020 median is 0.
+    Input: year index, percentile columns '0.17'/'0.5'/'0.83' in metres. Falls back to
+    the first year as baseline if 2020 is missing; values with max |p50| < 10 are taken
+    to be metres.
     """
     df = pd.read_csv(csv_path, index_col=0)
     df.index.name = "year"
     df.index = df.index.astype(int)
 
-    # Rename percentile columns robustly
     rename = {}
     for col in df.columns:
         col_str = str(col).strip()
@@ -59,18 +43,14 @@ def load_slr_csv(csv_path: Path) -> pd.DataFrame:
             rename[col] = "p83"
     df = df.rename(columns=rename)
 
-    # Keep only the three quantile columns
     keep = [c for c in ("p17", "p50", "p83") if c in df.columns]
     df = df[keep].copy()
 
-    # Normalise: subtract 2020 baseline so SLR starts at 0
     if 2020 in df.index:
         df = df - df.loc[2020]
     else:
-        # Use the first available year as baseline
         df = df - df.iloc[0]
 
-    # Convert metres -> millimetres if the values look like metres
     if df["p50"].abs().max() < 10:
         df = df * 1000.0
 
@@ -100,7 +80,7 @@ def main() -> None:
         "SSP1": 126, "SSP2": 245, "SSP5": 585,
     })
     catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
-    slr_csv_dir = Path(catalog.get_source("ipcc_ar6_slr_wg1_csv").path)  # catalog key (data_catalog_gfm.yml)
+    slr_csv_dir = Path(catalog.get_source("ipcc_ar6_slr_wg1_csv").path)
 
     if not slr_csv_dir.exists():
         print(f"ERROR: SLR CSV directory not found: {slr_csv_dir}")
@@ -114,7 +94,6 @@ def main() -> None:
             continue
         print(f"  Reading {csv_path.name} -> {ssp}...")
         df_ssp = load_slr_csv(csv_path)
-        # Prefix each column with SSP label
         df_ssp.columns = [f"{ssp}_{col}" for col in df_ssp.columns]
         frames[ssp] = df_ssp
 
@@ -131,7 +110,6 @@ def main() -> None:
     result.to_csv(out_path)
     print(f"\nWritten: {out_path}")
 
-    # Quick summary
     print("\nMedian SLR (mm, relative to 2020 baseline):  [selected years]")
     p50_cols = [c for c in result.columns if c.endswith("_p50")]
     sample_years = [yr for yr in [2050, 2100, 2150] if yr in result.index]
