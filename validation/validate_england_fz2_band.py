@@ -45,7 +45,7 @@ from pipeline_plots import pixel_area_km2_grid  # noqa: E402
 import validation as v  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from validate_country import _chunks_overlapping_bbox  # noqa: E402
+from _chunks import _chunks_overlapping_bbox  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _BENCHMARK_KEY = "england_ea_floodzone2_sea"

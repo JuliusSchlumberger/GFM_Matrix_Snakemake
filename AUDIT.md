@@ -811,7 +811,7 @@ Baseline (Phase 0): thailand_bangkok 453 jobs (run_aqueduct 90, extract_boundari
 - Add `config_local.yml.example`, and `materialize_configs.py` (generic, replacing `build_delta_run_configs.py`).
 - *Verify*: `git grep -nE '[A-Z]:[\\/](Users|GFM)|/p/1121|/u/schlumbe'` returns only `*.example` and docs; `snakemake -n all` equals the baseline; `DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part eikonal` on Hydrax (you run this).
 
-**Phase 7: Renames and structural tidy.**
+**Phase 7: Renames and structural tidy.** ✅ *done 2026-10-18 (7a, 7b, 7c; see items).*
 - **7a. aqueduct → eikonal.** ✅ *done 2026-10-18. Files: eikonal_runner.py, run_eikonal(_cli).py, generate_eikonal_jobs.py, run_eikonal_dag.py, generate_hpc_exposure_jobs.py, tests/eikonal_runner_validation/. Rules run_eikonal / generate_eikonal_jobs; `run_eikonal_python`, `estimate_eikonal_mem_mb`, `EIKONAL_NODATA`; config `eikonal_mem_estimate` (old key still read as fallback); `{aqueduct_root}` removed. Provenance mentions (external Aqueduct model, WRI Aqueduct data) kept. Verified: AST of every .py equals HEAD with the rename map applied (docstrings aside), except 2 message strings and the aqueduct_root removal; ruff, pytest (66), --help, dry run (run_aqueduct 90 -> run_eikonal 90). generate_hpc_*_job(s) singular/plural left as is (only generate_exposure_jobs renamed). Hydrax follow-ups in TODO.md.* Covers about 260 mentions in 50 files, excluding logs and provenance mentions.
   - Modules: `aqueduct_runner.py` → `eikonal_runner.py`, `run_aqueduct{,_cli}.py` → `run_eikonal{,_cli}.py`, `generate_aqueduct_jobs.py` → `generate_eikonal_jobs.py`.
   - Rules: `run_aqueduct` → `run_eikonal`, `generate_aqueduct_jobs` → `generate_eikonal_jobs`.
@@ -827,7 +827,7 @@ Baseline (Phase 0): thailand_bangkok 453 jobs (run_aqueduct 90, extract_boundari
   - Move `select_country_tiles.py` to `preparation/`.
   - Rename the `exposure`/`exposure_analysis` and `plotting`/`visualization` modules to clarify the split.
   - *Verify*: `pytest`; `python <script> --help` for every renamed CLI; `snakemake -n all`.
-- **7c. Splits.**
+- **7c. Splits.** ✅ *done 2026-10-18 (partly): run_analysis.py is a STEPS table (old vs new: identical subprocess calls, SKIP lines and exit codes over 23,554 switch/flag/failure combinations); validate_country's chunk/mosaic helpers moved to validation/_chunks.py (AST-identical; England scripts import it). build_station_boundary_lines.py NOT split: not verifiable without tests or Hydrax stage 1 - see TODO.md.*
   - `build_station_boundary_lines.py` into lines, conflict and plot modules.
   - `validate_country.py`: after Phase 2b it is ~890 lines with one scoring path (national coverage), so splitting it is optional; at most, move the chunk/mosaic helpers (`_chunks_overlapping_bbox` etc.) into a `validation/_chunks.py` that the England scripts import.
   - `run_analysis.py` into a STEPS table.
