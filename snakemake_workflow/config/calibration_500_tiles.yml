@@ -58,7 +58,7 @@ adaptation:
 # normal two-phase design, since the phase-2 cross-node afterany wait that
 # design exists for protects a dependency this study doesn't have.
 #
-# 25 nodes (user direction, 2026-10 - up from 20), all 1vcpu: every tile
+# All nodes 1vcpu: every tile
 # runs on hpc.sbatch (2026-10-08: the old small/large RAM-aware split,
 # hpc.sbatch_large, and large_tile_pixel_threshold were removed entirely -
 # a real need under the OLD, pre-2026-10 greedy-covering tiling pipeline,

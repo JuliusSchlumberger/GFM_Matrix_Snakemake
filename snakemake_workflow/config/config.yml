@@ -153,7 +153,7 @@ tile_grid:
 tile_split: # Used by: run_eikonal_dag.py to split OOM tiles and re-run Snakemake.
   fraction: 0.667 # Each half spans this fraction of the parent tile's extent
   max_depth: 2 # Maximum number of times a single original tile may be recursively split
-  max_retries: 5 # Maximum number of times a single original tile may be recursively split
+  max_retries: 5 # Maximum number of Snakemake runs (initial + reruns after splitting) per run_eikonal_dag.py call
 
 
 # ── BOUNDARY CONDITIONS ───────────────────────────────────────────────────────
@@ -252,6 +252,7 @@ raster_format:
 simulation: # Used by: preprocessing rules
   model_outputs: "{root}/model_outputs"  # directory where per-tile "{tile_id}/inputs" and
   # "{tile_id}/results" are created
+  preprocessing_inputs_dir: null # when set, per-tile preprocessing inputs are read/written there instead of model_outputs
 
   # Flood model implementation: src/flood_model.py's flood_depth_dense
   # (dense domain, round-based solve capped at flooding.max_rounds below).
@@ -383,9 +384,9 @@ simulation: # Used by: preprocessing rules
 # SLURM `--dependency=afterany:<every prior-wave job id>` barrier so a
 # hop>=1 job never starts before its neighbour's job has finished. The user
 # runs submit_waves.sh manually and later runs postprocessing manually once
-# results land. Requires a git-ignored snakemake_workflow/config/config_hpc.yml
-# (copy from config_hpc.yml.example) pointing paths.root/code_root at the
-# Linux HPC mount of this same shared storage.
+# results land. Requires snakemake_workflow/config/config_hpc.yml (tracked,
+# Hydrax values; copy config_hpc.yml.example for another cluster) pointing
+# paths.root/code_root at the Linux HPC mount of this same shared storage.
 #
 # Within each wave (simulation) / on its own (preprocessing), tiles are
 # ALSO split by estimated size (2026-08): Hydrax's regular partitions all
@@ -414,9 +415,10 @@ simulation: # Used by: preprocessing rules
 # check_simulation_progress.py's --by-size) were removed as dead weight from
 # a retired pipeline generation, not a currently-needed safeguard.
 hpc:
-  n_nodes: 40                                        # 2026-10-06, user direction (down from 35) for a preprocess-only submission - a SHARED budget across
+  n_nodes: 40                                        # a SHARED budget across
   # every batch per wave, split evenly by tile count (see hpc_dispatch.smk's own batch-splitting logic)
   jobs_dir: "{root}/model_outputs/hpc_jobs"           # generated sbatch scripts, resolved_config.yml, submit_waves.sh, logs/
+  single_preprocess_job: false # true: generate_hpc_preprocess_job.py writes one job for all tiles instead of node batches
   sbatch:
     # Deltares Hydrax partitions: 1vcpu/4vcpu/16vcpu/24vcpu/60vcpu (regular),
     # 44vcpu, gpu, test (30 min cap, quick smoke-test before a real run).
@@ -520,7 +522,7 @@ postprocessing:
 
     # Output resolution (DPI) for all saved plot images.
     dpi: 300
-    merged_resolution_arcsec: 120  # 30" ≈ 900 m at the equator;
+    merged_resolution_arcsec: 120  # 120" ≈ 3.7 km at the equator
     waterdepth_cmap: "Blues"
     waterdepth_vmax_m: 10
     merged_map_figsize: [10, 10] # for plot_merged_results
@@ -676,6 +678,10 @@ visualization:
 
   # ── SSP SLR trajectory CSV ────────────────────────────────────────────────
   slr_trajectories_csv: "{processed_inputs_dir}/slr_trajectories_global_median.csv"
+
+  # ── Country population (analysis/extract_country_population.py) ───────────
+  country_population_csv: "{processed_inputs_dir}/country_population_2020.csv" # WorldPop totals per ISO
+  population_extract_row_band_deg: 5.0 # latitude band height (deg) per WorldPop read
 
   # ── Chart aesthetics ──────────────────────────────────────────────────────
   dpi: 200
