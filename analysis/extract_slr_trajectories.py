@@ -6,7 +6,7 @@ visualization.ssp_rcp_codes, and writes columns {SSP}_p17/_p50/_p83 indexed by y
 Usage:
     python analysis/extract_slr_trajectories.py \\
         [--config snakemake_workflow/config/config.yml] \\
-        [--output D:/GFM/processed_inputs/slr_trajectories_global_median.csv]
+        [--out D:/GFM/processed_inputs/slr_trajectories_global_median.csv]
 """
 
 import argparse
@@ -62,7 +62,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=_default_cfg, help=f"path to config.yml (default: {_default_cfg})")
     parser.add_argument(
-        "--output", default=None,
+        "--out", "--output", dest="output", default=None,
         help="output CSV path (default: visualization.slr_trajectories_csv from config)",
     )
     args = parser.parse_args()

@@ -15,7 +15,7 @@ model-minus-CoSMoS depth difference (m), plus the metrics CSV, to --out-dir
 (default {validation.output_dir}/USA). Plot them with plot_sf_bay.py.
 
 Usage:
-    python validation/validate_sf_bay.py [--config path/to/config.yml] [--out-dir DIR] [--out-csv path.csv]
+    python validation/validate_sf_bay.py [--config path/to/config.yml] [--out-dir DIR] [--out path.csv]
 """
 
 from __future__ import annotations
@@ -241,11 +241,11 @@ def validate_sf_bay(config_path: str, threshold_m: float | None = None, out_dir:
 
 
 def main() -> None:
-    """Print the SF Bay results; write rasters + metrics to --out-dir, optionally --out-csv."""
+    """Print the SF Bay results; write rasters + metrics to --out-dir, optionally --out."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--out-dir", default=None, help="default: {validation.output_dir}/USA")
-    parser.add_argument("--out-csv", default=None)
+    parser.add_argument("--out", "--out-csv", dest="out_csv", default=None)
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir) if args.out_dir else Path(load_config(Path(args.config))["validation"]["output_dir"]) / "USA"

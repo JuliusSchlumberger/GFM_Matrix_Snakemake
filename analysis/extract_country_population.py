@@ -8,7 +8,7 @@ population grid) and the geo109->ISO lookup cached with plot_world_map.py.
 Usage:
     python analysis/extract_country_population.py \\
         [--config snakemake_workflow/config/config.yml] \\
-        [--output D:/GFM/processed_inputs/country_population_2020.csv]
+        [--out D:/GFM/processed_inputs/country_population_2020.csv]
 """
 
 import argparse
@@ -118,7 +118,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=_default_cfg, help=f"path to config.yml (default: {_default_cfg})")
     parser.add_argument(
-        "--output", default=None,
+        "--out", "--output", dest="output", default=None,
         help="output CSV path (default: visualization.country_population_csv from config)",
     )
     args = parser.parse_args()

@@ -6,7 +6,7 @@ base / global_mean * T, so Pearson r does not depend on the target T.
 
 Reads, and on a cache miss writes, the same COAST-RP / SLR caches as
 preparation/prepare_boundary_conditions.py in `paths.processed_inputs_dir`.
-The figure goes to --output (default: the current directory).
+The figure goes to --out (default: the current directory).
 
 Usage:
     python calibration_studies/compare_slr_fingerprint_scenarios.py
@@ -55,7 +55,7 @@ def main() -> None:
     parser.add_argument("--scenario-a", default="ssp126", help="options: ssp119/ssp126/ssp245/ssp370/ssp585")
     parser.add_argument("--scenario-b", default="ssp245")
     parser.add_argument("--confidence", default=None, help="default: boundary_conditions.confidence_level from config")
-    parser.add_argument("--output", default="slr_fingerprint_scenario_comparison.png")
+    parser.add_argument("--out", "--output", dest="output", default="slr_fingerprint_scenario_comparison.png")
     args = parser.parse_args()
 
     cfg = load_config(Path(args.config))
