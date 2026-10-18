@@ -29,24 +29,33 @@ def run_sfincs_subprocess(
     label: str = "SFINCS run",
     n_threads: int | None = None,
 ) -> None:
-    """
-    Executes the SFINCS binary in ``cwd``, streaming stdout/stderr
-    line-by-line to both ``log`` and the terminal, with a timeout.
+    """Run the SFINCS binary in ``cwd`` and stream its output, with a timeout.
 
-    Args:
-        sfincs_exe: Path to the sfincs executable.
-        cwd:        Working directory SFINCS runs in; its own relative file
-                    references (dep, msk, bnd, rstfile, ...) resolve
-                    against this.
-        timeout_s:  Wall-clock timeout (seconds) before the process is killed.
-        log:        Logger to write SFINCS's stdout (info) / stderr (warning) to.
-        label:      Used only in raised error messages.
-        n_threads:  OpenMP thread count for SFINCS (sets OMP_NUM_THREADS for
-                    the subprocess only). SFINCS defaults to 1 thread when
-                    unset. None/0 leaves the environment unchanged.
+    Launches ``sfincs_exe`` via ``subprocess.Popen`` and forwards its
+    stdout/stderr line-by-line to both ``log`` and the terminal in real time.
 
-    Raises:
-        RuntimeError: on timeout or non-zero exit code.
+    Parameters
+    ----------
+    sfincs_exe : str or Path
+        Path to the SFINCS executable.
+    cwd : str or Path
+        Working directory SFINCS runs in; its own relative file references
+        (dep, msk, bnd, rstfile, ...) resolve against this.
+    timeout_s : float
+        Wall-clock timeout (seconds) before the process is killed.
+    log : logging.Logger
+        Logger that receives SFINCS's stdout (info) / stderr (warning).
+    label : str, optional
+        Used only in raised error messages. Default is "SFINCS run".
+    n_threads : int or None, optional
+        OpenMP thread count for SFINCS (sets OMP_NUM_THREADS for the
+        subprocess only). SFINCS defaults to 1 thread when unset; None or 0
+        leaves the environment unchanged. Default is None.
+
+    Raises
+    ------
+    RuntimeError
+        If the process exceeds ``timeout_s`` or exits with a non-zero code.
     """
     sfincs_exe = Path(sfincs_exe).resolve()
     log.info(f"Running {label}: {sfincs_exe}")

@@ -110,8 +110,23 @@ def preprocess_coastrp(raw_path: Path, out_path: Path, min_lat: float) -> xr.Dat
 
     The raw COAST-RP.nc file includes stations along the Antarctic ice
     shelf where the underlying storm-tide model outputs are unreliable.
-    `min_lat` is boundary_conditions.coastrp_min_lat in config.yml — see
-    that config entry for the reasoning behind the threshold value.
+    Returns the cached `out_path` dataset directly if it already exists.
+
+    Parameters
+    ----------
+    raw_path : Path
+        Path to the raw COAST-RP.nc file.
+    out_path : Path
+        Path to write (or load, if already present) the filtered dataset.
+    min_lat : float
+        Minimum station latitude (degrees) to keep. This is
+        boundary_conditions.coastrp_min_lat in config.yml (-60 by default) —
+        see that config entry for the reasoning behind the threshold.
+
+    Returns
+    -------
+    xr.Dataset
+        COAST-RP stations with station_y_coordinate > min_lat only.
     """
     if out_path.exists():
         logger.info("COAST-RP_preprocessed.nc already exists — loading.")
@@ -199,6 +214,25 @@ def compute_mdt_correction(
     enclosed sea/bay/fjord - see
     Boundary_conditions_waterlevels/01_retrieve_MDT_correction.ipynb's own
     TODO note on this same gap, left unchanged here).
+
+    Parameters
+    ----------
+    ds_coastrp : xr.Dataset
+        COAST-RP stations (needs station_x_coordinate/station_y_coordinate).
+    mdt_path : Path
+        Path to the AVISO MDT NetCDF file.
+    mdt_variable : str
+        Name of the MDT data variable in `mdt_path`.
+    fallback_deg : float
+        Search half-width (degrees) for the nearest non-NaN MDT cell when
+        the nearest cell itself is NaN.
+    out_path : Path
+        Path to write (or load, if already present) the mapped MDT dataset.
+
+    Returns
+    -------
+    xr.Dataset
+        Dataset with an `MDT` (m) variable, one value per COAST-RP station.
     """
     if out_path.exists():
         logger.info("MDT-mapped station file already exists — loading.")
@@ -267,6 +301,30 @@ def compute_slr_fingerprints(
     Fallback for stations with no valid SLR data within ±1°: the global-mean
     SLR is used (i.e. no spatial fingerprint, uniform offset = T), so the
     output is always NaN-free.
+
+    Parameters
+    ----------
+    ds_coastrp : xr.Dataset
+        COAST-RP stations (needs station_x_coordinate/station_y_coordinate).
+    slr_dir : Path
+        Root directory of the IPCC AR6 regional SLR projections.
+    scenario : str
+        SLR emissions scenario (e.g. "ssp245").
+    confidence : str
+        SLR confidence-level subdirectory (e.g. "medium").
+    target_slr_m : list[float]
+        Target global-mean SLR levels (m) to scale the fingerprint to.
+    slr_base_path : Path
+        Path to write the per-station base SLR (m) dataset.
+    fingerprints_path : Path
+        Path to write (or load, if already cached and covering every
+        target) the per-station fingerprint dataset.
+
+    Returns
+    -------
+    xr.Dataset
+        One `SLR_{mm}mm` (m) data variable per entry in `target_slr_m`, one
+        value per COAST-RP station.
     """
     #NOTE: check if the ration between station SLR and global mean changes significantly if using different timehorizons or SSP secnarios?
     if fingerprints_path.exists():
@@ -401,7 +459,28 @@ def combine_scenarios(
 
     Because the SLR fallback ensures no NaN values enter the calculation,
     all output files are guaranteed to be NaN-free (MDT NaNs, if any, are
-    replaced with 0 before use for the same reason).
+    replaced with 0 before use for the same reason). Skips any file that
+    already exists.
+
+    Parameters
+    ----------
+    ds_coastrp : xr.Dataset
+        COAST-RP stations; must include `storm_tide_rp_{RP:04d}` variables.
+    ds_slr : xr.Dataset
+        Per-station SLR fingerprints (see `compute_slr_fingerprints`).
+    out_dir : Path
+        Directory to write the scenario NetCDF files to.
+    return_periods : list[int]
+        Return periods (years) to write a file for.
+    target_slr_m : list[float]
+        Target global-mean SLR levels (m) to write a file for.
+    nc_filename_template : str
+        Output filename template, formatted with `return_period`/
+        `waterlevel_name`.
+    nc_variable_template : str
+        Output data-variable name template, formatted the same way.
+    mdt_arr : np.ndarray
+        MDT correction (m), aligned to `ds_coastrp`'s station order.
     """
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
@@ -451,15 +530,23 @@ def combine_scenarios(
 def run(config: dict, force: bool = True) -> None:
     """Run the full boundary-conditions pipeline (steps 1-4, see module docstring).
 
-    `force`: delete and recompute all intermediate files and scenario
-    outputs (otherwise cached files from a previous run are reused). Defaults
-    to True (changed 2026-09) - this step is meant to always reflect the
-    current config/code, and the cache-hit path ("skip if the output file
-    already exists") is exactly what let a real sign bug in the MDT
-    correction (see module docstring) sit silently unfixed in on-disk output
-    for weeks after the code was corrected. Pass force=False explicitly to
-    opt back into reusing cached intermediates (e.g. resuming after an
-    interrupted run without wanting to redo already-correct, expensive work).
+    Writes per-(return_period, SLR) scenario NetCDFs plus cached intermediate
+    files (COAST-RP_preprocessed.nc, MDT_mapped_on_coastal_points.nc,
+    SLR_base_*.nc, SLR_fingerprints_*.nc) into the configured directories.
+
+    Parameters
+    ----------
+    config : dict
+        Parsed config.yml. Uses `config["boundary_conditions"]`,
+        `config["adaptation"]`, and `config["paths"]`.
+    force : bool, default True
+        Delete and recompute all intermediate files and scenario outputs
+        instead of reusing any that already exist. Defaults to True
+        (changed 2026-09): the cache-hit path is exactly what let a real
+        sign bug in the MDT correction (see module docstring) sit silently
+        unfixed in on-disk output for weeks after the code was corrected.
+        Pass False to resume after an interrupted run without redoing
+        already-correct, expensive work.
     """
     wl_cfg = config["boundary_conditions"]
     adapt_cfg = config.get("adaptation", {})

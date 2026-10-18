@@ -49,52 +49,69 @@ def run_aqueduct_python(
 ) -> dict:
     """Run `flood_model.flood_depth_dense` in-process and write its output.
 
-    Exactly one of `boundaries_path` (wave-0: real/virtual COAST-RP
-    stations, IDW-seeded onto this tile's own coastline) or the
-    `seed_rows`/`seed_cols`/`seed_values` triple (hop>=1 hinterland: direct
-    eikonal seeds, typically from `boundaries.collect_neighbor_wave_seeds`)
-    must be given - see `flood_depth_dense`'s own docstring, which performs
-    the actual validation.
+    Exactly one of `boundaries_path` (wave-0: IDW-seeded from COAST-RP
+    stations) or the `seed_rows`/`seed_cols`/`seed_values` triple (hop>=1:
+    direct eikonal seeds) must be given - see `flood_depth_dense`'s own
+    docstring, which performs the actual validation. `friction_scale_factor`
+    defaults to 1.0 (a no-op) here; production's real value (9.0, from
+    config.yml) is a required correction for `eikonal.py`'s discretisation
+    treating friction as a cost-per-grid-step (×30, DeltaDTM's ~30m pixel)
+    times a ×0.3 SFINCS-calibrated factor - not a free tuning knob. Memory
+    exhaustion during the solve surfaces as a bare `MemoryError` (rare in
+    practice); callers catch it to mark the tile via `mark_tile_oom`.
 
-    `ocean_code`/`river_code`: only used on the `boundaries_path` path (see
-    `flood_model.coastline_mask`). `max_rounds`/`waterlevel_epsilon_m` are
-    forwarded regardless of `obstacle_coupling` (used by the default
-    round-based solve either way - see `flood_depth_dense`'s own docstring,
-    2026-08); `obstacle_coupling`/`max_outer_iterations`/
-    `outer_convergence_pct` are obstacle-coupling-specific. Defaults match
-    `simulation.flooding` in config.yml (`max_rounds`/`waterlevel_epsilon_m`
-    top-level, the rest under `.obstacle_coupling`).
+    Parameters
+    ----------
+    dem_path : str or Path
+        Path to this tile's int16-cm-encoded DEM raster.
+    mask_path : str or Path
+        Path to this tile's land/water/boundary-code mask raster.
+    friction_path : str or Path
+        Path to this tile's int16-encoded friction raster.
+    output_path : str or Path
+        Path to write the resulting waterdepth raster to.
+    resolution : float
+        Pixel resolution in metres, forwarded to `flood_depth_dense`.
+    k : int
+        Number of nearest boundary stations used for IDW seeding.
+    variable : str
+        Name of the water-level variable/column to use.
+    boundaries_path : str or Path or None, optional
+        Boundary-stations vector file (wave-0 path). Mutually exclusive
+        with `seed_rows`/`seed_cols`/`seed_values`.
+    seed_rows : numpy.ndarray or None, optional
+        Row indices of direct eikonal seed cells (hop>=1 path).
+    seed_cols : numpy.ndarray or None, optional
+        Column indices matching `seed_rows`.
+    seed_values : numpy.ndarray or None, optional
+        Water-level seed values in metres, matching `seed_rows`/`seed_cols`.
+    ocean_code : int, default 1
+        Mask code identifying ocean cells; only used on the
+        `boundaries_path` path.
+    river_code : int or None, optional
+        Mask code identifying river cells; only used on the
+        `boundaries_path` path.
+    obstacle_coupling : bool, default False
+        Whether to use the obstacle-coupling outer-iteration solve instead
+        of the default round-based solve.
+    max_outer_iterations : int, default 3
+        Max outer iterations for the obstacle-coupling solve.
+    max_rounds : int, default 40
+        Max rounds for the round-based solve (used regardless of
+        `obstacle_coupling`).
+    outer_convergence_pct : float, default 0.01
+        Convergence threshold (percent) for the obstacle-coupling solve.
+    waterlevel_epsilon_m : float, default WATERLEVEL_EPSILON_M
+        Water-level epsilon in metres (used regardless of
+        `obstacle_coupling`).
+    friction_scale_factor : float, default 1.0
+        Multiplier applied to the decoded friction raster; 1.0 is a no-op
+        here (see the note above for production's real value).
 
-    `friction_scale_factor` (default 1.0 here, a true no-op for this
-    function - production's real value, 9.0, lives in config.yml's
-    `simulation.flooding.friction_scale_factor` and is passed in explicitly
-    by callers, never read from config by this function itself): a runtime
-    multiplier applied to the already-decoded friction raster, deliberately
-    NOT baked into `compute_friction.py`'s own preprocessing output, so the
-    expensive, land-use-derived friction raster is computed once and reused
-    across every sweep combination that varies a DIFFERENT parameter.
-
-    NOT a free empirical tuning knob on an otherwise-correct baseline - see
-    config.yml's own comment on `simulation.flooding.friction_scale_factor`
-    and docs/methods_02_flood_depth.md section 2.1: most of production's
-    9.0 (specifically, a factor of 30) is a REQUIRED correction for
-    `src/eikonal.py`'s discretisation having no distance term at all (it
-    treats friction, a per-METRE rate, as a cost-per-GRID-STEP, so it must
-    be pre-multiplied by DeltaDTM's ~30m grid step just to be dimensionally
-    correct) - only the remaining ×0.3 is real calibration, from comparing
-    against SFINCS directly. `friction_scale_factor=1.0` (this function's
-    own default) is therefore NOT a meaningful "unscaled" physical baseline,
-    just a no-op for callers that don't care about friction at all.
-
-    Returns:
-        The `diagnostics` dict from `flood_depth_dense` - see its docstring.
-
-    Raises:
-        MemoryError: if the solve exhausts available memory - callers apply
-            the oom_tiles/skipped_tiles marking on this (see
-            `mark_tile_oom`). In practice rare (a 358M-cell tile ran fine
-            here at ~5GB peak RSS) - this is a dormant safety net, not an
-            expected code path.
+    Returns
+    -------
+    dict
+        The `diagnostics` dict from `flood_depth_dense`.
     """
     # dem.tif/friction.tif/boundaries.gpkg's water-level column are all
     # int16-encoded on disk (see rasters.py's encode_dem_cm/
@@ -137,20 +154,24 @@ def estimate_aqueduct_mem_mb(dem_path: str | Path, mem_estimate_cfg: dict[str, A
     """Conservative peak-memory estimate (MB) for running the flood solve on one tile.
 
     Calibrated from 7 real tiles spanning 2.2M-140M DEM pixels (peak working
-    set 800-7500MB). Pixel count alone isn't an exact predictor - two tiles
-    with near-identical pixel counts differed by ~900MB in practice, likely
-    flood-extent/connected-component complexity - so this is deliberately
-    generous, not a tight fit. Used as run_aqueduct's `resources: mem_mb` so
-    Snakemake's own scheduler throttles concurrent jobs to fit within a
-    `--resources mem_mb=N` budget (see that rule's docstring).
+    set 800-7500MB); pixel count alone isn't an exact predictor (two tiles
+    with near-identical pixel counts differed by ~900MB, likely flood-extent
+    complexity), so this is deliberately generous. Used as run_aqueduct's
+    `resources: mem_mb` so Snakemake throttles concurrent jobs to fit a
+    `--resources mem_mb=N` budget.
 
-    Args:
-        dem_path: Path to the tile's DEM raster (read for width/height only -
-            a metadata-only open, not a full raster load).
-        mem_estimate_cfg: `simulation.aqueduct_mem_estimate` config section,
-            with keys `base_mb` and `bytes_per_pixel`.
+    Parameters
+    ----------
+    dem_path : str or Path
+        Path to the tile's DEM raster; opened for width/height metadata
+        only, not a full raster load.
+    mem_estimate_cfg : dict of str to Any
+        `simulation.aqueduct_mem_estimate` config section, with keys
+        `base_mb` and `bytes_per_pixel`.
 
-    Returns:
+    Returns
+    -------
+    int
         Estimated peak memory in MB, rounded up to the nearest 100.
     """
     with retry_transient_io(rasterio.open, dem_path) as ds:
@@ -160,12 +181,40 @@ def estimate_aqueduct_mem_mb(dem_path: str | Path, mem_estimate_cfg: dict[str, A
 
 
 def oom_marker_path(log_dir: str | Path, tile_id: str) -> Path:
-    """Path to the OOM marker file for `tile_id` in `log_dir`."""
+    """Path to the OOM marker file for `tile_id` in `log_dir`.
+
+    Parameters
+    ----------
+    log_dir : str or Path
+        Directory the marker file lives in.
+    tile_id : str
+        The tile's `tile_id`.
+
+    Returns
+    -------
+    Path
+        Path to the marker file (not checked for existence).
+    """
     return Path(log_dir) / f"{tile_id}.txt"
 
 
 def tile_marked_oom(log_dir: str | Path, tile_id: str) -> bool:
-    """Return True if `tile_id` was previously marked as too large for the flood solve (see `mark_tile_oom`)."""
+    """Return True if `tile_id` was previously marked as too large for the flood solve.
+
+    See `mark_tile_oom`, which writes the marker this checks for.
+
+    Parameters
+    ----------
+    log_dir : str or Path
+        Directory the marker file lives in.
+    tile_id : str
+        The tile's `tile_id`.
+
+    Returns
+    -------
+    bool
+        True if an OOM marker file exists for `tile_id`.
+    """
     return oom_marker_path(log_dir, tile_id).exists()
 
 
@@ -176,10 +225,14 @@ def mark_tile_oom(log_dir: str | Path, tile_id: str, reason: str) -> None:
     `tile_id` skip the solve entirely (see `tile_marked_oom`), since they
     would run out of memory for the same reason (tile size).
 
-    Args:
-        log_dir: Directory to write the marker file to. Created if missing.
-        tile_id: The tile's `tile_id`.
-        reason: Short human-readable reason the tile was marked.
+    Parameters
+    ----------
+    log_dir : str or Path
+        Directory to write the marker file to. Created if missing.
+    tile_id : str
+        The tile's `tile_id`.
+    reason : str
+        Short human-readable reason the tile was marked.
     """
     log_dir = Path(log_dir)
     retry_transient_io(log_dir.mkdir, parents=True, exist_ok=True)
@@ -195,11 +248,16 @@ def log_skipped_tile(log_dir: str | Path, tile_id: str, scenario_name: str, reas
     tile grid). Writing one file per job avoids concurrent-write issues
     between parallel Snakemake jobs.
 
-    Args:
-        log_dir: Directory to write the marker file to. Created if missing.
-        tile_id: The tile's `tile_id`.
-        scenario_name: The `{return_period}_{waterlevel_name}` scenario identifier.
-        reason: Short human-readable reason the tile/scenario was skipped.
+    Parameters
+    ----------
+    log_dir : str or Path
+        Directory to write the marker file to. Created if missing.
+    tile_id : str
+        The tile's `tile_id`.
+    scenario_name : str
+        The `{return_period}_{waterlevel_name}` scenario identifier.
+    reason : str
+        Short human-readable reason the tile/scenario was skipped.
     """
     log_dir = Path(log_dir)
     retry_transient_io(log_dir.mkdir, parents=True, exist_ok=True)
@@ -225,17 +283,22 @@ def write_zero_waterdepth(dem_path: str | Path, output_path: str | Path) -> None
     """Write a real, genuinely-computed all-zero waterdepth raster.
 
     For a tile confidently known to have no flooding (no boundary stations
-    at all for a wave-0 tile, or no non-zero water level in any available
-    overlapping earlier-wave tile for a hop>=1 one - see NO_STATIONS_REASON/
-    NO_UPSTREAM_FLOODING_REASON) - distinct from `rasters.save_nodata_raster`
-    (used for OOM/too-large skips), which writes the NODATA sentinel:
-    `merge.merge_tile_rasters_chunk` treats an all-nodata tile as "not
-    computed" and ignores it when merging, but "confidently zero" is a real
-    answer, not an unknown - writing it as nodata risks leaving a real gap
-    in merged output wherever this tile is the only one covering an area.
-    Reuses `rasters.save_waterdepth_raster` unchanged (a genuine computed
-    result that happens to be all zeros), rather than adding a parallel
-    writer.
+    for a wave-0 tile, or no non-zero water level in any overlapping
+    earlier-wave tile for a hop>=1 one - see NO_STATIONS_REASON/
+    NO_UPSTREAM_FLOODING_REASON). Deliberately distinct from
+    `rasters.save_nodata_raster` (used for OOM/too-large skips): a NODATA
+    tile is treated by `merge.merge_tile_rasters_chunk` as "not computed"
+    and ignored, but "confidently zero" is a real answer, not an unknown -
+    writing it as nodata risks a real gap in merged output. Reuses
+    `rasters.save_waterdepth_raster` unchanged rather than adding a
+    parallel writer.
+
+    Parameters
+    ----------
+    dem_path : str or Path
+        Path to the tile's DEM raster (read for shape only).
+    output_path : str or Path
+        Path to write the all-zero waterdepth raster to.
     """
     with retry_transient_io(rasterio.open, dem_path) as src:
         shape = (src.height, src.width)
@@ -243,12 +306,27 @@ def write_zero_waterdepth(dem_path: str | Path, output_path: str | Path) -> None
 
 
 def tile_output_complete(model_outputs_dir: str | Path, tile_id: int | str, n_scenarios_per_tile: int) -> bool:
-    """Return True once every (return_period, waterlevel_name) output for `tile_id` has been written.
+    """Return True once every (return_period, waterlevel_name) output for `tile_id` is written.
 
-    Counts `waterdepth_*.tif` files in the tile's results dir (written for
-    every branch in run_aqueduct.py - genuine run, OOM fallback, no-stations
-    skip, or no-upstream-flooding skip - so this is agnostic to *how* each
-    scenario finished).
+    Counts `waterdepth_*.tif` files in the tile's results dir, written by
+    every branch in run_aqueduct.py (genuine run, OOM fallback, no-stations
+    skip, or no-upstream-flooding skip), so this is agnostic to *how* each
+    scenario finished.
+
+    Parameters
+    ----------
+    model_outputs_dir : str or Path
+        Root directory containing per-tile model output subdirectories.
+    tile_id : int or str
+        The tile's `tile_id`.
+    n_scenarios_per_tile : int
+        Expected number of (return_period, waterlevel_name) scenarios.
+
+    Returns
+    -------
+    bool
+        True if the tile's results dir has at least `n_scenarios_per_tile`
+        `waterdepth_*.tif` files.
     """
     results_dir = Path(model_outputs_dir) / str(tile_id) / "results"
     if not results_dir.exists():
@@ -261,7 +339,20 @@ def tile_had_no_stations(skipped_dir: str | Path, tile_id: int | str) -> bool:
 
     A tile's boundary-station selection depends only on its bbox, not on
     return_period/waterlevel_name, so if one scenario was skipped for this
-    reason every scenario for this tile_id was - checking one marker suffices.
+    reason every scenario for this `tile_id` was - checking one marker
+    suffices.
+
+    Parameters
+    ----------
+    skipped_dir : str or Path
+        Directory containing `log_skipped_tile` marker files.
+    tile_id : int or str
+        The tile's `tile_id`.
+
+    Returns
+    -------
+    bool
+        True if any skip marker for `tile_id` contains `NO_STATIONS_REASON`.
     """
     for marker in Path(skipped_dir).glob(f"{tile_id}_*.txt"):
         if NO_STATIONS_REASON in marker.read_text():
@@ -277,44 +368,38 @@ def log_run_timing(
     elapsed_s: float,
     obstacle_coupling_diagnostics: dict | None = None,
 ) -> None:
-    """Record one (tile_id, return_period, waterlevel_name) invocation's
-    wall-clock time and outcome to a JSON file - no stdout/terminal logging
-    at all, by design (2026-10-08 - this is the file-based record every real
-    HPC dispatch job writes, in place of printing anything).
+    """Record one (tile_id, return_period, waterlevel_name) invocation's time and outcome.
 
-    Written one file per (tile_id, return_period, waterlevel_name) - same
-    reasoning as `log_skipped_tile`: avoids concurrent-write corruption
-    between parallel jobs. Called from EVERY outcome branch in
-    run_aqueduct_cli.py (genuine solve, skip - no stations/no upstream
-    flooding, OOM) - NOT from the idempotent "already done" early return,
-    since that one's own trivial elapsed time would silently overwrite the
-    REAL record an earlier invocation already wrote for the same (tile, rp,
-    slr). `run_aqueduct.py` (the Snakemake-local path) only ever calls this
-    for genuine solves - its own skip/OOM branches instead rely solely on
-    `log_skipped_tile`'s marker file, unchanged.
+    Written as a JSON file, one per invocation, with no stdout/terminal
+    logging at all by design - this is the file-based record every real HPC
+    dispatch job writes. One file per (tile_id, return_period,
+    waterlevel_name) avoids concurrent-write corruption between parallel
+    jobs, same reasoning as `log_skipped_tile`. Called from every outcome
+    branch (genuine solve, skip, OOM) except the idempotent "already done"
+    early return, whose own trivial elapsed time would otherwise overwrite
+    a real record an earlier invocation already wrote.
 
-    Args:
-        log_dir: Directory to write the marker file to. Created if missing.
-        tile_id: The tile's `tile_id`.
-        return_period: The run's `return_period` wildcard value.
-        waterlevel_name: The run's `waterlevel_name` wildcard value.
-        elapsed_s: Wall-clock seconds for this invocation. For a genuine
-            solve, this is inside `run_aqueduct_python` specifically
-            (excluding this script's own setup/skip-check overhead) when
-            called from `run_aqueduct.py`; `run_aqueduct_cli.py` instead
-            times its own ENTIRE invocation from argument parsing onward,
-            since that end-to-end wall-clock is what HPC scheduling/ETA
-            estimates actually care about.
-        obstacle_coupling_diagnostics: for a genuine solve, the dict
-            `run_aqueduct_python`/`flood_depth_dense` returned (merged
-            directly into the record so tiles that hit `max_outer_iterations`
-            or `max_rounds` without converging are visible in production,
-            not just in ad-hoc test scripts) - `run_aqueduct_cli.py` adds its
-            own `"outcome"` key to this same dict ("solved"). For a skip/OOM
-            call from `run_aqueduct_cli.py`, instead a small dict of its own,
-            e.g. `{"outcome": "skip_no_inundation", "skip_reason": ...}` or
-            `{"outcome": "oom"}` - no real solver diagnostics exist for
-            those cases.
+    Parameters
+    ----------
+    log_dir : str or Path
+        Directory to write the record file to. Created if missing.
+    tile_id : str
+        The tile's `tile_id`.
+    return_period : str
+        The run's `return_period` wildcard value.
+    waterlevel_name : str
+        The run's `waterlevel_name` wildcard value.
+    elapsed_s : float
+        Wall-clock seconds for this invocation. For a genuine solve called
+        from `run_aqueduct.py` this covers only `run_aqueduct_python`
+        itself; `run_aqueduct_cli.py` instead times its entire invocation
+        from argument parsing onward.
+    obstacle_coupling_diagnostics : dict or None, optional
+        For a genuine solve, the diagnostics dict `run_aqueduct_python`
+        returned, merged directly into the record. For a skip/OOM call
+        from `run_aqueduct_cli.py`, a small dict of its own instead, e.g.
+        `{"outcome": "skip_no_inundation", "skip_reason": ...}` or
+        `{"outcome": "oom"}`.
     """
     log_dir = Path(log_dir)
     retry_transient_io(log_dir.mkdir, parents=True, exist_ok=True)
@@ -339,9 +424,23 @@ def print_simulation_progress(
     """Print a running tally of tile outcomes across the whole tile grid.
 
     Only meaningful once called for a tile that just finished all its
-    scenarios (see run_aqueduct.py) - cheap per-call (one glob per tile_id
-    plus a couple of marker-file checks), but still O(n_tiles), so callers
-    should only trigger it on that per-tile milestone, not on every job.
+    scenarios (see run_aqueduct.py). Cheap per call, but still O(n_tiles),
+    so callers should trigger it only on that per-tile milestone, not on
+    every job.
+
+    Parameters
+    ----------
+    model_outputs_dir : str or Path
+        Root directory containing per-tile model output subdirectories.
+    oom_dir : str or Path
+        Directory containing `mark_tile_oom` marker files.
+    skipped_dir : str or Path
+        Directory containing `log_skipped_tile` marker files.
+    tile_ids : list of int
+        All tile ids in the grid, used to compute the tally.
+    n_scenarios_per_tile : int
+        Expected number of scenarios per tile, forwarded to
+        `tile_output_complete`.
     """
     n_simulated = n_oom = n_no_stations = n_incomplete = 0
     for tile_id in tile_ids:

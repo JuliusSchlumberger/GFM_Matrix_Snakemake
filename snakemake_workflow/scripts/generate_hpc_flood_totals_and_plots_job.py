@@ -85,11 +85,38 @@ def write_flood_totals_and_plots_job(
     local_config: dict, linux_config: dict,
     partition: str = "24vcpu", cpus: int = 24, mem: str = "32G", time: str | None = None,
 ) -> tuple[Path, str]:
-    """Write the flood_totals_and_plots.sbatch script (NOT submitted here -
-    the caller decides whether to submit it standalone or append it onto an
-    existing chain, see generate_hpc_postprocess_job.py's own use of this
-    for the latter). Returns (local_script_path, linux_script_path) so a
-    caller can reference the Linux path in a generated `sbatch` line.
+    """Write the flood_totals_and_plots.sbatch script, without submitting it.
+
+    Runs compute_flood_totals.py followed by run_analysis.py --only-plots
+    --skip-flood-totals on a single node (see module docstring for why one
+    node rather than a multi-node phase-barrier dispatch). The caller decides
+    whether to submit it standalone or append it onto an existing chain (see
+    generate_hpc_postprocess_job.py's use of this for the latter). Reuses an
+    existing resolved_config.yml under `hpc.jobs_dir` if one is already there.
+
+    Parameters
+    ----------
+    local_config : dict
+        Config resolved against the local (this-machine) path view.
+    linux_config : dict
+        Config resolved against the Linux/HPC path view, used for every path
+        embedded into the generated sbatch script.
+    partition : str, optional
+        SLURM partition to request, by default "24vcpu".
+    cpus : int, optional
+        CPUs per task, also passed to compute_flood_totals.py's `--workers`,
+        by default 24.
+    mem : str, optional
+        SLURM memory request, by default "32G".
+    time : str or None, optional
+        SLURM time limit; defaults to `hpc.sbatch.time` from the config when
+        None.
+
+    Returns
+    -------
+    tuple[Path, str]
+        The local script path and the corresponding Linux path, for a caller
+        to reference in a generated `sbatch` line.
     """
     local_jobs_dir = Path(local_config["hpc"]["jobs_dir"])
     linux_jobs_dir = linux_config["hpc"]["jobs_dir"]
@@ -153,6 +180,11 @@ def write_flood_totals_and_plots_job(
 
 
 def main() -> None:
+    """Parse CLI arguments and write the flood-totals-and-plots sbatch script.
+
+    Prints the written script's local path and the ``sbatch`` command to
+    submit it on Hydrax.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
     parser.add_argument("--config", default=str(default_config))

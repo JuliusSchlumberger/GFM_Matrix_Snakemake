@@ -56,6 +56,19 @@ def _sbatch_header(name: str, partition: str, cpus: int, mem: str, hours: int, l
 
 
 def cmd_stage1(args) -> None:
+    """Write the stage-1 sbatch jobs, the bridge job, and submit_chain.sh.
+
+    Resolves the config to a Linux path view, generates the candidate pool and
+    shards via select_calibration_tiles.py, and writes one sbatch script per shard
+    (screen -> boundary lines -> SFINCS mask pre-flight) plus a bridge job that runs
+    the line summary, tile selection and submits stage 2.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed CLI arguments (config, base_dir_name, n_jobs, partition, mem,
+        stage1_hours, n_tiles, stage2_jobs).
+    """
     import yaml
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -112,6 +125,20 @@ def cmd_stage1(args) -> None:
 
 
 def cmd_stage2(args) -> None:
+    """Write the stage-2 final-run sbatch jobs, and submit them if requested.
+
+    Distributes tiles without a `calibration_run.done` marker over `--n-jobs` jobs
+    using longest-processing-time-first on a per-tile runtime estimate derived from
+    the pre-flight active-cell count, then writes one sbatch script and tile list
+    per job plus submit_all.sh.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed CLI arguments (config, base_dir_name, n_jobs, partition, mem,
+        overhead_min, sfincs_min_per_mcell, eikonal_min_per_mcell, time_margin,
+        submit).
+    """
     root = read_root(Path(args.config))
     base = root / args.base_dir_name
     ids = [t.strip() for t in (base / "tile_ids.txt").read_text().split() if t.strip()]
@@ -168,6 +195,7 @@ def cmd_stage2(args) -> None:
 
 
 def main() -> None:
+    """Parse CLI arguments and dispatch to `cmd_stage1` or `cmd_stage2`."""
     repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", choices=["stage1", "stage2"])

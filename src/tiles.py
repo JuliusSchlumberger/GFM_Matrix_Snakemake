@@ -52,22 +52,40 @@ def _open_mask_tile(path: Path, **open_kwargs):
 
 
 def load_tile_grid(tile_grid_path: str | Path) -> gpd.GeoDataFrame:
-    """Load the tile grid (`tile_grid.path`, built by preparation/build_tile_manifest.py)."""
+    """Load the tile grid (``tile_grid.path``, built by preparation/build_tile_manifest.py).
+
+    Parameters
+    ----------
+    tile_grid_path : str or Path
+        Path to the tile grid vector file (e.g. a GeoPackage).
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        One row per tile, including at least a ``tile_id`` column.
+    """
     return retry_transient_io(gpd.read_file, tile_grid_path)
 
 
 def get_tile_geometry(tile_grid: gpd.GeoDataFrame, tile_id: int) -> gpd.GeoDataFrame:
     """Select a single tile from the tile grid by its tile_id.
 
-    Args:
-        tile_grid: The full tile grid, as returned by `load_tile_grid`.
-        tile_id: Unique identifier of the tile to select.
+    Parameters
+    ----------
+    tile_grid : geopandas.GeoDataFrame
+        The full tile grid, as returned by `load_tile_grid`.
+    tile_id : int
+        Unique identifier of the tile to select.
 
-    Returns:
+    Returns
+    -------
+    geopandas.GeoDataFrame
         A single-row GeoDataFrame containing the selected tile.
 
-    Raises:
-        ValueError: If `tile_id` is not present in `tile_grid`.
+    Raises
+    ------
+    ValueError
+        If `tile_id` is not present in `tile_grid`.
     """
     tile = tile_grid[tile_grid["tile_id"] == tile_id]
     if tile.empty:
@@ -76,7 +94,15 @@ def get_tile_geometry(tile_grid: gpd.GeoDataFrame, tile_id: int) -> gpd.GeoDataF
 
 
 def save_tile_geometry(tile: gpd.GeoDataFrame, output_path: str | Path) -> None:
-    """Save a single tile geometry to a GeoPackage file."""
+    """Save a single tile geometry to a GeoPackage file.
+
+    Parameters
+    ----------
+    tile : geopandas.GeoDataFrame
+        Tile geometry to write, e.g. as returned by `get_tile_geometry`.
+    output_path : str or Path
+        Destination file path; written with the GPKG driver.
+    """
     retry_transient_io(tile.to_file, output_path, driver="GPKG")
 
 
@@ -243,16 +269,22 @@ def mosaic_water_fraction_downsampled(
     tile-plus-nearby-candidate-station windows this is built for; would need
     a genuinely streaming rewrite before pointing it at a much larger area.
 
-    Args:
-        bbox: Bounding box to mosaic, as ``(minx, miny, maxx, maxy)``.
-        mask_index: ``{coord_str: path}`` from `_scan_mask_dir`.
-        target_resolution_m: Approximate coarse cell size in metres (native
-            pixel size is converted via a fixed equatorial 111,320 m/degree
-            approximation - fine for an aggregation factor, not a precision
-            measurement).
-        ocean_code: Mask value meaning "ocean" (default 1).
+    Parameters
+    ----------
+    bbox : tuple of float
+        Bounding box to mosaic, as ``(minx, miny, maxx, maxy)``.
+    mask_index : dict[str, Path]
+        ``{coord_str: path}`` from `_scan_mask_dir`.
+    target_resolution_m : float
+        Approximate coarse cell size in metres (native pixel size is
+        converted via a fixed equatorial 111,320 m/degree approximation -
+        fine for an aggregation factor, not a precision measurement).
+    ocean_code : int, default 1
+        Mask value meaning "ocean".
 
-    Returns:
+    Returns
+    -------
+    tuple[numpy.ndarray, affine.Affine] or None
         ``(water_fraction, transform)`` - ``water_fraction`` is a float32
         array in ``[0, 1]``, one cell per coarse pixel - or ``None`` if no
         mask file overlaps ``bbox`` at all.
@@ -388,8 +420,25 @@ def mosaic_mask_dem_coarse(
     miss one. Both fill uncovered areas the same as their native-resolution
     counterparts (255 for mask, -9999.0 for elevation).
 
-    Returns ``(mask_band, dem_band, transform)`` at the coarse resolution,
-    or ``None`` if no mask file overlaps `bbox` at all.
+    Parameters
+    ----------
+    bbox : tuple of float
+        Bounding box to mosaic, as ``(minx, miny, maxx, maxy)``.
+    mask_index : dict[str, Path]
+        ``{coord_str: path}`` from `_scan_mask_dir`, for the mask catalog.
+    dem_index : dict[str, Path] or None
+        ``{coord_str: path}`` from `_scan_mask_dir`, for the elevation
+        catalog. ``None`` skips elevation mosaicking entirely (`dem_out`
+        stays all-nodata).
+    resolution_m : float
+        Target coarse cell size in metres (converted to degrees via a fixed
+        equatorial 111,320 m/degree approximation).
+
+    Returns
+    -------
+    tuple[numpy.ndarray, numpy.ndarray, affine.Affine] or None
+        ``(mask_band, dem_band, transform)`` at the coarse resolution, or
+        ``None`` if no mask file overlaps `bbox` at all.
     """
     minx, miny, maxx, maxy = bbox
     px_deg = resolution_m / 111_320.0

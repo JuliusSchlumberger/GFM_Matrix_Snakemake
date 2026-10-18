@@ -41,9 +41,35 @@ MAX_MATCH_DIST_DEG = 0.5  # nearest COAST-HG station must be this close (COAST-H
 
 def build_line_forcing(lines_gpkg: Path, coast_hg_nc: Path, tile_dir: Path | None = None,
                        root: Path | None = None) -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
-    """Forcing points + hydrographs: one per used station node on the line ("line"), plus - given
-    tile_dir/root - one per station inside the tile that is not a node but lies by water that stays
-    active in SFINCS ("interior", connected_forcing.py)."""
+    """Build forcing points and matching hydrographs for a tile's boundary line.
+
+    One point per used station node on the line ("line" kind), plus - when
+    `tile_dir`/`root` are given - one per station inside the tile that is
+    not a line node but lies by water that stays active in SFINCS
+    ("interior" kind, via connected_forcing.interior_points).
+
+    Parameters
+    ----------
+    lines_gpkg : Path
+        build_station_boundary_lines.py output (boundary_line/stations layers).
+    coast_hg_nc : Path
+        COAST-HG hydrograph NetCDF (COAST-HG_RP100.nc).
+    tile_dir : Path, optional
+        Tile's base directory (containing inputs/); enables interior points.
+    root : Path, optional
+        Config root directory; required together with `tile_dir`.
+
+    Returns
+    -------
+    tuple[geopandas.GeoDataFrame, pandas.DataFrame]
+        Forcing points (EPSG:4326) and the matching hydrographs (elapsed_hr
+        plus one column per point, in the same order).
+
+    Raises
+    ------
+    ValueError
+        If `lines_gpkg` has no used station.
+    """
     st = retry_transient_io(gpd.read_file, lines_gpkg, layer="stations")
     st = st[st["status"] == "used"].reset_index(drop=True)
     if st.empty:
@@ -95,6 +121,8 @@ def build_line_forcing(lines_gpkg: Path, coast_hg_nc: Path, tile_dir: Path | Non
 
 
 def main() -> None:
+    """Parse CLI arguments and write the tile's matched boundary points and
+    corrected hydrographs (matched_boundary_points.gpkg, corrected_hydrographs.csv)."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tile-id", required=True)
     parser.add_argument("--base-dir-name", required=True)

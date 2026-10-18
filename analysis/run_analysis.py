@@ -71,6 +71,13 @@ def _run(
 
 
 def main() -> None:
+    """Parse CLI arguments and run the enabled post-simulation analysis steps in sequence.
+
+    Each step (exposure, flood totals, and the plot scripts) runs in its own
+    subprocess per config.yml's ``analysis.*`` switches, overridable via the
+    ``--only-*``/``--skip-*`` flags; a failed step aborts the rest only if
+    ``--fail-fast`` is set. Exits with status 1 if any step failed.
+    """
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     _default_cfg = str(SCRIPTS_DIR.parent / "snakemake_workflow" / "config" / "config.yml")

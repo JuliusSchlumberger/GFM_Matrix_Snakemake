@@ -29,6 +29,24 @@ from retry_io import retry_transient_io  # noqa: E402
 
 
 def regenerate_dem_mask(tile_id: str, root: Path, base_dir_name: str, config: dict) -> None:
+    """Rebuild and overwrite a tile's dem.tif and mask.tif with the current production DEM-extraction logic.
+
+    Reads the tile's bbox from model_bbox.json and the same data catalog and
+    dem_gap_fill config production uses, then overwrites the tile's existing
+    inputs/dem.tif and inputs/mask.tif in place.
+
+    Parameters
+    ----------
+    tile_id : str
+        Tile identifier, used to locate `{base_dir_name}/{tile_id}/inputs/`.
+    root : Path
+        Pipeline data root (paths.root from config).
+    base_dir_name : str
+        Name of the output root directory under `root` containing the tile.
+    config : dict
+        Loaded pipeline config (paths, simulation.dem_gap_fill,
+        vertical_datum_correction, raster_format).
+    """
     tile_inputs_dir = root / base_dir_name / tile_id / "inputs"
     with open(tile_inputs_dir / "model_bbox.json") as f:
         bbox = json.load(f)
@@ -64,6 +82,7 @@ def regenerate_dem_mask(tile_id: str, root: Path, base_dir_name: str, config: di
 
 
 def main() -> None:
+    """Parse CLI arguments, load the config, and regenerate one tile's dem.tif and mask.tif."""
     _repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tile-id", required=True)

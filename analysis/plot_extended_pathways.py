@@ -71,6 +71,13 @@ def _strategy_name(label: str) -> str:
 
 
 def main() -> None:
+    """Parse CLI arguments and plot SSP pathways continued beyond 2100 through the growth matrices.
+
+    Follows each strategy's SSP-RCP pathway through the scenario-neutral growth matrices up
+    to extended_pathways.to_year, using illustrative population continuations after 2100.
+    Writes timeseries_extended_continents.png and extended_pathways.csv (and, if
+    extended_pathways.ember is set, ember_extended_pathways.png) to --outdir.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_*_growth_matrix.csv files")

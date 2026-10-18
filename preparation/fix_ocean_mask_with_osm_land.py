@@ -106,8 +106,21 @@ def _correct_tile(
 def run(config: dict, tile_filter: set[str] | None = None, dry_run: bool = False) -> None:
     """Correct every DeltaDTM mask tile in place (unless dry_run=True).
 
-    `tile_filter`, if given, restricts the run to tiles whose filename is in
-    the set (ad hoc testing - not used by run_preparation.py's normal call).
+    Loads the OSM land-polygon index once, then for each mask tile
+    reclassifies ocean_code cells that fall inside real land polygons to
+    river_code, writing the tile back only if at least one cell changed.
+
+    Parameters
+    ----------
+    config : dict
+        Full pipeline config; must contain `paths.hydromt_data_catalog`,
+        `paths.root`, and `tile_generation.ocean_code` / `river_code`.
+    tile_filter : set of str or None, optional
+        If given, restrict the run to tiles whose filename is in this set
+        (ad hoc testing; the normal run_preparation.py call omits it).
+    dry_run : bool, optional
+        If True, report what would change but write nothing (default
+        False).
     """
     catalog = get_data_catalog(
         _REPO_ROOT / config["paths"]["hydromt_data_catalog"], root=config["paths"]["root"]

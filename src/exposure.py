@@ -24,15 +24,34 @@ def prepare_exposure_grid_chunk(
     population_output_path: str | Path,
     geogunit_output_path: str | Path,
 ) -> None:
-    """Cache the population raster and geogunit-ID raster (on population's grid) once per chunk.
+    """Fetch and write the population raster and geogunit-ID raster for one spatial chunk.
 
-    Both depend only on the chunk's bounds, not on return_period,
-    waterlevel_name or adaptation measure.  Resolving them once here avoids
+    Both outputs depend only on the chunk's bounds, not on return_period,
+    waterlevel_name or adaptation measure, so resolving them once here avoids
     repeating the HydroMT catalog fetch and nearest-neighbour geogunit
-    reprojection in every one of the ~100+ jobs per chunk.
+    reprojection in every one of the ~100+ jobs per chunk. Writes empty
+    (zero-byte) placeholder files at both output paths when the chunk has no
+    population coverage (pure ocean/buffer, outside the raster's extent).
 
-    Writes empty (zero-byte) placeholder files when the chunk has no
-    population coverage (outside the raster's extent).
+    Parameters
+    ----------
+    reference_path : str or Path
+        Path to a raster defining the chunk's bounds (only its bounds are read).
+    data_catalog : hydromt.DataCatalog
+        Catalog used to fetch the population and geogunit source rasters.
+    population_source : str
+        Data-catalog key for the population raster.
+    geogunit_source : str
+        Data-catalog key for the WRI geogunit-ID raster.
+    population_output_path : str or Path
+        Destination for the cached population raster, on its native grid.
+    geogunit_output_path : str or Path
+        Destination for the geogunit-ID raster, reprojected onto the population grid
+        (int32, nodata `GEOGUNIT_INVALID`).
+
+    Returns
+    -------
+    None
     """
     # Only the bounds are needed here - a plain rasterio open avoids the
     # xarray/rioxarray backend-plugin-discovery overhead `load_raster`

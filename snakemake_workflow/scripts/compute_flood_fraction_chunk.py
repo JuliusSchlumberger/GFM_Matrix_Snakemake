@@ -37,31 +37,28 @@ def compute_flood_fraction(
 ) -> None:
     """Write a coarse flood-fraction raster from a fine waterdepth chunk.
 
-    Processes the fine raster block-by-block (memory-safe) into an
-    exceedance array (nodata outside the model domain) and a domain mask
-    (0/1, no nodata), then hands both to `rasters.average_pool_to_grid` for
-    the actual area-weighted reprojection - see that function's docstring
-    for the full A×B derivation and why it MUST run as two separate
-    `reproject()` calls (an earlier combined-call version silently
-    corrupted ~360,000 real coarse cells - reverted, correctness over that
-    specific speedup).
+    Thresholds the fine raster (depth > threshold_m) block-by-block into an
+    exceedance array and a domain mask, then hands both to
+    `rasters.average_pool_to_grid` for the area-weighted reprojection to
+    `population_path`'s coarse grid (ff = sum(flooded fine pixels) /
+    n_total_fine_pixels_in_cell). Values are in [0, 1]; nodata is -1.0. If
+    `population_path` is itself an empty (zero-byte) placeholder - the
+    convention for a chunk with zero population coverage - writes the same
+    empty-placeholder convention to `output_path` instead of crashing.
 
-    ff = sum(flooded fine pixels) / n_total_fine_pixels_in_cell. Coarse
-    cells inside the tile but entirely outside the domain end up NaN →
-    written as this module's own `_NODATA_COARSE`.
-
-    `population_path` can itself be an empty (zero-byte) placeholder -
-    `prepare_exposure_grid_chunk`'s own, deliberate convention for a chunk
-    with zero population coverage (confirmed live 2026-10-16: several
-    remote/unpopulated chunks - e.g. S70E160, S65W050 - produce this on
-    every single regeneration, 100% deterministically, not a corruption or
-    a write race). There is no coarse grid shape to compute anything
-    against in that case (population_path's own raster defines the output
-    grid), so this writes the SAME empty-placeholder convention for
-    `output_path` and returns, rather than crashing - this script
-    previously had no handling for it at all, so any chunk hitting this
-    aborted its ENTIRE Snakemake batch (--cores 1, no -k), silently taking
-    down every OTHER, unrelated target still queued in that same batch too.
+    Parameters
+    ----------
+    waterdepth_path : str or Path
+        Fine-resolution merged waterdepth raster for this (chunk, RP, SLR) scenario.
+    population_path : str or Path
+        Population raster defining the coarse output grid; may be an empty
+        placeholder for a chunk with no population coverage.
+    threshold_m : float
+        Flood-depth threshold in meters; pixels with depth > threshold_m are flooded.
+    output_path : str or Path
+        Where the coarse float32 flood-fraction raster is written.
+    block_size : int
+        Block edge length (pixels) for processing the fine raster memory-safely.
     """
     if Path(population_path).stat().st_size == 0:
         retry_transient_io(Path(output_path).touch)

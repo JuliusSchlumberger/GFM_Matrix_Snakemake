@@ -95,21 +95,41 @@ def generate_exposure_dispatch(
     submit_lines: list[str],
     prev_ids_expr: str,
 ) -> list[str]:
-    """Write the exposure-analysis pass1/reduce_shares/pass2/reduce_write
-    sbatch scripts and APPEND their submission onto an existing
-    `submit_lines` script, rather than building a fresh standalone one.
+    """Write the exposure-analysis sbatch scripts and append their submission.
 
-    `chunk_ids` is taken as given - NOT filtered for non-empty population
-    here (that filtering now happens inline in pass1_shares_all_intensities/
-    pass2_all_tasks, see _chunk_is_populated - necessary because this may be
-    the tile-grid-derived list, planned before the real population files
-    exist).
+    Writes pass1 (shares) -> reduce_shares -> pass2 (EAI) -> reduce_write
+    sbatch scripts, with `chunk_ids` split evenly across `hpc.n_nodes`, and
+    appends their `sbatch` calls onto an existing submit script rather than
+    building a fresh standalone one. `chunk_ids` is used as given - population
+    filtering happens later, inline in pass1/pass2 (see `_chunk_is_populated`),
+    since this may be the unfiltered tile-grid-derived list, planned before
+    the real population files exist.
 
-    `prev_ids_expr`: a bash expression (e.g. `"$POSTPROCESS_IDS"`, or `""`
-    for no incoming dependency) that pass1's own batches should depend on
-    via `--dependency=afterany`. Returns the extended `submit_lines` list -
-    does NOT write it to disk itself, so the caller can keep appending
-    further phases before writing once at the end.
+    Parameters
+    ----------
+    local_config : dict
+        Config resolved against the local (this-machine) path view.
+    linux_config : dict
+        Config resolved against the Linux/HPC path view, used for every path
+        embedded into the generated sbatch scripts.
+    chunk_ids : list[str]
+        Chunk ids to dispatch; not pre-filtered for non-empty population.
+    submit_lines : list[str]
+        Existing submit-script lines to append this dispatch's phases onto.
+    prev_ids_expr : str
+        Bash expression (e.g. `"$POSTPROCESS_IDS"`) that pass1's batches
+        should depend on via `--dependency=afterany`, or `""` for none.
+
+    Returns
+    -------
+    list[str]
+        The extended `submit_lines`; not written to disk here, so the caller
+        can append further phases before writing once at the end.
+
+    Raises
+    ------
+    SystemExit
+        If `chunk_ids` is empty.
     """
     local_jobs_dir = Path(local_config["hpc"]["jobs_dir"]) / "exposure"
     linux_jobs_dir = f"{linux_config['hpc']['jobs_dir']}/exposure"
@@ -288,27 +308,37 @@ def generate_exposure_resume_dispatch(
     submit_lines: list[str],
     prev_ids_expr: str,
 ) -> list[str]:
-    """Resume mode: regenerate + resubmit ONLY the pass1/pass2 batches whose
-    output is still missing, reusing their ORIGINAL chunk assignment
-    (batch_{id}_chunks.txt, already on disk from the first
-    generate_exposure_dispatch run) rather than rebalancing chunks across a
-    fresh batch layout - unlike the postprocessing/simulation resumes,
-    which DO rebalance, because here that would break the batch_id <->
-    output filename convention exposure_reduce_shares.sbatch/
-    exposure_reduce_write.sbatch's glob patterns (pass1_batch_*.json /
-    pass2_batch_*.pkl) already rely on: reassigning chunks to a NEW batch_id
-    would leave an already-complete batch_id's file representing the WRONG
-    chunk set. Exposure batches are already small (chunk_ids split evenly
-    across hpc.n_nodes, same as a fresh run) and cheap relative to
-    postprocessing, so this coarser per-batch (not per-chunk) resume
-    granularity is a reasonable trade for the simplicity of reusing
-    reduce_shares.sbatch/reduce_write.sbatch UNCHANGED (they're pure glob
-    consumers - no batch-id-specific content - so resubmitting the exact
-    files already on disk is correct, no need to regenerate them).
+    """Regenerate and resubmit only the exposure pass1/pass2 batches missing output.
 
-    Raises SystemExit if no batch_*_chunks.txt files exist yet (nothing to
-    resume - run generate_exposure_dispatch/generate_hpc_postprocess_job.py
-    for a fresh dispatch first).
+    Reuses each batch's ORIGINAL chunk assignment (`batch_{id}_chunks.txt`,
+    already on disk from the first dispatch) rather than rebalancing chunks,
+    since reassigning would break the batch_id <-> output filename convention
+    `exposure_reduce_shares.sbatch`/`exposure_reduce_write.sbatch` rely on (a
+    reassigned batch_id's file would represent the wrong chunk set). Those
+    two reduce scripts are pure glob consumers and are reused unchanged.
+
+    Parameters
+    ----------
+    local_config : dict
+        Config resolved against the local (this-machine) path view.
+    linux_config : dict
+        Config resolved against the Linux/HPC path view, used for every path
+        embedded into the generated sbatch scripts.
+    submit_lines : list[str]
+        Existing submit-script lines to append this resume dispatch onto.
+    prev_ids_expr : str
+        Bash expression that the resumed pass1 batches should depend on via
+        `--dependency=afterany`, or `""` for none.
+
+    Returns
+    -------
+    list[str]
+        The extended `submit_lines`; not written to disk here.
+
+    Raises
+    ------
+    SystemExit
+        If no `batch_*_chunks.txt` files exist yet (nothing to resume).
     """
     local_jobs_dir = Path(local_config["hpc"]["jobs_dir"]) / "exposure"
     linux_jobs_dir = f"{linux_config['hpc']['jobs_dir']}/exposure"
@@ -440,6 +470,15 @@ def generate_exposure_resume_dispatch(
 
 
 def main() -> None:
+    """Parse CLI arguments and write the standalone exposure-analysis dispatch scripts.
+
+    With ``--resume``, regenerates and resubmits only the pass1/pass2 batches
+    still missing output, reusing their original chunk assignment. Otherwise
+    discovers chunk ids by globbing the real flood_fraction/population chunk
+    files under ``postprocessing.merged_outputs`` and writes a fresh
+    dispatch. Writes submit_exposure_analysis.sh (or
+    submit_resume_exposure_analysis.sh) under ``hpc.jobs_dir``/exposure.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
     parser.add_argument("--config", default=str(default_config))

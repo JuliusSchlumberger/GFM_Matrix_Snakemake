@@ -351,6 +351,18 @@ def _write_batches(
 
 
 def main() -> None:
+    """Parse CLI arguments and write the postprocessing + exposure dispatch sbatch scripts.
+
+    Builds the chunk grid from the tile grid, then generates either a
+    per-chunk dispatch (merge -> exposure grid -> flood fraction chained per
+    chunk) or a three-phase barrier dispatch, depending on whether there are
+    at least as many chunks as ``hpc.n_nodes``. Appends the exposure-analysis
+    dispatch and, unless ``--no-flood-totals-and-plots`` is set, a final
+    flood-totals-and-plots job onto the same submission chain. With
+    ``--resume``, rebalances only the still-missing targets per phase. Writes
+    submit_postprocess_and_exposure.sh (or
+    submit_resume_postprocess_and_exposure.sh) under ``hpc.jobs_dir``.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
     parser.add_argument("--config", default=str(default_config))

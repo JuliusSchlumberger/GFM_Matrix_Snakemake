@@ -385,6 +385,13 @@ def _scatter_envelope(ref_by_ssp, mats, slr_mm, gfr, traj, ext, variant, names, 
 
 
 def main() -> None:
+    """Parse CLI arguments and plot the SLR-vs-population decomposition of no-adaptation EAI.
+
+    For each configured SSP, decomposes the change in EAI 2020-2100 (and extended years)
+    into SLR-alone, population-alone and interaction terms, then writes per-country
+    waterfall plots, cross-country scatter plots and the top-N envelope scatter, plus one
+    CSV per SSP, to --outdir.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_baseline_growth_matrix.csv")

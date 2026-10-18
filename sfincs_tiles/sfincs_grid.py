@@ -14,8 +14,22 @@ import rasterio
 
 
 def parse_sfincs_inp(inp_path: Path) -> dict:
-    """`key = value` lines in sfincs.inp - only the handful of grid-geometry
-    keys needed here (mmax, nmax, dx, dy, x0, y0, epsg, rotation)."""
+    """Parse the ``key = value`` lines of a sfincs.inp file.
+
+    Only the handful of grid-geometry keys needed here (mmax, nmax, dx, dy,
+    x0, y0, epsg, rotation) matter to callers; values are returned as raw
+    strings.
+
+    Parameters
+    ----------
+    inp_path : Path
+        Path to the sfincs.inp file.
+
+    Returns
+    -------
+    dict
+        Mapping of key to raw string value.
+    """
     out: dict = {}
     for line in inp_path.read_text().splitlines():
         if "=" not in line:
@@ -26,14 +40,27 @@ def parse_sfincs_inp(inp_path: Path) -> dict:
 
 
 def read_sfincs_mask(sfincs_dir: Path) -> tuple[np.ndarray, rasterio.Affine, str]:
-    """Reconstructs the 2D active/boundary mask directly from SFINCS's own
-    `sfincs.ind`/`sfincs.msk` binary files, without hydromt_sfincs.
+    """Reconstruct the 2D active/boundary mask directly from SFINCS's own binary grid files.
 
-    Format: sfincs.ind is uint32 little-endian, first value N = active-cell
-    count, remaining N values are 1-based flat (column-major, ncol x nrow)
-    indices of active cells. sfincs.msk is N raw uint8 values (0/1/2/3),
-    same order as sfincs.ind's indices. Reshape to (ncol, nrow) then
-    transpose to get a normal (nrow, ncol) row-major array.
+    Reads ``sfincs.ind``/``sfincs.msk`` without hydromt_sfincs. ``sfincs.ind``
+    is uint32 little-endian: the first value is the active-cell count N, the
+    remaining N values are 1-based flat (column-major, ncol x nrow) indices
+    of active cells. ``sfincs.msk`` holds N raw uint8 values (0/1/2/3) in the
+    same order. For a rotated grid the returned affine encodes the rotation
+    and row 0 keeps SFINCS's own n=0 (south) edge; for an unrotated grid the
+    mask is flipped so row 0 is north, matching a north-up affine.
+
+    Parameters
+    ----------
+    sfincs_dir : Path
+        SFINCS model directory containing sfincs.inp, sfincs.ind and sfincs.msk.
+
+    Returns
+    -------
+    tuple of (numpy.ndarray, rasterio.Affine, str)
+        The (nrow, ncol) mask array (values 0/1/2/3), its affine transform,
+        and its CRS as an "EPSG:<code>" string (None if sfincs.inp has no
+        epsg key).
     """
     inp = parse_sfincs_inp(sfincs_dir / "sfincs.inp")
     mmax, nmax = int(inp["mmax"]), int(inp["nmax"])  # mmax=ncol, nmax=nrow
@@ -71,9 +98,32 @@ def read_sfincs_mask(sfincs_dir: Path) -> tuple[np.ndarray, rasterio.Affine, str
 
 
 def active_on_subgrid(sfincs_dir: Path, sg_shape: tuple, sg_transform) -> np.ndarray:
-    """sfincs.msk > 0 expanded onto the subgrid (hmax_subgrid.tif / dep_subgrid.tif
-    grid): the subgrid shares the coarse grid's origin and rotation at an
-    integer fraction of its cell size, so each coarse cell is an f x f block."""
+    """Expand the SFINCS active-cell mask (sfincs.msk > 0) onto a finer subgrid.
+
+    The subgrid (e.g. hmax_subgrid.tif / dep_subgrid.tif) shares the coarse
+    grid's origin and rotation at an integer fraction ``f`` of its cell size,
+    so each coarse cell maps onto an f x f block of subgrid pixels.
+
+    Parameters
+    ----------
+    sfincs_dir : Path
+        SFINCS model directory, as read by `read_sfincs_mask`.
+    sg_shape : tuple
+        (nrow, ncol) shape of the target subgrid.
+    sg_transform : rasterio.Affine
+        Affine transform of the target subgrid.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean active-cell mask on the subgrid, shape `sg_shape`.
+
+    Raises
+    ------
+    ValueError
+        If the coarse grid does not nest exactly into the subgrid (origin,
+        rotation or shape mismatch).
+    """
     msk, tr, _ = read_sfincs_mask(sfincs_dir)
     f = int(round(tr.a / sg_transform.a)) if tr.b == 0 else int(round(np.hypot(tr.a, tr.d) / np.hypot(sg_transform.a, sg_transform.d)))
     if not (np.isclose(tr.c, sg_transform.c) and np.isclose(tr.f, sg_transform.f)

@@ -200,6 +200,15 @@ def _simulate_target_paths(tile_dir: str, return_periods: list[str], waterlevel_
 
 
 def main() -> None:
+    """Run this script: generate (and print how to submit) the HPC preprocessing dispatch.
+
+    Writes resolved_config.yml, one preprocessing sbatch script per node batch
+    (plus its `*_targets.txt` target-file list), and a submit script that
+    builds every shared input synchronously, submits the batches in parallel,
+    then - unless `--fuse` or `--preprocess-only` - submits one more job that
+    generates and submits the simulation waves. See module docstring and
+    --calibration/--fuse/--preprocess-only help text for the mode variants.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
     parser.add_argument("--config", default=str(default_config))

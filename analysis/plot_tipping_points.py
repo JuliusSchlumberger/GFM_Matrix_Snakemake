@@ -98,6 +98,13 @@ def _first_crossing(eai: np.ndarray, threshold: float, years: np.ndarray = YEARS
 
 
 def main() -> None:
+    """Parse CLI arguments and plot each country's adaptation tipping points by scenario.
+
+    For every country in visualization.tipping_points.countries, draws a two-panel figure:
+    the SLR-vs-population tipping isolines per adaptation strategy with each SSP's pathway
+    overlaid, and the year each strategy's EAI first crosses the configured threshold.
+    Writes tipping_points.png and tipping_points.csv (every tipping year) to --outdir.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_*_growth_matrix.csv files")

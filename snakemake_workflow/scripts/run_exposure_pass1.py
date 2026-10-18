@@ -24,6 +24,14 @@ from compute_exposure_analysis import load_analysis_context, pass1_shares_all_in
 
 
 def main() -> None:
+    """Parse CLI arguments and run pass 1 for this batch's chunk subset.
+
+    Loads the config and chunk list, accumulates raw per-country
+    (amount, capacity) sums for every slr_intensity via
+    ``pass1_shares_all_intensities``, and atomically writes the result as
+    JSON to ``--out`` so a ``--resume`` dispatch can trust the file's mere
+    existence as "this batch is done".
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--chunks-file", required=True, help="one chunk_id per line")

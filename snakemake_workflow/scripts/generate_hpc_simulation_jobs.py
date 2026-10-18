@@ -83,6 +83,16 @@ def _resolve_wave_tier(hop: int, wave_tiers: list[dict]) -> dict:
 
 
 def main() -> None:
+    """Parse CLI arguments and write the sbatch scripts for a simulation wave dispatch.
+
+    Builds the same (wave, batch_id, tile_ids) partition hpc_dispatch.smk's
+    Snakemake rule computes, directly from the tile grid, skipping Snakemake's
+    own dependency-DAG verification. With ``--resume``, instead rebalances only
+    the still-missing (tile_id, return_period, slr) scenarios across the full
+    node budget (see module docstring). Writes wave*.sbatch/submit_waves.sh
+    (fresh) or resume_wave*.sbatch/submit_resume_waves.sh (resume) under
+    ``hpc.jobs_dir``.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
     parser.add_argument("--config", default=str(default_config))

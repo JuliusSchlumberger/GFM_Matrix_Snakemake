@@ -29,11 +29,38 @@ DISPLAY_LABEL = {"bathtub": "HC-bathtub", "eikonal": "EA-bathtub"}
 
 
 def fsf_key(fsf: float) -> str:
+    """Build the JSON key for one eikonal friction-sweep point.
+
+    Parameters
+    ----------
+    fsf : float
+        Friction scale factor.
+
+    Returns
+    -------
+    str
+        Key of the form ``fsf_{fsf:g}``, as used under ``result["eikonal"]``.
+    """
     return f"fsf_{fsf:g}"
 
 
 def load_results(base_dir: Path, tile_ids: list[str] | None = None) -> dict[int, dict]:
-    """Every tile's calibration_result.json (only tiles that have one)."""
+    """Load every tile's calibration_result.json into a dict keyed by tile id.
+
+    Skips tiles whose result file is missing or unreadable rather than raising.
+
+    Parameters
+    ----------
+    base_dir : Path
+        Tile-results root containing ``{tile_id}/outputs/calibration_result.json``.
+    tile_ids : list of str, optional
+        Tile ids to load; if None (default), all tiles found under `base_dir` are loaded.
+
+    Returns
+    -------
+    dict[int, dict]
+        Mapping from tile id to its parsed calibration_result.json contents.
+    """
     if tile_ids is None:
         paths = sorted(base_dir.glob(f"*/outputs/{RESULT_NAME}"))
     else:
@@ -55,8 +82,20 @@ def _model_entry(result: dict, model: str, fsf: float | None) -> dict | None:
 
 
 def sweep_tables(results: dict[int, dict]) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """(per_tile, pooled): eikonal vs SFINCS per (tile, friction scale factor),
-    and the counts summed over tiles per friction scale factor."""
+    """Build eikonal-vs-SFINCS extent-agreement tables across the friction sweep.
+
+    Parameters
+    ----------
+    results : dict[int, dict]
+        Per-tile results as returned by `load_results`.
+
+    Returns
+    -------
+    tuple of pandas.DataFrame
+        ``(per_tile, pooled)``: one row per (tile, friction_scale_factor) with
+        matched/only areas (km2) and HT/FAR/CSI/bias, and the same metrics pooled
+        by summing counts across tiles per friction_scale_factor.
+    """
     rows = []
     for tid, r in results.items():
         for key, e in (r.get("eikonal") or {}).items():
@@ -75,10 +114,26 @@ def sweep_tables(results: dict[int, dict]) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def tile_table(results: dict[int, dict], fsf: float, meta: pd.DataFrame | None = None) -> pd.DataFrame:
-    """One row per tile at friction point `fsf`, in the column layout the
-    figure functions of plot_validation_results.py use:
-    {sfincs,bathtub,eikonal}_km2, *_depth_median_m, {bathtub,eikonal}_{matched,only,sfincs_only}_km2,
-    land / active-land areas, and lon/lat from `meta` (tile_selection_metadata.csv)."""
+    """Build one row per tile at a single friction point, in the column layout
+    the figure functions of plot_validation_results.py use.
+
+    Parameters
+    ----------
+    results : dict[int, dict]
+        Per-tile results as returned by `load_results`.
+    fsf : float
+        Friction scale factor to select the eikonal entry for.
+    meta : pandas.DataFrame, optional
+        Tile metadata (tile_selection_metadata.csv) with ``tile_id``, ``lon`` and
+        ``lat`` columns; when given, lon/lat are merged into the output.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per tile with land/active-land areas (km2), SFINCS/bathtub/eikonal
+        flooded areas and median depths (m), and each model's matched/only/
+        sfincs_only areas (km2) and CSI vs SFINCS.
+    """
     rows = []
     for tid, r in results.items():
         row = {"tile_id": tid, "land_km2": r["domain"]["land_km2"],
@@ -100,8 +155,26 @@ def tile_table(results: dict[int, dict], fsf: float, meta: pd.DataFrame | None =
 
 
 def pooled_depth_joint(results: dict[int, dict], model: str, fsf: float | None) -> dict:
-    """Sum of every tile's depth_joint (sufficient stats + histograms) for
-    `model` vs SFINCS - same shape flood_agreement.depth_error_metrics_from_pooled reads."""
+    """Sum every tile's depth-joint sufficient statistics and histograms for one
+    model vs SFINCS.
+
+    Parameters
+    ----------
+    results : dict[int, dict]
+        Per-tile results as returned by `load_results`.
+    model : str
+        Model to pool, either "bathtub" or "eikonal".
+    fsf : float or None
+        Friction scale factor selecting the eikonal entry; ignored for "bathtub".
+
+    Returns
+    -------
+    dict
+        Summed ``n``, ``sum_x``, ``sum_y``, ``sum_x2``, ``sum_y2``, ``sum_xy`` plus
+        summed ``hist_fine``/``hist_category`` arrays (None if no tile had a
+        depth_joint entry) - the shape
+        `flood_agreement.depth_error_metrics_from_pooled` reads.
+    """
     keys = ("n", "sum_x", "sum_y", "sum_x2", "sum_y2", "sum_xy")
     out = {k: 0.0 for k in keys}
     out["hist_fine"] = out["hist_category"] = None
@@ -119,8 +192,21 @@ def pooled_depth_joint(results: dict[int, dict], model: str, fsf: float | None) 
 
 
 def metrics_overview(results: dict[int, dict], fsf: float) -> pd.DataFrame:
-    """Pooled extent (HT/FAR/CSI/bias) and depth (r/bias/RMSE/...) agreement
-    with SFINCS: HC-bathtub and EA-bathtub at friction point `fsf`."""
+    """Build the pooled HC-bathtub vs EA-bathtub agreement table.
+
+    Parameters
+    ----------
+    results : dict[int, dict]
+        Per-tile results as returned by `load_results`.
+    fsf : float
+        Friction scale factor to select the eikonal (EA-bathtub) entry for.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per model with pooled extent agreement (HT/FAR/CSI/bias) and
+        depth agreement (r/bias/RMSE/...) against SFINCS.
+    """
     df = tile_table(results, fsf)
     rows = []
     for model in ("bathtub", "eikonal"):

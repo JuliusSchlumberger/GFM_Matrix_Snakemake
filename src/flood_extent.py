@@ -15,10 +15,24 @@ LAND_CODE = 0
 
 
 def effective_dem(dem: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """Elevation Aqueduct will actually use at run time.
+    """Zero out elevation on non-land cells, mirroring core.jl's run-time preprocessing.
 
-    Mirrors core.jl's `dem[.!landmask] .= 0.0`: every non-land cell (ocean,
-    lake, river) is treated as elevation 0 regardless of what value happens
-    to be stored in dem.tif for it.
+    Every non-land cell (ocean, lake, river) is treated as elevation 0.0 regardless of
+    what value is stored in dem.tif for it, matching core.jl's `dem[.!landmask] .= 0.0`
+    (needed because `rasters.extract_dem` only fills DEM-source nodata, so a water-body
+    cell can still carry a real DeltaDTM elevation that core.jl zeroes anyway).
+
+    Parameters
+    ----------
+    dem : np.ndarray
+        Elevation raster (metres), same shape as `mask`.
+    mask : np.ndarray
+        Land/water code raster (0=land, 1=ocean, 2=lake, 3=river); any non-land code is
+        zeroed.
+
+    Returns
+    -------
+    np.ndarray
+        Elevation array with the same dtype as `dem`, non-land cells set to 0.0.
     """
     return np.where(mask == LAND_CODE, dem, dem.dtype.type(0.0))

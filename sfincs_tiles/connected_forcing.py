@@ -81,9 +81,32 @@ def _label_at(labels, tr, lon, lat, r_px: int) -> int:
 
 
 def interior_points(lines_gpkg: Path, tile_dir: Path, root: Path, hg_xy: np.ndarray) -> gpd.GeoDataFrame:
-    """Interior forcing points (EPSG:4326) with station, rp100_level_m, coast_hg_station,
-    coast_hg_dist_deg, kind="interior". `tile_dir` is the tile's base dir (with inputs/),
-    `hg_xy` the COAST-HG station lon/lat array."""
+    """Find interior forcing points: stations not on the boundary line but by water
+    that stays active in SFINCS.
+
+    Applies the module's rules (ocean snap within STATION_OCEAN_TOL_M, line
+    clearance, hydrological connectivity via the DeltaDTM mask) to every
+    candidate station and returns the surviving points with their matched
+    COAST-HG hydrograph station.
+
+    Parameters
+    ----------
+    lines_gpkg : Path
+        build_station_boundary_lines.py output (stations/boundary_line/inactive layers).
+    tile_dir : Path
+        Tile's base directory (containing inputs/, with tile_geometry.gpkg and mask.tif).
+    root : Path
+        Config root directory (for the production station search box mask).
+    hg_xy : numpy.ndarray
+        COAST-HG station (lon, lat) coordinates, shape (n_stations, 2).
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        Interior points (EPSG:4326) with columns station, station_index,
+        rp100_level_m, coast_hg_station, coast_hg_dist_deg, kind="interior";
+        empty (same columns, no rows) if none qualify.
+    """
     cols = ["station", "station_index", "rp100_level_m", "coast_hg_station", "coast_hg_dist_deg", "kind"]
     empty = gpd.GeoDataFrame({c: [] for c in cols}, geometry=[], crs="EPSG:4326")
     st = gpd.read_file(lines_gpkg, layer="stations")

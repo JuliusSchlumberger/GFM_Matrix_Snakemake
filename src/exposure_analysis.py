@@ -133,12 +133,30 @@ def scatter_country_values(
 ) -> np.ndarray:
     """Scatter one value per ISO country onto a (H, W) grid.
 
-    `iso_list`/`iso_idx`/`cell_idx` come from `_build_iso_index`. Cells with no
-    resolvable geogunit (not covered by `cell_idx`), or whose country has no
-    entry in `values_by_iso`, get `default`.
+    Cells with no resolvable geogunit (not covered by `cell_idx`), or whose
+    country has no entry in `values_by_iso`, get `default`. O(H×W) via the
+    precomputed index arrays, instead of an O(n_countries) Python loop
+    assigning into one boolean mask per country.
 
-    O(H×W) via the precomputed index arrays, instead of an O(n_countries)
-    Python loop assigning into one boolean mask per country.
+    Parameters
+    ----------
+    values_by_iso : dict[str, float]
+        Value to assign per ISO-3 country code.
+    iso_list : list[str]
+        Sorted ISO codes present in the study area, from `_build_iso_index`.
+    iso_idx : np.ndarray
+        Per-valid-cell index into `iso_list`, from `_build_iso_index`.
+    cell_idx : np.ndarray
+        Per-valid-cell flat index into the output grid, from `_build_iso_index`.
+    shape : tuple[int, int]
+        Output grid shape (H, W).
+    default : float, optional
+        Value for cells with no resolvable geogunit or unlisted country. Default 1.0.
+
+    Returns
+    -------
+    np.ndarray
+        (H, W) float64 grid of scattered values.
     """
     values = np.array([values_by_iso.get(iso, default) for iso in iso_list], dtype="float64")
     grid = np.full(shape, default, dtype="float64")
@@ -157,10 +175,30 @@ def build_protection_fraction(
     rp_applied: dict[int, float],
     geo_ids: np.ndarray,
 ) -> np.ndarray:
-    """Per-cell protection-level flood fraction.
+    """Compute the per-cell protection-level flood fraction.
 
-    For each coarse cell: prot_frac = flood_fraction[(RP_applied(geogunit), SLR_0)].
-    RP_applied is the nearest simulated RP ≥ the FLOPROS standard for that geogunit.
+    For each coarse cell: prot_frac = flood_fraction[(RP_applied(geogunit), slr_baseline)].
+    RP_applied is the nearest simulated RP >= the FLOPROS standard for that geogunit
+    (the highest simulated RP if none qualifies).
+
+    Parameters
+    ----------
+    flood_fractions : dict[tuple[int, str], np.ndarray]
+        Flood fraction grids keyed by (return_period, slr_name).
+    return_periods : list[int]
+        Simulated return periods (years).
+    slr_baseline : str
+        SLR scenario name to read protection fractions from (e.g. "SLR_0").
+    rp_applied : dict[int, float]
+        Geogunit ID -> FLOPROS protection standard return period (years).
+    geo_ids : np.ndarray
+        (H, W) int32 geogunit ID per cell; -1 = no geogunit.
+
+    Returns
+    -------
+    np.ndarray
+        (H, W) float64 protection-level flood fraction grid; 0 where no
+        matching geogunit/RP group is found.
     """
     sorted_rps = sorted(return_periods)
     prot_frac = np.zeros(geo_ids.shape, dtype="float64")
@@ -194,7 +232,26 @@ def build_adapt_protection_fraction(
     rp_applied: dict[int, float],
     geo_ids: np.ndarray,
 ) -> np.ndarray:
-    """Same as build_protection_fraction but for an adaptation SLR intensity."""
+    """Compute `build_protection_fraction` for an adaptation SLR intensity.
+
+    Parameters
+    ----------
+    flood_fractions : dict[tuple[int, str], np.ndarray]
+        Flood fraction grids keyed by (return_period, slr_name).
+    return_periods : list[int]
+        Simulated return periods (years).
+    slr_intensity : str
+        Adaptation SLR scenario name to read protection fractions from.
+    rp_applied : dict[int, float]
+        Geogunit ID -> FLOPROS protection standard return period (years).
+    geo_ids : np.ndarray
+        (H, W) int32 geogunit ID per cell; -1 = no geogunit.
+
+    Returns
+    -------
+    np.ndarray
+        (H, W) float64 protection-level flood fraction grid at `slr_intensity`.
+    """
     return build_protection_fraction(
         flood_fractions, return_periods, slr_intensity, rp_applied, geo_ids
     )
@@ -223,14 +280,30 @@ def country_sums(
 ) -> tuple[dict[str, float], dict[str, float]]:
     """Sum `per_cell_amount` and `capacity` per ISO country.
 
-    Returns `(total_amount_by_iso, total_capacity_by_iso)`. Only includes ISOs
-    actually present in this call's `geo_ids` - a chunk-local call naturally
-    returns a subset of all countries; callers accumulating across chunks
-    should sum these dicts together (plain float addition, associative).
+    Only includes ISOs actually present in this call's `geo_ids` - a chunk-local
+    call naturally returns a subset of all countries; callers accumulating
+    across chunks should sum these dicts together (plain float addition,
+    associative).
 
-    `iso_index`: optional precomputed `_build_iso_index(geo_ids, iso_lookup)`
-    result, to avoid rebuilding it when the caller already has one (e.g. once
-    per chunk, reused across every (RP, SLR) or scenario at that chunk).
+    Parameters
+    ----------
+    per_cell_amount : np.ndarray
+        (H, W) per-cell amount to sum per country.
+    capacity : np.ndarray
+        (H, W) per-cell capacity to sum per country.
+    geo_ids : np.ndarray
+        (H, W) int32 geogunit ID per cell; -1 = no geogunit.
+    iso_lookup : dict[int, str]
+        Geogunit ID -> ISO-3 country code.
+    iso_index : tuple[list[str], np.ndarray, np.ndarray] or None, optional
+        Precomputed `_build_iso_index(geo_ids, iso_lookup)` result, to avoid
+        rebuilding it when the caller already has one (e.g. once per chunk,
+        reused across every (RP, SLR) or scenario at that chunk). Default None.
+
+    Returns
+    -------
+    tuple[dict[str, float], dict[str, float]]
+        `(total_amount_by_iso, total_capacity_by_iso)`.
     """
     iso_list, iso_idx, cell_idx = (
         iso_index if iso_index is not None else _build_iso_index(geo_ids, iso_lookup)
@@ -262,6 +335,24 @@ def apply_country_shares(
     A country with no entry in `share_by_iso` (e.g. zero total capacity, or
     simply never seen) gets 0 everywhere - same "no redistribution" outcome
     as `_redistribute_by_country`'s zero-capacity handling.
+
+    Parameters
+    ----------
+    capacity : np.ndarray
+        (H, W) per-cell capacity weights.
+    share_by_iso : dict[str, float]
+        Per-ISO share to scatter.
+    geo_ids : np.ndarray
+        (H, W) int32 geogunit ID per cell; -1 = no geogunit.
+    iso_lookup : dict[int, str]
+        Geogunit ID -> ISO-3 country code.
+    iso_index : tuple[list[str], np.ndarray, np.ndarray] or None, optional
+        Precomputed `_build_iso_index(geo_ids, iso_lookup)` result. Default None.
+
+    Returns
+    -------
+    np.ndarray
+        (H, W) grid of `capacity * share_by_iso[country]`, 0 where no entry.
     """
     iso_list, iso_idx, cell_idx = (
         iso_index if iso_index is not None else _build_iso_index(geo_ids, iso_lookup)
@@ -309,7 +400,7 @@ def protect_exposure_grid(
     adapt_prot_frac: np.ndarray,
     population: np.ndarray,
 ) -> np.ndarray:
-    """Per-cell protect exposure for one (RP, SLR) scenario.
+    """Compute per-cell protect exposure for one (RP, SLR) scenario.
 
     Binary: cells where flood_fraction <= adapt_prot_frac are fully
     protected -> 0. Cells where flood_fraction > adapt_prot_frac: exposure =
@@ -326,6 +417,20 @@ def protect_exposure_grid(
     guarantees protect_SLR_x can never show *more* exposure than baseline,
     since its design ff (calibrated at a higher SLR) is always >= baseline's
     (calibrated at SLR_0).
+
+    Parameters
+    ----------
+    ff : np.ndarray
+        (H, W) flood fraction grid for this (RP, SLR) scenario (0-1).
+    adapt_prot_frac : np.ndarray
+        (H, W) design-flood-fraction threshold grid (protection level).
+    population : np.ndarray
+        (H, W) population per cell.
+
+    Returns
+    -------
+    np.ndarray
+        (H, W) exposed population grid.
     """
     ff_s = _safe(ff)
     exposed_mask = ff_s > _safe(adapt_prot_frac)
@@ -340,7 +445,7 @@ def compute_retreat_capacity(
     geo_ids: np.ndarray,
     iso_lookup: dict[int, str],
 ) -> np.ndarray:
-    """Effective population per cell after retreat, for one adaptation design grid.
+    """Compute the effective population per cell after retreat, for one adaptation design grid.
 
     Depends only on `adapt_prot_frac` (i.e. the slr_intensity design grid),
     `population` and `geo_ids` — NOT on the (return_period, waterlevel_name)
@@ -354,6 +459,22 @@ def compute_retreat_capacity(
     (1 − adapt_prot_frac) across all cells in the same country:
 
         eff_pop = (1 − adapt_prot_frac) × population + redistributed_retreaters
+
+    Parameters
+    ----------
+    adapt_prot_frac : np.ndarray
+        (H, W) design-flood-fraction threshold grid for this slr_intensity.
+    population : np.ndarray
+        (H, W) population per cell.
+    geo_ids : np.ndarray
+        (H, W) int32 geogunit ID per cell; -1 = no geogunit.
+    iso_lookup : dict[int, str]
+        Geogunit ID -> ISO-3 country code.
+
+    Returns
+    -------
+    np.ndarray
+        (H, W) effective population grid after retreat.
     """
     apf = _safe(adapt_prot_frac)
 
@@ -371,7 +492,7 @@ def compute_retreat(
     adapt_prot_frac: np.ndarray,
     eff_pop: np.ndarray,
 ) -> np.ndarray:
-    """Per-cell retreat exposure for one (RP, SLR) scenario.
+    """Compute per-cell retreat exposure for one (RP, SLR) scenario.
 
     `eff_pop` is the precomputed effective population from
     compute_retreat_capacity() for this scenario's adaptation design grid.
@@ -386,6 +507,20 @@ def compute_retreat(
     share of that concentrated population when a flood of extent ff occurs
     is therefore the marginal exceedance measured AS A FRACTION OF THE SAFE
     AREA, not of the whole cell.
+
+    Parameters
+    ----------
+    ff : np.ndarray
+        (H, W) flood fraction grid for this (RP, SLR) scenario (0-1).
+    adapt_prot_frac : np.ndarray
+        (H, W) design-flood-fraction threshold grid.
+    eff_pop : np.ndarray
+        (H, W) effective population grid from `compute_retreat_capacity`.
+
+    Returns
+    -------
+    np.ndarray
+        (H, W) exposed population grid.
     """
     ff_s = _safe(ff)
     apf = _safe(adapt_prot_frac)
@@ -403,7 +538,7 @@ def compute_avoid_redirected(
     geo_ids: np.ndarray,
     iso_lookup: dict[int, str],
 ) -> np.ndarray:
-    """Per-cell redirected-growth grid for one (adapt_prot_frac, growth_factor) pair.
+    """Compute the per-cell redirected-growth grid for one (adapt_prot_frac, growth_factor) pair.
 
     Depends only on `adapt_prot_frac` (i.e. the slr_intensity design grid) and
     `growth_factor` (i.e. the SSP × year scenario) — NOT on the
@@ -415,6 +550,24 @@ def compute_avoid_redirected(
     avoiding[cell] = adapt_prot_frac × population × max(0, growth_factor − 1)
     redistributed proportionally to (1 − adapt_prot_frac) across all cells in
     the same country.
+
+    Parameters
+    ----------
+    adapt_prot_frac : np.ndarray
+        (H, W) design-flood-fraction threshold grid for this slr_intensity.
+    population : np.ndarray
+        (H, W) 2020 baseline population per cell.
+    growth_factor : float or np.ndarray
+        Per-country or scenario-neutral population growth multiplier (1 = no growth).
+    geo_ids : np.ndarray
+        (H, W) int32 geogunit ID per cell; -1 = no geogunit.
+    iso_lookup : dict[int, str]
+        Geogunit ID -> ISO-3 country code.
+
+    Returns
+    -------
+    np.ndarray
+        (H, W) redistributed redirected-growth grid.
     """
     apf = _safe(adapt_prot_frac)
     g = np.broadcast_to(np.asarray(growth_factor, dtype="float64"), population.shape)
@@ -435,44 +588,45 @@ def compute_avoid(
     growth_factor: "float | np.ndarray",
     existing_prot_frac: "np.ndarray | None" = None,
 ) -> np.ndarray:
-    """Per-cell avoid (or protect + avoid) exposure for one (RP, SLR) scenario.
+    """Compute per-cell avoid (or protect + avoid) exposure for one (RP, SLR) scenario.
 
-    `population` is E0, the UNSCALED 2020 population. `redirected` is the
-    precomputed redistributed-growth grid from compute_avoid_redirected()
-    for this scenario's (adapt_prot_frac, growth_factor). `growth_factor` is
-    the same per-country (SSP, year) or scenario-neutral scalar/grid passed
-    to compute_avoid_redirected() for this scenario.
+    `population` is E0, the unscaled 2020 population; `redirected` is the
+    precomputed grid from `compute_avoid_redirected` for this scenario's
+    (adapt_prot_frac, growth_factor). `existing_prot_frac` selects the
+    strategy: pass baseline's protection grid for avoid (growth steered away,
+    no new defence raised; equals baseline exactly at growth_factor <= 1), or
+    leave it None (default) to use `adapt_prot_frac` for protect + avoid
+    (protection raised AND growth steered away; equals protect exactly at
+    growth_factor <= 1).
 
-    Two strategies share this formula and differ only in the protection the
-    EXISTING population gets (`existing_prot_frac`, ff_exist below):
-      - avoid: the baseline (today's) protection - avoid only steers new
-        growth away from the design floodplain, it does not raise any
-        defence. Callers pass baseline's protection grid. At growth_factor
-        <= 1 avoid therefore equals baseline exactly.
-      - protect + avoid: `existing_prot_frac=None` -> the adaptation design
-        protection (adapt_prot_frac), i.e. protection is raised AND growth
-        is steered away. At growth_factor <= 1 it equals protect exactly.
+    Exposure sums three terms: the existing E0 population exposed under its
+    own protection (scaled by min(1,g) so it shrinks under population decline
+    like protect/baseline), growth that stays in place outside the design
+    floodplain, and growth redirected elsewhere in the country. The latter two
+    use retreat's /(1 - adapt_prot_frac)-normalized marginal exceedance,
+    applied to the growth increment max(0, g-1) — omitting the in-place-growth
+    term would wrongly treat it as permanently safe beyond the design standard.
 
-        exposure = E0 × ff × min(1,g)                   where ff > ff_exist   [original-population term]
-                 + (ff − ff_prot)/(1 − ff_prot) × E0×(1−ff_prot)×max(0,g−1)
-                                                         where ff > ff_prot   [organic-growth term]
-                 + (ff − ff_prot)/(1 − ff_prot) × redirected
-                                                         where ff > ff_prot   [redirected-growth term]
+    Parameters
+    ----------
+    ff : np.ndarray
+        (H, W) flood fraction grid for this (RP, SLR) scenario (0-1).
+    adapt_prot_frac : np.ndarray
+        (H, W) design-flood-fraction threshold that growth is steered out of.
+    population : np.ndarray
+        (H, W) E0, the unscaled 2020 population per cell.
+    redirected : np.ndarray
+        (H, W) redistributed-growth grid from `compute_avoid_redirected`.
+    growth_factor : float or np.ndarray
+        Per-country or scenario-neutral population growth multiplier (1 = no growth).
+    existing_prot_frac : np.ndarray or None, optional
+        Protection grid for the existing population: baseline's grid for avoid,
+        or None (default) to use `adapt_prot_frac` (protect + avoid).
 
-    ff_prot = adapt_prot_frac, the design floodplain the growth is steered
-    out of. The first term is protect_exposure_grid's binary formula applied
-    to E0 at the existing population's protection, scaled by min(1,g) so it
-    shrinks under population decline exactly like apply_growth_rates_to_eai
-    scales protect/baseline (both are E0×ff×g for g<=1). Above g=1 the cap
-    saturates at 1; all further growth is handled by the other two terms,
-    which both vanish at max(0,g-1) == 0. Those use retreat's
-    /(1 - adapt_prot_frac)-normalized marginal exceedance, applied to the
-    GROWTH INCREMENT (same convention as compute_avoid_redirected) of the
-    population living outside the design floodplain: the second to the
-    increment that stayed in place, the third to the increment redirected
-    out of the floodplain. Omitting the second term would treat in-place
-    growth outside the (usually small) design floodplain as permanently safe
-    from any exceedance beyond the design standard.
+    Returns
+    -------
+    np.ndarray
+        (H, W) exposed population grid.
     """
     ff_s = _safe(ff)
     apf = _safe(adapt_prot_frac)
@@ -524,13 +678,28 @@ def compute_country_eai(
     Uses np.bincount for O(H×W) aggregation per (RP, SLR) instead of scanning
     the grid once per country — avoids O(n_countries × H×W × n_rp × n_slr) cost.
 
-    `iso_index`: optional precomputed `_build_iso_index(geo_ids, iso_lookup)`
-    result. Pass this when calling compute_country_eai many times for the same
-    (geo_ids, iso_lookup) (e.g. once per baseline/protect/retreat/avoid
-    scenario) to avoid rebuilding it on every call.
+    Parameters
+    ----------
+    exposure_per_rp_slr : dict[tuple[int, str], np.ndarray]
+        (H, W) exposure grids keyed by (return_period, slr_name). A missing
+        key is treated as all-zero exposure.
+    return_periods : list[int]
+        Simulated return periods (years), used for the trapezoidal EAI integration.
+    slr_scenarios : list[str]
+        SLR scenario names to produce output columns for.
+    geo_ids : np.ndarray
+        (H, W) int32 geogunit ID per cell; -1 = no geogunit.
+    iso_lookup : dict[int, str]
+        Geogunit ID -> ISO-3 country code.
+    iso_index : tuple[list[str], np.ndarray, np.ndarray] or None, optional
+        Precomputed `_build_iso_index(geo_ids, iso_lookup)` result. Pass this
+        when calling many times for the same (geo_ids, iso_lookup) (e.g. once
+        per baseline/protect/retreat/avoid scenario). Default None.
 
-    Returns:
-        DataFrame with index=ISO, columns=SLR_name with EAI values.
+    Returns
+    -------
+    pd.DataFrame
+        Index = ISO code, columns = SLR scenario name, values = EAI.
     """
     sorted_rps = sorted(return_periods)
 
@@ -561,7 +730,7 @@ def compute_country_eai_from_cells(
     iso_list: list[str],
     iso_idx: np.ndarray,
 ) -> pd.DataFrame:
-    """`compute_country_eai` for exposure values already gathered per cell.
+    """Compute `compute_country_eai` for exposure values already gathered per cell.
 
     `weights_per_rp_slr[key]` holds the exposure of exactly the cells whose
     country index is `iso_idx` (same length, same order) - i.e. what
@@ -572,6 +741,25 @@ def compute_country_eai_from_cells(
     same weights in the same order give the same sums, and dropping exact
     zeros never changes a sum. A missing key counts as all-zero exposure,
     exactly like compute_country_eai's zeros-grid fallback.
+
+    Parameters
+    ----------
+    weights_per_rp_slr : dict[tuple[int, str], np.ndarray]
+        1-D exposure-weight arrays (parallel to `iso_idx`) keyed by
+        (return_period, slr_name). A missing key counts as all-zero exposure.
+    return_periods : list[int]
+        Simulated return periods (years), used for the trapezoidal EAI integration.
+    slr_scenarios : list[str]
+        SLR scenario names to produce output columns for.
+    iso_list : list[str]
+        Sorted ISO codes present in the study area.
+    iso_idx : np.ndarray
+        Per-cell index into `iso_list`, parallel to each `weights_per_rp_slr` array.
+
+    Returns
+    -------
+    pd.DataFrame
+        Index = ISO code, columns = SLR scenario name, values = EAI.
     """
     sorted_rps = sorted(return_periods)
     n_iso = len(iso_list)
@@ -607,13 +795,28 @@ def interpolate_eai_linear(
     base EAI-vs-SLR curve onto visualization.slr_interp's grid for the
     burning-ember growth-matrix file.
 
-    `eai_df` columns must be SLR scenario names (e.g. "SLR_0", "SLR_200",
-    ...) and must already be in the same ascending order as `slr_mm_values`
-    (see `config_utils.merged_slr_scenarios`).
+    Parameters
+    ----------
+    eai_df : pd.DataFrame
+        Per-ISO EAI at the discrete simulated SLR levels. Columns must be SLR
+        scenario names (e.g. "SLR_0", "SLR_200", ...) in the same ascending
+        order as `slr_mm_values` (see `config_utils.merged_slr_scenarios`).
+    slr_mm_values : list[float]
+        Strictly increasing SLR levels (mm) matching `eai_df`'s columns, 1:1.
+    target_slr_mm : np.ndarray
+        SLR levels (mm) to interpolate EAI onto.
 
-    Returns a DataFrame indexed like `eai_df`, with one column per
-    `target_slr_mm` entry named "SLR_{mm}" (mm rounded to the nearest
-    integer). Values are clipped to >= 0.
+    Returns
+    -------
+    pd.DataFrame
+        Indexed like `eai_df`; one column "SLR_{mm}" per `target_slr_mm` entry
+        (mm rounded to the nearest integer). Values clipped to >= 0.
+
+    Raises
+    ------
+    ValueError
+        If `slr_mm_values` has fewer than 2 entries or is not strictly
+        increasing, or its length does not match `eai_df`'s column count.
     """
     x = np.asarray(slr_mm_values, dtype=float)
     if x.size < 2 or not np.all(np.diff(x) > 0):
@@ -650,11 +853,35 @@ def resolve_ssp_scenario_eai(
     population growth factor. Both interpolation steps happen here, at
     file-creation time, rather than being left to plotting code.
 
-    `slr_traj`: DataFrame indexed by year, one column per SSP, global-mean
-    SLR in mm (see visualization.load_slr_trajectories).
+    Parameters
+    ----------
+    eai_df : pd.DataFrame
+        Per-ISO EAI at the discrete simulated SLR levels, columns matching
+        `slr_mm_values` 1:1 in the same order.
+    slr_mm_values : list[float]
+        Strictly increasing SLR levels (mm) matching `eai_df`'s columns.
+    growth_df : pd.DataFrame
+        Per-country SSP/year population growth factors (see `population_growth`).
+    ssps : list[str]
+        SSP scenario names to resolve; entries missing from `slr_traj.columns`
+        are skipped.
+    years : list[int]
+        Target years to resolve.
+    slr_traj : pd.DataFrame
+        Global-mean SLR trajectory in mm, indexed by year, one column per SSP
+        (see `visualization.load_slr_trajectories`).
 
-    Output columns: ``EAI_{SSP}_{year}`` (one value per country per column,
-    not a per-SLR grid).
+    Returns
+    -------
+    pd.DataFrame
+        Indexed by ISO; one column "EAI_{SSP}_{year}" per resolved (SSP, year)
+        pair (one value per country per column, not a per-SLR grid).
+
+    Raises
+    ------
+    ValueError
+        If `slr_mm_values` has fewer than 2 entries or is not strictly
+        increasing, or its length does not match `eai_df`'s column count.
     """
     from population_growth import interpolate_growth_factor
 
@@ -692,15 +919,26 @@ def apply_growth_rates_to_eai(
 ) -> pd.DataFrame:
     """Scale per-country base EAI by a generic (scenario-neutral) growth-rate axis.
 
-    Unlike `apply_ssp_growth_to_eai`, the growth factor here is the same
-    single scalar for every ISO/SLR cell — not a per-country SSP projection.
-    Valid for baseline/protect/retreat because their exposure is linear in a
-    uniform population scaling (see compute_exposure_analysis.py's growth-matrix
-    section for the proof); avoid is NOT linear in growth and must be
-    recomputed directly instead of scaled this way.
+    Unlike a per-country SSP projection, the growth factor here is the same
+    single scalar for every ISO/SLR cell. Valid for baseline/protect/retreat
+    because their exposure is linear in a uniform population scaling (see
+    compute_exposure_analysis.py's growth-matrix section for the proof); avoid
+    is NOT linear in growth and must be recomputed directly instead of scaled
+    this way.
 
-    Output columns: ``EAI_{SLR}_g{pct}`` for each growth_rates entry, e.g.
-    ``EAI_SLR_0_g-50``, ``EAI_SLR_1400_g150`` (pct = round(g * 100)).
+    Parameters
+    ----------
+    eai_df : pd.DataFrame
+        Per-ISO base EAI, columns = SLR scenario names.
+    growth_rates : np.ndarray
+        Fractional population growth rates to apply (e.g. -0.5 = -50%, 1.5 = +150%).
+
+    Returns
+    -------
+    pd.DataFrame
+        Indexed by ISO; one column ``EAI_{SLR}_g{pct}`` per (SLR, growth_rates
+        entry), e.g. ``EAI_SLR_0_g-50``, ``EAI_SLR_1400_g150``
+        (pct = round(g * 100)).
     """
     rows: list[dict] = []
     pct_labels = [int(round(g * 100)) for g in growth_rates]

@@ -384,45 +384,39 @@ def validate_country_national_coverage(
     bench_catalog,
     read_tiles_directly: bool = False,
 ) -> pd.DataFrame:
-    """Extent comparison for `coverage == "national"` benchmarks (the ENTIRE
-    coastline was assessed, e.g. Scotland's SEPA coastal flood map - see
-    BenchmarkSpec.coverage's own docstring) - processed per POSTPROCESSING
-    CHUNK directly, with no evaluation-cluster buffer/merge step at all.
+    """Score every national-coverage coastal benchmark for one country, per postprocessing chunk.
 
-    Why per-chunk, not per-benchmark-polygon cluster:
+    A "national coverage" benchmark (``coverage != "partial"``) assessed its entire coastline, so
+    a model-wet cell anywhere in the model's domain outside the benchmark polygon is an
+    unambiguous false positive - there is no unsurveyed region to protect with a buffer/merge
+    step. Processing goes chunk-by-chunk rather than clustering the whole benchmark into one
+    evaluation polygon, which previously overflowed memory (a 65.9 GiB allocation crash) on a
+    long national coastline. The domain is the model's own domain, masked to `country_iso`'s
+    territory (or `spec.geogunit_ids`) so that flooding outside a region's bounding box is never
+    misscored as a false positive.
 
-    1. Correctness: national coverage has no "surveyed and dry" vs. "never
-       looked at" ambiguity outside the benchmark polygons (caveats doc
-       §1.1) - a model-wet cell outside the benchmark polygon (but within
-       the country's assessed domain) is a real, unambiguous
-       over-prediction, so there is nothing for a buffer to protect against.
-    2. Robustness: a national benchmark's long coastline can make a
-       buffer+merge clustering step collapse into ONE cluster spanning
-       almost the entire country (confirmed 2026-09: a 65.9 GiB allocation
-       crash). Chunk-sized processing (mirroring
-       analysis/compute_flood_totals.py's own chunk-streaming architecture)
-       bounds memory per iteration regardless of how far a national
-       benchmark's footprint spans.
+    Parameters
+    ----------
+    country_iso : str
+        ISO-3 country code to validate.
+    cfg : dict
+        Loaded pipeline config; uses the `validation`, `postprocessing`, `simulation` and
+        `tile_grid` sections.
+    gfm_catalog : hydromt data catalog
+        Catalog for model-side sources (permanent water mask, geogunit/ISO lookup).
+    bench_catalog : hydromt data catalog
+        Catalog holding the benchmark specs and geometries.
+    read_tiles_directly : bool, default False
+        Read model depth from production's per-tile result rasters instead of `merge_chunk`'s
+        merged chunks - for an ad hoc tile subset that was never run through `merge_chunk`
+        (see `_tile_paths_overlapping_bbox`).
 
-    Domain is always "the model's own domain, nothing more restrictive"
-    (every cell the model computed something for is in scope) - EXCEPT it
-    is also masked to `country_iso`'s own territory, or to
-    `spec.geogunit_ids` for a sub-national benchmark like Wales within GBR
-    (validation.read_country_mask), since a region's bbox is just a rectangle
-    and can genuinely overlap neighbouring territory - without this, GFM's own
-    real flooding there would be scored as a false positive against a
-    benchmark that never covered it.
-
-    `read_tiles_directly` (default False): read each region's model depth by
-    mosaicking production's own per-tile `results/waterdepth_{rp}_{slr}.tif`
-    files directly (`_tile_paths_overlapping_bbox` + `_mosaic_read`) instead
-    of `merge_chunk`'s merged 5deg chunk files. For a small, ad hoc tile
-    subset (e.g. a country-validation run over a handful of tiles) that was
-    deliberately never run through `merge_chunk` - doing so would require
-    simulating every OTHER tile sharing the same 5deg chunk too, see
-    `_tile_paths_overlapping_bbox`'s own docstring. One mosaic read per
-    region instead of one open+window per overlapping chunk file; everything
-    downstream (scoring, agreement rasters) is unchanged either way.
+    Returns
+    -------
+    pandas.DataFrame
+        One row per scored region plus one blended country-level row (region ``"ALL"``) when a
+        benchmark has multiple regions; empty if no national-coverage extent benchmark exists
+        for this country. Also writes one agreement raster per region as a side effect.
     """
     val_cfg = cfg["validation"]
     rp = val_cfg["return_period"]
@@ -734,6 +728,14 @@ def _write_agreement_raster(
 
 
 def main() -> None:
+    """Parse CLI arguments, score one country's benchmarks, and write its metrics CSV.
+
+    Runs `validate_country_national_coverage` for the given country, writes
+    ``{output_dir}/{country}/metrics_{country}_{rp}_{slr}.csv`` (and one agreement raster per
+    region, as a side effect of that call), and prints the blended or per-region
+    HR/FAR/CSI/CSI_tol summary to the console. Prints a notice and does nothing else if no
+    extent rows are produced.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--country", required=True, help="ISO-3 country code, e.g. GBR")

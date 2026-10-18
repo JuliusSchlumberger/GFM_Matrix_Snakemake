@@ -146,6 +146,15 @@ def _process_chunk(
 
 
 def main() -> None:
+    """Parse CLI arguments and write per-country flood-totals CSVs for every (RP, SLR) combo.
+
+    Streams each flood-fraction chunk through a thread pool (see
+    ``--workers``), aggregates wet area (km2) and exposed population per
+    country, and writes one CSV per ISO to
+    ``{outdir}/flood_totals/flood_totals_{ISO}.csv``. Exits with status 1 if
+    no flood-fraction/population chunks are found, or if any chunk fails
+    after retries (the written CSVs still cover every chunk that succeeded).
+    """
     _default_cfg = str(Path(__file__).resolve().parents[1] / "snakemake_workflow" / "config" / "config.yml")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=_default_cfg)

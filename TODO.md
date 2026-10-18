@@ -50,3 +50,15 @@ in-phase.
 - **`openpyxl` in environment.yml has no user** (found in Phase 4). Its only consumer,
   a calibration xlsx report script, was removed earlier; nothing imports openpyxl or
   calls `to_excel`/`ExcelWriter`. Dropping the pin is an env change, so it's logged here.
+- **`src/flood_model.prune_to_coast_connected` docstring describes a "pre-solve candidate
+  mask" use** (found in Phase 4b), but every caller uses it post-solve on the flood mask,
+  and `flood_depth_dense` says the dense solver has no pre-solve candidate step. This is
+  probably a leftover from an older (sparse) solver. Confirm, then trim the docstring.
+- **`src/aqueduct_runner.py` module docstring** names `scripts/run_aqueduct.py` /
+  `run_aqueduct_cli.py`; the real paths are under `snakemake_workflow/scripts/`. Fix it with
+  the Phase 7a renames (these files become `run_eikonal*.py`).
+- **`generate_aqueduct_jobs.generate_wave_dispatch` has 3 unused parameters** (found in
+  Phase 4b): `model_outputs`, `hop_by_tile` and `raster_config` are accepted and passed by
+  both callers (`rules/hpc_dispatch.smk`, `generate_hpc_simulation_jobs.py:178`) but never
+  read. The docstring now says "unused". Drop them with the Phase 5c helper consolidation
+  or the Phase 7a renames (signature change).

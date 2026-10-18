@@ -75,6 +75,15 @@ def _run_one(python_exe: str, config_path: str, tile_id: str, rp: str, slr: str,
 
 
 def main() -> None:
+    """Parse CLI arguments and run this batch's simulation triples concurrently.
+
+    Reads the triples CSV and fans the batch out across a thread pool of
+    ``run_aqueduct_cli.py`` subprocess calls (one per triple), honoring
+    ``--workers`` and a hard per-triple ``--timeout-min``. A failed or
+    timed-out triple is logged (stdout) and, if ``--fail-log`` is given,
+    appended to that file; it does not abort the rest of the batch. Exits
+    with status 1 if any triple failed.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--triples-file", required=True, help="CSV, no header: tile_id,return_period,waterlevel_name per line")
     parser.add_argument("--config", required=True, help="path to a fully-resolved config.yml (e.g. resolved_config.yml)")

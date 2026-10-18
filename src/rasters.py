@@ -70,24 +70,24 @@ def _encode_int16(values: np.ndarray, scale: float, label: str, valid_hint: str)
 def encode_dem_cm(dem_m: np.ndarray) -> np.ndarray:
     """Encode a float DEM (metres) as int16 centimetres.
 
-    DEM_VALUE_CLIPPED_TO_INT16_RANGE (2026-08-10, search this token to find
-    this note again): values below DeltaDTM's usual <=30m envelope can
-    still be real - confirmed directly against two real preprocessing
-    failures: tile 1464 (the Dead Sea, -369.29m) and tile 303 (the Danakil
-    Depression / Red Sea rift, -379.08m) - but int16-cm only spans
-    +-327.67m, so both genuinely overflow it. CLIPPED here, not rejected:
-    this is a deliberate, lossy alteration of the true DEM value for any
-    cell this extreme, on the reasoning that once an elevation is this far
-    below any plausible coastal water level, the exact number cannot affect
-    flood results - "-369m" and "-327.67m" both mean "never floods," so no
-    flood-extent difference is expected at either location. Flagged here
-    (and printed at runtime below) specifically so this is easy to find
-    again if that assumption ever needs revisiting - e.g. if a future
-    version of this pipeline computes anything OTHER than coastal flood
-    extent from this DEM (elevation-dependent exposure metrics, terrain
-    analysis, etc.) where the true (deeper) value would matter.
-    _encode_int16 itself is untouched - friction/waterdepth encoding still
-    raise a hard error on overflow; only this DEM-specific caller clips.
+    DEM_VALUE_CLIPPED_TO_INT16_RANGE (search this token to find this note
+    again): values below DeltaDTM's usual <=30m envelope can still be real
+    (confirmed on the Dead Sea and Danakil Depression tiles, both beyond
+    int16-cm's +-327.67m range) but are CLIPPED here rather than rejected,
+    since an elevation that far below any coastal water level never floods
+    either way. `_encode_int16` itself still raises hard on overflow; only
+    this DEM-specific caller clips first.
+
+    Parameters
+    ----------
+    dem_m : np.ndarray
+        DEM elevation values in metres.
+
+    Returns
+    -------
+    np.ndarray
+        `dem_m` scaled by `DEM_SCALE` and cast to int16 centimetres, clipped
+        to int16's representable range.
     """
     lo_m = np.iinfo(np.int16).min / DEM_SCALE  # -327.68
     hi_m = np.iinfo(np.int16).max / DEM_SCALE  # 327.67
@@ -105,37 +105,78 @@ def encode_dem_cm(dem_m: np.ndarray) -> np.ndarray:
 
 
 def decode_dem_cm(dem_int16: np.ndarray) -> np.ndarray:
-    """Decode an int16-centimetre DEM back to float32 metres."""
+    """Decode an int16-centimetre DEM back to float32 metres.
+
+    Parameters
+    ----------
+    dem_int16 : np.ndarray
+        DEM encoded as int16 centimetres (see `encode_dem_cm`).
+
+    Returns
+    -------
+    np.ndarray
+        DEM elevation in metres, as float32.
+    """
     return dem_int16.astype(np.float32) / DEM_SCALE
 
 
 def encode_friction_int16(friction: np.ndarray) -> np.ndarray:
-    """Encode a float friction raster as int16 (x FRICTION_SCALE)."""
+    """Encode a float friction raster as int16 (x `FRICTION_SCALE`).
+
+    Parameters
+    ----------
+    friction : np.ndarray
+        Friction values in the per-metre Manning's-n-derived convention
+        (see `compute_friction`).
+
+    Returns
+    -------
+    np.ndarray
+        `friction` scaled by `FRICTION_SCALE` and cast to int16.
+    """
     return _encode_int16(friction, FRICTION_SCALE, "Friction", "within the land-cover lookup table's Manning's n / 100 range")
 
 
 def decode_friction_int16(friction_int16: np.ndarray) -> np.ndarray:
     """Decode an int16 friction raster back to float32.
 
-    Divides by `np.float32(FRICTION_SCALE)`, not the raw Python int - numpy's
-    legacy value-based casting promotes `float32_array / python_int` to
-    float64 once the int needs more than 16 bits to represent exactly
-    (`FRICTION_SCALE = 1_000_000` does; `DEM_SCALE`/`WATERDEPTH_SCALE`/
-    `WATERLEVEL_SCALE` at 100 don't, which is why only this one decoder was
-    silently affected). This one array (`friction`) sets `solve_eikonal_
-    dense`'s `dtype`, which every subsequent large array in a flood solve
-    inherits (`t`, in particular, the dominant allocation) - the bug was
-    silently doubling the peak memory of every "python" engine flood solve,
-    coupling or not, until caught investigating OOM failures during 2026-08
-    obstacle-coupling calibration on large real tiles.
+    Divides by `np.float32(FRICTION_SCALE)`, not the raw Python int: numpy's
+    legacy value-based casting silently promotes the result to float64
+    once the divisor needs more than 16 bits (`FRICTION_SCALE = 1_000_000`
+    does), which previously doubled the peak memory of every flood solve
+    since this array's dtype propagates to `solve_eikonal_dense`'s `t`.
+
+    Parameters
+    ----------
+    friction_int16 : np.ndarray
+        Friction encoded as int16 (see `encode_friction_int16`).
+
+    Returns
+    -------
+    np.ndarray
+        Friction values as float32, in the per-metre convention.
     """
     return friction_int16.astype(np.float32) / np.float32(FRICTION_SCALE)
 
 
 def encode_waterdepth_cm(waterdepth_m: np.ndarray) -> np.ndarray:
-    """Encode a float water-depth raster (metres, 0.0 where dry) as int16
-    centimetres. Raises if any value would collide with
-    WATERDEPTH_NODATA_INT16 (implausible for a real flood depth).
+    """Encode a float water-depth raster (metres) as int16 centimetres.
+
+    Parameters
+    ----------
+    waterdepth_m : np.ndarray
+        Water depth in metres, `0.0` where dry.
+
+    Returns
+    -------
+    np.ndarray
+        `waterdepth_m` scaled by `WATERDEPTH_SCALE` and cast to int16.
+
+    Raises
+    ------
+    ValueError
+        If any encoded value would collide with `WATERDEPTH_NODATA_INT16`
+        (implausible for a real flood depth).
     """
     encoded = _encode_int16(waterdepth_m, WATERDEPTH_SCALE, "Water depth", "well below the int16 'not computed' sentinel")
     if (encoded == WATERDEPTH_NODATA_INT16).any():
@@ -147,10 +188,21 @@ def encode_waterdepth_cm(waterdepth_m: np.ndarray) -> np.ndarray:
 
 
 def decode_waterdepth_cm(waterdepth_int16: np.ndarray) -> np.ndarray:
-    """Decode an int16-centimetre water-depth raster to float32 metres, with
-    WATERDEPTH_NODATA_INT16 mapped to `merge.AQUEDUCT_NODATA` so the
-    existing float32 merge/overlap-correction pipeline needs no changes of
-    its own.
+    """Decode an int16-centimetre water-depth raster to float32 metres.
+
+    `WATERDEPTH_NODATA_INT16` cells are mapped to `merge.AQUEDUCT_NODATA` so
+    the existing float32 merge/overlap-correction pipeline needs no changes.
+
+    Parameters
+    ----------
+    waterdepth_int16 : np.ndarray
+        Water depth encoded as int16 centimetres (see `encode_waterdepth_cm`).
+
+    Returns
+    -------
+    np.ndarray
+        Water depth in metres, as float32, with `merge.AQUEDUCT_NODATA`
+        where not computed.
     """
     decoded = waterdepth_int16.astype(np.float32) / WATERDEPTH_SCALE
     decoded[waterdepth_int16 == WATERDEPTH_NODATA_INT16] = AQUEDUCT_NODATA
@@ -171,11 +223,20 @@ WATERLEVEL_SCALE = 100  # cm per metre
 def encode_waterlevel_cm(waterlevel_m: np.ndarray) -> np.ndarray:
     """Encode float boundary water levels (metres) as int16 centimetres.
 
-    Boundary GeoPackages can legitimately have zero rows (a tile with no
-    findable COAST-RP station - see scripts/extract_boundaries.py's empty-
-    placeholder handling) - returned as an empty int16 array as-is, rather
-    than going through `_encode_int16`'s min/max range check, which raises
-    on an empty array.
+    An empty input (a tile with no findable COAST-RP station - see
+    scripts/extract_boundaries.py's empty-placeholder handling) is returned
+    as an empty int16 array as-is, bypassing `_encode_int16`'s min/max range
+    check, which raises on an empty array.
+
+    Parameters
+    ----------
+    waterlevel_m : np.ndarray
+        Boundary-forcing water levels in metres.
+
+    Returns
+    -------
+    np.ndarray
+        `waterlevel_m` scaled by `WATERLEVEL_SCALE` and cast to int16.
     """
     if waterlevel_m.size == 0:
         return waterlevel_m.astype(np.int16)
@@ -186,18 +247,52 @@ def encode_waterlevel_cm(waterlevel_m: np.ndarray) -> np.ndarray:
 
 
 def decode_waterlevel_cm(waterlevel_int16: np.ndarray) -> np.ndarray:
-    """Decode an int16-centimetre boundary water level array to float32 metres."""
+    """Decode an int16-centimetre boundary water level array to float32 metres.
+
+    Parameters
+    ----------
+    waterlevel_int16 : np.ndarray
+        Boundary water levels encoded as int16 centimetres (see
+        `encode_waterlevel_cm`).
+
+    Returns
+    -------
+    np.ndarray
+        Boundary water levels in metres, as float32.
+    """
     return waterlevel_int16.astype(np.float32) / WATERLEVEL_SCALE
 
 
 def load_raster(path: str | Path) -> xr.DataArray:
-    """Load a single-band GeoTIFF as an xarray DataArray with hydromt raster accessor."""
+    """Load a single-band GeoTIFF as an xarray DataArray with hydromt raster accessor.
+
+    Parameters
+    ----------
+    path : str or Path
+        Path to the single-band GeoTIFF file.
+
+    Returns
+    -------
+    xr.DataArray
+        The raster's single band, with the `band` dimension squeezed out.
+    """
     import rioxarray  # noqa: F401 - registers the rasterio xarray backend and spatial metadata
     return retry_transient_io(xr.open_dataarray, path, engine="rasterio").squeeze("band", drop=True)
 
 
 def get_tile_bbox(tile: gpd.GeoDataFrame) -> list[float]:
-    """Return the [minx, miny, maxx, maxy] bounding box of a single-row tile GeoDataFrame."""
+    """Return the bounding box of a single-row tile GeoDataFrame.
+
+    Parameters
+    ----------
+    tile : gpd.GeoDataFrame
+        A single-row GeoDataFrame whose geometry is the tile's rectangle.
+
+    Returns
+    -------
+    list of float
+        Bounding box as ``[minx, miny, maxx, maxy]``.
+    """
     return tile.total_bounds.tolist()
 
 
@@ -212,57 +307,46 @@ def compute_model_bbox(
     """Compute the model domain bbox as the DEM's flood-relevant extent plus a buffer.
 
     The full tile bbox is much larger than needed: most of the tile is inland
-    land without DeltaDTM coverage.  This function shrinks the domain to the
-    bounding box of flood-relevant DeltaDTM cells expanded by ``buffer_arcsec``
-    on all four sides, then clips the result to ``tile_bbox``.
+    land without DeltaDTM coverage. Shrinks the domain to the bounding box of
+    flood-relevant DeltaDTM cells expanded by `buffer_arcsec` on all four
+    sides, then clips the result to `tile_bbox`.
 
-    A cell counts as flood-relevant (kept in the domain) unless it is
-    *confirmed* high land: ocean/lake/river cells (mask != land) always
-    count, regardless of what the raw DEM says there (DeltaDTM routinely has
-    no elevation reading at all over water - that's expected, not a gap -
-    see rasters.extract_dem's own land/water fill split). A land cell only
-    drops out when its raw DeltaDTM elevation is both present and
-    ``>= elevation_threshold_m`` - land with no elevation reading (a gap
-    extract_dem will later either interpolate or hard-fill, depending on gap
-    size) is conservatively kept here rather than trying to replicate that
-    gap-size logic a second time. This mirrors the obstacle-coupling static
-    pre-filter's own ``dem > max_waterlevel`` reasoning (definitively-dry
-    terrain doesn't need to be part of the domain), just applied at
-    domain-selection time instead of solve time - and the elevation
-    threshold should be the same value the tile-grid construction pipeline
-    uses for its own wide-gap/safe-cut detection (``tile_grid.
-    elevation_relevance_threshold_m`` - see tiles.py), so a tile's recorded
-    footprint and its actually-extracted domain agree on what counts as
-    irrelevant.
+    A cell counts as flood-relevant (kept) unless it is *confirmed* high
+    land: ocean/lake/river cells always count, and a land cell only drops out
+    when its raw elevation is both present and >= `elevation_threshold_m`
+    (land with no elevation reading is conservatively kept, since `extract_dem`
+    will interpolate or hard-fill it later anyway). This mirrors the
+    obstacle-coupling pre-filter's `dem > max_waterlevel` reasoning, applied
+    at domain-selection time; the threshold should match `tile_grid.
+    elevation_relevance_threshold_m` (tiles.py) so a tile's recorded
+    footprint and its extracted domain agree. If `elevation_threshold_m` is
+    `None`, any non-nodata DEM cell counts as valid (land/water split
+    ignored). If the DEM has no valid cells in `tile_bbox`, `tile_bbox` is
+    returned unchanged.
 
-    If ``elevation_threshold_m`` is ``None``, falls back to the original,
-    coarser behaviour: any real (non-nodata) DEM cell counts as valid,
-    land/water split not considered at all.
+    Parameters
+    ----------
+    data_catalog : hydromt.DataCatalog
+        HydroMT data catalog.
+    dem_source : str
+        Catalog key for the DEM (DeltaDTM) RasterDataset.
+    mask_source : str
+        Catalog key for the DeltaDTM validity mask RasterDataset. Only read
+        when `elevation_threshold_m` is given.
+    tile_bbox : list of float
+        Full tile bounding box as ``[minx, miny, maxx, maxy]``.
+    buffer_arcsec : float, default 1.0
+        Buffer added to each side of the DEM extent, in arc-seconds. DeltaDTM
+        covers right to the shoreline, so even 1 arc-second (~30 m) is enough
+        to include a thin seaward strip of ocean cells for flood entry.
+    elevation_threshold_m : float, optional
+        Elevation (m) at/above which confirmed land is excluded from the
+        domain. `None` (default) disables the elevation criterion entirely.
 
-    DeltaDTM covers right to the shoreline, so a buffer of even 1 arc-second
-    (~30 m) is enough to include a thin strip of ocean cells on the seaward
-    edge, giving the Aqueduct model the coastal entry points it needs for flood
-    propagation.  Increase ``buffer_arcsec`` (via ``simulation.model_bbox_buffer_arcsec``
-    in config) if coastal tiles show incomplete flood entry.
-
-    If the DEM has no valid cells within ``tile_bbox``, the full ``tile_bbox``
-    is returned unchanged.
-
-    Args:
-        data_catalog: HydroMT data catalog.
-        dem_source: Catalog key for the DEM (DeltaDTM) RasterDataset.
-        mask_source: Catalog key for the DeltaDTM validity mask RasterDataset.
-            Only read when ``elevation_threshold_m`` is given.
-        tile_bbox: Full tile bounding box as ``[minx, miny, maxx, maxy]``.
-        buffer_arcsec: Buffer added to each side of the DEM extent, in
-            arc-seconds.
-        elevation_threshold_m: Elevation (m) at/above which confirmed land is
-            excluded from the domain. ``None`` (default) disables the
-            elevation criterion entirely (mask/land-vs-water is not
-            considered either, matching the pre-2026-08 behaviour).
-
-    Returns:
-        Reduced bounding box ``[minx, miny, maxx, maxy]``, clipped to ``tile_bbox``.
+    Returns
+    -------
+    list of float
+        Reduced bounding box ``[minx, miny, maxx, maxy]``, clipped to `tile_bbox`.
     """
     da = data_catalog.get_rasterdataset(dem_source, bbox=tile_bbox)
 
@@ -411,55 +495,45 @@ def resolve_offshore_mask_gaps_via_gebco(
     """Reclassify `deltadtm_mask` nodata cells to ocean where GEBCO bathymetry
     and connectivity both agree it's plausible open water.
 
-    `deltadtm_mask`'s own coverage doesn't always extend to a tile's full
-    bbox - most commonly for tiles whose domain reaches well offshore, past
-    the coastal band DeltaDTM was built to cover. The default fallback
-    (nodata -> land, see `extract_dem`/`extract_dem_mask`) is safe for
-    genuinely inland data-sparse gaps but wrong for these far-offshore ones:
-    a false "land" strip between the true coast and a tile's outer edge can
-    starve `hydromt_sfincs`'s create_boundary() of almost its entire real
-    coastline, since it only places forcing on ocean cells touching the
-    domain's own rectangular perimeter (confirmed live on SFINCS validation
-    tile 1273 - 2026-09).
+    `deltadtm_mask` coverage doesn't always extend to a tile's full bbox,
+    most commonly for tiles reaching well offshore past DeltaDTM's coastal
+    band. The default nodata->land fallback is safe for inland gaps but
+    wrong here: a false "land" strip between the true coast and a tile's
+    outer edge can starve `hydromt_sfincs`'s `create_boundary()` of almost
+    its entire real coastline (it only places forcing on ocean cells
+    touching the domain's rectangular perimeter).
 
-    A nodata cell is only reclassified to ocean if BOTH:
-    - GEBCO reads negative (plausible bathymetry) at that cell, and
-    - it is 4-connected (matching `_compute_dem_gap_fill`'s own convention)
-      through a chain of other GEBCO-negative nodata cells to at least one
-      cell the mask already confirms is real ocean (`mask_vals ==
-      ocean_code`).
+    A nodata cell is reclassified to ocean only if GEBCO reads negative
+    (plausible bathymetry) there AND it is 4-connected through other
+    GEBCO-negative nodata cells to a cell the mask already confirms is real
+    ocean. The connectivity requirement protects genuinely isolated
+    below-sea-level inland basins (e.g. the Dead Sea, Danakil Depression -
+    see `encode_dem_cm`), which also read negative in GEBCO but must stay
+    land. This only helps far-offshore gaps: GEBCO's known coastal artifact
+    (ocean cells reading up to +16.6m near the DeltaDTM/GEBCO transition)
+    means nearshore nodata gaps typically read non-negative and correctly
+    stay land.
 
-    The connectivity requirement exists specifically to protect genuinely
-    isolated below-sea-level inland basins, which legitimately read negative
-    in GEBCO (a hybrid land+ocean product) but must stay land - real prior
-    cases already hit by this pipeline include tile 1464 (Dead Sea,
-    -369.29m) and tile 303 (Danakil Depression, -379.08m), see
-    `encode_dem_cm`. Anchoring is against `ocean_code` only, not lake/river,
-    since `build_sfincs_tile.py`'s boundary polygon is built strictly from
-    mask==1.
+    Parameters
+    ----------
+    mask_vals : np.ndarray
+        Raw mask array, still containing `nodata_sentinel`.
+    nodata_sentinel : int
+        Value marking "no mask coverage at all".
+    gebco_vals : np.ndarray
+        GEBCO elevation, reprojected onto the same grid as `mask_vals`.
+    gebco_nodata : float
+        GEBCO's own nodata value.
+    ocean_code : int, default 1
+        Mask value meaning confirmed real ocean.
+    land_code : int, default 0
+        Mask value to fall back to when a nodata cell isn't resolved to ocean.
 
-    Note this only helps far-offshore gaps: GEBCO has a known coarse-
-    resolution artifact right at the coast (ocean cells reading up to
-    +16.6m near the DeltaDTM/GEBCO transition, see build_elevation.py's
-    MAX_OCEAN_ELEVATION_M), so nearshore nodata gaps will typically read
-    non-negative and correctly fail closed (stay land) rather than being
-    fixed here - the existing, safe status quo for that case.
-
-    Args:
-        mask_vals: Raw mask array, still containing `nodata_sentinel`.
-        nodata_sentinel: Value marking "no mask coverage at all".
-        gebco_vals: GEBCO elevation, reprojected onto the same grid as
-            `mask_vals`.
-        gebco_nodata: GEBCO's own nodata value.
-        ocean_code: Mask value meaning confirmed real ocean.
-        land_code: Mask value to fall back to when a nodata cell isn't
-            resolved to ocean.
-
-    Returns:
-        Tuple of the corrected mask array (no `nodata_sentinel` values
-        remain - every cell is `ocean_code` or an original valid value or
-        `land_code`) and a diagnostics dict with `n_resolved_ocean` and
-        `n_still_land` counts.
+    Returns
+    -------
+    tuple of (np.ndarray, dict)
+        The corrected mask array (no `nodata_sentinel` values remain) and a
+        diagnostics dict with `n_resolved_ocean` and `n_still_land` counts.
     """
     is_nodata = mask_vals == nodata_sentinel
     is_ocean = mask_vals == ocean_code
@@ -495,33 +569,35 @@ def relabel_small_isolated_ocean_patches(
     lake_code: int = 2,
     min_cells: int = 30,
 ) -> tuple[np.ndarray, dict]:
-    """Reclassify small ocean-coded (`ocean_code`) connected components
-    (fewer than `min_cells` cells) to `lake_code`.
+    """Reclassify small ocean-coded connected components to `lake_code`.
 
-    `mask_vals`'s ocean/land/lake/river classification is otherwise trusted
-    as-is from the upstream `deltadtm_mask` source (see `extract_dem_mask`'s
-    own docstring) - but that source sometimes mislabels a small inland
-    water body (e.g. a coastal lagoon or reservoir) as ocean rather than
-    lake. Left uncorrected, such a patch is still 4-connected-boundary
-    "coastline" from `flood_model.coastline_mask`'s point of view and, more
-    consequentially, still `ocean_code` from `build_sfincs_tile.py::
-    _compute_zsini_array`'s point of view - which explicitly restricts its
-    IDW-interpolated initial water level to `ocean_code` cells but has no
-    way to tell a genuinely isolated ocean-coded blob from real coast, so it
-    seeds a nonzero initial water level there with no actual hydraulic
-    connection to the sea (found 2026-09-28, SFINCS validation tile 713 -
-    SFINCS reported the patch "flooded" from timestep zero, disconnected
-    from any real coastline).
+    `deltadtm_mask` sometimes mislabels a small inland water body (e.g. a
+    coastal lagoon or reservoir) as ocean rather than lake. Left uncorrected,
+    `build_sfincs_tile.py::_compute_zsini_array` seeds such a patch with a
+    nonzero IDW-interpolated initial water level (restricted to `ocean_code`
+    cells) despite it having no hydraulic connection to the sea (found on
+    SFINCS validation tile 713, where SFINCS reported it "flooded" from
+    timestep zero). Uses 4-connectivity, matching
+    `resolve_offshore_mask_gaps_via_gebco`'s convention; every component is
+    checked purely by size, with no "except the largest" special case.
 
-    4-connectivity, matching `resolve_offshore_mask_gaps_via_gebco`'s own
-    convention immediately above. Every component is checked purely by
-    size, including the tile's own dominant ocean body if it somehow fell
-    below `min_cells` (not a realistic case in production - every selected
-    tile already has a real, substantial ocean presence - but simpler and
-    more predictable than a "except the largest" special case).
+    Parameters
+    ----------
+    mask_vals : np.ndarray
+        Mask array with ocean/land/lake/river classification.
+    ocean_code : int, default 1
+        Mask value meaning ocean.
+    lake_code : int, default 2
+        Mask value to relabel small ocean components to.
+    min_cells : int, default 30
+        Minimum connected-component size (cells, 4-connectivity) for an
+        ocean-coded component to stay ocean; smaller components are relabeled.
 
-    Returns the corrected mask array and a diagnostics dict with
-    `n_relabeled` and `n_components_relabeled`.
+    Returns
+    -------
+    tuple of (np.ndarray, dict)
+        The corrected mask array and a diagnostics dict with `n_relabeled`
+        and `n_components_relabeled` counts.
     """
     ocean = mask_vals == ocean_code
     structure = ndimage.generate_binary_structure(2, 1)  # 4-connectivity
@@ -553,69 +629,62 @@ def extract_dem(
 ) -> xr.DataArray:
     """Clip the DEM to the model domain bbox and fill all missing cells.
 
-    Every cell in the output has a real value — no nodata cells remain. The
-    fill value is decided entirely from `mask_source` (the DeltaDTM validity
-    mask), reprojected onto the DEM's own grid — not from any separately
-    sourced land polygon dataset, which can misalign with DeltaDTM's own
-    coastline:
-    - Cells with valid DeltaDTM elevation: kept as-is (optionally geoid-
-      corrected first, see `geoid_offset_raster` below).
-    - Missing cells where the mask says land (0), OR where the mask itself
-      has no coverage at all (nodata): split by the size of the connected
-      (4-connectivity) group of missing-land cells they belong to.
-        - SMALL group (< `min_hard_fill_component_size` cells, e.g. an
-          isolated pixel or a small cluster): treated as a plausible
-          measurement/sensor gap and INTERPOLATED from the surrounding
-          valid DeltaDTM elevation (`rasterio.fill.fillnodata`, inverse-
-          distance weighted), rather than hard-filled - a lone nodata pixel
-          surrounded by real elevation is very unlikely to be exactly
-          9999 m in reality.
-        - LARGE group (>= `min_hard_fill_component_size` cells): set to
-          `land_fill_value_m` (99 m - comfortably above DeltaDTM's <=30m
-          validity envelope, so it reads as real, very high elevation and
-          never floods, while still fitting the int16-centimetre output
-          encoding) - genuinely unmeasured terrain (the common case for land
-          nodata), not a small gap worth interpolating over.
-      Areas outside the mask's own coverage are treated the same as known
-      land throughout this split - irrelevant, definitely-dry terrain if
-      the gap is large, an interpolation candidate if it's small.
-    - Missing cells where the mask says ocean (1), lake (2), or river (3):
-      set to 0.0, regardless of gap size. Julia re-zeros ocean cells anyway
-      (``dem[.!landmask] .= 0.0``); lake/river cells are permanent inland
-      water bodies where DeltaDTM has no terrain elevation, and filling with
-      0 lets the flood model propagate through them rather than blocking it
-      with an artificially high land elevation.
+    Every output cell has a real value - no nodata remains. The fill value
+    is decided from `mask_source` (the DeltaDTM validity mask), reprojected
+    onto the DEM's grid, not from a separately sourced land polygon that
+    could misalign with DeltaDTM's own coastline:
 
-    Args:
-        data_catalog: HydroMT data catalog containing `dem_source` and `mask_source`.
-        dem_source: Name of the DEM RasterDataset in `data_catalog`.
-        bbox: Model domain bounding box as ``[minx, miny, maxx, maxy]``.
-        mask_source: Name of the DeltaDTM validity mask RasterDataset in
-            `data_catalog`, used to decide the fill value for missing DEM cells.
-        geoid_offset_raster: Path to the cached global EGM2008 -> GOCO06s
-            geoid-offset raster (see vertical_datum.write_geoid_offset_raster
-            / rule compute_geoid_offset_raster). Always applied: resampled
-            onto this tile's own DEM grid and ADDED to every cell with valid
-            DeltaDTM elevation - never to the fill cells above, which are not
-            real elevations. See src/vertical_datum.py for the full reasoning.
-        min_hard_fill_component_size: Connected-component size (in cells,
-            4-connectivity) at/above which a missing-land gap is hard-filled
-            to `land_fill_value_m` rather than interpolated. Default 10 (i.e. a
-            cell connected to at least 9 other missing-land cells).
-        interp_max_search_distance: `rasterio.fill.fillnodata`'s search
-            radius (pixels) for small-gap interpolation.
-        interp_smoothing_iterations: `rasterio.fill.fillnodata`'s post-fill
-            smoothing pass count for small-gap interpolation.
-        land_fill_value_m: Elevation (m) written for large missing-land gaps
-            (simulation.dem_gap_fill.land_fill_value_m).
-        gebco_source: Name of the GEBCO bathymetry RasterDataset in
-            `data_catalog`, used to reclassify far-offshore mask nodata
-            cells to ocean - see `resolve_offshore_mask_gaps_via_gebco`.
+    - Valid DeltaDTM cells: kept as-is (geoid-corrected, see
+      `geoid_offset_raster`).
+    - Missing land cells (mask says land, or mask has no coverage at all):
+      split by the size of their 4-connected missing-land group. A SMALL
+      group (< `min_hard_fill_component_size` cells) is treated as a
+      plausible sensor gap and INTERPOLATED from surrounding valid
+      elevation; a LARGE group is hard-filled to `land_fill_value_m`
+      (99 m - above DeltaDTM's validity envelope, so it reads as real, very
+      high land that never floods).
+    - Missing ocean/lake/river cells: set to 0.0 regardless of gap size, so
+      the flood model can propagate through permanent water rather than
+      being blocked by an artificially high elevation.
 
-    Returns:
+    Parameters
+    ----------
+    data_catalog : hydromt.DataCatalog
+        HydroMT data catalog containing `dem_source` and `mask_source`.
+    dem_source : str
+        Name of the DEM RasterDataset in `data_catalog`.
+    bbox : list of float
+        Model domain bounding box as ``[minx, miny, maxx, maxy]``.
+    mask_source : str
+        Name of the DeltaDTM validity mask RasterDataset in `data_catalog`,
+        used to decide the fill value for missing DEM cells.
+    geoid_offset_raster : str or Path
+        Path to the cached global EGM2008 -> GOCO06s geoid-offset raster
+        (see `vertical_datum.write_geoid_offset_raster`). Resampled onto
+        this tile's DEM grid and added to every cell with valid DeltaDTM
+        elevation only, never to fill cells.
+    min_hard_fill_component_size : int, default 10
+        Connected-component size (cells, 4-connectivity) at/above which a
+        missing-land gap is hard-filled rather than interpolated.
+    interp_max_search_distance : float, default 100.0
+        `rasterio.fill.fillnodata`'s search radius (pixels) for small-gap
+        interpolation.
+    interp_smoothing_iterations : int, default 0
+        `rasterio.fill.fillnodata`'s post-fill smoothing pass count for
+        small-gap interpolation.
+    land_fill_value_m : float, default DEM_NODATA_M
+        Elevation (m) written for large missing-land gaps
+        (simulation.dem_gap_fill.land_fill_value_m).
+    gebco_source : str, default "gebco"
+        Name of the GEBCO bathymetry RasterDataset in `data_catalog`, used
+        to reclassify far-offshore mask nodata cells to ocean - see
+        `resolve_offshore_mask_gaps_via_gebco`.
+
+    Returns
+    -------
+    xr.DataArray
         The DEM clipped to `bbox`, all missing cells filled, encoded as
-        int16 centimetres (see `encode_dem_cm` - DeltaDTM's <=30m validity
-        envelope fits int16-cm with enormous headroom).
+        int16 centimetres (see `encode_dem_cm`).
     """
     da = data_catalog.get_rasterdataset(dem_source, bbox=bbox)
 
@@ -692,33 +761,36 @@ def extract_dem_mask(
 ) -> xr.DataArray:
     """Clip the DEM-validity mask and reproject it onto the DEM's grid.
 
-    The mask source raster has a different native grid/resolution than the
-    DEM, so it is reprojected (nearest-neighbour) onto the DEM's grid to
-    ensure matching dimensions, as required by the flood model. Cells with no
-    mask coverage at all (value == `nodata_sentinel`) default to land (0) —
-    consistent with `extract_dem`'s own fill rule: areas outside DeltaDTM's
-    own coverage are irrelevant, definitely-dry terrain, not an unknown for a
-    separately sourced land polygon dataset to arbitrate — UNLESS GEBCO
-    bathymetry and connectivity to confirmed real ocean both indicate the gap
-    is actually far-offshore water; see
-    `resolve_offshore_mask_gaps_via_gebco` for the full reasoning and the
-    below-sea-level-inland-basin safeguard. Valid DeltaTM values (0 = land,
+    Reprojected (nearest-neighbour) since the mask source has a different
+    native grid/resolution than the DEM. Cells with no mask coverage at all
+    default to land (0), consistent with `extract_dem`'s own fill rule,
+    UNLESS GEBCO bathymetry and connectivity to confirmed ocean both
+    indicate the gap is actually far-offshore water - see
+    `resolve_offshore_mask_gaps_via_gebco`. Valid DeltaDTM values (0 = land,
     1 = ocean, 2 = lake, 3 = river) are otherwise kept unchanged, except
-    that any small (< 30 cells) ocean-coded connected component is
-    relabeled to lake - see `relabel_small_isolated_ocean_patches` for why.
+    that any small ocean-coded component is relabeled to lake - see
+    `relabel_small_isolated_ocean_patches`.
 
-    Args:
-        data_catalog: HydroMT data catalog containing `mask_source`.
-        mask_source: Name of the DEM-mask RasterDataset in `data_catalog`.
-        bbox: Model domain bounding box as ``[minx, miny, maxx, maxy]``.
-        dem: The tile's DEM, as returned by `extract_dem`, used as the
-            reprojection target grid.
-        nodata_sentinel: Value used by `mask_source` to indicate no data.
-        gebco_source: Name of the GEBCO bathymetry RasterDataset in
-            `data_catalog`, used to reclassify far-offshore mask nodata
-            cells to ocean.
+    Parameters
+    ----------
+    data_catalog : hydromt.DataCatalog
+        HydroMT data catalog containing `mask_source`.
+    mask_source : str
+        Name of the DEM-mask RasterDataset in `data_catalog`.
+    bbox : list of float
+        Model domain bounding box as ``[minx, miny, maxx, maxy]``.
+    dem : xr.DataArray
+        The tile's DEM, as returned by `extract_dem`, used as the
+        reprojection target grid.
+    nodata_sentinel : int, default 255
+        Value used by `mask_source` to indicate no data.
+    gebco_source : str, default "gebco"
+        Name of the GEBCO bathymetry RasterDataset in `data_catalog`, used
+        to reclassify far-offshore mask nodata cells to ocean.
 
-    Returns:
+    Returns
+    -------
+    xr.DataArray
         The DEM-validity mask reprojected onto `dem`'s grid with no nodata cells.
     """
     da_mask = data_catalog.get_rasterdataset(mask_source, bbox=bbox)
@@ -745,37 +817,42 @@ def compute_friction(
     """Clip land use, reproject it onto the DEM's grid, and convert it to friction.
 
     Land use classes are reclassified to Manning's n roughness coefficients
-    using the `lookup_source` lookup table, then converted to a friction
-    value via `roughness / 100`, giving a per-METRE resistance rate. Cells
-    with no valid land use classification are filled with `default_friction`
-    (already in this same per-metre convention, not itself divided by 100).
+    via `lookup_source`, then converted to a per-METRE friction value via
+    `roughness / 100`. Cells with no valid land use classification are
+    filled with `default_friction` (already in this per-metre convention).
 
-    This raster does NOT include the grid-resolution correction the eikonal
-    solver actually needs (src/eikonal.py's discretisation has no distance
-    term, so it needs cost-per-GRID-STEP, not cost-per-metre) - that's
-    applied separately, at runtime, via `simulation.flooding.
-    friction_scale_factor` (see config.yml's own comment on that key and
-    docs/methods_02_flood_depth.md section 2.1), specifically so this
+    This raster excludes the grid-resolution correction the eikonal solver
+    needs (its discretisation has no distance term, so it needs
+    cost-per-GRID-STEP, not cost-per-metre) - that is applied separately at
+    runtime via `simulation.flooding.friction_scale_factor`, so this
     expensive land-use raster is computed once and reused unscaled across
     every sweep that varies a different parameter.
 
-    Args:
-        data_catalog: HydroMT data catalog containing `lulc_source` and `lookup_source`.
-        lulc_source: Name of the land use RasterDataset in `data_catalog`.
-        lookup_source: Name of the land-use-to-roughness lookup DataFrame in
-            `data_catalog`. Must have an index named `copernicus_worldcover`
-            and a `manning_n` column.
-        bbox: Tile bounding box as `[minx, miny, maxx, maxy]`.
-        dem: The tile's DEM, as returned by `extract_dem`, used as the
-            reprojection target grid.
-        default_friction: Friction value written for cells with no valid land
-            use classification (e.g. ocean, outside LULC coverage). Should
-            match the Aqueduct core default (flooding.default_friction in config).
+    Parameters
+    ----------
+    data_catalog : hydromt.DataCatalog
+        HydroMT data catalog containing `lulc_source` and `lookup_source`.
+    lulc_source : str
+        Name of the land use RasterDataset in `data_catalog`.
+    lookup_source : str
+        Name of the land-use-to-roughness lookup DataFrame in `data_catalog`.
+        Must have an index named `copernicus_worldcover` and a `manning_n`
+        column.
+    bbox : list of float
+        Tile bounding box as ``[minx, miny, maxx, maxy]``.
+    dem : xr.DataArray
+        The tile's DEM, as returned by `extract_dem`, used as the
+        reprojection target grid.
+    default_friction : float
+        Friction value written for cells with no valid land use
+        classification (e.g. ocean, outside LULC coverage). Should match the
+        Aqueduct core default (flooding.default_friction in config).
 
-    Returns:
+    Returns
+    -------
+    xr.DataArray
         A friction raster on `dem`'s grid with no nodata cells, encoded as
-        int16 (see `encode_friction_int16` - real land-cover-derived values
-        comfortably fit int16 x FRICTION_SCALE).
+        int16 (see `encode_friction_int16`).
     """
     _MISSING = np.float32(-9999.0)  # internal sentinel for unclassified cells
 
@@ -870,19 +947,29 @@ def save_raster(
 ) -> None:
     """Save a DataArray as a raster file using the workflow's raster output settings.
 
-    Tiled explicitly (512x512 blocks) regardless of `raster_config["driver"]`, since
-    plain GTiff (unlike COG) defaults to striped layout - tiling matters here because
-    downstream code (merge.py's per-block reads, tile_split.py's windowed land-pixel
-    count) reads small rectangular windows, not full scanlines.
+    Writes via a temp file + atomic rename (see `_atomic_raster_write`), and
+    creates `output_path`'s parent directory if missing. Tiled explicitly
+    (512x512 blocks) regardless of `raster_config["driver"]`, since plain
+    GTiff (unlike COG) defaults to striped layout, and downstream code
+    (merge.py's per-block reads, tile_split.py's windowed land-pixel count)
+    reads small rectangular windows, not full scanlines. For an integer
+    `dtype`, the predictor is forced to 1 (none) regardless of
+    `raster_config["predictor"]`, since predictor 2 was found empirically to
+    be worse than no predictor for this pipeline's integer rasters under zstd.
 
-    Args:
-        da: The data array to save. Must have `da.raster.crs`, `da.raster.transform`,
-            `da.raster.width` and `da.raster.height` accessors (provided by rioxarray
-            via HydroMT's raster accessor).
-        output_path: Destination file path.
-        raster_config: The workflow's `raster_format` configuration section,
-            with keys `driver`, `compression`, `predictor` and `nodata`.
-        dtype: Output data type.
+    Parameters
+    ----------
+    da : xr.DataArray
+        The data array to save. Must have `da.raster.crs`, `da.raster.transform`,
+        `da.raster.width` and `da.raster.height` accessors (provided by
+        rioxarray via HydroMT's raster accessor).
+    output_path : str or Path
+        Destination file path.
+    raster_config : dict
+        The workflow's `raster_format` configuration section, with keys
+        `driver`, `compression`, `predictor` and `nodata`.
+    dtype : str, default "float32"
+        Output data type.
     """
     # raster_config["predictor"] (3) is GDAL's floating-point predictor -
     # correct for the float32 rasters this config was written for, but wrong
@@ -927,18 +1014,21 @@ def save_nodata_raster(reference_path: str | Path, output_path: str | Path, rast
     Used as a placeholder `waterdepth` output for tiles that are skipped
     instead of being run through Aqueduct (see
     `aqueduct_runner.log_skipped_tile`). Filled with `WATERDEPTH_NODATA_INT16`
-    (the int16 counterpart of `merge.AQUEDUCT_NODATA` - see
-    `decode_waterdepth_cm`, which maps it back to `AQUEDUCT_NODATA` at merge
-    time), so `merge.merge_tile_rasters_chunk` ignores this tile entirely
-    when merging results.
+    so `merge.merge_tile_rasters_chunk` ignores this tile entirely when
+    merging results. Writes via a temp file + atomic rename (see
+    `_atomic_raster_write`), and creates `output_path`'s parent directory if
+    missing.
 
-    Args:
-        reference_path: Path to a raster (e.g. the tile's DEM) whose grid
-            (transform, CRS, width, height) the output should match.
-        output_path: Destination file path.
-        raster_config: The workflow's `raster_format` configuration section,
-            with keys `driver` and `compression` (predictor is fixed at 1 -
-            see `save_raster`'s note on why that beats 2 empirically here).
+    Parameters
+    ----------
+    reference_path : str or Path
+        Path to a raster (e.g. the tile's DEM) whose grid (transform, CRS,
+        width, height) the output should match.
+    output_path : str or Path
+        Destination file path.
+    raster_config : dict
+        The workflow's `raster_format` configuration section, with keys
+        `driver` and `compression` (predictor is fixed at 1).
     """
     with retry_transient_io(rasterio.open, reference_path) as ref:
         profile = ref.profile
@@ -965,18 +1055,23 @@ def save_waterdepth_raster(
 ) -> None:
     """Write a genuinely-computed `waterdepth` raster from `flood_model.flood_depth_dense`.
 
-    int16 centimetres (see `encode_waterdepth_cm`) - real flood depths never
-    approach int16's ceiling, so this is a pure I/O win with no meaningful
-    precision loss (see conversation 2026-08-01). `merge.
-    merge_tile_rasters_chunk` decodes this format via `merge.
-    decode_waterdepth_array`.
+    Encoded as int16 centimetres (see `encode_waterdepth_cm`) - real flood
+    depths never approach int16's ceiling, so this is a pure I/O win with no
+    meaningful precision loss. `merge.merge_tile_rasters_chunk` decodes this
+    format via `merge.decode_waterdepth_array`. Writes via a temp file +
+    atomic rename (see `_atomic_raster_write`), and creates `output_path`'s
+    parent directory if missing.
 
-    Args:
-        reference_path: Path to a raster (e.g. the tile's DEM) whose grid
-            (transform, CRS, width, height) the output should match.
-        waterdepth: The computed water depth array, same shape as the
-            reference raster, `0.0` where not flooded.
-        output_path: Destination file path.
+    Parameters
+    ----------
+    reference_path : str or Path
+        Path to a raster (e.g. the tile's DEM) whose grid (transform, CRS,
+        width, height) the output should match.
+    waterdepth : np.ndarray
+        The computed water depth array (metres), same shape as the
+        reference raster, `0.0` where not flooded.
+    output_path : str or Path
+        Destination file path.
     """
     with retry_transient_io(rasterio.open, reference_path) as ref:
         transform, crs = ref.transform, ref.crs
@@ -1019,49 +1114,48 @@ def average_pool_to_grid(
     dst_shape: tuple[int, int],
     numerator_nodata: float,
 ) -> np.ndarray:
-    """Area-weighted fraction of each destination cell belonging to a class,
-    disaggregated from a fine-resolution source grid whose own valid domain
-    may only partially cover a given destination cell.
+    """Compute the area-weighted fraction of each destination cell belonging to a class.
 
-    `numerator`: fine-resolution array, `1.0` where a fine cell belongs to
-        the class of interest, `numerator_nodata` everywhere else INSIDE the
-        valid domain is never correct here - nodata must mark cells outside
-        the domain, not "in the domain but not in the class" (those must be
-        `0.0`, not nodata, or they would be silently excluded from both the
-        numerator's sum and its own average).
-    `domain`: fine-resolution array, `1.0` where a fine cell is inside the
-        valid domain (regardless of class), `0.0` outside. No nodata - every
-        fine cell must be one or the other.
+    Disaggregates from a fine-resolution source grid whose valid domain may
+    only partially cover a given destination cell, using the identity
+    ``ff = A x B`` where ``A = reproject(numerator, average, nodata
+    excluded) = sum(class) / n_in_domain`` and ``B = reproject(domain,
+    average) = n_in_domain / n_total``, so ``A x B = sum(class) / n_total``
+    and `NaN` propagates correctly for zero-coverage cells. Runs as two
+    SEPARATE `reproject()` calls, never combined into one multi-band call:
+    `reproject()` shares a single validity mask across bands under
+    `Resampling.average`, so a combined call silently corrupts `domain`'s
+    average wherever `numerator` is nodata (confirmed on real production
+    data: ~360,000 coarse cells differed from the two-call version).
 
-    Returns a `dst_shape` array: `NaN` where a destination cell has zero
-    domain coverage (matches `dst_nodata` conventions elsewhere in this
-    module - caller decides how to encode that on write), otherwise the
-    fraction of that destination cell's *in-domain* fine cells belonging to
-    the class - i.e. `sum(class) / n_total`, not `sum(class) / n_in_domain`.
+    Parameters
+    ----------
+    numerator : np.ndarray
+        Fine-resolution array, `1.0` where a fine cell belongs to the class
+        of interest, `0.0` where in-domain but not in the class, and
+        `numerator_nodata` only outside the valid domain.
+    domain : np.ndarray
+        Fine-resolution array, `1.0` where a fine cell is inside the valid
+        domain (regardless of class), `0.0` outside. No nodata.
+    src_transform : affine.Affine
+        Affine transform of `numerator`/`domain`'s source grid.
+    src_crs : rasterio.crs.CRS
+        CRS of the source grid.
+    dst_transform : affine.Affine
+        Affine transform of the destination grid.
+    dst_crs : rasterio.crs.CRS
+        CRS of the destination grid.
+    dst_shape : tuple of int
+        Destination array shape as ``(height, width)``.
+    numerator_nodata : float
+        Nodata value in `numerator`, marking cells outside the valid domain.
 
-    Extracted from `compute_flood_fraction_chunk.py`'s original inline
-    two-pass logic (2026-08) - generalized to a standalone function so a
-    second caller (population disaggregation across TP/FP/FN/TN class
-    masks, in the coastal flood-extent validation pipeline) could reuse it
-    without duplicating the same two-pass logic; that second caller was
-    later removed (2026-10, population weighting dropped from that
-    pipeline) - this function itself stays, still used by
-    compute_flood_fraction_chunk.py.
-
-    Uses the identity `ff = A x B`:
-        A = reproject(numerator, average, nodata excluded) = sum(class) / n_in_domain
-        B = reproject(domain,    average, no nodata)       = n_in_domain / n_total
-        A x B = sum(class) / n_total; NaN x anything = NaN, so cells with
-        zero domain coverage correctly stay nodata regardless of B.
-
-    MUST run as two SEPARATE `reproject()` calls, never combined into one
-    multi-band call: `reproject()` shares a single validity mask across
-    bands under `Resampling.average`, so if `numerator` and `domain` were
-    packed as two bands of one array and warped together, band B's average
-    would be silently corrupted wherever band A was nodata (which includes
-    "in-domain but not in the class", not just "outside the domain").
-    Confirmed on real production data when this was tried: ~360,000 coarse
-    cells differed from the two-call version, each by exactly 1.0.
+    Returns
+    -------
+    np.ndarray
+        `dst_shape` array: `NaN` where a destination cell has zero domain
+        coverage, otherwise the fraction of that cell's in-domain fine cells
+        belonging to the class (``sum(class) / n_total``).
     """
     out_h, out_w = dst_shape
     dst_kwargs = dict(

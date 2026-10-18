@@ -55,6 +55,13 @@ def _run(cmd: list[str]) -> None:
 
 
 def main() -> None:
+    """Parse CLI arguments and run the friction-sweep calibration analysis pipeline.
+
+    Runs, as subprocesses, the friction-sweep metrics, worst-tile panels,
+    validation-results figures and forcing-check figures steps in sequence
+    (or, with ``--forcing-checks-only``, just the last one), picking the
+    best friction scale factor by pooled CSI or bias on the way.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")

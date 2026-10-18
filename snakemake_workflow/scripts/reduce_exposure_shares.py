@@ -21,6 +21,13 @@ from pathlib import Path
 
 
 def main() -> None:
+    """Parse CLI arguments and write the globally-reduced per-country shares.
+
+    Sums every pass-1 batch's raw (amount, capacity) totals matched by
+    ``--parts-glob``, then writes each (slr_intensity, iso) share =
+    amount / capacity (skipping entries where capacity is 0) as JSON to
+    ``--out``. Raises ``SystemExit`` if no part files match the glob.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--parts-glob", required=True, help="glob pattern matching every pass-1 batch's output JSON")
     parser.add_argument("--out", required=True)

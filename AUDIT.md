@@ -792,7 +792,7 @@ Baseline (Phase 0): thailand_bangkok 453 jobs (run_aqueduct 90, extract_boundari
 - Docs and docstrings: call the env `gfm`, noting "(`gfm_python_preprocessing` on the Windows machine)". Add dedup and the rerun scripts to methods_04a.
 - *Verify*: a script that checks every repo path mentioned in `*.md`, `*.py` docstrings and `*.sh` comments exists; `snakemake -n all` is unchanged.
 
-**Phase 4b: NumPy-style docstrings** (own phase, user 2026-10-17; text only).
+**Phase 4b: NumPy-style docstrings** (own phase, user 2026-10-17; text only). ✅ *done 2026-10-18: 71 CORE modules, 250 public functions/classes, all NumPy-style. Docstring-only verified by AST comparison (docstrings stripped) against HEAD.*
 - Convert the public functions/classes of every CORE module (§3) to short NumPy-style docstrings (Parameters / Returns / Raises where useful) that say what and why, not a restatement of the code. Keep the existing explanatory prose where it carries the *why*.
 - One subagent per module, one commit per directory (`src/`, `snakemake_workflow/scripts/`, `sfincs_tiles/`, `preparation/`, `analysis/`, `validation/`).
 - Other phases leave docstring style alone.

@@ -54,12 +54,23 @@ def compute_geoid_offset_grid(
     much finer grid by `sample_geoid_offset` below, since the offset field
     itself is smooth at DEM (arc-second) scale.
 
-    Args:
-        goco06s_gfc: Path to GOCO06s.gfc (ICGEM format).
-        egm2008_gfc: Path to EGM2008.gfc (ICGEM format).
+    Parameters
+    ----------
+    goco06s_gfc : str or Path
+        Path to GOCO06s.gfc (ICGEM format).
+    egm2008_gfc : str or Path
+        Path to EGM2008.gfc (ICGEM format).
 
-    Returns:
-        (offset_arr, transform, crs) - offset_arr in metres.
+    Returns
+    -------
+    tuple of (numpy.ndarray, Affine, str)
+        ``(offset_arr, transform, crs)``, where ``offset_arr`` is the offset
+        grid in metres.
+
+    Raises
+    ------
+    ImportError
+        If `pyshtools` or `boule` is not installed.
     """
     try:
         import pyshtools as pysh
@@ -130,6 +141,16 @@ def write_geoid_offset_raster(
     (preprocessing.smk) - every per-tile `extract_dem` job then reads this
     cached raster via `sample_geoid_offset` instead of resynthesizing the
     spherical harmonics itself.
+
+    Parameters
+    ----------
+    goco06s_gfc : str or Path
+        Path to GOCO06s.gfc (ICGEM format).
+    egm2008_gfc : str or Path
+        Path to EGM2008.gfc (ICGEM format).
+    out_path : str or Path
+        Destination path for the cached offset GeoTIFF; parent directories
+        are created if they do not already exist.
     """
     offset_arr, transform, crs = compute_geoid_offset_grid(goco06s_gfc, egm2008_gfc)
 
@@ -157,7 +178,25 @@ def sample_geoid_offset(
     own DEM clip window (cheap - just a small bilinear resample of an
     already-computed, already-cached global field).
 
-    Returns a float32 array of shape (dst_height, dst_width), in metres.
+    Parameters
+    ----------
+    offset_raster_path : str or Path
+        Path to the cached global geoid-offset GeoTIFF (as written by
+        `write_geoid_offset_raster`).
+    dst_transform : Affine
+        Affine transform of the destination grid.
+    dst_crs : rasterio CRS or compatible
+        Coordinate reference system of the destination grid.
+    dst_height : int
+        Number of rows in the destination grid.
+    dst_width : int
+        Number of columns in the destination grid.
+
+    Returns
+    -------
+    numpy.ndarray
+        Float32 array of shape (dst_height, dst_width): the offset, in
+        metres, resampled onto the destination grid.
     """
     with retry_transient_io(rasterio.open, offset_raster_path) as src:
         offset_on_dst = np.empty((dst_height, dst_width), dtype=np.float32)

@@ -164,6 +164,26 @@ def _write_size_histogram(final: gpd.GeoDataFrame, path: Path) -> None:
 
 
 def run(config: dict) -> None:
+    """Build the connectivity-first tile/domain manifest and write tile_grid.path.
+
+    Runs the full pipeline (load_raw_tile_index, build_connectivity_graph,
+    connected_components, split_component_to_budget, merge_small_domains_tiered,
+    compute_hop_distances, pad_hop0_domains_bbox, assign_tile_id - see module
+    docstring) via src/connectivity_tiling.py. Phase 3 (splitting) is
+    checkpointed and resumes automatically from
+    tile_generation_phase3_checkpoint.jsonl in the output directory. Writes the
+    final tile grid plus one intermediate GeoPackage per phase, a domain-size
+    histogram PNG, and the final-domains/dropped-unreachable methods maps, all
+    into the output path's own directory.
+
+    Parameters
+    ----------
+    config : dict
+        Parsed config.yml. Uses ``config["tile_generation"]`` (ConnectivityConfig
+        fields), ``config["tile_grid"]["path"]`` (output GeoPackage path),
+        ``config["paths"]`` (data catalog root), and the DeltaDTM mask/DEM
+        catalog entries.
+    """
     tg_cfg = config["tile_generation"]
     output_path = Path(config["tile_grid"]["path"])
     intermediate_dir = output_path.parent

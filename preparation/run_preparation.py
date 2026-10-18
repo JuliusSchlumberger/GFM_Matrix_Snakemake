@@ -125,6 +125,14 @@ def _run_step(fn, label: str, fail_fast: bool, **kwargs) -> bool:
 
 
 def main() -> None:
+    """Parse CLI arguments and run the selected preparation pipeline steps in order.
+
+    Runs sync_deltadtm, fix_ocean_mask, build_deltadtm_vrt, tile_generation
+    and boundary_conditions (or only the STEPs named on the command line),
+    loading config.yml once and catching/reporting each step's exceptions so
+    later steps still run unless --fail-fast is given. Exits with status 1
+    if any step failed.
+    """
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     _default_cfg = str(SCRIPTS_DIR.parent / "snakemake_workflow" / "config" / "config.yml")

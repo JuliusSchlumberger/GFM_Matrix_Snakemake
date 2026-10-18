@@ -66,6 +66,13 @@ def _run(cmd: list[str], label: str, fail_fast: bool) -> bool:
 
 
 def main() -> None:
+    """Parse CLI arguments and run validate_country.py + plot_agreement_map.py for every country.
+
+    Discovers countries from the benchmark catalog when ``--countries`` is omitted, runs both
+    steps per country as subprocesses (one country's crash doesn't abort the rest unless
+    ``--fail-fast``), then concatenates every country's metrics CSV into one cross-country
+    summary CSV. Exits with status 1 if no countries are found or any step failed.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     _default_cfg = str(SCRIPTS_DIR.parent / "snakemake_workflow" / "config" / "config.yml")
     parser.add_argument("--config", default=_default_cfg)

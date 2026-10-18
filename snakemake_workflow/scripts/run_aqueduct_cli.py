@@ -92,6 +92,16 @@ def _stage_file_locally(src_path: str) -> str:
 
 
 def main() -> None:
+    """Run this script: solve (or skip/placeholder) one (tile, rp, slr) combo.
+
+    Parses --config/--tile-id/--return-period/--waterlevel-name, then either
+    returns early (output already done, or tile pre-marked OOM - writing a
+    nodata placeholder in the OOM case), writes a zero-waterdepth placeholder
+    when this scenario has no boundaries/no upstream flooding to seed from, or
+    runs the real flood solve and writes `waterdepth_{rp}_{slr}.tif`. Always
+    logs a run-timing record (see module docstring) except on the
+    already-done early return.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, help="Path to a fully-resolved config.yml (e.g. resolved_config.yml)")
     parser.add_argument("--tile-id", required=True)

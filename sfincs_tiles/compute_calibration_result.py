@@ -98,6 +98,31 @@ def _compare(depth: np.ndarray, wet: np.ndarray, ref: dict) -> dict:
 
 
 def compute_result(tile_dir: Path, fsfs: list[float], flooding: dict, river_code: int) -> dict:
+    """Build the merged calibration_result dict for one tile.
+
+    Compares SFINCS's own hmax_subgrid.tif against the bathtub and every
+    eikonal friction-sweep output on SFINCS's 30 m subgrid, restricted to
+    real land (mask.tif == LAND_CODE) that is active in SFINCS
+    (sfincs.msk > 0). Bathtub flooding is pruned to coast-connected cells
+    first; eikonal and SFINCS results are connected by construction.
+
+    Parameters
+    ----------
+    tile_dir : Path
+        Tile directory containing ``inputs/``, ``sfincs_model/`` and ``outputs/``.
+    fsfs : list of float
+        Friction scale factors to look for eikonal results at.
+    flooding : dict
+        The simulation's "flooding" config block, copied verbatim into the
+        result's "settings".
+    river_code : int
+        Mask code identifying river cells, passed to `prune_to_ocean_connected`.
+
+    Returns
+    -------
+    dict
+        The tile's calibration_result.json content (see module docstring for schema).
+    """
     sfincs_dir = tile_dir / "sfincs_model"
     out_dir = tile_dir / "outputs"
     with retry_transient_io(rasterio.open, sfincs_dir / "hmax_subgrid.tif") as src:
@@ -168,6 +193,11 @@ def compute_result(tile_dir: Path, fsfs: list[float], flooding: dict, river_code
 
 
 def main() -> None:
+    """Parse CLI arguments, compute one tile's calibration result and write it to disk.
+
+    Writes ``{tile_dir}/outputs/calibration_result.json`` and prints a
+    one-line summary of SFINCS/bathtub/eikonal flooded area and CSI scores.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--base-dir-name", required=True)

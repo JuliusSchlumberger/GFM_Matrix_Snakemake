@@ -15,8 +15,19 @@ import yaml
 
 
 def read_root(config_path: Path) -> Path:
-    """Returns paths.root from config_path, overridden by a sibling
-    config_local.yml if one exists."""
+    """Resolve the data root path from a config file, honoring a local override.
+
+    Parameters
+    ----------
+    config_path : Path
+        Path to the YAML config file containing a ``paths.root`` entry.
+
+    Returns
+    -------
+    Path
+        `paths.root` from `config_path`, overridden by ``paths.root`` in a
+        sibling ``config_local.yml`` if one exists.
+    """
     with open(config_path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     root = cfg["paths"]["root"]
@@ -33,9 +44,29 @@ def read_root(config_path: Path) -> Path:
 
 
 def resolve_catalog_path(catalog_path: Path, root: Path, source_name: str) -> Path:
-    """Resolves the on-disk path for a data_catalog_gfm.yml entry by joining
-    root with the entry's `path` field. Handles only plain relative path
-    entries, not full hydromt.DataCatalog driver parsing.
+    """Resolve the on-disk path for a data-catalog entry.
+
+    Handles only plain relative ``path`` entries, not full
+    hydromt.DataCatalog driver parsing.
+
+    Parameters
+    ----------
+    catalog_path : Path
+        Path to the YAML data catalog (e.g. ``data_catalog_gfm.yml``).
+    root : Path
+        Data root directory to join the entry's relative path against.
+    source_name : str
+        Key of the catalog entry to resolve.
+
+    Returns
+    -------
+    Path
+        `root` joined with the entry's ``path`` field.
+
+    Raises
+    ------
+    KeyError
+        If `source_name` is not present in the catalog.
     """
     with open(catalog_path, encoding="utf-8") as f:
         catalog = yaml.safe_load(f)

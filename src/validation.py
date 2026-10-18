@@ -36,7 +36,36 @@ from config_utils import retry_transient_io
 
 @dataclass
 class BenchmarkSpec:
-    """Parsed from one data_catalog_validation.yml entry's `meta:` block."""
+    """Per-benchmark validation settings, parsed from one catalog entry's `meta:` block.
+
+    Attributes
+    ----------
+    key : str
+        The catalog entry's own key, used to re-fetch the source data later.
+    data_type : str
+        Hydromt data type; only "GeoDataFrame" (vector benchmarks) is supported.
+    country_iso : str
+        ISO-3 country code the benchmark covers.
+    hazard_type : str
+        "coastal", "fluvial", or "mixed"; only "coastal" is comparable to this model.
+    variable : str
+        Benchmark variable; only "extent" (binary wet/dry) is supported.
+    coverage : str
+        "national" (the source surveyed the whole coastline, so outside-polygon means
+        surveyed-dry) or "partial".
+    attribute_filter : dict or None
+        ``{column: value}`` rows to keep when loading the benchmark; None keeps all rows.
+    regions : dict[str, list[float]] or None
+        ``{name: [minx, miny, maxx, maxy]}`` named sub-regions covering the whole
+        country, used to tag evaluation units for per-region reporting.
+    geogunit_ids : list[int] or None
+        Explicit WRI geogunit_107 unit ID(s) to mask to, bypassing the
+        ``country_iso``-based lookup for benchmarks covering a sub-national unit that
+        shares its ISO code with sibling units the benchmark does not cover.
+    comparison_return_periods : list[int] or None
+        Extra native return periods (years) to also score this benchmark against,
+        beyond the single global ``validation.return_period``.
+    """
 
     key: str
     data_type: str              # "GeoDataFrame" (vector benchmarks only)
@@ -77,25 +106,21 @@ class BenchmarkSpec:
 def fix_catalog_meta_encoding(catalog, yml_path: str | Path) -> None:
     """Re-read `yml_path` as UTF-8 and patch each already-loaded source's `meta` dict in-place.
 
-    `hydromt.DataCatalog.from_yml` opens catalog yaml files with a bare
-    `open(...)` (no explicit encoding), so it inherits the OS default
-    (`locale.getpreferredencoding()`) - cp1252 on Windows. Any non-ASCII
-    byte in a UTF-8-encoded catalog file (e.g. an accented character inside
-    an `attribute_filter` value) is then silently mojibake-corrupted
-    ('Ñ' -> 'Ã' + U+2018) before it ever reaches Python. There is no
-    exception anywhere in that path - the only symptom is
-    `filter_benchmark`'s exact-match `==` against the (correctly
-    UTF-8-decoded) shapefile attribute never matching anything, so every
-    benchmark row gets silently dropped. Re-parsing the same file explicitly as UTF-8
-    and overwriting `meta` for every already-loaded source fixes this
-    regardless of the host OS's default locale, without touching hydromt
-    itself.
+    `hydromt.DataCatalog.from_yml` opens catalog YAML with a bare `open(...)`, so it
+    inherits the OS default encoding (cp1252 on Windows); any non-ASCII byte (e.g. an
+    accented `attribute_filter` value) is then silently mojibake-corrupted with no
+    exception, and `filter_benchmark`'s exact `==` match against it never matches,
+    silently dropping every row. Re-parsing explicitly as UTF-8 and overwriting `meta`
+    fixes this regardless of host locale, without touching hydromt itself. Call once
+    right after building any DataCatalog over a catalog whose `meta:` blocks may
+    contain non-ASCII text.
 
-    Call this once, right after building any DataCatalog over
-    data_catalog_validation.yml (or any other catalog whose `meta:` blocks
-    may contain non-ASCII text) - both validate_country.py and
-    run_validation.py's country-discovery scan need it, so it lives here
-    rather than as a private helper duplicated in just one of them.
+    Parameters
+    ----------
+    catalog : hydromt.DataCatalog
+        Already-loaded catalog whose sources' `meta` dicts are patched in-place.
+    yml_path : str or Path
+        Path to the same catalog YAML file `catalog` was loaded from.
     """
     with open(yml_path, encoding="utf-8") as f:
         raw = yaml.safe_load(f)
@@ -108,9 +133,21 @@ def fix_catalog_meta_encoding(catalog, yml_path: str | Path) -> None:
 def load_benchmark_spec(catalog, key: str) -> BenchmarkSpec:
     """Read one catalog entry's `meta:` block into a BenchmarkSpec.
 
-    `source.meta`/`source.data_type` are real hydromt DataAdapter attributes
-    (confirmed against this repo's installed hydromt version, 2026-09) - not
-    a re-parse of the YAML.
+    Reads `source.meta`/`source.data_type`, real hydromt DataAdapter attributes
+    (confirmed against this repo's installed hydromt version, 2026-09), not a
+    re-parse of the YAML.
+
+    Parameters
+    ----------
+    catalog : hydromt.DataCatalog
+        Catalog to look `key` up in.
+    key : str
+        The catalog entry's key.
+
+    Returns
+    -------
+    BenchmarkSpec
+        The parsed per-benchmark settings for `key`.
     """
     source = catalog.get_source(key)
     meta = dict(source.meta or {})
@@ -129,21 +166,26 @@ def load_benchmark_spec(catalog, key: str) -> BenchmarkSpec:
 
 
 def primary_region_name(regions: dict[str, list[float]] | None) -> str | None:
-    """Which named region is "the main one" - the largest by bbox area
-    (lon/lat degrees - an approximation, fine for picking one region out of
-    a handful, not a real-area computation). Works uniformly for both
-    `regions:` usage patterns: a disjoint partition (a mainland vs. much
-    smaller islands/territories) and a nested whole-territory + sub-area
-    set (Wales/Scotland/New Brunswick - the whole-territory bbox is by
-    construction bigger than any sub-area bbox it contains). Returns None
-    if `regions` is empty/None - caller should fall back to "the whole
-    benchmark, no region split" in that case.
+    """Pick the "main" named region: the one with the largest bbox area.
 
-    Used to pick a single representative region for a benchmark-wide
-    diagnostic that doesn't need (or want) one output per region - e.g. the
-    tile-coverage plot - distinct from `_blend_regions`' own bbox-
-    containment check in validate_country.py, which exists to avoid
-    double-counting nested regions, not to pick a display region.
+    Area is lon/lat-degree bbox area (an approximation, fine for picking one region
+    out of a handful). Works for both `regions:` usage patterns: a disjoint partition
+    (mainland vs. smaller islands) and a nested whole-territory + sub-area set
+    (the whole-territory bbox is by construction bigger than any sub-area it
+    contains). Used to pick one representative region for a benchmark-wide
+    diagnostic that wants a single output (e.g. the tile-coverage plot), not one
+    per region.
+
+    Parameters
+    ----------
+    regions : dict[str, list[float]] or None
+        ``{name: [minx, miny, maxx, maxy]}``.
+
+    Returns
+    -------
+    str or None
+        The largest region's name, or None if `regions` is empty/None (caller should
+        fall back to "the whole benchmark, no region split").
     """
     if not regions:
         return None
@@ -158,12 +200,21 @@ def primary_region_name(regions: dict[str, list[float]] | None) -> str | None:
 def load_benchmark_full(catalog, spec: BenchmarkSpec) -> gpd.GeoDataFrame:
     """Load and filter ALL of a vector benchmark's geometries (no bbox).
 
-    Loads everything once per country/benchmark_key rather than per
-    evaluation unit - there is no repeated bbox-scoped catalog read to make
-    nodata-safe here.
+    Loads everything once per country/benchmark_key rather than per evaluation
+    unit, then applies `spec.attribute_filter` (keep only matching rows).
 
-    Applies `spec.attribute_filter` (keep only matching rows) - read from
-    the catalog entry's own `meta`, not hardcoded per country.
+    Parameters
+    ----------
+    catalog : hydromt.DataCatalog
+        Catalog to read `spec.key` from.
+    spec : BenchmarkSpec
+        The benchmark's parsed settings; `spec.key` and `spec.attribute_filter` are used.
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        The filtered benchmark geometries, or an empty GeoDataFrame (CRS EPSG:4326)
+        if the source has none.
     """
     gdf = catalog.get_geodataframe(spec.key)
     if gdf is None or gdf.empty:
@@ -172,7 +223,22 @@ def load_benchmark_full(catalog, spec: BenchmarkSpec) -> gpd.GeoDataFrame:
 
 
 def filter_benchmark(gdf: gpd.GeoDataFrame, spec: BenchmarkSpec) -> gpd.GeoDataFrame:
-    """Apply `spec.attribute_filter` to an already-loaded benchmark GeoDataFrame."""
+    """Keep only the rows matching `spec.attribute_filter` in an already-loaded benchmark.
+
+    Parameters
+    ----------
+    gdf : geopandas.GeoDataFrame
+        Benchmark geometries to filter.
+    spec : BenchmarkSpec
+        Only `spec.attribute_filter` (``{column: value}`` rows to keep) is used; no
+        filtering is applied if it is None.
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        `gdf` restricted to the matching rows (unchanged if `gdf` is empty or
+        `spec.attribute_filter` is None).
+    """
     if gdf.empty:
         return gdf
     if spec.attribute_filter:
@@ -192,16 +258,33 @@ def benchmark_fraction_from_vector(
     dst_shape: tuple[int, int],
     supersample: int = 5,
 ) -> np.ndarray:
-    """Coverage fraction (0-1) of `gdf`'s geometries within each dst cell.
+    """Compute the coverage fraction (0-1) of `gdf`'s geometries within each dst cell.
 
     Rasterizes at `supersample`x finer resolution than the destination grid
-    (reprojecting gdf to dst_crs first if needed), then block-averages each
-    supersample x supersample sub-pixel block down to one destination cell.
-    Unbiased, unlike `rasterize(all_touched=False)` (systematically loses
-    thin coastal strips) or `all_touched=True` (systematically inflates
-    them). Also gives an exact benchmark area for the
-    coverage diagnostic, independent of any wet-fraction threshold, if the
-    caller sums this directly (before thresholding).
+    (reprojecting `gdf` to `dst_crs` first if needed), then block-averages each
+    supersample x supersample sub-pixel block down to one destination cell. Unbiased,
+    unlike `rasterize(all_touched=False)` (systematically loses thin coastal strips)
+    or `all_touched=True` (systematically inflates them). Summing the result directly,
+    before any thresholding, also gives an exact benchmark area for a coverage
+    diagnostic.
+
+    Parameters
+    ----------
+    gdf : geopandas.GeoDataFrame
+        Benchmark geometries.
+    dst_transform : affine.Affine
+        Affine transform of the destination grid.
+    dst_crs
+        CRS of the destination grid.
+    dst_shape : tuple[int, int]
+        ``(height, width)`` of the destination grid.
+    supersample : int, default 5
+        Sub-pixel rasterization factor per destination-grid axis.
+
+    Returns
+    -------
+    numpy.ndarray
+        float32 array of shape `dst_shape`, each cell's covered fraction in [0, 1].
     """
     if gdf.crs is not None and dst_crs is not None and gdf.crs != dst_crs:
         gdf = gdf.to_crs(dst_crs)
@@ -224,29 +307,70 @@ def benchmark_fraction_from_vector(
 
 
 def wet_mask_from_fraction(fraction: np.ndarray, wet_fraction: float = 0.5) -> np.ndarray:
-    """Binary benchmark-wet decision from a coverage fraction grid (the 0.5-rule threshold)."""
+    """Threshold a coverage-fraction grid into a binary benchmark-wet mask.
+
+    Parameters
+    ----------
+    fraction : numpy.ndarray
+        Per-cell benchmark coverage fraction (0-1), e.g. from
+        `benchmark_fraction_from_vector`.
+    wet_fraction : float, default 0.5
+        Minimum fraction for a cell to count as wet.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean array, same shape as `fraction`; True where ``fraction >= wet_fraction``.
+    """
     return fraction >= wet_fraction
 
 
 # ── Evaluation domain ────────────────────────────────────────────────────────
 
 def model_domain_mask(depth: np.ndarray, nodata: float = -9999.0) -> np.ndarray:
-    """True where the model actually computed a value here (not outside its domain)."""
+    """Mark cells where the model actually computed a value (inside its domain).
+
+    Parameters
+    ----------
+    depth : numpy.ndarray
+        Model flood-depth grid.
+    nodata : float, default -9999.0
+        Sentinel value marking cells outside the model domain.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean array, same shape as `depth`; True where ``depth != nodata``.
+    """
     return depth != nodata
 
 
 def tri_domain_mask(
     perimeter_gdf: gpd.GeoDataFrame, dst_transform: Affine, dst_crs, dst_shape: tuple[int, int],
 ) -> np.ndarray:
-    """Evaluation domain for a "perimeter" study area: the perimeter
-    polygon(s) rasterized exactly as-is (point-in-polygon containment,
-    `all_touched=False`) - no buffer at all: an official study-area
-    perimeter IS the agency's own study design, so there is nothing a
-    buffer would be compensating for.
+    """Rasterize a "perimeter" study area into an evaluation-domain mask.
 
-    `perimeter_gdf` should already be filtered to the zones relevant to
-    the caller before calling this - this function itself does no
-    filtering, it only rasterizes whatever geometries it's given.
+    Rasterizes the perimeter polygon(s) exactly as given (point-in-polygon
+    containment, `all_touched=False`), with no buffer: an official study-area
+    perimeter IS the agency's own study design, so there is nothing a buffer would be
+    compensating for. `perimeter_gdf` should already be filtered to the zones
+    relevant to the caller; this function does no filtering of its own.
+
+    Parameters
+    ----------
+    perimeter_gdf : geopandas.GeoDataFrame
+        Study-area perimeter polygon(s).
+    dst_transform : affine.Affine
+        Affine transform of the destination grid.
+    dst_crs
+        CRS of the destination grid.
+    dst_shape : tuple[int, int]
+        ``(height, width)`` of the destination grid.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean array of shape `dst_shape`; True inside the perimeter.
     """
     if dst_crs is not None and perimeter_gdf.crs is not None and perimeter_gdf.crs != dst_crs:
         perimeter_gdf = perimeter_gdf.to_crs(dst_crs)
@@ -260,20 +384,27 @@ def tri_domain_mask(
 
 
 def permanent_water_mask(land_use: np.ndarray, exclude_codes: tuple[int, ...]) -> np.ndarray:
-    """True where a cell is permanent water (rivers/lakes/sea) per whichever
-    categorical source `land_use` came from and its own `exclude_codes`
-    (`validation.permanent_water_source`/`permanent_water_codes` in
-    config.yml - DeltaDTM's own land/ocean/lake/river mask, codes {1,2,3},
-    since 2026-09; was Copernicus Global Land Cover, codes {80,200} - the
-    DeltaDTM switch is a real, measured coastal-strip-masking improvement,
-    same DEM the model itself is built from, no second independently-
-    registered dataset in the loop).
+    """Mark cells that are permanent water (rivers/lakes/sea) per a categorical land-use grid.
 
-    These cells must be excluded from the evaluation domain entirely, not
-    scored as agree/dry/wet - "is this pixel flooded" is not a meaningful
-    question over water that is always wet regardless of any storm event
-    (2026-09 addition, following real QGIS inspection of the benchmark vs.
-    model rasters during design review).
+    These cells must be excluded from the evaluation domain entirely, not scored as
+    agree/dry/wet: "is this pixel flooded" is not meaningful over water that is
+    always wet regardless of any storm event. `exclude_codes` depends on the source
+    (`validation.permanent_water_source`/`permanent_water_codes` in config.yml) -
+    DeltaDTM's land/ocean/lake/river mask uses codes {1,2,3}; the older Copernicus
+    Global Land Cover source used {80,200}.
+
+    Parameters
+    ----------
+    land_use : numpy.ndarray
+        Categorical land-use/land-cover grid.
+    exclude_codes : tuple[int, ...]
+        Category codes that count as permanent water.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean array, same shape as `land_use`; True where the code is in
+        `exclude_codes`.
     """
     return np.isin(land_use, np.asarray(exclude_codes))
 
@@ -282,20 +413,36 @@ def read_permanent_water_mask(
     gfm_catalog, permanent_water_source: str, permanent_water_codes,
     bbox: list[float], out_transform: Affine, out_shape: tuple[int, int],
 ) -> np.ndarray:
-    """Permanent-water (rivers/lakes/sea) mask on an arbitrary target grid.
+    """Read and reproject a permanent-water (rivers/lakes/sea) mask onto an arbitrary grid.
 
-    `permanent_water_source` is a categorical raster (originally Copernicus
-    land_use, ~100m; DeltaDTM's own native-resolution land/ocean/lake/river
-    mask, ~25-31m, is the default since 2026-09 - a real, measured
-    resolution improvement - either works, this function doesn't care which), coarser than the model
-    grid either way, so this is always a nearest-neighbour reproject onto
-    `out_transform`/`out_shape` (same convention as
-    protection.load_geogunit_ids - never interpolate a categorical raster).
-    Shared by validate_country.py (evaluation-domain construction) and
-    plot_agreement_map.py (land background for the agreement map, in place of
-    the separate `land_polygons` vector source - 2026-09, reuses the SAME
-    raster the validation domain itself is already built from, instead of a
-    second, independent coastline dataset).
+    `permanent_water_source` is a categorical raster (DeltaDTM's native-resolution
+    land/ocean/lake/river mask, ~25-31m, by default; Copernicus land_use, ~100m, is
+    the older alternative), always coarser than the model grid, so this always
+    nearest-neighbour reprojects onto `out_transform`/`out_shape` (never interpolate a
+    categorical raster - same convention as `protection.load_geogunit_ids`). Returns an
+    all-False mask on any read failure or empty source, rather than raising. Shared by
+    validate_country.py (evaluation-domain construction) and plot_agreement_map.py
+    (land background for the agreement map).
+
+    Parameters
+    ----------
+    gfm_catalog : hydromt.DataCatalog
+        Catalog to read `permanent_water_source` from.
+    permanent_water_source : str
+        Catalog key of the categorical land-use raster.
+    permanent_water_codes : Sequence[int]
+        Category codes that count as permanent water.
+    bbox : list[float]
+        ``[minx, miny, maxx, maxy]`` bounding box to read.
+    out_transform : affine.Affine
+        Affine transform of the destination grid.
+    out_shape : tuple[int, int]
+        ``(height, width)`` of the destination grid.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean array of shape `out_shape`; True where permanent water.
     """
     try:
         lu_da = retry_transient_io(
@@ -320,10 +467,24 @@ def read_permanent_water_mask(
 
 
 def load_iso_lookup(gfm_catalog, iso_lookup_source: str) -> dict[int, str]:
-    """Geogunit-107 ID -> ISO-3 country code, the SAME table/convention as
-    analysis/compute_exposure_analysis.py's/compute_flood_totals.py's own
-    `iso_lookup` (FLOPROS's dataframe is indexed by geogunit ID, with an "ISO"
-    column) - reused here rather than building a second, different mapping.
+    """Build a WRI geogunit_107 ID -> ISO-3 country code lookup.
+
+    Reads FLOPROS's dataframe (indexed by geogunit ID, with an "ISO" column), the
+    same table/convention as `compute_exposure_analysis.py`/`compute_flood_totals.py`'s
+    own `iso_lookup`, reused here rather than building a second, different mapping.
+    Rows with a missing ISO are dropped.
+
+    Parameters
+    ----------
+    gfm_catalog : hydromt.DataCatalog
+        Catalog to read `iso_lookup_source` from.
+    iso_lookup_source : str
+        Catalog key of the FLOPROS dataframe.
+
+    Returns
+    -------
+    dict[int, str]
+        Geogunit_107 ID -> ISO-3 country code.
     """
     flopros = gfm_catalog.get_dataframe(iso_lookup_source)
     return {
@@ -337,24 +498,42 @@ def read_country_mask(
     bbox: list[float], out_transform: Affine, out_shape: tuple[int, int],
     geogunit_ids: list[int] | None = None,
 ) -> np.ndarray:
-    """True where a cell's WRI geogunit (nearest-neighbour reprojected onto this
-    call's own grid - same convention as read_permanent_water_mask, never
-    interpolate a categorical raster) resolves to `country_iso`.
+    """Mask cells whose WRI geogunit resolves to `country_iso` (or `geogunit_ids`).
 
-    Needed anywhere a comparison's working extent is a rectangular bbox rather
-    than the benchmark's own real geometry - a bbox can genuinely overlap a
-    neighbouring country's territory (validate_country_national_coverage
-    processes chunks found from a region bbox directly, with no
-    benchmark-geometry step to naturally exclude them). Without
-    this mask, GFM's own real flooding in a neighbouring country would be
-    scored as a false positive against a benchmark that was never meant to
-    cover that territory at all.
+    The geogunit raster is nearest-neighbour reprojected onto this call's own grid
+    (same convention as `read_permanent_water_mask`, never interpolate a categorical
+    raster). Needed wherever a comparison's working extent is a rectangular bbox
+    rather than the benchmark's own real geometry - a bbox can genuinely overlap a
+    neighbouring country's territory, and without this mask GFM's own real flooding
+    there would be scored as a false positive against a benchmark never meant to
+    cover it. Returns an all-False mask on any read failure or empty source.
 
-    `geogunit_ids`, when given (BenchmarkSpec.geogunit_ids), matches those
-    geogunit_107 IDs directly instead of resolving `country_iso` through
-    `iso_lookup` - for a benchmark covering a sub-national unit that shares
-    its ISO code with sibling units it does NOT cover (Wales: ID 3367, ISO
-    "GBR" like England/Scotland/N.Ireland's own separate IDs).
+    Parameters
+    ----------
+    gfm_catalog : hydromt.DataCatalog
+        Catalog to read `geogunit_source` from.
+    geogunit_source : str
+        Catalog key of the WRI geogunit_107 raster.
+    iso_lookup : dict[int, str]
+        Geogunit_107 ID -> ISO-3 country code, from `load_iso_lookup`.
+    country_iso : str
+        ISO-3 country code to resolve, via `iso_lookup`, when `geogunit_ids` is None.
+    bbox : list[float]
+        ``[minx, miny, maxx, maxy]`` bounding box to read.
+    out_transform : affine.Affine
+        Affine transform of the destination grid.
+    out_shape : tuple[int, int]
+        ``(height, width)`` of the destination grid.
+    geogunit_ids : list[int] or None, default None
+        Explicit geogunit_107 IDs to match directly instead of resolving `country_iso`
+        through `iso_lookup` - for a benchmark covering a sub-national unit that
+        shares its ISO code with sibling units it does not cover (e.g. Wales).
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean array of shape `out_shape`; True where the cell belongs to the
+        target country/unit(s).
     """
     try:
         geo_da = retry_transient_io(
@@ -389,17 +568,31 @@ def read_country_mask(
 def confusion_counts(
     model_wet: np.ndarray, benchmark_wet: np.ndarray, domain_mask: np.ndarray, weight: np.ndarray,
 ) -> tuple[float, float, float, float]:
-    """Weighted (tp, fp, fn, tn) sums within `domain_mask`.
+    """Compute weighted (tp, fp, fn, tn) confusion sums within `domain_mask`.
 
-    `weight` is whatever consistent unit the caller wants weighted metrics
-    in (km² from plotting.pixel_area_km2_grid is the production use today).
-    Raw cell counts (weight=1 everywhere) work too, for a reproducibility
-    figure alongside the area-weighted ones.
+    `weight` is whatever consistent unit the caller wants the metrics in (km², from
+    `plotting.pixel_area_km2_grid`, is the production use today; raw cell counts,
+    weight=1 everywhere, work too for a reproducibility figure). Hard-threshold
+    counterpart to `confusion_counts_soft`; not used in the current production
+    scoring path, but still a generic, independently useful building block.
 
-    tp = model wet AND benchmark wet (hit)
-    fp = model wet AND NOT benchmark wet (over-prediction)
-    fn = NOT model wet AND benchmark wet (under-prediction)
-    tn = NOT model wet AND NOT benchmark wet
+    Parameters
+    ----------
+    model_wet : numpy.ndarray
+        Boolean model wet/dry mask.
+    benchmark_wet : numpy.ndarray
+        Boolean benchmark wet/dry mask.
+    domain_mask : numpy.ndarray
+        Boolean mask of cells to include in the sums.
+    weight : numpy.ndarray
+        Per-cell weight (e.g. area in km²) to sum.
+
+    Returns
+    -------
+    tuple[float, float, float, float]
+        ``(tp, fp, fn, tn)`` weighted sums: tp = model wet AND benchmark wet (hit);
+        fp = model wet AND NOT benchmark wet (over-prediction); fn = NOT model wet
+        AND benchmark wet (under-prediction); tn = NOT model wet AND NOT benchmark wet.
     """
     d = domain_mask
     tp = float(weight[d & model_wet & benchmark_wet].sum())
@@ -412,32 +605,34 @@ def confusion_counts(
 def confusion_counts_soft(
     model_wet: np.ndarray, fraction: np.ndarray, domain_mask: np.ndarray, weight: np.ndarray,
 ) -> tuple[float, float, float, float]:
-    """Weighted (tp, fp, fn, tn) sums within `domain_mask`, using the
-    benchmark coverage FRACTION directly as continuous credit instead of
-    thresholding it into a binary wet/dry call first
-    (wet_mask_from_fraction) - a cell 20% covered by the benchmark
-    contributes 0.2 of its weight to the wet side and 0.8 to the dry side,
-    regardless of the model's own (still binary) wet/dry call at that cell.
+    """Compute weighted (tp, fp, fn, tn) sums using continuous benchmark-coverage credit.
 
-    Replaces confusion_counts + wet_mask_from_fraction as the primary
-    scoring path 2026-09-30: the optimal hard wet_fraction threshold varied
-    by benchmark, and soft credit avoids having to choose one.
+    Uses the benchmark coverage FRACTION directly as continuous credit instead of
+    thresholding it into a binary wet/dry call first (`wet_mask_from_fraction`): a
+    cell 20% covered by the benchmark contributes 0.2 of its weight to the wet side
+    and 0.8 to the dry side, regardless of the model's own (still binary) wet/dry
+    call. This is the primary scoring path (since 2026-09-30, replacing
+    `confusion_counts` + `wet_mask_from_fraction`): the optimal hard wet_fraction
+    threshold varied by benchmark, and soft credit avoids having to choose one.
 
-    tp = model wet, weighted by fraction (partial hit)
-    fp = model wet, weighted by (1 - fraction) (partial over-prediction)
-    fn = model dry, weighted by fraction (partial miss)
-    tn = model dry, weighted by (1 - fraction)
+    Parameters
+    ----------
+    model_wet : numpy.ndarray
+        Boolean model wet/dry mask.
+    fraction : numpy.ndarray
+        Per-cell benchmark coverage fraction (0-1).
+    domain_mask : numpy.ndarray
+        Boolean mask of cells to include in the sums.
+    weight : numpy.ndarray
+        Per-cell weight (e.g. area in km²) to sum.
 
-    wet_mask_from_fraction (the 0.5-style threshold call this function
-    itself never uses) survives for a narrow, still-real purpose, NOT as a
-    scoring shortcut: the agreement-map DISPLAY category raster
-    (_CAT_AGREE/_CAT_UNDER/_CAT_OVER need one discrete colour per cell; a
-    soft credit can't render as a single colour). `confusion_counts` itself (the hard-threshold tp/fp/fn/tn
-    function this replaces) is no longer called anywhere in
-    validate_country.py at all - it remains a real, independently useful
-    function (generic weighted confusion counts over any two boolean
-    masks), still exercised by its own unit tests
-    (tests/flood_extent_validation/test_metrics.py).
+    Returns
+    -------
+    tuple[float, float, float, float]
+        ``(tp, fp, fn, tn)`` weighted sums: tp = model wet, weighted by fraction
+        (partial hit); fp = model wet, weighted by (1 - fraction) (partial
+        over-prediction); fn = model dry, weighted by fraction (partial miss);
+        tn = model dry, weighted by (1 - fraction).
     """
     d = domain_mask
     f = np.clip(fraction, 0.0, 1.0)
@@ -455,55 +650,51 @@ def confusion_counts_tolerant(
     weight: np.ndarray,
     tolerance_cells: int,
 ) -> dict[str, float]:
-    """Diagnostic companion to confusion_counts_soft - NOT a replacement, and
-    never part of the primary scoring path (HR/FAR/CSI/EB/bias everywhere
-    else stay confusion_counts_soft's own continuous-credit numbers,
-    untouched). Answers one narrow question: how much of the STRICT (hard,
-    zero-tolerance) disagreement between model and benchmark sits within
-    `tolerance_cells` pixels of a cell where the two genuinely agree - i.e.
-    looks like the same flood boundary drawn with a small spatial offset,
-    rather than a real disagreement about whether an area floods at all.
+    """Compute hard tp/fp/fn/tn with nearby disagreement forgiven as registration offset.
 
-    Written for the permanent-water-mask-vs-benchmark-coastline
-    misalignment caveat (methods_04b_MapsValidation.md), but not specific to
-    that caveat, to any one country, or to the coastline specifically - it
-    is a generic small-scale-registration check applied uniformly over the
-    whole domain. In practice it mostly fires along a coastline because
-    that is where two independently-drawn wet/dry boundaries disagree by a
-    pixel or two; the mechanism itself has no notion of "coastline."
+    Diagnostic companion to `confusion_counts_soft`, not a replacement - the primary
+    scoring path's HR/FAR/CSI/EB/bias stay untouched. Answers one narrow question:
+    how much of the strict (hard, zero-tolerance) disagreement sits within
+    `tolerance_cells` pixels of a cell where model and benchmark genuinely agree,
+    i.e. looks like the same flood boundary drawn with a small spatial offset rather
+    than a real disagreement about whether an area floods at all. A generic
+    small-scale-registration check (not specific to any country or to coastlines,
+    though it mostly fires along them in practice); written for the permanent-water-
+    mask-vs-benchmark-coastline misalignment caveat in methods_04b_MapsValidation.md.
 
-    Guards against the obvious failure mode - silently inflating CSI:
-      - Operates on a HARD benchmark-wet basis (`fraction > 0`, "any real
-        benchmark-reported wet area in this cell at all" - an existence
-        test, not a reintroduced 0.5-style majority threshold) and a hard
-        tp/fp/fn/tn partition, entirely separate from confusion_counts_soft's
-        own continuous credit. CSI itself is never touched by this function.
-      - A disagreement cell is forgiven only if a REAL opposite-type cell
-        exists nearby (binary dilation of the actual wet masks, not a
-        blanket buffer drawn around the benchmark's extent) - an isolated
-        model-wet patch with no nearby benchmark-wet cell at all gets zero
-        credit regardless of `tolerance_cells`.
-      - Symmetric: forgives a false positive against nearby benchmark-wet
-        cells AND a false negative against nearby model-wet cells equally -
-        a one-directional version would just mechanically inflate precision
-        or recall, not test registration agreement.
-      - Can only ever move weight from fp/fn into fp_forgiven/fn_forgiven;
-        tp and tn are untouched, so CSI_tol >= the hard CSI this function's
-        own tp/fp/fn/tn would give at tolerance_cells=0, always, by
-        construction - never by estimation noise.
-      - `tolerance_cells` is meant to be set from a real, independently
-        justified registration-uncertainty distance (this pipeline's own
-        native 30m grid resolution and the permanent-water mask's own
-        ~25-31m native resolution are both close to one cell), not tuned
-        upward until the number looks good. Callers are expected to also
-        report fp_forgiven/fn_forgiven (or the share of strict disagreement
-        they represent) alongside CSI_tol, so a reader can see how much
-        work the tolerance is doing rather than just the headline number.
+    Operates on a hard benchmark-wet basis (``fraction > 0``, an existence test, not
+    a 0.5-style majority threshold). A disagreement cell is forgiven only if a real
+    opposite-type cell exists nearby (binary dilation of the actual wet masks, not a
+    blanket buffer around the benchmark extent); forgiveness is symmetric (fp against
+    nearby benchmark-wet, fn against nearby model-wet). Weight only ever moves from
+    fp/fn into fp_forgiven/fn_forgiven, so CSI_tol is always >= the hard CSI at
+    tolerance_cells=0. `tolerance_cells` should be set from a real registration-
+    uncertainty distance (this pipeline's 30m grid and the permanent-water mask's
+    ~25-31m resolution are both close to one cell), not tuned upward until the
+    number looks good; callers should report fp_forgiven/fn_forgiven alongside
+    CSI_tol so a reader can see how much work the tolerance is doing.
 
-    Returns a dict (not a 4-tuple like confusion_counts_soft - there are two
-    extra quantities here): tp, fp, fn, tn (feed straight into
-    metrics_from_counts for CSI_tol/HR_tol/FAR_tol), plus fp_forgiven/
-    fn_forgiven (the weight moved out of fp/fn by the tolerance check).
+    Parameters
+    ----------
+    model_wet : numpy.ndarray
+        Boolean model wet/dry mask.
+    fraction : numpy.ndarray
+        Per-cell benchmark coverage fraction; thresholded here at ``> 1e-9`` for a
+        hard benchmark-wet basis.
+    domain_mask : numpy.ndarray
+        Boolean mask of cells to include in the sums.
+    weight : numpy.ndarray
+        Per-cell weight (e.g. area in km²) to sum.
+    tolerance_cells : int
+        Dilation radius, in cells, within which a disagreement is forgiven as
+        registration offset; 0 disables forgiveness.
+
+    Returns
+    -------
+    dict[str, float]
+        ``tp``, ``fp``, ``fn``, ``tn`` (feed into `metrics_from_counts` for
+        CSI_tol/HR_tol/FAR_tol), plus ``fp_forgiven``/``fn_forgiven`` (the weight
+        moved out of fp/fn by the tolerance check).
     """
     d = domain_mask
     bench_wet = fraction > 1e-9
@@ -540,13 +731,28 @@ def _safe_div(a: float, b: float) -> float:
 
 
 def metrics_from_counts(tp: float, fp: float, fn: float, tn: float = 0.0) -> dict[str, float]:
-    """HR, FAR, CSI, EB, EB_ratio, bias from (weighted) TP/FP/FN(/TN) counts.
+    """Compute HR, FAR, CSI, EB, EB_ratio, and bias from (weighted) TP/FP/FN(/TN) counts.
 
-    Zero denominators return NaN, never a silent 0 - "no benchmark wet area
-    in this domain" must not read as "CSI = 0". `EB == 0.5`
-    exactly whenever `FP == FN` (both nonzero) - the requested
-    over/under-prediction form; `EB_ratio = FP/FN` is the Wing et al. (2017)
-    form, more legible at extremes (kept alongside, not instead of, EB).
+    Zero denominators return NaN, never a silent 0: "no benchmark wet area in this
+    domain" must not read as "CSI = 0". `EB` is the over/under-prediction form,
+    exactly 0.5 whenever FP == FN (both nonzero); `EB_ratio = FP/FN` is the Wing et
+    al. (2017) form, more legible at extremes, kept alongside (not instead of) `EB`.
+
+    Parameters
+    ----------
+    tp : float
+        Weighted true-positive (hit) count.
+    fp : float
+        Weighted false-positive (over-prediction) count.
+    fn : float
+        Weighted false-negative (under-prediction) count.
+    tn : float, default 0.0
+        Weighted true-negative count; unused by any of the returned metrics.
+
+    Returns
+    -------
+    dict[str, float]
+        ``HR``, ``FAR``, ``CSI``, ``EB``, ``EB_ratio``, ``bias``.
     """
     return {
         "HR": _safe_div(tp, tp + fn),

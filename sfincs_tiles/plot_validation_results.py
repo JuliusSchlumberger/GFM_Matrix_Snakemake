@@ -54,11 +54,21 @@ def _category_bin_labels(edges: np.ndarray) -> list[str]:
 
 
 def plot_depth_correlation(pooled: dict, out_path: Path) -> None:
-    """Pooled cell-level depth density (fine 0.1m bins) for bathtub/eikonal
-    vs SFINCS, annotated with pooled r/bias/RMSE (see
-    flood_agreement.depth_error_metrics_from_pooled). Median error/% within
-    band are printed to console and written to metrics_overview_table.csv
-    rather than crowding the title."""
+    """Plot pooled cell-level depth density heatmaps for bathtub/eikonal vs SFINCS.
+
+    Uses fine 0.1m bins, annotated with pooled r/bias/RMSE (see
+    ``flood_agreement.depth_error_metrics_from_pooled``). Median error and
+    percent-within-band are printed to console and written to
+    metrics_overview_table.csv rather than crowding the title.
+
+    Parameters
+    ----------
+    pooled : dict
+        Per-model pooled joint depth histograms, keyed by "bathtub" and
+        "eikonal" (as returned by ``pooled_depth_joint``).
+    out_path : Path
+        File path the resulting PNG figure is saved to.
+    """
     lo, hi = float(DEPTH_CORR_FINE_EDGES[0]), float(DEPTH_CORR_FINE_EDGES[-1])
     fig, axes = plt.subplots(1, 2, figsize=(12, 5.5))
     for ax, model, label in [(axes[0], "bathtub", DISPLAY_LABEL["bathtub"]), (axes[1], "eikonal", DISPLAY_LABEL["eikonal"])]:
@@ -90,12 +100,22 @@ def plot_depth_correlation(pooled: dict, out_path: Path) -> None:
 
 
 def plot_depth_category_alignment(pooled: dict, out_path: Path) -> None:
-    """Depth-bin confusion-matrix heatmap (0.1-1.5m/0.2m-wide bins, plus a
-    >1.5m catch-all), EA-bathtub vs SFINCS only: for cells in a given
-    SFINCS depth bin (rows), what fraction land in each EA-bathtub depth
-    bin (columns), row-normalized to 100%. No <0.1m catch-all bin - both
-    axes are wet-thresholded at WET_THRESHOLD_M=0.10m, so that bin is
-    always empty."""
+    """Plot a row-normalized depth-bin confusion matrix for EA-bathtub vs SFINCS.
+
+    For cells in a given SFINCS depth bin (rows), shows what fraction land
+    in each EA-bathtub depth bin (columns), normalized to 100% per row.
+    Bins are 0.1-1.5m in 0.2m steps plus a >1.5m catch-all; both axes are
+    wet-thresholded at WET_THRESHOLD_M=0.10m, so the <0.1m catch-all bin
+    is always empty and is dropped.
+
+    Parameters
+    ----------
+    pooled : dict
+        Per-model pooled joint depth histograms, keyed by "bathtub" and
+        "eikonal" (as returned by ``pooled_depth_joint``).
+    out_path : Path
+        File path the resulting PNG figure is saved to.
+    """
     labels = _category_bin_labels(DEPTH_CATEGORY_EDGES)[1:]  # drop the <0.1m catch-all label
     model = "eikonal"
     fig, ax = plt.subplots(figsize=(6.2, 5.3))
@@ -141,6 +161,19 @@ def _csi(matched, model_only, sfincs_only):
 
 
 def plot_extent_scatter(df: pd.DataFrame, out_path: Path) -> None:
+    """Plot log-log scatter of bathtub/eikonal flooded extent against SFINCS.
+
+    One panel per model, with a dotted 1:1 reference line; only tiles with
+    positive, finite areas on both axes are plotted.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Per-tile table with "sfincs_km2", "bathtub_km2" and "eikonal_km2"
+        columns (as returned by ``tile_table``).
+    out_path : Path
+        File path the resulting PNG figure is saved to.
+    """
     fig, axes = plt.subplots(1, 2, figsize=(12, 5.5))
 
     ax = axes[0]
@@ -179,6 +212,20 @@ def plot_extent_scatter(df: pd.DataFrame, out_path: Path) -> None:
 
 
 def plot_agreement_hist(df: pd.DataFrame, out_path: Path) -> None:
+    """Plot histograms of per-tile extent agreement (CSI) and print summary stats.
+
+    Computes CSI for bathtub and eikonal against SFINCS, plots overlaid
+    histograms, and prints per-tile median/mean alongside the
+    area-weighted (pooled) CSI for each model.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Per-tile table with the matched/model-only/SFINCS-only km2 columns
+        for "bathtub" and "eikonal" (as returned by ``tile_table``).
+    out_path : Path
+        File path the resulting PNG figure is saved to.
+    """
     bathtub_csi = _csi(df["bathtub_matched_km2"], df["bathtub_only_km2"], df["bathtub_sfincs_only_km2"])
     eikonal_csi = _csi(df["eikonal_matched_km2"], df["eikonal_only_km2"], df["eikonal_sfincs_only_km2"])
 
@@ -220,6 +267,19 @@ def plot_agreement_hist(df: pd.DataFrame, out_path: Path) -> None:
 
 
 def plot_depth_scatter(df: pd.DataFrame, out_path: Path) -> None:
+    """Plot scatter of bathtub/eikonal median flood depth against SFINCS.
+
+    One panel per model, with a dotted 1:1 reference line over finite
+    depths.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Per-tile table with "sfincs_depth_median_m", "bathtub_depth_median_m"
+        and "eikonal_depth_median_m" columns (as returned by ``tile_table``).
+    out_path : Path
+        File path the resulting PNG figure is saved to.
+    """
     fig, axes = plt.subplots(1, 2, figsize=(12, 5.5))
 
     for ax, col, color, label in [
@@ -253,12 +313,22 @@ def _agreement_df(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def plot_tile_agreement_map(df: pd.DataFrame, out_path: Path) -> None:
-    """Global map of per-tile EA-bathtub-SFINCS extent agreement (CSI) -
-    every geolocated tile with a defined CSI (i.e. some real union
-    area - CSI is NaN only when matched+eikonal-only+SFINCS-only=0, no
-    flooding in either model at all) is plotted, colored by CSI. No
-    small-union-area grey split and no caption box (2026-10-07, user
-    request - was distinguishing by union area before)."""
+    """Plot a global map of per-tile EA-bathtub-SFINCS extent agreement (CSI).
+
+    Every geolocated tile with a defined CSI is plotted, colored by CSI;
+    CSI is NaN only when matched + eikonal-only + SFINCS-only = 0 (no
+    flooding in either model at all). No small-union-area grey split and
+    no caption box (2026-10-07, per user request - was distinguishing by
+    union area before).
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Per-tile table with "lon", "lat" and the eikonal
+        matched/only/SFINCS-only km2 columns (as returned by ``tile_table``).
+    out_path : Path
+        File path the resulting PNG figure is saved to.
+    """
     csi = _csi(df["eikonal_matched_km2"], df["eikonal_only_km2"], df["eikonal_sfincs_only_km2"])
     plot_df = df.assign(csi=csi)
     plot_df = plot_df[plot_df["lon"].notna() & np.isfinite(plot_df["csi"])]
@@ -283,8 +353,19 @@ def plot_tile_agreement_map(df: pd.DataFrame, out_path: Path) -> None:
 
 
 def plot_agreement_vs_tile_size(df: pd.DataFrame, out_path: Path) -> None:
-    """Per-tile misalignment (1 - CSI) against the tile's land area (log scale).
-    Pearson r on log10(area); Spearman rho alongside as a rank-based check."""
+    """Plot per-tile misalignment (1 - CSI) against tile land area (log scale).
+
+    Reports Pearson r on log10(area) alongside Spearman rho as a
+    rank-based check, when at least 3 valid tiles are available.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Per-tile table with "land_km2" and the eikonal
+        matched/only/SFINCS-only km2 columns (as returned by ``tile_table``).
+    out_path : Path
+        File path the resulting PNG figure is saved to.
+    """
     plot_df = _agreement_df(df)
 
     fig, ax = plt.subplots(figsize=(9, 6.5))
@@ -309,6 +390,13 @@ def plot_agreement_vs_tile_size(df: pd.DataFrame, out_path: Path) -> None:
 
 
 def main() -> None:
+    """Parse CLI arguments and generate all SFINCS validation figures and tables.
+
+    Loads per-tile calibration results for one friction scale factor,
+    writes the validation_summary and metrics_overview_table CSVs, and
+    renders the extent, depth and agreement figures to
+    ``{base}/figures/``.
+    """
     repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(repo_root / "snakemake_workflow" / "config" / "config.yml"))

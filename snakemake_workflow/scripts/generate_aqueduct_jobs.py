@@ -266,18 +266,45 @@ def generate_wave_dispatch(
 ) -> None:
     """Write every wave's sbatch scripts + resolved_config.yml + submit_waves.sh.
 
-    `script_paths` must be in the same order as `batches` (one path per
-    (wave, batch_id, tile_ids) entry) - both the Snakemake rule and the
-    standalone CLI build them from the same `batches` list, so the order
-    always matches by construction.
+    One `run_simulation_batch.py`-driven sbatch script per (wave, batch_id,
+    tile_ids) entry in `batches`, plus that batch's `{name}_triples.csv` of
+    (tile_id, rp, slr) rows, then a `submit_waves.sh` chaining every wave via
+    SLURM `afterany` dependencies and appending the postprocessing+exposure
+    bridge.
 
-    `wave_sbatch_cfg` (optional, 2026-10-08): `{wave: sbatch_cfg}` - overrides
-    `hpc_cfg["sbatch"]` for that specific wave (e.g. `hpc.wave_tiers` resolved
-    by generate_hpc_simulation_jobs.py, for a wave that needs a bigger/smaller
-    node allocation - e.g. a big-24vcpu, heavily-parallel dispatch for
-    hop_distance=0 - than production's default 1vcpu `hpc.sbatch`). `None`
-    (the Snakemake-rule caller's default, unchanged) preserves the original
-    uniform `hpc_cfg["sbatch"]`-for-every-wave behaviour exactly.
+    Parameters
+    ----------
+    model_outputs : str
+        Accepted but unused in this function's body.
+    tile_ids : list
+        Tile IDs to generate jobs for; combined with `return_periods` and
+        `waterlevel_names` into every (tile, rp, slr) combo.
+    hop_by_tile : dict
+        Accepted but unused in this function's body.
+    batches : list
+        `(wave, batch_id, tile_ids)` entries, in the same order as `script_paths`.
+    return_periods : list
+        Return-period names included in every tile's job set.
+    waterlevel_names : list
+        SLR/waterlevel scenario names included in every tile's job set.
+    raster_config : dict
+        Accepted but unused in this function's body.
+    hpc_cfg : dict
+        HPC config; `hpc_cfg["sbatch"]` is the default per-wave SLURM allocation.
+    base_config_path : Path
+        Base config.yml path, used to load both the local and Linux-expanded
+        (config_hpc.yml) views.
+    script_paths : list
+        Output sbatch script path per `batches` entry, same order.
+    resolved_config_path : str
+        Where the Linux-expanded config is written (YAML) for the sbatch scripts
+        to stage and read.
+    submit_waves_path : str
+        Where the generated submit_waves.sh is written.
+    wave_sbatch_cfg : dict or None, optional
+        `{wave: sbatch_cfg}` override of `hpc_cfg["sbatch"]` for specific waves
+        (e.g. a bigger node tier for hop_distance=0); `None` uses
+        `hpc_cfg["sbatch"]` uniformly for every wave.
     """
     # Every (tile, rp, slr) combo is included unconditionally - wave-0 jobs
     # whose boundaries turn out empty are no longer pre-filtered here (2026-08
@@ -443,34 +470,34 @@ def generate_resume_dispatch(
 ) -> None:
     """Write sbatch scripts for a RESUME/rebalance dispatch (2026-08, new).
 
-    Unlike generate_wave_dispatch (whole-tile-per-batch - every scenario for
-    an included tile), each entry in `batches` here is `(wave, batch_id,
-    items)` where `items` is a flat list of individual `(tile_id, rp, slr)`
-    triples - built by the caller (generate_hpc_simulation_jobs.py's
-    --resume mode) from whatever's still missing on disk, then re-split
-    evenly across the full node budget without regard to the ORIGINAL
-    whole-tile batch boundaries. This is what lets a rebalance recover from
-    batches that finished their own (uneven) original tile lists early and
-    went idle (see conversation 2026-08-11) - the new batches are sized by
-    remaining WORK ITEMS, not by how many whole tiles happened to land in a
-    batch originally.
+    Unlike `generate_wave_dispatch` (whole-tile-per-batch), each entry in
+    `batches` here is `(wave, batch_id, items)` where `items` is a flat list
+    of individual `(tile_id, rp, slr)` triples, re-split evenly across the
+    full node budget regardless of original batch boundaries - this lets a
+    rebalance recover from batches that finished early and went idle. A wave
+    with zero remaining items is skipped (no key in `scripts_by_wave`), so
+    submit_waves.sh's dependency chain carries forward to the next wave that
+    genuinely has work.
 
-    Each batch's items run CONCURRENTLY via run_simulation_batch.py, same as
-    generate_wave_dispatch (see that function's own docstring) - combined
-    with run_aqueduct_cli.py's own idempotency check (`_output_already_done`),
-    submitting these is safe even if a listed item finishes via some other
-    path before its job actually runs, though the intended usage is to
-    cancel the original batches first (see module docstring) so there's no
-    double-processing window at all.
-
-    A wave with zero remaining items is skipped entirely (no key in
-    `scripts_by_wave`) - submit_waves.sh's PREV_IDS then correctly carries
-    forward from the last wave that DID have batches, so a fully-finished
-    early wave doesn't break the dependency chain into whatever wave
-    genuinely has remaining work first.
-
-    `wave_sbatch_cfg`: see generate_wave_dispatch's own docstring - same
-    `{wave: sbatch_cfg}` override, `None` preserves uniform `hpc_cfg["sbatch"]`.
+    Parameters
+    ----------
+    hpc_cfg : dict
+        HPC config; `hpc_cfg["sbatch"]` is the default per-wave SLURM allocation.
+    base_config_path : Path
+        Base config.yml path, used to load both the local and Linux-expanded
+        (config_hpc.yml) views.
+    batches : list
+        `(wave, batch_id, items)` entries, in the same order as `script_paths`.
+    script_paths : list
+        Output sbatch script path per `batches` entry, same order.
+    resolved_config_path : str
+        Where the Linux-expanded config is written (YAML) for the sbatch scripts
+        to stage and read.
+    submit_waves_path : str
+        Where the generated submit_waves.sh is written.
+    wave_sbatch_cfg : dict or None, optional
+        `{wave: sbatch_cfg}` override of `hpc_cfg["sbatch"]` for specific waves;
+        see `generate_wave_dispatch`. `None` uses `hpc_cfg["sbatch"]` uniformly.
     """
     linux_config = load_config(base_config_path, extra_override=base_config_path.parent / "config_hpc.yml")
     linux_batch_runner = f"{linux_config['paths']['code_root']}/snakemake_workflow/scripts/run_simulation_batch.py"

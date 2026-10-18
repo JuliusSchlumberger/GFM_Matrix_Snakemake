@@ -42,13 +42,24 @@ WATERDEPTH_SCALE = 100  # cm per metre - must match rasters.WATERDEPTH_SCALE
 
 
 def decode_waterdepth_array(raw: np.ndarray) -> np.ndarray:
-    """Decode an already-read int16-centimetre waterdepth array to float32
-    metres, with AQUEDUCT_NODATA marking cells the tile didn't cover/compute.
+    """Decode an already-read int16-centimetre waterdepth array to float32 metres.
 
-    Any waterdepth-reading code outside this module (e.g. diagnostic
-    scripts that reproject/warp a tile directly rather than doing a plain
-    windowed `.read()`) should decode through this function too, rather
-    than duplicating the scale/nodata conversion.
+    Any waterdepth-reading code outside this module (e.g. diagnostic scripts that
+    reproject/warp a tile directly rather than doing a plain windowed ``.read()``)
+    should decode through this function too, rather than duplicating the
+    scale/nodata conversion.
+
+    Parameters
+    ----------
+    raw : np.ndarray
+        Array of int16 centimetre values, as read directly from a per-tile
+        waterdepth raster (see ``rasters.encode_waterdepth_cm``).
+
+    Returns
+    -------
+    np.ndarray
+        float32 array in metres. Cells equal to ``WATERDEPTH_NODATA_INT16`` in
+        ``raw`` are set to ``AQUEDUCT_NODATA`` (not covered/computed by the tile).
     """
     patch = raw.astype(np.float32) / WATERDEPTH_SCALE
     patch[raw == WATERDEPTH_NODATA_INT16] = AQUEDUCT_NODATA
@@ -181,41 +192,50 @@ def merge_tile_rasters_chunk(
     block_size: int,
     raster_config: dict[str, Any],
 ) -> None:
-    """Merge per-tile water depth rasters within one spatial chunk by
-    PER-CELL MAXIMUM (2026-08 - replaces the previous valid-count-weighted
-    mean). Rationale (tile-generation spec): if water reached a cell in one
-    tile, it reached it, regardless of what another tile says - this flips
-    the error asymmetry so under-resolution in one tile is recoverable by
-    any other tile that got it right, while over-estimation is the only
-    error a max-combine can no longer self-correct. Also writes a parallel
-    PROVENANCE raster (int32 tile_id per winning cell, `PROVENANCE_NODATA`
-    where no tile covers the cell at all) - under max-combine this is the
-    only practical debugging handle when a value looks wrong, since there's
-    no "average" to inspect the contributing tiles of.
+    """Merge per-tile water depth rasters within one spatial chunk by per-cell maximum.
 
-    Correctness gate this combine strategy leans on: because no tile can
-    ever pull a value back down, a station wrongly assigned across a thin
-    land barrier poisons the mosaic PERMANENTLY (unlike under the old mean,
-    where it was merely diluted). The native-resolution ocean-connectivity
-    fix in flood_model.py remains sole authority on per-cell boundary
-    assignment for exactly this reason - it should reject on ambiguity
-    rather than accept; the coarse long-range connectivity check
-    (boundaries.filter_stations_by_ocean_connectivity) only ever filters
-    the candidate station pool, never assigns a value itself.
+    Per-cell max replaces the earlier valid-count-weighted mean (2026-08): if water
+    reached a cell in any one tile, it's kept, regardless of what other tiles say.
+    This flips the error asymmetry so under-resolution in one tile is recoverable by
+    another tile that got it right, while over-estimation is the only error type a
+    max-combine can no longer self-correct down. Because no tile can pull a value
+    back down, a station wrongly assigned across a thin land barrier would poison
+    the mosaic permanently; the native-resolution ocean-connectivity check in
+    flood_model.py is therefore sole authority on per-cell boundary assignment, and
+    boundaries.filter_stations_by_ocean_connectivity only ever filters the candidate
+    station pool, never assigns a value itself.
 
-    Tile files are opened once (for GDAL cache reuse) but data is read one
-    block at a time — only the current block's worth of tile data is ever held
-    in RAM simultaneously.  This keeps peak memory proportional to
-    ``block_size² × tiles_per_block`` rather than to the full intersection area.
+    Also writes a parallel int32 PROVENANCE raster (winning tile_id per cell,
+    `PROVENANCE_NODATA` where no tile covers the cell) - the only debugging handle
+    available under max-combine, since there's no "average" to inspect.
 
-    Args:
-        tile_rasters: Paths to the per-tile waterdepth rasters for the chunk.
-        chunk_bounds: (minx, miny, maxx, maxy) of the chunk in the tile CRS.
-        waterdepth_output_path: Path for the max-combined water-depth output raster.
-        provenance_output_path: Path for the parallel int32 winning-tile_id raster.
-        block_size: Side-length in pixels of each write block.
-        raster_config: Raster format config dict (driver, compression,
-            predictor, nodata).
+    Tile files are opened once (for GDAL cache reuse) but read one block at a time,
+    so peak memory is proportional to ``block_size**2 x tiles_per_block`` rather
+    than to the full intersection area. Both outputs are written to same-directory
+    temp files and atomically `os.replace`-d into place at the end, so a process
+    killed mid-write (e.g. a SLURM time limit or node failure) cannot leave a
+    truncated file that Snakemake's file-exists check would treat as complete.
+
+    Parameters
+    ----------
+    tile_rasters : list of str or Path
+        Paths to the per-tile waterdepth rasters contributing to this chunk.
+    chunk_bounds : tuple of float
+        (minx, miny, maxx, maxy) of the chunk, in the tile CRS.
+    waterdepth_output_path : str or Path
+        Output path for the max-combined water-depth raster (float32 metres).
+    provenance_output_path : str or Path
+        Output path for the parallel int32 winning-tile_id raster.
+    block_size : int
+        Side length, in pixels, of each write block.
+    raster_config : dict
+        Raster format config dict with keys ``driver``, ``compression``,
+        ``predictor`` and ``nodata``.
+
+    Raises
+    ------
+    ValueError
+        If `tile_rasters` is empty.
     """
     if not tile_rasters:
         raise ValueError("tile_rasters must not be empty")

@@ -240,7 +240,21 @@ def _ring_pieces(ocean_geom, area_utm, simplify_m: float, edge_m: float) -> list
 class Coast:
     """Ocean/land polygons (UTM) of the search area, coastline pieces at the
     real coast (offset 0) and at seaward offsets (the edge of the ocean
-    polygon shrunk by d - narrow bays close by themselves), cached per d."""
+    polygon shrunk by d - narrow bays close by themselves), cached per d.
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        Land/ocean mask read from the DeltaDTM VRT (OCEAN_CODE marks ocean).
+    transform : affine.Affine
+        Pixel-to-CRS (lon/lat) transform of `mask`.
+    area_utm : shapely.Polygon
+        Search-area bounding box, in `utm_crs`.
+    utm_crs : pyproj.CRS
+        UTM CRS the polygons and coastline pieces are built in.
+    pixel_m : float
+        Approximate mask pixel size in metres, used to size buffers.
+    """
 
     def __init__(self, mask: np.ndarray, transform, area_utm, utm_crs, pixel_m: float):
         self.area_utm, self.pixel_m = area_utm, pixel_m
@@ -876,6 +890,41 @@ def _clean(geom):
 
 def build_tile(root: Path, tile_dir: Path, out_dir: Path, buffer_deg: float, overwrite: bool,
                plot: str = "suitable", min_size_deg: float = 0.0) -> dict:
+    """Build one tile's SFINCS waterlevel-boundary line and write its outputs.
+
+    Writes {tile_id}.gpkg under `out_dir` (layers: stations, boundary_line,
+    segments, inactive/land_inactive/ocean_active) unless it already exists
+    and `overwrite` is False, and redraws the inspection figure according to
+    `plot`. Also looks up each used station's COAST-HG hydrograph to flag
+    whether the tile has enough forcing stations to be usable.
+
+    Parameters
+    ----------
+    root : Path
+        Project root (paths.root), used to open the DeltaDTM mask VRT and
+        the COAST-HG hydrograph file.
+    tile_dir : Path
+        Tile directory holding inputs/tile_geometry.gpkg and the tile's own
+        station selection (TILE_STATIONS_GPKG).
+    out_dir : Path
+        boundary_lines output directory to write {tile_id}.gpkg and figures
+        under.
+    buffer_deg : float
+        Degrees added to the tile bbox for the station search box.
+    overwrite : bool
+        Rebuild an existing {tile_id}.gpkg instead of keeping it (loses any
+        hand edits).
+    plot : str, default "suitable"
+        "all", "suitable" or "none": which tiles get the inspection figure.
+    min_size_deg : float, default 0.0
+        Minimum width/height (degrees) of the station search box.
+
+    Returns
+    -------
+    dict
+        One row of per-tile counts/flags, also written to
+        boundary_lines/status/{tile_id}.json and collected by `summarize`.
+    """
     tile_id = tile_dir.name
     gpkg = out_dir / f"{tile_id}.gpkg"
     row = {"tile_id": int(tile_id)}
@@ -1122,7 +1171,19 @@ def _safe_build(args):
 
 
 def summarize(out_dir: Path) -> pd.DataFrame:
-    """All per-tile status files -> summary.csv, suitable_tiles.txt, unsuitable_tiles.txt."""
+    """Collect every tile's status JSON into summary.csv, suitable_tiles.txt
+    and unsuitable_tiles.txt.
+
+    Parameters
+    ----------
+    out_dir : Path
+        boundary_lines output directory holding status/*.json.
+
+    Returns
+    -------
+    pandas.DataFrame
+        The combined per-tile summary, also written to out_dir/summary.csv.
+    """
     rows = [json.loads(p.read_text()) for p in sorted((out_dir / "status").glob("*.json"))]
     summary = pd.DataFrame(rows).sort_values("tile_id")
     summary.drop(columns=["traceback"], errors="ignore").to_csv(out_dir / "summary.csv", index=False)
@@ -1189,6 +1250,13 @@ def _run_jobs(jobs: list, workers: int, out_dir: Path) -> list[dict]:
 
 
 def main() -> None:
+    """Parse CLI arguments and build boundary lines for the selected tiles,
+    or (with --summarize) just collect existing results into summary.csv.
+
+    Runs tiles over a process pool (--workers), writing each tile's
+    {tile_id}.gpkg, status JSON and inspection figure under
+    {base-dir-name}/boundary_lines/ beneath paths.root.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(Path(__file__).resolve().parents[1]
                                                  / "snakemake_workflow" / "config" / "config.yml"))
