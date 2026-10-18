@@ -1,18 +1,8 @@
-"""Functions for merging per-tile flood model results into spatial-chunk rasters.
+"""Merge per-tile flood depth rasters into spatial-chunk rasters.
 
-All input tiles share a common pixel grid (extracted from the same DEM mosaic
-at the same resolution), so no resampling is needed: offsets between any tile
-and the chunk output grid are always whole-pixel.
-
-The merge strategy is:
-  - The study area is partitioned into regular chunks (size set by
-    `merge.chunk_size_deg` in config).  Each chunk is merged independently.
-  - For each chunk, tile files are kept open but data is read block by block
-    inside the write loop — only the current block's data is ever in RAM.
-
-EIKONAL_NODATA (`np.finfo(np.float32).max`) is the sentinel written by the
-eikonal model for cells it did not compute.  `0.0` means "computed, no
-flooding".
+All tiles share one pixel grid (same DEM mosaic), so tile/chunk offsets are
+whole-pixel and no resampling is needed. EIKONAL_NODATA marks cells the eikonal
+model did not compute; 0.0 means computed, not flooded.
 """
 
 from __future__ import annotations
@@ -31,35 +21,16 @@ from rasterio.windows import Window
 
 EIKONAL_NODATA = np.finfo(np.float32).max
 
-# int16 counterpart of EIKONAL_NODATA, for per-tile waterdepth rasters (see
-# rasters.encode_waterdepth_cm/WATERDEPTH_NODATA_INT16). Every read in this
-# module decodes int16 tiles to this module's existing float32+
-# EIKONAL_NODATA convention immediately, before any of the merge/overlap-
-# correction arithmetic below - none of that arithmetic needs to think in
-# int16-centimetres.
+# int16-cm per-tile rasters (rasters.encode_waterdepth_cm) are decoded to
+# float32 m + EIKONAL_NODATA on read, before any merge arithmetic.
 WATERDEPTH_NODATA_INT16 = np.iinfo(np.int16).max
 WATERDEPTH_SCALE = 100  # cm per metre - must match rasters.WATERDEPTH_SCALE
 
 
 def decode_waterdepth_array(raw: np.ndarray) -> np.ndarray:
-    """Decode an already-read int16-centimetre waterdepth array to float32 metres.
+    """Decode an int16-centimetre waterdepth array to float32 metres.
 
-    Any waterdepth-reading code outside this module (e.g. diagnostic scripts that
-    reproject/warp a tile directly rather than doing a plain windowed ``.read()``)
-    should decode through this function too, rather than duplicating the
-    scale/nodata conversion.
-
-    Parameters
-    ----------
-    raw : np.ndarray
-        Array of int16 centimetre values, as read directly from a per-tile
-        waterdepth raster (see ``rasters.encode_waterdepth_cm``).
-
-    Returns
-    -------
-    np.ndarray
-        float32 array in metres. Cells equal to ``WATERDEPTH_NODATA_INT16`` in
-        ``raw`` are set to ``EIKONAL_NODATA`` (not covered/computed by the tile).
+    ``WATERDEPTH_NODATA_INT16`` cells become ``EIKONAL_NODATA``.
     """
     patch = raw.astype(np.float32) / WATERDEPTH_SCALE
     patch[raw == WATERDEPTH_NODATA_INT16] = EIKONAL_NODATA
@@ -67,43 +38,27 @@ def decode_waterdepth_array(raw: np.ndarray) -> np.ndarray:
 
 
 def _read_waterdepth_patch(src: rasterio.DatasetReader, window: Window) -> np.ndarray:
-    """Read one tile's waterdepth patch, decoded to float32 metres with
-    EIKONAL_NODATA marking cells the tile didn't cover/compute.
-    """
     raw = src.read(1, window=window, boundless=True, fill_value=WATERDEPTH_NODATA_INT16)
     return decode_waterdepth_array(raw)
 
 
 @dataclass
 class _TileMeta:
-    """Open file handle and chunk-intersection geometry for one tile.
-
-    Keeping the file open (rather than re-opening per block) lets GDAL reuse
-    its internal cache between block reads.  Call .src.close() when done.
-    """
+    # src stays open across block reads so GDAL reuses its cache; caller closes it.
     src: rasterio.DatasetReader
     path: str
-    row_off: int    # row in output grid where this tile's intersection starts
-    col_off: int    # col in output grid where this tile's intersection starts
-    n_rows: int     # height of the intersection (output-grid pixels)
-    n_cols: int     # width  of the intersection (output-grid pixels)
-    src_r0: int     # first row inside the source tile for that intersection
-    src_c0: int     # first col inside the source tile for that intersection
+    row_off: int    # output-grid offsets/size of the tile-chunk intersection
+    col_off: int
+    n_rows: int
+    n_cols: int
+    src_r0: int     # same intersection's origin inside the source tile
+    src_c0: int
 
 
 def _make_chunk_transform(
     chunk_bounds: tuple[float, float, float, float],
     ref_transform: Affine,
 ) -> tuple[Affine, int, int]:
-    """Snap chunk bounds to the shared input pixel grid.
-
-    Because all tiles share the same origin and pixel size (same DEM mosaic),
-    snapping to the grid ensures whole-pixel alignment between every tile and
-    the chunk output, so ``round()`` offsets are exact with no sub-pixel error.
-
-    Returns:
-        (out_transform, out_width, out_height)
-    """
     px = ref_transform.a
     py = -ref_transform.e
     ox, oy = ref_transform.c, ref_transform.f
@@ -122,16 +77,6 @@ def _open_overlapping_tiles(
     out_w: int,
     out_h: int,
 ) -> list[_TileMeta]:
-    """Open each tile and compute its intersection with the chunk.
-
-    Files that do not intersect the chunk are closed immediately.  For tiles
-    that do intersect, the file is left open so GDAL can reuse its read cache
-    across multiple block reads.  The caller must close each ``tm.src`` when
-    finished.
-
-    Returns:
-        List of _TileMeta, one per overlapping tile.
-    """
     px = out_transform.a
     py = -out_transform.e
     ox, oy = out_transform.c, out_transform.f
@@ -173,14 +118,7 @@ PROVENANCE_NODATA = -1  # no tile covers this cell
 
 
 def _tile_id_from_path(path: str) -> int:
-    """Recover a tile_id from a per-tile waterdepth raster path, relying on
-    this pipeline's established `model_outputs/{tile_id}/results/...`
-    directory convention (see e.g. compute_model_bbox's own
-    `model_outputs/{tile_id}/inputs/...` sibling path). Fragile in the
-    sense that it depends on that convention rather than an explicit
-    tile_id passed alongside each path - acceptable here since every other
-    part of this pipeline already depends on the same convention.
-    """
+    # Relies on the model_outputs/{tile_id}/results/... path convention.
     return int(Path(path).parents[1].name)
 
 
@@ -192,50 +130,18 @@ def merge_tile_rasters_chunk(
     block_size: int,
     raster_config: dict[str, Any],
 ) -> None:
-    """Merge per-tile water depth rasters within one spatial chunk by per-cell maximum.
+    """Merge per-tile water depths (m) in one chunk by per-cell maximum.
 
-    Per-cell max replaces the earlier valid-count-weighted mean (2026-08): if water
-    reached a cell in any one tile, it's kept, regardless of what other tiles say.
-    This flips the error asymmetry so under-resolution in one tile is recoverable by
-    another tile that got it right, while over-estimation is the only error type a
-    max-combine can no longer self-correct down. Because no tile can pull a value
-    back down, a station wrongly assigned across a thin land barrier would poison
-    the mosaic permanently; the native-resolution ocean-connectivity check in
-    flood_model.py is therefore sole authority on per-cell boundary assignment, and
-    boundaries.filter_stations_by_ocean_connectivity only ever filters the candidate
-    station pool, never assigns a value itself.
+    Max-combine lets one tile recover another's under-resolution but cannot
+    correct over-estimation, so a station wrongly assigned across a thin land
+    barrier poisons the mosaic; flood_model.py's native-resolution
+    ocean-connectivity check is therefore sole authority on boundary assignment.
 
-    Also writes a parallel int32 PROVENANCE raster (winning tile_id per cell,
-    `PROVENANCE_NODATA` where no tile covers the cell) - the only debugging handle
-    available under max-combine, since there's no "average" to inspect.
-
-    Tile files are opened once (for GDAL cache reuse) but read one block at a time,
-    so peak memory is proportional to ``block_size**2 x tiles_per_block`` rather
-    than to the full intersection area. Both outputs are written to same-directory
-    temp files and atomically `os.replace`-d into place at the end, so a process
-    killed mid-write (e.g. a SLURM time limit or node failure) cannot leave a
-    truncated file that Snakemake's file-exists check would treat as complete.
-
-    Parameters
-    ----------
-    tile_rasters : list of str or Path
-        Paths to the per-tile waterdepth rasters contributing to this chunk.
-    chunk_bounds : tuple of float
-        (minx, miny, maxx, maxy) of the chunk, in the tile CRS.
-    waterdepth_output_path : str or Path
-        Output path for the max-combined water-depth raster (float32 metres).
-    provenance_output_path : str or Path
-        Output path for the parallel int32 winning-tile_id raster.
-    block_size : int
-        Side length, in pixels, of each write block.
-    raster_config : dict
-        Raster format config dict with keys ``driver``, ``compression``,
-        ``predictor`` and ``nodata``.
-
-    Raises
-    ------
-    ValueError
-        If `tile_rasters` is empty.
+    Also writes an int32 provenance raster (winning tile_id, PROVENANCE_NODATA
+    where uncovered). ``chunk_bounds`` is (minx, miny, maxx, maxy) in tile CRS.
+    Peak memory ~ block_size**2 x tiles_per_block. Outputs are written to temp
+    files and os.replace-d so a killed job cannot leave a truncated file that
+    Snakemake treats as complete.
     """
     if not tile_rasters:
         raise ValueError("tile_rasters must not be empty")
@@ -272,17 +178,7 @@ def merge_tile_rasters_chunk(
         "predictor": 2,  # integer predictor - tile_ids are arbitrary integers, not a smooth field
     }
 
-    # Write via same-directory temp files + atomic os.replace at the very
-    # end (2026-10-16) - confirmed live that a process killed mid-write here
-    # (SLURM time limit, node failure/preemption) leaves a truncated file at
-    # the real output_path that Snakemake's own file-exists check treats as
-    # complete forever after, with every downstream reader (compute_flood_fraction_chunk)
-    # crashing on it every single time it's re-attempted - the exact same
-    # failure mode _atomic_raster_write (src/rasters.py) already exists to
-    # prevent, just never applied to this writer (which, unlike that
-    # helper's single dst.write() callback, needs two files open across one
-    # shared block loop, so the same temp+rename pattern is implemented
-    # inline here instead of reusing that function directly).
+    # Inline temp+rename (not rasters._atomic_raster_write): two files share one block loop.
     wd_tmp = Path(waterdepth_output_path).with_name(f"{Path(waterdepth_output_path).name}.tmp{os.getpid()}")
     prov_tmp = Path(provenance_output_path).with_name(f"{Path(provenance_output_path).name}.tmp{os.getpid()}")
     try:
@@ -293,15 +189,9 @@ def merge_tile_rasters_chunk(
                 for col_off in range(0, out_w, block_size):
                     block_w = min(block_size, out_w - col_off)
 
-                    # Per-cell running maximum + which tile_id is currently
-                    # winning (PROVENANCE_NODATA/-inf where no tile has
-                    # covered the cell yet) - replaces the pre-2026-08
-                    # valid_count-weighted mean. See this function's own
-                    # docstring for why max, not mean.
                     best_depth = np.full((block_h, block_w), -np.inf, dtype="float64")
                     best_tile_id = np.full((block_h, block_w), PROVENANCE_NODATA, dtype="int32")
 
-                    # Read one patch per tile that overlaps this block.
                     for tm in tile_metas:
                         out_r0 = max(row_off, tm.row_off)
                         out_r1 = min(row_off + block_h, tm.row_off + tm.n_rows)
@@ -309,7 +199,6 @@ def merge_tile_rasters_chunk(
                         out_c1 = min(col_off + block_w, tm.col_off + tm.n_cols)
                         if out_r0 >= out_r1 or out_c0 >= out_c1:
                             continue
-                        # Position within the source tile.
                         s_r0 = tm.src_r0 + (out_r0 - tm.row_off)
                         s_c0 = tm.src_c0 + (out_c0 - tm.col_off)
                         win_h = out_r1 - out_r0
@@ -334,8 +223,7 @@ def merge_tile_rasters_chunk(
 
                     covered = best_tile_id != PROVENANCE_NODATA
                     merged = np.where(covered, best_depth, raster_config["nodata"]).astype("float32")
-                    # cm-precision rounding shrinks the compressed file some
-                    # (nodata sentinel is an integer value, unaffected).
+                    # cm rounding shrinks the compressed file; integer nodata unaffected.
                     merged = np.round(merged, 2)
                     window = Window(col_off, row_off, block_w, block_h)
                     wd_dst.write(merged, 1, window=window)

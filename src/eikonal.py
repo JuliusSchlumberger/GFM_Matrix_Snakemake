@@ -1,21 +1,9 @@
-"""Fast Sweeping Method (Zhao, 2005) for the eikonal equation, dense domain.
+"""Fast Sweeping Method (Zhao, 2005) for the eikonal equation on a dense grid.
 
-Ports the numerical method used by Aqueduct's Julia core (`core/src/core.jl`,
-via `Eikonal.jl`'s `FastSweeping`/`sweep!`), operating on the full dense
-raster grid - every cell (land, ocean, lake) participates, via plain
-array-index arithmetic (no neighbor-index tables). One deliberate difference
-from Julia: `solve_eikonal_dense`'s unseeded-cell default is t=+99, not t=0
-(see that function's own comment), to stop unreached cells from silently
-reading as "flooded at sea level."
-
-Replicates Eikonal.jl's exact staggered-grid convention (arrival time `t` on
-grid vertices, one larger per axis than the `friction`/cell grid, with each
-of the 4 sweep directions - "orthants" - using a different single corner
-cell to feed a given vertex's update).
-
-Vertex/cell index derivation (0-indexed; vertex grid is (m+1, n+1) for an
-(m, n) friction grid), reduced from Eikonal.jl's generic N-D `Orthant`/
-`sweep!` to its 4 concrete 2-D cases:
+Port of Aqueduct's Julia core (`core/src/core.jl`, Eikonal.jl `sweep!`); every
+cell (land, ocean, lake) participates. Deviation from Julia: unseeded t=+99,
+not 0. Staggered grid as Eikonal.jl: `t` on vertices, (m+1, n+1) for an (m, n)
+friction grid; each orthant feeds a vertex from one corner cell (0-indexed):
 
 | orthant | row range | col range | t-neighbors used      | cell used   |
 |---------|-----------|-----------|-----------------------|-------------|
@@ -24,12 +12,9 @@ Vertex/cell index derivation (0-indexed; vertex grid is (m+1, n+1) for an
 | 3       | [0, m-1]  | [0, n-1]  | (i+1,j), (i,j+1)      | (i,   j)    |
 | 4       | [1, m]    | [0, n-1]  | (i-1,j), (i,j+1)      | (i-1, j)    |
 
-The final result at cell (r, c) reads vertex (r+1, c+1) - Julia's
-`waterlevel = -t[2:end, 2:end]` drops the vertex grid's first row/col.
-Seeding writes directly at vertex (r, c) for coastline cell (r, c) (no
-offset) - this asymmetry is Aqueduct's own convention (`core.jl` writes
-`solver.t[I] = -initial[I]` using cell-index `I` directly into the vertex
-array), not something introduced here.
+Cell (r, c) reads vertex (r+1, c+1) (Julia `waterlevel = -t[2:end, 2:end]`),
+but seeds write at vertex (r, c): Aqueduct's own asymmetry (`core.jl`
+`solver.t[I] = -initial[I]`).
 """
 
 from __future__ import annotations
@@ -37,37 +22,21 @@ from __future__ import annotations
 import numpy as np
 from numba import njit
 
-# Julia's `sweep!` visits its 4 Gray-code orthants in this order, in this
-# module's own orthant numbering (see module docstring table) - not
-# (1, 2, 3, 4).
+# Julia's Gray-code orthant order, in this module's numbering.
 _ORTHANT_ORDER = (1, 4, 3, 2)
 
-# Unseeded/unreached default for `t` - see solve_eikonal_dense's own comment.
 UNREACHED_T = 99.0
 
-# Vertex block edge length for `_block_sweep`'s skip-unchanged-blocks
-# bookkeeping. Any value gives bit-identical results; 64 measured well on
-# real calibration tiles (2026-10: 1.2-5.8x over plain dense sweeps).
+# Any value is bit-identical; 64 gave 1.2-5.8x over dense sweeps on calibration tiles.
 SWEEP_BLOCK_SIZE = 64
 
 
 @njit(cache=True)
 def _update(t_a: float, t_b: float, v: float, neg_two: float, eight: float, four: float) -> float:
-    """Zhao's upwind quadratic update from two orthogonal neighbor times.
-
-    Mirrors Eikonal.jl's `update` for N=2, including its fallback to the
-    simpler 1-D characteristic (`t + v`) when the 2-D quadratic solution
-    isn't causal (`t <= max(t_a, t_b)`).
-
-    `neg_two`/`eight`/`four` are `-2`/`8`/`4` pre-cast to `t_a`'s own dtype
-    by the caller (float32 for real tiles), matching Julia's own arithmetic:
-    Julia computes the discriminant in Float32, not Float64, and at real
-    friction scales this is a catastrophic cancellation (`b**2` and `4*a*c`
-    are O(100-200) while their difference is O(1e-5)) - Julia's result is
-    dominated by Float32 rounding noise, not a lightly-rounded true value,
-    so matching its output requires reproducing that same noise, computed
-    in the same precision with the same literal formula structure.
-    """
+    # Eikonal.jl `update` (N=2), falling back to t + v when the quadratic is
+    # not causal. Constants are pre-cast to t's dtype: Julia's Float32
+    # discriminant is a catastrophic cancellation (O(100) terms, O(1e-5)
+    # difference), so matching it needs the same precision and formula.
     b = neg_two * (t_a + t_b)
     c = t_a * t_a + t_b * t_b - v * v
     disc = b * b - eight * c
@@ -84,25 +53,9 @@ def _dense_sweep(
     t: np.ndarray, friction: np.ndarray, orthant: int,
     neg_two: float, eight: float, four: float,
 ) -> float:
-    """One dense directional sweep - the 4 concrete cases from the module
-    docstring's table, operating directly on `t`'s (m+1, n+1) array via
-    index arithmetic (no neighbor-index tables at all).
-
-    Loop order is row-outer/column-inner (contiguous for numpy's C-order
-    arrays), not Julia's column-outer/row-inner (contiguous for Julia's own
-    column-major arrays) - ~2.5-3x faster on real tiles. This is bit-for-bit
-    identical to Julia's order, not an approximation: within one orthant
-    sweep, vertex (i, j)'s update reads only its two upwind neighbours, and
-    both loop orders visit both of those before (i, j) itself, so every
-    update sees exactly the same inputs (locked in by
-    `tests/eikonal_kernel_validation`).
-
-    Early-out: `_update`'s result is always >= min(t_a, t_b) (the quadratic
-    branch requires > max(t_a, t_b); the fallback is min(t_a, t_b) + v with
-    v >= 0), so if min(t_a, t_b) >= t[i, j] it can never improve t[i, j] -
-    skipping it is exact, and avoids the sqrt for every blocked, unreached
-    or already-settled vertex.
-    """
+    # Reference kernel. Row-outer order (vs Julia's column-outer) is
+    # bit-identical: each vertex reads only its two upwind neighbours, visited
+    # first in both orders. Early-out is exact: _update >= min(t_a, t_b).
     m, n = friction.shape
     max_change = 0.0
     if orthant == 1:
@@ -170,35 +123,12 @@ def _block_sweep(
     neg_two: float, eight: float, four: float,
     block: int, changed_at: np.ndarray, swept_at: np.ndarray, sweep_idx: int,
 ) -> tuple[float, int]:
-    """`_dense_sweep`, `block x block` vertex block by block, skipping blocks
-    that provably cannot change - bit-for-bit identical to `_dense_sweep`
-    (same `t`, same returned max_change; locked in by
-    `tests/eikonal_kernel_validation`). This is what `solve_eikonal_dense`
-    runs; `_dense_sweep` stays as the plain reference kernel.
-
-    Bookkeeping (caller-owned, persistent across one solve's sweeps):
-    `changed_at[b]` is the index of the last sweep in which any vertex of
-    block `b` changed; `swept_at[o, b]` the index of the last sweep in
-    orthant `o` (0-based) that actually processed block `b` (-1 = never).
-
-    Order: blocks in the orthant's own row/column direction, cells within a
-    block likewise - still a valid topological order of the sweep's
-    dependency graph (each vertex reads only its two upwind neighbours, see
-    `_dense_sweep`'s loop-order note), so every update sees the same inputs.
-
-    Skip rule: one orthant sweep is idempotent (re-running it with unchanged
-    inputs changes nothing - every vertex is already <= the update from its
-    upwind neighbours' final values). A block's inputs in orthant `o` are its
-    own vertices plus the halo row/column in its upwind vertical and
-    horizontal neighbour blocks (friction is constant within a solve). So if
-    none of those three blocks changed since this block was last swept in
-    orthant `o`, re-sweeping it is a no-op and is skipped. Changes made
-    during that same earlier sweep are already accounted for (upwind blocks
-    are processed first), hence `<=`. Later rounds typically only move a
-    narrow front through winding channels, so most blocks get skipped.
-
-    Returns `(max_change, n_blocks_swept)`.
-    """
+    # _dense_sweep block by block; bit-identical (tests/eikonal_kernel_validation).
+    # changed_at[b]: last sweep that changed block b; swept_at[o, b]: last
+    # orthant-o sweep that processed b (-1 = never). An orthant sweep is
+    # idempotent and a block depends only on itself plus its upwind vertical and
+    # horizontal neighbours, so it is skipped if none changed since (<=, since
+    # upwind blocks run first).
     m, n = friction.shape
     if orthant == 1:
         di, dj = -1, -1
@@ -210,7 +140,6 @@ def _block_sweep(
         di, dj = -1, 1
     fi = -1 if di == -1 else 0
     fj = -1 if dj == -1 else 0
-    # Vertex row/col ranges per the module docstring's table.
     row_min, row_end = (1, m + 1) if di == -1 else (0, m)
     col_min, col_end = (1, n + 1) if dj == -1 else (0, n)
     o = orthant - 1
@@ -277,64 +206,21 @@ def solve_eikonal_dense(
 ) -> np.ndarray | tuple[np.ndarray, dict]:
     """Solve the eikonal equation on the full dense grid via Fast Sweeping.
 
-    Every cell participates, exactly like Eikonal.jl's own domain (no
-    candidate/coastline/ocean restriction at all). Sweeps run block-wise
-    (`_block_sweep`, `SWEEP_BLOCK_SIZE`), skipping blocks that provably
-    cannot change - bit-for-bit identical to plain `_dense_sweep` sweeps.
-
-    Parameters
-    ----------
-    friction : numpy.ndarray
-        Friction values, shape `(m, n)` (the full, unmasked tile array).
-    seed_rows : numpy.ndarray
-        Row index of each seeded (coastline) cell.
-    seed_cols : numpy.ndarray
-        Column index of each seeded (coastline) cell. Seeding writes directly to the
-        same-indexed vertex, per Aqueduct's own convention (see module docstring).
-    seed_values : numpy.ndarray
-        Initial `t` value at each seeded vertex (Aqueduct seeds with `-waterlevel`).
-        Seeded vertices are not frozen afterwards - like Julia's `sweep!`, they stay
-        eligible for further updates if a neighboring path yields a smaller `t`.
-    epsilon : float
-        Convergence threshold (max per-round absolute change), mirroring `core.jl`'s
-        `minimum(friction) / (resolution * 10)`.
-    max_rounds : int, default 10000
-        Safety cap on rounds of 4 sweeps. Only used when `sweep_budget` is `None`.
-    sweep_budget : int or None, default None
-        If set, run exactly this many individual directional sweeps (Julia's real
-        Gray-code order, `_ORTHANT_ORDER`) and stop, ignoring `epsilon`/`max_rounds`
-        entirely. `3` reproduces Eikonal.jl's own runtime behaviour in Aqueduct's
-        usage (see module docstring). `None` instead runs the round-based solve,
-        capped at `max_rounds`.
-    verbose : bool, default False
-        If true, print each round's `max_change` and elapsed time - diagnostic
-        only, for watching convergence without waiting for the full run.
-    return_diagnostics : bool, default False
-        If true, also return a dict with `n_rounds_used`, `max_change` (the last
-        round's; `None` under `sweep_budget`), `converged` (`max_change <= epsilon`;
-        `None` under `sweep_budget`) and `frac_blocks_swept` (share of block visits
-        not skipped) - used by `flood_model.py`'s obstacle-coupling outer loop to
-        log per-tile convergence behaviour.
-
-    Returns
-    -------
-    numpy.ndarray or tuple of (numpy.ndarray, dict)
-        `t`, shape `(m+1, n+1)` - read cell `(r, c)`'s result at vertex `(r+1, c+1)`.
-        If `return_diagnostics` is true, returns `(t, diagnostics_dict)` instead.
+    Returns `t` with shape (m+1, n+1); cell (r, c) is at vertex (r+1, c+1).
+    seed_values: initial `t` (Aqueduct seeds -waterlevel); seeds are not frozen.
+    epsilon: max per-round change, as `core.jl`'s
+    `minimum(friction) / (resolution * 10)`.
+    sweep_budget: run exactly this many sweeps in `_ORTHANT_ORDER`, ignoring
+    epsilon/max_rounds; 3 reproduces Aqueduct's Eikonal.jl runtime behaviour.
+    return_diagnostics: also return n_rounds_used, max_change, converged (None
+    under sweep_budget) and frac_blocks_swept.
     """
     m, n = friction.shape
     dtype = friction.dtype
-    # Unseeded default: t=+99 (waterlevel=-t=-99m), not Julia/Aqueduct's own
-    # t=0 (waterlevel=0m) - 0m is a physically real elevation (mean sea
-    # level), so a cell the relaxation never reaches would otherwise
-    # silently read as "flooded" for any DEM cell below 0m. +99m mirrors
-    # rasters.DEM_NODATA_M/land_fill_value_m's own "definitely dry" sentinel
-    # (opposite sign), and stays within int16-centimetre range so nothing
-    # downstream needs special-case handling for it. The relaxation below
-    # only ever decreases t (Gauss-Seidel/Dijkstra-style), so a real
-    # candidate from an actual seed always overwrites the sentinel; a cell
-    # no seed's influence ever reaches keeps it, correctly reading as
-    # "never flooded" rather than "flooded at exactly sea level."
+    # Unseeded t=+99 (waterlevel -99 m), not Julia's t=0: 0 m is MSL, so
+    # unreached cells below 0 m would read as flooded. Mirrors the +99 m dry
+    # sentinel (opposite sign) and fits int16-cm. t only decreases, so any
+    # real seed path overwrites it.
     t = np.full((m + 1, n + 1), UNREACHED_T, dtype=dtype)
     t[seed_rows, seed_cols] = seed_values
 
@@ -342,7 +228,6 @@ def solve_eikonal_dense(
     eight = dtype.type(8.0)
     four = dtype.type(4.0)
 
-    # _block_sweep's per-block bookkeeping - see its docstring.
     n_block_rows = -(-(m + 1) // SWEEP_BLOCK_SIZE)
     n_block_cols = -(-(n + 1) // SWEEP_BLOCK_SIZE)
     changed_at = np.full((n_block_rows, n_block_cols), -1, dtype=np.int64)

@@ -1,27 +1,8 @@
-"""Visualization functions for GFM coastal-flood exposure statistics.
+"""Plot GFM coastal-flood exposure statistics from compute_exposure_analysis.py's CSVs.
 
-Chart functions operate on compute_exposure_analysis.py's per-scenario CSVs,
-read directly with plain pd.read_csv (each has a simple, single column
-convention — no shared loader needed):
-
-  File 1 — exposure_{label}_base.csv           cols = plain SLR_{mm} names
-  File 2 — exposure_{label}_growth_matrix.csv   cols = EAI_SLR_{mm}_g{pct}
-           (parse with load_growth_matrix_csv)
-  File 3 — exposure_{label}_ssp.csv             cols = EAI_{SSP}_{year}
-
-The functions here are organized in three layers:
-  1. Data preparation — parse growth-matrix CSVs, aggregate, build lookups.
-  2. Single-chart functions — each returns a matplotlib Figure.
-  3. Batch helpers — iterate over countries / continents / scenarios.
-
-Usage (standalone, after the Snakemake pipeline has completed):
-
-    from analysis_figures import (
-        load_growth_matrix_csv,
-        build_growth_matrix_from_grid,
-        plot_burning_ember,
-        plot_world_map,
-    )
+Inputs: exposure_{label}_base.csv (cols SLR_{mm}), exposure_{label}_growth_matrix.csv
+(cols EAI_SLR_{mm}_g{pct}, via `load_growth_matrix_csv`) and exposure_{label}_ssp.csv
+(cols EAI_{SSP}_{year}).
 """
 
 from __future__ import annotations
@@ -37,8 +18,6 @@ from scipy.interpolate import pchip_interpolate
 
 from config_utils import retry_transient_io
 
-
-# ── Constants / defaults ──────────────────────────────────────────────────────
 
 _DEFAULT_SLR_COLORS = {
     "SSP1": "#1f77b4",
@@ -56,14 +35,11 @@ _DEFAULT_MEASURE_COLORS = {
 }
 
 
-# ── Continents ────────────────────────────────────────────────────────────────
 CONTINENTS = ["Africa", "Asia", "Europe", "North America", "South America", "Oceania"]
 
-# ISO-3 codes the exposure outputs use but Natural Earth's lowres country table
-# lacks (small islands/territories, mostly) - Natural Earth's own continent
-# convention: Caribbean and Central America under North America, Pacific
-# islands under Oceania. Open-ocean/Antarctic territories with no population
-# (BVT, HMD, IOT) are left out of every continent.
+# ISO-3 codes missing from Natural Earth lowres, using its continent convention
+# (Caribbean/Central America -> North America, Pacific islands -> Oceania).
+# Unpopulated BVT, HMD, IOT belong to no continent.
 _ISO_CONTINENT_OVERRIDES = {
     **dict.fromkeys(["ABW", "AIA", "ATG", "BES", "BLM", "BMU", "BRB", "CUW", "CYM", "DMA", "GLP", "GRD", "KNA",
                      "LCA", "MAF", "MSR", "MTQ", "SPM", "SXM", "TCA", "VCT", "VGB", "VIR", "XCL"], "North America"),
@@ -78,10 +54,10 @@ _ISO_CONTINENT_OVERRIDES = {
 
 
 def iso_to_continent(isos) -> dict[str, str]:
-    """{ISO-3: continent} for every ISO in `isos` that belongs to one of
-    CONTINENTS - Natural Earth lowres's own `continent` field, plus
-    _ISO_CONTINENT_OVERRIDES for the codes that table lacks. ISOs with no
-    continent (open ocean, Antarctica, unknown codes) are left out."""
+    """Map each ISO in `isos` to one of CONTINENTS (Natural Earth lowres + overrides).
+
+    ISOs with no continent (open ocean, Antarctica, unknown codes) are left out.
+    """
     import warnings
 
     import geopandas as gpd
@@ -107,14 +83,11 @@ def draw_ember_panel(
     log_vmin: float | None = None,
     label_fontsize: float | None = None,
 ):
-    """The burning-ember heatmap + contours on an existing axis - the
-    scenario-neutral impact matrix only (no SSP trajectories, no SLR
-    uncertainty subplot; see plot_burning_ember for those). Returns the image
-    for a colorbar.
+    """Draw the scenario-neutral burning-ember heatmap + contours on `ax`; return the image.
 
-    `log_vmin`: logarithmic colour scale from log_vmin to vmax (values below
-    are drawn at log_vmin) with contours at 1-2-5 steps per decade, instead of
-    the default linear scale from 0 with `n_contours` evenly spaced contours."""
+    `log_vmin` switches to a log colour scale from log_vmin to vmax (values below are
+    drawn at log_vmin) with 1-2-5 contours per decade.
+    """
     slr_x = np.asarray(slr_mm, dtype=float) / 1000.0
     gr_y = np.asarray(growth_rates, dtype=float) * 100.0
     vmax_c = vmax if vmax is not None else (float(np.nanmax(matrix)) or 1.0)
@@ -145,10 +118,10 @@ def draw_ember_panel(
 
 
 def ssp_rcp_label(ssp: str, ssp_rcp_codes: dict[str, int] | None) -> str:
-    """'SSP2' -> 'SSP2-RCP4.5' using the CMIP6 code's last two digits as the
-    RCP value (naming convention: ssp245 = SSP2 + RCP4.5, ssp585 = SSP5 +
-    RCP8.5). Falls back to the bare SSP label if no code is configured.
-    Used by plot_timeseries.py's panel titles."""
+    """Label 'SSP2' as 'SSP2-RCP4.5' from its CMIP6 code (ssp245 -> RCP4.5).
+
+    Falls back to the bare SSP label if no code is configured.
+    """
     code = (ssp_rcp_codes or {}).get(ssp)
     if code is None:
         return ssp
@@ -156,28 +129,14 @@ def ssp_rcp_label(ssp: str, ssp_rcp_codes: dict[str, int] | None) -> str:
     return f"{ssp}-RCP{rcp:.1f}"
 
 
-# ── 1. Data preparation ───────────────────────────────────────────────────────
-
 def load_growth_matrix_csv(
     csv_path: str | Path, window: dict | None = None,
 ) -> tuple[pd.DataFrame, list[float], list[float]]:
-    """Load a scenario-neutral growth-matrix CSV (exposure_*_growth_matrix.csv).
+    """Load a growth-matrix CSV (``EAI_{SLR}_g{pct}`` columns) into a sorted MultiIndex frame.
 
-    Columns are named ``EAI_{SLR}_g{pct}`` (e.g. ``EAI_SLR_250_g-50``,
-    ``EAI_SLR_1400_g150``), written by compute_exposure_analysis.py's
-    apply_growth_rates_to_eai / avoid growth-matrix worker. Unlike the SSP-
-    growth columns in the main exposure_*.csv files, the growth axis here is
-    a single scenario-neutral scalar applied uniformly to every ISO.
-
-    Returns:
-        df:            index=ISO, columns=MultiIndex (slr_mm, growth_frac),
-                        sorted ascending on both levels.
-        slr_mm_values: sorted unique SLR levels (mm) found in the columns.
-        growth_fracs:  sorted unique growth fractions (e.g. -0.5 … 1.5).
-
-    `window` (e.g. visualization.ember_display: slr_max_mm / growth_min /
-    growth_max, each optional) keeps only that part of the matrix - for
-    figures that show less than the stored matrix covers.
+    Returns ``(df, slr_mm_values, growth_fracs)``; df columns are (slr_mm,
+    growth_frac), growth as a fraction (-0.5 = -50%), applied uniformly to every ISO.
+    `window` (slr_max_mm / growth_min / growth_max, each optional) crops the matrix.
     """
     import re
 
@@ -213,45 +172,25 @@ def build_growth_matrix_from_grid(
     slr_mm_values: list[float],
     growth_fracs: list[float],
 ) -> np.ndarray:
-    """Build a (len(growth_fracs), len(slr_mm_values)) EAI matrix from a
-    scenario-neutral growth-matrix table (see load_growth_matrix_csv), summed
-    over whichever ISO rows are already present in `eai_grid` (subset it to
-    one country / a region's ISOs / everything before calling, as needed).
+    """Sum `eai_grid` over its ISO rows into a (growth_fracs, slr_mm_values) matrix.
 
-    Growth is NOT assumed to scale EAI linearly — each growth_fracs column
-    was independently computed (this matters for avoid, whose exposure is
-    genuinely non-linear in growth; harmless for baseline/protect/retreat,
-    which are linear anyway). No SLR interpolation happens here:
-    compute_exposure_analysis.py already linearly interpolates each
-    scenario's base EAI-vs-SLR curve onto the dense visualization.slr_interp
-    grid at file-creation time, so `slr_mm_values` (from load_growth_matrix_csv)
-    is already the dense axis — this is a plain aggregate + reshape.
+    Each growth column was computed independently (avoid is non-linear in growth),
+    and the SLR axis is already dense, so this is a plain aggregate + reshape.
     """
     totals = eai_grid.sum(axis=0)  # MultiIndex (slr_mm, growth_frac) -> summed EAI
-    # unstack (vectorized, C-level pivot) instead of one Python-level scalar
-    # MultiIndex lookup per (growth_frac, slr_mm) cell - confirmed bit-identical
-    # output, ~10x faster on a real grid (5719 cells: 58.6ms -> 6.0ms) - this
-    # function is called once per (country, strategy/design) in every script
-    # that builds per-country/per-continent pathways (plot_tipping_points.py,
-    # compute_tipping_points_summary.py, compute_adaptation_pathways.py, ...),
-    # so the per-call saving compounds into real wall-clock minutes at
-    # continent scale (hundreds of countries x several strategy/design grids).
     pivot = totals.unstack(level="slr_mm")
     matrix = pivot.reindex(index=growth_fracs, columns=slr_mm_values).to_numpy(dtype=float)
     return np.clip(matrix, 0.0, None)
 
 
 def load_slr_trajectories(csv_path: str | Path) -> pd.DataFrame:
-    """Load the global-mean SLR trajectory CSV (output of extract_slr_trajectories.py).
+    """Load the global-mean SLR trajectory CSV (extract_slr_trajectories.py).
 
-    Expected columns: year (int) + one column per SSP (e.g. SSP1, SSP2, …) with
-    global-median SLR in mm relative to the 2020 baseline.
+    Index year, one column per SSP: global-median SLR in mm relative to 2020.
     """
     df = pd.read_csv(csv_path, index_col="year")
     return df
 
-
-# ── 2. Chart functions ────────────────────────────────────────────────────────
 
 def draw_slr_uncertainty_band(
     ax: plt.Axes,
@@ -260,31 +199,15 @@ def draw_slr_uncertainty_band(
     colors: dict[str, str],
     fontsize: float = 10,
 ) -> None:
-    """The burning-ember "uncertainty in SLR projections" strip, factored out
-    of plot_burning_ember so other figures (e.g. analysis/plot_tipping_points.py)
-    can place the identical sub-panel under their own SLR-axis plot.
+    """Draw the burning-ember "uncertainty in SLR projections" strip on `ax`.
 
-    One row per highlight year, every SSP's P17-P83 SLR error bar plotted
-    side by side within that row (colour identifies the SSP, matching
-    whatever legend the caller's own main panel uses - no per-row label).
-    Only the left spine remains; the x-axis has no tick marks/labels of its
-    own - it reads against whatever SLR axis sits directly above `ax`
-    (shared via `sharex`), not as a separately boxed panel.
-
-    Args:
-        ax:               Target axes - must share its x-axis (SLR, metres)
-                           with the panel above it.
-        slr_uncertainty:  {SSP: pd.DataFrame(index=year, columns=[p17,p50,p83] in mm)}.
-        highlight_years:  Years to draw a row for (e.g. [2050, 2100]).
-        colors:           Per-SSP colour map.
-        fontsize:         Matches the panel above it.
+    One row per highlight year with each SSP's P17-P83 error bar (`slr_uncertainty`:
+    {SSP: DataFrame(index=year, columns p17/p50/p83 in mm)}); `ax` must share its
+    x-axis (SLR, metres) with the panel above and has no x ticks of its own.
     """
     ssp_list = [ssp for ssp in colors if ssp in slr_uncertainty]
     n_unc = len(ssp_list)
     n_years = len(highlight_years)
-    # Evenly spaced offsets within each year's unit-height row so each SSP's
-    # error bar sits at its own y position instead of overlapping; a lone
-    # SSP sits exactly on the tick (offset 0).
     offsets = np.linspace(-0.3, 0.3, n_unc) if n_unc > 1 else np.array([0.0])
     for yi, yr in enumerate(highlight_years):
         for ssp, offset in zip(ssp_list, offsets):
@@ -332,71 +255,16 @@ def plot_burning_ember(
     diverging_vmin: float | None = None,
     contour_vmax: float | None = None,
 ) -> plt.Figure:
-    """Burning-ember impact matrix: EAI as a function of SLR × population growth.
+    """Plot the burning-ember impact matrix: EAI over SLR x population growth.
 
-    Two stacked subplots sharing the SLR (x) axis:
-      1. The impact-matrix heatmap + contours + SSP trajectory overlays.
-      2. A single uncertainty subplot, one y-tick per highlight year (not
-         per SSP): each year's row shows every SSP's P17-P83 SLR error bar
-         side by side, offset slightly around that year's tick position so
-         they don't overlap. Colour (matching subplot 1's legend), not a
-         per-row label, identifies which SSP each error bar belongs to.
-         Only the left spine remains (top/bottom/right hidden) and the
-         x-axis has no tick marks or labels of its own (just the vertical
-         gridlines, read against the heatmap's x-axis above) - it reads as
-         one continuous panel, not a separately boxed one. The
-         "Uncertainty in SLR projections" annotation (rotated to read
-         upward) is this subplot's y-axis label directly.
-
-    Both subplots live in the same GridSpec column so their plot areas are
-    IDENTICAL widths regardless of the heatmap's colorbar (which occupies
-    its own dedicated GridSpec column, row 0 only) — attaching a colorbar
-    via the simpler `fig.colorbar(im, ax=ax)` shrinks only ax's width,
-    breaking x-axis alignment with any other sharex'd subplot.
-
-    Args:
-        matrix:             2-D array (n_growth_rates, n_slr_interp).
-        slr_interp_mm:      Dense SLR axis values in mm.
-        growth_rates:       Growth-rate axis values (fractions, e.g. -0.5 → 1.5).
-        title:              Figure title (country name / continent / scenario).
-        slr_trajectories:   Per-SSP global-mean (median) SLR in mm (index=year, cols=SSP*).
-        ssp_growth:         {SSP: pd.Series(index=year, values=fraction growth rate)}.
-        slr_uncertainty:    {SSP: pd.DataFrame(index=year, columns=[p17,p50,p83] in mm)} —
-                             the uncertainty subplot is created only if this is non-empty,
-                             with one error bar per key present here at each highlight year.
-        highlight_years:    Years to mark on SSP trajectories (e.g. [2050, 2100]).
-        cmap:               Matplotlib colormap name.
-        vmax:               Colour scale maximum (auto if None).
-        dpi:                Figure resolution.
-        figsize:            Size (inches) of the heatmap row; total figure height
-                             grows with the number of highlight_years.
-        unit_label:         Colourbar label.
-        ssp_colors:         Per-SSP colour overrides.
-        n_contours:         Number of labelled EAI contour lines drawn on the heatmap.
-        fontsize:           Base font size (points); axis/tick labels use this directly,
-                             the title and colourbar label scale up from it, contour
-                             labels and legend scale down from it.
-        diverging_center:   If given, colour the heatmap on a diverging scale (RdBu_r,
-                             blue=below/red=above) centred on this EAI value instead of
-                             the default sequential scale (cmap, vmin=0). Useful for a
-                             growth-only panel where population decline can pull EAI
-                             below its growth=0% value - pass that value here to make
-                             the reduction read as a distinct colour, not just a lighter
-                             shade of the same ramp.
-        diverging_vmin:     Lower bound for the diverging norm (only used when
-                             diverging_center is set). Defaults to this panel's own
-                             matrix minimum (auto). Pass a fixed value shared across
-                             several plot_burning_ember() calls to give them all an
-                             identical colour-to-value mapping instead of each panel
-                             auto-scaling its own low end.
-        contour_vmax:       Upper bound for contour LEVEL placement, independent of the
-                             colour scale's vmax. Pass this when several panels share one
-                             fixed vmax for cross-panel colour comparability but have very
-                             different value ranges themselves - without it, a low-range
-                             panel's contour levels are spaced across the shared (much
-                             larger) vmax and mostly fall outside its own data, leaving
-                             few or no contour lines to show its internal shape. Defaults
-                             to the colour scale's own vmax (current behaviour).
+    `matrix` is (n_growth_rates, n_slr_interp); `slr_interp_mm` in mm, `growth_rates`
+    as fractions. Optional SSP trajectory overlays (`slr_trajectories` in mm,
+    `ssp_growth` growth factors) stop at the last highlight year; an SLR-uncertainty
+    strip is added below if `slr_uncertainty` is non-empty. The colorbar has its own
+    GridSpec column so both panels keep identical widths for `sharex`.
+    `diverging_center` switches to RdBu_r centred on that EAI (`diverging_vmin` fixes
+    the low end across panels); `contour_vmax` places contour levels independently
+    of the shared colour vmax.
     """
     colors_ = ssp_colors or _DEFAULT_SLR_COLORS
     if highlight_years is None:
@@ -452,10 +320,6 @@ def plot_burning_ember(
     cb.ax.tick_params(labelsize=max(6, fontsize - 2))
     cb.set_label(unit_label, fontsize=fontsize)
 
-    # Contour lines, labelled with their EAI value. Level placement can be
-    # decoupled from the colour scale's vmax via contour_vmax (see docstring)
-    # so a shared cross-panel colour scale doesn't starve a lower-range
-    # panel of its own meaningful contour lines.
     contour_lo = diverging_center if diverging_center is not None else 0.0
     contour_hi = contour_vmax if contour_vmax is not None else vmax_c
     levels = np.linspace(contour_lo, contour_hi, n_contours + 1)[1:]
@@ -464,8 +328,6 @@ def plot_burning_ember(
     for lbl in clabels:
         lbl.set_bbox(dict(facecolor="white", edgecolor="none", alpha=0.7, pad=1))
 
-    # SSP trajectory overlays — line stops at the last highlight year (e.g. 2100),
-    # even if the underlying trajectory/growth data extends further.
     if slr_trajectories is not None and ssp_growth is not None:
         line_cutoff = max(highlight_years)
         for ssp, color in colors_.items():
@@ -515,24 +377,10 @@ def plot_timeseries(
     figsize: tuple[float, float] = (10, 6),
     unit_label: str = "EAI (people)",
 ) -> plt.Figure:
-    """Time-series plot of EAI along SSP SLR trajectories for each adaptation measure.
+    """Plot EAI along each SSP's SLR trajectory per adaptation measure.
 
-    For each (SSP, year), the SLR level is read from `slr_trajectories`, the EAI
-    for that SLR is interpolated from the discrete scenario grid, and optionally
-    scaled by the corresponding population growth factor.
-
-    Args:
-        eai_dict:          {measure_label: EAI DataFrame (index=geogunit, cols=SLR scenarios)}.
-        slr_trajectories:  Global-median SLR in mm (index=year, cols=SSP names).
-        ssp_growth:        {SSP: pd.Series(index=year, values=growth factor)}.
-        years:             Years to evaluate (e.g. list(range(2020, 2151, 10))).
-        slr_mm_values:     Discrete SLR levels (mm) corresponding to eai_dict columns.
-        entity_label:      Title suffix.
-        measure_colors:    Colour overrides per measure.
-        ssp_colors:        Colour overrides per SSP.
-        dpi:               Figure resolution.
-        figsize:           Figure size.
-        unit_label:        Y-axis label.
+    EAI at the trajectory's SLR (mm) is PCHIP-interpolated over `slr_mm_values`
+    (anchored at 0 EAI at 0 mm) and scaled by the SSP growth factor when available.
     """
     m_colors = measure_colors or _DEFAULT_MEASURE_COLORS
     s_colors = ssp_colors or _DEFAULT_SLR_COLORS
@@ -550,7 +398,6 @@ def plot_timeseries(
         color_ssp = s_colors.get(ssp, "#444444")
         for measure in measures:
             df = eai_dict[measure]
-            # Sum geogunits → series indexed by SLR scenario name
             eai_totals = np.array([df[slr].sum() if slr in df.columns else 0.0
                                    for slr in [f"SLR_{int(mm)}" for mm in slr_mm_values]])
 
@@ -559,7 +406,6 @@ def plot_timeseries(
                 if yr not in slr_trajectories.index:
                     continue
                 slr_at_yr = float(slr_trajectories.loc[yr, ssp])
-                # Interpolate EAI at this SLR
                 y_known = eai_totals.copy()
                 x_ext = x_known.copy()
                 if x_ext[0] > 0:
@@ -568,7 +414,6 @@ def plot_timeseries(
                 eai_interp = float(np.clip(
                     pchip_interpolate(x_ext, y_known, np.array([slr_at_yr])), 0, None
                 )[0])
-                # Apply population growth
                 g = 1.0
                 if ssp in ssp_growth and yr in ssp_growth[ssp].index:
                     g = float(ssp_growth[ssp][yr])
@@ -589,7 +434,6 @@ def plot_timeseries(
         ax.grid(alpha=0.3)
 
     axes[0].set_ylabel(unit_label, fontsize=10)
-    # Single shared legend
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="upper left", fontsize=8, bbox_to_anchor=(0.01, 0.97))
     fig.suptitle(f"EAI time-series — {entity_label}", fontsize=11, y=1.01)
@@ -603,21 +447,10 @@ def build_geo109_to_iso_lookup(
     flopros_xlsx_path: str | Path,
     subsample: int = 10,
 ) -> dict[int, str]:
-    """Build a geogunit_109 ID → ISO-3 country code lookup table.
+    """Map each geogunit_109 ID to the ISO-3 of its most common geogunit_107 unit.
 
-    Overlaps the geogunit_109 country raster with the geogunit_107 sub-national
-    raster (both at ~30 arcsec), then maps each 109-unit to the ISO code of the
-    most-common 107-unit within it (via the FLOPROS table).
-
-    Args:
-        geo109_nc_path:    Path to geogunit_109_all.nc.
-        geo107_nc_path:    Path to geogunit_107_all.nc.
-        flopros_xlsx_path: Path to FLOPROS_NL_geogunit_107.xlsx (has ISO column).
-        subsample:         Read every Nth pixel to reduce memory; default 10 (100×
-                           fewer pixels at the cost of some spatial precision).
-
-    Returns:
-        Dict mapping each geogunit_109 integer ID → ISO-3 string.
+    Both rasters are ~30 arcsec; ISO comes from the FLOPROS table. `subsample` reads
+    every Nth pixel per axis (10 = 100x fewer pixels).
     """
     flopros = pd.read_excel(flopros_xlsx_path, index_col=0, header=0)
     if "ISO" not in flopros.columns:
@@ -671,32 +504,16 @@ def plot_world_map(
     lat_range: tuple[float, float] = (-60, 85),
     downsample: int = 4,
 ) -> plt.Figure:
-    """Raster choropleth world map coloured by per-country EAI.
+    """Plot a raster choropleth world map of per-country EAI on the geogunit_109 grid.
 
-    Each pixel of the geogunit_109 raster is coloured by the EAI of the country
-    it belongs to.  No external vector shapefile required.
-
-    Args:
-        eai_by_iso:       pd.Series indexed by ISO-3 country code.
-        geo109_nc_path:   Path to geogunit_109_all.nc.
-        geo109_to_iso:    Dict {geogunit_109_id → ISO-3} (from build_geo109_to_iso_lookup).
-        title:            Figure title.
-        cmap:             Matplotlib colormap name.
-        vmax:             Colour scale maximum (auto if None).
-        dpi:              Figure resolution.
-        figsize:          Figure size in inches.
-        unit_label:       Colorbar label.
-        lat_range:        (min_lat, max_lat) to clip the display.
-        downsample:       Read every Nth pixel row/col to reduce memory and draw time.
+    Assumes the raster's top edge is 90N (latitude rows from `lat_range`).
     """
-    # Build ISO→EAI lookup
     iso_to_eai = eai_by_iso.to_dict()
 
     with retry_transient_io(rasterio.open, f"netcdf:{geo109_nc_path}:Geogunits") as src:
         transform = src.transform
         height, width = src.height, src.width
 
-        # Determine lat-clipping row indices
         lat_max_row = max(0, int((90.0 - lat_range[1]) / abs(transform.e)))
         lat_min_row = min(height, int((90.0 - lat_range[0]) / abs(transform.e)))
 
@@ -705,18 +522,15 @@ def plot_world_map(
         )
         geo109 = src.read(1, window=window, out_dtype="int32")
 
-    # Downsample for display
     ds = int(downsample)
     geo109_ds = geo109[::ds, ::ds]
 
-    # Build coloured array: invalid → NaN
     eai_grid = np.full(geo109_ds.shape, np.nan, dtype=float)
     for g109_id, iso in geo109_to_iso.items():
         eai_val = iso_to_eai.get(iso, np.nan)
         if not np.isnan(eai_val):
             eai_grid[geo109_ds == g109_id] = eai_val
 
-    # Extent for imshow
     left = transform.c
     right = transform.c + width * transform.a
     top = transform.f + lat_max_row * transform.e

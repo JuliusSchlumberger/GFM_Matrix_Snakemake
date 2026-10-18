@@ -22,31 +22,11 @@ _STRUCTURE_8 = np.ones((3, 3), dtype=bool)
 
 
 def load_waterlevel_stations(nc_path: str | Path, variable: str, x_var: str, y_var: str, column_name: str) -> gpd.GeoDataFrame:
-    """Load water level stations from a COAST-RP_EWL NetCDF file as a GeoDataFrame.
+    """Load COAST-RP_EWL water level stations from NetCDF as a GeoDataFrame.
 
-    Parameters
-    ----------
-    nc_path : str or Path
-        Path to the NetCDF file containing one water-level scenario.
-    variable : str
-        Name of the data variable holding the water level values.
-    x_var : str
-        Name of the coordinate variable holding station longitudes.
-    y_var : str
-        Name of the coordinate variable holding station latitudes.
-    column_name : str
-        Name to give the water level column in the output GeoDataFrame. Must match
-        the `waterlevels.name` value written into the tile/scenario's Aqueduct TOML
-        configuration.
-
-    Returns
-    -------
-    geopandas.GeoDataFrame
-        Stations with a `column_name` column (plain float64 metres - see
-        `save_boundary_points` for the int16-centimetre encoding used on disk,
-        matching DEM/friction/waterdepth's convention) and point geometries in
-        EPSG:4326. Stations with a NaN water level are dropped, since the eikonal
-        flood model cannot handle missing boundary values.
+    `column_name` must match the Aqueduct TOML `waterlevels.name`. Water levels are
+    float64 metres, geometries EPSG:4326. NaN stations are dropped (the eikonal
+    model cannot handle missing boundary values).
     """
     with retry_transient_io(xr.open_dataset, nc_path) as ds:
         waterlevel = ds[variable].values.astype(np.float64)
@@ -67,36 +47,12 @@ def select_stations_for_tile(
     buffer_deg: float = 0.0,
     min_search_size_deg: float = 0.0,
 ) -> gpd.GeoDataFrame:
-    """Select water level stations within a tile's bounding box, plus a buffer.
+    """Select stations within the tile bbox plus `buffer_deg` (or a minimum search box).
 
-    Also enforces a minimum search-area floor centred on the tile, since a domain's
-    own bbox (src/connectivity_tiling.py) is NOT uniformly padded and small chunks
-    (post drop_redundant_chunks/split_oversized_chunks) need an explicit floor so a
-    shrinking buffer_deg can never silently starve the candidate pool the eikonal solver's
-    k-nearest-neighbour IDW interpolation draws from. The area actually used is the
-    ENVELOPE of "bbox + buffer_deg" and "min_search_size_deg centred on the tile" -
-    whichever is larger per dimension.
-
-    Parameters
-    ----------
-    stations : geopandas.GeoDataFrame
-        Water level stations, as returned by `load_waterlevel_stations`.
-    tile : geopandas.GeoDataFrame
-        Single-row GeoDataFrame of the tile geometry, as returned by
-        `tiles.get_tile_geometry`.
-    buffer_deg : float, optional
-        Degrees added to each side of the tile's bbox before selecting candidates
-        (plain lon/lat expansion in EPSG:4326, not latitude-corrected). Should be
-        `boundary_conditions.station_search_buffer_deg`. Default 0.0.
-    min_search_size_deg : float, optional
-        Minimum width/height of the search area in degrees, centred on the tile's
-        own centre. Should be `boundary_conditions.station_search_min_size_deg`.
-        Default 0.0.
-
-    Returns
-    -------
-    geopandas.GeoDataFrame
-        The water level stations within the tile's search area.
+    The search area is the envelope of "bbox + buffer_deg" (plain lon/lat, not
+    latitude-corrected) and a `min_search_size_deg` square centred on the tile. The
+    floor exists because domain bboxes are not uniformly padded, so small chunks
+    could otherwise starve the solver's k-nearest-neighbour IDW candidate pool.
     """
     minx, miny, maxx, maxy = tile.total_bounds
     buf_minx, buf_miny, buf_maxx, buf_maxy = minx - buffer_deg, miny - buffer_deg, maxx + buffer_deg, maxy + buffer_deg
@@ -121,41 +77,12 @@ def filter_stations_by_ocean_connectivity(
 ) -> gpd.GeoDataFrame:
     """Drop candidate stations that aren't ocean-connected to this tile.
 
-    `select_stations_for_tile`'s bbox buffer is purely distance-based, so a station
-    across a land barrier (a thin isthmus, a strait's far shore) still passes it,
-    and `flood_model._idw_seed_values`'s own connectivity fix can't catch that
-    either since it only ever sees the tile's own (tightly trimmed) mask array.
-    This runs a coarser, longer-range version of the same idea: build a
-    downsampled ocean mask spanning the tile and every candidate station, label
-    its connected components (8-connectivity, same convention as
-    `flood_model.coastline_mask`), and keep only stations sharing a component with
-    the tile's own coastline. Deliberately conservative: this is a pre-filter, not
-    the final say, so ambiguous cases (no confident water in the tile's own bbox,
-    or a station's cell below `water_fraction_threshold`) are kept rather than
-    dropped.
-
-    Parameters
-    ----------
-    stations : geopandas.GeoDataFrame
-        Candidate stations, as returned by `select_stations_for_tile`.
-    tile : geopandas.GeoDataFrame
-        Single-row GeoDataFrame of the tile geometry.
-    mask_dir : str or Path
-        Directory containing the 1x1 degree DeltaDTM mask GeoTIFF tiles (see
-        `tiles.mosaic_water_fraction_downsampled`).
-    target_resolution_m : float
-        Coarse cell size in metres for the connectivity check
-        (`boundary_conditions.connectivity_resolution_m`).
-    water_fraction_threshold : float
-        Minimum fraction of a coarse cell's underlying native pixels that must be
-        ocean for the cell to count as water
-        (`boundary_conditions.connectivity_water_fraction_threshold`).
-
-    Returns
-    -------
-    geopandas.GeoDataFrame
-        The subset of `stations` that are ocean-connected to `tile` (or all of
-        `stations`, unfiltered, in the inconclusive cases described above).
+    The bbox buffer is distance-only, so stations across a land barrier pass it.
+    Labels a downsampled ocean mask (8-connectivity, as `flood_model.coastline_mask`)
+    over tile + stations and keeps stations sharing a component with the tile.
+    Conservative pre-filter: inconclusive cases (no confident water in the tile
+    bbox, or a station cell below `water_fraction_threshold`, the minimum ocean
+    fraction of a coarse cell) are kept.
     """
     if stations.empty:
         return stations
@@ -216,23 +143,10 @@ def filter_stations_by_ocean_connectivity(
 
 
 def save_boundary_points(stations: gpd.GeoDataFrame, output_path: str | Path, column_name: str) -> None:
-    """Save selected water level stations to a GeoPackage.
+    """Save stations to a GeoPackage with water levels encoded as int16 centimetres.
 
-    Encodes `column_name` (the water level column - see `load_waterlevel_stations`)
-    to int16 centimetres before writing (`rasters.encode_waterlevel_cm`), matching
-    the precision convention DEM/friction/waterdepth already use on disk. A caller
-    reading this file back for computation (`eikonal_runner.run_eikonal_python`)
-    must decode it with `rasters.decode_waterlevel_cm` before use.
-
-    Parameters
-    ----------
-    stations : geopandas.GeoDataFrame
-        Water level stations to save, with `column_name` holding plain float64
-        metres.
-    output_path : str or Path
-        Destination GeoPackage path.
-    column_name : str
-        Name of the water level column to encode and write.
+    Input `column_name` is float64 metres; readers must decode with
+    `rasters.decode_waterlevel_cm`.
     """
     stations = stations.copy()
     stations[column_name] = encode_waterlevel_cm(stations[column_name].to_numpy())
@@ -243,45 +157,16 @@ def collect_neighbor_wave_seeds(
     target_dem_path: str | Path,
     source_paths: list[tuple[str | Path, str | Path, str | Path]],
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Collect direct eikonal seed cells for a hop>=1 tile from already-simulated,
-    lower-hop_distance neighbour tile(s).
+    """Collect direct eikonal seeds for a hop>=1 tile from lower-hop neighbour outputs.
 
-    For each `(dem_path, mask_path, waterdepth_path)` neighbour (its own DEM + mask
-    + this SAME scenario's waterdepth raster), reads a window restricted to the
-    target tile's own bounds, keeps only cells the neighbour actually flooded
-    (depth not nodata and > 0), computes absolute water level as
-    `effective_dem(dem, mask) + depth`, and snaps each cell's centre onto the
-    nearest target-grid cell (`rasterio.transform.rowcol`, floor convention).
-    Uses `effective_dem` (not the raw DEM) because `flood_depth_dense` already
-    computes `depth` as `waterlevel - effective_dem`, so adding the raw DEM would
-    double-count terrain elevation on non-land cells (found 2026-08: a river cell
-    with dem=29.89m produced a seed of 35.63m from a true ~5.74m water level).
-    Unlike real COAST-RP stations, these values are used directly as eikonal
-    seeds, not IDW interpolated. Multiple source cells snapping to the same target
-    cell are combined with `np.maximum.at` - the maximum wins.
-
-    Parameters
-    ----------
-    target_dem_path : str or Path
-        Path to the hop>=1 tile's own DEM raster (read for its transform/shape/
-        bounds only - never for elevation values here).
-    source_paths : list of tuple of (str or Path, str or Path, str or Path)
-        `(dem_path, mask_path, waterdepth_path)` for each candidate earlier-wave
-        neighbour whose output already exists on disk; a not-yet-computed
-        neighbour should simply be omitted by the caller.
-
-    Returns
-    -------
-    tuple of numpy.ndarray
-        `(seed_rows, seed_cols, seed_values)` - row/col indices into the target
-        tile's own grid and the absolute water level (metres) at each, ready for
-        `flood_depth_dense`'s explicit-seed path. Empty arrays if no source
-        contributed any usable cell (including empty `source_paths`).
-
-    Raises
-    ------
-    ValueError
-        If a source's mask or waterdepth raster grid does not match its own DEM's.
+    `source_paths` holds `(dem, mask, waterdepth)` per already-simulated neighbour
+    (same scenario). Wet cells (depth > 0, not nodata) give absolute water level
+    `effective_dem(dem, mask) + depth` in metres; the raw DEM would double-count
+    terrain on non-land cells, since depth is `waterlevel - effective_dem`. Cell
+    centres snap to the target grid with floor; collisions keep the maximum. Seeds
+    are used directly, not IDW-interpolated. Returns `(rows, cols, values)`, empty if
+    nothing contributed. Raises ValueError if a source's mask/waterdepth grid differs
+    from its DEM.
     """
     with retry_transient_io(rasterio.open, target_dem_path) as target_src:
         target_transform = target_src.transform
@@ -299,7 +184,7 @@ def collect_neighbor_wave_seeds(
             col_end = min(dem_src.width, raw_window.col_off + raw_window.width)
             row_end = min(dem_src.height, raw_window.row_off + raw_window.height)
             if col_end <= col_off or row_end <= row_off:
-                continue  # no real overlap with the target's own extent
+                continue
             window = Window(col_off, row_off, col_end - col_off, row_end - row_off)
             source_dem = decode_dem_cm(dem_src.read(1, window=window))
             source_win_transform = dem_src.window_transform(window)

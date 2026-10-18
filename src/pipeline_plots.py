@@ -18,26 +18,10 @@ _DELTADTM_LAND_CODE = 0  # inputs/DeltaDTM_masks/deltadtm_mask.vrt convention: 0
 
 
 def land_polygons_from_deltadtm_mask(data_catalog_root: str | Path, bounds: tuple[float, float, float, float]) -> gpd.GeoDataFrame:
-    """Build a land-polygon background layer from the project's DeltaDTM land/ocean mask.
+    """Vectorize DeltaDTM mask land cells (value 0) within `bounds` (EPSG:4326).
 
-    Vectorizes land cells (value 0) from `inputs/DeltaDTM_masks/deltadtm_mask.vrt`
-    (EPSG:4326), windowed to `bounds`, replacing the retired external OSM
-    `land_polygons` dataset this project no longer uses (2026-10-02). Purely cosmetic
-    context for `plot_raster_with_coastlines`, never load-bearing: never raises, and
-    returns an empty GeoDataFrame if the VRT is missing or the window has no land cells.
-
-    Parameters
-    ----------
-    data_catalog_root : str or Path
-        Root directory containing `inputs/DeltaDTM_masks/deltadtm_mask.vrt`.
-    bounds : tuple of float
-        (minx, miny, maxx, maxy) window to vectorize, in the mask's CRS (EPSG:4326).
-
-    Returns
-    -------
-    geopandas.GeoDataFrame
-        Land polygons in EPSG:4326, empty if the mask could not be read or has no
-        land cells within `bounds`.
+    Cosmetic plot background only: never raises; returns an empty GeoDataFrame if
+    the VRT is unreadable or the window has no land.
     """
     mask_vrt = Path(data_catalog_root) / "inputs" / "DeltaDTM_masks" / "deltadtm_mask.vrt"
     try:
@@ -60,30 +44,11 @@ def land_polygons_from_deltadtm_mask(data_catalog_root: str | Path, bounds: tupl
 
 def cached_land_polygons(data_catalog_root: str | Path, bounds: tuple[float, float, float, float],
                          cache_dir: str | Path) -> gpd.GeoDataFrame:
-    """Return `land_polygons_from_deltadtm_mask`, cached on disk per (bounds, mask VRT).
+    """Return `land_polygons_from_deltadtm_mask`, pickled on disk per (bounds, mask VRT).
 
-    Every plot_merged_results job of one study plots the same mosaic extent, so
-    without caching all of them vectorize the identical land polygons from the
-    full-resolution mask - ~half of each plot job's runtime (thailand_bangkok,
-    2026-10-09: 45 s of 94 s). The cache is a pickle of the exact GeoDataFrame
-    (coordinates and row order preserved), so the rendered figure is pixel-identical
-    to an uncached run. The key covers the exact bounds and the mask VRT's path, size
-    and mtime. Written to a temp name and atomically renamed, so concurrent plot jobs
-    never read a partial file. An empty result is never cached.
-
-    Parameters
-    ----------
-    data_catalog_root : str or Path
-        Root directory containing `inputs/DeltaDTM_masks/deltadtm_mask.vrt`.
-    bounds : tuple of float
-        (minx, miny, maxx, maxy) window to vectorize, in the mask's CRS (EPSG:4326).
-    cache_dir : str or Path
-        Directory to read/write the cached pickle in; created if missing.
-
-    Returns
-    -------
-    geopandas.GeoDataFrame
-        Land polygons in EPSG:4326 (see `land_polygons_from_deltadtm_mask`).
+    Key covers exact bounds and the VRT's path, size and mtime. Written via temp file
+    + atomic rename so concurrent plot jobs never read a partial file. Empty results
+    are not cached.
     """
     import hashlib
     import os
@@ -122,32 +87,11 @@ def cached_land_polygons(data_catalog_root: str | Path, bounds: tuple[float, flo
 
 
 def pixel_area_km2_grid(transform, width: int, height: int, row_offset: int = 0) -> np.ndarray:
-    """Compute a per-cell area (km²) grid for a window of an EPSG:4326 raster.
+    """Compute a (height, width) per-cell area grid in km² for an EPSG:4326 window.
 
-    Uses the standard approximation (1° latitude ≈ 111.32 km; 1° longitude ≈
-    cos(lat) × 111.32 km), varying **per row** since a pixel's real east-west
-    ground size shrinks toward the poles even where its degree-width does not -
-    so pixel size must always be read from the raster's own transform, never
-    assumed/hardcoded. Shared by `compute_flood_area_km2` and `validation.py`
-    (area-weighted metrics/exposure-difference disaggregation) - one formula, not two.
-
-    Parameters
-    ----------
-    transform : affine.Affine
-        Raster affine transform (degrees), giving pixel size and row latitude.
-    width : int
-        Window width in pixels.
-    height : int
-        Window height in pixels.
-    row_offset : int, optional
-        Row offset of the window within the full raster (0 for a read covering the
-        whole raster), needed so a block-wise caller's window gets its true latitude,
-        not one computed as if the block's own row 0 were the raster's row 0.
-
-    Returns
-    -------
-    numpy.ndarray
-        (height, width) array of per-cell area in km².
+    Approximation: 1° latitude ≈ 111.32 km, 1° longitude ≈ cos(lat) × 111.32 km,
+    evaluated per row. `row_offset` is the window's row within the full raster, so
+    block-wise reads get their true latitude.
     """
     row_centres = transform.f + (row_offset + np.arange(height) + 0.5) * transform.e
     pixel_height_km = abs(transform.e) * _KM_PER_DEG
@@ -156,25 +100,10 @@ def pixel_area_km2_grid(transform, width: int, height: int, row_offset: int = 0)
 
 
 def compute_flood_area_km2(raster_path: str | Path, threshold_m: float) -> float:
-    """Compute the total area (km²) of cells with flood depth >= threshold_m.
+    """Compute the total area (km²) of cells with flood depth >= `threshold_m` (metres).
 
-    Reads the raster block-by-block in parallel threads to keep memory use bounded
-    for large merged rasters; per-window partial sums are added to the total
-    sequentially in the original window order so the result is bit-identical to a
-    serial reduction (float addition is not associative). Pixel area comes from
-    `pixel_area_km2_grid` (see there for the formula/rationale).
-
-    Parameters
-    ----------
-    raster_path : str or Path
-        Path to a single-band flood-depth raster (EPSG:4326).
-    threshold_m : float
-        Minimum depth (metres) to count as flooded.
-
-    Returns
-    -------
-    float
-        Total flooded area in km².
+    Raster must be EPSG:4326. Blocks are reduced in parallel threads but summed in
+    window order, so the result is bit-identical to a serial reduction.
     """
     import os
     import threading
@@ -185,12 +114,8 @@ def compute_flood_area_km2(raster_path: str | Path, threshold_m: float) -> float
         nodata = src.nodata
         windows = [window for _, window in src.block_windows(1)]
 
-    # Windows are read and reduced in parallel threads (GDAL and numpy release
-    # the GIL; one dataset handle per thread - rasterio handles must not be
-    # shared across threads), but the per-window partial sums are added to
-    # the total sequentially IN THE ORIGINAL WINDOW ORDER, exactly as the
-    # former serial loop did - the result is bit-identical to it (float
-    # addition is not associative, so the order is what must not change).
+    # One dataset handle per thread: rasterio handles must not be shared across
+    # threads. Partials are summed in window order (float addition is not associative).
     local, handles, handles_lock = threading.local(), [], threading.Lock()
 
     def window_sum(window) -> float | None:
@@ -213,7 +138,7 @@ def compute_flood_area_km2(raster_path: str | Path, threshold_m: float) -> float
 
     try:
         with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 1)) as pool:
-            partials = list(pool.map(window_sum, windows))  # map() preserves input order
+            partials = list(pool.map(window_sum, windows))
     finally:
         for ds in handles:
             ds.close()
@@ -240,52 +165,15 @@ def plot_raster_with_coastlines(
     figsize: tuple[float, float] = (10, 10),
     dpi: int = 200,
 ) -> None:
-    """Plot a raster with a land-polygon background and save it as an image.
+    """Plot a raster over a land-polygon background and save it as an image.
 
-    The raster is read downsampled to `resolution_arcsec` arc-seconds per pixel
-    (1 arcsec = 1/3600°), so the output resolution is consistent regardless of the
-    combined area size; has no effect if the native resolution is already coarser.
-    Since flooding only occurs on land, ocean pixels carry 0 or nodata and are
-    already transparent via `mask_value=0` - no explicit ocean masking is needed.
-    Saves the figure to `output_path` and closes it.
-
-    Parameters
-    ----------
-    raster_path : str or Path
-        Path to the raster to plot (single band).
-    coastlines : geopandas.GeoDataFrame
-        Land polygons drawn as a whitesmoke background for geographic context.
-        Should already be (roughly) limited to the raster's area.
-    output_path : str or Path
-        Where to save the plot image (e.g. a `.png` file).
-    title : str
-        Plot title.
-    label : str
-        Colorbar label.
-    cmap : str
-        Matplotlib colormap name for the raster.
-    resolution_arcsec : float
-        Target pixel size in arc-seconds; the raster is downsampled so that each
-        output pixel covers this many arc-seconds.
-    mask_value : float, optional
-        If given, cells equal to this value are masked (transparent), so the
-        coastline background is visible through them.
-    oom_tiles : geopandas.GeoDataFrame, optional
-        If given, tile polygons that were skipped due to OutOfMemoryError are
-        drawn as a semi-transparent grey overlay.
-    annotation : str, optional
-        If given, drawn as a text box in the lower-left corner of the plot.
-    vmax_m : float, optional
-        Colour-scale cap (m); depths above this clip to the same top colour
-        (postprocessing.plots.waterdepth_vmax_m). Default is 10.0.
-    figsize : tuple of float, optional
-        Figure size in inches (postprocessing.plots.merged_map_figsize).
-        Default is (10, 10).
-    dpi : int, optional
-        Output image resolution in dots per inch. Default is 200.
+    Reads the raster average-downsampled to `resolution_arcsec` (1 arcsec = 1/3600°;
+    no-op if native is coarser). Cells equal to `mask_value` are transparent;
+    `oom_tiles` (tiles skipped with OutOfMemoryError) are drawn as a grey overlay;
+    `vmax_m` caps the colour scale in metres.
     """
     with retry_transient_io(rasterio.open, raster_path) as src:
-        native_deg = src.transform.a          # native pixel width in degrees
+        native_deg = src.transform.a
         target_deg = resolution_arcsec / 3600.0
         scale = max(1.0, target_deg / native_deg)
         out_shape = (max(1, round(src.height / scale)), max(1, round(src.width / scale)))

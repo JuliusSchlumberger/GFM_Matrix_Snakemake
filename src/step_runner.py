@@ -1,9 +1,4 @@
-"""Run one pipeline step as a subprocess, with a banner, timing and fail-fast handling.
-
-The single definition of the step runner used by the orchestrators
-(analysis/run_analysis.py, validation/run_validation.py, run_delta_floodmaps.py), which each
-had their own copy.
-"""
+"""Run one orchestrator pipeline step as a subprocess with banner, timing, fail-fast."""
 
 from __future__ import annotations
 
@@ -20,29 +15,9 @@ def run_step(
     cwd: str | Path | None = None,
     env: dict | None = None,
 ) -> bool:
-    """Run `cmd` in a subprocess and report the outcome.
+    """Run `cmd` and return True if it exited 0.
 
-    Prints a banner with `label` and the command, runs it, then prints "Done in Ns" or
-    "FAILED (exit N)". A child's own failure never raises here: the caller decides what a
-    failed step means, except that `fail_fast` exits this process with the child's code.
-
-    Parameters
-    ----------
-    cmd : list of str
-        Command and arguments.
-    label : str
-        Human-readable step name for the banner and the result line.
-    fail_fast : bool, default False
-        On failure, ``sys.exit`` with the child's return code instead of returning False.
-    cwd : str or Path, optional
-        Working directory for the child (default: inherit).
-    env : dict, optional
-        Environment for the child (default: inherit).
-
-    Returns
-    -------
-    bool
-        True if the command exited 0.
+    A failed child never raises; with `fail_fast` this process exits with its code.
     """
     print(f"\n{'═' * 60}")
     print(f"  {label}")
