@@ -1,7 +1,8 @@
 """Smoke-test SFINCS build -> run -> postprocess on the smallest finished calibration tile.
 
 Needs P:\\, a local sfincs.exe and a finished FIXTURE_BASE_DIR_NAME tile; skips
-otherwise. Writes a copy under SMOKE_BASE_DIR_NAME; the fixture is never touched.
+otherwise. The fixture is only read: its build inputs are copied into a local temp
+dir (pytest's tmp_path) and the model is built and run there, never on P:\\.
 """
 
 from __future__ import annotations
@@ -9,9 +10,11 @@ from __future__ import annotations
 import json
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SFINCS_TILES_DIR = REPO_ROOT / "sfincs_tiles"
@@ -64,9 +67,9 @@ def _prereqs_available() -> tuple[Path, Path, str] | None:
     return None if tile_id is None else (root, DEFAULT_SFINCS_EXE, tile_id)
 
 
-def _stage_fixture(root: Path, tile_id: str) -> Path:
-    src, dst = root / FIXTURE_BASE_DIR_NAME / tile_id, root / SMOKE_BASE_DIR_NAME / tile_id
-    shutil.rmtree(dst, ignore_errors=True)
+def _stage_fixture(root: Path, tile_id: str, stage_root: Path) -> Path:
+    """Copy the fixture tile's build inputs from `root` to `stage_root`/SMOKE_BASE_DIR_NAME."""
+    src, dst = root / FIXTURE_BASE_DIR_NAME / tile_id, stage_root / SMOKE_BASE_DIR_NAME / tile_id
     shutil.copytree(src / "inputs", dst / "inputs")
     (dst / "sfincs_model").mkdir(parents=True)
     for f in PREP_FILES:
@@ -76,19 +79,20 @@ def _stage_fixture(root: Path, tile_id: str) -> Path:
     return line
 
 
-def test_build_run_postprocess_produces_plausible_output() -> None:
+def test_build_run_postprocess_produces_plausible_output(tmp_dir: Path) -> None:
     print("=== SFINCS smoke test: full build -> run -> postprocess on a real fixture tile ===")
     prereqs = _prereqs_available()
     if prereqs is None:
-        print("SKIP: real P:\\ modelling share, a finished calibration_roughness_SFINCS tile, and/or the local "
-              "sfincs.exe aren't available in this environment - not a failure, nothing to run against.")
-        print()
-        return
+        pytest.skip("real P:\\ modelling share, a finished calibration_roughness_SFINCS tile, and/or the local "
+                    "sfincs.exe aren't available in this environment")
     root, sfincs_exe, tile_id = prereqs
-    line = _stage_fixture(root, tile_id)
-    print(f"  fixture: tile {tile_id} from {FIXTURE_BASE_DIR_NAME}, copied to {SMOKE_BASE_DIR_NAME}")
+    # build_sfincs_tile only touches <root>/<base_dir_name>/<tile_id>/{inputs,sfincs_model},
+    # so a local stage root keeps every write off P:\.
+    stage_root = tmp_dir
+    line = _stage_fixture(root, tile_id, stage_root)
+    print(f"  fixture: tile {tile_id} from {FIXTURE_BASE_DIR_NAME}, copied to {stage_root / SMOKE_BASE_DIR_NAME}")
 
-    sfincs_dir = build_sfincs_tile(tile_id, root, base_dir_name=SMOKE_BASE_DIR_NAME, boundary_lines_gpkg=line)
+    sfincs_dir = build_sfincs_tile(tile_id, stage_root, base_dir_name=SMOKE_BASE_DIR_NAME, boundary_lines_gpkg=line)
     assert sfincs_dir.exists()
     inp_path = sfincs_dir / "sfincs.inp"
     assert inp_path.exists(), "build_sfincs_tile did not produce sfincs.inp"
@@ -99,7 +103,7 @@ def test_build_run_postprocess_produces_plausible_output() -> None:
     assert map_path.exists(), "SFINCS ran but produced no sfincs_map.nc"
     print("  run: OK, produced sfincs_map.nc")
 
-    land_mask_path = root / SMOKE_BASE_DIR_NAME / tile_id / "inputs" / "mask.tif"
+    land_mask_path = stage_root / SMOKE_BASE_DIR_NAME / tile_id / "inputs" / "mask.tif"
     hmax, grid_info = compute_max_inundation(sfincs_dir, land_mask_path)
 
     assert hmax.ndim == 2 and hmax.size > 0, hmax.shape
@@ -115,7 +119,11 @@ def test_build_run_postprocess_produces_plausible_output() -> None:
 
 
 def main() -> None:
-    test_build_run_postprocess_produces_plausible_output()
+    with tempfile.TemporaryDirectory(prefix="sfincs_smoke_") as td:
+        try:
+            test_build_run_postprocess_produces_plausible_output(Path(td))
+        except pytest.skip.Exception as exc:
+            print(f"SKIP: {exc}\n")
     print("SFINCS end-to-end smoke test complete.")
 
 
