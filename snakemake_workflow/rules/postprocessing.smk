@@ -63,7 +63,7 @@ rule compute_flood_fraction_chunk:
     """Compute the coarse flood-fraction raster for one (chunk, RP, SLR) scenario.
 
     Reads the fine waterdepth from merge_chunk, evaluates depth > threshold per
-    fine Aqueduct pixel, and average-pools the binary result to the population
+    fine eikonal-model pixel, and average-pools the binary result to the population
     raster's native ~1 km resolution.
 
     Output: a tiny coarse raster (values 0–1) that replaces the large fine

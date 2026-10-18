@@ -19,7 +19,7 @@ For each scenario, runs in order:
 
 Hop-wave ordering (2026-10, real bug found live on this run): a hop>=1
 tile's neighbour-seeding read (`collect_neighbor_wave_seeds`, via
-run_aqueduct.py's `path_ready()` check on each lower-hop candidate's own
+run_eikonal.py's `path_ready()` check on each lower-hop candidate's own
 waterdepth output) treats a candidate that simply hasn't been simulated
 YET identically to one that will never exist - both just get omitted from
 `available`, and if every candidate is omitted the tile is marked
@@ -34,7 +34,7 @@ were genuine. Fixed by running `simulate` in explicit hop_distance waves
 (ascending), each wave's full target list given directly to `snakemake`
 and blocked on until that whole wave finishes, before the next wave's
 targets are even requested - same ordering guarantee production's HPC
-`generate_aqueduct_jobs`/`submit_waves.sh` already gives via SLURM
+`generate_eikonal_jobs`/`submit_waves.sh` already gives via SLURM
 `--dependency=afterany` chains, just as sequential local Snakemake calls
 instead of sequential sbatch submissions. This also makes the
 graceful-degradation omission trustworthy for small, spatially-restricted
@@ -73,7 +73,6 @@ Usage:
 """
 
 import argparse
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -84,7 +83,7 @@ CONFIG_DIR = REPO_ROOT / "snakemake_workflow" / "config"
 ALL_SCENARIOS = ["ssp126", "ssp245"]
 # "design": the design-event floods at SLR_0 for the FLOPROS-protected deltas only (protection-failure
 # reference for compute_delta_flood_extent.py) - its config deltas_design_materialized.yml is written by
-# analysis/prepare_delta_design_runs.py, not build_delta_run_configs.py. Not part of the default run.
+# analysis/prepare_delta_design_runs.py, not materialize_configs.py. Not part of the default run.
 EXTRA_SCENARIOS = ["design"]
 ALL_STAGES = ["boundary_conditions", "preprocess", "simulate", "postprocess"]
 
@@ -102,9 +101,11 @@ _MAX_TARGETS_PER_SNAKEMAKE_CALL = 150
 
 
 def _run(cmd: list[str], env: dict | None = None) -> bool:
-    print(f"\n$ {' '.join(cmd)}", flush=True)
-    result = subprocess.run(cmd, cwd=REPO_ROOT, env=env)
-    return result.returncode == 0
+    """Run `cmd` from the repo root via `step_runner.run_step`; True on success (never exits)."""
+    sys.path.insert(0, str(REPO_ROOT / "src"))
+    from step_runner import run_step
+
+    return run_step(cmd, label=" ".join(cmd[:2]), cwd=REPO_ROOT, env=env)
 
 
 def _chunked(items: list, size: int):
@@ -163,13 +164,13 @@ def run_scenario(scenario: str, cores: int, mem_mb: int | None, stages: list[str
         raise FileNotFoundError(
             f"{materialized} does not exist - run "
             + ("analysis/prepare_delta_design_runs.py" if scenario in EXTRA_SCENARIOS
-               else "snakemake_workflow/scripts/build_delta_run_configs.py") + " first."
+               else f"snakemake_workflow/scripts/materialize_configs.py deltas_{scenario}") + " first."
         )
 
     env = os.environ.copy()
     env["GFM_CONFIG_PATH"] = str(materialized)
 
-    resources = [f"--resources", f"mem_mb={mem_mb}"] if mem_mb else []
+    resources = ["--resources", f"mem_mb={mem_mb}"] if mem_mb else []
     results: dict[str, bool] = {}
 
     for stage in stages:

@@ -38,7 +38,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import load_config, retry_transient_io  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
-DELTAS_PATH = Path(r"P:\11212688-004-global-floodmaps\modelling\inputs\DeltasGlobal\all_deltas.shp")
 DEFAULT_BUFFER_DEG = 0.5
 
 
@@ -47,8 +46,9 @@ def build_delta_tile_subset(
 ) -> gpd.GeoDataFrame:
     cfg = load_config(config_path)
     tile_grid_path = Path(cfg["tile_grid"]["path"])
+    deltas_path = Path(cfg["paths"]["deltas_shapefile"])
 
-    deltas = retry_transient_io(gpd.read_file, DELTAS_PATH)
+    deltas = retry_transient_io(gpd.read_file, deltas_path)
     tile_grid = retry_transient_io(gpd.read_file, tile_grid_path)
     if tile_grid.crs != deltas.crs:
         tile_grid = tile_grid.to_crs(deltas.crs)

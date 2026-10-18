@@ -21,9 +21,8 @@ much finer resolution than the model grid, and the user wants BOTH an
 up-sampled and a down-sampled comparison rather than a single fractional-
 coverage score - that's genuinely different machinery (explicit reprojection
 to one common grid per direction, then plain array-level confusion counts
-and RMSE/MAE), not a variant of the existing soft-fraction path. See
-validate_country_depth_raster() in validate_country.py for the reusable
-version of this pattern (this script is SF Bay's own driver/CLI).
+and RMSE/MAE), not a variant of the existing soft-fraction path; this script
+is SF Bay's own driver/CLI (there is no reusable version in validate_country.py).
 
 Evaluation domain (2026-10-15, revised): NOT the benchmark raster's own
 valid-pixel footprint - confirmed live that CoSMoS depth rasters only carry
@@ -56,7 +55,6 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import rasterio
-from affine import Affine
 from rasterio.features import rasterize
 from rasterio.warp import Resampling, reproject
 
@@ -65,14 +63,31 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 
-SURVEYED_DOMAIN_PATH = Path(
-    "P:/11212688-004-global-floodmaps/modelling/inputs/validation/California/"
-    "flooding/sf_bay_county_bbox_union.gpkg"
-)
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # validation/ (for _chunks)
+from _chunks import _chunks_overlapping_bbox, _mosaic_read  # noqa: E402
 
 
-def _rasterize_surveyed_domain(out_transform, out_shape, out_crs) -> np.ndarray:
-    gdf = gpd.read_file(SURVEYED_DOMAIN_PATH).to_crs(out_crs)
+def _rasterize_surveyed_domain(surveyed_domain_path: Path, out_transform, out_shape, out_crs) -> np.ndarray:
+    """Rasterize the surveyed-domain polygon(s) onto the given output grid.
+
+    Parameters
+    ----------
+    surveyed_domain_path : Path
+        Path to the surveyed-domain vector file (e.g. the 9-county bbox
+        union gpkg).
+    out_transform : affine.Affine
+        Affine transform of the destination grid.
+    out_shape : tuple[int, int]
+        Shape (rows, cols) of the destination grid.
+    out_crs : rasterio.crs.CRS
+        CRS of the destination grid.
+
+    Returns
+    -------
+    np.ndarray
+        Boolean mask, True inside the surveyed domain.
+    """
+    gdf = gpd.read_file(surveyed_domain_path).to_crs(out_crs)
     return rasterize(
         [(geom, 1) for geom in gdf.geometry], out_shape=out_shape,
         transform=out_transform, fill=0, dtype="uint8",
@@ -92,15 +107,30 @@ def _permanent_water_mask_lean(land_use: np.ndarray, exclude_codes) -> np.ndarra
     return out
 
 NODATA_SENTINEL = -9999.0
-BENCHMARK_PATH = Path(
-    "P:/11212688-004-global-floodmaps/modelling/inputs/validation/California/"
-    "flooding/sf_bay_flddepth_slr000_w100_mosaic.tif"
-)
-MODEL_CHUNK_PATH = Path(
-    "P:/11212688-004-global-floodmaps/modelling/merged_results/chunks/waterdepth_N35W125_RP100_SLR_0.tif"
-)
 # SF Bay bbox (EPSG:4326) - same footprint the v2.1 sfb_fldhazd benchmark covers.
 BAY_BBOX_4326 = (-122.64, 37.40, -121.88, 38.28)
+
+
+def _read_model_bay(chunk_paths: list[Path], bbox):
+    """Read the model's merged waterdepth over `bbox` (EPSG:4326) from every overlapping chunk.
+
+    One chunk (the case for SF Bay with 5deg chunks): a windowed read, exactly as before.
+    Several chunks (smaller chunk_size_deg, or a bbox across a chunk edge): mosaicked with
+    validation/_chunks._mosaic_read, the same path validate_country.py uses.
+
+    Returns
+    -------
+    tuple
+        (depth_m float64, transform, crs, nodata).
+    """
+    if not chunk_paths:
+        raise FileNotFoundError(f"no merged waterdepth chunk overlaps the SF Bay bbox {bbox}")
+    if len(chunk_paths) == 1:
+        return _read_model_window(chunk_paths[0], bbox)
+    mosaic, transform = _mosaic_read(chunk_paths, list(bbox))
+    with rasterio.open(chunk_paths[0]) as src:
+        crs = src.crs
+    return mosaic.astype("float64"), transform, crs, -9999.0
 
 
 def _read_model_window(path: Path, bbox):
@@ -184,11 +214,18 @@ def validate_sf_bay(config_path: str, threshold_m: float | None = None) -> dict[
     permanent_water_source = val_cfg["permanent_water_source"]
     permanent_water_codes = val_cfg["permanent_water_codes"]
 
-    bench_depth_2m, bench_transform_2m, bench_crs_2m = _read_benchmark_full(BENCHMARK_PATH)
-    bench_shape_2m = bench_depth_2m.shape
-    bay_bbox_26910 = rasterio.warp.transform_bounds("EPSG:4326", bench_crs_2m, *BAY_BBOX_4326)
+    benchmark_root = Path(val_cfg["benchmark_root"])
+    surveyed_domain_path = benchmark_root / "California" / "flooding" / "sf_bay_county_bbox_union.gpkg"
+    benchmark_path = benchmark_root / "California" / "flooding" / "sf_bay_flddepth_slr000_w100_mosaic.tif"
+    model_chunk_paths = _chunks_overlapping_bbox(
+        list(BAY_BBOX_4326), cfg["postprocessing"]["chunk_size_deg"],
+        Path(cfg["postprocessing"]["merged_outputs"]) / "chunks", "RP100", "SLR_0",
+    )
 
-    model_depth_native, model_transform_native, model_crs, model_nodata = _read_model_window(MODEL_CHUNK_PATH, BAY_BBOX_4326)
+    bench_depth_2m, bench_transform_2m, bench_crs_2m = _read_benchmark_full(benchmark_path)
+    bench_shape_2m = bench_depth_2m.shape
+
+    model_depth_native, model_transform_native, model_crs, model_nodata = _read_model_bay(model_chunk_paths, BAY_BBOX_4326)
     model_shape_native = model_depth_native.shape
     model_valid_native = model_depth_native != model_nodata if model_nodata is not None else np.isfinite(model_depth_native)
     model_depth_native = np.where(model_valid_native, model_depth_native, NODATA_SENTINEL)
@@ -208,7 +245,7 @@ def validate_sf_bay(config_path: str, threshold_m: float | None = None) -> dict[
         gfm_catalog, permanent_water_source, permanent_water_codes,
         list(BAY_BBOX_4326), model_transform_native, model_shape_native, model_crs,
     )
-    surveyed_a = _rasterize_surveyed_domain(model_transform_native, model_shape_native, model_crs)
+    surveyed_a = _rasterize_surveyed_domain(surveyed_domain_path, model_transform_native, model_shape_native, model_crs)
     # Within the surveyed footprint, CoSMoS nodata means "modeled, found dry" - fill it
     # as a real 0.0 depth rather than excluding it, so it can register as a TN or FP.
     bench_on_model = np.where((bench_on_model == NODATA_SENTINEL) & surveyed_a, 0.0, bench_on_model)
@@ -234,7 +271,7 @@ def validate_sf_bay(config_path: str, threshold_m: float | None = None) -> dict[
         gfm_catalog, permanent_water_source, permanent_water_codes,
         list(BAY_BBOX_4326), bench_transform_2m, bench_shape_2m, bench_crs_2m,
     )
-    surveyed_b = _rasterize_surveyed_domain(bench_transform_2m, bench_shape_2m, bench_crs_2m)
+    surveyed_b = _rasterize_surveyed_domain(surveyed_domain_path, bench_transform_2m, bench_shape_2m, bench_crs_2m)
     bench_depth_2m = np.where((bench_depth_2m == NODATA_SENTINEL) & surveyed_b, 0.0, bench_depth_2m)
     domain_b = (model_on_2m != NODATA_SENTINEL) & surveyed_b & ~water_on_2m
     model_wet_b = model_on_2m > threshold_m

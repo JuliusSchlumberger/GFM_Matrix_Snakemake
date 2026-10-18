@@ -28,13 +28,15 @@ TILE_ID="$1"
 BASE_DIR_NAME="${BASE_DIR_NAME:-calibration_roughness_SFINCS}"
 SFINCS_THREADS="${SFINCS_THREADS:-4}"
 
-CODE_ROOT="/u/schlumbe/gfm_code"
-DATA_ROOT="/p/11212688-004-global-floodmaps/modelling"
+# Hydrax paths: single definition in hydrax_env.sh (env-overridable).
+source "$(dirname "${BASH_SOURCE[0]}")/hydrax_env.sh"
+CODE_ROOT="$GFM_CODE_ROOT"
+DATA_ROOT="$GFM_DATA_ROOT"
 CONFIG="$DATA_ROOT/$BASE_DIR_NAME/resolved_config.yml"
 SFINCS_IMAGE="docker://deltares/sfincs-cpu:sfincs-v2.4.0-Galibier-Release"
 SFINCS_TIMEOUT_S=14400
-HYDROMT_SFINCS_DEV_PY="/u/schlumbe/.conda/envs/hydromt-sfincs-dev/bin/python"
-GFM_PY="/u/schlumbe/.conda/envs/gfm/bin/python"
+HYDROMT_SFINCS_DEV_PY="$GFM_SFINCS_PYTHON"
+GFM_PY="$GFM_PYTHON"
 
 SRC="$DATA_ROOT/model_outputs/$TILE_ID/inputs"
 TILE_DIR="$DATA_ROOT/$BASE_DIR_NAME/$TILE_ID"

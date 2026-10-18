@@ -7,14 +7,13 @@ isolation, one country's crash doesn't abort the rest unless --fail-fast),
 then concatenates every country's metrics CSV into one cross-country summary.
 
 Usage:
-    python snakemake_workflow/validation/run_validation.py \\
+    python validation/run_validation.py \\
         [--config snakemake_workflow/config/config.yml] \\
-        [--countries ESP FRA] \\
+        [--countries GBR CAN] \\
         [--fail-fast]
 """
 
 import argparse
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -23,6 +22,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io  # noqa: E402
+from step_runner import run_step  # noqa: E402
 from validation import fix_catalog_meta_encoding  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -48,24 +48,18 @@ def _discover_countries(cfg: dict) -> list[str]:
 
 
 def _run(cmd: list[str], label: str, fail_fast: bool) -> bool:
-    print(f"\n{'═' * 60}")
-    print(f"  {label}")
-    print(f"  {' '.join(cmd)}")
-    print(f"{'═' * 60}")
-    t0 = time.time()
-    result = subprocess.run(cmd)
-    elapsed = time.time() - t0
-    if result.returncode != 0:
-        print(f"\n  ✗ FAILED (exit {result.returncode}) after {elapsed:.0f}s — {label}")
-        if fail_fast:
-            print("  Aborting (--fail-fast).")
-            sys.exit(result.returncode)
-        return False
-    print(f"\n  ✓ Done in {elapsed:.0f}s — {label}")
-    return True
+    """Run `cmd` via `step_runner.run_step`; True on success."""
+    return run_step(cmd, label, fail_fast)
 
 
 def main() -> None:
+    """Parse CLI arguments and run validate_country.py + plot_agreement_map.py for every country.
+
+    Discovers countries from the benchmark catalog when ``--countries`` is omitted, runs both
+    steps per country as subprocesses (one country's crash doesn't abort the rest unless
+    ``--fail-fast``), then concatenates every country's metrics CSV into one cross-country
+    summary CSV. Exits with status 1 if no countries are found or any step failed.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     _default_cfg = str(SCRIPTS_DIR.parent / "snakemake_workflow" / "config" / "config.yml")
     parser.add_argument("--config", default=_default_cfg)

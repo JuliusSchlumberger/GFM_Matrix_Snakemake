@@ -4,7 +4,7 @@ analysis.plot_* steps (run_analysis.py --only-plots --skip-flood-totals),
 on one node.
 
 Why a single node rather than the multi-node phase-barrier dispatch
-generate_hpc_postprocess_job.py/generate_exposure_jobs.py use: both steps
+generate_hpc_postprocess_job.py/generate_hpc_exposure_jobs.py use: both steps
 here are reading many small per-chunk files that already exist (flood
 fraction / population / geogunit chunks, already produced by the completed
 postprocess + exposure-analysis dispatch) - the work is I/O-wait bound, not
@@ -36,6 +36,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from config_utils import atomic_write, load_config, retry_transient_io  # noqa: E402
+from hpc_common import _account_line, _stage_configfile_lines  # noqa: E402
 
 # Duplicated from generate_hpc_postprocess_job.py (not imported - that module
 # imports write_flood_totals_and_plots_job FROM here to append this phase
@@ -44,52 +45,42 @@ from config_utils import atomic_write, load_config, retry_transient_io  # noqa: 
 # own matching helpers already use rather than a shared module).
 
 
-def _account_line(sbatch_cfg: dict) -> list[str]:
-    if sbatch_cfg.get("account"):  # optional - Hydrax jobs don't require one
-        return [f"#SBATCH --account={sbatch_cfg['account']}"]
-    return []
-
-
-def _stage_configfile_lines() -> list[str]:
-    """Bash function def: copies a --configfile path to node-local scratch
-    and validates it parses as UTF-8 YAML before use, retrying the CHEAP
-    copy+validate step on failure - see generate_hpc_postprocess_job.py's
-    matching helper for the full rationale (live evidence 2026-09-14: a
-    node-local stale-cache issue on the shared P:\\ mount that re-running
-    against the same path alone doesn't fix)."""
-    return [
-        "stage_configfile_locally() {",
-        '  local src="$1" out_var="$2"',
-        '  local stage_dir="${TMPDIR:-/tmp}/gfm_resolved_config"',
-        '  mkdir -p "$stage_dir"',
-        '  local dst="$stage_dir/resolved_config_${SLURM_JOB_ID:-$$}_$$.yml"',
-        "  local attempt=1 max_attempts=8 delay=5",
-        '  while [ "$attempt" -le "$max_attempts" ]; do',
-        '    cp -f -- "$src" "$dst" 2>/dev/null',
-        "    if python -c \"import sys, yaml; yaml.safe_load(open(sys.argv[1], encoding='utf-8'))\" \"$dst\" 2>/dev/null; then",
-        "      printf -v \"$out_var\" '%s' \"$dst\"",
-        "      return 0",
-        "    fi",
-        '    echo "  [config-stage retry $attempt/$max_attempts] $src did not copy/parse cleanly - retrying in ${delay}s..." >&2',
-        '    rm -f -- "$dst"',
-        '    sleep "$delay"',
-        "    attempt=$((attempt + 1))",
-        "  done",
-        '  echo "  failed to stage a valid local copy of $src after $max_attempts attempts - giving up." >&2',
-        "  return 1",
-        "}",
-    ]
-
-
 def write_flood_totals_and_plots_job(
     local_config: dict, linux_config: dict,
     partition: str = "24vcpu", cpus: int = 24, mem: str = "32G", time: str | None = None,
 ) -> tuple[Path, str]:
-    """Write the flood_totals_and_plots.sbatch script (NOT submitted here -
-    the caller decides whether to submit it standalone or append it onto an
-    existing chain, see generate_hpc_postprocess_job.py's own use of this
-    for the latter). Returns (local_script_path, linux_script_path) so a
-    caller can reference the Linux path in a generated `sbatch` line.
+    """Write the flood_totals_and_plots.sbatch script, without submitting it.
+
+    Runs compute_flood_totals.py followed by run_analysis.py --only-plots
+    --skip-flood-totals on a single node (see module docstring for why one
+    node rather than a multi-node phase-barrier dispatch). The caller decides
+    whether to submit it standalone or append it onto an existing chain (see
+    generate_hpc_postprocess_job.py's use of this for the latter). Reuses an
+    existing resolved_config.yml under `hpc.jobs_dir` if one is already there.
+
+    Parameters
+    ----------
+    local_config : dict
+        Config resolved against the local (this-machine) path view.
+    linux_config : dict
+        Config resolved against the Linux/HPC path view, used for every path
+        embedded into the generated sbatch script.
+    partition : str, optional
+        SLURM partition to request, by default "24vcpu".
+    cpus : int, optional
+        CPUs per task, also passed to compute_flood_totals.py's `--workers`,
+        by default 24.
+    mem : str, optional
+        SLURM memory request, by default "32G".
+    time : str or None, optional
+        SLURM time limit; defaults to `hpc.sbatch.time` from the config when
+        None.
+
+    Returns
+    -------
+    tuple[Path, str]
+        The local script path and the corresponding Linux path, for a caller
+        to reference in a generated `sbatch` line.
     """
     local_jobs_dir = Path(local_config["hpc"]["jobs_dir"])
     linux_jobs_dir = linux_config["hpc"]["jobs_dir"]
@@ -153,6 +144,11 @@ def write_flood_totals_and_plots_job(
 
 
 def main() -> None:
+    """Parse CLI arguments and write the flood-totals-and-plots sbatch script.
+
+    Prints the written script's local path and the ``sbatch`` command to
+    submit it on Hydrax.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
     parser.add_argument("--config", default=str(default_config))

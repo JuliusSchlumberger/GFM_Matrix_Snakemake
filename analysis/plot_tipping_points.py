@@ -53,11 +53,13 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _common)
+from _common import _first_crossing, _growth_matrix_path  # noqa: E402
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pathways import eai_along_pathway, matrix_interpolator, slr_pathway  # noqa: E402
 from population_extension import extend_growth_factors  # noqa: E402
 from population_growth import _build_name_to_iso, interpolate_growth_factor, load_ssp_growth_factors  # noqa: E402
-from visualization import (  # noqa: E402
+from analysis_figures import (  # noqa: E402
     _DEFAULT_SLR_COLORS, build_growth_matrix_from_grid, load_growth_matrix_csv, load_slr_trajectories,
 )
 
@@ -80,24 +82,14 @@ YEARS = np.arange(2020, 2101)
 LAST_SSP_YEAR = 2100  # IIASA SSP population projections end here
 
 
-def _growth_matrix_path(exp_dir: Path, strategy: str, design: str) -> Path:
-    label = "baseline" if strategy == "baseline" else f"{strategy}_{design}"
-    return exp_dir / f"exposure_{label}_growth_matrix.csv"
-
-
-def _first_crossing(eai: np.ndarray, threshold: float, years: np.ndarray = YEARS) -> float | None:
-    """First (fractional) year in `years` where `eai` reaches `threshold`, or None."""
-    above = np.nonzero(eai >= threshold)[0]
-    if len(above) == 0:
-        return None
-    k = int(above[0])
-    if k == 0:
-        return float(years[0])
-    e0, e1 = eai[k - 1], eai[k]
-    return float(years[k - 1] + (threshold - e0) / (e1 - e0))
-
-
 def main() -> None:
+    """Parse CLI arguments and plot each country's adaptation tipping points by scenario.
+
+    For every country in visualization.tipping_points.countries, draws a two-panel figure:
+    the SLR-vs-population tipping isolines per adaptation strategy with each SSP's pathway
+    overlaid, and the year each strategy's EAI first crosses the configured threshold.
+    Writes tipping_points.png and tipping_points.csv (every tipping year) to --outdir.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_*_growth_matrix.csv files")

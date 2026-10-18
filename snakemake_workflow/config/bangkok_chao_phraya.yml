@@ -21,7 +21,7 @@
 # choice thailand_bangkok.yml already made): 9 return periods x 5 SLR
 # scenarios, simulated in two sequential waves (hop_distance=0 tiles fully
 # complete before hop_distance=1 tiles start - a hidden runtime dependency,
-# not encoded in Snakemake's own DAG, see run_aqueduct_cli.py's
+# not encoded in Snakemake's own DAG, see run_eikonal_cli.py's
 # collect_neighbor_wave_seeds) via run_simulation_batch.py, 3 local cores.
 #
 # Layered on top of config.yml + config_local.yml via

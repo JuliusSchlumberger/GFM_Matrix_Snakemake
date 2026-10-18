@@ -15,8 +15,11 @@ REM     run_bangkok_case_study.bat
 setlocal
 
 set REPO=%~dp0
-set PYEXE=C:\Users\schlumbe\AppData\Local\miniforge3\envs\gfm_python_preprocessing\python.exe
-set SNAKEMAKE=C:\Users\schlumbe\AppData\Local\miniforge3\envs\gfm_python_preprocessing\Scripts\snakemake.exe
+REM Conda env with the pipeline (`gfm`; named gfm_python_preprocessing on this machine).
+REM Override by setting GFM_ENV before running this file.
+if not defined GFM_ENV set "GFM_ENV=%LOCALAPPDATA%\miniforge3\envs\gfm_python_preprocessing"
+set PYEXE=%GFM_ENV%\python.exe
+set SNAKEMAKE=%GFM_ENV%\Scripts\snakemake.exe
 set STUDY_ROOT=P:\11212688-004-global-floodmaps\modelling\bangkok_chao_phraya
 set CASE_GPKG=%STUDY_ROOT%\bangkok_chao_phraya_domain.gpkg
 set MATERIALIZED=%REPO%snakemake_workflow\config\bangkok_chao_phraya_materialized.yml

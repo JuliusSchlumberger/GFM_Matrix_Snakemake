@@ -1,11 +1,11 @@
 """Runs one production simulation HPC batch: a flat list of (tile_id,
 return_period, waterlevel_name) triples, up to --workers of them
 CONCURRENTLY via a thread pool of subprocess.run calls - one subprocess per
-triple, each a full `run_aqueduct_cli.py` invocation (keeps every skip/
+triple, each a full `run_eikonal_cli.py` invocation (keeps every skip/
 idempotency check - already-done output, no-stations zero-write, OOM marking
 - in that one script, rather than duplicating it here).
 
-Why this exists (2026-10-08): `generate_aqueduct_jobs.py`'s own generated
+Why this exists (2026-10-08): `generate_eikonal_jobs.py`'s own generated
 sbatch scripts used to run every (tile, rp, slr) triple in a batch through a
 single bash `run_job` call, SEQUENTIALLY, one after another - `cpus_per_task`
 was requested from SLURM but never actually used for simulation throughput
@@ -28,14 +28,14 @@ Hard per-triple timeout (2026-10-13, --timeout-min, default 20): confirmed
 live that a P:\\ mount hang on a compute node (not reproducible from the
 login node or from other machines - looks specific to the 24vcpu partition,
 reproduced on two separate, otherwise-healthy job submissions) can block
-run_aqueduct_cli.py's own very first, unprotected `open(args.config)` call
+run_eikonal_cli.py's own very first, unprotected `open(args.config)` call
 indefinitely - every worker thread hangs on the exact same read
 simultaneously, nothing ever raises, so retry_transient_io (which only
 retries real exceptions) never gets a chance to help, and the whole batch
 goes silent for hours with zero diagnostic signal. subprocess.run(timeout=)
 turns that silent hang into a clean, logged failure instead - a timed-out
 triple still gets picked up correctly on the NEXT resume dispatch (its
-output file never got written, so run_aqueduct_cli.py's own idempotency
+output file never got written, so run_eikonal_cli.py's own idempotency
 check won't skip it), same as any other genuine failure.
 
 Usage:
@@ -53,7 +53,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-RUNNER = Path(__file__).resolve().parent / "run_aqueduct_cli.py"
+RUNNER = Path(__file__).resolve().parent / "run_eikonal_cli.py"
 
 
 def _run_one(python_exe: str, config_path: str, tile_id: str, rp: str, slr: str, timeout_s: float):
@@ -75,6 +75,15 @@ def _run_one(python_exe: str, config_path: str, tile_id: str, rp: str, slr: str,
 
 
 def main() -> None:
+    """Parse CLI arguments and run this batch's simulation triples concurrently.
+
+    Reads the triples CSV and fans the batch out across a thread pool of
+    ``run_eikonal_cli.py`` subprocess calls (one per triple), honoring
+    ``--workers`` and a hard per-triple ``--timeout-min``. A failed or
+    timed-out triple is logged (stdout) and, if ``--fail-log`` is given,
+    appended to that file; it does not abort the rest of the batch. Exits
+    with status 1 if any triple failed.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--triples-file", required=True, help="CSV, no header: tile_id,return_period,waterlevel_name per line")
     parser.add_argument("--config", required=True, help="path to a fully-resolved config.yml (e.g. resolved_config.yml)")

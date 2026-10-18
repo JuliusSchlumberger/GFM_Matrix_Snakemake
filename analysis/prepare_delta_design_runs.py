@@ -41,10 +41,10 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
-from validation import tri_domain_mask  # noqa: E402
+from rasters import polygon_domain_mask  # noqa: E402
 
 from compute_delta_flood_extent import (  # noqa: E402
-    DELTA_NAME_INFERRED, DELTAS_PATH, GEOGUNIT_SOURCE, PROTECTION_THRESHOLD_YEARS, VOLGA_ID, build_tile_delta_join,
+    DELTA_NAME_INFERRED, GEOGUNIT_SOURCE, PROTECTION_THRESHOLD_YEARS, VOLGA_ID, build_tile_delta_join,
     snap_rp,
 )
 
@@ -60,7 +60,7 @@ def design_rps_for_delta(delta_geometry, catalog, rp_by_geogunit: pd.Series, def
     except Exception:  # noqa: BLE001
         return []
     arr = np.nan_to_num(geo.values.astype("float64"), nan=-1)
-    inside = tri_domain_mask(gpd.GeoDataFrame(geometry=[delta_geometry], crs="EPSG:4326"),
+    inside = polygon_domain_mask(gpd.GeoDataFrame(geometry=[delta_geometry], crs="EPSG:4326"),
                              geo.raster.transform, geo.raster.crs, arr.shape)
     ids = np.unique(arr[inside & (arr >= 0)].astype("int64"))
     rps = [float(rp_by_geogunit.get(int(i), default_rp)) for i in ids]
@@ -101,7 +101,7 @@ def main() -> None:
     rp_by_geogunit = flopros["Coastal"].fillna(flopros["Riverine"]).fillna(default_rp)
     rp_by_geogunit.index = rp_by_geogunit.index.astype("int64")
 
-    deltas = retry_transient_io(gpd.read_file, DELTAS_PATH)
+    deltas = retry_transient_io(gpd.read_file, Path(prod["paths"]["deltas_shapefile"]))
     deltas = deltas[deltas["Id"] != VOLGA_ID].reset_index(drop=True)
     rows = []
     for _, d in deltas.iterrows():

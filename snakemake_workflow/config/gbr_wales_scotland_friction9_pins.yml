@@ -1,0 +1,12 @@
+# Values pinned for the `gbr_wales_scotland_friction9` scenario (2026-10-18): what its existing outputs were
+# computed with, before config.yml's defaults moved on. Merged by
+# snakemake_workflow/scripts/materialize_configs.py AFTER gbr_wales_scotland_friction9.yml.
+# Delete a key here to let the scenario follow config.yml again (then re-run it).
+analysis: {plot_timeseries: true}
+hpc: {n_nodes: 35}
+population_growth:
+  output_years: [2025, 2030, 2035, 2040, 2045, 2050, 2060, 2075, 2100]
+tile_generation: {min_split_gap_coarse_cells: 60}
+visualization:
+  growth_rates: {max: 1.5, min: -0.5}
+  slr_interp: {max_mm: 1500, n_points: 100}

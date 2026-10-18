@@ -10,7 +10,7 @@ The one real ordering constraint is wave-based hinterland forcing
 from a strictly-lower-`hop_distance` neighbour's own output for the SAME
 scenario (`src/boundaries.collect_neighbor_wave_seeds`). Wave `N+1` can
 therefore only start once every wave-`N` job has reached a terminal state -
-not "the neighbour happened to finish first". `generate_aqueduct_jobs`
+not "the neighbour happened to finish first". `generate_eikonal_jobs`
 groups tiles by wave, generates one set of sbatch scripts per wave, and
 writes a `submit_waves.sh` driver that submits each wave to SLURM with a
 `--dependency=afterany:<every prior-wave job id>` barrier.
@@ -42,7 +42,7 @@ the way through to exposure analysis unattended, once
    ```
    Set `paths.root` (Linux mount of the same storage as the local `paths.root`)
    and `paths.code_root` (Linux checkout of this repo — used to locate
-   `run_aqueduct_cli.py`). Git-ignored, like `config_local.yml`. Not needed
+   `run_eikonal_cli.py`). Git-ignored, like `config_local.yml`. Not needed
    at all if you're running stage 1 directly ON Hydrax (see below) — in
    that case `config_local.yml` alone already points at Hydrax's own paths.
 
@@ -86,7 +86,7 @@ removed as dead weight from a retired pipeline generation.)
 ## 1. Preprocess + generate jobs
 
 ```
-snakemake generate_aqueduct_jobs --cores N
+snakemake generate_eikonal_jobs --cores N
 ```
 
 Runs every preprocessing rule (DEM/mask/friction/boundaries, one set per
@@ -107,7 +107,7 @@ tile) in parallel across `--cores N`, then writes to
 
 Wave-0 tiles/scenarios with no boundary stations are resolved immediately
 during this step (nodata placeholder written locally, same as
-`run_aqueduct` does today) and never show up in any sbatch script.
+`run_eikonal` does today) and never show up in any sbatch script.
 Hop_distance≥1 tiles are never pre-excluded this way — whether a hinterland
 tile has any upstream flooding to seed from can only be known once its
 neighbour has actually run, so every hop≥1 tile always gets a job; a tile
@@ -138,7 +138,7 @@ separate preprocessing-only config) plus a
 read at runtime via `$(cat ...)` rather than inlined, since a batch's target
 list can run into the thousands of paths). It also writes
 `{jobs_dir}/generate_jobs_and_dispatch.sbatch` (uses `hpc.sbatch` —
-lightweight, just runs `snakemake generate_aqueduct_jobs` — fast, since
+lightweight, just runs `snakemake generate_eikonal_jobs` — fast, since
 every preprocessing output already exists by then — then `submit_waves.sh`),
 and `{jobs_dir}/submit_preprocess_and_dispatch.sh`, which submits every
 preprocessing batch with NO dependency between them (fully parallel), then
@@ -155,7 +155,7 @@ fails there's nothing sensible to chain into.
 
 Can be generated from either machine: from the local Windows box (writing
 scripts meant for Hydrax, same `config_hpc.yml`-based dual path resolution
-as `generate_aqueduct_jobs.py`), or run natively ON Hydrax itself, in which
+as `generate_eikonal_jobs.py`), or run natively ON Hydrax itself, in which
 case there's no separate "local" machine to reconcile paths with —
 `config_hpc.yml` is simply unnecessary and `config_local.yml` alone already
 points at Hydrax's own paths.
@@ -166,23 +166,23 @@ points at Hydrax's own paths.
 bash {root}/model_outputs/hpc_jobs/submit_waves.sh
 ```
 
-Each job calls `run_aqueduct_cli.py` once per `(tile, return_period,
+Each job calls `run_eikonal_cli.py` once per `(tile, return_period,
 waterlevel_name)`, sequentially within its batch. A failed call doesn't
 abort the rest of that batch's jobs; it's appended to
 `logs/wave{H}_batch_{id}_failures.txt` instead. For a `hop_distance == 0`
-tile, `run_aqueduct_cli.py` reads that tile's real boundary stations; for
+tile, `run_eikonal_cli.py` reads that tile's real boundary stations; for
 `hop_distance >= 1`, it reads its lower-hop neighbours' already-written
 `waterdepth` rasters directly off disk (guaranteed to exist by the wave
 barrier) and seeds from their wet cells — if none of them show any
 flooding in the overlap, it writes a real all-zero result itself, exactly
-like a local run would. Aqueduct's own OOM handling (mark tile, skip
+like a local run would. The eikonal runner's own OOM handling (mark tile, skip
 remaining scenarios, write nodata placeholder) works exactly as it does
 locally too — it's just discovered live on whichever node hits it.
 
 Monitor with `squeue`/`sacct` as usual. To retry one failed job by hand:
 
 ```
-python {code_root}/snakemake_workflow/scripts/run_aqueduct_cli.py \
+python {code_root}/snakemake_workflow/scripts/run_eikonal_cli.py \
     --config {root}/model_outputs/hpc_jobs/resolved_config.yml \
     --tile-id <id> --return-period <RP..> --waterlevel-name <SLR_..>
 ```
@@ -241,18 +241,18 @@ snakemake postprocess --cores N
 ```
 
 Results land at the same `model_outputs/{tile_id}/results/
-waterdepth_{rp}_{slr}.tif` paths `run_aqueduct` would have produced, so
+waterdepth_{rp}_{slr}.tif` paths `run_eikonal` would have produced, so
 Snakemake sees them as already up to date and proceeds straight to merging/
 plotting — no different from a fully-local run.
 
 ## Notes
 
-- `run_aqueduct` itself is untouched — still the right choice for a small
+- `run_eikonal` itself is untouched — still the right choice for a small
   local/debug run, no SLURM involved.
-- Re-running `generate_aqueduct_jobs` after changing `hpc.n_nodes` won't
+- Re-running `generate_eikonal_jobs` after changing `hpc.n_nodes` won't
   regenerate scripts on its own (Snakemake sees the old outputs as already
   present) — delete `model_outputs/hpc_jobs/` first, or use `--forcerun
-  generate_aqueduct_jobs`.
+  generate_eikonal_jobs`.
 - `submit_waves.sh` uses `afterany`, not `afterok` — a wave starts once its
   predecessor has finished regardless of individual job failures, since a
   failed tile there just means its downstream neighbours fall back to a

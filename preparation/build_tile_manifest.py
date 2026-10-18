@@ -34,7 +34,7 @@ Intermediate output: one GeoPackage per stage (00_raw_tile_index.gpkg through
 04_tile_grid_final.gpkg) is always written straight into tile_grid.path's own
 directory - not a "debug" extra, lets every intermediate shape be inspected in
 QGIS, not just the final tile_grid.path output. Also writes a 50-bin histogram
-of each final domain's native (1 arcsecond) pixel count - Aqueduct's OOM risk
+of each final domain's native (1 arcsecond) pixel count - the eikonal solver's OOM risk
 is dominated by tile pixel count (see src/tile_split.py's own docstring).
 
 Checkpointed: Phase 3 is by far the most expensive stage (a real global run:
@@ -135,7 +135,7 @@ def _append_checkpoint(checkpoint_path: Path, domains: list[Domain], component_i
 
 def _write_size_histogram(final: gpd.GeoDataFrame, path: Path) -> None:
     """50-bin histogram of each final domain's approximate native (1
-    arcsecond) pixel count - a direct proxy for Aqueduct's OOM risk, which
+    arcsecond) pixel count - a direct proxy for the eikonal solver's OOM risk, which
     is dominated by tile pixel count (see src/tile_split.py's own
     docstring). Log-scale y-axis since domain sizes span orders of
     magnitude.
@@ -164,6 +164,26 @@ def _write_size_histogram(final: gpd.GeoDataFrame, path: Path) -> None:
 
 
 def run(config: dict) -> None:
+    """Build the connectivity-first tile/domain manifest and write tile_grid.path.
+
+    Runs the full pipeline (load_raw_tile_index, build_connectivity_graph,
+    connected_components, split_component_to_budget, merge_small_domains_tiered,
+    compute_hop_distances, pad_hop0_domains_bbox, assign_tile_id - see module
+    docstring) via src/connectivity_tiling.py. Phase 3 (splitting) is
+    checkpointed and resumes automatically from
+    tile_generation_phase3_checkpoint.jsonl in the output directory. Writes the
+    final tile grid plus one intermediate GeoPackage per phase, a domain-size
+    histogram PNG, and the final-domains/dropped-unreachable methods maps, all
+    into the output path's own directory.
+
+    Parameters
+    ----------
+    config : dict
+        Parsed config.yml. Uses ``config["tile_generation"]`` (ConnectivityConfig
+        fields), ``config["tile_grid"]["path"]`` (output GeoPackage path),
+        ``config["paths"]`` (data catalog root), and the DeltaDTM mask/DEM
+        catalog entries.
+    """
     tg_cfg = config["tile_generation"]
     output_path = Path(config["tile_grid"]["path"])
     intermediate_dir = output_path.parent

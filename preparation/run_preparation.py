@@ -55,11 +55,11 @@ frozen-geometry tile-generation pipeline's own hop-distance/neighbour-
 forcing direction (now src/connectivity_tiling.py::compute_hop_distances)
 as the intended way to give hinterland chunks non-ocean boundary forcing. A
 chunk that can't find a real COAST-RP station now gets an explicit empty
-placeholder (see extract_boundaries.py) rather than being dropped from
+placeholder (see snakemake_workflow/scripts/extract_boundaries.py) rather than being dropped from
 tile_grid.path.
 
 Usage:
-    python snakemake_workflow/preparation/run_preparation.py \\
+    python preparation/run_preparation.py \\
         [STEP ...] [--config  snakemake_workflow/config/config.yml] \\
         [--no-force] [--fail-fast]
 
@@ -125,6 +125,14 @@ def _run_step(fn, label: str, fail_fast: bool, **kwargs) -> bool:
 
 
 def main() -> None:
+    """Parse CLI arguments and run the selected preparation pipeline steps in order.
+
+    Runs sync_deltadtm, fix_ocean_mask, build_deltadtm_vrt, tile_generation
+    and boundary_conditions (or only the STEPs named on the command line),
+    loading config.yml once and catching/reporting each step's exceptions so
+    later steps still run unless --fail-fast is given. Exits with status 1
+    if any step failed.
+    """
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     _default_cfg = str(SCRIPTS_DIR.parent / "snakemake_workflow" / "config" / "config.yml")

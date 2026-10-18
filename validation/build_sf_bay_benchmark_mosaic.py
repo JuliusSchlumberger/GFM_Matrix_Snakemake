@@ -12,25 +12,55 @@ ground only, see validate_sf_bay.py's own permanent-water exclusion for how
 that's handled before scoring).
 
 Usage:
-    python validation/build_sf_bay_benchmark_mosaic.py
+    python validation/build_sf_bay_benchmark_mosaic.py [--config path/to/config.yml]
 """
 
+import argparse
+import sys
 from pathlib import Path
 
 import numpy as np
 import rasterio
 from rasterio.merge import merge
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_REPO_ROOT / "src"))
+
+from config_utils import load_config  # noqa: E402
+
 COUNTIES = [
     "san_francisco", "alameda", "contra_costa", "marin", "napa",
     "san_mateo", "santa_clara", "solano", "sonoma",
 ]
-SRC_DIR = Path("P:/11212688-004-global-floodmaps/modelling/inputs/validation/California/flooding/v2.1")
-OUT_PATH = Path("P:/11212688-004-global-floodmaps/modelling/inputs/validation/California/flooding/sf_bay_flddepth_slr000_w100_mosaic.tif")
 
 
-def main() -> None:
-    paths = [SRC_DIR / f"county_{c}_flddepth_slr000_w100.tif" for c in COUNTIES]
+def main(src_dir: Path | None = None, out_path: Path | None = None, config_path: str | Path | None = None) -> None:
+    """Mosaic the 9 Bay Area counties' CoSMoS rasters into one Bay-wide depth raster.
+
+    Parameters
+    ----------
+    src_dir : Path or None, optional
+        Directory holding the per-county ``county_<name>_flddepth_slr000_w100.tif``
+        rasters. If None, resolved from config as
+        ``validation.benchmark_root/California/flooding/v2.1``.
+    out_path : Path or None, optional
+        Destination path for the mosaicked output raster. If None, resolved
+        from config as
+        ``validation.benchmark_root/California/flooding/sf_bay_flddepth_slr000_w100_mosaic.tif``.
+    config_path : str, Path, or None, optional
+        Path to config.yml, used to resolve `src_dir`/`out_path` when either
+        is not given. Defaults to this repo's
+        ``snakemake_workflow/config/config.yml``.
+    """
+    if src_dir is None or out_path is None:
+        cfg = load_config(config_path or _REPO_ROOT / "snakemake_workflow" / "config" / "config.yml")
+        benchmark_root = Path(cfg["validation"]["benchmark_root"])
+        if src_dir is None:
+            src_dir = benchmark_root / "California" / "flooding" / "v2.1"
+        if out_path is None:
+            out_path = benchmark_root / "California" / "flooding" / "sf_bay_flddepth_slr000_w100_mosaic.tif"
+
+    paths = [src_dir / f"county_{c}_flddepth_slr000_w100.tif" for c in COUNTIES]
     missing = [p for p in paths if not p.exists()]
     if missing:
         raise FileNotFoundError(f"missing county rasters: {missing}")
@@ -59,11 +89,11 @@ def main() -> None:
         "count": 1, "crs": crs, "transform": out_transform,
         "compress": "deflate",
     }
-    with rasterio.open(OUT_PATH, "w", **profile) as dst:
+    with rasterio.open(out_path, "w", **profile) as dst:
         dst.write(mosaic_m, 1)
 
     n_valid = int(valid.sum())
-    print(f"wrote {OUT_PATH}")
+    print(f"wrote {out_path}")
     print(f"shape: {mosaic_m.shape}, crs: {crs}, n_valid_px: {n_valid}")
     wet = mosaic_m[valid][mosaic_m[valid] > 0]
     print(f"depth (m) over valid: min={np.nanmin(mosaic_m[valid]):.3f} max={np.nanmax(mosaic_m[valid]):.3f}")
@@ -71,4 +101,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
+    args = parser.parse_args()
+    main(config_path=args.config)

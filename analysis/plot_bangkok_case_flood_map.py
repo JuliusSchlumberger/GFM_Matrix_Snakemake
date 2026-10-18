@@ -3,7 +3,7 @@ per SLR scenario, case polygon outlined on every panel. Reads the merged
 per-(RP,SLR) VRTs the Snakemake postprocess target already writes
 (merged_results/waterdepth_RP100_{SLR}.vrt), windowed to the case
 polygon's own bbox (+ a small buffer for context) - adapts
-src/plotting.py::plot_raster_with_coastlines's own windowed-read/colorbar
+src/pipeline_plots.py::plot_raster_with_coastlines's own windowed-read/colorbar
 idiom (that function saves one whole figure per call, not a subplot, so
 its internals are reproduced here instead of calling it directly).
 
@@ -125,7 +125,6 @@ def main() -> None:
             window = from_bounds(*bounds, transform=src.transform)
             data = src.read(1, window=window, boundless=True, fill_value=src.nodata or 0.0)
             nodata = src.nodata
-            win_transform = src.window_transform(window)
 
         # Mask BOTH true nodata and zero-depth (dry) cells - not just nodata -
         # so the land-use background actually shows through dry land, not

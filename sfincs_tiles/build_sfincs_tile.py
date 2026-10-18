@@ -42,10 +42,32 @@ def idw_interpolate_to_grid(
     station_x: np.ndarray, station_y: np.ndarray, station_values: np.ndarray,
     grid_x: np.ndarray, grid_y: np.ndarray, k: int | None = None,
 ) -> np.ndarray:
-    """Inverse-distance-squared interpolation of `station_values` (in the
-    same planar/metric CRS as station_x/y and grid_x/y - e.g. the SFINCS UTM
-    grid) onto every (grid_x, grid_y) point using plain Euclidean distance.
-    `k` defaults to using every station.
+    """Inverse-distance-squared interpolation of station values onto a grid.
+
+    Uses plain Euclidean distance in a planar/metric CRS (e.g. the SFINCS
+    UTM grid) - callers must supply station_x/y and grid_x/y in the same
+    CRS.
+
+    Parameters
+    ----------
+    station_x : numpy.ndarray
+        Station x coordinates (metres, same CRS as grid_x).
+    station_y : numpy.ndarray
+        Station y coordinates (metres, same CRS as grid_y).
+    station_values : numpy.ndarray
+        Value at each station.
+    grid_x : numpy.ndarray
+        Target grid x coordinates (any shape).
+    grid_y : numpy.ndarray
+        Target grid y coordinates, same shape as `grid_x`.
+    k : int, optional
+        Number of nearest stations to use per grid point. Defaults to
+        using every station.
+
+    Returns
+    -------
+    numpy.ndarray
+        Interpolated values, same shape as `grid_x`.
     """
     k = k if k is not None else len(station_values)
     k = min(k, len(station_values))
@@ -285,6 +307,59 @@ def build_sfincs_tile(
     rotated: bool = True,
     boundary_lines_gpkg: Path | None = None,  # required - keyword only for call-site readability
 ) -> Path:
+    """Build a runnable SFINCS model for one GFM tile.
+
+    Creates the rotated (or axis-aligned) UTM grid, active/waterlevel-
+    boundary mask along the tile's boundary line (plus any interior forcing
+    points), a subgrid table from the tile's elevation/roughness rasters,
+    boundary water-level forcing from the matched COAST-HG hydrographs,
+    and IDW-interpolated initial water levels; then writes the model to
+    `root`/`base_dir_name`/`tile_id`/sfincs_model.
+
+    Parameters
+    ----------
+    tile_id : str
+        Tile identifier.
+    root : Path
+        Config root directory (paths.root).
+    resolution_m : float, default MAIN_RES_M_DEFAULT
+        Main computational grid resolution in metres.
+    dtmapout_s : float, default 1800.0
+        Map output interval in seconds.
+    tref : datetime, optional
+        Reference/start time for the simulation. Defaults to 2026-01-01
+        (arbitrary but fixed; only elapsed time is physically meaningful).
+    truncate_window_hr : tuple[float, float], optional
+        (start, end) hours to truncate the COAST-HG hydrograph to, relative
+        to its own time axis. None uses the full ~148.8h hydrograph.
+    subgrid_nr_pixels : int, default SUBGRID_NR_PIXELS_DEFAULT
+        Subgrid refinement factor relative to `resolution_m`; must be a
+        positive multiple of 2 (hydromt_sfincs's own requirement).
+    subgrid_nr_levels : int, default SUBGRID_NR_LEVELS_DEFAULT
+        Number of hypsometric bins in the subgrid table.
+    subgrid_nrmax : int, default SUBGRID_NRMAX_DEFAULT
+        Tile/block size for subgrid table construction.
+    base_dir_name : str, default "calibration_roughness_SFINCS"
+        Output root directory name under `root`.
+    rotated : bool, default True
+        Use a rotated UTM grid aligned to the tile's coastline instead of
+        an axis-aligned one.
+    boundary_lines_gpkg : Path
+        build_station_boundary_lines.py output for this tile (required;
+        keyword-only for call-site readability).
+
+    Returns
+    -------
+    Path
+        The sfincs_model directory the model was written to.
+
+    Raises
+    ------
+    ValueError
+        If `boundary_lines_gpkg` is None, or the subgrid parameters are invalid.
+    RuntimeError
+        If the boundary line produces zero waterlevel-boundary cells.
+    """
     if boundary_lines_gpkg is None:
         raise ValueError("build_sfincs_tile needs boundary_lines_gpkg (build_station_boundary_lines.py output)")
     _validate_subgrid_params(resolution_m, subgrid_nr_pixels)
@@ -521,6 +596,8 @@ def build_sfincs_tile(
 
 
 def main() -> None:
+    """Parse CLI arguments and build the SFINCS model for one tile via
+    `build_sfincs_tile`."""
     _repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tile-id", required=True)

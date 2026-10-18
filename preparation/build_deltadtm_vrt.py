@@ -416,6 +416,20 @@ def _build_vrt(
 
 
 def run(config: dict) -> None:
+    """Build both the DeltaDTM DEM and mask VRT mosaics with relative source paths.
+
+    Reads tile directories from the data catalog's ``deltadtm``/``deltadtm_mask``
+    sources and rebuilds both VRTs unconditionally (cheap, idempotent - see
+    module docstring). DEM tiles resample bilinear and keep their own embedded
+    nodata; mask tiles resample nearest-neighbour with nodata=255.
+
+    Parameters
+    ----------
+    config : dict
+        Parsed config.yml. Uses ``config["paths"]["hydromt_data_catalog"]`` and
+        ``config["paths"]["root"]`` to resolve the DEM/mask VRT destination
+        paths via the data catalog.
+    """
     catalog = get_data_catalog(
         _REPO_ROOT / config["paths"]["hydromt_data_catalog"], root=config["paths"]["root"]
     )

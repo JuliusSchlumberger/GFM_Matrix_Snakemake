@@ -37,6 +37,30 @@ MIN_BOUNDARY_CELLS = 1
 
 
 def preflight_tile(tile_id: str, tiles_root: Path, lines_dir: Path, resolution_m: float) -> dict:
+    """Build a tile's SFINCS grid and mask only, and report whether it is viable.
+
+    No elevation, subgrid or forcing is built. A tile is ok=True only if its mask
+    has at least one active cell and at least `MIN_BOUNDARY_CELLS` waterlevel
+    boundary cells.
+
+    Parameters
+    ----------
+    tile_id : str
+        Tile identifier, used as the output dict's "tile_id" (cast to int) and to
+        locate the tile's inputs under `tiles_root`.
+    tiles_root : Path
+        Root directory containing `{tile_id}/inputs/tile_geometry.gpkg`.
+    lines_dir : Path
+        Directory containing the tile's boundary line geopackage (`{tile_id}.gpkg`).
+    resolution_m : float
+        SFINCS grid resolution in metres.
+
+    Returns
+    -------
+    dict
+        Record with "tile_id", "ok", "n_active", "n_boundary" and "error" (None on
+        success).
+    """
     row = {"tile_id": int(tile_id), "ok": False, "n_active": 0, "n_boundary": 0, "error": None}
     gpkg = lines_dir / f"{tile_id}.gpkg"
     tile_gdf = retry_transient_io(gpd.read_file, tiles_root / tile_id / "inputs" / "tile_geometry.gpkg")
@@ -60,6 +84,11 @@ def preflight_tile(tile_id: str, tiles_root: Path, lines_dir: Path, resolution_m
 
 
 def main() -> None:
+    """Parse CLI arguments, pre-flight check each requested tile, and write one JSON record per tile under boundary_lines/preflight/.
+
+    Skips tiles whose boundary line is not marked suitable unless `--all` is given,
+    and skips tiles with an existing record when `--skip-done` is given.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--base-dir-name", required=True)

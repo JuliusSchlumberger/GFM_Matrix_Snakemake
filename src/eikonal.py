@@ -3,13 +3,10 @@
 Ports the numerical method used by Aqueduct's Julia core (`core/src/core.jl`,
 via `Eikonal.jl`'s `FastSweeping`/`sweep!`), operating on the full dense
 raster grid - every cell (land, ocean, lake) participates, via plain
-array-index arithmetic (no neighbor-index tables). Validated bit-for-bit
-identical to real Aqueduct output across 26 real tiles spanning ~9M-135M
-cells each (100.000% Jaccard, 0.0m RMSE/mean-error/90th-percentile/max-diff
-on every one - see `docs/python_vs_julia_qa.md`) - except for
-`solve_eikonal_dense`'s unseeded-cell default, deliberately changed from
-Julia's own t=0 to t=+99 (see that function's own comment) to stop unreached
-cells from silently reading as "flooded at sea level."
+array-index arithmetic (no neighbor-index tables). One deliberate difference
+from Julia: `solve_eikonal_dense`'s unseeded-cell default is t=+99, not t=0
+(see that function's own comment), to stop unreached cells from silently
+reading as "flooded at sea level."
 
 Replicates Eikonal.jl's exact staggered-grid convention (arrival time `t` on
 grid vertices, one larger per axis than the `friction`/cell grid, with each
@@ -285,42 +282,45 @@ def solve_eikonal_dense(
     (`_block_sweep`, `SWEEP_BLOCK_SIZE`), skipping blocks that provably
     cannot change - bit-for-bit identical to plain `_dense_sweep` sweeps.
 
-    `verbose`: print each round's `max_change` and elapsed time - diagnostic
-    only, for watching convergence rate without waiting for the whole run
-    to finish or hit `max_rounds`.
+    Parameters
+    ----------
+    friction : numpy.ndarray
+        Friction values, shape `(m, n)` (the full, unmasked tile array).
+    seed_rows : numpy.ndarray
+        Row index of each seeded (coastline) cell.
+    seed_cols : numpy.ndarray
+        Column index of each seeded (coastline) cell. Seeding writes directly to the
+        same-indexed vertex, per Aqueduct's own convention (see module docstring).
+    seed_values : numpy.ndarray
+        Initial `t` value at each seeded vertex (Aqueduct seeds with `-waterlevel`).
+        Seeded vertices are not frozen afterwards - like Julia's `sweep!`, they stay
+        eligible for further updates if a neighboring path yields a smaller `t`.
+    epsilon : float
+        Convergence threshold (max per-round absolute change), mirroring `core.jl`'s
+        `minimum(friction) / (resolution * 10)`.
+    max_rounds : int, default 10000
+        Safety cap on rounds of 4 sweeps. Only used when `sweep_budget` is `None`.
+    sweep_budget : int or None, default None
+        If set, run exactly this many individual directional sweeps (Julia's real
+        Gray-code order, `_ORTHANT_ORDER`) and stop, ignoring `epsilon`/`max_rounds`
+        entirely. `3` reproduces Eikonal.jl's own runtime behaviour in Aqueduct's
+        usage (see module docstring). `None` instead runs the round-based solve,
+        capped at `max_rounds`.
+    verbose : bool, default False
+        If true, print each round's `max_change` and elapsed time - diagnostic
+        only, for watching convergence without waiting for the full run.
+    return_diagnostics : bool, default False
+        If true, also return a dict with `n_rounds_used`, `max_change` (the last
+        round's; `None` under `sweep_budget`), `converged` (`max_change <= epsilon`;
+        `None` under `sweep_budget`) and `frac_blocks_swept` (share of block visits
+        not skipped) - used by `flood_model.py`'s obstacle-coupling outer loop to
+        log per-tile convergence behaviour.
 
-    `return_diagnostics`: if true, also return a dict with `n_rounds_used`,
-    `max_change` (the last round's; `None` under `sweep_budget`, which
-    tracks no such thing), `converged` (`max_change <= epsilon`; `None`
-    under `sweep_budget`) and `frac_blocks_swept` (share of block visits
-    not skipped) - used by `flood_model.py`'s obstacle-coupling
-    outer loop to log per-tile convergence behaviour.
-
-    Args:
-        friction: (m, n) friction values (the full, unmasked tile array).
-        seed_rows/seed_cols: (row, col) of each seeded (coastline) CELL -
-            seeding writes directly to the same-indexed vertex, per
-            Aqueduct's own convention (see module docstring).
-        seed_values: Initial `t` values at the seeded vertices (Aqueduct
-            seeds with `-waterlevel`). Seeded vertices are NOT frozen after
-            initialization - like Julia's `sweep!`, they remain eligible for
-            further updates if a neighboring path yields a smaller `t`.
-        epsilon: Convergence threshold (max per-round absolute change) -
-            mirrors `core.jl`'s `minimum(friction) / (resolution * 10)`.
-        max_rounds: Safety cap on rounds of 4 sweeps (only used when
-            `sweep_budget` is `None`).
-        sweep_budget: If set, run exactly this many individual directional
-            sweeps (Julia's real Gray-code order, `_ORTHANT_ORDER`) and
-            stop - ignoring `epsilon`/`max_rounds` entirely. `3` reproduces
-            Eikonal.jl's own runtime behaviour in Aqueduct's usage
-            (bit-for-bit validated, see module docstring). `None` (the
-            production default) instead runs the round-based solve below,
-            capped at `max_rounds`.
-
-    Returns:
-        `t`, shape `(m+1, n+1)` - read cell `(r, c)`'s result at vertex
-        `(r+1, c+1)`. If `return_diagnostics`, `(t, diagnostics_dict)`
-        instead - see `return_diagnostics` above.
+    Returns
+    -------
+    numpy.ndarray or tuple of (numpy.ndarray, dict)
+        `t`, shape `(m+1, n+1)` - read cell `(r, c)`'s result at vertex `(r+1, c+1)`.
+        If `return_diagnostics` is true, returns `(t, diagnostics_dict)` instead.
     """
     m, n = friction.shape
     dtype = friction.dtype

@@ -1,6 +1,6 @@
 """Generate HPC sbatch scripts that run preprocessing across hpc.n_nodes
 PARALLEL nodes, then - once every node's batch has finished - one more job
-that runs `snakemake generate_aqueduct_jobs` (wave sbatch generation) and
+that runs `snakemake generate_eikonal_jobs` (wave sbatch generation) and
 submits submit_waves.sh itself. So a full run (preprocessing AND
 simulation) can be launched from a single driver script, with preprocessing
 itself spread across the same number of nodes as the simulation waves use.
@@ -8,15 +8,15 @@ itself spread across the same number of nodes as the simulation waves use.
 Preprocessing has no wave/hop_distance ordering constraint (every tile's
 DEM/mask/friction/boundaries are independent of every other tile) - unlike
 simulation, where hop>=1 tiles must wait for their neighbours. So instead of
-one monolithic `snakemake generate_aqueduct_jobs --cores N` run on a single
+one monolithic `snakemake generate_eikonal_jobs --cores N` run on a single
 node, this splits every tile's target files evenly across up to hpc.n_nodes
 batches, writes one `snakemake --cores N <explicit target file list>`
 sbatch script per batch, and submits all of them with NO dependency between
 them (fully parallel) - then submits ONE more job with
-`--dependency=afterany:<every batch job id>` that runs generate_aqueduct_jobs
+`--dependency=afterany:<every batch job id>` that runs generate_eikonal_jobs
 (fast, since every preprocessing output already exists by then) and chains
 into submit_waves.sh. This is the exact same afterany-join-multiple-jobs
-pattern generate_aqueduct_jobs.py's own submit_waves.sh already uses between
+pattern generate_eikonal_jobs.py's own submit_waves.sh already uses between
 simulation waves - just one more phase in front of wave 0.
 
 Before any batch is submitted, submit_preprocess_and_dispatch.sh itself
@@ -30,7 +30,7 @@ job, "wave 0"/`build_shared_inputs.sbatch`, submitted immediately after
 resolved_config.yml was written; that specific job kept hitting a
 cross-node stale-read of that file on the shared P:\\ mount, identical
 byte/position every time, that not even retries survived - see
-_stage_configfile_lines' docstring. Running it synchronously in the same
+src/hpc_common.py's _stage_configfile_lines docstring. Running it synchronously in the same
 process/machine that just wrote resolved_config.yml removes the network
 round-trip for this step entirely, not just mitigates it). Snakemake locks
 its own working directory by default (one process at a time per
@@ -44,11 +44,11 @@ time any batch is submitted, eliminating every real write-write race
 Target file paths are reconstructed directly (not via `rules.X.output.Y`
 references, since this is a standalone script, not a Snakemake `script:`)
 using the exact same path templates preprocessing.smk's rules declare -
-mirrors the same approach generate_aqueduct_jobs.py already uses for its
+mirrors the same approach generate_eikonal_jobs.py already uses for its
 own local-view boundaries check.
 
 Uses the same local-view/Linux-view path resolution as
-generate_aqueduct_jobs.py (config_hpc.yml, if present), so it can be run
+generate_eikonal_jobs.py (config_hpc.yml, if present), so it can be run
 either from the Windows preprocessing machine (writing scripts meant for
 Hydrax) or natively ON Hydrax (config_hpc.yml unnecessary in that case).
 
@@ -81,104 +81,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
-
-
-def _account_line(sbatch_cfg: dict) -> list[str]:
-    if sbatch_cfg.get("account"):  # optional - Hydrax jobs don't require one
-        return [f"#SBATCH --account={sbatch_cfg['account']}"]
-    return []
-
-
-def _retry_wrapper_lines() -> list[str]:
-    """Bash function def: retries a `snakemake --configfile ...` invocation
-    on failure - confirmed live 2026-09: a job with NO SLURM dependency
-    (build_shared_inputs.sbatch - submitted essentially instantly after
-    resolved_config.yml is written on the login node, unlike every other
-    generated job, which waits on something first) can hit a cross-node
-    filesystem consistency gap on the shared P:\\ mount and read a
-    corrupted/stale copy of that file (UnicodeDecodeError inside
-    Snakemake's own --configfile loader) - the SAME exact byte at the SAME
-    exact position every time it's happened, ruling out a random race and
-    pointing at cache staleness specifically (very plausibly SMB/CIFS-style
-    client caching on this mount, not NFS). Retrying (rather than a fixed
-    sleep) matches this codebase's own retry_transient_io philosophy -
-    assume transient, retry with backoff, fail loudly only once attempts
-    are genuinely exhausted.
-
-    2026-09-14: staging resolved_config.yml to node-local disk first
-    (_stage_configfile_lines, below) did NOT stop this recurring, which
-    means it isn't necessarily resolved_config.yml at all - the Snakefile
-    itself has `configfile: "snakemake_workflow/config/config.yml"` +
-    a conditional one for config_local.yml, BOTH loaded automatically on
-    every snakemake invocation before --configfile is even merged in, and
-    raw UnicodeDecodeErrors never report which file they came from. Each
-    failed attempt below now dumps a checksum/mtime of every candidate
-    config file, so a recurrence gives real forensic evidence instead of
-    another guess.
-    """
-    return [
-        "run_snakemake_with_retry() {",
-        "  local attempt=1 max_attempts=10 delay=30",
-        '  while [ "$attempt" -le "$max_attempts" ]; do',
-        '    if "$@"; then',
-        "      return 0",
-        "    fi",
-        '    echo "  [retry $attempt/$max_attempts] snakemake invocation failed - retrying in ${delay}s..." >&2',
-        '    echo "  [forensics] candidate config files at time of failure:" >&2',
-        '    sha256sum snakemake_workflow/config/config.yml snakemake_workflow/config/config_local.yml "$LOCAL_CONFIGFILE" >&2 || true',
-        '    stat snakemake_workflow/config/config.yml snakemake_workflow/config/config_local.yml "$LOCAL_CONFIGFILE" >&2 || true',
-        '    sleep "$delay"',
-        "    attempt=$((attempt + 1))",
-        "  done",
-        '  echo "  snakemake invocation failed after $max_attempts attempts - giving up." >&2',
-        "  return 1",
-        "}",
-    ]
-
-
-def _stage_configfile_lines() -> list[str]:
-    """Bash function def: copies a --configfile path to node-local scratch
-    and validates it parses as UTF-8 YAML before use, retrying the CHEAP
-    copy+validate step (not a full snakemake run) on failure.
-
-    Escalation from run_snakemake_with_retry, above - live evidence
-    2026-09-14 showed 5 back-to-back FRESH `snakemake` retries (new
-    process each time, ~75s apart) all hit the IDENTICAL byte/position
-    UnicodeDecodeError reading resolved_config.yml over the shared P:\\
-    mount, while the very same file read completely cleanly from a
-    different client moments later. That rules out a short-lived cross-
-    node race (which retrying the whole snakemake invocation assumed) and
-    points at THIS COMPUTE NODE's own stale/corrupted client-side cache
-    for that specific file - re-running snakemake on the same node
-    against the same P:\\ path just keeps hitting the same bad cache
-    entry. Staging a local copy first isolates the flaky network read to
-    one small, cheap step that can be retried on its own; every
-    subsequent read (Snakemake's own config parse, or
-    generate_hpc_simulation_jobs.py's plain yaml.safe_load) then hits
-    node-local disk instead of the network mount again.
-    """
-    return [
-        "stage_configfile_locally() {",
-        '  local src="$1" out_var="$2"',
-        '  local stage_dir="${TMPDIR:-/tmp}/gfm_resolved_config"',
-        '  mkdir -p "$stage_dir"',
-        '  local dst="$stage_dir/resolved_config_${SLURM_JOB_ID:-$$}_$$.yml"',
-        "  local attempt=1 max_attempts=8 delay=5",
-        '  while [ "$attempt" -le "$max_attempts" ]; do',
-        '    cp -f -- "$src" "$dst" 2>/dev/null',
-        "    if python -c \"import sys, yaml; yaml.safe_load(open(sys.argv[1], encoding='utf-8'))\" \"$dst\" 2>/dev/null; then",
-        "      printf -v \"$out_var\" '%s' \"$dst\"",
-        "      return 0",
-        "    fi",
-        '    echo "  [config-stage retry $attempt/$max_attempts] $src did not copy/parse cleanly - retrying in ${delay}s..." >&2',
-        '    rm -f -- "$dst"',
-        '    sleep "$delay"',
-        "    attempt=$((attempt + 1))",
-        "  done",
-        '  echo "  failed to stage a valid local copy of $src after $max_attempts attempts - giving up." >&2',
-        "  return 1",
-        "}",
-    ]
+from hpc_common import _account_line, _retry_wrapper_lines, _stage_configfile_lines  # noqa: E402
 
 
 def _target_paths(tile_dir: str, return_periods: list[str], waterlevel_names: list[str]) -> list[str]:
@@ -190,7 +93,7 @@ def _target_paths(tile_dir: str, return_periods: list[str], waterlevel_names: li
 
 
 def _simulate_target_paths(tile_dir: str, return_periods: list[str], waterlevel_names: list[str]) -> list[str]:
-    """Same per-tile target shape as `_target_paths`, but for `run_aqueduct`'s
+    """Same per-tile target shape as `_target_paths`, but for `run_eikonal`'s
     own `results/waterdepth_*.tif` outputs rather than preprocessing's
     `inputs/*` - used only by the `--calibration --fuse` path below, where a
     batch's preprocessing and simulate targets are built the same way and
@@ -200,17 +103,26 @@ def _simulate_target_paths(tile_dir: str, return_periods: list[str], waterlevel_
 
 
 def main() -> None:
+    """Run this script: generate (and print how to submit) the HPC preprocessing dispatch.
+
+    Writes resolved_config.yml, one preprocessing sbatch script per node batch
+    (plus its `*_targets.txt` target-file list), and a submit script that
+    builds every shared input synchronously, submits the batches in parallel,
+    then - unless `--fuse` or `--preprocess-only` - submits one more job that
+    generates and submits the simulation waves. See module docstring and
+    --calibration/--fuse/--preprocess-only help text for the mode variants.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
     parser.add_argument("--config", default=str(default_config))
     parser.add_argument(
         "--calibration", action="store_true",
         help="use generate_hpc_simulation_jobs.py directly for the post-preprocessing "
-             "wave-dispatch phase instead of `snakemake generate_aqueduct_jobs` - skips "
+             "wave-dispatch phase instead of `snakemake generate_eikonal_jobs` - skips "
              "Snakemake's own full-DAG preprocessing-output verification (safe here: this "
              "phase only runs after submit_preprocess_and_dispatch.sh's own afterany chain "
              "already guarantees every preprocessing batch above finished), and - unlike "
-             "`rule generate_aqueduct_jobs`, whose own base_config_path is a hardcoded "
+             "`rule generate_eikonal_jobs`, whose own base_config_path is a hardcoded "
              "literal path to production config.yml regardless of --configfile (see "
              "hpc_dispatch.smk) - correctly honors a scenario --config end to end. "
              "Appropriate at calibration-subset scale, where the full-DAG build's "
@@ -235,10 +147,10 @@ def main() -> None:
     parser.add_argument(
         "--preprocess-only", action="store_true",
         help="skip phase 2 (generate+dispatch simulate waves) entirely - no "
-             "`generate_aqueduct_jobs`/`generate_hpc_simulation_jobs.py` call, no dispatch "
+             "`generate_eikonal_jobs`/`generate_hpc_simulation_jobs.py` call, no dispatch "
              "sbatch, no afterany chain. For call sites that only need preprocessing "
-             "outputs (dem/mask/friction/boundaries) and never intend to run aqueduct's "
-             "own flood solve at all - e.g. building shared model_outputs/ inputs for a "
+             "outputs (dem/mask/friction/boundaries) and never intend to run the eikonal "
+             "flood solve at all - e.g. building shared model_outputs/ inputs for a "
              "downstream pipeline (SFINCS) that reads them directly and has its own, "
              "separate run/dispatch mechanism. Mutually exclusive with --fuse (nothing to "
              "fuse simulate into). Writes submit_preprocess_batches.sh instead of "
@@ -275,7 +187,7 @@ def main() -> None:
     # re-parsing the Snakefile from a bare `snakemake ...` call falls back to
     # its own default config.yml, silently ignoring whatever --config this
     # script itself was given (a scenario config, when --config points at
-    # one - see generate_aqueduct_jobs.py's generate_wave_dispatch, which
+    # one - see generate_eikonal_jobs.py's generate_wave_dispatch, which
     # already does the same thing for the simulation phase).
     #
     # atomic_write (temp file + os.replace), NOT a plain open()+write -
@@ -285,7 +197,7 @@ def main() -> None:
     # mid-write or stale-cache read) - build_shared_inputs.sbatch hit exactly
     # this, while a later read of the same file (~5min on, after more of the
     # pipeline had run) succeeded. Same latent bug already existed in
-    # generate_aqueduct_jobs.py's own resolved_config.yml write - fixed
+    # generate_eikonal_jobs.py's own resolved_config.yml write - fixed
     # there too, not just here.
     resolved_config_path = local_jobs_dir / "resolved_config.yml"
     atomic_write(resolved_config_path, lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
@@ -301,7 +213,7 @@ def main() -> None:
     # Linux views point at the same underlying shared storage, so the DATA
     # read is identical regardless of which config's path string opens it -
     # only the STRING form embedded into sbatch scripts below needs to be
-    # the Linux one. Same fix already applied in generate_exposure_jobs.py's
+    # the Linux one. Same fix already applied in generate_hpc_exposure_jobs.py's
     # own chunk discovery for the identical reason.
     tile_gdf = retry_transient_io(gpd.read_file, local_config["tile_grid"]["path"])
     return_periods = [f"RP{rp}" for rp in linux_config["boundary_conditions"]["return_periods"]]
@@ -438,9 +350,9 @@ def main() -> None:
             # a real failure mode, not hypothetical: exactly this happened on
             # 2026-08-08 (job 243423/243440 - LockException from a batch that
             # started before the shared build had run).
-            f'while IFS= read -r shared_target; do',
-            f'    if [ ! -f "$shared_target" ]; then',
-            f'        echo "ERROR: shared preprocessing input not found: $shared_target" >&2',
+            'while IFS= read -r shared_target; do',
+            '    if [ ! -f "$shared_target" ]; then',
+            '        echo "ERROR: shared preprocessing input not found: $shared_target" >&2',
             f'        echo "This batch must not start before the shared-inputs build (in'
             f' {submit_script_name}) completes." >&2',
             f'        echo "Submit via {submit_script_name} (which orders this'
@@ -483,7 +395,7 @@ def main() -> None:
     # dedicated config.
     #
     # --calibration routes this through generate_hpc_simulation_jobs.py
-    # instead of `snakemake generate_aqueduct_jobs` - the latter's own
+    # instead of `snakemake generate_eikonal_jobs` - the latter's own
     # base_config_path (hpc_dispatch.smk) is a hardcoded literal path to
     # production config.yml, NOT derived from GFM_CONFIG_PATH, so
     # resolved_config.yml (and therefore every solver parameter +
@@ -498,14 +410,14 @@ def main() -> None:
     if not args.fuse and not args.preprocess_only:
         if args.calibration:
             generate_call = (
-                f'python snakemake_workflow/scripts/generate_hpc_simulation_jobs.py '
-                f'--config "$LOCAL_CONFIGFILE"'
+                'python snakemake_workflow/scripts/generate_hpc_simulation_jobs.py '
+                '--config "$LOCAL_CONFIGFILE"'
             )
         else:
             generate_call = (
-                f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
-                f'snakemake generate_aqueduct_jobs --cores 1 --nolock '
-                f'--rerun-triggers=mtime'
+                'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
+                'snakemake generate_eikonal_jobs --cores 1 --nolock '
+                '--rerun-triggers=mtime'
             )
 
         dispatch_cfg = hpc_cfg["sbatch"]

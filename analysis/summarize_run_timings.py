@@ -2,7 +2,7 @@
 
 Every run (tile, return period, SLR scenario) writes
 <model_outputs>/run_timings/{tile_id}_{return_period}_{waterlevel_name}.json with its wall-clock
-seconds (`elapsed_s`, src/aqueduct_runner.log_run_timing) and, for the HPC path, an `outcome`
+seconds (`elapsed_s`, src/eikonal_runner.log_run_timing) and, for the HPC path, an `outcome`
 ("solved", "skip_*", "oom"). This script reads them all and prints:
   - number of runs and tiles, by outcome
   - total computational hours (sum of elapsed_s over all runs)

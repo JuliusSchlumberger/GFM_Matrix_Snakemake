@@ -27,7 +27,7 @@ frozen flood extent by round 40 - the residual change is confined to depth
 still settling in already-wet cells, not the wet/dry boundary. Production
 caps `max_rounds` at 40 on this basis.
 
-**Supporting scripts**: `calibration_studies/test_sweep_budget_calibration.py` (per-tile
+**Supporting scripts**: `calibration_studies/run_sweep_budget_study.py` (per-tile
 sweep traces, one CSV per tile) - `calibration_studies/aggregate_wet_tiles.py`
 (combines per-tile results when the calibration run is split across
 parallel HPC jobs) - `calibration_studies/plot_sweep_calibration_bands.py` (single
@@ -119,7 +119,7 @@ self-documentation and for cells that genuinely get reached on a later
 iteration, but has not been shown to affect any real output on the tiles
 tested.
 
-**Supporting scripts**: `calibration_studies/test_obstacle_coupling_calibration.py`
+**Supporting scripts**: `calibration_studies/run_obstacle_coupling_study.py`
 (per-tile outer-iteration traces) - `calibration_studies/plot_obstacle_coupling_calibration_bands.py`
 (single 2-panel summary figure, `obstacle_coupling_calibration_bands.png` -
 (a) converged-vs-still-active tile counts per outer iteration (stacked

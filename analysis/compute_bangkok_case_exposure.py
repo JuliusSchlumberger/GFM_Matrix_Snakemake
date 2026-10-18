@@ -28,34 +28,16 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import rasterio
-from affine import Affine
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _common)
+from _common import _read_band, _read_band_and_transform, _round_val  # noqa: E402
 from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
 from exposure_analysis import _safe  # noqa: E402
-from plotting import pixel_area_km2_grid  # noqa: E402
-from validation import tri_domain_mask  # noqa: E402
+from pipeline_plots import pixel_area_km2_grid  # noqa: E402
+from rasters import polygon_domain_mask  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-
-
-def _read_band(path: Path, dtype: str, fill) -> np.ndarray:
-    with retry_transient_io(rasterio.open, path) as src:
-        arr = src.read(1, masked=True)
-        return arr.filled(fill).astype(dtype)
-
-
-def _read_band_and_transform(path: Path, dtype: str, fill) -> tuple[np.ndarray, Affine]:
-    with retry_transient_io(rasterio.open, path) as src:
-        arr = src.read(1, masked=True)
-        return arr.filled(fill).astype(dtype), src.transform
-
-
-def _round_val(val: float) -> float | int:
-    if val != val:  # NaN
-        return val
-    return round(val, 2) if abs(val) < 1 else int(round(val))
 
 
 def main() -> None:
@@ -109,7 +91,7 @@ def main() -> None:
         pop[~np.isfinite(pop)] = 0.0
         height, width = pop.shape
 
-        mask = tri_domain_mask(case_poly, transform, "EPSG:4326", (height, width))
+        mask = polygon_domain_mask(case_poly, transform, "EPSG:4326", (height, width))
         if not mask.any():
             continue
         chunks_with_overlap += 1

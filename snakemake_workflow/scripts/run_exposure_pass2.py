@@ -29,6 +29,15 @@ from compute_exposure_analysis import (  # noqa: E402
 
 
 def main() -> None:
+    """Parse CLI arguments and run pass 2 for this batch's chunk subset.
+
+    Loads the config, chunk list and the final reduced shares (from
+    ``reduce_exposure_shares.py``), builds the scenario/adaptation tasks,
+    computes every task's per-country EAI contribution via
+    ``pass2_all_tasks``, and atomically writes the results as a pickle to
+    ``--out`` so a ``--resume`` dispatch can trust the file's mere existence
+    as "this batch is done".
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--chunks-file", required=True, help="one chunk_id per line")

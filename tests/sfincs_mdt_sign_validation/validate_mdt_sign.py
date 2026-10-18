@@ -54,14 +54,17 @@ def test_elevation_mdt_is_added_not_subtracted() -> None:
     tmpdir = Path(tempfile.mkdtemp(prefix="mdt_sign_elevation_test_"))
     try:
         transform = rasterio.Affine(0.0003, 0, 10.0, 0, -0.0003, 50.0)
-        shape = (4, 4)
+        # Wide enough that the checked ocean cell (column 0) lies beyond build_elevation's
+        # GEBCO_COAST_CLIP_M (200 m) coastal-transition band: inside it, GEBCO is replaced by an
+        # interpolation from the land edge, so a 4x4 grid never saw GEBCO + MDT at all.
+        shape = (4, 24)  # ~21.5 m cells at 50N -> column 0 is ~430 m from the first land column
 
         dem_cm = np.full(shape, 500, dtype=np.int16)  # 5.00 m land everywhere by default
         dem_path = tmpdir / "dem.tif"
         _write_raster(dem_path, dem_cm, "int16", -9999, transform)
 
         mask = np.zeros(shape, dtype=np.float32)
-        mask[:, 0] = 1.0  # left column: ocean
+        mask[:, :20] = 1.0  # left 20 columns: ocean
         mask_path = tmpdir / "mask.tif"
         _write_raster(mask_path, mask, "float32", None, transform)
 
@@ -72,7 +75,6 @@ def test_elevation_mdt_is_added_not_subtracted() -> None:
 
         known_mdt_m = 0.4336  # deliberately non-zero, matches the real magnitude seen live on tile 691
         mdt_arr = np.full((10, 10), known_mdt_m, dtype=np.float64)
-        mdt_transform = rasterio.Affine(1.0, 0, 0.0, 0, -1.0, 90.0)
         mdt_path = tmpdir / "mdt.nc"
         mdt_da = xr.DataArray(
             mdt_arr, dims=("lat", "lon"),

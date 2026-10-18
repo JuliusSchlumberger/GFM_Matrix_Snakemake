@@ -28,35 +28,11 @@ import sys
 import time
 from pathlib import Path
 
-import geopandas as gpd
-import numpy as np
-from shapely.geometry import box as shapely_box
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 from config_utils import load_config, merged_slr_scenarios  # noqa: E402
-from tiles import load_tile_grid  # noqa: E402
+from tiles import build_chunk_grid, load_tile_grid  # noqa: E402
 
-
-def _build_chunk_grid(tile_gdf: gpd.GeoDataFrame, chunk_size_deg: float) -> list[str]:
-    """Mirrors the root Snakefile's own _build_chunk_grid (also duplicated
-    in scripts/generate_hpc_postprocess_job.py) - returns just the
-    chunk_id list, all this script needs.
-    """
-    minx, miny, maxx, maxy = tile_gdf.total_bounds
-    sz = chunk_size_deg
-    xs = np.arange(np.floor(minx / sz) * sz, np.ceil(maxx / sz) * sz, sz)
-    ys = np.arange(np.floor(miny / sz) * sz, np.ceil(maxy / sz) * sz, sz)
-    chunk_ids = []
-    for x in xs:
-        for y in ys:
-            cell = shapely_box(x, y, x + sz, y + sz)
-            if not tile_gdf.geometry.intersects(cell).any():
-                continue
-            xi, yi = int(round(x)), int(round(y))
-            lat = f"N{yi:02d}" if yi >= 0 else f"S{-yi:02d}"
-            lon = f"E{xi:03d}" if xi >= 0 else f"W{-xi:03d}"
-            chunk_ids.append(f"{lat}{lon}")
-    return chunk_ids
 
 
 def _bar(done: int, expected: int, bar_len: int = 30) -> str:
@@ -81,7 +57,7 @@ def main() -> None:
 
     cfg = load_config(Path(args.config).resolve())
     tile_gdf = load_tile_grid(cfg["tile_grid"]["path"])
-    chunk_ids = _build_chunk_grid(tile_gdf, cfg["postprocessing"]["chunk_size_deg"])
+    chunk_ids = build_chunk_grid(tile_gdf, cfg["postprocessing"]["chunk_size_deg"])["chunk_id"].tolist()
     n_chunks = len(chunk_ids)
 
     bc_cfg = cfg["boundary_conditions"]

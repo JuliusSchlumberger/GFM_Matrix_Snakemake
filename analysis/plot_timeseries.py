@@ -13,7 +13,7 @@ continents for the SSPs in visualization.timeseries_overview.ssps
 (continent/timeseries_continents_overview.png).
 
 Usage:
-    python snakemake_workflow/analysis/plot_timeseries.py \\
+    python analysis/plot_timeseries.py \\
         --config  snakemake_workflow/config/config.yml \\
         --expdir  D:/GFM/merged_results/exposure \\
         [--outdir D:/GFM/figures/timeseries]
@@ -28,7 +28,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import load_config, retry_transient_io  # noqa: E402
-from visualization import CONTINENTS, iso_to_continent, ssp_rcp_label  # noqa: E402
+from analysis_figures import CONTINENTS, iso_to_continent, ssp_rcp_label  # noqa: E402
 
 
 def _draw_panel(

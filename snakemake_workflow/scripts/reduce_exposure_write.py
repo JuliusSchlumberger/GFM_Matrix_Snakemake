@@ -34,6 +34,14 @@ from compute_exposure_analysis import (  # noqa: E402
 
 
 def main() -> None:
+    """Parse CLI arguments and write the final merged exposure CSVs.
+
+    Sums every pass-2 batch's partial per-task EAI DataFrames matched by
+    ``--parts-glob`` (``.add(fill_value=0.0)``, chunk-to-chunk added
+    batch-to-batch), then writes the File 1/2/3 CSVs to ``--outdir`` via
+    ``write_exposure_outputs``. Raises ``SystemExit`` if no part files match
+    the glob.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--parts-glob", required=True, help="glob pattern matching every pass-2 batch's output pickle")

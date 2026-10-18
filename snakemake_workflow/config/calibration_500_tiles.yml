@@ -4,7 +4,7 @@
 # tile-grid migration superseded its tile numbering entirely.
 #
 # 571 candidate tiles (stratified by size AND geography - see
-# calibration_studies/select_calibration_tiles.py), selected from the FULL
+# calibration_studies/select_study_candidate_tiles.py), selected from the FULL
 # hop_distance==0 population of the current grid regardless of whether
 # model_outputs already exists for them (see that script's own docstring).
 # Final wet-tile count (target ~500) comes from
@@ -77,7 +77,7 @@ adaptation:
 # preprocessing ~142.5 core-seconds/tile (measured on the 400-tile delta
 # run) -> 571 tiles / 30 cores ~= 0.75h; simulate worst-case (zero early
 # exit at either loop level, the 0.05s/Mcell/sweep rate
-# test_sweep_budget_calibration.py's own study measured and confirmed,
+# run_sweep_budget_study.py's own study measured and confirmed,
 # scaled by the 9.4x ceiling ratio above) on this candidate pool's real
 # total pixel count (~20.7 billion px) -> ~14.1h worst case on 30 cores.
 # Combined worst case ~14.9h > this 9h budget - STILL not a guarantee every

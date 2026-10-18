@@ -1,0 +1,40 @@
+# SFINCS environment for sfincs_tiles/ (SFINCS model build + run only).
+#
+# Separate from environment.yml (`gfm`) because hydromt_sfincs 2.x needs
+# hydromt>=1.x / numpy 2 / pandas 3, which conflict with gfm's hydromt 0.9.3
+# pins. Recorded 2026-10-17 from the working local env (`conda env export
+# --from-history` + installed versions); Hydrax has the same env name.
+#
+# hydromt_sfincs is NOT on conda-forge at this version: it is an editable
+# install of a Deltares/hydromt_sfincs checkout (main @ cbba4362,
+# 2.0.0rc4.dev0). After creating the env:
+#   git clone https://github.com/Deltares/hydromt_sfincs.git
+#   git -C hydromt_sfincs checkout cbba4362
+#   conda run -n hydromt-sfincs-dev pip install -e ./hydromt_sfincs --no-deps
+#
+# matplotlib's savefig() hard-crashes in this env - run every sfincs_tiles
+# plotting script in `gfm` instead (environment.yml).
+name: hydromt-sfincs-dev
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11.16
+  - hydromt=1.4.1
+  - numpy=2.4.6
+  - pandas=3.0.5
+  - xarray=2026.7.0
+  - rasterio=1.4.4
+  - geopandas=1.1.4
+  - shapely=2.1.2
+  - pyproj=3.7.2
+  - numba=0.67.0
+  - xugrid=0.15.3
+  - pyflwdir=0.5.12
+  - scipy=1.17.1
+  - pyyaml=6.0.3
+  - netcdf4=1.7.4
+  - cartopy=0.26.0
+  - matplotlib=3.11.2
+  - affine
+  - pillow
+  - pip

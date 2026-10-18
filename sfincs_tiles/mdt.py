@@ -74,10 +74,24 @@ def _nearest_valid_grid(
 
 
 def mdt_lookup_fn(mdt_path: Path, mdt_variable: str = "mdt", fallback_deg: float = 3.0):
-    """Returns a `f(lon, lat) -> MDT value (m)` closure, loading the MDT grid once.
+    """Return a `(lon, lat) -> MDT value (m)` lookup closure, loading the MDT grid once.
 
-    `fallback_deg` matches `boundary_conditions.mdt_correction.fallback_search_deg`
-    in config.yml (default 3.0).
+    Parameters
+    ----------
+    mdt_path : Path
+        Path to the AVISO MDT NetCDF file.
+    mdt_variable : str, optional
+        Variable name in the MDT dataset, by default "mdt".
+    fallback_deg : float, optional
+        Search radius (degrees) used when the nearest grid cell is NaN, by
+        default 3.0. Matches
+        `boundary_conditions.mdt_correction.fallback_search_deg` in config.yml.
+
+    Returns
+    -------
+    Callable[[float, float], float]
+        Function mapping (lon, lat) to the MDT value (m), NaN if no valid cell
+        is found within `fallback_deg`.
     """
     da = _load_mdt(mdt_path, mdt_variable)
     lat_dim = next(d for d in da.dims if "lat" in d.lower())

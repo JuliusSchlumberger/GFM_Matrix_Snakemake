@@ -24,7 +24,7 @@ import rasterio
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import load_config  # noqa: E402
 from eikonal import _ORTHANT_ORDER, _dense_sweep  # noqa: E402
-from flood_extent import effective_dem  # noqa: E402
+from flood_model import effective_dem  # noqa: E402
 from flood_model import _idw_seed_values, coastline_mask  # noqa: E402
 from rasters import decode_dem_cm, decode_friction_int16, decode_waterlevel_cm  # noqa: E402
 
@@ -53,7 +53,7 @@ def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor
     boundaries = gpd.read_file(inputs / f"boundaries_{scenario}.gpkg")
 
     dem = effective_dem(dem, mask)
-    # decode -> scale -> floor, matching aqueduct_runner.py's production order.
+    # decode -> scale -> floor, matching eikonal_runner.py's production order.
     friction = friction * friction_scale_factor
     friction = np.where(friction > 0, friction, friction.dtype.type(0.001))
     coastline = coastline_mask(mask, ocean_code=OCEAN_CODE, river_code=RIVER_CODE)

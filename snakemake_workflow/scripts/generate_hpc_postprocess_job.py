@@ -2,11 +2,11 @@
 prepare_exposure_grid_chunk -> compute_flood_fraction_chunk) across
 hpc.n_nodes PARALLEL nodes - the postprocessing-side counterpart to
 generate_hpc_preprocess_job.py, filling the gap between the simulation
-dispatch and the exposure-analysis dispatch (generate_exposure_jobs.py).
+dispatch and the exposure-analysis dispatch (generate_hpc_exposure_jobs.py).
 
 Also plans and appends the exposure-analysis dispatch onto the SAME
 submission (submit_postprocess_and_exposure.sh) via
-generate_exposure_jobs.generate_exposure_dispatch, so the whole remaining
+generate_hpc_exposure_jobs.generate_exposure_dispatch, so the whole remaining
 pipeline - postprocessing then exposure analysis - is submitted in one
 call, with exposure analysis's own first phase gated on afterany of
 postprocessing's last phase. See generate_exposure_dispatch's own
@@ -51,15 +51,13 @@ output shared across every chunk, so there is no write-write race for
 Each batch is a plain `snakemake --cores N --nolock --rerun-triggers=mtime
 <target files>` call, the exact same pattern generate_hpc_preprocess_job.py
 already uses successfully for preprocessing - not a new standalone CLI
-script (unlike run_aqueduct_cli.py for simulation), since these rules'
+script (unlike run_eikonal_cli.py for simulation), since these rules'
 Snakemake DAG-build cost is cheap (each target's own dependency chain is
 just a handful of per-tile waterdepth files or one other chunk file, not
-the entire domain like generate_aqueduct_jobs' _PREPROCESS_OUTPUTS gate).
+the entire domain like generate_eikonal_jobs' _PREPROCESS_OUTPUTS gate).
 
-Chunk grid construction (_build_chunk_grid) is copied from the root
-Snakefile's own module-level code - it can't be imported directly (the
-Snakefile is not a plain importable module), so this mirrors it exactly;
-if that logic ever changes there, update it here too.
+The chunk grid comes from src/tiles.py::build_chunk_grid, the same function
+the root Snakefile uses, so chunk IDs always match the DAG's.
 
 Uses the same local-view/Linux-view path resolution as
 generate_hpc_preprocess_job.py (config_hpc.yml, if present): the tile grid
@@ -79,142 +77,21 @@ import sys
 from pathlib import Path
 
 import geopandas as gpd
-import numpy as np
 import yaml
-from shapely.geometry import box as shapely_box
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
-from generate_exposure_jobs import generate_exposure_dispatch, generate_exposure_resume_dispatch  # noqa: E402
+from hpc_common import _account_line, _retry_wrapper_lines, _stage_configfile_lines, _stage_tile_grid_lines  # noqa: E402
+from generate_hpc_exposure_jobs import generate_exposure_dispatch, generate_exposure_resume_dispatch  # noqa: E402
 from generate_hpc_flood_totals_and_plots_job import write_flood_totals_and_plots_job  # noqa: E402
-
-
-def _account_line(sbatch_cfg: dict) -> list[str]:
-    if sbatch_cfg.get("account"):  # optional - Hydrax jobs don't require one
-        return [f"#SBATCH --account={sbatch_cfg['account']}"]
-    return []
-
-
-def _retry_wrapper_lines() -> list[str]:
-    """Bash function def: retries a `snakemake --configfile ...` invocation
-    on failure - see generate_hpc_preprocess_job.py's matching helper for
-    the full rationale (confirmed live 2026-09: a job with no/minimal
-    dependency delay can read a stale/corrupted resolved_config.yml over
-    the shared P:\\ mount - same exact failure every time, pointing at
-    cross-node filesystem cache staleness, not a random race).
-
-    2026-09-14: staging resolved_config.yml locally did NOT stop this
-    recurring, so it may not be resolved_config.yml at all - the Snakefile
-    auto-loads config.yml + config_local.yml (configfile: directives)
-    before --configfile is even merged, and a raw UnicodeDecodeError never
-    reports which file it came from. Dumping checksums/mtimes of every
-    candidate on failure turns a recurrence into real evidence.
-    """
-    return [
-        "run_snakemake_with_retry() {",
-        "  local attempt=1 max_attempts=10 delay=30",
-        '  while [ "$attempt" -le "$max_attempts" ]; do',
-        '    if "$@"; then',
-        "      return 0",
-        "    fi",
-        '    echo "  [retry $attempt/$max_attempts] snakemake invocation failed - retrying in ${delay}s..." >&2',
-        '    echo "  [forensics] candidate config files at time of failure:" >&2',
-        '    sha256sum snakemake_workflow/config/config.yml snakemake_workflow/config/config_local.yml "$LOCAL_CONFIGFILE" >&2 || true',
-        '    stat snakemake_workflow/config/config.yml snakemake_workflow/config/config_local.yml "$LOCAL_CONFIGFILE" >&2 || true',
-        '    sleep "$delay"',
-        "    attempt=$((attempt + 1))",
-        "  done",
-        '  echo "  snakemake invocation failed after $max_attempts attempts - giving up." >&2',
-        "  return 1",
-        "}",
-    ]
-
-
-def _stage_configfile_lines() -> list[str]:
-    """Bash function def: copies a --configfile path to node-local scratch
-    and validates it parses as UTF-8 YAML before use, retrying the CHEAP
-    copy+validate step (not a full snakemake run) on failure - see
-    generate_hpc_preprocess_job.py's matching helper for the full
-    rationale (live evidence 2026-09-14: 5 fresh `snakemake` retries in a
-    row hit the identical byte/position UnicodeDecodeError on the same
-    node, while the file read cleanly from a different client moments
-    later - a node-local stale-cache issue that re-running snakemake
-    against the same P:\\ path doesn't fix).
-    """
-    return [
-        "stage_configfile_locally() {",
-        '  local src="$1" out_var="$2"',
-        '  local stage_dir="${TMPDIR:-/tmp}/gfm_resolved_config"',
-        '  mkdir -p "$stage_dir"',
-        '  local dst="$stage_dir/resolved_config_${SLURM_JOB_ID:-$$}_$$.yml"',
-        "  local attempt=1 max_attempts=8 delay=5",
-        '  while [ "$attempt" -le "$max_attempts" ]; do',
-        '    cp -f -- "$src" "$dst" 2>/dev/null',
-        "    if python -c \"import sys, yaml; yaml.safe_load(open(sys.argv[1], encoding='utf-8'))\" \"$dst\" 2>/dev/null; then",
-        "      printf -v \"$out_var\" '%s' \"$dst\"",
-        "      return 0",
-        "    fi",
-        '    echo "  [config-stage retry $attempt/$max_attempts] $src did not copy/parse cleanly - retrying in ${delay}s..." >&2',
-        '    rm -f -- "$dst"',
-        '    sleep "$delay"',
-        "    attempt=$((attempt + 1))",
-        "  done",
-        '  echo "  failed to stage a valid local copy of $src after $max_attempts attempts - giving up." >&2',
-        "  return 1",
-        "}",
-    ]
-
-
-def _stage_tile_grid_lines() -> list[str]:
-    """Bash function def: copies the tile_grid gpkg to node-local scratch,
-    validated by comparing copied/source byte sizes (not UTF-8/YAML parsing
-    like `_stage_configfile_lines` - a GeoPackage is a binary SQLite file),
-    retrying on failure - see `_stage_configfile_lines`'s own docstring for
-    the matching retry rationale.
-
-    Added 2026-10-15: `snakemake` itself reads `tile_grid.path` via GDAL/OGR
-    at Snakefile-PARSE time (CHUNK_IDS/TILE_IDS are derived from it before
-    any rule even starts - see the Snakefile's own comment), which has
-    SQLite try to acquire an advisory file lock first. Confirmed live
-    (generate_aqueduct_jobs.py's matching `_stage_tile_grid_lines`) that this
-    lock acquisition can hang indefinitely on a Hydrax compute node reading
-    P:\\ directly, even for a single, non-concurrent read - reproduced live
-    as the cause of a `postprocess_*_batch_*.sbatch` job sitting silent for
-    hours right after its own startup banner, with `stage_configfile_locally`
-    alone not enough to prevent it, since that only stages resolved_config.yml
-    itself, not the gpkg path written INSIDE it.
-    """
-    return [
-        "stage_tile_grid_locally() {",
-        '  local src="$1" out_var="$2"',
-        '  local stage_dir="${TMPDIR:-/tmp}/gfm_tile_grid"',
-        '  mkdir -p "$stage_dir"',
-        '  local dst="$stage_dir/tile_grid_${SLURM_JOB_ID:-$$}_$$.gpkg"',
-        "  local attempt=1 max_attempts=8 delay=5",
-        '  local src_size; src_size=$(stat -c%s -- "$src" 2>/dev/null)',
-        '  while [ "$attempt" -le "$max_attempts" ]; do',
-        '    cp -f -- "$src" "$dst" 2>/dev/null',
-        '    local dst_size; dst_size=$(stat -c%s -- "$dst" 2>/dev/null)',
-        '    if [ -n "$dst_size" ] && [ "$dst_size" = "$src_size" ]; then',
-        "      printf -v \"$out_var\" '%s' \"$dst\"",
-        "      return 0",
-        "    fi",
-        '    echo "  [tile-grid-stage retry $attempt/$max_attempts] $src did not copy cleanly - retrying in ${delay}s..." >&2',
-        '    rm -f -- "$dst"',
-        '    sleep "$delay"',
-        "    attempt=$((attempt + 1))",
-        "  done",
-        '  echo "  failed to stage a valid local copy of $src after $max_attempts attempts - giving up." >&2',
-        "  return 1",
-        "}",
-    ]
+from tiles import build_chunk_grid  # noqa: E402
 
 
 def _stage_file_locally(src_path: str) -> str:
     """Copy `src_path` to node-local scratch and return the local copy's
     path, instead of opening it straight off P:\\ - mirrors
-    run_aqueduct_cli.py's own helper of the same name (see its docstring for
+    run_eikonal_cli.py's own helper of the same name (see its docstring for
     the full GDAL/SQLite-lock-acquisition rationale).
 
     Added 2026-10-15: this script's OWN `gpd.read_file(tile_grid.path)` call
@@ -235,24 +112,6 @@ def _stage_file_locally(src_path: str) -> str:
     retry_transient_io(shutil.copy2, src_path, dst)
     return dst
 
-
-def _build_chunk_grid(tile_gdf: gpd.GeoDataFrame, chunk_size_deg: float) -> gpd.GeoDataFrame:
-    """Mirrors the root Snakefile's own _build_chunk_grid exactly."""
-    minx, miny, maxx, maxy = tile_gdf.total_bounds
-    sz = chunk_size_deg
-    xs = np.arange(np.floor(minx / sz) * sz, np.ceil(maxx / sz) * sz, sz)
-    ys = np.arange(np.floor(miny / sz) * sz, np.ceil(maxy / sz) * sz, sz)
-    rows = []
-    for x in xs:
-        for y in ys:
-            cell = shapely_box(x, y, x + sz, y + sz)
-            if not tile_gdf.geometry.intersects(cell).any():
-                continue
-            xi, yi = int(round(x)), int(round(y))
-            lat = f"N{yi:02d}" if yi >= 0 else f"S{-yi:02d}"
-            lon = f"E{xi:03d}" if xi >= 0 else f"W{-xi:03d}"
-            rows.append({"chunk_id": f"{lat}{lon}", "geometry": cell})
-    return gpd.GeoDataFrame(rows, crs=tile_gdf.crs)
 
 
 def _split_evenly(targets: list[str], n_nodes: int) -> list[list[str]]:
@@ -351,13 +210,25 @@ def _write_batches(
 
 
 def main() -> None:
+    """Parse CLI arguments and write the postprocessing + exposure dispatch sbatch scripts.
+
+    Builds the chunk grid from the tile grid, then generates either a
+    per-chunk dispatch (merge -> exposure grid -> flood fraction chained per
+    chunk) or a three-phase barrier dispatch, depending on whether there are
+    at least as many chunks as ``hpc.n_nodes``. Appends the exposure-analysis
+    dispatch and, unless ``--no-flood-totals-and-plots`` is set, a final
+    flood-totals-and-plots job onto the same submission chain. With
+    ``--resume``, rebalances only the still-missing targets per phase. Writes
+    submit_postprocess_and_exposure.sh (or
+    submit_resume_postprocess_and_exposure.sh) under ``hpc.jobs_dir``.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
     parser.add_argument("--config", default=str(default_config))
     parser.add_argument(
         "--resume", action="store_true",
         help="rebalance only the still-missing targets across the full node budget per phase "
-             "(skipping any phase that's already 100% done), instead of a fresh dispatch. "
+             "(skipping any phase that's already 100%% done), instead of a fresh dispatch. "
              "Cancel the original dispatch's still-running jobs FIRST - see "
              "generate_hpc_simulation_jobs.py's own --resume docstring for why (same reasoning: "
              "a stale batch racing a new one over the same still-incomplete targets would redo "
@@ -420,7 +291,7 @@ def main() -> None:
     baseline_slr = local_config["protection"]["baseline_waterlevel_name"]
 
     chunk_size_deg = local_config["postprocessing"]["chunk_size_deg"]
-    chunk_grid = _build_chunk_grid(tile_gdf, chunk_size_deg)
+    chunk_grid = build_chunk_grid(tile_gdf, chunk_size_deg)
     chunk_ids = chunk_grid["chunk_id"].tolist()
     print(f"{len(chunk_ids)} populated chunk(s) (chunk_size_deg={chunk_size_deg}), "
           f"{len(return_periods)} RPs, {len(waterlevel_names)} SLRs, n_nodes={n_nodes}\n")
@@ -557,7 +428,7 @@ def main() -> None:
     # with ZERO batches (resume mode, already 100% done) is skipped
     # entirely - PREV_IDS then correctly carries forward from the last
     # phase that DID have batches, same "skip empty phase" pattern
-    # generate_aqueduct_jobs.generate_resume_dispatch already uses.
+    # generate_eikonal_jobs.generate_resume_dispatch already uses.
     submit_lines = ["#!/bin/bash", "set -euo pipefail", "", 'PREV_IDS=""']
     for phase_label, scripts in phases:
         if not scripts:
@@ -580,7 +451,7 @@ def main() -> None:
     # continuing the afterany chain from postprocessing's own job IDs
     # ($PREV_IDS, empty string if every postprocessing phase was already
     # done) rather than writing a separate script - see
-    # generate_exposure_jobs.py's own module docstring for why this stays
+    # generate_hpc_exposure_jobs.py's own module docstring for why this stays
     # one synchronous, upfront submission. In resume mode, use the
     # matching exposure resume/fresh path depending on whether exposure
     # batches were ever generated before (batch_*_chunks.txt existing under

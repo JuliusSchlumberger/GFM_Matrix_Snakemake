@@ -1,6 +1,6 @@
 """Builds wet_tiles_selected.txt from a sweep_budget output directory's
 per-tile CSVs, post-hoc. This is the counterpart to
-test_sweep_budget_calibration.py's own sequential-run write of that file,
+run_sweep_budget_study.py's own sequential-run write of that file,
 which is skipped when the script runs as one tile per call (concurrent
 single-tile HPC tasks all writing "the" same file would race - see that
 script's own main() comment).
@@ -63,7 +63,7 @@ def aggregate_wet_tiles(sweep_budget_dir: Path, n_tiles_wanted: int) -> list[int
     print(f"{len(selected)}/{n_tiles_wanted} wet tiles selected, written to {wet_file}")
     if len(selected) < n_tiles_wanted:
         print(f"WARNING: only found {len(selected)} wet tiles - need more candidates from "
-              f"select_calibration_tiles.py, or the array job hasn't finished yet "
+              f"select_study_candidate_tiles.py, or the array job hasn't finished yet "
               f"({n_unreadable} tile(s) still unreadable/running)")
     return selected
 

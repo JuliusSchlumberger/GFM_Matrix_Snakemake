@@ -29,6 +29,31 @@ MANNING_N_MAX = 1.0
 
 
 def build_manning_n(friction_path: Path, out_path: Path) -> tuple[float, float]:
+    """Decode a tile's friction.tif into a real Manning's n GeoTIFF for SFINCS.
+
+    Converts the int16-encoded Manning's n/100 values back to real Manning's
+    n by multiplying by 100, checks the result against a physically-
+    plausible envelope (catches a missed or doubled unit conversion), and
+    writes a float32 GeoTIFF with NaN nodata.
+
+    Parameters
+    ----------
+    friction_path : Path
+        Input friction.tif (int16, Manning's n/100 encoding).
+    out_path : Path
+        Output path for the decoded float32 Manning's n GeoTIFF; parent
+        directories are created if they don't exist.
+
+    Returns
+    -------
+    tuple[float, float]
+        Min and max finite Manning's n values written.
+
+    Raises
+    ------
+    ValueError
+        If any finite decoded value falls outside [MANNING_N_MIN, MANNING_N_MAX].
+    """
     with retry_transient_io(rasterio.open, friction_path) as src:
         friction_int16 = src.read(1)
         nodata = src.nodata

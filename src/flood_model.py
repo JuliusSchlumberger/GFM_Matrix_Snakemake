@@ -1,12 +1,9 @@
 """Python port of Aqueduct's flood model (`core/src/core.jl`, `flood_depth`).
 
-`flood_depth_dense` is the production implementation - its fixed-3-sweep
-mode is bit-for-bit identical to real Aqueduct output across 26 real tiles
-spanning ~9M-135M cells each (100.000% Jaccard, 0.0m RMSE/mean-error/
-90th-percentile/max-diff on every one - see `docs/python_vs_julia_qa.md`),
-including two precision details that would otherwise silently diverge from
-Julia: `coastline_mask`'s exact boolean reduction, and the Haversine
-axis-order/unit convention required by scikit-learn vs. the
+`flood_depth_dense` is the production implementation. Two precision details
+keep its fixed-3-sweep mode from silently diverging from Julia:
+`coastline_mask`'s exact boolean reduction, and the Haversine axis-order/unit
+convention required by scikit-learn vs. the
 (internally-consistent) convention `core.jl` uses via `Distances.jl`.
 """
 
@@ -20,7 +17,37 @@ from scipy import ndimage
 from sklearn.neighbors import BallTree
 
 from eikonal import solve_eikonal_dense
-from flood_extent import effective_dem
+
+
+# Effective elevation (formerly src/flood_model.py, folded in during cleanup Phase 7b).
+# Mirrors core.jl's run-time preprocessing (`dem[.!landmask] .= 0.0`) rather than trusting
+# dem.tif's raw values: rasters.extract_dem only fills cells that are nodata in the DEM
+# SOURCE, so a river/lake/ocean cell with a real DeltaDTM elevation keeps it in dem.tif.
+LAND_CODE = 0
+
+
+def effective_dem(dem: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Zero out elevation on non-land cells, mirroring core.jl's run-time preprocessing.
+
+    Every non-land cell (ocean, lake, river) is treated as elevation 0.0 regardless of
+    what value is stored in dem.tif for it, matching core.jl's `dem[.!landmask] .= 0.0`
+    (needed because `rasters.extract_dem` only fills DEM-source nodata, so a water-body
+    cell can still carry a real DeltaDTM elevation that core.jl zeroes anyway).
+
+    Parameters
+    ----------
+    dem : np.ndarray
+        Elevation raster (metres), same shape as `mask`.
+    mask : np.ndarray
+        Land/water code raster (0=land, 1=ocean, 2=lake, 3=river); any non-land code is
+        zeroed.
+
+    Returns
+    -------
+    np.ndarray
+        Elevation array with the same dtype as `dem`, non-land cells set to 0.0.
+    """
+    return np.where(mask == LAND_CODE, dem, dem.dtype.type(0.0))
 
 EARTH_RADIUS_M = 6_371_000.0
 _STRUCTURE_8 = np.ones((3, 3), dtype=bool)
@@ -45,23 +72,34 @@ OBSTACLE_BLOCK_FRICTION = 9999.0
 
 
 def coastline_mask(mask: np.ndarray, ocean_code: int = 1, river_code: int | None = None) -> np.ndarray:
-    """Ocean cells within 1px of land (or river) that are actually part of
-    the tile's real, edge-connected ocean body.
+    """Mark ocean cells that belong to the tile's real, edge-connected ocean body.
 
-    Differs from `core.jl`'s original `coastlinemask`
-    (`dilate(landmask) & (mask == ocean_code)`), which treats any ocean-coded
-    cell touching land as coastline - including isolated inland "ocean"
-    speckle DeltaDTM regularly miscodes (ponds, aquaculture, thermokarst),
-    which would otherwise get IDW-seeded from real ocean stations and start
-    flooding from a location with no real path to the sea.
+    Differs from `core.jl`'s original `coastlinemask` (`dilate(landmask) & (mask ==
+    ocean_code)`), which treats any ocean-coded cell touching land as coastline -
+    including isolated inland "ocean" speckle DeltaDTM regularly miscodes (ponds,
+    aquaculture, thermokarst), which would otherwise get IDW-seeded from real ocean
+    stations and start flooding from a location with no real path to the sea.
 
-    Labels the tile's ocean-coded cells into 8-connected components, keeps
-    only the component(s) touching the tile's own array edge (a land-locked
-    pond can never do this), and requires adjacency to land or `river_code`
-    (river mouths are legitimate forcing entry points too).
+    Labels ocean-coded cells into 8-connected components, keeps only the component(s)
+    touching the tile's own array edge (a land-locked pond can never do this), and
+    requires adjacency to land or `river_code` (river mouths are legitimate forcing
+    entry points too).
 
-    `river_code` defaults to `None` (land-only adjacency) for callers that
-    don't pass one, e.g. `calibration_studies/diagnose_large_residual.py`.
+    Parameters
+    ----------
+    mask : numpy.ndarray
+        Land/water code raster, shape `(m, n)`.
+    ocean_code : int, default 1
+        Mask value marking open ocean.
+    river_code : int or None, default None
+        Mask value marking river cells, also treated as valid coastline adjacency.
+        `None` restricts adjacency to land only (the convention used by callers that
+        don't pass one, e.g. `calibration_studies/diagnose_large_residual.py`).
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean mask, shape `(m, n)`, true at coastline cells.
     """
     ocean = mask == ocean_code
     components, _n = ndimage.label(ocean, structure=_STRUCTURE_8)
@@ -79,22 +117,30 @@ def coastline_mask(mask: np.ndarray, ocean_code: int = 1, river_code: int | None
 
 
 def prune_to_coast_connected(region: np.ndarray, coastline: np.ndarray) -> np.ndarray:
-    """Keep only the 8-connected components of `region` touching `coastline`.
+    """Keep only the 8-connected components of `region` that touch `coastline`.
 
-    This is `core.jl`'s own step 10 (`label_components` + keep components
-    whose label appears under the dilated coastline). Applied here to two
-    different inputs for two different reasons:
-      - to the candidate mask (pre-solve): a provably-exact optimization,
-        not an approximation - since every genuinely flooded cell satisfies
-        `dem < max_waterlevel` (flood subseteq candidate, proven in the plan
-        doc), any candidate component disconnected from the coast can never
-        contain a flood cell connected to the coast either, so discarding it
-        cannot change the final answer.
-      - to the flood mask (post-solve): this IS the model's actual required
-        step 10, not an optimization at all.
-    Implemented via `np.isin` against a label array, never per-component
-    index lists - avoiding `component_indices`'s documented OOM cause in
-    `core.jl` regardless of domain size.
+    This is `core.jl`'s own step 10 (`label_components` + keep components whose
+    label appears under the dilated coastline), applied post-solve to the flood mask
+    by `flood_depth_dense` and the calibration studies. (It would also be exact as a
+    pre-solve filter on a candidate mask, since a component disconnected from the coast
+    can never hold a coast-connected flood cell, but no caller uses it that way.)
+    Implemented via `np.isin` against a label array, never per-component index lists -
+    avoiding `component_indices`'s documented OOM cause in `core.jl` regardless of
+    domain size.
+
+    Parameters
+    ----------
+    region : numpy.ndarray
+        Boolean mask, shape `(m, n)`, of candidate or flooded cells to prune.
+    coastline : numpy.ndarray
+        Boolean mask, shape `(m, n)`, of coastline cells; components of `region` not
+        touching (8-connected, one-cell dilated) any coastline cell are dropped.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean mask, shape `(m, n)`, `region` restricted to coast-connected
+        components. All-false if `coastline` is empty or no component touches it.
     """
     labels, _ = ndimage.label(region, structure=_STRUCTURE_8)
     if not coastline.any():
@@ -158,11 +204,41 @@ def idw_seed_values_at(
     mask: np.ndarray,
     ocean_code: int,
 ) -> np.ndarray:
-    """`_idw_seed_values` for cells whose (lon, lat) positions are given
-    explicitly - the same haversine k-nearest IDW with the same ocean-
-    connectivity restriction (components of `mask` at `rows`/`cols`), for
-    grids that are not lon/lat themselves (e.g. a projected, rotated SFINCS
-    subgrid: pass its cell centres transformed to EPSG:4326)."""
+    """Inverse-distance-weighted seed values for cells at given (lon, lat) positions.
+
+    Same haversine k-nearest IDW as `_idw_seed_values`, with the same ocean-
+    connectivity restriction (components of `mask` at `rows`/`cols`): a cell is only
+    seeded from stations in the same connected ocean component, since nearest-by-
+    straight-line-distance can otherwise draw a cell's forcing from a station with no
+    real water path to it (e.g. across a thin isthmus). For grids that are not
+    lon/lat themselves (e.g. a projected, rotated SFINCS subgrid: pass its cell
+    centres transformed to EPSG:4326).
+
+    Parameters
+    ----------
+    cell_lonlat : numpy.ndarray
+        Cell positions, shape `(N, 2)`, columns `(lon, lat)` in degrees.
+    rows : numpy.ndarray
+        Row index of each cell in `mask`, shape `(N,)`; used only to look up each
+        cell's ocean-mask component.
+    cols : numpy.ndarray
+        Column index of each cell in `mask`, shape `(N,)`.
+    stations_lonlat : numpy.ndarray
+        Station positions, shape `(S, 2)`, columns `(lon, lat)` in degrees.
+    station_values : numpy.ndarray
+        Value at each station (e.g. water level, metres), shape `(S,)`.
+    k : int
+        Number of nearest stations to average per cell (clipped to `len(station_values)`).
+    mask : numpy.ndarray
+        Land/water code raster used to build the ocean-connectivity components.
+    ocean_code : int
+        Mask value marking open ocean.
+
+    Returns
+    -------
+    numpy.ndarray
+        IDW-interpolated value at each cell, shape `(N,)`, dtype float64.
+    """
     k = min(k, len(station_values))
     cell_latlon_rad = np.radians(np.asarray(cell_lonlat)[:, ::-1])  # (lon,lat) -> (lat,lon)
     station_latlon_rad = np.radians(stations_lonlat[:, ::-1])  # (lon,lat) -> (lat,lon)
@@ -243,108 +319,110 @@ def flood_depth_dense(
 ) -> tuple[np.ndarray, dict]:
     """Production flood-depth solve: dense domain, round-based by default.
 
-    The dense solver has no candidate/elevation domain restriction - every
-    cell participates, exactly like Julia's own full-tile solve - so there
-    is no pre-solve candidate-mask/connectivity pruning step, only the same
-    post-solve connectivity filter Julia itself applies. That's true
-    regardless of `obstacle_coupling` - it changes what friction values the
-    solver sees, never which cells participate.
+    Every cell participates (no candidate/elevation domain restriction, matching
+    `core.jl`'s own full-tile solve), so only the same post-solve connectivity
+    filter Julia itself applies is needed - true regardless of `obstacle_coupling`,
+    which changes what friction values the solver sees, never which cells
+    participate.
 
-    `obstacle_coupling` (default off): Fast Sweeping shares a known
-    structural weakness with cost-distance flood models (Kasmalkar et al.
-    2024's "Flow-Tub" critique) - a friction-cheap "shortcut" through terrain
-    higher than the locally-attenuated water level can produce an
-    illegitimate high potential value at cells beyond it, since Fast
-    Sweeping's Gauss-Seidel relaxation has no per-step elevation check the
-    way Dijkstra/BFS-based methods do (no monotonic finalization property -
-    a cell's value can keep improving across many sweeps, so there's no safe
-    intermediate point to check elevation mid-solve). When enabled, this
-    runs an outer loop instead of a single solve:
-      1. Static pre-filter (free, exact, zero iteration cost): any cell
-         whose effective elevation exceeds the highest boundary water level
-         anywhere in the tile can never legitimately flood under ANY
-         friction/path, since friction only ever attenuates the propagated
-         level, never amplifies it. Ocean cells are never blocked by this
-         condition (their effective elevation is always 0, below any real
-         positive water level) - correctly so, since the sea is how the
-         flood signal reaches other coastal points, not something to block.
-         These cells get `OBSTACLE_BLOCK_FRICTION` from the start.
-      2. Solve (up to `max_rounds` rounds, epsilon=`WATERLEVEL_EPSILON_M`),
-         then block any cell where the resulting (locally-attenuated)
-         waterlevel <= its elevation - it can't legitimately be on a real
-         flood path either - and re-solve. Repeats until the newly-blocked
-         cell count drops below `outer_convergence_pct`% of the tile (or
-         `max_outer_iterations` is reached).
-    Monotonicity (raising friction anywhere can only lower or hold eikonal
-    solution values everywhere, never raise them) guarantees the blocked-cell
-    set only grows across iterations, so this terminates in finite steps.
+    `obstacle_coupling` (default off) works around a known weakness Fast Sweeping
+    shares with cost-distance flood models (Kasmalkar et al. 2024's "Flow-Tub"
+    critique): its Gauss-Seidel relaxation has no per-step elevation check and no
+    monotonic finalization property, so a friction-cheap "shortcut" through terrain
+    higher than the locally-attenuated water level can leak an illegitimate high
+    potential value past it. When enabled, an outer loop instead (1) applies a free,
+    exact static pre-filter blocking (`OBSTACLE_BLOCK_FRICTION`) any cell whose
+    effective elevation exceeds the tile's highest boundary water level under any
+    path - never ocean cells, which must stay open to carry the flood signal - then
+    (2) solves (up to `max_rounds` rounds), blocks any cell whose resulting
+    waterlevel ends up <= its elevation, and re-solves, repeating until the
+    newly-blocked share of the tile drops below `outer_convergence_pct`% (or
+    `max_outer_iterations` is reached). Monotonicity (raising friction anywhere can
+    only lower eikonal values, never raise them) guarantees the blocked-cell set
+    only grows across iterations, so this terminates in finite steps.
 
-    Args:
-        dem, mask, friction, transform: same shape/type conventions as
-            `core.jl`'s `flood_depth`, except `transform` (an
-            `affine.Affine`), needed here to convert pixel coordinates to
-            lon/lat for the boundary-station KNN search - `core.jl` gets
-            this for free from `GeoArrays.coords`, since GeoArrays rasters
-            carry their own transform. Assumes `dem`/`mask`/`friction`
-            already have no nodata cells (guaranteed by this pipeline's
-            `extract_dem`/`extract_dem_mask`/`compute_friction` - see
-            `src/rasters.py`).
-        boundaries: real/virtual water-level stations, IDW-seeded onto this
-            tile's own `coastline_mask` fringe - the wave-0 path, for a tile
-            with its own real ocean edge. Must be non-empty if given.
-        seed_rows, seed_cols, seed_values: the hop>=1 hinterland path, an
-            alternative to `boundaries`: direct eikonal seed cells and values
-            (already-known absolute water levels, typically collected from
-            an already-simulated neighbour tile's own wet cells - see
-            `boundaries.collect_neighbor_wave_seeds`), bypassing
-            `coastline_mask`/IDW entirely. A hop>=1 tile has no `ocean_code`
-            cells of its own by construction, so this is the only way such a
-            tile can flood at all. Must be non-empty if given. Exactly one
-            of `boundaries` or this triple must be given.
-            `obstacle_coupling=True` works with this path too: `station_values`
-            is aliased to `seed_values` below, so the static pre-filter's
-            `max_waterlevel = station_values.max()` uses the seed values'
-            own max as the "highest known water level for this tile"
-            threshold.
-        resolution, k, variable, ocean_code, river_code: flood-model
-            parameters - resolution in metres, `k` nearest boundary
-            stations for IDW, `variable` the boundary water-level column
-            name, `ocean_code`/`river_code` the mask values marking open
-            ocean/river (only used on the `boundaries` path - see
-            `coastline_mask`).
-        sweep_budget: if given, forces the fixed-count mode - run exactly
-            this many individual directional sweeps unconditionally,
-            ignoring `max_rounds`/epsilon entirely (`3` reproduces real
-            Aqueduct/Julia's bit-exact-validated production behaviour - see
-            module docstring). `None` (the default) instead runs the
-            round-based solve capped at `max_rounds`, stopping early once
-            converged (round-level max change <= `waterlevel_epsilon_m`).
-            Only used when `obstacle_coupling` is false (the outer loop's
-            own inner solve always uses the round-based mode).
-        obstacle_coupling: enable the static-pre-filter + outer-loop
-            algorithm above instead of the single solve. Off by default.
-        max_rounds: caps the round-based solve (4 individual sweeps per
-            round), each round checked against `waterlevel_epsilon_m` for
-            early exit. Used both by the default non-coupling path (when
-            `sweep_budget` is `None`) and by every `obstacle_coupling` outer
-            iteration's own inner solve.
-        max_outer_iterations, outer_convergence_pct: only used when
-            `obstacle_coupling` is true - `max_outer_iterations` caps the
-            outer loop; `outer_convergence_pct` is the early-stop threshold
-            (percent of the tile's cells newly blocked this outer
-            iteration).
-        waterlevel_epsilon_m: round-level early-exit convergence threshold
-            for the round-based solve (metres - see module docstring's
-            `WATERLEVEL_EPSILON_M`). Defaults to the module constant;
-            exposed as a parameter so it can be set from
-            `simulation.flooding.waterlevel_epsilon_m` in `config.yml`.
+    Parameters
+    ----------
+    dem : numpy.ndarray
+        Elevation raster (metres), shape `(m, n)`. Assumed already free of nodata
+        cells (guaranteed by this pipeline's `extract_dem`/`extract_dem_mask`/
+        `compute_friction` - see `src/rasters.py`).
+    mask : numpy.ndarray
+        Land/water code raster, same shape as `dem`.
+    friction : numpy.ndarray
+        Friction raster, same shape as `dem`.
+    transform : affine.Affine
+        Pixel-to-lon/lat transform, used to resolve coastline cells to geographic
+        coordinates for the boundary-station k-NN search (`core.jl` gets this for
+        free from `GeoArrays.coords`, since its rasters carry their own transform).
+    boundaries : geopandas.GeoDataFrame or None, default None
+        Real/virtual water-level stations, IDW-seeded onto this tile's own
+        `coastline_mask` fringe - the wave-0 path, for a tile with its own real ocean
+        edge. Must be non-empty if given. Exactly one of `boundaries` or the
+        `seed_rows`/`seed_cols`/`seed_values` triple must be given.
+    seed_rows, seed_cols, seed_values : numpy.ndarray or None, default None
+        The hop>=1 hinterland path, an alternative to `boundaries`: direct eikonal
+        seed cells and already-known absolute water levels, typically collected
+        from an already-simulated neighbour tile's own wet cells (see
+        `boundaries.collect_neighbor_wave_seeds`), bypassing `coastline_mask`/IDW
+        entirely - the only way a hop>=1 tile (no `ocean_code` cells of its own by
+        construction) can flood at all. Must be given all together and non-empty.
+        With `obstacle_coupling=True`, the static pre-filter's `max_waterlevel` uses
+        `seed_values.max()` as the tile's known water-level bound.
+    resolution : float, default 30.0
+        Pixel resolution in metres.
+    k : int, default 5
+        Number of nearest boundary stations to average per IDW-seeded coastline
+        cell.
+    variable : str, default "waterlevel"
+        Column name in `boundaries` holding the water-level value.
+    ocean_code : int, default 1
+        Mask value marking open ocean (only used on the `boundaries` path - see
+        `coastline_mask`).
+    river_code : int or None, default None
+        Mask value marking river cells (only used on the `boundaries` path - see
+        `coastline_mask`).
+    sweep_budget : int or None, default None
+        If given, forces the fixed-count mode: run exactly this many directional
+        sweeps unconditionally, ignoring `max_rounds`/epsilon (`3` reproduces
+        Aqueduct/Julia's production sweep count - see module docstring). `None`
+        instead runs the round-based solve capped at `max_rounds`, stopping early
+        once converged (round-level max change <= `waterlevel_epsilon_m`). Only used
+        when `obstacle_coupling` is false (its own inner solve always uses the
+        round-based mode).
+    obstacle_coupling : bool, default False
+        Enable the static-pre-filter + outer-loop algorithm above instead of a
+        single solve.
+    max_outer_iterations : int, default 3
+        Caps the outer loop. Only used when `obstacle_coupling` is true.
+    max_rounds : int, default 40
+        Caps the round-based solve (4 sweeps per round, each checked against
+        `waterlevel_epsilon_m` for early exit). Used both by the default
+        non-coupling path (when `sweep_budget` is `None`) and by every
+        `obstacle_coupling` outer iteration's own inner solve.
+    outer_convergence_pct : float, default 0.01
+        Only used when `obstacle_coupling` is true: early-stop threshold, as a
+        percent of the tile's cells newly blocked in an outer iteration.
+    waterlevel_epsilon_m : float, default WATERLEVEL_EPSILON_M
+        Round-level early-exit convergence threshold (metres) for the round-based
+        solve. Exposed as a parameter so it can be set from
+        `simulation.flooding.waterlevel_epsilon_m` in `config.yml`.
 
-    Returns:
-        `(waterdepth, diagnostics)`. `waterdepth` has the same shape as
-        `dem`, `0.0` where not flooded. `diagnostics` always has key
-        `obstacle_coupling` (bool); when true it also has
-        `outer_iterations_used`, `outer_converged`, `inner_rounds_used` and
-        `inner_converged` (the last inner solve's), and `final_max_change`.
+    Returns
+    -------
+    tuple of (numpy.ndarray, dict)
+        `(waterdepth, diagnostics)`. `waterdepth` has the same shape as `dem`, `0.0`
+        where not flooded. `diagnostics` always has key `obstacle_coupling` (bool);
+        when true it also has `outer_iterations_used`, `outer_converged`,
+        `inner_rounds_used` and `inner_converged` (the last inner solve's), and
+        `final_max_change`.
+
+    Raises
+    ------
+    ValueError
+        If `boundaries` is given together with any of `seed_rows`/`seed_cols`/
+        `seed_values`; if neither is given; or if only some of `seed_rows`/
+        `seed_cols`/`seed_values` are given.
     """
     using_seeds = seed_rows is not None or seed_cols is not None or seed_values is not None
     if using_seeds and boundaries is not None:

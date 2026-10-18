@@ -51,11 +51,13 @@ from matplotlib.patches import Patch  # noqa: E402
 from scipy.spatial import ConvexHull  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _common)
+from _common import _people  # noqa: E402
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pathways import eai_along_pathway  # noqa: E402
 from population_extension import extend_growth_factors  # noqa: E402
 from population_growth import _build_name_to_iso, interpolate_growth_factor, load_ssp_growth_factors  # noqa: E402
-from visualization import (  # noqa: E402
+from analysis_figures import (  # noqa: E402
     CONTINENTS, build_growth_matrix_from_grid, iso_to_continent, load_growth_matrix_csv, load_slr_trajectories,
     ssp_rcp_label,
 )
@@ -63,12 +65,6 @@ from visualization import (  # noqa: E402
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 C_SLR, C_POP, C_INT = "#1f77b4", "#ff7f0e", "#9467bd"
 CONTINENT_COLORS = dict(zip(CONTINENTS, plt.cm.Set2.colors))
-
-
-def _people(v: float, _=None) -> str:
-    a = abs(v)
-    s = f"{a / 1e6:g} M" if a >= 1e6 else (f"{a / 1e3:g} k" if a >= 1e3 else f"{a:g}")
-    return ("-" if v < 0 else "") + s
 
 
 def _decompose(mats, slr_mm, gfr, traj, ext, ssp, iso, year, variant) -> dict:
@@ -385,6 +381,13 @@ def _scatter_envelope(ref_by_ssp, mats, slr_mm, gfr, traj, ext, variant, names, 
 
 
 def main() -> None:
+    """Parse CLI arguments and plot the SLR-vs-population decomposition of no-adaptation EAI.
+
+    For each configured SSP, decomposes the change in EAI 2020-2100 (and extended years)
+    into SLR-alone, population-alone and interaction terms, then writes per-country
+    waterfall plots, cross-country scatter plots and the top-N envelope scatter, plus one
+    CSV per SSP, to --outdir.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_baseline_growth_matrix.csv")

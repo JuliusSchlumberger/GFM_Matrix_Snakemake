@@ -18,7 +18,7 @@ Read-only audit: the only file written is this one. Uncommitted edits at audit t
 
 **Do the validation and SFINCS-calibration rows (the two benchmark entry points) overlap?** No. They compare the eikonal solver against different references: official hazard maps (fractional coverage, soft scoring) versus SFINCS model runs (binary depth rasters, hard scoring). What they share is only the metric formulas, which are copied (see §4.1.3). Inside the SFINCS row there is overlap: the two `rerun_*.sh` scripts share their path setup, reset loop and stage-2 submit. They differ only in which artefacts they delete and whether a post job is queued, so they can become one `rerun_calibration.sh --part {eikonal,sfincs}`.
 
-**Environments**: `gfm` (`environment.yml`: Python 3.10.13, snakemake 7.32.4, hydromt 0.9.3, no hydromt_sfincs, no pytest) is the main environment. `hydromt-sfincs-dev` is used for sfincs_tiles model building/running (matplotlib broken); no env file describes it. `gfm_python_preprocessing` is an older version of `gfm`, so `gfm` should be used in its place (user, 2026-10-17).
+**Environments**: `gfm` (`environment.yml`: Python 3.10.13, snakemake 7.32.4, hydromt 0.9.3, no hydromt_sfincs, no pytest) is the main environment. `hydromt-sfincs-dev` is used for sfincs_tiles model building/running (matplotlib broken); no env file describes it. `gfm_python_preprocessing` is the **same** `gfm` env under an outdated name on the Windows machine; Hydrax calls it `gfm` (user, 2026-10-17, correcting an earlier note).
 
 **Existing tooling**: no pyproject/setup.cfg, no pytest config, no pre-commit, no ruff config, no CI (`.github/` absent). Ruff is mentioned only as an optional comment in `environment.yml`.
 
@@ -35,7 +35,7 @@ Read-only audit: the only file written is this one. Uncommitted edits at audit t
 | `snakemake_workflow/config/` | `config.yml` (source of truth), data catalogs, per-study override ymls, **tracked** `*_materialized.yml`, **tracked** `config_hpc.yml`, `calibration/sweep/*.yml` (orphaned) |
 | `preparation/` | Pre-DAG steps run by `run_preparation.py`, manual subset/ingest tools, `logs/` (72k lines of tracked historical logs) |
 | `analysis/` | Post-DAG exposure, pathways and tipping-point figures, plus the deltas deliverable, the Bangkok case study and one-off experiments (mixed concerns) |
-| `validation/` | National-map benchmark validation (ESP/FRA/NOR via `run_validation.py`; GBR/SF Bay via standalone scripts) and tracked result CSVs |
+| `validation/` | National-map benchmark validation: GBR (Wales, Scotland, England) + CAN (New Brunswick) via `run_validation.py`; England FZ2/FZ3 and SF Bay via standalone scripts (scope since 2026-10-17, §9) and tracked result CSVs |
 | `sfincs_tiles/` | SFINCS calibration/validation sub-pipeline (separate env, Hydrax `.sh` drivers) |
 | `calibration_studies/` | Eikonal round-cap / obstacle-coupling sensitivity studies (methods_03) |
 | `julius_sfincs_code/` | Imported external basin-scale SFINCS workflow (reference only, not runnable here) |
@@ -118,7 +118,7 @@ shared: gfm_config, retry_io, sfincs_grid
   - `src/map_style.py:111 land_water_legend_handles`
   - `src/merge.py:66 _bounds_intersect`
   - `sfincs_tiles/sfincs_run.py` `parse_sfincs_inp`, `forward_geometry_files`
-- Called only from tests: `src/rasters.py:404 resolve_offshore_mask_gaps_via_gebco`, `src/rasters.py:493 relabel_small_isolated_ocean_patches`
+- ~~Called only from tests: `src/rasters.py:404 resolve_offshore_mask_gaps_via_gebco`, `src/rasters.py:493 relabel_small_isolated_ocean_patches`~~ **Correction (Phase 3, 2026-10-18): wrong. Both are called unconditionally by `extract_dem` (rasters.py:661) and `extract_dem_mask` (:731, :734), i.e. by every production preprocessing run. They are CORE and stay; their tests stay.**
 
 ---
 
@@ -405,7 +405,7 @@ The *Reach* column says how a file is reached:
 | slr_fingerprint_scenario_comparison/*.py (+png) | 130 | 09-28 | manual | SUPPORT | analysis script, no asserts |
 | _list_tiles_by_size.py | 46 | 09-14 | — | STALE | hard-coded `D:/GFM/model_outputs` |
 | norway_diagnostics/ (12 py + csv/json) | ~1,600 | 09-14 | — | STALE | Norway dropped from validation scope (§9) → delete, with its comment pointers |
-| connectivity_tiling_prototype/output/ | ~8,050 | 10-05 | — | STALE (archive) | prototype scripts already removed |
+| connectivity_tiling_prototype/output/ | ~8,050 | 10-05 | — | STALE (delete) | prototype scripts already removed |
 
 ### docs/
 
@@ -417,7 +417,7 @@ The *Reach* column says how a file is reached:
 | methods_04a_SFINCSvalidation.md | 120 | 10-13 | SUPPORT | omits dedup + rerun_*.sh; `sfincs_calibration_bline`, `pct_within_0` not in code |
 | methods_04b_MapsValidation.md | 161 | 10-02 | SUPPORT | OK |
 | sfincs_validation_pipeline_preparation.md | 228 | 09-27 | STALE | 11 referenced scripts deleted in 7b6f7f1 (10-13) |
-| python_vs_julia_qa.md | 215 | 07-30 | STALE | slide notes; cites absent timing files; predates solver changes |
+| python_vs_julia_qa.md | 215 | 07-30 | STALE | deleted in Phase 4 (user decision); its evidence citations in code removed |
 | hydromt_sfincs_bug_*.md (2) | 25/51 | 09-24 | SUPPORT | upstream bug reports |
 | generate_eikonal_solver_examples.py | 471 | 10-08 | SUPPORT | generates eikonal_example_*.png |
 | eikonal_example_{rounds,block_sweep,obstacle_coupling}.png | — | 09-25..10-08 | SUPPORT | generated |
@@ -583,7 +583,7 @@ Module size: `sfincs_tiles/build_station_boundary_lines.py` (1254), `validation/
 ### 4.5 Dead code and branches
 - No `if False`, commented-out blocks or TODO/FIXME markers found anywhere.
 - Dead functions (§2e): `src/exposure_analysis.py:205`, `src/map_style.py:111`, `src/merge.py:66`, `sfincs_tiles/sfincs_run.py` (`parse_sfincs_inp`, `forward_geometry_files`).
-- Test-only functions: `src/rasters.py:404`, `:493` (no config key enables them).
+- ~~Test-only functions: `src/rasters.py:404`, `:493` (no config key enables them).~~ **Correction (Phase 3, 2026-10-18): wrong. Both are called unconditionally by `extract_dem` (rasters.py:661) and `extract_dem_mask` (:731, :734), i.e. by every production preprocessing run. They are CORE and stay; their tests stay.**
 - Unused imports:
   - `snakemake_workflow/scripts/generate_aqueduct_jobs.py:65 os`
   - `src/exposure.py:12 numpy`
@@ -636,7 +636,7 @@ Module size: `sfincs_tiles/build_station_boundary_lines.py` (1254), `validation/
 
 **What a new contributor could not run.**
 1. **Anything in `sfincs_tiles/`** or its 8 tests: `hydromt_sfincs` is not in `environment.yml`, and no env file exists for `hydromt-sfincs-dev`. Its interpreter paths are hard-coded to `/u/schlumbe/.conda/envs/…`.
-2. **The plotting environment**: `gfm_python_preprocessing` is undocumented, and it is the one used for plotting because hydromt-sfincs-dev's matplotlib is broken.
+2. **The environment naming**: nothing documents that the `gfm` env is called `gfm_python_preprocessing` on the Windows machine, or that sfincs_tiles plotting must run in it because hydromt-sfincs-dev's matplotlib is broken.
 3. **HPC dispatch with their own account or paths**: `config_hpc.yml` is tracked with personal paths, and the sfincs `.sh` scripts hard-code Hydrax paths in 5 places.
 4. **The default config off this machine**: `config.yml` defaults to `D:/GFM` and `C:/Users/Schlu005/GFM`, so a contributor must create `config_local.yml`. The README explains this but gives no template.
 5. **The tests as a suite**: no pytest in the env, no config, and only 3 files match `test_*.py`.
@@ -671,21 +671,21 @@ Module size: `sfincs_tiles/build_station_boundary_lines.py` (1254), `validation/
 | 1 | Entry points | Incomplete: the eikonal sensitivity studies were missing; `run_pipeline.py` needs a descriptive name | Entry-point table updated (top of file). Rename `run_pipeline.py` to `run_eikonal_dag.py` (see open question A). Merge the two `rerun_*.sh` (B) |
 | 2 | `julius_sfincs_code/` | **Delete** | Phase 2. Replace the reference in `sfincs_tiles/sfincs_run.py`'s docstring with a provenance line naming the deleting commit |
 | 3 | `run_aqueduct.py` vs `run_aqueduct_cli.py` | Keep both entry points, unify the logic | Phase 5b |
-| 4 | Hop-0 boundary read (465dd93) | **Meant for both** | `run_aqueduct.py` (local) has run without it since 10-14. Local DAG outputs produced after 10-14 may differ from HPC outputs; see open question E. 5b ports the change to the local path |
+| 4 | Hop-0 boundary read (465dd93) | **Meant for both** | **Correction (Phase 5b, 2026-10-18):** 465dd93 only copies the boundaries `.gpkg` to node-local scratch before opening it (a GDAL/SQLite lock hang on Hydrax compute nodes). It reads the same file, so local and HPC results never differed. Phase 5b gave both entry points the shared `aqueduct_runner.run_tile_scenario`; staging stays HPC-only (`stage_boundaries=True` in the CLI) |
 | 5 | Metric drift | Unintentional | See the finding below the table |
 | 6 | `calibration/sweep/*.yml` | Delete | Phase 2 |
 | 7 | `*_materialized.yml` | Gitignore + one generic `materialize_configs.py` | Phase 1 (untrack) + Phase 6 (generator) |
-| 8 | `config_hpc.yml` | Untrack, keep `.example` | Phase 1 |
+| 8 | `config_hpc.yml` | Untrack, keep `.example` | Phase 1. **Reverted 2026-10-18 (user): tracked again**, with the Hydrax values |
 | 9 | Tracked outputs/logs | Untrack all listed; keep `validation/*.csv` | Phase 1 |
 | 10 | `triplet_comparison_CLEAN.csv` | **Untrack and delete** | Phase 1 (`git rm`, not `--cached`) |
 | 11 | `plot_adaptation_pathways.py`, `plot_adaptation_bars.py` | Retire after `plot_custom_pathways.py` is committed | Phase 3. Precondition: you commit your 3 modified analysis files first |
 | 12 | 3 uncalled analysis figures | Move to a figures folder | Phase 2: move to `docs/figure_scripts/` together with `docs/generate_eikonal_solver_examples.py` |
 | 13 | One-off diagnostics | **Delete** (not archive) | Phase 2. Covers `debug_avoid_ssp.py`, `compare_fundy_extreme_forcing.py`, `_scratch_check_corrupt_exposure_grids.py`, `scan_nodata_frame_leak.py` (nothing is running), `tests/_list_tiles_by_size.py`, `scratch/dtm_seeger_pronk.py` (so `scratch/` goes too), `promote_world_domains.py` |
-| 14 | `norway_diagnostics/`, `connectivity_tiling_prototype/output/` | Move to `archive/`. **Superseded for norway_diagnostics** by the validation scope reduction (§9): Norway is dropped, so delete it | Phase 2: archive `connectivity_tiling_prototype/output/`. Phase 2b: delete `norway_diagnostics/` and its comment pointers (config.yml:789, data_catalog_gfm.yml:233, README:99) |
+| 14 | `norway_diagnostics/`, `connectivity_tiling_prototype/output/` | ~~Move to `archive/`~~ → **delete both** (no archive dir, 2026-10-17). **Superseded for norway_diagnostics** by the validation scope reduction (§9): Norway is dropped, so delete it | Phase 2: delete `connectivity_tiling_prototype/output/`. Phase 2b: delete `norway_diagnostics/` and its comment pointers (config.yml:789, data_catalog_gfm.yml:233, README:99) |
 | 15 | `select_calibration_tiles.py` collision, `select_country_tiles.py` | Rename the calibration_studies one; move the other to `preparation/` | Phase 7 |
-| 16 | 2 test-only `rasters.py` functions | Delete, with their test cases | Phase 3 |
+| 16 | 2 test-only `rasters.py` functions | ~~Delete, with their test cases~~ **Kept.** The audit finding was wrong: `extract_dem` / `extract_dem_mask` call both in production (found in Phase 3) | none |
 | 17 | pytest + ruff + minimal `pyproject.toml` | Yes | Phase 0 |
-| 18 | Environments | Add `environment_sfincs.yml`. `gfm_python_preprocessing` is an old `gfm`; use `gfm` | Phase 0 (env file). Phase 4/6: replace `gfm_python_preprocessing` in the 3 launchers and in the `sfincs_tiles/plot_sfincs_tile_diagnostics.py:8` and `sfincs_grid.py:2` docstrings |
+| 18 | Environments | Add `environment_sfincs.yml`. `gfm_python_preprocessing` is the local (Windows) name of the `gfm` env; Hydrax calls it `gfm` | Phase 0 (env file). Phase 4: docs call the env `gfm` and mention the local alias. Phase 6: launchers read the interpreter from an env var instead of hard-coding either name. Local checks use `C:/Users/schlumbe/AppData/Local/miniforge3/envs/gfm_python_preprocessing/python.exe` |
 | 19 | Renames | In scope, **including `aqueduct` → `eikonal`** | New Phase 7a (below). See open questions C and D |
 | 20 | Running work | Nothing running | No freeze on `sfincs_tiles/` |
 
@@ -713,15 +713,25 @@ There is one real "different method" risk. Soft scoring replaced hard τ=0.5 sco
   - No fallback or deprecation warning is needed.
   - **Phase 1 gotcha:** `git rm --cached` a tracked file, commit it, then pull on another clone, and git **deletes** that clone's working copy. Before pulling the Phase 1 commit on Hydrax, back up `config_hpc.yml` (and any `*_materialized.yml` or logs you still need there), then restore them as untracked files. This applies only if `/u/schlumbe/gfm_code` is a git clone; the rerun scripts say "sync", so check whether it is rsync'd instead.
 - **D. Snakemake code-change re-run after the rule rename.** Deferred until after the cleanup; see the "After the cleanup" list at the end of §8.
-- **E. Local runs without the hop-0 fix.** You ran the deltas locally on 2026-10-16 (`run_delta_floodmaps.py` → `snakemake` → rule `run_aqueduct` → `run_aqueduct.py`, which lacks 465dd93). So `P:\…\modelling\deltas_floodmaps\` and everything derived from it must be **re-run after Phase 5b**: the deltas flood-extent CSVs, `add_slr_year_column`/`add_protection_standard_column` outputs, and the deltas figures. See the "After the cleanup" list.
+- **E. Local runs without the hop-0 fix.** ~~You ran the deltas locally on 2026-10-16 (`run_delta_floodmaps.py` → `snakemake` → rule `run_aqueduct` → `run_aqueduct.py`, which lacks 465dd93). So `P:\…\modelling\deltas_floodmaps\` and everything derived from it must be **re-run after Phase 5b**: the deltas flood-extent CSVs, `add_slr_year_column`/`add_protection_standard_column` outputs, and the deltas figures. See the "After the cleanup" list.~~ **Correction (Phase 5b, 2026-10-18):** 465dd93 only copies the boundaries `.gpkg` to node-local scratch before opening it (a GDAL/SQLite lock hang on Hydrax compute nodes). It reads the same file, so local and HPC results never differed. **The deltas do not need a re-run for this reason.**
 
 ---
 
 ## 8. Proposed cleanup plan (revised 2026-10-17)
 
-Each phase is one commit or a small PR and can be verified independently. **Precondition**: commit your 3 modified analysis files. **Baseline** before Phase 0: save the `snakemake -n all` output (job counts per rule), the generated sbatch files from each `generate_hpc_*` script written to a temp dir, and one run of every synthetic test script.
+Each phase is one commit or a small PR and can be verified independently. **Precondition**: commit your 3 modified analysis files (done: 4403f0c). **Branch**: `cleanup`.
 
-**Phase 0: Tooling only.**
+**Dry-run check used by every phase.** Never build the full DAG locally: production splits it into parallel jobs on HPC, and `snakemake -n all` over the whole tile grid does not finish in reasonable time (killed after 6+ min on 2026-10-17). "`snakemake -n` equals the baseline" means both subset dry runs below give the same per-rule job counts as `.cleanup_baseline/snakemake_n_all_{thailand_bangkok,bangkok_chao_phraya}.txt`:
+```bash
+E=/c/Users/schlumbe/AppData/Local/miniforge3/envs/gfm_python_preprocessing
+for c in thailand_bangkok bangkok_chao_phraya; do
+  GFM_CONFIG_PATH="$PWD/snakemake_workflow/config/${c}_materialized.yml" PATH="$E:$E/Scripts:$E/Library/bin:$PATH" \
+    $E/Scripts/snakemake.exe -n all --cores 1 | sed -n '/^Job stats:/,/^$/p'
+done
+```
+Baseline (Phase 0): thailand_bangkok 453 jobs (run_aqueduct 90, extract_boundaries 90, merge_chunk 90, compute_flood_fraction_chunk 90, build_mosaic_vrt 45, plot_merged_results 45, prepare_exposure_grid_chunk 2, all 1); bangkok_chao_phraya 455 jobs (merge_chunk 180, compute_flood_fraction_chunk 180, build_mosaic_vrt 45, plot_merged_results 45, prepare_exposure_grid_chunk 4, all 1). After Phase 1 untracks the `*_materialized.yml`, they stay on disk (gitignored), so this check keeps working. **Since Phase 5b**, bangkok_chao_phraya's 405 locally produced `run_aqueduct` outputs dry-run as "Code has changed" (the script was rewritten; outputs unchanged, item D). From then on that config is checked with `--rerun-triggers mtime params input software-env`, which must report "Nothing to be done" (it does on the pre-5b code too).
+
+**Phase 0: Tooling only.** ✅ *done, ce7540e (2026-10-17)*
 - Add `pytest` and `ruff` to `environment.yml`. Add `environment_sfincs.yml` (hydromt-sfincs-dev).
 - Add a minimal `pyproject.toml`:
   - `python_files = ["test_*.py", "validate_*.py"]`, `testpaths = ["tests"]`
@@ -730,26 +740,25 @@ Each phase is one commit or a small PR and can be verified independently. **Prec
 - Add `CLAUDE.md` (appendix).
 - *Verify*: `pytest tests -m "not needs_pdrive and not needs_sfincs"` passes. `ruff check .` is reported only, not fixed.
 
-**Phase 1: Untrack generated artifacts.**
+**Phase 1: Untrack generated artifacts.** ✅ *done 2026-10-17 (58 files untracked, `triplet_comparison_CLEAN.csv` deleted). Until Phase 6 adds `materialize_configs.py`, a fresh clone has no `*_materialized.yml`, so copy them from an existing checkout.*
 - `git rm --cached` these: `run_timings.csv`, `sfincs.log`, `batch_logs/`, `preparation/logs/`, `adaptation_validation_output/`, `config_hpc.yml`, all `*_materialized.yml`. Extend `.gitignore`.
 - `git rm` (also deletes the local file) `triplet_comparison_CLEAN.csv`.
 - **Before pulling this commit on Hydrax**, back up the files there that are about to be untracked (`config_hpc.yml`, any `*_materialized.yml` still needed). A pull deletes files that another clone untracked with `git rm --cached`; restore them afterwards as untracked files (see Q-C).
 - *Verify*: `git status` is clean; the untracked files still exist on disk; `snakemake -n all` equals the baseline.
 
-**Phase 2: Delete and move unreachable code.**
+**Phase 2: Delete unreachable code.** ✅ *done 2026-10-17; also removed the empty, unused `src/__init__.py` (STALE in §3). 3 unused imports in the moved figure scripts were fixed early so ruff passes on touched files.* *No `archive/` dir (user, 2026-10-17): every STALE/DUPLICATE item is deleted; git history keeps it.*
 - Delete:
   - `julius_sfincs_code/`, `scratch/`
   - `config/calibration/sweep/`
   - the Q13 one-offs
   - `docs/_zoom_panel_a1.png`, `docs/ridge_gap_test_figure.png`
-- Move to `archive/`:
   - `tests/connectivity_tiling_prototype/`
-  - `docs/sfincs_validation_pipeline_preparation.md` (marked superseded)
+  - `docs/sfincs_validation_pipeline_preparation.md`. Before deleting it, carry its only unique content (the `hydromt-sfincs-dev` env notes) into `environment_sfincs.yml` (done in Phase 0) and methods_04a.
 - Move to `docs/figure_scripts/`: the 3 uncalled analysis figures plus `generate_eikonal_solver_examples.py`. Fix their `sys.path` depth.
 - Update the reference in `sfincs_run.py`'s docstring (provenance line for the deleted julius code).
 - *Verify*: `git grep` finds no reference to any deleted or moved path; `python docs/figure_scripts/<each>.py --help`; `pytest`; `snakemake -n all` equals the baseline.
 
-**Phase 2b: Validation scope reduction** (§9; delete only, one commit).
+**Phase 2b: Validation scope reduction** (§9; delete only, one commit). ✅ *done 2026-10-18. Verified: a local GBR+CAN `run_validation.py` on the pre-2b commit vs on the trimmed code gave identical metrics CSVs (GBR 9×35, CAN 3×35, summary 12×35), pixel-identical agreement rasters (8) and byte-identical PNGs (11). The multi-RP summary and England scripts were not re-run (user decision; they share the verified code path). `known_caveats` values reworded (user, 2026-10-17); untracked leftovers under tests/ deleted.*
 - Delete the files: `preparation/convert_norway_stormflo.py`, `tests/norway_diagnostics/`.
 - Delete the catalog entries: the 10 DROP entries in `data_catalog_validation.yml` (§9.2).
 - Delete the code ranges in §9.1:
@@ -768,43 +777,49 @@ Each phase is one commit or a small PR and can be verified independently. **Prec
   - `python validation/run_validation.py --countries GBR CAN` reproduces the current `P:\…\validation\{GBR,CAN}` metrics CSVs exactly. Snapshot them first.
   - `python validation/validate_england_fz2_band.py`, `_rescore_england_fz3.py`, `validate_sf_bay.py` and `run_multi_rp_summary.py --countries GBR` all run and give unchanged CSVs.
 
-**Phase 3: Delete dead code inside live modules.**
-- Remove the unused imports, the 3 dead functions, the 2 unused `sfincs_run.py` functions, and the 2 test-only `rasters.py` functions with their tests.
+**Phase 3: Delete dead code inside live modules.** ✅ *done 2026-10-18; `ruff check .` is clean repo-wide. The 2 "test-only" rasters.py functions were kept (the audit finding was wrong, see Q16).*
+- Remove the unused imports (and the other ruff F401/F541/F841 hits listed in `.cleanup_baseline/ruff_all.txt`: 39 at Phase 0), the 3 dead functions, the 2 unused `sfincs_run.py` functions. ~~and the 2 test-only `rasters.py` functions~~ (kept: they are production code, see Q16).
 - Remove `plot_adaptation_pathways.py` and `plot_adaptation_bars.py`, plus the `run_analysis.py` step and config switch.
 - *Verify*: `ruff check --select F401,F811,F841` on the touched files; `pytest`; `snakemake -n all`; `python analysis/run_analysis.py --help`.
 
-**Phase 4: Documentation drift** (text only).
+**Phase 4: Documentation drift** (text only). ✅ *done 2026-10-18. Verified by an AST comparison: every changed .py differs from HEAD only in docstrings/comments, apart from one SKIP message string. `docs/python_vs_julia_qa.md` deleted (user, 2026-10-18), and the Python-vs-Julia evidence comments citing it removed from src/eikonal.py, src/flood_model.py, rules/simulation.smk and config.yml (design notes in those sentences kept).*
 - README:
   - layout, including the eikonal-sensitivity and SFINCS-calibration entry points
   - remove the memory.md and martinique references
   - correct the claim that `analysis/` is outside the DAG
   - list the standalone validation scripts
 - Fix the stale usage paths in docstrings (§4.4), the `config_utils.py:141` docstring, `.gitignore:5`/`Snakefile:117` and the `environment.yml` references.
-- Replace `gfm_python_preprocessing` with `gfm` in docstrings. Add dedup and the rerun scripts to methods_04a.
+- Docs and docstrings: call the env `gfm`, noting "(`gfm_python_preprocessing` on the Windows machine)". Add dedup and the rerun scripts to methods_04a.
 - *Verify*: a script that checks every repo path mentioned in `*.md`, `*.py` docstrings and `*.sh` comments exists; `snakemake -n all` is unchanged.
 
-**Phase 5: Consolidate duplicated logic** (one PR each).
-- **5a.** One `_build_chunk_grid` in `src/`, used by the Snakefile, `generate_hpc_postprocess_job` and `check_postprocess_progress`. *Verify*: a unit test asserting identical chunk IDs; `snakemake -n postprocess` equals the baseline.
-- **5b.** Move the shared tile solve into `src/aqueduct_runner.py` (renamed in 7a), **including the hop-0 boundary-read change for the local path** (Q4). *Verify*: parity test on a synthetic tile (both entry points give bit-identical output); real-tile spot-check of 2–3 tiles against existing HPC outputs on P:\.
-- **5c.** HPC sbatch helpers go into `snakemake_workflow/scripts/hpc_common.py`. *Verify*: the generated `.sh` files are byte-identical to the baseline.
-- **5d.** Analysis helpers go into `analysis/_common.py`, and the triplicated `_run` goes into `src/`. *Verify*: rerun `run_analysis.py` on one country subset and diff the CSVs.
-- **5e.** `sfincs_tiles` imports `confusion_counts`/`metrics_from_counts`/`retry_transient_io` from `src/`, which is pure numpy and works in both environments. Keep an `HT` alias column so existing calibration CSVs stay readable. *Verify*: parity pytest on synthetic arrays; recompute one tile's `calibration_result.json` and diff it, expecting identical HR/FAR/CSI/bias.
+**Phase 4b: NumPy-style docstrings** (own phase, user 2026-10-17; text only). ✅ *done 2026-10-18: 71 CORE modules, 250 public functions/classes, all NumPy-style. Docstring-only verified by AST comparison (docstrings stripped) against HEAD.*
+- Convert the public functions/classes of every CORE module (§3) to short NumPy-style docstrings (Parameters / Returns / Raises where useful) that say what and why, not a restatement of the code. Keep the existing explanatory prose where it carries the *why*.
+- One subagent per module, one commit per directory (`src/`, `snakemake_workflow/scripts/`, `sfincs_tiles/`, `preparation/`, `analysis/`, `validation/`).
+- Other phases leave docstring style alone.
+- *Verify*: `ruff check` on the touched files; `pytest`; `git diff --stat` shows only docstring and comment lines (check with `git diff -U0 | grep '^[+-]' | grep -v '^[+-]\s*\(#\|"""\|$\)'`, reviewed by hand).
 
-**Phase 6: Hard-coded paths into config.**
+**Phase 5: Consolidate duplicated logic** (one PR each). ✅ *done 2026-10-18 (5a-5e).*
+- **5a.** ✅ *done 2026-10-18: `src/tiles.build_chunk_grid`; parity vs all 3 old copies on production (949 chunks) + 2 subset grids: IDs, bounds, geometry, CRS identical; new tests/chunk_grid_validation.* One `_build_chunk_grid` in `src/`, used by the Snakefile, `generate_hpc_postprocess_job` and `check_postprocess_progress`. *Verify*: a unit test asserting identical chunk IDs; `snakemake -n postprocess` equals the baseline.
+- **5b.** ✅ *done 2026-10-18: `aqueduct_runner.run_tile_scenario` (+ `_stage_file_locally`); both entry points are thin wrappers keeping their own timing/progress behaviour. Parity: synthetic 5-tile harness (all branches) old vs new, local + CLI: all rasters, skip/OOM markers and timing records identical; real tiles (Thailand 31/499 x RP100_SLR_0 + RP1000_SLR_1000, inputs from P:, outputs local) old vs new CLI: all 4 rasters bit-identical. Snakemake now flags locally produced simulation outputs as "code changed" (`run_aqueduct.py` was rewritten); outputs are unchanged, see D.* Move the shared tile solve into `src/aqueduct_runner.py` (renamed in 7a), **including the hop-0 boundary-read change for the local path** (Q4). *Verify*: parity test on a synthetic tile (both entry points give bit-identical output); real-tile spot-check of 2–3 tiles against existing HPC outputs on P:\.
+- **5c.** ✅ *done 2026-10-18: in `src/hpc_common.py` (not scripts/: every importer already has src/ on its path, incl. the Snakemake `script:` generate_aqueduct_jobs.py). 4 helpers x 12 copies -> 1. Verified: each generator's AST equals HEAD minus the removed defs plus one import (so every call site and generated sbatch line is unchanged); helper outputs identical to HEAD copies; all 6 generators import. `_stage_file_locally` (1 copy left in generate_hpc_postprocess_job) not merged: it stages on the login node, aqueduct_runner's on compute nodes; merging would make the generator import the solver stack.* HPC sbatch helpers go into `snakemake_workflow/scripts/hpc_common.py`. *Verify*: first (before any 5c edit) run each `generate_hpc_*` with a temp copy of `config_hpc.yml` whose job/output dirs point into `.cleanup_baseline/sbatch_before/` (never the real Hydrax/P: job dirs; deferred from Phase 0 for that reason); after the change, regenerate into `sbatch_after/` and diff: byte-identical.
+- **5d.** ✅ *done 2026-10-18: `analysis/_common.py` holds `_read_band`, `_round_val`, `_growth_matrix_path`, `_growth_path`, `_eai_from_interp` (11 copies in 6 scripts -> 1; `_growth_matrix_path` in plot_tipping_points differed only in a type hint). Verified: each file's AST equals HEAD minus the removed defs plus the import lines; all affected scripts (incl. the 4 HPC exposure scripts importing compute_exposure_analysis) pass `--help`. Not merged (behaviour differs): `_first_crossing`, `_people`, flood_totals' `_read_band`/`_read_band_and_transform`, and the 3 `_run` variants - see TODO.md. No run_analysis.py rerun: its outputs live on P:\ and the moved code is AST-identical.* Analysis helpers go into `analysis/_common.py`, and the triplicated `_run` goes into `src/`. *Verify*: rerun `run_analysis.py` on one country subset and diff the CSVs.
+- **5e.** ✅ *done 2026-10-18, differently than planned: sfincs_tiles cannot import src/ in hydromt-sfincs-dev (`src/config_utils` needs hydromt 0.9's `hydromt.log.setuplog`; confirmed ImportError), so the copies stay. New tests/metric_parity_validation/validate_sfincs_src_parity.py pins them to the src originals (confusion counts, HR/HT-FAR-CSI-bias incl. NaN cases, waterdepth decoding + constants, retry semantics); each copy got a 'twin of src/...' comment. No calibration code changed, so no calibration_result.json recompute needed.* ~~`sfincs_tiles` imports `confusion_counts`/`metrics_from_counts`/`retry_transient_io` from `src/`, which is pure numpy and works in both environments. Keep an `HT` alias column so existing calibration CSVs stay readable. *Verify*: parity pytest on synthetic arrays; recompute one tile's `calibration_result.json` and diff it, expecting identical HR/FAR/CSI/bias.~~
+
+**Phase 6: Hard-coded paths into config.** ✅ *done 2026-10-18. New key `paths.deltas_shapefile`; all other paths derive from existing keys (validation.benchmark_root/output_dir, postprocessing.merged_outputs, tile_grid.path, ...). 11 replaced constants verified to resolve to the old values on this machine. Hydrax: `sfincs_tiles/hydrax_env.sh` (sourced by shell, parsed by `gfm_config.hydrax_paths()`), `rerun_calibration.sh --part` (old names = wrappers; both branches exercised against a fake tree). Launchers use `GFM_ENV` (default = old env path) + `%~dp0`; .ps1 deleted. `materialize_configs.py` replaces build_delta_run_configs.py, but existing materialized files are older snapshots and were NOT regenerated (TODO.md). config.yml defaults kept (TODO.md).*
 - Move to config: `DELTAS_PATH`, the validation reporting inputs, and the Hydrax paths (one sourced `sfincs_tiles/hydrax_env.sh`, plus the merged `rerun_calibration.sh` per B).
 - Launchers: use `%~dp0` and an env var for the interpreter, targeting `gfm`. Delete `run_thailand_bangkok.ps1` (duplicate of the .bat).
 - Add `config_local.yml.example`, and `materialize_configs.py` (generic, replacing `build_delta_run_configs.py`).
 - *Verify*: `git grep -nE '[A-Z]:[\\/](Users|GFM)|/p/1121|/u/schlumbe'` returns only `*.example` and docs; `snakemake -n all` equals the baseline; `DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part eikonal` on Hydrax (you run this).
 
-**Phase 7: Renames and structural tidy.**
-- **7a. aqueduct → eikonal.** Covers about 260 mentions in 50 files, excluding logs and provenance mentions.
+**Phase 7: Renames and structural tidy.** ✅ *done 2026-10-18 (7a, 7b, 7c; see items).*
+- **7a. aqueduct → eikonal.** ✅ *done 2026-10-18. Files: eikonal_runner.py, run_eikonal(_cli).py, generate_eikonal_jobs.py, run_eikonal_dag.py, generate_hpc_exposure_jobs.py, tests/eikonal_runner_validation/. Rules run_eikonal / generate_eikonal_jobs; `run_eikonal_python`, `estimate_eikonal_mem_mb`, `EIKONAL_NODATA`; config `eikonal_mem_estimate` (old key still read as fallback); `{aqueduct_root}` removed. Provenance mentions (external Aqueduct model, WRI Aqueduct data) kept. Verified: AST of every .py equals HEAD with the rename map applied (docstrings aside), except 2 message strings and the aqueduct_root removal; ruff, pytest (66), --help, dry run (run_aqueduct 90 -> run_eikonal 90). generate_hpc_*_job(s) singular/plural left as is (only generate_exposure_jobs renamed). Hydrax follow-ups in TODO.md.* Covers about 260 mentions in 50 files, excluding logs and provenance mentions.
   - Modules: `aqueduct_runner.py` → `eikonal_runner.py`, `run_aqueduct{,_cli}.py` → `run_eikonal{,_cli}.py`, `generate_aqueduct_jobs.py` → `generate_eikonal_jobs.py`.
   - Rules: `run_aqueduct` → `run_eikonal`, `generate_aqueduct_jobs` → `generate_eikonal_jobs`.
   - Config keys, with fallback (C).
   - `run_pipeline.py` → `run_eikonal_dag.py` (A).
   - Unify `generate_hpc_*_job(s)` naming; `generate_exposure_jobs` → `generate_hpc_exposure_jobs`.
   - *Verify*: `git grep -i aqueduct` shows only provenance and the deprecation fallback; `pytest`; `snakemake -n all` job counts equal the baseline (then D: `--list-code-changes`, and `--touch` if needed); the generated sbatch files differ from the baseline only in the renamed script names.
-- **7b. Other renames.**
+- **7b. Other renames.** ✅ *done 2026-10-18 (all items listed below; `generate_hpc_*` singular/plural not unified). Verified: 38 of 46 changed .py files are pure renames by AST; the other 8 are the intended moves (flood_model fold, polygon_domain_mask move + its 4 importers, select_country_tiles path depth), with the moved definitions AST-identical to the originals. All 22 src modules import; every touched CLI passes --help; ruff, pytest (66), dry runs clean.*
   - `src/flood_extent.py` folds into `flood_model.py`.
   - `src/validation.tri_domain_mask` → `polygon_domain_mask`, probably moved to `rasters.py`. It is a generic polygon-to-raster mask, used by the deltas and Bangkok analysis, not by validation.
   - `_rescore_england_fz3.py` → `rescore_england_fz3.py`.
@@ -812,7 +827,7 @@ Each phase is one commit or a small PR and can be verified independently. **Prec
   - Move `select_country_tiles.py` to `preparation/`.
   - Rename the `exposure`/`exposure_analysis` and `plotting`/`visualization` modules to clarify the split.
   - *Verify*: `pytest`; `python <script> --help` for every renamed CLI; `snakemake -n all`.
-- **7c. Splits.**
+- **7c. Splits.** ✅ *done 2026-10-18 (partly): run_analysis.py is a STEPS table (old vs new: identical subprocess calls, SKIP lines and exit codes over 23,554 switch/flag/failure combinations); validate_country's chunk/mosaic helpers moved to validation/_chunks.py (AST-identical; England scripts import it). build_station_boundary_lines.py split later the same day into boundary_lines_geometry.py (tracing, linking, conflicts, domain check + constants), boundary_lines_plot.py and the CLI/build_tile module, which re-exports the names other modules use; all 37 defs and 35 constants AST-identical, and 4 real tiles (3717, 1086, 2420, 3104) give identical gpkg, status and PNG outputs.*
   - `build_station_boundary_lines.py` into lines, conflict and plot modules.
   - `validate_country.py`: after Phase 2b it is ~890 lines with one scoring path (national coverage), so splitting it is optional; at most, move the chunk/mosaic helpers (`_chunks_overlapping_bbox` etc.) into a `validation/_chunks.py` that the England scripts import.
   - `run_analysis.py` into a STEPS table.
@@ -821,7 +836,7 @@ Each phase is one commit or a small PR and can be verified independently. **Prec
 
 **After the cleanup (deferred, long-running; you run these):**
 1. **Snakemake code-change check (D).** Run `snakemake -n all --list-code-changes`. If the rule/script rename makes simulation outputs look stale, run `snakemake --touch` once rather than re-simulating. This writes Snakemake metadata next to the P:\ outputs, so approve it explicitly.
-2. **Re-run the deltas (E).** `python run_delta_floodmaps.py` (all scenarios), then `analysis/prepare_delta_design_runs.py`, `compute_delta_flood_extent.py`, `add_slr_year_column.py`, `add_protection_standard_column.py` and the `plot_delta_*` figures. The 2026-10-16 local run lacked the hop-0 boundary fix.
+2. ~~**Re-run the deltas (E).**~~ Not needed: see the correction under E (465dd93 never changed results).
 3. **FRA RP250 validation:** closed. FRA is dropped and its outputs are deleted. `validation/multi_rp_summary.csv` was checked 2026-10-17 and has GBR rows only (also no CAN rows; see §9.4 Q3).
 
 ---
@@ -896,11 +911,11 @@ That is about 590 of 935 lines removed.
 - **src/validation.py**: `BenchmarkSpec`, `fix_catalog_meta_encoding`, `load_benchmark_spec`, `primary_region_name`, `load_benchmark_full`, `filter_benchmark` (Wales `attribute_filter`), `benchmark_fraction_from_vector`, `wet_mask_from_fraction`, `model_domain_mask`, `permanent_water_mask`, `read_permanent_water_mask`, `load_iso_lookup`, `read_country_mask`, `confusion_counts`, `confusion_counts_soft`, `confusion_counts_tolerant`, `_safe_div`, `metrics_from_counts`, plus `tri_domain_mask` (for analysis).
 - **Subregions**: keep `regions:`, `_blend_regions`, `primary_region_name` and `plot_subregions_grid`. GBR and CAN use them.
 
-### 9.4 Questions (best guess included)
+### 9.4 Questions: answered
 
-1. **Keep the raster-benchmark path** as generic support for a future raster benchmark? *Guess*: delete it. SF Bay is a raster but uses its own script; git history keeps the code.
-2. **Bring SF Bay into the catalog** and `validate_country`, so all 5 regions run from `run_validation.py`? *Guess*: not in this cleanup. Do it later; it would also remove the hard-coded paths in `validate_sf_bay.py:69,96,100`.
-3. **New Brunswick in `multi_rp_summary.csv`.** It has no CAN rows. Is that intended? *Guess*: CAN has only an RP100 benchmark, so the multi-RP summary skips it. Fine.
+1. **Keep the raster-benchmark path?** Deleted in Phase 2b. A non-GeoDataFrame entry now raises `ValueError`.
+2. **Bring SF Bay into the catalog / `run_validation.py`?** Not in this cleanup. It stays standalone, its scripts are untouched by 2b, and it is documented in methods_04b. Its hard-coded single-chunk input is logged in TODO.md, and its paths move to config in Phase 6.
+3. **No CAN rows in `multi_rp_summary.csv`?** By design. `new_brunswick_present_day_1in100yr` has no `comparison_return_periods`, and the multi-RP summary only scores benchmarks that do.
 
 ---
 
@@ -950,7 +965,9 @@ adaptation analysis and benchmark validation. A separate SFINCS sub-pipeline
   (including sfincs_tiles plot scripts). Snakemake pinned to 7.32.4.
 - `hydromt-sfincs-dev` (environment_sfincs.yml): sfincs_tiles model build/run only.
   Its matplotlib is broken; never plot in it.
-- `gfm_python_preprocessing` is an obsolete older copy of `gfm`; do not use or reference it.
+- On the Windows machine this env is named `gfm_python_preprocessing` (outdated name, same env):
+  `C:/Users/schlumbe/AppData/Local/miniforge3/envs/gfm_python_preprocessing/python.exe`.
+  The PATH `python` there is the Windows Store stub; always use the full interpreter path.
 
 ## Commands
 - Dry run: `snakemake -n all`  (always run after touching Snakefile/rules/scripts)
@@ -968,7 +985,6 @@ Never write to, move, or delete anything on P:\ or the model output directories.
 - Output path patterns and wildcard constraints in `snakemake_workflow/rules/*.smk`:
   changing them orphans existing outputs on P:\.
 - `snakemake_workflow/config/config.yml` defaults, `data_catalog_*.yml`.
-- `archive/` (historical investigations, kept as evidence cited from config comments).
 - Pinned versions in `environment.yml`.
 - `sfincs_tiles/` while a Hydrax batch is running (ask whether one is).
 

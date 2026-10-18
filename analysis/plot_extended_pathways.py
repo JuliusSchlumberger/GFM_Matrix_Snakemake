@@ -37,11 +37,13 @@ from matplotlib.lines import Line2D  # noqa: E402
 from matplotlib.patches import Patch  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _common)
+from _common import _people  # noqa: E402
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pathways import eai_along_pathway, slr_pathway  # noqa: E402
 from population_extension import extend_growth_factors  # noqa: E402
 from population_growth import _build_name_to_iso, interpolate_growth_factor, load_ssp_growth_factors  # noqa: E402
-from visualization import (  # noqa: E402
+from analysis_figures import (  # noqa: E402
     CONTINENTS, build_growth_matrix_from_grid, draw_ember_panel, iso_to_continent, load_growth_matrix_csv,
     load_slr_trajectories, ssp_rcp_label,
 )
@@ -52,10 +54,6 @@ VARIANT_STYLES = ["--", ":", "-."]
 PROJECTION_LINESTYLE = "--"  # timeseries_extended_continents.png's own single "this is a projection" style
 STRATEGY_NAMES = {"baseline": "No adaptation", "protect": "Protect", "avoid": "Avoid", "retreat": "Retreat",
                   "protect_avoid": "Protect + Avoid"}
-
-
-def _people(v: float, _=None) -> str:
-    return f"{v / 1e6:g} M" if v >= 1e6 else (f"{v / 1e3:g} k" if v >= 1e3 else f"{v:g}")
 
 
 def _nice_vmax(top: float, n: int) -> float:
@@ -71,6 +69,13 @@ def _strategy_name(label: str) -> str:
 
 
 def main() -> None:
+    """Parse CLI arguments and plot SSP pathways continued beyond 2100 through the growth matrices.
+
+    Follows each strategy's SSP-RCP pathway through the scenario-neutral growth matrices up
+    to extended_pathways.to_year, using illustrative population continuations after 2100.
+    Writes timeseries_extended_continents.png and extended_pathways.csv (and, if
+    extended_pathways.ember is set, ember_extended_pathways.png) to --outdir.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_*_growth_matrix.csv files")

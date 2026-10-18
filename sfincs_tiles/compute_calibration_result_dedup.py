@@ -68,12 +68,23 @@ _PARTITION_CRS = "EPSG:6933"  # equal-area - fair distance comparison regardless
 
 
 def build_tile_tree(tile_selection_gpkg: Path) -> tuple[cKDTree, np.ndarray]:
-    """KDTree over every SELECTED tile's centroid (in EPSG:6933), + the
-    parallel tile_id array (tree index i -> tile_ids[i]). Built from ALL
-    selected tiles (not just ones with a usable result) so a tile missing
-    its own eikonal/bathtub output still correctly claims its own Voronoi
-    territory from its overlapping neighbours, rather than silently ceding
-    it to them.
+    """Build a KDTree over every selected tile's centroid, for Voronoi partitioning.
+
+    Built from ALL selected tiles (not just ones with a usable result) so a
+    tile missing its own eikonal/bathtub output still correctly claims its
+    own Voronoi territory from its overlapping neighbours, rather than
+    silently ceding it to them.
+
+    Parameters
+    ----------
+    tile_selection_gpkg : Path
+        Path to the tile_selection.gpkg produced by tile selection.
+
+    Returns
+    -------
+    tuple of (scipy.spatial.cKDTree, numpy.ndarray)
+        The KDTree over centroids in EPSG:6933, and the parallel tile_id
+        array such that tree index i corresponds to ``tile_ids[i]``.
     """
     gdf = gpd.read_file(tile_selection_gpkg)
     sel = gdf[gdf["category"] == "selected"].to_crs(_PARTITION_CRS)
@@ -105,9 +116,35 @@ def compute_result_dedup(
     tile_dir: Path, fsfs: list[float], flooding: dict, river_code: int,
     tree: cKDTree, tile_ids: np.ndarray,
 ) -> dict:
-    """Same as compute_calibration_result.compute_result, except `score`
+    """Build one tile's calibration_result dict, restricted to its Voronoi core.
+
+    Same as `compute_calibration_result.compute_result`, except ``score``
     (SFINCS-active real land) is additionally intersected with this tile's
-    own Voronoi core mask before any counting - see module docstring."""
+    own Voronoi core mask before any counting, to avoid double-counting
+    overlap zones shared between friction-sweep tiles (see module docstring).
+
+    Parameters
+    ----------
+    tile_dir : Path
+        Tile directory containing ``inputs/``, ``sfincs_model/`` and ``outputs/``.
+    fsfs : list of float
+        Friction scale factors to look for eikonal results at.
+    flooding : dict
+        The simulation's "flooding" config block, copied verbatim into the
+        result's "settings".
+    river_code : int
+        Mask code identifying river cells, passed to `prune_to_ocean_connected`.
+    tree : scipy.spatial.cKDTree
+        KDTree over every selected tile's centroid, from `build_tile_tree`.
+    tile_ids : numpy.ndarray
+        Tile-id array parallel to `tree`, from `build_tile_tree`.
+
+    Returns
+    -------
+    dict
+        The tile's calibration_result.json content, with ``"dedup": True``
+        and an added ``"core_fraction_of_active_land"`` domain stat.
+    """
     this_tile_id = tile_dir.name
     sfincs_dir = tile_dir / "sfincs_model"
     out_dir = tile_dir / "outputs"
@@ -189,6 +226,14 @@ def _process_one(args_tuple) -> tuple[str, str | None]:
 
 
 def main() -> None:
+    """Parse CLI arguments and write de-duplicated calibration results for every selected tile.
+
+    Builds the Voronoi tile-center tree from tile_selection.gpkg, computes
+    each tile's calibration result restricted to its own core (in parallel,
+    via a process pool) and writes it to
+    ``{out-dir-name}/{tile_id}/outputs/calibration_result.json``. Prints
+    progress with an ETA and a final failure summary.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")

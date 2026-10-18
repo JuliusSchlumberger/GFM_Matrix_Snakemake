@@ -14,7 +14,7 @@ window would be silently truncated to a scenario that never reaches its
 own real storm peak, without any error or warning.
 
 This is a DATA-validation test, not a pure-logic one: it needs real
-corrected_hydrographs.csv files on disk (from a real build_boundary_forcing.py
+corrected_hydrographs.csv files on disk (from a real sfincs_tiles/build_line_forcing.py
 run) to check anything meaningful, so it's the one test in this batch that
 degrades to a documented skip rather than a hard failure when no tiles have
 been built yet (e.g. a fresh checkout, before any local --build-only run).
@@ -77,7 +77,7 @@ def test_all_available_tiles_peak_within_truncation_window(root: Path | None = N
 
     if root is None or not (root / BASE_DIR_NAME).exists():
         print(f"SKIP: no {BASE_DIR_NAME}/ data available at the expected root - "
-              "this check needs at least one real build_boundary_forcing.py output "
+              "this check needs at least one real build_line_forcing.py output "
               "(corrected_hydrographs.csv) to validate against. Not a failure, just "
               "nothing to check in this environment.")
         print()

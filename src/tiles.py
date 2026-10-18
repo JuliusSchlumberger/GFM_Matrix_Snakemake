@@ -11,6 +11,7 @@ import rasterio
 from affine import Affine
 from rasterio.enums import Resampling
 from rasterio.windows import from_bounds
+from shapely.geometry import box as shapely_box
 
 from config_utils import retry_transient_io
 
@@ -22,8 +23,8 @@ def _open_mask_tile(path: Path, **open_kwargs):
     """`rasterio.open(path, **open_kwargs)`, retrying briefly on I/O errors
     before giving up.
 
-    merge_tiles.py's per-tile loops (compute_tile_stats_batch,
-    compute_trimmed_geometries) can run for hours over thousands of mask
+    Per-tile loops over the mask tiles (originally the since-removed
+    merge_tiles.py's compute_tile_stats_batch / compute_trimmed_geometries) can run for hours over thousands of mask
     tiles on the P:\\ network share - a single transient SMB hiccup surfaces
     as `rasterio.errors.RasterioIOError` ("No such file or directory") on a
     file that both exists and is reachable moments later, and previously
@@ -52,22 +53,40 @@ def _open_mask_tile(path: Path, **open_kwargs):
 
 
 def load_tile_grid(tile_grid_path: str | Path) -> gpd.GeoDataFrame:
-    """Load the overlapping tile grid produced by `tile_mask_creation.py`."""
+    """Load the tile grid (``tile_grid.path``, built by preparation/build_tile_manifest.py).
+
+    Parameters
+    ----------
+    tile_grid_path : str or Path
+        Path to the tile grid vector file (e.g. a GeoPackage).
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        One row per tile, including at least a ``tile_id`` column.
+    """
     return retry_transient_io(gpd.read_file, tile_grid_path)
 
 
 def get_tile_geometry(tile_grid: gpd.GeoDataFrame, tile_id: int) -> gpd.GeoDataFrame:
     """Select a single tile from the tile grid by its tile_id.
 
-    Args:
-        tile_grid: The full tile grid, as returned by `load_tile_grid`.
-        tile_id: Unique identifier of the tile to select.
+    Parameters
+    ----------
+    tile_grid : geopandas.GeoDataFrame
+        The full tile grid, as returned by `load_tile_grid`.
+    tile_id : int
+        Unique identifier of the tile to select.
 
-    Returns:
+    Returns
+    -------
+    geopandas.GeoDataFrame
         A single-row GeoDataFrame containing the selected tile.
 
-    Raises:
-        ValueError: If `tile_id` is not present in `tile_grid`.
+    Raises
+    ------
+    ValueError
+        If `tile_id` is not present in `tile_grid`.
     """
     tile = tile_grid[tile_grid["tile_id"] == tile_id]
     if tile.empty:
@@ -76,8 +95,77 @@ def get_tile_geometry(tile_grid: gpd.GeoDataFrame, tile_id: int) -> gpd.GeoDataF
 
 
 def save_tile_geometry(tile: gpd.GeoDataFrame, output_path: str | Path) -> None:
-    """Save a single tile geometry to a GeoPackage file."""
+    """Save a single tile geometry to a GeoPackage file.
+
+    Parameters
+    ----------
+    tile : geopandas.GeoDataFrame
+        Tile geometry to write, e.g. as returned by `get_tile_geometry`.
+    output_path : str or Path
+        Destination file path; written with the GPKG driver.
+    """
     retry_transient_io(tile.to_file, output_path, driver="GPKG")
+
+
+def chunk_id_from_corner(lon_deg: int, lat_deg: int) -> str:
+    """Format a postprocessing chunk ID from its south-west corner, e.g. "S10E030".
+
+    The single naming rule for chunk IDs, used by `build_chunk_grid` and by
+    validation/_chunks.py's point-to-chunk lookup.
+
+    Parameters
+    ----------
+    lon_deg, lat_deg : int
+        Longitude / latitude of the chunk's south-west corner, in whole degrees.
+
+    Returns
+    -------
+    str
+        N/S + 2-digit latitude, then E/W + 3-digit longitude.
+    """
+    lat = f"N{lat_deg:02d}" if lat_deg >= 0 else f"S{-lat_deg:02d}"
+    lon = f"E{lon_deg:03d}" if lon_deg >= 0 else f"W{-lon_deg:03d}"
+    return f"{lat}{lon}"
+
+
+def build_chunk_grid(tile_gdf: gpd.GeoDataFrame, chunk_size_deg: float) -> gpd.GeoDataFrame:
+    """Build the postprocessing chunk grid covering the tile grid.
+
+    The single definition of chunk IDs and extents, shared by the Snakefile (local DAG),
+    the HPC postprocess job generator and the postprocess progress monitor, so their chunk
+    IDs can never drift apart. Cells are `chunk_size_deg` squares aligned to multiples of
+    `chunk_size_deg`; only cells that intersect at least one tile are kept. A chunk is named
+    by its south-west corner, e.g. "S10E030" for (lon=30, lat=-10).
+
+    Parameters
+    ----------
+    tile_gdf : geopandas.GeoDataFrame
+        Tile grid (`tile_grid.path`), in degrees.
+    chunk_size_deg : float
+        Chunk edge length in degrees (`postprocessing.chunk_size_deg`).
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        One row per chunk with columns `chunk_id`, `bounds` ([minx, miny, maxx, maxy]) and
+        `geometry` (the chunk box), in `tile_gdf`'s CRS; ordered by x, then y.
+    """
+    minx, miny, maxx, maxy = tile_gdf.total_bounds
+    sz = chunk_size_deg
+    xs = np.arange(np.floor(minx / sz) * sz, np.ceil(maxx / sz) * sz, sz)
+    ys = np.arange(np.floor(miny / sz) * sz, np.ceil(maxy / sz) * sz, sz)
+    rows = []
+    for x in xs:
+        for y in ys:
+            cell = shapely_box(x, y, x + sz, y + sz)
+            if not tile_gdf.geometry.intersects(cell).any():
+                continue
+            rows.append({
+                "chunk_id": chunk_id_from_corner(int(round(x)), int(round(y))),
+                "bounds": [x, y, x + sz, y + sz],
+                "geometry": cell,
+            })
+    return gpd.GeoDataFrame(rows, crs=tile_gdf.crs)
 
 
 def _coord_str(lat: int, lon: int) -> str:
@@ -243,16 +331,22 @@ def mosaic_water_fraction_downsampled(
     tile-plus-nearby-candidate-station windows this is built for; would need
     a genuinely streaming rewrite before pointing it at a much larger area.
 
-    Args:
-        bbox: Bounding box to mosaic, as ``(minx, miny, maxx, maxy)``.
-        mask_index: ``{coord_str: path}`` from `_scan_mask_dir`.
-        target_resolution_m: Approximate coarse cell size in metres (native
-            pixel size is converted via a fixed equatorial 111,320 m/degree
-            approximation - fine for an aggregation factor, not a precision
-            measurement).
-        ocean_code: Mask value meaning "ocean" (default 1).
+    Parameters
+    ----------
+    bbox : tuple of float
+        Bounding box to mosaic, as ``(minx, miny, maxx, maxy)``.
+    mask_index : dict[str, Path]
+        ``{coord_str: path}`` from `_scan_mask_dir`.
+    target_resolution_m : float
+        Approximate coarse cell size in metres (native pixel size is
+        converted via a fixed equatorial 111,320 m/degree approximation -
+        fine for an aggregation factor, not a precision measurement).
+    ocean_code : int, default 1
+        Mask value meaning "ocean".
 
-    Returns:
+    Returns
+    -------
+    tuple[numpy.ndarray, affine.Affine] or None
         ``(water_fraction, transform)`` - ``water_fraction`` is a float32
         array in ``[0, 1]``, one cell per coarse pixel - or ``None`` if no
         mask file overlaps ``bbox`` at all.
@@ -388,8 +482,25 @@ def mosaic_mask_dem_coarse(
     miss one. Both fill uncovered areas the same as their native-resolution
     counterparts (255 for mask, -9999.0 for elevation).
 
-    Returns ``(mask_band, dem_band, transform)`` at the coarse resolution,
-    or ``None`` if no mask file overlaps `bbox` at all.
+    Parameters
+    ----------
+    bbox : tuple of float
+        Bounding box to mosaic, as ``(minx, miny, maxx, maxy)``.
+    mask_index : dict[str, Path]
+        ``{coord_str: path}`` from `_scan_mask_dir`, for the mask catalog.
+    dem_index : dict[str, Path] or None
+        ``{coord_str: path}`` from `_scan_mask_dir`, for the elevation
+        catalog. ``None`` skips elevation mosaicking entirely (`dem_out`
+        stays all-nodata).
+    resolution_m : float
+        Target coarse cell size in metres (converted to degrees via a fixed
+        equatorial 111,320 m/degree approximation).
+
+    Returns
+    -------
+    tuple[numpy.ndarray, numpy.ndarray, affine.Affine] or None
+        ``(mask_band, dem_band, transform)`` at the coarse resolution, or
+        ``None`` if no mask file overlaps `bbox` at all.
     """
     minx, miny, maxx, maxy = bbox
     px_deg = resolution_m / 111_320.0

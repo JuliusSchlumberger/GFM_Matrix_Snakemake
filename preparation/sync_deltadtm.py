@@ -69,7 +69,18 @@ MASK_ZIP_URL = "https://data.4tu.nl/file/1da2e70f-6c4d-4b03-86bd-b53e789cc629/bf
 
 
 def download_file(url: str, dest_path: Path, chunk_size: int = 1024 * 1024) -> None:
-    """Stream a large file to disk with progress reporting, resuming if partially present."""
+    """Stream a large file to disk with progress reporting, resuming if partially present.
+
+    Parameters
+    ----------
+    url : str
+        URL to download from.
+    dest_path : Path
+        Local path to write the downloaded file to; parent directories are
+        created if missing.
+    chunk_size : int, optional
+        Download chunk size in bytes (default 1 MiB).
+    """
     retry_transient_io(dest_path.parent.mkdir, parents=True, exist_ok=True)
 
     # Skip if already fully downloaded (best-effort check via Content-Length)
@@ -96,7 +107,21 @@ def download_file(url: str, dest_path: Path, chunk_size: int = 1024 * 1024) -> N
 
 
 def extract_tifs(zip_path: Path, out_dir: Path) -> int:
-    """Extract every .tif file inside a zip (ignoring subfolder structure) into out_dir."""
+    """Extract every .tif file inside a zip (ignoring subfolder structure) into out_dir.
+
+    Parameters
+    ----------
+    zip_path : Path
+        Path to the source zip archive.
+    out_dir : Path
+        Directory to extract .tif files into; created if missing. Files
+        already present there are skipped.
+
+    Returns
+    -------
+    int
+        Number of .tif files newly extracted.
+    """
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
     count = 0
     with zipfile.ZipFile(zip_path, "r") as zf:
@@ -122,6 +147,18 @@ def extraction_marker_path(out_dir: Path, name: str) -> Path:
     every re-run would re-download a continent's multi-GB zip purely to
     re-extract .tif files that are already all there (extract_tifs already
     skips per-file, but that doesn't avoid the download itself).
+
+    Parameters
+    ----------
+    out_dir : Path
+        Directory the zip's contents were extracted into.
+    name : str
+        Name of the zip (e.g. a continent name, or "mask_tiles").
+
+    Returns
+    -------
+    Path
+        Path to the marker file (its existence is not checked here).
     """
     return out_dir / f"{name}.extracted"
 
@@ -151,6 +188,27 @@ def _try_delete(path: Path, attempts: int = 5, delay_s: float = 2.0) -> bool:
 def process_zip(
     name: str, url: str, zip_download_dir: Path, out_dir: Path, delete_zip_after_extract: bool,
 ) -> None:
+    """Download one zip (unless already extracted) and extract its .tif files.
+
+    Skips the download entirely if the extraction marker for `name` already
+    exists. Writes the marker after extracting, and optionally deletes the
+    downloaded zip afterward.
+
+    Parameters
+    ----------
+    name : str
+        Name of this zip (continent name, or "mask_tiles"); used for the
+        download filename and the extraction marker.
+    url : str
+        URL to download the zip from; if falsy, this zip is skipped
+        entirely.
+    zip_download_dir : Path
+        Directory to download the zip into.
+    out_dir : Path
+        Directory to extract .tif files into.
+    delete_zip_after_extract : bool
+        If True, delete the downloaded zip after extraction succeeds.
+    """
     if not url:
         print(f"Skipping {name} (no URL provided)")
         return
@@ -179,6 +237,20 @@ def process_zip(
 
 
 def run(config: dict) -> None:
+    """Download DeltaDTM DEM/mask tiles and extract them into the data catalog's tile dirs.
+
+    Resolves the DEM/mask output directories from the hydromt data catalog,
+    downloads each continent's DEM zip (`DEM_ZIP_URLS`) and the mask zip
+    (`MASK_ZIP_URL`), and extracts their .tif files in place; already-
+    extracted zips are skipped (see `process_zip`).
+
+    Parameters
+    ----------
+    config : dict
+        Full pipeline config; must contain `sync_deltadtm.zip_download_dir`,
+        optional `sync_deltadtm.delete_zips_after_extract`, and
+        `paths.hydromt_data_catalog` / `paths.root`.
+    """
     sync_cfg = config["sync_deltadtm"]
 
     # DEM/mask tiles land next to the `deltadtm`/`deltadtm_mask` VRT mosaics

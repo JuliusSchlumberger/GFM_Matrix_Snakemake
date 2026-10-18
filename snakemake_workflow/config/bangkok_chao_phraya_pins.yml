@@ -1,0 +1,14 @@
+# Values pinned for the `bangkok_chao_phraya` scenario (2026-10-18): what its existing outputs were
+# computed with, before config.yml's defaults moved on. Merged by
+# snakemake_workflow/scripts/materialize_configs.py AFTER bangkok_chao_phraya.yml.
+# Delete a key here to let the scenario follow config.yml again (then re-run it).
+adaptation:
+  slr_intensities: [SLR_500, SLR_1000, SLR_1500]
+analysis: {plot_timeseries: true}
+population_growth:
+  output_years: [2025, 2030, 2035, 2040, 2045, 2050, 2060, 2075, 2100]
+simulation:
+  flooding: {friction_scale_factor: 9.0}
+visualization:
+  growth_rates: {max: 1.5, min: -0.5}
+  slr_interp: {max_mm: 1500, n_points: 100}

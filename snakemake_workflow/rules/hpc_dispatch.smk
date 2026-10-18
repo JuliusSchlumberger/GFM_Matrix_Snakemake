@@ -10,10 +10,10 @@ are therefore grouped by hop_distance FIRST, then split into node batches
 within each wave (same whole-tile-per-batch, even-split logic as before),
 so this rule generates one set of sbatch scripts per wave instead of one
 flat set across all tiles. The generated submit_waves.sh driver (written by
-generate_aqueduct_jobs.py) submits wave 0 with no dependency, then each
+generate_eikonal_jobs.py) submits wave 0 with no dependency, then each
 subsequent wave with `sbatch --dependency=afterany:<every prior-wave job
 id>`, guaranteeing a hop>=1 tile's neighbour output actually exists on disk
-before it runs. run_aqueduct_cli.py itself is unchanged - it already
+before it runs. run_eikonal_cli.py itself is unchanged - it already
 resolves hop_distance per tile and reads/writes accordingly; this rule only
 controls WHEN each tile's job is allowed to start.
 
@@ -56,18 +56,18 @@ _HPC_SCRIPT_PATHS = [
 ]
 
 
-rule generate_aqueduct_jobs:
+rule generate_eikonal_jobs:
     """Generate one sbatch script per (wave, node batch), once preprocessing is done.
 
-    Replaces run_aqueduct as the way to actually execute the flood solver
+    Replaces run_eikonal as the way to actually execute the flood solver
     for a full run: tiles are grouped whole (a tile's full return_period x
     waterlevel_name set stays on one node), split per-wave, across up to
     hpc.n_nodes sbatch scripts per wave. Written to hpc.jobs_dir together
     with a resolved_config.yml (Linux-path-expanded, via config_hpc.yml -
-    see scripts/generate_aqueduct_jobs.py) and a submit_waves.sh driver that
+    see scripts/generate_eikonal_jobs.py) and a submit_waves.sh driver that
     submits every wave to SLURM in order, each wave depending on the full
     previous wave. The user runs that driver manually (or
-    generate_hpc_preprocess_job.py chains it automatically); run_aqueduct
+    generate_hpc_preprocess_job.py chains it automatically); run_eikonal
     itself is untouched and still usable for local/small/debug runs.
     """
     input:
@@ -98,4 +98,4 @@ rule generate_aqueduct_jobs:
         waterlevel_names=WATERLEVEL_NAMES,
         raster_config=config["raster_format"],
     script:
-        "../scripts/generate_aqueduct_jobs.py"
+        "../scripts/generate_eikonal_jobs.py"

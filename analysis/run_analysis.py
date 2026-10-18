@@ -10,7 +10,6 @@ Analysis switches in config.yml:
   analysis.compute_flood_totals — per-country total flooded area/exposed population per (RP, SLR),
                                    no protection/adaptation applied - consumed by flood_extent_validation
   analysis.plot_burning_ember   — impact-matrix (SLR × growth) figures
-  analysis.plot_adaptation_bars — grouped bar comparison per scenario
   analysis.plot_timeseries      — EAI along SSP SLR trajectories over time (global / country / continent)
   analysis.plot_tipping_points  — tipping-point figure (isolines x SSP pathways, tipping years)
   analysis.plot_extended_pathways — continent time series to 2150 (population variants after 2100)
@@ -20,7 +19,7 @@ Analysis switches in config.yml:
 All figures are written directly to --figdir (visualization.output_dir), no subdirectories.
 
 Usage:
-    python snakemake_workflow/analysis/run_analysis.py \\
+    python analysis/run_analysis.py \\
         [--config  snakemake_workflow/config/config.yml] \\
         [--expdir  D:/GFM/merged_results/exposure] \\
         [--figdir  D:/GFM/figures] \\
@@ -33,45 +32,55 @@ Override switches without editing config.yml by passing --skip-* / --only-*:
 """
 
 import argparse
-import subprocess
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import load_config  # noqa: E402
+from step_runner import run_step  # noqa: E402
 
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 PYTHON = sys.executable
 
 
-def _run(
-    script: Path,
-    extra_args: list[str],
-    label: str,
-    fail_fast: bool,
-) -> bool:
-    """Run `script` in a subprocess; return True on success."""
-    cmd = [PYTHON, str(script)] + extra_args
-    print(f"\n{'═' * 60}")
-    print(f"  {label}")
-    print(f"  {' '.join(cmd)}")
-    print(f"{'═' * 60}")
-    t0 = time.time()
-    result = subprocess.run(cmd)
-    elapsed = time.time() - t0
-    if result.returncode != 0:
-        print(f"\n  ✗ FAILED (exit {result.returncode}) after {elapsed:.0f}s — {label}")
-        if fail_fast:
-            print("  Aborting (--fail-fast).")
-            sys.exit(result.returncode)
-        return False
-    print(f"\n  ✓ Done in {elapsed:.0f}s — {label}")
-    return True
+def _run(script: Path, extra_args: list[str], label: str, fail_fast: bool) -> bool:
+    """Run analysis script `script` with `extra_args` via `step_runner.run_step`; True on success."""
+    return run_step([PYTHON, str(script)] + extra_args, label, fail_fast)
+
+
+# Analysis steps, run in this order: (results key, analysis.* config switch, default when the
+# switch is absent, script, kind, title, skip label). kind "compute" scripts get
+# --outdir <expdir>; kind "plot" scripts get --expdir <expdir> --outdir <figdir>.
+_STEPS = [
+    ("exposure", "compute_exposure", True, "compute_exposure_analysis.py", "compute",
+     "Exposure analysis (baseline / protect / retreat / avoid / protect + avoid)", "Exposure analysis"),
+    ("flood_totals", "compute_flood_totals", True, "compute_flood_totals.py", "compute",
+     "Flood totals (per-country flooded area / exposed population per RP, SLR)", "Flood totals"),
+    ("burning_ember", "plot_burning_ember", True, "plot_burning_ember.py", "plot",
+     "Burning-ember / impact-matrix figures", "Burning-ember plots"),
+    ("timeseries", "plot_timeseries", True, "plot_timeseries.py", "plot",
+     "EAI time-series along SSP trajectories", "Time-series plots"),
+    ("tipping_points", "plot_tipping_points", True, "plot_tipping_points.py", "plot",
+     "Tipping-point figure (visualization.tipping_points)", "Tipping-point figure"),
+    ("extended_pathways", "plot_extended_pathways", True, "plot_extended_pathways.py", "plot",
+     "Pathways beyond 2100 (visualization.extended_pathways)", "Pathways beyond 2100"),
+    ("slr_vs_population", "plot_slr_vs_population", True, "plot_slr_vs_population.py", "plot",
+     "SLR vs population: waterfalls + scatter (visualization.slr_vs_population)", "SLR vs population"),
+    ("world_maps", "plot_world_maps", False, "plot_world_map.py", "plot",
+     "World choropleth maps", "World maps"),
+]
 
 
 def main() -> None:
+    """Parse CLI arguments and run the enabled post-simulation analysis steps in sequence.
+
+    Each step (exposure, flood totals, and the plot scripts) runs in its own
+    subprocess per config.yml's ``analysis.*`` switches, overridable via the
+    ``--only-*``/``--skip-*`` flags; a failed step aborts the rest only if
+    ``--fail-fast`` is set. Exits with status 1 if any step failed.
+    """
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     _default_cfg = str(SCRIPTS_DIR.parent / "snakemake_workflow" / "config" / "config.yml")
@@ -105,147 +114,29 @@ def main() -> None:
 
     # ── Resolve which steps to run from config + CLI overrides ────────────────
     sw = cfg.get("analysis", {})
-
-    do_exposure    = sw.get("compute_exposure",     True)
-    do_flood_totals = sw.get("compute_flood_totals", True)
-    do_ember       = sw.get("plot_burning_ember",   True)
-    do_bars        = sw.get("plot_adaptation_bars", True)
-    do_timeseries  = sw.get("plot_timeseries",      True)
-    do_tipping     = sw.get("plot_tipping_points",  True)
-    do_extended    = sw.get("plot_extended_pathways", True)
-    do_slr_pop     = sw.get("plot_slr_vs_population", True)
-    do_world_maps  = sw.get("plot_world_maps",      False)
-
-    if args.only_exposure:
-        do_ember = do_bars = do_timeseries = do_tipping = do_extended = do_slr_pop = do_world_maps = False
-    if args.only_plots:
-        do_exposure = False
-    if args.skip_exposure:
-        do_exposure = False
+    enabled = {key: sw.get(switch, default) for key, switch, default, *_ in _STEPS}
+    if args.only_exposure:  # plots off; exposure and flood totals keep their config switch
+        for key, _sw, _d, _script, kind, *_ in _STEPS:
+            if kind == "plot":
+                enabled[key] = False
+    if args.only_plots or args.skip_exposure:
+        enabled["exposure"] = False
     if args.skip_flood_totals:
-        do_flood_totals = False
+        enabled["flood_totals"] = False
     if args.skip_world_maps:
-        do_world_maps = False
+        enabled["world_maps"] = False
 
     cfg_arg = ["--config", str(config_path)]
 
     results: dict[str, bool] = {}
     t_start = time.time()
 
-    # ── Step 1: Compute exposure (baseline / protect / retreat / avoid / protect + avoid) ──
-    if do_exposure:
-        success = _run(
-            SCRIPTS_DIR / "compute_exposure_analysis.py",
-            cfg_arg + ["--outdir", str(exp_dir)],
-            "Exposure analysis (baseline / protect / retreat / avoid / protect + avoid)",
-            args.fail_fast,
-        )
-        results["exposure"] = success
-    else:
-        print("\n  [ SKIP ] Exposure analysis (analysis.compute_exposure = false)")
-
-    # ── Step 1b: Per-country flood totals (no protection/adaptation) ───────────
-    if do_flood_totals:
-        success = _run(
-            SCRIPTS_DIR / "compute_flood_totals.py",
-            cfg_arg + ["--outdir", str(exp_dir)],
-            "Flood totals (per-country flooded area / exposed population per RP, SLR)",
-            args.fail_fast,
-        )
-        results["flood_totals"] = success
-    else:
-        print("\n  [ SKIP ] Flood totals (analysis.compute_flood_totals = false)")
-
-    # ── Step 2: Burning-ember charts ──────────────────────────────────────────
-    if do_ember:
-        success = _run(
-            SCRIPTS_DIR / "plot_burning_ember.py",
-            cfg_arg + ["--expdir", str(exp_dir),
-                        "--outdir", str(fig_dir)],
-            "Burning-ember / impact-matrix figures",
-            args.fail_fast,
-        )
-        results["burning_ember"] = success
-    else:
-        print("\n  [ SKIP ] Burning-ember plots (analysis.plot_burning_ember = false)")
-
-    # ── Step 3: Adaptation bar charts ────────────────────────────────────────
-    if do_bars:
-        success = _run(
-            SCRIPTS_DIR / "plot_adaptation_bars.py",
-            cfg_arg + ["--expdir", str(exp_dir),
-                        "--outdir", str(fig_dir)],
-            "Adaptation strategy bar charts",
-            args.fail_fast,
-        )
-        results["adaptation_bars"] = success
-    else:
-        print("\n  [ SKIP ] Adaptation bar charts (analysis.plot_adaptation_bars = false)")
-
-    # ── Step 4: Time-series ───────────────────────────────────────────────────
-    if do_timeseries:
-        success = _run(
-            SCRIPTS_DIR / "plot_timeseries.py",
-            cfg_arg + ["--expdir", str(exp_dir),
-                        "--outdir", str(fig_dir)],
-            "EAI time-series along SSP trajectories",
-            args.fail_fast,
-        )
-        results["timeseries"] = success
-    else:
-        print("\n  [ SKIP ] Time-series plots (analysis.plot_timeseries = false)")
-
-    # ── Step 4b: Tipping points ───────────────────────────────────────────────
-    if do_tipping:
-        success = _run(
-            SCRIPTS_DIR / "plot_tipping_points.py",
-            cfg_arg + ["--expdir", str(exp_dir),
-                        "--outdir", str(fig_dir)],
-            "Tipping-point figure (visualization.tipping_points)",
-            args.fail_fast,
-        )
-        results["tipping_points"] = success
-    else:
-        print("\n  [ SKIP ] Tipping-point figure (analysis.plot_tipping_points = false)")
-
-    # ── Step 4c: Pathways beyond 2100 ─────────────────────────────────────────
-    if do_extended:
-        success = _run(
-            SCRIPTS_DIR / "plot_extended_pathways.py",
-            cfg_arg + ["--expdir", str(exp_dir),
-                        "--outdir", str(fig_dir)],
-            "Pathways beyond 2100 (visualization.extended_pathways)",
-            args.fail_fast,
-        )
-        results["extended_pathways"] = success
-    else:
-        print("\n  [ SKIP ] Pathways beyond 2100 (analysis.plot_extended_pathways = false)")
-
-    # ── Step 4d: SLR vs population decomposition ──────────────────────────────
-    if do_slr_pop:
-        success = _run(
-            SCRIPTS_DIR / "plot_slr_vs_population.py",
-            cfg_arg + ["--expdir", str(exp_dir),
-                        "--outdir", str(fig_dir)],
-            "SLR vs population: waterfalls + scatter (visualization.slr_vs_population)",
-            args.fail_fast,
-        )
-        results["slr_vs_population"] = success
-    else:
-        print("\n  [ SKIP ] SLR vs population (analysis.plot_slr_vs_population = false)")
-
-    # ── Step 5: World maps ────────────────────────────────────────────────────
-    if do_world_maps:
-        success = _run(
-            SCRIPTS_DIR / "plot_world_map.py",
-            cfg_arg + ["--expdir", str(exp_dir),
-                        "--outdir", str(fig_dir)],
-            "World choropleth maps",
-            args.fail_fast,
-        )
-        results["world_maps"] = success
-    else:
-        print("\n  [ SKIP ] World maps (analysis.plot_world_maps = false)")
+    for key, switch, _default, script, kind, title, skip_label in _STEPS:
+        if not enabled[key]:
+            print(f"\n  [ SKIP ] {skip_label} (analysis.{switch} = false)")
+            continue
+        io_args = ["--outdir", str(exp_dir)] if kind == "compute" else ["--expdir", str(exp_dir), "--outdir", str(fig_dir)]
+        results[key] = _run(SCRIPTS_DIR / script, cfg_arg + io_args, title, args.fail_fast)
 
     # ── Summary ───────────────────────────────────────────────────────────────
     total = time.time() - t_start

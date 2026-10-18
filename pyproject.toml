@@ -1,0 +1,28 @@
+# Tool configuration only - this repo is NOT an installable package (flat
+# sys.path layout, see README "Import convention"), so there is no [project]
+# table.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Most regression scripts are named validate_*.py (runnable directly with
+# `python <script>.py`); collect them alongside the test_*.py files.
+python_files = ["test_*.py", "validate_*.py"]
+# importlib mode: test folders have no __init__.py and scripts insert their own
+# sys.path entries, so pytest must not prepend/rewrite module paths itself.
+addopts = "--import-mode=importlib -ra"
+markers = [
+    "needs_sfincs: needs the hydromt-sfincs-dev env (auto-applied to tests/sfincs_*; skipped elsewhere)",
+    "needs_pdrive: reads real data from the P:\\ modelling share",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+extend-exclude = [".snakemake", "*.ipynb"]
+# Snakemake injects a global `snakemake` object into every `script:` target.
+builtins = ["snakemake"]
+
+[tool.ruff.lint]
+# Conservative baseline: real errors only (undefined names, unused imports,
+# syntax). Widen once the cleanup phases are through.
+select = ["F", "E9"]

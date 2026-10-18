@@ -4,7 +4,7 @@ San-Francisco-Bay-only table with RMSE/MAE (all-pixels and flooded-pixels,
 both comparison directions) against Kasmalkar et al. (2024).
 
 Reuses every number already computed by validate_country.py (GBR/CAN
-metrics_*.csv), _rescore_england_fz3.py, validate_england_fz2_band.py and
+metrics_*.csv), rescore_england_fz3.py, validate_england_fz2_band.py and
 validate_sf_bay.py - no new scoring, just reshaped for reporting. See
 compare_against_published.py for the long/tidy equivalent this draws the
 same underlying numbers from (published values transcribed from the user,
@@ -12,20 +12,22 @@ same underlying numbers from (published values transcribed from the user,
 revised).
 
 Usage:
-    python validation/build_overview_table.py
+    python validation/build_overview_table.py [--config path/to/config.yml]
 """
 
 from __future__ import annotations
 
+import argparse
+import sys
 from pathlib import Path
 
 import pandas as pd
 
-GBR_METRICS_RP100 = Path("P:/11212688-004-global-floodmaps/modelling/validation/GBR/metrics_GBR_RP100_SLR_0.csv")
-GBR_METRICS_RP250 = Path("P:/11212688-004-global-floodmaps/modelling/validation/GBR/metrics_GBR_RP250_SLR_0.csv")
-CAN_METRICS = Path("P:/11212688-004-global-floodmaps/modelling/validation/CAN/metrics_CAN_RP100_SLR_0.csv")
-ENGLAND_FZ3_RESCORE = Path("P:/11212688-004-global-floodmaps/modelling/validation/england_fz3_rescore.csv")
-ENGLAND_FZ2_BAND = Path("P:/11212688-004-global-floodmaps/modelling/validation/GBR/england_fz2_band_result.csv")
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_REPO_ROOT / "src"))
+
+from config_utils import load_config  # noqa: E402
+
 SF_BAY_RESULTS = Path(__file__).resolve().parent / "sf_bay_results.csv"
 OUT_DIR = Path(__file__).resolve().parent
 
@@ -58,12 +60,36 @@ def _fmt_published(pairs: list[tuple[str, float]]) -> str:
     return "; ".join(f"{study}: {val:.2f}" for study, val in pairs)
 
 
-def build_extent_table() -> pd.DataFrame:
-    gbr_rp100 = pd.read_csv(GBR_METRICS_RP100).set_index("region")
-    gbr_rp250 = pd.read_csv(GBR_METRICS_RP250).set_index("region")
-    can = pd.read_csv(CAN_METRICS).set_index("region")
-    fz3 = pd.read_csv(ENGLAND_FZ3_RESCORE)
-    fz2 = pd.read_csv(ENGLAND_FZ2_BAND)
+def build_extent_table(
+    gbr_metrics_rp100: Path, gbr_metrics_rp250: Path, can_metrics: Path,
+    england_fz3_rescore: Path, england_fz2_band: Path,
+) -> pd.DataFrame:
+    """Build the HR/FAR/bias/CSI (ours) + published-CSI overview table.
+
+    Parameters
+    ----------
+    gbr_metrics_rp100 : Path
+        ``metrics_GBR_RP100_SLR_0.csv`` from ``validate_country.py``.
+    gbr_metrics_rp250 : Path
+        ``metrics_GBR_RP250_SLR_0.csv`` from ``validate_country.py``.
+    can_metrics : Path
+        ``metrics_CAN_RP100_SLR_0.csv`` from ``validate_country.py``.
+    england_fz3_rescore : Path
+        ``england_fz3_rescore.csv`` from ``rescore_england_fz3.py``.
+    england_fz2_band : Path
+        ``england_fz2_band_result.csv`` from ``validate_england_fz2_band.py``.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per region (per RP for ranged regions), with HR/FAR/bias/CSI,
+        formatted published CSI, and any caveat note.
+    """
+    gbr_rp100 = pd.read_csv(gbr_metrics_rp100).set_index("region")
+    gbr_rp250 = pd.read_csv(gbr_metrics_rp250).set_index("region")
+    can = pd.read_csv(can_metrics).set_index("region")
+    fz3 = pd.read_csv(england_fz3_rescore)
+    fz2 = pd.read_csv(england_fz2_band)
     sf_bay = pd.read_csv(SF_BAY_RESULTS, index_col=0)
 
     rows = []
@@ -124,11 +150,30 @@ def build_sf_bay_depth_table() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def main() -> None:
+def main(config_path: str | Path | None = None) -> None:
+    """Build and print/write both overview tables.
+
+    Parameters
+    ----------
+    config_path : str, Path, or None, optional
+        Path to config.yml, used to resolve the GBR/CAN/England input CSVs
+        under ``validation.output_dir``. Defaults to this repo's
+        ``snakemake_workflow/config/config.yml``.
+    """
+    cfg = load_config(config_path or _REPO_ROOT / "snakemake_workflow" / "config" / "config.yml")
+    validation_dir = Path(cfg["validation"]["output_dir"])
+    gbr_metrics_rp100 = validation_dir / "GBR" / "metrics_GBR_RP100_SLR_0.csv"
+    gbr_metrics_rp250 = validation_dir / "GBR" / "metrics_GBR_RP250_SLR_0.csv"
+    can_metrics = validation_dir / "CAN" / "metrics_CAN_RP100_SLR_0.csv"
+    england_fz3_rescore = validation_dir / "england_fz3_rescore.csv"
+    england_fz2_band = validation_dir / "GBR" / "england_fz2_band_result.csv"
+
     pd.set_option("display.width", 220)
     pd.set_option("display.max_colwidth", 60)
 
-    extent_df = build_extent_table()
+    extent_df = build_extent_table(
+        gbr_metrics_rp100, gbr_metrics_rp250, can_metrics, england_fz3_rescore, england_fz2_band,
+    )
     print("=== HR / FAR / bias / CSI (ours), CSI (published where available) ===")
     print(extent_df.drop(columns="Note").round(3).to_string(index=False))
     notes = extent_df[extent_df["Note"] != ""][["Region", "Note"]]
@@ -149,4 +194,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
+    args = parser.parse_args()
+    main(config_path=args.config)

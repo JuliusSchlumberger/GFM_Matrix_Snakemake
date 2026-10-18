@@ -9,7 +9,7 @@ Adapts `sfincs_tiles/plot_validation_results.py`'s `plot_tile_agreement_map`
 severity metric (0% = no flooding, 100% = fully flooded), not a
 bounded-at-a-midpoint one like CSI; ocean left WHITE (no facecolor fill)
 rather than filled with WATER_COLOR - same fix already applied to
-sfincs_tiles/plot_no_coastrp_tiles.py's own locator inset: only an actual
+sfincs_tiles/plot_no_coastrp_tiles.py's own locator inset (that script was removed in 7b6f7f1): only an actual
 raster MASK gets the water color, a world map's plain background does not.
 
 Combined into one multi-panel figure per ssp (5 SLR subplots + one shared

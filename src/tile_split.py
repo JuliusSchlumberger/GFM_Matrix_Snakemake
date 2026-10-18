@@ -13,7 +13,7 @@ assumed - a split child's id is now simply one more than the current global
 maximum tile_id (`max(tile_grid["tile_id"]) + 1`), which is trivially
 collision-free (every existing tile_id is smaller) and, since child ids are
 assigned in increasing order as splits happen, always sorts to the end of a
-tile_id-ordered job list - the same property run_pipeline.py's --batch
+tile_id-ordered job list - the same property run_eikonal_dag.py's --batch
 handling relies on, just no longer expressed as a digit-encoding trick.
 Split depth is tracked in its own `split_depth` GeoDataFrame column (0 for
 an original tile) instead of being inferred from the id's digits, since
@@ -149,7 +149,7 @@ def split_tile(
     if not mask_path.exists():
         raise FileNotFoundError(
             f"Expected {mask_path} (DEM/mask extraction should have completed "
-            f"before Aqueduct could OOM on tile {tile_id})"
+            f"before the eikonal solve could OOM on tile {tile_id})"
         )
 
     _axis, half_a, half_b = choose_split(row.geometry, mask_path, fraction)
@@ -159,7 +159,7 @@ def split_tile(
     # hop_distance is inherited from the parent, not recomputed - a split child is
     # geometrically a sub-region of the parent, so the same ocean-distance/forcing-
     # source classification applies. Fixed 2026-10: previously omitted entirely,
-    # leaving it NaN on every split child - run_aqueduct.py/run_aqueduct_cli.py both
+    # leaving it NaN on every split child - run_eikonal.py/run_eikonal_cli.py both
     # do `int(this_tile["hop_distance"].iloc[0])`, which raises on NaN, so this would
     # crash the moment any hop_distance>=1 tile needed OOM-splitting (found via code
     # review during the connectivity-tiling migration, not a real production

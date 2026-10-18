@@ -1,468 +1,27 @@
 # ── Root path ─────────────────────────────────────────────────────────────────
 # Separate catalog from data_catalog_gfm.yml (not merged with it) because it
-# needs its own `root`. Overridden at load time by validation/validate_country.py via
-# config_utils.get_data_catalog(..., root=config["validation"]["benchmark_root"]) -
-# the value below is only the checked-in default for this machine.
-root: "P:/11212688-004-global-floodmaps/modelling/inputs/validation"
+# needs its own root: every loader passes config["validation"]["benchmark_root"]
+# (config_utils.get_data_catalog(..., root=...)), so there is no `root:` in this file.
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Benchmark flood-hazard-map metadata. Per-country/per-dataset transformation
-# rules (attribute_filter, exclude_bbox, wet_values, depth_threshold_m, study_area)
+# rules (attribute_filter, geogunit_ids, regions, comparison_return_periods)
 # are read by validation.load_benchmark_spec() from each entry's own `meta` block,
 # so adding a new country/dataset is a catalog entry here, not a new
 # `if country == ...` branch in code. See docs/methods_04b_MapsValidation.md for
-# the full field reference. Australia's own entry is still pending (not downloaded).
-
-spain_arpsi_marina_segments:
-  data_type: GeoDataFrame
-  driver: vector
-  path: ESP/Capa_Nacional_2c_3c_PBC_v4.shp
-  crs: 25830
-  filesystem: local
-  meta:
-    category: study_area_source   # not a flood_hazard_benchmark - deliberately no
-    # hazard_type set, so validate_country.py's own benchmark discovery
-    # (_find_benchmark_keys, which requires meta.hazard_type=="coastal") never
-    # picks this up as a benchmark in its own right.
-    country: Spain
-    description: >
-      ARPSI (Spanish: "area con riesgo potencial significativo de inundacion") national
-      layer (3,040 line segments/tramos, all ORIGEN_INU types - Marina, Fluvial,
-      Pluvial, and mixed combinations). Referenced as spain_zi_marina_q100's own
-      study_area.source, filtered there to ORIGEN_INU=="Marina" for the
-      coastal-only segments.
-    source_url: <to confirm - MITECO ARPSI download portal>
-    date_retrieved: "2026-09-29"
-    source_license: <to confirm>
-
-spain_zi_marina_q100:
-  data_type: GeoDataFrame
-  driver: vector
-  path: ESP/LAMINAS_Q100_MEDIA_ETRS89.shp
-  crs: 4258
-  filesystem: local
-  meta:
-    category: flood_hazard_benchmark
-    country: Spain
-    country_iso: ESP
-    hazard_type: coastal          # coastal | fluvial | mixed - only `coastal` is comparable
-    return_period: 100
-    variable: extent               # extent | depth
-    native_resolution_m: 5         # from PRECISION = "MDT 5x5" (documentation only -
-                                    # comparison happens on the model grid, not this)
-    # --- transformation rules read by validation.load_benchmark() ---
-    attribute_filter: {TIPO_ZONA: "Z.I. PROBABILIDAD MEDIA (100 AÑOS)"}
-    # Named sub-regions covering the whole benchmark, scored/reported/plotted
-    # separately AND auto-blended into one country-level row by
-    # validate_country.py's own _blend_regions (2026-09 - previously the
-    # Canary Islands were dropped entirely via exclude_bbox; now scored as
-    # their own region instead, for consistency with France's kept-overseas
-    # approach).
-    regions:
-      mainland: [-9.5, 35.0, 4.5, 44.0]          # continental Spain + Balearic Islands
-      canary_islands: [-19.0, 27.0, -13.0, 30.0]
-    # raster sources instead use: wet_values: [1,2] | depth_threshold_m: 0.1 | nodata: 255
-    study_area:                    # official ARPSI study design, not yet consumed by any
-      source: spain_arpsi_marina_segments   # code - see docs item 11 ("study-area evaluation
-      geometry_type: segments               # domain") for the engine that will read this
-      attribute_filter: {ORIGEN_INU: "Marina"}
-      # snap_tolerance_m: 250 (default)
-    # ---
-    description: >
-      SNCZI "Zonas Inundables de origen marino" - marine-origin flood zones for the
-      Spanish coast, medium probability (100-year return period).
-    methodology: >
-      Still-water + wave levels from a 60-year C3E hindcast, run-up via IH2VOF
-      formulae at profiles spaced 200 m, flooded onto a 5 m LiDAR DTM. 90% band.
-    source_url: https://www.miteco.gob.es/es/cartografia-y-sig/ide/descargas/costas-medio-marino/zi-origen-marino.html
-    date_retrieved: "2026-09-08"
-    source_license: <to confirm - see the MITECO download page>
-    source_version: "2016-04-12"   # DBF_DATE_LAST_UPDATE
-    known_caveats: >
-      Covers only surveyed coastal stretches, NOT the whole coast - see the plan
-      doc's §3. Includes wave run-up, which the GFM model does not simulate.
-
-france_tri_perimeters:
-  data_type: GeoDataFrame
-  driver: vector
-  path: FRA/n_tri_s.shp
-  crs: 4326
-  filesystem: local
-  meta:
-    category: study_area_source   # not a flood_hazard_benchmark - deliberately no
-    # hazard_type set, so validate_country.py's own benchmark discovery
-    # (_find_benchmark_keys, which requires meta.hazard_type=="coastal") never
-    # picks this up as a benchmark in its own right.
-    country: France
-    description: >
-      TRI ("Territoire à Risque important d'Inondation") perimeters, all 131
-      nationally-designated risk territories. Covers BOTH coastal and fluvial
-      TRIs (e.g. "Dijonnais", an inland Burgundy TRI, alongside "TRI DE
-      MAYOTTE") - no attribute here separates them. Referenced as every France
-      benchmark's own study_area.source with no attribute_filter; the
-      study-area engine's own coverage filter (not yet implemented - see docs
-      item 11) is relied on to drop the fluvial-only TRIs this layer can't.
-    source_url: <to confirm - Géorisques / DREAL TRI download portal>
-    date_retrieved: "2026-09-29"
-    source_license: <to confirm>
-
-france_inondable_02moy:
-  data_type: GeoDataFrame
-  driver: vector
-  path: FRA/n_inondable_03_02moy_s.shp
-  crs: 4326
-  filesystem: local
-  meta:
-    category: flood_hazard_benchmark
-    country: France
-    country_iso: FRA
-    hazard_type: coastal
-    return_period: 100             # "02Moy" is officially "at least centennial", generally
-                                    # cited as a 100-300yr class - not an exact RP100 the way
-                                    # Spain's "100 AÑOS" label is. See known_caveats.
-    variable: extent               # extent | depth
-    # No attribute_filter: confirmed 2026-09 against the real shapefile (74,547 rows) - this
-    # file is ALREADY pre-split to typ_inond=03 (submersion marine) x scenario=02Moy only,
-    # every row already matches. Do NOT filter on cours_deau=='submar' here - in this file
-    # that column is mostly None/real river names, and filtering on it would wrongly drop
-    # ~85% of the real coastal rows (an earlier, stale note assumed the opposite).
-    regions:
-      metropole:  [-6.0, 41.0, 10.5, 51.5]     # mainland France + Corsica
-      guadeloupe: [-62.6, 15.2, -60.3, 17.4]
-      martinique: [-61.5, 14.0, -60.5, 15.2]
-      guyane:     [-53.5, 3.5, -51.5, 6.0]     # data only covers the Ile de Cayenne area,
-                                                 # not the whole Guyane coast - see known_caveats
-      mayotte:    [44.5, -13.5, 45.8, -12.0]
-      # Réunion is a SEPARATE catalog entry (france_inondable_reunion_03mcc below) - this
-      # file has no Réunion rows at all (no plain "02Moy" scenario exists for Réunion).
-    study_area:                    # official TRI study design, not yet consumed by any
-      source: france_tri_perimeters   # code - see docs item 11 ("study-area evaluation
-      geometry_type: perimeter        # domain") for the engine that will read this
-      # No attribute_filter - see france_tri_perimeters' own description.
-      # snap_tolerance_m: 250 (default)
-    description: >
-      TRI ("Territoires à Risque important d'Inondation") submersion marine extent zones,
-      typ_inond=03 / scenario=02Moy ("moyen" probability class), covering metropolitan
-      France (incl. Corsica) plus Guadeloupe, Martinique, Guyane and Mayotte.
-    source_url: <to confirm - Géorisques / DREAL TRI download portal>
-    date_retrieved: "2026-09-09"
-    source_license: https://www.georisques.gouv.fr/donnees/bases-de-donnees/zonages-inondation-rapportage-2020
-    known_caveats: >
-      Only the legally-designated TRI zones are surveyed, not the full coastline (see plan
-      doc/caveats doc). "02Moy" is officially "at least centennial", generally cited as a
-      100-300yr class - more definitional slack than Spain's exact "100 AÑOS" label. Guyane's
-      TRI zone only covers the Ile de Cayenne area, not French Guiana's whole coast.
-
-france_inondable_reunion_03mcc:
-  data_type: GeoDataFrame
-  driver: vector
-  path: FRA/n_inondable_03_03mcc_ct_s.shp
-  crs: 4326
-  filesystem: local
-  meta:
-    category: flood_hazard_benchmark
-    country: France
-    country_iso: FRA
-    hazard_type: coastal
-    return_period: 100             # approximate analog only - see known_caveats
-    variable: extent
-    # No attribute_filter: confirmed 2026-09 against the real shapefile (9 rows, 6 TRI
-    # zones) - already homogeneous, typ_inond=03 / scenario=03Mcc_ct throughout.
-    regions:
-      reunion: [54.5, -21.9, 56.0, -20.3]
-    study_area:
-      source: france_tri_perimeters
-      geometry_type: perimeter
-      # No attribute_filter - see france_tri_perimeters' own description.
-      # snap_tolerance_m: 250 (default)
-    description: >
-      TRI submersion marine extent zones for La Réunion, typ_inond=03 / scenario=03Mcc_ct
-      (the medium of Réunion's 3 cyclone-adjusted classes: 01Forcc_ct / 03Mcc_ct / 04Faicc_ct).
-      Réunion has no plain "02Moy" scenario in this dataset - this is the closest analog.
-    source_url: <to confirm - Géorisques / DREAL TRI download portal>
-    date_retrieved: "2026-09-09"
-    source_license: https://www.georisques.gouv.fr/donnees/bases-de-donnees/zonages-inondation-rapportage-2020
-    known_caveats: >
-      Very sparse (9 polygons across 6 TRI zones for the whole island) - statistically close
-      to meaningless as a standalone metric, should be reported but flagged, not treated as a
-      real result (see caveats doc §2.2). "03Mcc_ct" is a cyclone-adjusted scenario, not a
-      strict return-period equivalent of the mainland file's "02Moy" - comparing it directly
-      against the model's RP100 scenario carries more uncertainty than the mainland comparison.
-
-france_inondable_ht_02moy:
-  data_type: GeoDataFrame
-  driver: vector
-  path: FRA/n_iso_ht_03_02moy_s.shp
-  crs: 4326
-  filesystem: local
-  meta:
-    category: flood_hazard_benchmark
-    country: France
-    country_iso: FRA
-    hazard_type: coastal
-    return_period: 100
-    variable: depth               # dispatches validate_country.py's depth-band comparison,
-    # not the binary extent one - see src/validation.py::rasterize_depth_bands /
-    # validate_country.py::validate_country_depth_bands
-    ht_min_col: ht_min
-    ht_max_col: ht_max            # open-ended top band uses inconsistent per-zone sentinels
-    # (9999/999/99, or NaN with no max recorded) - resolved generically by magnitude via
-    # validation.depth_band_open_ended_min_m, not enumerated here.
-    # No attribute_filter: confirmed 2026-09 against the real shapefile (788,947 rows) -
-    # already pre-split to typ_inond=03 / scenario=02Moy throughout, same as the companion
-    # extent entry france_inondable_02moy.
-    regions:
-      metropole:  [-6.0, 41.0, 10.5, 51.5]
-      guadeloupe: [-62.6, 15.2, -60.3, 17.4]
-      martinique: [-61.5, 14.0, -60.5, 15.2]
-      guyane:     [-53.5, 3.5, -51.5, 6.0]     # confirmed 2026-09: this file has ZERO rows
-      # for Guyane (unlike the extent layer, which has 123) - depth-band comparison simply
-      # produces no "guyane" region row for this benchmark; not an error, a real coverage gap.
-      mayotte:    [44.5, -13.5, 45.8, -12.0]
-    study_area:
-      source: france_tri_perimeters
-      geometry_type: perimeter
-      # No attribute_filter - see france_tri_perimeters' own description.
-      # snap_tolerance_m: 250 (default)
-    description: >
-      TRI submersion marine DEPTH-BAND zones (ht_min/ht_max, m), typ_inond=03 /
-      scenario=02Moy - the depth-resolved companion to france_inondable_02moy's extent
-      polygons. Confirmed 2026-09: each TRI zone's depth-band sub-polygons exactly tile
-      that same zone's own extent polygon (union area matches to floating-point noise) -
-      this is a finer spatial subdivision of the same flood zones, not a separate survey.
-    source_url: <to confirm - Géorisques / DREAL TRI download portal>
-    date_retrieved: "2026-09-10"
-    source_license: https://www.georisques.gouv.fr/donnees/bases-de-donnees/zonages-inondation-rapportage-2020
-    known_caveats: >
-      Same coverage/return-period caveats as france_inondable_02moy (see that entry and the
-      caveats doc §2.2). Additionally: Guyane has NO depth-band rows in this file at all
-      (confirmed 2026-09) despite having extent rows - depth-band comparison is not possible
-      for Guyane via this dataset. Open-ended top-band sentinels are internally consistent
-      per TRI zone but vary across zones/regions (9999 most zones, 999 for Mayotte, 99 for
-      Martinique, NaN - no value recorded - for several Brittany/Normandy zones) - handled by
-      validation.rasterize_depth_bands' magnitude-threshold rule, not a literal sentinel value.
-
-france_inondable_ht_reunion_03mcc:
-  data_type: GeoDataFrame
-  driver: vector
-  path: FRA/n_iso_ht_03_03mcc_ct_s.shp
-  crs: 4326
-  filesystem: local
-  meta:
-    category: flood_hazard_benchmark
-    country: France
-    country_iso: FRA
-    hazard_type: coastal
-    return_period: 100             # approximate analog only - see known_caveats
-    variable: depth
-    ht_min_col: ht_min
-    ht_max_col: ht_max
-    # No attribute_filter: confirmed 2026-09 against the real shapefile (48 rows) - already
-    # homogeneous, typ_inond=03 / scenario=03Mcc_ct throughout, same as the companion extent
-    # entry france_inondable_reunion_03mcc.
-    regions:
-      reunion: [54.5, -21.9, 56.0, -20.3]
-    study_area:
-      source: france_tri_perimeters
-      geometry_type: perimeter
-      # No attribute_filter - see france_tri_perimeters' own description.
-      # snap_tolerance_m: 250 (default)
-    description: >
-      TRI submersion marine depth-band zones for La Réunion, typ_inond=03 / scenario=03Mcc_ct
-      - the depth-resolved companion to france_inondable_reunion_03mcc's extent polygons.
-    source_url: <to confirm - Géorisques / DREAL TRI download portal>
-    date_retrieved: "2026-09-10"
-    source_license: https://www.georisques.gouv.fr/donnees/bases-de-donnees/zonages-inondation-rapportage-2020
-    known_caveats: >
-      Same caveats as france_inondable_reunion_03mcc (very sparse, cyclone-adjusted scenario
-      not a strict RP100 equivalent - see caveats doc §2.2).
-
-norway_stormflo_200ar:
-  data_type: GeoDataFrame
-  driver: vector
-  driver_kwargs: {layer: stormflo200ar_klimaarna}
-  path: NOR/stormflo200ar_klimaarna.gpkg
-  crs: 25833                     # ETRS89 / UTM zone 33N - projected, unlike Spain (4258) and
-                                  # France (4326); build_evaluation_clusters/benchmark_fraction_from_vector
-                                  # reproject to the working CRS as needed, no extra handling required.
-  filesystem: local
-  meta:
-    category: flood_hazard_benchmark
-    country: Norway
-    country_iso: NOR
-    hazard_type: coastal
-    return_period: 200            # real value ("F2"/TEK17 safety class 2, storm-surge recurring
-                                   # ~1/200yr) - Norway has no 100yr layer (only 20/200/1000yr,
-                                   # "sikkerhetsklasseflom" F1/F2/F3). Compared against the model's
-                                   # RP100 anyway (user decision 2026-09) - a real, documented
-                                   # return-period mismatch, same spirit as France's "02Moy" caveat.
-    comparison_return_periods: [100, 250]   # 2026-10: the multi-RP summary
-    # (validation/run_multi_rp_summary.py) scores Norway at both of the model's own NATIVE
-    # return periods - RP100 (the global default every country gets) and RP250 (the model's
-    # own nearest native scenario above Norway's real ~200yr benchmark class). An earlier
-    # version of this also reported an interpolated RP200 point (log-linear interpolation
-    # between the native RP100/RP250 merged chunks) to get the closest direct match to the
-    # benchmark's own real-world return period - removed 2026-10 (user decision): report
-    # performance at the model's own real, simulated return periods only, not an estimated
-    # intermediate one.
-    variable: extent
-    coverage: national            # Kartverket assessed the ENTIRE Norwegian coastline (unlike
-    # Spain/France's isolated designated survey zones) - confirmed via the dump's own
-    # dekningsomrade (coverage) table: ikkeRelevant (inland, excluded) + kartlagtUtenFunn
-    # (mapped, nothing found - real dry evidence) + grundigKartlagtMedFunn (thoroughly mapped
-    # with findings) partition the whole country, no "unsurveyed" gap. Dispatches
-    # validate_country.py to validate_country_national_coverage (per-postprocessing-chunk,
-    # no buffer/cluster) instead of the cluster-based path - both because "outside the
-    # polygon" is unambiguous here (a real dry result, not "never looked at"), and because
-    # Norway's long, only-lightly-fragmented coastline collapses build_evaluation_clusters'
-    # buffer+merge into one cluster spanning almost the whole country, which crashed the
-    # cluster-based path's per-cluster bbox-sized array allocation (confirmed 2026-09: a
-    # single cluster with bbox 27deg x 13.5deg triggered a 65.9 GiB allocation).
-    # No attribute_filter: this GeoPackage (converted 2026-09 from Kartverket's real 26 GiB
-    # PostGIS dump by preparation/convert_norway_stormflo.py) is ALREADY a single-scenario
-    # extract - every one of its 115,440 rows has sikkerhetsklasseflom='F2' (confirmed).
-    # NOT pre-filtered/subtracted for the sea: each raw polygon is "everything below water
-    # level X", which includes the permanently-wet sea (confirmed 2026-09: 97.6-99.3% of raw
-    # polygon area at sampled AOIs). This is NOT stripped at conversion time - it relies on
-    # this pipeline's EXISTING Copernicus land-use permanent-water exclusion (the same
-    # `not_water` masking already applied for Spain/France) instead, confirmed 2026-09 to
-    # correctly classify 98.06% of the real sea area as permanent water even across Norway's
-    # narrow fjords/island coastline (92.7-99.1% at every one of 5 sampled AOIs, including a
-    # narrow fjord and an island maze) - see known_caveats for the corresponding land-side cost.
-    regions:
-      mainland: [4.0, 57.5, 31.5, 71.5]   # real data bounds (converted GeoPackage):
-      # lon 4.28-31.35, lat 57.85-71.31 (Utsira to the Russian border, to North Cape) - no
-      # overseas territories.
-    description: >
-      Kartverket (Norwegian Mapping Authority) official storm-surge hazard polygons,
-      "sikkerhetsklasseflom" F2 (TEK17 safety class 2, ~200-year recurrence), scale 1:80,000.
-      Source table stormflo200ar_klimaarna ("today's climate", as opposed to the same
-      dataset's climaar2100/2150 projection tables, not used here).
-    methodology: >
-      Kartverket's own storm-surge model output, water level referenced to NN2000 (Norway's
-      vertical datum), delineated onto Kartverket's own elevation data. Distributed as a
-      PostGIS SQL dump (schema stormflohavniva_*), converted once to this GeoPackage by
-      preparation/convert_norway_stormflo.py (not part of the regular Snakemake DAG - run
-      manually/on-demand, like analysis/extract_country_population.py).
-    source_url: https://kartkatalog.geonorge.no/metadata/stormflo-og-havnivaa/fbb95c67-623f-430a-9fa5-9cfcea8366b3
-    date_retrieved: "2026-09-10"
-    source_license: NLOD (Norwegian Licence for Open Government Data)
-    source_version: "2026-09-06"   # dataset's own last-updated date per the Geonorge API
-    known_caveats: >
-      (1) Return-period mismatch: F2/~200yr compared against the model's RP100 - looser than
-      even France's vague "02Moy", see return_period above. (2) Vertical datum: real measured
-      NN2000->GOCO06s offset is -0.196 m mean (-0.334 to -0.006 m across Norway's latitude
-      range, via Kartverket's own HREF2018B grid) - given Norway's coastline is steep enough
-      that this translates to only ~2 m of horizontal boundary shift (~10 m displacement per
-      1 m of water level, measured from Kartverket's own nested hazard layers), this is 7% of
-      one DEM pixel and 50x below the vector_simplify_tolerance_m already accepted elsewhere -
-      measured and deliberately NOT corrected for.
-      (3) The SAME land-use masking that correctly excludes ~98% of the raw polygon's sea area
-      also masks ~51% of the genuine thin land-inundation strip (Norway's actual flooded land
-      is only ~0.2-2.1% of the raw polygon to begin with, and a coastal strip that narrow is
-      finer than Copernicus' 100 m resolution) - not Norway-specific (measured 97.8% for
-      Spain's own most-coastal feature too), but more consequential here given how thin
-      Norway's real flood extent is; effective benchmark-wet area is roughly ~1% of raw
-      polygon area. (4) Data-quality gap found in Bergen specifically: its four hazard layers
-      (mean-high-water/20yr/200yr/1000yr) have inconsistent feature counts (24/34/57/47) and
-      are not cleanly nested - real disagreement in Kartverket's own source data, unrelated to
-      anything this pipeline does, large enough to dominate the datum signal there.
-
-# -- Denmark (DEN) -------------------------------------------------------------
-# Danish "Oversvommelsesfare" (flood hazard) national flood-depth rasters,
-# downloaded 2026-09 from Statens IT's SFTP portal (see source_url). Two hazard
-# categories: "Hav" (sea/coastal, 9 return periods) and "Vandlob" (watercourse/
-# fluvial, 4 return periods) - only Hav is used (hazard_type: coastal; Vandlob
-# would be fluvial, not downloaded/cataloged).
-#
-# RasterDataset, NOT GeoDataFrame - the first raster benchmark this pipeline
-# supports (added 2026-09: BenchmarkSpec.wet_values/depth_threshold_m,
-# src/validation.py::read_benchmark_raster_fraction, and a data_type dispatch in
-# validate_country_national_coverage - GeoDataFrame benchmarks are unaffected).
-# Original per-RP files (confirmed via each .tif.xml's own ArcGIS rename lineage,
-# e.g. "H100_2023_dyb_5m.tif" - "dyb" = depth) are CONTINUOUS water depth in
-# metres at 5m resolution, EPSG:25832 - not a categorical hazard-class raster, so
-# `depth_threshold_m` (not `wet_values`) is used: any pixel with a real recorded
-# depth above threshold counts as benchmark-wet, nodata (the vast majority of
-# each file - real coastal flooding is a thin fringe within a national bounding
-# box, same shape as Norway/Finland) counts as not-wet.
-#
-# NOTE ASCII-only path: the original folder/file names contain "ø"/"å"
-# (Oversvømmelsesfare, hav/år) - hydromt's data_catalog reader opens this yml
-# with the platform default encoding (cp1252 on Windows), which would silently
-# mis-decode those bytes and break the actual file path used to open the
-# raster (not just cosmetic mangling the way it is for meta text) - the
-# RP100 file was renamed/moved to
-# DNK/coastal/Oversvommelsesfare_hav_100ar.tif (ASCII transliteration) rather
-# than referenced at its original location. Only RP100 was renamed - the other 8
-# return periods (and all of Vandlob) are still at their original accented paths,
-# unused by this catalog and untouched. The top-level folder itself was also
-# renamed DEN -> DNK (2026-09, alongside the country_iso fix below) for
-# consistency with every other country's folder matching its real ISO code.
-#
-# Scale/scope: RP100 only for now (matches every other country's convention);
-# Denmark's return periods (10/20/50/100/200/500/1000/5000/10000) overlap GFM's
-# own COAST-RP return periods more closely than any other country's benchmark so
-# far (10/50/100/200~250/500/1000 all near-exact matches) - a real opportunity
-# for a multi-RP comparison later, not built this session (validate_country.py's
-# single global val_cfg['return_period'] would need per-benchmark RP-matching
-# logic first, same open item already noted for Finland).
-denmark_stormsurge_national:
-  data_type: RasterDataset
-  driver: raster
-  path: DNK/coastal/Oversvommelsesfare_hav_100ar.tif
-  crs: 25832   # ETRS89 / UTM zone 32N - projected, same handling as Norway (25833) and Finland (3067)
-  filesystem: local
-  meta:
-    category: flood_hazard_benchmark
-    country: Denmark
-    country_iso: DNK   # real ISO 3166-1 alpha-3 code - confirmed 2026-09 against this
-    # pipeline's own FLOPROS_NL_geogunit_107.xlsx ISO column ("DEN" is not a valid ISO-3
-    # code at all, just a common sports/FIFA abbreviation - using it silently zeroed every
-    # metric via read_country_mask finding no matching geogunit cells, not a crash)
-    hazard_type: coastal
-    return_period: 100   # real value - original filename "H100_2023_dyb_5m.tif" confirms RP100, 2023 vintage
-    variable: extent
-    coverage: national
-    depth_threshold_m: 0.0   # any pixel with a real recorded depth (i.e. not nodata) counts as
-    # benchmark-wet - the source's own hydraulic model already decided what "flooded" means at
-    # 5m resolution; this pipeline doesn't re-threshold a deeper cutoff on top of that.
-    regions:
-      mainland: [7.82, 54.24, 15.78, 57.96]   # the Hav RP100 raster's own real bounds (EPSG:25832
-      # 441585/6049785/893020/6402300) reprojected to 4326 with a small pad - same bbox-can-
-      # overlap-a-neighbour caveat as Norway/Finland's own mainland regions (Denmark borders
-      # Germany and faces Sweden/Norway across narrow straits) - validate_country_national_
-      # coverage's read_country_mask step already handles this generically, no extra code needed.
-    description: >
-      Danish national coastal ("Hav") flood hazard depth raster, RP100, 5m resolution,
-      continuous water depth in metres (not categorical) - covers the entire Danish
-      coastline at fine resolution within one national bounding box.
-    source_url: https://sftp.statens-it.dk/public/folder/sudeyofd-echpkegqfxhbg/Plantrin%201%20National%20data%202024
-    date_retrieved: "2026-09-15"
-    source_license: <to confirm - Danish state data portal terms, see the download portal>
-    known_caveats: >
-      (1) First raster benchmark in this pipeline - the comparison code (read_benchmark_raster_
-      fraction) is new 2026-09, proven on this one real run, not battle-tested across many
-      countries the way the vector path is. (2) Extent only (depth_threshold_m=0, i.e. "any
-      recorded depth") - a genuine depth-vs-depth comparison is possible given this source's
-      continuous values (unlike every other country's categorical/binary benchmark) but was not
-      built this session - a real future opportunity, not a limitation of the source data itself.
-      (3) Only RP100 wired in despite Denmark having the widest RP overlap with GFM's own
-      COAST-RP scenarios of any country so far - see scope note above. (4) Defences / wave
-      run-up not independently verified for this benchmark's methodology - same caution as
-      every other country (Spain §2.1, France §2.2, Finland §2.4).
+# the full field reference. National-map validation targets Wales, Scotland,
+# England (GBR) and New Brunswick (CAN); the California/SF Bay comparison has no
+# catalog entry (it uses a standalone script).
 
 # -- Wales (part of GBR) -------------------------------------------------------
 # Natural Resources Wales "NRW_FLOODZONE_SEAS" (coastal/tidal flood zones),
 # downloaded 2026-09-30 via NRW's own WFS (datamap.gov.wales, see url.txt/
 # wfsrequest.txt alongside the shapefile) - 30,743 features, ALL valid
-# geometries (no buffer(0) repair needed, unlike France/Spain), EPSG:27700.
+# geometries (no buffer(0) repair needed), EPSG:27700.
 # Two nested risk classes ("Flood Zone 2" / "Flood Zone 3", the same
 # EA/NRW-wide convention used across Great Britain) spanning Wales' entire
 # coastal bounding box - this is a comprehensive national planning product,
-# not a selectively-surveyed subset like Spain's ARPSI or France's TRI -
-# coverage: national (same architecture as Norway/Denmark/Finland), NOT
-# item 11's partial-coverage study-area path.
+# not a selectively-surveyed subset - coverage: national.
 #
 # country_iso is "GBR" (Wales has no ISO-3166-1 code of its own) - but
 # read_country_mask's normal ISO-string lookup would then ALSO match
@@ -491,13 +50,13 @@ wales_nrw_floodzone_seas:
     hazard_type: coastal
     return_period: 200   # real value - "Flood Zone 3" is NRW's undefended 0.5% AEP (1-in-200)
     # coastal extent, the closer analog to the model's RP100 of the two available classes
-    # (Zone 2's own upper bound is the rarer 0.1% AEP / 1-in-1000 extent) - same convention
-    # as Norway's F2/~200yr mismatch, see known_caveats.
+    # (Zone 2's own upper bound is the rarer 0.1% AEP / 1-in-1000 extent) - a real,
+    # documented return-period mismatch, see known_caveats.
     variable: extent
     coverage: national
-    comparison_return_periods: [100, 250]   # same ~200yr-vs-native-RP100/RP250
-    # mismatch as Norway/Scotland (return_period above) - report the model's own real,
-    # simulated return periods only, not an estimated intermediate one.
+    comparison_return_periods: [100, 250]   # ~200yr benchmark bracketed by the model's
+    # native RP100/RP250 (same as Scotland; return_period above) - report the model's own
+    # real, simulated return periods only, not an estimated intermediate one.
     attribute_filter: {risk: "Flood Zone 3"}
     regions:
       wales: [-5.45, 51.30, -2.55, 53.50]   # real data bounds (EPSG:4326, from the
@@ -510,8 +69,8 @@ wales_nrw_floodzone_seas:
       # bbox by validate_country_national_coverage, so these rows are NOT a
       # disjoint partition of wales - severn_estuary/menai_strait cells are
       # scored twice, once under "wales" and once under their own name; do not
-      # sum region rows for a country total here the way Spain's mainland +
-      # canary_islands can be summed). Each region's bbox is the working read
+      # sum region rows for a country total here the way disjoint regions can be
+      # summed). Each region's bbox is the working read
       # extent, further masked to real Wales territory via geogunit_ids above -
       # menai_strait's latitude range as given by the user (53.05-53.06, ~1.1km)
       # was confirmed a typo for 53.05-53.26 (matches the strait's real ~21km
@@ -533,7 +92,7 @@ wales_nrw_floodzone_seas:
     source_license: <to confirm - Natural Resources Wales open data terms>
     known_caveats: >
       (1) Return-period mismatch: Zone 3's 0.5% AEP (~200yr) compared against the model's
-      RP100, same spirit as Norway's F2 mismatch - see return_period above. (2) Whether
+      RP100 - see return_period above. (2) Whether
       NRW's Zone 2/Zone 3 polygons are nested (Zone 2 encloses Zone 3) or mutually
       exclusive adjacent bands was NOT independently verified against NRW's own published
       methodology this session - attribute_filter keeps Zone 3 only either way, which is
@@ -542,97 +101,7 @@ wales_nrw_floodzone_seas:
       benchmark is the first sub-national-only national-coverage entry in this catalog) -
       see the file-header comment for how it was derived and verified. (4) Defences / wave
       run-up not independently verified for this benchmark's methodology - same caution as
-      every other country (Spain §2.1, France §2.2, Finland §2.4, Norway §2.3).
-
-# -- Finland (FIN) -------------------------------------------------------------
-# SYKE (Finnish Environment Institute) tulvavaaravyohykkeet - perusskenaariot
-# (flood hazard zones - basic scenarios), sea/coastal ("meri") flooding, downloaded
-# 2026-09 from https://ckan.ymparisto.fi/dataset/tulvavaaravyohykkeet-perusskenaariot-
-# flood-hazard-zones-basic-scenarios.
-#
-# Single GeoPackage, 20.3 GB, 8 named sub-areas ("kohde") x 8 return-period layers
-# (each ~4-5.6M features - a very fine lidar-derived grid-cell mesh, NOT dissolved
-# zones). Real investigation 2026-09 found kohdenro=133 ("Rannikkoalueen
-# meritulvakartta" - "coastal area sea flood map") alone spans nearly the entire
-# Finnish coast (40,258 km2 bbox, ~3.8M of the ~4.0M total RP100 features) and
-# genuinely spatially overlaps the other 7 named sub-areas (confirmed via a real
-# rtree-index bbox query, e.g. Naantali's own small bbox contains BOTH kohdenro=76's
-# own 1178 detailed features AND 347 of kohdenro=133's own features covering the same
-# ground) - the 7 smaller city-scale maps (Naantali/Hamina-Kotka/Rauma/Loviisa/
-# Helsinki-Espoo/Turku-Raisio/Kemi) are more detailed LOCAL alternatives, not
-# additional un-covered ground, so this pipeline uses kohdenro=133 only
-# (coverage: national, same architecture as Norway - see caveats doc). Loading a
-# 3.8M-feature single benchmark fully into memory (what load_benchmark_full/
-# validate_country_national_coverage both do today) is untested at this scale -
-# flagged as an open risk in the caveats doc, not resolved by this catalog wiring.
-#
-# Depth classification (`syvvyohluokka_id`, joined via domainmaartlvsyvyystaulu in
-# the source - not re-derived here, English values written directly): 0=dry land
-# (excluded), 1-5=depth bands 0-0.5/0.5-1/1-2/2-3/>3m, 99=permanent water body
-# (excluded - explicit in the source data, unlike Norway where this had to be
-# inferred from an external land-use mask). Filtering is pushed down to the GDAL/
-# SQLite read itself via `driver_kwargs.where` (confirmed working 2026-09: a real
-# `kohdenro=100 AND syvvyohluokka_id IN (1,2,3,4,5)` read returned 50,451 features
-# in 13.6s directly from the 20 GB file - no separate conversion/preprocessing file
-# needed).
-#
-# `variable: extent` only (not depth) for now - coverage=national depth-band
-# comparison has no chunk-based code path yet (validate_country_depth_bands raises
-# NotImplementedError for any non-partial-coverage benchmark by design - see its own
-# docstring); would need genuinely new code mirroring validate_country_national_
-# coverage's chunk-streaming architecture for depth bands specifically. Not built
-# this session - flagged as a known gap.
-finland_stormsurge_national:
-  data_type: GeoDataFrame
-  driver: vector
-  driver_kwargs:
-    layer: maartlvmeri0100syv
-    where: "kohdenro=133 AND syvvyohluokka_id IN (1,2,3,4,5)"
-  path: FIN/tulvavaaravyohykkeet_meri.gpkg
-  crs: 3067   # ETRS89 / TM35FIN - projected, same handling as Norway's 25833
-  filesystem: local
-  meta:
-    category: flood_hazard_benchmark
-    country: Finland
-    country_iso: FIN
-    hazard_type: coastal
-    return_period: 100   # real value - toistuvuus=100 confirmed directly against the
-    # source layer (layer name maartlvmeri0100syv, attribute toistuvuus all =100)
-    variable: extent
-    coverage: national
-    regions:
-      mainland: [17.3, 59.3, 28.3, 66.2]   # kohdenro=133's own real bounds (EPSG:3067
-      # 65000/6624000/548000/7314000) reprojected to 4326 with a small pad - same
-      # bbox-can-overlap-a-neighbour caveat as Norway's mainland region (Finland
-      # borders Sweden/Norway/Russia and the Gulf of Finland faces Estonia) -
-      # validate_country_national_coverage's own country-mask step (read_country_mask)
-      # already handles this generically, no extra code needed.
-    description: >
-      SYKE sea/coastal flood hazard zone polygons (kohdenro=133, "Rannikkoalueen
-      meritulvakartta"), RP100 basic scenario, covering essentially the entire
-      Finnish coastline at fine (lidar-grid) resolution. Extent-only (union of
-      depth classes 1-5) - see known_caveats for the depth-band gap and the
-      unused, more-detailed 7 city-scale sub-maps this pipeline does not read.
-    source_url: https://ckan.ymparisto.fi/dataset/tulvavaaravyohykkeet-perusskenaariot-flood-hazard-zones-basic-scenarios
-    date_retrieved: "2026-09-15"
-    source_license: <to confirm - SYKE/ymparisto.fi open data terms, see the download portal>
-    known_caveats: >
-      (1) National coverage assumed, not independently confirmed beyond kohdenro=133's
-      own bbox/feature-count dominance - see the file-header comment above for the real
-      overlap check performed. (2) No depth-band comparison yet (extent only) - the
-      chunk-based national-coverage path this benchmark requires has no depth-band
-      implementation (validate_country_depth_bands is partial-coverage-only by design).
-      (3) Defences are explicit and precisely quantifiable here (unlike every other
-      country so far, where this has been an open, unmeasured caveat): at RP100,
-      12.57 km2 of kohdenro=133's raw wet area (1573.75 km2, 0.80%) is reclassified as
-      "protected by fixed structures" (syvsuojluokka_id=12) when Finland's own real
-      flood defenses are accounted for - not applied to this comparison (this pipeline
-      compares raw, undefended extent, same convention as every other country), but now
-      a real measured number instead of an unknown risk. (4) The 7 detailed city-scale
-      sub-maps (kohdenro 76/97/98/100/101/145 + Naantali) are NOT read by this catalog
-      entry (see file-header comment) - if their local detail ever matters more than
-      kohdenro=133's coarser coverage for a specific city, they are a real, already-
-      identified upgrade path, not a data gap.
+      every benchmark (see docs/methods_04b_MapsValidation.md).
 
 # -- Scotland (part of GBR) -----------------------------------------------------
 # SEPA (Scottish Environment Protection Agency) "FRM_Coastal_Flood_Hazard_Layers_v3_0"
@@ -640,12 +109,12 @@ finland_stormsurge_national:
 # (Scotland) Act 2009 statutory coastal flood hazard maps, issued 2025-02-25. 9 layers
 # (EXTENT/DEPTH x H/M/L/M_CC); EXTENT_* layers are small (16-17 MultiPolygon features
 # each, one per SEPA mapping region, all homogeneous attributes - no attribute_filter
-# needed, same "already pre-split per file" pattern as Finland/Wales). Probability
+# needed - each file is already pre-split). Probability
 # bands confirmed 2026-10-01 directly from "Coastal Flood Map v3.0 - Dataset
 # Documentation.pdf" (Guidance Documents/, extracted via pdftotext): High=10yr,
 # Medium=200yr, Low=1000yr, Medium+Climate Change(2080,high emissions)=200yr. Medium
 # (EXTENT_M, present-day) is used here as the closest analog to the model's RP100 -
-# same convention/mismatch as Wales' Zone 3 (~200yr) and Norway's F2 (~200yr).
+# same convention/mismatch as Wales' Zone 3 (~200yr).
 #
 # country_iso is "GBR" (Scotland has no ISO-3166-1 code of its own) - same mechanism
 # as Wales (see that entry's header comment): geogunit_ids=[3366] (Scotland's own WRI
@@ -668,16 +137,16 @@ scotland_sepa_coastal_m:
     hazard_type: coastal
     return_period: 200   # real value - "Medium" likelihood, present-day scenario,
     # confirmed via the dataset's own documentation PDF (see file-header comment) -
-    # same ~200yr mismatch-vs-RP100 convention as Wales/Norway.
+    # same ~200yr mismatch-vs-RP100 convention as Wales.
     variable: extent
     coverage: national
     # No attribute_filter: this layer (FRM_FH_COASTAL_EXTENT_M) is already pre-split
     # to PROB="M"/SCENARIO="Present Day" throughout (confirmed 2026-10-01: all 16
     # rows share identical MAP_TYPE/SOURCE/METRIC/PROB/BAND_DESC/GRIDCODE/SCENARIO).
-    comparison_return_periods: [100, 250]   # same ~200yr-vs-native-RP100/RP250
-    # mismatch as Norway (return_period above) - report the model's own real,
-    # simulated return periods only, not an estimated intermediate one (see
-    # Norway's own comparison_return_periods comment).
+    comparison_return_periods: [100, 250]   # ~200yr benchmark bracketed by the
+    # model's native RP100/RP250 (same as Wales; return_period above) - report the
+    # model's own real, simulated return periods only, not an estimated
+    # intermediate (interpolated) one.
     regions:
       scotland: [-8.35, 54.54, -0.70, 60.87]   # real data bounds (EPSG:27700
       # 54235/529747/470825/1220802, reprojected to 4326 with a small pad) - the
@@ -704,10 +173,10 @@ scotland_sepa_coastal_m:
     source_version: "v3_0"
     known_caveats: >
       (1) Return-period mismatch: "Medium" (~200yr) compared against the model's
-      RP100, same spirit as Wales Zone 3/Norway F2 - see return_period above.
+      RP100, same as Wales Zone 3 - see return_period above.
       (2) Defences / wave run-up not independently verified for this benchmark's
-      methodology - same caution as every other country (Spain §2.1, France §2.2,
-      Finland §2.4, Norway §2.3, Wales §2.6). (3) geogunit_ids=[3366] uses the
+      methodology - same caution as every benchmark (cf. Wales point (4)).
+      (3) geogunit_ids=[3366] uses the
       same new sub-national masking mechanism introduced for Wales - see that
       entry's known_caveats point (3) for how it was derived/verified. (4) Only
       the present-day Medium layer is wired in; High(~10yr)/Low(~1000yr)/Medium+CC
@@ -722,9 +191,11 @@ scotland_sepa_coastal_m:
 # bbox request was tried first and never returned even one page; confirmed live
 # that individual ~1deg tiles over dense coastal stretches alone can take 1-3
 # minutes, so a single request over the whole country was never going to finish
-# in a reasonable time). Already pre-filtered client-side to flood_source="sea"
-# and origin="modelled" (excludes river/rainfall-model/recorded variants, not
-# comparable to this model's own pure coastal-storm-surge physics), then split by
+# in a reasonable time). Already pre-filtered client-side to flood_source in
+# {"sea", "river and sea"} (the latter is the estuarine/tidal-river class; an
+# earlier sea-only download wrongly dropped every estuary) and origin="modelled"
+# (excludes plain river/rainfall-model/recorded variants, not comparable to this
+# model's own pure coastal-storm-surge physics), then split by
 # flood_zone into its own file - no attribute_filter needed here, unlike Wales'
 # single-layer source.
 # country_iso is "GBR" (England has no ISO-3166-1 code of its own) - same
@@ -745,7 +216,7 @@ england_ea_floodzone3_sea:
     geogunit_ids: [3364]
     hazard_type: coastal
     return_period: 200   # Flood Zone 3 = >=1-in-200yr (0.5% AEP) high-probability extent -
-    # same convention as Wales Zone 3/Scotland Medium/Norway F2: no exact native model RP
+    # same convention as Wales Zone 3/Scotland Medium: no exact native model RP
     # (RP100/RP250 bracket it), see comparison_return_periods.
     variable: extent
     coverage: national
@@ -767,9 +238,9 @@ england_ea_floodzone3_sea:
     source_license: Open Government Licence 3.0 (Environment Agency / Defra attribution required)
     known_caveats: >
       (1) Return-period mismatch: Zone 3's 0.5% AEP (~200yr) compared against the
-      model's RP100/RP250 bracket, same spirit as Wales/Scotland/Norway - see
+      model's RP100/RP250 bracket, same as Wales/Scotland - see
       return_period above. (2) Defences / wave run-up not independently verified
-      for this benchmark's methodology - same caution as every other country.
+      for this benchmark's methodology - same caution as every benchmark.
       (3) geogunit_ids=[3364] uses the same sub-national masking mechanism as
       Wales/Scotland - see Wales' own known_caveats point (3) for how the WRI
       geogunit_107 lookup was derived/verified. (4) Fetched via 63 separate ~1deg
@@ -832,8 +303,7 @@ england_ea_floodzone2_sea:
 # used here (variable: extent only). Schema is just Id/gridcode/geometry - no
 # date/source/hazard-type attribute despite the dataset's own readme stating it
 # "includes both inland and coastal flood hazard mapping" - coastal vs inland
-# CANNOT be separated in this delivery (same limitation class as Denmark/Finland's
-# combined-hazard national rasters/layers).
+# CANNOT be separated in this delivery.
 #
 # country_iso is "CAN" (New Brunswick has no ISO-3166-1 code of its own) - same
 # mechanism as Wales/Scotland: Canada has 15 of its own geogunit_107 sub-units
@@ -883,7 +353,7 @@ new_brunswick_present_day_1in100yr:
       # Bay of Fundy, both already real-data spot-checked - see file-header comment.
       # Disjoint from each other (two separate estuaries, neither contains the
       # other) - validate_country.py's own _blend_regions sums them for the "ALL"
-      # row, same as Spain's mainland/canary_islands. NO whole-province
+      # row. NO whole-province
       # "new_brunswick" region here - deliberately removed 2026-10 (profiled
       # directly: the whole-province bbox's own spatial-index query against this
       # benchmark's 784,805-feature RasterToPolygon shapefile returns 783,560

@@ -11,7 +11,7 @@ Tiles are distributed by LPT (Longest Processing Time first) greedy
 bin-packing on ESTIMATED cost, not round-robin or a contiguous slice: each
 candidate's pixel count (`area_deg2 * 3600**2` from domain_tiles_global.
 gpkg's own bbox, EPSG:4326 ~1-arcsecond-native DeltaDTM tiles - the SAME
-proxy select_calibration_tiles.py already uses/trusts for this) stands in
+proxy select_study_candidate_tiles.py already uses/trusts for this) stands in
 for its compute cost, tiles are sorted largest-first, and each one goes to
 whichever node currently has the LOWEST accumulated cost so far - the
 standard, simple, effective heuristic for balanced multiway partitioning
@@ -34,7 +34,7 @@ multi-tile-capable via --tile-ids id1 id2 ...) - `set -uo pipefail`, not
 doesn't abort the rest of that node's own slice.
 
 wet_tiles_selected.txt is deliberately NEVER written by these node
-processes (see test_sweep_budget_calibration.py's own
+processes (see run_sweep_budget_study.py's own
 --write-wet-tiles-summary flag, off by default here) - build it with
 aggregate_wet_tiles.py once every node's CSVs are on disk.
 
@@ -65,13 +65,16 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import atomic_write, load_config, retry_transient_io  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sfincs_tiles"))
+from gfm_config import hydrax_paths  # noqa: E402  (Hydrax python path: sfincs_tiles/hydrax_env.sh)
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 N_NODES_DEFAULT = 30
 PARTITION_DEFAULT = "1vcpu"
 MEM_DEFAULT = "7G"
 CPUS_PER_TASK_DEFAULT = 1
-GFM_PY_LINUX = "/u/schlumbe/.conda/envs/gfm/bin/python"
+GFM_PY_LINUX = hydrax_paths()["GFM_PYTHON"]
 
 # Empirically measured on real tiles spanning 196K-18.9M cells (within ~10% of each other) -
 # used only for a worst-case --time ESTIMATE, not for the bin-packing itself (pixel count alone
@@ -82,13 +85,13 @@ SWEEPS_PER_ROUND = 4
 
 SCRIPTS = {
     "sweep_budget": {
-        "script_name": "test_sweep_budget_calibration.py",
+        "script_name": "run_sweep_budget_study.py",
         "out_subdir": "sweep_budget",
         "worst_case_sweeps_per_tile": 100 * SWEEPS_PER_ROUND,  # MAX_ROUNDS_CEILING - zero early exit ever
         "default_tile_ids_file": "candidate_tiles.txt",
     },
     "obstacle_coupling": {
-        "script_name": "test_obstacle_coupling_calibration.py",
+        "script_name": "run_obstacle_coupling_study.py",
         "out_subdir": "obstacle_coupling",
         # (max_outer+1) solves x inner_max_rounds rounds x 4 sweeps, at this study's own
         # 15/40 defaults (DEFAULT_MAX_OUTER/DEFAULT_INNER_MAX_ROUNDS) - zero early exit ever.
@@ -99,7 +102,7 @@ SCRIPTS = {
 
 
 def load_pixel_counts(tile_ids: list[str], domain_tiles_path: Path) -> dict[str, float]:
-    """tile_id (str) -> approx_px, same proxy select_calibration_tiles.py's
+    """tile_id (str) -> approx_px, same proxy select_study_candidate_tiles.py's
     own candidate-selection table already prints and trusts for this."""
     gdf = gpd.read_file(domain_tiles_path)
     bounds = gdf.geometry.bounds
@@ -206,9 +209,9 @@ def main() -> None:
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
     retry_transient_io((study_root_local / spec["out_subdir"]).mkdir, parents=True, exist_ok=True)
 
-    # Same resolved_config.yml staging pattern as generate_calibration_array_job.py
-    # (config_hpc.yml is a git-ignored, Windows-machine-only file - doesn't exist on
-    # the HPC side) and generate_v2_batch_jobs.py's own SFINCS-batch precedent.
+    # resolved_config.yml staging pattern (config_hpc.yml is a git-ignored,
+    # Windows-machine-only file - doesn't exist on the HPC side); the earlier job
+    # generators that used it first have since been removed (see git history).
     resolved_config_path = study_root_local / "resolved_config.yml"
     atomic_write(str(resolved_config_path), lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
     print(f"Wrote {resolved_config_path} (Linux path view, for --config on every node)")

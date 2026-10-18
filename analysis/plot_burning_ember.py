@@ -26,7 +26,7 @@ y-tick per highlight year, with SSPs clustered per year via small offsets and
 identified by colour only.
 
 Usage:
-    python snakemake_workflow/analysis/plot_burning_ember.py \\
+    python analysis/plot_burning_ember.py \\
         --config  snakemake_workflow/config/config.yml \\
         --expdir  D:/GFM/merged_results/exposure \\
         [--outdir D:/GFM/figures]
@@ -46,7 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pathways import slr_pathway  # noqa: E402
 from population_extension import extend_growth_factors  # noqa: E402
-from visualization import (  # noqa: E402
+from analysis_figures import (  # noqa: E402
     load_growth_matrix_csv,
     build_growth_matrix_from_grid,
     draw_ember_panel,
@@ -120,16 +120,46 @@ def plot_top_countries_ember(
     growth_df=None, slr_traj_full: pd.DataFrame | None = None, ssps: list[str] | None = None,
     ssp_rcp_codes: dict | None = None,
 ) -> None:
-    """Grid of scenario-neutral ember panels (no SSP trajectories, no SLR
-    uncertainty) for the `n` countries with the highest EAI at `rank_slr_mm`
-    SLR (nearest grid point) and today's population (growth 0 %) in
-    `growth_matrix_path` - the no-adaptation
-    (baseline) growth matrix. All panels share one linear colour scale from 0
-    to `vmax` (higher values saturate - the colorbar's arrow) and one colorbar,
-    with a contour line every vmax / 10. If `growth_df` and `slr_traj_full`
-    are given, each panel also shows every SSP-RCP's pathway to 2100 (median
-    SLR vs the country's own SSP population change), with 2050 and 2100
-    marked."""
+    """Plot a grid of scenario-neutral ember panels for the top-N countries by EAI.
+
+    Selects the `n` countries with the highest EAI at `rank_slr_mm` SLR
+    (nearest grid point in `growth_matrix_path`) and today's population
+    (growth 0%), then draws one no-adaptation ember panel per country on a
+    shared linear colour scale from 0 to `vmax` (higher values saturate) with
+    a contour every ``vmax / 10``. If `growth_df` and `slr_traj_full` are
+    given, each panel also overlays every SSP-RCP's pathway to 2100 (median
+    SLR vs the country's own SSP population change), marking 2050 and 2100.
+    Saves the figure to `out_path`.
+
+    Parameters
+    ----------
+    growth_matrix_path : Path
+        CSV path for the no-adaptation (baseline) growth matrix.
+    iso_to_name : dict[str, str]
+        ISO3 code to country name, for panel titles.
+    viz : dict
+        ``visualization`` config section (colormap, dpi, SSP colours, etc.).
+    out_path : Path
+        PNG output path.
+    n : int, default 12
+        Number of countries to plot.
+    ncols : int, default 4
+        Panels per row.
+    vmax : float, default 1e7
+        Shared colour-scale maximum (people).
+    rank_slr_mm : float, default 1400.0
+        SLR (mm) at which countries are ranked by EAI.
+    growth_df : optional
+        SSP growth-factor table (from `load_ssp_growth_factors`); enables the
+        SSP pathway overlay when given together with `slr_traj_full`.
+    slr_traj_full : pd.DataFrame or None, optional
+        Full SLR trajectory table (p17/p50/p83 per SSP), used for the pathway
+        overlay's median SLR.
+    ssps : list[str] or None, optional
+        SSP codes to overlay.
+    ssp_rcp_codes : dict or None, optional
+        SSP code to display label mapping, for the pathway legend.
+    """
     eai_grid, slr_mm, growth_fracs = load_growth_matrix_csv(growth_matrix_path, window=viz.get("ember_display"))
     g0 = min(growth_fracs, key=abs)
     slr_rank = min(slr_mm, key=lambda v: abs(v - rank_slr_mm))
@@ -184,14 +214,49 @@ def plot_country_set_ember(
     variants: dict[str, dict], to_year: int = 2150, ncols: int = 3, vmax: float = 1e7,
     window: dict | None = None, ssp_rcp_codes: dict | None = None,
 ) -> None:
-    """No-adaptation ember panels for a hand-picked set of countries (in the
-    given order), one shared linear colour scale 0..`vmax` with a contour every
-    vmax / 10, and each SSP-RCP's pathway: median SLR vs the country's SSP
-    population change, solid to 2100 (circles at 2050 and 2100), then one
-    branch per population continuation variant (src/population_extension.py)
-    to `to_year` (square). Each panel's y-axis covers its own pathways, so a
-    branch beyond the matrix's growth range stays visible (blank background
-    there). `window` crops the matrix (visualization.ember_display keys)."""
+    """Plot no-adaptation ember panels for a hand-picked set of countries with post-2100 pathways.
+
+    Draws one panel per country (in the given order) on a shared linear
+    colour scale from 0 to `vmax` with a contour every ``vmax / 10``, and
+    overlays each SSP-RCP's pathway (median SLR vs the country's SSP
+    population change): solid with circles at 2050/2100 to 2100, then one
+    dashed/dotted branch per population-continuation variant (see
+    `extend_growth_factors`) out to `to_year` (square marker). Each panel's
+    y-axis is sized to its own pathways so branches beyond the matrix's
+    growth range stay visible. Saves the figure to `out_path`.
+
+    Parameters
+    ----------
+    growth_matrix_path : Path
+        CSV path for the no-adaptation (baseline) growth matrix.
+    iso_to_name : dict[str, str]
+        ISO3 code to country name, for panel titles.
+    viz : dict
+        ``visualization`` config section (colormap, dpi, SSP colours, etc.).
+    out_path : Path
+        PNG output path.
+    countries : list[str]
+        ISO3 codes to plot, in display order.
+    growth_df : pd.DataFrame
+        SSP growth-factor table used to extend pathways past 2100.
+    slr_traj_full : pd.DataFrame
+        Full SLR trajectory table (p50 per SSP) for the pathway x-axis.
+    ssps : list[str]
+        SSP codes to overlay.
+    variants : dict[str, dict]
+        Population-continuation variant name to spec (passed to
+        `extend_growth_factors`), one line style per variant.
+    to_year : int, default 2150
+        Last year drawn on the post-2100 pathway branches.
+    ncols : int, default 3
+        Panels per row.
+    vmax : float, default 1e7
+        Shared colour-scale maximum (people).
+    window : dict or None, optional
+        Matrix crop window (``visualization.ember_display`` keys).
+    ssp_rcp_codes : dict or None, optional
+        SSP code to display label mapping, for the pathway legend.
+    """
     eai_grid, slr_mm, growth_fracs = load_growth_matrix_csv(growth_matrix_path, window=window)
     countries = [i for i in countries if i in eai_grid.index]
     colors = viz.get("ssp_colors") or {}
@@ -256,11 +321,31 @@ def plot_country_selection_ember(
     growth_matrix_path: Path, iso_to_name: dict[str, str], viz: dict, out_path: Path,
     countries: list[str], ncols: int = 4, n_contours: int = 5,
 ) -> None:
-    """Scenario-neutral no-adaptation ember panels for hand-picked countries of
-    similar EAI magnitude, in the given order, sharing one linear colour scale
-    (0 to the largest EAI among them, rounded up) and one colorbar so the
-    panels differ only in the SHAPE of the response to SLR and population;
-    `n_contours` labelled contour lines."""
+    """Plot scenario-neutral ember panels for hand-picked countries of similar EAI magnitude.
+
+    Draws one no-adaptation panel per country (in the given order) sharing a
+    single linear colour scale (0 to the largest EAI among them, rounded up
+    to a clean multiple of `n_contours`) and one colorbar, so panels differ
+    only in the shape of their response to SLR and population growth. Saves
+    the figure to `out_path`.
+
+    Parameters
+    ----------
+    growth_matrix_path : Path
+        CSV path for the no-adaptation (baseline) growth matrix.
+    iso_to_name : dict[str, str]
+        ISO3 code to country name, for panel titles.
+    viz : dict
+        ``visualization`` config section (colormap, dpi, etc.).
+    out_path : Path
+        PNG output path.
+    countries : list[str]
+        ISO3 codes to plot, in display order.
+    ncols : int, default 4
+        Panels per row.
+    n_contours : int, default 5
+        Number of labelled contour lines (also sets the rounded vmax).
+    """
     eai_grid, slr_mm, growth_fracs = load_growth_matrix_csv(growth_matrix_path, window=viz.get("ember_display"))
     countries = [i for i in countries if i in eai_grid.index]
     matrices = {iso: build_growth_matrix_from_grid(eai_grid.loc[[iso]], slr_mm, growth_fracs) for iso in countries}
@@ -314,6 +399,15 @@ def _make_ember(
 
 
 def main() -> None:
+    """Parse CLI arguments and write the configured burning-ember figures.
+
+    Reads SLR trajectories, SSP growth factors and per-scenario growth-matrix
+    CSVs from ``--expdir``, then writes whichever figures
+    ``visualization.burning_ember_figures`` enables (top-N countries, a
+    hand-picked selection, a hand-picked country set with post-2100
+    extensions, and/or the full global + per-country set per scenario) to
+    ``--outdir``.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_*_growth_matrix.csv files")

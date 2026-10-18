@@ -149,18 +149,54 @@ def build_combined_elevation(
     lake_river_min_elevation_m: float = LAKE_RIVER_MIN_ELEVATION_M,
     land_min_elevation_m: float = LAND_MIN_ELEVATION_M,
 ) -> tuple[np.ndarray, dict]:
-    """Returns (combined_elevation_m, profile) on dem.tif's own grid.
+    """Build the combined elevation surface for one tile on dem.tif's own grid: DeltaDTM on land, MDT-corrected GEBCO on sea.
 
     Land cells use DeltaDTM's dem.tif value, floored at ``land_min_elevation_m``
-    (see LAND_MIN_ELEVATION_M). Lake/river cells are re-derived from nearby
-    valid land data (see _fill_lake_river_elevation, LAKE_RIVER_SMOOTH_WINDOW_M),
-    floored at ``lake_river_min_elevation_m``. Ocean cells use GEBCO's
-    bathymetry, reprojected onto this grid and corrected by adding the local
-    MDT (H_GOCO06s = H_MSL + MDT, see mdt.py) so both halves of the merged
-    surface share DeltaDTM's GOCO06s reference.
+    (see LAND_MIN_ELEVATION_M). Lake/river cells are re-derived from nearby valid
+    land data (see _fill_lake_river_elevation, LAKE_RIVER_SMOOTH_WINDOW_M), floored
+    at ``lake_river_min_elevation_m``. Ocean cells use GEBCO's bathymetry,
+    reprojected onto this grid and corrected by adding the local MDT
+    (H_GOCO06s = H_MSL + MDT, see mdt.py) so both halves of the merged surface
+    share DeltaDTM's GOCO06s reference, then clipped to [``min_bathymetry_m``,
+    ``max_ocean_elevation_m``] (default -10 to 0 m).
 
-    Ocean elevation is then clipped to [``min_bathymetry_m``, ``max_ocean_elevation_m``]
-    (default -10 to 0 m) - see MIN_BATHYMETRY_M and MAX_OCEAN_ELEVATION_M.
+    Parameters
+    ----------
+    dem_path : Path
+        Path to the tile's dem.tif (int16, centimetres, DeltaDTM).
+    mask_path : Path
+        Path to the tile's mask.tif, pixel-identical grid to `dem_path`.
+    gebco_path : Path
+        Path to the GEBCO bathymetry raster.
+    mdt_path : Path
+        Path to the MDT raster (see mdt.py).
+    mdt_variable : str, optional
+        Variable name in the MDT dataset, by default "mdt".
+    mdt_fallback_deg : float, optional
+        Search radius (degrees) for a valid MDT value near the tile centroid,
+        by default 3.0.
+    min_bathymetry_m : float, optional
+        Ocean elevation floor (m), by default MIN_BATHYMETRY_M (-10.0).
+    max_ocean_elevation_m : float, optional
+        Ocean elevation ceiling (m), by default MAX_OCEAN_ELEVATION_M (0.0).
+    lake_river_min_elevation_m : float, optional
+        Lake/river elevation floor (m), by default LAKE_RIVER_MIN_ELEVATION_M (0.0).
+    land_min_elevation_m : float, optional
+        Land elevation floor (m), by default LAND_MIN_ELEVATION_M (-15.0).
+
+    Returns
+    -------
+    tuple[np.ndarray, dict]
+        Combined elevation array (m, float) on dem.tif's grid, and a diagnostics
+        dict (profile, transform, crs, mdt_m, and per-category cell/floor/ceiling
+        counts).
+
+    Raises
+    ------
+    ValueError
+        If mask.tif's shape does not match dem.tif's, if the tile has no ocean
+        cells, or if no valid MDT value is found within `mdt_fallback_deg` of the
+        centroid.
     """
     with retry_transient_io(rasterio.open, dem_path) as src:
         dem_cm = src.read(1)
@@ -234,6 +270,7 @@ def build_combined_elevation(
 
 
 def main() -> None:
+    """Parse CLI arguments, build the combined elevation surface for one tile, print summary statistics, and write elevation_combined.tif."""
     import argparse
 
     _repo_root = Path(__file__).resolve().parent.parent

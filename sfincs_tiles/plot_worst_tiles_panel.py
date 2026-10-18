@@ -64,9 +64,25 @@ OFF_DOMAIN_COLOR = WATER_COLOR  # non-land (ocean/river/lake) - previously left 
 
 
 def build_classification(tile_dir: Path, friction_scale_factor: float) -> np.ndarray | None:
-    """4-way classification array at SFINCS's own native subgrid
-    resolution over SFINCS-active land (everything else masked), or None if
-    SFINCS / the eikonal at `friction_scale_factor` hasn't been run for this tile."""
+    """Classify SFINCS vs eikonal wet/dry agreement for one tile on SFINCS's native subgrid.
+
+    Parameters
+    ----------
+    tile_dir : Path
+        Tile directory containing ``sfincs_model/hmax_subgrid.tif``,
+        ``outputs/`` (eikonal raster) and ``inputs/mask.tif``.
+    friction_scale_factor : float
+        Friction scale factor identifying which eikonal raster to compare against.
+
+    Returns
+    -------
+    numpy.ndarray or None
+        4-way classification array (`DRY`/`MATCHED`/`EIKONAL_ONLY`/
+        `SFINCS_ONLY` codes) at SFINCS's own native subgrid resolution over
+        SFINCS-active land (everything else masked), or `None` if SFINCS or
+        the eikonal at `friction_scale_factor` hasn't been run for this
+        tile, or the two rasters' shapes don't match.
+    """
     hmax_subgrid_path = tile_dir / "sfincs_model" / "hmax_subgrid.tif"
     ek_path = eikonal_path(tile_dir / "outputs", friction_scale_factor)
     native_mask_path = tile_dir / "inputs" / "mask.tif"
@@ -182,6 +198,13 @@ def _make_panel(worst, base_dir: Path, out_path: Path, friction_scale_factor: fl
 
 
 def main() -> None:
+    """Parse CLI arguments and write the worst-tile CSI panels and selection CSV.
+
+    Ranks tiles by CSI at ``--friction-scale-factor``, builds the SFINCS-
+    and EA-bathtub-over-predicting worst-tile panels, and writes
+    ``worst_tiles_selection_fsf<X>.csv`` alongside the panel PNGs under
+    ``{base-dir-name}/figures``.
+    """
     repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(repo_root / "snakemake_workflow" / "config" / "config.yml"))

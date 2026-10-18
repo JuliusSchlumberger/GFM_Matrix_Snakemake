@@ -69,7 +69,7 @@ from exposure_analysis import (  # noqa: E402
     compute_retreat_capacity,
     protect_exposure_grid,
 )
-from visualization import plot_burning_ember  # noqa: E402
+from analysis_figures import plot_burning_ember  # noqa: E402
 
 GRID_SIZE = 100
 SEED = 42

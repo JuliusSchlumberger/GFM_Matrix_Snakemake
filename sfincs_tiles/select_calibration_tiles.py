@@ -64,8 +64,27 @@ CATEGORY_STYLE = {  # funnel stage -> (colour, label)
 
 
 def stratified_sample_exact(df: pd.DataFrame, n_target: int, grid_deg: float, seed: int) -> pd.DataFrame:
-    """Round-robin one tile at a time over shuffled lon/lat bins until
-    n_target is met."""
+    """Round-robin one tile at a time over shuffled lon/lat bins until n_target is met.
+
+    Spreads the sample evenly across lon/lat bins instead of drawing uniformly at
+    random, so sparse bins are not starved.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Candidate tiles with "lon" and "lat" columns.
+    n_target : int
+        Number of tiles to sample (the caller caps this to len(df)).
+    grid_deg : float
+        Lon/lat bin size in degrees.
+    seed : int
+        Seed for the per-bin and bin-order shuffles.
+
+    Returns
+    -------
+    pd.DataFrame
+        n_target rows of df, sorted by "tile_id".
+    """
     rng = np.random.default_rng(seed)
     df = df.copy()
     df["_bin"] = (np.floor(df["lon"] / grid_deg).astype(int).astype(str) + "_"
@@ -90,6 +109,21 @@ def _ids(path: Path) -> list[str]:
 
 
 def cmd_pool(args, root: Path, base: Path) -> None:
+    """Build the candidate tile pool and split it into interleaved shards.
+
+    Keeps the domain grid's hop_distance == 0 tiles, drops antimeridian-crossing
+    ones, and writes the full id list plus args.n_shards shard files for the
+    stage-1 screen jobs under base/candidates/.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed CLI args; uses args.n_shards.
+    root : Path
+        GFM data root (from the config); the domain tile grid is read from here.
+    base : Path
+        Calibration run's base directory; outputs go under base/candidates/.
+    """
     tiles = gpd.read_file(root / TILE_GRID)
     n_all = len(tiles)
     tiles = tiles[tiles["hop_distance"] == 0]
@@ -106,6 +140,23 @@ def cmd_pool(args, root: Path, base: Path) -> None:
 
 
 def screen_tile(tile_dir: Path) -> dict:
+    """Check one tile's production inputs and record pass/fail plus geometry stats.
+
+    A tile fails if mask.tif, tile_geometry.gpkg, or boundaries_RP100_SLR_0.gpkg is
+    missing from its inputs/, or if that boundary file has no stations.
+
+    Parameters
+    ----------
+    tile_dir : Path
+        Tile's model_outputs/{tile_id} directory.
+
+    Returns
+    -------
+    dict
+        "tile_id", "ok", "reason" always; when the inputs are present also "lon",
+        "lat" (bbox centre), "n_cells", "ocean_frac", "river_frac",
+        "n_boundary_points" (recorded for the selection figures only).
+    """
     tid = int(tile_dir.name)
     inputs = tile_dir / "inputs"
     for f in ("mask.tif", "tile_geometry.gpkg", "boundaries_RP100_SLR_0.gpkg"):
@@ -124,6 +175,22 @@ def screen_tile(tile_dir: Path) -> dict:
 
 
 def cmd_screen(args, root: Path, base: Path) -> None:
+    """Run screen_tile over one shard's tile ids and write the ids that passed.
+
+    Caches each tile's result as candidates/screen/{tile}.json (reused unless
+    args.overwrite), so a re-run after a crash resumes instead of re-screening.
+    A tile whose screening raises is recorded as screened out, not fatal.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed CLI args; uses args.tile_ids_file, args.out_ids, args.overwrite.
+    root : Path
+        GFM data root, used to locate each tile's model_outputs directory.
+    base : Path
+        Calibration run's base directory; per-tile JSON is cached under
+        base/candidates/screen/.
+    """
     out = base / "candidates" / "screen"
     out.mkdir(parents=True, exist_ok=True)
     passed = []
@@ -198,6 +265,25 @@ def _plot_histograms(funnel: pd.DataFrame, out: Path) -> None:
 
 
 def cmd_select(args, root: Path, base: Path) -> None:
+    """Classify every candidate, draw the final sample, and write selection outputs.
+
+    Merges screen results with the boundary-line builder's status/preflight outputs
+    to label each candidate (not_screened / screened_out / line_unsuitable /
+    preflight_failed / eligible / selected), then draws args.n_tiles eligible tiles
+    with stratified_sample_exact. Writes base/tile_ids.txt,
+    tile_selection_metadata.csv, candidates/candidate_funnel.csv,
+    tile_selection.gpkg, and figures/tile_selection_{map,histograms}.png.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed CLI args; uses args.n_tiles, args.seed.
+    root : Path
+        GFM data root, used to read the domain tile grid for the map figure.
+    base : Path
+        Calibration run's base directory; reads the earlier candidates/ and
+        boundary_lines/ stage outputs and writes the selection outputs here.
+    """
     cand = [int(t) for t in _ids(base / "candidates" / "candidate_tile_ids.txt")]
     funnel = pd.DataFrame({"tile_id": cand})
     screen = _read_jsons(base / "candidates" / "screen")
@@ -251,6 +337,7 @@ def cmd_select(args, root: Path, base: Path) -> None:
 
 
 def main() -> None:
+    """Parse CLI args and run the requested pool/screen/select subcommand."""
     repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", choices=["pool", "screen", "select"])

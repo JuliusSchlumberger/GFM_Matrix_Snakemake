@@ -8,7 +8,7 @@ in its output CSVs (which only store final outcomes for the chains actually
 enumerated, not the raw per-block EAI(t) curves needed to evaluate a new
 one). Building block EAI(t) curves (baseline + 8 measure/design blocks, per
 entity) is the expensive step shared with that script - see
-src/visualization.py::build_growth_matrix_from_grid's own docstring for a
+src/analysis_figures.py::build_growth_matrix_from_grid's own docstring for a
 real fix applied there 2026-10-16 (a double Python-level MultiIndex-scalar-
 lookup loop replaced with a vectorized unstack - confirmed bit-identical,
 ~10x faster per call) that makes this now take low minutes, not the ~1 hour
@@ -41,7 +41,7 @@ from config_utils import get_data_catalog, load_config, retry_transient_io  # no
 from pathways import matrix_interpolator, slr_pathway  # noqa: E402
 from population_extension import extend_growth_factors  # noqa: E402
 from population_growth import load_ssp_growth_factors  # noqa: E402
-from visualization import (  # noqa: E402
+from analysis_figures import (  # noqa: E402
     CONTINENTS, build_growth_matrix_from_grid, iso_to_continent, load_growth_matrix_csv, load_slr_trajectories,
 )
 

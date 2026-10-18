@@ -1,17 +1,17 @@
-# Configuration for the GFM Aqueduct preprocessing & simulation workflow.
+# Configuration for the GFM eikonal preprocessing & simulation workflow.
 # Parameters are grouped by pipeline stage. 
 
 
 # ── DATA CATALOGS ─────────────────────────────────────────────────────────────
 paths:
-  # Machine-specific root directory for all project data and model outputs.
-  # Using config_local.yml (git-ignored) is the preferred way to override this per-machine, so that the repository clone can be shared across multiple machines without editing this file.
-  root: "D:/GFM"  # storage of outputs and input data
-  code_root: "C:/Users/Schlu005/GFM" # Root of the code
+  # Machine-specific: `root` (data + outputs) and `code_root` (repo checkout) have NO default
+  # here. Set them in config_local.yml (git-ignored; copy config_local.yml.example) or, for
+  # Hydrax, config_hpc.yml. Every {root}/{code_root} placeholder below resolves from those.
 
   hydromt_data_catalog: "snakemake_workflow/config/data_catalog_gfm.yml" # relative to the code root
 
   processed_inputs_dir: "{root}/processed_inputs" # # Directory for prepare_boundary_conditions.py's intermediate files
+  deltas_shapefile: "{root}/inputs/DeltasGlobal/all_deltas.shp" # global delta polygons - deltas deliverable (analysis/compute_delta_flood_extent.py & co, preparation/build_delta_tile_subset.py)
 # ── SYNC DELTADTM ──────────────────────────────────────────────────────────────
 sync_deltadtm:  # Used by: preparation/sync_deltadtm.py.
   zip_download_dir: "{root}/inputs/DeltaDTM/_zips" # Temp directory for the downloaded .zip archives
@@ -72,8 +72,8 @@ tile_generation:
   # ocean is excluded.
   river_code: 3 # mask value treated as "river" - NOT used by this module
   # itself (the old pipeline's river-mouth marking is retired), but still a
-  # live, load-bearing constant read directly by run_aqueduct.py/
-  # run_aqueduct_cli.py - kept here.
+  # live, load-bearing constant read directly by run_eikonal.py/
+  # run_eikonal_cli.py - kept here.
 
   coarse_resolution_m: 500 # standard working resolution for every coarse
   # (non-native) read in this pipeline: Phase 1's edge-connectivity check,
@@ -150,7 +150,7 @@ tile_grid:
 
 
 # ── TILE SPLITTING (OOM RECOVERY) ───────────────────────────────────────────────
-tile_split: # Used by: run_pipeline.py to split OOM tiles and re-run Snakemake.
+tile_split: # Used by: run_eikonal_dag.py to split OOM tiles and re-run Snakemake.
   fraction: 0.667 # Each half spans this fraction of the parent tile's extent
   max_depth: 2 # Maximum number of times a single original tile may be recursively split
   max_retries: 5 # Maximum number of times a single original tile may be recursively split
@@ -171,7 +171,8 @@ boundary_conditions:
   # MDT (mean dynamic topography) is always ADDED to COAST-RP storm-tide
   # levels (fixed 2026-09 - was wrongly subtracted; see
   # preparation/prepare_boundary_conditions.py's module docstring and
-  # tests/martinique_diagnostics/ for the real-data investigation), re-
+  # the real-data investigation in tests/martinique_diagnostics/, removed in
+  # e98340a - see git history), re-
   # referencing them from local MSL to the GOCO06s geoid - matching the
   # DEM's own geoid correction above.
   mdt_correction: # Vertical-reference correction for COAST-RP storm-tide levels
@@ -254,11 +255,9 @@ simulation: # Used by: preprocessing rules
 
   # Flood model implementation: src/flood_model.py's flood_depth_dense
   # (dense domain, round-based solve capped at flooding.max_rounds below).
-  # Its fixed-3-sweep mode is validated bit-for-bit identical to the
-  # original Aqueduct/Julia reference implementation across 26 real tiles
-  # spanning ~9M-135M cells each - see docs/python_vs_julia_qa.md. That
-  # fixed-sweep mode remains available on demand (flood_depth_dense's own
-  # `sweep_budget` param), just no longer the default (see max_rounds below).
+  # Its original fixed-3-sweep mode remains available on demand
+  # (flood_depth_dense's own `sweep_budget` param), just no longer the default
+  # (see max_rounds below).
   model_bbox_buffer_arcsec: 3 # Buffer added to tile's previously shaved bbox to ensure thin strip of ocean.
   dem_gap_fill: # land-nodata gap handling: large connected (4-connectivity) group get Nodata value, other IDW-interpolation
     min_hard_fill_component_size: 15 # a missing-land DEM cell is only hard-filled to land_fill_value_m for patches larger than that
@@ -316,7 +315,7 @@ simulation: # Used by: preprocessing rules
     # each outer iteration's inner solve when obstacle_coupling is enabled
     # (below) - not obstacle_coupling-specific, hence top-level here rather
     # than nested under it. 40 rounds: the sweep-budget calibration study's
-    # conclusion (calibration_studies/test_sweep_budget_calibration.py, see
+    # conclusion (calibration_studies/run_sweep_budget_study.py, see
     # docs/methods_03_calibration_sensitivity.md §2) - 58.5% of tiles
     # strictly converge by round 40, and of the ones that don't, 97.8%
     # already have their flood extent (depth>0 cells) fully frozen by then
@@ -366,18 +365,18 @@ simulation: # Used by: preprocessing rules
       max_outer_iterations: 4
       outer_convergence_pct: 0.01  # stop early once < this % of the tile's cells are newly blocked in an outer iteration
 
-  # Peak-memory estimate for run_aqueduct's `resources: mem_mb` (replaces the
-  # old aqueduct_runs=1 serialization - see aqueduct_runner.
-  # estimate_aqueduct_mem_mb). Calibrated from 7 real tiles; deliberately
+  # Peak-memory estimate for run_eikonal's `resources: mem_mb` (replaces the
+  # old aqueduct_runs=1 serialization - see eikonal_runner.
+  # estimate_eikonal_mem_mb). Calibrated from 7 real tiles; deliberately
   # generous given real per-tile variance beyond pixel count alone. Retune
   # from production telemetry if jobs are consistently over/under-budgeted.
-  aqueduct_mem_estimate:
+  eikonal_mem_estimate:
     base_mb: 1000
     bytes_per_pixel: 80
 
 # ── HPC DISPATCH ────────────────────────────────────────────────────────────────
-# Used by: rule generate_aqueduct_jobs (rules/hpc_dispatch.smk) /
-# scripts/generate_aqueduct_jobs.py. Wave-based hinterland forcing
+# Used by: rule generate_eikonal_jobs (rules/hpc_dispatch.smk) /
+# scripts/generate_eikonal_jobs.py. Wave-based hinterland forcing
 # (src/connectivity_tiling.compute_hop_distances's hop_distance column) means a
 # hop_distance>=1 tile is seeded from a strictly-lower-hop_distance
 # neighbour's own output for the same scenario, so tiles are grouped by wave
@@ -409,12 +408,12 @@ simulation: # Used by: preprocessing rules
 # hard_ceiling_cells (tile_generation.hard_ceiling_cells, 100,000,000) caps
 # every tile's size directly, and a live check against the real production
 # grid (domain_tiles_global.gpkg, 4504 tiles) confirmed only one tile exceeds
-# aqueduct_mem_estimate's 1vcpu-node ceiling (~87M px) at all (95.08M px,
+# eikonal_mem_estimate's 1vcpu-node ceiling (~87M px) at all (95.08M px,
 # tile 2569, hop_distance=0 - safely absorbed by hpc.wave_tiers' shared
 # 168GB/24-way pool for that wave, not an isolated 1vcpu allocation) - so the
 # large/small split, `sbatch_large`, and every "size_class" branch that read
 # it (hpc_dispatch.smk, generate_hpc_simulation_jobs.py,
-# generate_hpc_preprocess_job.py, generate_aqueduct_jobs.py,
+# generate_hpc_preprocess_job.py, generate_eikonal_jobs.py,
 # check_simulation_progress.py's --by-size) were removed as dead weight from
 # a retired pipeline generation, not a currently-needed safeguard.
 hpc:
@@ -457,7 +456,7 @@ hpc:
     # Hydrax compute node with zero progress - a separate, well-documented
     # HDF5-over-NFS file-locking issue (distinct from the GDAL/SQLite one
     # affecting .gpkg reads, fixed via node-local staging instead - see
-    # generate_aqueduct_jobs.py's _stage_tile_grid_lines). HDF5 only needs
+    # generate_eikonal_jobs.py's _stage_tile_grid_lines). HDF5 only needs
     # this one env var to skip its own locking entirely for read-only access,
     # no staging required.
     env_activate_cmd: 'module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm && export HDF5_USE_FILE_LOCKING=FALSE'
@@ -580,7 +579,6 @@ analysis: # Used by: analysis/run_analysis.py
   # no protection/adaptation applied - consumed by flood_extent_validation's
   # validate_country.py (validation.flood_totals_dir below)
   plot_burning_ember:    true   # impact-matrix (SLR × growth) figures
-  plot_adaptation_bars:  false   # grouped bar charts per adaptation strategy
   plot_timeseries:       false  # EAI along SSP SLR trajectories to 2100 (global, per country, per continent);
                                 # superseded by plot_extended_pathways' continent time series
   plot_tipping_points:   true   # tipping-point figure (visualization.tipping_points)
@@ -689,7 +687,6 @@ visualization:
 
   # ── Figure sizes (inches) ─────────────────────────────────────────────────
   ember_figsize: [8, 7]
-  adaptation_bars_figsize: [9, 5]
   world_map_figsize: [14, 7]
 
   # ── World map ──────────────────────────────────────────────────────────────
@@ -745,52 +742,25 @@ validation:
   # disagreement sits right next to a cell where model and benchmark actually agree (e.g. the
   # permanent-water-mask-vs-benchmark-coastline mismatch - methods_04b_MapsValidation.md's own
   # caveat). 1 cell (30m) matches the real registration-scale evidence already measured for this
-  # exact caveat (NN2000-vs-GOCO06s vertical-datum horizontal shift ~2m; DeltaDTM mask native
-  # resolution ~25-31m in Norway - both sub-pixel-to-one-pixel) - NOT tuned upward to make CSI_tol
+  # exact caveat (vertical-datum horizontal shift ~2m; DeltaDTM mask native
+  # resolution ~25-31m - both sub-pixel-to-one-pixel) - NOT tuned upward to make CSI_tol
   # look better. Raise only with a real measured reason, and always read it next to
   # pct_disagreement_forgiven (how much of the disagreement the tolerance actually excused) rather
   # than CSI_tol alone - see confusion_counts_tolerant's own docstring for the full guard rationale.
   benchmark_supersample: 5 # rasterisation supersampling factor per model pixel
   benchmark_wet_fraction: 0.5 # DISPLAY ONLY (the agreement-map category raster's own coverage-
-  # fraction cutoff - one discrete colour per cell needs a yes/no wet call) and Spain's own
-  # connectivity domain construction (src/validation.py::connectivity_domain_mask needs a binary
-  # benchmark-wet mask to label, same reason - see that function's own docstring). Scoring itself
+  # fraction cutoff - one discrete colour per cell needs a yes/no wet call). Scoring itself
   # (validation.confusion_counts_soft, 2026-09-30) weights tp/fp/fn/tn by the real coverage
-  # fraction directly instead of thresholding it first, after a per-country sensitivity sweep
-  # (DNK/FIN/NOR/FRA single-tile spot-checks, tau in [0,1]) found the optimal threshold diverges
-  # by country with no consistent winner - see src/validation.py's own confusion_counts_soft
+  # fraction directly instead of thresholding it first, after a sensitivity sweep across
+  # benchmarks (single-tile spot-checks, tau in [0,1]) found the optimal threshold diverges
+  # by benchmark with no consistent winner - see src/validation.py's own confusion_counts_soft
   # docstring for the full account.
-  # Evaluation domain for partial-coverage benchmarks (Spain/France, 2026-10): the benchmark
-  # agency's own official study design (meta.study_area per benchmark in
-  # data_catalog_validation.yml - geometry_type "perimeter" -> that zone's own polygon used as-is,
-  # no buffer; geometry_type "segments" -> a seeded-connectivity domain, not a buffer around the
-  # line) - see validate_country.py's own module docstring and src/validation.py's
-  # tri_domain_mask/connectivity_domain_mask. Replaced the earlier flat eval_domain.buffer_km
-  # margin and its "buffered"/"model_only" domain-variant reporting entirely.
-  eval_domain:
-    buffer_km: 2.0 # (1) validate_country_depth_bands' own evaluation domain (buffer+cluster,
-    # unaffected by the 2026-10 change above - depth-band comparison has no study_area path yet).
-    # (2) validate_country()'s own "segments" branch (Spain): NOT the scoring domain any more -
-    # purely a chunk-windowing optimization, grouping nearby ARPSI seed segments so the same
-    # merged chunk isn't read once per segment - see build_evaluation_clusters' own docstring.
-    also_report_model_domain_only: true # validate_country_depth_bands only (see above) -
-    # whether to also report the unrestricted "model_only" domain alongside "buffered".
-  # Evaluation units = benchmark-geometry clusters (buffer each polygon, merge
-  # overlapping ones, process per merged cluster), NOT a uniform grid - see
-  # validation.build_evaluation_clusters. Real timing on the Spain benchmark
-  # (397 polygons, 2026-09): simplify(100m, preserve_topology=False) +
-  # buffer(quad_segs=2) + union_all() -> 182 clusters in <1s. The default
-  # topology-preserving simplify and default buffer quad_segs are NOT safe -
-  # both hang (>160s) on a real degenerate high-vertex-count record.
-  vector_simplify_tolerance_m: 100.0
-  buffer_quad_segs: 2
   permanent_water_source: "deltadtm_mask" # data_catalog_gfm.yml key - DeltaDTM's own native-
-  # resolution land/ocean/lake/river mask (~25-31m ground cell in Norway, 4-8x finer in area than
-  # Copernicus land_use's ~100m - see tests/norway_diagnostics/ for the real quantified
-  # comparison, 2026-09). Switched from
+  # resolution land/ocean/lake/river mask (~25-31m ground cell, 4-8x finer in area than
+  # Copernicus land_use's ~100m; measured comparison 2026-09). Switched from
   # "land_use" (Copernicus Global Land Cover, still a valid catalog entry, just no longer the
   # default here) - real measured improvement (coastal-strip masking loss 45.7%->30.1% within
-  # 240m of shore for Norway) but NOT a full fix: ~1/3 of the original loss was genuine
+  # 240m of shore) but NOT a full fix: ~1/3 of the original loss was genuine
   # coarse-cell aliasing (now eliminated), the rest is a waterline-DEFINITION disagreement
   # (DeltaDTM/ESA WorldCover's optical water edge vs. a benchmark's own surveyed coastline) that
   # no 30m-resolution mask can resolve - see methods_04b_MapsValidation.md's own caveats section
@@ -806,9 +776,9 @@ validation:
   # used ONLY by validate_country_national_coverage (validation.read_country_mask) to restrict
   # a national-coverage benchmark's rectangular region bbox down to cells that actually belong
   # to that country - a bbox generous enough to cover a country's own latitude/longitude range
-  # can genuinely overlap real neighbouring-country territory (confirmed 2026-09: Norway's
-  # `mainland` bbox overlaps real Swedish/Danish coastline, whose own real GFM-modelled
-  # flooding would otherwise be scored as a false positive against Norway's benchmark).
+  # can genuinely overlap real neighbouring-country territory (e.g. a coastal bbox reaching
+  # across a border or a narrow strait), whose own real GFM-modelled flooding would otherwise
+  # be scored as a false positive against the benchmark.
   iso_lookup_source: "flopros_protection_standards" # data_catalog_gfm.yml key - geogunit_107-ID-indexed, "ISO" column
   flood_totals_dir: "{root}/merged_results/exposure/flood_totals" # written by
   # analysis/compute_flood_totals.py (analysis.compute_flood_totals switch) - one
@@ -819,16 +789,6 @@ validation:
   # just a benchmark cluster's own local window, matters). Must match
   # run_analysis.py's own exposure output dir (default "{merged_outputs}/exposure")
   # plus "/flood_totals" if that script's --outdir is ever overridden from its default.
-  # (80 = Permanent water bodies, 200 = Open sea - confirmed against
-  # inputs/Copernicus/lu_to_roughness_lookup.csv; "is this pixel flooded" is
-  # meaningless over water that's always wet regardless of any storm event)
-  depth_band_open_ended_min_m: 50.0 # validation.rasterize_depth_bands (variable="depth"
-  # benchmarks only, e.g. France's n_iso_ht_* layers): a benchmark ht_max value at/above
-  # this, or NaN, is treated as "no upper bound" rather than a literal depth - real French
-  # data (2026-09) uses inconsistent per-zone sentinels for the open-ended top band (9999,
-  # 999, 99, or NaN with no max recorded at all), so this is a magnitude threshold
-  # comfortably above any real closed band (max found: 4.0 m) and comfortably below every
-  # sentinel found, not an enumeration of specific sentinel values.
   plots:
     resolution_m: 200
     dpi: 300

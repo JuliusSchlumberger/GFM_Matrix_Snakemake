@@ -23,6 +23,19 @@ from retry_io import retry_transient_io  # noqa: E402
 
 
 def main() -> None:
+    """Parse CLI arguments and write the per-tile and pooled friction-sweep metric CSVs.
+
+    Loads every tile's calibration_result.json, scores eikonal vs SFINCS per
+    (tile, friction scale factor) and pooled per friction scale factor,
+    writes ``{base}/friction_sweep_per_tile_metrics.csv`` and
+    ``{base}/friction_sweep_pooled_metrics.csv``, and prints the best point
+    by CSI and by |bias - 1|.
+
+    Raises
+    ------
+    SystemExit
+        If no tile has a calibration_result.json yet.
+    """
     repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(repo_root / "snakemake_workflow" / "config" / "config.yml"))
