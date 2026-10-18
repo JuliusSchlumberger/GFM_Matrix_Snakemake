@@ -63,6 +63,9 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # validation/ (for _chunks)
+from _chunks import _chunks_overlapping_bbox, _mosaic_read  # noqa: E402
+
 
 def _rasterize_surveyed_domain(surveyed_domain_path: Path, out_transform, out_shape, out_crs) -> np.ndarray:
     """Rasterize the surveyed-domain polygon(s) onto the given output grid.
@@ -106,6 +109,28 @@ def _permanent_water_mask_lean(land_use: np.ndarray, exclude_codes) -> np.ndarra
 NODATA_SENTINEL = -9999.0
 # SF Bay bbox (EPSG:4326) - same footprint the v2.1 sfb_fldhazd benchmark covers.
 BAY_BBOX_4326 = (-122.64, 37.40, -121.88, 38.28)
+
+
+def _read_model_bay(chunk_paths: list[Path], bbox):
+    """Read the model's merged waterdepth over `bbox` (EPSG:4326) from every overlapping chunk.
+
+    One chunk (the case for SF Bay with 5deg chunks): a windowed read, exactly as before.
+    Several chunks (smaller chunk_size_deg, or a bbox across a chunk edge): mosaicked with
+    validation/_chunks._mosaic_read, the same path validate_country.py uses.
+
+    Returns
+    -------
+    tuple
+        (depth_m float64, transform, crs, nodata).
+    """
+    if not chunk_paths:
+        raise FileNotFoundError(f"no merged waterdepth chunk overlaps the SF Bay bbox {bbox}")
+    if len(chunk_paths) == 1:
+        return _read_model_window(chunk_paths[0], bbox)
+    mosaic, transform = _mosaic_read(chunk_paths, list(bbox))
+    with rasterio.open(chunk_paths[0]) as src:
+        crs = src.crs
+    return mosaic.astype("float64"), transform, crs, -9999.0
 
 
 def _read_model_window(path: Path, bbox):
@@ -192,12 +217,15 @@ def validate_sf_bay(config_path: str, threshold_m: float | None = None) -> dict[
     benchmark_root = Path(val_cfg["benchmark_root"])
     surveyed_domain_path = benchmark_root / "California" / "flooding" / "sf_bay_county_bbox_union.gpkg"
     benchmark_path = benchmark_root / "California" / "flooding" / "sf_bay_flddepth_slr000_w100_mosaic.tif"
-    model_chunk_path = Path(cfg["postprocessing"]["merged_outputs"]) / "chunks" / "waterdepth_N35W125_RP100_SLR_0.tif"
+    model_chunk_paths = _chunks_overlapping_bbox(
+        list(BAY_BBOX_4326), cfg["postprocessing"]["chunk_size_deg"],
+        Path(cfg["postprocessing"]["merged_outputs"]) / "chunks", "RP100", "SLR_0",
+    )
 
     bench_depth_2m, bench_transform_2m, bench_crs_2m = _read_benchmark_full(benchmark_path)
     bench_shape_2m = bench_depth_2m.shape
 
-    model_depth_native, model_transform_native, model_crs, model_nodata = _read_model_window(model_chunk_path, BAY_BBOX_4326)
+    model_depth_native, model_transform_native, model_crs, model_nodata = _read_model_bay(model_chunk_paths, BAY_BBOX_4326)
     model_shape_native = model_depth_native.shape
     model_valid_native = model_depth_native != model_nodata if model_nodata is not None else np.isfinite(model_depth_native)
     model_depth_native = np.where(model_valid_native, model_depth_native, NODATA_SENTINEL)

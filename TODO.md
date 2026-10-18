@@ -34,12 +34,6 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
   with the Phase 7a renames) via `snakemake --touch` - it writes Snakemake metadata next to P:\ outputs.
   The earlier "local path lacks the hop-0 fix" item was wrong (465dd93 only staged the file), so the
   deltas do not need a re-run.
-- **SF Bay validation reads one hard-coded model chunk.** `validation/validate_sf_bay.py:100`
-  points at `merged_results/chunks/waterdepth_N35W125_RP100_SLR_0.tif`. If the Bay domain
-  spans more than that chunk, or the chunk grid changes, part of the Bay is silently not
-  scored. Phase 6 moves the path into config; picking up overlapping chunks automatically
-  (as `validate_country.py` does with `_chunks_overlapping_bbox`) would be a behaviour
-  change, so it's logged here. Bringing SF Bay into `run_validation.py` is deferred (AUDIT.md §9.4 Q2).
 - **`generate_eikonal_jobs.generate_wave_dispatch` has 3 unused parameters** (`model_outputs`,
   `hop_by_tile`, `raster_config`; docstring says so). Left in place in Phase 7a on purpose:
   dropping them also means dropping the `generate_eikonal_jobs` rule's params, which re-triggers
