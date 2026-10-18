@@ -189,7 +189,10 @@ def main() -> None:
             f"#SBATCH --output={linux_jobs_dir}/logs/{name}_%j.out",
             f"#SBATCH --error={linux_jobs_dir}/logs/{name}_%j.err",
             "",
-            "set -uo pipefail",  # not -e: one tile's failure must not abort the rest of this node's batch
+            # -e would change nothing: the node runs one command, and the study script itself
+            # carries on past a failing tile.
+            "set -uo pipefail",
+            "unset PROJ_LIB PROJ_DATA GDAL_DATA",  # as the sfincs_tiles jobs: no stale PROJ/GDAL data dirs
             f'"{GFM_PY_LINUX}" "{linux_code_root}/calibration_studies/{spec["script_name"]}" "{out_dir_linux}" '
             f'--config "{linux_config_path}" --tile-ids {" ".join(batch_tiles)} {args.extra_args}',
             "",
