@@ -11,14 +11,11 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from validation import confusion_counts, confusion_counts_tolerant, metrics_from_counts  # noqa: E402
 
-_FAILURES: list[str] = []
-
-
 def _check(name: str, condition: bool, detail: str = "") -> None:
+    """Print a PASS/FAIL line and assert, so pytest fails on a wrong value."""
     status = "PASS" if condition else "FAIL"
     print(f"  [{status}] {name}" + (f" - {detail}" if detail and not condition else ""))
-    if not condition:
-        _FAILURES.append(name)
+    assert condition, name + (f" - {detail}" if detail else "")
 
 
 def _is_nan(x: float) -> bool:
@@ -138,19 +135,30 @@ def test_confusion_counts_tolerant_forgives_only_adjacent_disagreement() -> None
            hard_disagreement == strict["fp"] + strict["fn"], f"got {hard_disagreement}")
 
 
+_TESTS = (
+    test_hand_computed_contingency_table,
+    test_perfect_match,
+    test_eb_exactly_half_when_fp_equals_fn,
+    test_no_benchmark_wet,
+    test_no_model_wet,
+    test_completely_empty_domain,
+    test_confusion_counts_area_weighted,
+    test_confusion_counts_tolerant_forgives_only_adjacent_disagreement,
+)
+
+
 def main() -> None:
-    test_hand_computed_contingency_table()
-    test_perfect_match()
-    test_eb_exactly_half_when_fp_equals_fn()
-    test_no_benchmark_wet()
-    test_no_model_wet()
-    test_completely_empty_domain()
-    test_confusion_counts_area_weighted()
-    test_confusion_counts_tolerant_forgives_only_adjacent_disagreement()
+    """Run every test in script mode; a failed check ends only its own test."""
+    failures: list[str] = []
+    for test in _TESTS:
+        try:
+            test()
+        except AssertionError as exc:
+            failures.append(f"{test.__name__}: {exc}")
 
     print()
-    if _FAILURES:
-        print(f"FAILED: {len(_FAILURES)} check(s): {', '.join(_FAILURES)}")
+    if failures:
+        print(f"FAILED: {len(failures)} test(s): {'; '.join(failures)}")
         sys.exit(1)
     print("All checks passed.")
 
