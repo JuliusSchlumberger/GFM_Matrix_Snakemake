@@ -109,9 +109,10 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import rasterio
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _common)
+from _common import _read_band  # noqa: E402
 from config_utils import get_data_catalog, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
 from population_growth import load_ssp_growth_factors, interpolate_growth_factor  # noqa: E402
 from visualization import load_slr_trajectories  # noqa: E402
@@ -177,22 +178,6 @@ class ChunkData:
     geo: np.ndarray
     ff: dict[tuple[int, str], np.ndarray]
     iso_index: tuple[list[str], np.ndarray, np.ndarray]
-
-
-def _read_band(path: Path, dtype: str, fill) -> np.ndarray:
-    """Read band 1, replacing the file's OWN nodata value (whatever it is -
-    population chunks use float32-min, geogunit uses -1, flood_fraction uses
-    -1.0, all different) with `fill`.
-
-    A plain `src.read(1)` does NOT do this. Population's nodata sentinel
-    (-3.4e38, np.finfo(np.float32).min) is a FINITE value, so a naive
-    `~np.isfinite(arr)` cleanup step does not catch it on a raw read -
-    `masked=True` must be used to replace it explicitly, or it corrupts
-    every downstream computation for any chunk containing it.
-    """
-    with retry_transient_io(rasterio.open, path) as src:
-        arr = src.read(1, masked=True)
-        return arr.filled(fill).astype(dtype)
 
 
 def _load_chunk(

@@ -50,6 +50,8 @@ import rasterio
 from affine import Affine
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _common)
+from _common import _round_val  # noqa: E402
 from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from plotting import pixel_area_km2_grid  # noqa: E402
 from exposure_analysis import _build_iso_index, _safe, country_sums  # noqa: E402
@@ -95,15 +97,6 @@ def _read_band_and_transform(path: Path, dtype: str, fill) -> tuple[np.ndarray, 
     that same grid (see analysis/compute_exposure_analysis.py's own chunk
     convention), so re-opening them just for a transform would be redundant."""
     return _open_and_read(path, dtype, fill)
-
-
-def _round_val(val: float) -> float | int:
-    """Same magnitude-conditional rounding rule as validate_country.py's _round_row -
-    whole integer, except abs(val) < 1 rounds to 2 decimals so a small real
-    nonzero value doesn't silently read as "none"."""
-    if val != val:  # NaN
-        return val
-    return round(val, 2) if abs(val) < 1 else int(round(val))
 
 
 def _process_chunk(

@@ -71,3 +71,13 @@ in-phase.
   argparse raises `TypeError: %d format: a real number is required, not dict` because a
   `help=` string contains an unescaped `%`. Only `--help` is affected; normal runs parse fine.
   Fix: escape it as `%%`.
+- **Near-duplicate helpers left unmerged in Phase 5d** (they differ in behaviour, so merging
+  would change results or output; unify deliberately if wanted):
+  - `_first_crossing`: compute_tipping_points_summary.py vs plot_tipping_points.py (the latter
+    defaults `years=YEARS`).
+  - `_people`: plot_extended_pathways.py vs plot_slr_vs_population.py (the latter handles
+    negative values with a sign).
+  - `_read_band` / `_read_band_and_transform`: compute_flood_totals.py (via `_open_and_read`)
+    vs analysis/_common.py / compute_bangkok_case_exposure.py.
+  - `_run` (subprocess step runner): analysis/run_analysis.py, validation/run_validation.py,
+    run_delta_floodmaps.py: three different variants (printing, timing, fail-fast handling).

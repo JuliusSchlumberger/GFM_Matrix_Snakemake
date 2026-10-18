@@ -55,6 +55,8 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _common)
+from _common import _eai_from_interp, _growth_matrix_path, _growth_path  # noqa: E402
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pathways import matrix_interpolator, slr_pathway  # noqa: E402
 from population_extension import extend_growth_factors  # noqa: E402
@@ -67,24 +69,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 MEASURES = ["avoid", "protect", "retreat", "protect_avoid"]
 DESIGN_LABEL = {"SLR_500": "small", "SLR_1000": "large"}
 LAST_SSP_YEAR = 2100
-
-
-def _growth_path(growth_df: pd.DataFrame, ssp: str, iso: str, years: np.ndarray, default: float = 1.0) -> np.ndarray:
-    """Vectorized interpolate_growth_factor - see compute_tipping_points_summary.py's
-    own identical helper/docstring for why (one call over the whole `years`
-    array instead of one call per year)."""
-    try:
-        row = growth_df.loc[(ssp, iso)]
-    except KeyError:
-        return np.full(len(years), default)
-    yrs = np.array(sorted(row.index.astype(int)))
-    vals = row[yrs].to_numpy(dtype=float)
-    return np.interp(years.astype(float), yrs.astype(float), vals)
-
-
-def _growth_matrix_path(exp_dir: Path, strategy: str, design: str | None) -> Path:
-    label = "baseline" if strategy == "baseline" else f"{strategy}_{design}"
-    return exp_dir / f"exposure_{label}_growth_matrix.csv"
 
 
 def _first_crossing_after(eai: np.ndarray, threshold: float, years: np.ndarray, start_year: float) -> float | None:
@@ -104,11 +88,6 @@ def _first_crossing_after(eai: np.ndarray, threshold: float, years: np.ndarray, 
         return float(years[k])
     e0, e1 = eai[k - 1], eai[k]
     return float(years[k - 1] + (threshold - e0) / (e1 - e0))
-
-
-def _eai_from_interp(interp, slr_path_mm: np.ndarray, growth_path: np.ndarray) -> np.ndarray:
-    pts = np.column_stack([np.asarray(growth_path, float), np.asarray(slr_path_mm, float)])
-    return np.clip(interp(pts), 0.0, None)
 
 
 def _all_chains(blocks: list[tuple[str, str]], max_stages: int) -> list[tuple[tuple[str, str], ...]]:

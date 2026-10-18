@@ -53,6 +53,8 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # analysis/ (for _common)
+from _common import _growth_matrix_path  # noqa: E402
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pathways import eai_along_pathway, matrix_interpolator, slr_pathway  # noqa: E402
 from population_extension import extend_growth_factors  # noqa: E402
@@ -78,11 +80,6 @@ STRATEGY_MARKERS = {"baseline": "o", "protect": "s", "avoid": "^", "retreat": "D
                     "protect_avoid": "P", "avoid_retreat": "X"}
 YEARS = np.arange(2020, 2101)
 LAST_SSP_YEAR = 2100  # IIASA SSP population projections end here
-
-
-def _growth_matrix_path(exp_dir: Path, strategy: str, design: str) -> Path:
-    label = "baseline" if strategy == "baseline" else f"{strategy}_{design}"
-    return exp_dir / f"exposure_{label}_growth_matrix.csv"
 
 
 def _first_crossing(eai: np.ndarray, threshold: float, years: np.ndarray = YEARS) -> float | None:
