@@ -130,7 +130,9 @@ def main() -> None:
             )
         if not splittable:
             print("\nNo further tiles can be split — stopping.")
-            return
+            # Exhausted OOM tiles alone exit 0 (their nodata placeholders are
+            # valid outputs); an unrelated snakemake failure must still fail.
+            sys.exit(result.returncode)
 
         print(f"\n  Splitting {len(splittable)} OOM'd tile(s) (attempt {attempt}/{max_retries}): {splittable}")
         for tid in splittable:
