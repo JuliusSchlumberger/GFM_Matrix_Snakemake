@@ -1,30 +1,10 @@
-"""Global Equal Earth map(s) of the connectivity-first tiling pipeline's
-own domain set (preparation/build_tile_manifest.py / src/connectivity_tiling.py):
-the FINAL domains ("domain_final" figure) and, when available, the domains
-DROPPED for having no connectivity path back to open water within their
-own component (see docs/methods_01_tile_processing_and_waterlevels.md
-section 3's own description of this drop rule).
+"""Plot global Equal Earth maps of the final and dropped-unreachable tile domains.
 
-plot_final_domains_map() reads straight from tile_grid.path
-(domain_tiles_global.gpkg) - the pipeline's own authoritative, always-
-current output. plot_dropped_unreachable_map() has no equivalent
-standalone source (dropped domains aren't part of the final grid), so it
-only runs from build_tile_manifest.py's own run() below, where they're
-still in memory.
+build_tile_manifest.run() calls these directly; standalone use re-plots
+domains_final.png from tile_grid.path. --mark-no-stations highlights domains the
+simulation skipped for no COAST-RP station (eikonal_runner.NO_STATIONS_REASON).
 
-Folded into the tiling pipeline itself (2026-10-07): build_tile_manifest.py's
-own run() now calls both plot functions directly at the end, using
-already-in-memory GeoDataFrames - no extra disk read, always in sync with
-whatever tile_grid.path that run just wrote.
-
-Optional switch --mark-no-stations: after the production simulation, also
-write domains_final_no_stations.png - the same map with the domains that were
-skipped for having no COAST-RP water level station within their search box
-(the simulation's skipped_tiles/ markers, eikonal_runner.NO_STATIONS_REASON)
-drawn on top in light red.
-
-Usage (standalone - e.g. to refresh domains_final.png without re-running
-tile generation):
+Usage:
     python plot_domain_maps.py
     python plot_domain_maps.py --tile-grid path/to/domain_tiles_global.gpkg --out-dir DIR
     python plot_domain_maps.py --mark-no-stations [--skipped-dir <model_outputs>/skipped_tiles]
@@ -52,16 +32,13 @@ REPO = Path(__file__).resolve().parents[1]
 LAND_COLOR = "#d8d8d4"
 COAST_COLOR = "#b8b8b3"
 DOMAIN_COLOR = "#2a78d6"
-INLAND_DOMAIN_COLOR = "#8db9ea"  # hop_distance > 0 (no own ocean edge) - a lighter DOMAIN_COLOR
+INLAND_DOMAIN_COLOR = "#8db9ea"  # hop_distance > 0
 DROPPED_COLOR = "#d6572a"
-NO_STATIONS_COLOR = "#ef8a7e"  # light red: coastal domains skipped for having no COAST-RP station
+NO_STATIONS_COLOR = "#ef8a7e"
 
 
 def no_station_tile_ids(skipped_dir: Path) -> set[int]:
-    """Tile ids the production simulation skipped for having no COAST-RP
-    water level station (one skipped_tiles/{tile_id}_{scenario}.txt marker per
-    skipped run; the reason is the same for all scenarios of a tile, so one
-    marker per tile is read)."""
+    """Return tile ids skipped for no COAST-RP station (one marker per tile is read)."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
     from eikonal_runner import NO_STATIONS_REASON
 
@@ -75,9 +52,11 @@ def no_station_tile_ids(skipped_dir: Path) -> set[int]:
 def plot_domains_map(gdf: gpd.GeoDataFrame, out_path: Path, color: str, label: str,
                      inland_color: str | None = None, highlight: set[int] | None = None,
                      highlight_color: str = NO_STATIONS_COLOR) -> None:
-    """`inland_color`: draw hop_distance > 0 domains in this colour, underneath
-    the hop_distance == 0 ones (`color`) - only if gdf has a hop_distance column.
-    `highlight`: tile ids drawn on top of everything in `highlight_color`."""
+    """Plot domains on a global Equal Earth map.
+
+    inland_color: hop_distance > 0 domains, drawn under hop 0 ones.
+    highlight: tile ids drawn on top in highlight_color.
+    """
     proj = ccrs.EqualEarth()
     fig = plt.figure(figsize=(14, 7.5), facecolor="white")
     ax = plt.axes(projection=proj)
@@ -92,7 +71,7 @@ def plot_domains_map(gdf: gpd.GeoDataFrame, out_path: Path, color: str, label: s
         layers = [(sub[~marked.loc[sub.index]], c, z) for sub, c, z in layers] + [(gdf[marked], highlight_color, 5)]
     for sub, c, z in layers:
         if len(sub):
-            # highlighted domains get a wider outline so small ones stay visible at global scale
+            # wider outline keeps small highlighted domains visible at global scale
             ax.add_geometries(sub.geometry, crs=ccrs.PlateCarree(), facecolor=c, edgecolor=c,
                               linewidth=0.6 if z == 5 else 0.2, alpha=0.9 if z == 5 else 0.75, zorder=z)
     ax.spines["geo"].set_edgecolor(COAST_COLOR)
@@ -104,8 +83,7 @@ def plot_domains_map(gdf: gpd.GeoDataFrame, out_path: Path, color: str, label: s
 
 def plot_final_domains_map(final_gdf: gpd.GeoDataFrame, out_dir: Path,
                            no_station_ids: set[int] | None = None) -> Path:
-    """`no_station_ids`: if given, write domains_final_no_stations.png instead,
-    with those domains in light red on top."""
+    """Plot final domains; with no_station_ids, write domains_final_no_stations.png."""
     out_dir.mkdir(parents=True, exist_ok=True)
     if no_station_ids:
         out_path = out_dir / "domains_final_no_stations.png"
@@ -121,9 +99,7 @@ def plot_final_domains_map(final_gdf: gpd.GeoDataFrame, out_dir: Path,
 
 
 def plot_dropped_unreachable_map(dropped_gdf: gpd.GeoDataFrame, out_dir: Path) -> Path | None:
-    """None (writes nothing) if there's nothing to plot - an empty map is
-    not a useful artifact, and a 0-domain scatter would just be a blank
-    globe."""
+    """Plot domains dropped as unreachable; write nothing and return None if empty."""
     if len(dropped_gdf) == 0:
         print("No unreachable-dropped domains this run - skipping domains_dropped_unreachable.png")
         return None

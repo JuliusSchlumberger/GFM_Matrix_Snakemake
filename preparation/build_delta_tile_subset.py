@@ -1,27 +1,8 @@
-"""Select the production tile_grid chunks relevant to the 49 global deltas
-(inputs/DeltasGlobal/all_deltas.shp) for the RCP2.6/RCP4.5 (ssp126/ssp245)
-delta flood-hazard-map deliverable.
+"""Select global tile_grid tiles intersecting the 49 deltas' buffered bboxes.
 
-Filters the EXISTING global tile grid (tile_grid.path - a frozen-geometry,
-scenario-independent output already computed for the whole world, see
-run_preparation.py's tile_generation step) down to just the chunks
-intersecting ANY delta's bounding box, buffered by a configurable margin
-(default 0.5 deg, per direct user confirmation 2026-10) - no tile geometry
-is recomputed here, this is a pure selection step over already-correct
-chunk geometries (hop_distance/overlap/shave decisions already made),
-matching the same restriction pattern used for the Wales/Scotland
-(gbr_wales_scotland_friction9_tiles.gpkg) and Thailand
-(thailand_bangkok_tiles.gpkg) isolated runs this session.
-
-Buffers each delta's own bounding BOX (not its exact polygon outline) -
-matches the user's own framing ("a bbox around each delta with a bit of
-buffer"), simpler and more predictable than buffering an often-irregular
-polygon boundary.
-
-Standalone - not wired into run_preparation.py's ALL_STEPS (this is
-specific to the deltas deliverable, not a general pipeline stage). Shared,
-scenario-independent output: both the ssp126 and ssp245 materialized
-configs point `tile_grid.path` at the SAME file this script writes.
+For the ssp126/ssp245 delta deliverable (all_deltas.shp); both scenario configs
+share the output. Pure selection, no tile geometry recomputed. Buffers each
+delta's bbox (degrees), not its polygon.
 
 Usage:
     python preparation/build_delta_tile_subset.py
@@ -44,6 +25,7 @@ DEFAULT_BUFFER_DEG = 0.5
 def build_delta_tile_subset(
     config_path: str | Path, buffer_deg: float = DEFAULT_BUFFER_DEG, out_path: Path | None = None,
 ) -> gpd.GeoDataFrame:
+    """Return (and optionally write) tiles intersecting any buffered delta bbox."""
     cfg = load_config(config_path)
     tile_grid_path = Path(cfg["tile_grid"]["path"])
     deltas_path = Path(cfg["paths"]["deltas_shapefile"])
