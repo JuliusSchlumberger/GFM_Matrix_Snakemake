@@ -28,7 +28,7 @@ tile_grid:
 
 simulation:
   flooding:
-    friction_scale_factor: 9.0
+    friction_scale_factor: 9.0  # the value its existing outputs were computed with (production config.yml: 12.0)
     # Reverted to production's own default (4), 2026-10 - briefly set to 5
     # based on a sample-bounded production-run byproduct signal, before the
     # real obstacle-coupling calibration study (calibration_500_tiles,
