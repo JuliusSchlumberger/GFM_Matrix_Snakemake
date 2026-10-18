@@ -5,7 +5,7 @@ eikonal_runner.log_run_timing; `outcome` on the HPC path, default "solved") and 
 run counts by outcome, total compute hours, and seconds per run and per tile.
 
 Run it on Hydrax - ~200k small files are slow over a network share:
-    python analysis/summarize_run_timings.py --dir <model_outputs>/run_timings [--csv timings.csv]
+    python analysis/summarize_run_timings.py --timings-dir <model_outputs>/run_timings [--csv timings.csv]
 """
 
 import argparse
@@ -29,9 +29,9 @@ def _read(path: str) -> dict | None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--dir", required=True, help="<model_outputs>/run_timings")
+    parser.add_argument("--timings-dir", "--dir", dest="dir", required=True, help="<model_outputs>/run_timings")
     parser.add_argument("--csv", default=None, help="optional: write the per-run table here")
-    parser.add_argument("--threads", type=int, default=32)
+    parser.add_argument("--workers", "--threads", dest="threads", type=int, default=32, help="reader threads")
     args = parser.parse_args()
 
     paths = [e.path for e in os.scandir(args.dir) if e.name.endswith(".json")]
