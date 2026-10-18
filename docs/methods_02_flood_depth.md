@@ -43,7 +43,7 @@ coast, not by straight-line (Euclidean) distance or by elevation alone.
 ### 2.1 Friction as a land-cover-informed resistance surface
 
 The friction field $v(x)$ is derived from a global land-cover
-classification (ESA WorldCover), reclassified to a Manning's roughness
+classification (Copernicus Global Land Cover LC100, 100 m), reclassified to a Manning's roughness
 coefficient $n(x)$ per land-cover class via a land-cover-to-roughness
 mapping table, then
 converted to a per-cell friction/resistance value used directly as the
@@ -89,7 +89,7 @@ chosen).
 |---|---|---|
 | $z(x)$ | Land surface elevation | DEM, land cells only (see §4.1) |
 | $\mathrm{mask}(x)$ | Land / ocean / lake classification | Land-water mask raster |
-| $v(x)$ | Local friction / hydraulic resistance | ESA WorldCover land cover, reclassified to Manning's roughness and converted to resistance |
+| $v(x)$ | Local friction / hydraulic resistance | Copernicus LC100 land cover, reclassified to Manning's roughness and converted to resistance |
 | $\{(p_i, H_i)\}$ | Discrete boundary water levels at offshore/coastal points $p_i$, for the scenario (return period × SLR) being run | Offshore/coastal boundary-condition model output |
 
 ## 4. Mathematical formulation
@@ -394,7 +394,7 @@ convergence at the earliest mathematically possible outer iteration
 against, so it cannot fire any earlier), almost all of the remainder at
 iteration 3, and a small number at iteration 4 - no domain in this
 calibration needed more than that. Production caps the outer loop at
-`max_outer_iterations = 3`, covering all but that small iteration-4 group.
+`max_outer_iterations = 4`, covering every domain in the calibration.
 See
 `methods_03_calibration_sensitivity.md` §3 for the full calibration
 methodology and exact per-tile breakdown.

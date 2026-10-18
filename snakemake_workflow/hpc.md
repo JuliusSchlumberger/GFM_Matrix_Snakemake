@@ -26,27 +26,27 @@ Stage 1 can run either on your local preprocessing machine (as below) or as
 one more Hydrax job that also submits stage 2 for you — see "Bundling
 preprocessing + dispatch into one Hydrax job" below. Stages 3 and 4 can
 likewise run manually (as documented below) or automatically once every
-simulation wave finishes — `submit_waves.sh` now ends with one more job,
+simulation wave finishes — `submit_waves.sh` ends with one more job,
 gated `--dependency=afterany` on every wave's job ids, that generates and
 submits the postprocessing+exposure dispatch itself (see "## 3. Postprocess"
 below). So a single `bash submit_preprocess_and_dispatch.sh` (or a plain
-`bash submit_waves.sh`, if job generation already happened) now carries all
+`bash submit_waves.sh`, if job generation already happened) carries all
 the way through to exposure analysis unattended, once
 `preparation/run_preparation.py` has been run.
 
 ## One-time setup
 
-1. Copy the HPC path override template and fill in your cluster's mount/checkout paths:
+1. `snakemake_workflow/config/config_hpc.yml` (tracked) holds the Hydrax
+   values for `paths.root` (Linux mount of the same storage as the local
+   `paths.root`) and `paths.code_root` (Linux checkout of this repo — used to
+   locate `run_eikonal_cli.py`). For another cluster, start from the template:
    ```
    cp snakemake_workflow/config/config_hpc.yml.example snakemake_workflow/config/config_hpc.yml
    ```
-   Set `paths.root` (Linux mount of the same storage as the local `paths.root`)
-   and `paths.code_root` (Linux checkout of this repo — used to locate
-   `run_eikonal_cli.py`). Git-ignored, like `config_local.yml`. Not needed
-   at all if you're running stage 1 directly ON Hydrax (see below) — in
+   Not needed at all if you're running stage 1 directly ON Hydrax (see below) — in
    that case `config_local.yml` alone already points at Hydrax's own paths.
 
-2. Fill in the placeholders under `hpc:` in `config.yml`:
+2. Check the values under `hpc:` in `config.yml` (set for Hydrax):
    `n_nodes` (max sbatch scripts to generate PER WAVE — a wave with fewer
    tiles than `n_nodes` gets one script per tile instead, never an empty
    one), and `sbatch.partition` / `account` / `time` / `mem` /
@@ -64,7 +64,7 @@ the way through to exposure analysis unattended, once
 
 `cpus_per_task` is the real degree of concurrency for a batch, not just a
 SLURM allocation size: for preprocessing it's passed straight to
-`snakemake --cores N`; for simulation, `run_simulation_batch.py` (2026-10-08)
+`snakemake --cores N`; for simulation, `run_simulation_batch.py`
 runs that many tiles' solves concurrently via a thread pool (each eikonal
 solve is single-threaded numba, so N concurrent solves on an N-cpu node is a
 genuine use of the allocation, not oversubscription). A `cpus_per_task: 1`
@@ -72,16 +72,8 @@ partition means fully serial, one tile/job at a time; bump it up (directly,
 or via a `wave_tiers` entry for simulation) if throughput matters more than
 a minimal per-node footprint.
 
-(2026-10-08: tiles used to also be routed by estimated pixel count to a
-separate, bigger-RAM `hpc.sbatch_large` partition — a real need under the
-OLD, pre-2026-10 greedy-covering tiling pipeline, which could produce much
-larger domains. The connectivity-first pipeline's own `hard_ceiling_cells`
-caps every tile's size directly, and a live check against the real
-production grid found only one tile anywhere near that old concern — see
-`config.yml`'s own comment on `hpc.sbatch` for the numbers — so this
-size-class split, `hpc.sbatch_large`, `hpc.large_tile_pixel_threshold`/
-`large_tile_batch_multiplier`, and every script branch that read them were
-removed as dead weight from a retired pipeline generation.)
+There is no size-class routing: `tile_generation.hard_ceiling_cells` caps
+every tile's size, so all tiles of a wave share one partition.
 
 ## 1. Preprocess + generate jobs
 
@@ -105,14 +97,11 @@ tile) in parallel across `--cores N`, then writes to
   a SLURM `afterany` dependency on the full previous wave.
 - `logs/` — sbatch stdout/stderr and a per-batch failure log land here once jobs run.
 
-Wave-0 tiles/scenarios with no boundary stations are resolved immediately
-during this step (nodata placeholder written locally, same as
-`run_eikonal` does today) and never show up in any sbatch script.
-Hop_distance≥1 tiles are never pre-excluded this way — whether a hinterland
-tile has any upstream flooding to seed from can only be known once its
-neighbour has actually run, so every hop≥1 tile always gets a job; a tile
-whose neighbour ends up dry is resolved live, at run time, into a real-zero
-result (see step 2).
+Every `(tile, return_period, waterlevel_name)` gets a job, with no
+pre-exclusion: whether a hinterland tile has any upstream flooding to seed
+from can only be known once its neighbour has actually run. A wave-0 tile
+without boundary stations, or a hop≥1 tile whose neighbours end up dry, is
+resolved live, at run time, into a real-zero result (see step 2).
 
 ### Bundling preprocessing + dispatch into Hydrax jobs
 
@@ -140,7 +129,9 @@ list can run into the thousands of paths). It also writes
 `{jobs_dir}/generate_jobs_and_dispatch.sbatch` (uses `hpc.sbatch` —
 lightweight, just runs `snakemake generate_eikonal_jobs` — fast, since
 every preprocessing output already exists by then — then `submit_waves.sh`),
-and `{jobs_dir}/submit_preprocess_and_dispatch.sh`, which submits every
+and `{jobs_dir}/submit_preprocess_and_dispatch.sh`, which first builds the
+shared, tile-independent inputs (geoid-offset raster, cached station
+GeoPackages) synchronously on the submitting node, then submits every
 preprocessing batch with NO dependency between them (fully parallel), then
 submits `generate_jobs_and_dispatch.sbatch` with
 `--dependency=afterany:<every batch job id>` — the same afterany-join
@@ -148,10 +139,12 @@ pattern `submit_waves.sh` already uses between simulation waves, just one
 more phase in front of wave 0.
 
 Unlike `run_simulation_batch.py`'s own per-item failure handling, every
-script here uses `set -euo pipefail` with no per-step failure catch — each
+script here uses `set -euo pipefail` with no per-tile failure catch — each
 is either one Snakemake invocation across many tiles or one monolithic
 dispatch step, and if it
-fails there's nothing sensible to chain into.
+fails there's nothing sensible to chain into. Each Snakemake call is only
+retried as a whole (`run_snakemake_with_retry`, up to 10 attempts) against
+transient P:\ read errors.
 
 Can be generated from either machine: from the local Windows box (writing
 scripts meant for Hydrax, same `config_hpc.yml`-based dual path resolution
@@ -167,7 +160,7 @@ bash {root}/model_outputs/hpc_jobs/submit_waves.sh
 ```
 
 Each job calls `run_eikonal_cli.py` once per `(tile, return_period,
-waterlevel_name)`, sequentially within its batch. A failed call doesn't
+waterlevel_name)`, up to `cpus_per_task` at once (`run_simulation_batch.py`). A failed call doesn't
 abort the rest of that batch's jobs; it's appended to
 `logs/wave{H}_batch_{id}_failures.txt` instead. For a `hop_distance == 0`
 tile, `run_eikonal_cli.py` reads that tile's real boundary stations; for
@@ -219,15 +212,17 @@ categories:
 
 **Automatic (default once you've submitted via `submit_waves.sh`):** the
 last phase `submit_waves.sh` submits — `gfm_generate_postprocess_and_dispatch`
-— is gated `--dependency=afterany:<every wave's job ids>` (via a new
-`ALL_WAVE_IDS` accumulator kept alongside the existing wave-to-wave
+— is gated `--dependency=afterany:<every wave's job ids>` (via an
+`ALL_WAVE_IDS` accumulator kept alongside the wave-to-wave
 `PREV_IDS`, since `PREV_IDS` alone only ever holds the *previous* wave's
 ids). Once every wave has reached a terminal state, it runs
 `generate_hpc_postprocess_job.py` (fresh, no `--resume`) and submits the
 resulting `submit_postprocess_and_exposure.sh` itself — see that script's
 own docstring (`snakemake_workflow/scripts/generate_hpc_postprocess_job.py`)
 for the merge_chunk → prepare_exposure_grid_chunk →
-compute_flood_fraction_chunk → exposure-analysis phase chain it generates.
+compute_flood_fraction_chunk → exposure-analysis phase chain it generates,
+plus a final flood-totals + plots job (`compute_flood_totals.py` +
+`run_analysis.py --only-plots`; off with `--no-flood-totals-and-plots`).
 No separate action needed; check `squeue`/`sacct` for
 `gfm_generate_postprocess_and_dispatch` and the phases after it the same way
 you'd watch any other stage.
@@ -247,7 +242,7 @@ plotting — no different from a fully-local run.
 
 ## Notes
 
-- `run_eikonal` itself is untouched — still the right choice for a small
+- The `run_eikonal` rule remains the right choice for a small
   local/debug run, no SLURM involved.
 - Re-running `generate_eikonal_jobs` after changing `hpc.n_nodes` won't
   regenerate scripts on its own (Snakemake sees the old outputs as already

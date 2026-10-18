@@ -105,7 +105,7 @@ domain within its own component - i.e. one that could never receive
 boundary forcing of any kind - is dropped from the final domain set.
 
 **Coastal buffer.** Every hop-0 domain's bbox is padded outward by a fixed
-margin (order of several km) after the hop-distance assignment above. The
+margin (20 km on each side) after the hop-distance assignment above. The
 trimming step earlier already gives an *implicit* buffer around a coastal
 nose or headland for free (water within the land's own row/column bounding
 extent survives, since domains are rectangles, not per-pixel masks), but

@@ -6,19 +6,18 @@ This validates the GFM eikonal model's own production flood-extent output agains
 
 Scope: **Wales, Scotland, England (GBR), New Brunswick (CAN) and San Francisco Bay (USA)**, plus their named sub-regions. Every benchmark is a sub-national product covering its whole territory's coastline.
 
-Not part of the Snakemake DAG — standalone entry points, run manually after the production pipeline has produced `merged_results/chunks/waterdepth_*.tif`. Also used as the scoring backend for the OFAT calibration sweep (`validate_country.py --run-tag`).
+Not part of the Snakemake DAG — standalone entry points, run manually after the production pipeline has produced `merged_results/chunks/waterdepth_*.tif`. `validate_country.py --run-tag` tags every output row, for aggregating several runs.
 
 `merge_chunk`'s waterdepth/provenance output (`snakemake_workflow/rules/postprocessing.smk`) always stays on disk, regardless of `postprocessing.plots.enabled` — validation's dependency on `merged_results/chunks/` is a guaranteed contract.
 
 ## Benchmark catalog
 
-`snakemake_workflow/config/data_catalog_validation.yml` (root set by `validation.benchmark_catalog` in `config.yml`) holds one entry per benchmark dataset. `_find_benchmark_keys()` scans every entry for `meta.country_iso`/`meta.hazard_type == "coastal"` — adding a dataset is a catalog entry, not a code branch. Each entry's `meta` block (`BenchmarkSpec`, `src/validation.py`):
+`snakemake_workflow/config/data_catalog_validation.yml` (path set by `validation.benchmark_catalog`, data root by `validation.benchmark_root` in `config.yml`) holds one entry per benchmark dataset. `_find_benchmark_keys()` scans every entry for `meta.country_iso`/`meta.hazard_type == "coastal"` — adding a dataset is a catalog entry, not a code branch. Each entry's `meta` block (`BenchmarkSpec`, `src/validation.py`):
 
 - `data_type`: `GeoDataFrame` (vector polygons) — every kept benchmark.
 - `variable`: `extent`.
 - `coverage`: `national` — the benchmark covers the whole territory, so "outside it" means "assessed and found dry".
 - `attribute_filter`: `{column: value}` rows to keep (`==` match, ANDed) — e.g. Wales' `{risk: "Flood Zone 3"}`.
-- `exclude_bbox`: drops rows whose centroid falls inside the box.
 - `regions`: `{name: [minx, miny, maxx, maxy]}` — named sub-areas, each scored and reported as its own row (see "Region blending" below). Required: there is no other geometry to derive a processing extent from.
 - `geogunit_ids`: explicit WRI geogunit-107 unit ID(s). Every kept benchmark covers a sub-national unit that shares its `country_iso` with sibling units it does NOT cover (England 3364, Scotland 3366, Wales 3367 under `GBR`; New Brunswick 492 under `CAN`) — bypasses `read_country_mask`'s normal ISO-string lookup entirely when set.
 - `comparison_return_periods`: optional list of NATIVE RPs (each must be one of `boundary_conditions.return_periods` in `config.yml`) to score this benchmark at, beyond the single global `validation.return_period` — see "Multi-RP summary" below. Set for Wales/Scotland/England FZ3 (`[100, 250]`, bracketing their ~1-in-200 benchmarks) and England FZ2 (`[1000]`).
@@ -76,8 +75,10 @@ Written per country to `{validation.output_dir}/{country}/`:
 
 `plot_agreement_map.py` then writes, per country. Every region raster is first grouped by which benchmark's `meta.regions` claims it — GBR has several benchmarks sharing its `country_iso`, distinguished only by `geogunit_ids`, so each gets its own independent plots (filenames carry a `_{benchmark_key}` segment); CAN has one benchmark and no such segment.
 
-1. **`{metric}_{country}[_{benchmark_key}]_{RP}_{SLR}.png`** (`plot_agreement_map()`) — the region with the most pixels as the main map, every other region in that group as a small corner inset. Every panel shows its own HR/FAR/CSI (`_load_region_metrics`, reading `metrics_{country}_{RP}_{SLR}.csv`).
-2. **`{metric}_{country}[_{benchmark_key}]_subregions_{RP}_{SLR}.png`** (`plot_subregions_grid()`, when a group has more than one region) — every non-main region as its own full-size panel. For Wales/Scotland this is the close-up view of the sub-areas paired with (1)'s whole-territory map.
+The `_{RP}` segment is dropped for a benchmark with several `comparison_return_periods`: its RPs share one figure.
+
+1. **`{metric}_{country}[_{benchmark_key}][_{RP}]_{SLR}.png`** (`plot_agreement_map()`) — the region with the most pixels as the main map, every other region in that group as a small corner inset. Every panel shows its own HR/FAR/CSI (`_load_region_metrics`, reading `metrics_{country}_{RP}_{SLR}.csv`).
+2. **`{metric}_{country}[_{benchmark_key}]_subregions[_{RP}]_{SLR}.png`** (`plot_subregions_grid()`, when a group has more than one region) — every non-main region as its own full-size panel. For Wales/Scotland this is the close-up view of the sub-areas paired with (1)'s whole-territory map.
 3. **`tile_coverage_{country}_{benchmark_key}.png`** (`plot_tile_coverage()`) — which production tiles intersect the benchmark's extent, for the largest region (`v.primary_region_name()`), tile IDs labeled.
 
 ## Multi-RP summary — `run_multi_rp_summary.py`
@@ -86,7 +87,7 @@ A separate, standalone script (not called by `run_validation.py`) for the questi
 
 Every listed RP must be NATIVE (a real `merged_results/chunks/waterdepth_*_{RP}_*.tif` on disk). For each one, the script re-runs the same `validate_country_national_coverage()` scoring with `validation.return_period` overridden — no new code path.
 
-Output: one row per `(country, benchmark_key, return_period)` in `{validation.output_dir}/multi_rp_summary.csv` — the `"ALL"` blended row where one exists, else the single region row. Columns: `HR`/`FAR`/`CSI`/`EB`/`EB_ratio`/`bias`, `tp_km2`/`fp_km2`/`fn_km2`, `benchmark_wet_outside_model_domain_pct` (no tolerant-confusion columns). It also plots every RP it scores (`plot_agreement_map.plot_country()`), since the normal run only plots at the global `validation.return_period`; filenames include the RP, so RPs never overwrite each other.
+Output: one row per `(country, benchmark_key, return_period)` in `{validation.output_dir}/multi_rp_summary.csv` — the `"ALL"` blended row where one exists, else the single region row. Columns: `HR`/`FAR`/`CSI`/`EB`/`EB_ratio`/`bias`, `tp_km2`/`fp_km2`/`fn_km2`, `benchmark_wet_outside_model_domain_pct` (no tolerant-confusion columns). It also plots every RP it scores (`plot_agreement_map.plot_country()`, once per country after scoring), since the normal run only plots at the global `validation.return_period`; a benchmark's RPs go into one RP-less figure (see "Outputs").
 
 ## England — standalone scripts
 

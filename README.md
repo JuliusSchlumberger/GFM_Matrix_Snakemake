@@ -39,7 +39,7 @@ validation/                run_validation.py: HR/FAR/CSI vs national hazard
 
 sfincs_tiles/              eikonal vs SFINCS calibration/validation (Hydrax):
                             generate_calibration_jobs.py stage1|stage2,
-                            rerun_{eikonal,sfincs}_calibration.sh;
+                            rerun_calibration.sh --part eikonal|sfincs;
                             run_final_tile.sh is the per-tile SLURM worker
 
 calibration_studies/       eikonal solver sensitivity (inner sweep rounds /
