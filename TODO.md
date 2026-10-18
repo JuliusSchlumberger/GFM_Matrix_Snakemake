@@ -23,17 +23,6 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
 
 ## Open
 
-- **`tests/sfincs_mdt_sign_validation/validate_mdt_sign.py` fails (found in Phase 0, 2026-10-17).**
-  `test_elevation_mdt_is_added_not_subtracted` expects the ocean cell to be
-  GEBCO + MDT (-19.5664 m), but `sfincs_tiles/build_elevation.build_combined_elevation`
-  returns 5.0 m, the land value. This is neither the added nor the subtracted value.
-  It already fails at baseline (`.cleanup_baseline/validate_mdt_sign.log`), in hydromt-sfincs-dev.
-  *Probable cause, not verified:* `_fill_coastal_transition_elevation` (added in
-  283b07c, 2026-09-24) blends the coastal ocean band towards land elevation. On the
-  test's 4×4 grid with a single ocean column, every ocean cell lies inside that band.
-  If so, the fixture needs a wider ocean region, or the MDT sign should be asserted
-  on `info`/`gebco_shifted` before the transition fill. That is a test fix, not a
-  sign bug, but confirm that before changing anything.
 - **FZ2 band figures disagree between the tracked CSVs (found in Phase 2b).**
   The note in `validation/comparison_vs_published.csv` says bias 2.4x and HR 0.066;
   `validation/overview_extent_metrics.csv` says bias 1.99 and HR 0.060. One of them is
@@ -49,9 +38,6 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
   which doesn't exist. `_rescore_england_fz3.py`'s docstring implies it uses
   `postprocessing.block_size`, but it hard-codes 8192 px. Both are docstring-only fixes
   (Phase 4/4b).
-- **`fetch_england_flood_zones.py` and `build_overview_table.py` have no CLI** (no
-  argparse). Any `--help` runs them for real, and fetch writes to P:\. Add argparse in
-  Phase 6, when the hard-coded P:\ paths move to config.
 - **Two console messages disappeared with the partial path.** "flood_totals missing →
   model_total_wet_km2 NaN" and "No coastal benchmark found for X" were only printed by
   the deleted `validate_country()`. The national path now prints just "No extent rows
