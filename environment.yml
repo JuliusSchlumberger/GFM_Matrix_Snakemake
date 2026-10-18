@@ -39,7 +39,7 @@ dependencies:
   # nothing else in this list pulls it in as a dependency. Capped below the
   # setuptools versions that started deprecating/dropping pkg_resources -
   # confirmed missing entirely (ModuleNotFoundError at that exact Snakefile
-  # line) on a fresh Hydrax env build, 2026-08.
+  # line) on a fresh cluster env build.
   - setuptools<70
   - libblas=*=*openblas          # forces OpenBLAS over MKL - see note above
   - hydromt=0.9.3
@@ -66,7 +66,7 @@ dependencies:
   - affine=2.4.0
   - openpyxl=3.1.2                # pandas ExcelWriter engine (its only user, a calibration xlsx report script, was removed - see TODO.md)
   - tomli=2.0.1                   # TOML fallback for Python <3.11 (no stdlib tomllib) - calibration scripts
-  - pytest=8.4.2                  # test runner (config in pyproject.toml; tests/conftest.py skips P:-drive and hydromt-sfincs tests)
+  - pytest=8.4.2                  # test runner (config in pyproject.toml; tests/conftest.py skips needs_data and hydromt-sfincs tests)
   - ruff=0.12.0                   # linter (config in pyproject.toml)
   - pip
   - pip:
@@ -80,7 +80,7 @@ dependencies:
       # bound), so an unpinned solve installs the latest pulp (3.x, which
       # renamed this to listSolvers) and every single snakemake invocation
       # crashes immediately with AttributeError, before touching any files -
-      # confirmed 2026-08 on Hydrax (every generated preprocessing sbatch
+      # confirmed on the cluster (every generated preprocessing sbatch
       # job died in 1-5s at CLI-parser construction, not real work).
       - pulp==2.7.0
 

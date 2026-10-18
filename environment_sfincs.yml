@@ -3,7 +3,7 @@
 # Separate from environment.yml (`gfm`) because hydromt_sfincs 2.x needs
 # hydromt>=1.x / numpy 2 / pandas 3, which conflict with gfm's hydromt 0.9.3
 # pins. Recorded 2026-10-17 from the working local env (`conda env export
-# --from-history` + installed versions); Hydrax has the same env name.
+# --from-history` + installed versions); the cluster uses the same env name.
 #
 # hydromt_sfincs is NOT on conda-forge at this version: it is an editable
 # install of a Deltares/hydromt_sfincs checkout (main @ cbba4362,

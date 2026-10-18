@@ -14,7 +14,7 @@ DeltaDTM tile it prepares DEM/mask/friction/water-level boundaries, runs a Pytho
 fast-sweeping eikonal solver per (tile, return period, SLR scenario), merges tiles
 into 5 deg chunks, then runs exposure/adaptation analysis and validation against
 national hazard maps. `sfincs_tiles/` calibrates the eikonal friction against SFINCS
-on the Hydrax HPC.
+on the HPC cluster.
 
 Size: ~31,600 lines of Python/Snakemake/shell in 189 tracked files.
 
@@ -25,7 +25,7 @@ Size: ~31,600 lines of Python/Snakemake/shell in 189 tracked files.
 | `preparation/` (10) | One-off global inputs: tile grid, boundary conditions, DeltaDTM VRTs | `run_preparation.py` |
 | `analysis/` (28) | Exposure, adaptation pathways, figures, delta case | `run_analysis.py`, `run_delta_floodmaps.py` (top level) |
 | `validation/` (13) | Eikonal vs national maps (GBR, CAN) and SF Bay | `run_validation.py`, standalone `validate_sf_bay.py` + `plot_sf_bay.py`, `rescore_england_fz3.py`, `validate_england_fz2_band.py` |
-| `sfincs_tiles/` (36) | SFINCS calibration, Hydrax only | `generate_calibration_jobs.py stage1/stage2`, `rerun_calibration.sh --part`, `run_final_tile.sh` |
+| `sfincs_tiles/` (36) | SFINCS calibration, HPC cluster only | `generate_calibration_jobs.py stage1/stage2`, `rerun_calibration.sh --part`, `run_final_tile.sh` |
 | `calibration_studies/` (10) | Solver sensitivity (sweep budget, obstacle coupling) | `generate_calibration_batch_jobs.py` |
 | `tests/` (26) | pytest suites (`validate_*.py`, `test_*.py`) | `pytest` |
 | `docs/` | `methods_01..04b` method write-ups, `figure_scripts/` | - |
@@ -68,11 +68,11 @@ All on branch `cleanup` (~50 commits ahead of `main`, not merged).
 
 - **Behaviour-preserving by default.** A change that alters results, outputs, file
   names or CLI behaviour is logged in `TODO.md`, not made, unless the user asks.
-- **Never write to, move or delete anything on `P:\`** (`/p/11212688-004-global-floodmaps/`
-  on Hydrax). Reading is fine. Local test outputs go to `.cleanup_baseline/` (gitignored).
+- **Never write to, move or delete anything under `<data_root>`** (`paths.root`).
+  Reading is fine. Local test outputs go to `.cleanup_baseline/` (gitignored).
 - **Do not change without asking:** output path patterns and wildcard constraints in
-  `rules/*.smk` (orphans outputs on P:\), `config.yml` defaults, `data_catalog_*.yml`,
-  pinned versions in `environment*.yml`, `sfincs_tiles/` while a Hydrax batch runs.
+  `rules/*.smk` (orphans outputs under `<data_root>`), `config.yml` defaults, `data_catalog_*.yml`,
+  pinned versions in `environment*.yml`, `sfincs_tiles/` while a cluster batch runs.
 - **Stale code is deleted** (git keeps it), never moved to an archive folder.
 - **Documentation standard** (CLAUDE.md): one-line imperative docstrings plus only
   non-inferable facts (units, datums, sign conventions, references); no history,
@@ -80,23 +80,21 @@ All on branch `cleanup` (~50 commits ahead of `main`, not merged).
 - **Validation scope:** Wales, Scotland, England, New Brunswick, SF Bay only.
 - **Never run `snakemake -n all` on the full grid** (does not finish); never run a
   script's `--help` without checking it uses argparse (some run for real and write
-  to P:\); progress monitors (`check_*_progress.py`) are run by the user.
+  to `<data_root>`); progress monitors (`check_*_progress.py`) are run by the user.
 - **Git:** commit per logical step with a clear message; do not push unless asked.
 - Flat `src/` layout via `sys.path.insert`; no packaging or relative imports.
 
 ## 4. Verification toolkit
 
-Interpreters (Windows): `gfm` env at
-`C:/Users/schlumbe/AppData/Local/miniforge3/envs/gfm_python_preprocessing/python.exe`
-(the PATH `python` is a Store stub); `hydromt-sfincs-dev` for `sfincs_tiles` model
-build/run and `tests/sfincs_*` (its matplotlib is broken, never plot there; its
+Interpreters: `gfm` env (local name and path: CLAUDE.local.md); `hydromt-sfincs-dev`
+for `sfincs_tiles` model build/run and `tests/sfincs_*` (its matplotlib is broken, never plot there; its
 hydromt 1.x cannot import `src/config_utils`).
 
 | Check | Command | Current result |
 |---|---|---|
 | Lint | `python -m ruff check .` | clean |
 | Tests (gfm) | `python -m pytest -q -m "not needs_data" tests` | 69 passed |
-| Tests (sfincs) | in hydromt-sfincs-dev: `python -m pytest -q -m "not needs_data" tests/sfincs_*` | 14 passed, 3 deselected (the P:\-reading tests; they write only under pytest tmp dirs) |
+| Tests (sfincs) | in hydromt-sfincs-dev: `python -m pytest -q -m "not needs_data" tests/sfincs_*` | 14 passed, 3 deselected (the `needs_data` tests; they write only under pytest tmp dirs) |
 | Dry run | `GFM_CONFIG_PATH=snakemake_workflow/config/bangkok_chao_phraya_materialized.yml snakemake -n all --cores 1` | 480 jobs (config-key rename re-triggers 25), matches `.cleanup_baseline/snakemake_n_all_bangkok_chao_phraya_final.txt` |
 
 The dry-run job count depends on `profiles/default/config.yaml`
@@ -108,14 +106,14 @@ Methods that worked for proving a refactor changes nothing:
   docstring statements) and the docstring-stripped AST against `git show HEAD:<file>`.
 - **Moves/splits:** every moved def/constant AST-identical to HEAD, defined once.
 - **Behaviour parity:** run old code (a `git worktree` of HEAD) and new code on the
-  same inputs (synthetic, or real tiles read from P:\ with outputs to
+  same inputs (synthetic, or real tiles read from `<data_root>` with outputs to
   `.cleanup_baseline/`) and compare outputs (raster hashes, gpkg geometry/attribute
   hashes, CSV/DataFrame equality). Example: 4 real tiles for the boundary-line split.
 - **Config edits:** materialize to a scratch dir and compare parsed YAML by value.
 
 ## 5. Known open items (details in TODO.md)
 
-Decisions for the user, not sweep work: merge `cleanup`; Hydrax checks after pulling
+Decisions for the user, not sweep work: merge `cleanup`; cluster checks after pulling
 (`DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part eikonal`); re-run the
 delta / bangkok_chao_phraya / calibration_500_tiles outputs that used
 `friction_scale_factor` 9.0 or 30.0; history rewrite for ~1 GB of `.npy` blobs.
@@ -154,9 +152,9 @@ Not yet systematically checked:
    around non-transient errors; exit codes of drivers.
 7. **Tests:** modules no test imports (`src/exposure_analysis.py`, `exposure_grid.py`,
    `pathways.py`, `population_growth.py`, `connectivity_tiling.py`, all of `analysis/`);
-   tests that only run with P:\ data; misnamed tests.
+   tests that only run with `<data_root>` data; misnamed tests.
 8. **Shell drivers** (`sfincs_tiles/*.sh`): only syntax-checked locally; review
-   quoting, `set -uo pipefail` use and path handling for Hydrax.
+   quoting, `set -uo pipefail` use and path handling on the cluster.
 9. **Naming consistency** across scripts (CLI flag names, output file patterns,
    `rp`/`return_period`, `slr`/`waterlevel_name`).
 
