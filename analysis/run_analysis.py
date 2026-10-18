@@ -4,13 +4,13 @@ Each step runs in its own subprocess, so a crash does not abort later steps unle
 --fail-fast. Switches: compute_exposure, compute_flood_totals (raw per-country totals for
 flood_extent_validation), plot_burning_ember, plot_timeseries, plot_tipping_points,
 plot_extended_pathways, plot_slr_vs_population, plot_world_maps (slow globally). All
-figures go directly into --figdir.
+figures go directly into --fig-dir.
 
 Usage:
     python analysis/run_analysis.py \\
         [--config  snakemake_workflow/config/config.yml] \\
         [--expdir  D:/GFM/merged_results/exposure] \\
-        [--figdir  D:/GFM/figures] \\
+        [--fig-dir D:/GFM/figures] \\
         [--fail-fast] [--only-exposure | --only-plots] [--skip-world-maps]
 """
 
@@ -33,7 +33,7 @@ def _run(script: Path, extra_args: list[str], label: str, fail_fast: bool) -> bo
 
 
 # (results key, analysis.* switch, default if absent, script, kind, title, skip label), in run
-# order. "compute" gets --out-dir <expdir>; "plot" gets --expdir <expdir> --out-dir <figdir>.
+# order. "compute" gets --out-dir <expdir>; "plot" gets --expdir <expdir> --out-dir <fig-dir>.
 _STEPS = [
     ("exposure", "compute_exposure", True, "compute_exposure_analysis.py", "compute",
      "Exposure analysis (baseline / protect / retreat / avoid / protect + avoid)", "Exposure analysis"),
@@ -63,7 +63,7 @@ def main() -> None:
                         help=f"path to config.yml (default: {_default_cfg})")
     parser.add_argument("--expdir", default=None,
                         help="exposure CSV directory (default: merged_outputs/exposure)")
-    parser.add_argument("--figdir", default=None,
+    parser.add_argument("--fig-dir", "--figdir", dest="figdir", default=None,
                         help="figures root directory (default: visualization.output_dir)")
     parser.add_argument("--fail-fast", action="store_true",
                         help="abort on first failed step")
