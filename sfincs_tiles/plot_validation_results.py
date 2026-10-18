@@ -4,7 +4,7 @@ HC-bathtub: elevation threshold + ocean-connectivity pruning. Writes {base}/figu
 and {base}/metrics_overview_table_fsf<X>.csv.
 
 Usage:
-    python plot_validation_results.py --base-dir-name calibration_roughness_SFINCS --friction-scale-factor 9
+    python plot_validation_results.py --base-dir-name calibration_roughness_SFINCS --friction-scale-factor 12
 """
 
 from __future__ import annotations

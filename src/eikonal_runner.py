@@ -53,10 +53,10 @@ def run_eikonal_python(
     """Run `flood_model.flood_depth_dense` in-process, write depth, return diagnostics.
 
     Inputs are int16-encoded on disk (DEM and water levels in cm) and decoded
-    to float32 m. `friction_scale_factor` (production 9.0, config.yml) is a
+    to float32 m. `friction_scale_factor` (production 12.0, config.yml) is a
     required correction, not a tuning knob: the solver treats friction as
-    cost per grid step (x30 for DeltaDTM's ~30 m pixel) times a x0.3
-    SFINCS-calibrated factor. Raises MemoryError on OOM.
+    cost per grid step (x30 for DeltaDTM's ~30 m pixel) times a x0.4
+    SFINCS-calibrated factor (docs/methods_02). Raises MemoryError on OOM.
     """
     with retry_transient_io(rasterio.open, dem_path) as src:
         dem = decode_dem_cm(src.read(1))

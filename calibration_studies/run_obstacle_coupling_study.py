@@ -7,7 +7,7 @@ CSV per tile: an n_outer=0 unblocked baseline, one row per outer iteration
 by the static filter alone vs the full outer loop.
 
 Each inner solve runs up to --inner-max-rounds rounds (4 sweeps, Julia's
-Gray-code order) with epsilon early exit; BLOCK_FRICTION = 9999.0 as
+Gray-code order) with epsilon early exit; blocking uses
 flood_model.OBSTACLE_BLOCK_FRICTION. Unlike production, dynamic blocking is
 restricted to cells with t < 99 (reached): unreached cells read as
 waterlevel -99 m and a block is never undone. pct_unreached is logged.
@@ -31,7 +31,7 @@ import rasterio
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import load_config  # noqa: E402
 from eikonal import _ORTHANT_ORDER, _dense_sweep  # noqa: E402
-from flood_model import effective_dem  # noqa: E402
+from flood_model import OBSTACLE_BLOCK_FRICTION as BLOCK_FRICTION, effective_dem  # noqa: E402
 from flood_model import _idw_seed_values, coastline_mask, prune_to_coast_connected  # noqa: E402
 from rasters import decode_dem_cm, decode_friction_int16, decode_waterlevel_cm  # noqa: E402
 
@@ -39,7 +39,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 RETURN_PERIOD = "RP100"
 WATERLEVEL_NAME = "SLR_0"
 OCEAN_CODE = 1
-BLOCK_FRICTION = 9999.0  # matches flood_model.OBSTACLE_BLOCK_FRICTION
 DEFAULT_OUTER_EPSILON_M = 0.03  # = simulation.flooding.waterlevel_epsilon_m
 DEFAULT_MAX_OUTER = 15  # beyond production's default, to find where tiles stop needing more
 DEFAULT_INNER_MAX_ROUNDS = 40  # methods_03 §2: most tiles converge or freeze extent by round 40

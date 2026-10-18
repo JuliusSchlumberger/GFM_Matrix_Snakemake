@@ -6,7 +6,7 @@ SFINCS-only patch), coastrp_forcing. Reads sfincs.msk/ind raw, so it runs in `gf
 Usage:
     python plot_sfincs_tile_diagnostics.py --tile-id 1693 --base-dir-name calibration_roughness_SFINCS
     python plot_sfincs_tile_diagnostics.py --tile-id 1974 --base-dir-name calibration_roughness_SFINCS \
-        --friction-scale-factor 9
+        --friction-scale-factor 12
     # one figure only, into another directory under another name:
     python plot_sfincs_tile_diagnostics.py --tile-id 1974 --base-dir-name calibration_roughness_SFINCS \
         --figures coastrp_forcing --fig-dir <dir> --out-name underprediction_1974_forcing_comparison.png

@@ -5,7 +5,7 @@ CSI counts. --min-union-km2 keeps a few noisy pixels from crowding out real
 disagreement. Needs only rasterio/scipy/matplotlib.
 
 Usage:
-    python plot_worst_tiles_panel.py --base-dir-name calibration_roughness_SFINCS --friction-scale-factor 9 \
+    python plot_worst_tiles_panel.py --base-dir-name calibration_roughness_SFINCS --friction-scale-factor 12 \
         [--n-tiles 6] [--min-union-km2 50]
 """
 

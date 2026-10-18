@@ -18,7 +18,7 @@ import rasterio
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import load_config  # noqa: E402
 from eikonal import _ORTHANT_ORDER, _dense_sweep  # noqa: E402
-from flood_model import effective_dem  # noqa: E402
+from flood_model import OBSTACLE_BLOCK_FRICTION as BLOCK_FRICTION, effective_dem  # noqa: E402
 from flood_model import _idw_seed_values, coastline_mask  # noqa: E402
 from rasters import decode_dem_cm, decode_friction_int16, decode_waterlevel_cm  # noqa: E402
 
@@ -27,7 +27,6 @@ RETURN_PERIOD = "RP100"
 WATERLEVEL_NAME = "SLR_0"
 OCEAN_CODE = 1
 RIVER_CODE = 3
-BLOCK_FRICTION = 100.0
 INNER_MAX_ROUNDS = 25
 EPSILON = 0.03  # matches production's simulation.flooding.waterlevel_epsilon_m
 

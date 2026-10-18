@@ -15,28 +15,20 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
    that Phase 1 untracked; restore afterwards. (`config_hpc.yml` is tracked again since 2026-10-18.)
 3. **On Hydrax after pulling:** `DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part eikonal`.
    (Stale job files: done 2026-10-18 from Windows, see the Phase 7a/7b notes below.)
-4. **Snakemake "code changed" flags** (renamed rules/scripts, and the docstring trim: Snakemake 7
-   hashes rule scripts, so comment-only edits flag e.g. `cache_waterlevel_stations`). Do NOT
-   `--touch` the full grid (full-DAG build + mtime writes on every P:\ output). Instead run with
-   `--rerun-triggers mtime params input software-env`; optionally `--touch` only the two subset
-   configs (bangkok_chao_phraya, thailand_bangkok) on the Windows machine, where their
-   `.snakemake/metadata` lives (metadata is per working dir, not next to the outputs).
+4. **Snakemake "code changed" flags**: solved by `profiles/default/config.yaml` (auto-loaded,
+   `rerun-triggers: [mtime, params, input, software-env]`). No `--touch` needed.
 5. **Decide:** re-materialize the scenario configs or not (item below); the `mdt_sign` test fixture;
    the near-duplicates left in Phase 5d.
 6. Hydrax `gfm` env: `mamba install -n gfm pytest=8.4.2 ruff=0.12.0` (Phase 0 tooling).
 
 ## Found during the docstring trim (code, not docs - not changed)
 
-- `src/eikonal_runner.py` docs say the production `friction_scale_factor` is 9.0; `config.yml` sets 12.0
-  (some scenario pins hold older values). Confirm which is current.
-- `sfincs_tiles/calibration_results.DISPLAY_LABEL` / `plot_validation_results.py` call HC-bathtub
-  "elevation threshold + ocean-connectivity pruning", but `run_calibration_models.compute_bathtub_depth`
-  applies no connectivity.
-- `preparation/prepare_boundary_conditions.py`: variable `SLR_ssp245_2100` is hard-coded whatever
-  scenario is configured.
-- `calibration_studies/diagnose_large_residual.py`: `BLOCK_FRICTION = 100.0` vs production 9999.0.
-- `validation/build_overview_table.py` hard-codes its own copy of the published values that also live
-  in `compare_against_published.py` (can drift).
+- **Decide: outputs computed with `friction_scale_factor` != 12.0** (production is 12.0 since
+  2026-10-13; the global run's `model_outputs/hpc_jobs/resolved_config.yml` has 12.0). Still at 9.0:
+  deltas_ssp126 / deltas_ssp245 / deltas_design (base configs set 9.0, "0.3x production's 30"),
+  bangkok_chao_phraya (run 2026-10-08), gbr_wales_scotland_friction9 (deliberate experiment).
+  Still at 30.0: thailand_bangkok, calibration_500_tiles (solver studies, 2026-10-05). Re-run at 12.0
+  = change the base config + its `*_pins.yml`, re-materialize, re-run.
 - `preparation/select_country_tiles.py`: GBR comment still says only Wales/Scotland benchmarks (England
   FZ2/FZ3 exist now).
 - `src/population_growth.interpolate_growth_factor` docs say it returns `default` outside the year range;

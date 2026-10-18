@@ -80,7 +80,10 @@ def build_inputs_from_sfincs_subgrid(
 
 
 def compute_bathtub_depth(dem: np.ndarray, mask: np.ndarray, max_waterlevel_m: float) -> np.ndarray:
-    """Flood every land cell below one flat level (m): no connectivity, friction or propagation.
+    """Flood every land cell below one flat level (m): no friction or propagation.
+
+    Unpruned on disk; compute_calibration_result prunes it to ocean-connected cells
+    (flood_agreement.prune_to_ocean_connected) before scoring.
 
     `max_waterlevel_m` is the tile's highest boundary station value, not interpolated.
     """
