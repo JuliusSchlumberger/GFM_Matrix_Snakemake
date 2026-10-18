@@ -72,9 +72,39 @@ Never write to, move, or delete anything on P:\ or the model output directories.
 ## Conventions
 - The per-tile solve lives in `src/eikonal_runner.run_tile_scenario`; `run_eikonal.py`
   (Snakemake) and `run_eikonal_cli.py` (HPC) are thin wrappers - change behaviour there, not in them.
-- Rich module docstrings explaining *why*; match the surrounding comment density.
-  Public functions/classes in core modules use NumPy-style docstrings (short: what + why).
+- Docstrings and comments follow the documentation standard below.
 - Stale code and one-off diagnostics are deleted (git history keeps them), not archived.
+
+## Documentation standard
+
+Documentation is for future readers of the code, not a record of this session.
+
+- Never write change history into code or docs: no "previously", "updated to",
+  "now handles", "refactored", "fixed", phase/step references, or dates.
+  Git is the changelog. If a summary of changes is needed, put it in the
+  commit message or say it in chat.
+- Docstrings: one summary line in the imperative, max ~80 chars. Add further
+  lines ONLY for things not inferable from the signature: units, datums and
+  sign conventions, assumptions, valid ranges, the equation or paper the
+  function implements, non-obvious side effects or failure modes.
+- No Parameters/Returns sections that only repeat the type hints. Document a
+  parameter only when its name and type do not make it obvious.
+- No docstrings on private helpers, trivial wrappers, dunder methods, or tests
+  unless a non-obvious assumption is involved.
+- Inline comments explain WHY, never WHAT. Delete comments that paraphrase the
+  code. Keep comments that encode a physical/numerical assumption or a
+  reference.
+- Module docstring: one or two lines on purpose and main entry point. No file
+  listings, no author/date headers.
+- README per package: purpose, how to run, key config options. Target under
+  40 lines. Top-level README: under 120 lines. No feature lists, no "overview"
+  prose that repeats the directory names.
+- Do not create new .md files (NOTES, SUMMARY, CHANGES, DESIGN, etc.) unless
+  asked. Report in chat instead.
+- Prefer self-explanatory names over comments. If a comment is needed to
+  explain a name, rename.
+- When unsure whether to document something: leave it out. Missing docs are
+  cheap to add; noise is expensive to remove.
 
 ## Ongoing cleanup
 `AUDIT.md` holds the repo audit, the user's final decisions (§7, §9) and the phased
