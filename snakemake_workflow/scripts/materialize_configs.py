@@ -1,16 +1,9 @@
 """Materialize scenario configs: `config/<name>.yml` -> `config/<name>_materialized.yml`.
 
-Each materialized file is a standalone, fully-merged config.yml + config_local.yml + the
-scenario's override file + its optional `<name>_pins.yml` (values pinned to what the scenario's
-existing outputs were computed with) (src/config_utils.py::materialize_config - the same deep-merge semantics
-load_config uses). Point GFM_CONFIG_PATH at it to run Snakemake on that scenario (see the
-Snakefile's comment on why GFM_CONFIG_PATH is used instead of --configfile).
-
-The `*_materialized.yml` files are generated and git-ignored; this script rebuilds them on a
-fresh clone. It replaces build_delta_run_configs.py (deltas_ssp126/245 only) and covers every
-override that has a materialized sibling. `deltas_design_materialized.yml` is not an override
-merge (it carries per-delta computed values) and is still written by
-analysis/prepare_delta_design_runs.py.
+Each output is config.yml + config_local.yml + the override + optional `<name>_pins.yml`
+(values pinned to what the scenario's existing outputs were computed with), deep-merged
+like load_config. Point GFM_CONFIG_PATH at it. `deltas_design_materialized.yml` is not
+built here (analysis/prepare_delta_design_runs.py writes it).
 
 Usage:
     python snakemake_workflow/scripts/materialize_configs.py              # every known scenario

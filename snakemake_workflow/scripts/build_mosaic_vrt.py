@@ -1,10 +1,4 @@
-"""Build a GDAL VRT mosaicking all chunk waterdepth outputs for one SLR scenario.
-
-A VRT (Virtual Raster Table) is a lightweight XML file that GDAL/rasterio
-treats as a single raster covering the union of all source files.  Reading
-through the VRT for plotting or area computation is transparent — no data is
-copied; GDAL reads the relevant chunk on demand.
-"""
+"""Build a GDAL VRT mosaic of all chunk waterdepth outputs for one SLR scenario."""
 
 from osgeo import gdal
 

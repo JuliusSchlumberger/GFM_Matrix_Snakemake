@@ -1,38 +1,19 @@
-"""Rules for preprocessing per-tile model inputs.
+"""Rules for preprocessing per-tile model inputs into `{preprocessing_inputs_dir}/{tile_id}/inputs/`.
 
-Each rule produces a single file in `{preprocessing_inputs_dir}/{tile_id}/
-inputs/`. All fixed parameters (data source names, raster output options,
-water level scenario definitions) are read from `config/config.yml`.
-
-`_preprocessing_inputs_dir` defaults to `simulation.model_outputs` (so
-production, which never sets `simulation.preprocessing_inputs_dir`, is
-byte-for-byte unaffected) but can be pointed elsewhere - added 2026-09-14
-for the ESP/FRA/NOR calibration sweep (now complete and removed): within
-one group (e.g. esp_fra_rp100), none of the 14 OFAT sweep points
-(friction_scale_factor, max_rounds, obstacle_coupling.*,
-waterlevel_epsilon_m, exposure.exceedance_threshold_m) touch anything
-preprocessing produces here - they're all solver-runtime or
-postprocessing/exposure-only parameters - so all 14 sweep points needed
-byte-identical inputs/ content, by pointing preprocessing_inputs_dir at a
-GROUP-level shared directory instead of isolating it per run_tag like
-`simulation.model_outputs` (which stays isolated - it also holds
-results/waterdepth_*.tif, whose filename has no sweep-point tag, so THAT
-genuinely must not be shared). Cut calibration preprocessing from
-14x-per-group redundant to 1x-per-group.
+`_preprocessing_inputs_dir` defaults to `simulation.model_outputs`. Calibration
+sweeps whose points only change solver-runtime/exposure parameters can point it
+at a group-level shared directory; model_outputs must stay per-run because
+results/waterdepth_*.tif filenames carry no sweep-point tag.
 """
 
 _preprocessing_inputs_dir = config["simulation"].get("preprocessing_inputs_dir") or config["simulation"]["model_outputs"]
 
 
 rule compute_geoid_offset_raster:
-    """One-time computation of the global EGM2008 -> GOCO06s geoid-offset
-    field (pyshtools spherical-harmonic synthesis, ~12s), cached to a small
-    GeoTIFF. NOT tile_id-wildcarded: the offset field is smooth and global,
-    so it only needs to be computed once regardless of how many tiles exist
-    - every per-tile `extract_dem` job (below) reads a tiny reprojected
-    window of this cached raster instead of resynthesizing the harmonics
-    itself (see src/vertical_datum.py). Always in the DAG - extract_dem
-    always depends on this rule's output (see below).
+    """Compute the global EGM2008 -> GOCO06s geoid-offset field once, as a GeoTIFF.
+
+    Not tile-wildcarded: the field is smooth and global, so extract_dem reads a
+    reprojected window of it instead of resynthesizing harmonics (pyshtools).
     """
     input:
         egm2008_gfc=_data_catalog.get_source("egm2008_geoid").path,
@@ -69,12 +50,7 @@ rule compute_model_bbox:
 
 
 rule extract_dem:
-    """Clip the DEM to the model domain bbox.
-
-    Geoid-corrects the clipped elevation (EGM2008 -> GOCO06s) via the cached
-    offset raster from compute_geoid_offset_raster above - see
-    src/vertical_datum.py and rasters.extract_dem.
-    """
+    """Clip the DEM to the model bbox and geoid-correct it (EGM2008 -> GOCO06s)."""
     input:
         model_bbox=rules.compute_model_bbox.output.model_bbox,
         geoid_offset_raster=rules.compute_geoid_offset_raster.output.offset_raster,
@@ -120,45 +96,21 @@ rule compute_friction:
         "../scripts/compute_friction.py"
 
 
-# Resolved ONCE here at Snakefile-parse time (mirrors _data_catalog's own
-# module-level construction in the root Snakefile), not per-job - unlike
-# extract_dem/extract_dem_mask/compute_friction/compute_model_bbox (which
-# genuinely need a live DataCatalog object for real raster reads via
-# get_rasterdataset), extract_boundaries.py only ever used its own per-job
-# get_data_catalog() call for ONE static path
-# (deltadtm_mask's directory, for filter_stations_by_ocean_connectivity) that
-# never varies across tiles/scenarios - rebuilding a whole HydroMT catalog
-# (~5s, confirmed via real HPC job logs 2026-08-10: consecutive
-# "Parsing data catalog" lines exactly 5s apart) JUST for that, ~45x per tile
-# (once per return_period x waterlevel_name boundaries file), was costing
-# ~3-4 minutes of pure overhead per tile - the dominant share of the ~5min/
-# tile preprocessing throughput observed live on Hydrax.
+# Resolved once at parse time: rebuilding a HydroMT catalog per boundaries job
+# (~5 s each, ~45x per tile) only for this static path dominated tile runtime.
 _deltadtm_mask_dir = os.path.dirname(_data_catalog.get_source("deltadtm_mask").path)
 
 _stations_cache_dir = os.path.join(config["paths"]["processed_inputs_dir"], "WL_scenarios_cache")
 
 
 rule cache_waterlevel_stations:
-    """Cache one (return_period, waterlevel_name) scenario's global COAST-RP
-    water-level stations ONCE, as a small pre-parsed GeoPackage.
+    """Cache one scenario's global COAST-RP water-level stations as a GeoPackage.
 
-    The source NetCDF (boundary_conditions.nc_filename_template) is wildcarded
-    ONLY by (return_period, waterlevel_name) - it has no tile dimension at
-    all, so its station set is 100% identical for every tile that needs this
-    scenario. Before this rule existed, every tile's own extract_boundaries
-    job re-opened and re-parsed that same NetCDF via xarray independently
-    (~5s each, confirmed against real tile 1013 data 2026-08-10) - up to
-    ~2578x redundant re-reads of the same ~45 files. Same "compute once
-    globally, read cheaply per tile" pattern as compute_geoid_offset_raster.
-
-    NOT temp() - reused across every future preprocessing batch/invocation
-    that needs this scenario, not just jobs within one Snakemake run. NOT
-    tile-wildcarded, so - like compute_geoid_offset_raster's output - this is
-    a shared, non-tile-specific output: on HPC, it must be built during the
-    same build_shared_inputs phase-0 step (see generate_hpc_preprocess_job.py)
-    BEFORE any --nolock batch starts, to avoid the exact concurrent-write
-    race compute_geoid_offset_raster's own phase-0 build already exists to
-    prevent (see that rule's/generate_hpc_preprocess_job.py's own docstrings).
+    The source NetCDF has no tile dimension, so parsing it once replaces a
+    per-tile re-read. Not temp(): reused across runs. Shared, non-tile output:
+    on HPC it must be built in the build_shared_inputs step
+    (generate_hpc_preprocess_job.py) before any --nolock batch starts, to
+    avoid concurrent-write races.
     """
     output:
         stations_cache=os.path.join(

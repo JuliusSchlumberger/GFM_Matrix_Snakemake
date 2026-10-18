@@ -19,11 +19,7 @@ waterlevel_name = snakemake.wildcards.waterlevel_name  # noqa: F821
 
 tile = retry_transient_io(gpd.read_file, snakemake.input.tile_geometry)  # noqa: F821
 
-# Pre-parsed once per (return_period, waterlevel_name) scenario by
-# cache_waterlevel_stations - NOT re-read from the raw NetCDF per tile here
-# anymore (that NetCDF has no tile dimension at all, so every tile was
-# redundantly re-parsing the exact same global station set - see that rule's
-# own docstring, conversation 2026-08-10).
+# Pre-parsed once per scenario by cache_waterlevel_stations.
 stations = retry_transient_io(gpd.read_file, snakemake.input.stations_cache)  # noqa: F821
 
 selected = select_stations_for_tile(
@@ -32,17 +28,8 @@ selected = select_stations_for_tile(
     min_search_size_deg=bc_cfg["station_search_min_size_deg"],
 )  # noqa: F821
 
-# Coarse, long-range ocean-connectivity filter - select_stations_for_tile above
-# is purely distance-based and can't tell a station across a thin land
-# barrier from a genuinely nearby one; see filter_stations_by_ocean_connectivity's
-# own docstring for why this has to be a separate, coarser pass rather than
-# folded into the native-resolution IDW connectivity fix in flood_model.py.
-# mask_dir is resolved once at Snakefile-parse time (preprocessing.smk's
-# _deltadtm_mask_dir), not rebuilt from a fresh HydroMT DataCatalog on every
-# one of the ~45 (return_period, waterlevel_name) jobs per tile this rule
-# runs - that per-job rebuild (~5s each, pure catalog-parsing overhead for a
-# path that never changes) was the dominant cost in a tile's whole
-# preprocessing time - see conversation 2026-08-10.
+# select_stations_for_tile is distance-only and cannot see thin land barriers;
+# this coarse long-range ocean-connectivity pass removes such stations.
 mask_dir = Path(snakemake.params.mask_dir)  # noqa: F821
 selected = filter_stations_by_ocean_connectivity(
     selected,
@@ -52,19 +39,9 @@ selected = filter_stations_by_ocean_connectivity(
     water_fraction_threshold=bc_cfg["connectivity_water_fraction_threshold"],
 )
 
-# A tile that finds no real COAST-RP station at all (small/hinterland
-# chunks, or genuinely isolated ones) used to be dropped from tile_grid.path
-# entirely by the now-retired connectivity_map step. That step is gone, so
-# this is now an explicit, intentional EMPTY placeholder instead - `selected`
-# already has the right schema/crs even with zero rows, so save_boundary_points
-# writes it as-is. Revisit if a tile's OWN COAST-RP station search (this
-# script) should also pull from a lower-hop neighbour's already-SIMULATED
-# result, the way inland tiles already get their actual flood-boundary
-# forcing from their lower-hop neighbour's output at run time (see
-# src/connectivity_tiling.py::compute_hop_distances and this project's own
-# methods doc, section 3) - that propagation already exists for simulation
-# itself; this placeholder is specifically about the upstream
-# station-selection step, which doesn't consult it.
+# No station found: write an explicit empty placeholder (`selected` keeps its
+# schema/crs with zero rows). Station selection does not consult lower-hop
+# neighbours; hinterland forcing from them happens only at run time.
 if selected.empty:
     print(f"  no COAST-RP station found for this tile/scenario - writing an empty "  # noqa: T201
           f"placeholder boundaries file (tile_id={snakemake.wildcards.tile_id})")  # noqa: F821

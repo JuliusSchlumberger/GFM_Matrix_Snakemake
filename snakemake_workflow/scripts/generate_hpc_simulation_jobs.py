@@ -1,57 +1,13 @@
-"""Generate the simulation-wave sbatch scripts directly from the tile grid,
-with NO Snakemake DAG/dependency check at all - the simulation-side
-counterpart to generate_hpc_preprocess_job.py.
+"""Generate the simulation-wave sbatch scripts directly from the tile grid, without a DAG check.
 
-`rule generate_eikonal_jobs` (hpc_dispatch.smk) is gated on `input:
-_PREPROCESS_OUTPUTS` - every preprocessing output across the WHOLE domain
-(~2578 tiles x ~45 scenarios each) - so Snakemake has to verify that entire
-dependency list before this rule can even start, which is genuinely slow
-over a network mount (confirmed live 2026-08-10: several hours for this
-exact DAG build on a real run). That verification is real and correct the
-first time - but once preprocessing is confirmed done (e.g. via
-check_preprocess_progress.py), REGENERATING the wave scripts afterwards
-(e.g. after an hpc.n_nodes change, like the 2026-08-10 fix reducing peak
-concurrent nodes from 40 to 20) does not need to re-pay that cost every
-time. This script computes the exact same (wave, batch_id, tile_ids)
-partition hpc_dispatch.smk does, directly from the tile grid, and
-calls the SAME generate_wave_dispatch() function
-scripts/generate_eikonal_jobs.py's Snakemake path uses - one implementation,
-two entry points, so they can't drift apart.
+Computes the same (wave, batch_id, tile_ids) partition as hpc_dispatch.smk and calls
+the same generate_wave_dispatch(), skipping rule generate_eikonal_jobs' slow
+_PREPROCESS_OUTPUTS verification. Does NOT verify preprocessing is complete.
+The tile grid is read via the local config; embedded paths use the Linux view.
 
-This does NOT verify preprocessing is actually complete (unlike the
-Snakemake path) - that's the caller's own responsibility. It also does NOT
-run the wave-0-boundaries-empty pre-check any differently - that still
-happens here too (see generate_wave_dispatch's own docstring), just without
-Snakemake's own dependency-freshness check wrapped around the whole thing.
-
-Uses the same local-view/Linux-view path resolution as
-generate_hpc_preprocess_job.py (config_hpc.yml, if present): the tile grid
-is read via the LOCAL config (this machine's own reachable mount), while
-every path string embedded into generated sbatch scripts uses the Linux
-view - see generate_hpc_preprocess_job.py's own note on why the tile-grid
-read specifically must use the local view.
-
---resume (2026-08, new): instead of a fresh whole-tile dispatch, scans every
-tile's results/ dir once to find which (rp, slr) scenarios are still
-missing, then re-batches ONLY that remaining work - flat (tile, rp, slr)
-items, not whole tiles - evenly across the full hpc.n_nodes budget again
-(scripts/generate_eikonal_jobs.py's generate_resume_dispatch). This is for
-rebalancing a wave whose ORIGINAL batches finished their own (uneven) tile
-lists at different times and went idle one by one, silently shrinking
-effective parallelism (found live 2026-08-11: 5 of wave 0's 17 small
-batches had already finished while the wave overall was still <40% done).
-Writes resume_wave*.sbatch / submit_resume_waves.sh - separate filenames
-from a fresh dispatch's wave*.sbatch / submit_waves.sh, so neither
-overwrites the other.
-
-**Before submitting a --resume dispatch, cancel whatever's still running
-from the ORIGINAL dispatch for the same wave(s) first** (e.g. `scancel
-<jobids>` from `squeue`). The remaining-work scan is a snapshot; if the old
-batches keep running alongside newly-submitted resume batches, both can
-pick up the same still-incomplete item and redo it concurrently for as long
-as both stay alive - run_eikonal_cli.py's own idempotency check
-(_output_already_done) only prevents redoing work that has ALREADY finished
-and been written, not work still in flight in another job.
+--resume re-batches only missing (tile, rp, slr) items evenly across hpc.n_nodes
+into resume_wave*.sbatch / submit_resume_waves.sh. Cancel the original dispatch's
+still-running jobs first: _output_already_done does not cover in-flight work.
 
 Usage:
     python generate_hpc_simulation_jobs.py [--config path/to/config.yml]
@@ -72,9 +28,10 @@ from generate_eikonal_jobs import generate_resume_dispatch, generate_wave_dispat
 
 
 def _resolve_wave_tier(hop: int, wave_tiers: list[dict]) -> dict:
-    """First `hpc.wave_tiers` entry whose `hops` list contains `hop` (or
-    `hops: null`, a catch-all - must be last). See config.yml's own comment
-    on `hpc.wave_tiers` for the full semantics."""
+    """Return the first hpc.wave_tiers entry whose `hops` contains `hop`.
+
+    `hops: null` is a catch-all and must be last.
+    """
     for tier in wave_tiers:
         hops = tier.get("hops")
         if hops is None or hop in hops:
@@ -83,16 +40,7 @@ def _resolve_wave_tier(hop: int, wave_tiers: list[dict]) -> dict:
 
 
 def main() -> None:
-    """Parse CLI arguments and write the sbatch scripts for a simulation wave dispatch.
-
-    Builds the same (wave, batch_id, tile_ids) partition hpc_dispatch.smk's
-    Snakemake rule computes, directly from the tile grid, skipping Snakemake's
-    own dependency-DAG verification. With ``--resume``, instead rebalances only
-    the still-missing (tile_id, return_period, slr) scenarios across the full
-    node budget (see module docstring). Writes wave*.sbatch/submit_waves.sh
-    (fresh) or resume_wave*.sbatch/submit_resume_waves.sh (resume) under
-    ``hpc.jobs_dir``.
-    """
+    """Write the sbatch scripts for a fresh or --resume simulation wave dispatch."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
     parser.add_argument("--config", default=str(default_config))
@@ -113,8 +61,7 @@ def main() -> None:
     n_nodes = hpc_cfg["n_nodes"]
     model_outputs = Path(local_config["simulation"]["model_outputs"])
 
-    # Local view (this machine's own reachable mount), not linux_config's -
-    # see generate_hpc_preprocess_job.py's own note on this exact point.
+    # Local view: linux_config's path is only for embedding in sbatch scripts.
     tile_gdf = retry_transient_io(gpd.read_file, local_config["tile_grid"]["path"])
     tile_ids = tile_gdf["tile_id"].astype(int).tolist()
     hop_by_tile = {str(tid): int(hop) for tid, hop in zip(tile_gdf["tile_id"], tile_gdf["hop_distance"])}
@@ -136,8 +83,7 @@ def main() -> None:
         for wave in sorted(hpc_waves):
             wave_tiles = hpc_waves[wave]
             if wave_tiers:
-                # hpc.wave_tiers present (2026-10-08) - see config.yml's own
-                # comment on hpc.wave_tiers for the full semantics.
+                # See config.yml's comment on hpc.wave_tiers.
                 tier = _resolve_wave_tier(wave, wave_tiers)
                 wave_sbatch_cfg[wave] = {
                     "partition": tier["partition"], "cpus_per_task": tier["cpus_per_task"],
@@ -147,7 +93,6 @@ def main() -> None:
                 }
                 n_batches = len(wave_tiles) if tier["n_nodes"] is None else min(tier["n_nodes"], len(wave_tiles))
             else:
-                # No hpc.wave_tiers configured - original uniform behaviour, unchanged.
                 n_batches = min(n_nodes, len(wave_tiles))
 
             k, m = divmod(len(wave_tiles), n_batches)
@@ -193,7 +138,6 @@ def main() -> None:
         print(f"\nSubmit on Hydrax with: bash {linux_config['hpc']['jobs_dir']}/submit_waves.sh")
         return
 
-    # ── --resume: scan what's actually missing, rebalance across all nodes ──
     wave_tiers = hpc_cfg.get("wave_tiers")
     wave_sbatch_cfg: dict[int, dict] = {}
 
@@ -236,18 +180,8 @@ def main() -> None:
                 "env_activate_cmd": hpc_cfg["sbatch"]["env_activate_cmd"],
             }
             if tier["n_nodes"] is None:
-                # Uncapped tier = "one 1vcpu node per TILE" (its own documented
-                # meaning in config.yml - correct for generate_wave_dispatch's
-                # own whole-tile batches). `items` here is a FLAT list of
-                # individual (tile_id, rp, slr) triples, though (resume mode's
-                # own rebalance-by-work-item design) - naively doing
-                # `n_batches = len(items)` therefore created one SLURM job
-                # PER MISSING TRIPLE instead of per tile (confirmed live
-                # 2026-10-13: wave 4's 27 tiles turned into 1200+ one-item
-                # batches). Group by tile_id first instead, so a resumed
-                # uncapped-tier wave gets back to the same "one node, every
-                # remaining triple for that tile" shape the fresh dispatch
-                # already uses.
+                # Uncapped tier means one node per TILE: group the flat triples
+                # by tile_id, else every missing triple becomes its own job.
                 items_by_tile: dict[str, list[tuple[str, str, str]]] = {}
                 for tile_id, rp, slr in items:
                     items_by_tile.setdefault(tile_id, []).append((tile_id, rp, slr))

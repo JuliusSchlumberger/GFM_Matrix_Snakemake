@@ -1,4 +1,4 @@
-"""Merge per-tile water depth rasters within one spatial chunk for a single return period and SLR scenario."""
+"""Merge per-tile water depth rasters within one chunk for one RP and SLR scenario."""
 
 import sys
 from pathlib import Path

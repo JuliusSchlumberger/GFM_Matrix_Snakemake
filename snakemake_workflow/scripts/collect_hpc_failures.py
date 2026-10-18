@@ -1,26 +1,8 @@
-"""Compile a single report of every tile/scenario that did NOT produce a
-real simulated waterdepth after an HPC run.
+"""Report every tile/scenario that did not produce a simulated waterdepth on HPC.
 
-Two genuinely different categories, kept separate rather than merged into
-one "failed" bucket:
-
-  - JOB ERRORS: the (tile_id, return_period, waterlevel_name) lines
-    appended by each generated sbatch script's `run_job()` wrapper (see
-    generate_eikonal_jobs.py) to `{jobs_dir}/logs/wave*_batch_*_failures.
-    txt` when `run_eikonal_cli.py` exits non-zero - a genuine, unresolved
-    unknown (crash, timeout, bad input) that needs investigating and
-    re-running. `run_job()` already logs the failure and moves on to the
-    next job in its batch instead of aborting (`set -uo pipefail`, not
-    `-e`), so one bad tile never takes down the rest of a node's batch or
-    a wave.
-  - CONFIDENTLY-RESOLVED SKIPS: `model_outputs/skipped_tiles/*.txt`
-    markers written DURING a normal run (no boundary stations, no upstream
-    flooding found yet, or OOM/too-large) - these are real, deliberate
-    results (a genuine zero or a genuine "unknown, too large"), not
-    failures. Listed here for visibility only; re-running them the same
-    way as a job error would be wrong for the first two (same outcome
-    every time) and pointless for OOM (same outcome unless the tile is
-    re-chunked).
+job_error rows (from {jobs_dir}/logs/wave*_batch_*_failures.txt) need re-running;
+skipped_tiles/*.txt rows (no stations, no upstream flooding, OOM) are deliberate
+results, listed for visibility only.
 
 Usage:
     python collect_hpc_failures.py [--config path/to/config.yml] [--out report.csv]
@@ -51,6 +33,7 @@ def _classify_skip_reason(reason: str) -> str:
 
 
 def collect_job_errors(jobs_dir: Path) -> list[dict]:
+    """Collect non-zero-exit (tile, RP, SLR) lines written by the sbatch run_job()."""
     rows = []
     logs_dir = jobs_dir / "logs"
     for fail_file in sorted(logs_dir.glob("wave*_batch_*_failures.txt")):
@@ -75,11 +58,10 @@ def collect_job_errors(jobs_dir: Path) -> list[dict]:
 
 
 def collect_skipped_tiles(skipped_dir: Path) -> list[dict]:
+    """Collect skipped-tile markers written during a normal run."""
     rows = []
     for marker in sorted(skipped_dir.glob("*.txt")):
-        # {tile_id}_{return_period}_{waterlevel_name}.txt - return_period
-        # (e.g. "RP100") never contains "_", but waterlevel_name (e.g.
-        # "SLR_0") often does, so split on the FIRST two underscores only.
+        # waterlevel_name (e.g. "SLR_0") may contain "_"; tile_id and RP never do.
         tile_id, scenario_name = marker.stem.split("_", 1)
         return_period, _, waterlevel_name = scenario_name.partition("_")
         reason = marker.read_text(encoding="utf-8-sig").strip()
@@ -95,6 +77,7 @@ def collect_skipped_tiles(skipped_dir: Path) -> list[dict]:
 
 
 def main() -> None:
+    """Write the failure report CSV and print per-category counts."""
     parser = argparse.ArgumentParser(description=__doc__)
     default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
     parser.add_argument("--config", default=str(default_config))

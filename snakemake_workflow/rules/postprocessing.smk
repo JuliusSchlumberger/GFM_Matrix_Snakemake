@@ -1,19 +1,11 @@
-"""Rules for combining and visualising per-tile flood model results.
+"""Rules for merging per-tile flood results into spatial chunks, a VRT mosaic and plots.
 
-The study area is partitioned into spatial chunks (size: merge.chunk_size_deg).
-Each chunk is merged independently (rule merge_chunk), then all chunks are
-assembled into a GDAL VRT mosaic (rule build_mosaic_vrt) which is used for
-the final plots (rule plot_merged_results).  This partitioning means each
-merge job reads only the handful of tiles that overlap its chunk rather than
-the full tile set, and produces smaller, faster-to-write output files.
+Chunks (merge.chunk_size_deg) are merged independently so each job reads only
+the tiles overlapping it.
 """
 
-# chunk_id's constraint (so Snakemake does not try to match it against other
-# wildcard patterns, e.g. waterlevel_name/return_period) lives in common.smk
-# alongside the other wildcard_constraints - Snakemake merges all such blocks
-# into one global dict, so declaring waterlevel_name/return_period again here
-# with a looser regex would just silently shadow common.smk's tighter,
-# config-derived ones for whichever file happens to be `include:`d last.
+# chunk_id's constraint lives in common.smk: Snakemake merges all
+# wildcard_constraints globally, so redeclaring here would shadow those.
 _merge_chunk_waterdepth_path = os.path.join(
     config["postprocessing"]["merged_outputs"], "chunks",
     "waterdepth_{chunk_id}_{return_period}_{waterlevel_name}.tif",
@@ -25,31 +17,17 @@ _merge_chunk_provenance_path = os.path.join(
 
 
 rule merge_chunk:
-    """Merge per-tile water depths within one spatial chunk for one return period and SLR scenario.
+    """Merge per-tile water depths within one chunk for one RP and SLR scenario.
 
-    The fine-resolution waterdepth output always stays on disk (NOT temp() -
-    2026-10, removed the earlier postprocessing.plots.enabled-gated
-    auto-deletion). Two independent reasons it must persist regardless of
-    whether plotting is on: (1) build_mosaic_vrt's output VRT is a
-    lightweight XML reference to chunk file paths, not a data copy, so
-    plot_merged_results (which reads real pixel data through that VRT - e.g.
-    compute_flood_area_km2's windowed reads) needs the underlying chunk file
-    to still exist when it runs; (2) validation/validate_country.py and
-    validation/run_multi_rp_summary.py (docs/methods_04b_MapsValidation.md)
-    read these exact files directly, as a standalone step run well after
-    this pipeline finishes - a plots.enabled-gated temp() silently deleted
-    them before validation ever got a chance to run, with no error, just
-    quietly fewer (or zero) chunks found.
+    The fine waterdepth is not temp(): the VRT only references chunk files, and
+    validation/validate_country.py and validation/run_multi_rp_summary.py read
+    these files directly after the pipeline finishes.
     """
     input:
         waterdepth_tiles=waterdepth_tiles_for_chunk,
     output:
         waterdepth=_merge_chunk_waterdepth_path,
-        # Per-cell winning tile_id (int32) - the max-combine (2026-08,
-        # replacing the previous valid-count-weighted mean) has no "average"
-        # to inspect, so this is the practical debugging handle when a
-        # merged value looks wrong. Same persistence as waterdepth, since
-        # it's only useful alongside it.
+        # Per-cell winning tile_id (int32) of the max-combine; debugging handle.
         provenance=_merge_chunk_provenance_path,
     params:
         chunk_bounds=lambda wildcards: _chunk_bounds_dict[wildcards.chunk_id],
@@ -62,16 +40,8 @@ rule merge_chunk:
 rule compute_flood_fraction_chunk:
     """Compute the coarse flood-fraction raster for one (chunk, RP, SLR) scenario.
 
-    Reads the fine waterdepth from merge_chunk, evaluates depth > threshold per
-    fine eikonal-model pixel, and average-pools the binary result to the population
-    raster's native ~1 km resolution.
-
-    Output: a tiny coarse raster (values 0–1) that replaces the large fine
-    waterdepth for all downstream exposure analysis. The fine waterdepth
-    itself always stays on disk (merge_chunk's own output is no longer
-    temp() - see that rule's own docstring) for build_mosaic_vrt/
-    plot_merged_results and the standalone 04b validation pipeline to read
-    later.
+    Average-pools (depth > threshold) per fine pixel to the population raster's
+    native ~1 km grid; values 0-1. Replaces the fine waterdepth for exposure.
     """
     input:
         waterdepth=rules.merge_chunk.output.waterdepth,
@@ -92,11 +62,7 @@ rule compute_flood_fraction_chunk:
 
 
 rule build_mosaic_vrt:
-    """Assemble all chunk outputs into a GDAL VRT mosaic for one return period and SLR scenario.
-
-    The VRT is a lightweight XML file; no data is copied.  Downstream rules
-    (plot_merged_results) open it with rasterio exactly like a regular raster.
-    """
+    """Assemble all chunk outputs into a GDAL VRT mosaic for one RP and SLR scenario."""
     input:
         waterdepth=expand(
             rules.merge_chunk.output.waterdepth,
@@ -132,17 +98,13 @@ rule plot_merged_results:
 
 
 rule prepare_exposure_grid_chunk:
-    """Resolve and cache the population raster and per-pixel geogunit IDs (on population's grid), once per chunk.
+    """Resolve and cache the population raster and geogunit IDs once per chunk.
 
-    Both depend only on this chunk's bounds, not on return_period,
-    waterlevel_name or adaptation_scenario, so resolving them here - instead
-    of inside rule compute_exposure_chunk, which runs 100+ times per chunk -
-    avoids that many redundant data-catalog fetches and nearest-neighbour
-    geogunit reprojections (exposure.prepare_exposure_grid_chunk).
+    Geogunit IDs are on population's grid (nearest-neighbour). Both depend only
+    on chunk bounds, so this avoids 100+ redundant fetches per chunk.
     """
     input:
-        # Use a fixed (RP, SLR) merge output just for the chunk bbox/grid metadata.
-        # Any (RP, SLR) works since chunk extent depends only on chunk_id.
+        # Any (RP, SLR) works: only the chunk grid metadata is used.
         reference=lambda wildcards: expand(
             rules.merge_chunk.output.waterdepth,
             chunk_id=[wildcards.chunk_id],
@@ -161,8 +123,7 @@ rule prepare_exposure_grid_chunk:
     params:
         data_catalog=config["paths"]["hydromt_data_catalog"],
         data_catalog_root=config["paths"]["root"],
-        # Catalog keys, not config values - data_catalog_gfm.yml is the
-        # single place dataset identifiers live (see config.yml's header).
+        # Catalog keys: data_catalog_gfm.yml holds dataset identifiers.
         population_source="population",
         geogunit_source="geogunit_protection_units",
     script:

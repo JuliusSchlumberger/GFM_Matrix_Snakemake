@@ -1,11 +1,7 @@
-"""HPC batch worker: pass 2 of the chunk-partitioned exposure pipeline.
+"""HPC batch worker: exposure pass 2 (per-country EAI for every adaptation task).
 
-Streams this batch's chunk subset ONCE, computing every scenario/adaptation
-task's (baseline/protect/retreat/avoid/protect_avoid) per-country EAI contribution in the
-same pass. See analysis/compute_exposure_analysis.py's module docstring and
-pass2_all_tasks/build_exposure_tasks for the full design. Requires
-reduce_exposure_shares.py's output (the FINAL, globally-reduced share, not
-any single pass-1 batch's partial contribution).
+Requires reduce_exposure_shares.py's globally-reduced shares, not a single
+pass-1 batch's partial contribution.
 
 Usage:
     python run_exposure_pass2.py --config path/to/config.yml \\
@@ -29,15 +25,7 @@ from compute_exposure_analysis import (  # noqa: E402
 
 
 def main() -> None:
-    """Parse CLI arguments and run pass 2 for this batch's chunk subset.
-
-    Loads the config, chunk list and the final reduced shares (from
-    ``reduce_exposure_shares.py``), builds the scenario/adaptation tasks,
-    computes every task's per-country EAI contribution via
-    ``pass2_all_tasks``, and atomically writes the results as a pickle to
-    ``--out`` so a ``--resume`` dispatch can trust the file's mere existence
-    as "this batch is done".
-    """
+    """Run pass 2 for this batch's chunk subset and pickle the task results."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--chunks-file", required=True, help="one chunk_id per line")
@@ -62,8 +50,7 @@ def main() -> None:
 
     out_path = Path(args.out)
     retry_transient_io(out_path.parent.mkdir, parents=True, exist_ok=True)
-    # Atomic - see run_exposure_pass1.py's own comment on why (a --resume
-    # dispatch trusts mere existence of this file as "this batch is done").
+    # Atomic: a --resume dispatch treats the file's existence as "batch done".
     atomic_write(out_path, lambda f: pickle.dump(results, f), mode="wb")
     print(f"Written: {out_path} ({len(results)} task results)")
 

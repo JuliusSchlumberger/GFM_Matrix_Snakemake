@@ -4,54 +4,18 @@
 rule run_eikonal:
     """Run the flood model for a single tile, return period and SLR scenario.
 
-    The output filename includes `{return_period}_{waterlevel_name}` so it is
-    clearly linked to the return period and sea level rise scenario used to
-    produce it.
+    `mem_mb` (eikonal_runner.estimate_eikonal_mem_mb) lets Snakemake throttle
+    concurrency under `--resources mem_mb=<N>`; leave headroom (~80% of RAM).
 
-    Runs `flood_model.flood_depth_dense` in-process (see `run_eikonal.py`).
+    hop_distance == 0 tiles use COAST-RP/IDW forcing; hop_distance >= 1 tiles
+    are seeded from non-zero cells of strictly-lower-hop overlapping tiles for
+    the SAME scenario. With no stations / no flooded seeds, an all-ZERO
+    waterdepth is written ("definitely dry") and logged to
+    `model_outputs/skipped_tiles/{tile_id}_{return_period}_{waterlevel_name}.txt`.
 
-    Multiple tiles run fully concurrently on one machine without issue - the
-    only real local constraint is ordinary system memory. This rule's
-    `mem_mb` resource (see `eikonal_runner.estimate_eikonal_mem_mb`) lets
-    Snakemake's own scheduler run many small tiles concurrently while
-    throttling around large ones, bounded by `--resources mem_mb=<N>` on
-    the command line (`<N>` should leave headroom below total system RAM
-    for the OS and other processes, e.g. ~80% of physical RAM).
-
-    Wave-based hinterland forcing (2026-08, hop_distance now computed by
-    `connectivity_tiling.compute_hop_distances`): `tile_grid_path`'s `hop_distance`
-    column tells `run_eikonal.py` which
-    of two forcing paths a tile uses. `hop_distance == 0` (wave-0, has its
-    own real ocean edge): the existing COAST-RP/IDW path - if `boundaries`
-    has no stations at all (see `boundaries.select_stations_for_tile`),
-    the solve is skipped and a real all-ZERO `waterdepth` is written directly
-    (a confidently-computed "definitely dry" result, not an unknown - see
-    `eikonal_runner.write_zero_waterdepth` for why this differs from the
-    OOM case below). `hop_distance >= 1` (hinterland, no ocean edge of its
-    own): seeded directly from non-zero cells of already-simulated,
-    strictly-lower-`hop_distance` overlapping tile(s)' own output for the
-    SAME scenario (`boundaries.collect_neighbor_wave_seeds`) - if none are
-    available yet or none show any flooding in the overlap, same real-zero
-    fallback. Either skip case is logged to `model_outputs/skipped_tiles/
-    {tile_id}_{return_period}_{waterlevel_name}.txt` for later mapping.
-
-    If the solve raises `MemoryError` - a rare, tile-size-driven failure, or
-    from `mem_mb` under-estimating concurrent memory pressure - the tile is
-    marked in `model_outputs/oom_tiles/{tile_id}.txt` and this job's output
-    falls back to an all-`EIKONAL_NODATA` placeholder instead - a genuine
-    unknown ("not computed", unlike the confidently-zero fallbacks above -
-    still logged to `skipped_tiles/` the same way) so `merge_results` ignores
-    this tile rather than treating it as a real dry result. Once marked, all other
-    `(return_period, waterlevel_name)` combinations for this `tile_id` skip
-    the solve entirely and do the same, instead of also running out of memory.
-
-    Each job also checks whether its own tile_id's output count just reached
-    `n_scenarios_per_tile` (i.e. this was the last scenario for that tile);
-    if so it scans model_outputs/ once and prints a running tally of tiles
-    simulated/OOM'd/no-stations/still-running across the whole tile grid
-    (see eikonal_runner.print_simulation_progress) - a milestone per tile,
-    not per job, to keep the O(n_tiles) scan infrequent.
-
+    On `MemoryError` the tile is marked in `model_outputs/oom_tiles/{tile_id}.txt`
+    and an all-`EIKONAL_NODATA` placeholder ("not computed") is written, which
+    `merge_results` ignores; other scenarios of that tile then skip the solve.
     """
     input:
         dem=rules.extract_dem.output.dem,
@@ -65,29 +29,21 @@ rule run_eikonal:
         ),
     params:
         model_outputs=config["simulation"]["model_outputs"],
-        # See preprocessing.smk's own comment - defaults to model_outputs
-        # (no-op for production, which never sets this) - used only for the
-        # hop>=1 neighbour-tile dem/mask lookup below, since those are
-        # preprocessing inputs (shared per calibration group), not results.
+        # Neighbour dem/mask for hop>=1 are preprocessing inputs (shared per
+        # calibration group), not results; defaults to model_outputs.
         preprocessing_inputs_dir=config["simulation"].get("preprocessing_inputs_dir") or config["simulation"]["model_outputs"],
         raster_config=config["raster_format"],
         tile_grid_path=config["tile_grid"]["path"],
-        # Reused from tile_generation.* (2026-08 - same values already used at
-        # tile-generation time, e.g. for wet/dry classification) rather than a
-        # near-duplicate simulation-scoped config surface - see
-        # flood_model.coastline_mask / run_eikonal.py's hop_distance branching.
+        # Same values as at tile-generation time (wet/dry classification).
         ocean_code=config["tile_generation"]["ocean_code"],
         river_code=config["tile_generation"]["river_code"],
         n_scenarios_per_tile=len(RETURN_PERIODS) * len(WATERLEVEL_NAMES),
         flooding_config=config["simulation"]["flooding"],
     resources:
-        # A deliberately generous upper bound (see eikonal_mem_estimate in
-        # config.yml) - a concurrency-throttling estimate, not a correctness
-        # concern; only effect of over-estimating is somewhat fewer
-        # concurrent jobs than strictly necessary.
+        # Deliberately generous; over-estimating only reduces concurrency.
         mem_mb=lambda wildcards, input: estimate_eikonal_mem_mb(
             input.dem,
-            # Configs materialized/resolved before 2026-10-18 still use the old key name.
+            # Configs materialized/resolved with the old key name.
             config["simulation"].get("eikonal_mem_estimate") or config["simulation"]["aqueduct_mem_estimate"],
         ),
     script:

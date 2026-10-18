@@ -1,4 +1,4 @@
-"""Resolve and cache the population raster and per-pixel geogunit IDs (on population's grid), once per spatial chunk."""
+"""Resolve and cache the population raster and geogunit IDs for one spatial chunk."""
 
 import sys
 from pathlib import Path
