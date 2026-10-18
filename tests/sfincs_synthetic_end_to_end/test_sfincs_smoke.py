@@ -1,8 +1,9 @@
 """Smoke-test SFINCS build -> run -> postprocess on the smallest finished calibration tile.
 
-Needs P:\\, a local sfincs.exe and a finished FIXTURE_BASE_DIR_NAME tile; skips
-otherwise. The fixture is only read: its build inputs are copied into a local temp
-dir (pytest's tmp_path) and the model is built and run there, never on P:\\.
+Needs P:\\, a local sfincs.exe (`paths.sfincs_exe` in config_local.yml) and a finished
+FIXTURE_BASE_DIR_NAME tile; skips otherwise. The fixture is only read: its build inputs
+are copied into a local temp dir (pytest's tmp_path) and the model is built and run
+there, never on P:\\.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SFINCS_TILES_DIR = REPO_ROOT / "sfincs_tiles"
@@ -28,9 +30,7 @@ from sfincs_run import run_sfincs_subprocess  # noqa: E402
 FIXTURE_BASE_DIR_NAME = "calibration_roughness_SFINCS"  # read-only
 SMOKE_BASE_DIR_NAME = "sfincs_smoke_test"
 PREP_FILES = ["elevation_combined.tif", "manning_n.tif", "matched_boundary_points.gpkg", "corrected_hydrographs.csv"]
-DEFAULT_SFINCS_EXE = Path(
-    r"C:\Users\schlumbe\hydromt_sfincs\delta_model\software\SFINCS_v2.3.0_mt_Faber_release_exe\sfincs.exe"
-)
+CONFIG_DIR = REPO_ROOT / "snakemake_workflow" / "config"
 
 
 class _SilentLog:
@@ -55,16 +55,27 @@ def _fixture_tile(root: Path) -> str | None:
     return None
 
 
+def _sfincs_exe() -> Path | None:
+    """`paths.sfincs_exe` from config_local.yml (machine-specific), or None if unset."""
+    local_path = CONFIG_DIR / "config_local.yml"
+    if not local_path.exists():
+        return None
+    with open(local_path, encoding="utf-8") as f:
+        exe = ((yaml.safe_load(f) or {}).get("paths") or {}).get("sfincs_exe")
+    return Path(exe) if exe else None
+
+
 def _prereqs_available() -> tuple[Path, Path, str] | None:
-    config_path = REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"
-    if not config_path.exists() or not DEFAULT_SFINCS_EXE.exists():
+    config_path = CONFIG_DIR / "config.yml"
+    sfincs_exe = _sfincs_exe()
+    if not config_path.exists() or sfincs_exe is None or not sfincs_exe.exists():
         return None
     try:
         root = read_root(config_path)
     except Exception:
         return None
     tile_id = _fixture_tile(root)
-    return None if tile_id is None else (root, DEFAULT_SFINCS_EXE, tile_id)
+    return None if tile_id is None else (root, sfincs_exe, tile_id)
 
 
 def _stage_fixture(root: Path, tile_id: str, stage_root: Path) -> Path:
@@ -84,7 +95,7 @@ def test_build_run_postprocess_produces_plausible_output(tmp_dir: Path) -> None:
     prereqs = _prereqs_available()
     if prereqs is None:
         pytest.skip("real P:\\ modelling share, a finished calibration_roughness_SFINCS tile, and/or the local "
-                    "sfincs.exe aren't available in this environment")
+                    "sfincs.exe (paths.sfincs_exe in config_local.yml) aren't available in this environment")
     root, sfincs_exe, tile_id = prereqs
     # build_sfincs_tile only touches <root>/<base_dir_name>/<tile_id>/{inputs,sfincs_model},
     # so a local stage root keeps every write off P:\.
