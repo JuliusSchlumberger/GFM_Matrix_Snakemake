@@ -11,8 +11,8 @@ is merged into `main` yet. Each phase was verified locally (ruff, pytest, subset
 AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for you:
 
 1. **Review / merge `cleanup`** into `main` (one commit per phase, `git log main..cleanup`).
-2. **Before pulling on Hydrax:** back up the now-untracked `config_hpc.yml` (and any
-   `*_materialized.yml` there) - a pull deletes files that Phase 1 untracked; restore afterwards.
+2. **Before pulling on Hydrax:** back up any `*_materialized.yml` there - a pull deletes files
+   that Phase 1 untracked; restore afterwards. (`config_hpc.yml` is tracked again since 2026-10-18.)
 3. **On Hydrax after pulling:** regenerate any HPC job files written before Phase 7a/7b (they call
    old script names); then `DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part eikonal`.
 4. **Snakemake "code changed" flags** (renamed rules/scripts): clear once with `snakemake --touch`

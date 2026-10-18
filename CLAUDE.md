@@ -32,7 +32,7 @@ adaptation analysis and benchmark validation. A separate SFINCS sub-pipeline
 - `snakemake_workflow/config/config.yml` is the single source of truth for every pipeline.
 - Machine-specific paths go in `config_local.yml` (gitignored, auto-loaded). Never put
   per-machine values in `config.yml`.
-- HPC: `config_hpc.yml` (copy from `config_hpc.yml.example`; untracked from cleanup Phase 1), passed via
+- HPC: `config_hpc.yml` (tracked, Hydrax values; `config_hpc.yml.example` for other clusters), passed via
   `GFM_CONFIG_PATH`.
 - `*_materialized.yml` are generated; never hand-edit them.
 

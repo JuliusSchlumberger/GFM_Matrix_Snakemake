@@ -121,8 +121,9 @@ every pipeline above (not just the Snakemake DAG). Override machine-specific
 values (`paths.root`, `paths.code_root`, ...) in
 `snakemake_workflow/config/config_local.yml` — gitignored, auto-loaded if
 present, never touch the committed `config.yml` for a per-machine value.
-`*_materialized.yml` and `config_hpc.yml` are generated/untracked: never
-hand-edit the former; create the latter by copying `config_hpc.yml.example`.
+`*_materialized.yml` are generated/untracked: never hand-edit them (rebuild with
+`snakemake_workflow/scripts/materialize_configs.py`). `config_hpc.yml` holds the
+Hydrax paths (tracked); for another cluster start from `config_hpc.yml.example`.
 
 ## Import convention
 

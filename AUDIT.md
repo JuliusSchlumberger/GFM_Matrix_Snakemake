@@ -675,7 +675,7 @@ Module size: `sfincs_tiles/build_station_boundary_lines.py` (1254), `validation/
 | 5 | Metric drift | Unintentional | See the finding below the table |
 | 6 | `calibration/sweep/*.yml` | Delete | Phase 2 |
 | 7 | `*_materialized.yml` | Gitignore + one generic `materialize_configs.py` | Phase 1 (untrack) + Phase 6 (generator) |
-| 8 | `config_hpc.yml` | Untrack, keep `.example` | Phase 1 |
+| 8 | `config_hpc.yml` | Untrack, keep `.example` | Phase 1. **Reverted 2026-10-18 (user): tracked again**, with the Hydrax values |
 | 9 | Tracked outputs/logs | Untrack all listed; keep `validation/*.csv` | Phase 1 |
 | 10 | `triplet_comparison_CLEAN.csv` | **Untrack and delete** | Phase 1 (`git rm`, not `--cached`) |
 | 11 | `plot_adaptation_pathways.py`, `plot_adaptation_bars.py` | Retire after `plot_custom_pathways.py` is committed | Phase 3. Precondition: you commit your 3 modified analysis files first |
