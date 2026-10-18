@@ -27,7 +27,13 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
-from hpc_common import _retry_wrapper_lines, _stage_configfile_lines, _stage_tile_grid_lines, sbatch_header  # noqa: E402
+from hpc_common import (  # noqa: E402
+    _retry_wrapper_lines,
+    _stage_configfile_lines,
+    _stage_tile_grid_lines,
+    read_targets_lines,
+    sbatch_header,
+)
 from generate_hpc_exposure_jobs import generate_exposure_dispatch, generate_exposure_resume_dispatch  # noqa: E402
 from generate_hpc_flood_totals_and_plots_job import write_flood_totals_and_plots_job  # noqa: E402
 from tiles import build_chunk_grid  # noqa: E402
@@ -99,13 +105,14 @@ def _write_batches(
             "yaml.safe_dump(cfg, open(cfg_path, \"w\", encoding=\"utf-8\"))' "
             '"$LOCAL_CONFIGFILE" "$LOCAL_TILE_GRID"',
             "",
+            *read_targets_lines("TARGETS", f"{linux_jobs_dir}/{name}_targets.txt"),
             (
                 f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
                 f'snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
                 # --rerun-incomplete: redo outputs a killed earlier job left flagged
                 # incomplete instead of aborting the batch.
                 f'--rerun-triggers=mtime --rerun-incomplete '
-                f'$(cat "{linux_jobs_dir}/{name}_targets.txt")'
+                '"${TARGETS[@]}"'
             ),
             "",
         ]

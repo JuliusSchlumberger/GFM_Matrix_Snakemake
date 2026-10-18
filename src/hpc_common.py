@@ -37,7 +37,8 @@ def sbatch_header(
         Log file stem; defaults to `name`.
     errexit : bool
         False writes `set -uo pipefail` instead of `set -euo pipefail`, for
-        scripts whose later commands must run after an earlier one failed.
+        scripts whose later commands must run after an earlier one failed;
+        the env activation then gets an explicit `|| exit 1`.
 
     Returns
     -------
@@ -58,8 +59,24 @@ def sbatch_header(
         f"#SBATCH --error={log_dir}/{log_name}_%j.err",
         "",
         "set -euo pipefail" if errexit else "set -uo pipefail",
-        sbatch_cfg["env_activate_cmd"],
+        sbatch_cfg["env_activate_cmd"] if errexit else f"{sbatch_cfg['env_activate_cmd']} || exit 1",
         "",
+    ]
+
+
+def read_targets_lines(var: str, targets_file: str) -> list[str]:
+    """Return bash lines loading `targets_file` (one target per line) into array `var`.
+
+    Use as `"${VAR[@]}"`. Unlike an unchecked `$(cat file)`, a missing or empty
+    file exits the script: an empty target list would make snakemake build its
+    first rule instead of nothing.
+    """
+    return [
+        f'mapfile -t {var} < "{targets_file}" || exit 1',
+        f'if [ "${{#{var}[@]}}" -eq 0 ] || [ -z "${{{var}[0]}}" ]; then',
+        f'    echo "ERROR: no targets in {targets_file}" >&2',
+        "    exit 1",
+        "fi",
     ]
 
 

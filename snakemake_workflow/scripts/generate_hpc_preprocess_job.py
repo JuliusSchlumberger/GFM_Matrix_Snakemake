@@ -27,7 +27,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
-from hpc_common import _retry_wrapper_lines, _stage_configfile_lines, sbatch_header  # noqa: E402
+from hpc_common import _retry_wrapper_lines, _stage_configfile_lines, read_targets_lines, sbatch_header  # noqa: E402
 
 
 def _target_paths(tile_dir: str, return_periods: list[str], waterlevel_names: list[str]) -> list[str]:
@@ -178,7 +178,7 @@ def main() -> None:
             for p in _target_paths(f"{linux_preprocessing_inputs_dir}/{tile_id}", return_periods, waterlevel_names)
         ]
 
-        # Targets in a file expanded via $(cat ...), keeping the script short.
+        # Targets in a file read via mapfile (read_targets_lines), keeping the script short.
         targets_path = local_jobs_dir / f"{name}_targets.txt"
         with open(targets_path, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(targets) + "\n")
@@ -216,22 +216,24 @@ def main() -> None:
             "    fi",
             f'done < "{linux_shared_targets_file}"',
             "",
+            *read_targets_lines("TARGETS", f"{linux_jobs_dir}/{name}_targets.txt"),
             (
                 f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
                 f'snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
                 '--rerun-triggers=mtime --rerun-incomplete '
-                f'$(cat "{linux_jobs_dir}/{name}_targets.txt")'
+                '"${TARGETS[@]}"'
             ),
             "",
         ]
         if args.fuse:
             lines += [
                 f'echo "=== Simulating batch {batch_id}: {len(batch_tiles)} tiles ==="',
+                *read_targets_lines("SIMULATE_TARGETS", f"{linux_jobs_dir}/{name}_simulate_targets.txt"),
                 (
                     f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
                     f'snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
                     '--rerun-triggers=mtime --rerun-incomplete '
-                    f'$(cat "{linux_jobs_dir}/{name}_simulate_targets.txt")'
+                    '"${SIMULATE_TARGETS[@]}"'
                 ),
                 "",
             ]
@@ -297,10 +299,11 @@ def main() -> None:
         f'cd "{linux_code_root}"',
         'echo "=== Building shared preprocessing inputs (synchronous, on this login node) ==="',
         f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
+        *read_targets_lines("SHARED_TARGETS", linux_shared_targets_file),
         (
             f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
             'snakemake --cores 1 --nolock --rerun-triggers=mtime '
-            f'$(cat "{linux_shared_targets_file}") 2>&1 | tee "{linux_jobs_dir}/logs/build_shared_inputs.log"'
+            f'"${{SHARED_TARGETS[@]}}" 2>&1 | tee "{linux_jobs_dir}/logs/build_shared_inputs.log"'
         ),
         "",
         'IDS=""',

@@ -59,11 +59,14 @@ def write_flood_totals_and_plots_job(
         'echo "=== compute_flood_totals.py ==="',
         f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
         "",
+        # Own checked line: inside an argument, a failing $(...) would go unnoticed.
+        (
+            'OUTDIR=$(python -c \'import yaml,sys; c=yaml.safe_load(open(sys.argv[1], encoding="utf-8")); '
+            'print(c["postprocessing"]["merged_outputs"] + "/exposure")\' "$LOCAL_CONFIGFILE") || exit 1'
+        ),
         (
             f'python analysis/compute_flood_totals.py --config "$LOCAL_CONFIGFILE" '
-            f'--outdir "$(python -c \'import yaml,sys; c=yaml.safe_load(open(sys.argv[1])); '
-            f'print(c["postprocessing"]["merged_outputs"] + "/exposure")\' "$LOCAL_CONFIGFILE")" '
-            f'--workers {sbatch_cfg["cpus_per_task"]}'
+            f'--outdir "$OUTDIR" --workers {sbatch_cfg["cpus_per_task"]}'
         ),
         "",
         'echo "=== run_analysis.py --only-plots (flood totals already done above) ==="',

@@ -124,7 +124,8 @@ def _write_wave_scripts(
                 writer.writerow([tile_id, rp, slr])
 
         lines = [
-            # not -e: one failed (tile,rp,slr) must not abort the rest of this node's batch
+            # not -e: one failed (tile,rp,slr) must not abort the rest of this node's
+            # batch, so each setup step below exits explicitly on failure instead.
             *sbatch_header(name, sbatch_cfg, f"{linux_jobs_dir}/logs", errexit=False),
             *_stage_configfile_lines(),
             *_stage_tile_grid_lines(),
@@ -135,7 +136,8 @@ def _write_wave_scripts(
             "python -c 'import sys, yaml; cfg_path, new_path = sys.argv[1], sys.argv[2]; "
             "cfg = yaml.safe_load(open(cfg_path, encoding=\"utf-8\")); cfg[\"tile_grid\"][\"path\"] = new_path; "
             "yaml.safe_dump(cfg, open(cfg_path, \"w\", encoding=\"utf-8\"))' "
-            '"$LOCAL_CONFIGFILE" "$LOCAL_TILE_GRID"',
+            # Unchecked, a failed rewrite would silently read the tile grid off P:\ again.
+            '"$LOCAL_CONFIGFILE" "$LOCAL_TILE_GRID" || exit 1',
             "",
             f'python "{linux_batch_runner}" \\',
             f'  --triples-file "{linux_triples_path}" \\',
