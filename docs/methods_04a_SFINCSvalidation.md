@@ -103,7 +103,7 @@ The analysis is run twice, once per base directory, and each run writes its CSVs
 
 ## HPC pipeline
 
-Two stages, chained on Slurm (`generate_calibration_jobs.py`), all jobs on the 4vcpu partition:
+Two stages, chained on Slurm (`generate_calibration_jobs.py`), all jobs on the partition set by `hpc.calibration_sbatch.partition`:
 
 - **Stage 1** - 10 jobs, each one interleaved shard of the candidate pool: screen → boundary lines (4 worker processes) → SFINCS mask pre-flight.
 - **Bridge** - one job that starts when every stage-1 job has ended: collects the line results, runs the tile selection (+ maps) and submits stage 2.

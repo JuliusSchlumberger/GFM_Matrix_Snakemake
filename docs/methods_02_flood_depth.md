@@ -74,7 +74,7 @@ eikonal solver directly against real SFINCS runs, see
 `calibration_studies/` and the `sfincs_tiles/` friction-sweep tooling) found
 the best match at **0.4× the grid-resolution-corrected baseline**, i.e.
 `friction_scale_factor = 30 × 0.4 = 12.0` - production's actual default
-(`P:/.../calibration_roughness_SFINCS/friction_sweep_pooled_metrics.csv`,
+(`<data_root>/calibration_roughness_SFINCS/friction_sweep_pooled_metrics.csv`,
 1000 tiles: CSI=0.7428, bias=1.053 at fsf=12.0 vs CSI=0.7320, bias=1.209 at
 fsf=9.0 - a clearly better bias fit, not just a narrower CSI win).
 The resulting real-world attenuation rate at this production value is
