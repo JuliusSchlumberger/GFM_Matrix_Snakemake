@@ -15,11 +15,47 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
    that Phase 1 untracked; restore afterwards. (`config_hpc.yml` is tracked again since 2026-10-18.)
 3. **On Hydrax after pulling:** `DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part eikonal`.
    (Stale job files: done 2026-10-18 from Windows, see the Phase 7a/7b notes below.)
-4. **Snakemake "code changed" flags** (renamed rules/scripts): clear once with `snakemake --touch`
-   on the configs whose outputs exist (writes Snakemake metadata next to P:\ outputs).
+4. **Snakemake "code changed" flags** (renamed rules/scripts, and the docstring trim: Snakemake 7
+   hashes rule scripts, so comment-only edits flag e.g. `cache_waterlevel_stations`). Do NOT
+   `--touch` the full grid (full-DAG build + mtime writes on every P:\ output). Instead run with
+   `--rerun-triggers mtime params input software-env`; optionally `--touch` only the two subset
+   configs (bangkok_chao_phraya, thailand_bangkok) on the Windows machine, where their
+   `.snakemake/metadata` lives (metadata is per working dir, not next to the outputs).
 5. **Decide:** re-materialize the scenario configs or not (item below); the `mdt_sign` test fixture;
    the near-duplicates left in Phase 5d.
 6. Hydrax `gfm` env: `mamba install -n gfm pytest=8.4.2 ruff=0.12.0` (Phase 0 tooling).
+
+## Found during the docstring trim (code, not docs - not changed)
+
+- `src/eikonal_runner.py` docs say the production `friction_scale_factor` is 9.0; `config.yml` sets 12.0
+  (some scenario pins hold older values). Confirm which is current.
+- `sfincs_tiles/calibration_results.DISPLAY_LABEL` / `plot_validation_results.py` call HC-bathtub
+  "elevation threshold + ocean-connectivity pruning", but `run_calibration_models.compute_bathtub_depth`
+  applies no connectivity.
+- `preparation/prepare_boundary_conditions.py`: variable `SLR_ssp245_2100` is hard-coded whatever
+  scenario is configured.
+- `calibration_studies/diagnose_large_residual.py`: `BLOCK_FRICTION = 100.0` vs production 9999.0.
+- `validation/build_overview_table.py` hard-codes its own copy of the published values that also live
+  in `compare_against_published.py` (can drift).
+- `preparation/select_country_tiles.py`: GBR comment still says only Wales/Scotland benchmarks (England
+  FZ2/FZ3 exist now).
+- `src/population_growth.interpolate_growth_factor` docs say it returns `default` outside the year range;
+  the code clamps. `src/tile_split.choose_split` docs say it raises; it falls back with a warning.
+- `sfincs_tiles/retry_io.retry_transient_io`: `retries` is total attempts, not retries.
+- `sfincs_tiles/calibration_paths.decode_waterdepth_cm`: only nodata becomes NaN, 0 cm stays 0.0 -
+  check that dry is always encoded as nodata where callers assume NaN = dry.
+- `src/connectivity_tiling._domain_touches_ocean` reads DEM tiles via `dem_index` and ignores the result
+  (wasted read). `sfincs_tiles/build_sfincs_tile._compute_zsini_array`: `grid_coords` unused.
+- Rename candidate: `boundary_lines_geometry` attribute `land_eroded` holds land grown outward.
+- Strings with stale history/claims (string literals, so untouched): argparse help of
+  `build_sfincs_tile.py --no-rotated`; assert messages with dates in `tests/flood_model_memory_validation`
+  and `tests/eikonal_kernel_validation`; `generate_hpc_postprocess_job.py` Usage names
+  `submit_postprocess.sh` (writes `submit_postprocess_and_exposure.sh`); `generate_eikonal_solver_examples.py`
+  prints "by round 40" for a 15-round loop; `build_overview_table._FZ2_NOTE` says "see session notes".
+- `tests/sfincs_subgrid_nearest_validation`: `test_reproject_nearest_transform_matches_scaled_source`
+  tests a misaligned target - name does not match.
+- Git history holds ~1 GB of `sfincs_tiles/tile306_*.npy` / `tile1669_*.npy` (commit c0f84d6,
+  2026-09-23; up to 97 MB each, GitHub warns on push). Removing them needs a history rewrite.
 
 ## Open
 
