@@ -20,9 +20,18 @@ REM Override by setting GFM_ENV before running this file.
 if not defined GFM_ENV set "GFM_ENV=%LOCALAPPDATA%\miniforge3\envs\gfm_python_preprocessing"
 set PYEXE=%GFM_ENV%\python.exe
 set SNAKEMAKE=%GFM_ENV%\Scripts\snakemake.exe
-set STUDY_ROOT=P:\11212688-004-global-floodmaps\modelling\bangkok_chao_phraya
-set CASE_GPKG=%STUDY_ROOT%\bangkok_chao_phraya_domain.gpkg
 set MATERIALIZED=%REPO%snakemake_workflow\config\bangkok_chao_phraya_materialized.yml
+REM Study data lives at {paths.root}/bangkok_chao_phraya, paths.root read from the
+REM materialized config. Override by setting STUDY_ROOT before running this file.
+if not defined STUDY_ROOT (
+  for /f "usebackq delims=" %%R in (`call "%PYEXE%" -c "import sys, yaml; print(yaml.safe_load(open(sys.argv[1], encoding='utf-8'))['paths']['root'])" "%MATERIALIZED%"`) do set "STUDY_ROOT=%%R/bangkok_chao_phraya"
+)
+if not defined STUDY_ROOT (
+  echo FAILED to read paths.root from %MATERIALIZED% - materialize it or set STUDY_ROOT.
+  exit /b 1
+)
+set "STUDY_ROOT=%STUDY_ROOT:/=\%"
+set CASE_GPKG=%STUDY_ROOT%\bangkok_chao_phraya_domain.gpkg
 set RESOLVED=%STUDY_ROOT%\resolved_config.yml
 
 echo.
