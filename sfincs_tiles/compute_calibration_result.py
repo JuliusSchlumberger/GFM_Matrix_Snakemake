@@ -1,29 +1,4 @@
-"""One merged result file per tile for the final SFINCS calibration
-(calibration_roughness_SFINCS): SFINCS, bathtub and every eikonal friction
-point compared on SFINCS's own 30 m subgrid in one pass -
-{base}/{tile_id}/outputs/calibration_result.json. Replaces the older
-summary_{bathtub,eikonal,sfincs}.json + sweep_comparison_cache.json pair.
-
-Scoring area: real land (native mask.tif, code 0) that is ACTIVE in SFINCS
-(sfincs.msk > 0, each 120 m cell -> its 4x4 subgrid pixels). Land the
-boundary line cut off as inactive is left out of every count for every model -
-the eikonal/bathtub rasters themselves are not masked.
-
-Schema:
-{
-  "tile_id": "1122", "built": "<timestamp>",
-  "settings": {"wet_threshold_m", "subgrid_res_m", "friction_scale_factors", "flooding": <config block>},
-  "domain": {"land_km2", "sfincs_active_land_km2", "sfincs_inactive_land_km2",
-             "n_active_cells", "n_boundary_cells", "n_forcing_points", "boundary_dist_{mean,median,max}_km"},
-  "sfincs":  {"flooded_km2", "depth": {"mean_m", "median_m", "max_m"}},
-  "bathtub": {"level_m", "flooded_km2", "depth", "vs_sfincs"},
-  "eikonal": {"fsf_3": {"flooded_km2", "depth", "vs_sfincs", "solver"}, ...}
-}
-vs_sfincs: matched_km2, model_only_km2, sfincs_only_km2, HT, FAR, CSI, bias,
-depth_joint (sufficient stats + hist_fine/hist_category, flood_agreement's
-pooling shape). Bathtub is pruned to coast-connected flooding first
-(flood_agreement.prune_to_ocean_connected); eikonal and SFINCS are connected by
-construction.
+"""Write a tile's calibration_result.json: SFINCS vs bathtub vs eikonal on the 30 m subgrid.
 
 Needs hydromt-sfincs-dev (reads sfincs.msk through SfincsModel).
 
@@ -69,8 +44,7 @@ def _depth_stats(depth: np.ndarray, wet: np.ndarray) -> dict:
 
 
 def _sfincs_active_on_subgrid(sfincs_dir: Path, sg_shape: tuple, sg_transform) -> tuple:
-    """(active mask on the subgrid, cell counts, msk, coarse transform). The subgrid shares the
-    coarse grid's origin and rotation at exactly a quarter of its cell size."""
+    # The subgrid shares the coarse grid's origin and rotation at exactly a quarter of its cell size.
     sf = SfincsModel(root=str(sfincs_dir), mode="r")
     retry_transient_io(sf.grid.read)
     msk = sf.grid.data["mask"].values
@@ -98,30 +72,13 @@ def _compare(depth: np.ndarray, wet: np.ndarray, ref: dict) -> dict:
 
 
 def compute_result(tile_dir: Path, fsfs: list[float], flooding: dict, river_code: int) -> dict:
-    """Build the merged calibration_result dict for one tile.
+    """Build one tile's calibration_result dict vs SFINCS's hmax_subgrid.tif.
 
-    Compares SFINCS's own hmax_subgrid.tif against the bathtub and every
-    eikonal friction-sweep output on SFINCS's 30 m subgrid, restricted to
-    real land (mask.tif == LAND_CODE) that is active in SFINCS
-    (sfincs.msk > 0). Bathtub flooding is pruned to coast-connected cells
-    first; eikonal and SFINCS results are connected by construction.
-
-    Parameters
-    ----------
-    tile_dir : Path
-        Tile directory containing ``inputs/``, ``sfincs_model/`` and ``outputs/``.
-    fsfs : list of float
-        Friction scale factors to look for eikonal results at.
-    flooding : dict
-        The simulation's "flooding" config block, copied verbatim into the
-        result's "settings".
-    river_code : int
-        Mask code identifying river cells, passed to `prune_to_ocean_connected`.
-
-    Returns
-    -------
-    dict
-        The tile's calibration_result.json content (see module docstring for schema).
+    Scoring area: real land (mask.tif == LAND_CODE) active in SFINCS
+    (sfincs.msk > 0, each 120 m cell -> its 4x4 subgrid pixels); inactive land
+    is left out of every count, the model rasters themselves are not masked.
+    Bathtub is pruned to coast-connected flooding first; eikonal and SFINCS are
+    connected by construction. `flooding` is copied verbatim into "settings".
     """
     sfincs_dir = tile_dir / "sfincs_model"
     out_dir = tile_dir / "outputs"
@@ -146,7 +103,6 @@ def compute_result(tile_dir: Path, fsfs: list[float], flooding: dict, river_code
               "sfincs_inactive_land_km2": float((land & ~active).sum() * cell_km2), **counts}
     forcing = sfincs_dir / "matched_boundary_points.gpkg"
     domain["n_forcing_points"] = int(len(gpd.read_file(forcing))) if forcing.exists() else None
-    # boundary cells' distance to real land, on the coarse grid
     land_c = land[::4, ::4][: msk.shape[0], : msk.shape[1]]
     bnd = msk == 2
     if land_c.any() and bnd.any():
@@ -193,11 +149,6 @@ def compute_result(tile_dir: Path, fsfs: list[float], flooding: dict, river_code
 
 
 def main() -> None:
-    """Parse CLI arguments, compute one tile's calibration result and write it to disk.
-
-    Writes ``{tile_dir}/outputs/calibration_result.json`` and prints a
-    one-line summary of SFINCS/bathtub/eikonal flooded area and CSI scores.
-    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--base-dir-name", required=True)

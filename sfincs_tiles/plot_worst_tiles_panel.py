@@ -1,20 +1,8 @@
-"""Two 2x3 panels of the worst-matching tiles between EA-bathtub and SFINCS
-(lowest CSI), split by which model is over-predicting - one panel where
-SFINCS-only area dominates the disagreement, one where EA-bathtub-only area
-dominates. Each panel tile is a local map of the four-way classification
-(matched / EA-bathtub-only / SFINCS-only / dry land) at SFINCS's own native
-subgrid resolution - pixel-for-pixel what the CSI metric actually counts.
+"""Plot the lowest-CSI EA-bathtub vs SFINCS tiles, one panel per over-predicting model.
 
-Tiles are ranked by their CSI at --friction-scale-factor from
-{base}/friction_sweep_per_tile_metrics.csv (compute_friction_sweep_metrics.py).
-Candidate tiles are restricted to at least --min-union-km2 (default 50) km2 of total union area
-(matched + EA-bathtub-only + SFINCS-only, CSI's own denominator), so a
-technically-low CSI from a handful of noisy pixels doesn't crowd out a
-real, substantial disagreement. Like the metrics, the maps count only land
-that is active in SFINCS; land the boundary line cut off is drawn as
-off-domain.
-
-Needs only rasterio/scipy/matplotlib (sfincs_grid.py reads sfincs.msk directly).
+Maps are on SFINCS's native subgrid over SFINCS-active land, pixel-for-pixel what
+CSI counts. --min-union-km2 keeps a few noisy pixels from crowding out real
+disagreement. Needs only rasterio/scipy/matplotlib.
 
 Usage:
     python plot_worst_tiles_panel.py --base-dir-name calibration_roughness_SFINCS --friction-scale-factor 9 \
@@ -52,36 +40,18 @@ from map_style import (  # noqa: E402
 
 LAND_CODE = 0
 
-# category codes for the 4-way classification. Colors/labels from
-# src/map_style.py - the same palette validation/plot_agreement_map.py uses (SFINCS=A_ONLY/blue, EA-bathtub
-# (eikonal)=B_ONLY/red, matched=AGREE/green, same convention everywhere
-# this pairing appears).
+# Repo-wide convention: SFINCS=A_ONLY/blue, EA-bathtub=B_ONLY/red, matched=AGREE/green.
 DRY, MATCHED, EIKONAL_ONLY, SFINCS_ONLY = 0, 1, 2, 3
-CATEGORY_COLORS = [LAND_COLOR, AGREE_COLOR, B_ONLY_COLOR, A_ONLY_COLOR]  # dry, matched, eikonal-only, sfincs-only
+CATEGORY_COLORS = [LAND_COLOR, AGREE_COLOR, B_ONLY_COLOR, A_ONLY_COLOR]
 CATEGORY_LABELS = [LAND_LABEL, "Agree (both wet)", "EA-bathtub only", "SFINCS only"]
-OFF_DOMAIN_COLOR = WATER_COLOR  # non-land (ocean/river/lake) - previously left blank/white,
-# now drawn the same "permanent water" colour every other agreement map in the repo uses.
+OFF_DOMAIN_COLOR = WATER_COLOR
 
 
 def build_classification(tile_dir: Path, friction_scale_factor: float) -> np.ndarray | None:
-    """Classify SFINCS vs eikonal wet/dry agreement for one tile on SFINCS's native subgrid.
+    """Classify SFINCS vs eikonal wet/dry agreement on SFINCS's native subgrid.
 
-    Parameters
-    ----------
-    tile_dir : Path
-        Tile directory containing ``sfincs_model/hmax_subgrid.tif``,
-        ``outputs/`` (eikonal raster) and ``inputs/mask.tif``.
-    friction_scale_factor : float
-        Friction scale factor identifying which eikonal raster to compare against.
-
-    Returns
-    -------
-    numpy.ndarray or None
-        4-way classification array (`DRY`/`MATCHED`/`EIKONAL_ONLY`/
-        `SFINCS_ONLY` codes) at SFINCS's own native subgrid resolution over
-        SFINCS-active land (everything else masked), or `None` if SFINCS or
-        the eikonal at `friction_scale_factor` hasn't been run for this
-        tile, or the two rasters' shapes don't match.
+    Masked outside SFINCS-active land; None if an input is missing or shapes differ.
+    Rows keep the subgrid's own (south-up) order.
     """
     hmax_subgrid_path = tile_dir / "sfincs_model" / "hmax_subgrid.tif"
     ek_path = eikonal_path(tile_dir / "outputs", friction_scale_factor)
@@ -97,7 +67,7 @@ def build_classification(tile_dir: Path, friction_scale_factor: float) -> np.nda
 
     eikonal_depth, ek_transform, ek_crs, ek_shape = decode_waterdepth_cm(ek_path)
     if ek_shape != sg_shape:
-        return None  # not pixel-identical (stale/mismatched raster) - skip rather than misrepresent
+        return None  # stale/mismatched raster: skip rather than misrepresent
 
     mog = np.empty(sg_shape, dtype=np.float32)
     with rasterio.open(native_mask_path) as src:
@@ -115,14 +85,12 @@ def build_classification(tile_dir: Path, friction_scale_factor: float) -> np.nda
     cls[land & eikonal_wet & sfincs_wet] = MATCHED
     cls[land & eikonal_wet & ~sfincs_wet] = EIKONAL_ONLY
     cls[land & ~eikonal_wet & sfincs_wet] = SFINCS_ONLY
-    cls = np.ma.masked_where(~land, cls)  # non-land and SFINCS-inactive land drawn as off-domain
+    cls = np.ma.masked_where(~land, cls)
     return cls
 
 
 def _crop_to_disagreement(cls: np.ma.MaskedArray, pad_frac: float = 0.25) -> np.ma.MaskedArray:
-    """Crop to the bounding box of any wet cell (matched or either-only),
-    padded - a coastal tile is mostly dry land/ocean, so a full-domain view
-    would render the disagreement as a few stray pixels."""
+    # A coastal tile is mostly dry land/ocean; uncropped, disagreement is a few stray pixels.
     wet = np.isin(cls.filled(DRY), [MATCHED, EIKONAL_ONLY, SFINCS_ONLY])
     if not wet.any():
         return cls
@@ -137,10 +105,6 @@ def _crop_to_disagreement(cls: np.ma.MaskedArray, pad_frac: float = 0.25) -> np.
 
 
 def _caption_corner(cls: np.ma.MaskedArray, box_w: float = 0.5, box_h: float = 0.25) -> str:
-    """The corner for the caption box that covers the least flooded (matched /
-    EA-bathtub-only / SFINCS-only) area of the displayed (north-up) map; ties go
-    to a corner that is uniformly land or uniformly water. The box is
-    approximated as box_w x box_h of the map."""
     h, w = cls.shape
     rh, rw = max(int(h * box_h), 1), max(int(w * box_w), 1)
     windows = {"upper left": (slice(0, rh), slice(0, rw)), "upper right": (slice(0, rh), slice(w - rw, w)),
@@ -171,8 +135,6 @@ def _make_panel(worst, base_dir: Path, out_path: Path, friction_scale_factor: fl
         if cls is None:
             ax.text(0.5, 0.5, "no subgrid data", ha="center", va="center", transform=ax.transAxes)
         else:
-            # build_classification keeps the subgrid's own (south-up) row order -
-            # flipped here for display only.
             with rasterio.open(tile_dir / "sfincs_model" / "hmax_subgrid.tif") as src:
                 cls = orient_north_up(cls, src.transform)
             cls = _crop_to_disagreement(cls)
@@ -198,13 +160,6 @@ def _make_panel(worst, base_dir: Path, out_path: Path, friction_scale_factor: fl
 
 
 def main() -> None:
-    """Parse CLI arguments and write the worst-tile CSI panels and selection CSV.
-
-    Ranks tiles by CSI at ``--friction-scale-factor``, builds the SFINCS-
-    and EA-bathtub-over-predicting worst-tile panels, and writes
-    ``worst_tiles_selection_fsf<X>.csv`` alongside the panel PNGs under
-    ``{base-dir-name}/figures``.
-    """
     repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(repo_root / "snakemake_workflow" / "config" / "config.yml"))

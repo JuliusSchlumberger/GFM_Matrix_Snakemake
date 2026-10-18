@@ -1,18 +1,7 @@
-"""Boundary forcing for a SFINCS tile built on a station boundary line
-(build_station_boundary_lines.py): one forcing point per COAST-RP station
-node on the line, each with its own COAST-HG hydrograph - no resampling
-along the line, SFINCS interpolates between the points.
+"""Write a tile's SFINCS boundary forcing points and hydrographs from its station line.
 
-Per used station (status "used" in the line's stations layer):
-  - forcing point: the station's node (node_lon/node_lat - the station moved
-    ~1 km out to sea, where the line passes);
-  - hydrograph: the nearest COAST-HG station's average-tide hydrograph,
-    shifted so its peak equals the station's COAST-RP RP100 level
-    (rp100_level_m, MDT-corrected): offset = boundary_value - hydrograph_max.
-
-Writes the two files build_sfincs_tile.py reads for its forcing step:
-  sfincs_model/matched_boundary_points.gpkg  (points at the nodes, EPSG:4326)
-  sfincs_model/corrected_hydrographs.csv     (elapsed_hr + one column per point)
+Writes sfincs_model/matched_boundary_points.gpkg (EPSG:4326) and
+corrected_hydrographs.csv (elapsed_hr + one column per point).
 
 Usage:
     python build_line_forcing.py --tile-id 1122 --base-dir-name calibration_roughness_SFINCS \\
@@ -36,39 +25,19 @@ from retry_io import retry_transient_io  # noqa: E402
 
 COAST_HG_NC = "inputs/COAST_HG/COAST-HG_RP100.nc"
 HYDROGRAPH_VARIABLE = "hydrograph_average_tide_signal"
-MAX_MATCH_DIST_DEG = 0.5  # nearest COAST-HG station must be this close (COAST-HG is dense along real coastline)
+MAX_MATCH_DIST_DEG = 0.5  # COAST-HG is dense along real coastline
 
 
 def build_line_forcing(lines_gpkg: Path, coast_hg_nc: Path, tile_dir: Path | None = None,
                        root: Path | None = None) -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
-    """Build forcing points and matching hydrographs for a tile's boundary line.
+    """Build forcing points (EPSG:4326) and matching hydrographs for a boundary line.
 
-    One point per used station node on the line ("line" kind), plus - when
-    `tile_dir`/`root` are given - one per station inside the tile that is
-    not a line node but lies by water that stays active in SFINCS
-    ("interior" kind, via connected_forcing.interior_points).
-
-    Parameters
-    ----------
-    lines_gpkg : Path
-        build_station_boundary_lines.py output (boundary_line/stations layers).
-    coast_hg_nc : Path
-        COAST-HG hydrograph NetCDF (COAST-HG_RP100.nc).
-    tile_dir : Path, optional
-        Tile's base directory (containing inputs/); enables interior points.
-    root : Path, optional
-        Config root directory; required together with `tile_dir`.
-
-    Returns
-    -------
-    tuple[geopandas.GeoDataFrame, pandas.DataFrame]
-        Forcing points (EPSG:4326) and the matching hydrographs (elapsed_hr
-        plus one column per point, in the same order).
-
-    Raises
-    ------
-    ValueError
-        If `lines_gpkg` has no used station.
+    One point per used station at its node (node_lon/node_lat: the station
+    moved ~1 km out to sea onto the line); SFINCS interpolates between points.
+    Hydrograph: nearest COAST-HG average-tide hydrograph, shifted so its peak
+    equals the station's MDT-corrected COAST-RP RP100 level:
+    offset = boundary_value - hydrograph_max. With `tile_dir`/`root`, also adds
+    "interior" points for non-node stations by water that stays active in SFINCS.
     """
     st = retry_transient_io(gpd.read_file, lines_gpkg, layer="stations")
     st = st[st["status"] == "used"].reset_index(drop=True)
@@ -82,7 +51,7 @@ def build_line_forcing(lines_gpkg: Path, coast_hg_nc: Path, tile_dir: Path | Non
 
     cols, rows = {}, []
     for k, r in st.iterrows():
-        # nearest COAST-HG station to the real COAST-RP station position
+        # Match on the real station position, not the node.
         d2 = (hg_lon - r.geometry.x) ** 2 + (hg_lat - r.geometry.y) ** 2
         j = int(np.argmin(d2))
         dist_deg = float(np.sqrt(d2[j]))
@@ -121,8 +90,6 @@ def build_line_forcing(lines_gpkg: Path, coast_hg_nc: Path, tile_dir: Path | Non
 
 
 def main() -> None:
-    """Parse CLI arguments and write the tile's matched boundary points and
-    corrected hydrographs (matched_boundary_points.gpkg, corrected_hydrographs.csv)."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tile-id", required=True)
     parser.add_argument("--base-dir-name", required=True)

@@ -1,24 +1,7 @@
-"""Bathtub + the eikonal friction sweep for one tile of the final SFINCS
-calibration (calibration_roughness_SFINCS), on SFINCS's own 30 m subgrid -
-the same grid SFINCS's hmax_subgrid.tif is compared on.
+"""Run the bathtub and the eikonal friction sweep for one calibration tile on SFINCS's 30 m subgrid.
 
-Compared with the eikonal runner of the earlier calibration studies:
-  - solver settings come from the main config's simulation.flooding block
-    (max_rounds, waterlevel_epsilon_m, obstacle_coupling.enabled /
-    max_outer_iterations / outer_convergence_pct, knn) - nothing hard-coded;
-  - production coastline + production station weighting: the coastline is
-    flood_model.coastline_mask's rule (ocean within 1 px of land/river, in the
-    ocean body connected to the domain edge - on this rotated grid "edge" also
-    means the no-data corners outside the lon/lat tile), and each coastline
-    cell gets the inverse-distance-squared average of its knn nearest
-    CONNECTED stations (flood_model.idw_seed_values_at - the same function
-    production uses, fed the cells' lon/lat);
-  - inputs and seeds are built once, then every friction scale factor is
-    solved in the same process;
-  - outputs are always tagged by friction only:
-      outputs/eikonal_on_subgrid_waterdepth_RP100_SLR_0_fsf<X>.tif
-      outputs/bathtub_waterdepth_RP100_SLR_0.tif
-      outputs/eikonal_solver_diagnostics.json   ({"fsf_<X>": {solver diagnostics, runtime_s}})
+Solver settings come from config simulation.flooding; coastline and station weighting
+are production's (flood_model). Outputs go to outputs/, tagged by friction scale factor.
 
 Usage:
     python run_calibration_models.py --config <resolved_config.yml> --base-dir-name calibration_roughness_SFINCS --tile-id 1122
@@ -53,41 +36,19 @@ from retry_io import retry_transient_io  # noqa: E402
 
 _STRUCTURE_8 = np.ones((3, 3), dtype=bool)
 LAND_CODE, OCEAN_CODE = 0, 1
-NODATA_CODE = 4  # subgrid cells the native lon/lat mask.tif does not cover - see build_inputs_from_sfincs_subgrid
+NODATA_CODE = 4  # subgrid cells the native lon/lat mask.tif does not cover
 
 
 def build_inputs_from_sfincs_subgrid(
     sfincs_dir: Path, native_mask_path: Path,
     friction_scale_factor: float, default_friction: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, rasterio.Affine, str]:
-    """Load the DEM, land/water mask and friction field on SFINCS's subgrid UTM grid.
+    """Load (dem, mask, friction, transform, crs) on SFINCS's subgrid UTM grid.
 
-    dem is dep_subgrid.tif with NaN cells filled with rasters.DEM_NODATA_M's 99.0m
-    dry sentinel. mask is the native lon/lat mask.tif reprojected onto this grid
-    (nearest-neighbour): that rectangle becomes a curved shape in UTM (meridian
-    convergence), and SFINCS's own UTM rectangle overshoots the curve at the
-    corners, so cells with no real coverage there get NODATA_CODE rather than
-    land or ocean. friction is manning_subgrid.tif / 100 * friction_scale_factor,
-    with NaN cells filled with default_friction * 100 before scaling.
-
-    Parameters
-    ----------
-    sfincs_dir : Path
-        Tile's `sfincs_model` directory, containing `subgrid/dep_subgrid.tif`
-        and `subgrid/manning_subgrid.tif`.
-    native_mask_path : Path
-        Path to the tile's native lon/lat `mask.tif`.
-    friction_scale_factor : float
-        Multiplier applied to the Manning's n field.
-    default_friction : float
-        Manning's n used to fill NaN cells in the friction field.
-
-    Returns
-    -------
-    tuple of (numpy.ndarray, numpy.ndarray, numpy.ndarray, rasterio.Affine, str)
-        `(dem, mask, friction, transform, crs)`: DEM in metres, int8 land/water
-        code raster, friction (Manning's n), the subgrid's affine transform and
-        CRS.
+    DEM NaN -> 99.0 m dry sentinel (rasters.DEM_NODATA_M). The lon/lat mask is reprojected
+    nearest; the UTM rectangle overshoots it at the corners (meridian convergence), and
+    those cells get NODATA_CODE. Friction = manning_subgrid.tif / 100 * friction_scale_factor,
+    NaN filled with default_friction * 100 before scaling.
     """
     dep_path = sfincs_dir / "subgrid" / "dep_subgrid.tif"
     man_path = sfincs_dir / "subgrid" / "manning_subgrid.tif"
@@ -119,25 +80,9 @@ def build_inputs_from_sfincs_subgrid(
 
 
 def compute_bathtub_depth(dem: np.ndarray, mask: np.ndarray, max_waterlevel_m: float) -> np.ndarray:
-    """Compute the naive "bathtub" baseline water depth.
+    """Flood every land cell below one flat level (m): no connectivity, friction or propagation.
 
-    Every land cell below `max_waterlevel_m` (a single scalar - the tile's
-    highest real boundary station value, not spatially interpolated) floods to
-    exactly that level. No connectivity, friction, or propagation.
-
-    Parameters
-    ----------
-    dem : numpy.ndarray
-        Elevation raster in metres.
-    mask : numpy.ndarray
-        Land/water code raster; only cells equal to `LAND_CODE` can flood.
-    max_waterlevel_m : float
-        Flat water level applied to all land cells, in metres.
-
-    Returns
-    -------
-    numpy.ndarray
-        Water depth in metres, float32, zero outside land cells.
+    `max_waterlevel_m` is the tile's highest boundary station value, not interpolated.
     """
     depth = np.maximum(np.float32(max_waterlevel_m) - dem, np.float32(0.0))
     return np.where(mask == LAND_CODE, depth, np.float32(0.0)).astype(np.float32)
@@ -159,24 +104,8 @@ def _write_waterdepth(waterdepth: np.ndarray, transform, crs, output_path: Path)
 def subgrid_coastline_mask(mask: np.ndarray, ocean_code: int, river_code: int | None) -> np.ndarray:
     """Mark coastline cells on the rotated subgrid, as flood_model.coastline_mask does.
 
-    Ocean cells within 1 px of land (or river) in an ocean body that reaches
-    the domain edge - the array edge, or the no-data corners where the
-    rotated UTM rectangle sticks out of the lon/lat tile (that boundary IS the
-    tile edge on this grid).
-
-    Parameters
-    ----------
-    mask : numpy.ndarray
-        Land/water code raster.
-    ocean_code : int
-        Mask value marking open ocean.
-    river_code : int or None
-        Mask value marking river cells, treated like land; None to disable.
-
-    Returns
-    -------
-    numpy.ndarray
-        Boolean coastline mask, same shape as `mask`.
+    Ocean within 1 px of land (or river) in an ocean body reaching the domain edge:
+    the array edge or the NODATA_CODE corners (the tile edge on this grid).
     """
     ocean = mask == ocean_code
     components, _ = ndimage.label(ocean, structure=_STRUCTURE_8)
@@ -192,29 +121,11 @@ def subgrid_coastline_mask(mask: np.ndarray, ocean_code: int, river_code: int | 
 
 
 def solver_inputs(dem: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Prepare `(dem, mask)` for `flood_depth_dense` by closing off the no-data frame.
+    """Turn NODATA_CODE cells into dry land at 99 m for `flood_depth_dense`.
 
-    NODATA_CODE cells become dry land at the 99m sentinel. flood_depth_dense's
-    effective_dem zeroes every non-land cell, so left as-is the no-data frame
-    around the rotated grid is a 0m channel touching the ocean that carries
-    water along the domain border into any below-level land beside it (tile
-    631: the Gran Bajo de San Julian, cut off from the sea by a 20-30m rim,
-    flooded via the frame). The original mask is still what
-    subgrid_coastline_mask and the seeds use - there the frame marks the
-    domain edge.
-
-    Parameters
-    ----------
-    dem : numpy.ndarray
-        Elevation raster in metres.
-    mask : numpy.ndarray
-        Land/water code raster, possibly containing `NODATA_CODE` cells.
-
-    Returns
-    -------
-    tuple of (numpy.ndarray, numpy.ndarray)
-        `(dem, mask)` with every `NODATA_CODE` cell turned into land at the
-        99m dry sentinel.
+    flood_depth_dense zeroes every non-land cell, so the no-data frame would be a 0 m
+    channel carrying water along the border (tile 631: Gran Bajo de San Julian flooded
+    past its 20-30 m rim). Coastline and seeds still use the original mask.
     """
     nodata = mask == NODATA_CODE
     return (np.where(nodata, np.float32(99.0), dem).astype(dem.dtype),
@@ -222,35 +133,10 @@ def solver_inputs(dem: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, np.nda
 
 
 def production_seeds(mask, transform, crs, boundaries: gpd.GeoDataFrame, knn: int, river_code: int):
-    """Build eikonal seed cells on the subgrid's coastline with production weighting.
+    """Return (rows, cols, level_m) eikonal seeds on the subgrid coastline, or None if none.
 
-    Finds the coastline via `subgrid_coastline_mask`, then assigns each
-    coastline cell the inverse-distance-squared average of its `knn` nearest
-    edge-connected boundary stations (`flood_model.idw_seed_values_at`, the
-    same function production uses), after transforming cell centres to
-    EPSG:4326.
-
-    Parameters
-    ----------
-    mask : numpy.ndarray
-        Land/water code raster.
-    transform : rasterio.Affine
-        Affine transform of `mask`'s grid.
-    crs : str
-        CRS of `mask`'s grid.
-    boundaries : geopandas.GeoDataFrame
-        Boundary stations, with a water level column named `WATERLEVEL_NAME`.
-    knn : int
-        Number of nearest connected stations averaged per coastline cell.
-    river_code : int
-        Mask value marking river cells, treated like land for connectivity.
-
-    Returns
-    -------
-    tuple of (numpy.ndarray, numpy.ndarray, numpy.ndarray) or None
-        `(rows, cols, values)` of the coastline seed cells (int64, int64,
-        float32 water level in metres), or None if the tile has no coastline
-        cell.
+    Each cell gets the inverse-distance-squared average of its `knn` nearest connected
+    stations (flood_model.idw_seed_values_at, as production), computed in lon/lat.
     """
     coast = subgrid_coastline_mask(mask, OCEAN_CODE, river_code)
     rows, cols = np.nonzero(coast)
@@ -276,15 +162,7 @@ def _jsonable(o):
 
 
 def main() -> None:
-    """Parse CLI arguments and run the bathtub and/or eikonal sweep for one tile.
-
-    Builds the DEM/mask/friction inputs once from the tile's SFINCS subgrid,
-    then writes the bathtub baseline and/or sweeps the requested friction
-    scale factors through `flood_depth_dense`, writing one water-depth GeoTIFF
-    per factor plus a merged `eikonal_solver_diagnostics.json` (solver
-    diagnostics and runtime per factor). Skips any output that already exists
-    unless `--overwrite` is given.
-    """
+    """Run the bathtub and/or eikonal sweep for one tile, skipping existing outputs."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tile-id", required=True)
     parser.add_argument("--config", required=True, help="config.yml or the base dir's resolved_config.yml")
@@ -296,7 +174,7 @@ def main() -> None:
 
     with open(args.config, encoding="utf-8") as f:
         config = yaml.safe_load(f)
-    root = read_root(Path(args.config))  # paths.root, or a sibling config_local.yml's
+    root = read_root(Path(args.config))
     flooding = config["simulation"]["flooding"]
     oc = flooding.get("obstacle_coupling", {})
     river_code = int(config["tile_generation"]["river_code"])

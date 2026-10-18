@@ -1,25 +1,9 @@
 #!/bin/bash
-# Final SFINCS calibration (calibration_roughness_SFINCS), stage 2, ONE tile:
-#
-#   1. copy the production inputs from model_outputs/<tile>/inputs (copies, no
-#      symlinks - the analysis reads them from Windows too) and the tile's
-#      boundary line (boundary_lines/<tile>.gpkg, stage 1)
-#   2. regenerate dem.tif/mask.tif (gfm), elevation_combined.tif + manning_n.tif
-#      (hydromt-sfincs-dev)
-#   3. forcing on the line's station nodes (build_line_forcing.py) and the SFINCS
-#      model with the line's mask (build_sfincs_tile.py --boundary-lines-gpkg)
-#   4. bathtub + eikonal friction sweep fsf 3..30 on the SFINCS subgrid
-#      (run_calibration_models.py, solver settings from the config)
-#   5. SFINCS on node-local scratch (apptainer)
-#   6. hmax_subgrid.tif/hmax.tif (run_sfincs_tile.py --skip-run) and the merged
-#      outputs/calibration_result.json (compute_calibration_result.py)
-#
-# Idempotent: every step is skipped when its output exists; a tile with
-# outputs/calibration_run.done is skipped entirely. A failure appends to
-# outputs/calibration_run.failed (removed on a later success) and moves on.
-# outputs/calibration_run.step holds the step currently running
-# (check_calibration_progress.py).
-#
+# Run the SFINCS calibration (stage 2) for ONE tile: inputs -> SFINCS model -> eikonal sweep
+# -> SFINCS run -> calibration_result.json. Inputs are copied, not symlinked (read from Windows too).
+# Idempotent: each step is skipped when its output exists. A failure appends to
+# outputs/calibration_run.failed (cleared on success) and exits 0 so the job's tile loop continues.
+# calibration_run.done skips the tile; calibration_run.step holds the running step.
 # Usage: BASE_DIR_NAME=calibration_roughness_SFINCS SFINCS_THREADS=4 bash run_final_tile.sh <tile_id>
 set -uo pipefail
 unset PROJ_LIB PROJ_DATA GDAL_DATA
@@ -28,7 +12,6 @@ TILE_ID="$1"
 BASE_DIR_NAME="${BASE_DIR_NAME:-calibration_roughness_SFINCS}"
 SFINCS_THREADS="${SFINCS_THREADS:-4}"
 
-# Hydrax paths: single definition in hydrax_env.sh (env-overridable).
 source "$(dirname "${BASH_SOURCE[0]}")/hydrax_env.sh"
 CODE_ROOT="$GFM_CODE_ROOT"
 DATA_ROOT="$GFM_DATA_ROOT"
@@ -66,7 +49,6 @@ fi
 [ -f "$LINES_SRC" ] || fail "no boundary line ($LINES_SRC)"
 mkdir -p "$IN" "$SM" "$OUT" || fail "cannot create $TILE_DIR"
 
-# -- 1. inputs + line --
 step "copy_inputs"
 for f in tile_geometry.gpkg model_bbox.json dem.tif mask.tif friction.tif boundaries_RP100_SLR_0.gpkg; do
   if [ ! -f "$IN/$f" ]; then
@@ -78,7 +60,7 @@ done
 
 cd "$CODE_ROOT/sfincs_tiles" || fail "cannot cd to $CODE_ROOT/sfincs_tiles"
 
-# -- 2. elevation / roughness (dem.tif/mask.tif are regenerated only before the first build) --
+# dem.tif/mask.tif are regenerated only before the first build.
 if [ ! -f "$SM/elevation_combined.tif" ]; then
   step "regenerate_dem_mask"
   "$GFM_PY" regenerate_dem_mask.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
@@ -93,7 +75,6 @@ if [ ! -f "$SM/manning_n.tif" ]; then
     || fail "build_roughness.py failed"
 fi
 
-# -- 3. line forcing + SFINCS model --
 if [ ! -f "$SM/sfincs.inp" ] || [ ! -f "$SM/subgrid/dep_subgrid.tif" ]; then
   step "build_line_forcing"
   "$HYDROMT_SFINCS_DEV_PY" build_line_forcing.py --tile-id "$TILE_ID" --base-dir-name "$BASE_DIR_NAME" \
@@ -104,12 +85,11 @@ if [ ! -f "$SM/sfincs.inp" ] || [ ! -f "$SM/subgrid/dep_subgrid.tif" ]; then
     --boundary-lines-gpkg "$LINES" --config "$CONFIG" || fail "build_sfincs_tile.py failed"
 fi
 
-# -- 4. bathtub + eikonal sweep (each fsf skipped when its raster exists) --
+# Each friction factor is skipped when its raster exists.
 step "eikonal_sweep"
 "$GFM_PY" run_calibration_models.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
   || fail "run_calibration_models.py failed"
 
-# -- 5. SFINCS on node-local scratch --
 if [ ! -f "$SM/sfincs_map.nc" ]; then
   step "sfincs_run"
   LOCAL_DIR="${TMPDIR:-/tmp}/sfincs_final_${TILE_ID}_${SLURM_JOB_ID:-$$}"
@@ -138,7 +118,6 @@ if [ ! -f "$SM/sfincs_map.nc" ]; then
   rm -rf "$LOCAL_DIR"
 fi
 
-# -- 6. postprocess + merged result --
 if [ ! -f "$SM/hmax_subgrid.tif" ]; then
   step "sfincs_postprocess"
   "$HYDROMT_SFINCS_DEV_PY" run_sfincs_tile.py --tile-id "$TILE_ID" --config "$CONFIG" --skip-run --base-dir-name "$BASE_DIR_NAME" \

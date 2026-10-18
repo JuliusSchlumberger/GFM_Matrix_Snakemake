@@ -1,35 +1,8 @@
-"""Overlap-corrected re-derivation of compute_calibration_result.py's
-per-tile calibration_result.json - friction-sweep tiles overlap each other
-(production tile grid, deliberate boundary-condition buffer), so naively
-pooling matched_km2/model_only_km2/sfincs_only_km2 across tiles (calibration_
-results.sweep_tables) counts any (mis)agreement in an overlap zone once PER
-overlapping tile, not once per real location - confirmed 2026-10 via
-tile_selection.gpkg: summed individual tile footprints overcount the real
-(union) area by 1.237x.
+"""Write calibration_result.json per tile, each counting only its Voronoi core.
 
-Fix: a Voronoi partition of the selected tile set (each tile's "core" =
-the portion of its domain closer to ITS OWN center than to any other
-selected tile's center) - same structural idea as src/merge.py's own
-provenance-raster resolution of overlapping PRODUCTION tiles (one winning
-tile per real-world cell), just applied to the comparison mask instead of
-merged depth values. Every pixel counts toward exactly one tile's
-contribution to the pooled metric.
-
-Reuses compute_calibration_result.py's own per-pixel comparison logic
-UNCHANGED (_depth_stats, _sfincs_active_on_subgrid, _compare) - the ONLY
-change is intersecting `score` (SFINCS-active real land) with the new
-`core_mask` before any counting happens, so every downstream count
-(domain stats, bathtub/eikonal flooded_km2, vs_sfincs confusion counts)
-is automatically restricted to the de-duplicated core.
-
-Writes to a SEPARATE base directory (e.g. calibration_roughness_SFINCS_dedup),
-mirroring the {tile_id}/outputs/calibration_result.json layout the original
-study uses - NOT overwriting calibration_roughness_SFINCS - so the existing,
-unmodified calibration_results.py/compute_friction_sweep_metrics.py can read
-it back with zero changes, just pointed at the new --base-dir-name.
-
-Needs hydromt-sfincs-dev (reads sfincs.msk through SfincsModel, same as
-compute_calibration_result.py).
+Sweep tiles overlap (boundary-condition buffer), so pooling raw counts counts
+overlap zones once per tile (summed footprints overcount the union by 1.237x).
+Output mirrors the original layout in a separate base dir. Needs hydromt-sfincs-dev.
 
 Usage:
     python compute_calibration_result_dedup.py --config <config.yml> \\
@@ -68,23 +41,10 @@ _PARTITION_CRS = "EPSG:6933"  # equal-area - fair distance comparison regardless
 
 
 def build_tile_tree(tile_selection_gpkg: Path) -> tuple[cKDTree, np.ndarray]:
-    """Build a KDTree over every selected tile's centroid, for Voronoi partitioning.
+    """Return a KDTree over selected tiles' centroids (EPSG:6933) and the parallel tile ids.
 
-    Built from ALL selected tiles (not just ones with a usable result) so a
-    tile missing its own eikonal/bathtub output still correctly claims its
-    own Voronoi territory from its overlapping neighbours, rather than
-    silently ceding it to them.
-
-    Parameters
-    ----------
-    tile_selection_gpkg : Path
-        Path to the tile_selection.gpkg produced by tile selection.
-
-    Returns
-    -------
-    tuple of (scipy.spatial.cKDTree, numpy.ndarray)
-        The KDTree over centroids in EPSG:6933, and the parallel tile_id
-        array such that tree index i corresponds to ``tile_ids[i]``.
+    Uses ALL selected tiles, so a tile without a usable result still claims its
+    own Voronoi territory instead of ceding it to its neighbours.
     """
     gdf = gpd.read_file(tile_selection_gpkg)
     sel = gdf[gdf["category"] == "selected"].to_crs(_PARTITION_CRS)
@@ -94,13 +54,6 @@ def build_tile_tree(tile_selection_gpkg: Path) -> tuple[cKDTree, np.ndarray]:
 
 
 def _core_mask(shape: tuple, transform, crs, this_tile_id: str, tree: cKDTree, tile_ids: np.ndarray) -> np.ndarray:
-    """True where this tile's own center is the NEAREST of every selected
-    tile's center - i.e. this tile's Voronoi core. Vectorized: builds every
-    pixel's own real-world center coordinate from the raster's affine
-    transform directly (no per-pixel rasterio.transform.xy call), reprojects
-    the whole grid to the partition CRS in one batch, then one vectorized
-    KDTree query for the whole tile.
-    """
     h, w = shape
     rows, cols = np.indices((h, w))
     xs = transform.c + (cols + 0.5) * transform.a + (rows + 0.5) * transform.b
@@ -118,32 +71,8 @@ def compute_result_dedup(
 ) -> dict:
     """Build one tile's calibration_result dict, restricted to its Voronoi core.
 
-    Same as `compute_calibration_result.compute_result`, except ``score``
-    (SFINCS-active real land) is additionally intersected with this tile's
-    own Voronoi core mask before any counting, to avoid double-counting
-    overlap zones shared between friction-sweep tiles (see module docstring).
-
-    Parameters
-    ----------
-    tile_dir : Path
-        Tile directory containing ``inputs/``, ``sfincs_model/`` and ``outputs/``.
-    fsfs : list of float
-        Friction scale factors to look for eikonal results at.
-    flooding : dict
-        The simulation's "flooding" config block, copied verbatim into the
-        result's "settings".
-    river_code : int
-        Mask code identifying river cells, passed to `prune_to_ocean_connected`.
-    tree : scipy.spatial.cKDTree
-        KDTree over every selected tile's centroid, from `build_tile_tree`.
-    tile_ids : numpy.ndarray
-        Tile-id array parallel to `tree`, from `build_tile_tree`.
-
-    Returns
-    -------
-    dict
-        The tile's calibration_result.json content, with ``"dedup": True``
-        and an added ``"core_fraction_of_active_land"`` domain stat.
+    As `compute_calibration_result.compute_result`, with ``score`` also
+    intersected with the core mask before any counting.
     """
     this_tile_id = tile_dir.name
     sfincs_dir = tile_dir / "sfincs_model"
@@ -162,7 +91,7 @@ def compute_result_dedup(
     active, counts, msk, coarse_tr = _sfincs_active_on_subgrid(sfincs_dir, shape, transform)
 
     core = _core_mask(shape, transform, crs, this_tile_id, tree, tile_ids)
-    score = land & active & core  # <- the one real change vs compute_result()
+    score = land & active & core  # only difference from compute_result()
 
     cell_km2 = abs(transform.a * transform.e - transform.b * transform.d) / 1e6
     ref = {"score": score, "weight": np.full(shape, cell_km2, dtype=np.float64), "sfincs_depth": sfincs_depth,
@@ -212,7 +141,6 @@ def compute_result_dedup(
 
 
 def _process_one(args_tuple) -> tuple[str, str | None]:
-    """One tile, for the process pool - returns (tile_id, error_or_None)."""
     tile_dir, out_tile_dir, fsfs, flooding, river_code, tree, tile_ids = args_tuple
     tile_id = tile_dir.name
     try:
@@ -226,14 +154,6 @@ def _process_one(args_tuple) -> tuple[str, str | None]:
 
 
 def main() -> None:
-    """Parse CLI arguments and write de-duplicated calibration results for every selected tile.
-
-    Builds the Voronoi tile-center tree from tile_selection.gpkg, computes
-    each tile's calibration result restricted to its own core (in parallel,
-    via a process pool) and writes it to
-    ``{out-dir-name}/{tile_id}/outputs/calibration_result.json``. Prints
-    progress with an ETA and a final failure summary.
-    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")

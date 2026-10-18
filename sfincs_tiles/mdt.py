@@ -1,12 +1,8 @@
-"""Mean Dynamic Topography (MDT) lookup, for re-referencing local-MSL data
-onto the GOCO06s geoid used by this pipeline's DEM/boundary forcing.
+"""Look up Mean Dynamic Topography (MDT) to re-reference local-MSL data onto GOCO06s.
 
-`_load_mdt`/`_nearest_valid_grid` are copied (not imported) from
-`preparation/prepare_boundary_conditions.py`.
-
-Sign convention: MDT is ADDED to re-reference local-MSL data onto GOCO06s -
-`H_GOCO06s = H_MSL + MDT`. Applies to both GEBCO (bathymetry) and COAST-HG
-(storm-tide hydrographs), which are local-MSL-referenced at the source.
+Sign convention: `H_GOCO06s = H_MSL + MDT`. Applies to GEBCO and COAST-HG, both
+local-MSL-referenced at the source. Helpers copied from
+preparation/prepare_boundary_conditions.py.
 """
 
 from __future__ import annotations
@@ -22,10 +18,6 @@ from retry_io import retry_transient_io  # noqa: E402
 
 
 def _load_mdt(mdt_path: Path, mdt_variable: str = "mdt") -> xr.DataArray:
-    """Loads the AVISO MDT as a 2-D lat/lon DataArray, ascending coordinates.
-
-    The open is retried (see retry_io.py) to handle transient P:\\ share I/O
-    errors."""
     with retry_transient_io(xr.open_dataset, mdt_path) as ds:
         da = ds[mdt_variable].load()
 
@@ -44,12 +36,7 @@ def _load_mdt(mdt_path: Path, mdt_variable: str = "mdt") -> xr.DataArray:
 def _nearest_valid_grid(
     da: xr.DataArray, lon_dim: str, lon: float, lat_dim: str, lat: float, fallback_deg: float,
 ) -> float:
-    """Value of a 2-D lat/lon grid nearest (lon, lat), NaN-safe.
-
-    Falls back to the nearest non-NaN cell within +/-fallback_deg if the
-    nearest cell itself is NaN. `da` must have ascending lat/lon
-    coordinates (see `_load_mdt`).
-    """
+    # `da` must have ascending lat/lon coordinates (slice() below).
     val = float(da.sel({lon_dim: lon, lat_dim: lat}, method="nearest").values)
     if not np.isnan(val):
         return val
@@ -74,24 +61,10 @@ def _nearest_valid_grid(
 
 
 def mdt_lookup_fn(mdt_path: Path, mdt_variable: str = "mdt", fallback_deg: float = 3.0):
-    """Return a `(lon, lat) -> MDT value (m)` lookup closure, loading the MDT grid once.
+    """Return a `(lon, lat) -> MDT (m)` lookup over the AVISO MDT NetCDF, loaded once.
 
-    Parameters
-    ----------
-    mdt_path : Path
-        Path to the AVISO MDT NetCDF file.
-    mdt_variable : str, optional
-        Variable name in the MDT dataset, by default "mdt".
-    fallback_deg : float, optional
-        Search radius (degrees) used when the nearest grid cell is NaN, by
-        default 3.0. Matches
-        `boundary_conditions.mdt_correction.fallback_search_deg` in config.yml.
-
-    Returns
-    -------
-    Callable[[float, float], float]
-        Function mapping (lon, lat) to the MDT value (m), NaN if no valid cell
-        is found within `fallback_deg`.
+    If the nearest cell is NaN, uses the nearest valid cell within +/-`fallback_deg`
+    (default matches config `boundary_conditions.mdt_correction.fallback_search_deg`), else NaN.
     """
     da = _load_mdt(mdt_path, mdt_variable)
     lat_dim = next(d for d in da.dims if "lat" in d.lower())

@@ -1,15 +1,6 @@
-"""
-sfincs_run.py -- Shared SFINCS subprocess execution (Popen + threaded
-stdout/stderr forwarding + timeout), used by every rule that executes the
-SFINCS binary. Also holds helpers for hand-crafting a sfincs.inp that
-borrows geometry from a different SFINCS model directory via relative
-paths. Adapted from the basin-scale SFINCS workflow's own sfincs_run.py
-(13_build_sfincs.py / 14_run_spinup.py there), which was vendored here as
-julius_sfincs_code/ until cleanup Phase 2 removed it - see git history.
+"""Run the SFINCS binary as a subprocess with streamed output and a timeout.
 
-Paths are written by hand rather than via HydroMT's sf.config.write():
-HydroMT's get_set_file_variable absolutizes file references outside the
-model's own root instead of preserving a relative ../ path.
+Adapted from the basin-scale SFINCS workflow's sfincs_run.py.
 """
 
 from __future__ import annotations
@@ -29,33 +20,11 @@ def run_sfincs_subprocess(
     label: str = "SFINCS run",
     n_threads: int | None = None,
 ) -> None:
-    """Run the SFINCS binary in ``cwd`` and stream its output, with a timeout.
+    """Run SFINCS in ``cwd``, forwarding stdout/stderr to ``log`` and stderr live.
 
-    Launches ``sfincs_exe`` via ``subprocess.Popen`` and forwards its
-    stdout/stderr line-by-line to both ``log`` and the terminal in real time.
-
-    Parameters
-    ----------
-    sfincs_exe : str or Path
-        Path to the SFINCS executable.
-    cwd : str or Path
-        Working directory SFINCS runs in; its own relative file references
-        (dep, msk, bnd, rstfile, ...) resolve against this.
-    timeout_s : float
-        Wall-clock timeout (seconds) before the process is killed.
-    log : logging.Logger
-        Logger that receives SFINCS's stdout (info) / stderr (warning).
-    label : str, optional
-        Used only in raised error messages. Default is "SFINCS run".
-    n_threads : int or None, optional
-        OpenMP thread count for SFINCS (sets OMP_NUM_THREADS for the
-        subprocess only). SFINCS defaults to 1 thread when unset; None or 0
-        leaves the environment unchanged. Default is None.
-
-    Raises
-    ------
-    RuntimeError
-        If the process exceeds ``timeout_s`` or exits with a non-zero code.
+    Relative file references in sfincs.inp resolve against ``cwd``. ``n_threads``
+    sets OMP_NUM_THREADS for the subprocess only (SFINCS defaults to 1; None/0
+    leaves the env unchanged). Raises RuntimeError on timeout or non-zero exit.
     """
     sfincs_exe = Path(sfincs_exe).resolve()
     log.info(f"Running {label}: {sfincs_exe}")
@@ -72,7 +41,7 @@ def run_sfincs_subprocess(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        bufsize=1,  # line-buffered
+        bufsize=1,
         env=env,
     )
 

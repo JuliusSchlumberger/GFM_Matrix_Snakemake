@@ -1,14 +1,7 @@
-"""Pre-flight check for the final SFINCS calibration: build only the SFINCS
-grid + mask from a tile's boundary line (build_station_boundary_lines.py) -
-the step that failed for 22 of the 573 bline runs - without elevation,
-subgrid or forcing, so a tile is known to build before it is selected.
+"""Check that a tile's SFINCS grid + mask builds from its boundary line, before selection.
 
-Runs under hydromt-sfincs-dev (it calls build_sfincs_tile._create_mask).
-Writes {base}/boundary_lines/preflight/{tile_id}.json:
-    {"tile_id", "ok", "n_active", "n_boundary", "error"}
-ok = the mask builds, has active cells and >= MIN_BOUNDARY_CELLS waterlevel
-boundary cells. Only tiles whose line status says suitable are checked
-(the rest get ok=false, error="not suitable") unless --all.
+Writes {base}/boundary_lines/preflight/{tile_id}.json. Only tiles whose line is
+suitable are checked unless --all. Runs under hydromt-sfincs-dev.
 
 Usage:
     python preflight_sfincs_mask.py --config <config.yml> --base-dir-name calibration_roughness_SFINCS \\
@@ -37,29 +30,10 @@ MIN_BOUNDARY_CELLS = 1
 
 
 def preflight_tile(tile_id: str, tiles_root: Path, lines_dir: Path, resolution_m: float) -> dict:
-    """Build a tile's SFINCS grid and mask only, and report whether it is viable.
+    """Build only a tile's SFINCS grid and mask (no elevation/subgrid/forcing).
 
-    No elevation, subgrid or forcing is built. A tile is ok=True only if its mask
-    has at least one active cell and at least `MIN_BOUNDARY_CELLS` waterlevel
+    ok=True if the mask has an active cell and >= `MIN_BOUNDARY_CELLS` waterlevel
     boundary cells.
-
-    Parameters
-    ----------
-    tile_id : str
-        Tile identifier, used as the output dict's "tile_id" (cast to int) and to
-        locate the tile's inputs under `tiles_root`.
-    tiles_root : Path
-        Root directory containing `{tile_id}/inputs/tile_geometry.gpkg`.
-    lines_dir : Path
-        Directory containing the tile's boundary line geopackage (`{tile_id}.gpkg`).
-    resolution_m : float
-        SFINCS grid resolution in metres.
-
-    Returns
-    -------
-    dict
-        Record with "tile_id", "ok", "n_active", "n_boundary" and "error" (None on
-        success).
     """
     row = {"tile_id": int(tile_id), "ok": False, "n_active": 0, "n_boundary": 0, "error": None}
     gpkg = lines_dir / f"{tile_id}.gpkg"
@@ -84,11 +58,6 @@ def preflight_tile(tile_id: str, tiles_root: Path, lines_dir: Path, resolution_m
 
 
 def main() -> None:
-    """Parse CLI arguments, pre-flight check each requested tile, and write one JSON record per tile under boundary_lines/preflight/.
-
-    Skips tiles whose boundary line is not marked suitable unless `--all` is given,
-    and skips tiles with an existing record when `--skip-done` is given.
-    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--base-dir-name", required=True)

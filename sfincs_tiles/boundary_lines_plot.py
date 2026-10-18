@@ -1,5 +1,4 @@
-"""Per-tile diagnostic figure of the SFINCS station boundary lines (split out of
-build_station_boundary_lines.py, cleanup 2026-10-18; pure move)."""
+"""Plot the per-tile diagnostic figure of the SFINCS station boundary lines."""
 
 from __future__ import annotations
 import math
@@ -32,7 +31,6 @@ def _plot(tile_id, tile_dir, gpkg, mask, bounds, tile, out_path: Path, row: dict
     segs = gpd.read_file(gpkg, layer="segments") if "segments" in layers else None
     st = gpd.read_file(gpkg, layer="stations") if "stations" in layers else None
 
-    # (a) lines
     ax.imshow(land_sea, extent=extent, cmap=ListedColormap([WATER_COLOR, "#e4e4e0"]), vmin=0, vmax=1,
               interpolation="nearest")
     tile.boundary.plot(ax=ax, color="black", linewidth=1.0)
@@ -68,7 +66,6 @@ def _plot(tile_id, tile_dir, gpkg, mask, bounds, tile, out_path: Path, row: dict
     ax.set_title(f"(a) tile {tile_id}  boundary lines   " + "  ".join(flags), fontsize=10)
     ax.legend(loc="lower left", fontsize=8)
 
-    # (b) active / inactive split of the tile
     tb = tile.total_bounds
     ax2.imshow(land_sea, extent=extent, cmap=ListedColormap([WATER_COLOR, "#e4e4e0"]), vmin=0, vmax=1,
                interpolation="nearest")

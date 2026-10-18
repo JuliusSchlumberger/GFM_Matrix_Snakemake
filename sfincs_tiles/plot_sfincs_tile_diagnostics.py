@@ -1,30 +1,7 @@
-"""Default per-tile SFINCS validation inspection: four diagnostic figures
-for one built (and ideally run) tile, written to
-`{base_dir_name}/{tile_id}/figures/`.
+"""Draw per-tile SFINCS diagnostic figures into {base_dir_name}/{tile_id}/figures/.
 
-Reads `sfincs.msk`/`sfincs.ind` directly as SFINCS's own raw binary format
-(sfincs_grid.read_sfincs_mask) instead of going through `hydromt_sfincs.
-SfincsModel`, so it needs only rasterio/scipy/matplotlib and runs under
-`gfm` (named `gfm_python_preprocessing` on the Windows dev machine) like every
-other sfincs_tiles/ plotting script.
-
-Figures:
-  1. {tile_id}_mask.png - SFINCS's own active/inactive/waterlevel-boundary
-     mask (sfincs.msk), boundary cells drawn as an enlarged, high-contrast
-     overlay so a 1-cell-wide boundary line stays visible at figure scale.
-  2. {tile_id}_boundary_forcing.png - (a) map of the matched boundary
-     stations (matched_boundary_points.gpkg) and the boundary cell line(s)
-     (mask==2) together, (b) the forcing timeseries for every station
-     (corrected_hydrographs.csv).
-  3. {tile_id}_biggest_disagreement.png - zoomed to the single largest
-     contiguous eikonal-only-or-SFINCS-only patch (four-way classification
-     reused from plot_worst_tiles_panel.py's own build_classification()),
-     labelled with which model over-predicts there and its area.
-  4. {tile_id}_coastrp_forcing.png - (a) COAST-RP RP100 levels across the
-     tile, the eikonal's IDW coastline seed and SFINCS's forcing points,
-     (b) station level vs. eikonal seed vs. SFINCS zsmax along the coast.
-     Drawn for every scored tile by run_calibration_sweep_analysis.py
-     (forcing checks).
+Figures: mask, boundary_forcing, biggest_disagreement (largest eikonal-only or
+SFINCS-only patch), coastrp_forcing. Reads sfincs.msk/ind raw, so it runs in `gfm`.
 
 Usage:
     python plot_sfincs_tile_diagnostics.py --tile-id 1693 --base-dir-name calibration_roughness_SFINCS
@@ -75,21 +52,15 @@ MASK_COLORS = ["#f5f5f2", "#a8c8e8", "#d62728"]  # inactive, active, boundary
 MASK_LABELS = ["inactive", "active", "waterlevel boundary"]
 
 FIGURES = ["mask", "boundary_forcing", "biggest_disagreement", "coastrp_forcing"]
-NEAREST_MAX_KM = 10.0  # profile panels: comparison point = the coastline cell nearest the station, if this close
-# (COAST-RP stations sit up to ~6 km off the DeltaDTM coastline on wide, shallow mudflat coasts)
-SAME_POINT_MAX_KM = 1.5  # ... and SFINCS is read at its nearest wet cell to that same point, if this close
-# (0.5 km missed the wet cells on many coasts - the comparison point is a 1" coastline cell, often in a mangrove
-# or river-mouth pixel that SFINCS's 120 m cells around it are not all wet at)
-STATION_OCEAN_TOL_M = 2000.0  # profile panels: a station counts as "on ocean" with an ocean pixel this close
-# (same tolerance as build_station_boundary_lines.py's not-open-ocean station filter)
+# Profile panels. COAST-RP stations sit up to ~6 km off the DeltaDTM coastline on mudflat coasts.
+NEAREST_MAX_KM = 10.0  # max station -> nearest coastline cell (the comparison point)
+SAME_POINT_MAX_KM = 1.5  # max comparison point -> wet SFINCS cell; 0.5 km missed mangrove/river-mouth cells
+STATION_OCEAN_TOL_M = 2000.0  # same as build_station_boundary_lines.py
 PREFIXED_FIGURE_NAMES = {"coastrp_forcing": "forcing_comparison"}  # --out-prefix file names
 
 
 def _read_sfincs_bnd_bzs(sfincs_dir: Path) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
-    """The boundary points SFINCS is actually forced with (`sfincs.bnd`, x/y
-    in the model CRS) and their water-level series (`sfincs.bzs`: time in
-    seconds, then one column per bnd point) - which can be far fewer than
-    the matched_boundary_points.gpkg candidates."""
+    # bnd: x/y in model CRS; bzs: time (s), then one column per bnd point
     bnd_path, bzs_path = sfincs_dir / "sfincs.bnd", sfincs_dir / "sfincs.bzs"
     if not (bnd_path.exists() and bzs_path.exists()):
         return None, None
@@ -98,8 +69,7 @@ def _read_sfincs_bnd_bzs(sfincs_dir: Path) -> tuple[np.ndarray, np.ndarray] | tu
 
 def _grid_corners_lonlat(transform: rasterio.Affine, crs: str,
                          shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
-    """(nrow+1, ncol+1) lon/lat of every cell corner, for pcolormesh - exact
-    for rotated SFINCS grids too, unlike a rectangular imshow extent."""
+    # cell corners for pcolormesh: exact on rotated grids, unlike an imshow extent
     nrow, ncol = shape
     cols, rows = np.meshgrid(np.arange(ncol + 1), np.arange(nrow + 1))
     xs, ys = transform * (cols.ravel(), rows.ravel())
@@ -115,27 +85,12 @@ def _cell_centres_lonlat(transform: rasterio.Affine, crs: str, rows: np.ndarray,
 
 def plot_mask(mask2d: np.ndarray, transform: rasterio.Affine, crs: str, out_path: Path,
                stations_path: Path | None = None) -> None:
-    """Draw and save figure 1: SFINCS's own active/inactive/waterlevel-boundary mask.
+    """Plot the SFINCS active/inactive/waterlevel-boundary mask.
 
-    Boundary cells are dilated by 1px for display so a 1-cell-wide boundary line stays
-    visible at figure scale; the caption box reports true (undilated) cell counts.
-
-    Parameters
-    ----------
-    mask2d : np.ndarray
-        SFINCS mask array (INACTIVE/ACTIVE/BOUNDARY codes), as read by `read_sfincs_mask`.
-    transform : rasterio.Affine
-        Grid-to-CRS affine transform for `mask2d`.
-    crs : str
-        CRS of `mask2d`/`transform`.
-    out_path : Path
-        PNG file to write the figure to.
-    stations_path : Path | None
-        Optional COAST-RP station points (e.g. matched_boundary_points.gpkg) to overlay.
+    Boundary cells are dilated 1 px for display only; the caption counts are undilated.
     """
     corner_lon, corner_lat = _grid_corners_lonlat(transform, crs, mask2d.shape)
 
-    # dilate boundary cells by 1px for display - a 1-cell-wide line is easy to miss at figure scale.
     boundary = mask2d == BOUNDARY
     boundary_display = ndimage.binary_dilation(boundary, iterations=1)
     display = np.where(boundary_display, BOUNDARY, mask2d)
@@ -174,31 +129,12 @@ def plot_mask(mask2d: np.ndarray, transform: rasterio.Affine, crs: str, out_path
 
 def plot_boundary_forcing(mask2d: np.ndarray, transform: rasterio.Affine, crs: str,
                            sfincs_dir: Path, out_path: Path) -> None:
-    """Draw and save figure 2: matched boundary stations vs. the forcing SFINCS actually got.
+    """Plot matched boundary stations and hydrographs vs. the forcing SFINCS actually got.
 
-    Panel (a) maps the matched COAST-RP stations (matched_boundary_points.gpkg) and the
-    boundary cell line (mask==2) together with the points actually forcing SFINCS
-    (sfincs.bnd, which can be far fewer than the matched candidates). Panel (b) plots every
-    matched station's hydrograph (corrected_hydrographs.csv) against the sfincs.bzs series
-    SFINCS is actually driven by.
-
-    Parameters
-    ----------
-    mask2d : np.ndarray
-        SFINCS mask array (INACTIVE/ACTIVE/BOUNDARY codes), as read by `read_sfincs_mask`.
-    transform : rasterio.Affine
-        Grid-to-CRS affine transform for `mask2d`.
-    crs : str
-        CRS of `mask2d`/`transform`.
-    sfincs_dir : Path
-        Tile's sfincs_model directory, holding matched_boundary_points.gpkg,
-        corrected_hydrographs.csv and sfincs.bnd/sfincs.bzs.
-    out_path : Path
-        PNG file to write the figure to.
+    sfincs.bnd/bzs can hold far fewer points than matched_boundary_points.gpkg.
     """
     fig, axes = plt.subplots(1, 2, figsize=(16, 8), gridspec_kw={"width_ratios": [1, 1.1]})
 
-    # (a) map: active domain (context) + boundary cell line + boundary station points
     ax = axes[0]
     corner_lon, corner_lat = _grid_corners_lonlat(transform, crs, mask2d.shape)
     active_display = np.where(mask2d == ACTIVE, 1, 0)
@@ -228,8 +164,6 @@ def plot_boundary_forcing(mask2d: np.ndarray, transform: rasterio.Affine, crs: s
     draw_caption_box(ax, "Boundary stations + boundary cell line(s)", loc="lower left")
     ax.legend(fontsize=8, loc="best")
 
-    # (b) forcing timeseries: every matched station's hydrograph (context) and
-    # the bzs series SFINCS actually receives at its bnd points.
     ax = axes[1]
     hydro_path = sfincs_dir / "corrected_hydrographs.csv"
     hydro = pd.read_csv(hydro_path)
@@ -257,22 +191,9 @@ def plot_boundary_forcing(mask2d: np.ndarray, transform: rasterio.Affine, crs: s
 
 
 def plot_biggest_disagreement(tile_dir: Path, out_path: Path, friction_scale_factor: float) -> None:
-    """Draw and save figure 3: a zoom on the single largest eikonal-vs-SFINCS disagreement.
+    """Zoom on the largest contiguous eikonal-only or SFINCS-only patch.
 
-    Reuses `plot_worst_tiles_panel.build_classification`'s four-way agreement classification,
-    picks the largest contiguous eikonal-only-or-SFINCS-only patch, crops to it (plus a 30%
-    padding margin) and labels which model over-predicts there and its area. Writes nothing
-    and prints a SKIP message if the tile has no usable SFINCS/eikonal subgrid data, or no
-    eikonal-only/SFINCS-only cells at all (perfect agreement).
-
-    Parameters
-    ----------
-    tile_dir : Path
-        Tile directory (holds sfincs_model/hmax_subgrid.tif and the eikonal rasters).
-    out_path : Path
-        PNG file to write the figure to.
-    friction_scale_factor : float
-        Which friction point's eikonal raster to compare SFINCS against.
+    Writes nothing (prints SKIP) without usable subgrid data or without disagreement.
     """
     cls = build_classification(tile_dir, friction_scale_factor)
     if cls is None:
@@ -304,14 +225,10 @@ def plot_biggest_disagreement(tile_dir: Path, out_path: Path, friction_scale_fac
     dominant = "eikonal" if n_eik >= n_sfincs else "SFINCS"
 
     fig, ax = plt.subplots(figsize=(9, 9))
-    ax.set_facecolor(WATER_COLOR)  # non-land (ocean/river/lake) cells within the crop -
-    # same shared colour every agreement map in the repo uses, not a plain white background.
-    # Draw every cell at its real corner coordinates (subgrid CRS) rather than
-    # imshow's "row 0 = north" assumption: SFINCS subgrid rasters are stored
-    # south-up (positive y step) and, on rotated grids, rotated - imshow would
-    # show them mirrored north-south. Ticks are labelled in lon/lat along the
-    # crop's centre lines (UTM grid convergence over a crop this size is far
-    # below the label precision).
+    ax.set_facecolor(WATER_COLOR)
+    # Real corner coordinates, not imshow: SFINCS subgrid rasters are stored south-up
+    # (positive y step) and may be rotated. Lon/lat ticks along the crop's centre lines
+    # (UTM grid convergence over the crop is below label precision).
     with rasterio.open(tile_dir / "sfincs_model" / "hmax_subgrid.tif") as src:
         sg_transform, sg_crs = src.transform, src.crs
     cc, rr = np.meshgrid(np.arange(c0, c1 + 1), np.arange(r0, r1 + 1))
@@ -344,10 +261,7 @@ def plot_biggest_disagreement(tile_dir: Path, out_path: Path, friction_scale_fac
 
 
 def _order_along_coast(lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Greedy nearest-neighbour chain through the stations, starting from the
-    one farthest from their centroid (an end of the coastline) - an along-coast
-    order without needing the coastline geometry itself. Returns (order,
-    cumulative distance in km)."""
+    # greedy nearest-neighbour chain from the station farthest from the centroid; km
     kx = 111.32 * np.cos(np.radians(np.mean(lat)))
     xy = np.column_stack([lon * kx, lat * 110.57])
     start = int(np.argmax(np.hypot(*(xy - xy.mean(axis=0)).T)))
@@ -361,10 +275,6 @@ def _order_along_coast(lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np
 
 
 def _coastrp_context(tile_dir: Path, knn: int, river_code: int) -> dict:
-    """Native land/sea mask, COAST-RP stations (lon/lat/RP100 level), the
-    eikonal's own IDW seed level along the coastline (production
-    `_idw_seed_values`, `knn` nearest stations) and the stations inside the
-    tile ordered along the coast (`idx`, cumulative `dist_km`)."""
     from flood_model import _idw_seed_values, coastline_mask  # src/, heavy imports only needed here
 
     with rasterio.open(tile_dir / "inputs" / "mask.tif") as src:
@@ -379,10 +289,8 @@ def _coastrp_context(tile_dir: Path, knn: int, river_code: int) -> dict:
                             min(knn, len(level_m)), mask_native, OCEAN_CODE)
     c_lon, c_lat = (np.asarray(v) for v in rasterio.transform.xy(native_transform, c_rows, c_cols))
     inside = ((st_lon >= bounds.left) & (st_lon <= bounds.right) & (st_lat >= bounds.bottom) & (st_lat <= bounds.top))
-    # compared stations must be on ocean: an ocean pixel of the native mask within
-    # STATION_OCEAN_TOL_M (COAST-RP points follow a coarser coastline and often sit a
-    # few hundred m on land-coded pixels; this drops the ones up rivers / inland).
-    # Every station still feeds the eikonal seed above, as in production.
+    # COAST-RP points follow a coarser coastline and often sit a few hundred m on land
+    # pixels; this drops only the ones up rivers/inland. All still feed the seed above.
     on_ocean = np.zeros(len(st_lon), dtype=bool)
     px_m = abs(native_transform.e) * 110570.0
     w = int(np.ceil(STATION_OCEAN_TOL_M / px_m))
@@ -405,7 +313,6 @@ def _coastrp_context(tile_dir: Path, knn: int, river_code: int) -> dict:
 
 
 def _zsmax_lonlat(sfincs_dir: Path, crs: str):
-    """(lon, lat, zsmax) of every wet SFINCS cell centre, or (None, None, None)."""
     map_path = sfincs_dir / "sfincs_map.nc"
     if not map_path.exists():
         return None, None, None
@@ -434,14 +341,9 @@ def _land_sea_background(ax, ctx: dict) -> None:
 
 
 def _profile_panel(ax, ctx: dict, zsmax_lonlat, bzs, letter: str, title: str | None = None) -> None:
-    """Along the coast, per COAST-RP station inside the tile and on ocean
-    (_coastrp_context): the station's level and - at ONE shared comparison
-    point per station, the coastline cell nearest the station (within
-    NEAREST_MAX_KM) - the eikonal seed level there and SFINCS's peak water
-    level (zsmax) of the wet SFINCS cell at that same point (within
-    SAME_POINT_MAX_KM - the 120 m SFINCS grid does not line up with the 1"
-    coastline cells). Either left out where there is none (no SFINCS value =
-    SFINCS never got wet at that point). SFINCS forcing peaks dotted."""
+    # Eikonal seed and SFINCS zsmax are both read at one comparison point per station
+    # (its nearest coastline cell); the 120 m SFINCS grid does not line up with the 1"
+    # cells. A missing SFINCS value means SFINCS never got wet there.
     idx, dist_km, st_lon, st_lat = ctx["idx"], ctx["dist_km"], ctx["st_lon"], ctx["st_lat"]
     if len(idx) == 0:
         ax.text(0.5, 0.5, "no COAST-RP station inside the tile", ha="center", va="center", transform=ax.transAxes)
@@ -453,7 +355,6 @@ def _profile_panel(ax, ctx: dict, zsmax_lonlat, bzs, letter: str, title: str | N
     def km(lon, lat) -> np.ndarray:
         return np.column_stack([np.asarray(lon) * kx, np.asarray(lat) * 110.57])
 
-    # the shared comparison point: the coastline cell nearest each station
     d_c, j_c = cKDTree(km(ctx["c_lon"], ctx["c_lat"])).query(km(st_lon[idx], st_lat[idx]))
     has_point = d_c <= NEAREST_MAX_KM
     seed_at = np.where(has_point, ctx["seed"][j_c], np.nan)
@@ -485,9 +386,7 @@ def _profile_panel(ax, ctx: dict, zsmax_lonlat, bzs, letter: str, title: str | N
 
 
 def _legend_corner_map(ctx: dict, extra_lon=(), extra_lat=(), box_w: float = 0.55, box_h: float = 0.45) -> str:
-    """Corner of the panel-a map whose box_w x box_h window holds the fewest plotted
-    points (coastline seed cells, stations, boundary cells/forcing points) and is
-    otherwise as uniformly land or water as possible."""
+    # corner with the fewest plotted points, then the most uniform land/water
     b, m = ctx["bounds"], ctx["mask"]
     lon = np.concatenate([ctx["c_lon"], ctx["st_lon"], np.asarray(extra_lon, float)])
     lat = np.concatenate([ctx["c_lat"], ctx["st_lat"], np.asarray(extra_lat, float)])
@@ -509,32 +408,9 @@ def _legend_corner_map(ctx: dict, extra_lon=(), extra_lat=(), box_w: float = 0.5
 
 def plot_coastrp_forcing(tile_dir: Path, sfincs_dir: Path, mask2d: np.ndarray, transform: rasterio.Affine,
                          crs: str, out_path: Path, knn: int, river_code: int) -> None:
-    """Draw and save figure 4: COAST-RP forcing levels vs. what each model is driven by.
+    """Plot COAST-RP RP100 levels vs. the eikonal IDW seed and SFINCS forcing/zsmax.
 
-    Panel (a) maps COAST-RP RP100 levels across the tile: every station, the eikonal's own
-    IDW coastline seed and SFINCS's actual forcing points/boundary line. Panel (b) plots,
-    per station inside the tile and ordered along the coast, the station's own level vs.
-    the eikonal seed vs. SFINCS's peak water level (zsmax) nearby. Just sets up larger fonts
-    and delegates to `_plot_coastrp_forcing` for the actual figure.
-
-    Parameters
-    ----------
-    tile_dir : Path
-        Tile directory (holds inputs/mask.tif and inputs/boundaries_RP100_SLR_0.gpkg).
-    sfincs_dir : Path
-        Tile's sfincs_model directory (sfincs.bnd/sfincs.bzs, sfincs_map.nc).
-    mask2d : np.ndarray
-        SFINCS mask array (INACTIVE/ACTIVE/BOUNDARY codes), as read by `read_sfincs_mask`.
-    transform : rasterio.Affine
-        Grid-to-CRS affine transform for `mask2d`.
-    crs : str
-        CRS of `mask2d`/`transform`.
-    out_path : Path
-        PNG file to write the figure to.
-    knn : int
-        Number of nearest stations used for the eikonal's IDW coastline seed.
-    river_code : int
-        Mask code identifying river cells, for the coastline mask.
+    `knn` is the eikonal seed's number of nearest stations.
     """
     with plt.rc_context({"font.size": 14, "axes.labelsize": 15, "xtick.labelsize": 13, "ytick.labelsize": 13}):
         _plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs, out_path, knn, river_code)
@@ -566,9 +442,9 @@ def _plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs, out_path
     cb = fig.colorbar(sc, ax=ax, fraction=0.04, pad=0.02, label="COAST-RP RP100 water level (m)")
     b = ctx["bounds"]
     map_aspect = (b.right - b.left) * np.cos(np.radians(0.5 * (b.bottom + b.top))) / (b.top - b.bottom)
-    if map_aspect < 1.2:  # tall/narrow map: the legend would be wider than it - put it underneath
+    if map_aspect < 1.2:  # tall/narrow map: the legend would be wider than it
         legend_kw = dict(loc="upper center", bbox_to_anchor=(0.5, -0.1), fontsize=12, frameon=False)
-    else:  # inside, in the corner with the fewest plotted points
+    else:
         legend_kw = dict(loc=_legend_corner_map(ctx, np.concatenate([blons, bnd_lons if bnd is not None else []]),
                                                 np.concatenate([blats, bnd_lats if bnd is not None else []])),
                          fontsize=12, framealpha=0.9)
@@ -587,7 +463,7 @@ def _plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs, out_path
 
     _profile_panel(axes[1], ctx, _zsmax_lonlat(sfincs_dir, crs), bzs, "b")
     fig.tight_layout()
-    # (b) as high as the aspect-locked map (a) and level with it; the colorbar follows (a)
+    # align (b) and the colorbar with the aspect-locked map (a)
     fig.canvas.draw()
     pa, pb = axes[0].get_position(), axes[1].get_position()
     axes[1].set_position([pb.x0, pa.y0, pb.width, pa.height])
@@ -599,13 +475,7 @@ def _plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs, out_path
 
 
 def main() -> None:
-    """Run the CLI: draw the requested diagnostic figure(s) for one tile and write them to disk.
-
-    Parses --tile-id/--base-dir-name/--config to locate the tile, reads its SFINCS mask once,
-    and calls the selected `--figures` plot function(s) (default: all four), writing each PNG
-    into --fig-dir (default `{base_dir_name}/{tile_id}/figures/`) under the name chosen by
-    --out-name, --out-prefix or the `{tile_id}_{figure}.png` default.
-    """
+    """Draw the requested diagnostic figure(s) for one tile."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tile-id", required=True)
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")

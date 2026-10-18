@@ -1,99 +1,9 @@
-"""The SFINCS waterlevel-boundary line of a calibration tile, built from
-COAST-RP stations as nodes: a coast-following boundary ~1 km offshore
-instead of the open-sea tile edge (whose distance from the coast lets the
-tide amplify across a -10 m-floored sea, see build_elevation.py's
-MIN_BATHYMETRY_M). build_sfincs_tile.py masks the line's ocean side inactive
-and forces the model along it (build_line_forcing.py).
+"""Build each calibration tile's SFINCS waterlevel-boundary line from COAST-RP stations.
 
-Rules:
-  1. Nodes: every station of the tile's own production selection
-     (inputs/boundaries_RP100_SLR_0.gpkg: production's search box - the tile
-     bbox + boundary_conditions.station_search_buffer_deg, at least
-     station_search_min_size_deg wide - minus stations in separate water
-     bodies) that lies at (or within STATION_OCEAN_TOL_M of) open
-     ocean - ocean water bodies touching the search area's edge or larger
-     than OPEN_OCEAN_MIN_KM2; stations on land or in closed lagoons are
-     dropped before anything is built, and so are stations in a bay whose
-     mouth closes when the ocean is shrunk by BAY_CLOSE_M (cut off from the
-     open ocean: dropped_closed_bay).
-  2. Link geometry, per candidate pair (each station with its
-     CANDIDATE_NEIGHBOURS nearest stations): for seaward offset d = 0, then
-     SEAWARD_OFFSETS_M, two shapes are built -
-       coastline  the coastline between the two stations (both projected onto
-                  the coastline piece they are both near, within COAST_SNAP_M;
-                  for d > 0 the ocean polygon's edge shrunk by d, which also
-                  closes narrow bays), shifted to start/end exactly at the
-                  stations, the shift fading out over RAMP_FACTOR x each
-                  station's own offset;
-       straight   the straight line, for d > 0 shifted d to the sea side with
-                  the same fade towards both stations (up to MAX_STRAIGHT_M).
-     At the smallest d where one clears the land: the coastline if it is not
-     rugged (<= RUGGED_RATIO x the straight distance), else the straight
-     line ("coastline-first"). Bay mouths, rugged coasts, stations on
-     separate coastline pieces and offshore stations therefore get straight
-     links. Nothing clears the land: the plain coastline path is kept and
-     flagged (crosses_land / coastline_long), or there is no link at all.
-  3. Linking: candidate links cheapest (shortest actual geometry, flagged
-     ones last) first; a link is accepted if both stations have fewer than
-     two links so far and it does not close a loop. Result: one
-     MultiLineString per tile, one part per separate line.
-  4. Domain check: the lines split the tile into faces; a face that is mostly
-     ocean becomes inactive (the ocean side of the boundary), the rest stays
-     active. Conflicts: land inside inactive faces (> CONFLICT_LAND_FRAC of
-     the tile's land) or open ocean left active (> CONFLICT_OCEAN_FRAC of
-     the tile's ocean - a line that doesn't close off the sea). A tile with
-     conflicts is rebuilt "straight-first" (at each offset the straight line
-     before the coastline - bay mouths instead of bays); if that has fewer
-     conflicts it is kept. Still conflicting: suitable=False (not usable
-     for SFINCS without hand edits).
-  5. Every line must cross the tile edge at both ends or be a closed ring: a
-     line end inside the tile is extended along the (seaward-offset)
-     coastline, away from its neighbouring station, until it leaves the
-     tile - only if that is not rugged (<= RUGGED_RATIO x straight, i.e. not
-     into a bay) - else straight on in the line's own direction
-     (extension). A line with both ends stuck inside the tile is dropped
-     with its stations (dropped_dangling) and the lines are rebuilt; a single
-     stuck end on an otherwise valid line is an open-end conflict.
-  0. Offshore: every station's node (where its line passes) is moved to the
-     nearest point MIN_OFFSHORE_M out at open sea (at most MAX_NODE_SHIFT_M),
-     coastline links follow the coastline shifted >= MIN_OFFSHORE_M seaward,
-     and a link only clears the land if it keeps LAND_CLEARANCE_M from it.
-  7. Final scan per line: untangle (2-opt over up to UNTANGLE_WINDOW
-     consecutive stations, e.g. 90-92-91-93 -> 90-91-92-93) and shortcuts
-     (two stations whose boundary in between is > SHORTCUT_RATIO x a straight
-     link that clears the land, <= MAX_SHORTCUT_M: the stretch is replaced
-     by that link, the stations skipped are dropped_shortcut) - kept only if
-     the tile's conflicts do not get worse.
-  8. Tile-edge fallback (last): tile-edge stretches still running through
-     open sea on the active side - sea no station line closes off - become
-     boundary lines themselves (tile_edge), unless shorter than EDGE_MIN_M.
-  6. Relevance: after the split, a station inside the tile further than
-     RELEVANCE_TOL_M from the active/inactive interface plays no part in the
-     boundary (a chain inside a cut-off bay, or out at sea): it is dropped
-     and the lines are rebuilt without it (up to MAX_RELEVANCE_ROUNDS).
-
-The coastline is traced from the global DeltaDTM mask VRT (ocean code 1) over
-the same buffered bbox, decimated to at most MAX_MASK_PX pixels per side, one
-ocean ring at a time, with the bbox's own outer edge removed (an ocean
-polygon's boundary along the bbox edge is not coastline).
-
-Outputs under {base-dir-name}/boundary_lines/:
-  {tile_id}.gpkg   layers: boundary_line (one MultiLineString - the one to
-                   edit by hand), segments (per link, with its kind and
-                   offset), stations, inactive (the tile faces that would be
-                   inactive SFINCS cells)
-  figures/{tile_id}.png   (a) the lines on the land/sea mask with the tile
-                   outline (and SFINCS boundary cells if the tile has a model), (b) the
-                   tile's active/inactive split and its conflicts
-  summary.csv      per tile counts/flags, to find the tiles needing hand edits
-
-Existing {tile_id}.gpkg files are never overwritten without --overwrite (so
-hand edits survive a rerun); the figure is always redrawn from the gpkg.
-
-Tracking: every finished tile writes boundary_lines/status/{tile_id}.json
-(safe with many jobs at once; --skip-done resumes); --summarize collects
-them into summary.csv, suitable_tiles.txt and unsuitable_tiles.txt. The
-inspection figure goes to figures/ (suitable) or figures_unsuitable/ (not).
+The line runs ~1 km offshore instead of along the open-sea tile edge, whose distance
+from the coast lets the tide amplify across a -10 m-floored sea (build_elevation.py
+MIN_BATHYMETRY_M). Writes boundary_lines/{tile_id}.gpkg (boundary_line is the layer to
+hand-edit; kept unless --overwrite), figures/ or figures_unsuitable/, status/*.json.
 
 Usage:
     python build_station_boundary_lines.py [--tile-ids 841 2905 | --sample 30] [--workers 8]
@@ -159,10 +69,7 @@ from gfm_config import read_root  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 
-# Geometry core and plotting live in boundary_lines_geometry.py / boundary_lines_plot.py; the
-# names below are imported for build_tile and the CLI, and re-exported for
-# connected_forcing.py (bsl.MASK_VRT, bsl.OCEAN_CODE, bsl._read_mask_window, bsl._search_box)
-# and analysis/compute_delta_flood_extent.py.
+# Re-exported for connected_forcing.py and analysis/compute_delta_flood_extent.py.
 from boundary_lines_geometry import (  # noqa: E402,F401
     BAY_CLOSE_M,
     Coast,
@@ -191,40 +98,11 @@ from boundary_lines_plot import _plot  # noqa: E402
 
 def build_tile(root: Path, tile_dir: Path, out_dir: Path, buffer_deg: float, overwrite: bool,
                plot: str = "suitable", min_size_deg: float = 0.0) -> dict:
-    """Build one tile's SFINCS waterlevel-boundary line and write its outputs.
+    """Build one tile's boundary line, write {tile_id}.gpkg and return its summary row.
 
-    Writes {tile_id}.gpkg under `out_dir` (layers: stations, boundary_line,
-    segments, inactive/land_inactive/ocean_active) unless it already exists
-    and `overwrite` is False, and redraws the inspection figure according to
-    `plot`. Also looks up each used station's COAST-HG hydrograph to flag
-    whether the tile has enough forcing stations to be usable.
-
-    Parameters
-    ----------
-    root : Path
-        Project root (paths.root), used to open the DeltaDTM mask VRT and
-        the COAST-HG hydrograph file.
-    tile_dir : Path
-        Tile directory holding inputs/tile_geometry.gpkg and the tile's own
-        station selection (TILE_STATIONS_GPKG).
-    out_dir : Path
-        boundary_lines output directory to write {tile_id}.gpkg and figures
-        under.
-    buffer_deg : float
-        Degrees added to the tile bbox for the station search box.
-    overwrite : bool
-        Rebuild an existing {tile_id}.gpkg instead of keeping it (loses any
-        hand edits).
-    plot : str, default "suitable"
-        "all", "suitable" or "none": which tiles get the inspection figure.
-    min_size_deg : float, default 0.0
-        Minimum width/height (degrees) of the station search box.
-
-    Returns
-    -------
-    dict
-        One row of per-tile counts/flags, also written to
-        boundary_lines/status/{tile_id}.json and collected by `summarize`.
+    An existing gpkg is kept unless `overwrite` (it may hold hand edits). Suitable
+    means no domain conflicts and >= MIN_FORCING_STATIONS used stations with COAST-HG.
+    `plot` is "all", "suitable" or "none".
     """
     tile_id = tile_dir.name
     gpkg = out_dir / f"{tile_id}.gpkg"
@@ -259,7 +137,6 @@ def build_tile(root: Path, tile_dir: Path, out_dir: Path, buffer_deg: float, ove
                     else np.full(len(xy), np.inf))
         status[(status == "used") & (bay_dist > BAY_CLOSE_M + STATION_OCEAN_TOL_M)] = "dropped_closed_bay"
         ids = [i for i in range(len(xy)) if status[i] == "used"]
-        # nodes: each station moved MIN_OFFSHORE_M out to open sea (lines pass there)
         node_sea = coast.open_eroded(MIN_OFFSHORE_M)
         node_xy = xy.copy()
         if not node_sea.is_empty:
@@ -343,7 +220,6 @@ def build_tile(root: Path, tile_dir: Path, out_dir: Path, buffer_deg: float, ove
                    suitable=best["n_conflicts"] == 0 and n_forcing >= MIN_FORCING_STATIONS)
         row["status"] = "written"
 
-    # suitable tiles -> figures/, unsuitable ones -> figures_unsuitable/
     suitable = bool(row.get("suitable"))
     fig_path = out_dir / ("figures" if suitable else "figures_unsuitable") / f"{tile_id}.png"
     stale = out_dir / ("figures_unsuitable" if suitable else "figures") / f"{tile_id}.png"
@@ -352,7 +228,7 @@ def build_tile(root: Path, tile_dir: Path, out_dir: Path, buffer_deg: float, ove
     for path in ([stale] if plot != "none" else []) + ([fig_path] if plot == "suitable" and not suitable else []):
         if path.exists():
             try:
-                path.unlink()  # figure from an earlier run in which the tile was the other way round
+                path.unlink()
             except OSError as exc:  # e.g. open in a viewer - never fail the tile for it
                 print(f"  tile {tile_id}: could not remove stale figure {path} ({exc})", flush=True)
     return row
@@ -363,8 +239,7 @@ def _status_path(out_dir: Path, tile_id) -> Path:
 
 
 def _write_status(out_dir: Path, row: dict) -> None:
-    """One small JSON per tile, written atomically as soon as the tile is done -
-    many jobs can run at once, and a restart can skip what is finished."""
+    # atomic: many jobs write at once and --skip-done reads them
     path = _status_path(out_dir, row["tile_id"])
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f".tmp{os.getpid()}")
@@ -380,7 +255,7 @@ def _safe_build(args):
     root, tile_dir, out_dir, buffer_deg, overwrite, plot, min_size_deg = args
     marker = _running_marker(out_dir, tile_dir.name)
     marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(str(os.getpid()))  # tells the parent which tiles were running if this worker dies
+    marker.write_text(str(os.getpid()))  # tells the parent which tiles were in flight if this worker dies
     try:
         row = build_tile(root, tile_dir, out_dir, buffer_deg, overwrite, plot, min_size_deg)
     except Exception as exc:  # one broken tile must not stop the batch
@@ -392,19 +267,7 @@ def _safe_build(args):
 
 
 def summarize(out_dir: Path) -> pd.DataFrame:
-    """Collect every tile's status JSON into summary.csv, suitable_tiles.txt
-    and unsuitable_tiles.txt.
-
-    Parameters
-    ----------
-    out_dir : Path
-        boundary_lines output directory holding status/*.json.
-
-    Returns
-    -------
-    pandas.DataFrame
-        The combined per-tile summary, also written to out_dir/summary.csv.
-    """
+    """Collect status/*.json into summary.csv, suitable_tiles.txt and unsuitable_tiles.txt."""
     rows = [json.loads(p.read_text()) for p in sorted((out_dir / "status").glob("*.json"))]
     summary = pd.DataFrame(rows).sort_values("tile_id")
     summary.drop(columns=["traceback"], errors="ignore").to_csv(out_dir / "summary.csv", index=False)
@@ -434,11 +297,8 @@ def _report(row: dict, k: int, n: int) -> None:
 
 
 def _run_jobs(jobs: list, workers: int, out_dir: Path) -> list[dict]:
-    """Runs the tiles over `workers` processes. A worker killed outright (out
-    of memory, native crash) breaks the whole pool: the tiles that were still
-    in flight are then retried one at a time in a fresh single-worker pool -
-    a tile that kills even that one is recorded as crashed - and the rest
-    continues in a new pool."""
+    # A killed worker (OOM, native crash) breaks the whole pool: in-flight tiles are
+    # retried alone, one that still kills its pool is recorded as crashed.
     rows, pending, n = [], list(jobs), len(jobs)
     while pending:
         in_flight: dict = {}
@@ -453,7 +313,6 @@ def _run_jobs(jobs: list, workers: int, out_dir: Path) -> list[dict]:
         except BrokenProcessPool:
             print(f"  worker process died - retrying the {len(pending)} unfinished tile(s), the in-flight ones alone",
                   flush=True)
-            # the tiles a worker was busy with when it died still have their .running marker
             suspects = [job for job in pending if _running_marker(out_dir, job[1].name).exists()]
             for job in suspects:
                 _running_marker(out_dir, job[1].name).unlink(missing_ok=True)
@@ -471,13 +330,7 @@ def _run_jobs(jobs: list, workers: int, out_dir: Path) -> list[dict]:
 
 
 def main() -> None:
-    """Parse CLI arguments and build boundary lines for the selected tiles,
-    or (with --summarize) just collect existing results into summary.csv.
-
-    Runs tiles over a process pool (--workers), writing each tile's
-    {tile_id}.gpkg, status JSON and inspection figure under
-    {base-dir-name}/boundary_lines/ beneath paths.root.
-    """
+    """Build boundary lines for the selected tiles, or collect results with --summarize."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(Path(__file__).resolve().parents[1]
                                                  / "snakemake_workflow" / "config" / "config.yml"))
