@@ -94,9 +94,9 @@ hydromt 1.x cannot import `src/config_utils`).
 | Check | Command | Current result |
 |---|---|---|
 | Lint | `python -m ruff check .` | clean |
-| Tests (gfm) | `python -m pytest -q -m "not needs_pdrive" tests` | 68 passed |
+| Tests (gfm) | `python -m pytest -q -m "not needs_pdrive" tests` | 69 passed |
 | Tests (sfincs) | in hydromt-sfincs-dev: `python -m pytest -q -m "not needs_pdrive" tests/sfincs_*` | 14 passed, 3 deselected (the P:\-reading tests; they write only under pytest tmp dirs) |
-| Dry run | `GFM_CONFIG_PATH=snakemake_workflow/config/bangkok_chao_phraya_materialized.yml snakemake -n all --cores 1` | 455 jobs, matches `.cleanup_baseline/snakemake_n_all_bangkok_chao_phraya_profile.txt` |
+| Dry run | `GFM_CONFIG_PATH=snakemake_workflow/config/bangkok_chao_phraya_materialized.yml snakemake -n all --cores 1` | 480 jobs (config-key rename re-triggers 25), matches `.cleanup_baseline/snakemake_n_all_bangkok_chao_phraya_final.txt` |
 
 The dry-run job count depends on `profiles/default/config.yaml`
 (`rerun-triggers: [mtime, params, input, software-env]`); without it, any script
