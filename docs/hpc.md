@@ -120,20 +120,13 @@ Without Snakemake metadata for the old scripts (a fresh checkout), force regener
 ## A small scenario on the cluster
 
 Test a site setup with the Bangkok scenario ([running.md](running.md#4-bangkok--chao-phraya-case-study), steps 1-2 first).
-Its override does not set `hpc.jobs_dir`, so add one to keep its scripts out of the production jobs directory, as `calibration_500_tiles.yml` does:
-
-```
-hpc:
-  jobs_dir: "{root}/bangkok_chao_phraya/hpc_jobs"
-```
-
-Then:
+Its scenario config writes the job scripts to `<data_root>/bangkok_chao_phraya/model_outputs/hpc_jobs` (`hpc.jobs_dir`), apart from production:
 
 ```
 python snakemake_workflow/scripts/materialize_configs.py bangkok_chao_phraya
 python snakemake_workflow/scripts/generate_hpc_preprocess_job.py \
     --config snakemake_workflow/config/bangkok_chao_phraya_materialized.yml --calibration
-bash <data_root>/bangkok_chao_phraya/hpc_jobs/submit_preprocess_and_dispatch.sh
+bash <data_root>/bangkok_chao_phraya/model_outputs/hpc_jobs/submit_preprocess_and_dispatch.sh
 ```
 
 ## Failures and retries

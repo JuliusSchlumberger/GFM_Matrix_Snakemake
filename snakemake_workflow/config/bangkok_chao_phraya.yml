@@ -15,3 +15,5 @@ postprocessing:
   merged_outputs: "{root}/bangkok_chao_phraya/merged_results"
 visualization:
   output_dir: "{root}/bangkok_chao_phraya/figures"
+hpc:
+  jobs_dir: "{root}/bangkok_chao_phraya/model_outputs/hpc_jobs"
