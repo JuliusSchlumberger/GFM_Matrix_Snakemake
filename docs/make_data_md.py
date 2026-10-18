@@ -1,4 +1,4 @@
-"""Write docs/data.md, the input-dataset table, from the two data catalogs.
+"""Write docs/data.md from the two data catalogs and the non-catalog inputs.
 
 Usage: python docs/make_data_md.py
 """
@@ -31,6 +31,35 @@ the script instead of editing this file.
 
 The data root layout follows the catalogs' `path:` entries (the Path column). Authors, papers,
 vertical references and field descriptions are in each entry's `meta` block.
+Override `validation.benchmark_root` (like any key) in `config_local.yml`.
+
+Every dataset is a global file read by window, and DeltaDTM downloads by continent, so even the
+smallest scenario needs the full set; there is no regional download.
+Some files are not publicly linked: obtain those from the project maintainers via
+`<issue_tracker>`:
+
+```
+https://github.com/<owner>/<repo>/issues
+```
+"""
+
+NOTES_HEADER = """
+## Obtaining the data
+
+From each entry's `source_notes`; paths are relative to the Path column's root.
+"""
+
+# Inputs read through config keys instead of a catalog entry.
+EXTRA = """
+## Inputs outside the catalogs
+
+| Input | Path | How to obtain |
+|---|---|---|
+| Global delta polygons | `paths.deltas_shapefile` (`<data_root>/inputs/DeltasGlobal/all_deltas.shp`) | 49 polygons with fields `Id`, `Area`, EPSG:4326; needed only for the global-deltas runs (`build_delta_tile_subset.py`, `prepare_delta_design_runs.py`). Source and licence: obtain from the project maintainers (`<issue_tracker>`). |
+| CoSMoS SF Bay depth rasters | `<benchmark_root>/California/flooding/v2.1/county_<county>_flddepth_slr000_w100.tif` | USGS CoSMoS v2.1, RP100 without SLR, one raster per county (san_francisco, alameda, contra_costa, marin, napa, san_mateo, santa_clara, solano, sonoma), taken from the per-county `*_flooding_slr000.zip` downloads. `python validation/build_sf_bay_benchmark_mosaic.py` mosaics them into `sf_bay_flddepth_slr000_w100_mosaic.tif` next to `v2.1/`. Source URL and licence: obtain from the project maintainers (`<issue_tracker>`). |
+| SF Bay scoring domain | `<benchmark_root>/California/flooding/sf_bay_county_bbox_union.gpkg` | Union of the nine county rasters' rectangular extents, read by `validate_sf_bay.py`; no script in the repo writes it, so obtain it from the project maintainers (`<issue_tracker>`). |
+| GEBCO VRT | `<data_root>/inputs/gebco_2026_geotiff/gebco.vrt` | `python sfincs_tiles/build_gebco_vrt.py [--config <config.yml>]` after downloading the 8 quadrant GeoTIFFs (entry `gebco`). |
+| DeltaDTM tiles and VRTs | `<data_root>/inputs/DeltaDTM/`, `<data_root>/inputs/DeltaDTM_masks/` | `python preparation/run_preparation.py sync_deltadtm fix_ocean_mask build_deltadtm_vrt`: download all continents, recode ocean cells inside OSM land (needs `land_polygons`), build `deltadtm.vrt` and `deltadtm_mask.vrt` ([running.md](running.md#1-preparation)). |
 """
 
 COLUMNS = ["Dataset", "Description", "Version", "Source", "Licence", "Access", "Path"]
@@ -64,9 +93,13 @@ def _row(key: str, entry: dict, root: str) -> str:
 
 def main() -> None:
     lines = [HEADER, "| " + " | ".join(COLUMNS) + " |", "|" + "---|" * len(COLUMNS)]
+    notes = [NOTES_HEADER]
     for filename, root in CATALOGS:
         catalog = yaml.safe_load((CONFIG_DIR / filename).read_text(encoding="utf-8"))
         lines += [_row(key, entry, root) for key, entry in catalog.items()]
+        notes += [f"- `{key}`: {_cell(entry['meta']['source_notes'])}"
+                  for key, entry in catalog.items() if entry.get("meta", {}).get("source_notes")]
+    lines += notes + [EXTRA.rstrip()]
     OUT.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     print(f"wrote {OUT}")
 

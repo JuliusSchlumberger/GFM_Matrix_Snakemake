@@ -28,8 +28,9 @@ Population change follows the SSP projections to 2100.
 ## Quick start
 
 The pipeline reads the input datasets listed in [docs/data.md](docs/data.md) from one data root
-(several TB for the global grid). No scenario runs without them; there is no bundled sample data.
-The unit tests run without data.
+(several TB for the global grid, needed in full even for the smallest scenario). There is no
+bundled sample data; the unit tests run without data. Commands are bash (Git Bash on Windows,
+see [docs/install.md](docs/install.md)).
 
 ```
 git clone <repo_url> gfm && cd gfm
@@ -41,17 +42,22 @@ pytest -m "not needs_data"                   # checks the install, no data neede
 ```
 
 With the data in place, the smallest real scenario is the Bangkok / Chao Phraya case study
-(9 tiles, all return periods and sea-level-rise levels). Its tile subset and the hop ordering
-are described in [docs/running.md](docs/running.md):
+(9 tiles, all return periods and sea-level-rise levels). The sequence, with the hop-by-hop
+simulate commands and the exposure and plot scripts, is
+[docs/running.md §4](docs/running.md#4-bangkok--chao-phraya-case-study):
 
 ```
 python preparation/run_preparation.py        # global inputs, once
+printf '%s\n' 1026 1048 1092 1194 1195 1199 3930 3933 3943 > bangkok_tile_ids.txt
+python preparation/build_tile_subset_by_id.py --tile-ids-file bangkok_tile_ids.txt \
+    --out <data_root>/processed_inputs/mask/bangkok_chao_phraya_tiles.gpkg
 python snakemake_workflow/scripts/materialize_configs.py bangkok_chao_phraya
 export GFM_CONFIG_PATH=snakemake_workflow/config/bangkok_chao_phraya_materialized.yml
-snakemake preprocess --cores 4
-snakemake simulate --cores 4                 # hop-0 tiles must finish first: rerun until complete
-snakemake postprocess --cores 4
-python analysis/run_analysis.py --config $GFM_CONFIG_PATH
+snakemake preprocess --cores 3 --resources mem_mb=8000
+snakemake simulate --cores 3                 # hop-0 tiles must finish first: rerun until complete
+snakemake postprocess --cores 3
+python analysis/compute_bangkok_case_exposure.py --config $GFM_CONFIG_PATH \
+    --case-polygon-gpkg <data_root>/bangkok_chao_phraya/bangkok_chao_phraya_domain.gpkg
 ```
 
 The full global grid runs on a SLURM cluster: [docs/hpc.md](docs/hpc.md).
@@ -70,6 +76,7 @@ The full global grid runs on a SLURM cluster: [docs/hpc.md](docs/hpc.md).
 | `tests/` | pytest suites |
 | `docs/` | methods, data, install, running and HPC guides |
 | `profiles/` | Snakemake profile loaded by default |
+| repository root | `run_eikonal_dag.py`, `run_delta_floodmaps.py`, `check_*_progress.py`, `run_bangkok_case_study.bat` ([docs/running.md](docs/running.md)) |
 
 ## Configuration
 
@@ -81,9 +88,9 @@ Settings are layered; later files override earlier ones:
 3. `<scenario>.yml` plus `<scenario>_pins.yml` (values a scenario's existing outputs were
    computed with), merged into `<scenario>_materialized.yml` by
    `snakemake_workflow/scripts/materialize_configs.py` and selected with `GFM_CONFIG_PATH`.
-4. On a cluster: `config_hpc.yml` and `sfincs_tiles/site_env.sh` (gitignored; copy
-   `config_hpc.example.yml` and `site_env.example.sh`) hold the cluster paths, partitions and
-   environment activation.
+4. On a cluster: `config_hpc.yml` (gitignored; copy `config_hpc.example.yml`) holds the cluster
+   paths, partitions and environment activation; the SFINCS calibration also needs
+   `sfincs_tiles/site_env.sh` (copy `site_env.example.sh`). See [docs/hpc.md](docs/hpc.md).
 
 `profiles/default/config.yaml` makes Snakemake re-run a job only when its inputs, parameters or
 software environment change, not when a script is edited.

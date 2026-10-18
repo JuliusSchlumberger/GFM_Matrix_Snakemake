@@ -9,6 +9,16 @@ the script instead of editing this file.
 
 The data root layout follows the catalogs' `path:` entries (the Path column). Authors, papers,
 vertical references and field descriptions are in each entry's `meta` block.
+Override `validation.benchmark_root` (like any key) in `config_local.yml`.
+
+Every dataset is a global file read by window, and DeltaDTM downloads by continent, so even the
+smallest scenario needs the full set; there is no regional download.
+Some files are not publicly linked: obtain those from the project maintainers via
+`<issue_tracker>`:
+
+```
+https://github.com/<owner>/<repo>/issues
+```
 
 | Dataset | Description | Version | Source | Licence | Access | Path |
 |---|---|---|---|---|---|---|
@@ -35,3 +45,41 @@ vertical references and field descriptions are in each entry's `meta` block.
 | `england_ea_floodzone3_sea` | Environment Agency "Flood Map for Planning" Flood Zone 3 (>= 0.5% AEP, 1-in-200), sources "sea" and "river and sea", modelled origin, covering the English coast. | Flood Map for Planning, Flood Zones 2 and 3 (Rivers and Sea) | [Environment Agency](https://environment.data.gov.uk/spatialdata/flood-map-for-planning-flood-zones/ogc/features/v1/collections/Flood_Zones_2_3_Rivers_and_Sea/items) | Open Government Licence v3.0 (Environment Agency / Defra attribution) | OGC API / WFS download | `<benchmark_root>/England/fz3_sea_modelled.gpkg` |
 | `england_ea_floodzone2_sea` | Environment Agency "Flood Map for Planning" Flood Zone 2, sources "sea" and "river and sea", modelled origin: the incremental 0.1-0.5% AEP band (1-in-1000 to 1-in-200), not the cumulative 1-in-1000 extent. | Flood Map for Planning, Flood Zones 2 and 3 (Rivers and Sea) | [Environment Agency](https://environment.data.gov.uk/spatialdata/flood-map-for-planning-flood-zones/ogc/features/v1/collections/Flood_Zones_2_3_Rivers_and_Sea/items) | Open Government Licence v3.0 (Environment Agency / Defra attribution) | OGC API / WFS download | `<benchmark_root>/England/fz2_sea_modelled.gpkg` |
 | `new_brunswick_present_day_1in100yr` | GeoNB present-day 1-in-100-year flood extent (combined inland and coastal), covering the New Brunswick coast and tidal rivers. | 2025-03-21 | [Government of New Brunswick (GeoNB)](https://www.gnb.ca/en/campaign/geonb/data-catalogue/flood-extent.html) | GeoNB Open Data Licence | open download | `<benchmark_root>/NewBrunswick/PresentDay_1in100year.shp` |
+
+## Obtaining the data
+
+From each entry's `source_notes`; paths are relative to the Path column's root.
+
+- `coast_rp`: Download `COAST-RP.nc` from the record into `inputs/COAST-RP_dataset/`.
+- `coast_hg`: Download the record's zip and extract `COAST-HG_RP100.nc` into `inputs/COAST_HG/`. Needed only by `sfincs_tiles/`.
+- `ipcc_ar6_slr_projections`: Download `ar6-regional-confidence.zip` from the record and unzip it in `inputs/SLR/`. The pipeline reads `<confidence_level>_confidence/<slr_projection>/` (`boundary_conditions.*`, default medium and ssp245; the deltas scenarios also use ssp126).
+- `ipcc_ar6_slr_wg1_csv`: No script in the repo writes these files; obtain them from the project maintainers (`<issue_tracker>`). Each `SLR_<code>_wg1.csv` (codes 126, 245, 585 from visualization.ssp_rcp_codes) has a `years` index column and columns 0.17, 0.5, 0.83 (global-mean SLR in m). Read by the analysis only.
+- `deltadtm`: `python preparation/run_preparation.py sync_deltadtm` downloads every continent's tile zip and extracts the tiles here; `build_deltadtm_vrt` then writes the VRT. There is no regional download: the tile grid is built from the global mosaic.
+- `deltadtm_mask`: Downloaded (`mask_tiles.zip`) and extracted by sync_deltadtm; fix_ocean_mask edits the tiles in place before build_deltadtm_vrt writes the VRT.
+- `gebco`: Download the GEBCO_2026 Grid as GeoTIFF (8 quadrant files `gebco_2026_n*_s*_w*_e*_geotiff.tif`) into `inputs/gebco_2026_geotiff/`, then run `python sfincs_tiles/build_gebco_vrt.py` to write gebco.vrt.
+- `land_polygons`: Download the WGS84 split variant (`land-polygons-split-4326.zip`) and put the contents of its `land-polygons-split-4326/` folder (`land_polygons.shp` and sidecar files) in `inputs/OSM_land/`.
+- `land_use`: Download the record's global discrete-classification GeoTIFF of epoch 2019 (one global file, no mosaic needed) and save it as `inputs/Copernicus/Copernicus_LandUse.tif`.
+- `geogunit_protection_units`: The source page does not link this file; obtain it from the project maintainers (`<issue_tracker>`).
+- `geogunit_country_units`: The source page does not link this file; obtain it from the project maintainers (`<issue_tracker>`).
+- `flopros_protection_standards`: The papers do not ship this workbook; obtain it from the project maintainers (`<issue_tracker>`). Layout: one sheet, index column FID_Aque (geogunit_107 ID), columns ISO, Riverine, Coastal (return periods in years).
+- `ssp_population_growth_factors`: The export steps are not in the repo; obtain it from the project maintainers (`<issue_tracker>`). Layout: sheets SSP_scenarios (SSP1-SSP5) and historical_data_SSP (scenario "Historical Reference", for the 2020 base), each an IAMC table with one Excel-table header row above the real header: unit, model, scenario, type, region (country name), variable (Population), version, then one column per year.
+- `population`: Download `global_pop_2020_CN_1km_R2025A_UA_v1.tif` from the record into `inputs/exposure/`.
+- `lu_to_roughness_lookup`: Not in the repo; obtain it from the project maintainers (`<issue_tracker>`). CSV with columns copernicus_worldcover, lu_name, manning_n, one row per LC100 class.
+- `goco06s`: Download `GOCO06s.gfc` from ICGEM into `inputs/ICGM/`. The pipeline computes the geoid offset raster (vertical_datum_correction.offset_raster_path) from it and `EGM2008.gfc`.
+- `egm2008_geoid`: Download `EGM2008.gfc` from ICGEM into `inputs/ICGM/`.
+- `mdt_cnes_cls22`: After AVISO+ grants access to the product, download `mdt_hybrid_cnes_cls22_cmems2020_global.nc` into `inputs/Aviso/`. The boundary_conditions step cannot run without it.
+- `wales_nrw_floodzone_seas`: The repo has no fetch script; save the layer from the source as `Wales/NRW_FLOODZONE_SEAS.shp` (EPSG:27700).
+- `scotland_sepa_coastal_m`: Download and unzip so that the file geodatabase sits at `Scotland/Data/FRM_Coastal_Flood_Hazard_Layers_v3_0.gdb`.
+- `england_ea_floodzone3_sea`: `python validation/fetch_england_flood_zones.py` downloads and writes it (together with `fz2_sea_modelled.gpkg`).
+- `england_ea_floodzone2_sea`: `python validation/fetch_england_flood_zones.py` downloads and writes it (together with `fz3_sea_modelled.gpkg`).
+- `new_brunswick_present_day_1in100yr`: Download and unzip so that `PresentDay_1in100year.shp` and its sidecar files sit in `NewBrunswick/`.
+
+## Inputs outside the catalogs
+
+| Input | Path | How to obtain |
+|---|---|---|
+| Global delta polygons | `paths.deltas_shapefile` (`<data_root>/inputs/DeltasGlobal/all_deltas.shp`) | 49 polygons with fields `Id`, `Area`, EPSG:4326; needed only for the global-deltas runs (`build_delta_tile_subset.py`, `prepare_delta_design_runs.py`). Source and licence: obtain from the project maintainers (`<issue_tracker>`). |
+| CoSMoS SF Bay depth rasters | `<benchmark_root>/California/flooding/v2.1/county_<county>_flddepth_slr000_w100.tif` | USGS CoSMoS v2.1, RP100 without SLR, one raster per county (san_francisco, alameda, contra_costa, marin, napa, san_mateo, santa_clara, solano, sonoma), taken from the per-county `*_flooding_slr000.zip` downloads. `python validation/build_sf_bay_benchmark_mosaic.py` mosaics them into `sf_bay_flddepth_slr000_w100_mosaic.tif` next to `v2.1/`. Source URL and licence: obtain from the project maintainers (`<issue_tracker>`). |
+| SF Bay scoring domain | `<benchmark_root>/California/flooding/sf_bay_county_bbox_union.gpkg` | Union of the nine county rasters' rectangular extents, read by `validate_sf_bay.py`; no script in the repo writes it, so obtain it from the project maintainers (`<issue_tracker>`). |
+| GEBCO VRT | `<data_root>/inputs/gebco_2026_geotiff/gebco.vrt` | `python sfincs_tiles/build_gebco_vrt.py [--config <config.yml>]` after downloading the 8 quadrant GeoTIFFs (entry `gebco`). |
+| DeltaDTM tiles and VRTs | `<data_root>/inputs/DeltaDTM/`, `<data_root>/inputs/DeltaDTM_masks/` | `python preparation/run_preparation.py sync_deltadtm fix_ocean_mask build_deltadtm_vrt`: download all continents, recode ocean cells inside OSM land (needs `land_polygons`), build `deltadtm.vrt` and `deltadtm_mask.vrt` ([running.md](running.md#1-preparation)). |
