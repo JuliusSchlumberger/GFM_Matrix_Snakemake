@@ -62,6 +62,9 @@ def _read_flood_totals(flood_totals_dir: Path, country_iso: str, rp: str, slr: s
     if not csv_path.exists():
         return float("nan"), float("nan")
     df = pd.read_csv(csv_path)
+    # An int column would match no "RP100" row and silently give NaN.
+    if not df["return_period"].astype(str).str.startswith("RP").all():
+        raise ValueError(f'{csv_path}: return_period must be "RP<years>"; regenerate it with analysis/compute_flood_totals.py')
     row = df[(df["return_period"] == rp) & (df["waterlevel_name"] == slr)]
     if row.empty:
         return float("nan"), float("nan")
