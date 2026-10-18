@@ -52,11 +52,26 @@ def test_tile_spanning_cells_yields_every_cell_in_x_then_y_order():
     print("PASS: a tile crossing cell edges appears in every touched cell, ordered x then y")
 
 
+def test_point_lookup_matches_grid_ids():
+    # validation/_chunks._postprocess_chunk_id must name a point's chunk exactly as build_chunk_grid does.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "validation"))
+    import numpy as np
+    from _chunks import _postprocess_chunk_id
+    rng = np.random.default_rng(1)
+    for lon, lat in rng.uniform([-179.9, -79.9], [179.9, 79.9], size=(500, 2)):
+        grid = build_chunk_grid(_tiles((lon - 0.01, lat - 0.01, lon + 0.01, lat + 0.01)), 5)
+        cell = grid[grid.geometry.contains(box(lon - 0.001, lat - 0.001, lon + 0.001, lat + 0.001))]
+        if len(cell) == 1:  # skip points within 0.01 deg of a cell edge (tile spans 2 cells)
+            assert _postprocess_chunk_id(lon, lat, 5) == cell["chunk_id"].iloc[0], (lon, lat)
+    print("PASS: point-to-chunk lookup (validation/_chunks) agrees with build_chunk_grid IDs")
+
+
 def main():
     test_ids_name_south_west_corner_in_all_hemispheres()
     test_cells_align_to_chunk_size_and_bounds_match_geometry()
     test_cells_without_tiles_are_skipped()
     test_tile_spanning_cells_yields_every_cell_in_x_then_y_order()
+    test_point_lookup_matches_grid_ids()
     print("\nAll chunk grid checks passed.")
 
 

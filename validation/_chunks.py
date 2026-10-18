@@ -18,15 +18,14 @@ from shapely.geometry import box
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import retry_transient_io  # noqa: E402
+from tiles import chunk_id_from_corner  # noqa: E402
 
 
 def _postprocess_chunk_id(x: float, y: float, chunk_size_deg: float) -> str:
     """Which postprocessing (chunk_size_deg, typically 5deg) chunk a point falls in."""
     xi = int(math.floor(x / chunk_size_deg) * chunk_size_deg)
     yi = int(math.floor(y / chunk_size_deg) * chunk_size_deg)
-    lat = f"N{yi:02d}" if yi >= 0 else f"S{-yi:02d}"
-    lon = f"E{xi:03d}" if xi >= 0 else f"W{-xi:03d}"
-    return f"{lat}{lon}"
+    return chunk_id_from_corner(xi, yi)
 
 
 def _chunks_overlapping_bbox(

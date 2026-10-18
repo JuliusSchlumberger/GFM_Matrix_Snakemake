@@ -107,6 +107,27 @@ def save_tile_geometry(tile: gpd.GeoDataFrame, output_path: str | Path) -> None:
     retry_transient_io(tile.to_file, output_path, driver="GPKG")
 
 
+def chunk_id_from_corner(lon_deg: int, lat_deg: int) -> str:
+    """Format a postprocessing chunk ID from its south-west corner, e.g. "S10E030".
+
+    The single naming rule for chunk IDs, used by `build_chunk_grid` and by
+    validation/_chunks.py's point-to-chunk lookup.
+
+    Parameters
+    ----------
+    lon_deg, lat_deg : int
+        Longitude / latitude of the chunk's south-west corner, in whole degrees.
+
+    Returns
+    -------
+    str
+        N/S + 2-digit latitude, then E/W + 3-digit longitude.
+    """
+    lat = f"N{lat_deg:02d}" if lat_deg >= 0 else f"S{-lat_deg:02d}"
+    lon = f"E{lon_deg:03d}" if lon_deg >= 0 else f"W{-lon_deg:03d}"
+    return f"{lat}{lon}"
+
+
 def build_chunk_grid(tile_gdf: gpd.GeoDataFrame, chunk_size_deg: float) -> gpd.GeoDataFrame:
     """Build the postprocessing chunk grid covering the tile grid.
 
@@ -139,11 +160,8 @@ def build_chunk_grid(tile_gdf: gpd.GeoDataFrame, chunk_size_deg: float) -> gpd.G
             cell = shapely_box(x, y, x + sz, y + sz)
             if not tile_gdf.geometry.intersects(cell).any():
                 continue
-            xi, yi = int(round(x)), int(round(y))
-            lat = f"N{yi:02d}" if yi >= 0 else f"S{-yi:02d}"
-            lon = f"E{xi:03d}" if xi >= 0 else f"W{-xi:03d}"
             rows.append({
-                "chunk_id": f"{lat}{lon}",
+                "chunk_id": chunk_id_from_corner(int(round(x)), int(round(y))),
                 "bounds": [x, y, x + sz, y + sz],
                 "geometry": cell,
             })
