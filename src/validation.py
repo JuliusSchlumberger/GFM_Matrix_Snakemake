@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import yaml
 from affine import Affine
+from hydromt.exceptions import NoDataException
 from rasterio.features import rasterize
 from rasterio.warp import Resampling, reproject
 from scipy import ndimage
@@ -170,15 +171,16 @@ def _read_categorical_on_grid(
     """Read a categorical catalog raster, nearest-reprojected onto a target grid.
 
     `bbox` is the EPSG:4326 read extent. Cells without a source value are -1;
-    returns None on read failure or an empty source. `dtype` float32 halves
-    memory on very large grids (SF Bay at 2 m).
+    returns None when the source has no data there (hydromt NoDataException or
+    an empty read); other read errors raise. `dtype` float32 halves memory on
+    very large grids (SF Bay at 2 m).
     """
     read_kwargs = {"bbox": bbox}
     if variables is not None:
         read_kwargs["variables"] = variables
     try:
         da = retry_transient_io(gfm_catalog.get_rasterdataset, source, **read_kwargs).squeeze(drop=True)
-    except Exception:
+    except NoDataException:
         return None
     if da is None or da.size == 0:
         return None
@@ -201,7 +203,7 @@ def read_permanent_water_mask(
     """Read a categorical permanent-water raster, nearest-reprojected to an EPSG:4326 grid.
 
     Source: DeltaDTM mask (~25-31 m) or Copernicus land use (~100 m), always
-    coarser than the model grid. Returns all-False on read failure or empty source.
+    coarser than the model grid. Returns all-False where the source has no data.
     """
     dst = _read_categorical_on_grid(gfm_catalog, permanent_water_source, bbox, out_transform, out_shape)
     if dst is None:
@@ -226,7 +228,7 @@ def read_country_mask(
     """Mask cells whose WRI geogunit resolves to `country_iso` (or `geogunit_ids`).
 
     Keeps a rectangular bbox from scoring neighbouring countries' flooding as
-    false positives. Nearest reprojection; all-False on read failure.
+    false positives. Nearest reprojection; all-False where the source has no data.
     """
     dst = _read_categorical_on_grid(
         gfm_catalog, geogunit_source, bbox, out_transform, out_shape, variables=["Geogunits"],
