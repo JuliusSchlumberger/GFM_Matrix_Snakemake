@@ -14,3 +14,7 @@ paths:
 
   # Root of this repository clone.
   code_root: "C:/path/to/GFM_Matrix_Snakemake"          # <- your checkout
+
+  # Optional: local SFINCS executable for tests/sfincs_synthetic_end_to_end/test_sfincs_smoke.py
+  # (the test skips when unset).
+  # sfincs_exe: "C:/path/to/SFINCS/sfincs.exe"

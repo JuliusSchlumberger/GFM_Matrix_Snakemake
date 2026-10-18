@@ -51,16 +51,25 @@ def retry_transient_io(fn: Callable[..., _T], *args, retries: int = 4, delay_s: 
     raise last_err
 
 
-def atomic_write(output_path: str | Path, write_fn: Callable[[Any], None], mode: str = "w", **open_kwargs) -> None:
+def atomic_write(
+    output_path: str | Path,
+    write_fn: Callable[[Any], None],
+    mode: str = "w",
+    opener: Callable[..., Any] = open,
+    **open_kwargs,
+) -> None:
     """Write a file atomically via a temp file + ``os.replace``.
 
     A killed job never leaves a truncated file that resumable pipelines would
-    treat as complete. ``write_fn(f)`` receives the open temp-file handle.
+    treat as complete. ``write_fn(f)`` receives the handle returned by
+    ``opener(tmp_path, mode, **open_kwargs)`` (a context manager; ``open`` by
+    default, e.g. ``rasterio.open`` for rasters). The PID suffix of the temp
+    file keeps concurrent writers off each other's temp file.
     """
     output_path = Path(output_path)
     tmp_path = output_path.with_name(f"{output_path.name}.tmp{os.getpid()}")
     try:
-        with retry_transient_io(open, tmp_path, mode, **open_kwargs) as f:
+        with retry_transient_io(opener, tmp_path, mode, **open_kwargs) as f:
             write_fn(f)
         retry_transient_io(os.replace, tmp_path, output_path)
     except BaseException:
@@ -194,11 +203,34 @@ def get_data_catalog(
     return catalog
 
 
-def merged_slr_scenarios(bc_cfg: dict, adapt_cfg: dict) -> list[str]:
-    """Union of boundary_conditions.slr_scenarios and adaptation.slr_intensities.
+def merged_waterlevel_names(bc_cfg: dict, adapt_cfg: dict) -> list[str]:
+    """Union of boundary_conditions.waterlevel_names and adaptation.slr_intensities.
 
     Names are "SLR_<mm>", sorted ascending by mm: callers feed them to
     np.interp/pchip_interpolate, which need strictly increasing x.
     """
-    names = list(dict.fromkeys(bc_cfg["slr_scenarios"] + adapt_cfg.get("slr_intensities", [])))
+    names = list(dict.fromkeys(bc_cfg["waterlevel_names"] + adapt_cfg.get("slr_intensities", [])))
     return sorted(names, key=lambda s: int(s.split("_")[1]))
+
+
+def return_period_label(rp: int) -> str:
+    """Return the "RP100" form of a return period given in years (a config list entry).
+
+    "RP100" (the Snakemake `return_period` wildcard) is what every output CSV's
+    `return_period` column holds; config lists hold plain ints.
+    """
+    return f"RP{int(rp)}"
+
+
+def return_period_years(label: str) -> int:
+    """Return the integer years of an "RP100"-form return period, for numeric axes and sorting.
+
+    Raises
+    ------
+    ValueError
+        If `label` is not of the form "RP<int>".
+    """
+    s = str(label)
+    if not (s.startswith("RP") and s[2:].isdigit()):
+        raise ValueError(f'return period {label!r} is not of the form "RP<years>"')
+    return int(s[2:])

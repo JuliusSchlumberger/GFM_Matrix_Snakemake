@@ -26,8 +26,8 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
-from hpc_common import _account_line, _retry_wrapper_lines, _stage_configfile_lines  # noqa: E402
+from config_utils import atomic_write, load_config, merged_waterlevel_names, retry_transient_io  # noqa: E402
+from hpc_common import _retry_wrapper_lines, _stage_configfile_lines, read_targets_lines, sbatch_header  # noqa: E402
 
 
 def _target_paths(tile_dir: str, return_periods: list[str], waterlevel_names: list[str]) -> list[str]:
@@ -121,7 +121,7 @@ def main() -> None:
     # scripts, not opened from Windows.
     tile_gdf = retry_transient_io(gpd.read_file, local_config["tile_grid"]["path"])
     return_periods = [f"RP{rp}" for rp in linux_config["boundary_conditions"]["return_periods"]]
-    waterlevel_names = merged_slr_scenarios(linux_config["boundary_conditions"], linux_config["adaptation"])
+    waterlevel_names = merged_waterlevel_names(linux_config["boundary_conditions"], linux_config["adaptation"])
 
     if args.fuse:
         non_wave0 = tile_gdf.loc[tile_gdf["hop_distance"] != 0, "tile_id"].tolist()
@@ -178,7 +178,7 @@ def main() -> None:
             for p in _target_paths(f"{linux_preprocessing_inputs_dir}/{tile_id}", return_periods, waterlevel_names)
         ]
 
-        # Targets in a file expanded via $(cat ...), keeping the script short.
+        # Targets in a file read via mapfile (read_targets_lines), keeping the script short.
         targets_path = local_jobs_dir / f"{name}_targets.txt"
         with open(targets_path, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(targets) + "\n")
@@ -194,19 +194,7 @@ def main() -> None:
                 f.write("\n".join(simulate_targets) + "\n")
 
         lines = [
-            "#!/bin/bash",
-            f"#SBATCH --job-name={name}",
-            f"#SBATCH --partition={sbatch_cfg['partition']}",
-            *_account_line(sbatch_cfg),
-            f"#SBATCH --time={sbatch_cfg['time']}",
-            f"#SBATCH --mem={sbatch_cfg['mem']}",
-            f"#SBATCH --cpus-per-task={sbatch_cfg['cpus_per_task']}",
-            f"#SBATCH --output={linux_jobs_dir}/logs/{name}_%j.out",
-            f"#SBATCH --error={linux_jobs_dir}/logs/{name}_%j.err",
-            "",
-            "set -euo pipefail",
-            sbatch_cfg["env_activate_cmd"],
-            "",
+            *sbatch_header(name, sbatch_cfg, f"{linux_jobs_dir}/logs"),
             *_retry_wrapper_lines(),
             *_stage_configfile_lines(),
             "",
@@ -228,22 +216,24 @@ def main() -> None:
             "    fi",
             f'done < "{linux_shared_targets_file}"',
             "",
+            *read_targets_lines("TARGETS", f"{linux_jobs_dir}/{name}_targets.txt"),
             (
                 f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
                 f'snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
                 '--rerun-triggers=mtime --rerun-incomplete '
-                f'$(cat "{linux_jobs_dir}/{name}_targets.txt")'
+                '"${TARGETS[@]}"'
             ),
             "",
         ]
         if args.fuse:
             lines += [
                 f'echo "=== Simulating batch {batch_id}: {len(batch_tiles)} tiles ==="',
+                *read_targets_lines("SIMULATE_TARGETS", f"{linux_jobs_dir}/{name}_simulate_targets.txt"),
                 (
                     f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
                     f'snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
                     '--rerun-triggers=mtime --rerun-incomplete '
-                    f'$(cat "{linux_jobs_dir}/{name}_simulate_targets.txt")'
+                    '"${SIMULATE_TARGETS[@]}"'
                 ),
                 "",
             ]
@@ -273,19 +263,10 @@ def main() -> None:
 
         dispatch_cfg = hpc_cfg["sbatch"]
         dispatch_lines = [
-            "#!/bin/bash",
-            "#SBATCH --job-name=gfm_generate_jobs_and_dispatch",
-            f"#SBATCH --partition={dispatch_cfg['partition']}",
-            *_account_line(dispatch_cfg),
-            f"#SBATCH --time={dispatch_cfg['time']}",
-            f"#SBATCH --mem={dispatch_cfg['mem']}",
-            "#SBATCH --cpus-per-task=1",
-            f"#SBATCH --output={linux_jobs_dir}/logs/generate_jobs_and_dispatch_%j.out",
-            f"#SBATCH --error={linux_jobs_dir}/logs/generate_jobs_and_dispatch_%j.err",
-            "",
-            "set -euo pipefail",
-            dispatch_cfg["env_activate_cmd"],
-            "",
+            *sbatch_header(
+                "gfm_generate_jobs_and_dispatch", dispatch_cfg, f"{linux_jobs_dir}/logs",
+                cpus_per_task=1, log_name="generate_jobs_and_dispatch",
+            ),
             *_retry_wrapper_lines(),  # only used by the non-calibration snakemake branch below; harmless if unused
             *_stage_configfile_lines(),
             "",
@@ -318,10 +299,11 @@ def main() -> None:
         f'cd "{linux_code_root}"',
         'echo "=== Building shared preprocessing inputs (synchronous, on this login node) ==="',
         f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
+        *read_targets_lines("SHARED_TARGETS", linux_shared_targets_file),
         (
             f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
             'snakemake --cores 1 --nolock --rerun-triggers=mtime '
-            f'$(cat "{linux_shared_targets_file}") 2>&1 | tee "{linux_jobs_dir}/logs/build_shared_inputs.log"'
+            f'"${{SHARED_TARGETS[@]}}" 2>&1 | tee "{linux_jobs_dir}/logs/build_shared_inputs.log"'
         ),
         "",
         'IDS=""',

@@ -33,11 +33,14 @@ FALLBACK_MCELLS = 2.0  # tile without a pre-flight record
 
 
 def _sbatch_header(name: str, partition: str, cpus: int, mem: str, hours: int, log_dir: str) -> list[str]:
+    # No -e: a job's later steps still run after an earlier one partly failed (stage 1: the
+    # pre-flight after tiles errored in the line build; stage 2: the rest of the tile loop).
+    # Steps the rest cannot do without end in `|| exit 1`.
     return ["#!/bin/bash", f"#SBATCH --job-name={name}", f"#SBATCH --partition={partition}",
             f"#SBATCH --cpus-per-task={cpus}", f"#SBATCH --mem={mem}",
             f"#SBATCH --time={hours // 24}-{hours % 24:02d}:00:00",
             f"#SBATCH --output={log_dir}/{name}_%j.out", f"#SBATCH --error={log_dir}/{name}_%j.err", "",
-            "set -uo pipefail", "unset PROJ_LIB PROJ_DATA GDAL_DATA", f"cd {LINUX_CODE_ROOT}/sfincs_tiles || exit 1", ""]
+            "set -uo pipefail", "unset PROJ_LIB PROJ_DATA GDAL_DATA", f'cd "{LINUX_CODE_ROOT}/sfincs_tiles" || exit 1', ""]
 
 
 def cmd_stage1(args) -> None:
@@ -76,11 +79,11 @@ def cmd_stage1(args) -> None:
         n = len((base / "candidates" / f"shard_{k:03d}.txt").read_text().split())
         lines = _sbatch_header(f"cal_{name}", args.partition, 4, args.mem, args.stage1_hours, f"{ljobs}/logs") + [
             f"# {n} candidate tile(s): screen -> boundary lines -> SFINCS mask pre-flight",
-            f"{GFM_PY} select_calibration_tiles.py screen {common} --tile-ids-file {shard} --out-ids {screened}",
+            f"{GFM_PY} select_calibration_tiles.py screen {common} --tile-ids-file {shard} --out-ids {screened} || exit 1",
             f"{GFM_PY} build_station_boundary_lines.py {common} --tiles-dir-name model_outputs "
-            f"--tile-ids-file {screened} --workers 4 --skip-done --plot all",
+            f"--tile-ids-file {screened} --workers 4 --skip-existing --plot all",
             f"{HYDROMT_PY} preflight_sfincs_mask.py {common} --tiles-dir-name model_outputs "
-            f"--tile-ids-file {screened} --skip-done",
+            f"--tile-ids-file {screened} --skip-existing",
             ""]
         (jobs_dir / f"{name}.sbatch").write_text("\n".join(lines), newline="\n")
 
@@ -149,7 +152,7 @@ def cmd_stage2(args) -> None:
             f"done < {lout}/tiles_{j:03d}.txt", ""]
         (out_dir / f"{name}.sbatch").write_text("\n".join(lines), newline="\n")
     (out_dir / "submit_all.sh").write_text(
-        "#!/bin/bash\n" + "".join(f"sbatch {lout}/{n}.sbatch\n" for n in names), newline="\n")
+        "#!/bin/bash\nset -euo pipefail\n" + "".join(f"sbatch {lout}/{n}.sbatch\n" for n in names), newline="\n")
     loads = sorted(load.values())
     print(f"{len(tiles)} tile(s) to run ({n_done} already done) over {len(jobs)} job(s) on {args.partition}")
     print(f"estimated hours per job: {loads[0] / 60:.1f}-{loads[-1] / 60:.1f} (x{args.time_margin:g} margin for --time; "

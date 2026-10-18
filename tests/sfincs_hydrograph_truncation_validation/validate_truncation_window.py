@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "sfincs_tiles"))
@@ -58,18 +59,13 @@ def test_all_available_tiles_peak_within_truncation_window(root: Path | None = N
         root = next((c for c in candidates if c.exists()), None)
 
     if root is None or not (root / BASE_DIR_NAME).exists():
-        print(f"SKIP: no {BASE_DIR_NAME}/ data available at the expected root - "
-              "this check needs at least one real build_line_forcing.py output "
-              "(corrected_hydrographs.csv) to validate against. Not a failure, just "
-              "nothing to check in this environment.")
-        print()
-        return
+        pytest.skip(f"no {BASE_DIR_NAME}/ data available at the expected root - "
+                    "this check needs at least one real build_line_forcing.py output "
+                    "(corrected_hydrographs.csv) to validate against")
 
     files = find_corrected_hydrograph_files(root)
     if not files:
-        print(f"SKIP: {root / BASE_DIR_NAME} exists but no corrected_hydrographs.csv found under it yet.")
-        print()
-        return
+        pytest.skip(f"{root / BASE_DIR_NAME} exists but no corrected_hydrographs.csv found under it yet")
 
     n_checked = 0
     failures: list[str] = []
@@ -99,7 +95,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=None, help="modelling root (default: auto-detect the real P:\\ share)")
     args = parser.parse_args()
-    test_all_available_tiles_peak_within_truncation_window(Path(args.root) if args.root else None)
+    try:
+        test_all_available_tiles_peak_within_truncation_window(Path(args.root) if args.root else None)
+    except pytest.skip.Exception as exc:
+        print(f"SKIP: {exc}\n")
     print("Hydrograph truncation-window coverage check complete.")
 
 

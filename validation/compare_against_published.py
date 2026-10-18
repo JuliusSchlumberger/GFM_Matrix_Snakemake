@@ -4,7 +4,7 @@ CSI vs Bates et al. (2023), Wing et al. (2024), Chaudhuri et al. (2026); SF Bay
 RMSE/MAE vs Kasmalkar et al. (2024). Published values are transcribed, not re-derived.
 
 Usage:
-    python validation/compare_against_published.py [--config path/to/config.yml] [--out-csv path.csv]
+    python validation/compare_against_published.py [--config path/to/config.yml] [--out path.csv]
 """
 
 from __future__ import annotations
@@ -18,9 +18,12 @@ import pandas as pd
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from config_utils import load_config  # noqa: E402
+from config_utils import load_config, return_period_years  # noqa: E402
+import validation as v  # noqa: E402
 
-SF_BAY_RESULTS = Path(__file__).resolve().parent / "sf_bay_results.csv"
+FZ3_KEY = "england_ea_floodzone3_sea"
+FZ2_KEY = "england_ea_floodzone2_sea"
+FZ2_BAND = "RP100-RP1000"
 
 # "wales"/"england" = whole territory; other regions are Chaudhuri et al.'s study areas.
 PUBLISHED_CSI = [
@@ -34,22 +37,14 @@ PUBLISHED_CSI = [
     ("Wing et al. (2024)", "england", 0.62),
 ]
 NB_CAVEAT = (
-    "Known, already-documented limitation (not a new finding) - data_catalog_validation.yml's "
-    "own comments attribute Bay of Fundy's near-zero CSI to a COAST-RP/GTSM boundary-forcing "
-    "limitation capturing the Fundy's extreme tidal resonance, not a pipeline bug."
+    "Known limitation: the COAST-RP/GTSM boundary forcing does not capture the Bay of Fundy's "
+    "extreme tidal resonance; the near-zero CSI here is attributed to that, not to a pipeline bug."
 )
 ENGLAND_FZ2_CAVEAT = (
-    "CONFIRMED (2026-10-16, EA Flood Zones Product Description via environment.data.gov.uk FAQ "
-    "778338325): Flood Zone 2 (sea) IS the INCREMENTAL 0.1%-0.5% AEP band (1-in-1000 to 1-in-200), "
-    "not the cumulative 1-in-1000 extent - comparing it against the model's cumulative RP1000 extent "
-    "(what the naive comparison below does) gave bias=26.2x/CSI=0.023, a benchmark-definition "
-    "mismatch, not a real model failure. validate_england_fz2_band.py re-scores against the model's "
-    "own matching incremental band (RP1000 minus RP100 - RP100 is the model's nearest native RP below "
-    "the benchmark's real ~RP200 inner edge) instead: bias drops to a sane 2.0x (confirming the "
-    "cumulative-vs-incremental mismatch was the dominant driver of the 26x figure), but CSI stays low "
-    "(0.021, HR=0.060; benchmark re-fetched 2026-10-16 with flood_source 'sea' + 'river and sea') - plausibly because a thin coastal band is highly sensitive to small positional "
-    "offsets between model and benchmark, but this is NOT independently confirmed; treat the band "
-    "result as a real, methodologically-sound number, not yet a fully-explained one."
+    "Flood Zone 2 (sea) is the incremental 0.1%-0.5% AEP band (1-in-1000 to 1-in-200), not the "
+    "cumulative 1-in-1000 extent, so it is compared against the model's RP1000-minus-RP100 band "
+    "(RP100 is the nearest native RP below the ~RP200 inner edge). CSI stays low, plausibly "
+    "because a thin band is highly sensitive to small positional offsets between model and benchmark."
 )
 
 KASMALKAR_SF_BAY = {
@@ -58,10 +53,31 @@ KASMALKAR_SF_BAY = {
 }
 
 
-def _csi_rows(gbr_metrics: Path, can_metrics: Path, england_fz3_rescore: Path, england_fz2_band: Path) -> list[dict]:
+def england_fz3_results(validation_dir: Path, slr: str) -> pd.DataFrame:
+    """rescore_england_fz3.py's rows from its per-RP metrics CSVs, RP ascending."""
+    paths = [p for p in (Path(validation_dir) / "GBR").glob(f"metrics_GBR_{FZ3_KEY}_RP*_{slr}.csv")
+             if "-" not in p.stem]
+    if not paths:
+        raise FileNotFoundError(
+            f"no {Path(validation_dir) / 'GBR'}/metrics_GBR_{FZ3_KEY}_RP*_{slr}.csv; run validation/rescore_england_fz3.py"
+        )
+    df = pd.concat([pd.read_csv(p) for p in paths], ignore_index=True)
+    return df.sort_values("return_period", key=lambda s: s.map(return_period_years)).reset_index(drop=True)
+
+
+def england_fz2_band_path(validation_dir: Path, slr: str) -> Path:
+    """validate_england_fz2_band.py's result CSV."""
+    return v.standalone_metrics_path(validation_dir, "GBR", FZ2_KEY, FZ2_BAND, slr)
+
+
+def sf_bay_results_path(validation_dir: Path, slr: str) -> Path:
+    """validate_sf_bay.py's metrics CSV."""
+    return v.standalone_metrics_path(validation_dir, "USA", "sf_bay", "RP100", slr)
+
+
+def _csi_rows(gbr_metrics: Path, can_metrics: Path, fz3_df: pd.DataFrame, england_fz2_band: Path) -> list[dict]:
     gbr_df = pd.read_csv(gbr_metrics)
     can_df = pd.read_csv(can_metrics)
-    fz3_df = pd.read_csv(england_fz3_rescore)
     fz2_band_df = pd.read_csv(england_fz2_band) if england_fz2_band.exists() else None
     rows = []
     for study, region, published in PUBLISHED_CSI:
@@ -98,8 +114,8 @@ def _csi_rows(gbr_metrics: Path, can_metrics: Path, england_fz3_rescore: Path, e
     return rows
 
 
-def _sf_bay_rows() -> list[dict]:
-    df = pd.read_csv(SF_BAY_RESULTS, index_col=0)
+def _sf_bay_rows(sf_bay_csv: Path) -> list[dict]:
+    df = pd.read_csv(sf_bay_csv, index_col=0)
     rows = []
     for direction in df.index:
         for metric, published in KASMALKAR_SF_BAY.items():
@@ -132,14 +148,16 @@ def main(config_path: str | Path | None = None, out_csv: str | Path | None = Non
     """Print and write the published-comparison table."""
     cfg = load_config(config_path or _REPO_ROOT / "snakemake_workflow" / "config" / "config.yml")
     validation_dir = Path(cfg["validation"]["output_dir"])
+    slr = cfg["validation"]["waterlevel_name"]
     gbr_metrics = validation_dir / "GBR" / "metrics_GBR_RP100_SLR_0.csv"
     can_metrics = validation_dir / "CAN" / "metrics_CAN_RP100_SLR_0.csv"
-    england_fz3_rescore = validation_dir / "england_fz3_rescore.csv"
-    england_fz2_band = validation_dir / "GBR" / "england_fz2_band_result.csv"
+    fz3_df = england_fz3_results(validation_dir, slr)
+    england_fz2_band = england_fz2_band_path(validation_dir, slr)
+    sf_bay_csv = sf_bay_results_path(validation_dir, slr)
     if out_csv is None:
         out_csv = Path(__file__).resolve().parent / "comparison_vs_published.csv"
 
-    df = pd.DataFrame(_csi_rows(gbr_metrics, can_metrics, england_fz3_rescore, england_fz2_band) + _sf_bay_rows())
+    df = pd.DataFrame(_csi_rows(gbr_metrics, can_metrics, fz3_df, england_fz2_band) + _sf_bay_rows(sf_bay_csv))
     df["ratio_ours_over_published"] = df["ours"] / df["published"]
 
     pd.set_option("display.width", 200)
@@ -153,6 +171,6 @@ def main(config_path: str | Path | None = None, out_csv: str | Path | None = Non
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
-    parser.add_argument("--out-csv", default=str(Path(__file__).resolve().parent / "comparison_vs_published.csv"))
+    parser.add_argument("--out", default=str(Path(__file__).resolve().parent / "comparison_vs_published.csv"))
     args = parser.parse_args()
-    main(config_path=args.config, out_csv=args.out_csv)
+    main(config_path=args.config, out_csv=args.out)

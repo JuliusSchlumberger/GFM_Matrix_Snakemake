@@ -8,7 +8,7 @@
 set -uo pipefail
 unset PROJ_LIB PROJ_DATA GDAL_DATA
 
-TILE_ID="$1"
+TILE_ID="${1:?usage: run_final_tile.sh <tile_id>}"
 BASE_DIR_NAME="${BASE_DIR_NAME:-calibration_roughness_SFINCS}"
 SFINCS_THREADS="${SFINCS_THREADS:-4}"
 
@@ -60,11 +60,12 @@ done
 
 cd "$CODE_ROOT/sfincs_tiles" || fail "cannot cd to $CODE_ROOT/sfincs_tiles"
 
-# dem.tif/mask.tif are regenerated only before the first build.
+# dem.tif/mask.tif are regenerated only before the first build; a failure stops the tile
+# (it would otherwise be built from the copied model_outputs dem.tif/mask.tif).
 if [ ! -f "$SM/elevation_combined.tif" ]; then
   step "regenerate_dem_mask"
   "$GFM_PY" regenerate_dem_mask.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
-    || echo "tile $TILE_ID: regenerate_dem_mask.py failed (non-fatal - keeping the model_outputs dem.tif/mask.tif)" >&2
+    || fail "regenerate_dem_mask.py failed"
   step "build_elevation"
   "$HYDROMT_SFINCS_DEV_PY" build_elevation.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
     || fail "build_elevation.py failed"

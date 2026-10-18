@@ -8,7 +8,7 @@ Usage:
     python analysis/plot_world_map.py \\
         --config  snakemake_workflow/config/config.yml \\
         --expdir  D:/GFM/merged_results/exposure \\
-        [--outdir D:/GFM/figures/world_maps] \\
+        [--out-dir D:/GFM/figures/world_maps] \\
         [--years 2050 2100] \\
         [--ssps  SSP1 SSP2 SSP5]
 """
@@ -32,23 +32,23 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True)
-    parser.add_argument("--outdir", default=None)
+    parser.add_argument("--out-dir", default=None)
     parser.add_argument("--years", nargs="+", type=int, default=[2050, 2100])
     parser.add_argument("--ssps", nargs="+", default=["SSP1", "SSP2", "SSP5"])
     args = parser.parse_args()
 
     cfg = load_config(args.config)
 
-    viz = cfg.get("visualization", {})
+    viz = cfg["visualization"]
 
     exp_dir = Path(args.expdir)
-    out_dir = Path(args.outdir or str(
-        Path(viz.get("output_dir", f"{cfg['paths']['root']}/figures")) / "world_maps"
+    out_dir = Path(args.out_dir or str(
+        Path(viz["output_dir"]) / "world_maps"
     ))
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
-    dpi = int(viz.get("dpi", 200))
-    cmap = viz.get("cmap_ember", "YlOrRd")
+    dpi = int(viz["dpi"])
+    cmap = viz["cmap_ember"]
 
     geo109_nc = f"{cfg['paths']['root']}/inputs/WRI/geogunit_109_all.nc"
     geo107_nc = f"{cfg['paths']['root']}/inputs/WRI/geogunit_107_all.nc"
@@ -62,7 +62,7 @@ def main() -> None:
         print("Building geogunit_109->ISO lookup (one-time)…")
         geo109_to_iso = build_geo109_to_iso_lookup(
             geo109_nc, geo107_nc, flopros_xlsx,
-            subsample=int(viz.get("geo109_subsample", 10)),
+            subsample=int(viz["geo109_subsample"]),
         )
         pd.DataFrame({"ISO": geo109_to_iso}).to_csv(lookup_cache)
 
@@ -95,9 +95,9 @@ def main() -> None:
                 fig = plot_world_map(
                     eai_df[col], geo109_nc, geo109_to_iso,
                     title=title, cmap=cmap, vmax=global_vmax, dpi=dpi,
-                    figsize=tuple(viz.get("world_map_figsize", (14, 7))),
-                    lat_range=tuple(viz.get("world_map_lat_range", (-60, 85))),
-                    downsample=int(viz.get("world_map_downsample", 4)),
+                    figsize=tuple(viz["world_map_figsize"]),
+                    lat_range=tuple(viz["world_map_lat_range"]),
+                    downsample=int(viz["world_map_downsample"]),
                 )
                 fname = out_dir / f"world_map_{label}_{ssp}_{yr}.png"
                 fig.savefig(fname, bbox_inches="tight")

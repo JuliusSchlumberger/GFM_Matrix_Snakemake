@@ -200,7 +200,7 @@ def run(config: dict) -> None:
     print(f"Phase 4 merge: {len(all_domains)} -> {len(merged)} domain(s)", flush=True)
     _write_intermediate(_domains_to_gdf(merged), "02_domains_merged.gpkg")
 
-    hop, unreachable = compute_hop_distances(merged, mask_index, dem_index, cfg)
+    hop, unreachable = compute_hop_distances(merged, mask_index, cfg)
     n_hop0 = sum(1 for h in hop if h == 0)
     print(f"Phase 5 hop-distance: hop=0 {n_hop0}/{len(merged)}, unreachable (dropped) {len(unreachable)}", flush=True)
     unreachable_set = set(unreachable)

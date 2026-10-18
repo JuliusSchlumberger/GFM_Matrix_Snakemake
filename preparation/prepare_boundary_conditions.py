@@ -24,7 +24,7 @@ import numpy as np
 import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from config_utils import get_data_catalog, merged_slr_scenarios, retry_transient_io  # noqa: E402
+from config_utils import get_data_catalog, merged_waterlevel_names, retry_transient_io  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -350,7 +350,7 @@ def run(config: dict, force: bool = True) -> None:
     wl_cfg = config["boundary_conditions"]
     adapt_cfg = config.get("adaptation", {})
     # Union of base SLR and adaptation scenarios; must match WATERLEVEL_NAMES in Snakefile.
-    all_slr_names = merged_slr_scenarios(wl_cfg, adapt_cfg)
+    all_slr_names = merged_waterlevel_names(wl_cfg, adapt_cfg)
     target_slr_m   = _slr_names_to_metres(all_slr_names)
     return_periods  = wl_cfg["return_periods"]
     coastrp_min_lat = wl_cfg["coastrp_min_lat"]
@@ -360,7 +360,7 @@ def run(config: dict, force: bool = True) -> None:
     )
     coastrp_raw  = Path(catalog.get_source("coast_rp").path)
 
-    slr_scenario = wl_cfg.get("slr_scenario", "ssp245")
+    slr_projection = wl_cfg["slr_projection"]
     confidence   = wl_cfg.get("confidence_level", "medium")
     # Catalog path is the confidence_output_files root.
     slr_dir      = Path(catalog.get_source("ipcc_ar6_slr_projections").path) / f"{confidence}_confidence"
@@ -391,12 +391,12 @@ def run(config: dict, force: bool = True) -> None:
     mdt_arr = ds_mdt["MDT"].values
 
     # Scenario/confidence in the cache names, so switching either is a cache miss.
-    slr_base_path     = proc_dir / f"SLR_base_{slr_scenario}_{confidence}_2100.nc"
-    fingerprints_path = proc_dir / f"SLR_fingerprints_{slr_scenario}_{confidence}_all.nc"
+    slr_base_path     = proc_dir / f"SLR_base_{slr_projection}_{confidence}_2100.nc"
+    fingerprints_path = proc_dir / f"SLR_fingerprints_{slr_projection}_{confidence}_all.nc"
     _maybe_delete(slr_base_path)
     _maybe_delete(fingerprints_path)
     ds_slr = compute_slr_fingerprints(
-        ds_coastrp, slr_dir, slr_scenario, confidence,
+        ds_coastrp, slr_dir, slr_projection, confidence,
         target_slr_m, slr_base_path, fingerprints_path,
     )
 

@@ -48,7 +48,8 @@ coefficient $n(x)$ per land-cover class via a land-cover-to-roughness
 mapping table, then
 converted to a per-cell friction/resistance value used directly as the
 eikonal equation's slowness field. Cells with no assigned land-cover class
-default to $n = 0.002$.
+default to $n = 0.2$ (config `default_friction: 0.002`, which is stored as
+$n/100$, the same scaling as $v(x)$ below).
 
 **`friction_scale_factor` is not a free empirical tuning knob - most of it is
 a required unit correction, and only a small remaining piece is calibration.**
@@ -206,10 +207,10 @@ implementation) was found to under-converge on larger/geometrically complex
 tiles, so a round-based, convergence-checked scheme is the production
 default instead, with the original fixed-count mode retained as an optional
 non-default configuration. The round cap itself was set empirically: a
-calibration exercise across a representative sample of 260 real coastal
-domains found that 58.7% of domains fully converge (every cell's potential
+calibration exercise across a representative sample of 537 wet real coastal
+domains found that 58.5% of domains fully converge (every cell's potential
 change drops to/below $\varepsilon$) within 40 rounds, and of the remaining
-domains that have not strictly converged by round 40, 84% already have a
+domains that have not strictly converged by round 40, 97.8% already have a
 stable flood extent by then - the residual change is confined to depth
 still settling in already-flooded cells, not the flooded/dry boundary
 itself. Production therefore caps the solve at `max_rounds = 40`. See
@@ -381,18 +382,19 @@ every previous iteration's own blocked set) can let a cell blocked in one
 iteration appear "unblocked" in the next, once other cells' fresh blocking
 reroutes the flow around it - production accumulates the blocked-cell set
 as a running union across iterations for exactly this reason. Without that
-accumulation, a real calibration run across 260 domains showed the large
-majority (91%) of domains that failed to converge were instead caught in a
+accumulation, calibration runs on real domains showed that most domains
+that failed to converge were instead caught in a
 stable, undamped two-state oscillation between alternating blocked-cell
 configurations, never settling regardless of how many outer iterations were
 allowed.
 
-With the accumulation in place, every domain converges, the large majority
-within a handful of outer iterations: the single largest group reaches
-convergence at the earliest mathematically possible outer iteration
-(iteration 2 - the stopping check needs a previous iteration to compare
-against, so it cannot fire any earlier), almost all of the remainder at
-iteration 3, and a small number at iteration 4 - no domain in this
+With the accumulation in place, every one of the 500 calibration domains
+converges, the large majority within a handful of outer iterations: the
+single largest group (370, 74.0%) reaches convergence at the earliest
+mathematically possible outer iteration (iteration 2 - the stopping check
+needs a previous iteration to compare against, so it cannot fire any
+earlier), almost all of the remainder (123, 24.6%) at iteration 3, and a
+small number (7, 1.4%) at iteration 4 - no domain in this
 calibration needed more than that. Production caps the outer loop at
 `max_outer_iterations = 4`, covering every domain in the calibration.
 See

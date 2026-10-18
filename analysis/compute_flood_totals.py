@@ -11,7 +11,7 @@ Writes {outdir}/flood_totals/flood_totals_{ISO}.csv.
 Usage:
     python compute_flood_totals.py \\
         [--config snakemake_workflow/config/config.yml] \\
-        --outdir D:/GFM/merged_results/exposure
+        --out-dir D:/GFM/merged_results/exposure
 """
 
 import argparse
@@ -26,10 +26,11 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import _read_band, _read_band_and_transform, _round_val  # noqa: E402
-from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io  # noqa: E402
+from _common import _read_band, _read_band_and_transform, _round_val, discover_chunk_ids  # noqa: E402
+from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io, return_period_label  # noqa: E402
 from pipeline_plots import pixel_area_km2_grid  # noqa: E402
 from exposure_analysis import _build_iso_index, _safe, country_sums  # noqa: E402
+from validation import load_iso_lookup  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -72,7 +73,7 @@ def main() -> None:
     _default_cfg = str(Path(__file__).resolve().parents[1] / "snakemake_workflow" / "config" / "config.yml")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=_default_cfg)
-    parser.add_argument("--outdir", required=True)
+    parser.add_argument("--out-dir", required=True)
     parser.add_argument(
         "--workers", type=int, default=1,
         help="chunks processed concurrently via a thread pool (default 1 = serial). Each chunk's "
@@ -86,27 +87,18 @@ def main() -> None:
     cfg = load_config(args.config)
     bc = cfg["boundary_conditions"]
     return_periods = bc["return_periods"]
-    slr_scenarios = bc["slr_scenarios"]
+    slr_scenarios = bc["waterlevel_names"]
 
     merged_dir = Path(cfg["postprocessing"]["merged_outputs"])
     flood_frac_dir = merged_dir / "chunks" / "flood_fraction"
     chunks_dir = merged_dir / "chunks"
-    out_dir = Path(args.outdir) / "flood_totals"
+    out_dir = Path(args.out_dir) / "flood_totals"
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
-    all_chunk_ids = sorted(set(
-        p.stem.split("_RP")[0].replace("flood_fraction_", "")
-        for p in flood_frac_dir.glob("flood_fraction_*.tif")
-    ))
+    chunk_ids, all_chunk_ids = discover_chunk_ids(flood_frac_dir, chunks_dir)
     if not all_chunk_ids:
         print(f"ERROR: no flood fraction files in {flood_frac_dir}")
         sys.exit(1)
-
-    chunk_ids = [
-        cid for cid in all_chunk_ids
-        if (chunks_dir / f"exposure_population_grid_{cid}.tif").exists()
-        and (chunks_dir / f"exposure_population_grid_{cid}.tif").stat().st_size > 0
-    ]
     if not chunk_ids:
         print("ERROR: no population chunk files found — run the Snakemake postprocess target first.")
         sys.exit(1)
@@ -114,11 +106,7 @@ def main() -> None:
 
     print("Loading FLOPROS ISO lookup…")
     catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
-    flopros = catalog.get_dataframe("flopros_protection_standards")
-    iso_lookup = {
-        int(gid): str(row["ISO"]) for gid, row in flopros.iterrows()
-        if pd.notna(row.get("ISO"))
-    }
+    iso_lookup = load_iso_lookup(catalog, "flopros_protection_standards")
 
     totals: dict[str, dict[tuple[int, str], dict[str, float]]] = defaultdict(dict)
 
@@ -160,7 +148,7 @@ def main() -> None:
     for iso, by_key in sorted(totals.items()):
         rows = [
             {
-                "iso": iso, "return_period": rp, "waterlevel_name": slr,
+                "iso": iso, "return_period": return_period_label(rp), "waterlevel_name": slr,
                 "total_wet_km2": _round_val(v["total_wet_km2"]),
                 "total_exposed_pop": _round_val(v["total_exposed_pop"]),
             }

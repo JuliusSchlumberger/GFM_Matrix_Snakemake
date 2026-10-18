@@ -1,7 +1,7 @@
 """Add the year each row's SLR magnitude is reached to the delta flood-extent CSV.
 
 Year = first year the `ssp_scenario` median AR6 trajectory (mm, relative to 2020;
-from extract_slr_trajectories.py) reaches the row's `slr_scenario`. Inverted with
+from extract_slr_trajectories.py) reaches the row's `waterlevel_name`. Inverted with
 np.interp, valid because median trajectories increase monotonically. Targets beyond
 the 2150 end of the data are NaN, not clamped (ssp126/ssp245 medians top out at
 632/870 mm, so their SLR_1000+ rows are NaN).
@@ -24,7 +24,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import load_config, retry_transient_io  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-SSP_RCP_CODES_DEFAULT = {"SSP1": 126, "SSP2": 245, "SSP5": 585}
 
 
 def year_for_slr(traj_df: pd.DataFrame, ssp_scenario: str, target_mm: float, ssp_rcp_codes: dict[str, int]) -> float:
@@ -46,7 +45,7 @@ def year_for_slr(traj_df: pd.DataFrame, ssp_scenario: str, target_mm: float, ssp
 def add_year_column(df: pd.DataFrame, traj_df: pd.DataFrame, ssp_rcp_codes: dict[str, int]) -> pd.DataFrame:
     """Return a copy of `df` with a `year_slr_reached_median` column."""
     df = df.copy()
-    target_mm = df["slr_scenario"].str.split("_").str[1].astype(float)
+    target_mm = df["waterlevel_name"].str.split("_").str[1].astype(float)
     df["year_slr_reached_median"] = [
         year_for_slr(traj_df, ssp, mm, ssp_rcp_codes)
         for ssp, mm in zip(df["ssp_scenario"], target_mm)
@@ -65,11 +64,9 @@ def main() -> None:
     cfg = load_config(args.config)
     root = Path(cfg["paths"]["root"])
     csv_path = Path(args.csv) if args.csv else root / "deltas_floodmaps" / "delta_flood_extent.csv"
-    viz = cfg.get("visualization", {})
-    traj_path = Path(args.slr_trajectories_csv) if args.slr_trajectories_csv else Path(
-        viz.get("slr_trajectories_csv", root / "processed_inputs" / "slr_trajectories_global_median.csv")
-    )
-    ssp_rcp_codes = viz.get("ssp_rcp_codes", SSP_RCP_CODES_DEFAULT)
+    viz = cfg["visualization"]
+    traj_path = Path(args.slr_trajectories_csv) if args.slr_trajectories_csv else Path(viz["slr_trajectories_csv"])
+    ssp_rcp_codes = viz["ssp_rcp_codes"]
 
     df = pd.read_csv(csv_path)
     traj_df = pd.read_csv(traj_path, index_col="year")

@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 import rasterio
 from affine import Affine
+from hydromt.exceptions import NoDataException
 from rasterio.enums import Resampling
 from rasterio.warp import reproject
 from rasterio.windows import Window
@@ -149,12 +150,15 @@ def _read_mask_on_grid(root: Path, transform, width: int, height: int) -> np.nda
 
 
 def _protection_rp(catalog, rp_by_geogunit: pd.Series, default_rp: float, transform, width: int, height: int):
-    # Cells without a geogunit unit get default_rp.
+    # Cells without a geogunit unit get default_rp; only hydromt's "no data here" means
+    # no coverage, any other read error raises after the transient-IO retries.
     left, top = transform.c, transform.f
     bbox = [left, top + height * transform.e, left + width * transform.a, top]
     try:
-        geo = catalog.get_rasterdataset(GEOGUNIT_SOURCE, bbox=bbox, variables=["Geogunits"]).squeeze(drop=True)
-    except Exception as e:  # noqa: BLE001 - no geogunit coverage: production's default standard everywhere
+        geo = retry_transient_io(
+            catalog.get_rasterdataset, GEOGUNIT_SOURCE, bbox=bbox, variables=["Geogunits"],
+        ).squeeze(drop=True)
+    except NoDataException as e:  # no geogunit coverage: production's default standard everywhere
         print(f"    (no geogunit coverage: {e}) - default protection {default_rp:g} yr everywhere", flush=True)
         return np.full((height, width), default_rp, dtype="float32")
     gid = np.full((height, width), -1, dtype="int32")
@@ -338,7 +342,7 @@ def main() -> None:
     root = Path(first_cfg["paths"]["root"])
     out_path = Path(args.out) if args.out else root / "deltas_floodmaps" / "delta_flood_extent.csv"
 
-    default_rp = float(prod_cfg.get("protection", {}).get("default_rp", 5.0))
+    default_rp = float(prod_cfg["protection"]["default_rp"])
     catalog = get_data_catalog(_REPO_ROOT / prod_cfg["paths"]["hydromt_data_catalog"], root=prod_cfg["paths"]["root"])
     flopros = catalog.get_dataframe("flopros_protection_standards")
     rp_by_geogunit = flopros["Coastal"].fillna(flopros["Riverine"]).fillna(default_rp)
@@ -397,7 +401,7 @@ def main() -> None:
                     "centroid_lon": round(float(delta_row["centroid_lon"]), 4),
                     "centroid_lat": round(float(delta_row["centroid_lat"]), 4),
                     "ssp_scenario": scenario,
-                    "slr_scenario": slr,
+                    "waterlevel_name": slr,
                     "return_period": RETURN_PERIOD,
                     "n_tiles": result["n_tiles"],
                     "flooded_area_km2": round(flooded_km2, 4),

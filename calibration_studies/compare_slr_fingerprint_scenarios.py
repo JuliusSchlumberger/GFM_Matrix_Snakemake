@@ -4,10 +4,14 @@ Tests the assumption that the fingerprint shape is scenario-invariant, so one
 reference scenario can be rescaled to any target global-mean SLR. Rescaling is
 base / global_mean * T, so Pearson r does not depend on the target T.
 
+Reads, and on a cache miss writes, the same COAST-RP / SLR caches as
+preparation/prepare_boundary_conditions.py in `paths.processed_inputs_dir`.
+The figure goes to --out (default: the current directory).
+
 Usage:
-    python compare_slr_fingerprint_scenarios.py
-    python compare_slr_fingerprint_scenarios.py --scenario-a ssp126 --scenario-b ssp245
-    python compare_slr_fingerprint_scenarios.py --scenario-a ssp245 --scenario-b ssp585
+    python calibration_studies/compare_slr_fingerprint_scenarios.py
+    python calibration_studies/compare_slr_fingerprint_scenarios.py --scenario-a ssp126 --scenario-b ssp245
+    python calibration_studies/compare_slr_fingerprint_scenarios.py --scenario-a ssp245 --scenario-b ssp585
 """
 
 from __future__ import annotations
@@ -23,14 +27,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 sys.path.insert(0, str(_REPO_ROOT / "preparation"))
 from config_utils import get_data_catalog, load_config  # noqa: E402
 from prepare_boundary_conditions import compute_slr_fingerprints, preprocess_coastrp  # noqa: E402
 
 TARGET_SLR_M = 1.0  # plot units only; r is invariant to it
-OUT_DIR = Path(__file__).resolve().parent
 
 
 def _load_scenario_fingerprints(
@@ -52,7 +55,7 @@ def main() -> None:
     parser.add_argument("--scenario-a", default="ssp126", help="options: ssp119/ssp126/ssp245/ssp370/ssp585")
     parser.add_argument("--scenario-b", default="ssp245")
     parser.add_argument("--confidence", default=None, help="default: boundary_conditions.confidence_level from config")
-    parser.add_argument("--output", default=str(OUT_DIR / "slr_fingerprint_scenario_comparison.png"))
+    parser.add_argument("--out", default="slr_fingerprint_scenario_comparison.png")
     args = parser.parse_args()
 
     cfg = load_config(Path(args.config))
@@ -102,9 +105,9 @@ def main() -> None:
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
-    fig.savefig(args.output, dpi=170)
+    fig.savefig(args.out, dpi=170)
     plt.close(fig)
-    print(f"\nWrote {args.output}")
+    print(f"\nWrote {args.out}")
 
 
 if __name__ == "__main__":

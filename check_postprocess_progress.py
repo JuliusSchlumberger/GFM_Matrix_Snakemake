@@ -8,25 +8,19 @@ Usage:
 
 import argparse
 import sys
-import time
 from pathlib import Path
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
-from config_utils import load_config, merged_slr_scenarios  # noqa: E402
+from config_utils import load_config, merged_waterlevel_names  # noqa: E402
+from progress_report import progress_bar, run_report  # noqa: E402
 from tiles import build_chunk_grid, load_tile_grid  # noqa: E402
 
 
 
-def _bar(done: int, expected: int, bar_len: int = 30) -> str:
-    filled = int(bar_len * done / expected) if expected else 0
-    filled = min(filled, bar_len)
-    return "#" * filled + "-" * (bar_len - filled)
-
-
 def _print_line(label: str, done: int, expected: int) -> None:
     pct = 100 * done / expected if expected else 0
-    print(f"  {label:<32} [{_bar(done, expected)}] {done:>6}/{expected:<6} ({pct:5.1f}%)")
+    print(f"  {label:<32} [{progress_bar(done, expected)}] {done:>6}/{expected:<6} ({pct:5.1f}%)")
 
 
 def main() -> None:
@@ -44,7 +38,7 @@ def main() -> None:
     n_chunks = len(chunk_ids)
 
     bc_cfg = cfg["boundary_conditions"]
-    waterlevel_names = merged_slr_scenarios(bc_cfg, cfg["adaptation"])
+    waterlevel_names = merged_waterlevel_names(bc_cfg, cfg["adaptation"])
     n_scenarios_per_chunk = len(bc_cfg["return_periods"]) * len(waterlevel_names)
 
     merged_dir = Path(cfg["postprocessing"]["merged_outputs"])
@@ -73,22 +67,13 @@ def main() -> None:
 
         print("\nExposure analysis:")
         _print_line("pass 1   shares", n_pass1, n_exposure_batches)
-        print(f"  {'reduce_shares':<32} [{_bar(1 if shares_done else 0, 1)}] "
+        print(f"  {'reduce_shares':<32} [{progress_bar(1 if shares_done else 0, 1)}] "
               f"{'done' if shares_done else 'not yet':>6}/{'done':<6}")
         _print_line("pass 2   EAI", n_pass2, n_exposure_batches)
         print(f"  {'reduce_write (output CSVs)':<32} {n_csvs} CSV file(s) written"
               + (f" to {exposure_out_dir}" if n_csvs else ""))
 
-    if args.watch:
-        try:
-            while True:
-                print(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} ===")
-                _report()
-                time.sleep(args.watch)
-        except KeyboardInterrupt:
-            print("\nStopped.")
-    else:
-        _report()
+    run_report(_report, args.watch)
 
 
 if __name__ == "__main__":

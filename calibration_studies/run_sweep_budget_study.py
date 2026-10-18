@@ -9,7 +9,7 @@ A tile dry at sweep 1 is logged DRY and stopped (the candidate pool is
 over-provisioned). Writes one CSV per tile with per-sweep depth-change metrics.
 
 Usage:
-    python run_sweep_budget_study.py <output_dir> [--config <config.yml>] [--tile-ids id [id ...]]
+    python run_sweep_budget_study.py --out-dir <output_dir> [--config <config.yml>] [--tile-ids id [id ...]]
 """
 import argparse
 import csv
@@ -47,8 +47,29 @@ N_TILES_WANTED_DEFAULT = 500  # only reachable in a single sequential run, not p
 DEFAULT_EPSILON_M = 0.03  # = simulation.flooding.waterlevel_epsilon_m
 
 
-def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor: float):
-    """Load a tile's decoded solver inputs and IDW-seeded coastline values."""
+def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor: float, on_no_stations: str = "dry"):
+    """Load a tile's decoded solver inputs and IDW-seeded coastline values.
+
+    Shared by the calibration studies (run_obstacle_coupling_study.py,
+    diagnose_large_residual.py), so all of them seed exactly as production does.
+
+    Parameters
+    ----------
+    on_no_stations : {"dry", "raise"}
+        A tile with zero boundary stations: "dry" seeds nothing (sweep 1 then
+        reports DRY; production's NO_STATIONS_REASON), "raise" raises ValueError
+        (studies whose tile list should already exclude such tiles; BallTree would
+        crash on them).
+
+    Returns
+    -------
+    tuple
+        (dem, mask, friction, coastline, coastline_rows, coastline_cols, initial,
+        max_waterlevel); max_waterlevel is the highest station level in m, None
+        for a "dry" tile without stations.
+    """
+    if on_no_stations not in ("dry", "raise"):
+        raise ValueError(f"on_no_stations must be 'dry' or 'raise', not {on_no_stations!r}")
     tile_dir = model_outputs / str(tile_id)
     scenario = f"{RETURN_PERIOD}_{WATERLEVEL_NAME}"
     inputs = tile_dir / "inputs"
@@ -71,14 +92,18 @@ def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor
     coastline = coastline_mask(mask, ocean_code=OCEAN_CODE, river_code=RIVER_CODE)
     coastline_rows, coastline_cols = np.nonzero(coastline)
 
-    # Int16 cm-encoded levels. Zero stations (expected for small/isolated tiles,
-    # production's NO_STATIONS_REASON) -> seed nothing, so sweep 1 reports DRY.
+    # Int16 cm-encoded levels. Zero stations are expected for small/isolated tiles.
     station_values = decode_waterlevel_cm(boundaries[WATERLEVEL_NAME].to_numpy())
     if len(station_values) == 0:
+        if on_no_stations == "raise":
+            raise ValueError(
+                f"tile {tile_id} has zero boundary stations - should have been excluded "
+                "from wet_tiles_selected.txt by run_sweep_budget_study.py"
+            )
         coastline_rows = np.array([], dtype=coastline_rows.dtype)
         coastline_cols = np.array([], dtype=coastline_cols.dtype)
         initial = np.array([], dtype=np.float64)
-        return dem, mask, friction, coastline, coastline_rows, coastline_cols, initial
+        return dem, mask, friction, coastline, coastline_rows, coastline_cols, initial, None
 
     stations_lonlat = np.column_stack(
         [boundaries.geometry.x.to_numpy(), boundaries.geometry.y.to_numpy()]
@@ -87,7 +112,8 @@ def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor
         coastline_rows, coastline_cols, transform, stations_lonlat, station_values,
         min(knn, len(station_values)), mask, OCEAN_CODE,
     )
-    return dem, mask, friction, coastline, coastline_rows, coastline_cols, initial
+    max_waterlevel = float(station_values.max())
+    return dem, mask, friction, coastline, coastline_rows, coastline_cols, initial, max_waterlevel
 
 
 def _full_depth_array(t, dem, mask, coastline) -> np.ndarray:
@@ -129,7 +155,7 @@ def run_tile_sweep_trace(
     is_wet is False iff sweep 1 has zero flooding. round_converged is True iff a
     complete round's max raw change reached <= epsilon before max_sweeps.
     """
-    dem, mask, friction, coastline, seed_rows, seed_cols, initial = load_tile(
+    dem, mask, friction, coastline, seed_rows, seed_cols, initial, _ = load_tile(
         tile_id, model_outputs, knn, friction_scale_factor,
     )
     seed_values = -initial
@@ -195,7 +221,7 @@ FIELDNAMES = [
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("out_dir")
+    parser.add_argument("--out-dir", required=True)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--tile-ids", type=int, nargs="*", default=None)
     parser.add_argument("--epsilon", type=float, default=DEFAULT_EPSILON_M, help=f"round-level convergence threshold (default: {DEFAULT_EPSILON_M}, production's own simulation.flooding.waterlevel_epsilon_m)")
@@ -226,6 +252,7 @@ def main() -> None:
           f"n_tiles_wanted={n_tiles_wanted}", flush=True)
 
     wet_tiles: list[int] = []
+    errored_tiles: list[int] = []
 
     for tile_id in tiles:
         print(f"=== tile {tile_id} ===", flush=True)
@@ -262,6 +289,7 @@ def main() -> None:
                 err_row["tile"] = tile_id
                 err_row["status"] = f"error: {exc}"
                 writer.writerow(err_row)
+                errored_tiles.append(tile_id)
 
         if len(wet_tiles) >= n_tiles_wanted:
             print(f"\n{n_tiles_wanted} wet tiles found - stopping early, "
@@ -269,6 +297,9 @@ def main() -> None:
             break
 
     print(f"\nDone. Per-tile CSVs written to {out_dir}")
+    if errored_tiles:
+        print(f"WARNING: {len(errored_tiles)} tile(s) errored (status 'error' row, neither wet nor dry): "
+              f"{errored_tiles}", flush=True)
     # Off by default: parallel processes would race on this file (use aggregate_wet_tiles.py).
     if args.write_wet_tiles_summary:
         selected = wet_tiles[:n_tiles_wanted]

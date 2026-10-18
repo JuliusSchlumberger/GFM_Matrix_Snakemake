@@ -7,7 +7,7 @@ hand-edit; kept unless --overwrite), figures/ or figures_unsuitable/, status/*.j
 
 Usage:
     python build_station_boundary_lines.py [--tile-ids 841 2905 | --sample 30] [--workers 8]
-    python build_station_boundary_lines.py --tile-ids-file tiles_000.txt --overwrite --skip-done   # one HPC job
+    python build_station_boundary_lines.py --tile-ids-file tiles_000.txt --overwrite --skip-existing   # one HPC job
     python build_station_boundary_lines.py --summarize
     (HPC jobs: generate_calibration_jobs.py stage1)
 """
@@ -239,7 +239,7 @@ def _status_path(out_dir: Path, tile_id) -> Path:
 
 
 def _write_status(out_dir: Path, row: dict) -> None:
-    # atomic: many jobs write at once and --skip-done reads them
+    # atomic: many jobs write at once and --skip-existing reads them
     path = _status_path(out_dir, row["tile_id"])
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f".tmp{os.getpid()}")
@@ -267,18 +267,25 @@ def _safe_build(args):
 
 
 def summarize(out_dir: Path) -> pd.DataFrame:
-    """Collect status/*.json into summary.csv, suitable_tiles.txt and unsuitable_tiles.txt."""
+    """Collect status/*.json into summary.csv and suitable/unsuitable/errored_tiles.txt.
+
+    Errored tiles (build raised or the worker crashed) are listed apart from the
+    unsuitable ones, since a rerun may still make them suitable.
+    """
     rows = [json.loads(p.read_text()) for p in sorted((out_dir / "status").glob("*.json"))]
     summary = pd.DataFrame(rows).sort_values("tile_id")
     summary.drop(columns=["traceback"], errors="ignore").to_csv(out_dir / "summary.csv", index=False)
     written = summary[summary["status"] == "written"]
     suitable = written[written["suitable"].astype(bool)]["tile_id"].astype(int)
-    unsuitable = summary[~summary["tile_id"].isin(suitable)]["tile_id"].astype(int)
+    is_error = summary["status"].astype(str).str.startswith("error")
+    errored = summary[is_error]["tile_id"].astype(int)
+    unsuitable = summary[~summary["tile_id"].isin(suitable) & ~is_error]["tile_id"].astype(int)
     (out_dir / "suitable_tiles.txt").write_text("".join(f"{t}\n" for t in suitable), newline="\n")
     (out_dir / "unsuitable_tiles.txt").write_text("".join(f"{t}\n" for t in unsuitable), newline="\n")
+    (out_dir / "errored_tiles.txt").write_text("".join(f"{t}\n" for t in errored), newline="\n")
     _print_summary(summary)
     print(f"Wrote {out_dir / 'summary.csv'}, suitable_tiles.txt ({len(suitable)}), "
-          f"unsuitable_tiles.txt ({len(unsuitable)})")
+          f"unsuitable_tiles.txt ({len(unsuitable)}), errored_tiles.txt ({len(errored)})")
     return summary
 
 
@@ -344,13 +351,13 @@ def main() -> None:
     parser.add_argument("--tiles-dir-name", default="model_outputs",
                         help="where the tile dirs (with inputs/) live, under paths.root (default: model_outputs)")
     parser.add_argument("--overwrite", action="store_true", help="rebuild existing {tile_id}.gpkg (loses hand edits)")
-    parser.add_argument("--skip-done", action="store_true",
+    parser.add_argument("--skip-existing", action="store_true",
                         help="skip tiles that already have a status file (not an error one) - resume a run")
     parser.add_argument("--plot", choices=["suitable", "all", "none"], default="all",
                         help="which tiles get the inspection figure - suitable ones go to figures/, "
                              "unsuitable ones to figures_unsuitable/ (default: all)")
     parser.add_argument("--summarize", action="store_true",
-                        help="only collect boundary_lines/status/*.json into summary.csv + suitable/unsuitable lists")
+                        help="only collect boundary_lines/status/*.json into summary.csv + suitable/unsuitable/errored lists")
     parser.add_argument("--workers", type=int, default=8)
     args = parser.parse_args()
 
@@ -375,13 +382,13 @@ def main() -> None:
         if args.sample:
             tile_dirs = sorted(random.Random(0).sample(tile_dirs, min(args.sample, len(tile_dirs))),
                                key=lambda d: int(d.name))
-    if args.skip_done:
+    if args.skip_existing:
         def done(d):
             p = _status_path(out_dir, d.name)
             return p.exists() and not json.loads(p.read_text())["status"].startswith("error")
         n0 = len(tile_dirs)
         tile_dirs = [d for d in tile_dirs if not done(d)]
-        print(f"--skip-done: {n0 - len(tile_dirs)} tile(s) already done")
+        print(f"--skip-existing: {n0 - len(tile_dirs)} tile(s) already done")
     print(f"{len(tile_dirs)} tile(s) -> {out_dir}", flush=True)
 
     jobs = [(root, d, out_dir, buffer_deg, args.overwrite, args.plot, min_size_deg) for d in tile_dirs]
@@ -390,6 +397,10 @@ def main() -> None:
         print()
         _print_summary(pd.DataFrame(rows))
     print("(collect every job's results with: --summarize)")
+    n_err = sum(str(r["status"]).startswith("error") for r in rows)
+    if n_err:
+        print(f"{n_err} tile(s) errored (status/<tile_id>.json has the traceback; rerun with --skip-existing)")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

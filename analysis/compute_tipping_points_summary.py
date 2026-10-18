@@ -7,12 +7,12 @@ sum of member-country EAI time series (each on its own population path), not of 
 growth matrices. --continent-eai-threshold (default 5,000,000) is an arbitrary round
 starting point larger than the per-country default, not a finding.
 
-Writes tipping_points_{countries,continents}_median.csv to --outdir (default:
+Writes tipping_points_{countries,continents}_median.csv to --out-dir (default:
 visualization.output_dir).
 
 Usage:
     python analysis/compute_tipping_points_summary.py --config snakemake_workflow/config/config.yml \\
-        --expdir <merged_results>/exposure [--outdir <figures>] \\
+        --expdir <merged_results>/exposure [--out-dir <figures>] \\
         [--countries NGA THA EGY] [--continent-eai-threshold 5000000]
 """
 
@@ -25,18 +25,15 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import _eai_from_interp, _first_crossing, _growth_matrix_path, _growth_path  # noqa: E402
-from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
-from pathways import matrix_interpolator, slr_pathway  # noqa: E402
-from population_extension import extend_growth_factors  # noqa: E402
-from population_growth import load_ssp_growth_factors  # noqa: E402
-from analysis_figures import (  # noqa: E402
-    CONTINENTS, build_growth_matrix_from_grid, iso_to_continent, load_growth_matrix_csv, load_slr_trajectories,
+from _common import (  # noqa: E402
+    _country_interpolator, _eai_from_interp, _first_crossing, _growth_matrix_path, _growth_path,
+    load_pathway_setup,
 )
+from pathways import slr_pathway  # noqa: E402
+from population_extension import extend_growth_factors  # noqa: E402
+from analysis_figures import CONTINENTS, iso_to_continent, load_growth_matrix_csv  # noqa: E402
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
 MEASURES = ["protect", "avoid", "retreat", "protect_avoid"]
-LAST_SSP_YEAR = 2100
 
 
 def _median_crossing(
@@ -66,7 +63,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_*_growth_matrix.csv files")
-    parser.add_argument("--outdir", default=None)
+    parser.add_argument("--out-dir", default=None)
     parser.add_argument("--countries", nargs="+", default=None, help="default: visualization.tipping_points.countries")
     parser.add_argument("--continents", nargs="+", default=CONTINENTS)
     parser.add_argument("--continent-eai-threshold", type=float, default=5_000_000.0,
@@ -74,32 +71,15 @@ def main() -> None:
     parser.add_argument("--to-year", type=int, default=None, help="default: visualization.tipping_points.to_year")
     args = parser.parse_args()
 
-    cfg = load_config(args.config)
-    viz = cfg["visualization"]
-    tp = viz.get("tipping_points", {})
-    exp_dir = Path(args.expdir)
-    out_dir = Path(args.outdir or viz.get("output_dir", f"{cfg['paths']['root']}/figures"))
-    retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
-
-    countries = args.countries or tp.get("countries", ["VNM", "NLD", "NGA"])
-    default_thr = float(tp.get("eai_threshold", 1_000_000))
-    thr_by_iso = {k: float(v) for k, v in (tp.get("per_country_eai_threshold") or {}).items()}
-    to_year = args.to_year or int(tp.get("to_year", LAST_SSP_YEAR))
-    ssps = list(tp.get("ssps", cfg.get("population_growth", {}).get("ssps", ["SSP2", "SSP5"])))
-    strategies = [s for s in tp.get("strategies", ["baseline"] + MEASURES)
+    st = load_pathway_setup(args)
+    exp_dir, out_dir, countries, to_year, years = st.exp_dir, st.out_dir, st.countries, st.to_year, st.years
+    default_thr, thr_by_iso, variants = st.default_thr, st.thr_by_iso, st.variants
+    ssps, designs = st.ssps, st.designs
+    strategies = [s for s in st.tp["strategies"]
                   if s == "baseline" or s in MEASURES]
-    designs = list(cfg.get("adaptation", {}).get("slr_intensities", ["SLR_500", "SLR_1000"]))
+    slr_paths = {(s, p): slr_pathway(st.traj, f"{s}_{p}", years) for s in ssps for p in ("p17", "p50", "p83")}
 
-    traj = load_slr_trajectories(viz["slr_trajectories_csv"])
-    ssps = [s for s in ssps if all(f"{s}_{p}" in traj.columns for p in ("p17", "p50", "p83"))]
-    years = np.arange(2020, to_year + 1)
-    slr_paths = {(s, p): slr_pathway(traj, f"{s}_{p}", years) for s in ssps for p in ("p17", "p50", "p83")}
-
-    catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
-    growth_df = load_ssp_growth_factors(Path(catalog.get_source("ssp_population_growth_factors").path))
-    variants = (viz.get("extended_pathways", {}).get("variants") if to_year > LAST_SSP_YEAR else None) \
-        or {"ssp": {"mode": "constant", "label": "SSP"}}
-    ext = {v: extend_growth_factors(growth_df, spec, to_year=to_year) for v, spec in variants.items()}
+    ext = {v: extend_growth_factors(st.growth_df, spec, to_year=to_year) for v, spec in variants.items()}
 
     strategy_designs: list[tuple[str, str | None]] = [("baseline", None)]
     for meas in strategies:
@@ -116,11 +96,9 @@ def main() -> None:
         thr = thr_by_iso.get(iso, default_thr)
         growth_paths = {(s, v): _growth_path(ext[v], s, iso, years) - 1.0 for s in ssps for v in variants}
         for strat, design in strategy_designs:
-            eai_grid, slr_mm, growth_fracs = grids[(strat, design)]
-            if iso not in eai_grid.index:
+            if iso not in grids[(strat, design)][0].index:
                 continue
-            matrix = build_growth_matrix_from_grid(eai_grid.loc[[iso]], slr_mm, growth_fracs)
-            interp = matrix_interpolator(matrix, slr_mm, growth_fracs)
+            interp = _country_interpolator(grids[(strat, design)], iso)
             for ssp in ssps:
                 samples = _country_eai_samples(interp, ssp, slr_paths, growth_paths, variants, thr, years)
                 label, n_reached = _median_crossing(samples, to_year)
@@ -148,13 +126,8 @@ def main() -> None:
             for iso in members
         }
         for strat, design in strategy_designs:
-            eai_grid, slr_mm, growth_fracs = grids[(strat, design)]
-            present = [i for i in members if i in eai_grid.index]
-            interps = {
-                i: matrix_interpolator(build_growth_matrix_from_grid(eai_grid.loc[[i]], slr_mm, growth_fracs),
-                                       slr_mm, growth_fracs)
-                for i in present
-            }
+            present = [i for i in members if i in grids[(strat, design)][0].index]
+            interps = {i: _country_interpolator(grids[(strat, design)], i) for i in present}
             for ssp in ssps:
                 samples = []
                 for v in variants:

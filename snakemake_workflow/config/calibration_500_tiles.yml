@@ -40,12 +40,12 @@ simulation:
 # calibration/representativeness study needs one real solve per tile, not
 # production's full ~10 RP x 5 SLR grid (which would be ~28,500 solves
 # across 571 tiles instead of 571). slr_intensities REQUIRED, not
-# decorative - merged_slr_scenarios() unions it with boundary_conditions.
-# slr_scenarios; leaving it unset would silently pull in config.yml's own
+# decorative - merged_waterlevel_names() unions it with boundary_conditions.
+# waterlevel_names; leaving it unset would silently pull in config.yml's own
 # SLR_500 adaptation intensity.
 boundary_conditions:
   return_periods: [100]
-  slr_scenarios: ["SLR_0"]
+  waterlevel_names: ["SLR_0"]
 adaptation:
   slr_intensities: []
 
@@ -58,7 +58,7 @@ adaptation:
 # normal two-phase design, since the phase-2 cross-node afterany wait that
 # design exists for protects a dependency this study doesn't have.
 #
-# 25 nodes (user direction, 2026-10 - up from 20), all 1vcpu: every tile
+# All nodes 1vcpu: every tile
 # runs on hpc.sbatch (2026-10-08: the old small/large RAM-aware split,
 # hpc.sbatch_large, and large_tile_pixel_threshold were removed entirely -
 # a real need under the OLD, pre-2026-10 greedy-covering tiling pipeline,

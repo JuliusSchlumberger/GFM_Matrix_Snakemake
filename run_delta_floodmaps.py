@@ -2,8 +2,8 @@
 
 Stages per scenario: boundary_conditions, preprocess, simulate, postprocess, with
 GFM_CONFIG_PATH = deltas_{scenario}_materialized.yml. simulate runs in ascending
-hop_distance waves: a hop>=1 tile whose lower-hop neighbours are not yet done is
-permanently zeroed as "no upstream flooding". A failing stage stops its scenario.
+hop_distance waves: a hop>=1 tile whose lower-hop neighbours are not yet done
+fails without output. A failing stage stops its scenario.
 
 Usage:
     python run_delta_floodmaps.py                          # both scenarios, all stages
@@ -52,14 +52,14 @@ def run_simulate_stage(materialized: Path, cores: int, mem_mb: int | None, env: 
     """
     sys.path.insert(0, str(REPO_ROOT / "src"))
     import geopandas as gpd
-    from config_utils import load_config, merged_slr_scenarios
+    from config_utils import load_config, merged_waterlevel_names
 
     cfg = load_config(materialized)
     tile_grid = gpd.read_file(cfg["tile_grid"]["path"])
     tile_grid["tile_id"] = tile_grid["tile_id"].astype(int)
     model_outputs = cfg["simulation"]["model_outputs"]
     return_periods = [f"RP{rp}" for rp in cfg["boundary_conditions"]["return_periods"]]
-    waterlevel_names = merged_slr_scenarios(cfg["boundary_conditions"], cfg["adaptation"])
+    waterlevel_names = merged_waterlevel_names(cfg["boundary_conditions"], cfg["adaptation"])
 
     resources = ["--resources", f"mem_mb={mem_mb}"] if mem_mb else []
     waves = sorted(tile_grid["hop_distance"].unique().tolist())

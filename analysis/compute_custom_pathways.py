@@ -1,11 +1,11 @@
 """Evaluate a hand-specified set of adaptation pathway sequences for one SSP.
 
 Covers 4-stage chains beyond compute_adaptation_pathways.py's --max-stages=3 cap.
-Writes --outdir/custom_pathways_{ssp}.csv, one row per (entity, sequence).
+Writes --out-dir/custom_pathways_{ssp}.csv, one row per (entity, sequence).
 
 Usage:
     python analysis/compute_custom_pathways.py --config snakemake_workflow/config/config.yml \\
-        --expdir <merged_results>/exposure --ssp SSP5 [--outdir <figures>] \\
+        --expdir <merged_results>/exposure --ssp SSP5 [--out-dir <figures>] \\
         [--countries NGA THA EGY] [--continent-eai-threshold 5000000]
 """
 
@@ -17,21 +17,15 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from compute_adaptation_pathways import (  # noqa: E402
-    _eai_from_interp, _evaluate_chain, _first_crossing_after, _growth_matrix_path, _growth_path, _chain_label,
+from _common import (  # noqa: E402
+    _country_interpolator, _eai_from_interp, _growth_matrix_path, _growth_path, load_pathway_setup,
 )
+from compute_adaptation_pathways import _chain_label, _evaluate_chain, _first_crossing_after  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
-from pathways import matrix_interpolator, slr_pathway  # noqa: E402
+from pathways import slr_pathway  # noqa: E402
 from population_extension import extend_growth_factors  # noqa: E402
-from population_growth import load_ssp_growth_factors  # noqa: E402
-from analysis_figures import (  # noqa: E402
-    CONTINENTS, build_growth_matrix_from_grid, iso_to_continent, load_growth_matrix_csv, load_slr_trajectories,
-)
-
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-LAST_SSP_YEAR = 2100
+from analysis_figures import CONTINENTS, iso_to_continent, load_growth_matrix_csv  # noqa: E402
 
 # D's last stage "avoid + protect (l) + retreat (l)" is read as protect_avoid_large then
 # retreat_large, not one combined measure.
@@ -48,7 +42,7 @@ def main() -> None:
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True)
     parser.add_argument("--ssp", required=True)
-    parser.add_argument("--outdir", default=None)
+    parser.add_argument("--out-dir", default=None)
     parser.add_argument("--countries", nargs="+", default=None)
     parser.add_argument("--continents", nargs="+", default=CONTINENTS)
     parser.add_argument("--continent-eai-threshold", type=float, default=5_000_000.0)
@@ -63,29 +57,14 @@ def main() -> None:
         name, _, val = item.partition("=")
         continent_thr_overrides[name] = float(val)
 
-    cfg = load_config(args.config)
-    viz = cfg["visualization"]
-    tp = viz.get("tipping_points", {})
-    exp_dir = Path(args.expdir)
-    out_dir = Path(args.outdir or viz.get("output_dir", f"{cfg['paths']['root']}/figures"))
-    retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
-
-    countries = args.countries or tp.get("countries", ["VNM", "NLD", "NGA"])
-    default_thr = float(tp.get("eai_threshold", 1_000_000))
-    thr_by_iso = {k: float(v) for k, v in (tp.get("per_country_eai_threshold") or {}).items()}
-    to_year = args.to_year or int(tp.get("to_year", LAST_SSP_YEAR))
+    st = load_pathway_setup(args)
+    exp_dir, out_dir, countries, to_year, years = st.exp_dir, st.out_dir, st.countries, st.to_year, st.years
+    default_thr, thr_by_iso, variants = st.default_thr, st.thr_by_iso, st.variants
     ssp = args.ssp
+    slr_path = slr_pathway(st.traj, f"{ssp}_p50", years)
 
-    traj = load_slr_trajectories(viz["slr_trajectories_csv"])
-    years = np.arange(2020, to_year + 1)
-    slr_path = slr_pathway(traj, f"{ssp}_p50", years)
-
-    catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
-    growth_df = load_ssp_growth_factors(Path(catalog.get_source("ssp_population_growth_factors").path))
-    variants = (viz.get("extended_pathways", {}).get("variants") if to_year > LAST_SSP_YEAR else None) \
-        or {"ssp": {"mode": "constant", "label": "SSP"}}
     v0 = next(iter(variants))
-    ext0 = extend_growth_factors(growth_df, variants[v0], to_year=to_year)
+    ext0 = extend_growth_factors(st.growth_df, variants[v0], to_year=to_year)
 
     blocks = sorted({b for seq in CUSTOM_SEQUENCES.values() for b in seq})
     strategy_designs: list[tuple[str, str | None]] = [("baseline", None)] + blocks
@@ -124,11 +103,9 @@ def main() -> None:
         for strat, design in strategy_designs:
             if (strat, design) not in grids:
                 continue
-            eai_grid, slr_mm, growth_fracs = grids[(strat, design)]
-            if iso not in eai_grid.index:
+            if iso not in grids[(strat, design)][0].index:
                 continue
-            interp = matrix_interpolator(build_growth_matrix_from_grid(eai_grid.loc[[iso]], slr_mm, growth_fracs),
-                                         slr_mm, growth_fracs)
+            interp = _country_interpolator(grids[(strat, design)], iso)
             gp = _growth_path(ext0, ssp, iso, years) - 1.0
             eai_by_block[(strat, design)] = _eai_from_interp(interp, slr_path, gp)
         all_rows += rows_for_entity(iso, "country", thr, eai_by_block)
@@ -148,13 +125,8 @@ def main() -> None:
         for strat, design in strategy_designs:
             if (strat, design) not in grids:
                 continue
-            eai_grid, slr_mm, growth_fracs = grids[(strat, design)]
-            present = [i for i in members if i in eai_grid.index]
-            interps = {
-                i: matrix_interpolator(build_growth_matrix_from_grid(eai_grid.loc[[i]], slr_mm, growth_fracs),
-                                       slr_mm, growth_fracs)
-                for i in present
-            }
+            present = [i for i in members if i in grids[(strat, design)][0].index]
+            interps = {i: _country_interpolator(grids[(strat, design)], i) for i in present}
             total = np.zeros(len(years))
             for i in present:
                 gp = _growth_path(ext0, ssp, i, years) - 1.0

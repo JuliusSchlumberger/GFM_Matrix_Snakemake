@@ -4,7 +4,7 @@ Not restricted to wet tiles. Non-converged tiles are triangles at
 (n_rounds_available, elapsed time so far), not extrapolated.
 
 Usage:
-    python plot_sweep_time_vs_size.py <sweep_budget_dir> <figures_dir> [--epsilon 0.03]
+    python plot_sweep_time_vs_size.py <sweep_budget_dir> --fig-dir <figures_dir> [--epsilon 0.03]
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ def make_figure(df: pd.DataFrame, epsilon: float, out_path: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("sweep_budget_dir")
-    parser.add_argument("figures_dir")
+    parser.add_argument("--fig-dir", required=True)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--epsilon", type=float, default=None, help="default: config simulation.flooding.waterlevel_epsilon_m")
     args = parser.parse_args()
@@ -77,7 +77,7 @@ def main() -> None:
     epsilon = args.epsilon if args.epsilon is not None else float(cfg["simulation"]["flooding"]["waterlevel_epsilon_m"])
 
     sweep_budget_dir = Path(args.sweep_budget_dir)
-    figures_dir = Path(args.figures_dir)
+    figures_dir = Path(args.fig_dir)
     figures_dir.mkdir(parents=True, exist_ok=True)
 
     df = collect(sweep_budget_dir, epsilon)

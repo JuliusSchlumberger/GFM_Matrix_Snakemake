@@ -6,15 +6,18 @@ CSV per tile: an n_outer=0 unblocked baseline, one row per outer iteration
 --outer-convergence-pct), and a status="summary" row splitting flooding removed
 by the static filter alone vs the full outer loop.
 
-Each inner solve runs up to --inner-max-rounds rounds (4 sweeps, Julia's
+Each inner solve runs up to --max-rounds rounds (4 sweeps, Julia's
 Gray-code order) with epsilon early exit; blocking uses
 flood_model.OBSTACLE_BLOCK_FRICTION. Unlike production, dynamic blocking is
 restricted to cells with t < 99 (reached): unreached cells read as
 waterlevel -99 m and a block is never undone. pct_unreached is logged.
 
 Usage:
-    python run_obstacle_coupling_study.py <output_dir> [--config <config.yml>]
-        [--tile-ids id [id ...]] [--max-outer N] [--inner-max-rounds N] [--epsilon M]
+    python run_obstacle_coupling_study.py --out-dir <output_dir> [--config <config.yml>]
+        [--tile-ids id [id ...]] [--max-outer-iterations N] [--max-rounds N] [--epsilon M]
+
+The flag names mirror the config keys (obstacle_coupling.max_outer_iterations,
+flooding.max_rounds).
 """
 import argparse
 import csv
@@ -24,75 +27,25 @@ import time
 import traceback
 from pathlib import Path
 
-import geopandas as gpd
 import numpy as np
-import rasterio
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import load_config  # noqa: E402
 from eikonal import _ORTHANT_ORDER, _dense_sweep  # noqa: E402
-from flood_model import OBSTACLE_BLOCK_FRICTION as BLOCK_FRICTION, effective_dem  # noqa: E402
-from flood_model import _idw_seed_values, coastline_mask, prune_to_coast_connected  # noqa: E402
-from rasters import decode_dem_cm, decode_friction_int16, decode_waterlevel_cm  # noqa: E402
+from flood_model import OBSTACLE_BLOCK_FRICTION as BLOCK_FRICTION  # noqa: E402
+from flood_model import prune_to_coast_connected  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from run_sweep_budget_study import OCEAN_CODE, TILES, load_tile  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-RETURN_PERIOD = "RP100"
-WATERLEVEL_NAME = "SLR_0"
-OCEAN_CODE = 1
 DEFAULT_OUTER_EPSILON_M = 0.03  # = simulation.flooding.waterlevel_epsilon_m
 DEFAULT_MAX_OUTER = 15  # beyond production's default, to find where tiles stop needing more
 DEFAULT_INNER_MAX_ROUNDS = 40  # methods_03 §2: most tiles converge or freeze extent by round 40
-# Not config-driven on purpose; pass --max-outer/--inner-max-rounds to match config.yml.
+# Not config-driven on purpose; pass --max-outer-iterations/--max-rounds to match config.yml.
 
 # t only decreases from the unseeded 99.0 (eikonal.solve_eikonal_dense) once seeds reach a cell.
 UNREACHED_SENTINEL = 99.0
-
-RIVER_CODE = 3  # tile_generation.river_code
-
-# Smoke-test fallback when no --tile-ids are given.
-TILES = [2083, 2514, 1421, 2569, 2858, 2314, 753]
-
-
-def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor: float):
-    """Load a tile's decoded solver inputs and IDW-seeded coastline values."""
-    tile_dir = model_outputs / str(tile_id)
-    scenario = f"{RETURN_PERIOD}_{WATERLEVEL_NAME}"
-    inputs = tile_dir / "inputs"
-
-    with rasterio.open(inputs / "dem.tif") as src:
-        dem = decode_dem_cm(src.read(1))
-        transform = src.transform
-    with rasterio.open(inputs / "mask.tif") as src:
-        # int8: int64 would OOM on the largest tiles.
-        mask = src.read(1).astype(np.int8)
-    with rasterio.open(inputs / "friction.tif") as src:
-        friction = decode_friction_int16(src.read(1))
-    boundaries = gpd.read_file(inputs / f"boundaries_{scenario}.gpkg")
-
-    dem = effective_dem(dem, mask)
-    # decode -> scale -> floor, as in eikonal_runner.
-    friction = friction * friction_scale_factor
-    friction = np.where(friction > 0, friction, friction.dtype.type(0.001))
-    coastline = coastline_mask(mask, ocean_code=OCEAN_CODE, river_code=RIVER_CODE)
-    coastline_rows, coastline_cols = np.nonzero(coastline)
-
-    # Int16 cm-encoded levels. Zero stations would crash in BallTree; fail clearly.
-    station_values = decode_waterlevel_cm(boundaries[WATERLEVEL_NAME].to_numpy())
-    if len(station_values) == 0:
-        raise ValueError(
-            f"tile {tile_id} has zero boundary stations - should have been excluded "
-            "from wet_tiles_selected.txt by run_sweep_budget_study.py"
-        )
-
-    stations_lonlat = np.column_stack(
-        [boundaries.geometry.x.to_numpy(), boundaries.geometry.y.to_numpy()]
-    )
-    initial = _idw_seed_values(
-        coastline_rows, coastline_cols, transform, stations_lonlat, station_values,
-        min(knn, len(station_values)), mask, OCEAN_CODE,
-    )
-    max_waterlevel = float(station_values.max())
-    return dem, mask, friction, coastline, coastline_rows, coastline_cols, initial, max_waterlevel
 
 
 def solve_inner(friction, seed_rows, seed_cols, seed_values, dtype, epsilon, max_rounds):
@@ -189,7 +142,7 @@ def run_tile_trace(
 ) -> list[dict]:
     """Trace the unblocked baseline and each outer iteration; one row per solve."""
     dem, mask, friction, coastline, seed_rows, seed_cols, initial, max_waterlevel = load_tile(
-        tile_id, model_outputs, knn, friction_scale_factor,
+        tile_id, model_outputs, knn, friction_scale_factor, on_no_stations="raise",
     )
     seed_values = -initial
     dtype = friction.dtype
@@ -309,12 +262,15 @@ def build_summary_row(rows: list[dict], tile_id: int) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("out_dir")
+    # allow_abbrev=False: a removed flag that is a prefix of its replacement must be an error.
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter, allow_abbrev=False,
+    )
+    parser.add_argument("--out-dir", required=True)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--tile-ids", type=int, nargs="*", default=None)
-    parser.add_argument("--max-outer", type=int, default=None, help=f"default: {DEFAULT_MAX_OUTER} (production uses config simulation.flooding.obstacle_coupling.max_outer_iterations)")
-    parser.add_argument("--inner-max-rounds", type=int, default=None, help=f"default: {DEFAULT_INNER_MAX_ROUNDS} (production uses config simulation.flooding.max_rounds)")
+    parser.add_argument("--max-outer-iterations", type=int, default=None, help=f"default: {DEFAULT_MAX_OUTER} (production uses config simulation.flooding.obstacle_coupling.max_outer_iterations)")
+    parser.add_argument("--max-rounds", type=int, default=None, help=f"default: {DEFAULT_INNER_MAX_ROUNDS} (production uses config simulation.flooding.max_rounds)")
     parser.add_argument("--epsilon", type=float, default=None, help=f"default: {DEFAULT_OUTER_EPSILON_M} (matches production's own config simulation.flooding.waterlevel_epsilon_m)")
     parser.add_argument("--outer-convergence-pct", type=float, default=None, help="default: config simulation.flooding.obstacle_coupling.outer_convergence_pct")
     args = parser.parse_args()
@@ -328,8 +284,8 @@ def main() -> None:
     flooding_cfg = cfg["simulation"]["flooding"]
     knn = int(flooding_cfg["knn"])
     friction_scale_factor = float(flooding_cfg["friction_scale_factor"])
-    max_outer = args.max_outer if args.max_outer is not None else DEFAULT_MAX_OUTER
-    inner_max_rounds = args.inner_max_rounds if args.inner_max_rounds is not None else DEFAULT_INNER_MAX_ROUNDS
+    max_outer = args.max_outer_iterations if args.max_outer_iterations is not None else DEFAULT_MAX_OUTER
+    inner_max_rounds = args.max_rounds if args.max_rounds is not None else DEFAULT_INNER_MAX_ROUNDS
     epsilon = args.epsilon if args.epsilon is not None else DEFAULT_OUTER_EPSILON_M
     outer_convergence_pct = args.outer_convergence_pct if args.outer_convergence_pct is not None else float(flooding_cfg["obstacle_coupling"]["outer_convergence_pct"])
     print(f"model_outputs={model_outputs}  knn={knn}  friction_scale_factor={friction_scale_factor}  "

@@ -5,7 +5,7 @@ Style after https://github.com/JuliusSchlumberger/Pathways_Analysis_Dashboard
 
 Usage:
     python analysis/plot_custom_pathways.py --csv-ssp2 <figures>/custom_pathways_SSP2.csv \\
-        --csv-ssp5 <figures>/custom_pathways_SSP5.csv [--to-year 2150] [--outdir <figures>]
+        --csv-ssp5 <figures>/custom_pathways_SSP5.csv [--to-year 2150] [--out-dir <figures>]
 """
 
 import argparse
@@ -215,12 +215,12 @@ def make_countries_combined_figure(
 
 
 def main() -> None:
-    """Write the countries and per-SSP continents pathway maps to --outdir."""
+    """Write the countries and per-SSP continents pathway maps to --out-dir."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--csv-ssp2", required=True)
     parser.add_argument("--csv-ssp5", required=True)
     parser.add_argument("--to-year", type=int, default=2150)
-    parser.add_argument("--outdir", required=True)
+    parser.add_argument("--out-dir", required=True)
     parser.add_argument("--dpi", type=int, default=200)
     args = parser.parse_args()
 
@@ -231,7 +231,7 @@ def main() -> None:
             raise SystemExit(f"No rows for ssp={ssp}")
 
     iso_to_name = {v: k for k, v in _build_name_to_iso().items()}
-    out_dir = Path(args.outdir)
+    out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     countries = list(dict.fromkeys(sub_by_ssp["SSP2"].loc[sub_by_ssp["SSP2"]["entity_type"] == "country", "entity"]))

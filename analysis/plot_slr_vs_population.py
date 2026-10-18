@@ -4,7 +4,7 @@ Writes waterfall and scatter figures plus one CSV per SSP (visualization.slr_vs_
 
 Usage:
     python analysis/plot_slr_vs_population.py --config snakemake_workflow/config/config.yml \\
-        --expdir <merged_results>/exposure [--outdir <figures>]
+        --expdir <merged_results>/exposure [--out-dir <figures>]
 """
 
 import argparse
@@ -320,27 +320,27 @@ def _scatter_envelope(ref_by_ssp, mats, slr_mm, gfr, traj, ext, variant, names, 
 
 
 def main() -> None:
-    """Write the decomposition CSVs, waterfalls and scatter figures to --outdir."""
+    """Write the decomposition CSVs, waterfalls and scatter figures to --out-dir."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_baseline_growth_matrix.csv")
-    parser.add_argument("--outdir", default=None)
+    parser.add_argument("--out-dir", default=None)
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    viz = cfg.get("visualization", {})
-    sv = viz.get("slr_vs_population", {})
-    ep = viz.get("extended_pathways", {})
-    ssps = list(sv.get("ssps", ["SSP2", "SSP5"]))
-    n_top = int(sv.get("waterfall_n", 20))
-    min_change = float(sv.get("scatter_min_change", 1e5))
-    n_labels = int(sv.get("scatter_labels", 25))
-    to_year = int(ep.get("to_year", 2150))
+    viz = cfg["visualization"]
+    sv = viz["slr_vs_population"]
+    ep = viz["extended_pathways"]
+    ssps = list(sv["ssps"])
+    n_top = int(sv["waterfall_n"])
+    min_change = float(sv["scatter_min_change"])
+    n_labels = int(sv["scatter_labels"])
+    to_year = int(ep["to_year"])
     variants: dict[str, dict] = ep.get("variants") or {"stabilise": {"mode": "constant"}}
     v0 = next(iter(variants))
-    rcp = viz.get("ssp_rcp_codes", {})
-    dpi = int(viz.get("dpi", 200))
-    out_dir = Path(args.outdir or viz.get("output_dir", f"{cfg['paths']['root']}/figures"))
+    rcp = viz["ssp_rcp_codes"]
+    dpi = int(viz["dpi"])
+    out_dir = Path(args.out_dir or viz["output_dir"])
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
     catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])

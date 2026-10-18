@@ -31,6 +31,8 @@ WATERDEPTH_NODATA_INT16 = 32767
 def decode_waterdepth_cm(path: Path):
     """Decode an int16-cm waterdepth raster to float32 metres, NaN at nodata.
 
+    Only nodata cells become NaN; a stored 0 cm (dry, or below 1 cm) stays 0.0. So NaN
+    does not mean "dry": callers test wetness as ``np.isfinite(d) & (d > threshold)``.
     Returns ``(depth_m, transform, crs, shape)``.
     """
     import numpy as np

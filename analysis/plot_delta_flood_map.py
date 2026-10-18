@@ -1,6 +1,6 @@
 """Map river deltas colored by % of modeled area flooded, one figure per ssp_scenario.
 
-One panel per slr_scenario from compute_delta_flood_extent.py's CSV. Ocean is left
+One panel per waterlevel_name (SLR level) from compute_delta_flood_extent.py's CSV. Ocean is left
 white; water color is reserved for raster masks.
 
 Usage:
@@ -36,18 +36,18 @@ PROTECTED_COLOR = "#8c8c8c"  # FLOPROS protection >= 100 yr, not failed: all lan
 FAILED_EDGE = "#222222"  # a >= 100 yr protection class fails at this SLR
 
 
-def _slr_label(slr_scenario: str) -> str:
-    mm = int(slr_scenario.split("_")[1])
+def _slr_label(waterlevel_name: str) -> str:
+    mm = int(waterlevel_name.split("_")[1])
     return f"SLR +{mm / 1000:.1f} m"
 
 
 def plot_delta_flood_map(df: pd.DataFrame, ssp_scenario: str, out_path: Path) -> None:
-    """Plot one ssp_scenario's delta points, one EqualEarth panel per slr_scenario."""
+    """Plot one ssp_scenario's delta points, one EqualEarth panel per waterlevel_name."""
     sub_ssp = df[df["ssp_scenario"] == ssp_scenario]
-    slr_scenarios = sorted(sub_ssp["slr_scenario"].unique(), key=lambda s: int(s.split("_")[1]))
+    waterlevel_names = sorted(sub_ssp["waterlevel_name"].unique(), key=lambda s: int(s.split("_")[1]))
 
-    ncols = math.ceil(math.sqrt(len(slr_scenarios)))
-    nrows = math.ceil(len(slr_scenarios) / ncols)
+    ncols = math.ceil(math.sqrt(len(waterlevel_names)))
+    nrows = math.ceil(len(waterlevel_names) / ncols)
 
     proj = ccrs.EqualEarth()
     fig, axes = plt.subplots(
@@ -58,8 +58,8 @@ def plot_delta_flood_map(df: pd.DataFrame, ssp_scenario: str, out_path: Path) ->
     axes = axes.ravel().tolist() if hasattr(axes, "ravel") else [axes]
 
     sc = None
-    for ax, slr_scenario, letter in zip(axes, slr_scenarios, string.ascii_lowercase):
-        sub = sub_ssp[(sub_ssp["slr_scenario"] == slr_scenario) & (sub_ssp["n_tiles"] > 0)]
+    for ax, waterlevel_name, letter in zip(axes, waterlevel_names, string.ascii_lowercase):
+        sub = sub_ssp[(sub_ssp["waterlevel_name"] == waterlevel_name) & (sub_ssp["n_tiles"] > 0)]
         status = sub["protection_status"] if "protection_status" in sub.columns else pd.Series("", index=sub.index)
         prot = sub[status == "protected"]
         sub = sub[status != "protected"]
@@ -76,10 +76,10 @@ def plot_delta_flood_map(df: pd.DataFrame, ssp_scenario: str, out_path: Path) ->
         )
         ax.spines["geo"].set_edgecolor(COAST_COLOR)
         ax.spines["geo"].set_linewidth(0.6)
-        ax.text(0.0, 1.06, f"({letter}) {_slr_label(slr_scenario)}", transform=ax.transAxes,
+        ax.text(0.0, 1.06, f"({letter}) {_slr_label(waterlevel_name)}", transform=ax.transAxes,
                 ha="left", va="bottom", fontsize=10, fontweight="bold")
 
-    for ax in axes[len(slr_scenarios):]:
+    for ax in axes[len(waterlevel_names):]:
         ax.axis("off")
 
     cbar = fig.colorbar(sc, ax=axes, fraction=0.02, pad=0.02, shrink=0.8)

@@ -9,7 +9,7 @@ Usage:
         --config snakemake_workflow/config/bangkok_chao_phraya_materialized.yml \\
         --case-polygon-gpkg P:/.../bangkok_chao_phraya/bangkok_chao_phraya_domain.gpkg \\
         --case-polygon-layer bangkok_tile \\
-        --outdir P:/.../bangkok_chao_phraya/merged_results/exposure
+        --out-dir P:/.../bangkok_chao_phraya/merged_results/exposure
 """
 
 import argparse
@@ -22,8 +22,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import _read_band, _read_band_and_transform, _round_val  # noqa: E402
-from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
+from _common import _read_band, _read_band_and_transform, _round_val, discover_chunk_ids  # noqa: E402
+from config_utils import atomic_write, load_config, merged_waterlevel_names, retry_transient_io, return_period_label  # noqa: E402
 from exposure_analysis import _safe  # noqa: E402
 from pipeline_plots import pixel_area_km2_grid  # noqa: E402
 from rasters import polygon_domain_mask  # noqa: E402
@@ -37,35 +37,26 @@ def main() -> None:
     parser.add_argument("--config", default=_default_cfg)
     parser.add_argument("--case-polygon-gpkg", required=True)
     parser.add_argument("--case-polygon-layer", default="bangkok_tile")
-    parser.add_argument("--outdir", default=None, help="default: {merged_outputs}/exposure")
+    parser.add_argument("--out-dir", default=None, help="default: {merged_outputs}/exposure")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
     bc = cfg["boundary_conditions"]
     return_periods = bc["return_periods"]
-    slr_scenarios = merged_slr_scenarios(bc, cfg["adaptation"])
+    slr_scenarios = merged_waterlevel_names(bc, cfg["adaptation"])
 
     merged_dir = Path(cfg["postprocessing"]["merged_outputs"])
     flood_frac_dir = merged_dir / "chunks" / "flood_fraction"
     chunks_dir = merged_dir / "chunks"
-    out_dir = Path(args.outdir) if args.outdir else merged_dir / "exposure"
+    out_dir = Path(args.out_dir) if args.out_dir else merged_dir / "exposure"
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
     case_poly = gpd.read_file(args.case_polygon_gpkg, layer=args.case_polygon_layer)
 
-    all_chunk_ids = sorted(set(
-        p.stem.split("_RP")[0].replace("flood_fraction_", "")
-        for p in flood_frac_dir.glob("flood_fraction_*.tif")
-    ))
+    chunk_ids, all_chunk_ids = discover_chunk_ids(flood_frac_dir, chunks_dir)
     if not all_chunk_ids:
         print(f"ERROR: no flood fraction files in {flood_frac_dir} - run the Snakemake postprocess target first.")
         sys.exit(1)
-
-    chunk_ids = [
-        cid for cid in all_chunk_ids
-        if (chunks_dir / f"exposure_population_grid_{cid}.tif").exists()
-        and (chunks_dir / f"exposure_population_grid_{cid}.tif").stat().st_size > 0
-    ]
     if not chunk_ids:
         print("ERROR: no population chunk files found - run the Snakemake postprocess target first.")
         sys.exit(1)
@@ -111,7 +102,7 @@ def main() -> None:
 
     rows = [
         {
-            "return_period": rp, "waterlevel_name": slr,
+            "return_period": return_period_label(rp), "waterlevel_name": slr,
             "flooded_km2": _round_val(v["flooded_km2"]),
             "flooded_pct_of_polygon": _round_val(100.0 * v["flooded_km2"] / polygon_area_km2),
             "exposed_population": _round_val(v["exposed_population"]),

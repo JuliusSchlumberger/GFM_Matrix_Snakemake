@@ -24,14 +24,11 @@ from validation import (  # noqa: E402
     wet_mask_from_fraction,
 )
 
-_FAILURES: list[str] = []
-
-
 def _check(name: str, condition: bool, detail: str = "") -> None:
+    """Print a PASS/FAIL line and assert, so pytest fails on a wrong value."""
     status = "PASS" if condition else "FAIL"
     print(f"  [{status}] {name}" + (f" - {detail}" if detail and not condition else ""))
-    if not condition:
-        _FAILURES.append(name)
+    assert condition, name + (f" - {detail}" if detail else "")
 
 
 def _close(a: float, b: float, tol: float = 1e-9) -> bool:
@@ -166,19 +163,30 @@ def test_model_domain_mask() -> None:
            list(domain) == [False, True, True, False], f"got {domain}")
 
 
+_TESTS = (
+    test_fraction_full_cell_aligned,
+    test_fraction_partial_cell_supersample_aligned,
+    test_confusion_and_metrics_closed_form,
+    test_confusion_soft_reduces_to_hard_on_binary_fraction,
+    test_confusion_soft_partial_coverage_closed_form,
+    test_area_weighted_matches_pixel_area_grid,
+    test_wet_mask_threshold,
+    test_model_domain_mask,
+)
+
+
 def main() -> None:
-    test_fraction_full_cell_aligned()
-    test_fraction_partial_cell_supersample_aligned()
-    test_confusion_and_metrics_closed_form()
-    test_confusion_soft_reduces_to_hard_on_binary_fraction()
-    test_confusion_soft_partial_coverage_closed_form()
-    test_area_weighted_matches_pixel_area_grid()
-    test_wet_mask_threshold()
-    test_model_domain_mask()
+    """Run every test in script mode; a failed check ends only its own test."""
+    failures: list[str] = []
+    for test in _TESTS:
+        try:
+            test()
+        except AssertionError as exc:
+            failures.append(f"{test.__name__}: {exc}")
 
     print()
-    if _FAILURES:
-        print(f"FAILED: {len(_FAILURES)} check(s): {', '.join(_FAILURES)}")
+    if failures:
+        print(f"FAILED: {len(failures)} test(s): {'; '.join(failures)}")
         sys.exit(1)
     print("All checks passed.")
 

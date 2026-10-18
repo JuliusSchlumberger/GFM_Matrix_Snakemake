@@ -169,7 +169,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tile-id", required=True)
     parser.add_argument("--config", required=True, help="config.yml or the base dir's resolved_config.yml")
-    parser.add_argument("--base-dir-name", required=True)
+    parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
     parser.add_argument("--friction-scale-factors", type=float, nargs="+", default=list(FRICTION_SCALE_FACTORS))
     parser.add_argument("--models", nargs="+", choices=["bathtub", "eikonal"], default=["bathtub", "eikonal"])
     parser.add_argument("--overwrite", action="store_true", help="redo outputs that already exist")
@@ -179,7 +179,7 @@ def main() -> None:
         config = yaml.safe_load(f)
     root = read_root(Path(args.config))
     flooding = config["simulation"]["flooding"]
-    oc = flooding.get("obstacle_coupling", {})
+    oc = flooding["obstacle_coupling"]
     river_code = int(config["tile_generation"]["river_code"])
     tile_dir = root / args.base_dir_name / args.tile_id
     out_dir = tile_dir / "outputs"
@@ -219,9 +219,9 @@ def main() -> None:
             solver_dem, solver_mask, base_friction * np.float32(fsf), transform,
             seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
             ocean_code=OCEAN_CODE, river_code=river_code,
-            obstacle_coupling=bool(oc.get("enabled", False)),
-            max_outer_iterations=int(oc.get("max_outer_iterations", 3)),
-            outer_convergence_pct=float(oc.get("outer_convergence_pct", 0.01)),
+            obstacle_coupling=bool(oc["enabled"]),
+            max_outer_iterations=int(oc["max_outer_iterations"]),
+            outer_convergence_pct=float(oc["outer_convergence_pct"]),
             max_rounds=int(flooding["max_rounds"]),
             waterlevel_epsilon_m=float(flooding["waterlevel_epsilon_m"]),
         )

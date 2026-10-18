@@ -37,7 +37,7 @@ _RP_OUTER = "RP1000"
 
 
 def main() -> None:
-    """Score the FZ2 band and write england_fz2_band_result.csv."""
+    """Score the FZ2 band and write metrics_GBR_england_ea_floodzone2_sea_RP100-RP1000_{SLR}.csv."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     args = parser.parse_args()
@@ -59,11 +59,9 @@ def main() -> None:
     iso_lookup = v.load_iso_lookup(gfm_catalog, val_cfg["iso_lookup_source"])
 
     spec = v.load_benchmark_spec(bench_catalog, _BENCHMARK_KEY)
-    full_gdf = v.load_benchmark_full(bench_catalog, spec)
+    full_gdf = v.load_benchmark_4326(bench_catalog, spec)
     if full_gdf.empty:
         sys.exit(f"{_BENCHMARK_KEY}: empty after filtering - nothing to score.")
-    if full_gdf.crs is None or full_gdf.crs.to_epsg() != 4326:
-        full_gdf = full_gdf.to_crs(4326)
     full_sindex = full_gdf.sindex
 
     region, region_bbox = next(iter(spec.regions.items()))
@@ -105,16 +103,11 @@ def main() -> None:
             chunk_bench_gdf, out_transform, "EPSG:4326", depth_outer.shape, supersample=supersample,
         )
 
-        water_mask = v.read_permanent_water_mask(
-            gfm_catalog, permanent_water_source, permanent_water_codes, bbox, out_transform, depth_outer.shape,
-        )
-        not_water = ~water_mask
-        in_country = v.read_country_mask(
-            gfm_catalog, geogunit_source, iso_lookup, _COUNTRY_ISO, bbox, out_transform, depth_outer.shape,
+        not_water, domain_mask = v.window_scoring_domain(
+            gfm_catalog, permanent_water_source, permanent_water_codes, geogunit_source,
+            iso_lookup, _COUNTRY_ISO, bbox, out_transform, model_domain,
             geogunit_ids=spec.geogunit_ids,
         )
-        not_water = not_water & in_country
-        domain_mask = model_domain & not_water
 
         wet_outer = model_domain & (depth_outer > primary_threshold_m) & not_water
         wet_inner = model_domain & (depth_inner > primary_threshold_m) & not_water
@@ -137,17 +130,23 @@ def main() -> None:
         f"  HR={metrics['HR']:.3f}  FAR={metrics['FAR']:.3f}  CSI={metrics['CSI']:.3f}  bias={metrics['bias']:.3f}"
     )
 
-    out_dir = Path(val_cfg["output_dir"]) / _COUNTRY_ISO
-    retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
-    out_path = out_dir / "england_fz2_band_result.csv"
     row = {
         "benchmark_key": _BENCHMARK_KEY, "region": region,
         "band_inner_rp": _RP_INNER, "band_outer_rp": _RP_OUTER,
         "model_band_km2": model_band_km2, "benchmark_wet_km2": benchmark_wet_km2,
         "HR": metrics["HR"], "FAR": metrics["FAR"], "CSI": metrics["CSI"], "bias": metrics["bias"],
     }
+    write_result(row, val_cfg["output_dir"], slr)
+
+
+def write_result(row: dict, output_dir: str | Path, slr: str) -> Path:
+    """Write the band row to its standalone metrics CSV; the RP part is "RP100-RP1000"."""
+    out_path = v.standalone_metrics_path(output_dir, _COUNTRY_ISO, _BENCHMARK_KEY,
+                                         f"{row['band_inner_rp']}-{row['band_outer_rp']}", slr)
+    retry_transient_io(out_path.parent.mkdir, parents=True, exist_ok=True)
     atomic_write(out_path, lambda f: pd.DataFrame([row]).to_csv(f, index=False), mode="w", encoding="utf-8", newline="")
     print(f"  wrote {out_path}")
+    return out_path
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@
 # Sibling of deltas_ssp126.yml - see that file's header for the full
 # rationale (delta tile selection, friction_scale_factor=9.0, isolation
 # policy, the Volga/Caspian exclusion). ssp245 happens to be production's
-# own default boundary_conditions.slr_scenario, but this run still builds
+# own default boundary_conditions.slr_projection, but this run still builds
 # its own fresh, isolated WL_scenarios rather than reusing production's,
 # per explicit user decision.
 
@@ -13,7 +13,7 @@ tile_grid:
 
 simulation:
   flooding:
-    friction_scale_factor: 9.0
+    friction_scale_factor: 9.0  # the value its existing outputs were computed with (production config.yml: 12.0)
     # Reverted to production's own default (4) - see deltas_ssp126.yml's
     # own identical note for the full rationale.
   model_outputs: "{root}/deltas_floodmaps/ssp245/model_outputs"
@@ -25,7 +25,7 @@ visualization:
   output_dir: "{root}/deltas_floodmaps/ssp245/figures"
 
 boundary_conditions:
-  slr_scenario: "ssp245"
+  slr_projection: "ssp245"
   waterlevel_nc_dir: "{root}/deltas_floodmaps/ssp245/WL_scenarios"
   return_periods: [100]
 

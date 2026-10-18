@@ -6,7 +6,7 @@ visualization.ssp_rcp_codes, and writes columns {SSP}_p17/_p50/_p83 indexed by y
 Usage:
     python analysis/extract_slr_trajectories.py \\
         [--config snakemake_workflow/config/config.yml] \\
-        [--output D:/GFM/processed_inputs/slr_trajectories_global_median.csv]
+        [--out D:/GFM/processed_inputs/slr_trajectories_global_median.csv]
 """
 
 import argparse
@@ -62,23 +62,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=_default_cfg, help=f"path to config.yml (default: {_default_cfg})")
     parser.add_argument(
-        "--output", default=None,
+        "--out", default=None,
         help="output CSV path (default: visualization.slr_trajectories_csv from config)",
     )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
 
-    viz = cfg.get("visualization", {})
+    viz = cfg["visualization"]
 
-    if args.output is None:
-        args.output = viz.get(
-            "slr_trajectories_csv",
-            f"{cfg['paths']['root']}/processed_inputs/slr_trajectories_global_median.csv",
-        )
-    ssp_rcp_codes: dict[str, int] = viz.get("ssp_rcp_codes", {
-        "SSP1": 126, "SSP2": 245, "SSP5": 585,
-    })
+    if args.out is None:
+        args.out = viz["slr_trajectories_csv"]
+    ssp_rcp_codes: dict[str, int] = viz["ssp_rcp_codes"]
     catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
     slr_csv_dir = Path(catalog.get_source("ipcc_ar6_slr_wg1_csv").path)
 
@@ -105,7 +100,7 @@ def main() -> None:
     result.index.name = "year"
     result = result.sort_index()
 
-    out_path = Path(args.output)
+    out_path = Path(args.out)
     retry_transient_io(out_path.parent.mkdir, parents=True, exist_ok=True)
     result.to_csv(out_path)
     print(f"\nWritten: {out_path}")

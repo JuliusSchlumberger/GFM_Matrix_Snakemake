@@ -6,7 +6,7 @@ of existing per-chunk files, so a wide thread pool saturates useful concurrency.
 
 Usage:
     python generate_hpc_flood_totals_and_plots_job.py [--config path/to/config.yml]
-        [--partition 24vcpu] [--cpus 24] [--mem 32G] [--time 1-00:00:00]
+        [--partition 24vcpu] [--cpus-per-task 24] [--mem 32G] [--time 1-00:00:00]
     bash <printed submit command>
 """
 
@@ -18,7 +18,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from config_utils import atomic_write, load_config, retry_transient_io  # noqa: E402
-from hpc_common import _account_line, _stage_configfile_lines  # noqa: E402
+from hpc_common import _stage_configfile_lines, sbatch_header  # noqa: E402
 
 
 def write_flood_totals_and_plots_job(
@@ -52,30 +52,21 @@ def write_flood_totals_and_plots_job(
 
     name = "flood_totals_and_plots"
     lines = [
-        "#!/bin/bash",
-        f"#SBATCH --job-name={name}",
-        f"#SBATCH --partition={sbatch_cfg['partition']}",
-        *_account_line(sbatch_cfg),
-        f"#SBATCH --time={sbatch_cfg['time']}",
-        f"#SBATCH --mem={sbatch_cfg['mem']}",
-        f"#SBATCH --cpus-per-task={sbatch_cfg['cpus_per_task']}",
-        f"#SBATCH --output={linux_jobs_dir}/logs/{name}_%j.out",
-        f"#SBATCH --error={linux_jobs_dir}/logs/{name}_%j.err",
-        "",
-        "set -euo pipefail",
-        sbatch_cfg["env_activate_cmd"],
-        "",
+        *sbatch_header(name, sbatch_cfg, f"{linux_jobs_dir}/logs"),
         *_stage_configfile_lines(),
         "",
         f'cd "{linux_code_root}"',
         'echo "=== compute_flood_totals.py ==="',
         f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
         "",
+        # Own checked line: inside an argument, a failing $(...) would go unnoticed.
+        (
+            'OUTDIR=$(python -c \'import yaml,sys; c=yaml.safe_load(open(sys.argv[1], encoding="utf-8")); '
+            'print(c["postprocessing"]["merged_outputs"] + "/exposure")\' "$LOCAL_CONFIGFILE") || exit 1'
+        ),
         (
             f'python analysis/compute_flood_totals.py --config "$LOCAL_CONFIGFILE" '
-            f'--outdir "$(python -c \'import yaml,sys; c=yaml.safe_load(open(sys.argv[1])); '
-            f'print(c["postprocessing"]["merged_outputs"] + "/exposure")\' "$LOCAL_CONFIGFILE")" '
-            f'--workers {sbatch_cfg["cpus_per_task"]}'
+            f'--out-dir "$OUTDIR" --workers {sbatch_cfg["cpus_per_task"]}'
         ),
         "",
         'echo "=== run_analysis.py --only-plots (flood totals already done above) ==="',
@@ -91,11 +82,14 @@ def write_flood_totals_and_plots_job(
 
 def main() -> None:
     """Write the flood-totals-and-plots sbatch script and print the submit command."""
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    # allow_abbrev=False: a removed flag that is a prefix of its replacement must be an error.
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter, allow_abbrev=False,
+    )
     default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
     parser.add_argument("--config", default=str(default_config))
     parser.add_argument("--partition", default="24vcpu")
-    parser.add_argument("--cpus", type=int, default=24)
+    parser.add_argument("--cpus-per-task", type=int, default=24)
     parser.add_argument("--mem", default="32G", help="a guess at this partition's safe ceiling - "
                          "confirm against `sinfo -N -o \"%%N %%P %%m %%c\"` before relying on it "
                          "(see hpc.sbatch.mem's own comment on 1vcpu's real-vs-nominal gap)")
@@ -107,7 +101,7 @@ def main() -> None:
     linux_config = load_config(config_path, extra_override=config_path.parent / "config_hpc.yml")
 
     script_path, linux_script_path = write_flood_totals_and_plots_job(
-        local_config, linux_config, args.partition, args.cpus, args.mem, args.time,
+        local_config, linux_config, args.partition, args.cpus_per_task, args.mem, args.time,
     )
     print(f"Wrote {script_path}")
     print(f"Submit on Hydrax with: sbatch {linux_script_path}")

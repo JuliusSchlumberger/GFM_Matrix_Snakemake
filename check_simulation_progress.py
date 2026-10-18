@@ -9,12 +9,12 @@ Usage:
 
 import argparse
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 from eikonal_runner import oom_marker_path  # noqa: E402
-from config_utils import load_config, merged_slr_scenarios  # noqa: E402
+from config_utils import load_config, merged_waterlevel_names  # noqa: E402
+from progress_report import progress_bar, run_report  # noqa: E402
 from tiles import load_tile_grid  # noqa: E402
 
 
@@ -44,17 +44,12 @@ def _count_progress(model_outputs: Path, tile_ids_by_wave: dict[int, list[int]],
     return per_wave
 
 
-def _bar(done: int, expected: int, bar_len: int = 30) -> str:
-    filled = int(bar_len * done / expected) if expected else 0
-    return "#" * filled + "-" * (bar_len - filled)
-
-
 def _print_report(per_wave: dict) -> None:
     for wave, s in per_wave.items():
         pct = 100 * s["n_files_done"] / s["n_files_expected"] if s["n_files_expected"] else 0
         oom_note = f", {s['n_oom']} OOM" if s["n_oom"] else ""
         print(
-            f"  wave {wave:<3} [{_bar(s['n_files_done'], s['n_files_expected'])}] "
+            f"  wave {wave:<3} [{progress_bar(s['n_files_done'], s['n_files_expected'])}] "
             f"{s['n_files_done']:>6}/{s['n_files_expected']:<6} ({pct:5.1f}%)  "
             f"tiles complete: {s['n_tiles_complete']:>4}/{s['n_tiles']:<4}{oom_note}"
         )
@@ -67,7 +62,7 @@ def _print_report(per_wave: dict) -> None:
     pct = 100 * total_files_done / total_files_expected if total_files_expected else 0
     oom_note = f", {total_oom} OOM" if total_oom else ""
     print(
-        f"\n  {'TOTAL':<8} [{_bar(total_files_done, total_files_expected)}] "
+        f"\n  {'TOTAL':<8} [{progress_bar(total_files_done, total_files_expected)}] "
         f"{total_files_done:>6}/{total_files_expected:<6} ({pct:5.1f}%)  "
         f"tiles complete: {total_tiles_complete:>4}/{total_tiles:<4}{oom_note}"
     )
@@ -90,21 +85,10 @@ def main() -> None:
     model_outputs = Path(cfg["simulation"]["model_outputs"])
 
     bc_cfg = cfg["boundary_conditions"]
-    waterlevel_names = merged_slr_scenarios(bc_cfg, cfg["adaptation"])
+    waterlevel_names = merged_waterlevel_names(bc_cfg, cfg["adaptation"])
     n_scenarios_per_tile = len(bc_cfg["return_periods"]) * len(waterlevel_names)
 
-    if args.watch:
-        try:
-            while True:
-                print(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} ===")
-                per_wave = _count_progress(model_outputs, tile_ids_by_wave, n_scenarios_per_tile)
-                _print_report(per_wave)
-                time.sleep(args.watch)
-        except KeyboardInterrupt:
-            print("\nStopped.")
-    else:
-        per_wave = _count_progress(model_outputs, tile_ids_by_wave, n_scenarios_per_tile)
-        _print_report(per_wave)
+    run_report(lambda: _print_report(_count_progress(model_outputs, tile_ids_by_wave, n_scenarios_per_tile)), args.watch)
 
 
 if __name__ == "__main__":

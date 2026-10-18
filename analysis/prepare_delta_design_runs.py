@@ -27,6 +27,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import yaml
+from hydromt.exceptions import NoDataException
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
@@ -42,11 +43,15 @@ _CONFIG_DIR = _REPO_ROOT / "snakemake_workflow" / "config"
 
 
 def design_rps_for_delta(delta_geometry, catalog, rp_by_geogunit: pd.Series, default_rp: float) -> list[int]:
-    """Snapped design RPs (>= threshold) of the FLOPROS units covering the delta polygon."""
+    """Snapped design RPs (>= threshold) of the FLOPROS units covering the delta polygon.
+
+    Empty when the geogunit raster has no data there (hydromt NoDataException); any other
+    read error raises after the transient-IO retries.
+    """
     try:
-        geo = catalog.get_rasterdataset(GEOGUNIT_SOURCE, bbox=list(delta_geometry.bounds),
-                                        variables=["Geogunits"]).squeeze(drop=True)
-    except Exception:  # noqa: BLE001
+        geo = retry_transient_io(catalog.get_rasterdataset, GEOGUNIT_SOURCE, bbox=list(delta_geometry.bounds),
+                                 variables=["Geogunits"]).squeeze(drop=True)
+    except NoDataException:
         return []
     arr = np.nan_to_num(geo.values.astype("float64"), nan=-1)
     inside = polygon_domain_mask(gpd.GeoDataFrame(geometry=[delta_geometry], crs="EPSG:4326"),
@@ -83,7 +88,7 @@ def main() -> None:
     base = yaml.safe_load(open(args.base_config, encoding="utf-8"))
     cfg = load_config(args.base_config)
     prod = load_config(_CONFIG_DIR / "config.yml")
-    default_rp = float(prod.get("protection", {}).get("default_rp", 5.0))
+    default_rp = float(prod["protection"]["default_rp"])
     catalog = get_data_catalog(_REPO_ROOT / prod["paths"]["hydromt_data_catalog"], root=prod["paths"]["root"])
     flopros = catalog.get_dataframe("flopros_protection_standards")
     rp_by_geogunit = flopros["Coastal"].fillna(flopros["Riverine"]).fillna(default_rp)
@@ -123,11 +128,11 @@ def main() -> None:
     design["tile_grid"] = {**base["tile_grid"], "path": base["tile_grid"]["path"].replace(
         "deltas_global_tiles.gpkg", "deltas_design_tiles.gpkg")}
     design["boundary_conditions"] = {**base["boundary_conditions"], "return_periods": rps_to_run,
-                                     "slr_scenarios": ["SLR_0"],
+                                     "waterlevel_names": ["SLR_0"],
                                      "waterlevel_nc_dir": "{root}/deltas_floodmaps/design/WL_scenarios"}
     design["simulation"] = {**base["simulation"], "model_outputs": "{root}/deltas_floodmaps/design/model_outputs"}
     design["postprocessing"] = {**base["postprocessing"], "merged_outputs": "{root}/deltas_floodmaps/design/merged_results"}
-    design["hpc"] = {**base.get("hpc", {}), "jobs_dir": "{root}/deltas_floodmaps/design/model_outputs/hpc_jobs"}
+    design["hpc"] = {**base["hpc"], "jobs_dir": "{root}/deltas_floodmaps/design/model_outputs/hpc_jobs"}
     if "visualization" in base:
         design["visualization"] = {**base["visualization"], "output_dir": "{root}/deltas_floodmaps/design/figures"}
     out_cfg = _CONFIG_DIR / "deltas_design_materialized.yml"

@@ -15,7 +15,7 @@ model-minus-CoSMoS depth difference (m), plus the metrics CSV, to --out-dir
 (default {validation.output_dir}/USA). Plot them with plot_sf_bay.py.
 
 Usage:
-    python validation/validate_sf_bay.py [--config path/to/config.yml] [--out-dir DIR] [--out-csv path.csv]
+    python validation/validate_sf_bay.py [--config path/to/config.yml] [--out-dir DIR] [--out path.csv]
 """
 
 from __future__ import annotations
@@ -34,6 +34,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
+import validation as v  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _chunks import _chunks_overlapping_bbox, _mosaic_read  # noqa: E402
@@ -119,23 +120,12 @@ def _read_benchmark_full(path: Path):
 
 
 def _permanent_water_on_grid(gfm_catalog, permanent_water_source, permanent_water_codes, bbox, out_transform, out_shape, out_crs):
-    """Like validation.read_permanent_water_mask, which hardcodes EPSG:4326, for any CRS."""
-    try:
-        lu_da = retry_transient_io(gfm_catalog.get_rasterdataset, permanent_water_source, bbox=bbox).squeeze(drop=True)
-    except Exception:
-        return np.zeros(out_shape, dtype=bool)
-    if lu_da is None or lu_da.size == 0:
-        return np.zeros(out_shape, dtype=bool)
-    lu_arr = lu_da.values.astype("float32")
-    lu_nodata = lu_da.raster.nodata
-    dst = np.full(out_shape, -1.0, dtype="float32")
-    reproject(
-        source=lu_arr, destination=dst,
-        src_transform=lu_da.raster.transform, src_crs=lu_da.raster.crs,
-        dst_transform=out_transform, dst_crs=out_crs,
-        src_nodata=lu_nodata, dst_nodata=-1.0,
-        resampling=Resampling.nearest,
+    """Like validation.read_permanent_water_mask, which hardcodes EPSG:4326, for any CRS (float32, lean mask)."""
+    dst = v._read_categorical_on_grid(
+        gfm_catalog, permanent_water_source, bbox, out_transform, out_shape, dst_crs=out_crs, dtype="float32",
     )
+    if dst is None:
+        return np.zeros(out_shape, dtype=bool)
     return _permanent_water_mask_lean(dst, tuple(permanent_water_codes))
 
 
@@ -145,11 +135,10 @@ def _confusion_metrics(model_wet: np.ndarray, bench_wet: np.ndarray, domain: np.
     fp = float((model_wet & ~bench_wet & d).sum())
     fn = float((~model_wet & bench_wet & d).sum())
     tn = float((~model_wet & ~bench_wet & d).sum())
-    ht = tp / (tp + fn) if (tp + fn) > 0 else np.nan
-    far = fp / (tp + fp) if (tp + fp) > 0 else np.nan
-    csi = tp / (tp + fp + fn) if (tp + fp + fn) > 0 else np.nan
-    bias = (tp + fp) / (tp + fn) if (tp + fn) > 0 else np.nan
-    return {"n_domain_px": int(d.sum()), "tp": tp, "fp": fp, "fn": fn, "tn": tn, "HT": ht, "FAR": far, "CSI": csi, "bias": bias}
+    m = v.metrics_from_counts(tp, fp, fn, tn)
+    # Output column is HT (hit rate); validation.py calls it HR.
+    return {"n_domain_px": int(d.sum()), "tp": tp, "fp": fp, "fn": fn, "tn": tn,
+            "HT": m["HR"], "FAR": m["FAR"], "CSI": m["CSI"], "bias": m["bias"]}
 
 
 def _depth_error_metrics(model_depth: np.ndarray, bench_depth: np.ndarray, domain: np.ndarray, bench_wet: np.ndarray) -> dict:
@@ -252,11 +241,11 @@ def validate_sf_bay(config_path: str, threshold_m: float | None = None, out_dir:
 
 
 def main() -> None:
-    """Print the SF Bay results; write rasters + metrics to --out-dir, optionally --out-csv."""
+    """Print the SF Bay results; write rasters + metrics to --out-dir, optionally --out."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--out-dir", default=None, help="default: {validation.output_dir}/USA")
-    parser.add_argument("--out-csv", default=None)
+    parser.add_argument("--out", default=None)
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir) if args.out_dir else Path(load_config(Path(args.config))["validation"]["output_dir"]) / "USA"
@@ -272,9 +261,9 @@ def main() -> None:
     df.to_csv(metrics_path)
     print(f"\nwrote {metrics_path}")
 
-    if args.out_csv:
-        df.to_csv(args.out_csv)
-        print(f"\nwrote {args.out_csv}")
+    if args.out:
+        df.to_csv(args.out)
+        print(f"\nwrote {args.out}")
 
 
 if __name__ == "__main__":

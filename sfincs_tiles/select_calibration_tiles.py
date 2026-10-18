@@ -31,6 +31,7 @@ import rasterio  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gfm_config import read_root  # noqa: E402
+from retry_io import retry_transient_io  # noqa: E402
 
 TILE_GRID = "processed_inputs/mask/domain_tiles_global.gpkg"
 OCEAN_CODE, RIVER_CODE = 1, 3  # config tile_generation.ocean_code / river_code
@@ -98,10 +99,10 @@ def screen_tile(tile_dir: Path) -> dict:
     for f in ("mask.tif", "tile_geometry.gpkg", "boundaries_RP100_SLR_0.gpkg"):
         if not (inputs / f).exists():
             return {"tile_id": tid, "ok": False, "reason": f"no model_outputs inputs/{f}"}
-    with rasterio.open(inputs / "mask.tif") as src:
+    with retry_transient_io(rasterio.open, inputs / "mask.tif") as src:
         mask = src.read(1)
         b = src.bounds
-    n_st = len(gpd.read_file(inputs / "boundaries_RP100_SLR_0.gpkg"))
+    n_st = len(retry_transient_io(gpd.read_file, inputs / "boundaries_RP100_SLR_0.gpkg"))
     rec = {"tile_id": tid, "lon": (b.left + b.right) / 2, "lat": (b.bottom + b.top) / 2, "n_cells": int(mask.size),
            "ocean_frac": float(np.mean(mask == OCEAN_CODE)), "river_frac": float(np.mean(mask == RIVER_CODE)),
            "n_boundary_points": n_st}
@@ -114,6 +115,8 @@ def cmd_screen(args, root: Path, base: Path) -> None:
     """Screen one shard's tiles and write the ids that passed.
 
     Results are cached in candidates/screen/{tile}.json (reused unless --overwrite).
+    A tile whose screen raised is screened out for this run but not cached, so a
+    rerun screens it again.
     """
     out = base / "candidates" / "screen"
     out.mkdir(parents=True, exist_ok=True)
@@ -128,7 +131,9 @@ def cmd_screen(args, root: Path, base: Path) -> None:
                 rec = screen_tile(root / "model_outputs" / tid)
             except Exception as e:  # noqa: BLE001 - a broken tile is screened out, not fatal
                 rec = {"tile_id": int(tid), "ok": False, "reason": f"{type(e).__name__}: {e}"[:300]}
-            p.write_text(json.dumps(rec))
+                print(f"  tile {tid}: screen failed, not cached ({rec['reason']})", flush=True)
+            else:
+                p.write_text(json.dumps(rec))
         if rec["ok"]:
             passed.append(tid)
         if k % 50 == 0 or k == len(ids):

@@ -18,7 +18,7 @@
 # fallback - own WL_scenarios, own merged_results/figures) - built fresh
 # rather than reusing any existing production boundary-condition data, per
 # explicit user decision, even though ssp245 happens to be production's
-# own default slr_scenario.
+# own default slr_projection.
 #
 # Layered on top of config.yml + config_local.yml via
 # src/config_utils.py::materialize_config.
@@ -28,7 +28,7 @@ tile_grid:
 
 simulation:
   flooding:
-    friction_scale_factor: 9.0
+    friction_scale_factor: 9.0  # the value its existing outputs were computed with (production config.yml: 12.0)
     # Reverted to production's own default (4), 2026-10 - briefly set to 5
     # based on a sample-bounded production-run byproduct signal, before the
     # real obstacle-coupling calibration study (calibration_500_tiles,
@@ -44,12 +44,12 @@ visualization:
   output_dir: "{root}/deltas_floodmaps/ssp126/figures"
 
 boundary_conditions:
-  slr_scenario: "ssp126"
+  slr_projection: "ssp126"
   waterlevel_nc_dir: "{root}/deltas_floodmaps/ssp126/WL_scenarios"
   return_periods: [100]
 
-# REQUIRED, not decorative - merged_slr_scenarios() unions this with
-# boundary_conditions.slr_scenarios; leaving it unset would silently pull
+# REQUIRED, not decorative - merged_waterlevel_names() unions this with
+# boundary_conditions.waterlevel_names; leaving it unset would silently pull
 # in config.yml's own SLR_500 adaptation intensity.
 adaptation:
   slr_intensities: []

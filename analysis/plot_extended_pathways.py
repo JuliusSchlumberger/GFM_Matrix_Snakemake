@@ -8,7 +8,7 @@ ember_extended_pathways.png only with extended_pathways.ember: true.
 
 Usage:
     python analysis/plot_extended_pathways.py --config snakemake_workflow/config/config.yml \\
-        --expdir <merged_results>/exposure [--outdir <figures>]
+        --expdir <merged_results>/exposure [--out-dir <figures>]
 """
 
 import argparse
@@ -57,27 +57,27 @@ def _strategy_name(label: str) -> str:
 
 
 def main() -> None:
-    """Write extended_pathways.csv and the extended-pathway figures to --outdir."""
+    """Write extended_pathways.csv and the extended-pathway figures to --out-dir."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_*_growth_matrix.csv files")
-    parser.add_argument("--outdir", default=None)
+    parser.add_argument("--out-dir", default=None)
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    viz = cfg.get("visualization", {})
-    ep = viz.get("extended_pathways", {})
-    to_year = int(ep.get("to_year", 2150))
-    ssps = list(ep.get("ssps", ["SSP2", "SSP5"]))
+    viz = cfg["visualization"]
+    ep = viz["extended_pathways"]
+    to_year = int(ep["to_year"])
+    ssps = list(ep["ssps"])
     variants: dict[str, dict] = ep.get("variants") or {"stabilise": {"mode": "constant"}}
-    labels = [l for l in ep.get("strategies", ["baseline"])
+    labels = [l for l in ep["strategies"]
               if (Path(args.expdir) / f"exposure_{l}_growth_matrix.csv").exists()]
-    out_dir = Path(args.outdir or viz.get("output_dir", f"{cfg['paths']['root']}/figures"))
+    out_dir = Path(args.out_dir or viz["output_dir"])
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
-    s_colors = viz.get("ssp_colors", {})
-    m_colors = viz.get("measure_colors", {})
-    rcp = viz.get("ssp_rcp_codes", {})
-    dpi = int(viz.get("dpi", 200))
+    s_colors = viz["ssp_colors"]
+    m_colors = viz["measure_colors"]
+    rcp = viz["ssp_rcp_codes"]
+    dpi = int(viz["dpi"])
 
     catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
     growth_df = load_ssp_growth_factors(Path(catalog.get_source("ssp_population_growth_factors").path))
@@ -114,7 +114,7 @@ def main() -> None:
     var_style = {v: VARIANT_STYLES[k % len(VARIANT_STYLES)] for k, v in enumerate(variants)}
     i_end = int(LAST_SSP_YEAR - years[0])
 
-    countries = [c for c in ep.get("ember_countries", []) if c in isos] if ep.get("ember", False) else []
+    countries = [c for c in ep["ember_countries"] if c in isos] if ep["ember"] else []
     if countries and "baseline" in grids:
         eai_grid, slr_mm, gfr = grids["baseline"]
         ncols = 3
@@ -124,7 +124,7 @@ def main() -> None:
         x_hi = max(max(slr_mm), max(p.max() for p in slr_paths.values())) / 1000.0
         for ax, iso in zip(axes.flat, countries):
             m = build_growth_matrix_from_grid(eai_grid.loc[[iso]], slr_mm, gfr)
-            im = draw_ember_panel(ax, m, slr_mm, np.array(gfr), cmap=viz.get("cmap_ember", "YlOrRd"),
+            im = draw_ember_panel(ax, m, slr_mm, np.array(gfr), cmap=viz["cmap_ember"],
                                   vmax=_nice_vmax(float(m.max()), 5), n_contours=5, contour_labels=True,
                                   fontsize=11, label_fontsize=9)
             cb = fig.colorbar(im, ax=ax, pad=0.02, fraction=0.05)

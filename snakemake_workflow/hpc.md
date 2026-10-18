@@ -165,10 +165,10 @@ abort the rest of that batch's jobs; it's appended to
 `logs/wave{H}_batch_{id}_failures.txt` instead. For a `hop_distance == 0`
 tile, `run_eikonal_cli.py` reads that tile's real boundary stations; for
 `hop_distance >= 1`, it reads its lower-hop neighbours' already-written
-`waterdepth` rasters directly off disk (guaranteed to exist by the wave
-barrier) and seeds from their wet cells — if none of them show any
-flooding in the overlap, it writes a real all-zero result itself, exactly
-like a local run would. The eikonal runner's own OOM handling (mark tile, skip
+`waterdepth` rasters directly off disk and seeds from their wet cells. If
+none of them show any flooding in the overlap, it writes a real all-zero
+result; if a neighbour's output is missing (that neighbour failed), the job
+fails without writing output, so a `--resume` dispatch picks it up. The eikonal runner's own OOM handling (mark tile, skip
 remaining scenarios, write nodata placeholder) works exactly as it does
 locally too — it's just discovered live on whichever node hits it.
 
@@ -185,9 +185,8 @@ friction/boundaries, and a hop≥1 job's neighbour dem/mask/waterdepth) is
 retried on transient I/O errors (`config_utils.retry_transient_io`), and
 neighbour-availability checks use `config_utils.path_ready` rather than bare
 `os.path.exists` — the latter swallows `OSError` and just returns `False`,
-so a momentary network blip would otherwise look identical to "neighbour
-genuinely hasn't run yet" and silently produce a wrongly-confident real-zero
-result instead of retrying.
+so a momentary network blip would otherwise look identical to a missing
+neighbour output and fail the job instead of retrying.
 
 ## 2b. Compile the failure report
 
@@ -244,13 +243,17 @@ plotting — no different from a fully-local run.
 
 - The `run_eikonal` rule remains the right choice for a small
   local/debug run, no SLURM involved.
-- Re-running `generate_eikonal_jobs` after changing `hpc.n_nodes` won't
-  regenerate scripts on its own (Snakemake sees the old outputs as already
-  present) — delete `model_outputs/hpc_jobs/` first, or use `--forcerun
-  generate_eikonal_jobs`.
+- Changing `hpc.n_nodes` (or anything else under `hpc:`) does regenerate the
+  scripts: the whole `hpc` section and the batch split are params of
+  `generate_eikonal_jobs`, and the default profile's `rerun-triggers`
+  include `params` (a different batch count also adds missing script
+  outputs). Scripts of batches that no longer exist stay in
+  `model_outputs/hpc_jobs/` but are not in the new `submit_waves.sh`; delete
+  the directory first for a clean listing. Without Snakemake metadata for
+  the old outputs (e.g. a fresh checkout) the params trigger cannot fire:
+  use `--forcerun generate_eikonal_jobs`.
 - `submit_waves.sh` uses `afterany`, not `afterok` — a wave starts once its
-  predecessor has finished regardless of individual job failures, since a
-  failed tile there just means its downstream neighbours fall back to a
-  real-zero result for that scenario, not that the whole next wave should
-  be blocked. The postprocessing bridge job at the end uses the same
+  predecessor has finished regardless of individual job failures: a
+  failed tile only fails its downstream neighbours for that scenario (they
+  are re-run with `--resume`), it does not block the whole next wave. The postprocessing bridge job at the end uses the same
   `afterany` philosophy for the same reason.

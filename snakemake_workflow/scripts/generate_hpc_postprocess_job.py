@@ -12,7 +12,7 @@ read via the local config; embedded paths use the Linux view (config_hpc.yml).
 
 Usage:
     python generate_hpc_postprocess_job.py [--config path/to/config.yml]
-    bash <printed submit_postprocess.sh path>
+    bash <printed submit_postprocess_and_exposure.sh path>
 """
 
 import argparse
@@ -26,8 +26,14 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from config_utils import atomic_write, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
-from hpc_common import _account_line, _retry_wrapper_lines, _stage_configfile_lines, _stage_tile_grid_lines  # noqa: E402
+from config_utils import atomic_write, load_config, merged_waterlevel_names, retry_transient_io  # noqa: E402
+from hpc_common import (  # noqa: E402
+    _retry_wrapper_lines,
+    _stage_configfile_lines,
+    _stage_tile_grid_lines,
+    read_targets_lines,
+    sbatch_header,
+)
 from generate_hpc_exposure_jobs import generate_exposure_dispatch, generate_exposure_resume_dispatch  # noqa: E402
 from generate_hpc_flood_totals_and_plots_job import write_flood_totals_and_plots_job  # noqa: E402
 from tiles import build_chunk_grid  # noqa: E402
@@ -85,19 +91,7 @@ def _write_batches(
             f.write("\n".join(batch_targets) + "\n")
 
         lines = [
-            "#!/bin/bash",
-            f"#SBATCH --job-name={name}",
-            f"#SBATCH --partition={sbatch_cfg['partition']}",
-            *_account_line(sbatch_cfg),
-            f"#SBATCH --time={sbatch_cfg['time']}",
-            f"#SBATCH --mem={sbatch_cfg['mem']}",
-            f"#SBATCH --cpus-per-task={sbatch_cfg['cpus_per_task']}",
-            f"#SBATCH --output={linux_jobs_dir}/logs/{name}_%j.out",
-            f"#SBATCH --error={linux_jobs_dir}/logs/{name}_%j.err",
-            "",
-            "set -euo pipefail",
-            sbatch_cfg["env_activate_cmd"],
-            "",
+            *sbatch_header(name, sbatch_cfg, f"{linux_jobs_dir}/logs"),
             *_retry_wrapper_lines(),
             *_stage_configfile_lines(),
             *_stage_tile_grid_lines(),
@@ -111,13 +105,14 @@ def _write_batches(
             "yaml.safe_dump(cfg, open(cfg_path, \"w\", encoding=\"utf-8\"))' "
             '"$LOCAL_CONFIGFILE" "$LOCAL_TILE_GRID"',
             "",
+            *read_targets_lines("TARGETS", f"{linux_jobs_dir}/{name}_targets.txt"),
             (
                 f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
                 f'snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
                 # --rerun-incomplete: redo outputs a killed earlier job left flagged
                 # incomplete instead of aborting the batch.
                 f'--rerun-triggers=mtime --rerun-incomplete '
-                f'$(cat "{linux_jobs_dir}/{name}_targets.txt")'
+                '"${TARGETS[@]}"'
             ),
             "",
         ]
@@ -131,7 +126,10 @@ def _write_batches(
 
 def main() -> None:
     """Write the postprocessing + exposure (+ flood totals/plots) dispatch scripts."""
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    # allow_abbrev=False: a removed flag that is a prefix of its replacement must be an error.
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter, allow_abbrev=False,
+    )
     default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
     parser.add_argument("--config", default=str(default_config))
     parser.add_argument(
@@ -152,7 +150,7 @@ def main() -> None:
              "plots pipeline is one single submission from the login node.",
     )
     parser.add_argument("--flood-totals-partition", default="24vcpu")
-    parser.add_argument("--flood-totals-cpus", type=int, default=24)
+    parser.add_argument("--flood-totals-cpus-per-task", type=int, default=24)
     parser.add_argument("--flood-totals-mem", default="32G")
     args = parser.parse_args()
 
@@ -187,7 +185,7 @@ def main() -> None:
         except OSError:
             pass
     return_periods = [f"RP{rp}" for rp in local_config["boundary_conditions"]["return_periods"]]
-    waterlevel_names = merged_slr_scenarios(local_config["boundary_conditions"], local_config["adaptation"])
+    waterlevel_names = merged_waterlevel_names(local_config["boundary_conditions"], local_config["adaptation"])
     baseline_slr = local_config["protection"]["baseline_waterlevel_name"]
 
     chunk_size_deg = local_config["postprocessing"]["chunk_size_deg"]
@@ -328,7 +326,7 @@ def main() -> None:
     if not args.no_flood_totals_and_plots:
         _, linux_ftp_script = write_flood_totals_and_plots_job(
             local_config, linux_config,
-            partition=args.flood_totals_partition, cpus=args.flood_totals_cpus, mem=args.flood_totals_mem,
+            partition=args.flood_totals_partition, cpus=args.flood_totals_cpus_per_task, mem=args.flood_totals_mem,
         )
         submit_lines.append("\n# flood totals + plots (final phase)")
         submit_lines += [

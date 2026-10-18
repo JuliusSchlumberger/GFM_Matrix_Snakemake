@@ -9,12 +9,12 @@ SLR/population trajectory is measure-independent, so one EAI(t) curve per block 
 reused. Single representative pathway per SSP: p50 SLR, first population variant.
 Entities whose baseline never tips are reported as "no_adaptation_needed".
 
-Writes pathways_countries.csv and pathways_continents.csv to --outdir (default:
+Writes pathways_countries.csv and pathways_continents.csv to --out-dir (default:
 visualization.output_dir); `stage_years` is ';'-separated, one switch year per stage.
 
 Usage:
     python analysis/compute_adaptation_pathways.py --config snakemake_workflow/config/config.yml \\
-        --expdir <merged_results>/exposure [--outdir <figures>] \\
+        --expdir <merged_results>/exposure [--out-dir <figures>] \\
         [--countries NGA THA EGY] [--continent-eai-threshold 5000000] [--max-stages 3]
 """
 
@@ -28,19 +28,15 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import _eai_from_interp, _growth_matrix_path, _growth_path  # noqa: E402
-from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
-from pathways import matrix_interpolator, slr_pathway  # noqa: E402
-from population_extension import extend_growth_factors  # noqa: E402
-from population_growth import load_ssp_growth_factors  # noqa: E402
-from analysis_figures import (  # noqa: E402
-    CONTINENTS, build_growth_matrix_from_grid, iso_to_continent, load_growth_matrix_csv, load_slr_trajectories,
+from _common import (  # noqa: E402
+    _country_interpolator, _eai_from_interp, _growth_matrix_path, _growth_path, load_pathway_setup,
 )
+from pathways import slr_pathway  # noqa: E402
+from population_extension import extend_growth_factors  # noqa: E402
+from analysis_figures import CONTINENTS, iso_to_continent, load_growth_matrix_csv  # noqa: E402
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
 MEASURES = ["avoid", "protect", "retreat", "protect_avoid"]
 DESIGN_LABEL = {"SLR_500": "small", "SLR_1000": "large"}
-LAST_SSP_YEAR = 2100
 
 
 def _first_crossing_after(eai: np.ndarray, threshold: float, years: np.ndarray, start_year: float) -> float | None:
@@ -98,7 +94,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_*_growth_matrix.csv files")
-    parser.add_argument("--outdir", default=None)
+    parser.add_argument("--out-dir", default=None)
     parser.add_argument("--countries", nargs="+", default=None, help="default: visualization.tipping_points.countries")
     parser.add_argument("--continents", nargs="+", default=CONTINENTS)
     parser.add_argument("--continent-eai-threshold", type=float, default=5_000_000.0)
@@ -106,31 +102,14 @@ def main() -> None:
     parser.add_argument("--max-stages", type=int, default=3)
     args = parser.parse_args()
 
-    cfg = load_config(args.config)
-    viz = cfg["visualization"]
-    tp = viz.get("tipping_points", {})
-    exp_dir = Path(args.expdir)
-    out_dir = Path(args.outdir or viz.get("output_dir", f"{cfg['paths']['root']}/figures"))
-    retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
+    st = load_pathway_setup(args)
+    exp_dir, out_dir, countries, to_year, years = st.exp_dir, st.out_dir, st.countries, st.to_year, st.years
+    default_thr, thr_by_iso, variants = st.default_thr, st.thr_by_iso, st.variants
+    ssps, designs = st.ssps, st.designs
+    slr_path_p50 = {s: slr_pathway(st.traj, f"{s}_p50", years) for s in ssps}
 
-    countries = args.countries or tp.get("countries", ["VNM", "NLD", "NGA"])
-    default_thr = float(tp.get("eai_threshold", 1_000_000))
-    thr_by_iso = {k: float(v) for k, v in (tp.get("per_country_eai_threshold") or {}).items()}
-    to_year = args.to_year or int(tp.get("to_year", LAST_SSP_YEAR))
-    ssps = list(tp.get("ssps", cfg.get("population_growth", {}).get("ssps", ["SSP2", "SSP5"])))
-    designs = list(cfg.get("adaptation", {}).get("slr_intensities", ["SLR_500", "SLR_1000"]))
-
-    traj = load_slr_trajectories(viz["slr_trajectories_csv"])
-    ssps = [s for s in ssps if all(f"{s}_{p}" in traj.columns for p in ("p17", "p50", "p83"))]
-    years = np.arange(2020, to_year + 1)
-    slr_path_p50 = {s: slr_pathway(traj, f"{s}_p50", years) for s in ssps}
-
-    catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
-    growth_df = load_ssp_growth_factors(Path(catalog.get_source("ssp_population_growth_factors").path))
-    variants = (viz.get("extended_pathways", {}).get("variants") if to_year > LAST_SSP_YEAR else None) \
-        or {"ssp": {"mode": "constant", "label": "SSP"}}
     v0 = next(iter(variants))
-    ext0 = extend_growth_factors(growth_df, variants[v0], to_year=to_year)
+    ext0 = extend_growth_factors(st.growth_df, variants[v0], to_year=to_year)
 
     blocks = [(m, d) for m in MEASURES for d in designs]
     chains = _all_chains(blocks, args.max_stages)
@@ -167,11 +146,9 @@ def main() -> None:
         for strat, design in strategy_designs:
             if (strat, design) not in grids:
                 continue
-            eai_grid, slr_mm, growth_fracs = grids[(strat, design)]
-            if iso not in eai_grid.index:
+            if iso not in grids[(strat, design)][0].index:
                 continue
-            interp = matrix_interpolator(build_growth_matrix_from_grid(eai_grid.loc[[iso]], slr_mm, growth_fracs),
-                                         slr_mm, growth_fracs)
+            interp = _country_interpolator(grids[(strat, design)], iso)
             for ssp in ssps:
                 gp = _growth_path(ext0, ssp, iso, years) - 1.0
                 eai_by_ssp[ssp][(strat, design)] = _eai_from_interp(interp, slr_path_p50[ssp], gp)
@@ -193,13 +170,8 @@ def main() -> None:
         for strat, design in strategy_designs:
             if (strat, design) not in grids:
                 continue
-            eai_grid, slr_mm, growth_fracs = grids[(strat, design)]
-            present = [i for i in members if i in eai_grid.index]
-            interps = {
-                i: matrix_interpolator(build_growth_matrix_from_grid(eai_grid.loc[[i]], slr_mm, growth_fracs),
-                                       slr_mm, growth_fracs)
-                for i in present
-            }
+            present = [i for i in members if i in grids[(strat, design)][0].index]
+            interps = {i: _country_interpolator(grids[(strat, design)], i) for i in present}
             for ssp in ssps:
                 total = np.zeros(len(years))
                 for i in present:

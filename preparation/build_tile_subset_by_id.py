@@ -1,7 +1,7 @@
 """Filter the tile_grid to tile_ids listed one per line in a text file.
 
 Usage:
-    python preparation/build_tile_subset_by_id.py <tile_ids_file> <out_path>
+    python preparation/build_tile_subset_by_id.py --tile-ids-file <tile_ids_file> --out <out_path>
 """
 
 import sys
@@ -40,8 +40,8 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("tile_ids_file")
-    parser.add_argument("out_path")
+    parser.add_argument("--tile-ids-file", required=True)
+    parser.add_argument("--out", required=True)
     parser.add_argument("--config", default=None)
     args = parser.parse_args()
-    build_tile_subset_by_id(Path(args.tile_ids_file), Path(args.out_path), args.config)
+    build_tile_subset_by_id(Path(args.tile_ids_file), Path(args.out), args.config)

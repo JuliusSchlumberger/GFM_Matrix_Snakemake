@@ -3,7 +3,6 @@
 Tiles are exact rectangles, so clipping with `bbox=...` needs no extra geometry mask.
 """
 
-import os
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +18,7 @@ from rasterio.fill import fillnodata
 from rasterio.warp import Resampling, reproject
 from scipy import ndimage
 
-from config_utils import retry_transient_io
+from config_utils import atomic_write, retry_transient_io
 
 from merge import EIKONAL_NODATA
 
@@ -27,7 +26,6 @@ from merge import EIKONAL_NODATA
 # 99 m gap-fill sentinel sits above any real value and inside int16's range.
 DEM_SCALE = 100  # cm per metre
 DEM_NODATA_M = 99.0
-DEM_NODATA_INT16 = int(DEM_NODATA_M * DEM_SCALE)  # 9900
 
 # Friction (Manning's n / 100) spans ~0.0001-0.0012; x1e6 keeps n's 2 significant
 # digits with ~27x headroom below int16's max.
@@ -470,17 +468,8 @@ def compute_friction(
 
 
 def _atomic_raster_write(output_path: str | Path, profile: dict[str, Any], write_fn) -> None:
-    # Temp file + os.replace so a killed job never leaves a truncated raster at
-    # output_path; the PID suffix keeps concurrent writers off each other's temp file.
-    output_path = Path(output_path)
-    tmp_path = output_path.with_name(f"{output_path.name}.tmp{os.getpid()}")
-    try:
-        with retry_transient_io(rasterio.open, tmp_path, "w", **profile) as dst:
-            write_fn(dst)
-        retry_transient_io(os.replace, tmp_path, output_path)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
+    # Temp file + os.replace so a killed job never leaves a truncated raster at output_path.
+    atomic_write(output_path, write_fn, "w", opener=rasterio.open, **profile)
 
 
 def save_raster(

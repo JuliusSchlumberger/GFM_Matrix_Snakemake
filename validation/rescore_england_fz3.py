@@ -85,16 +85,11 @@ def _score_one_rp(rp, slr, cfg, gfm_catalog, bench_catalog, spec, full_gdf, full
                     )
                     del block_bench_gdf
 
-                    water_mask = v.read_permanent_water_mask(
-                        gfm_catalog, permanent_water_source, permanent_water_codes, bbox, out_transform, depth.shape,
-                    )
-                    not_water = ~water_mask
-                    in_country = v.read_country_mask(
-                        gfm_catalog, geogunit_source, iso_lookup, _COUNTRY_ISO, bbox, out_transform, depth.shape,
+                    not_water, domain_mask = v.window_scoring_domain(
+                        gfm_catalog, permanent_water_source, permanent_water_codes, geogunit_source,
+                        iso_lookup, _COUNTRY_ISO, bbox, out_transform, model_domain,
                         geogunit_ids=spec.geogunit_ids,
                     )
-                    not_water = not_water & in_country
-                    domain_mask = model_domain & not_water
 
                     model_wet = model_domain & (depth > primary_threshold_m) & not_water
                     area_km2 = pixel_area_km2_grid(out_transform, depth.shape[1], depth.shape[0])
@@ -128,7 +123,7 @@ def _score_one_rp(rp, slr, cfg, gfm_catalog, bench_catalog, spec, full_gdf, full
 
 
 def main() -> None:
-    """Score FZ3 at RP100/RP250 and write england_fz3_rescore.csv."""
+    """Score FZ3 at RP100/RP250; write metrics_GBR_england_ea_floodzone3_sea_{RP}_{SLR}.csv per RP."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     args = parser.parse_args()
@@ -142,11 +137,9 @@ def main() -> None:
     v.fix_catalog_meta_encoding(bench_catalog, _REPO_ROOT / val_cfg["benchmark_catalog"])
 
     spec = v.load_benchmark_spec(bench_catalog, _BENCHMARK_KEY)
-    full_gdf = v.load_benchmark_full(bench_catalog, spec)
+    full_gdf = v.load_benchmark_4326(bench_catalog, spec)
     if full_gdf.empty:
         sys.exit(f"{_BENCHMARK_KEY}: empty after filtering - nothing to score.")
-    if full_gdf.crs is None or full_gdf.crs.to_epsg() != 4326:
-        full_gdf = full_gdf.to_crs(4326)
     full_sindex = full_gdf.sindex
 
     rows = []
@@ -159,11 +152,20 @@ def main() -> None:
     if not rows:
         print("No rows produced - nothing written.")
         return
+    write_results(rows, val_cfg["output_dir"])
 
-    out_path = Path(val_cfg["output_dir"]) / "england_fz3_rescore.csv"
-    retry_transient_io(out_path.parent.mkdir, parents=True, exist_ok=True)
-    atomic_write(out_path, lambda f: pd.DataFrame(rows).to_csv(f, index=False), mode="w", encoding="utf-8", newline="")
-    print(f"\nwrote {out_path}")
+
+def write_results(rows: list[dict], output_dir: str | Path) -> list[Path]:
+    """Write each RP's row to its own standalone metrics CSV (see validation.standalone_metrics_path)."""
+    paths = []
+    for row in rows:
+        out_path = v.standalone_metrics_path(output_dir, _COUNTRY_ISO, _BENCHMARK_KEY, row["return_period"], row["waterlevel_name"])
+        retry_transient_io(out_path.parent.mkdir, parents=True, exist_ok=True)
+        atomic_write(out_path, lambda f, row=row: pd.DataFrame([row]).to_csv(f, index=False),
+                     mode="w", encoding="utf-8", newline="")
+        print(f"wrote {out_path}")
+        paths.append(out_path)
+    return paths
 
 
 if __name__ == "__main__":

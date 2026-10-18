@@ -1,81 +1,87 @@
-# TODO: real changes found during the cleanup
+# TODO
 
-The cleanup phases (AUDIT.md §8) are behaviour-preserving. Anything that needs
-a real (behaviour- or result-changing) fix is logged here instead of being done
-in-phase.
+Open items after the cleanup on branch `cleanup` (not merged into `main`). Everything in
+the code is done; what remains needs you, Hydrax or P:\.
 
-## Start here (status 2026-10-18)
+## Next steps
 
-All cleanup phases (AUDIT.md section 8, Phases 0-7) are done on branch `cleanup` and pushed; nothing
-is merged into `main` yet. Each phase was verified locally (ruff, pytest, subset dry runs, and
-AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for you:
+1. **Review and merge `cleanup` into `main`** (`git log main..cleanup`).
+2. **Before pulling on Hydrax:** back up the `*_materialized.yml` files there (a pull removes
+   files that are now untracked); restore them afterwards.
+3. **After pulling, on every machine:** re-materialize the scenario configs
+   (`python snakemake_workflow/scripts/materialize_configs.py`). Config keys were renamed:
+   `boundary_conditions.slr_scenario` -> `slr_projection`, `slr_scenarios` -> `waterlevel_names`;
+   configs with the old keys now fail with KeyError. `deltas_design_materialized.yml` is written
+   by `analysis/prepare_delta_design_runs.py` (it still has the old keys and the removed
+   `aqueduct_mem_estimate`): regenerate it before the next delta design run.
+4. **On Hydrax:** `DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part eikonal` once, to check the
+   shell drivers (only tested locally with stubbed sbatch/python). Paths live in
+   `sfincs_tiles/hydrax_env.sh`; keep its roots in sync with `config_hpc.yml`.
+5. **Hydrax `gfm` env:** `mamba install -n gfm pytest=8.4.2 ruff=0.12.0`.
+6. **Local `config_local.yml`:** delete the leftover `paths.aqueduct_root` line (unused). This
+   machine has `paths.sfincs_exe` set for the SFINCS smoke test; add it on other machines if wanted.
+7. **P:\ cleanup:** `modelling/sfincs_smoke_test/` is no longer used (the smoke test now builds in a
+   temp folder); delete it if you like. When calibration stage 1 runs again, pass `--overwrite`
+   so screen / pre-flight error records cached by earlier runs are recomputed.
 
-1. **Review / merge `cleanup`** into `main` (one commit per phase, `git log main..cleanup`).
-2. **Before pulling on Hydrax:** back up any `*_materialized.yml` there - a pull deletes files
-   that Phase 1 untracked; restore afterwards. (`config_hpc.yml` is tracked again since 2026-10-18.)
-3. **On Hydrax after pulling:** `DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part eikonal`.
-   (Stale job files: done 2026-10-18 from Windows, see the Phase 7a/7b notes below.)
-4. **Snakemake "code changed" flags**: solved by `profiles/default/config.yaml` (auto-loaded,
-   `rerun-triggers: [mtime, params, input, software-env]`). No `--touch` needed.
-5. Hydrax `gfm` env: `mamba install -n gfm pytest=8.4.2 ruff=0.12.0` (Phase 0 tooling).
+## Before reusing existing outputs
 
-## Found during the docstring trim (code, not docs - not changed)
+Old formats are no longer accepted; regenerate before the next step that reads them:
+- `merged_results/exposure/flood_totals/flood_totals_*.csv` (int `return_period`): `analysis/compute_flood_totals.py`.
+- `bangkok_chao_phraya/merged_results/exposure/bangkok_case_exposure.csv`: `analysis/compute_bangkok_case_exposure.py`.
+- `deltas_floodmaps/delta_flood_extent.csv` (column `slr_scenario`): `analysis/compute_delta_flood_extent.py`,
+  then `analysis/add_slr_year_column.py`.
+- England FZ3 / FZ2 results (now `{validation.output_dir}/GBR/metrics_GBR_england_ea_floodzone{3,2}_sea_*.csv`):
+  `validation/rescore_england_fz3.py` and `validation/validate_england_fz2_band.py`, before
+  `compare_against_published.py` / `build_overview_table.py`.
+- Calibration-study batch jobs in `calibration_500_tiles/hpc_jobs/` pass the output dir
+  positionally: regenerate with `calibration_studies/generate_calibration_batch_jobs.py` before
+  resubmitting.
+- Snakemake: the config-key rename re-triggers `cache_waterlevel_stations`, `extract_boundaries` and
+  `run_eikonal` the next time a scenario runs (+25 jobs for bangkok_chao_phraya). Accepted.
 
-- **Decide: outputs computed with `friction_scale_factor` != 12.0** (production is 12.0 since
-  2026-10-13; the global run's `model_outputs/hpc_jobs/resolved_config.yml` has 12.0). Still at 9.0:
-  deltas_ssp126 / deltas_ssp245 / deltas_design (base configs set 9.0, "0.3x production's 30"),
-  bangkok_chao_phraya (run 2026-10-08).
-  Still at 30.0: calibration_500_tiles (solver studies, 2026-10-05). Re-run at 12.0
-  = change the base config + its `*_pins.yml`, re-materialize, re-run.
-- `src/population_growth.interpolate_growth_factor` docs say it returns `default` outside the year range;
-  the code clamps. `src/tile_split.choose_split` docs say it raises; it falls back with a warning.
-- `sfincs_tiles/retry_io.retry_transient_io`: `retries` is total attempts, not retries.
-- `sfincs_tiles/calibration_paths.decode_waterdepth_cm`: only nodata becomes NaN, 0 cm stays 0.0 -
-  check that dry is always encoded as nodata where callers assume NaN = dry.
-- `src/connectivity_tiling._domain_touches_ocean` reads DEM tiles via `dem_index` and ignores the result
-  (wasted read). `sfincs_tiles/build_sfincs_tile._compute_zsini_array`: `grid_coords` unused.
-- Rename candidate: `boundary_lines_geometry` attribute `land_eroded` holds land grown outward.
-- Strings with stale history/claims (string literals, so untouched): argparse help of
-  `build_sfincs_tile.py --no-rotated`; assert messages with dates in `tests/flood_model_memory_validation`
-  and `tests/eikonal_kernel_validation`; `generate_hpc_postprocess_job.py` Usage names
-  `submit_postprocess.sh` (writes `submit_postprocess_and_exposure.sh`); `generate_eikonal_solver_examples.py`
-  prints "by round 40" for a 15-round loop; `build_overview_table._FZ2_NOTE` says "see session notes".
-- `tests/sfincs_subgrid_nearest_validation`: `test_reproject_nearest_transform_matches_scaled_source`
-  tests a misaligned target - name does not match.
-- Git history holds ~1 GB of `sfincs_tiles/tile306_*.npy` / `tile1669_*.npy` (commit c0f84d6,
-  2026-09-23; up to 97 MB each, GitHub warns on push). Removing them needs a history rewrite.
+Renamed CLI flags (old spellings now rejected): `--outdir` -> `--out-dir`, `--figdir` -> `--fig-dir`,
+`--output` / `--out-csv` -> `--out`, `--dir` -> `--timings-dir`, `--threads` -> `--workers`,
+`--max-outer` -> `--max-outer-iterations`, `--inner-max-rounds` -> `--max-rounds`,
+`--tiles` -> `--mask-files`, `--skip-done` / `--no-force` -> `--skip-existing`,
+`--n-tiles` -> `--n-panel-tiles` (plots), `--cpus` -> `--cpus-per-task`,
+`--flood-totals-cpus` -> `--flood-totals-cpus-per-task`; positional arguments of the calibration
+study scripts and `build_tile_subset_by_id.py` are options now (`--out-dir`, `--n-candidates`,
+`--fig-dir`, `--tile-ids`, `--tile-ids-file`, `--out`). Notebooks or scripts outside the repo that
+import renamed modules (pipeline_plots, analysis_figures, exposure_grid, ...) need the same update.
 
-## Open
+## Known behaviour
 
-- **`generate_eikonal_jobs.generate_wave_dispatch` has 3 unused parameters** (`model_outputs`,
-  `hop_by_tile`, `raster_config`; docstring says so). Left in place in Phase 7a on purpose:
-  dropping them also means dropping the `generate_eikonal_jobs` rule's params, which re-triggers
-  that rule. Remove together with the rule params when you next regenerate HPC dispatch anyway.
-  (The audit's other "unused parameter", `connectivity_tiling`'s `dem_index`, is in fact used.)
-- **Hydrax: check the shell-driver changes once after pulling Phase 6** (I could only test them
-  locally against a fake tile tree with fake sbatch/python, where both branches matched the old
-  behaviour). All Hydrax paths now live in `sfincs_tiles/hydrax_env.sh` (same values as before,
-  overridable via GFM_DATA_ROOT / GFM_CODE_ROOT / GFM_PYTHON / GFM_SFINCS_PYTHON). The two rerun
-  scripts are merged into `sfincs_tiles/rerun_calibration.sh --part eikonal|sfincs`; the old names
-  still work as wrappers. Suggested check: `DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part eikonal`.
-- **Remaining machine-specific paths not moved to config** (deliberately): `run_bangkok_case_study.bat`'s
-  `STUDY_ROOT` (case-study data on P:\), and `tests/sfincs_synthetic_end_to_end/test_sfincs_smoke.py`'s
-  default SFINCS exe path (the test SKIPs when it's absent).
-- **Phase 7a renamed aqueduct -> eikonal** (files, rules, functions, config key). After pulling on
-  Hydrax: (1) job files - checked 2026-10-18: no file in `model_outputs/hpc_jobs` calls the old
-  names, nothing to regenerate; (2) "code changed" flags on renamed rules/scripts are ignored via
-  `profiles/default/config.yaml`.
-  `simulation.aqueduct_mem_estimate` was renamed `eikonal_mem_estimate`; rules/simulation.smk still
-  falls back to the old key for configs materialized/resolved before the rename - drop the fallback
-  once those are regenerated. `paths.aqueduct_root` was removed (no config used `{aqueduct_root}`);
-  the leftover line in your local config_local.yml is harmless, delete it by hand.
-- **Phase 7b renamed modules and scripts** (src/plotting -> pipeline_plots, visualization ->
-  analysis_figures, exposure -> exposure_grid, flood_extent folded into flood_model,
-  validation.tri_domain_mask -> rasters.polygon_domain_mask, validation/_rescore_england_fz3 ->
-  rescore_england_fz3, calibration_studies test_*_calibration -> run_*_study and
-  select_calibration_tiles -> select_study_candidate_tiles, scripts/calibration/select_country_tiles
-  -> preparation/select_country_tiles). Code outside this repo that imports the old module names
-  (notebooks, personal scripts) needs the same rename. The 60 calibration-study sbatch files in
-  `calibration_500_tiles/hpc_jobs` (2026-10-05) were fixed in place on 2026-10-18: only the script path
-  was rewritten (`tests/test_<study>_calibration.py` -> `calibration_studies/run_<study>_study.py`, same
-  CLI); batches, --time and resolved_config.yml are as they ran. Backup: `.cleanup_baseline/calib500_hpc_jobs_backup/`.
+- Outputs at `friction_scale_factor` 9.0 (deltas, bangkok_chao_phraya) and 30.0
+  (calibration_500_tiles) are kept as computed; each config says so. Production is 12.0.
+- A hop>=1 triple whose neighbour output is missing fails without writing output. Local multi-hop
+  `snakemake simulate` / `run_eikonal_dag.py` can therefore fail when Snakemake schedules a hop-1
+  tile before its neighbours (the rule does not declare neighbour inputs); rerun, or run wave by
+  wave as `run_delta_floodmaps.py` does.
+
+## Git history rewrite (after the merge)
+
+History holds ~1.2 GB of old files that are no longer tracked (209 MB packed): `sfincs_tiles/*.npy`
+(tile306 / tile1669 arrays, up to 102 MB each), `batch_logs/`, `batch_logs_simulate_regions/`,
+`run_timings.csv`, `run_postprocess.log`, `preparation/logs/`, `adaptation_validation_output/`,
+`tests/*/output/`, `tests/*/plots/`. Rewriting changes every commit hash and needs a force push.
+
+1. Merge `cleanup` into `main`, push, and make sure no clone has unpushed work (Windows repo,
+   Hydrax `~/gfm_code`).
+2. Install the tool: `pip install git-filter-repo`.
+3. Work on a fresh mirror, not your working repo:
+   ```
+   git clone --mirror https://github.com/JuliusSchlumberger/GFM_Matrix_Snakemake.git gfm-mirror.git
+   cd gfm-mirror.git
+   git filter-repo --invert-paths \
+     --path-glob 'sfincs_tiles/*.npy' --path batch_logs/ --path batch_logs_simulate_regions/ \
+     --path run_timings.csv --path run_postprocess.log --path preparation/logs/ \
+     --path adaptation_validation_output/ --path-glob 'tests/*/output/*' --path-glob 'tests/*/plots/*'
+   git count-objects -vH        # check size-pack dropped
+   git log --oneline -5 main    # spot-check
+   git push --force --mirror
+   ```
+4. Re-clone every working copy (copy the gitignored files across: `config_local.yml`,
+   `*_materialized.yml`, `.cleanup_baseline/`), or `git fetch && git reset --hard origin/<branch>`.
+5. Old hashes in docs and messages change; `.git/filter-repo/commit-map` in the mirror maps old to
+   new (e.g. for AUDIT.md's `git show 89e130e:AUDIT.md`).

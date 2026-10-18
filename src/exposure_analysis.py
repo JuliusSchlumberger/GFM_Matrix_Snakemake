@@ -335,26 +335,14 @@ def compute_country_eai(
 
     A missing (RP, SLR) key counts as zero exposure.
     """
-    sorted_rps = sorted(return_periods)
-
     iso_list, iso_idx, cell_idx = (
         iso_index if iso_index is not None else _build_iso_index(geo_ids, iso_lookup)
     )
-    n_iso = len(iso_list)
-
-    rows: dict[str, dict[str, float]] = {}
-    for slr in slr_scenarios:
-        country_rp = np.zeros((n_iso, len(sorted_rps)), dtype="float64")
-        for rp_i, rp in enumerate(sorted_rps):
-            grid = exposure_per_rp_slr.get((rp, slr), np.zeros(geo_ids.shape))
-            weights = grid.ravel()[cell_idx]
-            country_rp[:, rp_i] = np.bincount(iso_idx, weights=weights, minlength=n_iso)
-
-        eai_arr = _trapezoid_eai(country_rp, sorted_rps)
-        for i, iso in enumerate(iso_list):
-            rows.setdefault(iso, {})[slr] = float(eai_arr[i])
-
-    return pd.DataFrame.from_dict(rows, orient="index").fillna(0.0)
+    wanted = {(rp, slr) for rp in return_periods for slr in slr_scenarios}
+    weights = {
+        key: grid.ravel()[cell_idx] for key, grid in exposure_per_rp_slr.items() if key in wanted
+    }
+    return compute_country_eai_from_cells(weights, return_periods, slr_scenarios, iso_list, iso_idx)
 
 
 def compute_country_eai_from_cells(

@@ -8,7 +8,7 @@ population grid) and the geo109->ISO lookup cached with plot_world_map.py.
 Usage:
     python analysis/extract_country_population.py \\
         [--config snakemake_workflow/config/config.yml] \\
-        [--output D:/GFM/processed_inputs/country_population_2020.csv]
+        [--out D:/GFM/processed_inputs/country_population_2020.csv]
 """
 
 import argparse
@@ -17,6 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from hydromt.exceptions import NoDataException
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io  # noqa: E402
@@ -31,7 +32,7 @@ _GLOBAL_LAT_RANGE = (-75.0, 85.0)
 
 def _geo109_iso_lookup(catalog, cfg: dict, viz: dict) -> dict[int, str]:
     """Load the geo109->ISO lookup from plot_world_map.py's cache, else build and cache it."""
-    out_dir = Path(viz.get("output_dir", f"{cfg['paths']['root']}/figures")) / "world_maps"
+    out_dir = Path(viz["output_dir"]) / "world_maps"
     cache_path = out_dir / "geo109_iso_lookup.csv"
     if cache_path.exists():
         print(f"  Reusing cached geo109->ISO lookup: {cache_path}")
@@ -43,7 +44,7 @@ def _geo109_iso_lookup(catalog, cfg: dict, viz: dict) -> dict[int, str]:
     geo107_nc = Path(catalog.get_source("geogunit_protection_units").path)
     flopros_xlsx = Path(catalog.get_source("flopros_protection_standards").path)
     lookup = build_geo109_to_iso_lookup(
-        geo109_nc, geo107_nc, flopros_xlsx, subsample=int(viz.get("geo109_subsample", 10)),
+        geo109_nc, geo107_nc, flopros_xlsx, subsample=int(viz["geo109_subsample"]),
     )
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
     pd.DataFrame({"ISO": lookup}).to_csv(cache_path)
@@ -69,7 +70,9 @@ def sum_population_by_iso(
             pop_da = retry_transient_io(
                 catalog.get_rasterdataset, "population", bbox=bbox,
             ).squeeze(drop=True)
-        except Exception:
+        except NoDataException:
+            # Band outside WorldPop coverage; any other read error must abort, since a
+            # skipped band silently lowers the country totals.
             pop_da = None
         if pop_da is None or pop_da.size == 0:
             lat = lat_top
@@ -115,18 +118,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=_default_cfg, help=f"path to config.yml (default: {_default_cfg})")
     parser.add_argument(
-        "--output", default=None,
+        "--out", default=None,
         help="output CSV path (default: visualization.country_population_csv from config)",
     )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    viz = cfg.get("visualization", {})
+    viz = cfg["visualization"]
 
-    out_path = Path(args.output or viz.get(
-        "country_population_csv", f"{cfg['paths']['root']}/processed_inputs/country_population_2020.csv",
-    ))
-    row_band_deg = float(viz.get("population_extract_row_band_deg", 5.0))
+    out_path = Path(args.out or viz["country_population_csv"])
+    row_band_deg = float(viz["population_extract_row_band_deg"])
 
     catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
     geo109_to_iso = _geo109_iso_lookup(catalog, cfg, viz)

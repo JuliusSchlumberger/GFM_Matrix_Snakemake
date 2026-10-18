@@ -1,7 +1,9 @@
 """Cover every outcome of eikonal_runner.run_tile_scenario on synthetic tiles.
 
-Outcomes: hop-0 solve, no stations, hop-1 seeded from wave 0, OOM pre-marked,
-MemoryError during the solve; also staged-boundaries cleanup.
+Outcomes: hop-0 solve, no stations, hop-1 seeded from wave 0, hop-1 with a
+missing neighbour output (fails, nothing written) or an all-dry one (zero
+raster), OOM pre-marked, MemoryError during the solve; also staged-boundaries
+cleanup.
 """
 
 import os
@@ -19,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 import eikonal_runner  # noqa: E402
 from eikonal_runner import (  # noqa: E402
     NO_STATIONS_REASON,
+    NO_UPSTREAM_FLOODING_REASON,
     OOM_PREMARKED_REASON,
     mark_tile_oom,
     run_tile_scenario,
@@ -29,7 +32,8 @@ D, M, N = 0.0003, 10, 12
 SCN, SLR = "RP100_SLR_0", "SLR_0"
 RASTER_CONFIG = {"driver": "GTiff", "compression": "deflate", "predictor": 3, "nodata": -9999}
 FLOODING = {"resolution": 30.0, "knn": 5, "max_rounds": 40, "waterlevel_epsilon_m": 0.03,
-            "obstacle_coupling": {"enabled": False}}
+            "friction_scale_factor": 1.0,
+            "obstacle_coupling": {"enabled": False, "max_outer_iterations": 3, "outer_convergence_pct": 0.01}}
 
 
 def _write_tile(root: Path, tid: int, x0: float, dem_m, mask, stations) -> box:
@@ -107,6 +111,29 @@ def test_all_outcomes() -> None:
         assert res["outcome"] == "solved", res
         assert (arr > 0).sum() > 0, "hop-1 tile should be seeded from tile 1's flooding"
         print("PASS: hop-1 tile is seeded from the overlapping wave-0 tile's result")
+
+        out1 = root / "mo" / "1" / "results" / f"waterdepth_{SCN}.tif"
+        out3 = root / "mo" / "3" / "results" / f"waterdepth_{SCN}.tif"
+        with rasterio.open(out1) as src:
+            profile, wet1 = src.profile, src.read(1)
+        out1.unlink()
+        out3.unlink()
+        try:
+            _run(root, 3)
+        except FileNotFoundError as exc:
+            assert repr(str(out1)) in str(exc), exc  # the message lists the missing paths
+        else:
+            raise AssertionError("missing lower-hop neighbour output must fail the triple")
+        assert not out3.exists(), "a failed hop-1 triple must not write output"
+        assert not (root / "mo" / "skipped_tiles" / f"3_{SCN}.txt").exists()
+        print("PASS: hop-1 tile with a missing neighbour output fails without writing output")
+
+        with rasterio.open(out1, "w", **profile) as dst:
+            dst.write(np.zeros_like(wet1), 1)
+        res, arr = _run(root, 3)
+        assert res == {"outcome": "skip_no_inundation", "skip_reason": NO_UPSTREAM_FLOODING_REASON}, res
+        assert (arr == 0).all()
+        print("PASS: hop-1 tile whose neighbour exists but is all dry -> zero raster + skip reason")
 
         mark_tile_oom(root / "mo" / "oom_tiles", "2", reason="test")
         res, arr = _run(root, 2)

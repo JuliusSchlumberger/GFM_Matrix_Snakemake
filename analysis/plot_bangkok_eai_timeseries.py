@@ -7,7 +7,7 @@ Usage:
     python plot_bangkok_eai_timeseries.py \\
         --config snakemake_workflow/config/bangkok_chao_phraya_materialized.yml \\
         --exposure-csv P:/.../bangkok_chao_phraya/merged_results/exposure/bangkok_case_exposure.csv \\
-        --outdir P:/.../bangkok_chao_phraya/figures
+        --out-dir P:/.../bangkok_chao_phraya/figures
 """
 
 import argparse
@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from config_utils import get_data_catalog, load_config, merged_slr_scenarios  # noqa: E402
+from config_utils import get_data_catalog, load_config, merged_waterlevel_names, return_period_years  # noqa: E402
 from exposure_analysis import _trapezoid_eai, resolve_ssp_scenario_eai  # noqa: E402
 from population_growth import load_ssp_growth_factors  # noqa: E402
 from analysis_figures import load_slr_trajectories, ssp_rcp_label  # noqa: E402
@@ -32,18 +32,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=_default_cfg)
     parser.add_argument("--exposure-csv", required=True)
-    parser.add_argument("--outdir", default=None, help="default: visualization.output_dir")
+    parser.add_argument("--out-dir", default=None, help="default: visualization.output_dir")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
     viz = cfg["visualization"]
     bc = cfg["boundary_conditions"]
     return_periods = bc["return_periods"]
-    slr_scenarios = merged_slr_scenarios(bc, cfg["adaptation"])
+    slr_scenarios = merged_waterlevel_names(bc, cfg["adaptation"])
     slr_mm_values = sorted(int(s.split("_")[1]) for s in slr_scenarios)
     slr_order = [f"SLR_{mm}" for mm in slr_mm_values]
 
     df = pd.read_csv(args.exposure_csv)
+    df["return_period"] = df["return_period"].map(return_period_years)  # "RP100" -> 100
 
     # Trapezoidal integration over 1/RP; columns must follow slr_mm_values order.
     eai_by_slr = {}
@@ -55,7 +56,7 @@ def main() -> None:
     print("EAI-vs-SLR (discrete, simulated points):")
     print(eai_df.to_string())
 
-    traj_path = viz.get("slr_trajectories_csv", "")
+    traj_path = viz["slr_trajectories_csv"]
     traj_full = load_slr_trajectories(traj_path)
     p50_cols = {c: c.replace("_p50", "") for c in traj_full.columns if c.endswith("_p50")}
     slr_traj = traj_full[list(p50_cols)].rename(columns=p50_cols)
@@ -68,11 +69,11 @@ def main() -> None:
     resolved = resolve_ssp_scenario_eai(eai_df, slr_mm_values, growth_df, ssps, years, slr_traj)
     row = resolved.loc[_CASE_ISO]
 
-    out_dir = Path(args.outdir) if args.outdir else Path(viz["output_dir"])
+    out_dir = Path(args.out_dir) if args.out_dir else Path(viz["output_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    ssp_colors = viz.get("ssp_colors", {})
-    ssp_rcp_codes = viz.get("ssp_rcp_codes", {})
+    ssp_colors = viz["ssp_colors"]
+    ssp_rcp_codes = viz["ssp_rcp_codes"]
     ssps_avail = [s for s in ssps if any(c.startswith(f"EAI_{s}_") for c in resolved.columns)]
 
     fig, axes = plt.subplots(1, len(ssps_avail), figsize=(4 * len(ssps_avail) + 2, 5), sharey=True)

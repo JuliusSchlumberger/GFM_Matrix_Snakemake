@@ -1,7 +1,8 @@
 """Snakemake wrapper running eikonal_runner.run_tile_scenario for one tile scenario.
 
-A not-yet-computed hop>=1 neighbour is treated like "no flooding there"
-(real-zero fallback); the local DAG / HPC wave barriers prevent that case.
+A not-yet-computed hop>=1 neighbour fails the job without output. The rule does
+not declare neighbour outputs as inputs, so run multi-hop grids wave by wave
+(as run_delta_floodmaps.py and the HPC wave barriers do) or rerun until done.
 """
 
 import os

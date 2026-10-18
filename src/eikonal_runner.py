@@ -179,8 +179,9 @@ def run_tile_scenario(
     """Solve, skip or placeholder one (tile, return period, SLR scenario) and write its raster.
 
     Pre-marked OOM -> nodata placeholder. Hop-0 tiles use their stations;
-    hop>=1 tiles seed from strictly-earlier-wave overlapping tiles (a missing
-    neighbour output counts as no flooding). No stations/seeds -> zero raster.
+    hop>=1 tiles seed from strictly-earlier-wave overlapping tiles. No
+    stations, or no wet cell in any neighbour output -> zero raster. A missing
+    neighbour dem/mask/waterdepth raises FileNotFoundError and writes nothing.
     MemoryError -> OOM marker + nodata. `stage_boundaries` copies the
     GeoPackage to node-local scratch first (HPC). Timing is left to callers.
     Returns {"outcome": "oom_premarked" | "skip_no_inundation" | "oom" | "solved", ...}.
@@ -219,15 +220,27 @@ def run_tile_scenario(
                 & tile_grid.geometry.intersects(this_geom)
             ]
             available = []
+            missing = []
             for cand_id in candidates["tile_id"]:
                 cand_dem = os.path.join(preprocessing_inputs_dir, str(int(cand_id)), "inputs", "dem.tif")
                 cand_mask = os.path.join(preprocessing_inputs_dir, str(int(cand_id)), "inputs", "mask.tif")
                 cand_waterdepth = os.path.join(
                     model_outputs, str(int(cand_id)), "results", f"waterdepth_{scenario_name}.tif",
                 )
-                # path_ready: os.path.exists would read a P:\ blip as "not run yet" -> false zero.
-                if path_ready(cand_dem) and path_ready(cand_mask) and path_ready(cand_waterdepth):
+                # path_ready: os.path.exists would read a P:\ blip as "not run yet".
+                cand_missing = [p for p in (cand_dem, cand_mask, cand_waterdepth) if not path_ready(p)]
+                if cand_missing:
+                    missing += cand_missing
+                else:
                     available.append((cand_dem, cand_mask, cand_waterdepth))
+            # A neighbour that has not run (or failed) is unknown, not dry: a zero
+            # raster here would count as done and never be rerun. Raise without
+            # writing output so a resume / rerun picks this triple up again.
+            if missing:
+                raise FileNotFoundError(
+                    f"tile {tile_id} {scenario_name}: {len(missing)} lower-hop neighbour file(s) "
+                    f"missing, nothing written: {missing}"
+                )
             seed_rows, seed_cols, seed_values = collect_neighbor_wave_seeds(dem_path, available)
             if len(seed_rows) == 0:
                 skip_reason = NO_UPSTREAM_FLOODING_REASON
@@ -237,7 +250,9 @@ def run_tile_scenario(
             write_zero_waterdepth(dem_path, output_path)
             return {"outcome": "skip_no_inundation", "skip_reason": skip_reason}
 
-        oc_config = flooding_config.get("obstacle_coupling", {})
+        # Indexed, not .get(): every config layers on config.yml, which sets all
+        # of these, so a missing key is a broken config, not a reason to default.
+        oc_config = flooding_config["obstacle_coupling"]
         start = time.perf_counter()
         try:
             diagnostics = run_eikonal_python(
@@ -247,12 +262,12 @@ def run_tile_scenario(
                 boundaries_path=None if hop_distance >= 1 else read_boundaries_path,
                 seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
                 ocean_code=ocean_code, river_code=river_code,
-                obstacle_coupling=oc_config.get("enabled", False),
-                max_outer_iterations=oc_config.get("max_outer_iterations", 3),
+                obstacle_coupling=oc_config["enabled"],
+                max_outer_iterations=oc_config["max_outer_iterations"],
                 max_rounds=flooding_config["max_rounds"],
-                outer_convergence_pct=oc_config.get("outer_convergence_pct", 0.01),
+                outer_convergence_pct=oc_config["outer_convergence_pct"],
                 waterlevel_epsilon_m=flooding_config["waterlevel_epsilon_m"],
-                friction_scale_factor=flooding_config.get("friction_scale_factor", 1.0),
+                friction_scale_factor=flooding_config["friction_scale_factor"],
             )
         except MemoryError:
             mark_tile_oom(oom_dir, tile_id, reason="MemoryError in flood_depth_dense - tile too large")

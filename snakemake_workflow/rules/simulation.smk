@@ -43,8 +43,7 @@ rule run_eikonal:
         # Deliberately generous; over-estimating only reduces concurrency.
         mem_mb=lambda wildcards, input: estimate_eikonal_mem_mb(
             input.dem,
-            # Configs materialized/resolved with the old key name.
-            config["simulation"].get("eikonal_mem_estimate") or config["simulation"]["aqueduct_mem_estimate"],
+            config["simulation"]["eikonal_mem_estimate"],
         ),
     script:
         "../scripts/run_eikonal.py"

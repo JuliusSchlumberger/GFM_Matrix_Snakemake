@@ -9,7 +9,7 @@ Usage:
         --case-polygon-gpkg P:/.../bangkok_chao_phraya/bangkok_chao_phraya_domain.gpkg \\
         --case-polygon-layer bangkok_tile \\
         --return-period RP100 \\
-        --outdir P:/.../bangkok_chao_phraya/figures
+        --out-dir P:/.../bangkok_chao_phraya/figures
 """
 
 import argparse
@@ -25,7 +25,7 @@ from matplotlib.patches import Patch
 from rasterio.windows import from_bounds
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from config_utils import get_data_catalog, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
+from config_utils import get_data_catalog, load_config, merged_waterlevel_names, retry_transient_io  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _BUFFER_DEG = 0.15
@@ -67,20 +67,20 @@ def main() -> None:
     parser.add_argument("--case-polygon-gpkg", required=True)
     parser.add_argument("--case-polygon-layer", default="bangkok_tile")
     parser.add_argument("--return-period", default="RP100")
-    parser.add_argument("--outdir", default=None, help="default: visualization.output_dir")
+    parser.add_argument("--out-dir", default=None, help="default: visualization.output_dir")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
     bc = cfg["boundary_conditions"]
-    slr_order = merged_slr_scenarios(bc, cfg["adaptation"])
+    slr_order = merged_waterlevel_names(bc, cfg["adaptation"])
     slr_order = sorted(slr_order, key=lambda s: int(s.split("_")[1]))
 
     plots_cfg = cfg["postprocessing"]["plots"]
-    cmap = plots_cfg.get("waterdepth_cmap", "Blues")
-    vmax_m = float(plots_cfg.get("waterdepth_vmax_m", 10.0))
+    cmap = plots_cfg["waterdepth_cmap"]
+    vmax_m = float(plots_cfg["waterdepth_vmax_m"])
 
     merged_dir = Path(cfg["postprocessing"]["merged_outputs"])
-    out_dir = Path(args.outdir) if args.outdir else Path(cfg["visualization"]["output_dir"])
+    out_dir = Path(args.out_dir) if args.out_dir else Path(cfg["visualization"]["output_dir"])
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
     case_poly = gpd.read_file(args.case_polygon_gpkg, layer=args.case_polygon_layer)

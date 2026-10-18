@@ -93,7 +93,8 @@ def main() -> None:
     parser.add_argument("--config", default=str(repo_root / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
     parser.add_argument("--list-failed", action="store_true")
-    parser.add_argument("--watch", type=int, default=0, help="repeat every N seconds")
+    parser.add_argument("--watch", type=float, default=None, metavar="SECONDS",
+                        help="re-check and reprint every SECONDS (0 or absent: one report)")
     args = parser.parse_args()
     base = read_root(Path(args.config)) / args.base_dir_name
     while True:

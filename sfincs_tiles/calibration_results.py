@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 from flood_agreement import depth_error_metrics_from_pooled, metrics_from_counts
+from retry_io import retry_transient_io
 
 RESULT_NAME = "calibration_result.json"
 DISPLAY_LABEL = {"bathtub": "HC-bathtub", "eikonal": "EA-bathtub"}
@@ -26,19 +27,28 @@ def fsf_key(fsf: float) -> str:
 def load_results(base_dir: Path, tile_ids: list[str] | None = None) -> dict[int, dict]:
     """Load each tile's calibration_result.json, keyed by tile id.
 
-    Missing or unreadable files are skipped silently.
+    Reads are retried on transient share errors. Missing or unreadable files are
+    skipped, and their count and tile ids are printed.
     """
     if tile_ids is None:
         paths = sorted(base_dir.glob(f"*/outputs/{RESULT_NAME}"))
     else:
         paths = [base_dir / str(t) / "outputs" / RESULT_NAME for t in tile_ids]
     out = {}
+    skipped = []
     for p in paths:
         try:
-            d = json.loads(p.read_text())
+            # A missing file is not transient (tile not finished): skip it without retrying.
+            if not p.exists():
+                raise FileNotFoundError(p)
+            d = json.loads(retry_transient_io(p.read_text))
         except (OSError, ValueError):
+            skipped.append(p.parent.parent.name)
             continue
         out[int(d["tile_id"])] = d
+    if skipped:
+        print(f"load_results: {len(skipped)} tile(s) without a readable {RESULT_NAME} skipped: "
+              f"{', '.join(skipped)}", flush=True)
     return out
 
 

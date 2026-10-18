@@ -4,13 +4,13 @@ Each step runs in its own subprocess, so a crash does not abort later steps unle
 --fail-fast. Switches: compute_exposure, compute_flood_totals (raw per-country totals for
 flood_extent_validation), plot_burning_ember, plot_timeseries, plot_tipping_points,
 plot_extended_pathways, plot_slr_vs_population, plot_world_maps (slow globally). All
-figures go directly into --figdir.
+figures go directly into --fig-dir.
 
 Usage:
     python analysis/run_analysis.py \\
         [--config  snakemake_workflow/config/config.yml] \\
         [--expdir  D:/GFM/merged_results/exposure] \\
-        [--figdir  D:/GFM/figures] \\
+        [--fig-dir D:/GFM/figures] \\
         [--fail-fast] [--only-exposure | --only-plots] [--skip-world-maps]
 """
 
@@ -32,24 +32,24 @@ def _run(script: Path, extra_args: list[str], label: str, fail_fast: bool) -> bo
     return run_step([PYTHON, str(script)] + extra_args, label, fail_fast)
 
 
-# (results key, analysis.* switch, default if absent, script, kind, title, skip label), in run
-# order. "compute" gets --outdir <expdir>; "plot" gets --expdir <expdir> --outdir <figdir>.
+# (results key, analysis.* switch, script, kind, title, skip label), in run
+# order. "compute" gets --out-dir <expdir>; "plot" gets --expdir <expdir> --out-dir <fig-dir>.
 _STEPS = [
-    ("exposure", "compute_exposure", True, "compute_exposure_analysis.py", "compute",
+    ("exposure", "compute_exposure", "compute_exposure_analysis.py", "compute",
      "Exposure analysis (baseline / protect / retreat / avoid / protect + avoid)", "Exposure analysis"),
-    ("flood_totals", "compute_flood_totals", True, "compute_flood_totals.py", "compute",
+    ("flood_totals", "compute_flood_totals", "compute_flood_totals.py", "compute",
      "Flood totals (per-country flooded area / exposed population per RP, SLR)", "Flood totals"),
-    ("burning_ember", "plot_burning_ember", True, "plot_burning_ember.py", "plot",
+    ("burning_ember", "plot_burning_ember", "plot_burning_ember.py", "plot",
      "Burning-ember / impact-matrix figures", "Burning-ember plots"),
-    ("timeseries", "plot_timeseries", True, "plot_timeseries.py", "plot",
+    ("timeseries", "plot_timeseries", "plot_timeseries.py", "plot",
      "EAI time-series along SSP trajectories", "Time-series plots"),
-    ("tipping_points", "plot_tipping_points", True, "plot_tipping_points.py", "plot",
+    ("tipping_points", "plot_tipping_points", "plot_tipping_points.py", "plot",
      "Tipping-point figure (visualization.tipping_points)", "Tipping-point figure"),
-    ("extended_pathways", "plot_extended_pathways", True, "plot_extended_pathways.py", "plot",
+    ("extended_pathways", "plot_extended_pathways", "plot_extended_pathways.py", "plot",
      "Pathways beyond 2100 (visualization.extended_pathways)", "Pathways beyond 2100"),
-    ("slr_vs_population", "plot_slr_vs_population", True, "plot_slr_vs_population.py", "plot",
+    ("slr_vs_population", "plot_slr_vs_population", "plot_slr_vs_population.py", "plot",
      "SLR vs population: waterfalls + scatter (visualization.slr_vs_population)", "SLR vs population"),
-    ("world_maps", "plot_world_maps", False, "plot_world_map.py", "plot",
+    ("world_maps", "plot_world_maps", "plot_world_map.py", "plot",
      "World choropleth maps", "World maps"),
 ]
 
@@ -63,7 +63,7 @@ def main() -> None:
                         help=f"path to config.yml (default: {_default_cfg})")
     parser.add_argument("--expdir", default=None,
                         help="exposure CSV directory (default: merged_outputs/exposure)")
-    parser.add_argument("--figdir", default=None,
+    parser.add_argument("--fig-dir", default=None,
                         help="figures root directory (default: visualization.output_dir)")
     parser.add_argument("--fail-fast", action="store_true",
                         help="abort on first failed step")
@@ -80,16 +80,16 @@ def main() -> None:
     config_path = Path(args.config).resolve()
     cfg = load_config(config_path)
 
-    viz        = cfg.get("visualization", {})
+    viz        = cfg["visualization"]
     merged_out = cfg["postprocessing"]["merged_outputs"]
 
     exp_dir = Path(args.expdir or f"{merged_out}/exposure")
-    fig_dir = Path(args.figdir or viz.get("output_dir", f"{cfg['paths']['root']}/figures"))
+    fig_dir = Path(args.fig_dir or viz["output_dir"])
 
-    sw = cfg.get("analysis", {})
-    enabled = {key: sw.get(switch, default) for key, switch, default, *_ in _STEPS}
+    sw = cfg["analysis"]
+    enabled = {key: sw[switch] for key, switch, *_ in _STEPS}
     if args.only_exposure:  # flood totals keep their config switch
-        for key, _sw, _d, _script, kind, *_ in _STEPS:
+        for key, _sw, _script, kind, *_ in _STEPS:
             if kind == "plot":
                 enabled[key] = False
     if args.only_plots or args.skip_exposure:
@@ -104,11 +104,11 @@ def main() -> None:
     results: dict[str, bool] = {}
     t_start = time.time()
 
-    for key, switch, _default, script, kind, title, skip_label in _STEPS:
+    for key, switch, script, kind, title, skip_label in _STEPS:
         if not enabled[key]:
             print(f"\n  [ SKIP ] {skip_label} (analysis.{switch} = false)")
             continue
-        io_args = ["--outdir", str(exp_dir)] if kind == "compute" else ["--expdir", str(exp_dir), "--outdir", str(fig_dir)]
+        io_args = ["--out-dir", str(exp_dir)] if kind == "compute" else ["--expdir", str(exp_dir), "--out-dir", str(fig_dir)]
         results[key] = _run(SCRIPTS_DIR / script, cfg_arg + io_args, title, args.fail_fast)
 
     total = time.time() - t_start

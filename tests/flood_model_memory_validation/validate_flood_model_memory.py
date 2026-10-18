@@ -21,9 +21,8 @@ def test_mask_is_cast_to_int8_not_left_at_default_dtype() -> None:
     print("=== flood_depth_dense: mask is explicitly cast to int8 (not left at 8x-larger default) ===")
     source = inspect.getsource(fm.flood_depth_dense)
     assert "mask.astype(np.int8)" in source, (
-        "flood_depth_dense no longer casts mask to int8 - this is exactly the regression that "
-        "caused real OOM failures on large tiles during 2026-08 obstacle-coupling calibration "
-        "(mask defaulting to int64 is 8x larger than the handful of small codes it ever holds needs)."
+        "flood_depth_dense does not cast mask to int8: a default int64 mask is 8x larger than "
+        "the handful of small codes it holds needs and runs large tiles out of memory."
     )
     print("PASS: 'mask.astype(np.int8)' present in flood_depth_dense's own source")
     print()

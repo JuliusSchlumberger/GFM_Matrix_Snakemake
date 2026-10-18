@@ -6,7 +6,7 @@ time (no global mosaic) at ~1 km population-grid resolution.
 Usage:
     python compute_exposure_analysis.py \\
         [--config snakemake_workflow/config/config.yml] \\
-        --outdir D:/GFM/merged_results/exposure
+        --out-dir D:/GFM/merged_results/exposure
 """
 
 import argparse
@@ -21,9 +21,10 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import _read_band  # noqa: E402
-from config_utils import get_data_catalog, load_config, merged_slr_scenarios, retry_transient_io  # noqa: E402
+from _common import _chunk_is_populated, _read_band, discover_chunk_ids  # noqa: E402
+from config_utils import get_data_catalog, load_config, merged_waterlevel_names, retry_transient_io  # noqa: E402
 from population_growth import load_ssp_growth_factors, interpolate_growth_factor  # noqa: E402
+from validation import load_iso_lookup  # noqa: E402
 from analysis_figures import load_slr_trajectories  # noqa: E402
 from exposure_analysis import (                                 # noqa: E402
     build_adapt_protection_fraction,
@@ -280,7 +281,7 @@ def _avoid_ssp_worker_task(
 
     avoid_eai = _stream_eai(
         ctx["chunk_ids"], ctx["chunks_dir"], ctx["flood_frac_dir"],
-        ctx["return_periods"], ctx["slr_scenarios"], ctx["iso_lookup"], exposure_fn,
+        ctx["return_periods"], ctx["waterlevel_names"], ctx["iso_lookup"], exposure_fn,
     )
 
     traj_years = slr_traj.index.to_numpy(dtype=float)
@@ -309,7 +310,7 @@ def _avoid_growth_matrix_worker_task(
 
     avoid_eai = _stream_eai(
         ctx["chunk_ids"], ctx["chunks_dir"], ctx["flood_frac_dir"],
-        ctx["return_periods"], ctx["slr_scenarios"], ctx["iso_lookup"], exposure_fn,
+        ctx["return_periods"], ctx["waterlevel_names"], ctx["iso_lookup"], exposure_fn,
     )
     dense = interpolate_eai_linear(avoid_eai, ctx["slr_mm_sorted"], ctx["slr_interp_mm"])
     dense.columns = [f"EAI_{c}_g{g_pct}" for c in dense.columns]
@@ -321,25 +322,6 @@ def _avoid_growth_matrix_worker_task(
 # Chunks, not tasks, are partitioned across nodes and every task is evaluated
 # per chunk read. Two passes are needed: retreat/avoid shares must be summed
 # over ALL chunks before any chunk's EAI can be computed.
-
-def discover_chunk_ids(cfg: dict) -> list[str]:
-    """Return sorted populated chunk ids that have flood-fraction output.
-
-    Ocean/unpopulated chunks have zero-byte population placeholders and are dropped.
-    """
-    merged_dir = Path(cfg["postprocessing"]["merged_outputs"])
-    flood_frac_dir = merged_dir / "chunks" / "flood_fraction"
-    chunks_dir = merged_dir / "chunks"
-    all_chunk_ids = sorted(set(
-        p.stem.split("_RP")[0].replace("flood_fraction_", "")
-        for p in flood_frac_dir.glob("flood_fraction_*.tif")
-    ))
-    return [
-        cid for cid in all_chunk_ids
-        if (chunks_dir / f"exposure_population_grid_{cid}.tif").exists()
-        and (chunks_dir / f"exposure_population_grid_{cid}.tif").stat().st_size > 0
-    ]
-
 
 @dataclass
 class AnalysisContext:
@@ -367,39 +349,41 @@ class AnalysisContext:
 
 
 def load_analysis_context(cfg: dict) -> AnalysisContext:
-    """Build the AnalysisContext from config (mirrors main()'s setup)."""
+    """Build the AnalysisContext from config (shared by main() and the HPC steps)."""
     bc = cfg["boundary_conditions"]
-    adapt_cfg = cfg.get("adaptation", {})
-    pg_cfg = cfg.get("population_growth", {})
-    prot_cfg = cfg.get("protection", {})
-    viz = cfg.get("visualization", {})
+    adapt_cfg = cfg["adaptation"]
+    pg_cfg = cfg["population_growth"]
+    prot_cfg = cfg["protection"]
+    viz = cfg["visualization"]
 
     return_periods = bc["return_periods"]
-    slr_scenarios = merged_slr_scenarios(bc, adapt_cfg)
+    slr_scenarios = merged_waterlevel_names(bc, adapt_cfg)
     slr_mm_sorted = [float(_slr_mm(s)) for s in slr_scenarios]
-    slr_baseline = prot_cfg.get("baseline_waterlevel_name", "SLR_0")
-    slr_intensities = adapt_cfg.get("slr_intensities", [])
-    default_rp = float(prot_cfg.get("default_rp", 5.0))
+    slr_baseline = prot_cfg["baseline_waterlevel_name"]
+    slr_intensities = adapt_cfg["slr_intensities"]
+    default_rp = float(prot_cfg["default_rp"])
     sorted_rps = sorted(return_periods)
 
-    ssps = pg_cfg.get("ssps", ["SSP1", "SSP2", "SSP3", "SSP5"])
-    output_years = [int(y) for y in pg_cfg.get("output_years", [2030, 2050, 2100])]
+    ssps = pg_cfg["ssps"]
+    output_years = [int(y) for y in pg_cfg["output_years"]]
 
-    gr_cfg = viz.get("growth_rates", {})
+    # Uniform (not per-country) growth axis, shared with the burning-ember y-axis.
+    gr_cfg = viz["growth_rates"]
     growth_rates = np.arange(
-        float(gr_cfg.get("min", -0.5)),
-        float(gr_cfg.get("max", 1.5)) + float(gr_cfg.get("step", 0.1)) / 2,
-        float(gr_cfg.get("step", 0.1)),
+        float(gr_cfg["min"]),
+        float(gr_cfg["max"]) + float(gr_cfg["step"]) / 2,
+        float(gr_cfg["step"]),
     )
 
-    si_cfg = viz.get("slr_interp", {})
+    # EAI is assumed linear in SLR between modelled steps.
+    si_cfg = viz["slr_interp"]
     slr_interp_mm = np.linspace(
-        float(si_cfg.get("min_mm", 0)),
-        float(si_cfg.get("max_mm", max(slr_mm_sorted))),
-        int(si_cfg.get("n_points", 100)),
+        float(si_cfg["min_mm"]),
+        float(si_cfg["max_mm"]),
+        int(si_cfg["n_points"]),
     )
 
-    traj_path = viz.get("slr_trajectories_csv", "")
+    traj_path = viz["slr_trajectories_csv"]
     slr_traj = None
     if traj_path and Path(traj_path).exists():
         traj_full = load_slr_trajectories(traj_path)
@@ -415,10 +399,7 @@ def load_analysis_context(cfg: dict) -> AnalysisContext:
         return int(min(candidates)) if candidates else int(max(sorted_rps))
 
     rp_applied = {int(gid): _snap_rp(float(rp)) for gid, rp in coastal_rp.items()}
-    iso_lookup = {
-        int(gid): str(row["ISO"]) for gid, row in flopros.iterrows()
-        if pd.notna(row.get("ISO"))
-    }
+    iso_lookup = load_iso_lookup(catalog, "flopros_protection_standards")
 
     xlsx_path = Path(catalog.get_source("ssp_population_growth_factors").path)
     growth_df = load_ssp_growth_factors(xlsx_path) if xlsx_path.exists() else None
@@ -519,13 +500,6 @@ def build_exposure_tasks(
                     g_pct=g_pct,
                 ))
     return tasks
-
-
-def _chunk_is_populated(chunks_dir: Path, cid: str) -> bool:
-    # Zero-byte placeholders (ocean chunks) make rasterio.open raise; HPC callers
-    # may pass an unfiltered list planned before postprocessing ran.
-    p =chunks_dir / f"exposure_population_grid_{cid}.tif"
-    return p.exists() and p.stat().st_size > 0
 
 
 def pass1_shares_all_intensities(
@@ -710,16 +684,16 @@ def write_exposure_outputs(
 
 
 def main() -> None:
-    """Run the single-machine exposure pipeline, writing all CSVs to --outdir."""
+    """Run the single-machine exposure pipeline, writing all CSVs to --out-dir."""
     _default_cfg = str(Path(__file__).resolve().parents[1] / "snakemake_workflow" / "config" / "config.yml")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=_default_cfg)
-    parser.add_argument("--outdir", required=True)
+    parser.add_argument("--out-dir", required=True)
     parser.add_argument(
         "--skip-existing", action="store_true",
         help="Skip a scenario (baseline/protect_*/retreat_*) or an avoid / protect + avoid "
              "slr_intensity entirely if its output CSVs already exist in "
-             "--outdir, instead of recomputing and overwriting them. Useful "
+             "--out-dir, instead of recomputing and overwriting them. Useful "
              "for resuming after a partial failure without redoing already-"
              "correct, expensive work.",
     )
@@ -727,68 +701,29 @@ def main() -> None:
 
     cfg = load_config(args.config)
 
-    bc = cfg["boundary_conditions"]
-    adapt_cfg = cfg.get("adaptation", {})
-    pg_cfg = cfg.get("population_growth", {})
-    prot_cfg = cfg.get("protection", {})
-    viz = cfg.get("visualization", {})
-
-    return_periods = bc["return_periods"]
-    slr_scenarios = merged_slr_scenarios(bc, adapt_cfg)
-    slr_mm_sorted = [float(_slr_mm(s)) for s in slr_scenarios]
-    slr_baseline = prot_cfg.get("baseline_waterlevel_name", "SLR_0")
-    slr_intensities = adapt_cfg.get("slr_intensities", [])
-    default_rp = float(prot_cfg.get("default_rp", 5.0))
-    sorted_rps = sorted(return_periods)
-
-    ssps = pg_cfg.get("ssps", ["SSP1", "SSP2", "SSP3", "SSP5"])
-    output_years = [int(y) for y in pg_cfg.get("output_years", [2030, 2050, 2100])]
-
-    # Uniform (not per-country) growth axis, shared with the burning-ember y-axis.
-    gr_cfg = viz.get("growth_rates", {})
-    growth_rates = np.arange(
-        float(gr_cfg.get("min", -0.5)),
-        float(gr_cfg.get("max", 1.5)) + float(gr_cfg.get("step", 0.1)) / 2,
-        float(gr_cfg.get("step", 0.1)),
-    )
-
-    # EAI is assumed linear in SLR between modelled steps.
-    si_cfg = viz.get("slr_interp", {})
-    slr_interp_mm = np.linspace(
-        float(si_cfg.get("min_mm", 0)),
-        float(si_cfg.get("max_mm", max(slr_mm_sorted))),
-        int(si_cfg.get("n_points", 100)),
-    )
-
-    traj_path = viz.get("slr_trajectories_csv", "")
-    slr_traj = None
-    if traj_path and Path(traj_path).exists():
-        traj_full = load_slr_trajectories(traj_path)
-        p50_cols = {c: c.replace("_p50", "") for c in traj_full.columns if c.endswith("_p50")}
-        slr_traj = traj_full[list(p50_cols)].rename(columns=p50_cols)
-    else:
+    print("Loading FLOPROS protection standards and SSP growth factors…")
+    ctx = load_analysis_context(cfg)
+    return_periods, slr_scenarios = ctx.return_periods, ctx.slr_scenarios
+    slr_mm_sorted, slr_baseline, slr_intensities = ctx.slr_mm_sorted, ctx.slr_baseline, ctx.slr_intensities
+    ssps, output_years = ctx.ssps, ctx.output_years
+    growth_rates, slr_interp_mm = ctx.growth_rates, ctx.slr_interp_mm
+    growth_df, slr_traj = ctx.growth_df, ctx.slr_traj
+    rp_applied, iso_lookup = ctx.rp_applied, ctx.iso_lookup
+    chunks_dir, flood_frac_dir = ctx.chunks_dir, ctx.flood_frac_dir
+    if slr_traj is None:
+        traj_path = cfg["visualization"]["slr_trajectories_csv"]
         print(f"  WARNING: SLR trajectories not found at {traj_path}; File 3 (*_ssp.csv) will be skipped.")
+    if growth_df is None:
+        print("  WARNING: SSP growth factors not found; File 3 (*_ssp.csv) will be skipped.")
 
-    merged_dir = Path(cfg["postprocessing"]["merged_outputs"])
-    flood_frac_dir = merged_dir / "chunks" / "flood_fraction"
-    chunks_dir = merged_dir / "chunks"
-    out_dir = Path(args.outdir)
+    out_dir = Path(args.out_dir)
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
-    all_chunk_ids = sorted(set(
-        p.stem.split("_RP")[0].replace("flood_fraction_", "")
-        for p in flood_frac_dir.glob("flood_fraction_*.tif")
-    ))
+    # Ocean/unpopulated chunks have zero-byte placeholder population files.
+    chunk_ids, all_chunk_ids = discover_chunk_ids(flood_frac_dir, chunks_dir)
     if not all_chunk_ids:
         print(f"ERROR: no flood fraction files in {flood_frac_dir}")
         sys.exit(1)
-
-    # Ocean/unpopulated chunks have zero-byte placeholder population files.
-    chunk_ids = [
-        cid for cid in all_chunk_ids
-        if (chunks_dir / f"exposure_population_grid_{cid}.tif").exists()
-        and (chunks_dir / f"exposure_population_grid_{cid}.tif").stat().st_size > 0
-    ]
     if not chunk_ids:
         print("ERROR: no population chunk files found — run the Snakemake postprocess target first.")
         sys.exit(1)
@@ -797,27 +732,6 @@ def main() -> None:
         print(f"  Skipping {skipped} unpopulated/ocean chunks (zero-byte population files).")
     print(f"Using {len(chunk_ids)} populated chunks, {len(return_periods)} RPs, {len(slr_scenarios)} SLR scenarios.")
     print("Processing chunk-by-chunk (no global mosaic) - peak memory stays flat regardless of study-area size.")
-
-    print("Loading FLOPROS protection standards…")
-    catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
-    flopros = catalog.get_dataframe("flopros_protection_standards")
-    coastal_rp = flopros["Coastal"].fillna(flopros["Riverine"]).fillna(default_rp)
-
-    def _snap_rp(flopros_rp: float) -> int:
-        candidates = [r for r in sorted_rps if r >= flopros_rp]
-        return int(min(candidates)) if candidates else int(max(sorted_rps))
-
-    rp_applied = {int(gid): _snap_rp(float(rp)) for gid, rp in coastal_rp.items()}
-    iso_lookup = {
-        int(gid): str(row["ISO"]) for gid, row in flopros.iterrows()
-        if pd.notna(row.get("ISO"))
-    }
-
-    print("Loading SSP growth factors…")
-    xlsx_path = Path(catalog.get_source("ssp_population_growth_factors").path)
-    growth_df = load_ssp_growth_factors(xlsx_path) if xlsx_path.exists() else None
-    if growth_df is None:
-        print("  WARNING: SSP growth factors not found; File 3 (*_ssp.csv) will be skipped.")
 
     expect_ssp = growth_df is not None and slr_traj is not None
 
@@ -915,7 +829,7 @@ def main() -> None:
         for g_pct in growth_pct_labels
     ]
     n_tasks = len(ssp_tasks) + len(growth_tasks)
-    budget_gb = float(cfg.get("analysis", {}).get("avoid_worker_memory_budget_gb", 8))
+    budget_gb = float(cfg["analysis"]["avoid_worker_memory_budget_gb"])
     n_workers = max(1, min(os.cpu_count() or 1, max(n_tasks, 1)))
     print(
         f"\nComputing AVOID / PROTECT + AVOID exposure: {len(avoid_units)} (variant, slr_intensity) units x "

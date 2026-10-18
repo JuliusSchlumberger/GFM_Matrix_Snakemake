@@ -14,7 +14,7 @@ CLI names and config.yml preparation.* switches):
 Usage:
     python preparation/run_preparation.py \
         [STEP ...] [--config  snakemake_workflow/config/config.yml] \
-        [--no-force] [--fail-fast]
+        [--skip-existing] [--fail-fast]
 
     With no STEP given, runs whichever steps are enabled in config.yml's
     preparation.* block (the default: all of them). Name one or more STEPs
@@ -84,7 +84,7 @@ def main() -> None:
     )
     parser.add_argument("--config", default=_default_cfg,
                         help=f"path to config.yml (default: {_default_cfg})")
-    parser.add_argument("--no-force", dest="force", action="store_false", default=True,
+    parser.add_argument("--skip-existing", dest="force", action="store_false", default=True,
                         help="reuse the boundary_conditions step's cached intermediate/scenario "
                              "files instead of recomputing them (default: always recompute - "
                              "see prepare_boundary_conditions.run's own docstring for why a silent "

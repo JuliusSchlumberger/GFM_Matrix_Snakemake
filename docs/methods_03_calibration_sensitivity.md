@@ -51,10 +51,11 @@ value the fit is computed against).
 
 ## 3. Obstacle-coupling outer-loop calibration (`max_outer_iterations`)
 
-**Population**: the same 571-candidate pool, restricted to the 500 tiles §2
-already confirmed wet at the first sweep (`wet_tiles_selected.txt`) -
-obstacle coupling has nothing to iterate on for a tile with no flooding at
-all.
+**Population**: the same 571-candidate pool, restricted to 500 of the 537
+tiles §2 found wet at the first sweep - `wet_tiles_selected.txt`, which
+`aggregate_wet_tiles.py` caps at `--n-tiles-wanted 500` (the first 500 wet
+tiles in trace-completion order) - since obstacle coupling has nothing to
+iterate on for a tile with no flooding at all.
 
 **Method**: per tile, records an `n_outer = 0` baseline (a single
 unblocked solve, no elevation-aware correction at all), then runs

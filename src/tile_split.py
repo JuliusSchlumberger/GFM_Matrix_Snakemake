@@ -66,9 +66,9 @@ def choose_split(
 ) -> tuple[str, Polygon, Polygon]:
     """Pick the split axis that best balances land between halves.
 
-    Returns (axis_name, half_a, half_b). Raises ValueError only in the
-    pathological case where every candidate axis produces a zero-land half
-    on both sides (caller should fall back to giving up on this tile).
+    Returns (axis_name, half_a, half_b): the axis whose halves both hold land
+    and differ least in land count. If no axis keeps land on both halves, prints
+    a warning and falls back to the least-unbalanced axis (largest smaller half).
     """
     candidates = build_split_candidates(geom, fraction)
     scored: dict[str, tuple[int, int]] = {

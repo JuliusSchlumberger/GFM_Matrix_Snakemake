@@ -6,7 +6,7 @@ analysis: {plot_timeseries: true}
 population_growth:
   output_years: [2025, 2030, 2035, 2040, 2045, 2050, 2060, 2075, 2100]
 simulation:
-  flooding: {friction_scale_factor: 30.0}
+  flooding: {friction_scale_factor: 30.0}  # the value its existing outputs were computed with (production config.yml: 12.0)
 visualization:
   growth_rates: {max: 1.5, min: -0.5}
   slr_interp: {max_mm: 1500, n_points: 100}
