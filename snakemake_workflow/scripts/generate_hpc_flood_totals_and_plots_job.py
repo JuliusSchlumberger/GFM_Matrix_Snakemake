@@ -6,7 +6,7 @@ of existing per-chunk files, so a wide thread pool saturates useful concurrency.
 
 Usage:
     python generate_hpc_flood_totals_and_plots_job.py [--config path/to/config.yml]
-        [--partition 24vcpu] [--cpus-per-task 24] [--mem 32G] [--time 1-00:00:00]
+        [--partition P] [--cpus-per-task N] [--mem M] [--time 1-00:00:00]
     bash <printed submit command>
 """
 
@@ -17,29 +17,28 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from config_utils import atomic_write, load_config, retry_transient_io  # noqa: E402
-from hpc_common import _stage_configfile_lines, sbatch_header  # noqa: E402
+from config_utils import atomic_write, load_config, load_hpc_config, retry_transient_io  # noqa: E402
+from hpc_common import _stage_configfile_lines, job_sbatch_cfg, sbatch_header  # noqa: E402
 
 
 def write_flood_totals_and_plots_job(
     local_config: dict, linux_config: dict,
-    partition: str = "24vcpu", cpus: int = 24, mem: str = "32G", time: str | None = None,
+    partition: str | None = None, cpus: int | None = None, mem: str | None = None, time: str | None = None,
 ) -> tuple[Path, str]:
     """Write the flood_totals_and_plots.sbatch script, without submitting it.
 
-    `cpus` is also passed as compute_flood_totals.py's --workers; `time=None`
-    uses hpc.sbatch.time. Reuses an existing resolved_config.yml in hpc.jobs_dir.
-    Returns the local script path and its Linux path.
+    Resources default to hpc.flood_totals_sbatch (falling back to hpc.sbatch);
+    `cpus` is also passed as compute_flood_totals.py's --workers. Reuses an
+    existing resolved_config.yml in hpc.jobs_dir. Returns the local script path
+    and its Linux path.
     """
     local_jobs_dir = Path(local_config["hpc"]["jobs_dir"])
     linux_jobs_dir = linux_config["hpc"]["jobs_dir"]
     linux_code_root = linux_config["paths"]["code_root"]
-    sbatch_cfg = dict(linux_config["hpc"]["sbatch"])
-    sbatch_cfg["partition"] = partition
-    sbatch_cfg["cpus_per_task"] = cpus
-    sbatch_cfg["mem"] = mem
-    if time:
-        sbatch_cfg["time"] = time
+    sbatch_cfg = job_sbatch_cfg(linux_config["hpc"], "flood_totals_sbatch")
+    for key, value in (("partition", partition), ("cpus_per_task", cpus), ("mem", mem), ("time", time)):
+        if value:
+            sbatch_cfg[key] = value
 
     retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
@@ -88,17 +87,15 @@ def main() -> None:
     )
     default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
     parser.add_argument("--config", default=str(default_config))
-    parser.add_argument("--partition", default="24vcpu")
-    parser.add_argument("--cpus-per-task", type=int, default=24)
-    parser.add_argument("--mem", default="32G", help="a guess at this partition's safe ceiling - "
-                         "confirm against `sinfo -N -o \"%%N %%P %%m %%c\"` before relying on it "
-                         "(see hpc.sbatch.mem's own comment on 1vcpu's real-vs-nominal gap)")
+    parser.add_argument("--partition", default=None, help="default: hpc.flood_totals_sbatch.partition")
+    parser.add_argument("--cpus-per-task", type=int, default=None, help="default: hpc.flood_totals_sbatch.cpus_per_task")
+    parser.add_argument("--mem", default=None, help="default: hpc.flood_totals_sbatch.mem")
     parser.add_argument("--time", default=None, help="default: hpc.sbatch.time from --config")
     args = parser.parse_args()
 
     config_path = Path(args.config)
     local_config = load_config(config_path)
-    linux_config = load_config(config_path, extra_override=config_path.parent / "config_hpc.yml")
+    linux_config = load_hpc_config(config_path)
 
     script_path, linux_script_path = write_flood_totals_and_plots_job(
         local_config, linux_config, args.partition, args.cpus_per_task, args.mem, args.time,

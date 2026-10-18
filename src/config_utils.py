@@ -117,8 +117,8 @@ def _expand_paths(obj: Any, substitutions: dict[str, str]) -> Any:
 def load_config(config_path: str | Path, extra_override: str | Path | None = None) -> dict:
     """Load config.yml the same way the root Snakefile does, for standalone scripts.
 
-    Layers: config.yml < sibling config_local.yml < `extra_override` (e.g.
-    config_hpc.yml; skipped if missing). Then expands {root}, {code_root} and
+    Layers: config.yml < sibling config_local.yml < `extra_override` (skipped
+    if missing; HPC callers use `load_hpc_config`). Then expands {root}, {code_root} and
     {processed_inputs_dir} everywhere.
     """
     config_path = Path(config_path)
@@ -145,6 +145,54 @@ def load_config(config_path: str | Path, extra_override: str | Path | None = Non
     if "processed_inputs_dir" in config["paths"]:
         subs["processed_inputs_dir"] = _expand_paths(config["paths"]["processed_inputs_dir"], subs)
     return _expand_paths(config, subs)
+
+
+HPC_SITE_CONFIG_MISSING = (
+    "snakemake_workflow/config/config_hpc.yml not found: copy snakemake_workflow/config/config_hpc.example.yml "
+    "to snakemake_workflow/config/config_hpc.yml and fill in your site values"
+)
+
+
+def has_hpc_site_values(config: dict) -> bool:
+    """Return whether `config` carries the HPC site values (hpc.sbatch.env_activate_cmd set).
+
+    config.yml leaves them empty; config_hpc.yml sets them, and so does every
+    resolved_config.yml a generator writes from the layered config.
+    """
+    return bool(((config.get("hpc") or {}).get("sbatch") or {}).get("env_activate_cmd"))
+
+
+def load_hpc_config(config_path: str | Path) -> dict:
+    """Load `config_path` as the HPC jobs see it: `load_config` + sibling config_hpc.yml.
+
+    A config without a sibling config_hpc.yml must already carry the site values,
+    as the resolved_config.yml that chained on-node generators read; otherwise
+    raises FileNotFoundError naming the example file to copy.
+    """
+    config_path = Path(config_path)
+    site_path = config_path.parent / "config_hpc.yml"
+    if site_path.exists():
+        return load_config(config_path, extra_override=site_path)
+    config = load_config(config_path)
+    if not has_hpc_site_values(config):
+        raise FileNotFoundError(f"{HPC_SITE_CONFIG_MISSING} ({config_path} has no hpc site values either)")
+    return config
+
+
+def with_hpc_site_values(hpc_cfg: dict, config_dir: str | Path) -> dict:
+    """Layer the `hpc` block of `config_dir`/config_hpc.yml over `hpc_cfg`.
+
+    For the Snakefile's `config["hpc"]`, which has no site layer. Without the
+    file, `hpc_cfg` must already carry the site values (GFM_CONFIG_PATH set to
+    a resolved_config.yml); otherwise raises FileNotFoundError.
+    """
+    site_path = Path(config_dir) / "config_hpc.yml"
+    if site_path.exists():
+        with open(site_path, encoding="utf-8") as f:
+            hpc_cfg = _deep_merge(hpc_cfg, (yaml.safe_load(f) or {}).get("hpc") or {})
+    if not has_hpc_site_values({"hpc": hpc_cfg}):
+        raise FileNotFoundError(HPC_SITE_CONFIG_MISSING)
+    return hpc_cfg
 
 
 def materialize_config(

@@ -31,7 +31,8 @@ Size: ~31,600 lines of Python/Snakemake/shell in 189 tracked files.
 | `docs/` | `methods_01..04b` method write-ups, `figure_scripts/` | - |
 
 Scenario configs in `snakemake_workflow/config/`: `config.yml` (single source of
-truth), `config_local.yml` (gitignored, machine paths), `config_hpc.yml` (Hydrax),
+truth), `config_local.yml` (gitignored, machine paths), `config_hpc.yml` (gitignored, HPC site values;
+from `config_hpc.example.yml`),
 `<scenario>.yml` + `<scenario>_pins.yml` -> generated `<scenario>_materialized.yml`
 (bangkok_chao_phraya, calibration_500_tiles, deltas_ssp126, deltas_ssp245;
 deltas_design is written by `analysis/prepare_delta_design_runs.py`).
@@ -45,7 +46,7 @@ All on branch `cleanup` (~50 commits ahead of `main`, not merged).
   deleted, out-of-scope validation removed, doc drift fixed, near-duplicate helpers
   unified (`src/step_runner.py`, `analysis/_common.py`, `validation/_chunks.py`,
   `tiles.chunk_id_from_corner`), hard-coded paths moved to config /
-  `sfincs_tiles/hydrax_env.sh`, aqueduct -> eikonal and module renames, large
+  `sfincs_tiles/site_env.sh`, aqueduct -> eikonal and module renames, large
   modules split (`run_analysis.py` STEPS table, `build_station_boundary_lines.py`
   -> `boundary_lines_geometry.py` + `boundary_lines_plot.py`).
 - Documentation trim over all 188 files (CLAUDE.md "Documentation standard"):
@@ -94,8 +95,8 @@ hydromt 1.x cannot import `src/config_utils`).
 | Check | Command | Current result |
 |---|---|---|
 | Lint | `python -m ruff check .` | clean |
-| Tests (gfm) | `python -m pytest -q -m "not needs_pdrive" tests` | 69 passed |
-| Tests (sfincs) | in hydromt-sfincs-dev: `python -m pytest -q -m "not needs_pdrive" tests/sfincs_*` | 14 passed, 3 deselected (the P:\-reading tests; they write only under pytest tmp dirs) |
+| Tests (gfm) | `python -m pytest -q -m "not needs_data" tests` | 69 passed |
+| Tests (sfincs) | in hydromt-sfincs-dev: `python -m pytest -q -m "not needs_data" tests/sfincs_*` | 14 passed, 3 deselected (the P:\-reading tests; they write only under pytest tmp dirs) |
 | Dry run | `GFM_CONFIG_PATH=snakemake_workflow/config/bangkok_chao_phraya_materialized.yml snakemake -n all --cores 1` | 480 jobs (config-key rename re-triggers 25), matches `.cleanup_baseline/snakemake_n_all_bangkok_chao_phraya_final.txt` |
 
 The dry-run job count depends on `profiles/default/config.yaml`

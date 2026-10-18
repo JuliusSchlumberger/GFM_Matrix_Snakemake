@@ -4,6 +4,7 @@ One process per node runs its tile slice sequentially (amortizes env setup and
 Numba JIT). Tiles are LPT bin-packed on pixel count (bbox area_deg2 * 3600**2,
 EPSG:4326 ~1-arcsecond DeltaDTM); --time is a no-early-exit worst case.
 Build wet_tiles_selected.txt afterwards with aggregate_wet_tiles.py.
+Partition, mem, cpus and account default to hpc.sbatch (config_hpc.yml).
 
 Usage:
     python generate_calibration_batch_jobs.py sweep_budget
@@ -22,18 +23,14 @@ import geopandas as gpd
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from config_utils import atomic_write, load_config, retry_transient_io  # noqa: E402
+from config_utils import atomic_write, load_config, load_hpc_config, retry_transient_io  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sfincs_tiles"))
-from gfm_config import hydrax_paths  # noqa: E402  (Hydrax python path: sfincs_tiles/hydrax_env.sh)
+from gfm_config import check_site_roots, site_paths  # noqa: E402  (site python path: sfincs_tiles/site_env.sh)
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 N_NODES_DEFAULT = 30
-PARTITION_DEFAULT = "1vcpu"
-MEM_DEFAULT = "7G"
-CPUS_PER_TASK_DEFAULT = 1
-GFM_PY_LINUX = hydrax_paths()["GFM_PYTHON"]
 
 # Measured on tiles of 196K-18.9M cells (within ~10%); used only for the --time estimate.
 RATE_S_PER_MCELL_SWEEP = 0.05
@@ -108,12 +105,12 @@ def main() -> None:
     )
     parser.add_argument("--tile-ids-file", default=None, help="default: <study-dir-name>/<study's own default file>, see SCRIPTS above")
     parser.add_argument("--n-nodes", type=int, default=N_NODES_DEFAULT)
-    parser.add_argument("--partition", default=PARTITION_DEFAULT)
+    parser.add_argument("--partition", default=None, help="default: hpc.sbatch.partition")
     parser.add_argument("--time", default=None, help="default: derived from the worst-loaded node's own estimated worst-case time, see estimate_worst_case_hours()")
     parser.add_argument("--time-margin", type=float, default=1.5, help="safety multiplier applied to the worst-loaded node's estimated worst-case hours before rounding up to --time (default: 1.5x)")
-    parser.add_argument("--mem", default=MEM_DEFAULT)
-    parser.add_argument("--cpus-per-task", type=int, default=CPUS_PER_TASK_DEFAULT)
-    parser.add_argument("--account", default="")
+    parser.add_argument("--mem", default=None, help="default: hpc.sbatch.mem")
+    parser.add_argument("--cpus-per-task", type=int, default=None, help="default: hpc.sbatch.cpus_per_task")
+    parser.add_argument("--account", default=None, help="default: hpc.sbatch.account")
     parser.add_argument(
         "--extra-args", default="",
         help="extra CLI args forwarded verbatim to each node's script call, e.g. '--epsilon 0.03' "
@@ -125,7 +122,14 @@ def main() -> None:
 
     config_path = Path(args.config)
     local_config = load_config(config_path)
-    linux_config = load_config(config_path, extra_override=config_path.parent / "config_hpc.yml")
+    linux_config = load_hpc_config(config_path)
+    site = site_paths()
+    check_site_roots(site, linux_config["paths"])
+    gfm_py_linux = site["GFM_PYTHON"]
+    sbatch_cfg = linux_config["hpc"]["sbatch"]
+    for key in ("partition", "mem", "cpus_per_task", "account"):
+        if getattr(args, key) is None:
+            setattr(args, key, sbatch_cfg.get(key, ""))
 
     local_root = Path(local_config["paths"]["root"])
     linux_root = linux_config["paths"]["root"]
@@ -178,8 +182,9 @@ def main() -> None:
         lines = [
             "#!/bin/bash",
             f"#SBATCH --job-name={name}",
-            f"#SBATCH --partition={args.partition}",
         ]
+        if args.partition:
+            lines.append(f"#SBATCH --partition={args.partition}")
         if args.account:
             lines.append(f"#SBATCH --account={args.account}")
         lines += [
@@ -193,7 +198,7 @@ def main() -> None:
             # carries on past a failing tile.
             "set -uo pipefail",
             "unset PROJ_LIB PROJ_DATA GDAL_DATA",  # as the sfincs_tiles jobs: no stale PROJ/GDAL data dirs
-            f'"{GFM_PY_LINUX}" "{linux_code_root}/calibration_studies/{spec["script_name"]}" --out-dir "{out_dir_linux}" '
+            f'"{gfm_py_linux}" "{linux_code_root}/calibration_studies/{spec["script_name"]}" --out-dir "{out_dir_linux}" '
             f'--config "{linux_config_path}" --tile-ids {" ".join(batch_tiles)} {args.extra_args}',
             "",
         ]

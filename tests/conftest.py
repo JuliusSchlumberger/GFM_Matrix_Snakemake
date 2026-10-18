@@ -1,8 +1,8 @@
 """Mark and filter the standalone tests/ scripts for pytest.
 
 `tests/sfincs_*` need hydromt_sfincs 2.x (hydromt-sfincs-dev env) and are not
-collected without it. `needs_pdrive` tests self-skip when P:\\ is absent; the
-marker is only for selection (`-m "not needs_pdrive"`).
+collected without it. `needs_data` tests self-skip when the data root is absent; the
+marker is only for selection (`-m "not needs_data"`).
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ def _hydromt_sfincs_major() -> int:
 # unrelated 1.x copy, which imports fine but lacks the modules these tests need.
 _HAS_HYDROMT_SFINCS = _hydromt_sfincs_major() >= 2
 
-_NEEDS_PDRIVE = {
+_NEEDS_DATA = {
     "sfincs_antimeridian_validation/validate_antimeridian_handling.py",
     "sfincs_hydrograph_truncation_validation/validate_truncation_window.py",
     "sfincs_synthetic_end_to_end/test_sfincs_smoke.py",
@@ -58,7 +58,7 @@ def tmp_dir(tmp_path: Path) -> Path:
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Attach needs_sfincs / needs_pdrive markers by file location."""
+    """Attach needs_sfincs / needs_data markers by file location."""
     for item in items:
         path = Path(str(item.fspath))
         try:
@@ -67,5 +67,5 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             continue
         if rel.startswith("sfincs_"):
             item.add_marker(pytest.mark.needs_sfincs)
-        if rel in _NEEDS_PDRIVE:
-            item.add_marker(pytest.mark.needs_pdrive)
+        if rel in _NEEDS_DATA:
+            item.add_marker(pytest.mark.needs_data)

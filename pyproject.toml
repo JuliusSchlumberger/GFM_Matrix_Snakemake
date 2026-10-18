@@ -12,7 +12,7 @@ python_files = ["test_*.py", "validate_*.py"]
 addopts = "--import-mode=importlib -ra"
 markers = [
     "needs_sfincs: needs the hydromt-sfincs-dev env (auto-applied to tests/sfincs_*; skipped elsewhere)",
-    "needs_pdrive: reads real data from the P:\\ modelling share",
+    "needs_data: reads real data under paths.root (self-skips when absent)",
 ]
 
 [tool.ruff]

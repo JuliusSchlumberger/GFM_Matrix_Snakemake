@@ -26,7 +26,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from config_utils import atomic_write, load_config, merged_waterlevel_names, retry_transient_io  # noqa: E402
+from config_utils import atomic_write, load_config, load_hpc_config, merged_waterlevel_names, retry_transient_io  # noqa: E402
 from hpc_common import _retry_wrapper_lines, _stage_configfile_lines, read_targets_lines, sbatch_header  # noqa: E402
 
 
@@ -96,7 +96,7 @@ def main() -> None:
 
     config_path = Path(args.config)
     local_config = load_config(config_path)
-    linux_config = load_config(config_path, extra_override=config_path.parent / "config_hpc.yml")
+    linux_config = load_hpc_config(config_path)
 
     local_jobs_dir = Path(local_config["hpc"]["jobs_dir"])
     linux_jobs_dir = linux_config["hpc"]["jobs_dir"]

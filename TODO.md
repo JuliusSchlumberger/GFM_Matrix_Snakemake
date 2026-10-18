@@ -7,12 +7,15 @@ the code is done; what remains needs you, Hydrax or P:\.
 
 1. **Merge the latest `cleanup` commits into `main`** (the earlier merge is done; `git log origin/main..cleanup`).
 2. **On Hydrax:** back up the `*_materialized.yml` files in `~/gfm_code/snakemake_workflow/config/`,
-   `git pull` on `main`, then `python snakemake_workflow/scripts/materialize_configs.py` (the checkout
+   `git pull` on `main`, create the gitignored site files
+   (`cp sfincs_tiles/site_env.example.sh sfincs_tiles/site_env.sh` and
+   `cp snakemake_workflow/config/config_hpc.example.yml snakemake_workflow/config/config_hpc.yml`;
+   the examples hold the Hydrax values), then `python snakemake_workflow/scripts/materialize_configs.py` (the checkout
    is under /u, not on P:, so it cannot be done from Windows). Configs with the old keys
    `slr_scenario` / `slr_scenarios` fail with KeyError.
 3. **On Hydrax:** `DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part eikonal` once, to check the
    shell drivers (only tested locally with stubbed sbatch/python). Paths live in
-   `sfincs_tiles/hydrax_env.sh`; keep its roots in sync with `config_hpc.yml`.
+   `sfincs_tiles/site_env.sh`; keep its roots in sync with `config_hpc.yml`.
 4. **Hydrax `gfm` env:** `mamba install -n gfm pytest=8.4.2 ruff=0.12.0`.
 5. **P:\ cleanup:** `modelling/sfincs_smoke_test/` is no longer used; delete it if you like. When
    calibration stage 1 runs again, pass `--overwrite` so screen / pre-flight error records cached by

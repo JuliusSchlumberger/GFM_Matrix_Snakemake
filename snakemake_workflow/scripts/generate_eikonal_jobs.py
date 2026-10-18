@@ -19,7 +19,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from config_utils import atomic_write, load_config, retry_transient_io  # noqa: E402
+from config_utils import atomic_write, load_config, load_hpc_config, retry_transient_io, with_hpc_site_values  # noqa: E402
 from hpc_common import _stage_configfile_lines, _stage_tile_grid_lines, sbatch_header  # noqa: E402
 
 
@@ -92,7 +92,7 @@ def _write_wave_scripts(
     `name_prefix` of the scripts. `tiles_per_batch` only adds a tile count to the
     progress line. Returns the Linux script paths per wave and the local jobs dir.
     """
-    linux_config = load_config(base_config_path, extra_override=base_config_path.parent / "config_hpc.yml")
+    linux_config = load_hpc_config(base_config_path)
     linux_batch_runner = f"{linux_config['paths']['code_root']}/snakemake_workflow/scripts/run_simulation_batch.py"
     linux_jobs_dir = linux_config["hpc"]["jobs_dir"]
     linux_resolved_config = f"{linux_jobs_dir}/resolved_config.yml"
@@ -257,7 +257,9 @@ if "snakemake" in dir():
         batches=snakemake.params.batches,  # noqa: F821
         return_periods=snakemake.params.return_periods,  # noqa: F821
         waterlevel_names=snakemake.params.waterlevel_names,  # noqa: F821
-        hpc_cfg=snakemake.params.hpc_cfg,  # noqa: F821
+        hpc_cfg=with_hpc_site_values(
+            snakemake.params.hpc_cfg, Path(snakemake.params.base_config_path).parent,  # noqa: F821
+        ),
         base_config_path=Path(snakemake.params.base_config_path),  # noqa: F821
         script_paths=snakemake.output.scripts,  # noqa: F821
         resolved_config_path=snakemake.output.resolved_config,  # noqa: F821

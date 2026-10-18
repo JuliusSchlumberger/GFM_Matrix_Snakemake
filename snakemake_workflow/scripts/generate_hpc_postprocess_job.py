@@ -26,7 +26,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from config_utils import atomic_write, load_config, merged_waterlevel_names, retry_transient_io  # noqa: E402
+from config_utils import atomic_write, load_config, load_hpc_config, merged_waterlevel_names, retry_transient_io  # noqa: E402
 from hpc_common import (  # noqa: E402
     _retry_wrapper_lines,
     _stage_configfile_lines,
@@ -149,14 +149,15 @@ def main() -> None:
              "final reduce_write job, so the full postprocessing -> exposure -> flood-totals -> "
              "plots pipeline is one single submission from the login node.",
     )
-    parser.add_argument("--flood-totals-partition", default="24vcpu")
-    parser.add_argument("--flood-totals-cpus-per-task", type=int, default=24)
-    parser.add_argument("--flood-totals-mem", default="32G")
+    parser.add_argument("--flood-totals-partition", default=None, help="default: hpc.flood_totals_sbatch.partition")
+    parser.add_argument("--flood-totals-cpus-per-task", type=int, default=None,
+                        help="default: hpc.flood_totals_sbatch.cpus_per_task")
+    parser.add_argument("--flood-totals-mem", default=None, help="default: hpc.flood_totals_sbatch.mem")
     args = parser.parse_args()
 
     config_path = Path(args.config)
     local_config = load_config(config_path)
-    linux_config = load_config(config_path, extra_override=config_path.parent / "config_hpc.yml")
+    linux_config = load_hpc_config(config_path)
 
     local_jobs_dir = Path(local_config["hpc"]["jobs_dir"])
     linux_jobs_dir = linux_config["hpc"]["jobs_dir"]

@@ -211,46 +211,37 @@ hpc:
   # every batch per wave, split evenly by tile count
   jobs_dir: "{root}/model_outputs/hpc_jobs"           # generated sbatch scripts, resolved_config.yml, submit_waves.sh, logs/
   single_preprocess_job: false # true: generate_hpc_preprocess_job.py writes one job for all tiles instead of node batches
+  # Site SLURM values (partition, mem, env_activate_cmd, wave_tiers, *_sbatch) are left empty here:
+  # they come from config_hpc.yml (copy config_hpc.example.yml), which the HPC generators require.
   sbatch:
-    # Hydrax partitions: 1vcpu/4vcpu/16vcpu/24vcpu/60vcpu (8 GB/vCPU), 44vcpu, gpu, test (30 min cap).
-    # Responsible use: ~240 cores at once, so n_nodes x cpus_per_task per wave should stay under that.
-    partition: 1vcpu
+    partition: ""                                     # "" omits #SBATCH --partition (cluster default)
     account: ""                                       # optional; "" omits #SBATCH --account
     # days-hours:minutes:seconds. Mandatory: an unset Hydrax job gets a 1-minute default and is killed.
     time: "1-00:00:00"
-    # 1vcpu nodes have 7950 MB usable, not 8192; requesting 8G fails.
-    mem: "7G"
+    mem: ""
     # Simulation: tiles solved concurrently per node (single-threaded numba solves).
     # Preprocessing: `snakemake --cores` for the batch.
     cpus_per_task: 1
-    # HDF5_USE_FILE_LOCKING=FALSE: HDF5 reads (e.g. geogunit .nc) hang on Hydrax NFS otherwise.
-    env_activate_cmd: 'module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm && export HDF5_USE_FILE_LOCKING=FALSE'
+    env_activate_cmd: ""                              # shell line activating the gfm env in every job
 
   # Per-hop_distance-wave node/partition tiers; override n_nodes/sbatch above, read only by
   # generate_hpc_simulation_jobs.py (not hpc_dispatch.smk). First tier whose `hops` contains the
   # wave's hop_distance wins; `n_nodes: null` = one node per tile; `hops: null` is the catch-all
-  # and MUST be last. Sized for ~0.6 min/solve and the 4504-tile grid (hop 0: 3761 tiles,
-  # hop 1/2: 462+139); re-estimate before reusing for another grid or solver change.
-  wave_tiers:
-    - hops: [0]
-      n_nodes: 6
-      partition: "24vcpu"
-      cpus_per_task: 24
-      mem: "168G"           # 7G/vcpu, same headroom ratio as sbatch: above
-      time: "0-16:00:00"    # ~12h worst case (627 tiles/batch x 45 scenarios / 24-way / ~0.6min) + margin
-    - hops: [1, 2]
-      n_nodes: 2
-      partition: "24vcpu"
-      cpus_per_task: 24
-      mem: "168G"
-      time: "0-04:00:00"    # ~4.4h worst case (hop=1 batches), little margin
-    - hops: null
-      n_nodes: null         # one 1vcpu node per tile
-      partition: "1vcpu"
-      cpus_per_task: 1
-      mem: "7G"
-      time: "0-01:00:00"    # ~27min worst case (45 scenarios serial, ~0.6min each) + margin
+  # and MUST be last. Each tier sets n_nodes, partition, cpus_per_task, mem and time.
+  # Empty: every wave uses n_nodes/sbatch.
+  wave_tiers: []
 
+  # Resources of the SFINCS calibration jobs (sfincs_tiles/generate_calibration_jobs.py; --time is
+  # computed per job) and of the flood-totals + plots job (generate_hpc_flood_totals_and_plots_job.py,
+  # cpus_per_task is also its --workers). Empty/null values fall back to hpc.sbatch.
+  calibration_sbatch:
+    partition: ""
+    cpus_per_task: null
+    mem: ""
+  flood_totals_sbatch:
+    partition: ""
+    cpus_per_task: null
+    mem: ""
 
 # ── POSTPROCESSING ────────────────────────────────────────────────────────────
 # Used by: merge_chunk.py, compute_flood_fraction_chunk.py, build_mosaic_vrt.py,

@@ -6,7 +6,7 @@ Deltares' Aqueduct Coastal Flooding method. Per DeltaDTM tile it prepares DEM/ma
 friction/water-level boundaries, runs a Python Fast-Sweeping eikonal flood solver per
 (tile, return period, SLR scenario), merges to spatial chunks, then runs exposure/
 adaptation analysis and benchmark validation. A separate SFINCS sub-pipeline
-(`sfincs_tiles/`) calibrates/validates the eikonal solver against SFINCS on Hydrax.
+(`sfincs_tiles/`) calibrates/validates the eikonal solver against SFINCS on the HPC.
 
 ## Layout & entry points
 - `preparation/run_preparation.py`: run first; builds tile grid + boundary inputs.
@@ -21,7 +21,7 @@ adaptation analysis and benchmark validation. A separate SFINCS sub-pipeline
   SF Bay and England FZ2/FZ3 run via standalone scripts in `validation/`. Do not add
   other countries back without asking.
 - `sfincs_tiles/generate_calibration_jobs.py stage1|stage2`, `rerun_*_calibration.sh`:
-  eikonal vs SFINCS friction calibration, Hydrax only (`run_final_tile.sh` is the
+  eikonal vs SFINCS friction calibration, HPC only (`run_final_tile.sh` is the
   per-tile SLURM worker).
 - `calibration_studies/generate_calibration_batch_jobs.py sweep_budget|obstacle_coupling`:
   eikonal solver sensitivity (inner sweep rounds / outer iterations), docs/methods_03.
@@ -32,8 +32,9 @@ adaptation analysis and benchmark validation. A separate SFINCS sub-pipeline
 - `snakemake_workflow/config/config.yml` is the single source of truth for every pipeline.
 - Machine-specific paths go in `config_local.yml` (gitignored, auto-loaded). Never put
   per-machine values in `config.yml`.
-- HPC: `config_hpc.yml` (tracked, Hydrax values; `config_hpc.yml.example` for other clusters), passed via
-  `GFM_CONFIG_PATH`.
+- HPC site values: gitignored `config_hpc.yml` (copy `config_hpc.example.yml`) and
+  `sfincs_tiles/site_env.sh` (copy `site_env.example.sh`); the HPC generators and shell
+  drivers require them. Never put site values in `config.yml`.
 - `*_materialized.yml` are generated; never hand-edit them.
 
 ## Environments
@@ -41,34 +42,32 @@ adaptation analysis and benchmark validation. A separate SFINCS sub-pipeline
   (including sfincs_tiles plot scripts). Snakemake pinned to 7.32.4.
 - `hydromt-sfincs-dev` (environment_sfincs.yml): sfincs_tiles model build/run only.
   Its matplotlib is broken; never plot in it.
-- On the Windows machine this env is named `gfm_python_preprocessing` (outdated name, same env):
-  `C:/Users/schlumbe/AppData/Local/miniforge3/envs/gfm_python_preprocessing/python.exe`.
-  The PATH `python` there is the Windows Store stub; always use the full interpreter path.
+- Env names and interpreter paths on this machine: see CLAUDE.local.md.
 
 ## Commands
 - Dry run: never on the full DAG (it is split into parallel HPC jobs; a full local `-n all`
   does not finish). Use the subset config instead, via
   `GFM_CONFIG_PATH=snakemake_workflow/config/bangkok_chao_phraya_materialized.yml`
-  `snakemake -n all --cores 1` (~10 s). Baseline: `.cleanup_baseline/snakemake_n_all_bangkok_chao_phraya_final.txt` (480 jobs).
+  `snakemake -n all --cores 1` (~10 s). Baseline job count: see CLAUDE.local.md.
 - `profiles/default/config.yaml` (auto-loaded) sets `rerun-triggers: [mtime, params, input, software-env]`:
   code/comment edits never re-run outputs. A real logic change needs its outputs removed or re-run explicitly.
 - Local run: `python run_eikonal_dag.py`  or  `snakemake all --cores 4 --resources mem_mb=8000`
-- Tests: `pytest -m "not needs_pdrive"` in `gfm` (sfincs_* tests are skipped automatically);
-  `pytest tests/sfincs_* -m "not needs_pdrive"` in `hydromt-sfincs-dev`.
+- Tests: `pytest -m "not needs_data"` in `gfm` (sfincs_* tests are skipped automatically);
+  `pytest tests/sfincs_* -m "not needs_data"` in `hydromt-sfincs-dev`.
 - Lint: `ruff check .` must stay clean.
 - Progress monitors (`check_*_progress.py`, `sfincs_tiles/check_calibration_progress.py`):
-  the user runs these themselves, usually on Hydrax. Give the command, don't run it.
+  the user runs these themselves, usually on the HPC. Give the command, don't run it.
 
 ## Data
-Inputs/outputs live on the P:\ share (`/p/11212688-004-global-floodmaps/` on Hydrax).
-Never write to, move, or delete anything on P:\ or the model output directories.
+Inputs/outputs live under `<data_root>` (= `paths.root`; this machine's mounts: CLAUDE.local.md).
+Never write to, move, or delete anything under `<data_root>` or the model output directories.
 
 ## Do not touch without asking
 - Output path patterns and wildcard constraints in `snakemake_workflow/rules/*.smk`:
-  changing them orphans existing outputs on P:\.
+  changing them orphans existing outputs under `<data_root>`.
 - `snakemake_workflow/config/config.yml` defaults, `data_catalog_*.yml`.
 - Pinned versions in `environment.yml` / `environment_sfincs.yml`.
-- `sfincs_tiles/` while a Hydrax batch is running (ask whether one is).
+- `sfincs_tiles/` while an HPC batch is running (ask whether one is).
 
 ## Conventions
 - The per-tile solve lives in `src/eikonal_runner.run_tile_scenario`; `run_eikonal.py`
@@ -110,5 +109,5 @@ Documentation is for future readers of the code, not a record of this session.
 ## Cleanup state
 `AUDIT.md` describes the current repo state, the rules for changes, the verification
 toolkit and the areas still to sweep. Changes stay behaviour-preserving; real
-(result-changing) issues go to `TODO.md` instead of being made. `.cleanup_baseline/`
-(gitignored) holds reference outputs and local test outputs.
+(result-changing) issues go to `TODO.md` instead of being made. Where reference and
+local test outputs live: see CLAUDE.local.md.

@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from config_utils import load_config, retry_transient_io  # noqa: E402
+from config_utils import load_config, load_hpc_config, retry_transient_io  # noqa: E402
 from hpc_common import sbatch_header  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "analysis"))
@@ -314,7 +314,7 @@ def main() -> None:
     if args.resume:
         config_path = Path(args.config)
         local_config = load_config(config_path)
-        linux_config = load_config(config_path, extra_override=config_path.parent / "config_hpc.yml")
+        linux_config = load_hpc_config(config_path)
         submit_lines = generate_exposure_resume_dispatch(
             local_config, linux_config, submit_lines=["#!/bin/bash", "set -euo pipefail"], prev_ids_expr="",
         )
@@ -328,7 +328,7 @@ def main() -> None:
 
     config_path = Path(args.config)
     local_config = load_config(config_path)
-    linux_config = load_config(config_path, extra_override=config_path.parent / "config_hpc.yml")
+    linux_config = load_hpc_config(config_path)
 
     # Local view: the chunk glob must run against this machine's mount.
     merged_dir = Path(local_config["postprocessing"]["merged_outputs"])

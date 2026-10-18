@@ -12,11 +12,12 @@ TILE_ID="${1:?usage: run_final_tile.sh <tile_id>}"
 BASE_DIR_NAME="${BASE_DIR_NAME:-calibration_roughness_SFINCS}"
 SFINCS_THREADS="${SFINCS_THREADS:-4}"
 
-source "$(dirname "${BASH_SOURCE[0]}")/hydrax_env.sh"
+SITE_ENV="$(dirname "${BASH_SOURCE[0]}")/site_env.sh"
+[ -f "$SITE_ENV" ] || { echo "sfincs_tiles/site_env.sh not found: copy sfincs_tiles/site_env.example.sh to sfincs_tiles/site_env.sh and fill in your site values" >&2; exit 1; }
+source "$SITE_ENV"
 CODE_ROOT="$GFM_CODE_ROOT"
 DATA_ROOT="$GFM_DATA_ROOT"
 CONFIG="$DATA_ROOT/$BASE_DIR_NAME/resolved_config.yml"
-SFINCS_IMAGE="docker://deltares/sfincs-cpu:sfincs-v2.4.0-Galibier-Release"
 SFINCS_TIMEOUT_S=14400
 HYDROMT_SFINCS_DEV_PY="$GFM_SFINCS_PYTHON"
 GFM_PY="$GFM_PYTHON"
@@ -106,7 +107,7 @@ if [ ! -f "$SM/sfincs_map.nc" ]; then
 
   export OMP_NUM_THREADS="$SFINCS_THREADS"
   echo "tile $TILE_ID: starting sfincs with $OMP_NUM_THREADS threads (timeout ${SFINCS_TIMEOUT_S}s)"
-  ( cd "$LOCAL_DIR" && timeout "$SFINCS_TIMEOUT_S" apptainer exec -B "$LOCAL_DIR":/mnt/data "$SFINCS_IMAGE" sfincs ) 2>&1 \
+  ( cd "$LOCAL_DIR" && timeout "$SFINCS_TIMEOUT_S" "$CONTAINER_CMD" exec -B "$LOCAL_DIR":/mnt/data "$SFINCS_IMAGE" sfincs ) 2>&1 \
     | tee "$LOCAL_DIR/sfincs_hpc_run.log" | grep -v "% complete"
   run_rc=${PIPESTATUS[0]}
   cp -f "$LOCAL_DIR/sfincs_hpc_run.log" "$SM/" 2>/dev/null

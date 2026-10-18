@@ -9,15 +9,18 @@ REM snakemake_workflow\config\bangkok_chao_phraya_materialized.yml.
 REM Each step must finish before the next starts: the script stops on the first
 REM non-zero exit code rather than continuing on broken input.
 REM
-REM Usage: just double-click this file, or run it from a terminal:
+REM Usage, from a terminal:
+REM     set "GFM_ENV=<gfm conda env directory>"
 REM     run_bangkok_case_study.bat
 
 setlocal
 
 set REPO=%~dp0
-REM Conda env with the pipeline (`gfm`; named gfm_python_preprocessing on this machine).
-REM Override by setting GFM_ENV before running this file.
-if not defined GFM_ENV set "GFM_ENV=%LOCALAPPDATA%\miniforge3\envs\gfm_python_preprocessing"
+REM GFM_ENV: directory of the conda env with the pipeline (`gfm`), set before running this file.
+if not defined GFM_ENV (
+  echo GFM_ENV is not set: set it to the directory of the gfm conda env, the one holding python.exe and Scripts\snakemake.exe.
+  exit /b 1
+)
 set PYEXE=%GFM_ENV%\python.exe
 set SNAKEMAKE=%GFM_ENV%\Scripts\snakemake.exe
 set MATERIALIZED=%REPO%snakemake_workflow\config\bangkok_chao_phraya_materialized.yml

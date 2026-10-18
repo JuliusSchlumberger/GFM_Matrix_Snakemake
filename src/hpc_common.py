@@ -3,10 +3,25 @@
 from __future__ import annotations
 
 
-def _account_line(sbatch_cfg: dict) -> list[str]:
-    if sbatch_cfg.get("account"):
-        return [f"#SBATCH --account={sbatch_cfg['account']}"]
+def _optional_line(sbatch_cfg: dict, key: str) -> list[str]:
+    if sbatch_cfg.get(key):
+        return [f"#SBATCH --{key}={sbatch_cfg[key]}"]
     return []
+
+
+def job_sbatch_cfg(hpc_cfg: dict, key: str) -> dict:
+    """Return `hpc_cfg["sbatch"]` overlaid with the set values of `hpc_cfg[key]`.
+
+    For the per-job-type blocks (`calibration_sbatch`, `flood_totals_sbatch`):
+    empty or null entries fall back to `hpc.sbatch`. A config without the block
+    (a resolved_config.yml written by an older checkout) raises KeyError rather
+    than silently running on hpc.sbatch's resources.
+    """
+    if key not in hpc_cfg:
+        raise KeyError(f"hpc.{key} is not set: regenerate the resolved_config.yml from the current config.yml + config_hpc.yml")
+    merged = dict(hpc_cfg["sbatch"])
+    merged.update({k: v for k, v in (hpc_cfg[key] or {}).items() if v not in (None, "")})
+    return merged
 
 
 def sbatch_header(
@@ -28,7 +43,8 @@ def sbatch_header(
         SLURM job name.
     sbatch_cfg : dict
         An `hpc.sbatch`-shaped dict (partition, account, time, mem,
-        cpus_per_task, env_activate_cmd); an empty account omits --account.
+        cpus_per_task, env_activate_cmd); an empty partition or account
+        omits that line.
     log_dir : str
         Linux directory of the `{log_name}_%j.out/.err` files.
     cpus_per_task : int, optional
@@ -50,8 +66,8 @@ def sbatch_header(
     return [
         "#!/bin/bash",
         f"#SBATCH --job-name={name}",
-        f"#SBATCH --partition={sbatch_cfg['partition']}",
-        *_account_line(sbatch_cfg),
+        *_optional_line(sbatch_cfg, "partition"),
+        *_optional_line(sbatch_cfg, "account"),
         f"#SBATCH --time={sbatch_cfg['time']}",
         f"#SBATCH --mem={sbatch_cfg['mem']}",
         f"#SBATCH --cpus-per-task={cpus}",

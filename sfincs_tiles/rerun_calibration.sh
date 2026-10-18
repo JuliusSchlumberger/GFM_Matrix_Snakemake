@@ -10,7 +10,7 @@
 #   POST=0 bash sfincs_tiles/rerun_calibration.sh --part eikonal # no post job
 #   bash sfincs_tiles/rerun_calibration.sh --part sfincs
 #   DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part <part>   # only report what would be reset
-# Paths come from hydrax_env.sh (override e.g. GFM_PYTHON=... in the environment).
+# Paths and the post job's resources come from site_env.sh (override e.g. GFM_PYTHON=... in the environment).
 
 set -euo pipefail
 
@@ -24,7 +24,9 @@ if [ "$PART" != "eikonal" ] && [ "$PART" != "sfincs" ]; then
   exit 2
 fi
 
-source "$(dirname "${BASH_SOURCE[0]}")/hydrax_env.sh"
+SITE_ENV="$(dirname "${BASH_SOURCE[0]}")/site_env.sh"
+[ -f "$SITE_ENV" ] || { echo "sfincs_tiles/site_env.sh not found: copy sfincs_tiles/site_env.example.sh to sfincs_tiles/site_env.sh and fill in your site values" >&2; exit 1; }
+source "$SITE_ENV"
 
 BASE_DIR_NAME="${BASE_DIR_NAME:-calibration_roughness_SFINCS}"
 N_JOBS="${N_JOBS:-20}"
@@ -93,10 +95,10 @@ if [ "$PART" = "eikonal" ]; then
     cat > "$post" <<EOF
 #!/bin/bash
 #SBATCH --job-name=cal_post_eikonal
-#SBATCH --partition=4vcpu
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=30G
-#SBATCH --time=0-12:00:00
+#SBATCH --partition=$CAL_PARTITION
+#SBATCH --cpus-per-task=$CAL_CPUS
+#SBATCH --mem=$CAL_MEM
+#SBATCH --time=$CAL_TIME
 #SBATCH --output=$JOBS/logs/cal_post_eikonal_%j.out
 #SBATCH --error=$JOBS/logs/cal_post_eikonal_%j.err
 
@@ -108,7 +110,7 @@ cd "$CODE" || exit 1
 "$GFM_PY" check_calibration_progress.py --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME"
 "$GFM_PY" run_calibration_sweep_analysis.py --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME"
 "$HYDROMT_PY" compute_calibration_result_dedup.py --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \\
-    --out-dir-name "$DEDUP_DIR_NAME" --workers 4 || exit 1
+    --out-dir-name "$DEDUP_DIR_NAME" --workers $CAL_CPUS || exit 1
 "$GFM_PY" run_calibration_sweep_analysis.py --config "$CONFIG" --base-dir-name "$DEDUP_DIR_NAME" \\
     --raster-base-dir-name "$BASE_DIR_NAME"
 EOF

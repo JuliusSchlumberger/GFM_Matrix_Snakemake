@@ -36,17 +36,21 @@ the way through to exposure analysis unattended, once
 
 ## One-time setup
 
-1. `snakemake_workflow/config/config_hpc.yml` (tracked) holds the Hydrax
-   values for `paths.root` (Linux mount of the same storage as the local
-   `paths.root`) and `paths.code_root` (Linux checkout of this repo — used to
-   locate `run_eikonal_cli.py`). For another cluster, start from the template:
+1. Create the two gitignored site files from their worked (Hydrax) examples and
+   fill in your cluster's values; every HPC generator and shell driver stops with
+   a message naming the file to copy when one is missing:
    ```
-   cp snakemake_workflow/config/config_hpc.yml.example snakemake_workflow/config/config_hpc.yml
+   cp snakemake_workflow/config/config_hpc.example.yml snakemake_workflow/config/config_hpc.yml
+   cp sfincs_tiles/site_env.example.sh sfincs_tiles/site_env.sh
    ```
-   Not needed at all if you're running stage 1 directly ON Hydrax (see below) — in
-   that case `config_local.yml` alone already points at Hydrax's own paths.
+   `config_hpc.yml` holds `paths.root` (Linux mount of the same storage as the
+   local `paths.root`), `paths.code_root` (Linux checkout of this repo) and the
+   SLURM site values (`hpc.sbatch.partition` / `mem` / `env_activate_cmd`,
+   `hpc.wave_tiers`, `hpc.calibration_sbatch`, `hpc.flood_totals_sbatch`);
+   `site_env.sh` holds the same roots plus the python and SFINCS container paths
+   for the `sfincs_tiles/` drivers.
 
-2. Check the values under `hpc:` in `config.yml` (set for Hydrax):
+2. Check the values under `hpc:` in `config.yml` + `config_hpc.yml`:
    `n_nodes` (max sbatch scripts to generate PER WAVE — a wave with fewer
    tiles than `n_nodes` gets one script per tile instead, never an empty
    one), and `sbatch.partition` / `account` / `time` / `mem` /
@@ -149,9 +153,7 @@ transient P:\ read errors.
 Can be generated from either machine: from the local Windows box (writing
 scripts meant for Hydrax, same `config_hpc.yml`-based dual path resolution
 as `generate_eikonal_jobs.py`), or run natively ON Hydrax itself, in which
-case there's no separate "local" machine to reconcile paths with —
-`config_hpc.yml` is simply unnecessary and `config_local.yml` alone already
-points at Hydrax's own paths.
+case `config_hpc.yml` and `config_local.yml` point at the same paths.
 
 ## 2. Submit to SLURM
 

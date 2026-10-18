@@ -39,20 +39,41 @@ def resolve_catalog_path(catalog_path: Path, root: Path, source_name: str) -> Pa
     return Path(root) / catalog[source_name]["path"]
 
 
-_HYDRAX_ENV = Path(__file__).resolve().parent / "hydrax_env.sh"
+_SITE_ENV = Path(__file__).resolve().parent / "site_env.sh"
+SITE_ENV_MISSING = (
+    "sfincs_tiles/site_env.sh not found: copy sfincs_tiles/site_env.example.sh to "
+    "sfincs_tiles/site_env.sh and fill in your site values"
+)
 
 
-def hydrax_paths() -> dict[str, str]:
-    """Return the Hydrax paths defined in ``sfincs_tiles/hydrax_env.sh``.
+def site_paths() -> dict[str, str]:
+    """Return the site values defined in ``sfincs_tiles/site_env.sh``.
 
     As bash ``${NAME:-default}``: a set, non-empty environment variable overrides the default.
+    Raises FileNotFoundError when the file is missing.
     """
     import os
     import re
 
+    if not _SITE_ENV.exists():
+        raise FileNotFoundError(SITE_ENV_MISSING)
     out = {}
-    for line in _HYDRAX_ENV.read_text(encoding="utf-8").splitlines():
+    for line in _SITE_ENV.read_text(encoding="utf-8").splitlines():
         m = re.fullmatch(r'(\w+)="\$\{(\w+):-(.*)\}"', line.strip())
         if m and m.group(1) == m.group(2):
             out[m.group(1)] = os.environ.get(m.group(1)) or m.group(3)
     return out
+
+
+def check_site_roots(site: dict[str, str], hpc_paths: dict) -> None:
+    """Raise ValueError unless site_env.sh's roots equal config_hpc.yml's paths.root / code_root.
+
+    The shell drivers read the former, the Python generators the latter; both are
+    embedded in the same job chain.
+    """
+    pairs = [("GFM_DATA_ROOT", "root"), ("GFM_CODE_ROOT", "code_root")]
+    bad = [f"{env}={site.get(env)!r} vs paths.{key}={hpc_paths.get(key)!r}"
+           for env, key in pairs if str(site.get(env, "")).rstrip("/") != str(hpc_paths.get(key, "")).rstrip("/")]
+    if bad:
+        raise ValueError("sfincs_tiles/site_env.sh and snakemake_workflow/config/config_hpc.yml disagree: "
+                         + "; ".join(bad) + " - make them equal")

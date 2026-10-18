@@ -23,7 +23,7 @@ import geopandas as gpd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from config_utils import load_config, merged_waterlevel_names, retry_transient_io  # noqa: E402
+from config_utils import load_config, load_hpc_config, merged_waterlevel_names, retry_transient_io  # noqa: E402
 from generate_eikonal_jobs import generate_resume_dispatch, generate_wave_dispatch  # noqa: E402
 
 
@@ -54,7 +54,7 @@ def main() -> None:
 
     config_path = Path(args.config)
     local_config = load_config(config_path)
-    linux_config = load_config(config_path, extra_override=config_path.parent / "config_hpc.yml")
+    linux_config = load_hpc_config(config_path)
 
     local_jobs_dir = Path(local_config["hpc"]["jobs_dir"])
     hpc_cfg = linux_config["hpc"]

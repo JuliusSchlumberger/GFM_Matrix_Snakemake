@@ -123,8 +123,10 @@ every pipeline above (not just the Snakemake DAG). `paths.root` and
 `config_local.yml.example`) - every entry point stops with a clear error if
 `paths.root` is missing. Never put per-machine values in the committed `config.yml`.
 `*_materialized.yml` are generated/untracked: never hand-edit them (rebuild with
-`snakemake_workflow/scripts/materialize_configs.py`). `config_hpc.yml` holds the
-Hydrax paths (tracked); for another cluster start from `config_hpc.yml.example`.
+`snakemake_workflow/scripts/materialize_configs.py`). The HPC generators also need
+the gitignored site files `snakemake_workflow/config/config_hpc.yml` and
+`sfincs_tiles/site_env.sh`: copy `config_hpc.example.yml` / `site_env.example.sh`
+(worked Hydrax example) and fill in your cluster's values.
 
 ## Import convention
 
@@ -136,8 +138,8 @@ sibling file rather than introducing a different import mechanism.
 ## Tests
 
 ```
-pytest -m "not needs_pdrive"                    # in gfm
-pytest tests/sfincs_* -m "not needs_pdrive"     # in hydromt-sfincs-dev
+pytest -m "not needs_data"                      # in gfm
+pytest tests/sfincs_* -m "not needs_data"       # in hydromt-sfincs-dev
 ```
 `tests/conftest.py` skips the `tests/sfincs_*` tests unless hydromt_sfincs
 2.x is installed. Each script still runs standalone with `python <script>.py`.
