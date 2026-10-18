@@ -71,7 +71,8 @@ def _compare(depth: np.ndarray, wet: np.ndarray, ref: dict) -> dict:
     return out
 
 
-def compute_result(tile_dir: Path, fsfs: list[float], flooding: dict, river_code: int) -> dict:
+def compute_result(tile_dir: Path, fsfs: list[float], flooding: dict, river_code: int,
+                   core_mask: np.ndarray | None = None) -> dict:
     """Build one tile's calibration_result dict vs SFINCS's hmax_subgrid.tif.
 
     Scoring area: real land (mask.tif == LAND_CODE) active in SFINCS
@@ -79,6 +80,14 @@ def compute_result(tile_dir: Path, fsfs: list[float], flooding: dict, river_code
     is left out of every count, the model rasters themselves are not masked.
     Bathtub is pruned to coast-connected flooding first; eikonal and SFINCS are
     connected by construction. `flooding` is copied verbatim into "settings".
+
+    Parameters
+    ----------
+    core_mask : np.ndarray of bool, optional
+        On the hmax_subgrid.tif grid. When given, the scoring area is also
+        restricted to it (the tile's Voronoi core, so overlapping tiles do not
+        count shared land twice) and the result gains ``"dedup": True`` and
+        ``domain["core_fraction_of_active_land"]``.
     """
     sfincs_dir = tile_dir / "sfincs_model"
     out_dir = tile_dir / "outputs"
@@ -95,12 +104,17 @@ def compute_result(tile_dir: Path, fsfs: list[float], flooding: dict, river_code
     land = mog == LAND_CODE
     active, counts, msk, coarse_tr = _sfincs_active_on_subgrid(sfincs_dir, shape, transform)
     score = land & active
+    if core_mask is not None:
+        score = score & core_mask
     cell_km2 = abs(transform.a * transform.e - transform.b * transform.d) / 1e6
     ref = {"score": score, "weight": np.full(shape, cell_km2, dtype=np.float64), "sfincs_depth": sfincs_depth,
            "sfincs_wet": score & np.isfinite(sfincs_depth) & (sfincs_depth > WET_THRESHOLD_M)}
 
     domain = {"land_km2": float(land.sum() * cell_km2), "sfincs_active_land_km2": float(score.sum() * cell_km2),
-              "sfincs_inactive_land_km2": float((land & ~active).sum() * cell_km2), **counts}
+              "sfincs_inactive_land_km2": float((land & ~active).sum() * cell_km2)}
+    if core_mask is not None:
+        domain["core_fraction_of_active_land"] = float(score.sum() / max(1, (land & active).sum()))
+    domain.update(counts)
     forcing = sfincs_dir / "matched_boundary_points.gpkg"
     domain["n_forcing_points"] = int(len(gpd.read_file(forcing))) if forcing.exists() else None
     land_c = land[::4, ::4][: msk.shape[0], : msk.shape[1]]
@@ -112,6 +126,7 @@ def compute_result(tile_dir: Path, fsfs: list[float], flooding: dict, river_code
 
     result = {
         "tile_id": tile_dir.name, "built": time.strftime("%Y-%m-%d %H:%M:%S"),
+        **({"dedup": True} if core_mask is not None else {}),
         "settings": {"wet_threshold_m": WET_THRESHOLD_M, "subgrid_res_m": float(abs(transform.a)),
                      "friction_scale_factors": list(fsfs), "flooding": flooding},
         "domain": domain,

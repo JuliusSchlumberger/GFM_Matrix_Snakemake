@@ -25,15 +25,11 @@ import numpy as np
 import rasterio
 import yaml
 from pyproj import Transformer
-from rasterio.warp import Resampling, reproject
 from scipy.spatial import cKDTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from calibration_paths import (  # noqa: E402
-    FRICTION_SCALE_FACTORS, WATERLEVEL_NAME, bathtub_path, decode_waterdepth_cm, eikonal_path,
-)
-from compute_calibration_result import LAND_CODE, OCEAN_CODE, _compare, _depth_stats, _sfincs_active_on_subgrid  # noqa: E402
-from flood_agreement import WET_THRESHOLD_M, prune_to_ocean_connected  # noqa: E402
+from calibration_paths import FRICTION_SCALE_FACTORS  # noqa: E402
+from compute_calibration_result import compute_result  # noqa: E402
 from gfm_config import read_root  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
 
@@ -71,73 +67,13 @@ def compute_result_dedup(
 ) -> dict:
     """Build one tile's calibration_result dict, restricted to its Voronoi core.
 
-    As `compute_calibration_result.compute_result`, with ``score`` also
-    intersected with the core mask before any counting.
+    `compute_calibration_result.compute_result` with the core mask (on the
+    hmax_subgrid.tif grid) as its ``core_mask``.
     """
-    this_tile_id = tile_dir.name
-    sfincs_dir = tile_dir / "sfincs_model"
-    out_dir = tile_dir / "outputs"
-    with retry_transient_io(rasterio.open, sfincs_dir / "hmax_subgrid.tif") as src:
-        sfincs_depth = src.read(1).astype(np.float32)
-        nodata, transform, crs, shape = src.nodata, src.transform, src.crs, src.shape
-    if nodata is not None and not np.isnan(nodata):
-        sfincs_depth[sfincs_depth == nodata] = np.nan
-
-    mog = np.empty(shape, dtype=np.float32)
-    with retry_transient_io(rasterio.open, tile_dir / "inputs" / "mask.tif") as src:
-        reproject(source=rasterio.band(src, 1), destination=mog, src_transform=src.transform, src_crs=src.crs,
-                  dst_transform=transform, dst_crs=crs, resampling=Resampling.nearest)
-    land = mog == LAND_CODE
-    active, counts, msk, coarse_tr = _sfincs_active_on_subgrid(sfincs_dir, shape, transform)
-
-    core = _core_mask(shape, transform, crs, this_tile_id, tree, tile_ids)
-    score = land & active & core  # only difference from compute_result()
-
-    cell_km2 = abs(transform.a * transform.e - transform.b * transform.d) / 1e6
-    ref = {"score": score, "weight": np.full(shape, cell_km2, dtype=np.float64), "sfincs_depth": sfincs_depth,
-           "sfincs_wet": score & np.isfinite(sfincs_depth) & (sfincs_depth > WET_THRESHOLD_M)}
-
-    domain = {"land_km2": float(land.sum() * cell_km2), "sfincs_active_land_km2": float(score.sum() * cell_km2),
-              "sfincs_inactive_land_km2": float((land & ~active).sum() * cell_km2),
-              "core_fraction_of_active_land": float(score.sum() / max(1, (land & active).sum())), **counts}
-    forcing = sfincs_dir / "matched_boundary_points.gpkg"
-    domain["n_forcing_points"] = int(len(gpd.read_file(forcing))) if forcing.exists() else None
-
-    result = {
-        "tile_id": this_tile_id, "built": time.strftime("%Y-%m-%d %H:%M:%S"), "dedup": True,
-        "settings": {"wet_threshold_m": WET_THRESHOLD_M, "subgrid_res_m": float(abs(transform.a)),
-                     "friction_scale_factors": list(fsfs), "flooding": flooding},
-        "domain": domain,
-        "sfincs": {"flooded_km2": float(ref["sfincs_wet"].sum() * cell_km2),
-                   "depth": _depth_stats(sfincs_depth, ref["sfincs_wet"])},
-        "bathtub": None, "eikonal": {},
-    }
-
-    bp = bathtub_path(out_dir)
-    if bp.exists():
-        depth, _, _, bshape = decode_waterdepth_cm(bp)
-        if bshape == shape:
-            wet = prune_to_ocean_connected(land & np.isfinite(depth) & (depth > WET_THRESHOLD_M), mog,
-                                           ocean_code=OCEAN_CODE, land_code=LAND_CODE, river_code=river_code) & score
-            boundaries = gpd.read_file(tile_dir / "inputs" / "boundaries_RP100_SLR_0.gpkg")
-            result["bathtub"] = {"level_m": float(boundaries[WATERLEVEL_NAME].max()) / 100.0,
-                                 "flooded_km2": float(wet.sum() * cell_km2), "depth": _depth_stats(depth, wet),
-                                 "vs_sfincs": _compare(depth, wet, ref)}
-
-    diag_path = out_dir / "eikonal_solver_diagnostics.json"
-    diag = json.loads(diag_path.read_text()) if diag_path.exists() else {}
-    for fsf in fsfs:
-        p = eikonal_path(out_dir, fsf)
-        if not p.exists():
-            continue
-        depth, _, _, eshape = decode_waterdepth_cm(p)
-        if eshape != shape:
-            continue
-        wet = score & np.isfinite(depth) & (depth > WET_THRESHOLD_M)
-        key = f"fsf_{fsf:g}"
-        result["eikonal"][key] = {"flooded_km2": float(wet.sum() * cell_km2), "depth": _depth_stats(depth, wet),
-                                  "vs_sfincs": _compare(depth, wet, ref), "solver": diag.get(key)}
-    return result
+    with retry_transient_io(rasterio.open, tile_dir / "sfincs_model" / "hmax_subgrid.tif") as src:
+        transform, crs, shape = src.transform, src.crs, src.shape
+    core = _core_mask(shape, transform, crs, tile_dir.name, tree, tile_ids)
+    return compute_result(tile_dir, fsfs, flooding, river_code, core_mask=core)
 
 
 def _process_one(args_tuple) -> tuple[str, str | None]:
