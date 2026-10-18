@@ -8,7 +8,6 @@ Preprocessing produces several files per tile, roughly in this order:
     model_bbox.json      (compute_model_bbox)
     dem.tif, mask.tif, friction.tif   (extract_dem / extract_dem_mask / compute_friction - roughly parallel)
     boundaries_{RP}_{SLR}.gpkg   (extract_boundaries - one per return_period x waterlevel_name)
-    aqueduct_{RP}_{SLR}.toml     (write_aqueduct_config - one per return_period x waterlevel_name)
 
 Counting each gives a rough per-stage progress picture, not just a single
 "done/not done" per tile - e.g. many tiles with a DEM but no boundaries yet
@@ -37,7 +36,6 @@ def _count_progress(model_outputs: Path, tile_ids: list[int], n_scenarios_per_ti
         "friction.tif": 0,
     }
     total_boundaries = 0
-    total_tomls = 0
     for tid in tile_ids:
         inputs_dir = model_outputs / str(tid) / "inputs"
         if not inputs_dir.is_dir():
@@ -47,7 +45,6 @@ def _count_progress(model_outputs: Path, tile_ids: list[int], n_scenarios_per_ti
             if key in entries:
                 counts[key] += 1
         total_boundaries += sum(1 for n in entries if n.startswith("boundaries_") and n.endswith(".gpkg"))
-        total_tomls += sum(1 for n in entries if n.startswith("aqueduct_") and n.endswith(".toml"))
 
     n_tiles = len(tile_ids)
     expected_scenario_files = n_tiles * n_scenarios_per_tile
@@ -56,8 +53,6 @@ def _count_progress(model_outputs: Path, tile_ids: list[int], n_scenarios_per_ti
         "counts": counts,
         "boundaries": total_boundaries,
         "boundaries_expected": expected_scenario_files,
-        "tomls": total_tomls,
-        "tomls_expected": expected_scenario_files,
     }
 
 
@@ -73,7 +68,6 @@ def _print_report(report: dict) -> None:
 
     for label, done, expected in [
         ("boundaries_*.gpkg", report["boundaries"], report["boundaries_expected"]),
-        ("aqueduct_*.toml", report["tomls"], report["tomls_expected"]),
     ]:
         pct = 100 * done / expected if expected else 0
         bar_len = 30

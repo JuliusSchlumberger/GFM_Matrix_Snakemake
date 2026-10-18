@@ -101,9 +101,6 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
   falls back to the old key for configs materialized/resolved before the rename - drop the fallback
   once those are regenerated. `paths.aqueduct_root` was removed (no config used `{aqueduct_root}`);
   the leftover line in your local config_local.yml is harmless, delete it by hand.
-- **`check_preprocess_progress.py` still counts `aqueduct_*.toml` files** per tile: Julia-era Aqueduct
-  TOML configs that no current code writes, so that column always reports 0 of N. Not renamed in
-  Phase 7a (it is a file-name pattern on disk). Remove the TOML column or point it at a real output.
 - **Phase 7b renamed modules and scripts** (src/plotting -> pipeline_plots, visualization ->
   analysis_figures, exposure -> exposure_grid, flood_extent folded into flood_model,
   validation.tri_domain_mask -> rasters.polygon_domain_mask, validation/_rescore_england_fz3 ->
