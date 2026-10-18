@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 import rasterio
 from affine import Affine
+from hydromt.exceptions import NoDataException
 from rasterio.enums import Resampling
 from rasterio.warp import reproject
 from rasterio.windows import Window
@@ -149,12 +150,15 @@ def _read_mask_on_grid(root: Path, transform, width: int, height: int) -> np.nda
 
 
 def _protection_rp(catalog, rp_by_geogunit: pd.Series, default_rp: float, transform, width: int, height: int):
-    # Cells without a geogunit unit get default_rp.
+    # Cells without a geogunit unit get default_rp; only hydromt's "no data here" means
+    # no coverage, any other read error raises after the transient-IO retries.
     left, top = transform.c, transform.f
     bbox = [left, top + height * transform.e, left + width * transform.a, top]
     try:
-        geo = catalog.get_rasterdataset(GEOGUNIT_SOURCE, bbox=bbox, variables=["Geogunits"]).squeeze(drop=True)
-    except Exception as e:  # noqa: BLE001 - no geogunit coverage: production's default standard everywhere
+        geo = retry_transient_io(
+            catalog.get_rasterdataset, GEOGUNIT_SOURCE, bbox=bbox, variables=["Geogunits"],
+        ).squeeze(drop=True)
+    except NoDataException as e:  # no geogunit coverage: production's default standard everywhere
         print(f"    (no geogunit coverage: {e}) - default protection {default_rp:g} yr everywhere", flush=True)
         return np.full((height, width), default_rp, dtype="float32")
     gid = np.full((height, width), -1, dtype="int32")

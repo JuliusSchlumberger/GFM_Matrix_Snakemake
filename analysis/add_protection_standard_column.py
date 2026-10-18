@@ -20,6 +20,7 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+from hydromt.exceptions import NoDataException
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
@@ -32,11 +33,17 @@ GEOGUNIT_SOURCE = "geogunit_protection_units"
 
 
 def max_coastal_protection_for_delta(delta_geometry, catalog, coastal_rp: pd.Series) -> float:
-    """Return the max FLOPROS coastal design RP (years) over intersecting geogunits, or NaN."""
+    """Return the max FLOPROS coastal design RP (years) over intersecting geogunits, or NaN.
+
+    NaN means no FLOPROS coverage (hydromt NoDataException or no unit inside the delta);
+    any other read error raises after the transient-IO retries.
+    """
     bbox = list(delta_geometry.bounds)
     try:
-        geo_da = catalog.get_rasterdataset(GEOGUNIT_SOURCE, bbox=bbox, variables=["Geogunits"]).squeeze(drop=True)
-    except Exception:
+        geo_da = retry_transient_io(
+            catalog.get_rasterdataset, GEOGUNIT_SOURCE, bbox=bbox, variables=["Geogunits"],
+        ).squeeze(drop=True)
+    except NoDataException:
         return float("nan")
     if geo_da is None or geo_da.size == 0:
         return float("nan")
