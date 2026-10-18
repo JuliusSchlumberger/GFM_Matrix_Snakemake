@@ -221,7 +221,7 @@ def main() -> None:
 
     print(f"\nDone. {len(script_paths)} batch(es), {len(all_tile_ids)} tile(s) total.")
     print(f"Wrote {submit_path}")
-    print(f"\nSubmit on Hydrax with: bash {linux_jobs_dir}/{submit_filename}")
+    print(f"\nSubmit on the cluster with: bash {linux_jobs_dir}/{submit_filename}")
 
 
 if __name__ == "__main__":
