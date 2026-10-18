@@ -2,11 +2,11 @@
 #
 # Copy to config_local.yml (git-ignored) in this directory; only include keys to override.
 # Loaded automatically by Snakemake and every script (src/config_utils.load_config).
-# On HPC (Hydrax) use config_hpc.yml instead.
+# On an HPC cluster also copy config_hpc.example.yml to config_hpc.yml.
 
 paths:
   # Every {root} path in config.yml resolves to this.
-  root: "P:/11212688-004-global-floodmaps/modelling"   # <- your data root
+  root: "/path/to/data_root"                            # <- your data root (<data_root>)
 
   code_root: "C:/path/to/GFM_Matrix_Snakemake"          # <- your checkout
 

@@ -429,8 +429,7 @@ egm2008_geoid:
       Gravitational Model 2008 (EGM2008), J. Geophys. Res. 117, B04406.
     paper_doi: 10.1029/2011JB008916
 
-# The on-disk directory is "Aviso" (mixed case); Hydrax's Linux mount of P:\ is
-# case-sensitive.
+# The on-disk directory is "Aviso" (mixed case): Linux mounts are case-sensitive.
 mdt_cnes_cls22:
   data_type: GeoDataset
   driver: netcdf
