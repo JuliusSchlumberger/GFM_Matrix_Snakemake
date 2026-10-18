@@ -11,6 +11,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "sfincs_tiles"))
@@ -32,8 +33,7 @@ def test_water_level_create_near_antimeridian() -> None:
     needed = ["inputs/tile_geometry.gpkg", f"boundary_line_{TILE_ID}.gpkg",
               "sfincs_model/matched_boundary_points.gpkg", "sfincs_model/corrected_hydrographs.csv"]
     if tile is None or not all((tile / f).exists() for f in needed):
-        print(f"SKIP: tile {TILE_ID}'s files under {BASE_DIR_NAME} are not available here.\n")
-        return
+        pytest.skip(f"tile {TILE_ID}'s files under {BASE_DIR_NAME} are not available here")
 
     from hydromt_sfincs import SfincsModel
 
@@ -63,7 +63,10 @@ def test_water_level_create_near_antimeridian() -> None:
 
 
 def main() -> None:
-    test_water_level_create_near_antimeridian()
+    try:
+        test_water_level_create_near_antimeridian()
+    except pytest.skip.Exception as exc:
+        print(f"SKIP: {exc}\n")
 
 
 if __name__ == "__main__":

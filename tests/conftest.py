@@ -27,6 +27,7 @@ def _hydromt_sfincs_major() -> int:
 _HAS_HYDROMT_SFINCS = _hydromt_sfincs_major() >= 2
 
 _NEEDS_PDRIVE = {
+    "sfincs_antimeridian_validation/validate_antimeridian_handling.py",
     "sfincs_hydrograph_truncation_validation/validate_truncation_window.py",
     "sfincs_synthetic_end_to_end/test_sfincs_smoke.py",
 }
