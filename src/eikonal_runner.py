@@ -237,7 +237,9 @@ def run_tile_scenario(
             write_zero_waterdepth(dem_path, output_path)
             return {"outcome": "skip_no_inundation", "skip_reason": skip_reason}
 
-        oc_config = flooding_config.get("obstacle_coupling", {})
+        # Indexed, not .get(): every config layers on config.yml, which sets all
+        # of these, so a missing key is a broken config, not a reason to default.
+        oc_config = flooding_config["obstacle_coupling"]
         start = time.perf_counter()
         try:
             diagnostics = run_eikonal_python(
@@ -247,12 +249,12 @@ def run_tile_scenario(
                 boundaries_path=None if hop_distance >= 1 else read_boundaries_path,
                 seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
                 ocean_code=ocean_code, river_code=river_code,
-                obstacle_coupling=oc_config.get("enabled", False),
-                max_outer_iterations=oc_config.get("max_outer_iterations", 3),
+                obstacle_coupling=oc_config["enabled"],
+                max_outer_iterations=oc_config["max_outer_iterations"],
                 max_rounds=flooding_config["max_rounds"],
-                outer_convergence_pct=oc_config.get("outer_convergence_pct", 0.01),
+                outer_convergence_pct=oc_config["outer_convergence_pct"],
                 waterlevel_epsilon_m=flooding_config["waterlevel_epsilon_m"],
-                friction_scale_factor=flooding_config.get("friction_scale_factor", 1.0),
+                friction_scale_factor=flooding_config["friction_scale_factor"],
             )
         except MemoryError:
             mark_tile_oom(oom_dir, tile_id, reason="MemoryError in flood_depth_dense - tile too large")
