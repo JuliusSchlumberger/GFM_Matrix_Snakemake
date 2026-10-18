@@ -19,8 +19,7 @@ run_eikonal_dag.py            wraps `snakemake` with an OOM-retry loop
 check_{preprocess,simulation,postprocess}_progress.py
                             read-only progress monitors
 run_delta_floodmaps.py     global-deltas deliverable (ssp126/ssp245 configs)
-run_bangkok_case_study.bat, run_thailand_bangkok.{bat,ps1}
-                            local case-study launchers
+run_bangkok_case_study.bat  local case-study launcher
 
 src/                       shared library, imported by everything below
                             (sys.path.insert, not a pip-installed package)
@@ -110,8 +109,7 @@ Four separate things get run, none of them automatically triggering another:
 split into HPC jobs and a full local dry run does not finish). Use a subset
 config instead:
 ```
-GFM_CONFIG_PATH=snakemake_workflow/config/thailand_bangkok_materialized.yml snakemake -n all --cores 1
-# or bangkok_chao_phraya_materialized.yml
+GFM_CONFIG_PATH=snakemake_workflow/config/bangkok_chao_phraya_materialized.yml snakemake -n all --cores 1
 ```
 
 ## Configuration

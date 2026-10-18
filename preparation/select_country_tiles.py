@@ -25,7 +25,7 @@ from tiles import load_tile_grid  # noqa: E402
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 GROUPS = {
-    # GBR coastal benchmark entries are Wales and Scotland only (no England/N.Ireland).
+    # GBR coastal benchmarks: Wales, Scotland, England (no Northern Ireland).
     "gbr_wales_scotland": ["GBR"],
     "new_brunswick": ["CAN"],
 }

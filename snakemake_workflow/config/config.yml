@@ -302,10 +302,7 @@ simulation: # Used by: preprocessing rules
     # metrics - CSI 0.7428 vs 0.7320, and bias 1.053 vs 1.209 (much closer to
     # the unbiased 1.0) - not just a narrower CSI win, a clearly better fit
     # on the metric that matters most for a global product (systematic
-    # over/under-prediction). Supersedes the earlier gbr_wales_scotland_
-    # friction9.yml / validation_sfincs_v5 pilot (CSI=0.80, bias=0.99 at
-    # fsf=9.0) - that was against the PRE-smoothed-forcing SFINCS boundary
-    # data, not directly comparable 1:1 to this sweep's own numbers.
+    # over/under-prediction).
     friction_scale_factor: 12.0
 
     # Caps the eikonal solve's round-based mode (4 individual directional

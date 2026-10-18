@@ -7,7 +7,7 @@ built here (analysis/prepare_delta_design_runs.py writes it).
 
 Usage:
     python snakemake_workflow/scripts/materialize_configs.py              # every known scenario
-    python snakemake_workflow/scripts/materialize_configs.py deltas_ssp126 thailand_bangkok
+    python snakemake_workflow/scripts/materialize_configs.py deltas_ssp126 bangkok_chao_phraya
     python snakemake_workflow/scripts/materialize_configs.py --out-dir <dir>  # write elsewhere (e.g. to diff)
 """
 
@@ -26,8 +26,6 @@ SCENARIOS = [
     "calibration_500_tiles",
     "deltas_ssp126",
     "deltas_ssp245",
-    "gbr_wales_scotland_friction9",
-    "thailand_bangkok",
 ]
 
 

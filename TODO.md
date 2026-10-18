@@ -26,8 +26,8 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
 - **Decide: outputs computed with `friction_scale_factor` != 12.0** (production is 12.0 since
   2026-10-13; the global run's `model_outputs/hpc_jobs/resolved_config.yml` has 12.0). Still at 9.0:
   deltas_ssp126 / deltas_ssp245 / deltas_design (base configs set 9.0, "0.3x production's 30"),
-  bangkok_chao_phraya (run 2026-10-08), gbr_wales_scotland_friction9 (deliberate experiment).
-  Still at 30.0: thailand_bangkok, calibration_500_tiles (solver studies, 2026-10-05). Re-run at 12.0
+  bangkok_chao_phraya (run 2026-10-08).
+  Still at 30.0: calibration_500_tiles (solver studies, 2026-10-05). Re-run at 12.0
   = change the base config + its `*_pins.yml`, re-materialize, re-run.
 - `preparation/select_country_tiles.py`: GBR comment still says only Wales/Scotland benchmarks (England
   FZ2/FZ3 exist now).
