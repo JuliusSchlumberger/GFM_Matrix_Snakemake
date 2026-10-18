@@ -125,7 +125,6 @@ def main() -> None:
             window = from_bounds(*bounds, transform=src.transform)
             data = src.read(1, window=window, boundless=True, fill_value=src.nodata or 0.0)
             nodata = src.nodata
-            win_transform = src.window_transform(window)
 
         # Mask BOTH true nodata and zero-depth (dry) cells - not just nodata -
         # so the land-use background actually shows through dry land, not

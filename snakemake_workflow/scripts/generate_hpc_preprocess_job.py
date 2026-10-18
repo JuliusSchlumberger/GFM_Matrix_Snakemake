@@ -438,9 +438,9 @@ def main() -> None:
             # a real failure mode, not hypothetical: exactly this happened on
             # 2026-08-08 (job 243423/243440 - LockException from a batch that
             # started before the shared build had run).
-            f'while IFS= read -r shared_target; do',
-            f'    if [ ! -f "$shared_target" ]; then',
-            f'        echo "ERROR: shared preprocessing input not found: $shared_target" >&2',
+            'while IFS= read -r shared_target; do',
+            '    if [ ! -f "$shared_target" ]; then',
+            '        echo "ERROR: shared preprocessing input not found: $shared_target" >&2',
             f'        echo "This batch must not start before the shared-inputs build (in'
             f' {submit_script_name}) completes." >&2',
             f'        echo "Submit via {submit_script_name} (which orders this'
@@ -498,14 +498,14 @@ def main() -> None:
     if not args.fuse and not args.preprocess_only:
         if args.calibration:
             generate_call = (
-                f'python snakemake_workflow/scripts/generate_hpc_simulation_jobs.py '
-                f'--config "$LOCAL_CONFIGFILE"'
+                'python snakemake_workflow/scripts/generate_hpc_simulation_jobs.py '
+                '--config "$LOCAL_CONFIGFILE"'
             )
         else:
             generate_call = (
-                f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
-                f'snakemake generate_aqueduct_jobs --cores 1 --nolock '
-                f'--rerun-triggers=mtime'
+                'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
+                'snakemake generate_aqueduct_jobs --cores 1 --nolock '
+                '--rerun-triggers=mtime'
             )
 
         dispatch_cfg = hpc_cfg["sbatch"]

@@ -19,7 +19,6 @@ from hydromt.exceptions import NoDataException
 from rasterio.fill import fillnodata
 from rasterio.warp import Resampling, reproject
 from scipy import ndimage
-from shapely.geometry import box as shapely_box
 
 from config_utils import retry_transient_io
 

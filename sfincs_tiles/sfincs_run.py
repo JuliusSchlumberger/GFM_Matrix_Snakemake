@@ -21,48 +21,6 @@ import threading
 from pathlib import Path
 
 
-def parse_sfincs_inp(path: str | Path) -> dict[str, str]:
-    """Parses a sfincs.inp file into a lowercased {key: value} dict.
-
-    SFINCS's format is plain ``key = value`` lines; comments start with
-    ``!``. Generic reader, not aware of which keys mean what.
-    """
-    cfg: dict[str, str] = {}
-    with open(path) as fh:
-        for line in fh:
-            line = line.strip()
-            if "=" in line and not line.startswith("!"):
-                key, _, val = line.partition("=")
-                cfg[key.strip().lower()] = val.strip()
-    return cfg
-
-
-def forward_geometry_files(
-    cfg: dict[str, str],
-    source_root: str | Path,
-    dest_root: str | Path,
-    exclude: frozenset[str] = frozenset(),
-) -> list[str]:
-    """Builds ``"key = <relative path>"`` lines forwarding every non-empty
-    ``*file`` entry in ``cfg`` from ``source_root`` to a new sfincs.inp at
-    ``dest_root``, using a relative path computed with os.path.relpath.
-
-    Skips keys in ``exclude`` and any ``*file`` entry whose target doesn't
-    exist or is a 0-byte placeholder.
-    """
-    source_root = Path(source_root)
-    dest_root = Path(dest_root)
-    lines = []
-    for key, value in cfg.items():
-        if not key.endswith("file") or key in exclude:
-            continue
-        fpath = source_root / value
-        if fpath.exists() and fpath.stat().st_size > 0:
-            rel = os.path.relpath(fpath, start=dest_root)
-            lines.append(f"{key:<20} = {rel}")
-    return lines
-
-
 def run_sfincs_subprocess(
     sfincs_exe: str | Path,
     cwd: str | Path,

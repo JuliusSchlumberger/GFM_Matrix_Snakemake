@@ -27,7 +27,7 @@ import rasterio
 from affine import Affine
 
 from config_utils import retry_transient_io
-from rasterio.windows import Window, from_bounds
+from rasterio.windows import Window
 
 AQUEDUCT_NODATA = np.finfo(np.float32).max
 
@@ -61,14 +61,6 @@ def _read_waterdepth_patch(src: rasterio.DatasetReader, window: Window) -> np.nd
     """
     raw = src.read(1, window=window, boundless=True, fill_value=WATERDEPTH_NODATA_INT16)
     return decode_waterdepth_array(raw)
-
-
-def _bounds_intersect(
-    a: tuple[float, float, float, float],
-    b: tuple[float, float, float, float],
-) -> bool:
-    """Return True if bounding boxes a and b (minx, miny, maxx, maxy) overlap."""
-    return a[0] < b[2] and a[2] > b[0] and a[1] < b[3] and a[3] > b[1]
 
 
 @dataclass

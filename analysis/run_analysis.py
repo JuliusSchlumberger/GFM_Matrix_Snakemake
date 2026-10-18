@@ -10,7 +10,6 @@ Analysis switches in config.yml:
   analysis.compute_flood_totals — per-country total flooded area/exposed population per (RP, SLR),
                                    no protection/adaptation applied - consumed by flood_extent_validation
   analysis.plot_burning_ember   — impact-matrix (SLR × growth) figures
-  analysis.plot_adaptation_bars — grouped bar comparison per scenario
   analysis.plot_timeseries      — EAI along SSP SLR trajectories over time (global / country / continent)
   analysis.plot_tipping_points  — tipping-point figure (isolines x SSP pathways, tipping years)
   analysis.plot_extended_pathways — continent time series to 2150 (population variants after 2100)
@@ -109,7 +108,6 @@ def main() -> None:
     do_exposure    = sw.get("compute_exposure",     True)
     do_flood_totals = sw.get("compute_flood_totals", True)
     do_ember       = sw.get("plot_burning_ember",   True)
-    do_bars        = sw.get("plot_adaptation_bars", True)
     do_timeseries  = sw.get("plot_timeseries",      True)
     do_tipping     = sw.get("plot_tipping_points",  True)
     do_extended    = sw.get("plot_extended_pathways", True)
@@ -117,7 +115,7 @@ def main() -> None:
     do_world_maps  = sw.get("plot_world_maps",      False)
 
     if args.only_exposure:
-        do_ember = do_bars = do_timeseries = do_tipping = do_extended = do_slr_pop = do_world_maps = False
+        do_ember = do_timeseries = do_tipping = do_extended = do_slr_pop = do_world_maps = False
     if args.only_plots:
         do_exposure = False
     if args.skip_exposure:
@@ -168,19 +166,6 @@ def main() -> None:
         results["burning_ember"] = success
     else:
         print("\n  [ SKIP ] Burning-ember plots (analysis.plot_burning_ember = false)")
-
-    # ── Step 3: Adaptation bar charts ────────────────────────────────────────
-    if do_bars:
-        success = _run(
-            SCRIPTS_DIR / "plot_adaptation_bars.py",
-            cfg_arg + ["--expdir", str(exp_dir),
-                        "--outdir", str(fig_dir)],
-            "Adaptation strategy bar charts",
-            args.fail_fast,
-        )
-        results["adaptation_bars"] = success
-    else:
-        print("\n  [ SKIP ] Adaptation bar charts (analysis.plot_adaptation_bars = false)")
 
     # ── Step 4: Time-series ───────────────────────────────────────────────────
     if do_timeseries:

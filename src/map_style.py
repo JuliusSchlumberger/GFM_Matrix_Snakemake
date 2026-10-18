@@ -22,7 +22,6 @@ color means the same thing across every plot of that comparison type.
 """
 
 import matplotlib.pyplot as plt
-from matplotlib.patches import Patch
 
 # Land grey / permanent-water blue-grey - distinct from AGREE/A_ONLY/B_ONLY
 # below so the background is never mistaken for a 4th category.
@@ -108,25 +107,3 @@ def draw_caption_box(ax: plt.Axes, lines: list[str] | str, loc: str = "upper lef
     )
 
 
-def land_water_legend_handles(
-    agree_label: str, a_only_label: str, b_only_label: str,
-    extra: list[Patch] | None = None,
-) -> list[Patch]:
-    """The standard 5-entry legend every agreement/inundation map in this
-    repo should show: the 3 category colors (caller-supplied labels - see
-    this module's own docstring on the A/B convention) plus the 2 shared
-    background colors (fixed "Land"/"Permanent water" labels - a reader
-    comparing two different maps should see the same background legend
-    text on both). `extra` appends any genuinely map-specific entries
-    (e.g. a tile-footprint outline) after the standard 5.
-    """
-    handles = [
-        Patch(facecolor=AGREE_COLOR, label=agree_label),
-        Patch(facecolor=A_ONLY_COLOR, label=a_only_label),
-        Patch(facecolor=B_ONLY_COLOR, label=b_only_label),
-        Patch(facecolor=LAND_COLOR, edgecolor="black", linewidth=0.3, label=LAND_LABEL),
-        Patch(facecolor=WATER_COLOR, edgecolor="black", linewidth=0.3, label=WATER_LABEL),
-    ]
-    if extra:
-        handles.extend(extra)
-    return handles

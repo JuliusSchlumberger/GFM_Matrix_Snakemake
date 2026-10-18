@@ -26,7 +26,7 @@ def test_clamp_window_reproduces_the_real_documented_overshoot() -> None:
     print("=== _clamp_window: the exact real documented overshoot (3525,233) into (3525,232) ===")
     h, w = _clamp_window(r0=0, c0=0, h=3525, w=233, out_height=3525, out_width=232)
     assert (h, w) == (3525, 232), (h, w)
-    print(f"PASS: an oversized (3525,233) window clamps to (3525,232), fitting the mosaic exactly")
+    print("PASS: an oversized (3525,233) window clamps to (3525,232), fitting the mosaic exactly")
     print()
 
 
@@ -48,7 +48,7 @@ def test_clamp_window_accounts_for_nonzero_offset() -> None:
     # room for 20x20, even though 50x50 alone would easily fit an origin-anchored window.
     h, w = _clamp_window(r0=480, c0=480, h=50, w=50, out_height=500, out_width=500)
     assert (h, w) == (20, 20), (h, w)
-    print(f"PASS: a 50x50 window at offset (480,480) in a 500x500 mosaic clamps to (20,20)")
+    print("PASS: a 50x50 window at offset (480,480) in a 500x500 mosaic clamps to (20,20)")
     print()
 
 

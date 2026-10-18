@@ -9,7 +9,6 @@ scripts in snakemake_workflow/analysis/.
 from pathlib import Path
 
 import hydromt
-import numpy as np
 import rasterio
 
 from config_utils import retry_transient_io

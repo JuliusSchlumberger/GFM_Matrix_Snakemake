@@ -2,8 +2,9 @@
 (compute_custom_pathways.py's own CUSTOM_SEQUENCES), drawn in the style of
 https://github.com/JuliusSchlumberger/Pathways_Analysis_Dashboard/tree/main/scripts/PathwaysMaps:
 ONE FIXED HORIZONTAL TRACK PER MEASURE/DESIGN-INTENSITY BLOCK (not one lane
-per sequence, which was this repo's own earlier, simpler attempt - see
-plot_adaptation_pathways.py). Each sequence is a route that travels along a
+per sequence, which was this repo's own earlier, simpler attempt -
+plot_adaptation_pathways.py, removed in cleanup Phase 3, see git history).
+Each sequence is a route that travels along a
 track for as long as that stage holds, then jumps (a vertical connector) to
 its next measure's track at the switch year - the standard DAPP "metro map"
 convention. Multiple sequences sharing a track at an overlapping time are

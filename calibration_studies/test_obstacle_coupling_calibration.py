@@ -462,7 +462,6 @@ def main() -> None:
     tiles = args.tile_ids if args.tile_ids else TILES
 
     cfg = load_config(args.config)
-    root = Path(cfg["paths"]["root"])
     # cfg["simulation"]["model_outputs"], NOT a hardcoded root/"model_outputs" - see
     # test_sweep_budget_calibration.py's own comment on this exact line for why.
     model_outputs = Path(cfg["simulation"]["model_outputs"])

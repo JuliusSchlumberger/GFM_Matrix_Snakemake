@@ -169,7 +169,7 @@ def run_scenario(scenario: str, cores: int, mem_mb: int | None, stages: list[str
     env = os.environ.copy()
     env["GFM_CONFIG_PATH"] = str(materialized)
 
-    resources = [f"--resources", f"mem_mb={mem_mb}"] if mem_mb else []
+    resources = ["--resources", f"mem_mb={mem_mb}"] if mem_mb else []
     results: dict[str, bool] = {}
 
     for stage in stages:

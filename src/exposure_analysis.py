@@ -202,23 +202,6 @@ def build_adapt_protection_fraction(
 
 # ── Country aggregation helper ────────────────────────────────────────────────
 
-def _agg_by_country(
-    grid: np.ndarray,
-    geo_ids: np.ndarray,
-    iso_lookup: dict[int, str],
-) -> dict[str, float]:
-    """Sum a 2D grid per ISO country code."""
-    flat_g = geo_ids.ravel()
-    flat_v = grid.ravel()
-    valid = (flat_g >= 0) & np.isfinite(flat_v)
-    totals: dict[str, float] = {}
-    for gid, val in zip(flat_g[valid], flat_v[valid]):
-        iso = iso_lookup.get(int(gid))
-        if iso:
-            totals[iso] = totals.get(iso, 0.0) + float(val)
-    return totals
-
-
 # ── Redistribution helpers (retreat + avoid) ──────────────────────────────────
 #
 # Split into two composable halves so a chunk-streaming caller can run them as

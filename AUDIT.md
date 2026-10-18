@@ -118,7 +118,7 @@ shared: gfm_config, retry_io, sfincs_grid
   - `src/map_style.py:111 land_water_legend_handles`
   - `src/merge.py:66 _bounds_intersect`
   - `sfincs_tiles/sfincs_run.py` `parse_sfincs_inp`, `forward_geometry_files`
-- Called only from tests: `src/rasters.py:404 resolve_offshore_mask_gaps_via_gebco`, `src/rasters.py:493 relabel_small_isolated_ocean_patches`
+- ~~Called only from tests: `src/rasters.py:404 resolve_offshore_mask_gaps_via_gebco`, `src/rasters.py:493 relabel_small_isolated_ocean_patches`~~ **Correction (Phase 3, 2026-10-18): wrong. Both are called unconditionally by `extract_dem` (rasters.py:661) and `extract_dem_mask` (:731, :734), i.e. by every production preprocessing run. They are CORE and stay; their tests stay.**
 
 ---
 
@@ -583,7 +583,7 @@ Module size: `sfincs_tiles/build_station_boundary_lines.py` (1254), `validation/
 ### 4.5 Dead code and branches
 - No `if False`, commented-out blocks or TODO/FIXME markers found anywhere.
 - Dead functions (§2e): `src/exposure_analysis.py:205`, `src/map_style.py:111`, `src/merge.py:66`, `sfincs_tiles/sfincs_run.py` (`parse_sfincs_inp`, `forward_geometry_files`).
-- Test-only functions: `src/rasters.py:404`, `:493` (no config key enables them).
+- ~~Test-only functions: `src/rasters.py:404`, `:493` (no config key enables them).~~ **Correction (Phase 3, 2026-10-18): wrong. Both are called unconditionally by `extract_dem` (rasters.py:661) and `extract_dem_mask` (:731, :734), i.e. by every production preprocessing run. They are CORE and stay; their tests stay.**
 - Unused imports:
   - `snakemake_workflow/scripts/generate_aqueduct_jobs.py:65 os`
   - `src/exposure.py:12 numpy`
@@ -683,7 +683,7 @@ Module size: `sfincs_tiles/build_station_boundary_lines.py` (1254), `validation/
 | 13 | One-off diagnostics | **Delete** (not archive) | Phase 2. Covers `debug_avoid_ssp.py`, `compare_fundy_extreme_forcing.py`, `_scratch_check_corrupt_exposure_grids.py`, `scan_nodata_frame_leak.py` (nothing is running), `tests/_list_tiles_by_size.py`, `scratch/dtm_seeger_pronk.py` (so `scratch/` goes too), `promote_world_domains.py` |
 | 14 | `norway_diagnostics/`, `connectivity_tiling_prototype/output/` | ~~Move to `archive/`~~ → **delete both** (no archive dir, 2026-10-17). **Superseded for norway_diagnostics** by the validation scope reduction (§9): Norway is dropped, so delete it | Phase 2: delete `connectivity_tiling_prototype/output/`. Phase 2b: delete `norway_diagnostics/` and its comment pointers (config.yml:789, data_catalog_gfm.yml:233, README:99) |
 | 15 | `select_calibration_tiles.py` collision, `select_country_tiles.py` | Rename the calibration_studies one; move the other to `preparation/` | Phase 7 |
-| 16 | 2 test-only `rasters.py` functions | Delete, with their test cases | Phase 3 |
+| 16 | 2 test-only `rasters.py` functions | ~~Delete, with their test cases~~ **Kept.** The audit finding was wrong: `extract_dem` / `extract_dem_mask` call both in production (found in Phase 3) | none |
 | 17 | pytest + ruff + minimal `pyproject.toml` | Yes | Phase 0 |
 | 18 | Environments | Add `environment_sfincs.yml`. `gfm_python_preprocessing` is the local (Windows) name of the `gfm` env; Hydrax calls it `gfm` | Phase 0 (env file). Phase 4: docs call the env `gfm` and mention the local alias. Phase 6: launchers read the interpreter from an env var instead of hard-coding either name. Local checks use `C:/Users/schlumbe/AppData/Local/miniforge3/envs/gfm_python_preprocessing/python.exe` |
 | 19 | Renames | In scope, **including `aqueduct` → `eikonal`** | New Phase 7a (below). See open questions C and D |
@@ -777,8 +777,8 @@ Baseline (Phase 0): thailand_bangkok 453 jobs (run_aqueduct 90, extract_boundari
   - `python validation/run_validation.py --countries GBR CAN` reproduces the current `P:\…\validation\{GBR,CAN}` metrics CSVs exactly. Snapshot them first.
   - `python validation/validate_england_fz2_band.py`, `_rescore_england_fz3.py`, `validate_sf_bay.py` and `run_multi_rp_summary.py --countries GBR` all run and give unchanged CSVs.
 
-**Phase 3: Delete dead code inside live modules.**
-- Remove the unused imports (and the other ruff F401/F541/F841 hits listed in `.cleanup_baseline/ruff_all.txt`: 39 at Phase 0), the 3 dead functions, the 2 unused `sfincs_run.py` functions, and the 2 test-only `rasters.py` functions with their tests.
+**Phase 3: Delete dead code inside live modules.** ✅ *done 2026-10-18; `ruff check .` is clean repo-wide. The 2 "test-only" rasters.py functions were kept (the audit finding was wrong, see Q16).*
+- Remove the unused imports (and the other ruff F401/F541/F841 hits listed in `.cleanup_baseline/ruff_all.txt`: 39 at Phase 0), the 3 dead functions, the 2 unused `sfincs_run.py` functions. ~~and the 2 test-only `rasters.py` functions~~ (kept: they are production code, see Q16).
 - Remove `plot_adaptation_pathways.py` and `plot_adaptation_bars.py`, plus the `run_analysis.py` step and config switch.
 - *Verify*: `ruff check --select F401,F811,F841` on the touched files; `pytest`; `snakemake -n all`; `python analysis/run_analysis.py --help`.
 

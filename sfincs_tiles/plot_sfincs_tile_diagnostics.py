@@ -59,7 +59,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gfm_config import read_root  # noqa: E402
 from sfincs_grid import read_sfincs_mask  # noqa: E402
 from plot_worst_tiles_panel import (  # noqa: E402
-    CATEGORY_COLORS, CATEGORY_LABELS, DRY, EIKONAL_ONLY, MATCHED, SFINCS_ONLY,
+    CATEGORY_COLORS, CATEGORY_LABELS, DRY, EIKONAL_ONLY, SFINCS_ONLY,
     build_classification,
 )
 

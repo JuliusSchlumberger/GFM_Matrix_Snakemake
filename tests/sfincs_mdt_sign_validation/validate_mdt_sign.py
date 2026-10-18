@@ -72,7 +72,6 @@ def test_elevation_mdt_is_added_not_subtracted() -> None:
 
         known_mdt_m = 0.4336  # deliberately non-zero, matches the real magnitude seen live on tile 691
         mdt_arr = np.full((10, 10), known_mdt_m, dtype=np.float64)
-        mdt_transform = rasterio.Affine(1.0, 0, 0.0, 0, -1.0, 90.0)
         mdt_path = tmpdir / "mdt.nc"
         mdt_da = xr.DataArray(
             mdt_arr, dims=("lat", "lon"),

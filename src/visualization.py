@@ -20,7 +20,6 @@ Usage (standalone, after the Snakemake pipeline has completed):
         load_growth_matrix_csv,
         build_growth_matrix_from_grid,
         plot_burning_ember,
-        plot_adaptation_bars,
         plot_world_map,
     )
 """
@@ -31,7 +30,6 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-import matplotlib.cm as cm
 import numpy as np
 import pandas as pd
 import rasterio
@@ -504,64 +502,6 @@ def plot_burning_ember(
     return fig
 
 
-def plot_adaptation_bars(
-    eai_dict: dict[str, pd.DataFrame],
-    slr_scenarios: list[str],
-    slr_mm_values: list[float],
-    entity_label: str = "",
-    measure_colors: dict[str, str] | None = None,
-    dpi: int = 200,
-    figsize: tuple[float, float] = (9, 5),
-    unit_label: str = "EAI (people)",
-    log_scale: bool = False,
-) -> plt.Figure:
-    """Bar chart comparing EAI across adaptation strategies at each SLR scenario.
-
-    Args:
-        eai_dict:       {measure_label: per-geogunit EAI DataFrame} e.g.
-                        {"baseline": df_base, "protect_SLR_250": df_prot, …}.
-                        Each DataFrame has columns = SLR scenario names, rows = geogunits.
-        slr_scenarios:  SLR scenario names to include (column subset).
-        slr_mm_values:  Corresponding mm values for x-axis labels.
-        entity_label:   Title suffix (country ISO / continent name).
-        measure_colors: Colour per measure key.
-        dpi:            Figure resolution.
-        figsize:        Figure size.
-        unit_label:     Y-axis label.
-        log_scale:      Use log scale for y-axis.
-    """
-    colors_ = measure_colors or _DEFAULT_MEASURE_COLORS
-
-    measures = list(eai_dict.keys())
-    n_slr = len(slr_scenarios)
-    n_measures = len(measures)
-    bar_width = 0.7 / n_measures
-    x = np.arange(n_slr)
-
-    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
-
-    for i, measure in enumerate(measures):
-        df = eai_dict[measure]
-        vals = [df[slr].sum() if slr in df.columns else 0.0 for slr in slr_scenarios]
-        color = colors_.get(measure.split("_")[0], "#999999")
-        offset = (i - n_measures / 2.0 + 0.5) * bar_width
-        ax.bar(x + offset, vals, bar_width, label=measure, color=color, alpha=0.85)
-
-    slr_labels = [f"{int(mm / 1000)}.{int(mm % 1000 / 100)}m\n({int(mm)} mm)"
-                  for mm in slr_mm_values]
-    ax.set_xticks(x)
-    ax.set_xticklabels(slr_labels, fontsize=8)
-    ax.set_ylabel(unit_label, fontsize=10)
-    ax.set_xlabel("SLR scenario", fontsize=10)
-    ax.set_title(f"Adaptation comparison — {entity_label}", fontsize=11)
-    if log_scale:
-        ax.set_yscale("log")
-    ax.legend(fontsize=8, loc="upper left")
-    ax.grid(axis="y", alpha=0.3)
-    fig.tight_layout()
-    return fig
-
-
 def plot_timeseries(
     eai_dict: dict[str, pd.DataFrame],
     slr_trajectories: pd.DataFrame,
@@ -610,7 +550,6 @@ def plot_timeseries(
         color_ssp = s_colors.get(ssp, "#444444")
         for measure in measures:
             df = eai_dict[measure]
-            eai_total = df[[c for c in slr_trajectories.columns[:0]]].copy()
             # Sum geogunits → series indexed by SLR scenario name
             eai_totals = np.array([df[slr].sum() if slr in df.columns else 0.0
                                    for slr in [f"SLR_{int(mm)}" for mm in slr_mm_values]])

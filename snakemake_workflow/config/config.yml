@@ -580,7 +580,6 @@ analysis: # Used by: analysis/run_analysis.py
   # no protection/adaptation applied - consumed by flood_extent_validation's
   # validate_country.py (validation.flood_totals_dir below)
   plot_burning_ember:    true   # impact-matrix (SLR × growth) figures
-  plot_adaptation_bars:  false   # grouped bar charts per adaptation strategy
   plot_timeseries:       false  # EAI along SSP SLR trajectories to 2100 (global, per country, per continent);
                                 # superseded by plot_extended_pathways' continent time series
   plot_tipping_points:   true   # tipping-point figure (visualization.tipping_points)
@@ -689,7 +688,6 @@ visualization:
 
   # ── Figure sizes (inches) ─────────────────────────────────────────────────
   ember_figsize: [8, 7]
-  adaptation_bars_figsize: [9, 5]
   world_map_figsize: [14, 7]
 
   # ── World map ──────────────────────────────────────────────────────────────

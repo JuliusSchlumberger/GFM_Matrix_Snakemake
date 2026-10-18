@@ -318,7 +318,6 @@ def main() -> None:
     n_tiles_wanted = args.n_tiles_wanted
 
     cfg = load_config(args.config)
-    root = Path(cfg["paths"]["root"])
     # cfg["simulation"]["model_outputs"], NOT a hardcoded root/"model_outputs" - a calibration
     # study's solver outputs are deliberately isolated under its own study directory (e.g.
     # {root}/calibration_500_tiles/model_outputs), not the shared production tree, and

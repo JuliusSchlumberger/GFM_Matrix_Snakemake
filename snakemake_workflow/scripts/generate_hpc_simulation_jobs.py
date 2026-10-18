@@ -276,7 +276,7 @@ def main() -> None:
         submit_waves_path=str(local_jobs_dir / "submit_resume_waves.sh"),
         wave_sbatch_cfg=wave_sbatch_cfg or None,
     )
-    print(f"\nCancel the original dispatch's still-running jobs for these wave(s) FIRST (see module docstring), then:")
+    print("\nCancel the original dispatch's still-running jobs for these wave(s) FIRST (see module docstring), then:")
     print(f"Submit on Hydrax with: bash {linux_config['hpc']['jobs_dir']}/submit_resume_waves.sh")
 
 

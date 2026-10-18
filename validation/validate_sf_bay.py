@@ -56,7 +56,6 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import rasterio
-from affine import Affine
 from rasterio.features import rasterize
 from rasterio.warp import Resampling, reproject
 
@@ -186,7 +185,6 @@ def validate_sf_bay(config_path: str, threshold_m: float | None = None) -> dict[
 
     bench_depth_2m, bench_transform_2m, bench_crs_2m = _read_benchmark_full(BENCHMARK_PATH)
     bench_shape_2m = bench_depth_2m.shape
-    bay_bbox_26910 = rasterio.warp.transform_bounds("EPSG:4326", bench_crs_2m, *BAY_BBOX_4326)
 
     model_depth_native, model_transform_native, model_crs, model_nodata = _read_model_window(MODEL_CHUNK_PATH, BAY_BBOX_4326)
     model_shape_native = model_depth_native.shape

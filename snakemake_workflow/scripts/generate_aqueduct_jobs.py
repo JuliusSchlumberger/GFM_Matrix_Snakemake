@@ -62,7 +62,6 @@ runner to read.
 """
 
 import csv
-import os
 import sys
 from pathlib import Path
 
