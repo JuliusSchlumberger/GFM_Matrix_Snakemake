@@ -163,7 +163,10 @@ boundary_conditions:
   waterlevel_nc_dir: "{processed_inputs_dir}/WL_scenarios" # Directory for water level scenario files
 
   # IPCC AR6 regional SLR projection scenario/confidence level used to build
-  # the SLR fingerprints
+  # the SLR fingerprints. slr_scenario is the SSP-RCP projection CODE, not an SLR
+  # level (those are slr_scenarios below / the waterlevel_name wildcard). The key
+  # keeps its name: this whole section is a Snakemake rule param (bc_cfg), so a
+  # renamed key would re-trigger every cache_waterlevel_stations/extract_boundaries job.
   slr_scenario: "ssp245" # options: slr_scenario ssp126/ssp245/ssp585
   confidence_level: "medium" # options: low/medium
   coastrp_min_lat: -60  # exclude antarctic stations (no exposure)
@@ -179,6 +182,9 @@ boundary_conditions:
     mdt_variable: "mdt"
     fallback_search_deg: 3.0
 
+  # Return-period convention: RP lists (this one and every other RP list) are
+  # plain ints (years); a single scalar RP key (validation.return_period) is the
+  # "RP100" wildcard form, as are the return_period columns of every output CSV.
   return_periods: # Coast-RP return periods (wildcards) to simulate flood exposure fore
     # - 1
     - 2
@@ -191,7 +197,7 @@ boundary_conditions:
     - 500
     - 1000
 
-  slr_scenarios: # SLR scenario names used as wildcards
+  slr_scenarios: # SLR levels "SLR_<mm>" = the waterlevel_name wildcard values (key name kept, see slr_scenario)
     - "SLR_0"
     - "SLR_500"
     - "SLR_1000"
@@ -727,7 +733,7 @@ validation:
   benchmark_catalog: "snakemake_workflow/config/data_catalog_validation.yml"
   benchmark_root: "{root}/inputs/validation" # NOT the GFM catalog's own {root}
   output_dir: "{root}/validation"
-  return_period: "RP100"
+  return_period: "RP100" # scalar RP: "RP100" wildcard form (see boundary_conditions.return_periods)
   waterlevel_name: "SLR_0"
   primary_threshold_m: 0.01 # the single model wet-cell threshold scoring uses everywhere - the
   # model's own depth classification, a separate question from the benchmark's own coverage
