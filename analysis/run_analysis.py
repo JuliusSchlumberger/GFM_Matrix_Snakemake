@@ -63,7 +63,7 @@ def main() -> None:
                         help=f"path to config.yml (default: {_default_cfg})")
     parser.add_argument("--expdir", default=None,
                         help="exposure CSV directory (default: merged_outputs/exposure)")
-    parser.add_argument("--fig-dir", "--figdir", dest="figdir", default=None,
+    parser.add_argument("--fig-dir", default=None,
                         help="figures root directory (default: visualization.output_dir)")
     parser.add_argument("--fail-fast", action="store_true",
                         help="abort on first failed step")
@@ -84,7 +84,7 @@ def main() -> None:
     merged_out = cfg["postprocessing"]["merged_outputs"]
 
     exp_dir = Path(args.expdir or f"{merged_out}/exposure")
-    fig_dir = Path(args.figdir or viz["output_dir"])
+    fig_dir = Path(args.fig_dir or viz["output_dir"])
 
     sw = cfg["analysis"]
     enabled = {key: sw[switch] for key, switch, *_ in _STEPS}

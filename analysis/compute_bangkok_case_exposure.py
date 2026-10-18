@@ -37,7 +37,7 @@ def main() -> None:
     parser.add_argument("--config", default=_default_cfg)
     parser.add_argument("--case-polygon-gpkg", required=True)
     parser.add_argument("--case-polygon-layer", default="bangkok_tile")
-    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None, help="default: {merged_outputs}/exposure")
+    parser.add_argument("--out-dir", default=None, help="default: {merged_outputs}/exposure")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -48,7 +48,7 @@ def main() -> None:
     merged_dir = Path(cfg["postprocessing"]["merged_outputs"])
     flood_frac_dir = merged_dir / "chunks" / "flood_fraction"
     chunks_dir = merged_dir / "chunks"
-    out_dir = Path(args.outdir) if args.outdir else merged_dir / "exposure"
+    out_dir = Path(args.out_dir) if args.out_dir else merged_dir / "exposure"
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
     case_poly = gpd.read_file(args.case_polygon_gpkg, layer=args.case_polygon_layer)

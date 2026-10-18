@@ -5,8 +5,6 @@ Not restricted to wet tiles. Non-converged tiles are triangles at
 
 Usage:
     python plot_sweep_time_vs_size.py <sweep_budget_dir> --fig-dir <figures_dir> [--epsilon 0.03]
-
-<figures_dir> is also accepted as a second positional argument.
 """
 
 from __future__ import annotations
@@ -23,7 +21,6 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from cli_args import add_option_with_positional, require  # noqa: E402
 from config_utils import load_config  # noqa: E402
 from plot_sweep_budget_convergence import N_COMPLETE_ROUNDS, collect  # noqa: E402
 
@@ -71,17 +68,16 @@ def make_figure(df: pd.DataFrame, epsilon: float, out_path: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("sweep_budget_dir")
-    add_option_with_positional(parser, "--fig-dir", "figures_dir")
+    parser.add_argument("--fig-dir", required=True)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--epsilon", type=float, default=None, help="default: config simulation.flooding.waterlevel_epsilon_m")
     args = parser.parse_args()
-    require(parser, args, "figures_dir", "--fig-dir")
 
     cfg = load_config(args.config)
     epsilon = args.epsilon if args.epsilon is not None else float(cfg["simulation"]["flooding"]["waterlevel_epsilon_m"])
 
     sweep_budget_dir = Path(args.sweep_budget_dir)
-    figures_dir = Path(args.figures_dir)
+    figures_dir = Path(args.fig_dir)
     figures_dir.mkdir(parents=True, exist_ok=True)
 
     df = collect(sweep_budget_dir, epsilon)

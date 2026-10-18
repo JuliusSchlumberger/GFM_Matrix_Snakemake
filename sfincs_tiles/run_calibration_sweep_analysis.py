@@ -46,7 +46,7 @@ def main() -> None:
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
     parser.add_argument("--tile-ids-file", default=None,
                         help="restrict every step to these tiles (default: every tile with a calibration_result.json)")
-    parser.add_argument("--n-panel-tiles", "--n-tiles", dest="n_tiles", type=int, default=6, help="worst-tile panel size, forwarded to plot_worst_tiles_panel.py")
+    parser.add_argument("--n-panel-tiles", type=int, default=6, help="worst-tile panel size, forwarded to plot_worst_tiles_panel.py")
     parser.add_argument("--min-union-km2", type=float, default=50.0, help="forwarded to plot_worst_tiles_panel.py")
     parser.add_argument(
         "--select-by", choices=["CSI", "bias"], default="CSI",
@@ -82,7 +82,7 @@ def main() -> None:
     _run([python, str(_THIS_DIR / "compute_friction_sweep_metrics.py"), *common, *subset])
     best_fsf = _best_fsf(root, args)
     _run([python, str(_THIS_DIR / "plot_worst_tiles_panel.py"), *common, *raster,
-          "--friction-scale-factor", f"{best_fsf:g}", "--n-panel-tiles", str(args.n_tiles),
+          "--friction-scale-factor", f"{best_fsf:g}", "--n-panel-tiles", str(args.n_panel_tiles),
           "--min-union-km2", str(args.min_union_km2)])
     _run([python, str(_THIS_DIR / "plot_validation_results.py"), *common, *subset,
           "--friction-scale-factor", f"{best_fsf:g}"])

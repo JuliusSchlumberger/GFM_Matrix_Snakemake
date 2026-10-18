@@ -34,7 +34,7 @@ def main() -> None:
     parser.add_argument("--config", required=True)
     parser.add_argument("--parts-glob", required=True, help="glob pattern matching every pass-2 batch's output pickle")
     parser.add_argument("--shares", required=True, help="reduce_exposure_shares.py's output JSON")
-    parser.add_argument("--out-dir", "--outdir", dest="outdir", required=True)
+    parser.add_argument("--out-dir", required=True)
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -55,8 +55,8 @@ def main() -> None:
             totals[key] = df if key not in totals else totals[key].add(df, fill_value=0.0)
 
     print(f"Reduced {len(part_paths)} pass-2 parts -> {len(totals)} task totals. Writing CSVs…")
-    write_exposure_outputs(ctx, tasks, totals, Path(args.outdir))
-    print(f"All exposure CSVs written to: {args.outdir}")
+    write_exposure_outputs(ctx, tasks, totals, Path(args.out_dir))
+    print(f"All exposure CSVs written to: {args.out_dir}")
 
 
 if __name__ == "__main__":

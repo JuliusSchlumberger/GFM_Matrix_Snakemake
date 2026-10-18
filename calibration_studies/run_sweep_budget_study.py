@@ -10,8 +10,6 @@ over-provisioned). Writes one CSV per tile with per-sweep depth-change metrics.
 
 Usage:
     python run_sweep_budget_study.py --out-dir <output_dir> [--config <config.yml>] [--tile-ids id [id ...]]
-
-A positional <output_dir> is still accepted in place of --out-dir.
 """
 import argparse
 import csv
@@ -25,7 +23,6 @@ import numpy as np
 import rasterio
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from cli_args import add_option_with_positional, require  # noqa: E402
 from config_utils import load_config  # noqa: E402
 from eikonal import _ORTHANT_ORDER, _dense_sweep  # noqa: E402
 from flood_model import effective_dem  # noqa: E402
@@ -224,7 +221,7 @@ FIELDNAMES = [
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    add_option_with_positional(parser, "--out-dir", "out_dir")
+    parser.add_argument("--out-dir", required=True)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--tile-ids", type=int, nargs="*", default=None)
     parser.add_argument("--epsilon", type=float, default=DEFAULT_EPSILON_M, help=f"round-level convergence threshold (default: {DEFAULT_EPSILON_M}, production's own simulation.flooding.waterlevel_epsilon_m)")
@@ -239,7 +236,6 @@ def main() -> None:
              "tile's own CSV post-hoc and is safe regardless of how the work was split.",
     )
     args = parser.parse_args()
-    require(parser, args, "out_dir", "--out-dir")
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

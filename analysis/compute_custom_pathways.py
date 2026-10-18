@@ -42,7 +42,7 @@ def main() -> None:
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True)
     parser.add_argument("--ssp", required=True)
-    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None)
+    parser.add_argument("--out-dir", default=None)
     parser.add_argument("--countries", nargs="+", default=None)
     parser.add_argument("--continents", nargs="+", default=CONTINENTS)
     parser.add_argument("--continent-eai-threshold", type=float, default=5_000_000.0)

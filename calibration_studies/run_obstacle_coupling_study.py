@@ -17,8 +17,7 @@ Usage:
         [--tile-ids id [id ...]] [--max-outer-iterations N] [--max-rounds N] [--epsilon M]
 
 The flag names mirror the config keys (obstacle_coupling.max_outer_iterations,
-flooding.max_rounds); the older --max-outer / --inner-max-rounds and a positional
-<output_dir> are still accepted.
+flooding.max_rounds).
 """
 import argparse
 import csv
@@ -31,7 +30,6 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from cli_args import add_option_with_positional, require  # noqa: E402
 from config_utils import load_config  # noqa: E402
 from eikonal import _ORTHANT_ORDER, _dense_sweep  # noqa: E402
 from flood_model import OBSTACLE_BLOCK_FRICTION as BLOCK_FRICTION  # noqa: E402
@@ -265,15 +263,14 @@ def build_summary_row(rows: list[dict], tile_id: int) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    add_option_with_positional(parser, "--out-dir", "out_dir")
+    parser.add_argument("--out-dir", required=True)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--tile-ids", type=int, nargs="*", default=None)
-    parser.add_argument("--max-outer-iterations", "--max-outer", dest="max_outer", type=int, default=None, help=f"default: {DEFAULT_MAX_OUTER} (production uses config simulation.flooding.obstacle_coupling.max_outer_iterations)")
-    parser.add_argument("--max-rounds", "--inner-max-rounds", dest="inner_max_rounds", type=int, default=None, help=f"default: {DEFAULT_INNER_MAX_ROUNDS} (production uses config simulation.flooding.max_rounds)")
+    parser.add_argument("--max-outer-iterations", type=int, default=None, help=f"default: {DEFAULT_MAX_OUTER} (production uses config simulation.flooding.obstacle_coupling.max_outer_iterations)")
+    parser.add_argument("--max-rounds", type=int, default=None, help=f"default: {DEFAULT_INNER_MAX_ROUNDS} (production uses config simulation.flooding.max_rounds)")
     parser.add_argument("--epsilon", type=float, default=None, help=f"default: {DEFAULT_OUTER_EPSILON_M} (matches production's own config simulation.flooding.waterlevel_epsilon_m)")
     parser.add_argument("--outer-convergence-pct", type=float, default=None, help="default: config simulation.flooding.obstacle_coupling.outer_convergence_pct")
     args = parser.parse_args()
-    require(parser, args, "out_dir", "--out-dir")
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -284,8 +281,8 @@ def main() -> None:
     flooding_cfg = cfg["simulation"]["flooding"]
     knn = int(flooding_cfg["knn"])
     friction_scale_factor = float(flooding_cfg["friction_scale_factor"])
-    max_outer = args.max_outer if args.max_outer is not None else DEFAULT_MAX_OUTER
-    inner_max_rounds = args.inner_max_rounds if args.inner_max_rounds is not None else DEFAULT_INNER_MAX_ROUNDS
+    max_outer = args.max_outer_iterations if args.max_outer_iterations is not None else DEFAULT_MAX_OUTER
+    inner_max_rounds = args.max_rounds if args.max_rounds is not None else DEFAULT_INNER_MAX_ROUNDS
     epsilon = args.epsilon if args.epsilon is not None else DEFAULT_OUTER_EPSILON_M
     outer_convergence_pct = args.outer_convergence_pct if args.outer_convergence_pct is not None else float(flooding_cfg["obstacle_coupling"]["outer_convergence_pct"])
     print(f"model_outputs={model_outputs}  knn={knn}  friction_scale_factor={friction_scale_factor}  "

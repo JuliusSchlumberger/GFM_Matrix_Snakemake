@@ -200,10 +200,10 @@ def plot_conceptual_grid(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None, help="output directory (default: <repo>/adaptation_validation_output)")
+    parser.add_argument("--out-dir", default=None, help="output directory (default: <repo>/adaptation_validation_output)")
     args = parser.parse_args()
 
-    out_dir = Path(args.outdir) if args.outdir else Path(__file__).resolve().parents[1] / "adaptation_validation_output"
+    out_dir = Path(args.out_dir) if args.out_dir else Path(__file__).resolve().parents[1] / "adaptation_validation_output"
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
     rng = np.random.default_rng(SEED)

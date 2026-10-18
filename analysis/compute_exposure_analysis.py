@@ -688,7 +688,7 @@ def main() -> None:
     _default_cfg = str(Path(__file__).resolve().parents[1] / "snakemake_workflow" / "config" / "config.yml")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=_default_cfg)
-    parser.add_argument("--out-dir", "--outdir", dest="outdir", required=True)
+    parser.add_argument("--out-dir", required=True)
     parser.add_argument(
         "--skip-existing", action="store_true",
         help="Skip a scenario (baseline/protect_*/retreat_*) or an avoid / protect + avoid "
@@ -716,7 +716,7 @@ def main() -> None:
     if growth_df is None:
         print("  WARNING: SSP growth factors not found; File 3 (*_ssp.csv) will be skipped.")
 
-    out_dir = Path(args.outdir)
+    out_dir = Path(args.out_dir)
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
     # Ocean/unpopulated chunks have zero-byte placeholder population files.

@@ -220,7 +220,7 @@ def main() -> None:
     parser.add_argument("--csv-ssp2", required=True)
     parser.add_argument("--csv-ssp5", required=True)
     parser.add_argument("--to-year", type=int, default=2150)
-    parser.add_argument("--out-dir", "--outdir", dest="outdir", required=True)
+    parser.add_argument("--out-dir", required=True)
     parser.add_argument("--dpi", type=int, default=200)
     args = parser.parse_args()
 
@@ -231,7 +231,7 @@ def main() -> None:
             raise SystemExit(f"No rows for ssp={ssp}")
 
     iso_to_name = {v: k for k, v in _build_name_to_iso().items()}
-    out_dir = Path(args.outdir)
+    out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     countries = list(dict.fromkeys(sub_by_ssp["SSP2"].loc[sub_by_ssp["SSP2"]["entity_type"] == "country", "entity"]))

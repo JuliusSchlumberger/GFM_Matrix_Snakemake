@@ -22,12 +22,12 @@ from config_utils import return_period_years  # noqa: E402
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--exposure-csv", required=True)
-    parser.add_argument("--out-dir", "--outdir", dest="outdir", required=True)
+    parser.add_argument("--out-dir", required=True)
     args = parser.parse_args()
 
     df = pd.read_csv(args.exposure_csv)
     df["return_period"] = df["return_period"].map(return_period_years)  # "RP100" or an older int column
-    out_dir = Path(args.outdir)
+    out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     slr_order = sorted(df["waterlevel_name"].unique(), key=lambda s: int(s.split("_")[1]))

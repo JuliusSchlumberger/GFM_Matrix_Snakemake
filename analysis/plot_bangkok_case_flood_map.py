@@ -67,7 +67,7 @@ def main() -> None:
     parser.add_argument("--case-polygon-gpkg", required=True)
     parser.add_argument("--case-polygon-layer", default="bangkok_tile")
     parser.add_argument("--return-period", default="RP100")
-    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None, help="default: visualization.output_dir")
+    parser.add_argument("--out-dir", default=None, help="default: visualization.output_dir")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -80,7 +80,7 @@ def main() -> None:
     vmax_m = float(plots_cfg["waterdepth_vmax_m"])
 
     merged_dir = Path(cfg["postprocessing"]["merged_outputs"])
-    out_dir = Path(args.outdir) if args.outdir else Path(cfg["visualization"]["output_dir"])
+    out_dir = Path(args.out_dir) if args.out_dir else Path(cfg["visualization"]["output_dir"])
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
     case_poly = gpd.read_file(args.case_polygon_gpkg, layer=args.case_polygon_layer)

@@ -324,7 +324,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_baseline_growth_matrix.csv")
-    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None)
+    parser.add_argument("--out-dir", default=None)
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -340,7 +340,7 @@ def main() -> None:
     v0 = next(iter(variants))
     rcp = viz["ssp_rcp_codes"]
     dpi = int(viz["dpi"])
-    out_dir = Path(args.outdir or viz["output_dir"])
+    out_dir = Path(args.out_dir or viz["output_dir"])
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
     catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])

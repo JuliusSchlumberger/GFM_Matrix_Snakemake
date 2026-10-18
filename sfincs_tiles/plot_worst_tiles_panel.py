@@ -165,7 +165,7 @@ def main() -> None:
     parser.add_argument("--config", default=str(repo_root / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
     parser.add_argument("--friction-scale-factor", type=float, required=True, help="the friction point to rank and plot")
-    parser.add_argument("--n-panel-tiles", "--n-tiles", dest="n_tiles", type=int, default=6, help="tiles in the panel")
+    parser.add_argument("--n-panel-tiles", type=int, default=6, help="tiles in the panel")
     parser.add_argument("--min-eikonal-only-km2", type=float, default=50.0,
                         help="EA-bathtub-over-predicting panel: the EA-bathtub-only area itself must be at least this")
     parser.add_argument("--min-union-km2", type=float, default=50.0,
@@ -192,7 +192,7 @@ def main() -> None:
     print(f"{len(df)} tile(s) with union area >= {args.min_union_km2} km2 eligible "
           f"(friction_scale_factor={fsf:g}, from {per_tile_path.name})")
 
-    n = args.n_tiles
+    n = args.n_panel_tiles
     sfincs_over = df[df["eikonal_sfincs_only_km2"] > df["eikonal_only_km2"]].sort_values("csi").head(n)
     eikonal_over = df[(df["eikonal_only_km2"] > df["eikonal_sfincs_only_km2"])
                       & (df["eikonal_only_km2"] >= args.min_eikonal_only_km2)].sort_values("csi").head(n)

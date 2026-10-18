@@ -73,7 +73,7 @@ def main() -> None:
     _default_cfg = str(Path(__file__).resolve().parents[1] / "snakemake_workflow" / "config" / "config.yml")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=_default_cfg)
-    parser.add_argument("--out-dir", "--outdir", dest="outdir", required=True)
+    parser.add_argument("--out-dir", required=True)
     parser.add_argument(
         "--workers", type=int, default=1,
         help="chunks processed concurrently via a thread pool (default 1 = serial). Each chunk's "
@@ -92,7 +92,7 @@ def main() -> None:
     merged_dir = Path(cfg["postprocessing"]["merged_outputs"])
     flood_frac_dir = merged_dir / "chunks" / "flood_fraction"
     chunks_dir = merged_dir / "chunks"
-    out_dir = Path(args.outdir) / "flood_totals"
+    out_dir = Path(args.out_dir) / "flood_totals"
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
     chunk_ids, all_chunk_ids = discover_chunk_ids(flood_frac_dir, chunks_dir)

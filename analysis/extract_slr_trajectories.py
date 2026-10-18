@@ -62,7 +62,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=_default_cfg, help=f"path to config.yml (default: {_default_cfg})")
     parser.add_argument(
-        "--out", "--output", dest="output", default=None,
+        "--out", default=None,
         help="output CSV path (default: visualization.slr_trajectories_csv from config)",
     )
     args = parser.parse_args()
@@ -71,8 +71,8 @@ def main() -> None:
 
     viz = cfg["visualization"]
 
-    if args.output is None:
-        args.output = viz["slr_trajectories_csv"]
+    if args.out is None:
+        args.out = viz["slr_trajectories_csv"]
     ssp_rcp_codes: dict[str, int] = viz["ssp_rcp_codes"]
     catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
     slr_csv_dir = Path(catalog.get_source("ipcc_ar6_slr_wg1_csv").path)
@@ -100,7 +100,7 @@ def main() -> None:
     result.index.name = "year"
     result = result.sort_index()
 
-    out_path = Path(args.output)
+    out_path = Path(args.out)
     retry_transient_io(out_path.parent.mkdir, parents=True, exist_ok=True)
     result.to_csv(out_path)
     print(f"\nWritten: {out_path}")

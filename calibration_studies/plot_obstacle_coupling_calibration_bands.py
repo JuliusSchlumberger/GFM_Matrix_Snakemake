@@ -6,8 +6,6 @@ carry-forward.
 
 Usage:
     python plot_obstacle_coupling_calibration_bands.py <obstacle_coupling_dir> --fig-dir <figures_dir> [--max-outer-iterations 3]
-
-<figures_dir> is also accepted as a second positional argument.
 """
 
 from __future__ import annotations
@@ -26,7 +24,6 @@ from matplotlib.ticker import FuncFormatter, LogLocator, MaxNLocator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from cli_args import add_option_with_positional, require  # noqa: E402
 from config_utils import load_config  # noqa: E402
 from plot_sweep_budget_convergence import band_stats, plot_band, read_trace_csv  # noqa: E402
 
@@ -109,7 +106,7 @@ def make_figure(long_df: pd.DataFrame, max_outer_iterations: int, outer_converge
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("obstacle_dir")
-    add_option_with_positional(parser, "--fig-dir", "figures_dir")
+    parser.add_argument("--fig-dir", required=True)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--max-outer-iterations", type=int, default=None,
                          help="default: config simulation.flooding.obstacle_coupling.max_outer_iterations")
@@ -117,7 +114,6 @@ def main() -> None:
                          help="x-axis upper limit (outer iteration) - independent of the max outer "
                               "iteration actually observed in the data, for consistent axis framing")
     args = parser.parse_args()
-    require(parser, args, "figures_dir", "--fig-dir")
 
     cfg = load_config(args.config)
     obstacle_cfg = cfg["simulation"]["flooding"]["obstacle_coupling"]
@@ -127,7 +123,7 @@ def main() -> None:
     outer_convergence_pct = float(obstacle_cfg["outer_convergence_pct"])
 
     obstacle_dir = Path(args.obstacle_dir)
-    figures_dir = Path(args.figures_dir)
+    figures_dir = Path(args.fig_dir)
     figures_dir.mkdir(parents=True, exist_ok=True)
 
     records = []

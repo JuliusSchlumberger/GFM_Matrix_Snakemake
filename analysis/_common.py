@@ -131,7 +131,7 @@ class PathwaySetup:
 
 
 def load_pathway_setup(args) -> PathwaySetup:
-    """Build the PathwaySetup from parsed CLI args (`config`, `expdir`, `outdir`, `countries`, `to_year`).
+    """Build the PathwaySetup from parsed CLI args (`config`, `expdir`, `out_dir`, `countries`, `to_year`).
 
     Creates `out_dir`.
     """
@@ -145,7 +145,7 @@ def load_pathway_setup(args) -> PathwaySetup:
     viz = cfg["visualization"]
     tp = viz["tipping_points"]
     exp_dir = Path(args.expdir)
-    out_dir = Path(args.outdir or viz["output_dir"])
+    out_dir = Path(args.out_dir or viz["output_dir"])
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
     countries = args.countries or tp["countries"]

@@ -175,6 +175,6 @@ def main(config_path: str | Path | None = None, out_csv: str | Path | None = Non
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
-    parser.add_argument("--out", "--out-csv", dest="out_csv", default=str(Path(__file__).resolve().parent / "comparison_vs_published.csv"))
+    parser.add_argument("--out", default=str(Path(__file__).resolve().parent / "comparison_vs_published.csv"))
     args = parser.parse_args()
-    main(config_path=args.config, out_csv=args.out_csv)
+    main(config_path=args.config, out_csv=args.out)

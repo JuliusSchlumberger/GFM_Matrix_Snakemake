@@ -245,7 +245,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--out-dir", default=None, help="default: {validation.output_dir}/USA")
-    parser.add_argument("--out", "--out-csv", dest="out_csv", default=None)
+    parser.add_argument("--out", default=None)
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir) if args.out_dir else Path(load_config(Path(args.config))["validation"]["output_dir"]) / "USA"
@@ -261,9 +261,9 @@ def main() -> None:
     df.to_csv(metrics_path)
     print(f"\nwrote {metrics_path}")
 
-    if args.out_csv:
-        df.to_csv(args.out_csv)
-        print(f"\nwrote {args.out_csv}")
+    if args.out:
+        df.to_csv(args.out)
+        print(f"\nwrote {args.out}")
 
 
 if __name__ == "__main__":

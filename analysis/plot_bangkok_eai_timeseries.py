@@ -32,7 +32,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=_default_cfg)
     parser.add_argument("--exposure-csv", required=True)
-    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None, help="default: visualization.output_dir")
+    parser.add_argument("--out-dir", default=None, help="default: visualization.output_dir")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -69,7 +69,7 @@ def main() -> None:
     resolved = resolve_ssp_scenario_eai(eai_df, slr_mm_values, growth_df, ssps, years, slr_traj)
     row = resolved.loc[_CASE_ISO]
 
-    out_dir = Path(args.outdir) if args.outdir else Path(viz["output_dir"])
+    out_dir = Path(args.out_dir) if args.out_dir else Path(viz["output_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
 
     ssp_colors = viz["ssp_colors"]

@@ -29,13 +29,13 @@ def _read(path: str) -> dict | None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--timings-dir", "--dir", dest="dir", required=True, help="<model_outputs>/run_timings")
+    parser.add_argument("--timings-dir", required=True, help="<model_outputs>/run_timings")
     parser.add_argument("--csv", default=None, help="optional: write the per-run table here")
-    parser.add_argument("--workers", "--threads", dest="threads", type=int, default=32, help="reader threads")
+    parser.add_argument("--workers", type=int, default=32, help="reader threads")
     args = parser.parse_args()
 
-    paths = [e.path for e in os.scandir(args.dir) if e.name.endswith(".json")]
-    with ThreadPoolExecutor(args.threads) as ex:
+    paths = [e.path for e in os.scandir(args.timings_dir) if e.name.endswith(".json")]
+    with ThreadPoolExecutor(args.workers) as ex:
         rows = [r for r in ex.map(_read, paths, chunksize=500) if r is not None]
     d = pd.DataFrame(rows)
     print(f"{len(paths)} timing files, {len(d)} readable, {d.tile_id.nunique()} tiles")

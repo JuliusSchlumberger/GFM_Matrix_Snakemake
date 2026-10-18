@@ -117,9 +117,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--dry-run", action="store_true", help="report what would change, write nothing")
-    parser.add_argument("--mask-files", "--tiles", dest="tiles", default=None, help="comma-separated mask .tif filenames to restrict to (ad hoc testing)")
+    parser.add_argument("--mask-files", default=None, help="comma-separated mask .tif filenames to restrict to (ad hoc testing)")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    tile_filter = set(args.tiles.split(",")) if args.tiles else None
+    tile_filter = set(args.mask_files.split(",")) if args.mask_files else None
     run(cfg, tile_filter=tile_filter, dry_run=args.dry_run)

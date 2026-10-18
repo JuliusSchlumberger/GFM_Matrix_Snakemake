@@ -61,7 +61,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_*_growth_matrix.csv files")
-    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None)
+    parser.add_argument("--out-dir", default=None)
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -72,7 +72,7 @@ def main() -> None:
     variants: dict[str, dict] = ep.get("variants") or {"stabilise": {"mode": "constant"}}
     labels = [l for l in ep["strategies"]
               if (Path(args.expdir) / f"exposure_{l}_growth_matrix.csv").exists()]
-    out_dir = Path(args.outdir or viz["output_dir"])
+    out_dir = Path(args.out_dir or viz["output_dir"])
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
     s_colors = viz["ssp_colors"]
     m_colors = viz["measure_colors"]

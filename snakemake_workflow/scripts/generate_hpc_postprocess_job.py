@@ -147,7 +147,7 @@ def main() -> None:
              "plots pipeline is one single submission from the login node.",
     )
     parser.add_argument("--flood-totals-partition", default="24vcpu")
-    parser.add_argument("--flood-totals-cpus-per-task", "--flood-totals-cpus", dest="flood_totals_cpus", type=int, default=24)
+    parser.add_argument("--flood-totals-cpus-per-task", type=int, default=24)
     parser.add_argument("--flood-totals-mem", default="32G")
     args = parser.parse_args()
 
@@ -323,7 +323,7 @@ def main() -> None:
     if not args.no_flood_totals_and_plots:
         _, linux_ftp_script = write_flood_totals_and_plots_job(
             local_config, linux_config,
-            partition=args.flood_totals_partition, cpus=args.flood_totals_cpus, mem=args.flood_totals_mem,
+            partition=args.flood_totals_partition, cpus=args.flood_totals_cpus_per_task, mem=args.flood_totals_mem,
         )
         submit_lines.append("\n# flood totals + plots (final phase)")
         submit_lines += [

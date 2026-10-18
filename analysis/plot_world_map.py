@@ -32,7 +32,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True)
-    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None)
+    parser.add_argument("--out-dir", default=None)
     parser.add_argument("--years", nargs="+", type=int, default=[2050, 2100])
     parser.add_argument("--ssps", nargs="+", default=["SSP1", "SSP2", "SSP5"])
     args = parser.parse_args()
@@ -42,7 +42,7 @@ def main() -> None:
     viz = cfg["visualization"]
 
     exp_dir = Path(args.expdir)
-    out_dir = Path(args.outdir or str(
+    out_dir = Path(args.out_dir or str(
         Path(viz["output_dir"]) / "world_maps"
     ))
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)

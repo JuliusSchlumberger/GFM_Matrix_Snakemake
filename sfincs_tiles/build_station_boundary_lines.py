@@ -351,7 +351,7 @@ def main() -> None:
     parser.add_argument("--tiles-dir-name", default="model_outputs",
                         help="where the tile dirs (with inputs/) live, under paths.root (default: model_outputs)")
     parser.add_argument("--overwrite", action="store_true", help="rebuild existing {tile_id}.gpkg (loses hand edits)")
-    parser.add_argument("--skip-existing", "--skip-done", dest="skip_done", action="store_true",
+    parser.add_argument("--skip-existing", action="store_true",
                         help="skip tiles that already have a status file (not an error one) - resume a run")
     parser.add_argument("--plot", choices=["suitable", "all", "none"], default="all",
                         help="which tiles get the inspection figure - suitable ones go to figures/, "
@@ -382,7 +382,7 @@ def main() -> None:
         if args.sample:
             tile_dirs = sorted(random.Random(0).sample(tile_dirs, min(args.sample, len(tile_dirs))),
                                key=lambda d: int(d.name))
-    if args.skip_done:
+    if args.skip_existing:
         def done(d):
             p = _status_path(out_dir, d.name)
             return p.exists() and not json.loads(p.read_text())["status"].startswith("error")

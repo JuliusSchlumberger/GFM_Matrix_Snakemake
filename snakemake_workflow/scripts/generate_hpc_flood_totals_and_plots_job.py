@@ -86,7 +86,7 @@ def main() -> None:
     default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
     parser.add_argument("--config", default=str(default_config))
     parser.add_argument("--partition", default="24vcpu")
-    parser.add_argument("--cpus-per-task", "--cpus", dest="cpus", type=int, default=24)
+    parser.add_argument("--cpus-per-task", type=int, default=24)
     parser.add_argument("--mem", default="32G", help="a guess at this partition's safe ceiling - "
                          "confirm against `sinfo -N -o \"%%N %%P %%m %%c\"` before relying on it "
                          "(see hpc.sbatch.mem's own comment on 1vcpu's real-vs-nominal gap)")
@@ -98,7 +98,7 @@ def main() -> None:
     linux_config = load_config(config_path, extra_override=config_path.parent / "config_hpc.yml")
 
     script_path, linux_script_path = write_flood_totals_and_plots_job(
-        local_config, linux_config, args.partition, args.cpus, args.mem, args.time,
+        local_config, linux_config, args.partition, args.cpus_per_task, args.mem, args.time,
     )
     print(f"Wrote {script_path}")
     print(f"Submit on Hydrax with: sbatch {linux_script_path}")

@@ -68,7 +68,7 @@ def main() -> None:
     parser.add_argument("--tile-ids-file", default=None)
     parser.add_argument("--resolution-m", type=float, default=MAIN_RES_M_DEFAULT)
     parser.add_argument("--all", action="store_true", help="also check tiles whose line is not suitable")
-    parser.add_argument("--skip-existing", "--skip-done", dest="skip_done", action="store_true",
+    parser.add_argument("--skip-existing", action="store_true",
                         help="skip tiles that already have a record (not one whose pre-flight raised)")
     args = parser.parse_args()
 
@@ -84,7 +84,7 @@ def main() -> None:
     n_ok = 0
     for k, tile_id in enumerate(ids, 1):
         out = out_dir / f"{tile_id}.json"
-        if args.skip_done and out.exists():
+        if args.skip_existing and out.exists():
             prev = json.loads(out.read_text())
             if not prev.get("exception"):  # a pre-flight that raised is retried
                 n_ok += prev["ok"]

@@ -58,7 +58,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_*_growth_matrix.csv files")
-    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None)
+    parser.add_argument("--out-dir", default=None)
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -71,7 +71,7 @@ def main() -> None:
     exp_dir = Path(args.expdir)
     strategies = [s for s in tp["strategies"]
                   if _growth_matrix_path(exp_dir, s, design).exists()]
-    out_dir = Path(args.outdir or viz["output_dir"])
+    out_dir = Path(args.out_dir or viz["output_dir"])
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
     s_colors = viz.get("ssp_colors") or _DEFAULT_SLR_COLORS

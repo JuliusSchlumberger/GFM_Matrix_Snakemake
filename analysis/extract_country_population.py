@@ -118,7 +118,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=_default_cfg, help=f"path to config.yml (default: {_default_cfg})")
     parser.add_argument(
-        "--out", "--output", dest="output", default=None,
+        "--out", default=None,
         help="output CSV path (default: visualization.country_population_csv from config)",
     )
     args = parser.parse_args()
@@ -126,7 +126,7 @@ def main() -> None:
     cfg = load_config(args.config)
     viz = cfg["visualization"]
 
-    out_path = Path(args.output or viz["country_population_csv"])
+    out_path = Path(args.out or viz["country_population_csv"])
     row_band_deg = float(viz["population_extract_row_band_deg"])
 
     catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])

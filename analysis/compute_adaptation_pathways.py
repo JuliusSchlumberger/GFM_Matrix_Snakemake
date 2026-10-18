@@ -94,7 +94,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_*_growth_matrix.csv files")
-    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None)
+    parser.add_argument("--out-dir", default=None)
     parser.add_argument("--countries", nargs="+", default=None, help="default: visualization.tipping_points.countries")
     parser.add_argument("--continents", nargs="+", default=CONTINENTS)
     parser.add_argument("--continent-eai-threshold", type=float, default=5_000_000.0)

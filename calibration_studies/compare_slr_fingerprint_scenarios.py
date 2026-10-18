@@ -55,7 +55,7 @@ def main() -> None:
     parser.add_argument("--scenario-a", default="ssp126", help="options: ssp119/ssp126/ssp245/ssp370/ssp585")
     parser.add_argument("--scenario-b", default="ssp245")
     parser.add_argument("--confidence", default=None, help="default: boundary_conditions.confidence_level from config")
-    parser.add_argument("--out", "--output", dest="output", default="slr_fingerprint_scenario_comparison.png")
+    parser.add_argument("--out", default="slr_fingerprint_scenario_comparison.png")
     args = parser.parse_args()
 
     cfg = load_config(Path(args.config))
@@ -105,9 +105,9 @@ def main() -> None:
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
-    fig.savefig(args.output, dpi=170)
+    fig.savefig(args.out, dpi=170)
     plt.close(fig)
-    print(f"\nWrote {args.output}")
+    print(f"\nWrote {args.out}")
 
 
 if __name__ == "__main__":
