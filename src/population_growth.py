@@ -141,8 +141,8 @@ def interpolate_growth_factor(
 ) -> float:
     """Linearly interpolate the growth factor for (SSP, ISO, year) on the 5-year grid.
 
-    Returns `default` if the (SSP, ISO) pair is not in the table or the year is
-    outside the available range.
+    Returns `default` if the (SSP, ISO) pair is not in the table. A year outside
+    the available range is clamped to the first / last tabulated value.
     """
     try:
         row = growth_df.loc[(ssp, iso)]
