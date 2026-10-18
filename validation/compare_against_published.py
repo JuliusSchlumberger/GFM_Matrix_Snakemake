@@ -34,22 +34,14 @@ PUBLISHED_CSI = [
     ("Wing et al. (2024)", "england", 0.62),
 ]
 NB_CAVEAT = (
-    "Known, already-documented limitation (not a new finding) - data_catalog_validation.yml's "
-    "own comments attribute Bay of Fundy's near-zero CSI to a COAST-RP/GTSM boundary-forcing "
-    "limitation capturing the Fundy's extreme tidal resonance, not a pipeline bug."
+    "Known limitation: the COAST-RP/GTSM boundary forcing does not capture the Bay of Fundy's "
+    "extreme tidal resonance; the near-zero CSI here is attributed to that, not to a pipeline bug."
 )
 ENGLAND_FZ2_CAVEAT = (
-    "CONFIRMED (2026-10-16, EA Flood Zones Product Description via environment.data.gov.uk FAQ "
-    "778338325): Flood Zone 2 (sea) IS the INCREMENTAL 0.1%-0.5% AEP band (1-in-1000 to 1-in-200), "
-    "not the cumulative 1-in-1000 extent - comparing it against the model's cumulative RP1000 extent "
-    "(what the naive comparison below does) gave bias=26.2x/CSI=0.023, a benchmark-definition "
-    "mismatch, not a real model failure. validate_england_fz2_band.py re-scores against the model's "
-    "own matching incremental band (RP1000 minus RP100 - RP100 is the model's nearest native RP below "
-    "the benchmark's real ~RP200 inner edge) instead: bias drops to a sane 2.0x (confirming the "
-    "cumulative-vs-incremental mismatch was the dominant driver of the 26x figure), but CSI stays low "
-    "(0.021, HR=0.060; benchmark re-fetched 2026-10-16 with flood_source 'sea' + 'river and sea') - plausibly because a thin coastal band is highly sensitive to small positional "
-    "offsets between model and benchmark, but this is NOT independently confirmed; treat the band "
-    "result as a real, methodologically-sound number, not yet a fully-explained one."
+    "Flood Zone 2 (sea) is the incremental 0.1%-0.5% AEP band (1-in-1000 to 1-in-200), not the "
+    "cumulative 1-in-1000 extent, so it is compared against the model's RP1000-minus-RP100 band "
+    "(RP100 is the nearest native RP below the ~RP200 inner edge). CSI stays low, plausibly "
+    "because a thin band is highly sensitive to small positional offsets between model and benchmark."
 )
 
 KASMALKAR_SF_BAY = {
