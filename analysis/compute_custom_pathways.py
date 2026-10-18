@@ -1,11 +1,11 @@
 """Evaluate a hand-specified set of adaptation pathway sequences for one SSP.
 
 Covers 4-stage chains beyond compute_adaptation_pathways.py's --max-stages=3 cap.
-Writes --outdir/custom_pathways_{ssp}.csv, one row per (entity, sequence).
+Writes --out-dir/custom_pathways_{ssp}.csv, one row per (entity, sequence).
 
 Usage:
     python analysis/compute_custom_pathways.py --config snakemake_workflow/config/config.yml \\
-        --expdir <merged_results>/exposure --ssp SSP5 [--outdir <figures>] \\
+        --expdir <merged_results>/exposure --ssp SSP5 [--out-dir <figures>] \\
         [--countries NGA THA EGY] [--continent-eai-threshold 5000000]
 """
 
@@ -42,7 +42,7 @@ def main() -> None:
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True)
     parser.add_argument("--ssp", required=True)
-    parser.add_argument("--outdir", default=None)
+    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None)
     parser.add_argument("--countries", nargs="+", default=None)
     parser.add_argument("--continents", nargs="+", default=CONTINENTS)
     parser.add_argument("--continent-eai-threshold", type=float, default=5_000_000.0)

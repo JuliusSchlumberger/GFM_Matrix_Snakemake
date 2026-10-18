@@ -75,7 +75,7 @@ set EXPOSURE_CSV=%STUDY_ROOT%\merged_results\exposure\bangkok_case_exposure.csv
 echo.
 echo === Step 6a: exposure vs RP plot ===
 "%PYEXE%" "%REPO%analysis\plot_bangkok_exposure_vs_rp.py" ^
-  --exposure-csv "%EXPOSURE_CSV%" --outdir "%STUDY_ROOT%\figures"
+  --exposure-csv "%EXPOSURE_CSV%" --out-dir "%STUDY_ROOT%\figures"
 if %ERRORLEVEL% NEQ 0 (echo FAILED at plot_bangkok_exposure_vs_rp.py. & exit /b 1)
 
 echo.

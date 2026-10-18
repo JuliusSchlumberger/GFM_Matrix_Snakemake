@@ -7,7 +7,7 @@ Usage:
     python analysis/plot_burning_ember.py \\
         --config  snakemake_workflow/config/config.yml \\
         --expdir  D:/GFM/merged_results/exposure \\
-        [--outdir D:/GFM/figures]
+        [--out-dir D:/GFM/figures]
 """
 
 import argparse
@@ -282,7 +282,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_*_growth_matrix.csv files")
-    parser.add_argument("--outdir", default=None)
+    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None)
     args = parser.parse_args()
 
     cfg = load_config(args.config)

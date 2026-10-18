@@ -9,12 +9,12 @@ SLR/population trajectory is measure-independent, so one EAI(t) curve per block 
 reused. Single representative pathway per SSP: p50 SLR, first population variant.
 Entities whose baseline never tips are reported as "no_adaptation_needed".
 
-Writes pathways_countries.csv and pathways_continents.csv to --outdir (default:
+Writes pathways_countries.csv and pathways_continents.csv to --out-dir (default:
 visualization.output_dir); `stage_years` is ';'-separated, one switch year per stage.
 
 Usage:
     python analysis/compute_adaptation_pathways.py --config snakemake_workflow/config/config.yml \\
-        --expdir <merged_results>/exposure [--outdir <figures>] \\
+        --expdir <merged_results>/exposure [--out-dir <figures>] \\
         [--countries NGA THA EGY] [--continent-eai-threshold 5000000] [--max-stages 3]
 """
 
@@ -94,7 +94,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_*_growth_matrix.csv files")
-    parser.add_argument("--outdir", default=None)
+    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None)
     parser.add_argument("--countries", nargs="+", default=None, help="default: visualization.tipping_points.countries")
     parser.add_argument("--continents", nargs="+", default=CONTINENTS)
     parser.add_argument("--continent-eai-threshold", type=float, default=5_000_000.0)

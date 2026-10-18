@@ -8,7 +8,7 @@ Usage:
     python analysis/plot_world_map.py \\
         --config  snakemake_workflow/config/config.yml \\
         --expdir  D:/GFM/merged_results/exposure \\
-        [--outdir D:/GFM/figures/world_maps] \\
+        [--out-dir D:/GFM/figures/world_maps] \\
         [--years 2050 2100] \\
         [--ssps  SSP1 SSP2 SSP5]
 """
@@ -32,7 +32,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True)
-    parser.add_argument("--outdir", default=None)
+    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None)
     parser.add_argument("--years", nargs="+", type=int, default=[2050, 2100])
     parser.add_argument("--ssps", nargs="+", default=["SSP1", "SSP2", "SSP5"])
     args = parser.parse_args()

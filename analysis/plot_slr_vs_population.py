@@ -4,7 +4,7 @@ Writes waterfall and scatter figures plus one CSV per SSP (visualization.slr_vs_
 
 Usage:
     python analysis/plot_slr_vs_population.py --config snakemake_workflow/config/config.yml \\
-        --expdir <merged_results>/exposure [--outdir <figures>]
+        --expdir <merged_results>/exposure [--out-dir <figures>]
 """
 
 import argparse
@@ -320,11 +320,11 @@ def _scatter_envelope(ref_by_ssp, mats, slr_mm, gfr, traj, ext, variant, names, 
 
 
 def main() -> None:
-    """Write the decomposition CSVs, waterfalls and scatter figures to --outdir."""
+    """Write the decomposition CSVs, waterfalls and scatter figures to --out-dir."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_baseline_growth_matrix.csv")
-    parser.add_argument("--outdir", default=None)
+    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None)
     args = parser.parse_args()
 
     cfg = load_config(args.config)

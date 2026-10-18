@@ -66,7 +66,7 @@ def write_flood_totals_and_plots_job(
         ),
         (
             f'python analysis/compute_flood_totals.py --config "$LOCAL_CONFIGFILE" '
-            f'--outdir "$OUTDIR" --workers {sbatch_cfg["cpus_per_task"]}'
+            f'--out-dir "$OUTDIR" --workers {sbatch_cfg["cpus_per_task"]}'
         ),
         "",
         'echo "=== run_analysis.py --only-plots (flood totals already done above) ==="',

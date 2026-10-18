@@ -9,7 +9,7 @@ Usage:
         --case-polygon-gpkg P:/.../bangkok_chao_phraya/bangkok_chao_phraya_domain.gpkg \\
         --case-polygon-layer bangkok_tile \\
         --return-period RP100 \\
-        --outdir P:/.../bangkok_chao_phraya/figures
+        --out-dir P:/.../bangkok_chao_phraya/figures
 """
 
 import argparse
@@ -67,7 +67,7 @@ def main() -> None:
     parser.add_argument("--case-polygon-gpkg", required=True)
     parser.add_argument("--case-polygon-layer", default="bangkok_tile")
     parser.add_argument("--return-period", default="RP100")
-    parser.add_argument("--outdir", default=None, help="default: visualization.output_dir")
+    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None, help="default: visualization.output_dir")
     args = parser.parse_args()
 
     cfg = load_config(args.config)

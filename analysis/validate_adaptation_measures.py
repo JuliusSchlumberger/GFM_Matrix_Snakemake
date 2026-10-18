@@ -5,7 +5,7 @@ level per SLR step (no RP integration); the whole grid is one "country".
 
 Usage:
     python analysis/validate_adaptation_measures.py
-        [--outdir D:/GFM/figures/validation]
+        [--out-dir D:/GFM/figures/validation]
 """
 
 import argparse
@@ -200,7 +200,7 @@ def plot_conceptual_grid(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--outdir", default=None, help="output directory (default: <repo>/adaptation_validation_output)")
+    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None, help="output directory (default: <repo>/adaptation_validation_output)")
     args = parser.parse_args()
 
     out_dir = Path(args.outdir) if args.outdir else Path(__file__).resolve().parents[1] / "adaptation_validation_output"

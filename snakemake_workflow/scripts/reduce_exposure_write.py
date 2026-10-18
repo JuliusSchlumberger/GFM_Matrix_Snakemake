@@ -7,7 +7,7 @@ Usage:
     python reduce_exposure_write.py --config path/to/config.yml \\
         --parts-glob ".../exposure/pass2_batch_*.pkl" \\
         --shares .../exposure/shares_by_intensity.json \\
-        --outdir D:/GFM/merged_results/exposure
+        --out-dir D:/GFM/merged_results/exposure
 """
 
 import argparse
@@ -34,7 +34,7 @@ def main() -> None:
     parser.add_argument("--config", required=True)
     parser.add_argument("--parts-glob", required=True, help="glob pattern matching every pass-2 batch's output pickle")
     parser.add_argument("--shares", required=True, help="reduce_exposure_shares.py's output JSON")
-    parser.add_argument("--outdir", required=True)
+    parser.add_argument("--out-dir", "--outdir", dest="outdir", required=True)
     args = parser.parse_args()
 
     cfg = load_config(args.config)

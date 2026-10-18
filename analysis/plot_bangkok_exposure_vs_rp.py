@@ -5,7 +5,7 @@ Reads compute_bangkok_case_exposure.py's CSV.
 Usage:
     python plot_bangkok_exposure_vs_rp.py \\
         --exposure-csv P:/.../bangkok_chao_phraya/merged_results/exposure/bangkok_case_exposure.csv \\
-        --outdir P:/.../bangkok_chao_phraya/figures
+        --out-dir P:/.../bangkok_chao_phraya/figures
 """
 
 import argparse
@@ -18,7 +18,7 @@ import pandas as pd
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--exposure-csv", required=True)
-    parser.add_argument("--outdir", required=True)
+    parser.add_argument("--out-dir", "--outdir", dest="outdir", required=True)
     args = parser.parse_args()
 
     df = pd.read_csv(args.exposure_csv)

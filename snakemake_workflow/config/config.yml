@@ -791,7 +791,7 @@ validation:
   # (mitigates caveats doc §1.2 - see that file for why a country-wide total, not
   # just a benchmark cluster's own local window, matters). Must match
   # run_analysis.py's own exposure output dir (default "{merged_outputs}/exposure")
-  # plus "/flood_totals" if that script's --outdir is ever overridden from its default.
+  # plus "/flood_totals" if that script's --out-dir is ever overridden from its default.
   plots:
     resolution_m: 200
     dpi: 300

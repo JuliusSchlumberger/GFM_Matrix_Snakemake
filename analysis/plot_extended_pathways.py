@@ -8,7 +8,7 @@ ember_extended_pathways.png only with extended_pathways.ember: true.
 
 Usage:
     python analysis/plot_extended_pathways.py --config snakemake_workflow/config/config.yml \\
-        --expdir <merged_results>/exposure [--outdir <figures>]
+        --expdir <merged_results>/exposure [--out-dir <figures>]
 """
 
 import argparse
@@ -57,11 +57,11 @@ def _strategy_name(label: str) -> str:
 
 
 def main() -> None:
-    """Write extended_pathways.csv and the extended-pathway figures to --outdir."""
+    """Write extended_pathways.csv and the extended-pathway figures to --out-dir."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_*_growth_matrix.csv files")
-    parser.add_argument("--outdir", default=None)
+    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None)
     args = parser.parse_args()
 
     cfg = load_config(args.config)

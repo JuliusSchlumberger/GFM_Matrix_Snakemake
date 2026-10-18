@@ -7,7 +7,7 @@ Usage:
     python plot_bangkok_eai_timeseries.py \\
         --config snakemake_workflow/config/bangkok_chao_phraya_materialized.yml \\
         --exposure-csv P:/.../bangkok_chao_phraya/merged_results/exposure/bangkok_case_exposure.csv \\
-        --outdir P:/.../bangkok_chao_phraya/figures
+        --out-dir P:/.../bangkok_chao_phraya/figures
 """
 
 import argparse
@@ -32,7 +32,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=_default_cfg)
     parser.add_argument("--exposure-csv", required=True)
-    parser.add_argument("--outdir", default=None, help="default: visualization.output_dir")
+    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None, help="default: visualization.output_dir")
     args = parser.parse_args()
 
     cfg = load_config(args.config)

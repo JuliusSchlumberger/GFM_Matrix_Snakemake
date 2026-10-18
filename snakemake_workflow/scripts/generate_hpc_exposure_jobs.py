@@ -149,7 +149,7 @@ def generate_exposure_dispatch(
         (
             f'python "{linux_scripts_dir}/reduce_exposure_write.py" --config "{linux_config_path}" '
             f'--parts-glob "{linux_jobs_dir}/pass2_batch_*.pkl" --shares "{linux_shares_path}" '
-            f'--outdir "{linux_outdir}"'
+            f'--out-dir "{linux_outdir}"'
         ),
         "",
     ]

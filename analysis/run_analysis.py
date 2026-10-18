@@ -33,7 +33,7 @@ def _run(script: Path, extra_args: list[str], label: str, fail_fast: bool) -> bo
 
 
 # (results key, analysis.* switch, default if absent, script, kind, title, skip label), in run
-# order. "compute" gets --outdir <expdir>; "plot" gets --expdir <expdir> --outdir <figdir>.
+# order. "compute" gets --out-dir <expdir>; "plot" gets --expdir <expdir> --out-dir <figdir>.
 _STEPS = [
     ("exposure", "compute_exposure", True, "compute_exposure_analysis.py", "compute",
      "Exposure analysis (baseline / protect / retreat / avoid / protect + avoid)", "Exposure analysis"),
@@ -108,7 +108,7 @@ def main() -> None:
         if not enabled[key]:
             print(f"\n  [ SKIP ] {skip_label} (analysis.{switch} = false)")
             continue
-        io_args = ["--outdir", str(exp_dir)] if kind == "compute" else ["--expdir", str(exp_dir), "--outdir", str(fig_dir)]
+        io_args = ["--out-dir", str(exp_dir)] if kind == "compute" else ["--expdir", str(exp_dir), "--out-dir", str(fig_dir)]
         results[key] = _run(SCRIPTS_DIR / script, cfg_arg + io_args, title, args.fail_fast)
 
     total = time.time() - t_start

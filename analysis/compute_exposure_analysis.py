@@ -6,7 +6,7 @@ time (no global mosaic) at ~1 km population-grid resolution.
 Usage:
     python compute_exposure_analysis.py \\
         [--config snakemake_workflow/config/config.yml] \\
-        --outdir D:/GFM/merged_results/exposure
+        --out-dir D:/GFM/merged_results/exposure
 """
 
 import argparse
@@ -684,16 +684,16 @@ def write_exposure_outputs(
 
 
 def main() -> None:
-    """Run the single-machine exposure pipeline, writing all CSVs to --outdir."""
+    """Run the single-machine exposure pipeline, writing all CSVs to --out-dir."""
     _default_cfg = str(Path(__file__).resolve().parents[1] / "snakemake_workflow" / "config" / "config.yml")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=_default_cfg)
-    parser.add_argument("--outdir", required=True)
+    parser.add_argument("--out-dir", "--outdir", dest="outdir", required=True)
     parser.add_argument(
         "--skip-existing", action="store_true",
         help="Skip a scenario (baseline/protect_*/retreat_*) or an avoid / protect + avoid "
              "slr_intensity entirely if its output CSVs already exist in "
-             "--outdir, instead of recomputing and overwriting them. Useful "
+             "--out-dir, instead of recomputing and overwriting them. Useful "
              "for resuming after a partial failure without redoing already-"
              "correct, expensive work.",
     )

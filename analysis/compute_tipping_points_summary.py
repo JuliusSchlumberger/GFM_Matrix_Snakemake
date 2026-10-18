@@ -7,12 +7,12 @@ sum of member-country EAI time series (each on its own population path), not of 
 growth matrices. --continent-eai-threshold (default 5,000,000) is an arbitrary round
 starting point larger than the per-country default, not a finding.
 
-Writes tipping_points_{countries,continents}_median.csv to --outdir (default:
+Writes tipping_points_{countries,continents}_median.csv to --out-dir (default:
 visualization.output_dir).
 
 Usage:
     python analysis/compute_tipping_points_summary.py --config snakemake_workflow/config/config.yml \\
-        --expdir <merged_results>/exposure [--outdir <figures>] \\
+        --expdir <merged_results>/exposure [--out-dir <figures>] \\
         [--countries NGA THA EGY] [--continent-eai-threshold 5000000]
 """
 
@@ -63,7 +63,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True, help="directory with exposure_*_growth_matrix.csv files")
-    parser.add_argument("--outdir", default=None)
+    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None)
     parser.add_argument("--countries", nargs="+", default=None, help="default: visualization.tipping_points.countries")
     parser.add_argument("--continents", nargs="+", default=CONTINENTS)
     parser.add_argument("--continent-eai-threshold", type=float, default=5_000_000.0,

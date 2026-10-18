@@ -11,7 +11,7 @@ Writes {outdir}/flood_totals/flood_totals_{ISO}.csv.
 Usage:
     python compute_flood_totals.py \\
         [--config snakemake_workflow/config/config.yml] \\
-        --outdir D:/GFM/merged_results/exposure
+        --out-dir D:/GFM/merged_results/exposure
 """
 
 import argparse
@@ -73,7 +73,7 @@ def main() -> None:
     _default_cfg = str(Path(__file__).resolve().parents[1] / "snakemake_workflow" / "config" / "config.yml")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=_default_cfg)
-    parser.add_argument("--outdir", required=True)
+    parser.add_argument("--out-dir", "--outdir", dest="outdir", required=True)
     parser.add_argument(
         "--workers", type=int, default=1,
         help="chunks processed concurrently via a thread pool (default 1 = serial). Each chunk's "

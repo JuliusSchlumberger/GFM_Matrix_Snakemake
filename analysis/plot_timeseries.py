@@ -6,7 +6,7 @@ Usage:
     python analysis/plot_timeseries.py \\
         --config  snakemake_workflow/config/config.yml \\
         --expdir  D:/GFM/merged_results/exposure \\
-        [--outdir D:/GFM/figures/timeseries]
+        [--out-dir D:/GFM/figures/timeseries]
 """
 
 import argparse
@@ -184,7 +184,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expdir", required=True)
-    parser.add_argument("--outdir", default=None)
+    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None)
     args = parser.parse_args()
 
     cfg = load_config(args.config)

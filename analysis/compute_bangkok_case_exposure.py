@@ -9,7 +9,7 @@ Usage:
         --config snakemake_workflow/config/bangkok_chao_phraya_materialized.yml \\
         --case-polygon-gpkg P:/.../bangkok_chao_phraya/bangkok_chao_phraya_domain.gpkg \\
         --case-polygon-layer bangkok_tile \\
-        --outdir P:/.../bangkok_chao_phraya/merged_results/exposure
+        --out-dir P:/.../bangkok_chao_phraya/merged_results/exposure
 """
 
 import argparse
@@ -37,7 +37,7 @@ def main() -> None:
     parser.add_argument("--config", default=_default_cfg)
     parser.add_argument("--case-polygon-gpkg", required=True)
     parser.add_argument("--case-polygon-layer", default="bangkok_tile")
-    parser.add_argument("--outdir", default=None, help="default: {merged_outputs}/exposure")
+    parser.add_argument("--out-dir", "--outdir", dest="outdir", default=None, help="default: {merged_outputs}/exposure")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
