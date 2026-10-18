@@ -1,14 +1,4 @@
-"""Validate `flood_model.flood_depth_dense`'s 2026-08 explicit-seed path
-(`seed_rows`/`seed_cols`/`seed_values`, the hop>=1 hinterland forcing
-mechanism - an alternative to the existing `boundaries`/IDW path) and its
-mutual-exclusivity contract with `boundaries`.
-
-Synthetic domain unit tests - no raster I/O, no dependency on real DEM/mask
-data.
-
-Usage:
-    python validate_seed_path.py
-"""
+"""Test flood_depth_dense's explicit-seed path (hop>=1 forcing) vs `boundaries`."""
 
 import sys
 from pathlib import Path
@@ -25,16 +15,12 @@ import flood_model as fm  # noqa: E402
 
 def test_seed_propagation_and_pruning() -> None:
     print("=== explicit seed path: propagation from a seed cell + prune_to_coast_connected drops a disconnected flooded region ===")
-    # 5 rows x 15 cols: a low near-basin (cols 0-4) containing the seed, a
-    # high-dem barrier (cols 5-6) no real water level can cross, and a low
-    # far-basin (cols 7-11) that is NOT reachable from the seed through the
-    # boolean flood mask (even though its own raw solved water level ends up
-    # above its own dem, since friction-cost propagation doesn't "see" dem at
-    # all) - this is exactly what prune_to_coast_connected must remove.
+    # Near basin (seed), dem=100 barrier, far basin. Friction propagation ignores
+    # dem, so the far basin's raw level exceeds its dem; pruning must remove it.
     shape = (5, 15)
     dem = np.zeros(shape, dtype=np.float64)
-    dem[:, 5:7] = 100.0  # barrier: far above any reachable propagated water level
-    mask = np.zeros(shape, dtype=np.int64)  # all "land" - ocean_code (ndef 1) never appears
+    dem[:, 5:7] = 100.0
+    mask = np.zeros(shape, dtype=np.int64)  # all land: ocean_code never appears
     friction = np.full(shape, 0.001, dtype=np.float64)
     transform = Affine.identity()
 
@@ -86,14 +72,12 @@ def test_mutual_exclusivity_validation() -> None:
     )
     seed_rows, seed_cols, seed_values = np.array([1]), np.array([1]), np.array([2.0])
 
-    # neither given
     try:
         fm.flood_depth_dense(dem, mask, friction, transform)
         raise AssertionError("expected ValueError when neither boundaries nor seeds are given")
     except ValueError:
         print("PASS: neither boundaries nor seeds given -> ValueError")
 
-    # both given
     try:
         fm.flood_depth_dense(
             dem, mask, friction, transform,
@@ -104,15 +88,12 @@ def test_mutual_exclusivity_validation() -> None:
     except ValueError:
         print("PASS: both boundaries and seeds given -> ValueError")
 
-    # partial seed triple
     try:
         fm.flood_depth_dense(dem, mask, friction, transform, seed_rows=seed_rows, seed_cols=seed_cols)
         raise AssertionError("expected ValueError for a partial seed triple")
     except ValueError:
         print("PASS: partial seed triple (seed_values missing) -> ValueError")
 
-    # seeds + obstacle_coupling: no longer rejected (2026-08) - see
-    # test_seed_path_obstacle_coupling below for the real behavioural check.
     waterdepth, diagnostics = fm.flood_depth_dense(
         dem, mask, friction, transform,
         seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
@@ -125,7 +106,6 @@ def test_mutual_exclusivity_validation() -> None:
 
 def test_seed_path_obstacle_coupling() -> None:
     print("=== explicit seed path: obstacle_coupling=True matches obstacle_coupling=False ===")
-    # Same near-basin/barrier/far-basin domain as test_seed_propagation_and_pruning.
     shape = (5, 15)
     dem = np.zeros(shape, dtype=np.float64)
     dem[:, 5:7] = 100.0

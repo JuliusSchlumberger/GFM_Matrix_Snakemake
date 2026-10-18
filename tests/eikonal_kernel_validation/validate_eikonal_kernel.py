@@ -1,13 +1,4 @@
-"""Direct unit tests for eikonal.py's own numerical kernel
-(`_ORTHANT_ORDER`, `_update`, `solve_eikonal_dense`'s unseeded-cell
-default) - previously only exercised indirectly through
-`flood_depth_dense`'s tiny synthetic seed-path test and two non-asserting
-calibration scripts. Each test here locks in one specific, real, already-
-fixed bug documented in eikonal.py's own comments.
-
-Usage:
-    python validate_eikonal_kernel.py
-"""
+"""Test eikonal.py's kernel: sweep order, dtype, unseeded default, block skipping."""
 
 import sys
 from pathlib import Path
@@ -22,9 +13,7 @@ from eikonal import _ORTHANT_ORDER, _dense_sweep, _update, solve_eikonal_dense  
 
 
 def test_orthant_order_is_julias_real_gray_code_order() -> None:
-    """Locks in (1, 4, 3, 2), not the numerically-obvious (1, 2, 3, 4) -
-    confirmed bit-for-bit against a live Julia run (module docstring): the
-    naive order only matched 14-29% of cells by sweep 2/3 on a real tile."""
+    """Julia's sweep order is (1, 4, 3, 2); (1, 2, 3, 4) matched only 14-29% of cells."""
     print("=== _ORTHANT_ORDER: matches Julia's real Gray-code sweep order ===")
     assert _ORTHANT_ORDER == (1, 4, 3, 2), _ORTHANT_ORDER
     print(f"PASS: _ORTHANT_ORDER == {_ORTHANT_ORDER}")
@@ -32,14 +21,10 @@ def test_orthant_order_is_julias_real_gray_code_order() -> None:
 
 
 def test_sweep_order_actually_changes_the_result() -> None:
-    """If sweep order didn't matter, locking in a specific tuple above would
-    be theatre - this proves a real, non-square friction grid genuinely
-    produces a DIFFERENT result under the naive (1,2,3,4) order than under
-    the real (1,4,3,2) order after a fixed, small sweep budget (before full
-    convergence, where order-dependence is real and visible)."""
+    """Sweep order must change an under-converged result, or the order test is vacuous."""
     print("=== sweep order: naive (1,2,3,4) vs real (1,4,3,2) diverge before convergence ===")
     rng = np.random.default_rng(0)
-    m, n = 9, 13  # non-square, asymmetric - avoids accidental order-invariance from symmetry
+    m, n = 9, 13  # non-square: symmetry could hide order dependence
     friction = rng.uniform(0.5, 3.0, (m, n)).astype(np.float32)
     seed_rows = np.array([0], dtype=np.int64)
     seed_cols = np.array([0], dtype=np.int64)
@@ -53,7 +38,7 @@ def test_sweep_order_actually_changes_the_result() -> None:
             _dense_sweep(t, friction, order[i % 4], neg_two, eight, four)
         return t
 
-    n_sweeps = 2  # deliberately under-converged - full convergence can mask order effects
+    n_sweeps = 2  # full convergence masks order effects
     t_real = run(_ORTHANT_ORDER, n_sweeps)
     t_naive = run((1, 2, 3, 4), n_sweeps)
 
@@ -68,25 +53,14 @@ def test_sweep_order_actually_changes_the_result() -> None:
 
 
 def test_update_uses_the_callers_own_dtype_not_promoted() -> None:
-    """A real, confirmed bug: this port originally computed the quadratic
-    discriminant in effective float64 precision (Julia/numpy value-based
-    promotion), which does NOT match Julia's actual float32 rounding at
-    real friction scales, where the discriminant is a ~1e-5-magnitude
-    catastrophic-cancellation result dominated by float32 rounding noise.
+    """_update must compute in the caller's dtype, not promote to float64.
 
-    This constructs a genuine near-cancellation case (t_a, t_b close
-    together relative to their own magnitude, small v - the same regime
-    that produced the documented Δ~1.5e-5 in Julia's own live trace) and
-    confirms _update's result MEASURABLY DIFFERS depending on whether it's
-    called with float32 or float64 arguments/constants - i.e. it genuinely
-    computes in whatever dtype it's given, rather than silently promoting
-    everything to float64 internally (which would make the two calls
-    return the same answer)."""
+    Julia uses float32; at real friction scales the discriminant is a ~1e-5
+    catastrophic-cancellation result, so float64 promotion biases depths.
+    """
     print("=== _update: computes natively in the caller's own dtype (float32-sensitive) ===")
-    # Numerically searched near-cancellation regime (magnitudes matching the
-    # docstring's own documented Julia trace, cand~-3.51): both float32 and
-    # float64 calls take the quadratic (non-fallback) branch here, so the
-    # comparison below isolates precision itself, not a branch difference.
+    # Near-cancellation case (cand~-3.51, as in the Julia trace) where both dtypes
+    # take the quadratic branch, so only precision differs.
     t_a_val, t_b_val, v_val = -3.5, -3.5, 0.001
 
     t_a32, t_b32, v32 = np.float32(t_a_val), np.float32(t_b_val), np.float32(v_val)
@@ -115,34 +89,25 @@ def test_update_uses_the_callers_own_dtype_not_promoted() -> None:
 
 
 def test_unseeded_cells_default_to_never_flooded_sentinel_not_sea_level() -> None:
-    """Real bug fixed 2026-08: unseeded/unreached cells used to default to
-    t=0 (waterlevel=0, i.e. "flooded at exactly sea level"), which silently
-    marked any below-sea-level cell no real seed's influence ever reached
-    as flooded. Fixed to t=+99 (waterlevel=-99, comfortably below any real
-    DEM value), so an unreached cell correctly reads as "never flooded"
-    even where its own elevation is negative.
+    """Unreached cells must default to t=+99 (waterlevel -99), not t=0 (sea level).
 
-    Constructs a friction grid with an impassable high-friction wall
-    splitting it into two regions, seeds only one side, and confirms the
-    OTHER side's own eikonal result never triggers `waterlevel > dem` for a
-    realistic negative-elevation cell there - which the old t=0 default
-    would have (0 > -5)."""
+    t=0 would flood any unreached below-sea-level cell (0 > -5).
+    """
     print("=== solve_eikonal_dense: unreached cells never read as 'flooded at sea level' ===")
     m, n = 5, 12
     friction = np.full((m, n), 0.5, dtype=np.float32)
-    # An effectively-impassable wall down the middle column - OBSTACLE_BLOCK_FRICTION-scale,
-    # mirrors flood_model.py's own real use of a very high friction value to block a region.
+    # Impassable wall at OBSTACLE_BLOCK_FRICTION scale.
     friction[:, 6] = 9999.0
 
     seed_rows = np.array([0], dtype=np.int64)
     seed_cols = np.array([0], dtype=np.int64)
-    seed_values = np.array([0.0], dtype=np.float32)  # sea level on the seeded (left) side
+    seed_values = np.array([0.0], dtype=np.float32)
 
     t = solve_eikonal_dense(friction, seed_rows, seed_cols, seed_values, epsilon=0.03, max_rounds=50)
     waterlevel = -t[1:, 1:]
 
-    far_side_waterlevel = waterlevel[:, 8:]  # well past the wall, unreachable within any real budget
-    unreached_dem_m = -5.0  # a real, physically plausible below-sea-level elevation
+    far_side_waterlevel = waterlevel[:, 8:]
+    unreached_dem_m = -5.0
     would_flood_under_old_bug = far_side_waterlevel > unreached_dem_m
 
     print(f"  far-side waterlevel range: [{far_side_waterlevel.min():.2f}, {far_side_waterlevel.max():.2f}] m")
@@ -162,9 +127,7 @@ def test_unseeded_cells_default_to_never_flooded_sentinel_not_sea_level() -> Non
 
 
 def _reference_sweep_julia_loop_order(t, friction, orthant, neg_two, eight, four) -> float:
-    """The original, Julia-loop-order kernel (column-outer/row-inner, no
-    early-out), bit-for-bit validated against real Aqueduct output - kept
-    here as plain Python as the reference `_dense_sweep` must reproduce."""
+    """Reference kernel in Julia loop order (column-outer, no early-out), Aqueduct-exact."""
     m, n = friction.shape
     if orthant == 1:
         cells = [(i, j, i - 1, j, i, j - 1, i - 1, j - 1) for j in range(1, n + 1) for i in range(1, m + 1)]
@@ -184,17 +147,12 @@ def _reference_sweep_julia_loop_order(t, friction, orthant, neg_two, eight, four
 
 
 def test_dense_sweep_matches_julia_loop_order_bit_for_bit() -> None:
-    """`_dense_sweep` loops row-major and skips no-improvement updates for
-    speed (see its docstring) - both are claimed exact, not approximate.
-    This locks that in: after every individual sweep, on an under-converged
-    grid with impassable obstacles, unreached cells and multiple seeds, the
-    full `t` array and each sweep's max_change must equal the original
-    Julia-loop-order kernel exactly."""
+    """Row-major looping and no-improvement skipping must be exact, sweep by sweep."""
     print("=== _dense_sweep: bit-identical to the original Julia-loop-order kernel ===")
     rng = np.random.default_rng(1)
-    m, n = 23, 31  # non-square, asymmetric
+    m, n = 23, 31
     friction = rng.uniform(0.002, 0.06, (m, n)).astype(np.float32)
-    friction[rng.random((m, n)) < 0.25] = np.float32(9999.0)  # obstacles -> winding paths
+    friction[rng.random((m, n)) < 0.25] = np.float32(9999.0)
     neg_two, eight, four = np.float32(-2.0), np.float32(8.0), np.float32(4.0)
 
     t_fast = np.full((m + 1, n + 1), 99.0, dtype=np.float32)
@@ -217,8 +175,6 @@ def test_dense_sweep_matches_julia_loop_order_bit_for_bit() -> None:
 
 
 def _winding_test_grid(seed: int, m: int = 61, n: int = 83):
-    """Non-square grid with impassable obstacles (winding paths, unreached
-    pockets) and a few seeds."""
     rng = np.random.default_rng(seed)
     friction = rng.uniform(0.002, 0.06, (m, n)).astype(np.float32)
     friction[rng.random((m, n)) < 0.3] = np.float32(9999.0)
@@ -229,8 +185,6 @@ def _winding_test_grid(seed: int, m: int = 61, n: int = 83):
 
 
 def _reference_dense_solve(friction, seed_rows, seed_cols, seed_values, epsilon, max_rounds):
-    """solve_eikonal_dense's round loop on plain `_dense_sweep` (no block
-    skipping) - the reference the block-skipping solver must reproduce."""
     m, n = friction.shape
     t = np.full((m + 1, n + 1), 99.0, dtype=friction.dtype)
     t[seed_rows, seed_cols] = seed_values
@@ -246,11 +200,7 @@ def _reference_dense_solve(friction, seed_rows, seed_cols, seed_values, epsilon,
 
 
 def test_block_skipping_solve_is_bit_identical_to_dense_sweeps() -> None:
-    """`solve_eikonal_dense` sweeps block-wise and skips blocks that provably
-    cannot change (`_block_sweep`) - claimed exact, not approximate. Same
-    `t`, round count and final max_change as plain `_dense_sweep` rounds,
-    both fully converged (epsilon=0) and early-stopped, for block sizes from
-    1 (every vertex its own block) to larger than the grid."""
+    """Block skipping must match dense sweeps exactly (t, rounds, max_change), any block size."""
     print("=== solve_eikonal_dense: block skipping bit-identical to plain dense sweeps ===")
     production_block_size = eikonal.SWEEP_BLOCK_SIZE
     try:

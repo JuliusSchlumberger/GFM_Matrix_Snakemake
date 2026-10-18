@@ -1,19 +1,7 @@
-"""Validate `flood_model.coastline_mask`'s 2026-08 fix - restricting the
-coastline to ocean cells that are (a) part of a connected-component that
-actually touches the tile's own array edge, and (b) adjacent to land OR
-(when `river_code` is given) river.
+"""Test flood_model.coastline_mask: edge-connected ocean adjacent to land or river.
 
-The bug being fixed: the original formula (`dilate(landmask) & (mask ==
-ocean_code)`) flags ANY ocean-coded cell touching land as coastline,
-including isolated inland "ocean" speckle that DeltaDTM regularly
-miscodes (ponds/aquaculture/thermokarst) - such a patch would otherwise
-get IDW-seeded from real ocean stations and start flooding from a location
-with no real path to the sea.
-
-Pure array-logic unit tests - no raster I/O.
-
-Usage:
-    python validate_coastline_mask.py
+Isolated inland "ocean" speckle (DeltaDTM miscodes ponds/aquaculture/thermokarst)
+must not become coastline, or it gets IDW-seeded with no path to the sea.
 """
 
 import sys
@@ -39,7 +27,7 @@ def test_edge_connected_ocean_flagged() -> None:
         [OCEAN, OCEAN, OCEAN, OCEAN, OCEAN],
     ])
     result = fm.coastline_mask(mask, ocean_code=OCEAN)
-    expected = mask == OCEAN  # every ocean cell here is edge-connected AND 8-adjacent to the land block
+    expected = mask == OCEAN
     assert np.array_equal(result, expected), result.astype(int)
     print("PASS: entire ocean ring correctly flagged as coastline")
     print()
@@ -50,7 +38,7 @@ def test_isolated_interior_speckle_excluded() -> None:
     mask = np.array([
         [LAND, LAND, LAND, LAND, LAND],
         [LAND, LAND, LAND, LAND, LAND],
-        [LAND, LAND, OCEAN, LAND, LAND],  # isolated speckle at (2,2), surrounded by land, no edge contact
+        [LAND, LAND, OCEAN, LAND, LAND],
         [LAND, LAND, LAND, LAND, LAND],
         [LAND, LAND, LAND, LAND, LAND],
     ])
@@ -58,8 +46,7 @@ def test_isolated_interior_speckle_excluded() -> None:
     assert not result.any(), result.astype(int)
     print("PASS: isolated interior speckle correctly excluded (old formula would have flagged it - it's ocean adjacent to land)")
 
-    # sanity: confirm the OLD (buggy) formula really would have flagged it,
-    # so this test is actually exercising the fix and not a vacuous case
+    # A plain land-dilation formula must flag (2,2), so the case is not vacuous.
     old_formula = np.zeros_like(mask, dtype=bool)
     from scipy import ndimage
     dilated_land = ndimage.binary_dilation(mask == LAND, structure=np.ones((3, 3), dtype=bool))
@@ -73,7 +60,7 @@ def test_river_adjacency_only_with_river_code() -> None:
     print("=== edge-connected ocean adjacent only to river (no land at all) -> included iff river_code given ===")
     mask = np.array([
         [OTHER, OTHER, OTHER, OTHER, OTHER],
-        [OCEAN, OCEAN, OCEAN, OCEAN, OCEAN],  # edge-connected via col 0 and col 4
+        [OCEAN, OCEAN, OCEAN, OCEAN, OCEAN],
         [RIVER, RIVER, RIVER, RIVER, RIVER],
         [OTHER, OTHER, OTHER, OTHER, OTHER],
         [OTHER, OTHER, OTHER, OTHER, OTHER],

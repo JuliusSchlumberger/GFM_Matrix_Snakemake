@@ -1,18 +1,7 @@
-"""Validate the int16-centimetre encoding for boundary-forcing (COAST-RP)
-water levels (src/rasters.py's encode_waterlevel_cm/decode_waterlevel_cm,
-src/boundaries.py's save_boundary_points, 2026-08) - added so
-boundaries.gpkg matches the same on-disk precision convention as
-DEM/friction/waterdepth, since flood_model._idw_seed_values compares
-station values directly against the (already int16-cm-encoded-then-
-decoded) DEM.
+"""Test the int16-cm encoding of boundary water levels, in numpy and via GeoPackage.
 
-Two levels: pure encode/decode round-trip logic (no I/O), and a real
-save_boundary_points -> read-back-raw -> decode round trip through an
-actual GeoPackage file (to catch anything the OGR/GeoPackage int field
-write path itself might do differently than a plain numpy round-trip).
-
-Usage:
-    python validate_waterlevel_encoding.py
+Stations must share the DEM's int16-cm precision, since
+flood_model._idw_seed_values compares them directly against the decoded DEM.
 """
 
 import shutil
@@ -36,7 +25,7 @@ def test_encode_decode_roundtrip() -> None:
     values_m = np.array([0.0, 2.35, -1.20, 9.99, 0.001, -0.001], dtype=np.float64)
     encoded = rasters.encode_waterlevel_cm(values_m)
     assert encoded.dtype == np.int16, encoded.dtype
-    assert list(encoded) == [0, 235, -120, 999, 0, 0], list(encoded)  # rounds to nearest cm
+    assert list(encoded) == [0, 235, -120, 999, 0, 0], list(encoded)
     decoded = rasters.decode_waterlevel_cm(encoded)
     assert np.allclose(decoded, np.round(values_m, 2), atol=1e-6), decoded
     print(f"PASS: {values_m} -> encoded {list(encoded)} (int16 cm) -> decoded {decoded} (matches, rounded to nearest cm)")

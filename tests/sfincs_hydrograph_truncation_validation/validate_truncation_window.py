@@ -1,23 +1,7 @@
-"""Validate that build_sfincs_tile.py's TRUNCATE_WINDOW_HR_DEFAULT actually
-covers the real, current COAST-HG corrected-hydrograph peak, for EVERY
-tile's own corrected_hydrographs.csv already on disk under
-the calibration base dir - not just the 4 tiles (2335, 1573, 1907, 929) whose
-agreement on this originally justified the constant.
+"""Check every built tile's COAST-HG hydrograph peaks inside TRUNCATE_WINDOW_HR_DEFAULT.
 
-build_sfincs_tile.py's own comment on TRUNCATE_WINDOW_HR_DEFAULT=(40, 110)
-states this window is "a property of the dataset" (every COAST-HG
-hydrograph shares the same synthetic time axis, peak always at t=74.5h),
-confirmed only across 4 real tiles at the time. Now that up to 255 tiles
-are being built at production scale, resting on n=4 confirmation is a real,
-if modest, extrapolation risk - a hydrograph whose peak falls outside the
-window would be silently truncated to a scenario that never reaches its
-own real storm peak, without any error or warning.
-
-This is a DATA-validation test, not a pure-logic one: it needs real
-corrected_hydrographs.csv files on disk (from a real sfincs_tiles/build_line_forcing.py
-run) to check anything meaningful, so it's the one test in this batch that
-degrades to a documented skip rather than a hard failure when no tiles have
-been built yet (e.g. a fresh checkout, before any local --build-only run).
+COAST-HG shares one synthetic time axis (peak at t=74.5 h); a peak outside the
+window would be silently truncated away. Skips when no built tiles are on disk.
 
 Usage:
     python validate_truncation_window.py
@@ -36,7 +20,7 @@ sys.path.insert(0, str(REPO_ROOT / "sfincs_tiles"))
 
 from build_sfincs_tile import TRUNCATE_WINDOW_HR_DEFAULT  # noqa: E402
 
-BASE_DIR_NAME = "calibration_roughness_SFINCS"  # the final calibration's tiles
+BASE_DIR_NAME = "calibration_roughness_SFINCS"
 
 
 def find_corrected_hydrograph_files(root: Path) -> list[Path]:
@@ -47,9 +31,7 @@ def find_corrected_hydrograph_files(root: Path) -> list[Path]:
 
 
 def check_peak_within_window(csv_path: Path, window_hr: tuple[float, float]) -> tuple[bool, str]:
-    """Returns (ok, detail) - ok=False means at least one station's own
-    peak falls outside window_hr (the truncated series would silently
-    never reach that station's real storm peak)."""
+    """Return (ok, detail); ok is False if any station peaks outside window_hr."""
     df = pd.read_csv(csv_path)
     station_cols = [c for c in df.columns if c != "elapsed_hr"]
     if not station_cols:
@@ -94,7 +76,7 @@ def test_all_available_tiles_peak_within_truncation_window(root: Path | None = N
     for f in files:
         try:
             ok, detail = check_peak_within_window(f, TRUNCATE_WINDOW_HR_DEFAULT)
-        except Exception as e:  # a malformed/partial file from an interrupted build - report, don't crash the batch
+        except Exception as e:  # partial file from an interrupted build
             failures.append(f"{f.parent.parent.name}: could not check ({e})")
             continue
         n_checked += 1

@@ -1,11 +1,4 @@
-"""Land-use input map for a tile-grid region - the Copernicus Global Land
-Service Land Cover 100 m classification (`land_use` catalog source) that
-`compute_friction.py` converts to Manning's n roughness for every tile,
-clipped to the region's own tile grid and shown at native resolution.
-
-No production script plotted this input before (confirmed via codebase
-review) - every prior land-use figure was a one-off diagnostic. Generic over
-`tile_grid.path`, so it works for any region's config, not just one project.
+"""Map the Copernicus CGLS-LC100 land use (friction input) over a tile-grid region.
 
 Usage:
     python docs/figure_scripts/plot_landuse_map.py --config <config.yml> [--out <path>]
@@ -28,10 +21,8 @@ from config_utils import get_data_catalog, load_config  # noqa: E402
 from map_style import WATER_COLOR, draw_caption_box  # noqa: E402
 from tiles import load_tile_grid  # noqa: E402
 
-# Coarse Copernicus CGLS-LC100 classes (code, name, color) - the 11 forest
-# subtypes (111-126), all mapped to the SAME Manning's n in
-# lu_to_roughness_lookup.csv, are merged into one "Forest" entry so the
-# legend stays readable; every other code keeps its own class.
+# Forest subtypes 111-126 share one Manning's n in lu_to_roughness_lookup.csv,
+# so they are merged into one legend entry.
 _CLASSES = [
     (0, "No data", "#ffffff"),
     (20, "Shrubland", "#dcbe76"),
@@ -44,7 +35,7 @@ _CLASSES = [
     (90, "Herbaceous wetland", "#6ba8a9"),
     (95, "Mangroves", "#00cf75"),
     (100, "Moss and lichen", "#b0cc66"),
-    (111, "Forest", "#196d12"),  # also catches 112-126, see _remap below
+    (111, "Forest", "#196d12"),
     (200, "Open sea", WATER_COLOR),
 ]
 _FOREST_CODES = {111, 112, 113, 114, 115, 116, 121, 122, 123, 124, 125, 126}

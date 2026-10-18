@@ -1,20 +1,7 @@
-"""Regression test for the water-level forcing step near +-180 deg longitude.
+"""Test SFINCS water_level.create() with UTM forcing locations at the antimeridian.
 
-hydromt_sfincs's water_level.create() selects the forcing locations with the
-polygonized waterlevel-boundary cells, reprojected to the locations' CRS and
-merged (union_all). With EPSG:4326 locations, the rotated-grid cell polygons
-of a tile at the antimeridian reproject to invalid geometry and GEOS raises
-"TopologyException: side location conflict" (5 tiles of the final
-calibration run, 2026-10-13). build_sfincs_tile.py therefore passes the
-locations in the model's own UTM CRS, where nothing is reprojected.
-
-This test rebuilds tile 1359's grid + boundary-line mask (no subgrid - a few
-seconds) from its calibration_roughness_SFINCS files and checks that
-water_level.create() succeeds with UTM locations and keeps every forcing
-point. Skips (not fails) without the P: share or the tile's files.
-
-Usage:
-    python validate_antimeridian_handling.py
+With EPSG:4326 locations, rotated-grid cell polygons near +-180 deg reproject to
+invalid geometry (GEOS "side location conflict"). Uses tile 1359; skips without P:.
 """
 
 import shutil
@@ -31,7 +18,7 @@ sys.path.insert(0, str(REPO_ROOT / "sfincs_tiles"))
 from build_sfincs_tile import MAIN_RES_M_DEFAULT, _create_mask  # noqa: E402
 from gfm_config import read_root  # noqa: E402
 
-TILE_ID = "1359"  # tile reaches 180.18 deg E
+TILE_ID = "1359"  # reaches 180.18 deg E
 BASE_DIR_NAME = "calibration_roughness_SFINCS"
 
 

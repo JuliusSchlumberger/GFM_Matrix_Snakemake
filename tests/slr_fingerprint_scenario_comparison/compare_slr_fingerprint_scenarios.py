@@ -1,22 +1,8 @@
-"""Checks a core implicit assumption behind prepare_boundary_conditions.py's
-SLR-fingerprint rescaling: that the regional fingerprint's spatial SHAPE
-(each station's local SLR relative to the global mean) is scenario-invariant,
-so it's defensible to compute it once from a single reference scenario
-(boundary_conditions.slr_scenario in config.yml, "ssp245" by default) and
-rescale it by a scalar ratio to reach any prescribed target global-mean SLR,
-rather than needing a separate fingerprint per scenario.
+"""Compare SLR fingerprint shape between two scenarios across COAST-RP stations.
 
-Compares two scenarios (default ssp126 vs ssp245) across every COAST-RP
-station: for each, calls prepare_boundary_conditions.compute_slr_fingerprints
-- the SAME production function, not a reimplementation - rescaled to a common
-target global-mean SLR (1.0 m, for plot-axis units only), and plots one
-scenario's per-station offset against the other's, with the pooled Pearson r.
-
-Correlating at any single target SLR is representative of every other target
-SLR too: compute_slr_fingerprints' rescaling is `base(station) / global_mean *
-T`, a per-scenario positive affine transform of the same underlying `base`
-values, and Pearson r is invariant to that - so this comparison doesn't need
-repeating per target SLR level despite four being used in production.
+Tests the assumption that the fingerprint shape is scenario-invariant, so one
+reference scenario can be rescaled to any target global-mean SLR. Rescaling is
+base / global_mean * T, so Pearson r does not depend on the target T.
 
 Usage:
     python compare_slr_fingerprint_scenarios.py
@@ -43,18 +29,13 @@ sys.path.insert(0, str(_REPO_ROOT / "preparation"))
 from config_utils import get_data_catalog, load_config  # noqa: E402
 from prepare_boundary_conditions import compute_slr_fingerprints, preprocess_coastrp  # noqa: E402
 
-TARGET_SLR_M = 1.0  # plot-axis units only - see module docstring for why the choice doesn't affect r
+TARGET_SLR_M = 1.0  # plot units only; r is invariant to it
 OUT_DIR = Path(__file__).resolve().parent
 
 
 def _load_scenario_fingerprints(
     ds_coastrp: xr.Dataset, slr_dir: Path, scenario: str, confidence: str, cache_dir: Path,
 ) -> np.ndarray:
-    """Per-station local SLR offset (m) at TARGET_SLR_M, via the real
-    production function - writes/reuses the same scenario-keyed cache files
-    compute_slr_fingerprints already uses in processed_inputs/, so running
-    this for a new scenario just adds to that cache, never touches the
-    existing ssp245 files."""
     slr_base_path = cache_dir / f"SLR_base_{scenario}_{confidence}_2100.nc"
     fingerprints_path = cache_dir / f"SLR_fingerprints_{scenario}_{confidence}_all.nc"
     ds_fp = compute_slr_fingerprints(

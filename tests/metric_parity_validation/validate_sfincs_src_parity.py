@@ -1,18 +1,8 @@
-"""Parity between sfincs_tiles/ copies and their src/ originals.
+"""Pin sfincs_tiles/ copies of src/ helpers to their originals (run in `gfm`).
 
-sfincs_tiles/ runs in the hydromt-sfincs-dev env (hydromt 1.x), which cannot import src/
-(src/config_utils.py needs hydromt 0.9's `hydromt.log.setuplog`), so it keeps its own small
-copies of a few src/ helpers. This test pins them to the originals so they cannot drift:
-
-- `sfincs_tiles/flood_agreement.confusion_counts` / `metrics_from_counts` vs
-  `src/validation.confusion_counts` / `metrics_from_counts` (the SFINCS copy reports the hit
-  rate as `HT`, src as `HR`; it omits `tn`/`EB`/`EB_ratio`).
-- `sfincs_tiles/calibration_paths.decode_waterdepth_cm` (path -> NaN for nodata) vs
-  `src/rasters.decode_waterdepth_cm` (array -> `EIKONAL_NODATA` for nodata).
-- `sfincs_tiles/retry_io.retry_transient_io` vs `src/config_utils.retry_transient_io` (the
-  SFINCS copy catches plain `OSError`; src catches a curated tuple that includes it).
-
-Runs in `gfm` (both sides import there). Plain assert-based script; pytest collects it.
+sfincs_tiles/ (hydromt 1.x) cannot import src/ (needs hydromt 0.9). Known
+differences: hit rate `HT` vs `HR`, no tn/EB; nodata NaN vs EIKONAL_NODATA;
+retry catches plain OSError vs a tuple including it.
 """
 
 import sys
@@ -50,7 +40,7 @@ def test_confusion_counts_and_metrics_match() -> None:
         s, f = src_val.metrics_from_counts(tp, fp, fn), sf_agree.metrics_from_counts(tp, fp, fn)
         for src_key, sf_key in (("HR", "HT"), ("FAR", "FAR"), ("CSI", "CSI"), ("bias", "bias")):
             assert _same(s[src_key], f[sf_key]), (src_key, s[src_key], f[sf_key])
-    for counts in ((0.0, 0.0, 0.0), (0.0, 5.0, 0.0), (0.0, 0.0, 3.0)):  # zero denominators -> NaN in both
+    for counts in ((0.0, 0.0, 0.0), (0.0, 5.0, 0.0), (0.0, 0.0, 3.0)):
         s, f = src_val.metrics_from_counts(*counts), sf_agree.metrics_from_counts(*counts)
         assert all(_same(s[a], f[b]) for a, b in (("HR", "HT"), ("FAR", "FAR"), ("CSI", "CSI"), ("bias", "bias")))
     print("PASS: confusion counts and HR(HT)/FAR/CSI/bias identical, incl. zero-denominator NaNs")

@@ -1,30 +1,7 @@
-"""End-to-end smoke test for the SFINCS build+run+postprocess pipeline
-(build_sfincs_tile.py -> run_sfincs_tile.py), against a real, small, already
--prepped fixture tile - the single highest-leverage "did I break the whole
-pipeline" check, and (before this test) the only thing playing that role
-was manually rebuilding real tiles by hand after each change.
+"""Smoke-test SFINCS build -> run -> postprocess on the smallest finished calibration tile.
 
-Not a pure-synthetic test (unlike most of the other sfincs_* validation
-tests added alongside this one): constructing a from-scratch synthetic
-tile would mean faking GEBCO/MDT/COAST-HG catalog entries and a
-tile_geometry.gpkg with real hop_distance/ocean-boundary conventions -
-significant duplicated machinery for something a small REAL tile already
-does correctly and cheaply (the smallest finished calibration tile, see
-"Needs" below). This mirrors the existing house convention (most
-`tests/*_validation/` scripts here are real-data validation tools, run by
-hand, not CI-isolated unit tests - see e.g. this session's own
-`sfincs_hydrograph_truncation_validation`).
-
-Needs: the real P:\\ modelling share, a real local SFINCS executable, and
-one finished tile of the final calibration (FIXTURE_BASE_DIR_NAME): the
-smallest one (fewest active SFINCS cells) whose prep-stage files
-(elevation_combined.tif, manning_n.tif, matched_boundary_points.gpkg,
-corrected_hydrographs.csv) and boundary line exist. Its inputs are COPIED
-into SMOKE_BASE_DIR_NAME and the model is built and run there - the fixture
-tile itself is never touched. Skips (not fails) if anything is unavailable.
-
-Usage:
-    python test_sfincs_smoke.py
+Needs P:\\, a local sfincs.exe and a finished FIXTURE_BASE_DIR_NAME tile; skips
+otherwise. Writes a copy under SMOKE_BASE_DIR_NAME; the fixture is never touched.
 """
 
 from __future__ import annotations
@@ -45,8 +22,8 @@ from gfm_config import read_root  # noqa: E402
 from run_sfincs_tile import compute_max_inundation  # noqa: E402
 from sfincs_run import run_sfincs_subprocess  # noqa: E402
 
-FIXTURE_BASE_DIR_NAME = "calibration_roughness_SFINCS"  # read-only source of the fixture tile
-SMOKE_BASE_DIR_NAME = "sfincs_smoke_test"  # where the copy is built and run
+FIXTURE_BASE_DIR_NAME = "calibration_roughness_SFINCS"  # read-only
+SMOKE_BASE_DIR_NAME = "sfincs_smoke_test"
 PREP_FILES = ["elevation_combined.tif", "manning_n.tif", "matched_boundary_points.gpkg", "corrected_hydrographs.csv"]
 DEFAULT_SFINCS_EXE = Path(
     r"C:\Users\schlumbe\hydromt_sfincs\delta_model\software\SFINCS_v2.3.0_mt_Faber_release_exe\sfincs.exe"
@@ -62,8 +39,6 @@ class _SilentLog:
 
 
 def _fixture_tile(root: Path) -> str | None:
-    """Smallest finished calibration tile (pre-flight active cell count) with
-    every prep file and its boundary line."""
     base = root / FIXTURE_BASE_DIR_NAME
     sizes = []
     for pf in (base / "boundary_lines" / "preflight").glob("*.json"):
@@ -78,7 +53,6 @@ def _fixture_tile(root: Path) -> str | None:
 
 
 def _prereqs_available() -> tuple[Path, Path, str] | None:
-    """(root, sfincs_exe, tile_id) if this smoke test can actually run, else None."""
     config_path = REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"
     if not config_path.exists() or not DEFAULT_SFINCS_EXE.exists():
         return None
@@ -91,8 +65,6 @@ def _prereqs_available() -> tuple[Path, Path, str] | None:
 
 
 def _stage_fixture(root: Path, tile_id: str) -> Path:
-    """Fresh copy of the fixture tile's inputs/, prep files and boundary line
-    under SMOKE_BASE_DIR_NAME; returns the copied boundary line."""
     src, dst = root / FIXTURE_BASE_DIR_NAME / tile_id, root / SMOKE_BASE_DIR_NAME / tile_id
     shutil.rmtree(dst, ignore_errors=True)
     shutil.copytree(src / "inputs", dst / "inputs")
@@ -132,11 +104,7 @@ def test_build_run_postprocess_produces_plausible_output() -> None:
 
     assert hmax.ndim == 2 and hmax.size > 0, hmax.shape
     finite = hmax[np.isfinite(hmax)]
-    # Bounded, physically-plausible check - not "did it match a specific
-    # number" (that's what the manual tile comparisons already do), just
-    # "didn't degenerate": no absurd depths (e.g. a units/sign bug would
-    # produce metres in the thousands), and not silently all-NaN when the
-    # model actually ran successfully.
+    # Plausibility only: a units/sign bug gives depths in the thousands of metres.
     if finite.size:
         assert finite.max() < 100.0, f"implausible max depth {finite.max()} m - likely a units/decode bug"
         assert finite.min() >= 0.0, f"negative flood depth {finite.min()} m - should never happen"

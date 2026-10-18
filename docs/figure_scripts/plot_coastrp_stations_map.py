@@ -1,13 +1,7 @@
-"""Map of the real COAST-RP boundary stations forcing a tile-grid region, for
-one (return_period, waterlevel_name) scenario - the per-tile
-`boundaries_{RP}_{SLR}.gpkg` files `extract_boundaries.py` writes during
-preprocessing (post ocean-connectivity filtering - exactly what each tile's
-simulation actually used, not the unfiltered candidate pool).
+"""Map the COAST-RP boundary stations a tile-grid region used for one scenario.
 
-No production script plotted this before (confirmed via codebase review) -
-the only prior version was a one-off Martinique diagnostic
-(tests/martinique_diagnostics/06_make_figures.py fig1, removed in e98340a). Generic over
-`tile_grid.path`/`simulation.model_outputs`, so it works for any region.
+Reads the per-tile `boundaries_{RP}_{SLR}.gpkg` (after ocean-connectivity
+filtering, i.e. what each tile's simulation used).
 
 Usage:
     python docs/figure_scripts/plot_coastrp_stations_map.py --config <config.yml> \\

@@ -1,23 +1,8 @@
-"""Direct unit tests for rasters.py's real, documented historical bugs:
-  - encode_dem_cm's deliberate clip (not raise) for below-int16-range
-    elevations (real tiles: 1464 Dead Sea -369.29m, 303 Danakil -379.08m).
-  - decode_friction_int16's float32-preserving divide (numpy's legacy
-    value-based casting silently promoted `float32_array / python_int` to
-    float64 when the int needs >16 bits - doubled peak memory of every
-    flood solve until caught during OOM debugging).
-  - _compute_dem_gap_fill's stray-nodata routing (an all-nodata-window tile
-    used to leak a raw -9999 sentinel into encode_dem_cm and crash).
-  - save_waterdepth_raster creating its own output directory (broke live
-    on 2026-08-10 HPC run: run_eikonal_cli.py, unlike Snakemake, never
-    got its results/ dir auto-created).
-  - average_pool_to_grid's closed-form correctness (the two-separate-
-    reproject-calls structure this locks in - packing numerator/domain as
-    two bands of one multi-band reproject() call was tried and rejected:
-    confirmed live to silently corrupt ~360,000 real coarse cells, since
-    reproject() shares one nodata mask across bands under Resampling.average).
+"""Test rasters.py encoding, DEM gap fill, mask fixes and average pooling.
 
-Usage:
-    python validate_rasters_encoding.py
+Below-int16 DEMs must clip (tile 1464 Dead Sea -369.29 m, 303 Danakil -379.08 m).
+average_pool_to_grid needs two reproject() calls: one multi-band call shares one
+nodata mask across bands under Resampling.average and corrupted ~360,000 cells.
 """
 
 import shutil
@@ -45,17 +30,15 @@ from rasters import (  # noqa: E402
 
 def test_encode_dem_cm_clips_below_int16_range_instead_of_wrapping() -> None:
     print("=== encode_dem_cm: clips out-of-range elevations (real Dead Sea/Danakil tiles) instead of wrapping ===")
-    dem_m = np.array([[-369.29, -379.08], [10.0, 327.67]], dtype=np.float64)  # real values from tiles 1464/303
+    dem_m = np.array([[-369.29, -379.08], [10.0, 327.67]], dtype=np.float64)
     encoded = encode_dem_cm(dem_m)
 
     assert encoded.dtype == np.int16, encoded.dtype
-    lo_int = np.iinfo(np.int16).min  # -32768 -> -327.68m
-    # Both deep values must clip to the int16 floor, NOT wrap around to a
-    # small/positive value the way a naive `.astype(np.int16)` would.
+    lo_int = np.iinfo(np.int16).min  # -327.68 m
     assert encoded[0, 0] == lo_int, f"expected clip to {lo_int} (-327.68m), got {encoded[0, 0]} - possible silent int16 wraparound"
     assert encoded[0, 1] == lo_int, f"expected clip to {lo_int} (-327.68m), got {encoded[0, 1]} - possible silent int16 wraparound"
-    assert encoded[1, 0] == 1000, encoded[1, 0]  # 10.0m -> 1000 cm, well within range, untouched
-    assert encoded[1, 1] == np.iinfo(np.int16).max, encoded[1, 1]  # exactly at the ceiling
+    assert encoded[1, 0] == 1000, encoded[1, 0]
+    assert encoded[1, 1] == np.iinfo(np.int16).max, encoded[1, 1]
     print(f"PASS: -369.29m/-379.08m both clip to {lo_int} (-327.68m), not wrapped; in-range values untouched")
     print()
 
@@ -80,7 +63,7 @@ def test_dem_gap_fill_small_gap_interpolates_from_real_neighbors() -> None:
     print("=== _compute_dem_gap_fill: a small isolated land gap interpolates from real neighbours ===")
     nodata = -9999.0
     dem_vals = np.full((5, 5), 10.0, dtype=np.float32)
-    dem_vals[2, 2] = nodata  # one isolated missing land cell, surrounded by real elevation
+    dem_vals[2, 2] = nodata
     is_land = np.ones((5, 5), dtype=bool)
 
     fill = _compute_dem_gap_fill(
@@ -99,7 +82,7 @@ def test_dem_gap_fill_large_gap_hard_fills() -> None:
     print("=== _compute_dem_gap_fill: a large land gap hard-fills to land_fill_value_m ===")
     nodata = -9999.0
     dem_vals = np.full((6, 6), 10.0, dtype=np.float32)
-    dem_vals[1:5, 1:5] = nodata  # a 4x4=16-cell gap, >= min_hard_fill_component_size (10)
+    dem_vals[1:5, 1:5] = nodata  # 16 cells >= min_hard_fill_component_size
     is_land = np.ones((6, 6), dtype=bool)
 
     fill = _compute_dem_gap_fill(
@@ -113,14 +96,10 @@ def test_dem_gap_fill_large_gap_hard_fills() -> None:
 
 
 def test_dem_gap_fill_all_nodata_window_never_leaks_raw_nodata() -> None:
-    """Real bug fixed 2026-08: a ~3K-pixel tile with ZERO valid DEM coverage
-    in its read window crashed encode_dem_cm with a stray raw -9999 -
-    fillnodata has nothing to interpolate FROM when every cell is missing,
-    so those cells must fall through to the hard land_fill_value_m instead
-    of being left as the raw nodata sentinel."""
+    """With no valid cell, fillnodata has no source: hard-fill instead of leaking -9999."""
     print("=== _compute_dem_gap_fill: all-nodata window never leaks the raw nodata sentinel ===")
     nodata = -9999.0
-    dem_vals = np.full((4, 4), nodata, dtype=np.float32)  # zero valid coverage at all
+    dem_vals = np.full((4, 4), nodata, dtype=np.float32)
     is_land = np.ones((4, 4), dtype=bool)
 
     fill = _compute_dem_gap_fill(
@@ -138,7 +117,6 @@ def test_dem_gap_fill_all_nodata_window_never_leaks_raw_nodata() -> None:
 
 def test_resolve_offshore_mask_gaps_via_gebco_connected_negative_becomes_ocean() -> None:
     print("=== resolve_offshore_mask_gaps_via_gebco: nodata cell 4-connected to real ocean + negative GEBCO -> ocean ===")
-    # 1x4 strip: real ocean, then two nodata cells with negative (deep) GEBCO, then land.
     mask_vals = np.array([[1, 255, 255, 0]], dtype=np.uint8)
     gebco_vals = np.array([[-50.0, -40.0, -30.0, 5.0]], dtype=np.float32)
 
@@ -155,11 +133,9 @@ def test_resolve_offshore_mask_gaps_via_gebco_connected_negative_becomes_ocean()
 
 def test_resolve_offshore_mask_gaps_via_gebco_isolated_basin_stays_land() -> None:
     print("=== resolve_offshore_mask_gaps_via_gebco: isolated below-sea-level basin (Dead Sea/Danakil analog) stays land ===")
-    # Real ocean on the left, a LAND cell breaking connectivity, then an
-    # isolated nodata cell with negative GEBCO (an inland depression) that
-    # has no connectivity path to the real ocean cell.
+    # Land at col 1 cuts the nodata depression off from the ocean.
     mask_vals = np.array([[1, 0, 255, 0]], dtype=np.uint8)
-    gebco_vals = np.array([[-50.0, 5.0, -400.0, 10.0]], dtype=np.float32)  # -400 ~ Danakil-scale
+    gebco_vals = np.array([[-50.0, 5.0, -400.0, 10.0]], dtype=np.float32)
 
     corrected, stats = resolve_offshore_mask_gaps_via_gebco(mask_vals, 255, gebco_vals, -32767.0)
 
@@ -175,7 +151,7 @@ def test_resolve_offshore_mask_gaps_via_gebco_isolated_basin_stays_land() -> Non
 def test_resolve_offshore_mask_gaps_via_gebco_positive_gebco_stays_land() -> None:
     print("=== resolve_offshore_mask_gaps_via_gebco: nodata cell connected to ocean but non-negative/nodata GEBCO -> stays land ===")
     mask_vals = np.array([[1, 255, 255]], dtype=np.uint8)
-    gebco_vals = np.array([[-50.0, 5.0, -32767.0]], dtype=np.float32)  # positive, then GEBCO's own nodata
+    gebco_vals = np.array([[-50.0, 5.0, -32767.0]], dtype=np.float32)  # positive, then GEBCO nodata
 
     corrected, stats = resolve_offshore_mask_gaps_via_gebco(mask_vals, 255, gebco_vals, -32767.0)
 
@@ -190,7 +166,7 @@ def test_resolve_offshore_mask_gaps_via_gebco_positive_gebco_stays_land() -> Non
 def test_relabel_small_isolated_ocean_patches_relabels_small_component() -> None:
     print("=== relabel_small_isolated_ocean_patches: small isolated ocean blob -> lake ===")
     mask_vals = np.zeros((5, 5), dtype=np.uint8)
-    mask_vals[1:3, 1:3] = 1  # 4-cell isolated "ocean" patch, well under the 30-cell threshold
+    mask_vals[1:3, 1:3] = 1
 
     corrected, stats = relabel_small_isolated_ocean_patches(mask_vals, min_cells=30)
 
@@ -204,8 +180,8 @@ def test_relabel_small_isolated_ocean_patches_relabels_small_component() -> None
 def test_relabel_small_isolated_ocean_patches_keeps_large_component() -> None:
     print("=== relabel_small_isolated_ocean_patches: large ocean body stays ocean, small one still relabeled ===")
     mask_vals = np.zeros((6, 10), dtype=np.uint8)
-    mask_vals[:, 0:6] = 1  # 36-cell real ocean body, at/above the threshold
-    mask_vals[4:6, 8:10] = 1  # 4-cell isolated blob, well below the threshold
+    mask_vals[:, 0:6] = 1
+    mask_vals[4:6, 8:10] = 1
 
     corrected, stats = relabel_small_isolated_ocean_patches(mask_vals, min_cells=30)
 
@@ -217,10 +193,7 @@ def test_relabel_small_isolated_ocean_patches_keeps_large_component() -> None:
 
 
 def test_save_waterdepth_raster_creates_missing_output_directory() -> None:
-    """Real, live HPC failure (2026-08-10): run_eikonal_cli.py (a plain
-    standalone CLI, not a Snakemake rule with automatic output-dir
-    creation) crashed with RasterioIOError writing waterdepth_*.tif because
-    results/ had never been created for that tile."""
+    """run_eikonal_cli.py, unlike Snakemake, does not create results/ beforehand."""
     print("=== save_waterdepth_raster: creates its own output directory if missing ===")
     tmpdir = Path(tempfile.mkdtemp(prefix="waterdepth_mkdir_test_"))
     try:
@@ -234,8 +207,6 @@ def test_save_waterdepth_raster_creates_missing_output_directory() -> None:
             dst.write(np.zeros((4, 4), dtype=np.int16), 1)
 
         waterdepth = np.zeros((4, 4), dtype=np.float32)
-        # Deliberately nested, not-yet-existing output dir - mirrors the real
-        # failure ({tile_dir}/results/ never created before this write).
         out_path = tmpdir / "results" / "nested" / "waterdepth_RP100_SLR_0.tif"
         assert not out_path.parent.exists()
 
@@ -248,17 +219,10 @@ def test_save_waterdepth_raster_creates_missing_output_directory() -> None:
 
 
 def test_average_pool_to_grid_closed_form_correctness() -> None:
-    """Locks in the correct A x B closed-form result (sum(class)/n_total,
-    NOT sum(class)/n_in_domain) - a hand-computable, pixel-aligned 4x4 -> 2x2
-    downsample. This is exactly the computation that must stay as TWO
-    separate reproject() calls (see average_pool_to_grid's own docstring) -
-    if a future edit merged them into one multi-band call, this closed-form
-    check would silently start producing a DIFFERENT (wrong) value for any
-    block containing partial domain coverage, like the top-left block below."""
+    """Pool to sum(class)/n_total, not /n_in_domain; a merged multi-band reproject breaks it."""
     print("=== average_pool_to_grid: closed-form correctness on a hand-computable case ===")
-    transform = Affine(1.0, 0, 0.0, 0, -1.0, 4.0)  # 4x4 grid, 1-unit cells
-    # Top-left 2x2 block: domain covers 3 of 4 cells, 2 of those 3 are "class" ->
-    # expected fraction = 2/4 = 0.5 (NOT 2/3).
+    transform = Affine(1.0, 0, 0.0, 0, -1.0, 4.0)
+    # Top-left block: 3 of 4 cells in domain, 2 are class -> 2/4, not 2/3.
     domain = np.array([
         [1, 1, 1, 1],
         [1, 0, 1, 1],
@@ -267,13 +231,12 @@ def test_average_pool_to_grid_closed_form_correctness() -> None:
     ], dtype=np.float32)
     numerator = np.array([
         [1, 1, np.nan, np.nan],
-        [0, np.nan, np.nan, np.nan],  # in-domain but NOT class - 0.0, not nan (see contract note above)
+        [0, np.nan, np.nan, np.nan],  # in-domain, not class: 0.0
         [np.nan, np.nan, 1, 1],
         [np.nan, np.nan, 1, 1],
-    ], dtype=np.float32)  # nan marks "outside domain" per the function's own contract
-    # bottom-right 2x2 block: full domain coverage, all 4 cells are class -> fraction = 1.0
+    ], dtype=np.float32)  # nan = outside domain
 
-    dst_transform = Affine(2.0, 0, 0.0, 0, -2.0, 4.0)  # 2x2 output, 2-unit cells
+    dst_transform = Affine(2.0, 0, 0.0, 0, -2.0, 4.0)
 
     result = average_pool_to_grid(
         numerator, domain, transform, "EPSG:32633", dst_transform, "EPSG:32633",

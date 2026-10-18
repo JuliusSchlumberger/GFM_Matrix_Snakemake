@@ -1,32 +1,7 @@
-"""Validate `collect_neighbor_wave_seeds` (src/boundaries.py, 2026-08) - the
-hop>=1 hinterland eikonal-seed collection mechanism: gathers real,
-already-computed wet-cell water levels from lower-hop_distance neighbour
-tile(s), snapped onto the target tile's own grid, taking the max where
-sources disagree.
+"""Test boundaries.collect_neighbor_wave_seeds (hop>=1 seeds, max where sources disagree).
 
-Writes small real GeoTIFFs (matching this pipeline's own int16-centimetre
-DEM/waterdepth encoding - `rasters.encode_dem_cm`/`encode_waterdepth_cm`) to
-a temp directory and exercises the actual function end-to-end, not a mock.
-
-All source tiles share the target's own grid exactly (same origin/
-resolution/shape) except the deliberately-disjoint one - this keeps the
-row/col snapping arithmetic trivially exact (a source cell center maps back
-onto the identical target cell, no floating-point boundary ambiguity),
-since `rasterio.transform.xy`/`rowcol` round-tripping itself is not what
-this test is checking; the windowing/decode/wet-filter/max-conflict
-aggregation logic is. The "points outside target dropped" case from the
-implementation plan is covered here via a fully geographically-disjoint
-source tile (real neighbour tiles are only ever proposed as candidates
-because they DO overlap, so this is the realistic manifestation of that
-guard - `from_bounds(...).round_offsets().round_lengths()` was confirmed
-by direct experimentation to never produce a window that pads past the
-target's own bounds for aligned, equal-resolution, non-rotated grids like
-this pipeline's, so the post-transform in-bounds numpy filter is a
-defensive guard for degenerate/misaligned geometry rather than something
-reachable through this specific construction).
-
-Usage:
-    python validate_neighbor_wave_seeds.py
+Sources share the target grid exactly (except one disjoint tile), so snapping is
+exact and the test isolates windowing, decoding, wet filtering and max-conflict.
 """
 
 import sys
@@ -93,40 +68,34 @@ def _write_waterdepth(
 def test_max_conflict_dry_nodata_and_disjoint_source(tmp_dir: Path) -> None:
     print("=== multi-source aggregation: max-wins both directions, dry/nodata/no-wet-cells/disjoint sources excluded ===")
     target_dem = tmp_dir / "target_dem.tif"
-    _write_dem(target_dem, np.full(SHAPE, 5.0))  # target's own DEM values are never read by this function
+    _write_dem(target_dem, np.full(SHAPE, 5.0))  # target DEM values are never read
 
-    # All sources are all-land (mask=0) here, so effective_dem(dem, mask) ==
-    # dem - this test is about the windowing/decode/wet-filter/max-conflict
-    # logic, not the effective_dem substitution (see
-    # test_non_land_source_cell_uses_effective_dem below for that).
+    # All land, so effective_dem == dem here.
     all_land = np.zeros(SHAPE, dtype="uint8")
 
-    # source1: higher elevation, wins the (0,0) conflict
     source1_dem, source1_mask, source1_wd = tmp_dir / "s1_dem.tif", tmp_dir / "s1_mask.tif", tmp_dir / "s1_wd.tif"
     _write_dem(source1_dem, np.full(SHAPE, 2.0))
     _write_mask(source1_mask, all_land)
     s1_depth = np.zeros(SHAPE)
-    s1_depth[0, 0] = 0.5  # level 2.5
-    s1_depth[3, 3] = 0.5  # level 2.5 - will lose the (3,3) conflict to source2
-    _write_waterdepth(source1_wd, s1_depth, nodata_cells=[(1, 1)])  # (1,1): forced not-computed
+    s1_depth[0, 0] = 0.5  # level 2.5, wins
+    s1_depth[3, 3] = 0.5  # level 2.5, loses
+    _write_waterdepth(source1_wd, s1_depth, nodata_cells=[(1, 1)])
 
-    # source2: wins the (3,3) conflict despite lower elevation (higher depth more than compensates)
     source2_dem, source2_mask, source2_wd = tmp_dir / "s2_dem.tif", tmp_dir / "s2_mask.tif", tmp_dir / "s2_wd.tif"
     _write_dem(source2_dem, np.full(SHAPE, 1.0))
     _write_mask(source2_mask, all_land)
     s2_depth = np.zeros(SHAPE)
-    s2_depth[0, 0] = 0.3  # level 1.3 - loses the (0,0) conflict to source1
-    s2_depth[3, 3] = 1.8  # level 2.8 - wins the (3,3) conflict over source1
+    s2_depth[0, 0] = 0.3  # level 1.3, loses
+    s2_depth[3, 3] = 1.8  # level 2.8, wins
     _write_waterdepth(source2_wd, s2_depth)
 
-    # source3: real overlap, but computed nothing but dry cells - must contribute nothing
+    # All dry: contributes nothing.
     source3_dem, source3_mask, source3_wd = tmp_dir / "s3_dem.tif", tmp_dir / "s3_mask.tif", tmp_dir / "s3_wd.tif"
     _write_dem(source3_dem, np.full(SHAPE, 9.0))
     _write_mask(source3_mask, all_land)
     _write_waterdepth(source3_wd, np.zeros(SHAPE))
 
-    # source4: geographically disjoint from the target entirely - must be silently skipped,
-    # even though its (fabricated) values would dominate every conflict above if wrongly included
+    # Disjoint from the target: skipped, though its values would win every conflict.
     source4_dem, source4_mask, source4_wd = tmp_dir / "s4_dem.tif", tmp_dir / "s4_mask.tif", tmp_dir / "s4_wd.tif"
     far_origin = (100.0, 1.0)
     _write_dem(source4_dem, np.full(SHAPE, 3.0), origin=far_origin)
@@ -166,20 +135,12 @@ def test_empty_source_paths() -> None:
 
 def test_non_land_source_cell_uses_effective_dem(tmp_dir: Path) -> None:
     print("=== non-land source cell: seed value uses effective_dem (0), not raw dem ===")
-    # Regression test for a real bug found 2026-08: flood_depth_dense saves
-    # `depth = waterlevel - effective_dem`, which is 0 for ocean/lake/river
-    # cells - so `depth` there already IS the full water level. Using the
-    # RAW (un-zeroed) dem when reconstructing the seed value double-counts
-    # that cell's real terrain elevation. Caught on a real river cell
-    # (dem=29.89m, true water level ~5.74m) whose seed value came out as
-    # 35.63m instead - see boundaries.collect_neighbor_wave_seeds' docstring.
+    # depth = waterlevel - effective_dem, and effective_dem is 0 for ocean/lake/river,
+    # so adding the raw dem double-counts terrain (river cell: 35.63 m, not 5.74 m).
     target_dem = tmp_dir / "target_dem.tif"
     _write_dem(target_dem, np.full(SHAPE, 5.0))
 
     source_dem, source_mask, source_wd = tmp_dir / "sr_dem.tif", tmp_dir / "sr_mask.tif", tmp_dir / "sr_wd.tif"
-    # (0,0): land, raw dem is real and used as-is.
-    # (1,1): river (mask=3) with a large raw dem reading - must NOT be added
-    #        on top of depth (which is already the full water level there).
     dem_vals = np.full(SHAPE, 2.0)
     dem_vals[1, 1] = 29.89
     mask_vals = np.zeros(SHAPE, dtype="uint8")
@@ -187,8 +148,8 @@ def test_non_land_source_cell_uses_effective_dem(tmp_dir: Path) -> None:
     _write_dem(source_dem, dem_vals)
     _write_mask(source_mask, mask_vals)
     depth_vals = np.zeros(SHAPE)
-    depth_vals[0, 0] = 1.0  # level = 2.0 (land) + 1.0 = 3.0
-    depth_vals[1, 1] = 5.74  # level = effective_dem(0, river) + 5.74 = 5.74, NOT 29.89 + 5.74
+    depth_vals[0, 0] = 1.0  # level 2.0 + 1.0
+    depth_vals[1, 1] = 5.74  # level 0 + 5.74
     _write_waterdepth(source_wd, depth_vals)
 
     seed_rows, seed_cols, seed_values = bnd.collect_neighbor_wave_seeds(
