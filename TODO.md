@@ -55,15 +55,18 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
     vs analysis/_common.py / compute_bangkok_case_exposure.py.
   - `_run` (subprocess step runner): analysis/run_analysis.py, validation/run_validation.py,
     run_delta_floodmaps.py: three different variants (printing, timing, fail-fast handling).
-- **Materialized scenario configs are older snapshots than config.yml** (found in Phase 6).
-  `snakemake_workflow/scripts/materialize_configs.py` (new; replaces build_delta_run_configs.py)
-  rebuilds `<name>_materialized.yml` from `config.yml` + `config_local.yml` + `<name>.yml`, but a
-  fresh build differs from the files on disk (39-65 keys each), because config.yml changed after
-  they were written. Examples: bangkok_chao_phraya/thailand_bangkok `adaptation.slr_intensities`
-  lose SLR_1500; gbr_wales_scotland_friction9 `hpc.n_nodes` 35 -> 40; analysis switches;
-  removed/added hpc keys. I did NOT overwrite them (that would change what those scenarios run).
-  Decide per scenario whether to re-materialize (`python snakemake_workflow/scripts/materialize_configs.py <name>`);
-  to inspect first: `... --out-dir <tmp>` and diff. A fresh clone gets the new-config version.
+- **Scenario configs re-materialized 2026-10-18 (your decision): check the result-relevant changes.**
+  `materialize_configs.py` rebuilt all 6 `*_materialized.yml` from today's config.yml (old copies:
+  `.cleanup_baseline/materialized_backup_2026-10-18/`). Changes that alter results:
+  `simulation.flooding.friction_scale_factor` bangkok_chao_phraya 9 -> 12, thailand_bangkok 30 -> 12,
+  calibration_500_tiles 30 -> 12 (their override files don't pin it; 12 is config.yml's current,
+  calibrated default); `adaptation.slr_intensities` loses SLR_1500 for bangkok_chao_phraya and
+  thailand_bangkok; thailand_bangkok `tile_generation.min_split_gap_coarse_cells` 60 -> 10 (only if
+  tiles are regenerated); gbr_wales_scotland_friction9 `hpc.n_nodes` 35 -> 40; analysis output years
+  for all. Existing outputs of those scenarios were computed with the old values, so Snakemake now
+  plans re-runs (e.g. 90/91 run_eikonal jobs for thailand/chao_phraya, reason "Params have changed").
+  Either re-run them, or pin the old values in `<name>.yml` and re-materialize. Re-materialize on
+  Hydrax too (the configs are untracked there).
 - **Hydrax: check the shell-driver changes once after pulling Phase 6** (I could only test them
   locally against a fake tile tree with fake sbatch/python, where both branches matched the old
   behaviour). All Hydrax paths now live in `sfincs_tiles/hydrax_env.sh` (same values as before,
