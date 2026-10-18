@@ -135,11 +135,10 @@ def _confusion_metrics(model_wet: np.ndarray, bench_wet: np.ndarray, domain: np.
     fp = float((model_wet & ~bench_wet & d).sum())
     fn = float((~model_wet & bench_wet & d).sum())
     tn = float((~model_wet & ~bench_wet & d).sum())
-    ht = tp / (tp + fn) if (tp + fn) > 0 else np.nan
-    far = fp / (tp + fp) if (tp + fp) > 0 else np.nan
-    csi = tp / (tp + fp + fn) if (tp + fp + fn) > 0 else np.nan
-    bias = (tp + fp) / (tp + fn) if (tp + fn) > 0 else np.nan
-    return {"n_domain_px": int(d.sum()), "tp": tp, "fp": fp, "fn": fn, "tn": tn, "HT": ht, "FAR": far, "CSI": csi, "bias": bias}
+    m = v.metrics_from_counts(tp, fp, fn, tn)
+    # Output column is HT (hit rate), as in sf_bay_results.csv; validation.py calls it HR.
+    return {"n_domain_px": int(d.sum()), "tp": tp, "fp": fp, "fn": fn, "tn": tn,
+            "HT": m["HR"], "FAR": m["FAR"], "CSI": m["CSI"], "bias": m["bias"]}
 
 
 def _depth_error_metrics(model_depth: np.ndarray, bench_depth: np.ndarray, domain: np.ndarray, bench_wet: np.ndarray) -> dict:
