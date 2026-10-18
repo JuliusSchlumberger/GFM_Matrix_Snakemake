@@ -8,6 +8,9 @@ so the two entry points can't drift apart.
 
 import json
 import math
+import os
+import shutil
+import time
 from pathlib import Path
 from typing import Any
 
@@ -15,14 +18,17 @@ import geopandas as gpd
 import numpy as np
 import rasterio
 
-from config_utils import retry_transient_io
+from boundaries import collect_neighbor_wave_seeds
+from config_utils import path_ready, retry_transient_io
 from flood_model import WATERLEVEL_EPSILON_M, flood_depth_dense
 from rasters import (
     decode_dem_cm,
     decode_friction_int16,
     decode_waterlevel_cm,
+    save_nodata_raster,
     save_waterdepth_raster,
 )
+from tiles import load_tile_grid
 
 
 def run_aqueduct_python(
@@ -303,6 +309,185 @@ def write_zero_waterdepth(dem_path: str | Path, output_path: str | Path) -> None
     with retry_transient_io(rasterio.open, dem_path) as src:
         shape = (src.height, src.width)
     save_waterdepth_raster(dem_path, np.zeros(shape, dtype=np.float32), output_path)
+
+
+OOM_PREMARKED_REASON = "tile too large (out-of-memory on a previous return period/SLR scenario for this tile)"
+
+
+def _stage_file_locally(src_path: str) -> str:
+    """Copy `src_path` to node-local scratch and return the local copy's path.
+
+    Added 2026-10-14: on a Hydrax compute node, GDAL/OGR's SQLite lock acquisition - needed
+    just to OPEN a GeoPackage, even read-only, for a single non-concurrent read - can hang
+    indefinitely on P:\\. A plain content copy (`shutil.copy2`, no GDAL/SQLite) does not hit
+    that lock path. The caller deletes the returned file once done with it.
+    """
+    stage_dir = os.path.join(os.environ.get("TMPDIR", "/tmp"), "gfm_staged_inputs")
+    os.makedirs(stage_dir, exist_ok=True)
+    dst = os.path.join(stage_dir, f"{os.getpid()}_{os.path.basename(src_path)}")
+    retry_transient_io(shutil.copy2, src_path, dst)
+    return dst
+
+
+def run_tile_scenario(
+    tile_id: str,
+    return_period: str,
+    waterlevel_name: str,
+    *,
+    dem_path: str,
+    mask_path: str,
+    friction_path: str,
+    boundaries_path: str,
+    output_path: str,
+    model_outputs: str,
+    preprocessing_inputs_dir: str,
+    tile_grid_path: str,
+    raster_config: dict[str, Any],
+    flooding_config: dict[str, Any],
+    ocean_code: int,
+    river_code: int,
+    stage_boundaries: bool = False,
+) -> dict[str, Any]:
+    """Solve, skip or placeholder one (tile, return period, SLR scenario) and write its raster.
+
+    The shared per-tile logic of both entry points, `run_aqueduct.py` (Snakemake rule) and
+    `run_aqueduct_cli.py` (HPC sbatch CLI), so they cannot drift apart. In order:
+
+    - Tile pre-marked OOM: nodata placeholder (`save_nodata_raster`), skip marker.
+    - Forcing: a hop-0 tile reads its own `boundaries_path` stations; a hop>=1 tile collects
+      eikonal seeds from already-simulated, strictly-earlier-wave overlapping tiles
+      (`boundaries.collect_neighbor_wave_seeds`). A neighbour whose output does not exist
+      yet counts as "no flooding there". No stations / no seeds: zero-depth raster, skip
+      marker.
+    - Otherwise the real solve (`run_aqueduct_python`); a MemoryError marks the tile OOM for
+      all its later scenarios and writes a nodata placeholder instead.
+
+    Run-timing records are left to the caller: the two entry points record them differently.
+
+    Parameters
+    ----------
+    tile_id : str
+        Tile ID (`tile_grid.path`'s `tile_id`, as a string).
+    return_period : str
+        Return period name, e.g. "RP100".
+    waterlevel_name : str
+        SLR scenario name, e.g. "SLR_0"; also the boundaries' water-level column.
+    dem_path, mask_path, friction_path : str
+        This tile's preprocessed inputs.
+    boundaries_path : str
+        This scenario's `boundaries_{rp}_{slr}.gpkg` (read for hop-0 tiles only).
+    output_path : str
+        Destination `waterdepth_{rp}_{slr}.tif`.
+    model_outputs : str
+        `simulation.model_outputs`: root of per-tile results and of the `skipped_tiles/` and
+        `oom_tiles/` marker directories.
+    preprocessing_inputs_dir : str
+        Root of per-tile `inputs/` (neighbour DEM/mask lookups for hop>=1 tiles).
+    tile_grid_path : str
+        Tile grid with `tile_id`, `hop_distance` and geometry.
+    raster_config : dict
+        `raster_format` config section (nodata placeholder encoding).
+    flooding_config : dict
+        `simulation.flooding` config section.
+    ocean_code, river_code : int
+        Mask class codes (`tile_generation.ocean_code` / `river_code`).
+    stage_boundaries : bool, default False
+        Copy the boundaries GeoPackage to node-local scratch before opening it (HPC only;
+        see `_stage_file_locally`). The copy is always removed afterwards.
+
+    Returns
+    -------
+    dict
+        `{"outcome": "oom_premarked"}`, `{"outcome": "skip_no_inundation", "skip_reason": ...}`,
+        `{"outcome": "oom"}`, or `{"outcome": "solved", "diagnostics": <run_aqueduct_python's
+        dict>, "solve_elapsed_s": <seconds spent in the solve>}`.
+    """
+    scenario_name = f"{return_period}_{waterlevel_name}"
+    skipped_dir = os.path.join(model_outputs, "skipped_tiles")
+    oom_dir = os.path.join(model_outputs, "oom_tiles")
+
+    if tile_marked_oom(oom_dir, tile_id):
+        log_skipped_tile(skipped_dir, tile_id, scenario_name, reason=OOM_PREMARKED_REASON)
+        save_nodata_raster(dem_path, output_path, raster_config)
+        return {"outcome": "oom_premarked"}
+
+    tile_grid = load_tile_grid(tile_grid_path)
+    this_tile = tile_grid[tile_grid["tile_id"] == int(tile_id)]
+    hop_distance = int(this_tile["hop_distance"].iloc[0])
+
+    # Exactly one forcing set ends up populated (stations path or seeds), matching
+    # flood_depth_dense's mutual-exclusivity contract.
+    seed_rows = seed_cols = seed_values = None
+    skip_reason = None
+    read_boundaries_path = boundaries_path
+    local_boundaries_path = None
+
+    try:
+        if hop_distance == 0:
+            if stage_boundaries:
+                local_boundaries_path = _stage_file_locally(boundaries_path)
+                read_boundaries_path = local_boundaries_path
+            boundaries = retry_transient_io(gpd.read_file, read_boundaries_path)
+            if boundaries.empty:
+                skip_reason = NO_STATIONS_REASON
+        else:
+            this_geom = this_tile.geometry.iloc[0]
+            candidates = tile_grid[
+                (tile_grid["hop_distance"] < hop_distance)
+                & (tile_grid["tile_id"] != int(tile_id))
+                & tile_grid.geometry.intersects(this_geom)
+            ]
+            available = []
+            for cand_id in candidates["tile_id"]:
+                cand_dem = os.path.join(preprocessing_inputs_dir, str(int(cand_id)), "inputs", "dem.tif")
+                cand_mask = os.path.join(preprocessing_inputs_dir, str(int(cand_id)), "inputs", "mask.tif")
+                cand_waterdepth = os.path.join(
+                    model_outputs, str(int(cand_id)), "results", f"waterdepth_{scenario_name}.tif",
+                )
+                # path_ready, not bare os.path.exists (which swallows I/O errors and returns
+                # False without retrying): on the P:\ share a transient blip would otherwise be
+                # indistinguishable from "neighbour hasn't run yet", turning a flooded result
+                # into a wrongly-confident real zero.
+                if path_ready(cand_dem) and path_ready(cand_mask) and path_ready(cand_waterdepth):
+                    available.append((cand_dem, cand_mask, cand_waterdepth))
+            seed_rows, seed_cols, seed_values = collect_neighbor_wave_seeds(dem_path, available)
+            if len(seed_rows) == 0:
+                skip_reason = NO_UPSTREAM_FLOODING_REASON
+
+        if skip_reason is not None:
+            log_skipped_tile(skipped_dir, tile_id, scenario_name, reason=skip_reason)
+            write_zero_waterdepth(dem_path, output_path)
+            return {"outcome": "skip_no_inundation", "skip_reason": skip_reason}
+
+        oc_config = flooding_config.get("obstacle_coupling", {})
+        start = time.perf_counter()
+        try:
+            diagnostics = run_aqueduct_python(
+                dem_path, mask_path, friction_path, output_path,
+                resolution=flooding_config["resolution"], k=flooding_config["knn"],
+                variable=waterlevel_name,
+                boundaries_path=None if hop_distance >= 1 else read_boundaries_path,
+                seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
+                ocean_code=ocean_code, river_code=river_code,
+                obstacle_coupling=oc_config.get("enabled", False),
+                max_outer_iterations=oc_config.get("max_outer_iterations", 3),
+                max_rounds=flooding_config["max_rounds"],
+                outer_convergence_pct=oc_config.get("outer_convergence_pct", 0.01),
+                waterlevel_epsilon_m=flooding_config["waterlevel_epsilon_m"],
+                friction_scale_factor=flooding_config.get("friction_scale_factor", 1.0),
+            )
+        except MemoryError:
+            mark_tile_oom(oom_dir, tile_id, reason="MemoryError in flood_depth_dense - tile too large")
+            log_skipped_tile(skipped_dir, tile_id, scenario_name, reason="MemoryError - tile too large")
+            save_nodata_raster(dem_path, output_path, raster_config)
+            return {"outcome": "oom"}
+        return {"outcome": "solved", "diagnostics": diagnostics, "solve_elapsed_s": time.perf_counter() - start}
+    finally:
+        if local_boundaries_path is not None:
+            try:
+                os.remove(local_boundaries_path)
+            except OSError:
+                pass
 
 
 def tile_output_complete(model_outputs_dir: str | Path, tile_id: int | str, n_scenarios_per_tile: int) -> bool:

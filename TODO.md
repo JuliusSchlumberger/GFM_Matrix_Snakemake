@@ -39,8 +39,13 @@ in-phase.
   model_total_wet_km2 NaN" and "No coastal benchmark found for X" were only printed by
   the deleted `validate_country()`. The national path now prints just "No extent rows
   produced." Re-add them to the national path if you want them.
-- **Local DAG path lacks the hop-0 boundary-read change (465dd93).** Fixed by
-  Phase 5b; then re-run the deltas (AUDIT.md §8 "After the cleanup").
+- **Snakemake "code has changed" on locally produced simulation outputs** (Phase 5b): `run_aqueduct.py`
+  was rewritten into a thin wrapper, so e.g. bangkok_chao_phraya's 405 run_aqueduct outputs dry-run as
+  "Code has changed since last execution" (with `--rerun-triggers mtime params input software-env`
+  there is nothing to do, so inputs and outputs are untouched). Clear it once after the cleanup (item D,
+  with the Phase 7a renames) via `snakemake --touch` - it writes Snakemake metadata next to P:\ outputs.
+  The earlier "local path lacks the hop-0 fix" item was wrong (465dd93 only staged the file), so the
+  deltas do not need a re-run.
 - **SF Bay validation reads one hard-coded model chunk.** `validation/validate_sf_bay.py:100`
   points at `merged_results/chunks/waterdepth_N35W125_RP100_SLR_0.tif`. If the Bay domain
   spans more than that chunk, or the chunk grid changes, part of the Bay is silently not
