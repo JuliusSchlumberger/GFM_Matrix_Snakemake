@@ -1,7 +1,8 @@
 """Materialize scenario configs: `config/<name>.yml` -> `config/<name>_materialized.yml`.
 
-Each materialized file is a standalone, fully-merged config.yml + config_local.yml + the one
-override file (src/config_utils.py::materialize_config - the same deep-merge semantics
+Each materialized file is a standalone, fully-merged config.yml + config_local.yml + the
+scenario's override file + its optional `<name>_pins.yml` (values pinned to what the scenario's
+existing outputs were computed with) (src/config_utils.py::materialize_config - the same deep-merge semantics
 load_config uses). Point GFM_CONFIG_PATH at it to run Snakemake on that scenario (see the
 Snakefile's comment on why GFM_CONFIG_PATH is used instead of --configfile).
 
@@ -50,8 +51,10 @@ def main() -> None:
         override_path = _CONFIG_DIR / f"{name}.yml"
         if not override_path.exists():
             raise FileNotFoundError(f"{override_path} does not exist")
+        pins_path = _CONFIG_DIR / f"{name}_pins.yml"
+        overrides = [override_path] + ([pins_path] if pins_path.exists() else [])
         out_path = out_dir / f"{name}_materialized.yml"
-        materialize_config(_CONFIG_DIR / "config.yml", [override_path], out_path)
+        materialize_config(_CONFIG_DIR / "config.yml", overrides, out_path)
         print(f"wrote {out_path}")
 
 

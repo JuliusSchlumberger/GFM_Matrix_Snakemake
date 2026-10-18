@@ -23,10 +23,6 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
 
 ## Open
 
-- **Two console messages disappeared with the partial path.** "flood_totals missing →
-  model_total_wet_km2 NaN" and "No coastal benchmark found for X" were only printed by
-  the deleted `validate_country()`. The national path now prints just "No extent rows
-  produced." Re-add them to the national path if you want them.
 - **Snakemake "code has changed" on locally produced simulation outputs** (Phase 5b): `run_eikonal.py`
   was rewritten into a thin wrapper, so e.g. bangkok_chao_phraya's 405 run_eikonal outputs dry-run as
   "Code has changed since last execution" (with `--rerun-triggers mtime params input software-env`
@@ -34,23 +30,15 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
   with the Phase 7a renames) via `snakemake --touch` - it writes Snakemake metadata next to P:\ outputs.
   The earlier "local path lacks the hop-0 fix" item was wrong (465dd93 only staged the file), so the
   deltas do not need a re-run.
+  Also covered by the same `--touch`: after re-materializing (2026-10-18, old values pinned in
+  `config/<name>_pins.yml`), `merge_chunk` reports "Params have changed" because its `pp_cfg`
+  param is the whole `postprocessing` section, which lost ~12 keys config.yml retired (e.g.
+  `overlap_corr_*`; no code reads them). No simulation is re-triggered.
 - **`generate_eikonal_jobs.generate_wave_dispatch` has 3 unused parameters** (`model_outputs`,
   `hop_by_tile`, `raster_config`; docstring says so). Left in place in Phase 7a on purpose:
   dropping them also means dropping the `generate_eikonal_jobs` rule's params, which re-triggers
   that rule. Remove together with the rule params when you next regenerate HPC dispatch anyway.
   (The audit's other "unused parameter", `connectivity_tiling`'s `dem_index`, is in fact used.)
-- **Scenario configs re-materialized 2026-10-18 (your decision): check the result-relevant changes.**
-  `materialize_configs.py` rebuilt all 6 `*_materialized.yml` from today's config.yml (old copies:
-  `.cleanup_baseline/materialized_backup_2026-10-18/`). Changes that alter results:
-  `simulation.flooding.friction_scale_factor` bangkok_chao_phraya 9 -> 12, thailand_bangkok 30 -> 12,
-  calibration_500_tiles 30 -> 12 (their override files don't pin it; 12 is config.yml's current,
-  calibrated default); `adaptation.slr_intensities` loses SLR_1500 for bangkok_chao_phraya and
-  thailand_bangkok; thailand_bangkok `tile_generation.min_split_gap_coarse_cells` 60 -> 10 (only if
-  tiles are regenerated); gbr_wales_scotland_friction9 `hpc.n_nodes` 35 -> 40; analysis output years
-  for all. Existing outputs of those scenarios were computed with the old values, so Snakemake now
-  plans re-runs (e.g. 90/91 run_eikonal jobs for thailand/chao_phraya, reason "Params have changed").
-  Either re-run them, or pin the old values in `<name>.yml` and re-materialize. Re-materialize on
-  Hydrax too (the configs are untracked there).
 - **Hydrax: check the shell-driver changes once after pulling Phase 6** (I could only test them
   locally against a fake tile tree with fake sbatch/python, where both branches matched the old
   behaviour). All Hydrax paths now live in `sfincs_tiles/hydrax_env.sh` (same values as before,
