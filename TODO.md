@@ -17,9 +17,7 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
    (Stale job files: done 2026-10-18 from Windows, see the Phase 7a/7b notes below.)
 4. **Snakemake "code changed" flags**: solved by `profiles/default/config.yaml` (auto-loaded,
    `rerun-triggers: [mtime, params, input, software-env]`). No `--touch` needed.
-5. **Decide:** re-materialize the scenario configs or not (item below); the `mdt_sign` test fixture;
-   the near-duplicates left in Phase 5d.
-6. Hydrax `gfm` env: `mamba install -n gfm pytest=8.4.2 ruff=0.12.0` (Phase 0 tooling).
+5. Hydrax `gfm` env: `mamba install -n gfm pytest=8.4.2 ruff=0.12.0` (Phase 0 tooling).
 
 ## Found during the docstring trim (code, not docs - not changed)
 
@@ -29,8 +27,6 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
   bangkok_chao_phraya (run 2026-10-08).
   Still at 30.0: calibration_500_tiles (solver studies, 2026-10-05). Re-run at 12.0
   = change the base config + its `*_pins.yml`, re-materialize, re-run.
-- `preparation/select_country_tiles.py`: GBR comment still says only Wales/Scotland benchmarks (England
-  FZ2/FZ3 exist now).
 - `src/population_growth.interpolate_growth_factor` docs say it returns `default` outside the year range;
   the code clamps. `src/tile_split.choose_split` docs say it raises; it falls back with a warning.
 - `sfincs_tiles/retry_io.retry_transient_io`: `retries` is total attempts, not retries.
@@ -51,17 +47,6 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
 
 ## Open
 
-- **Snakemake "code has changed" on locally produced simulation outputs** (Phase 5b): `run_eikonal.py`
-  was rewritten into a thin wrapper, so e.g. bangkok_chao_phraya's 405 run_eikonal outputs dry-run as
-  "Code has changed since last execution" (with `--rerun-triggers mtime params input software-env`
-  there is nothing to do, so inputs and outputs are untouched). Clear it once after the cleanup (item D,
-  with the Phase 7a renames) via `snakemake --touch` - it writes Snakemake metadata next to P:\ outputs.
-  The earlier "local path lacks the hop-0 fix" item was wrong (465dd93 only staged the file), so the
-  deltas do not need a re-run.
-  Also covered by the same `--touch`: after re-materializing (2026-10-18, old values pinned in
-  `config/<name>_pins.yml`), `merge_chunk` reports "Params have changed" because its `pp_cfg`
-  param is the whole `postprocessing` section, which lost ~12 keys config.yml retired (e.g.
-  `overlap_corr_*`; no code reads them). No simulation is re-triggered.
 - **`generate_eikonal_jobs.generate_wave_dispatch` has 3 unused parameters** (`model_outputs`,
   `hop_by_tile`, `raster_config`; docstring says so). Left in place in Phase 7a on purpose:
   dropping them also means dropping the `generate_eikonal_jobs` rule's params, which re-triggers
@@ -78,9 +63,8 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
   default SFINCS exe path (the test SKIPs when it's absent).
 - **Phase 7a renamed aqueduct -> eikonal** (files, rules, functions, config key). After pulling on
   Hydrax: (1) job files - checked 2026-10-18: no file in `model_outputs/hpc_jobs` calls the old
-  names, nothing to regenerate; (2) item D: Snakemake will flag
-  locally produced outputs of the renamed rule/scripts as "code changed" - outputs are unchanged,
-  clear it with `snakemake --touch` (or run with `--rerun-triggers mtime params input software-env`).
+  names, nothing to regenerate; (2) "code changed" flags on renamed rules/scripts are ignored via
+  `profiles/default/config.yaml`.
   `simulation.aqueduct_mem_estimate` was renamed `eikonal_mem_estimate`; rules/simulation.smk still
   falls back to the old key for configs materialized/resolved before the rename - drop the fallback
   once those are regenerated. `paths.aqueduct_root` was removed (no config used `{aqueduct_root}`);

@@ -55,7 +55,7 @@ adaptation analysis and benchmark validation. A separate SFINCS sub-pipeline
 - Local run: `python run_eikonal_dag.py`  or  `snakemake all --cores 4 --resources mem_mb=8000`
 - Tests: `pytest -m "not needs_pdrive"` in `gfm` (sfincs_* tests are skipped automatically);
   `pytest tests/sfincs_* -m "not needs_pdrive"` in `hydromt-sfincs-dev`.
-- Lint: `ruff check <files you touched>` must pass; `ruff check .` is not clean yet.
+- Lint: `ruff check .` must stay clean.
 - Progress monitors (`check_*_progress.py`, `sfincs_tiles/check_calibration_progress.py`):
   the user runs these themselves, usually on Hydrax. Give the command, don't run it.
 
@@ -107,8 +107,8 @@ Documentation is for future readers of the code, not a record of this session.
 - When unsure whether to document something: leave it out. Missing docs are
   cheap to add; noise is expensive to remove.
 
-## Ongoing cleanup
-`AUDIT.md` holds the repo audit, the user's final decisions (§7, §9) and the phased
-plan (§8). Execute one phase at a time, behaviour-preserving; log real changes that
-come up in `TODO.md` instead of making them. `.cleanup_baseline/` (gitignored) holds
-the pre-cleanup reference outputs that later phases are verified against.
+## Cleanup state
+`AUDIT.md` describes the current repo state, the rules for changes, the verification
+toolkit and the areas still to sweep. Changes stay behaviour-preserving; real
+(result-changing) issues go to `TODO.md` instead of being made. `.cleanup_baseline/`
+(gitignored) holds reference outputs and local test outputs.
