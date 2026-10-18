@@ -328,7 +328,6 @@ analysis: # Used by: analysis/run_analysis.py
   # All figures are written to visualization.output_dir directly (no subdirectories).
   plot_world_maps:       false  # world choropleth maps (slow for global runs)
 
-  avoid_worker_memory_budget_gb: 4 # avoid-strategy worker memory budget; informational only (printed)
 
 
 # ── VISUALISATION ─────────────────────────────────────────────────────────────
