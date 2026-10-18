@@ -4,10 +4,9 @@
 
 # ── DATA CATALOGS ─────────────────────────────────────────────────────────────
 paths:
-  # Machine-specific root directory for all project data and model outputs.
-  # Using config_local.yml (git-ignored) is the preferred way to override this per-machine, so that the repository clone can be shared across multiple machines without editing this file.
-  root: "D:/GFM"  # storage of outputs and input data
-  code_root: "C:/Users/Schlu005/GFM" # Root of the code
+  # Machine-specific: `root` (data + outputs) and `code_root` (repo checkout) have NO default
+  # here. Set them in config_local.yml (git-ignored; copy config_local.yml.example) or, for
+  # Hydrax, config_hpc.yml. Every {root}/{code_root} placeholder below resolves from those.
 
   hydromt_data_catalog: "snakemake_workflow/config/data_catalog_gfm.yml" # relative to the code root
 

@@ -234,7 +234,9 @@ def load_config(config_path: str | Path, extra_override: str | Path | None = Non
             override_config = yaml.safe_load(f) or {}
         config = _deep_merge(config, override_config)
 
-    root = config["paths"].get("root", "")
+    root = config["paths"].get("root")
+    if not root:
+        raise ValueError(f"{config_path}: paths.root is not set - create snakemake_workflow/config/config_local.yml (copy config_local.yml.example) or pass a config that sets it (config_hpc.yml / a materialized scenario config)")
     code_root = config["paths"].get("code_root", root)
     subs = {"root": root, "code_root": code_root}
     # processed_inputs_dir itself needs root/code_root expanded

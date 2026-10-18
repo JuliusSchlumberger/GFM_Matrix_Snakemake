@@ -1,9 +1,7 @@
 # ── Root path ─────────────────────────────────────────────────────────────────
 # Separate catalog from data_catalog_gfm.yml (not merged with it) because it
-# needs its own `root`. Overridden at load time by validation/validate_country.py via
-# config_utils.get_data_catalog(..., root=config["validation"]["benchmark_root"]) -
-# the value below is only the checked-in default for this machine.
-root: "P:/11212688-004-global-floodmaps/modelling/inputs/validation"
+# needs its own root: every loader passes config["validation"]["benchmark_root"]
+# (config_utils.get_data_catalog(..., root=...)), so there is no `root:` in this file.
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Benchmark flood-hazard-map metadata. Per-country/per-dataset transformation

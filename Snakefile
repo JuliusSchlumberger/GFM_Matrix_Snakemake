@@ -125,8 +125,10 @@ if "GFM_CONFIG_PATH" not in os.environ and os.path.exists(_LOCAL_CFG):
 # script receives absolute paths without knowing about the substitution scheme.
 # (`{aqueduct_root}`, for the old external Aqueduct build, was dropped 2026-10-18:
 # no config value used it.)
+if not config["paths"].get("root"):
+    raise ValueError("paths.root is not set - create snakemake_workflow/config/config_local.yml (copy config_local.yml.example) or pass a config that sets it (config_hpc.yml / a materialized scenario config)")
 _PATH_SUBS = {
-    "root": config["paths"].get("root", ""),
+    "root": config["paths"]["root"],
     "code_root": config["paths"].get("code_root", config["paths"].get("root", "")),
 }
 # processed_inputs_dir itself needs root/code_root expanded

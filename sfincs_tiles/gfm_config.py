@@ -30,7 +30,7 @@ def read_root(config_path: Path) -> Path:
     """
     with open(config_path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
-    root = cfg["paths"]["root"]
+    root = (cfg.get("paths") or {}).get("root")
 
     local_path = config_path.parent / "config_local.yml"
     if local_path.exists():
@@ -40,6 +40,8 @@ def read_root(config_path: Path) -> Path:
         if local_root:
             root = local_root
 
+    if not root:
+        raise ValueError(f"{config_path}: paths.root is not set - create snakemake_workflow/config/config_local.yml (copy config_local.yml.example) or pass a config that sets it (config_hpc.yml / a materialized scenario config)")
     return Path(root)
 
 

@@ -117,10 +117,11 @@ GFM_CONFIG_PATH=snakemake_workflow/config/thailand_bangkok_materialized.yml snak
 ## Configuration
 
 `snakemake_workflow/config/config.yml` is the single source of truth for
-every pipeline above (not just the Snakemake DAG). Override machine-specific
-values (`paths.root`, `paths.code_root`, ...) in
-`snakemake_workflow/config/config_local.yml` — gitignored, auto-loaded if
-present, never touch the committed `config.yml` for a per-machine value.
+every pipeline above (not just the Snakemake DAG). `paths.root` and
+`paths.code_root` have no default: set them in
+`snakemake_workflow/config/config_local.yml` (gitignored, auto-loaded; copy
+`config_local.yml.example`) - every entry point stops with a clear error if
+`paths.root` is missing. Never put per-machine values in the committed `config.yml`.
 `*_materialized.yml` are generated/untracked: never hand-edit them (rebuild with
 `snakemake_workflow/scripts/materialize_configs.py`). `config_hpc.yml` holds the
 Hydrax paths (tracked); for another cluster start from `config_hpc.yml.example`.

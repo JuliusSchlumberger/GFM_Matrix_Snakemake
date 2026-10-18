@@ -1,12 +1,8 @@
 # ── Root path ─────────────────────────────────────────────────────────────────
-# HydroMT prepends `root` to every relative `path:` entry.  Change this one
-# value when the project is moved to a machine with a different storage layout.
-# Paths that are already absolute (e.g. entries under GCFM_UU\raw_data below)
-# are left untouched by HydroMT regardless of this setting.
-#
-# To avoid editing this file at all, you can also load a machine-local catalog
-# override on top of this one — see the `configfile` / `--configfile` option.
-root: "D:/GFM"
+# HydroMT prepends a root to every relative `path:` entry. There is no `root:` in
+# this file: every loader passes config["paths"]["root"] explicitly
+# (src/config_utils.get_data_catalog(..., root=...)). Paths that are already
+# absolute (e.g. entries under GCFM_UU\raw_data below) are left untouched.
 
 # ──────────────────────────────────────────────────────────────────────────────
 

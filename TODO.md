@@ -45,10 +45,6 @@ AST/parity checks); nothing ran on Hydrax or wrote to P:\. Suggested order for y
   overridable via GFM_DATA_ROOT / GFM_CODE_ROOT / GFM_PYTHON / GFM_SFINCS_PYTHON). The two rerun
   scripts are merged into `sfincs_tiles/rerun_calibration.sh --part eikonal|sfincs`; the old names
   still work as wrappers. Suggested check: `DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part eikonal`.
-- **`config.yml` default paths left as they are** (`paths.root: D:/GFM`, `code_root:
-  C:/Users/Schlu005/GFM`): changing them could break a machine that relies on them without a
-  config_local.yml. New `config_local.yml.example` documents the override. Replace the defaults
-  with neutral placeholders if no machine uses them.
 - **Remaining machine-specific paths not moved to config** (deliberately): `run_bangkok_case_study.bat`'s
   `STUDY_ROOT` (case-study data on P:\), and `tests/sfincs_synthetic_end_to_end/test_sfincs_smoke.py`'s
   default SFINCS exe path (the test SKIPs when it's absent).
