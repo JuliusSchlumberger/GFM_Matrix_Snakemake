@@ -27,26 +27,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from aggregate_wet_tiles import aggregate_wet_tiles  # noqa: E402
 from config_utils import load_config  # noqa: E402
-from plot_sweep_budget_convergence import N_COMPLETE_ROUNDS, collect as collect_convergence  # noqa: E402
+from plot_sweep_budget_convergence import (  # noqa: E402
+    N_COMPLETE_ROUNDS, SWEEPS_PER_ROUND, band_stats, collect as collect_convergence, plot_band, read_trace_csv,
+)
 
 N_TILES_WANTED_DEFAULT = 500  # matches aggregate_wet_tiles.py's own default
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-SWEEPS_PER_ROUND = 4
 FLOOR = 1e-4  # log-scale display floor for panels (b)/(c)
 FLOOR_COUNT = 0.2  # log-scale display floor for panel (d)'s raw cell counts
 
 
 def _aggregate_to_rounds(csv_path: Path) -> pd.DataFrame | None:
     # Per 4-sweep round: max of change columns, sum of newly flooded, last n_inundated.
-    try:
-        df = pd.read_csv(csv_path)
-    except pd.errors.EmptyDataError:
-        return None
-    if df.empty or "sweep_max_change_raw" not in df.columns:
-        return None
-    if len(df) < SWEEPS_PER_ROUND:
-        return None  # dry tile
+    df = read_trace_csv(csv_path, "sweep_max_change_raw")
+    if df is None or len(df) < SWEEPS_PER_ROUND:
+        return None  # unreadable, or a dry tile
 
     tile_id = int(df["tile"].iloc[0])
     n_rounds = len(df) // SWEEPS_PER_ROUND
@@ -62,26 +58,6 @@ def _aggregate_to_rounds(csv_path: Path) -> pd.DataFrame | None:
             "round_n_inundated": chunk["n_inundated"].iloc[-1],
         })
     return pd.DataFrame.from_records(records)
-
-
-def _band_stats(long_df: pd.DataFrame, value_col: str) -> pd.DataFrame:
-    g = long_df.groupby("round")[value_col]
-    return pd.DataFrame({
-        "median": g.median(), "p02": g.quantile(0.02), "p98": g.quantile(0.98),
-        "min": g.min(), "max": g.max(), "n": g.count(),
-    })
-
-
-def _plot_band(ax, s: pd.DataFrame, color: str, label: str, floor: float | None = None, show_p02: bool = False) -> None:
-    lo, hi, med, p98 = s["min"], s["max"], s["median"], s["p98"]
-    if floor is not None:
-        lo, hi, med, p98 = (x.clip(lower=floor) for x in (lo, hi, med, p98))
-    ax.fill_between(s.index, lo, hi, alpha=0.15, color=color)
-    ax.plot(s.index, med, color=color, linewidth=2, label=f"{label} - median")
-    ax.plot(s.index, p98, color=color, linewidth=1.3, linestyle="--", label=f"{label} - 98th percentile")
-    if show_p02:
-        p02 = s["p02"].clip(lower=floor) if floor is not None else s["p02"]
-        ax.plot(s.index, p02, color=color, linewidth=1.3, linestyle="-.", label=f"{label} - 2nd percentile")
 
 
 def _plot_cdf(ax, cdf_df: pd.DataFrame, max_rounds: int) -> None:
@@ -120,7 +96,7 @@ def make_figure(long_df: pd.DataFrame, cdf_df: pd.DataFrame, epsilon: float, max
     ax.set_title("(a)", loc="left", fontweight="bold", fontsize=13)
 
     ax = axes[0, 1]
-    _plot_band(ax, _band_stats(long_df, "round_max_change"), "#d62728", "max_change (raw solver residual)", floor=FLOOR)
+    plot_band(ax, band_stats(long_df, "round_max_change", "round"), "#d62728", "max_change (raw solver residual)", floor=FLOOR)
     ax.axhline(epsilon, color="grey", linestyle=":", linewidth=1, label=f"epsilon ({epsilon}m)")
     ax.axvline(max_rounds, color="black", linestyle="--", linewidth=1.3, label=f"max_rounds={max_rounds}")
     ax.set_yscale("log")
@@ -131,7 +107,7 @@ def make_figure(long_df: pd.DataFrame, cdf_df: pd.DataFrame, epsilon: float, max
     ax.grid(True, alpha=0.3)
 
     ax = axes[1, 0]
-    _plot_band(ax, _band_stats(long_df, "round_max_depth_change_abs"), "#ff7f0e", "max_depth_change_abs (flood extent only)", floor=FLOOR)
+    plot_band(ax, band_stats(long_df, "round_max_depth_change_abs", "round"), "#ff7f0e", "max_depth_change_abs (flood extent only)", floor=FLOOR)
     ax.axhline(epsilon, color="grey", linestyle=":", linewidth=1, label=f"epsilon ({epsilon}m)")
     ax.axvline(max_rounds, color="black", linestyle="--", linewidth=1.3, label=f"max_rounds={max_rounds}")
     ax.set_yscale("log")
@@ -142,7 +118,7 @@ def make_figure(long_df: pd.DataFrame, cdf_df: pd.DataFrame, epsilon: float, max
     ax.grid(True, alpha=0.3)
 
     ax = axes[1, 1]
-    _plot_band(ax, _band_stats(long_df, "round_n_newly_flooded"), "#1f77b4", "newly flooded cells", floor=FLOOR_COUNT)
+    plot_band(ax, band_stats(long_df, "round_n_newly_flooded", "round"), "#1f77b4", "newly flooded cells", floor=FLOOR_COUNT)
     ax.axvline(max_rounds, color="black", linestyle="--", linewidth=1.3, label=f"max_rounds={max_rounds}")
     ax.set_yscale("log")
     ax.set_xlabel("round")

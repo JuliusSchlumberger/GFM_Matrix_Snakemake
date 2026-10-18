@@ -22,8 +22,10 @@ import numpy as np
 import pandas as pd
 from matplotlib.ticker import FuncFormatter, LogLocator, MaxNLocator
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import load_config  # noqa: E402
+from plot_sweep_budget_convergence import band_stats, plot_band, read_trace_csv  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 FLOOR_PCT = 1e-4  # log-scale display floor for panel (b)'s pct_newly_blocked
@@ -31,11 +33,8 @@ FLOOR_PCT = 1e-4  # log-scale display floor for panel (b)'s pct_newly_blocked
 
 def _load_tile_trace(csv_path: Path) -> pd.DataFrame | None:
     # Tiles whose n_outer=0 baseline is dry are excluded.
-    try:
-        df = pd.read_csv(csv_path)
-    except pd.errors.EmptyDataError:
-        return None
-    if df.empty:
+    df = read_trace_csv(csv_path)
+    if df is None:
         return None
     baseline_rows = df[df["n_outer"] == 0]
     if baseline_rows.empty:
@@ -50,24 +49,6 @@ def _load_tile_trace(csv_path: Path) -> pd.DataFrame | None:
         return None
     iters["tile"] = tile_id
     return iters[["tile", "n_outer", "pct_newly_blocked"]]
-
-
-def _band_stats(long_df: pd.DataFrame, value_col: str) -> pd.DataFrame:
-    g = long_df.groupby("n_outer")[value_col]
-    return pd.DataFrame({
-        "median": g.median(), "p02": g.quantile(0.02), "p98": g.quantile(0.98),
-        "min": g.min(), "max": g.max(), "n": g.count(),
-    })
-
-
-def _plot_band(ax, s: pd.DataFrame, color: str, label: str, floor: float | None = None) -> None:
-    lo, hi, med, p98, p02 = s["min"], s["max"], s["median"], s["p98"], s["p02"]
-    if floor is not None:
-        lo, hi, med, p98, p02 = (x.clip(lower=floor) for x in (lo, hi, med, p98, p02))
-    ax.fill_between(s.index, lo, hi, alpha=0.15, color=color, label="full range (min-max) across tiles")
-    ax.plot(s.index, med, color=color, linewidth=2, label=f"{label} - median")
-    ax.plot(s.index, p98, color=color, linewidth=1.3, linestyle="--", label=f"{label} - 98th percentile")
-    ax.plot(s.index, p02, color=color, linewidth=1.3, linestyle="-.", label=f"{label} - 2nd percentile")
 
 
 def _plot_convergence_bars(ax, final_iter: pd.Series, x_max: int) -> None:
@@ -99,7 +80,8 @@ def make_figure(long_df: pd.DataFrame, max_outer_iterations: int, outer_converge
     ax.grid(True, alpha=0.3, axis="y")
 
     ax = axes[1]
-    _plot_band(ax, _band_stats(long_df, "pct_newly_blocked"), "#ff7f0e", "newly blocked (% of tile)", floor=FLOOR_PCT)
+    plot_band(ax, band_stats(long_df, "pct_newly_blocked", "n_outer"), "#ff7f0e", "newly blocked (% of tile)", floor=FLOOR_PCT,
+              show_p02=True, range_label="full range (min-max) across tiles")
     ax.axhline(outer_convergence_pct, color="black", linestyle=":", linewidth=1.3,
                label=f"outer_convergence_pct={outer_convergence_pct}")
     ax.axvline(max_outer_iterations, color="black", linestyle="--", linewidth=1.3,
