@@ -17,6 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from hydromt.exceptions import NoDataException
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io  # noqa: E402
@@ -69,7 +70,9 @@ def sum_population_by_iso(
             pop_da = retry_transient_io(
                 catalog.get_rasterdataset, "population", bbox=bbox,
             ).squeeze(drop=True)
-        except Exception:
+        except NoDataException:
+            # Band outside WorldPop coverage; any other read error must abort, since a
+            # skipped band silently lowers the country totals.
             pop_da = None
         if pop_da is None or pop_da.size == 0:
             lat = lat_top
