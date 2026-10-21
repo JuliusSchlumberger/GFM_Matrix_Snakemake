@@ -20,10 +20,9 @@ the code is done; what remains needs you, the HPC cluster or `<data_root>`.
 5. **`<data_root>` cleanup:** `sfincs_smoke_test/` is no longer used; delete it if you like. When
    calibration stage 1 runs again, pass `--overwrite` so screen / pre-flight error records cached by
    earlier runs are recomputed.
-6. **Global deltas, now flood-hazard only** (protection standards and the design-event runs removed
-   on 2026-10-21): regenerate the delta CSV and figures from the existing ssp126/ssp245 simulations
-   ([running.md](docs/running.md#7-global-deltas)). The old CSV's extra protection columns go away
-   and `flooded_area_km2` becomes its former `flooded_area_km2_unprotected`.
+Global deltas are flood-hazard only; their CSV and figures were regenerated on 2026-10-21 from the
+existing ssp126/ssp245 simulations (`flooded_area_km2` = the former unprotected value; old files in
+`.cleanup_baseline/deltas_before_hazard_only/`).
 
 Done on 2026-10-18 (outputs regenerated with the new code, values identical to the previous files;
 old copies in `.cleanup_baseline/p_backup_regen/`): flood totals (cluster job), Bangkok case exposure,
