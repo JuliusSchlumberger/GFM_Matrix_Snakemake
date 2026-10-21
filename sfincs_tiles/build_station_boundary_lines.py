@@ -69,7 +69,7 @@ from gfm_config import read_root  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 
-# Re-exported for connected_forcing.py and analysis/compute_delta_flood_extent.py.
+# Re-exported for connected_forcing.py.
 from boundary_lines_geometry import (  # noqa: E402,F401
     BAY_CLOSE_M,
     Coast,
