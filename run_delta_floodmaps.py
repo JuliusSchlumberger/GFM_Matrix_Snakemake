@@ -11,8 +11,6 @@ Usage:
     python run_delta_floodmaps.py --cores 4 --mem-mb 24000
     python run_delta_floodmaps.py --skip-boundary-conditions --stages preprocess simulate
     python run_delta_floodmaps.py --stages postprocess       # re-run just one stage
-    # design-event floods (SLR_0) of the FLOPROS-protected deltas, after analysis/prepare_delta_design_runs.py:
-    python run_delta_floodmaps.py --scenarios design --stages boundary_conditions preprocess simulate
 """
 
 import argparse
@@ -24,9 +22,6 @@ REPO_ROOT = Path(__file__).resolve().parent
 CONFIG_DIR = REPO_ROOT / "snakemake_workflow" / "config"
 
 ALL_SCENARIOS = ["ssp126", "ssp245"]
-# "design": SLR_0 design-event floods for FLOPROS-protected deltas; config written by
-# analysis/prepare_delta_design_runs.py.
-EXTRA_SCENARIOS = ["design"]
 ALL_STAGES = ["boundary_conditions", "preprocess", "simulate", "postprocess"]
 
 # Keeps each call under Windows' ~32,767-char CreateProcess limit (~130 chars/path).
@@ -88,8 +83,7 @@ def run_scenario(scenario: str, cores: int, mem_mb: int | None, stages: list[str
     if not materialized.exists():
         raise FileNotFoundError(
             f"{materialized} does not exist - run "
-            + ("analysis/prepare_delta_design_runs.py" if scenario in EXTRA_SCENARIOS
-               else f"snakemake_workflow/scripts/materialize_configs.py deltas_{scenario}") + " first."
+            f"snakemake_workflow/scripts/materialize_configs.py deltas_{scenario} first."
         )
 
     env = os.environ.copy()
@@ -121,8 +115,7 @@ def run_scenario(scenario: str, cores: int, mem_mb: int | None, stages: list[str
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--scenarios", nargs="+", choices=ALL_SCENARIOS + EXTRA_SCENARIOS, default=ALL_SCENARIOS,
-                        help="'design' = design-event floods for the protected deltas (prepare_delta_design_runs.py)")
+    parser.add_argument("--scenarios", nargs="+", choices=ALL_SCENARIOS, default=ALL_SCENARIOS)
     parser.add_argument("--stages", nargs="+", choices=ALL_STAGES, default=ALL_STAGES)
     parser.add_argument("--cores", type=int, default=4)
     parser.add_argument("--mem-mb", type=int, default=None)

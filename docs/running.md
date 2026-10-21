@@ -208,4 +208,18 @@ python preparation/build_delta_tile_subset.py
 python run_delta_floodmaps.py [--scenarios ssp126 ssp245] [--stages ...] [--cores 4] [--mem-mb <MB>] [--skip-boundary-conditions]
 ```
 
-Design-event floods of the FLOPROS-protected deltas: `python analysis/prepare_delta_design_runs.py`, then `python run_delta_floodmaps.py --scenarios design --stages boundary_conditions preprocess simulate`.
+The delta results are flood hazard only: no protection standards are applied. From the simulated tiles, per delta, scenario and SLR level (all RP100):
+
+```
+python analysis/compute_delta_flood_extent.py [--scenarios ssp126 ssp245] [--delta-ids <id> ...] [--out <csv>]
+python analysis/add_slr_year_column.py [--csv <csv>]
+python analysis/plot_delta_affected_fraction_timeseries.py [--csv <csv>] [--out <png>]
+python analysis/plot_delta_flood_map.py [--csv <csv>] [--out-dir <dir>]
+```
+
+| Script | Writes (default under `<data_root>/deltas_floodmaps/`) |
+|---|---|
+| `compute_delta_flood_extent.py` | `delta_flood_extent.csv`: `flooded_area_km2` (merged depth > 0 inside the delta polygon) and `pct_flooded_of_modeled_area` (of the tile-covered part of the polygon, `delta_area_km2_modeled`) |
+| `add_slr_year_column.py` | adds `year_slr_reached_median` to the CSV in place (NaN beyond 2150) |
+| `plot_delta_affected_fraction_timeseries.py` | `figures/delta_affected_fraction_timeseries.png`: % flooded over time on the median AR6 SLR trajectory |
+| `plot_delta_flood_map.py` | `figures/delta_flood_pct_<ssp>.png`: world maps of % flooded per SLR level |

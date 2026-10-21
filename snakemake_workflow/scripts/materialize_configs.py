@@ -2,8 +2,7 @@
 
 Each output is config.yml + config_local.yml + the override + optional `<name>_pins.yml`
 (values pinned to what the scenario's existing outputs were computed with), deep-merged
-like load_config. Point GFM_CONFIG_PATH at it. `deltas_design_materialized.yml` is not
-built here (analysis/prepare_delta_design_runs.py writes it).
+like load_config. Point GFM_CONFIG_PATH at it.
 
 Usage:
     python snakemake_workflow/scripts/materialize_configs.py              # every known scenario

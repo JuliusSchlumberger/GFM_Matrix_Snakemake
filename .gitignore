@@ -51,8 +51,7 @@ snakemake_workflow/.snakemake/
 
 # Generated / machine-specific config (cleanup Phase 1, AUDIT.md Q7/Q8).
 # *_materialized.yml: written
-# by snakemake_workflow/scripts/materialize_configs.py (deltas_design: by
-# analysis/prepare_delta_design_runs.py).
+# by snakemake_workflow/scripts/materialize_configs.py.
 snakemake_workflow/config/*_materialized.yml
 
 # Run logs and regenerable outputs (cleanup Phase 1, AUDIT.md Q9)

@@ -35,7 +35,7 @@ truth), `config_local.yml` (gitignored, machine paths), `config_hpc.yml` (gitign
 from `config_hpc.example.yml`),
 `<scenario>.yml` + `<scenario>_pins.yml` -> generated `<scenario>_materialized.yml`
 (bangkok_chao_phraya, calibration_500_tiles, deltas_ssp126, deltas_ssp245;
-deltas_design is written by `analysis/prepare_delta_design_runs.py`).
+the former deltas_design scenario was removed on 2026-10-21, deltas are flood-hazard only).
 `profiles/default/config.yaml` sets Snakemake rerun triggers (see section 4).
 
 ## 2. Already done (do not redo)

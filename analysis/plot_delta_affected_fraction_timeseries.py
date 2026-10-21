@@ -1,5 +1,8 @@
 """Plot % flooded delta area over time, one panel per ssp_scenario.
 
+Reads pct_flooded_of_modeled_area from compute_delta_flood_extent.py's CSV: RP100 flood
+hazard only (depth > 0, no protection standards), as % of the tile-covered delta area.
+
 pct_flooded(year) chains two interpolations without extrapolation: year -> SLR (mm)
 on the AR6 median trajectory (2020-2150), then SLR -> pct_flooded on each delta's
 simulated SLR_0..2000 points (medians stay below ~870 mm by 2150). pct_flooded per SLR
