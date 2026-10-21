@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import load_config, retry_transient_io  # noqa: E402
 from merge import EIKONAL_NODATA, _make_chunk_transform, _open_overlapping_tiles, _tile_id_from_path  # noqa: E402
 from pipeline_plots import pixel_area_km2_grid  # noqa: E402
-from rasters import polygon_domain_mask  # noqa: E402
+from rasters import decode_waterdepth_cm, polygon_domain_mask  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 RETURN_PERIOD = "RP100"
@@ -81,7 +81,8 @@ def merge_in_memory(model_outputs: Path, slr: str, out_w: int, out_h: int,
 
     Same rule as merge.merge_tile_rasters_chunk (tiles overlap; summing double
     counts). Safe in memory only because a delta bbox is small (Amazon ~287M px
-    at 30 m). NaN where no tile reaches a cell; None if no tile has this SLR.
+    at 30 m). int16-cm tiles are decoded, so their 'not computed' value is nodata, not
+    flooded. NaN where no tile reaches a cell; None if no tile has this SLR.
     """
     best = np.full((out_h, out_w), -np.inf, dtype="float64")
     covered = np.zeros((out_h, out_w), dtype=bool)
@@ -93,7 +94,8 @@ def merge_in_memory(model_outputs: Path, slr: str, out_w: int, out_h: int,
             continue
         any_found = True
         with rasterio.open(path) as src:
-            patch = src.read(1, window=Window(src_c0, src_r0, n_cols, n_rows)).astype("float64")
+            raw = src.read(1, window=Window(src_c0, src_r0, n_cols, n_rows))
+        patch = (decode_waterdepth_cm(raw) if raw.dtype == np.int16 else raw).astype("float64")
         valid = patch < EIKONAL_NODATA
         sl = (slice(row_off, row_off + n_rows), slice(col_off, col_off + n_cols))
         sub_best = best[sl]
