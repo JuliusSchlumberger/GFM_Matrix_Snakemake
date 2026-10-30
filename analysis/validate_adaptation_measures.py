@@ -52,7 +52,9 @@ INITIAL_WET_VALUE = 0.12
 ACTIVATION_PROB = 0.30     # per-step chance a dry neighbour of a wet cell activates
 WET_GROWTH_FACTOR = 1.3    # per-step multiplicative growth of already-wet cells
 
-# Isolines every CONTOUR_STEP people, offset from today's no-adaptation EAI so one line marks it.
+# Illustrative tipping point (people): white on the colour scale, blue below, increasingly red above.
+TIPPING_POINT = 300.0
+# Isolines every CONTOUR_STEP people, offset so one line marks the tipping point.
 CONTOUR_STEP = 200.0
 
 MEASURES = ["baseline", "protect", "avoid", "retreat", "protect_avoid"]
@@ -159,7 +161,7 @@ def plot_conceptual_grid(
     slr_x = SLR_MM / 1000.0
     gr_y = GROWTH_RATES * 100.0
     extent = [slr_x[0], slr_x[-1], gr_y[0], gr_y[-1]]
-    norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+    norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=vcenter, vmax=vmax)
 
     fig, axes = plt.subplots(len(FIGURE_ROWS), len(FIGURE_COLUMNS), figsize=(21, 11.5),
                              sharex=True, sharey=True, gridspec_kw={"hspace": 0.12, "wspace": 0.08})
@@ -190,7 +192,8 @@ def plot_conceptual_grid(
                             fontsize=20, fontweight="bold")
 
     cbar = fig.colorbar(im, ax=axes, fraction=0.025, pad=0.02)
-    cbar.set_ticks([])
+    cbar.set_ticks([vcenter])
+    cbar.set_ticklabels(["tipping\npoint"], fontsize=15)
     cbar.set_label("Expected annual impact (people)", fontsize=17)
     cbar.ax.text(0.5, -0.015, "lower", transform=cbar.ax.transAxes, ha="center", va="top", fontsize=15)
     cbar.ax.text(0.5, 1.015, "higher", transform=cbar.ax.transAxes, ha="center", va="bottom", fontsize=15)
@@ -251,16 +254,13 @@ def main() -> None:
             print(f"  {mode} / {measure} == {ref}: {'OK' if ok else f'VIOLATED (max rel diff {rel:.2%})'}")
     print("  ALL PASS" if all_ok else "  SOME INVARIANTS VIOLATED - see above")
 
-    # One colour scale and one set of isolines for every panel. White is today's no-adaptation
-    # EAI; the scale is symmetric about it (equal people per shade of blue and red) and reaches
-    # the largest panel value, so nothing saturates.
-    zero_growth_idx = int(np.argmin(np.abs(GROWTH_RATES)))
-    diverging_center = float(matrices[("Population driven", "baseline")][zero_growth_idx, 0])
+    # One colour scale and one set of isolines for every panel: 0 to the largest panel value
+    # (nothing saturates), white at the tipping point.
+    diverging_center = TIPPING_POINT
     data_min = min(float(m.min()) for m in matrices.values())
     data_max = max(float(m.max()) for m in matrices.values())
-    half_range = np.ceil((data_max - diverging_center) / 100.0) * 100.0
-    global_vmax = diverging_center + half_range
-    diverging_vmin = diverging_center - half_range
+    global_vmax = max(np.ceil(data_max / 100.0) * 100.0, diverging_center + 100.0)
+    diverging_vmin = 0.0
     k = np.arange(np.floor((data_min - diverging_center) / CONTOUR_STEP),
                   np.ceil((data_max - diverging_center) / CONTOUR_STEP) + 1)
     contour_levels = diverging_center + CONTOUR_STEP * k
