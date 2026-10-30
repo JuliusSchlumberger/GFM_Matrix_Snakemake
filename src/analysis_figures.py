@@ -254,6 +254,7 @@ def plot_burning_ember(
     diverging_center: float | None = None,
     diverging_vmin: float | None = None,
     contour_vmax: float | None = None,
+    contour_levels: np.ndarray | None = None,
 ) -> plt.Figure:
     """Plot the burning-ember impact matrix: EAI over SLR x population growth.
 
@@ -264,7 +265,7 @@ def plot_burning_ember(
     GridSpec column so both panels keep identical widths for `sharex`.
     `diverging_center` switches to RdBu_r centred on that EAI (`diverging_vmin` fixes
     the low end across panels); `contour_vmax` places contour levels independently
-    of the shared colour vmax.
+    of the shared colour vmax; `contour_levels` overrides both with fixed EAI levels.
     """
     colors_ = ssp_colors or _DEFAULT_SLR_COLORS
     if highlight_years is None:
@@ -322,11 +323,15 @@ def plot_burning_ember(
 
     contour_lo = diverging_center if diverging_center is not None else 0.0
     contour_hi = contour_vmax if contour_vmax is not None else vmax_c
-    levels = np.linspace(contour_lo, contour_hi, n_contours + 1)[1:]
-    cs = ax.contour(slr_x, gr_y, matrix, levels=levels, colors="k", linewidths=1.1, alpha=0.75)
-    clabels = ax.clabel(cs, inline=True, fontsize=max(7, fontsize - 1), fmt=lambda v: f"{v:,.0f}")
-    for lbl in clabels:
-        lbl.set_bbox(dict(facecolor="white", edgecolor="none", alpha=0.7, pad=1))
+    if contour_levels is not None:
+        levels = np.asarray(contour_levels, dtype=float)
+    else:
+        levels = np.linspace(contour_lo, contour_hi, n_contours + 1)[1:]
+    if levels.size:
+        cs = ax.contour(slr_x, gr_y, matrix, levels=levels, colors="k", linewidths=1.1, alpha=0.75)
+        clabels = ax.clabel(cs, inline=True, fontsize=max(7, fontsize - 1), fmt=lambda v: f"{v:,.0f}")
+        for lbl in clabels:
+            lbl.set_bbox(dict(facecolor="white", edgecolor="none", alpha=0.7, pad=1))
 
     if slr_trajectories is not None and ssp_growth is not None:
         line_cutoff = max(highlight_years)

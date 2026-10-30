@@ -52,6 +52,9 @@ INITIAL_WET_VALUE = 0.12
 ACTIVATION_PROB = 0.30     # per-step chance a dry neighbour of a wet cell activates
 WET_GROWTH_FACTOR = 1.3    # per-step multiplicative growth of already-wet cells
 
+# Isolines every CONTOUR_STEP people, offset from today's no-adaptation EAI so one line marks it.
+CONTOUR_STEP = 200.0
+
 MEASURES = ["baseline", "protect", "avoid", "retreat", "protect_avoid"]
 MODES = ["SLR driven", "Population driven", "Mixed drivers"]
 
@@ -148,7 +151,7 @@ def compute_eai_matrix(
 
 def plot_conceptual_grid(
     matrices: dict[tuple[str, str], np.ndarray], out_path: Path,
-    vmin: float, vcenter: float, vmax: float, n_contours: int = 9,
+    vmin: float, vcenter: float, vmax: float, contour_levels: np.ndarray,
 ) -> None:
     """Plot all 15 panels as one unnumbered manuscript figure (.png and .pdf)."""
     import matplotlib.colors as mcolors
@@ -156,7 +159,7 @@ def plot_conceptual_grid(
     slr_x = SLR_MM / 1000.0
     gr_y = GROWTH_RATES * 100.0
     extent = [slr_x[0], slr_x[-1], gr_y[0], gr_y[-1]]
-    norm = mcolors.TwoSlopeNorm(vmin=min(vmin, vcenter - 1e-9), vcenter=vcenter, vmax=max(vmax, vcenter + 1e-9))
+    norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
 
     fig, axes = plt.subplots(len(FIGURE_ROWS), len(FIGURE_COLUMNS), figsize=(21, 11.5),
                              sharex=True, sharey=True, gridspec_kw={"hspace": 0.12, "wspace": 0.08})
@@ -167,10 +170,10 @@ def plot_conceptual_grid(
             matrix = matrices[(mode, measure)]
             im = ax.imshow(matrix, origin="lower", aspect="auto", extent=extent, cmap="RdBu_r", norm=norm,
                            interpolation="bilinear")
-            hi = float(matrix.max()) or 1.0
-            levels = np.linspace(vcenter, hi, n_contours + 1)[1:]
-            if hi > vcenter:
-                ax.contour(slr_x, gr_y, matrix, levels=levels, colors="k", linewidths=1.0, alpha=0.7)
+            levels = contour_levels[(contour_levels > matrix.min()) & (contour_levels < matrix.max())]
+            if levels.size:
+                widths = np.where(np.isclose(levels, vcenter), 2.2, 0.9)
+                ax.contour(slr_x, gr_y, matrix, levels=levels, colors="k", linewidths=widths, alpha=0.7)
             ax.axhline(0.0, color="0.25", linestyle="--", linewidth=1.0)
             ax.set_xticks([])
             ax.set_yticks([0.0])
@@ -219,18 +222,6 @@ def main() -> None:
         for measure in MEASURES:
             matrices[(mode, measure)] = compute_eai_matrix(measure, mode, ff_sequence, population)
 
-    # Shared colour scale across panels; contour levels per panel (contour_vmax).
-    global_vmax = 1500.0
-    print(f"\nGlobal vmax (shared colour scale): {global_vmax:,.0f}")
-
-    mode_vmax = {
-        mode: max(float(matrices[(mode, m)].max()) for m in MEASURES) or 1.0
-        for mode in MODES
-    }
-    print("Per-mode max (used for contour spacing only):")
-    for mode, vmax in mode_vmax.items():
-        print(f"  {mode}: {vmax:,.0f}")
-
     print("\nSense-check numbers (max-severity, max-growth corner):")
     for mode in MODES:
         row = {m: matrices[(mode, m)][-1, -1] for m in MEASURES}
@@ -260,14 +251,22 @@ def main() -> None:
             print(f"  {mode} / {measure} == {ref}: {'OK' if ok else f'VIOLATED (max rel diff {rel:.2%})'}")
     print("  ALL PASS" if all_ok else "  SOME INVARIANTS VIOLATED - see above")
 
-    # vmin/vcenter anchored on "Population driven" (growth is its only driver).
+    # One colour scale and one set of isolines for every panel. White is today's no-adaptation
+    # EAI; the scale is symmetric about it (equal people per shade of blue and red) and reaches
+    # the largest panel value, so nothing saturates.
     zero_growth_idx = int(np.argmin(np.abs(GROWTH_RATES)))
-    pop_driven_matrices = [matrices[("Population driven", m)] for m in MEASURES]
-    diverging_vmin = min(float(m.min()) for m in pop_driven_matrices)
     diverging_center = float(matrices[("Population driven", "baseline")][zero_growth_idx, 0])
+    data_min = min(float(m.min()) for m in matrices.values())
+    data_max = max(float(m.max()) for m in matrices.values())
+    half_range = np.ceil((data_max - diverging_center) / 100.0) * 100.0
+    global_vmax = diverging_center + half_range
+    diverging_vmin = diverging_center - half_range
+    k = np.arange(np.floor((data_min - diverging_center) / CONTOUR_STEP),
+                  np.ceil((data_max - diverging_center) / CONTOUR_STEP) + 1)
+    contour_levels = diverging_center + CONTOUR_STEP * k
     print(
-        f"\nShared diverging colour scale: vmin={diverging_vmin:,.0f}, "
-        f"vcenter={diverging_center:,.0f}, vmax={global_vmax:,.0f}"
+        f"\nShared colour scale: vmin={diverging_vmin:,.0f}, white={diverging_center:,.0f}, "
+        f"vmax={global_vmax:,.0f}; isolines every {CONTOUR_STEP:,.0f}"
     )
 
     for mode in MODES:
@@ -279,18 +278,18 @@ def main() -> None:
                 matrix, SLR_MM, GROWTH_RATES,
                 title=f"{mode} — {measure}",
                 vmax=global_vmax, dpi=150, figsize=(7, 5.5),
-                n_contours=9, fontsize=13,
+                fontsize=13,
                 diverging_center=diverging_center,
                 diverging_vmin=diverging_vmin,
-                # levels start at diverging_center; panels wholly below it get none
-                contour_vmax=max(float(matrix.max()), diverging_center * 1.05),
+                contour_levels=contour_levels[(contour_levels > matrix.min()) & (contour_levels < matrix.max())],
             )
             fig.savefig(out_path, bbox_inches="tight")
             plt.close(fig)
             print(f"  wrote {out_path.name}")
 
     plot_conceptual_grid(matrices, out_dir / "validation_grid_5x3.png",
-                         vmin=diverging_vmin, vcenter=diverging_center, vmax=global_vmax)
+                         vmin=diverging_vmin, vcenter=diverging_center, vmax=global_vmax,
+                         contour_levels=contour_levels)
 
 
 if __name__ == "__main__":
