@@ -54,7 +54,7 @@ WET_GROWTH_FACTOR = 1.3    # per-step multiplicative growth of already-wet cells
 
 # Illustrative tipping point (people): white on the colour scale, blue below, increasingly red above.
 TIPPING_POINT = 300.0
-# Isolines every CONTOUR_STEP people, offset so one line marks the tipping point.
+# Isolines every CONTOUR_STEP people, offset so one of them lies on the tipping point.
 CONTOUR_STEP = 200.0
 
 MEASURES = ["baseline", "protect", "avoid", "retreat", "protect_avoid"]
@@ -174,8 +174,7 @@ def plot_conceptual_grid(
                            interpolation="bilinear")
             levels = contour_levels[(contour_levels > matrix.min()) & (contour_levels < matrix.max())]
             if levels.size:
-                widths = np.where(np.isclose(levels, vcenter), 2.2, 0.9)
-                ax.contour(slr_x, gr_y, matrix, levels=levels, colors="k", linewidths=widths, alpha=0.7)
+                ax.contour(slr_x, gr_y, matrix, levels=levels, colors="k", linewidths=1.0, alpha=0.7)
             ax.axhline(0.0, color="0.25", linestyle="--", linewidth=1.0)
             ax.set_xticks([])
             ax.set_yticks([0.0])
