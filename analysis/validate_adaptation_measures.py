@@ -191,8 +191,8 @@ def plot_conceptual_grid(
                             fontsize=20, fontweight="bold")
 
     cbar = fig.colorbar(im, ax=axes, fraction=0.025, pad=0.02)
-    cbar.set_ticks([vcenter])
-    cbar.set_ticklabels(["tipping\npoint"], fontsize=15)
+    cbar.ax.set_yscale("linear")  # bar length proportional to people, not two equal halves
+    cbar.set_ticks([])
     cbar.set_label("Expected annual impact (people)", fontsize=17)
     cbar.ax.text(0.5, -0.015, "lower", transform=cbar.ax.transAxes, ha="center", va="top", fontsize=15)
     cbar.ax.text(0.5, 1.015, "higher", transform=cbar.ax.transAxes, ha="center", va="bottom", fontsize=15)
