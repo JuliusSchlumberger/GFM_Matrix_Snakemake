@@ -308,7 +308,7 @@ VALIDATION_LABELS = {("landcover", 9.0): "land-cover fsf 9", ("landcover", 12.0)
                      ("B_uniform_a1", 0.1): "B a=1, uniform 0.1"}
 
 
-def plot_validation(df_fit: pd.DataFrame, results_dir: Path, fig_dir: Path) -> None:
+def plot_validation(df_fit: pd.DataFrame, worst: list[str], results_dir: Path, fig_dir: Path) -> None:
     path, sample_path = results_dir / "results_validation.jsonl", results_dir / "sample_validation.json"
     if not path.exists() or not sample_path.exists():
         return
@@ -324,22 +324,25 @@ def plot_validation(df_fit: pd.DataFrame, results_dir: Path, fig_dir: Path) -> N
         if fit.empty or oos.empty:
             continue
         rows.append({"config": label, "variant": variant, "param": param,
-                     **metrics(fit).add_suffix("_fit"), **metrics(oos).add_suffix("_validation"),
+                     **metrics(fit).add_suffix("_fit"), **metrics(fit[~fit.tile_id.isin(worst)]).add_suffix("_fit_random"),
+                     **metrics(oos).add_suffix("_validation"),
                      "median_tile_CSI_validation": tile_csi(oos).median()})
     table = pd.DataFrame(rows)
     table.to_csv(fig_dir / "V1_table_in_vs_out_of_sample.csv", index=False)
     x = np.arange(len(table))
     fig, axes = plt.subplots(1, 3, figsize=(19, 5.5), gridspec_kw={"width_ratios": [1, 1, 1.3]})
     for ax, key in zip(axes[:2], ["CSI", "bias"]):
-        ax.bar(x - 0.2, table[f"{key}_fit"], 0.4, color="0.6",
-               label=f"fitting sample ({int(table.n_tiles_fit.max())} tiles)")
-        ax.bar(x + 0.2, table[f"{key}_validation"], 0.4, color="tab:blue",
-               label=f"fresh tiles ({int(table.n_tiles_validation.max())})")
+        ax.bar(x - 0.27, table[f"{key}_fit"], 0.27, color="0.75",
+               label=f"fitting sample ({int(table.n_tiles_fit.max())} tiles incl. 12 worst)")
+        ax.bar(x, table[f"{key}_fit_random"], 0.27, color="0.45",
+               label=f"fitting sample, random tiles only ({int(table.n_tiles_fit_random.max())})")
+        ax.bar(x + 0.27, table[f"{key}_validation"], 0.27, color="tab:blue",
+               label=f"fresh random tiles ({int(table.n_tiles_validation.max())})")
         ax.set_xticks(x)
         ax.set_xticklabels(table.config, rotation=35, ha="right", fontsize=8)
         ax.set_title(f"pooled {key}")
         ax.grid(alpha=0.3, axis="y")
-    axes[0].set_ylim(0.4, 0.8)
+    axes[0].set_ylim(0.4, 0.85)
     axes[1].axhline(1.0, color="k", lw=0.8)
     axes[0].legend(fontsize=8)
     per_tile = [tile_csi(val[(val.variant == v) & (val.param == p)]).dropna()
@@ -432,7 +435,7 @@ def main() -> None:
     plot_c3_basins(results_dir, fig_dir)
     plot_maps(results_dir, fig_dir)
     plot_final_maps(results_dir, fig_dir)
-    plot_validation(df, results_dir, fig_dir)
+    plot_validation(df, worst, results_dir, fig_dir)
     print(f"{df.tile_id.nunique()} tiles, {len(errors)} errors; figures in {fig_dir}")
 
 
