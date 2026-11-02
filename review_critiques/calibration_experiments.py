@@ -193,7 +193,7 @@ def run_tile_extended(tile_id: str, out_dir: str, save_maps: bool) -> list[dict]
     return records
 
 
-def run_tile_validation(tile_id: str, out_dir: str, save_maps: bool) -> list[dict]:
+def run_tile_validation(tile_id: str, out_dir: str, save_maps: bool, configs: list | None = None) -> list[dict]:
     """Out-of-sample stage: the candidate configurations (VALIDATION_CONFIGS) on fresh tiles."""
     t0 = time.perf_counter()
     t = load_tile(tile_id)
@@ -208,7 +208,7 @@ def run_tile_validation(tile_id: str, out_dir: str, save_maps: bool) -> list[dic
 
     records = []
     base_depths = {}
-    for variant, param, alpha in VALIDATION_CONFIGS:
+    for variant, param, alpha in VALIDATION_CONFIGS if configs is None else configs:
         is_uniform = variant.startswith("uniform") or variant.startswith("B_uniform")
         if is_uniform:
             friction = np.full(t["dem"].shape, param * t["cell_m"] / 1000)
@@ -225,6 +225,32 @@ def run_tile_validation(tile_id: str, out_dir: str, save_maps: bool) -> list[dic
     return records
 
 
+def run_tile_maps(tile_id: str, out_dir: str, save_maps: bool) -> list[dict]:
+    """Map stage: depth maps and B friction multipliers of the best configurations."""
+    t0 = time.perf_counter()
+    t = load_tile(tile_id)
+    if t["seeds"] is None:
+        return [{"tile_id": tile_id, "variant": "no_seeds"}]
+    sources = np.zeros(t["dem"].shape, dtype=bool)
+    sources[t["seeds"][0], t["seeds"][1]] = True
+    fill = spill_level(t["dem"], sources | (t["mask"] == rcm.OCEAN_CODE))
+
+    def hydro_cells(rows, cols):
+        return t["series"], t["point_tree"].query(np.column_stack([rows, cols]))[1]
+
+    uniform = np.full(t["dem"].shape, 0.1 * t["cell_m"] / 1000)
+    maps = {"sfincs": t["sfincs"], "landcover_fsf12": solve(t, t["friction"] * 12.0)}
+    for key, friction in [("lc_fsf9", t["friction"] * 9.0), ("uniform_0.1", uniform)]:
+        base = solve(t, friction)
+        mult = duration_friction_multiplier(base, t["dem"], fill, hydro_cells, t["dt_s"], B_T_REF_S, 0.5)
+        maps[key], maps[f"mult_{key}"], maps[f"B_{key}_a0.5"] = base, mult, solve(t, friction * mult)
+    k = MAP_TILES_DOWNSAMPLE
+    np.savez_compressed(Path(out_dir) / "maps_final" / f"{tile_id}.npz",
+                        dem=t["dem"][::k, ::k], score=t["score"][::k, ::k], fill=fill[::k, ::k],
+                        **{n: a[::k, ::k].astype(np.float16) for n, a in maps.items()})
+    return [{"tile_id": tile_id, "variant": "maps", "elapsed_s_tile": round(time.perf_counter() - t0, 1)}]
+
+
 # (variant, fsf or m/km, B alpha or None), chosen from the main and extended stages.
 VALIDATION_CONFIGS = [
     ("landcover", 9.0, None),
@@ -237,8 +263,24 @@ VALIDATION_CONFIGS = [
     ("B_uniform_a1", 0.1, 1.0),
 ]
 
+# Brackets the uniform-rate optimum with and without B on the fitting sample.
+BRACKET_CONFIGS = [
+    ("uniform", 0.125, None),
+    ("B_uniform_a0.5", 0.075, 0.5),
+    ("B_uniform_a0.5", 0.125, 0.5),
+    ("B_uniform_a1", 0.075, 1.0),
+    ("B_uniform_a1", 0.125, 1.0),
+]
+
+
+def run_tile_bracket(tile_id: str, out_dir: str, save_maps: bool) -> list[dict]:
+    return run_tile_validation(tile_id, out_dir, save_maps, BRACKET_CONFIGS)
+
+
 STAGES = {"main": (run_tile, "results.jsonl"), "extended": (run_tile_extended, "results_extended.jsonl"),
-          "validation": (run_tile_validation, "results_validation.jsonl")}
+          "bracket": (run_tile_bracket, "results_bracket.jsonl"),
+          "validation": (run_tile_validation, "results_validation.jsonl"),
+          "maps": (run_tile_maps, "maps_final_log.jsonl")}
 
 
 def select_tiles(n_random: int, seed: int = 0) -> tuple[list[str], set[str]]:
@@ -271,9 +313,12 @@ def main() -> None:
     run_fn, results_name = STAGES[args.stage]
     out_dir = Path(args.out_dir)
     (out_dir / "maps").mkdir(parents=True, exist_ok=True)
+    (out_dir / "maps_final").mkdir(parents=True, exist_ok=True)
     tiles, worst = select_tiles(args.n_random)
     if args.stage == "validation":
         tiles, worst = select_validation_tiles(args.n_random, set(tiles)), set()
+    elif args.stage == "maps":
+        tiles = sorted(worst)
     if args.tile_ids:
         tiles = args.tile_ids
     results = out_dir / results_name
@@ -281,8 +326,9 @@ def main() -> None:
     if results.exists():
         done = {json.loads(line)["tile_id"] for line in results.read_text().splitlines() if line.strip()}
     todo = [t for t in tiles if t not in done]
-    sample_name = "sample_validation.json" if args.stage == "validation" else "sample.json"
-    (out_dir / sample_name).write_text(json.dumps({"tiles": tiles, "worst": sorted(worst)}, indent=1))
+    if args.stage != "maps":
+        sample_name = "sample_validation.json" if args.stage == "validation" else "sample.json"
+        (out_dir / sample_name).write_text(json.dumps({"tiles": tiles, "worst": sorted(worst)}, indent=1))
     print(f"{len(todo)} of {len(tiles)} tiles to run, {args.workers} workers", flush=True)
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         futures = {pool.submit(run_fn, t, str(out_dir), t in worst): t for t in todo}
