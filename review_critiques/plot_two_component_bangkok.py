@@ -81,13 +81,13 @@ def plot_h1(df: pd.DataFrame, fig_dir: Path) -> None:
     axes[0].set_title("Flooded area vs SLR")
     axes[0].legend(fontsize=8)
     sub = df[df.return_period == "RP100"].copy()
-    sub["ratio"] = sub.area_km2_two_component / sub.area_km2_attenuated.replace(0, np.nan)
+    sub["added"] = sub.area_km2_two_component - sub.area_km2_attenuated
     for tile, g in sub.groupby("tile_id"):
         g = g.sort_values("slr_m")
-        axes[1].plot(g.slr_m, g.ratio, "-o", label=tile)
-    axes[1].axhline(1.0, color="k", lw=0.8)
+        axes[1].plot(g.slr_m, g.added, "-o", label=tile)
+    axes[1].axhline(0.0, color="k", lw=0.8)
     axes[1].set_xlabel("SLR (m)")
-    axes[1].set_ylabel("two-component / attenuated flooded area")
+    axes[1].set_ylabel("two-component - attenuated flooded area (km²)")
     axes[1].set_title("RP100, per tile")
     axes[1].legend(fontsize=8, ncol=2)
     for ax in axes:
@@ -142,7 +142,7 @@ def plot_h3(ref_dir: Path, new_dir: Path, prep_dir: Path, tile: str, rp: str, sl
         col = plt.cm.plasma(i / max(1, len(slrs) - 1))
         for path_dir, ls, name in ((ref_dir, "--", "attenuated"), (new_dir, "-", "two-component")):
             d, _ = _depth(path_dir / tile / "results" / f"waterdepth_{rp}_{slr}.tif")
-            level = np.where(np.nan_to_num(d[row]) > 0, dem[row] + d[row], np.nan)
+            level = np.where((np.nan_to_num(d[row]) > 0) & land, dem[row] + d[row], np.nan)
             ax.plot(x_km, level, ls, color=col, lw=1.2, label=f"{slr} {name}")
     ax.set_ylim(-3, max(4.0, float(np.nanpercentile(dem[row][land], 60)) + 1))
     ax.set_xlabel("distance along tile row (km)")

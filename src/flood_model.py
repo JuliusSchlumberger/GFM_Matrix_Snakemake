@@ -83,12 +83,14 @@ def static_inundation(
     sources: np.ndarray,
     ocean_code: int = 1,
 ) -> np.ndarray:
-    """Mark non-ocean cells below the static level that connect to `sources` through such cells.
+    """Mark land cells below the static level that connect to `sources` through such cells.
 
     `dem` is the effective DEM (m); `sources` the coastline or hop>=1 seed cells.
     These cells are permanently inundated: a static sea level does not attenuate.
+    Rivers and lakes are excluded: their effective DEM is 0 m, so they would carry the
+    sea level (and the coastal storm tide seeded on it) up the whole river network.
     """
-    below = (dem < static_level) & (mask != ocean_code)
+    below = (dem < static_level) & (mask == LAND_CODE)
     return prune_to_coast_connected(below, sources)
 
 

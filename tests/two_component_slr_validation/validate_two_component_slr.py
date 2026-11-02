@@ -72,6 +72,18 @@ def test_enclosed_depression_behind_ridge_is_not_statically_inundated() -> None:
     assert not (two_comp[:, 110:] > 0).any()
 
 
+def test_river_channel_does_not_carry_the_static_sea_inland() -> None:
+    # A river (mask 3, effective DEM 0 m) through high ground leads to a low inland basin.
+    land = np.full(N_COLS, 3.0)
+    land[600:700] = 0.2
+    dem, mask = _transect(land)
+    mask[N_ROWS // 2, 2:600] = 3
+    coast = np.zeros(dem.shape, dtype=bool)
+    coast[:, :2] = True
+    wet = static_inundation(np.where(mask == 0, dem, 0.0), mask, np.full(dem.shape, 1.0), coast)
+    assert not wet.any()
+
+
 def test_flooded_area_never_decreases_with_slr() -> None:
     dem, mask = _transect(np.linspace(0.0, 2.5, N_COLS))
     areas = []
