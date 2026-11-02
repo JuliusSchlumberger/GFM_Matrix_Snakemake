@@ -14,7 +14,7 @@ event volume. Inputs are read from `<data_root>` (read-only); outputs go to `--o
 Run in the `gfm` env, e.g.
 
 ```
-python review_critiques/calibration_experiments.py --out-dir <dir> --n-random 120 --workers 2
+python review_critiques/calibration_experiments.py --out-dir <dir> --n-random 60 --workers 2
 python review_critiques/plot_calibration_experiments.py --results-dir <dir> --fig-dir <dir>/figures
 ```
 

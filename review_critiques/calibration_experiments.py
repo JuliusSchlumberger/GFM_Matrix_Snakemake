@@ -6,7 +6,7 @@ production solver settings, scored as compute_calibration_result (land & SFINCS-
 wet > 0.10 m). Reads the calibration tiles read-only; appends records to --out-dir/results.jsonl.
 
 Usage:
-    python review_critiques/calibration_experiments.py --out-dir <dir> [--n-random 120] [--workers 2]
+    python review_critiques/calibration_experiments.py --out-dir <dir> [--n-random 60] [--workers 2]
 """
 
 import argparse
@@ -36,8 +36,8 @@ from sfincs_grid import active_on_subgrid  # noqa: E402
 DATA_ROOT = Path("P:/11212688-004-global-floodmaps/modelling")
 BASE = DATA_ROOT / "calibration_roughness_SFINCS"
 LU_FSF = [6.0, 9.0, 12.0, 15.0, 18.0]
-UNIFORM_M_PER_KM = [0.05, 0.1, 0.15, 0.2, 0.3, 0.45, 0.6, 0.9]
-B_FSF = [6.0, 9.0, 12.0]
+UNIFORM_M_PER_KM = [0.1, 0.15, 0.2, 0.3, 0.45, 0.6]
+B_FSF = [9.0, 12.0]
 B_ALPHA = [0.5, 1.0]
 B_T_REF_S = 12 * 3600.0
 HYDRO_WINDOW_HR = (40.0, 110.0)  # build_sfincs_tile.TRUNCATE_WINDOW_HR_DEFAULT
@@ -164,7 +164,7 @@ def select_tiles(n_random: int, seed: int = 0) -> tuple[list[str], set[str]]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out-dir", required=True)
-    parser.add_argument("--n-random", type=int, default=120)
+    parser.add_argument("--n-random", type=int, default=60)
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--tile-ids", nargs="+", default=None)
     args = parser.parse_args()

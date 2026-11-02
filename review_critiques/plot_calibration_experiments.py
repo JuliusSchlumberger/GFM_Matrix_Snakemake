@@ -233,7 +233,14 @@ def main() -> None:
     if len(errors):
         errors.to_csv(fig_dir / "calibration_errors.csv", index=False)
     df = df[~df.variant.isin(["error", "no_seeds"])]
-    worst = json.loads((results_dir / "sample.json").read_text())["worst"]
+    sample = json.loads((results_dir / "sample.json").read_text())
+    worst = sample["worst"]
+    # Keep the sampled tiles and only (variant, param) pairs run on every one of them, so
+    # pooled curves never mix tile sets.
+    df = df[df.tile_id.isin(sample["tiles"])]
+    n_tiles = df.tile_id.nunique()
+    coverage = df.groupby(["variant", "param"]).tile_id.transform("nunique")
+    df = df[coverage == n_tiles]
     plot_v0(df, fig_dir)
     plot_c2(df, fig_dir)
     plot_c3(df, [w for w in worst if w in set(df.tile_id)], fig_dir)
