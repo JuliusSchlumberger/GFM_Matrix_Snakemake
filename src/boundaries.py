@@ -153,6 +153,44 @@ def save_boundary_points(stations: gpd.GeoDataFrame, output_path: str | Path, co
     retry_transient_io(stations.to_file, output_path, driver="GPKG")
 
 
+def static_station_levels(
+    waterlevel_nc_dir: str | Path,
+    nc_filename_template: str,
+    nc_variable_template: str,
+    mdt_path: str | Path,
+    return_period: str,
+    waterlevel_name: str,
+    baseline_waterlevel_name: str = "SLR_0",
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return (lonlat, level) of the static sea level MDT + SLR fingerprint per COAST-RP station.
+
+    The fingerprint is total(RP, SLR) - total(RP, baseline), so storm tide cancels
+    exactly; MDT NaN -> 0 as in prepare_boundary_conditions.combine_scenarios.
+    Metres in the DEM datum (GOCO06s geoid).
+    """
+    def _read(name: str) -> tuple[xr.Dataset, str]:
+        fmt = {"return_period": return_period, "waterlevel_name": name}
+        path = Path(waterlevel_nc_dir) / nc_filename_template.format(**fmt)
+        ds = retry_transient_io(xr.open_dataset, path)
+        return ds, nc_variable_template.format(**fmt)
+
+    ds_slr, var_slr = _read(waterlevel_name)
+    ds_base, var_base = _read(baseline_waterlevel_name)
+    ds_mdt = retry_transient_io(xr.open_dataset, mdt_path)
+    try:
+        lonlat = np.column_stack([ds_slr["station_x_coordinate"].values, ds_slr["station_y_coordinate"].values])
+        for other in (ds_base, ds_mdt):
+            other_lonlat = np.column_stack([other["station_x_coordinate"].values, other["station_y_coordinate"].values])
+            if not np.allclose(lonlat, other_lonlat):
+                raise ValueError("static_station_levels: station order differs between water-level and MDT files")
+        fingerprint = ds_slr[var_slr].values.astype(np.float64) - ds_base[var_base].values.astype(np.float64)
+        mdt = np.nan_to_num(ds_mdt["MDT"].values.astype(np.float64), nan=0.0)
+    finally:
+        for ds in (ds_slr, ds_base, ds_mdt):
+            ds.close()
+    return lonlat, mdt + fingerprint
+
+
 def collect_neighbor_wave_seeds(
     target_dem_path: str | Path,
     source_paths: list[tuple[str | Path, str | Path, str | Path]],

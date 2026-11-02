@@ -52,7 +52,8 @@ Decided, to implement:
   coast connectivity without attenuation and acts as sea; the total level (storm tide + MDT + SLR)
   is attenuated from the new shoreline. Switch `flooding.slr_propagation: attenuated | two_component`;
   default stays `attenuated` until validated.
-- **Protection rule:** water-level based, switch `exposure.protection_rule: flood_fraction | water_level`.
+- **Protection rule:** water-level based, switch `protection.rule: flood_fraction | water_level`
+  (implemented; `minimum_rp` applies to the water-level rule only).
   An event is protected where storm_tide(RP) + SLR <= storm_tide(RP_design) at the nearest COAST-RP
   station (per-cell effective protection RP per SLR level). The adaptation Protect measure raises
   the design level to storm_tide(RP_design) + SLR_intensity.
@@ -66,8 +67,18 @@ Open:
   include a tidal high water (MHHW). Needs a tide dataset (GTSM tide statistics or FES2014); COAST-RP
   cannot separate tide from surge.
 - **`protection.default_rp: 5`** for geogunits without FLOPROS values vs the RP2 minimum: keep 5?
-- **Event volume / duration correction (critique 3):** design under discussion (basin volume cap
-  vs duration-scaled attenuation); also covers overtopping volume over defence crests.
+- **Event volume / duration correction (critique 3):** compare (A) a weir-inflow volume cap per
+  enclosed basin (spill level by morphological reconstruction from the coast, single level pool per
+  basin, no fill-spill-merge, per tile with edge-touching basins flagged, weir C = 1.7 fixed plus a
+  sensitivity check) against (B) friction scaled by time above ground from the COAST-HG hydrograph;
+  B is preferred if it performs as well (simpler). Friction must be recalibrated with the
+  correction on, and RP10 / RP1000 transferability tested with it. Overtopping volume over defence
+  crests is deferred (would make hazard depend on protection). Open: hydrograph at the sill taken as
+  the coastal one shifted down by the eikonal attenuation loss (default, not yet confirmed).
+- **Permanent inundation p = 1 anchor:** needs the static-flood extent from the two-component solve;
+  implement together with it.
+- **Materialized configs on the cluster:** re-materialize after pulling (new keys `protection.rule`,
+  `protection.minimum_rp`).
 - **Cluster runs:** SFINCS at +1 m / +2 m SLR (benchmark for 1a) and at RP10 / RP1000 on ~100 tiles
   (transferability, critique 1b; RP100 COAST-HG shape shifted to each RP peak). Tile count and SLR
   levels to fix; check that no calibration batch is running before touching `sfincs_tiles/`.

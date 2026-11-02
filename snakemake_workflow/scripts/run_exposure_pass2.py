@@ -45,7 +45,7 @@ def main() -> None:
     print(f"Pass 2: {len(chunk_ids)} chunks x {len(tasks)} tasks…")
     results = pass2_all_tasks(
         chunk_ids, ctx.chunks_dir, ctx.flood_frac_dir, ctx.return_periods, ctx.slr_scenarios,
-        ctx.rp_applied, ctx.iso_lookup, tasks,
+        ctx.rp_applied, ctx.iso_lookup, tasks, ctx.water_level_protection,
     )
 
     out_path = Path(args.out)

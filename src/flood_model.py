@@ -39,6 +39,61 @@ WATERLEVEL_EPSILON_M = 0.03
 # Prohibitive even in float32 for any path crossing a blocked cell.
 OBSTACLE_BLOCK_FRICTION = 9999.0
 
+# Friction per grid step inside the permanently inundated (static) area: the surge crosses
+# it as open water. 1e-6 m/step loses < 4 mm over a 3600-cell tile.
+STATIC_WATER_FRICTION = 1e-6
+
+# Grid step (cells) of the coarse grid the static level is interpolated on before bilinear
+# upsampling; the level (MDT + SLR fingerprint) varies over tens of km.
+STATIC_LEVEL_COARSEN = 32
+
+
+def static_level_grid(
+    shape: tuple[int, int],
+    transform: Affine,
+    stations_lonlat: np.ndarray,
+    station_values: np.ndarray,
+    k: int = 5,
+) -> np.ndarray:
+    """Interpolate the static sea level (m, DEM datum) onto the tile grid.
+
+    Inverse-distance-squared k-NN of the station values on a STATIC_LEVEL_COARSEN
+    grid, bilinearly upsampled. Station values are MDT + SLR fingerprint
+    (`boundaries.static_station_levels`); `transform` must be EPSG:4326.
+    """
+    rows = np.arange(0, shape[0] + STATIC_LEVEL_COARSEN, STATIC_LEVEL_COARSEN).clip(max=shape[0] - 1)
+    cols = np.arange(0, shape[1] + STATIC_LEVEL_COARSEN, STATIC_LEVEL_COARSEN).clip(max=shape[1] - 1)
+    rows, cols = np.unique(rows), np.unique(cols)
+    rr, cc = np.meshgrid(rows, cols, indexing="ij")
+    xs, ys = rasterio.transform.xy(transform, rr.ravel(), cc.ravel())
+    cell_latlon_rad = np.radians(np.column_stack([ys, xs]))
+    coarse = _idw_nearest_k(
+        cell_latlon_rad, np.radians(stations_lonlat[:, ::-1]), station_values, min(k, len(station_values)),
+    ).reshape(rr.shape)
+    # Bilinear in index space between the coarse sample rows/cols.
+    r_full, c_full = np.arange(shape[0]), np.arange(shape[1])
+    r_pos = np.interp(r_full, rows, np.arange(len(rows)))
+    c_pos = np.interp(c_full, cols, np.arange(len(cols)))
+    return ndimage.map_coordinates(
+        coarse, np.meshgrid(r_pos, c_pos, indexing="ij"), order=1, mode="nearest",
+    ).astype(np.float64)
+
+
+def static_inundation(
+    dem: np.ndarray,
+    mask: np.ndarray,
+    static_level: np.ndarray,
+    sources: np.ndarray,
+    ocean_code: int = 1,
+) -> np.ndarray:
+    """Mark non-ocean cells below the static level that connect to `sources` through such cells.
+
+    `dem` is the effective DEM (m); `sources` the coastline or hop>=1 seed cells.
+    These cells are permanently inundated: a static sea level does not attenuate.
+    """
+    below = (dem < static_level) & (mask != ocean_code)
+    return prune_to_coast_connected(below, sources)
+
 
 def coastline_mask(mask: np.ndarray, ocean_code: int = 1, river_code: int | None = None) -> np.ndarray:
     """Mark ocean cells of the tile's edge-connected ocean adjacent to land/river.
@@ -179,6 +234,7 @@ def flood_depth_dense(
     max_rounds: int = 40,
     outer_convergence_pct: float = 0.01,
     waterlevel_epsilon_m: float = WATERLEVEL_EPSILON_M,
+    static_level: np.ndarray | None = None,
 ) -> tuple[np.ndarray, dict]:
     """Solve flood depth (m) on the full dense tile; 0.0 where not flooded.
 
@@ -197,6 +253,11 @@ def flood_depth_dense(
     solve and block cells with waterlevel <= elevation until the newly blocked
     share < `outer_convergence_pct` percent. Terminates because raising
     friction only lowers eikonal values, so the blocked set only grows.
+
+    `static_level` (m, tile grid, `static_level_grid`) switches on two-component
+    propagation: cells below it and connected to the coastline/seeds are permanently
+    inundated (`static_inundation`), carry STATIC_WATER_FRICTION, and keep at least
+    the static level, so only the storm tide on top attenuates inland of the new shore.
     """
     using_seeds = seed_rows is not None or seed_cols is not None or seed_values is not None
     if using_seeds and boundaries is not None:
@@ -230,6 +291,11 @@ def flood_depth_dense(
             coastline_rows, coastline_cols, transform, stations_lonlat, station_values,
             min(k, len(station_values)), mask, ocean_code,
         )
+
+    static_wet = None
+    if static_level is not None:
+        static_wet = static_inundation(dem, mask, static_level, coastline, ocean_code)
+        friction = np.where(static_wet, friction.dtype.type(STATIC_WATER_FRICTION), friction)
 
     if not obstacle_coupling:
         t = solve_eikonal_dense(
@@ -280,6 +346,10 @@ def flood_depth_dense(
             "inner_converged": inner_diag.get("converged"),
             "final_max_change": inner_diag.get("max_change"),
         }
+
+    if static_wet is not None:
+        waterlevel = np.where(static_wet, np.maximum(waterlevel, static_level), waterlevel)
+        diagnostics["n_static_wet_cells"] = int(static_wet.sum())
 
     flood = (waterlevel > dem) & (mask != ocean_code)
     flood = prune_to_coast_connected(flood, coastline)

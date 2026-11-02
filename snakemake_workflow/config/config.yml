@@ -267,6 +267,10 @@ postprocessing:
 protection: # Used by: analysis/compute_exposure_analysis.py
   baseline_waterlevel_name: "SLR_0" # SLR level at which the protection standard holds
   default_rp: 5 # minimum protection level assumed where no FLOPROS protection standards are available
+  # flood_fraction: a defence holds where the event floods no more of the cell than the design event.
+  # water_level: it holds where the event water level at the nearest COAST-RP station is <= the design level.
+  rule: "flood_fraction"
+  minimum_rp: 2 # water_level rule only: lowest design RP, also for cells without a geogunit
 
 exposure: # Used by: scripts/prepare_exposure_grid_chunk.py
   exceedance_threshold_m: 0.10 # Minimum flood depth (m) for a fine pixel to count as "flooded"

@@ -17,7 +17,7 @@ import rasterio
 
 from boundaries import collect_neighbor_wave_seeds
 from config_utils import path_ready, retry_transient_io
-from flood_model import WATERLEVEL_EPSILON_M, flood_depth_dense
+from flood_model import WATERLEVEL_EPSILON_M, flood_depth_dense, static_level_grid
 from rasters import (
     decode_dem_cm,
     decode_friction_int16,
@@ -49,6 +49,7 @@ def run_eikonal_python(
     outer_convergence_pct: float = 0.01,
     waterlevel_epsilon_m: float = WATERLEVEL_EPSILON_M,
     friction_scale_factor: float = 1.0,
+    static_stations: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> dict:
     """Run `flood_model.flood_depth_dense` in-process, write depth, return diagnostics.
 
@@ -57,6 +58,8 @@ def run_eikonal_python(
     required correction, not a tuning knob: the solver treats friction as
     cost per grid step (x30 for DeltaDTM's ~30 m pixel) times a x0.4
     SFINCS-calibrated factor (docs/methods_02). Raises MemoryError on OOM.
+    `static_stations` = (lonlat, level) from `boundaries.static_station_levels`
+    switches on two-component SLR propagation.
     """
     with retry_transient_io(rasterio.open, dem_path) as src:
         dem = decode_dem_cm(src.read(1))
@@ -74,6 +77,10 @@ def run_eikonal_python(
     else:
         boundaries = None
 
+    static_level = None
+    if static_stations is not None:
+        static_level = static_level_grid(dem.shape, transform, *static_stations)
+
     waterdepth, diagnostics = flood_depth_dense(
         dem, mask, friction, transform,
         boundaries=boundaries,
@@ -85,6 +92,7 @@ def run_eikonal_python(
         max_rounds=max_rounds,
         outer_convergence_pct=outer_convergence_pct,
         waterlevel_epsilon_m=waterlevel_epsilon_m,
+        static_level=static_level,
     )
     save_waterdepth_raster(dem_path, waterdepth, output_path)
     return diagnostics
@@ -175,6 +183,7 @@ def run_tile_scenario(
     ocean_code: int,
     river_code: int,
     stage_boundaries: bool = False,
+    static_stations: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> dict[str, Any]:
     """Solve, skip or placeholder one (tile, return period, SLR scenario) and write its raster.
 
@@ -183,7 +192,8 @@ def run_tile_scenario(
     stations, or no wet cell in any neighbour output -> zero raster. A missing
     neighbour dem/mask/waterdepth raises FileNotFoundError and writes nothing.
     MemoryError -> OOM marker + nodata. `stage_boundaries` copies the
-    GeoPackage to node-local scratch first (HPC). Timing is left to callers.
+    GeoPackage to node-local scratch first (HPC). `static_stations` (see
+    run_eikonal_python) switches on two-component SLR propagation. Timing is left to callers.
     Returns {"outcome": "oom_premarked" | "skip_no_inundation" | "oom" | "solved", ...}.
     """
     scenario_name = f"{return_period}_{waterlevel_name}"
@@ -268,6 +278,7 @@ def run_tile_scenario(
                 outer_convergence_pct=oc_config["outer_convergence_pct"],
                 waterlevel_epsilon_m=flooding_config["waterlevel_epsilon_m"],
                 friction_scale_factor=flooding_config["friction_scale_factor"],
+                static_stations=static_stations,
             )
         except MemoryError:
             mark_tile_oom(oom_dir, tile_id, reason="MemoryError in flood_depth_dense - tile too large")
