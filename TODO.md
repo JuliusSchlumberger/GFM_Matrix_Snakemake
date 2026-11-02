@@ -114,7 +114,9 @@ Open:
   therefore not a fair Table A3 row on its own; compare each scheme at its calibrated optimum
   (`C2_table_A3_candidates.csv`). 0.2 m/km scores 0.579.
   Under B the two remain level: 0.773/0.778 for land-cover against 0.765/0.797 for uniform on the
-  fresh tiles. So land-cover does not clearly earn its complexity. Decide whether to drop it. If
+  fresh tiles. Bracketing on the fitting sample puts the optimum for uniform alone at 0.125 m/km
+  (0.641) and for uniform under B at 0.075-0.10 m/km (0.71). So land-cover does not clearly earn
+  its complexity. Decide whether to drop it. If
   kept, rename it to a land-cover-indexed attenuation rate (no Manning) in code and docs (not done
   yet).
 
