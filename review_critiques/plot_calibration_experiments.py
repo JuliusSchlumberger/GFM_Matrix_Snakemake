@@ -15,7 +15,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy import ndimage
 
 BASE = Path("P:/11212688-004-global-floodmaps/modelling/calibration_roughness_SFINCS")
 VARIANT_STYLE = {
@@ -197,27 +196,51 @@ def plot_c3_basins(results_dir: Path, fig_dir: Path) -> None:
 
 
 def plot_maps(results_dir: Path, fig_dir: Path) -> None:
-    panels = [("sfincs", "SFINCS hmax"), ("landcover_fsf12", "land-cover fsf 12"), ("A_fsf12", "A: volume cap"),
-              ("B_fsf12_a1", "B: duration a=1"), ("uniform_0.2", "uniform 0.2 m/km")]
+    variants = [("landcover_fsf12", "land-cover fsf 12"), ("A_fsf12", "A: volume cap fsf 12"),
+                ("B_fsf12_a1", "B: duration a=1 fsf 12"), ("uniform_0.2", "uniform 0.2 m/km")]
+    cmap = matplotlib.colors.ListedColormap(["#ececec", "#3182bd", "#de2d26", "#fd8d3c"])
     for npz in sorted((results_dir / "maps").glob("*.npz")):
         d = np.load(npz)
         score = d["score"]
+        ref = score & (np.nan_to_num(d["sfincs"].astype(np.float32)) > 0.10)
+        any_wet = ref.copy()
+        for key, _ in variants:
+            if key in d:
+                any_wet |= score & (np.nan_to_num(d[key].astype(np.float32)) > 0.10)
+        if not any_wet.any():
+            continue
+        rows, cols = np.nonzero(any_wet)
+        pad = 20
+        win = (slice(max(rows.min() - pad, 0), rows.max() + pad), slice(max(cols.min() - pad, 0), cols.max() + pad))
         basins = ((d["fill"] - d["dem"]) > 0.05) & np.isfinite(d["fill"])
-        fig, axes = plt.subplots(1, len(panels), figsize=(5 * len(panels), 5.2))
-        for ax, (key, title) in zip(axes, panels):
+        fig, axes = plt.subplots(1, len(variants) + 1, figsize=(4.6 * (len(variants) + 1), 5.6))
+        sf = np.where(ref, np.nan_to_num(d["sfincs"].astype(np.float32)), np.nan)
+        axes[0].imshow(np.where(score, 0.25, 0.0)[win], cmap="Greys", vmin=0, vmax=1)
+        im = axes[0].imshow(sf[win], cmap="Blues", vmin=0, vmax=3)
+        axes[0].contour(basins[win], levels=[0.5], colors="tab:purple", linewidths=0.4)
+        axes[0].set_title("SFINCS hmax (m); purple = enclosed basins")
+        fig.colorbar(im, ax=axes[0], fraction=0.04)
+        for ax, (key, title) in zip(axes[1:], variants):
             if key not in d:
                 ax.set_axis_off()
                 continue
-            arr = d[key].astype(np.float32)
-            wet = np.nan_to_num(arr) > 0.10
-            ax.imshow(np.where(score, 0.3, 0.0), cmap="Greys", vmin=0, vmax=1)
-            ax.imshow(np.where(wet, np.nan_to_num(arr), np.nan), cmap="Blues", vmin=0, vmax=3)
-            ax.contour(ndimage.binary_opening(basins, iterations=1), levels=[0.5], colors="tab:red", linewidths=0.5)
-            ax.set_title(title)
+            wet = score & (np.nan_to_num(d[key].astype(np.float32)) > 0.10)
+            cls = np.zeros(wet.shape, dtype=int)
+            cls[wet & ref] = 1
+            cls[wet & ~ref] = 2
+            cls[~wet & ref] = 3
+            tp, fp, fn = (cls == 1).sum(), (cls == 2).sum(), (cls == 3).sum()
+            csi = tp / max(1, tp + fp + fn)
+            ax.imshow(cls[win], cmap=cmap, vmin=-0.5, vmax=3.5, interpolation="nearest")
+            ax.set_title(f"{title}, CSI {csi:.2f}")
+        for ax in axes:
             ax.set_axis_off()
-        fig.suptitle(f"Tile {npz.stem}: depth (m, 0-3); red = enclosed basins (spill level > ground); grey = scored land")
-        fig.tight_layout()
-        fig.savefig(fig_dir / f"C3_4_maps_tile{npz.stem}.png", dpi=100)
+        handles = [plt.Rectangle((0, 0), 1, 1, color=cmap(i)) for i in (1, 2, 3)]
+        fig.legend(handles, ["both wet", "eikonal only (over-prediction)", "SFINCS only (under-prediction)"],
+                   loc="lower center", ncol=3)
+        fig.suptitle(f"Tile {npz.stem}, cropped to the flooded area (scored land only, wet > 0.10 m)")
+        fig.tight_layout(rect=(0, 0.06, 1, 0.95))
+        fig.savefig(fig_dir / f"C3_4_maps_tile{npz.stem}.png", dpi=110)
         plt.close(fig)
 
 
@@ -228,7 +251,8 @@ def main() -> None:
     args = parser.parse_args()
     results_dir, fig_dir = Path(args.results_dir), Path(args.fig_dir)
     fig_dir.mkdir(parents=True, exist_ok=True)
-    df = pd.read_json(results_dir / "results.jsonl", lines=True, dtype={"tile_id": str})
+    df = pd.concat([pd.read_json(f, lines=True, dtype={"tile_id": str})
+                    for f in sorted(results_dir.glob("results*.jsonl"))], ignore_index=True)
     errors = df[df.variant.isin(["error", "no_seeds"])]
     if len(errors):
         errors.to_csv(fig_dir / "calibration_errors.csv", index=False)
@@ -239,7 +263,9 @@ def main() -> None:
     # pooled curves never mix tile sets.
     df = df[df.tile_id.isin(sample["tiles"])]
     n_tiles = df.tile_id.nunique()
-    coverage = df.groupby(["variant", "param"]).tile_id.transform("nunique")
+    # uniform_equal_mean's param is the tile's own rate, so it is grouped by variant only.
+    group_param = df.param.where(df.variant != "uniform_equal_mean", -1.0)
+    coverage = df.groupby([df.variant, group_param]).tile_id.transform("nunique")
     df = df[coverage == n_tiles]
     plot_v0(df, fig_dir)
     plot_c2(df, fig_dir)

@@ -40,6 +40,9 @@ UNIFORM_M_PER_KM = [0.1, 0.15, 0.2, 0.3, 0.45, 0.6]
 B_FSF = [9.0, 12.0]
 B_ALPHA = [0.5, 1.0]
 B_T_REF_S = 12 * 3600.0
+EXT_B_FSF = [6.0, 7.5]
+EXT_T_REF_H = [6.0, 24.0]
+EXT_B_UNIFORM_M_PER_KM = [0.1, 0.15]
 HYDRO_WINDOW_HR = (40.0, 110.0)  # build_sfincs_tile.TRUNCATE_WINDOW_HR_DEFAULT
 SOLVER = dict(ocean_code=1, river_code=3, obstacle_coupling=True, max_outer_iterations=4,
               outer_convergence_pct=0.01, max_rounds=40, waterlevel_epsilon_m=0.03)
@@ -149,6 +152,50 @@ def run_tile(tile_id: str, out_dir: str, save_maps: bool) -> list[dict]:
     return records
 
 
+def run_tile_extended(tile_id: str, out_dir: str, save_maps: bool) -> list[dict]:
+    """Second stage: B at lower fsf, T_ref sensitivity, and B on uniform friction."""
+    t0 = time.perf_counter()
+    t = load_tile(tile_id)
+    if t["seeds"] is None:
+        return [{"tile_id": tile_id, "variant": "no_seeds"}]
+    sources = np.zeros(t["dem"].shape, dtype=bool)
+    sources[t["seeds"][0], t["seeds"][1]] = True
+    fill = spill_level(t["dem"], sources | (t["mask"] == rcm.OCEAN_CODE))
+
+    def hydro_cells(rows, cols):
+        return t["series"], t["point_tree"].query(np.column_stack([rows, cols]))[1]
+
+    records = []
+
+    def add(variant: str, param: float, depth: np.ndarray) -> None:
+        records.append({"tile_id": tile_id, "variant": variant, "param": param, **score(t, depth)})
+
+    def with_b(friction: np.ndarray, alpha: float, t_ref_s: float = B_T_REF_S) -> np.ndarray:
+        base = solve(t, friction)
+        mult = duration_friction_multiplier(base, t["dem"], fill, hydro_cells, t["dt_s"], t_ref_s, alpha)
+        return base, solve(t, friction * mult)
+
+    for fsf in EXT_B_FSF:
+        for alpha in B_ALPHA:
+            base, b_depth = with_b(t["friction"] * fsf, alpha)
+            add(f"B_duration_a{alpha:g}", fsf, b_depth)
+        if fsf not in LU_FSF:
+            add("landcover", fsf, base)
+    for t_ref_h in EXT_T_REF_H:
+        _, b_depth = with_b(t["friction"] * 9.0, 0.5, t_ref_h * 3600.0)
+        add(f"B_duration_a0.5_tref{t_ref_h:g}h", 9.0, b_depth)
+    for rate in EXT_B_UNIFORM_M_PER_KM:
+        for alpha in B_ALPHA:
+            _, b_depth = with_b(np.full(t["dem"].shape, rate * t["cell_m"] / 1000), alpha)
+            add(f"B_uniform_a{alpha:g}", rate, b_depth)
+    for r in records:
+        r["elapsed_s_tile"] = round(time.perf_counter() - t0, 1)
+    return records
+
+
+STAGES = {"main": (run_tile, "results.jsonl"), "extended": (run_tile_extended, "results_extended.jsonl")}
+
+
 def select_tiles(n_random: int, seed: int = 0) -> tuple[list[str], set[str]]:
     worst = pd.read_csv(BASE / "figures" / "worst_tiles_selection_fsf12.csv")
     id_col = "tile_id" if "tile_id" in worst.columns else worst.columns[0]
@@ -167,13 +214,15 @@ def main() -> None:
     parser.add_argument("--n-random", type=int, default=60)
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--tile-ids", nargs="+", default=None)
+    parser.add_argument("--stage", choices=list(STAGES), default="main")
     args = parser.parse_args()
+    run_fn, results_name = STAGES[args.stage]
     out_dir = Path(args.out_dir)
     (out_dir / "maps").mkdir(parents=True, exist_ok=True)
     tiles, worst = select_tiles(args.n_random)
     if args.tile_ids:
         tiles = args.tile_ids
-    results = out_dir / "results.jsonl"
+    results = out_dir / results_name
     done = set()
     if results.exists():
         done = {json.loads(line)["tile_id"] for line in results.read_text().splitlines() if line.strip()}
@@ -181,7 +230,7 @@ def main() -> None:
     (out_dir / "sample.json").write_text(json.dumps({"tiles": tiles, "worst": sorted(worst)}, indent=1))
     print(f"{len(todo)} of {len(tiles)} tiles to run, {args.workers} workers", flush=True)
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
-        futures = {pool.submit(run_tile, t, str(out_dir), t in worst): t for t in todo}
+        futures = {pool.submit(run_fn, t, str(out_dir), t in worst): t for t in todo}
         for future in as_completed(futures):
             tile = futures[future]
             try:
