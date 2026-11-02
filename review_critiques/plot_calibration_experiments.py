@@ -404,6 +404,66 @@ def plot_final_maps(results_dir: Path, fig_dir: Path) -> None:
         plt.close(fig)
 
 
+def plot_representative(results_dir: Path, fig_dir: Path) -> None:
+    path = results_dir / "representative" / "results.jsonl"
+    if not path.exists():
+        return
+    rep = pd.read_json(path, lines=True, dtype={"tile_id": str})
+    rep = rep[~rep.variant.isin(["error", "no_seeds"])]
+    # Only tiles with every (variant, param) scored, so all curves share one tile set.
+    n_runs = rep.groupby(["variant", "param"]).ngroups
+    complete = rep.groupby("tile_id").size() == n_runs
+    rep = rep[rep.tile_id.isin(complete[complete].index)]
+    if rep.empty:
+        return
+    n = rep.tile_id.nunique()
+    table = rep.groupby(["variant", "param"]).apply(metrics).reset_index()
+    table["median_tile_CSI"] = rep.groupby(["variant", "param"]).apply(lambda d: tile_csi(d).median()).values
+    table.to_csv(fig_dir / "R1_table_representative.csv", index=False)
+
+    styles = {"landcover": ("land-cover-indexed rate", "k", "-o"), "B1_landcover": ("B on land-cover", "tab:red", "--v"),
+              "uniform": ("uniform rate", "tab:green", "-s"), "B1_uniform": ("B on uniform", "tab:cyan", ":P")}
+    fig, axes = plt.subplots(2, 2, figsize=(14, 8), sharex="col")
+    for col, (frame, xlabel) in enumerate([(("landcover", "B1_landcover"), "friction_scale_factor"),
+                                           (("uniform", "B1_uniform"), "uniform rate (m/km)")]):
+        for variant in frame:
+            m = table[table.variant == variant]
+            label, color, style = styles[variant]
+            axes[0, col].plot(m.param, m.CSI, style, color=color, label=label)
+            axes[1, col].plot(m.param, m.bias, style, color=color, label=label)
+        axes[0, col].set_ylabel("pooled CSI")
+        axes[1, col].set_ylabel("pooled bias")
+        axes[1, col].axhline(1.0, color="k", lw=0.8)
+        axes[1, col].set_xlabel(xlabel)
+        axes[0, col].legend(fontsize=8)
+    for ax in axes.ravel():
+        ax.grid(alpha=0.3)
+    fig.suptitle(f"Representative comparison on {n} random SFINCS tiles (production correction B, alpha 1)")
+    fig.tight_layout()
+    fig.savefig(fig_dir / "R1_pooled_vs_parameter.png", dpi=140)
+    plt.close(fig)
+
+    best = table.loc[table.groupby("variant").CSI.idxmax()].set_index("variant")
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    per_tile = {v: tile_csi(rep[(rep.variant == v) & (rep.param == best.loc[v, "param"])]) for v in styles}
+    axes[0].boxplot([per_tile[v].dropna() for v in styles], showmeans=True)
+    axes[0].set_xticks(np.arange(1, len(styles) + 1))
+    axes[0].set_xticklabels([f"{styles[v][0]}\n({best.loc[v, 'param']:g})" for v in styles], fontsize=8)
+    axes[0].set_title("per-tile CSI at each variant's best setting")
+    for ax, (a, b, title) in zip(axes[1:], [("B1_landcover", "landcover", "B gain, land-cover"),
+                                           ("B1_landcover", "B1_uniform", "land-cover - uniform (both B)")]):
+        diff = (per_tile[a] - per_tile[b].reindex(per_tile[a].index)).dropna()
+        ax.hist(diff, bins=50, color=styles[a][1], alpha=0.7)
+        ax.axvline(0, color="k")
+        ax.set_title(f"{title}: median {diff.median():+.3f}, {(diff > 0).mean():.0%} tiles > 0", fontsize=10)
+        ax.set_xlabel("per-tile CSI difference")
+    for ax in axes:
+        ax.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(fig_dir / "R2_per_tile_representative.png", dpi=140)
+    plt.close(fig)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--results-dir", required=True)
@@ -436,6 +496,7 @@ def main() -> None:
     plot_maps(results_dir, fig_dir)
     plot_final_maps(results_dir, fig_dir)
     plot_validation(df, worst, results_dir, fig_dir)
+    plot_representative(results_dir, fig_dir)
     print(f"{df.tile_id.nunique()} tiles, {len(errors)} errors; figures in {fig_dir}")
 
 
