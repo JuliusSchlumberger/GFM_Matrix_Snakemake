@@ -67,14 +67,19 @@ Open:
   include a tidal high water (MHHW). Needs a tide dataset (GTSM tide statistics or FES2014); COAST-RP
   cannot separate tide from surge.
 - **`protection.default_rp: 5`** for geogunits without FLOPROS values vs the RP2 minimum: keep 5?
-- **Event volume / duration correction (critique 3):** compare (A) a weir-inflow volume cap per
-  enclosed basin (spill level by morphological reconstruction from the coast, single level pool per
-  basin, no fill-spill-merge, per tile with edge-touching basins flagged, weir C = 1.7 fixed plus a
-  sensitivity check) against (B) friction scaled by time above ground from the COAST-HG hydrograph;
-  B is preferred if it performs as well (simpler). Friction must be recalibrated with the
-  correction on, and RP10 / RP1000 transferability tested with it. Overtopping volume over defence
-  crests is deferred (would make hazard depend on protection). Open: hydrograph at the sill taken as
-  the coastal one shifted down by the eikonal attenuation loss (default, not yet confirmed).
+- **Event volume / duration correction (critique 3):** tested locally against the SFINCS RP100
+  calibration tiles (`review_critiques/calibration_experiments.py`, results and figures in
+  `.cleanup_baseline/review_critiques/`). (A) the weir-inflow basin volume cap changes nothing
+  (pooled CSI +0.0004): weir inflow exceeds the basin volume in 98% of basins. (B) friction x
+  (T_ref / T)^alpha, T = time the hydrograph stays within (level - spill level) of its peak,
+  clipped to [1, 10], T_ref 12 h: pooled CSI 0.616 -> 0.689 on the 72-tile fitting sample
+  (12 worst + 60 random), 0.736 -> 0.77-0.80 on 59 fresh random tiles; largest gains on sill /
+  short-event tiles (2862 0.18 -> 0.75, 673 0.17 -> 0.67, 2863 0.02 -> 0.44). T_ref 6-24 h changes CSI by < 0.01 (it shifts the
+  bias only). Decide: adopt B, alpha (0.5 or 1) and base friction (see critique 2); wire it into
+  `run_tile_scenario` (needs the COAST-HG hydrograph per boundary station in production and a
+  second solve, ~2x runtime). Still to do: RP10 / RP1000 transferability with B on (cluster
+  SFINCS runs, see below). Overtopping volume over defence crests is deferred (would make hazard
+  depend on protection).
 - **Flood-fraction rule never exposes saturated cells:** where the design event already floods the
   whole cell (ff = 1), no larger event or SLR can exceed the design flood fraction, so the cell stays
   protected forever. Bangkok case: 33% of the population in the design floodplain sits in such cells.
@@ -99,9 +104,19 @@ Open:
 - **Cluster runs:** SFINCS at +1 m / +2 m SLR (benchmark for 1a) and at RP10 / RP1000 on ~100 tiles
   (transferability, critique 1b; RP100 COAST-HG shape shifted to each RP peak). Tile count and SLR
   levels to fix; check that no calibration batch is running before touching `sfincs_tiles/`.
-- **Land-cover friction (critique 2):** uniform-attenuation runs at equal mean (and 0.2 m/km) for
-  Table A3; keep or drop land-cover friction depending on the result; rename to land-cover-indexed
-  attenuation rate (no Manning) in code and docs.
+- **Land-cover friction (critique 2):** land-cover and uniform attenuation perform within about
+  0.02 CSI of each other, and which one wins depends on the tile set. On the 72-tile fitting
+  sample, uniform 0.1 m/km scores 0.631 against land-cover fsf 12 at 0.616. On random tiles only,
+  land-cover fsf 12 scores 0.739, against 0.721 for uniform 0.1 and 0.698 for uniform 0.15. On
+  the fresh tiles, land-cover scores 0.736 against 0.725 for uniform 0.15. Uniform at each tile's own
+  land-cover mean (median 0.23 m/km) scores only 0.451 and is biased low (0.72): flow follows the
+  low-friction paths, so a land-cover field attenuates less than its mean suggests. Equal-mean is
+  therefore not a fair Table A3 row on its own; compare each scheme at its calibrated optimum
+  (`C2_table_A3_candidates.csv`). 0.2 m/km scores 0.579.
+  Under B the two remain level: 0.773/0.778 for land-cover against 0.765/0.797 for uniform on the
+  fresh tiles. So land-cover does not clearly earn its complexity. Decide whether to drop it. If
+  kept, rename it to a land-cover-indexed attenuation rate (no Manning) in code and docs (not done
+  yet).
 
 ## Known behaviour
 
