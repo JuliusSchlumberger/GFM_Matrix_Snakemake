@@ -281,7 +281,7 @@ def _avoid_ssp_worker_task(
 
     avoid_eai = _stream_eai(
         ctx["chunk_ids"], ctx["chunks_dir"], ctx["flood_frac_dir"],
-        ctx["return_periods"], ctx["waterlevel_names"], ctx["iso_lookup"], exposure_fn,
+        ctx["return_periods"], ctx["slr_scenarios"], ctx["iso_lookup"], exposure_fn,
     )
 
     traj_years = slr_traj.index.to_numpy(dtype=float)
@@ -310,7 +310,7 @@ def _avoid_growth_matrix_worker_task(
 
     avoid_eai = _stream_eai(
         ctx["chunk_ids"], ctx["chunks_dir"], ctx["flood_frac_dir"],
-        ctx["return_periods"], ctx["waterlevel_names"], ctx["iso_lookup"], exposure_fn,
+        ctx["return_periods"], ctx["slr_scenarios"], ctx["iso_lookup"], exposure_fn,
     )
     dense = interpolate_eai_linear(avoid_eai, ctx["slr_mm_sorted"], ctx["slr_interp_mm"])
     dense.columns = [f"EAI_{c}_g{g_pct}" for c in dense.columns]
