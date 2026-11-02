@@ -177,14 +177,18 @@ def main() -> None:
     plot_h1(df, fig_dir)
     print("  wrote H1")
 
-    slrs = sorted(df["scenario"].str.split("_", n=1).str[1].unique(), key=lambda s: int(s.split("_")[1]))
-    rp100 = df[df.return_period == "RP100"]
-    added = (rp100.area_km2_two_component - rp100.area_km2_attenuated).groupby(rp100.tile_id).sum()
+    n_per_rp = df.groupby("return_period").scenario.nunique()
+    map_rp = "RP100" if n_per_rp.get("RP100", 0) == n_per_rp.max() else n_per_rp.idxmax()
+    sub = df[df.return_period == map_rp]
+    added = (sub.area_km2_two_component - sub.area_km2_attenuated).groupby(sub.tile_id).sum()
     map_tiles = args.map_tiles or list(added.sort_values(ascending=False).index[:2])
     for tile in map_tiles:
-        plot_h2(ref_dir, new_dir, prep_dir, tile, "RP100", [slrs[0], slrs[len(slrs) // 2], slrs[-1]], fig_dir)
-        plot_h3(ref_dir, new_dir, prep_dir, tile, "RP100", slrs, fig_dir)
-        print(f"  wrote H2/H3 tile {tile}")
+        slrs = sorted(sub[sub.tile_id == tile].scenario.str.split("_", n=1).str[1], key=lambda s: int(s.split("_")[1]))
+        if not slrs:
+            continue
+        plot_h2(ref_dir, new_dir, prep_dir, tile, map_rp, [slrs[0], slrs[len(slrs) // 2], slrs[-1]], fig_dir)
+        plot_h3(ref_dir, new_dir, prep_dir, tile, map_rp, slrs, fig_dir)
+        print(f"  wrote H2/H3 tile {tile} {map_rp}")
 
 
 if __name__ == "__main__":

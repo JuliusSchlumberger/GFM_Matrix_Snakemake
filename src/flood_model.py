@@ -12,6 +12,7 @@ import numpy as np
 import rasterio.transform
 from affine import Affine
 from scipy import ndimage
+from scipy.spatial import cKDTree
 from sklearn.neighbors import BallTree
 
 from eikonal import solve_eikonal_dense
@@ -38,10 +39,6 @@ WATERLEVEL_EPSILON_M = 0.03
 
 # Prohibitive even in float32 for any path crossing a blocked cell.
 OBSTACLE_BLOCK_FRICTION = 9999.0
-
-# Friction per grid step inside the permanently inundated (static) area: the surge crosses
-# it as open water. 1e-6 m/step loses < 4 mm over a 3600-cell tile.
-STATIC_WATER_FRICTION = 1e-6
 
 # Grid step (cells) of the coarse grid the static level is interpolated on before bilinear
 # upsampling; the level (MDT + SLR fingerprint) varies over tens of km.
@@ -256,8 +253,11 @@ def flood_depth_dense(
 
     `static_level` (m, tile grid, `static_level_grid`) switches on two-component
     propagation: cells below it and connected to the coastline/seeds are permanently
-    inundated (`static_inundation`), carry STATIC_WATER_FRICTION, and keep at least
-    the static level, so only the storm tide on top attenuates inland of the new shore.
+    inundated (`static_inundation`) and become seeds, moving the shoreline inland. Each
+    gets max(static level, level of its nearest original seed), so the static part does
+    not attenuate, the storm tide stays local to its own coast (a zero-friction new sea
+    would carry the highest coastal level everywhere), and only the storm tide on top
+    attenuates inland of the new shore.
     """
     using_seeds = seed_rows is not None or seed_cols is not None or seed_values is not None
     if using_seeds and boundaries is not None:
@@ -295,7 +295,15 @@ def flood_depth_dense(
     static_wet = None
     if static_level is not None:
         static_wet = static_inundation(dem, mask, static_level, coastline, ocean_code)
-        friction = np.where(static_wet, friction.dtype.type(STATIC_WATER_FRICTION), friction)
+        if static_wet.any():
+            s_rows, s_cols = np.nonzero(static_wet)
+            nearest = cKDTree(np.column_stack([coastline_rows, coastline_cols])).query(
+                np.column_stack([s_rows, s_cols]))[1]
+            s_values = np.maximum(static_level[s_rows, s_cols], np.asarray(initial)[nearest])
+            coastline_rows = np.concatenate([coastline_rows, s_rows])
+            coastline_cols = np.concatenate([coastline_cols, s_cols])
+            initial = np.concatenate([np.asarray(initial, dtype=np.float64), s_values])
+            station_values = np.concatenate([np.asarray(station_values, dtype=np.float64), s_values])
 
     if not obstacle_coupling:
         t = solve_eikonal_dense(
@@ -348,7 +356,6 @@ def flood_depth_dense(
         }
 
     if static_wet is not None:
-        waterlevel = np.where(static_wet, np.maximum(waterlevel, static_level), waterlevel)
         diagnostics["n_static_wet_cells"] = int(static_wet.sum())
 
     flood = (waterlevel > dem) & (mask != ocean_code)

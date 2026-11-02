@@ -100,6 +100,26 @@ def test_split_tile_seeded_from_neighbour_matches_single_solve() -> None:
     assert np.allclose(right, full[:, r0:], atol=0.01)
 
 
+def test_storm_tide_stays_local_across_the_new_sea() -> None:
+    # Two coasts (2.0 m and 4.0 m total level) joined by a plain below the 1.0 m static level:
+    # each side keeps its own coast's level; the high coast's level attenuates from the
+    # midpoint with land friction instead of covering the whole new sea.
+    dem, mask = _transect(np.full(N_COLS, 0.3))
+    mask[:, -2:] = 1
+    rows = np.repeat(np.arange(N_ROWS), 4)
+    cols = np.tile(np.array([0, 1, N_COLS - 2, N_COLS - 1]), N_ROWS)
+    values = np.where(cols < 2, 2.0, 4.0)
+    depth, _ = flood_depth_dense(
+        dem, mask, np.full(dem.shape, FRICTION, dtype=np.float32), TRANSFORM,
+        seed_rows=rows, seed_cols=cols, seed_values=values,
+        obstacle_coupling=True, max_outer_iterations=4, static_level=np.full(dem.shape, 1.0),
+    )
+    level = depth + dem
+    assert np.allclose(level[:, 2:20], 2.0, atol=0.1), level[N_ROWS // 2, 2:20].max()
+    assert level[:, 2:200].max() < 3.0
+    assert np.allclose(level[:, -50:-2], 4.0, atol=0.05)
+
+
 def test_static_level_grid_reproduces_station_field() -> None:
     lonlat = np.array([[100.0, 10.0], [100.2, 10.0], [100.0, 9.9], [100.2, 9.9]])
     values = np.array([1.0, 1.0, 1.0, 1.0])
