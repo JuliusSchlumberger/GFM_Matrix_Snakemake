@@ -45,6 +45,36 @@ study scripts and `build_tile_subset_by_id.py` are options now (`--out-dir`, `--
 `--fig-dir`, `--tile-ids`, `--tile-ids-file`, `--out`). Notebooks or scripts outside the repo that
 import renamed modules (pipeline_plots, analysis_figures, exposure_grid, ...) need the same update.
 
+## Reviewer critiques (branch `review-critiques`)
+
+Decided, to implement:
+- **SLR propagation (critique 1a):** two-component solve. Static level S = MDT + SLR spreads by
+  coast connectivity without attenuation and acts as sea; the total level (storm tide + MDT + SLR)
+  is attenuated from the new shoreline. Switch `flooding.slr_propagation: attenuated | two_component`;
+  default stays `attenuated` until validated.
+- **Protection rule:** water-level based, switch `exposure.protection_rule: flood_fraction | water_level`.
+  An event is protected where storm_tide(RP) + SLR <= storm_tide(RP_design) at the nearest COAST-RP
+  station (per-cell effective protection RP per SLR level). The adaptation Protect measure raises
+  the design level to storm_tide(RP_design) + SLR_intensity.
+- **Permanent inundation:** counted in EAI by anchoring the exceedance curve at p = 1 with the
+  permanently inundated exposure, and reported as a separate metric.
+- **Minimum protection RP2:** explicit setting, also for cells without a geogunit; sub-sea-level land
+  is protected at SLR_0 and loses protection once MDT + SLR exceeds the RP2 design level.
+
+Open:
+- **Tide in the static level:** decide later whether S = MDT + SLR (current choice) should also
+  include a tidal high water (MHHW). Needs a tide dataset (GTSM tide statistics or FES2014); COAST-RP
+  cannot separate tide from surge.
+- **`protection.default_rp: 5`** for geogunits without FLOPROS values vs the RP2 minimum: keep 5?
+- **Event volume / duration correction (critique 3):** design under discussion (basin volume cap
+  vs duration-scaled attenuation); also covers overtopping volume over defence crests.
+- **Cluster runs:** SFINCS at +1 m / +2 m SLR (benchmark for 1a) and at RP10 / RP1000 on ~100 tiles
+  (transferability, critique 1b; RP100 COAST-HG shape shifted to each RP peak). Tile count and SLR
+  levels to fix; check that no calibration batch is running before touching `sfincs_tiles/`.
+- **Land-cover friction (critique 2):** uniform-attenuation runs at equal mean (and 0.2 m/km) for
+  Table A3; keep or drop land-cover friction depending on the result; rename to land-cover-indexed
+  attenuation rate (no Manning) in code and docs.
+
 ## Known behaviour
 
 - Outputs at `friction_scale_factor` 9.0 (deltas, bangkok_chao_phraya) and 30.0
