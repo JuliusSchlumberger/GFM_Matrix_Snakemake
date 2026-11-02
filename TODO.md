@@ -47,78 +47,70 @@ import renamed modules (pipeline_plots, analysis_figures, exposure_grid, ...) ne
 
 ## Reviewer critiques (branch `review-critiques`)
 
-Decided, to implement:
-- **SLR propagation (critique 1a):** two-component solve. Static level S = MDT + SLR spreads by
-  coast connectivity without attenuation and acts as sea; the total level (storm tide + MDT + SLR)
-  is attenuated from the new shoreline. Switch `flooding.slr_propagation: attenuated | two_component`;
-  default stays `attenuated` until validated.
-- **Protection rule:** water-level based, switch `protection.rule: flood_fraction | water_level`
-  (implemented; `minimum_rp` applies to the water-level rule only).
-  An event is protected where storm_tide(RP) + SLR <= storm_tide(RP_design) at the nearest COAST-RP
-  station (per-cell effective protection RP per SLR level). The adaptation Protect measure raises
-  the design level to storm_tide(RP_design) + SLR_intensity.
-- **Permanent inundation:** counted in EAI by anchoring the exceedance curve at p = 1 with the
-  permanently inundated exposure, and reported as a separate metric.
-- **Minimum protection RP2:** explicit setting, also for cells without a geogunit; sub-sea-level land
-  is protected at SLR_0 and loses protection once MDT + SLR exceeds the RP2 design level.
+Evidence: `review_critiques/` scripts; results, figures and the summary page source in
+`.cleanup_baseline/review_critiques/`.
+
+Decided and implemented:
+- **SLR propagation (critique 1a):** `simulation.flooding.slr_propagation: two_component` is the
+  default. The static level S = MDT + SLR fingerprint spreads by coast connectivity without
+  attenuation and acts as sea; only the storm tide on top attenuates. Bangkok tiles: 1.8-2.7x the
+  attenuated flooded area from +0.5 m SLR, identical at SLR 0.
+- **Duration correction B (critique 3):** `simulation.flooding.duration_correction` on, alpha 1,
+  t_ref 12 h, COAST-HG shape of the nearest station per cell, second solve (~2x runtime). On SFINCS
+  RP100 tiles: pooled CSI +0.03-0.07, false alarms down; t_ref 6-24 h changes CSI by < 0.01. The
+  weir volume cap (A) changed nothing and stays in `src/event_volume.py` only for the experiments.
+- **Land-cover friction (critique 2):** kept, described as a land-cover-indexed attenuation rate
+  (docs/methods_02 §2.2, code comments; config keys and file names unchanged). Land-cover and
+  uniform attenuation are within ~0.02 CSI on random tiles, with and without B.
+- **Outputs:** new results go to `{root}/model_outputs_v2`, `merged_results_v2`, `figures_v2`,
+  `validation_v2`; per-tile inputs stay in `{root}/model_outputs` (`preprocessing_inputs_dir`).
+  Bangkok, deltas and calibration_500_tiles pin `attenuated` and B off in their `*_pins.yml` and
+  set `preprocessing_inputs_dir: null` (own inputs).
+- **Protection rule:** `protection.rule: flood_fraction | water_level` (implemented, default
+  flood_fraction; `minimum_rp` 2 applies to the water-level rule only).
+- **Permanent inundation:** to be counted in EAI by anchoring the exceedance curve at p = 1 with
+  the permanently inundated exposure, and reported as a separate metric (not implemented yet, see
+  Open).
 
 Open:
+- **friction_scale_factor with B:** still 12.0 (calibrated without B). The B calibration points to
+  fsf 7.5-9 on the 72-tile sample; the 500-tile run (`calibration_experiments.py --stage
+  representative`, results in `.cleanup_baseline/review_critiques/calibration/representative/`)
+  fixes the value. Set it in config.yml and update docs/methods_02 §2.2 when it is done.
+- **Pinned scenarios re-run on the next Snakemake call:** the new `flooding` keys and the
+  `static_level_inputs` param change run_eikonal's params, so bangkok_chao_phraya (98 jobs in the
+  dry run) and the other scenarios re-run run_eikonal with identical results. Use
+  `--rerun-triggers mtime` to skip that.
+- **HPC calibration tooling uses neither change:** `sfincs_tiles/run_calibration_models.py` calls
+  `flood_depth_dense` without the static level or B, so stage-1/2 calibration results describe the
+  old physics. Wire it when `sfincs_tiles/` may be touched.
+- **`run_eikonal_dag.py` OOM tile split:** `tile_split.split_tile` reads the mask from
+  `model_outputs/<tile>/inputs`; with `preprocessing_inputs_dir` set it raises FileNotFoundError
+  instead of splitting. Pass the inputs dir if splits are needed in production.
+- **Permanent inundation p = 1 anchor:** implement with the static-flood extent of the
+  two-component solve (flood_depth_dense diagnostic `n_static_wet_cells` only counts it now).
 - **Tide in the static level:** decide later whether S = MDT + SLR (current choice) should also
   include a tidal high water (MHHW). Needs a tide dataset (GTSM tide statistics or FES2014); COAST-RP
   cannot separate tide from surge.
 - **`protection.default_rp: 5`** for geogunits without FLOPROS values vs the RP2 minimum: keep 5?
-- **Event volume / duration correction (critique 3):** tested locally against the SFINCS RP100
-  calibration tiles (`review_critiques/calibration_experiments.py`, results and figures in
-  `.cleanup_baseline/review_critiques/`). (A) the weir-inflow basin volume cap changes nothing
-  (pooled CSI +0.0004): weir inflow exceeds the basin volume in 98% of basins. (B) friction x
-  (T_ref / T)^alpha, T = time the hydrograph stays within (level - spill level) of its peak,
-  clipped to [1, 10], T_ref 12 h: pooled CSI 0.616 -> 0.689 on the 72-tile fitting sample
-  (12 worst + 60 random), 0.736 -> 0.77-0.80 on 59 fresh random tiles; largest gains on sill /
-  short-event tiles (2862 0.18 -> 0.75, 673 0.17 -> 0.67, 2863 0.02 -> 0.44). T_ref 6-24 h changes CSI by < 0.01 (it shifts the
-  bias only). Decide: adopt B, alpha (0.5 or 1) and base friction (see critique 2); wire it into
-  `run_tile_scenario` (needs the COAST-HG hydrograph per boundary station in production and a
-  second solve, ~2x runtime). Still to do: RP10 / RP1000 transferability with B on (cluster
-  SFINCS runs, see below). Overtopping volume over defence crests is deferred (would make hazard
-  depend on protection).
 - **Flood-fraction rule never exposes saturated cells:** where the design event already floods the
   whole cell (ff = 1), no larger event or SLR can exceed the design flood fraction, so the cell stays
   protected forever. Bangkok case: 33% of the population in the design floodplain sits in such cells.
   Production uses this rule; the water-level rule does not have the flaw.
 - **Water-level rule + binary breach is harsh under SLR:** over all COAST-RP stations the median RP100
   standard drops to "fails every year" by ~0.25 m SLR (RP1000 by ~0.4 m), and a defence then counts
-  as fully breached. Bangkok: protect at the +1 m design equals no adaptation from +1.5 m. Needs the
-  deferred overtopping-volume treatment (or freeboard) before the water-level rule is adopted.
-- **SLR fingerprints scale vertical land motion with global SLR (production issue):**
-  `prepare_boundary_conditions.compute_slr_fingerprints` takes the nearest AR6 point within 1 deg
-  (tide gauges included), whose 2100 total relative SLR contains VLM, and scales it by T / GMSL.
+  as fully breached. Bangkok: protect at the +1 m design equals no adaptation from +1.5 m. Freeboard
+  or an overtopping volume would soften this before the water-level rule is adopted.
+- **SLR fingerprints scale vertical land motion with global SLR (production issue, left as is for
+  now):** `prepare_boundary_conditions.compute_slr_fingerprints` takes the nearest AR6 point within
+  1 deg (tide gauges included), whose 2100 total relative SLR contains VLM, and scales it by T / GMSL.
   Upper Gulf of Thailand stations (13.46 N, 100.2-100.7 E) get 5.16 m at T = 1.5 m; the global
-  0.1-99.9 percentiles are -3.9 / +4.3 m. Separate VLM (or use gridded values only) before scaling?
-  Affects current boundary conditions and both propagation variants.
-- **Production wiring of two-component propagation:** outputs would overwrite the attenuated rasters
-  under the same paths; needs its own scenario / output location and a `flooding` config switch
-  (changing `flooding` re-triggers every run_eikonal job via params).
-- **Permanent inundation p = 1 anchor:** needs the static-flood extent from the two-component solve;
-  implement together with it.
+  0.1-99.9 percentiles are -3.9 / +4.3 m. Affects both propagation variants.
 - **Materialized configs on the cluster:** re-materialize after pulling (new keys `protection.rule`,
-  `protection.minimum_rp`).
-- **Cluster runs:** SFINCS at +1 m / +2 m SLR (benchmark for 1a) and at RP10 / RP1000 on ~100 tiles
-  (transferability, critique 1b; RP100 COAST-HG shape shifted to each RP peak). Tile count and SLR
-  levels to fix; check that no calibration batch is running before touching `sfincs_tiles/`.
-- **Land-cover friction (critique 2):** land-cover and uniform attenuation perform within about
-  0.02 CSI of each other, and which one wins depends on the tile set. On the 72-tile fitting
-  sample, uniform 0.1 m/km scores 0.631 against land-cover fsf 12 at 0.616. On random tiles only,
-  land-cover fsf 12 scores 0.739, against 0.721 for uniform 0.1 and 0.698 for uniform 0.15. On
-  the fresh tiles, land-cover scores 0.736 against 0.725 for uniform 0.15. Uniform at each tile's own
-  land-cover mean (median 0.23 m/km) scores only 0.451 and is biased low (0.72): flow follows the
-  low-friction paths, so a land-cover field attenuates less than its mean suggests. Equal-mean is
-  therefore not a fair Table A3 row on its own; compare each scheme at its calibrated optimum
-  (`C2_table_A3_candidates.csv`). 0.2 m/km scores 0.579.
-  Under B the two remain level: 0.773/0.778 for land-cover against 0.765/0.797 for uniform on the
-  fresh tiles. Bracketing on the fitting sample puts the optimum for uniform alone at 0.125 m/km
-  (0.641) and for uniform under B at 0.075-0.10 m/km (0.71). So land-cover does not clearly earn
-  its complexity. Decide whether to drop it. If
-  kept, rename it to a land-cover-indexed attenuation rate (no Manning) in code and docs (not done
-  yet).
+  `protection.minimum_rp`, `flooding.slr_propagation`, `flooding.duration_correction`, new paths).
+- **Cluster runs (not planned for now):** SFINCS at +1 m / +2 m SLR (benchmark for 1a) and at
+  RP10 / RP1000 on ~100 tiles (transferability, critique 1b, now with B on; RP100 COAST-HG shape
+  shifted to each RP peak).
 
 ## Known behaviour
 
