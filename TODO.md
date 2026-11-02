@@ -83,6 +83,12 @@ Open:
   standard drops to "fails every year" by ~0.25 m SLR (RP1000 by ~0.4 m), and a defence then counts
   as fully breached. Bangkok: protect at the +1 m design equals no adaptation from +1.5 m. Needs the
   deferred overtopping-volume treatment (or freeboard) before the water-level rule is adopted.
+- **SLR fingerprints scale vertical land motion with global SLR (production issue):**
+  `prepare_boundary_conditions.compute_slr_fingerprints` takes the nearest AR6 point within 1 deg
+  (tide gauges included), whose 2100 total relative SLR contains VLM, and scales it by T / GMSL.
+  Upper Gulf of Thailand stations (13.46 N, 100.2-100.7 E) get 5.16 m at T = 1.5 m; the global
+  0.1-99.9 percentiles are -3.9 / +4.3 m. Separate VLM (or use gridded values only) before scaling?
+  Affects current boundary conditions and both propagation variants.
 - **Production wiring of two-component propagation:** outputs would overwrite the attenuated rasters
   under the same paths; needs its own scenario / output location and a `flooding` config switch
   (changing `flooding` re-triggers every run_eikonal job via params).
