@@ -193,7 +193,52 @@ def run_tile_extended(tile_id: str, out_dir: str, save_maps: bool) -> list[dict]
     return records
 
 
-STAGES = {"main": (run_tile, "results.jsonl"), "extended": (run_tile_extended, "results_extended.jsonl")}
+def run_tile_validation(tile_id: str, out_dir: str, save_maps: bool) -> list[dict]:
+    """Out-of-sample stage: the candidate configurations (VALIDATION_CONFIGS) on fresh tiles."""
+    t0 = time.perf_counter()
+    t = load_tile(tile_id)
+    if t["seeds"] is None:
+        return [{"tile_id": tile_id, "variant": "no_seeds"}]
+    sources = np.zeros(t["dem"].shape, dtype=bool)
+    sources[t["seeds"][0], t["seeds"][1]] = True
+    fill = spill_level(t["dem"], sources | (t["mask"] == rcm.OCEAN_CODE))
+
+    def hydro_cells(rows, cols):
+        return t["series"], t["point_tree"].query(np.column_stack([rows, cols]))[1]
+
+    records = []
+    base_depths = {}
+    for variant, param, alpha in VALIDATION_CONFIGS:
+        is_uniform = variant.startswith("uniform") or variant.startswith("B_uniform")
+        if is_uniform:
+            friction = np.full(t["dem"].shape, param * t["cell_m"] / 1000)
+        else:
+            friction = t["friction"] * param
+        if (is_uniform, param) not in base_depths:
+            base_depths[(is_uniform, param)] = solve(t, friction)
+        depth = base_depths[(is_uniform, param)]
+        if alpha is not None:
+            mult = duration_friction_multiplier(depth, t["dem"], fill, hydro_cells, t["dt_s"], B_T_REF_S, alpha)
+            depth = solve(t, friction * mult)
+        records.append({"tile_id": tile_id, "variant": variant, "param": param, **score(t, depth),
+                        "elapsed_s_tile": round(time.perf_counter() - t0, 1)})
+    return records
+
+
+# (variant, fsf or m/km, B alpha or None), chosen from the main and extended stages.
+VALIDATION_CONFIGS = [
+    ("landcover", 9.0, None),
+    ("landcover", 12.0, None),
+    ("uniform", 0.1, None),
+    ("uniform", 0.15, None),
+    ("B_duration_a0.5", 9.0, 0.5),
+    ("B_duration_a1", 7.5, 1.0),
+    ("B_uniform_a0.5", 0.1, 0.5),
+    ("B_uniform_a1", 0.1, 1.0),
+]
+
+STAGES = {"main": (run_tile, "results.jsonl"), "extended": (run_tile_extended, "results_extended.jsonl"),
+          "validation": (run_tile_validation, "results_validation.jsonl")}
 
 
 def select_tiles(n_random: int, seed: int = 0) -> tuple[list[str], set[str]]:
@@ -208,6 +253,13 @@ def select_tiles(n_random: int, seed: int = 0) -> tuple[list[str], set[str]]:
     return sorted(worst_ids) + sample, worst_ids
 
 
+def select_validation_tiles(n: int, exclude: set[str], seed: int = 1) -> list[str]:
+    per_tile = pd.read_csv(BASE / "friction_sweep_per_tile_metrics.csv")
+    pool = per_tile[(per_tile.friction_scale_factor == 12.0) & per_tile.CSI.notna()]
+    pool = sorted({str(int(i)) for i in pool.tile_id} - exclude)
+    return list(np.random.default_rng(seed).choice(pool, size=min(n, len(pool)), replace=False))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out-dir", required=True)
@@ -220,6 +272,8 @@ def main() -> None:
     out_dir = Path(args.out_dir)
     (out_dir / "maps").mkdir(parents=True, exist_ok=True)
     tiles, worst = select_tiles(args.n_random)
+    if args.stage == "validation":
+        tiles, worst = select_validation_tiles(args.n_random, set(tiles)), set()
     if args.tile_ids:
         tiles = args.tile_ids
     results = out_dir / results_name
@@ -227,7 +281,8 @@ def main() -> None:
     if results.exists():
         done = {json.loads(line)["tile_id"] for line in results.read_text().splitlines() if line.strip()}
     todo = [t for t in tiles if t not in done]
-    (out_dir / "sample.json").write_text(json.dumps({"tiles": tiles, "worst": sorted(worst)}, indent=1))
+    sample_name = "sample_validation.json" if args.stage == "validation" else "sample.json"
+    (out_dir / sample_name).write_text(json.dumps({"tiles": tiles, "worst": sorted(worst)}, indent=1))
     print(f"{len(todo)} of {len(tiles)} tiles to run, {args.workers} workers", flush=True)
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         futures = {pool.submit(run_fn, t, str(out_dir), t in worst): t for t in todo}
