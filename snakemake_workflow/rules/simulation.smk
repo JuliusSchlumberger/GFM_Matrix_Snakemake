@@ -39,6 +39,7 @@ rule run_eikonal:
         river_code=config["tile_generation"]["river_code"],
         n_scenarios_per_tile=len(RETURN_PERIODS) * len(WATERLEVEL_NAMES),
         flooding_config=config["simulation"]["flooding"],
+        static_level_inputs=static_level_inputs(config),
     resources:
         # Deliberately generous; over-estimating only reduces concurrency.
         mem_mb=lambda wildcards, input: estimate_eikonal_mem_mb(

@@ -28,9 +28,15 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 sys.path.insert(0, str(REPO_ROOT / "sfincs_tiles"))
 
 import run_calibration_models as rcm  # noqa: E402
-from event_volume import basin_volume_cap, duration_friction_multiplier, spill_level  # noqa: E402
+from event_volume import (  # noqa: E402
+    DurationCorrection,
+    basin_volume_cap,
+    duration_friction_multiplier,
+    load_coast_hg,
+    spill_level,
+)
 from flood_agreement import WET_THRESHOLD_M, confusion_counts  # noqa: E402
-from flood_model import flood_depth_dense  # noqa: E402
+from flood_model import effective_dem, flood_depth_dense  # noqa: E402
 from sfincs_grid import active_on_subgrid  # noqa: E402
 
 DATA_ROOT = Path("P:/11212688-004-global-floodmaps/modelling")
@@ -72,7 +78,7 @@ def load_tile(tile_id: str) -> dict:
     prow, pcol = rasterio.transform.rowcol(transform, px, py)
     series = [hydro[str(i)].to_numpy() for i in range(len(points))]
     return dict(tile_id=tile_id, dem=solver_dem, mask=solver_mask, friction=base_friction, transform=transform,
-                seeds=seeds, sfincs=sfincs, score=score, cell_m2=cell_m2,
+                seeds=seeds, sfincs=sfincs, score=score, cell_m2=cell_m2, crs=crs,
                 cell_m=float(np.hypot(transform.a, transform.d)),
                 weight=np.full(dem.shape, cell_m2 / 1e6), series=series,
                 point_tree=cKDTree(np.column_stack([prow, pcol])),
@@ -263,6 +269,54 @@ VALIDATION_CONFIGS = [
     ("B_uniform_a1", 0.1, 1.0),
 ]
 
+# Representative comparison: land-cover vs uniform, with and without B (alpha 1), on
+# REPRESENTATIVE_N random tiles, through the production DurationCorrection (COAST-HG station
+# nearest to each cell, effective DEM) rather than the per-tile SFINCS forcing points.
+REPRESENTATIVE_N = 500
+REP_LU_FSF = [6.0, 7.5, 9.0, 12.0]
+REP_UNIFORM_M_PER_KM = [0.075, 0.1, 0.125]
+REP_ALPHA = 1.0
+COAST_HG_NC = DATA_ROOT / "inputs" / "COAST_HG" / "COAST-HG_RP100.nc"
+
+
+def run_tile_representative(tile_id: str, out_dir: str, save_maps: bool) -> list[dict]:
+    """Representative stage: production B on land-cover and uniform friction."""
+    t0 = time.perf_counter()
+    t = load_tile(tile_id)
+    if t["seeds"] is None:
+        return [{"tile_id": tile_id, "variant": "no_seeds"}]
+    shape = t["dem"].shape
+    to_lonlat = Transformer.from_crs(t["crs"], "EPSG:4326", always_xy=True)
+    xs, ys = to_lonlat.transform(*[np.array(v) for v in rasterio.transform.xy(
+        t["transform"], [0, 0, shape[0] - 1, shape[0] - 1], [0, shape[1] - 1, 0, shape[1] - 1])])
+    lonlat, series, dt_s = load_coast_hg(COAST_HG_NC, (min(xs), min(ys), max(xs), max(ys)))
+    correction = DurationCorrection(lonlat, series, dt_s, B_T_REF_S, REP_ALPHA, crs=t["crs"])
+    sources = t["mask"] == rcm.OCEAN_CODE
+    sources[t["seeds"][0], t["seeds"][1]] = True
+    dem_eff = effective_dem(t["dem"], t["mask"])
+
+    records = []
+    runs = [("landcover", fsf, t["friction"] * fsf) for fsf in REP_LU_FSF]
+    runs += [("uniform", rate, np.full(shape, rate * t["cell_m"] / 1000)) for rate in REP_UNIFORM_M_PER_KM]
+    for variant, param, friction in runs:
+        base = solve(t, friction)
+        mult = correction.multiplier(base, dem_eff, sources, t["transform"])
+        corrected = solve(t, friction * mult)
+        for name, depth in [(variant, base), (f"B{REP_ALPHA:g}_{variant}", corrected)]:
+            records.append({"tile_id": tile_id, "variant": name, "param": param, **score(t, depth),
+                            "n_coast_hg": len(lonlat)})
+    for r in records:
+        r["elapsed_s_tile"] = round(time.perf_counter() - t0, 1)
+    return records
+
+
+def select_representative_tiles(n: int, seed: int = 2) -> list[str]:
+    per_tile = pd.read_csv(BASE / "friction_sweep_per_tile_metrics.csv")
+    pool = sorted({str(int(i)) for i in per_tile[(per_tile.friction_scale_factor == 12.0)
+                                                  & per_tile.CSI.notna()].tile_id})
+    return sorted(np.random.default_rng(seed).choice(pool, size=min(n, len(pool)), replace=False))
+
+
 # Brackets the uniform-rate optimum with and without B on the fitting sample.
 BRACKET_CONFIGS = [
     ("uniform", 0.125, None),
@@ -279,6 +333,7 @@ def run_tile_bracket(tile_id: str, out_dir: str, save_maps: bool) -> list[dict]:
 
 STAGES = {"main": (run_tile, "results.jsonl"), "extended": (run_tile_extended, "results_extended.jsonl"),
           "bracket": (run_tile_bracket, "results_bracket.jsonl"),
+          "representative": (run_tile_representative, "representative/results.jsonl"),
           "validation": (run_tile_validation, "results_validation.jsonl"),
           "maps": (run_tile_maps, "maps_final_log.jsonl")}
 
@@ -319,6 +374,9 @@ def main() -> None:
         tiles, worst = select_validation_tiles(args.n_random, set(tiles)), set()
     elif args.stage == "maps":
         tiles = sorted(worst)
+    elif args.stage == "representative":
+        tiles, worst = select_representative_tiles(REPRESENTATIVE_N), set()
+        (out_dir / "representative").mkdir(exist_ok=True)
     if args.tile_ids:
         tiles = args.tile_ids
     results = out_dir / results_name
@@ -327,7 +385,8 @@ def main() -> None:
         done = {json.loads(line)["tile_id"] for line in results.read_text().splitlines() if line.strip()}
     todo = [t for t in tiles if t not in done]
     if args.stage != "maps":
-        sample_name = "sample_validation.json" if args.stage == "validation" else "sample.json"
+        sample_name = {"validation": "sample_validation.json",
+                       "representative": "representative/sample.json"}.get(args.stage, "sample.json")
         (out_dir / sample_name).write_text(json.dumps({"tiles": tiles, "worst": sorted(worst)}, indent=1))
     print(f"{len(todo)} of {len(tiles)} tiles to run, {args.workers} workers", flush=True)
     with ProcessPoolExecutor(max_workers=args.workers) as pool:

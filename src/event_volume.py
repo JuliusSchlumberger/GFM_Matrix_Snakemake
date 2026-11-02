@@ -9,10 +9,16 @@ controlling elevation (`spill_level`) only briefly during the hydrograph peak.
 from __future__ import annotations
 
 import heapq
+from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
+import rasterio.transform
+import xarray as xr
 from numba import njit
+from pyproj import Transformer
 from scipy import ndimage
+from sklearn.neighbors import BallTree
 
 _STRUCTURE_8 = np.ones((3, 3), dtype=bool)
 
@@ -185,3 +191,90 @@ def duration_friction_multiplier(
     duration = np.maximum(duration, dt_s)
     mult[rows, cols] = np.clip((t_ref_s / duration) ** alpha, 1.0, max_multiplier)
     return mult
+
+
+# COAST-HG RP100 storm-tide hydrographs; only the shape around the peak is used, so the
+# tide phase variant and the vertical datum do not matter.
+COAST_HG_VARIABLE = "hydrograph_average_tide_signal"
+
+# Stations within this distance (deg) of the tile bounds are loaded.
+COAST_HG_BUFFER_DEG = 1.0
+
+# Grid step (cells) on which each cell's nearest COAST-HG station is resolved; stations are
+# ~10-50 km apart.
+HYDROGRAPH_LOOKUP_COARSEN = 32
+
+
+@dataclass
+class DurationCorrection:
+    """Correction B: friction x (t_ref / T)^alpha, T from the local storm-tide hydrograph.
+
+    `station_lonlat` (n, 2) and `series` (n, t) are the hydrographs near the tile (m, any
+    datum), `dt_s` their time step. `crs` is the solver grid's CRS when it is not EPSG:4326.
+    """
+
+    station_lonlat: np.ndarray
+    series: np.ndarray
+    dt_s: float
+    t_ref_s: float
+    alpha: float
+    max_multiplier: float = 10.0
+    crs: object = None
+
+    def station_index(self, shape: tuple[int, int], transform) -> np.ndarray:
+        """Return the nearest station per cell on a HYDROGRAPH_LOOKUP_COARSEN grid (coarse array)."""
+        k = HYDROGRAPH_LOOKUP_COARSEN
+        rr, cc = np.meshgrid(np.arange(0, shape[0], k) + k // 2, np.arange(0, shape[1], k) + k // 2, indexing="ij")
+        xs, ys = rasterio.transform.xy(transform, rr.ravel(), cc.ravel())
+        xs, ys = np.asarray(xs), np.asarray(ys)
+        if self.crs is not None:
+            xs, ys = Transformer.from_crs(self.crs, "EPSG:4326", always_xy=True).transform(xs, ys)
+        tree = BallTree(np.radians(self.station_lonlat[:, ::-1]), metric="haversine")
+        nearest = tree.query(np.radians(np.column_stack([ys, xs])), k=1)[1][:, 0]
+        return nearest.reshape(rr.shape)
+
+    def multiplier(self, depth: np.ndarray, dem: np.ndarray, sources: np.ndarray, transform) -> np.ndarray:
+        """Return the friction multiplier for a first-solve `depth` (`dem` effective, m)."""
+        wet = depth > 0
+        mult = np.ones(depth.shape, dtype=np.float32)
+        if not wet.any():
+            return mult
+        # Spill levels only matter on the wet cells; crop to their bounding box (plus sources
+        # inside it) to keep the priority flood small on large tiles.
+        rows, cols = np.nonzero(wet)
+        win = (slice(max(rows.min() - 1, 0), rows.max() + 2), slice(max(cols.min() - 1, 0), cols.max() + 2))
+        fill = np.full(depth.shape, np.inf)
+        fill[win] = spill_level(dem[win], sources[win])
+        coarse = self.station_index(depth.shape, transform)
+
+        def hydrograph_for_cells(r, c):
+            k = HYDROGRAPH_LOOKUP_COARSEN
+            return self.series, coarse[np.minimum(r // k, coarse.shape[0] - 1), np.minimum(c // k, coarse.shape[1] - 1)]
+
+        return duration_friction_multiplier(depth, dem, fill, hydrograph_for_cells, self.dt_s, self.t_ref_s,
+                                            self.alpha, self.max_multiplier)
+
+
+def load_coast_hg(
+    nc_path: str | Path,
+    bounds_lonlat: tuple[float, float, float, float],
+    buffer_deg: float = COAST_HG_BUFFER_DEG,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Return (station lonlat, series (n, t) m, dt s) of COAST-HG stations near `bounds_lonlat`.
+
+    `bounds_lonlat` = (lon_min, lat_min, lon_max, lat_max). Falls back to the nearest station
+    when none lies within the buffer (tiles far from any GTSM output point).
+    """
+    with xr.open_dataset(nc_path) as ds:
+        lon = ds["station_x_coordinate"].values.astype(np.float64)
+        lat = ds["station_y_coordinate"].values.astype(np.float64)
+        lon_min, lat_min, lon_max, lat_max = bounds_lonlat
+        sel = np.nonzero((lon >= lon_min - buffer_deg) & (lon <= lon_max + buffer_deg)
+                         & (lat >= lat_min - buffer_deg) & (lat <= lat_max + buffer_deg))[0]
+        if sel.size == 0:
+            centre = np.radians([[(lat_min + lat_max) / 2, (lon_min + lon_max) / 2]])
+            sel = BallTree(np.radians(np.column_stack([lat, lon])), metric="haversine").query(centre, k=1)[1][0]
+        series = ds[COAST_HG_VARIABLE].isel(stations=sel).values.astype(np.float64)
+        dt_s = float(np.median(np.diff(ds["time"].values)) / np.timedelta64(1, "s"))
+    keep = np.isfinite(series).all(axis=1)
+    return np.column_stack([lon[sel], lat[sel]])[keep], series[keep], dt_s

@@ -153,6 +153,21 @@ def save_boundary_points(stations: gpd.GeoDataFrame, output_path: str | Path, co
     retry_transient_io(stations.to_file, output_path, driver="GPKG")
 
 
+# Written by preparation/prepare_boundary_conditions.py into paths.processed_inputs_dir.
+MDT_STATIONS_FILENAME = "MDT_mapped_on_coastal_points.nc"
+
+
+def static_level_inputs(config: dict) -> dict:
+    """Return the `static_station_levels` file arguments (all but RP and SLR) for a config."""
+    bc = config["boundary_conditions"]
+    return {
+        "waterlevel_nc_dir": bc["waterlevel_nc_dir"],
+        "nc_filename_template": bc["nc_filename_template"],
+        "nc_variable_template": bc["nc_variable_template"],
+        "mdt_path": str(Path(config["paths"]["processed_inputs_dir"]) / MDT_STATIONS_FILENAME),
+    }
+
+
 def static_station_levels(
     waterlevel_nc_dir: str | Path,
     nc_filename_template: str,

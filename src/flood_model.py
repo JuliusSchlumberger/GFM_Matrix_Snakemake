@@ -16,6 +16,7 @@ from scipy.spatial import cKDTree
 from sklearn.neighbors import BallTree
 
 from eikonal import solve_eikonal_dense
+from event_volume import DurationCorrection
 
 
 LAND_CODE = 0
@@ -234,6 +235,7 @@ def flood_depth_dense(
     outer_convergence_pct: float = 0.01,
     waterlevel_epsilon_m: float = WATERLEVEL_EPSILON_M,
     static_level: np.ndarray | None = None,
+    duration_correction: DurationCorrection | None = None,
 ) -> tuple[np.ndarray, dict]:
     """Solve flood depth (m) on the full dense tile; 0.0 where not flooded.
 
@@ -260,6 +262,10 @@ def flood_depth_dense(
     not attenuate, the storm tide stays local to its own coast (a zero-friction new sea
     would carry the highest coastal level everywhere), and only the storm tide on top
     attenuates inland of the new shore.
+
+    `duration_correction` (event_volume.DurationCorrection) multiplies friction where the
+    first solve's water stands above the spill level only briefly during the storm-tide
+    peak, and solves again with that friction.
     """
     using_seeds = seed_rows is not None or seed_cols is not None or seed_values is not None
     if using_seeds and boundaries is not None:
@@ -307,14 +313,13 @@ def flood_depth_dense(
             initial = np.concatenate([np.asarray(initial, dtype=np.float64), s_values])
             station_values = np.concatenate([np.asarray(station_values, dtype=np.float64), s_values])
 
-    if not obstacle_coupling:
-        t = solve_eikonal_dense(
-            friction, coastline_rows, coastline_cols, -initial, waterlevel_epsilon_m,
-            max_rounds=max_rounds, sweep_budget=sweep_budget,
-        )
-        waterlevel = -t[1:, 1:]
-        diagnostics = {"obstacle_coupling": False}
-    else:
+    def solve(friction: np.ndarray) -> tuple[np.ndarray, dict]:
+        if not obstacle_coupling:
+            t = solve_eikonal_dense(
+                friction, coastline_rows, coastline_cols, -initial, waterlevel_epsilon_m,
+                max_rounds=max_rounds, sweep_budget=sweep_budget,
+            )
+            return -t[1:, 1:], {"obstacle_coupling": False}
         dtype = friction.dtype
         n_cells = dem.size
         max_waterlevel = float(station_values.max())
@@ -347,8 +352,7 @@ def flood_depth_dense(
                 break
             friction_b = np.where(blocked, dtype.type(OBSTACLE_BLOCK_FRICTION), friction)
             prev_blocked = blocked
-        waterlevel = -t[1:, 1:]
-        diagnostics = {
+        return -t[1:, 1:], {
             "obstacle_coupling": True,
             "outer_iterations_used": n_outer,
             "outer_converged": outer_converged,
@@ -357,12 +361,23 @@ def flood_depth_dense(
             "final_max_change": inner_diag.get("max_change"),
         }
 
+    def depth_from(waterlevel: np.ndarray) -> np.ndarray:
+        flood = prune_to_coast_connected((waterlevel > dem) & (mask != ocean_code), coastline)
+        depth = np.zeros_like(dem)
+        depth[flood] = waterlevel[flood] - dem[flood]
+        return depth
+
+    waterlevel, diagnostics = solve(friction)
+    if duration_correction is not None:
+        sources = mask == ocean_code
+        sources[coastline_rows, coastline_cols] = True
+        multiplier = duration_correction.multiplier(depth_from(waterlevel), dem, sources, transform)
+        corrected = multiplier > 1.0
+        waterlevel, diagnostics = solve(friction * multiplier)
+        diagnostics["n_duration_corrected_cells"] = int(corrected.sum())
+        diagnostics["mean_duration_multiplier"] = float(multiplier[corrected].mean()) if corrected.any() else 1.0
+
     if static_wet is not None:
         diagnostics["n_static_wet_cells"] = int(static_wet.sum())
 
-    flood = (waterlevel > dem) & (mask != ocean_code)
-    flood = prune_to_coast_connected(flood, coastline)
-
-    waterdepth = np.zeros_like(dem)
-    waterdepth[flood] = waterlevel[flood] - dem[flood]
-    return waterdepth, diagnostics
+    return depth_from(waterlevel), diagnostics

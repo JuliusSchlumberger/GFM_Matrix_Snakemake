@@ -9,6 +9,7 @@ tile_grid:
 
 simulation:
   model_outputs: "{root}/calibration_500_tiles/model_outputs"
+  preprocessing_inputs_dir: null  # own per-tile inputs under model_outputs
   # Ceilings well above production (max_rounds 40, max_outer_iterations 4) to probe convergence.
   flooding:
     max_rounds: 100

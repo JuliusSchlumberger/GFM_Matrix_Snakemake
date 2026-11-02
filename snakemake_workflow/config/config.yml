@@ -147,8 +147,10 @@ raster_format:
 
 # ── FLOOD SIMULATION ──────────────────────────────────────────────────────────
 simulation: # Used by: preprocessing rules
-  model_outputs: "{root}/model_outputs"  # per-tile "{tile_id}/inputs" and "{tile_id}/results"
-  preprocessing_inputs_dir: null # when set, per-tile preprocessing inputs are read/written there instead of model_outputs
+  # Results of two-component propagation with correction B; the attenuated results stay in
+  # {root}/model_outputs, which also keeps the per-tile inputs (preprocessing_inputs_dir).
+  model_outputs: "{root}/model_outputs_v2"  # per-tile "{tile_id}/results"
+  preprocessing_inputs_dir: "{root}/model_outputs" # when set, per-tile preprocessing inputs are read/written there instead of model_outputs
 
   # Solver: src/flood_model.py flood_depth_dense (round-based, capped at flooding.max_rounds).
   model_bbox_buffer_arcsec: 3 # buffer around the tile bbox to ensure a thin strip of ocean
@@ -193,6 +195,25 @@ simulation: # Used by: preprocessing rules
       max_outer_iterations: 4
       outer_convergence_pct: 0.01  # stop early once < this % of the tile's cells are newly blocked in an outer iteration
 
+    # SLR propagation (flood_model.flood_depth_dense). two_component: the static level MDT + SLR
+    # fingerprint (no tide) spreads over coast-connected land below it without attenuation and
+    # acts as sea; only the storm tide on top attenuates inland of that new shore.
+    # attenuated: the total level (storm tide + MDT + SLR) attenuates from the coastline.
+    slr_propagation: "two_component"
+
+    # Correction B (event_volume.DurationCorrection): where the first solve's water stands
+    # above the spill level (the sill behind a ridge, else the ground) for only T hours of the
+    # COAST-HG storm-tide peak, the attenuation rate is multiplied by (t_ref_h / T)^alpha,
+    # clipped to [1, max_multiplier], and the tile is solved again (~2x runtime).
+    # alpha 1, t_ref 12 h: review_critiques/calibration_experiments.py (CSI insensitive to
+    # t_ref 6-24 h). COAST-HG is RP100 only; its shape is used for every RP and SLR.
+    duration_correction:
+      enabled: true
+      alpha: 1.0
+      t_ref_h: 12.0
+      max_multiplier: 10.0
+      coast_hg_path: "{root}/inputs/COAST_HG/COAST-HG_RP100.nc"
+
   # Peak-memory estimate for run_eikonal's `resources: mem_mb` (eikonal_runner.estimate_eikonal_mem_mb).
   # Calibrated on 7 tiles, deliberately generous; retune from production telemetry.
   eikonal_mem_estimate:
@@ -209,7 +230,7 @@ simulation: # Used by: preprocessing rules
 hpc:
   n_nodes: 40                                        # shared budget across
   # every batch per wave, split evenly by tile count
-  jobs_dir: "{root}/model_outputs/hpc_jobs"           # generated sbatch scripts, resolved_config.yml, submit_waves.sh, logs/
+  jobs_dir: "{root}/model_outputs_v2/hpc_jobs"           # generated sbatch scripts, resolved_config.yml, submit_waves.sh, logs/
   single_preprocess_job: false # true: generate_hpc_preprocess_job.py writes one job for all tiles instead of node batches
   # Site SLURM values (partition, mem, env_activate_cmd, wave_tiers, *_sbatch) are left empty here:
   # they come from config_hpc.yml (copy config_hpc.example.yml), which the HPC generators require.
@@ -249,7 +270,7 @@ hpc:
 
 postprocessing:
   # Root directory for combined (multi-tile) rasters, VRTs and plots.
-  merged_outputs: "{root}/merged_results"
+  merged_outputs: "{root}/merged_results_v2"
   chunk_size_deg: 5 # spatial chunk size (degrees) for merging
   block_size: 2048 # side length (pixels) of the write blocks inside each chunk
 
@@ -327,7 +348,7 @@ analysis: # Used by: analysis/run_analysis.py
 
 # ── VISUALISATION ─────────────────────────────────────────────────────────────
 visualization:
-  output_dir: "{root}/figures"
+  output_dir: "{root}/figures_v2"
 
   # ── Burning-ember ────────────────────────────────────────
   # The growth matrices span a wider space than the ember figures show, so pathways can be
@@ -461,7 +482,7 @@ visualization:
 validation:
   benchmark_catalog: "snakemake_workflow/config/data_catalog_validation.yml"
   benchmark_root: "{root}/inputs/validation" # NOT the GFM catalog's own {root}
-  output_dir: "{root}/validation"
+  output_dir: "{root}/validation_v2"
   return_period: "RP100" # scalar RP: "RP100" wildcard form (see boundary_conditions.return_periods)
   waterlevel_name: "SLR_0"
   primary_threshold_m: 0.01 # model wet-cell depth threshold for scoring. Deliberately not
@@ -484,7 +505,7 @@ validation:
   # only by validate_country_national_coverage to clip a region bbox to the country's own cells, so
   # neighbouring-country flooding is not scored as false positive
   iso_lookup_source: "flopros_protection_standards" # data_catalog_gfm.yml key - geogunit_107-ID-indexed, "ISO" column
-  flood_totals_dir: "{root}/merged_results/exposure/flood_totals" # flood_totals_{ISO}.csv from
+  flood_totals_dir: "{root}/merged_results_v2/exposure/flood_totals" # flood_totals_{ISO}.csv from
   # analysis/compute_flood_totals.py, read for model_total_wet_km2. Must match run_analysis.py's
   # exposure output dir + "/flood_totals" if its --out-dir is overridden
   plots:

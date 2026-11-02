@@ -4,11 +4,13 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from affine import Affine
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from event_volume import (  # noqa: E402
+    DurationCorrection,
     basin_volume_cap,
     duration_friction_multiplier,
     level_pool_level,
@@ -16,8 +18,10 @@ from event_volume import (  # noqa: E402
     time_within_peak,
     weir_inflow_volume,
 )
+from flood_model import flood_depth_dense  # noqa: E402
 
 DT = 600.0
+TRANSFORM = Affine(0.00027, 0.0, 100.0, 0.0, -0.00027, 10.0)
 
 
 def _transect() -> tuple[np.ndarray, np.ndarray]:
@@ -78,3 +82,38 @@ def test_duration_multiplier_penalises_short_head_over_sill_only() -> None:
     # the local ground near the coast (up to 1.5 m), so the basin gets the larger multiplier.
     assert mult[:, 20].mean() > mult[:, 1].mean()
     assert (mult >= 1.0).all()
+
+
+def _correction(h: np.ndarray, t_ref_h: float = 12.0) -> DurationCorrection:
+    return DurationCorrection(np.array([[100.0, 10.0]]), h[None, :], DT, t_ref_s=t_ref_h * 3600.0, alpha=1.0)
+
+
+def _solve(dem, correction=None):
+    mask = np.zeros(dem.shape, dtype=np.int8)
+    mask[:, 0] = 1
+    rows = np.arange(dem.shape[0])
+    return flood_depth_dense(
+        dem, mask, np.full(dem.shape, 0.002, dtype=np.float32), TRANSFORM,
+        seed_rows=rows, seed_cols=np.zeros_like(rows), seed_values=np.full(rows.size, 1.8),
+        obstacle_coupling=True, max_outer_iterations=4, duration_correction=correction,
+    )
+
+
+def test_solver_duration_correction_dries_basin_behind_sill_under_short_peak() -> None:
+    dem, _ = _transect()
+    plain, _ = _solve(dem)
+    short = np.concatenate([np.zeros(20), [1.0, 1.8, 1.8, 1.0], np.zeros(20)])
+    corrected, diag = _solve(dem, _correction(short))
+    assert (plain[:, 11:41] > 0).all()
+    assert corrected[:, 11:41].sum() < plain[:, 11:41].sum()
+    assert diag["n_duration_corrected_cells"] > 0
+
+
+def test_solver_duration_correction_is_identity_for_long_events() -> None:
+    dem, _ = _transect()
+    plain, _ = _solve(dem)
+    # Water stands above every head for >= t_ref: multiplier 1 everywhere.
+    long = np.concatenate([np.zeros(5), np.full(200, 1.8), np.zeros(5)])
+    corrected, diag = _solve(dem, _correction(long, t_ref_h=6.0))
+    assert np.array_equal(plain, corrected)
+    assert diag["n_duration_corrected_cells"] == 0

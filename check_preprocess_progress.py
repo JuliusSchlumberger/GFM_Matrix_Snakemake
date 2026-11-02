@@ -14,7 +14,7 @@ from progress_report import progress_bar, run_report  # noqa: E402
 from tiles import load_tile_grid  # noqa: E402
 
 
-def _count_progress(model_outputs: Path, tile_ids: list[int], n_scenarios_per_tile: int) -> dict:
+def _count_progress(inputs_root: Path, tile_ids: list[int], n_scenarios_per_tile: int) -> dict:
     counts = {
         "tile_geometry.gpkg": 0,
         "model_bbox.json": 0,
@@ -24,7 +24,7 @@ def _count_progress(model_outputs: Path, tile_ids: list[int], n_scenarios_per_ti
     }
     total_boundaries = 0
     for tid in tile_ids:
-        inputs_dir = model_outputs / str(tid) / "inputs"
+        inputs_dir = inputs_root / str(tid) / "inputs"
         if not inputs_dir.is_dir():
             continue
         entries = set(p.name for p in inputs_dir.iterdir())
@@ -69,13 +69,13 @@ def main() -> None:
     cfg = load_config(Path(args.config).resolve())
     tile_gdf = load_tile_grid(cfg["tile_grid"]["path"])
     tile_ids = sorted(tile_gdf["tile_id"].astype(int).tolist())
-    model_outputs = Path(cfg["simulation"]["model_outputs"])
+    inputs_root = Path(cfg["simulation"].get("preprocessing_inputs_dir") or cfg["simulation"]["model_outputs"])
 
     bc_cfg = cfg["boundary_conditions"]
     waterlevel_names = merged_waterlevel_names(bc_cfg, cfg["adaptation"])
     n_scenarios_per_tile = len(bc_cfg["return_periods"]) * len(waterlevel_names)
 
-    run_report(lambda: _print_report(_count_progress(model_outputs, tile_ids, n_scenarios_per_tile)), args.watch)
+    run_report(lambda: _print_report(_count_progress(inputs_root, tile_ids, n_scenarios_per_tile)), args.watch)
 
 
 if __name__ == "__main__":

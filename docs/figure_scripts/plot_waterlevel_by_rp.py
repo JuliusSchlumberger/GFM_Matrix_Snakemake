@@ -33,7 +33,7 @@ def main() -> None:
 
     cfg = load_config(args.config)
     tile_grid = load_tile_grid(cfg["tile_grid"]["path"])
-    model_outputs = Path(cfg["simulation"]["model_outputs"])
+    inputs_root = Path(cfg["simulation"].get("preprocessing_inputs_dir") or cfg["simulation"]["model_outputs"])
     return_periods = cfg["boundary_conditions"]["return_periods"]
 
     rp_vals, rp_med, rp_lo, rp_hi, rp_n = [], [], [], [], []
@@ -41,7 +41,7 @@ def main() -> None:
         rp_label = f"RP{rp}"
         levels = []
         for tid in sorted(tile_grid["tile_id"].astype(int)):
-            bpath = model_outputs / str(tid) / "inputs" / f"boundaries_{rp_label}_{args.waterlevel_name}.gpkg"
+            bpath = inputs_root / str(tid) / "inputs" / f"boundaries_{rp_label}_{args.waterlevel_name}.gpkg"
             if not bpath.exists():
                 continue
             gdf = gpd.read_file(bpath)
