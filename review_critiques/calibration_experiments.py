@@ -1,6 +1,6 @@
 """Score eikonal variants against the existing SFINCS RP100 calibration results, per tile.
 
-Variants: land-cover friction (fsf sweep), uniform attenuation (critique 2), basin volume
+Variants: land-cover-indexed rate (fsf sweep), uniform attenuation (critique 2), basin volume
 cap A and duration-scaled friction B (critique 3). Solves on SFINCS's 30 m subgrid with the
 production solver settings, scored as compute_calibration_result (land & SFINCS-active,
 wet > 0.10 m). Reads the calibration tiles read-only; appends records to --out-dir/results.jsonl.

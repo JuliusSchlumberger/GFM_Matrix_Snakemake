@@ -18,7 +18,7 @@ import pandas as pd
 
 BASE = Path("P:/11212688-004-global-floodmaps/modelling/calibration_roughness_SFINCS")
 VARIANT_STYLE = {
-    "landcover": ("land-cover friction", "k", "-o"),
+    "landcover": ("land-cover-indexed rate", "k", "-o"),
     "A_volume_cap": ("A: basin volume cap", "tab:blue", "-s"),
     "B_duration_a0.5": ("B: duration friction a=0.5", "tab:orange", "-^"),
     "B_duration_a1": ("B: duration friction a=1", "tab:red", "-v"),
@@ -52,7 +52,7 @@ def plot_v0(df: pd.DataFrame, fig_dir: Path) -> None:
         ax.set_title(f"{name} (km²), pooled diff {rel:+.2f}%")
         ax.set_xlabel("stored calibration result (HPC)")
         ax.set_ylabel("this harness")
-    fig.suptitle(f"Harness check: land-cover friction fsf 12, {len(j)} tiles")
+    fig.suptitle(f"Harness check: land-cover-indexed rate fsf 12, {len(j)} tiles")
     fig.tight_layout()
     fig.savefig(fig_dir / "V0_harness_vs_stored.png", dpi=140)
     plt.close(fig)
@@ -67,7 +67,7 @@ def plot_c2(df: pd.DataFrame, fig_dir: Path) -> pd.DataFrame:
     eq = metrics(df[df.variant == "uniform_equal_mean"])
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     for ax, key in zip(axes, ["CSI", "bias"]):
-        ax.plot(lu_m.rate, lu_m[key], "-o", color="k", label="land-cover friction (x = median tile mean rate)")
+        ax.plot(lu_m.rate, lu_m[key], "-o", color="k", label="land-cover-indexed rate (x = median tile mean rate)")
         for fsf, row in lu_m.iterrows():
             ax.annotate(f"fsf {fsf:g}", (row.rate, row[key]), textcoords="offset points", xytext=(4, 4), fontsize=8)
         ax.plot(uni_m.rate, uni_m[key], "-s", color="tab:green", label="uniform attenuation")
@@ -121,7 +121,7 @@ def plot_c2(df: pd.DataFrame, fig_dir: Path) -> pd.DataFrame:
 def plot_c2_under_b(df: pd.DataFrame, fig_dir: Path) -> None:
     lu = df[df.variant == "landcover"]
     rate_per_fsf = lu[lu.param == 12.0].mean_m_per_km.median() / 12.0
-    curves = [("landcover", "land-cover friction", "k", "-o", rate_per_fsf),
+    curves = [("landcover", "land-cover-indexed rate", "k", "-o", rate_per_fsf),
               ("uniform", "uniform", "tab:green", "-s", 1.0),
               ("B_duration_a0.5", "B a=0.5 on land-cover", "tab:orange", "--^", rate_per_fsf),
               ("B_duration_a1", "B a=1 on land-cover", "tab:red", "--v", rate_per_fsf),
@@ -187,7 +187,7 @@ def plot_c3(df: pd.DataFrame, worst: list[str], fig_dir: Path) -> pd.DataFrame:
             axes[2].plot(mw.index, mw.CSI, style, color=color, label=label)
         rows += [{"variant": variant, "fsf": p, **r} for p, r in m.iterrows()]
     for ax, title in zip(axes, ["pooled CSI, all sampled tiles", "pooled bias", "pooled CSI, 12 worst tiles"]):
-        ax.set_xlabel("friction scale factor")
+        ax.set_xlabel("friction_scale_factor (land-cover-indexed rate multiplier)")
         ax.set_title(title)
         ax.grid(alpha=0.3)
     axes[1].axhline(1.0, color="k", lw=0.8)

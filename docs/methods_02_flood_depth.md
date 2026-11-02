@@ -5,14 +5,14 @@
 Coastal flood hazard (extent and depth) is estimated for each raster tile and
 scenario (a return period of extreme still water level, optionally combined
 with a sea-level-rise increment) from three static raster inputs — a digital
-elevation model (DEM), a land/ocean/lake mask, and a spatially-varying
-hydraulic friction (resistance) surface — together with a set of discrete
+elevation model (DEM), a land/ocean/lake mask, and a land-cover-indexed
+attenuation rate — together with a set of discrete
 boundary water-level points describing the offshore forcing for that
 scenario. Rather than solving the full time-dependent shallow-water equations
 at every grid cell, the model treats inland flood propagation as a
 **static, boundary-value problem governed by the eikonal equation**, with the
-land-cover-dependent friction field acting as a spatially varying propagation
-resistance. This formulation is solved numerically with the Fast Sweeping
+land-cover-indexed attenuation rate acting as a spatially varying
+propagation cost. This formulation is solved numerically with the Fast Sweeping
 Method (Zhao, 2005), giving a flood water level (and
 hence depth) at every cell in a single, non-iterative-in-time pass per
 scenario. 
@@ -31,8 +31,8 @@ $$
 $$
 
 with $T$ prescribed on a seed set $\Gamma$ (the coastline). Here $v(x) > 0$
-is a spatially varying "slowness" field — in this application, the local
-hydraulic friction/resistance derived from land cover — and $T(x)$ is
+is a spatially varying "slowness" field — in this application, the
+land-cover-indexed attenuation rate (§2.2) — and $T(x)$ is
 interpreted as the (negative) water level rather than a physical travel
 time (see §4.4). The physical intuition is direct: floodwater advancing
 inland preferentially follows the path of least resistance, and the
@@ -40,20 +40,27 @@ water level attained at any point is controlled by the *cumulative
 frictional head loss* along the least-resistive connected path from the
 coast, not by straight-line (Euclidean) distance or by elevation alone.
 
-### 2.1 Friction as a land-cover-informed resistance surface
+### 2.2 A land-cover-indexed attenuation rate
 
-The friction field $v(x)$ is derived from a global land-cover
-classification (Copernicus Global Land Cover LC100, 100 m), reclassified to a Manning's roughness
-coefficient $n(x)$ per land-cover class via a land-cover-to-roughness
-mapping table, then
-converted to a per-cell friction/resistance value used directly as the
-eikonal equation's slowness field. Cells with no assigned land-cover class
-default to $n = 0.2$ (config `default_friction: 0.002`, which is stored as
-$n/100$, the same scaling as $v(x)$ below).
+$v(x)$ is an empirical attenuation rate: the water-level loss per metre of
+inland travel, indexed by land cover. It is not a hydraulic roughness, and
+the model never evaluates a Manning-type flow law. "Friction" in the code
+and config names means this rate. Its relative values per land-cover class
+(Copernicus Global Land Cover LC100, 100 m) are taken from a land-cover
+roughness table: $v(x) = n(x)/100$ with $n$ the table's Manning's
+coefficient. The table only orders and spaces the classes; the absolute
+rate is set by calibration against SFINCS (`friction_scale_factor`, below).
+Cells with no assigned land-cover class get `default_friction: 0.002`
+($n = 0.2$ in table terms).
+
+Whether the land-cover indexing earns its complexity was tested against a
+single uniform rate (review_critiques/calibration_experiments.py). On random
+SFINCS tiles the two are within about 0.02 CSI, with and without the duration
+correction (§2.4); the land-cover index is kept for its spatial realism.
 
 **`friction_scale_factor` is not a free empirical tuning knob - most of it is
 a required unit correction, and only a small remaining piece is calibration.**
-$v(x) = n(x)/100$ is a *per-metre* resistance rate (head loss per metre
+$v(x) = n(x)/100$ is a *per-metre* attenuation rate (head loss per metre
 travelled). But the Fast Sweeping discretisation (§4.4) has **no separate
 distance term at all** - it uses whatever friction value it's given directly
 as the cost of crossing one grid step, regardless of that step's real size.
@@ -84,13 +91,43 @@ comparable land cover by Vafeidis et al. (2019) - a useful sanity check
 that the ×30 grid correction is dimensionally sound, not the reason it was
 chosen).
 
+### 2.3 Two-component sea-level propagation
+
+`simulation.flooding.slr_propagation: two_component` (default). A static sea level
+$S$ = MDT + SLR fingerprint (no tide) is not attenuated: every land cell below $S$
+that connects to the coastline (or the hop>=1 seeds) through such cells is
+permanently inundated and becomes part of the sea. Each gets the seed value
+max($S$, level of its nearest original coastline seed), so only the storm tide on
+top of $S$ attenuates inland of the new shoreline, and a coast keeps its own
+storm tide instead of spreading the highest coastal level over the new sea. Rivers
+and lakes do not carry $S$ inland. `attenuated` attenuates the total level
+(storm tide + MDT + SLR) from the present coastline, as Aqueduct.
+Implementation: `flood_model.static_inundation`, `flood_depth_dense(static_level=)`,
+station values from `boundaries.static_station_levels`.
+
+### 2.4 Duration correction
+
+The eikonal level is the peak of a quasi-static fill and ignores how long the
+storm tide lasts. Behind a sill, water stands above the controlling elevation only
+while the hydrograph is near its peak, so the eikonal fill overstates such basins.
+`simulation.flooding.duration_correction` (default on) solves twice. From the first
+solve, each wet cell's head above its spill level (priority flood from the sea,
+Barnes et al. 2014) gives the time $T$ that the local COAST-HG RP100 storm-tide
+hydrograph stays within that head of its peak. The attenuation rate is multiplied
+by $(T_\mathrm{ref}/T)^lpha$, clipped to [1, 10], with $lpha = 1$ and
+$T_\mathrm{ref} = 12$ h, and the tile is solved again. Long events and open coasts
+keep multiplier 1. Against SFINCS (RP100) pooled CSI rises by 0.03-0.07; CSI
+changes by less than 0.01 for $T_\mathrm{ref}$ between 6 and 24 h. COAST-HG has
+one shape per station (RP100), used for every return period and SLR level.
+Implementation: `event_volume.DurationCorrection`.
+
 ## 3. Data inputs
 
 | Symbol | Description | Source |
 |---|---|---|
 | $z(x)$ | Land surface elevation | DEM, land cells only (see §4.1) |
 | $\mathrm{mask}(x)$ | Land / ocean / lake classification | Land-water mask raster |
-| $v(x)$ | Local friction / hydraulic resistance | Copernicus LC100 land cover, reclassified to Manning's roughness and converted to resistance |
+| $v(x)$ | Land-cover-indexed attenuation rate (water-level loss per metre) | Copernicus LC100 land cover; class values from a land-cover roughness table, scaled by calibration |
 | $\{(p_i, H_i)\}$ | Discrete boundary water levels at offshore/coastal points $p_i$, for the scenario (return period × SLR) being run | Offshore/coastal boundary-condition model output |
 
 ## 4. Mathematical formulation

@@ -165,13 +165,15 @@ simulation: # Used by: preprocessing rules
   flooding:
     resolution: 30       # output raster resolution in metres
     knn: 15              # number of nearest water level stations used
-    # Default Manning's n roughness (÷ 100) for cells with no land use class.
+    # "friction" = the land-cover-indexed attenuation rate (water-level loss per metre), with
+    # class values n / 100 from the land-cover roughness table (docs/methods_02 §2.2).
+    # Rate for cells with no land use class.
     default_friction: 0.002
-    # Runtime multiplier on the decoded friction raster (n/100), not baked into compute_friction.py.
+    # Runtime multiplier on the decoded attenuation rate, not baked into compute_friction.py.
     # Not a free tuning knob: friction is a per-metre rate but src/eikonal.py uses it as the cost
     # of one grid step, so ~30 (DeltaDTM grid step in m) is a required unit correction and 1 is
     # wrong. 12.0 = 30 x 0.4 calibration against SFINCS (1000 tiles: CSI 0.743, bias 1.05 vs
-    # CSI 0.732, bias 1.21 at 9.0). See docs/methods_02_flood_depth.md §2.1.
+    # CSI 0.732, bias 1.21 at 9.0). See docs/methods_02_flood_depth.md §2.2.
     friction_scale_factor: 12.0
 
     # Max rounds (4 directional sweeps each, early exit on convergence) per solve, also per inner
