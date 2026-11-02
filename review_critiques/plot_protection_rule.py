@@ -151,7 +151,7 @@ def plot_p3(cfg: dict, fig_dir: Path, events: list[tuple[int, str]]) -> None:
         handles = [plt.Rectangle((0, 0), 1, 1, color=cmap(i)) for i in range(5)]
         fig.legend(handles, names, loc="lower center", ncol=5)
         fig.suptitle(f"Chunk {cid}: baseline protection, where the two rules disagree")
-        fig.tight_layout(rect=(0, 0.06, 1, 1))
+        fig.tight_layout(rect=(0, 0.06, 1, 0.9))
         fig.savefig(fig_dir / f"P3_rule_disagreement_{cid}.png", dpi=130)
         plt.close(fig)
         print(f"  wrote P3 {cid}")

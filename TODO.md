@@ -75,6 +75,17 @@ Open:
   correction on, and RP10 / RP1000 transferability tested with it. Overtopping volume over defence
   crests is deferred (would make hazard depend on protection). Open: hydrograph at the sill taken as
   the coastal one shifted down by the eikonal attenuation loss (default, not yet confirmed).
+- **Flood-fraction rule never exposes saturated cells:** where the design event already floods the
+  whole cell (ff = 1), no larger event or SLR can exceed the design flood fraction, so the cell stays
+  protected forever. Bangkok case: 33% of the population in the design floodplain sits in such cells.
+  Production uses this rule; the water-level rule does not have the flaw.
+- **Water-level rule + binary breach is harsh under SLR:** over all COAST-RP stations the median RP100
+  standard drops to "fails every year" by ~0.25 m SLR (RP1000 by ~0.4 m), and a defence then counts
+  as fully breached. Bangkok: protect at the +1 m design equals no adaptation from +1.5 m. Needs the
+  deferred overtopping-volume treatment (or freeboard) before the water-level rule is adopted.
+- **Production wiring of two-component propagation:** outputs would overwrite the attenuated rasters
+  under the same paths; needs its own scenario / output location and a `flooding` config switch
+  (changing `flooding` re-triggers every run_eikonal job via params).
 - **Permanent inundation p = 1 anchor:** needs the static-flood extent from the two-component solve;
   implement together with it.
 - **Materialized configs on the cluster:** re-materialize after pulling (new keys `protection.rule`,
