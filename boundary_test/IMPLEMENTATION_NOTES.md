@@ -29,13 +29,17 @@ Plan: `handoff_tide_corrected_duration_boundary.md`. Outputs: `.cleanup_baseline
 1. **T(z_cell) (plan §5.E) is not what B uses.** B uses the time within (local level - spill
    level) of the peak. That accounts for attenuation and for sills: behind a sill the
    controlling elevation is the crest, not the cell ground. A T(z) lookup on absolute ground
-   elevation would ignore both. Recommendation: keep B's definition. The T(z) lookup files are
-   then unnecessary; store the hydrographs and let B evaluate them.
-2. **H4 and runs G2/G3 need new-forcing SFINCS runs (HPC).** Against the existing SFINCS runs,
-   which use COAST-HG shifted to COAST-RP, H1 changes the eikonal forcing but not SFINCS. So
-   macrotidal tiles will disagree by construction. Until new SFINCS runs exist, only Fundy
-   (GeoNB), the GESLA gauges and Daigle test H1; vs-SFINCS numbers test H2 only, at unchanged
-   levels.
+   elevation would ignore both. Decided: keep B's definition; the T(z) lookup files are not
+   written, B evaluates the stored hydrographs. A check against T(z_cell) is in TODO.md.
+2. **H1 needs new-forcing SFINCS runs.** Against the existing SFINCS runs, which use COAST-HG
+   shifted to COAST-RP, H1 changes the eikonal forcing but not SFINCS, so macrotidal tiles
+   disagree by construction; those scores are labelled stand-in. New-forcing runs are made
+   locally (`boundary_test/sfincs_local.py`, SFINCS v2.3.0 Windows build in
+   `C:/Users/schlumbe/hydromt_sfincs/delta_model/software/`): the existing tile model with only
+   sfincs.bzs shifted by L_RP100 - production level of the nearest boundary seed, the same shift
+   as the eikonal H1 seeds. The local build with the original bzs reproduces the HPC v2.4.0 hmax
+   exactly on tile 3758 (same 1,784 wet cells, max depth difference 5e-7 m), so the HPC run is
+   the control. ~15 min per tile at 2 threads: 50 tiles locally (`sfincs_tiles_local.csv`).
 3. **FES2022 data:** the plan names `ocean_tide_extrapolated` (34 constituents). On P: there
    are only `load_tide` (8 constituents, not needed: solid-earth loading) and the unstructured
    mesh `FES2022b_OceanTide_NSgrid.nc` (downloading). pyTMD reads the gridded files.
@@ -47,7 +51,12 @@ Plan: `handoff_tide_corrected_duration_boundary.md`. Outputs: `.cleanup_baseline
    combined with the reanalysis surge.
 5. **MHWS definition:** "within +-36 h of each monthly spring maximum" is ambiguous, since springs
    come twice per lunation. Implemented: per half-lunation (14.77 d) block
-   (`src/tide_statistics.py`).
+   (`src/tide_statistics.py`). For diurnal tides the block maximum is the tropic maximum
+   (13.66 d cycle); a block needs >= 10 high waters (a diurnal block has ~15).
+   High-water values are parabola-refined crests. Tide series must be 10-min, not hourly:
+   at a 4.3 m MHWS GTSM station (NW Australia) hourly sampling with parabolic or 5-7 point
+   refinement still misses crests by 2-8 cm (shallow-water constituents) and picks the wrong
+   spring high water, giving MHWS 7-10 cm low. FES is therefore predicted at 10 min too.
 6. **TC identification (decision 1) is settled by the data:** `COAST-RP_TC.nc` / `COAST-RP_ETC.nc`
    exist. Station is TC-dominated when TC RP100 > ETC RP100 (3,050 of 23,226). Open: the
    Gaussian width, implemented as half width at half maximum = `tc_half_width_hr`
@@ -87,7 +96,15 @@ Plan: `handoff_tide_corrected_duration_boundary.md`. Outputs: `.cleanup_baseline
     recorded GTSM surge. The proxy, the highest tide in the hydrograph tails, underestimates
     GTSM's MHWS. S_RP needs MHWS from the GTSM tidal_elevation series (§5.B); the proxy is used
     only for stratification.
-15. **TC stations:** at tile 2146 (Japan) the RP10-1000 surge targets are 0.6-2.2 m, against
+15. **Test tiles: representative set, not only the 20 stratified picks.** 20 tiles show the
+    direction per stratum but give no pooled estimate. Eikonal runs use the 500 random tiles of
+    the representative calibration (R1/R2) outside the held-out regions plus the stratified
+    picks: 496 tiles (212 meso, 125 micro, 82 macrotidal estuary, 56 TC, 11 macrotidal open,
+    10 macrotidal other), `test_tiles_representative.csv`. The 20 picks stay the first 20 of the
+    50 local SFINCS tiles; the other 30 are drawn round-robin over strata.
+    GTSM series for ~10,800 stations are stored as int16 mm on disk (22 GB tide, 9 GB surge
+    1979-2024), see `extract_gtsm_series.py`.
+16. **TC stations:** at tile 2146 (Japan) the RP10-1000 surge targets are 0.6-2.2 m, against
     ERA5-driven GTSM peaks of at most 0.5 m. This confirms the plan's point that ERA5 events do
     not contain the storms that set TC return levels.
 
@@ -107,7 +124,8 @@ New (this repo only; GCFM_UUdev untouched; `sfincs_tiles/` untouched):
 | `boundary_test/surge_duration_diagnostic.py` | F6a: dur50 vs surge peak, above_record onset | done, see §2.12 |
 | `boundary_test/fes_tide_stats.py` | FES prediction (pyTMD) at boundary cells -> MHWS etc. | waits for FES |
 | `boundary_test/build_boundary_product.py` | S_RP, L_RP, hydrographs per boundary cell | waits for FES |
-| `boundary_test/run_boundary_test.py` | eikonal runs 1-4 on test tiles, scoring | after product |
+| `boundary_test/run_boundary_test.py` | eikonal runs 1-4 on test tiles, scoring (`--against-local-h1`) | after product |
+| `boundary_test/sfincs_local.py` | SFINCS with H1 forcing (shifted bzs), local exe | after product |
 | `boundary_test/daigle_extract.py` | §4a | waits for PDF |
 
 Config: none in `config.yml`; the driver takes its settings from a `boundary_test:` block in its
@@ -115,9 +133,8 @@ own YAML once the product exists.
 
 ## 4. Decisions still open
 
-- Tile list review (provisional, proxy MHWS): `.cleanup_baseline/boundary_test/test_tiles_provisional.csv`.
-  Re-stratify with FES MHWS once available.
-- T definition: keep B's head-above-spill (recommended) or adopt T(z_cell).
+- Tile list review: `.cleanup_baseline/boundary_test/test_tiles_representative.csv` (strata
+  from the proxy MHWS; re-stratify for reporting with FES MHWS).
 - TC Gaussian width: 8 h HWHM fixed, or scaled by the TC/ETC RP100 ratio.
 - Per-RP vs pooled shape: F6a favours per-RP selection (§2.12); confirm.
 - CHS chart datum -> CGVD2013 at Saint John; source of N_CGG2013.

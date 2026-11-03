@@ -116,6 +116,12 @@ Open:
   Then define one set of names (HC-bathtub, attenuated bathtub, eikonal / eikonal + B), use them
   in `sfincs_tiles/`, `review_critiques/` and `validation/`, and re-score every baseline on the
   same tiles. `sfincs_tiles/` changes need your go-ahead, and none while an HPC batch runs.
+- **Duration T in the boundary test (H2): check B's definition against the plan's.** The handoff
+  defines T(z_cell) as the time the hydrograph stays above the cell's ground level; B uses the time
+  the hydrograph stays within (local level - spill level) of its peak. The boundary test keeps B's
+  definition (decided). To check: re-score H2/H1H2 on the representative tiles with the plan's
+  T(z_cell) and compare CSI/bias per stratum (`boundary_test/run_boundary_test.py`, multiplier
+  from `event_volume.DurationCorrection`).
 - **fsf grid between 7.5 and 9:** the optimum may lie between the tested values (bias crosses 1
   near 8.7). Refine only if the bias matters more than the last 0.005 CSI.
 - **Pinned scenarios re-run on the next Snakemake call:** the new `flooding` keys and the

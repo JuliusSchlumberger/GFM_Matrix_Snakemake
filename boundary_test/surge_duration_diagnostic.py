@@ -20,11 +20,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import xarray as xr
 from scipy.stats import spearmanr
 from sklearn.neighbors import BallTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from extract_gtsm_series import load_series, station_series  # noqa: E402
 from storm_tide_hydrograph import (  # noqa: E402
     fill_short_gaps,
     fit_duration_scale,
@@ -50,22 +50,22 @@ def main() -> None:
     parser.add_argument("--mhws-col", default="spring_hw_proxy_m")
     args = parser.parse_args()
     out = Path(args.out_dir)
-    ds = xr.open_dataset(out / "gtsm_surge_test_stations.nc")
+    surge_st, time, surge = load_series(out, "surge")
     stations = pd.read_parquet(out / "stations.parquet")
-    tiles = pd.read_csv(out / "test_station_tiles.csv", dtype={"tile_id": str})
     strata = pd.read_csv(out / "test_tiles_provisional.csv", dtype={"tile_id": str}).set_index("tile_id").stratum
+    tiles = pd.read_csv(out / "test_station_tiles.csv", dtype={"tile_id": str})
+    tiles = tiles[tiles.tile_id.isin(strata.index)]
     tree = BallTree(np.radians(stations[["lat", "lon"]].to_numpy()), metric="haversine")
-    time = pd.DatetimeIndex(ds.time.values)
 
     rows, panels = [], []
-    for j in range(ds.sizes["station"]):
-        lon, lat = float(ds.lon[j]), float(ds.lat[j])
+    for j in np.flatnonzero(surge_st.gtsm_index.isin(tiles.gtsm_index)):
+        lon, lat = float(surge_st.lon.iloc[j]), float(surge_st.lat.iloc[j])
         st = stations.iloc[tree.query(np.radians([[lat, lon]]), k=1)[1][0, 0]]
-        series = pd.Series(ds["surge"].values[:, j].astype(float), index=time)
+        series = pd.Series(station_series(surge, j), index=time)
         annual = series.groupby(series.index.year).mean()
         ev = station_events(series)
-        tile = tiles[tiles.gtsm_index == int(ds.gtsm_index[j])].tile_id.iloc[0]
-        rec = {"tile_id": tile, "stratum": strata.get(tile), "gtsm_station": int(ds.gtsm_station[j]),
+        tile = tiles[tiles.gtsm_index == int(surge_st.gtsm_index.iloc[j])].tile_id.iloc[0]
+        rec = {"tile_id": tile, "stratum": strata.get(tile), "gtsm_station": int(surge_st.gtsm_station.iloc[j]),
                "lon": lon, "lat": lat, "tc_dominated": bool(st.tc_dominated),
                "annual_mean_std_m": float(annual.std()),
                "annual_mean_trend_mm_per_yr": float(np.polyfit(annual.index, annual.values, 1)[0] * 1000)}

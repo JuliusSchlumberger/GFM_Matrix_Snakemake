@@ -8,7 +8,8 @@ cell has no water path to any station. Then L_RP = S_RP + MHWS_FES(cell) + MDT (
 (close to production, which also masks by ocean component) for the other RPs.
 Station MDT is read back from the tile's production boundaries (level - COAST-RP RP100).
 
-Writes <out-dir>/boundary_product/<tile>.parquet, one row per boundary cell, in seed order.
+Writes <out-dir>/boundary_product/<tile>.parquet (skipped when present), one row per boundary cell,
+in seed order.
 
 Usage:
     python boundary_test/build_boundary_product.py --out-dir .cleanup_baseline/boundary_test \
@@ -114,8 +115,15 @@ def main() -> None:
     out = Path(args.out_dir)
     (out / "boundary_product").mkdir(exist_ok=True)
     for tile_id in pd.read_csv(args.tiles_csv, dtype={"tile_id": str}).tile_id:
-        cells = build_tile(tile_id, out)
-        cells.to_parquet(out / "boundary_product" / f"{tile_id}.parquet")
+        target = out / "boundary_product" / f"{tile_id}.parquet"
+        if target.exists():
+            continue
+        try:
+            cells = build_tile(tile_id, out)
+        except Exception as exc:  # one bad tile must not stop the batch; the runs skip it
+            print(f"tile {tile_id}: FAILED {exc!r}", flush=True)
+            continue
+        cells.to_parquet(target)
         d = cells.l_rp100_m - cells.seed_prod_rp100_m
         print(f"tile {tile_id}: {len(cells)} cells, {cells.attrs['n_stations']} stations, "
               f"fallback {cells.used_haversine_fallback.mean():.0%}, L_RP100 - production: "

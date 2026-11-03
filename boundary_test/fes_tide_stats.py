@@ -1,12 +1,14 @@
 """Plan §5.A: FES2022 tide statistics (MHWS, MHW, HW99, HAT) at the test tiles' boundary cells.
 
 Boundary cells are the production seeds of each tile on its SFINCS subgrid (as the calibration
-harness). Cells are grouped by FES grid node (1/30 deg); pyTMD predicts hourly over one nodal
-cycle at each node (nodal corrections, extrapolation to the nearest valid ocean node within
-CUTOFF_KM). FES files are decompressed from P: (.nc.xz, read-only) into a local cache once.
+harness). Cells are grouped by FES grid node (1/30 deg); pyTMD predicts one nodal cycle at
+each node at 10 min (hourly steps miss shallow-water crests, `tide_statistics.peak_values`),
+with nodal corrections and extrapolation to the nearest valid ocean node within CUTOFF_KM.
+FES files are decompressed from P: (.nc.xz, read-only) into a local cache once.
 Also evaluates the COAST-RP stations of the tiles, for F2/F4.
 
-Writes <out-dir>/tide_stats_fes2022.parquet (per node) and fes_cell_node_map/<tile>.parquet.
+Per tile (skipped when done): fes_node_stats/, fes_cell_node_map/ and fes_spring_windows/.
+Then <out-dir>/tide_stats_fes2022.parquet, the node statistics of every tile done so far.
 
 Usage:
     python boundary_test/fes_tide_stats.py --out-dir .cleanup_baseline/boundary_test \
@@ -28,7 +30,6 @@ from pyproj import Transformer
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "review_critiques"))
-from scipy.interpolate import CubicSpline  # noqa: E402
 from storm_tide_hydrograph import STEPS_PER_HR  # noqa: E402
 from tide_statistics import high_water_statistics, spring_high_waters  # noqa: E402
 
@@ -38,7 +39,8 @@ NODE_DEG = 1.0 / 30.0
 CUTOFF_KM = 20.0
 NODAL_CYCLE_YR = 18.61
 START = np.datetime64("1996-01-01T00:00")
-NODES_PER_CHUNK = 50
+NODES_PER_CHUNK = 20
+STEP_MIN = 60 // STEPS_PER_HR  # 10 min, the step of the synthetic hydrographs
 WINDOW_HR = 72  # plan §5.E: 6-day window centred on a spring high water
 
 
@@ -75,22 +77,19 @@ def node_of(lonlat: np.ndarray) -> np.ndarray:
     return np.round(lonlat / NODE_DEG) * NODE_DEG
 
 
-def spring_window_10min(series_hourly: np.ndarray, mhws_m: float) -> np.ndarray:
-    """±WINDOW_HR tide at 10 min around the spring high water closest to MHWS (cubic from hourly)."""
-    spring = spring_high_waters(series_hourly, 3600.0)
-    pad = int(WINDOW_HR) + 2
-    spring = spring[(spring - pad >= 0) & (spring + pad < len(series_hourly))]
-    centre = int(spring[np.argmin(np.abs(series_hourly[spring] - mhws_m))])
-    hrs = np.arange(centre - pad, centre + pad + 1)
-    fine = CubicSpline(hrs, series_hourly[hrs])(np.arange(hrs[0], hrs[-1] + 1e-9, 1 / STEPS_PER_HR))
-    peak = int(np.argmax(fine[(pad - 1) * STEPS_PER_HR:(pad + 1) * STEPS_PER_HR])) + (pad - 1) * STEPS_PER_HR
-    half = int(WINDOW_HR * STEPS_PER_HR)
-    return fine[peak - half: peak + half + 1]
+def spring_window(series: np.ndarray, dt_s: float, mhws_m: float) -> np.ndarray:
+    """±WINDOW_HR tide around the spring high water closest to MHWS."""
+    half = int(round(WINDOW_HR * 3600 / dt_s))
+    spring = spring_high_waters(series, dt_s)
+    spring = spring[(spring - half >= 0) & (spring + half < len(series))]
+    centre = int(spring[np.argmin(np.abs(series[spring] - mhws_m))])
+    return series[centre - half: centre + half + 1]
 
 
 def predict_stats(nodes: np.ndarray, fes_dir: Path) -> tuple[pd.DataFrame, np.ndarray]:
-    hours = np.arange(int(NODAL_CYCLE_YR * 365.25 * 24))
-    times = START + hours.astype("timedelta64[h]")
+    steps = np.arange(int(NODAL_CYCLE_YR * 365.25 * 24 * 60 / STEP_MIN))
+    times = START + (steps * STEP_MIN).astype("timedelta64[m]")
+    dt_s = STEP_MIN * 60.0
     rows, windows = [], []
     for i in range(0, len(nodes), NODES_PER_CHUNK):
         chunk = nodes[i:i + NODES_PER_CHUNK]
@@ -102,12 +101,12 @@ def predict_stats(nodes: np.ndarray, fes_dir: Path) -> tuple[pd.DataFrame, np.nd
         for (lon, lat), series in zip(chunk, tide):
             if not np.isfinite(series).all():
                 rows.append({"node_lon": lon, "node_lat": lat, "valid": False})
-                windows.append(np.full(int(2 * WINDOW_HR * STEPS_PER_HR) + 1, np.nan))
+                windows.append(np.full(int(2 * WINDOW_HR * 60 / STEP_MIN) + 1, np.nan))
                 continue
-            s = high_water_statistics(series, 3600.0)
+            s = high_water_statistics(series, dt_s)
             rows.append({"node_lon": lon, "node_lat": lat, "valid": True,
                          **{k: v for k, v in s.items() if k != "high_waters_m"}})
-            windows.append(spring_window_10min(series, s["mhws_m"]))
+            windows.append(spring_window(series, dt_s, s["mhws_m"]))
         print(f"  nodes {i + len(chunk)}/{len(nodes)}", flush=True)
     return pd.DataFrame(rows), np.vstack(windows)
 
@@ -124,8 +123,10 @@ def main() -> None:
     stations = pd.read_csv(out / "test_station_tiles.csv", dtype={"tile_id": str})
     (out / "fes_cell_node_map").mkdir(exist_ok=True)
     (out / "fes_spring_windows").mkdir(exist_ok=True)
-    parts = []
+    (out / "fes_node_stats").mkdir(exist_ok=True)
     for tile_id in tiles:
+        if (out / "fes_node_stats" / f"{tile_id}.parquet").exists():
+            continue
         ll, seed_level = tile_seeds(tile_id)
         cell_nodes = node_of(ll)
         pd.DataFrame({"lon": ll[:, 0], "lat": ll[:, 1], "node_lon": cell_nodes[:, 0], "node_lat": cell_nodes[:, 1],
@@ -138,8 +139,9 @@ def main() -> None:
         np.savez_compressed(out / "fes_spring_windows" / f"{tile_id}.npz", node_lon=stats.node_lon.to_numpy(),
                             node_lat=stats.node_lat.to_numpy(), tide=windows.astype(np.float32),
                             time_hr=np.arange(-WINDOW_HR * STEPS_PER_HR, WINDOW_HR * STEPS_PER_HR + 1) / STEPS_PER_HR)
-        parts.append(stats.assign(tile_id=tile_id))
-    stats = pd.concat(parts, ignore_index=True)
+        stats.assign(tile_id=tile_id).to_parquet(out / "fes_node_stats" / f"{tile_id}.parquet")
+    stats = pd.concat([pd.read_parquet(f) for f in sorted((out / "fes_node_stats").glob("*.parquet"))],
+                      ignore_index=True)
     stats.to_parquet(out / "tide_stats_fes2022.parquet")
     print(f"{len(stats)} nodes, {stats.valid.mean():.1%} valid")
 

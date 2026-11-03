@@ -30,6 +30,7 @@ ESTUARY_AMPLIFICATION = 1.2
 OPEN_RIVER_FRAC = 0.003
 OPEN_AMPLIFICATION = 1.1
 MIN_SPACING_DEG = 2.0
+N_SFINCS_LOCAL = 50  # ~15 min per local SFINCS run (2 threads): about half a day
 MATCH_KM = 0.1
 EARTH_RADIUS_KM = 6371.0
 # Held-out validation regions (plan §2, §6): region bboxes of data_catalog_validation.yml, plus
@@ -118,19 +119,50 @@ def pick(df: pd.DataFrame, seed: int = 0) -> pd.DataFrame:
     return pd.DataFrame(picks).drop(columns="r")
 
 
+def representative_set(df: pd.DataFrame, picks: pd.DataFrame, sample_json: Path) -> pd.DataFrame:
+    """Representative random tiles outside the held-out regions, plus the stratified picks."""
+    ids = set(json.loads(sample_json.read_text())["tiles"]) | set(picks.tile_id)
+    rep = df[df.tile_id.isin(ids) & df.held_out_region.isna()].copy()
+    rep["stratum"] = rep.tile_id.map(picks.set_index("tile_id").stratum).fillna(rep.stratum).fillna("macrotidal_other")
+    rep["stratified_pick"] = rep.tile_id.isin(picks.tile_id)
+    return rep
+
+
+def sfincs_local_order(rep: pd.DataFrame, picks: pd.DataFrame, n: int, seed: int = 0) -> pd.DataFrame:
+    """The stratified picks first, then random representative tiles round-robin over strata."""
+    rng = np.random.default_rng(seed)
+    rest = rep[~rep.stratified_pick].assign(r=lambda d: rng.random(len(d))).sort_values("r")
+    rest = rest.assign(k=rest.groupby("stratum").cumcount()).sort_values(["k", "r"])
+    first = rep.set_index("tile_id").loc[picks.tile_id].reset_index()
+    return pd.concat([first, rest.drop(columns=["r", "k"])]).head(n).reset_index(drop=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--mhws-col", default="spring_hw_proxy_m",
                         help="stations.parquet column used as MHWS (FES column once computed)")
+    parser.add_argument("--representative-sample", default=None,
+                        help="sample.json of the representative calibration stage (500 random tiles)")
     args = parser.parse_args()
     out = Path(args.out_dir)
     stations = pd.read_parquet(out / "stations.parquet")
     gesla = pd.read_parquet(out / "gesla_sites.parquet")
     df = tile_table(stations, gesla, args.mhws_col)
     df.to_csv(out / "tile_strata_all.csv", index=False)
-    picks = pick(df)
-    picks.to_csv(out / "test_tiles_provisional.csv", index=False)
+    if not args.representative_sample:
+        picks = pick(df)
+        picks.to_csv(out / "test_tiles_provisional.csv", index=False)
+    else:
+        # The provisional list is reviewed and edited by hand (Fundy tiles), so it is read, not re-picked.
+        picks = pd.read_csv(out / "test_tiles_provisional.csv", dtype={"tile_id": str})
+        rep = representative_set(df, picks, Path(args.representative_sample))
+        rep.to_csv(out / "test_tiles_representative.csv", index=False)
+        local = sfincs_local_order(rep, picks, N_SFINCS_LOCAL)
+        local.to_csv(out / "sfincs_tiles_local.csv", index=False)
+        print(rep.stratum.value_counts().to_string())
+        print(local.stratum.value_counts().to_string())
+        return
     print(df.stratum.value_counts(dropna=False).to_string())
     print(picks[["tile_id", "stratum", "lon", "lat", "mhws_median_m", "amplification", "river_frac",
                  "tc_share", "n_gesla_50km", "csi_fsf12"]].round(3).to_string(index=False))
