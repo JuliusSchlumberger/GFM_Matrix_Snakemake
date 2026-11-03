@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 import rasterio
 from pyproj import Transformer
+from scipy import ndimage
 from scipy.spatial import cKDTree
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -36,7 +37,7 @@ from event_volume import (  # noqa: E402
     spill_level,
 )
 from flood_agreement import WET_THRESHOLD_M, confusion_counts  # noqa: E402
-from flood_model import effective_dem, flood_depth_dense  # noqa: E402
+from flood_model import effective_dem, flood_depth_dense, prune_to_coast_connected  # noqa: E402
 from sfincs_grid import active_on_subgrid  # noqa: E402
 
 DATA_ROOT = Path("P:/11212688-004-global-floodmaps/modelling")
@@ -317,6 +318,40 @@ def select_representative_tiles(n: int, seed: int = 2) -> list[str]:
     return sorted(np.random.default_rng(seed).choice(pool, size=min(n, len(pool)), replace=False))
 
 
+# Straight-line attenuation: level = nearest seed level - rate x Euclidean distance to that seed,
+# no solver and no routing round terrain; with and without coast connectivity.
+DIST_M_PER_KM = [0.05, 0.075, 0.1, 0.15, 0.2, 0.3, 0.5, 1.0]
+
+
+def run_tile_distance(tile_id: str, out_dir: str, save_maps: bool) -> list[dict]:
+    """Distance stage: straight-line attenuation from the nearest coastline seed."""
+    t0 = time.perf_counter()
+    t = load_tile(tile_id)
+    if t["seeds"] is None:
+        return [{"tile_id": tile_id, "variant": "no_seeds"}]
+    rows, cols, values = t["seeds"]
+    coastline = np.zeros(t["dem"].shape, dtype=bool)
+    coastline[rows, cols] = True
+    seed_level = np.full(t["dem"].shape, np.nan, dtype=np.float32)
+    seed_level[rows, cols] = values
+    dist_px, (near_r, near_c) = ndimage.distance_transform_edt(~coastline, return_indices=True)
+    distance_m = dist_px * t["cell_m"]
+    nearest_level = seed_level[near_r, near_c]
+    dem_eff = effective_dem(t["dem"], t["mask"])
+    candidate = t["mask"] != rcm.OCEAN_CODE
+    records = []
+    for rate in DIST_M_PER_KM:
+        level = nearest_level - rate / 1000.0 * distance_m
+        wet = candidate & (level > dem_eff)
+        for name, region in [("distance", prune_to_coast_connected(wet, coastline)),
+                             ("distance_unconnected", wet)]:
+            depth = np.where(region, level - dem_eff, 0.0)
+            records.append({"tile_id": tile_id, "variant": name, "param": rate, **score(t, depth)})
+    for r in records:
+        r["elapsed_s_tile"] = round(time.perf_counter() - t0, 1)
+    return records
+
+
 # Brackets the uniform-rate optimum with and without B on the fitting sample.
 BRACKET_CONFIGS = [
     ("uniform", 0.125, None),
@@ -334,6 +369,7 @@ def run_tile_bracket(tile_id: str, out_dir: str, save_maps: bool) -> list[dict]:
 STAGES = {"main": (run_tile, "results.jsonl"), "extended": (run_tile_extended, "results_extended.jsonl"),
           "bracket": (run_tile_bracket, "results_bracket.jsonl"),
           "representative": (run_tile_representative, "representative/results.jsonl"),
+          "distance": (run_tile_distance, "representative/results_distance.jsonl"),
           "validation": (run_tile_validation, "results_validation.jsonl"),
           "maps": (run_tile_maps, "maps_final_log.jsonl")}
 
@@ -374,7 +410,7 @@ def main() -> None:
         tiles, worst = select_validation_tiles(args.n_random, set(tiles)), set()
     elif args.stage == "maps":
         tiles = sorted(worst)
-    elif args.stage == "representative":
+    elif args.stage in ("representative", "distance"):
         tiles, worst = select_representative_tiles(REPRESENTATIVE_N), set()
         (out_dir / "representative").mkdir(exist_ok=True)
     if args.tile_ids:
@@ -386,7 +422,8 @@ def main() -> None:
     todo = [t for t in tiles if t not in done]
     if args.stage != "maps":
         sample_name = {"validation": "sample_validation.json",
-                       "representative": "representative/sample.json"}.get(args.stage, "sample.json")
+                       "representative": "representative/sample.json",
+                       "distance": "representative/sample.json"}.get(args.stage, "sample.json")
         (out_dir / sample_name).write_text(json.dumps({"tiles": tiles, "worst": sorted(worst)}, indent=1))
     print(f"{len(todo)} of {len(tiles)} tiles to run, {args.workers} workers", flush=True)
     with ProcessPoolExecutor(max_workers=args.workers) as pool:

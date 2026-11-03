@@ -65,6 +65,10 @@ Decided and implemented:
 - **friction_scale_factor with B:** 7.5 (498 random RP100 tiles, pooled CSI 0.763, bias 1.08;
   9.0 gives 0.757, bias 0.98). Without B the optimum stays 12.0 (CSI 0.742). Results in
   `.cleanup_baseline/review_critiques/calibration/representative/`, figures R1/R2.
+- **Straight-line baseline** (level = nearest seed level - rate x Euclidean distance, no solver;
+  `--stage distance`): best pooled CSI 0.713 coast-connected (0.10 m/km), 0.668 without
+  connectivity, against 0.739 eikonal uniform and 0.763 eikonal + B. Median tile within 0.006;
+  worse by > 0.2 CSI on 3-4% of tiles (sills, basins, ridges). Figure R3.
 - **Outputs:** new results go to `{root}/model_outputs_v2`, `merged_results_v2`, `figures_v2`,
   `validation_v2`; per-tile inputs stay in `{root}/model_outputs` (`preprocessing_inputs_dir`).
   Bangkok, deltas and calibration_500_tiles pin `attenuated` and B off in their `*_pins.yml` and

@@ -464,6 +464,61 @@ def plot_representative(results_dir: Path, fig_dir: Path) -> None:
     plt.close(fig)
 
 
+def plot_distance(results_dir: Path, fig_dir: Path) -> None:
+    paths = [results_dir / "representative" / n for n in ("results.jsonl", "results_distance.jsonl")]
+    if not all(p.exists() for p in paths):
+        return
+    rep = pd.concat([pd.read_json(p, lines=True, dtype={"tile_id": str}) for p in paths], ignore_index=True)
+    rep = rep[~rep.variant.isin(["error", "no_seeds"])]
+    n_runs = rep.groupby(["variant", "param"]).ngroups
+    complete = rep.groupby("tile_id").size() == n_runs
+    rep = rep[rep.tile_id.isin(complete[complete].index)]
+    if rep.empty:
+        return
+    table = rep.groupby(["variant", "param"]).apply(metrics).reset_index()
+    table.to_csv(fig_dir / "R3_table_distance.csv", index=False)
+    best = table.loc[table.groupby("variant").CSI.idxmax()].set_index("variant")
+
+    styles = {"distance_unconnected": ("straight line, no connectivity", "tab:gray", ":x"),
+              "distance": ("straight line, coast-connected", "tab:purple", "-D"),
+              "uniform": ("eikonal, uniform rate", "tab:green", "-s"),
+              "B1_uniform": ("eikonal + B, uniform rate", "tab:cyan", ":P")}
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    for variant, (label, color, style) in styles.items():
+        m = table[table.variant == variant]
+        axes[0].plot(m.param, m.CSI, style, color=color, label=label)
+        axes[1].plot(m.param, m.bias, style, color=color, label=label)
+    for variant, color in [("landcover", "k"), ("B1_landcover", "tab:red")]:
+        axes[0].axhline(best.loc[variant, "CSI"], color=color, lw=0.9, ls="--",
+                        label=f"best {'eikonal + B' if variant.startswith('B') else 'eikonal'}, land-cover "
+                              f"(fsf {best.loc[variant, 'param']:g})")
+    axes[1].axhline(1.0, color="k", lw=0.8)
+    for ax, ylabel in zip(axes[:2], ["pooled CSI", "pooled bias"]):
+        ax.set_xscale("log")
+        ax.set_xlabel("attenuation rate (m/km)")
+        ax.set_ylabel(ylabel)
+    axes[0].legend(fontsize=8)
+
+    def best_tile_csi(variant):
+        return tile_csi(rep[(rep.variant == variant) & (rep.param == best.loc[variant, "param"])])
+
+    x, y = best_tile_csi("distance"), best_tile_csi("B1_landcover")
+    y = y.reindex(x.index)
+    axes[2].scatter(y, x, s=8, alpha=0.5, color="tab:purple")
+    axes[2].plot([0, 1], [0, 1], color="k", lw=0.8)
+    diff = (x - y).dropna()
+    axes[2].set_title(f"per tile: median {diff.median():+.3f}; straight line worse by > 0.2 "
+                      f"on {(diff < -0.2).mean():.0%} of tiles", fontsize=10)
+    axes[2].set_xlabel(f"CSI eikonal + B, land-cover (fsf {best.loc['B1_landcover', 'param']:g})")
+    axes[2].set_ylabel(f"CSI straight line, coast-connected ({best.loc['distance', 'param']:g} m/km)")
+    for ax in axes:
+        ax.grid(alpha=0.3)
+    fig.suptitle(f"Straight-line attenuation against the eikonal solver, {rep.tile_id.nunique()} random SFINCS tiles")
+    fig.tight_layout()
+    fig.savefig(fig_dir / "R3_straight_line_vs_eikonal.png", dpi=140)
+    plt.close(fig)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--results-dir", required=True)
@@ -497,6 +552,7 @@ def main() -> None:
     plot_final_maps(results_dir, fig_dir)
     plot_validation(df, worst, results_dir, fig_dir)
     plot_representative(results_dir, fig_dir)
+    plot_distance(results_dir, fig_dir)
     print(f"{df.tile_id.nunique()} tiles, {len(errors)} errors; figures in {fig_dir}")
 
 
