@@ -83,6 +83,10 @@ dependencies:
       # confirmed on the cluster (every generated preprocessing sbatch
       # job died in 1-5s at CLI-parser construction, not real work).
       - pulp==2.7.0
+      # Copernicus CDS API client - preparation/sync_gtsm_water_levels.py. Needs a
+      # ~/.cdsapirc credentials file (https://cds.climate.copernicus.eu/how-to-api),
+      # not installable by conda-forge-only solve constraints used elsewhere here.
+      - cdsapi==0.7.7
 
 # Optional dev tools (type-check, not needed to run the pipeline):
 #   mamba install -n gfm mypy

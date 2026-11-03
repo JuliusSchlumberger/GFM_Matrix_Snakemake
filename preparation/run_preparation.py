@@ -10,6 +10,15 @@ CLI names and config.yml preparation.* switches):
   tile_generation     - connectivity-first domain manifest -> tile_grid.path
                         (scenario-independent)
   boundary_conditions - COAST-RP + SLR fingerprint scenario NetCDFs
+  sync_gtsm           - download raw hourly GTSM reanalysis water levels (opt-in
+                        only - name it explicitly; not part of the default step set)
+  ea_coastal_dtm      - download the EA LIDAR Composite DTM 1m (2022) for coastal
+                        England (opt-in only, same reason as sync_gtsm)
+  noaa_sfbay_lidar    - download the 2025 SF Bay-Delta DEM (NOAA), clipped to the
+                        existing SF Bay scoring domain, converted to metres
+                        (opt-in only, same reason as sync_gtsm)
+  scotland_lidar_dem  - download Scottish public-sector LIDAR DTM tiles for the
+                        Firth of Forth region (opt-in only, same reason as sync_gtsm)
 
 Usage:
     python preparation/run_preparation.py \
@@ -39,9 +48,13 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 import build_deltadtm_vrt  # noqa: E402
 import build_tile_manifest  # noqa: E402
+import ea_coastal_dtm  # noqa: E402
 import fix_ocean_mask_with_osm_land  # noqa: E402
+import noaa_sfbay_lidar  # noqa: E402
 import prepare_boundary_conditions  # noqa: E402
+import scotland_lidar_dem  # noqa: E402
 import sync_deltadtm  # noqa: E402
+import sync_gtsm_water_levels  # noqa: E402
 
 ALL_STEPS = [
     "sync_deltadtm",
@@ -49,7 +62,19 @@ ALL_STEPS = [
     "build_deltadtm_vrt",
     "tile_generation",
     "boundary_conditions",
+    "sync_gtsm",
+    "ea_coastal_dtm",
+    "noaa_sfbay_lidar",
+    "scotland_lidar_dem",
 ]
+
+# Opt-in only: excluded from the default step set even though no config.yml
+# preparation.* switch says so (see main()'s `selected` below) - a 75-year,
+# two-variable, credentialed CDS download (sync_gtsm) and three many-tile
+# coastal LIDAR downloads (ea_coastal_dtm, noaa_sfbay_lidar, scotland_lidar_dem)
+# should never start just because someone ran `run_preparation.py` with no
+# arguments.
+_OPT_IN_STEPS = {"sync_gtsm", "ea_coastal_dtm", "noaa_sfbay_lidar", "scotland_lidar_dem"}
 
 
 def _run_step(fn, label: str, fail_fast: bool, **kwargs) -> bool:
@@ -114,7 +139,7 @@ def main() -> None:
         selected = set(args.steps)
     else:
         sw = cfg.get("preparation", {})
-        selected = {name for name in ALL_STEPS if sw.get(name, True)}
+        selected = {name for name in ALL_STEPS if sw.get(name, name not in _OPT_IN_STEPS)}
 
     results: dict[str, bool] = {}
     t_start = time.time()
@@ -158,6 +183,42 @@ def main() -> None:
         )
     else:
         print("\n  [ SKIP ] Boundary conditions")
+
+    if "sync_gtsm" in selected:
+        results["sync_gtsm"] = _run_step(
+            sync_gtsm_water_levels.run, "Download raw hourly GTSM reanalysis water levels",
+            args.fail_fast, config=cfg,
+        )
+    else:
+        print("\n  [ SKIP ] Download GTSM hourly water levels (opt-in - name it explicitly: "
+              "run_preparation.py sync_gtsm)")
+
+    if "ea_coastal_dtm" in selected:
+        results["ea_coastal_dtm"] = _run_step(
+            ea_coastal_dtm.run, "Download EA LIDAR Composite DTM 1m (2022), coastal England",
+            args.fail_fast, config=cfg,
+        )
+    else:
+        print("\n  [ SKIP ] Download EA coastal LIDAR DTM (opt-in - name it explicitly: "
+              "run_preparation.py ea_coastal_dtm)")
+
+    if "noaa_sfbay_lidar" in selected:
+        results["noaa_sfbay_lidar"] = _run_step(
+            noaa_sfbay_lidar.run, "Download NOAA 2025 SF Bay-Delta LIDAR DEM",
+            args.fail_fast, config=cfg,
+        )
+    else:
+        print("\n  [ SKIP ] Download NOAA SF Bay LIDAR DEM (opt-in - name it explicitly: "
+              "run_preparation.py noaa_sfbay_lidar)")
+
+    if "scotland_lidar_dem" in selected:
+        results["scotland_lidar_dem"] = _run_step(
+            scotland_lidar_dem.run, "Download Scottish LIDAR DTM (Firth of Forth)",
+            args.fail_fast, config=cfg,
+        )
+    else:
+        print("\n  [ SKIP ] Download Scottish LIDAR DTM (opt-in - name it explicitly: "
+              "run_preparation.py scotland_lidar_dem)")
 
     total = time.time() - t_start
     print(f"\n{'=' * 60}")
