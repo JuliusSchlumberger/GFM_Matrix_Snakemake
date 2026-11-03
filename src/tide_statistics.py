@@ -9,6 +9,8 @@ SPRING_WINDOW_S = 36 * 3600.0
 # waters of shallow-water tides, which the prominence filter merges.
 MIN_HIGH_WATER_SEPARATION_S = 6 * 3600.0
 MIN_HIGH_WATER_PROMINENCE_M = 0.01
+# A complete half-lunation holds ~28.5 semi-diurnal or ~14.8 diurnal high waters; fewer means a gap.
+MIN_HIGH_WATERS_PER_BLOCK = 10
 
 
 def high_waters(tide: np.ndarray, dt_s: float) -> np.ndarray:
@@ -23,7 +25,8 @@ def spring_high_waters(tide: np.ndarray, dt_s: float, hw_idx: np.ndarray | None 
     """Return the indices of the high waters within 36 h of each spring maximum.
 
     The spring maximum is the highest high water of each half-lunation (14.77 d) block,
-    so there are two per lunar month.
+    so there are two per lunar month. For diurnal tides this maximum is the tropic (declination)
+    maximum, whose 13.66 d cycle the 14.77 d blocks sample once each.
     """
     if hw_idx is None:
         hw_idx = high_waters(tide, dt_s)
@@ -35,7 +38,7 @@ def spring_high_waters(tide: np.ndarray, dt_s: float, hw_idx: np.ndarray | None 
     for b in np.unique(block):
         in_block = np.flatnonzero(block == b)
         # Skip incomplete blocks at the series ends: their maximum need not be a spring.
-        if (b + 1) * HALF_LUNATION_S > len(tide) * dt_s or in_block.size < 20:
+        if (b + 1) * HALF_LUNATION_S > len(tide) * dt_s or in_block.size < MIN_HIGH_WATERS_PER_BLOCK:
             continue
         spring = hw_idx[in_block[np.argmax(tide[hw_idx[in_block]])]]
         keep |= np.abs(hw_idx - spring) <= window
