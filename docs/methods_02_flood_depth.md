@@ -54,9 +54,10 @@ Cells with no assigned land-cover class get `default_friction: 0.002`
 ($n = 0.2$ in table terms).
 
 Whether the land-cover indexing earns its complexity was tested against a
-single uniform rate (review_critiques/calibration_experiments.py). On random
-SFINCS tiles the two are within about 0.02 CSI, with and without the duration
-correction (§2.4); the land-cover index is kept for its spatial realism.
+single uniform rate (review_critiques/calibration_experiments.py). On 498
+random SFINCS tiles (RP100), each at its best rate, the two are within 0.005
+pooled CSI, with and without the duration correction (§2.4); the land-cover
+index is kept for its spatial realism.
 
 **`friction_scale_factor` is not a free empirical tuning knob - most of it is
 a required unit correction, and only a small remaining piece is calibration.**
@@ -76,20 +77,21 @@ This `×30` grid-resolution correction is applied at runtime
 (`simulation.flooding.friction_scale_factor`), not baked into the
 land-cover-derived raster itself, purely so it can be combined with further
 calibration without recomputing the expensive land-cover processing. And it
-is further calibrated: the roughness/friction-sweep study (comparing the
-eikonal solver directly against real SFINCS runs, see
-`calibration_studies/` and the `sfincs_tiles/` friction-sweep tooling) found
-the best match at **0.4× the grid-resolution-corrected baseline**, i.e.
-`friction_scale_factor = 30 × 0.4 = 12.0` - production's actual default
-(`<data_root>/calibration_roughness_SFINCS/friction_sweep_pooled_metrics.csv`,
-1000 tiles: CSI=0.7428, bias=1.053 at fsf=12.0 vs CSI=0.7320, bias=1.209 at
-fsf=9.0 - a clearly better bias fit, not just a narrower CSI win).
-The resulting real-world attenuation rate at this production value is
-roughly `n(x) × 4` m/km (the full, uncalibrated ×30 baseline gives `n(x) ×
-10` m/km, which happens to land in the ~0.1-1.2 m/km range reported for
-comparable land cover by Vafeidis et al. (2019) - a useful sanity check
-that the ×30 grid correction is dimensionally sound, not the reason it was
-chosen).
+is further calibrated against SFINCS (RP100) by maximising pooled CSI.
+Without the duration correction (§2.4) the friction-sweep study
+(`calibration_studies/`, `sfincs_tiles/` friction-sweep tooling;
+`<data_root>/calibration_roughness_SFINCS/friction_sweep_pooled_metrics.csv`,
+1000 tiles) gives `friction_scale_factor = 30 × 0.4 = 12.0` (CSI 0.743, bias
+1.05 vs CSI 0.732, bias 1.21 at 9.0). The duration correction raises the rate
+where events are short, so the base rate must drop: with it, 498 random tiles
+give the production value **`friction_scale_factor = 30 × 0.25 = 7.5`**
+(CSI 0.763, bias 1.08; 0.757, bias 0.98 at 9.0; 0.710 at 12.0;
+review_critiques/calibration_experiments.py `--stage representative`).
+The resulting base attenuation rate is `n(x) × 2.5` m/km before the duration
+multiplier (the uncalibrated ×30 baseline gives `n(x) × 10` m/km, which lands
+in the ~0.1-1.2 m/km range reported for comparable land cover by Vafeidis et
+al. (2019) - a sanity check that the ×30 grid correction is dimensionally
+sound, not the reason it was chosen).
 
 ### 2.3 Two-component sea-level propagation
 
@@ -114,10 +116,12 @@ while the hydrograph is near its peak, so the eikonal fill overstates such basin
 solve, each wet cell's head above its spill level (priority flood from the sea,
 Barnes et al. 2014) gives the time $T$ that the local COAST-HG RP100 storm-tide
 hydrograph stays within that head of its peak. The attenuation rate is multiplied
-by $(T_\mathrm{ref}/T)^lpha$, clipped to [1, 10], with $lpha = 1$ and
+by $(T_\mathrm{ref}/T)^\alpha$, clipped to [1, 10], with $\alpha = 1$ and
 $T_\mathrm{ref} = 12$ h, and the tile is solved again. Long events and open coasts
-keep multiplier 1. Against SFINCS (RP100) pooled CSI rises by 0.03-0.07; CSI
-changes by less than 0.01 for $T_\mathrm{ref}$ between 6 and 24 h. COAST-HG has
+keep multiplier 1. Against SFINCS (RP100) pooled CSI rises from 0.742 to 0.763
+on 498 random tiles and from 0.736 to 0.778 on a separate 59-tile sample, each
+at its best `friction_scale_factor`, with fewer false alarms; CSI changes by
+less than 0.01 for $T_\mathrm{ref}$ between 6 and 24 h. COAST-HG has
 one shape per station (RP100), used for every return period and SLR level.
 Implementation: `event_volume.DurationCorrection`.
 

@@ -172,9 +172,10 @@ simulation: # Used by: preprocessing rules
     # Runtime multiplier on the decoded attenuation rate, not baked into compute_friction.py.
     # Not a free tuning knob: friction is a per-metre rate but src/eikonal.py uses it as the cost
     # of one grid step, so ~30 (DeltaDTM grid step in m) is a required unit correction and 1 is
-    # wrong. 12.0 = 30 x 0.4 calibration against SFINCS (1000 tiles: CSI 0.743, bias 1.05 vs
-    # CSI 0.732, bias 1.21 at 9.0). See docs/methods_02_flood_depth.md §2.2.
-    friction_scale_factor: 12.0
+    # wrong. 7.5 = 30 x 0.25 calibration against SFINCS with duration_correction on (498 tiles:
+    # CSI 0.763, bias 1.08 vs CSI 0.757, bias 0.98 at 9.0); without it the optimum is 12.0.
+    # See docs/methods_02_flood_depth.md §2.2.
+    friction_scale_factor: 7.5
 
     # Max rounds (4 directional sweeps each, early exit on convergence) per solve, also per inner
     # solve under obstacle_coupling. 40: sweep-budget study (docs/methods_03_calibration_sensitivity.md

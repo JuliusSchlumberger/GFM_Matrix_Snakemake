@@ -59,9 +59,9 @@ def run_eikonal_python(
     """Run `flood_model.flood_depth_dense` in-process, write depth, return diagnostics.
 
     Inputs are int16-encoded on disk (DEM and water levels in cm) and decoded
-    to float32 m. `friction_scale_factor` (production 12.0, config.yml) is a
+    to float32 m. `friction_scale_factor` (production 7.5, config.yml) is a
     required correction, not a tuning knob: the solver treats friction as
-    cost per grid step (x30 for DeltaDTM's ~30 m pixel) times a x0.4
+    cost per grid step (x30 for DeltaDTM's ~30 m pixel) times a x0.25
     SFINCS-calibrated factor (docs/methods_02). Raises MemoryError on OOM.
     `static_stations` = (lonlat, level) from `boundaries.static_station_levels`
     switches on two-component SLR propagation; `duration_config`

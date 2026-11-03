@@ -61,7 +61,10 @@ Decided and implemented:
   weir volume cap (A) changed nothing and stays in `src/event_volume.py` only for the experiments.
 - **Land-cover friction (critique 2):** kept, described as a land-cover-indexed attenuation rate
   (docs/methods_02 §2.2, code comments; config keys and file names unchanged). Land-cover and
-  uniform attenuation are within ~0.02 CSI on random tiles, with and without B.
+  uniform attenuation are within 0.005 pooled CSI on 498 random tiles, with and without B.
+- **friction_scale_factor with B:** 7.5 (498 random RP100 tiles, pooled CSI 0.763, bias 1.08;
+  9.0 gives 0.757, bias 0.98). Without B the optimum stays 12.0 (CSI 0.742). Results in
+  `.cleanup_baseline/review_critiques/calibration/representative/`, figures R1/R2.
 - **Outputs:** new results go to `{root}/model_outputs_v2`, `merged_results_v2`, `figures_v2`,
   `validation_v2`; per-tile inputs stay in `{root}/model_outputs` (`preprocessing_inputs_dir`).
   Bangkok, deltas and calibration_500_tiles pin `attenuated` and B off in their `*_pins.yml` and
@@ -73,10 +76,8 @@ Decided and implemented:
   Open).
 
 Open:
-- **friction_scale_factor with B:** still 12.0 (calibrated without B). The B calibration points to
-  fsf 7.5-9 on the 72-tile sample; the 500-tile run (`calibration_experiments.py --stage
-  representative`, results in `.cleanup_baseline/review_critiques/calibration/representative/`)
-  fixes the value. Set it in config.yml and update docs/methods_02 §2.2 when it is done.
+- **fsf grid between 7.5 and 9:** the optimum may lie between the tested values (bias crosses 1
+  near 8.7). Refine only if the bias matters more than the last 0.005 CSI.
 - **Pinned scenarios re-run on the next Snakemake call:** the new `flooding` keys and the
   `static_level_inputs` param change run_eikonal's params, so bangkok_chao_phraya (98 jobs in the
   dry run) and the other scenarios re-run run_eikonal with identical results. Use
