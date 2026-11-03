@@ -67,6 +67,30 @@ Plan: `handoff_tide_corrected_duration_boundary.md`. Outputs: `.cleanup_baseline
     (`validation/{NewBrunswick,England}/new_inputs/boundary_forcing` do not exist). GCFM_UUdev is
     not cloned locally; read-only from its public GitHub copy.
 
+12. **F6a result (decision 3).** 1,085 GTSM stations around the 20 test tiles, 1950-2024,
+    in `.cleanup_baseline/boundary_test/F6a_surge_duration_vs_peak.png` and
+    `surge_duration_summary.csv`:
+    - dur50 rises with the surge peak only for small events. Above about 0.2-0.4 m it levels
+      off at 10-60 h, and at several stations it falls for the largest events.
+    - A log-linear tau(peak) fit over all events is driven by the small, short events and
+      extrapolates to absurd values (tau(RP100) 100-23,000 h). The pooled shape with a fitted
+      log-linear time scale (plan §5.E.2) is therefore not viable as specified.
+    - HGRAPHER-RP's per-RP selection, with the 10 largest events above the record, follows the
+      plateau (median dur50 of the top 10 events: 6-61 h).
+    - Recommendation: keep per-RP selection. If a pooled shape is wanted, use a constant tau
+      from the upper-tail events, not a fit over all events.
+13. **Annual MSL in the surge residual (decision 4): essentially absent.** The spread of the
+    annual means is 5-40 mm, with trends within +-0.3 mm/yr. Removing the 1-yr running mean
+    stays as a harmless safeguard.
+14. **The COAST-HG spring-tide proxy is not a usable MHWS for S_RP.** At macrotidal tiles
+    3583, 805 and 1423 the RP1-2 surge target (COAST-RP - proxy) already lies above every
+    recorded GTSM surge. The proxy, the highest tide in the hydrograph tails, underestimates
+    GTSM's MHWS. S_RP needs MHWS from the GTSM tidal_elevation series (§5.B); the proxy is used
+    only for stratification.
+15. **TC stations:** at tile 2146 (Japan) the RP10-1000 surge targets are 0.6-2.2 m, against
+    ERA5-driven GTSM peaks of at most 0.5 m. This confirms the plan's point that ERA5 events do
+    not contain the storms that set TC return levels.
+
 ## 3. File-level plan
 
 New (this repo only; GCFM_UUdev untouched; `sfincs_tiles/` untouched):
@@ -80,7 +104,7 @@ New (this repo only; GCFM_UUdev untouched; `sfincs_tiles/` untouched):
 | `boundary_test/gesla_inventory.py` | deduplicated GESLA sites | done |
 | `boundary_test/select_test_tiles.py` | strata and provisional picks | done (proxy MHWS) |
 | `boundary_test/extract_gtsm_series.py` | surge / tide series at test stations | done |
-| `boundary_test/surge_duration_diagnostic.py` | F6a: dur50 vs surge peak, above_record onset | next |
+| `boundary_test/surge_duration_diagnostic.py` | F6a: dur50 vs surge peak, above_record onset | done, see §2.12 |
 | `boundary_test/fes_tide_stats.py` | FES prediction (pyTMD) at boundary cells -> MHWS etc. | waits for FES |
 | `boundary_test/build_boundary_product.py` | S_RP, L_RP, hydrographs per boundary cell | waits for FES |
 | `boundary_test/run_boundary_test.py` | eikonal runs 1-4 on test tiles, scoring | after product |
@@ -95,5 +119,5 @@ own YAML once the product exists.
   Re-stratify with FES MHWS once available.
 - T definition: keep B's head-above-spill (recommended) or adopt T(z_cell).
 - TC Gaussian width: 8 h HWHM fixed, or scaled by the TC/ETC RP100 ratio.
-- Per-RP vs pooled shape: from F6a.
+- Per-RP vs pooled shape: F6a favours per-RP selection (§2.12); confirm.
 - CHS chart datum -> CGVD2013 at Saint John; source of N_CGG2013.
