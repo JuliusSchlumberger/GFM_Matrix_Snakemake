@@ -57,7 +57,8 @@ Decided and implemented:
   attenuated flooded area from +0.5 m SLR, identical at SLR 0.
 - **Duration correction B (critique 3):** `simulation.flooding.duration_correction` on, alpha 1,
   t_ref 12 h, COAST-HG shape of the nearest station per cell, second solve (~2x runtime). On SFINCS
-  RP100 tiles: pooled CSI +0.03-0.07, false alarms down; t_ref 6-24 h changes CSI by < 0.01. The
+  RP100 tiles: pooled CSI 0.742 -> 0.763 on 498 random tiles (median tile unchanged; the gain comes
+  from a minority of overflooded basins), false alarms down; t_ref 6-24 h changes CSI by < 0.01. The
   weir volume cap (A) changed nothing and stays in `src/event_volume.py` only for the experiments.
 - **Land-cover friction (critique 2):** kept, described as a land-cover-indexed attenuation rate
   (docs/methods_02 §2.2, code comments; config keys and file names unchanged). Land-cover and
@@ -80,6 +81,41 @@ Decided and implemented:
   Open).
 
 Open:
+- **Bathtub baselines: review all implementations and make them consistent (to do before any
+  bathtub vs eikonal comparison goes into the paper).** Each was written for a different study, and
+  each makes its own choices, so their scores are not directly comparable:
+  - HC-bathtub: `sfincs_tiles/run_calibration_models.compute_bathtub_depth`. One flat level, the
+    tile's highest station value, not interpolated. The depth file is unpruned; it is pruned only at
+    scoring (`sfincs_tiles/compute_calibration_result.py` via
+    `flood_agreement.prune_to_ocean_connected`).
+  - Straight-line attenuated bathtub: `review_critiques/calibration_experiments.run_tile_distance`.
+    Level = the nearest production seed (IDW of 15 stations) minus rate x Euclidean distance.
+    Pruned with `flood_model.prune_to_coast_connected` on the seed cells, on the effective DEM.
+  - Static inundation: `flood_model.static_inundation`, a connected flat-level bathtub at
+    S = MDT + SLR inside the two-component solve. Land cells only; rivers and lakes are not
+    conduits.
+  - Spill level: `event_volume.spill_level`, a priority-flood bathtub (minimax elevation from the
+    sea) used by correction B.
+  - Naming: the eikonal solver is labelled "EA-bathtub" in `sfincs_tiles/` (calibration_results,
+    plots, docs/methods_04a) and in `analysis/summarize_run_timings.py`. Literature references:
+    Vafeidis et al. 2019 and the Flow-tub rate (0.2 m/km) in docs/methods_02.
+
+  They differ in:
+  - the water-level source (tile maximum, nearest seed, or IDW);
+  - the connectivity rule: two pruning functions, with different coastline definitions and
+    river cells as conduits or not;
+  - the DEM (raw or effective, no-data handling);
+  - whether pruning is applied to the depth raster or only to the score;
+  - the names used for them.
+
+  Goal: one shared implementation, e.g. `src/bathtub.py`, with:
+  - a level field: flat, nearest-seed or IDW, optionally minus rate x distance;
+  - one connectivity rule;
+  - the same DEM, seeds and wet threshold as the eikonal solver.
+
+  Then define one set of names (HC-bathtub, attenuated bathtub, eikonal / eikonal + B), use them
+  in `sfincs_tiles/`, `review_critiques/` and `validation/`, and re-score every baseline on the
+  same tiles. `sfincs_tiles/` changes need your go-ahead, and none while an HPC batch runs.
 - **fsf grid between 7.5 and 9:** the optimum may lie between the tested values (bias crosses 1
   near 8.7). Refine only if the bias matters more than the last 0.005 CSI.
 - **Pinned scenarios re-run on the next Snakemake call:** the new `flooding` keys and the
@@ -120,7 +156,7 @@ Open:
 ## Known behaviour
 
 - Outputs at `friction_scale_factor` 9.0 (deltas, bangkok_chao_phraya) and 30.0
-  (calibration_500_tiles) are kept as computed; each config says so. Production is 12.0.
+  (calibration_500_tiles) are kept as computed; each config says so. Production is 7.5 (with B).
 - A hop>=1 triple whose neighbour output is missing fails without writing output. Local multi-hop
   `snakemake simulate` / `run_eikonal_dag.py` can therefore fail when Snakemake schedules a hop-1
   tile before its neighbours (the rule does not declare neighbour inputs); rerun, or run wave by
