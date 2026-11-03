@@ -23,7 +23,7 @@ from sklearn.neighbors import BallTree
 GTSM_DIR = Path("P:/11212688-004-global-floodmaps/modelling/inputs/GTSM_storm_tide_hourly")
 BASE = Path("P:/11212688-004-global-floodmaps/modelling/calibration_roughness_SFINCS")
 FOLDERS = {"surge": ("storm_surge_residual", "reanalysis_surge_hourly_*_v3.nc", "surge"),
-           "tide": ("tidal_elevation", "reanalysis_tide_hourly_*_v3.nc", "tide")}
+           "tide": ("tidal_elevation", "historical_tide_*_v1.nc", "tide")}  # 10-min steps
 SLAB_GAP = 2000
 MATCH_KM = 0.1
 EARTH_RADIUS_KM = 6371.0
