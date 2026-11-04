@@ -89,9 +89,10 @@ def write_variant(model: Path, run_dir: Path, bzs_shift: np.ndarray | None) -> N
 def run_variant(tile_id: str, run_dir: Path, exe: Path, threads: int) -> float:
     t0 = time.perf_counter()
     if not (run_dir / "hmax_subgrid.tif").exists():
-        if not (run_dir / "sfincs_map.nc").exists():
-            run_sfincs_subprocess(exe, run_dir, TIMEOUT_S, _Log(), label=f"SFINCS {tile_id} {run_dir.name}",
-                                  n_threads=threads)
+        # A map without hmax is from an interrupted run, possibly truncated.
+        (run_dir / "sfincs_map.nc").unlink(missing_ok=True)
+        run_sfincs_subprocess(exe, run_dir, TIMEOUT_S, _Log(), label=f"SFINCS {tile_id} {run_dir.name}",
+                              n_threads=threads)
         compute_max_inundation(run_dir, BASE / tile_id / "inputs" / "mask.tif")
         (run_dir / "sfincs_map.nc").unlink()  # 0.1-1 GB per run; zsmax lives on in hmax_subgrid.tif
     return time.perf_counter() - t0
