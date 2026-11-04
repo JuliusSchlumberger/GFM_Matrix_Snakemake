@@ -15,6 +15,7 @@ Usage:
 """
 
 import argparse
+import gc
 import os
 import shutil
 import sys
@@ -94,7 +95,11 @@ def run_variant(tile_id: str, run_dir: Path, exe: Path, threads: int) -> float:
         run_sfincs_subprocess(exe, run_dir, TIMEOUT_S, _Log(), label=f"SFINCS {tile_id} {run_dir.name}",
                               n_threads=threads)
         compute_max_inundation(run_dir, BASE / tile_id / "inputs" / "mask.tif")
-        (run_dir / "sfincs_map.nc").unlink()  # 0.1-1 GB per run; zsmax lives on in hmax_subgrid.tif
+        gc.collect()  # compute_max_inundation leaves the map open; Windows refuses to delete open files
+        try:
+            (run_dir / "sfincs_map.nc").unlink()  # 0.1-1 GB per run; zsmax lives on in hmax_subgrid.tif
+        except PermissionError:
+            print(f"SFINCS {tile_id} {run_dir.name}: map still open, left in place", flush=True)
     return time.perf_counter() - t0
 
 
