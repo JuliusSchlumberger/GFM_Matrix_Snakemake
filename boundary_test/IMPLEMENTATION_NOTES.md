@@ -85,6 +85,27 @@ geodetic datums (needs each national datum's offset to GOCO06s).
   most estuarine coasts (FES within 5 cm MAE); at fjord/estuary heads neither source is reliable
   and a gauge- or plausibility-based rule is needed.
 
+### 0.25 Extremes (1c): COAST-RP vs GEV fits to annual maxima, 648 quality sites
+
+GESLA GEV: annual maxima of the record with yearly means removed (median 30 years); GTSM GEV:
+46 years of GTSM surge + GTSM harmonic tide; 90% interval from 100 bootstrap fits.
+
+| Comparison | RP10 median diff | RP10 MAE | RP100 median diff | RP100 MAE |
+|---|---|---|---|---|
+| COAST-RP - GESLA GEV | -0.06 m | 0.22 m | -0.06 m | 0.37 m |
+| GTSM GEV - GESLA GEV | -0.06 m | 0.20 m | -0.11 m | 0.37 m |
+| COAST-RP - GTSM GEV (same model, different statistics) | -0.01 m | 0.07 m | +0.02 m | 0.15 m |
+
+- COAST-RP's error at RP10 follows GTSM's tide error (correlation 0.88 with the MHWS excess of
+  §0.2). Without the tide excess, COAST-RP is 0.11 m (RP10) / 0.12 m (RP100) too low: the surge
+  part is too low on most coasts and the too-large tide hides it. Only 18% (RP10) / 44% (RP100)
+  of COAST-RP levels lie inside the GESLA 90% interval.
+- By region (RP100): NW Europe +0.19 m (tide excess dominates), N America Atlantic+Gulf -0.29 m,
+  Japan/E Asia -0.17 m (tropical cyclones with 30-46 y records on both sides), others within 0.1 m.
+- Implication for H1: replacing only the tide removes the excess but keeps the surge deficit,
+  so on most coasts H1 lowers levels that are already ~0.1 m too low against gauges. A tide
+  correction needs the surge part assessed with it.
+
 ### 0.3 Event shapes and durations (2a, 2b), 21,100 GESLA and 32,100 GTSM annual maxima at 698 sites
 
 Durations (hours; local MSL = 0; B's T = time within f x (peak - MSL) of the peak over +-72 h):

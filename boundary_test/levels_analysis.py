@@ -180,6 +180,39 @@ def plot_constituents(c: pd.DataFrame, t: pd.DataFrame, dest: Path) -> pd.DataFr
     return table
 
 
+def extremes_table(out: Path, t: pd.DataFrame, dest: Path) -> pd.DataFrame | None:
+    """COAST-RP vs GEV fits to GESLA and GTSM annual maxima (`levels_extremes.py`), quality sites."""
+    if not (out / "extremes.parquet").exists():
+        return None
+    ex = pd.read_parquet(out / "extremes.parquet")
+    g = ex[ex.source == "gesla"].set_index("file_name")
+    m = ex[ex.source == "gtsm"].set_index("file_name")
+    q = t[t.quality].index.intersection(g.index).intersection(m.index)
+    g, m = g.loc[q], m.loc[q]
+    tide_excess = (t.loc[q, "gtsm_raw__mhws_m"] - t.loc[q, "gesla_harm__mhws_m"])
+    rows = []
+    for rp in (10, 100):
+        crp = g[f"coast_rp_rp{rp}_m"]
+        pairs = {"COAST-RP vs GESLA GEV": (crp, g[f"rp{rp}_m"]), "GTSM GEV vs GESLA GEV": (m[f"rp{rp}_m"], g[f"rp{rp}_m"]),
+                 "COAST-RP vs GTSM GEV": (crp, m[f"rp{rp}_m"])}
+        for name, (a, b) in pairs.items():
+            ok = a.notna() & b.notna()
+            d = (a - b)[ok]
+            row = {"rp": rp, "comparison": name, "n": int(ok.sum()), "median_diff_m": d.median(),
+                   "mae_m": d.abs().mean(), "p10_diff_m": d.quantile(0.1), "p90_diff_m": d.quantile(0.9),
+                   "corr_with_gtsm_tide_excess": d.corr(tide_excess[ok])}
+            if name == "COAST-RP vs GESLA GEV":
+                inside = (crp >= g[f"rp{rp}_p05_m"]) & (crp <= g[f"rp{rp}_p95_m"])
+                row["share_inside_gesla_90ci"] = inside[ok].mean()
+                row["median_diff_m_minus_tide_excess"] = (d - tide_excess[ok]).median()
+            rows.append(row)
+    table = pd.DataFrame(rows)
+    table.to_csv(dest / "levels_extremes.csv", index=False)
+    by_region = pd.DataFrame({"region": t.loc[q, "region"], "d100": g["coast_rp_rp100_m"] - g["rp100_m"]})
+    by_region.groupby("region").d100.agg(["count", "median"]).to_csv(dest / "levels_extremes_by_region.csv")
+    return table
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out-dir", required=True)
@@ -209,6 +242,10 @@ def main() -> None:
         index="constituent", columns="comparison", values="median_ratio").round(3).to_string())
     plot_scatter(t, dest)
     plot_maps(t, dest)
+    ex = extremes_table(out, t, dest)
+    if ex is not None:
+        print("\nextremes (m)\n" + ex.round(3).to_string(index=False))
+        print(pd.read_csv(dest / "levels_extremes_by_region.csv").round(3).to_string(index=False))
 
 
 if __name__ == "__main__":

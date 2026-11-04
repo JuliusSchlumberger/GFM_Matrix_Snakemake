@@ -24,6 +24,7 @@ import netCDF4
 import numpy as np
 import pandas as pd
 from scipy.stats import genextreme
+from sklearn.neighbors import BallTree
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "boundary_test"))
@@ -37,6 +38,8 @@ YEAR_COVERAGE = 0.8
 MIN_ANNUAL_MAXIMA = 15
 BOOTSTRAP = 100
 SITES_PER_TASK = 10
+EARTH_RADIUS_KM = 6371.0
+SAME_STATION_KM = 0.1
 
 
 def annual_maxima(idx: np.ndarray, z: np.ndarray) -> np.ndarray:
@@ -91,13 +94,22 @@ def _site_task(args) -> list[dict]:
 
 
 def coast_rp_levels(pairs: pd.DataFrame) -> pd.DataFrame:
+    """RP levels of COAST-RP and its ETC/TC files at each site's COAST-RP station.
+
+    The TC file has its own (smaller) station set, so every file is matched by coordinates to the
+    station `levels_pairs.py` chose in COAST-RP.nc; a TC value is NaN where that station has none.
+    """
     rows = {"file_name": pairs.file_name.to_numpy()}
+    target = np.radians(pairs[["coast_rp_lat", "coast_rp_lon"]].to_numpy(dtype=float))
     for name, label in (("COAST-RP.nc", "coast_rp"), ("COAST-RP_ETC.nc", "coast_rp_etc"), ("COAST-RP_TC.nc", "coast_rp_tc")):
         with netCDF4.Dataset(INPUTS / name) as ds:
+            ll = np.column_stack([ds["station_y_coordinate"][:], ds["station_x_coordinate"][:]]).astype(float)
+            d, i = BallTree(np.radians(ll), metric="haversine").query(target, k=1)
+            same = d[:, 0] * EARTH_RADIUS_KM <= SAME_STATION_KM
             for rp in COAST_RP_RPS:
                 var = f"storm_tide_rp_{rp:04d}"
                 if var in ds.variables:
-                    rows[f"{label}_rp{rp}_m"] = np.ma.filled(ds[var][:], np.nan)[pairs.coast_rp_index.to_numpy()]
+                    rows[f"{label}_rp{rp}_m"] = np.where(same, np.ma.filled(ds[var][:], np.nan)[i[:, 0]], np.nan)
     return pd.DataFrame(rows)
 
 
@@ -119,7 +131,9 @@ def main() -> None:
             rows += r
             if k % 10 == 0:
                 print(f"  {min((k + 1) * SITES_PER_TASK, len(sites))}/{len(sites)} sites", flush=True)
-    table = pd.DataFrame(rows).merge(coast_rp_levels(pairs), on="file_name", how="left")
+    gev = pd.DataFrame(rows)
+    gev.to_parquet(out / "extremes_gev.parquet")
+    table = gev.merge(coast_rp_levels(pairs), on="file_name", how="left")
     table.to_parquet(out / "extremes.parquet")
     print(table.groupby("source")[["n_annual_maxima", "rp100_m"]].describe().round(2).to_string())
 
