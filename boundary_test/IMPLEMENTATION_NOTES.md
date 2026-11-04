@@ -104,7 +104,21 @@ Plan: `handoff_tide_corrected_duration_boundary.md`. Outputs: `.cleanup_baseline
     50 local SFINCS tiles; the other 30 are drawn round-robin over strata.
     GTSM series for ~10,800 stations are stored as int16 mm on disk (22 GB tide, 9 GB surge
     1979-2024), see `extract_gtsm_series.py`.
-16. **TC stations:** at tile 2146 (Japan) the RP10-1000 surge targets are 0.6-2.2 m, against
+16. **MHWS_FES vs MHWS_GTSM (F4, first 50 tiles, 1,483 stations): FES is lower almost
+    everywhere.** Median MHWS_FES - MHWS_GTSM: -0.07 m below 1 m MHWS, -0.13 m at 1-1.5 m,
+    -0.22 m at 1.5-3 m, -1.2 m above 3 m (median ratio 0.87-0.90). Not a datum effect (GTSM tide
+    mean +0.02 m) and not sampling (both 10-min, same `tide_statistics`). GTSM is 2-3x FES in the
+    western Baltic and on the Siberian/Alaskan Arctic shelf, and lower in the Gulf of Mexico and
+    Bohai. Against approximate gauge MHWS (chart datum to MSL, +-0.2 m), FES is within 0.1-0.2 m
+    at Brest, Dover, Avonmouth, Cuxhaven and Kiel (0.07 vs GTSM 0.21 m at Kiel); at Saint John it
+    is 0.4 m low (GTSM 1.5 m low). So H1 lowers the boundary level on most coasts (median shift
+    -0.1 to -0.25 m on the macrotidal tiles, -0.05 to -0.1 m microtidal) and raises it where
+    GTSM under-resolves the amplification (tiles 1800, 1517, 104, 575: +0.1 to +0.9 m).
+    `fes_tide_stats.py` predicts 94% of the boundary-cell nodes; the rest are inland nodes
+    > CUTOFF_KM from a valid FES cell and keep the production level.
+17. **Tile 1624** fails `calibration_experiments.load_tile` (its SFINCS grid does not nest into
+    its subgrid); it is skipped everywhere.
+18. **TC stations:** at tile 2146 (Japan) the RP10-1000 surge targets are 0.6-2.2 m, against
     ERA5-driven GTSM peaks of at most 0.5 m. This confirms the plan's point that ERA5 events do
     not contain the storms that set TC return levels.
 
