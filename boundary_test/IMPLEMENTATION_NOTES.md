@@ -121,6 +121,41 @@ Plan: `handoff_tide_corrected_duration_boundary.md`. Outputs: `.cleanup_baseline
 18. **TC stations:** at tile 2146 (Japan) the RP10-1000 surge targets are 0.6-2.2 m, against
     ERA5-driven GTSM peaks of at most 0.5 m. This confirms the plan's point that ERA5 events do
     not contain the storms that set TC return levels.
+19. **FES2022 is up to 2x too high at the heads of some macrotidal basins.** The native grids
+    (mask 0, not extrapolated) give M2 amplitudes of 10.7 m in Minas Basin, 11.5 m in Bahia Lomas
+    (Strait of Magellan) and 13.7 m in the upper Gulf of California. The real values are about
+    5-6 m, 4-5 m and 2.5-3 m. Resulting MHWS: 14.5 m, 16.3 m, 15.4 m. Gauges on open macrotidal
+    coasts are fine (Brest M2 2.19 m, Avonmouth MHWS 6.35 m). The native/extrapolated mask does
+    not separate these nodes. 29 of 494 tiles have a boundary cell whose H1 level is more than
+    2 m above production. These cells are 0.9% of all boundary cells; 2.5% of cells rise by more
+    than 1 m. The analysis reports every score with and without these tiles
+    (`analyse_boundary_test.py`, `SUSPECT_SHIFT_M`). A QA rule for MHWS_FES is open (§4).
+20. **First results (206 of 496 eikonal tiles, 39 of 50 local SFINCS H1 tiles; batches stopped
+    early).** These are pooled CSI and bias per stratum without the FES-suspect tiles, from
+    `.cleanup_baseline/boundary_test/analysis/scores_*.csv`.
+    - Against the existing SFINCS runs (stand-in, old levels), 190 tiles: the baseline is the
+      current calibration (CSI 0.71-0.90, bias 0.90-1.19). H1 lowers CSI in mesotidal
+      (0.71 -> 0.67) and macrotidal estuary (0.77 -> 0.71) tiles. This is expected, because
+      the stand-in keeps the old levels, so it is not a test of H1.
+    - H2 (synthetic hydrographs, production levels) does not beat B from COAST-HG at any
+      exponent:
+      - At alpha 1, CSI is within -0.01 of baseline in every stratum.
+      - Higher alpha lowers the bias, but at alpha 2 macrotidal-open CSI drops by 0.04.
+      - The stand-in SFINCS was forced with COAST-HG shapes, so B from COAST-HG matches it by
+        construction. A fair H2 test needs SFINCS forced with the synthetic hydrographs (§5.F).
+      - Macrotidal-estuary bias is already 1.01 at baseline in this sample, so the H2
+        acceptance threshold (<= 1.3) does not discriminate here.
+    - Against the local SFINCS with H1 forcing, 35 tiles: eikonal H1 beats the eikonal baseline
+      in every stratum (CSI +0.01 to +0.10; macrotidal estuary bias 1.29 -> 1.08). H1H2 at
+      alpha 1 is within 0.02 of H1.
+    - H4 (shared product >= current calibration), 18 tiles with both scores: median CSI of
+      H1-vs-SFINCS-H1 is >= baseline-vs-stand-in in four strata. Microtidal is the exception
+      (3 tiles, -0.015). Two tiles lose more than 0.02 (805 -0.05, 870 -0.05).
+    - At the FES-suspect tiles, eikonal H1 is much worse even against SFINCS with the same
+      shift (891 Minas Basin: CSI 0.57 -> 0.27, bias 3.25; 2325: 0.68 -> 0.45). The eikonal seeds
+      every boundary cell with its own level, while SFINCS takes the shift only at its offshore
+      boundary points. Extreme cell levels at the basin head therefore flood the eikonal and
+      not SFINCS.
 
 ## 3. File-level plan
 
@@ -139,7 +174,8 @@ New (this repo only; GCFM_UUdev untouched; `sfincs_tiles/` untouched):
 | `boundary_test/fes_tide_stats.py` | FES prediction (pyTMD) at boundary cells -> MHWS etc. | waits for FES |
 | `boundary_test/build_boundary_product.py` | S_RP, L_RP, hydrographs per boundary cell | waits for FES |
 | `boundary_test/run_boundary_test.py` | eikonal runs 1-4 on test tiles, scoring (`--against-local-h1`) | after product |
-| `boundary_test/sfincs_local.py` | SFINCS with H1 forcing (shifted bzs), local exe | after product |
+| `boundary_test/sfincs_local.py` | SFINCS with H1 forcing (shifted bzs), local exe | done (39 tiles) |
+| `boundary_test/analyse_boundary_test.py` | per-stratum scores, F2, F4, F9, H1 shift map | done |
 | `boundary_test/daigle_extract.py` | §4a | waits for PDF |
 
 Config: none in `config.yml`; the driver takes its settings from a `boundary_test:` block in its
@@ -152,3 +188,8 @@ own YAML once the product exists.
 - TC Gaussian width: 8 h HWHM fixed, or scaled by the TC/ETC RP100 ratio.
 - Per-RP vs pooled shape: F6a favours per-RP selection (§2.12); confirm.
 - CHS chart datum -> CGVD2013 at Saint John; source of N_CGG2013.
+- QA for MHWS_FES at basin heads (§2.19): cap by the nearest gauge, by a ratio to the
+  interpolated MHWS_GTSM, or keep the production level where the two differ by more than X m.
+- Finish or rescope the stopped batches: 290 eikonal tiles and 11 local SFINCS tiles remain;
+  1627, 2657 were interrupted mid-run.
+- F3, F6, F7, F8 and the depth metrics are not produced yet (the runs keep no depth maps).

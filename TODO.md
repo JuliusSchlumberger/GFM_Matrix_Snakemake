@@ -122,6 +122,19 @@ Open:
   definition (decided). To check: re-score H2/H1H2 on the representative tiles with the plan's
   T(z_cell) and compare CSI/bias per stratum (`boundary_test/run_boundary_test.py`, multiplier
   from `event_volume.DurationCorrection`).
+- **Boundary test: QA rule for MHWS_FES at macrotidal basin heads.** FES2022's native grids are
+  about 2x too high in Minas Basin, Bahia Lomas and the upper Gulf of California (MHWS 14-16 m).
+  29 of 494 test tiles get boundary cells more than 2 m above production under H1, and there
+  the eikonal H1 run is far off even against SFINCS with the same shift (tile 891: CSI 0.57 ->
+  0.27). Decide on a cap or fallback rule before H1 goes further (`boundary_test/IMPLEMENTATION_NOTES.md`
+  §2.19-2.20).
+- **Boundary test: fair H2 test.** Against the stand-in SFINCS (COAST-HG shapes), the synthetic
+  hydrographs do not beat B from COAST-HG at any exponent. That stand-in favours COAST-HG by
+  construction. Test H2 with SFINCS forced by the synthetic hydrographs (plan §5.F,
+  `build_line_forcing.py --forcing boundary_product`; needs a `sfincs_tiles/` change).
+- **Boundary test: finish the stopped batches** if the pooled numbers are needed on all
+  496 tiles. 290 eikonal tiles remain (`run_boundary_test.py` resumes). 11 local SFINCS H1 tiles
+  remain (`sfincs_local.py` resumes; about 16 min per tile).
 - **fsf grid between 7.5 and 9:** the optimum may lie between the tested values (bias crosses 1
   near 8.7). Refine only if the bias matters more than the last 0.005 CSI.
 - **Pinned scenarios re-run on the next Snakemake call:** the new `flooding` keys and the
