@@ -131,8 +131,9 @@ Open:
 - **Boundary sources: why GTSM's tide is 7-8% too large.** S2 is +20% and M2 +6% against
   GESLA (FES: ~0%). Check against the GTSM v3 validation and the dataset documentation (radiational
   S2, SAL). Confirm the GTSM tide run's MSL reference epoch (data suggest 1986-2005 + an imposed
-  ~2.6 mm/yr trend). COAST-RP inherits the tide, so COAST-RP levels are too high by roughly the
-  MHWS excess on most coasts (§0.2).
+  ~2.6 mm/yr trend). COAST-RP inherits the tide excess, but its surge part is about 0.1 m too low
+  against GESLA GEV fits, so the two partly cancel (§0.25). Replacing only the tide (H1) would
+  lower levels that are already about 0.1 m low. Decide how the surge part is treated before H1.
 - **Datum epochs in production:** MDT (CNES-CLS22) is a 1993-2012 mean, and COAST-RP is relative
   to GTSM model MSL. DeltaDTM is more recent. The gap is of order 5 cm of SLR; quantify it and
   decide whether to correct (§0.1).
