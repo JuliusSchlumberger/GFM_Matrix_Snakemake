@@ -159,6 +159,8 @@ def spring_window(series: np.ndarray, dt_s: float, mhws_m: float) -> np.ndarray:
     half = int(round(WINDOW_HR * 3600 / dt_s))
     spring = spring_high_waters(series, dt_s)
     spring = spring[(spring - half >= 0) & (spring + half < len(series))]
+    if spring.size == 0 or not np.isfinite(mhws_m):  # amphidromic or tideless node
+        return np.full(2 * half + 1, np.nan)
     centre = int(spring[np.argmin(np.abs(series[spring] - mhws_m))])
     return series[centre - half: centre + half + 1]
 
