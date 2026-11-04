@@ -122,19 +122,29 @@ Open:
   definition (decided). To check: re-score H2/H1H2 on the representative tiles with the plan's
   T(z_cell) and compare CSI/bias per stratum (`boundary_test/run_boundary_test.py`, multiplier
   from `event_volume.DurationCorrection`).
-- **Boundary test: QA rule for MHWS_FES at macrotidal basin heads.** FES2022's native grids are
-  about 2x too high in Minas Basin, Bahia Lomas and the upper Gulf of California (MHWS 14-16 m).
-  29 of 494 test tiles get boundary cells more than 2 m above production under H1, and there
-  the eikonal H1 run is far off even against SFINCS with the same shift (tile 891: CSI 0.57 ->
-  0.27). Decide on a cap or fallback rule before H1 goes further (`boundary_test/IMPLEMENTATION_NOTES.md`
-  §2.19-2.20).
-- **Boundary test: fair H2 test.** Against the stand-in SFINCS (COAST-HG shapes), the synthetic
-  hydrographs do not beat B from COAST-HG at any exponent. That stand-in favours COAST-HG by
-  construction. Test H2 with SFINCS forced by the synthetic hydrographs (plan §5.F,
-  `build_line_forcing.py --forcing boundary_product`; needs a `sfincs_tiles/` change).
-- **Boundary test: finish the stopped batches** if the pooled numbers are needed on all
-  496 tiles. 290 eikonal tiles remain (`run_boundary_test.py` resumes). 11 local SFINCS H1 tiles
-  remain (`sfincs_local.py` resumes; about 16 min per tile).
+- **Boundary sources: a rule for FES2022 at fjord and estuary heads.** FES matches GESLA within
+  0.05 m MAE on MHWS at 698 gauges, but misses by > 0.25 m at 20, all at fjord/estuary heads or
+  narrow entrances. It is too high in Juneau, Fulford Harbour, Port Phillip, Minas Basin, Bahia
+  Lomas and the upper Gulf of California, and too low in the upper St Lawrence. Decide on a
+  gauge-based or plausibility rule before FES levels go into forcing
+  (`boundary_test/IMPLEMENTATION_NOTES.md` §0.2, §2.19).
+- **Boundary sources: why GTSM's tide is 7-8% too large.** S2 is +20% and M2 +6% against
+  GESLA (FES: ~0%). Check against the GTSM v3 validation and the dataset documentation (radiational
+  S2, SAL). Confirm the GTSM tide run's MSL reference epoch (data suggest 1986-2005 + an imposed
+  ~2.6 mm/yr trend). COAST-RP inherits the tide, so COAST-RP levels are too high by roughly the
+  MHWS excess on most coasts (§0.2).
+- **Datum epochs in production:** MDT (CNES-CLS22) is a 1993-2012 mean, and COAST-RP is relative
+  to GTSM model MSL. DeltaDTM is more recent. The gap is of order 5 cm of SLR; quantify it and
+  decide whether to correct (§0.1).
+- **Duration correction B: reference duration and one-sided clip.** The water stays above MSL
+  for more than 12 h in a third of observed annual maxima (microtidal median 20 h, macrotidal 7 h).
+  B's T is cumulative over the hydrograph window, and SFINCS shows that the absolute duration,
+  not the shape, sets the reach. On synthetic SFINCS floodplains, t_ref = T of the calibration
+  hydrograph (COAST-HG) at the same head beats 12 h and beats "the hydrograph's longest
+  exposure". The clip at 1 prevents B from removing loss for long events. To decide: the
+  reference (calibration-relative), whether multipliers < 1 are allowed, and which hydrograph
+  source to use. COAST-HG's peak is about 3x narrower than observed and GTSM matches GESLA.
+  Each change needs a recalibration of fsf on the 498 SFINCS tiles (§0.3-0.4).
 - **fsf grid between 7.5 and 9:** the optimum may lie between the tested values (bias crosses 1
   near 8.7). Refine only if the bias matters more than the last 0.005 CSI.
 - **Pinned scenarios re-run on the next Snakemake call:** the new `flooding` keys and the

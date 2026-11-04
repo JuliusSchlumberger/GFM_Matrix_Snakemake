@@ -2,11 +2,12 @@
 
 Monthly files hold all ~43,000 stations in chunks of 8,000-22,000 stations, so a subset needs
 every file read in full; contiguous station runs are read as one hyperslab (as GCFM_UUdev
-workflow/src/gtsm.py). Stations: the boundary stations of the tiles in --tiles-csv.
+workflow/src/gtsm.py). Stations: the boundary stations of the tiles in --tiles-csv, or the GTSM
+indices in --stations-csv (column gtsm_index).
 Series are stored station-major as int16 mm (`load_series`), so one station reads contiguously:
 10,000 stations x 19 y of 10-min tide is ~22 GB, which does not fit in memory as float32.
 
-Writes <out-dir>/gtsm_<variable>/{series.npy, time.npy, stations.parquet} and
+Writes <out-dir>/gtsm_<variable>/{series.npy, time.npy, stations.parquet} and, with --tiles-csv,
 <out-dir>/test_station_tiles.csv.
 
 Usage:
@@ -90,7 +91,9 @@ def test_station_indices(tiles: pd.DataFrame, gtsm_lonlat: np.ndarray) -> pd.Dat
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out-dir", required=True)
-    parser.add_argument("--tiles-csv", required=True)
+    stations_from = parser.add_mutually_exclusive_group(required=True)
+    stations_from.add_argument("--tiles-csv")
+    stations_from.add_argument("--stations-csv")
     parser.add_argument("--variable", choices=list(FOLDERS), default="surge")
     parser.add_argument("--workers", type=int, default=6)
     args = parser.parse_args()
@@ -106,7 +109,8 @@ def main() -> None:
         with netCDF4.Dataset(f) as ds:
             lengths.append(ds.dimensions["time"].size)
     out = Path(args.out_dir)
-    stations = test_station_indices(pd.read_csv(args.tiles_csv, dtype={"tile_id": str}), lonlat)
+    stations = (test_station_indices(pd.read_csv(args.tiles_csv, dtype={"tile_id": str}), lonlat) if args.tiles_csv
+                else pd.read_csv(args.stations_csv))
     unique_idx = np.unique(stations.gtsm_index.to_numpy())
 
     d = out / f"gtsm_{args.variable}"
@@ -137,7 +141,8 @@ def main() -> None:
     np.save(d / "time.npy", np.concatenate(times))
     pd.DataFrame({"gtsm_index": unique_idx, "gtsm_station": ids[unique_idx], "lon": lonlat[unique_idx, 0],
                   "lat": lonlat[unique_idx, 1]}).to_parquet(d / "stations.parquet")
-    stations.to_csv(out / "test_station_tiles.csv", index=False)
+    if args.tiles_csv:
+        stations.to_csv(out / "test_station_tiles.csv", index=False)
     print(f"{len(unique_idx)} stations, {len(files)} files, {pos} steps")
 
 

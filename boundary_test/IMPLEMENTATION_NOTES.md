@@ -3,6 +3,150 @@
 Plan: `handoff_tide_corrected_duration_boundary.md`. Outputs: `.cleanup_baseline/boundary_test/`
 (local; P: stays read-only). Nothing here changes the production DAG.
 
+## 0. Analysis plan: sources first, then shapes, then model comparisons
+
+No eikonal-vs-SFINCS comparison is designed until steps 1 and 2 are done; the runs in §2.20 are
+not used for decisions. Scope: global, at the GESLA 4.1 gauges (1,154 sites with >= 20 y record,
+`gesla_sites.parquet`). Outputs: `.cleanup_baseline/level_sources/`.
+
+1. **Water-level sources: GESLA, GTSM, FES2022, COAST-RP, COAST-HG (+ MDT).**
+   - 1a Reference level of each source: what 0 m is, whether MSL is zero, whether MDT or SLR
+     is in it; checked against the data, not only the metadata.
+   - 1b Tidal levels on one basis: MSL, MHWS, MHW, MLW, MLWS, HAT, LAT, range. Same harmonic
+     constituents, same 18.61-y prediction epoch and the same `tide_statistics` code for
+     GESLA (harmonic fit), GTSM tide (fit and raw) and FES2022 (atlas constants).
+   - 1c Extremes: COAST-RP RP levels vs GEV fits to GESLA and GTSM annual maxima.
+   - 1d Where the differences are (regime, coast type, distance to the model point) and which
+     explanation each pattern supports.
+2. **Hydrograph shapes: GESLA vs GTSM vs COAST-HG.**
+   - 2a Events per gauge from observed and modelled total water level; duration above MSL
+     (MDT-consistent local MSL), above MHW/MHWS and within h of the peak.
+   - 2b Does the shape depend on event size (annual maxima ranks, RP)?
+   - 2c Does the water stay above MSL longer than 12 h? If so, B's fixed t_ref = 12 h is not
+     a meaningful reference, and a reference tied to the hydrograph itself (or to the
+     calibration hydrographs) is derived and tested on synthetic cases.
+3. Model comparisons, designed from 1 and 2 (not started).
+
+Scripts, in run order: `levels_pairs.py`, `extract_gtsm_series.py --stations-csv`,
+`levels_gesla_extract.py`, `levels_tides.py`, `levels_analysis.py`, `levels_extremes.py`,
+`shapes_events.py`, `shapes_analysis.py`, `duration_experiment.py`, `duration_analysis.py`.
+Quality sites (698 of 1,154): harmonic fit over >= 3 y explaining >= 50% of the variance, GTSM
+station within 10 km.
+
+### 0.1 Reference levels (1a)
+
+| Source | Content | 0 m is | MSL in the data | MDT | SLR / trend |
+|---|---|---|---|---|---|
+| GESLA 4.1 | observed total water level | gauge datum (chart datum, national datum; 311 sites "Unspecified") | arbitrary offset | no | relative SLR incl. land motion, median 3.0 mm/yr (1996-2014, 708 sites, 5-95%: -2.8..8.6) |
+| GTSM v3 tide (CDS, 10 min, 1996-2014) | "astronomic tide, self-attraction and loading, radiational tides and mean sea-level" (file attribute) | model MSL, apparently 1986-2005 (to confirm from the dataset documentation) | mean +0.02 m over 1996-2014 (5-95%: 0.00..0.05) | no (barotropic) | yes: median 2.6 mm/yr (1.2..4.4) imposed in the tide run |
+| GTSM v3 surge (CDS, hourly, 1979-2024) | water level - tide | relative to the tide run | mean -0.04..+0.07 m per station | no | none (0.1 mm/yr) |
+| FES2022b ocean tide | harmonic constants, 34 constituents | zero-mean by construction | 0 | no | no. Sa/Ssa present but ~0 (0.000-0.004 m at sample gauges). Ocean tide, not geocentric: what a gauge measures |
+| COAST-RP v1 | storm tide RP levels (GTSM ERA5 1979-2018 + STORM TC) | GTSM model MSL (no datum attribute in the file) | - | no (pipeline adds MDT) | not documented; at most a few cm over 1979-2018 |
+| COAST-HG RP100 | storm-tide hydrograph, 149 h at 10 min | same as COAST-RP: the peak equals COAST-RP RP100 exactly at all 23,226 stations | tails +0.47 m (average tide) / +0.60 m (spring) = HGRAPHER high water | no | no |
+| MDT CNES-CLS22 hybrid | mean dynamic topography | geoid | epoch 1993-2012 | - | - |
+
+Consequences: the sources do not share an MSL. Every comparison here removes each calendar
+year's mean from GESLA and from the GTSM tide (local MSL of that year), so datum, SLR trend and
+interannual MSL drop out; FES is zero-mean. In production the pipeline adds MDT (1993-2012
+epoch) to COAST-RP (GTSM model MSL) and compares with DeltaDTM on GOCO06s: the epochs differ by
+roughly a decade of SLR (order 5 cm). Not checked here: absolute MSL against MDT at gauges with
+geodetic datums (needs each national datum's offset to GOCO06s).
+
+### 0.2 Tidal levels (1b, 1d), 698 quality sites
+
+| Comparison | MHWS median ratio | MHWS MAE | within 0.1 m | spring range ratio |
+|---|---|---|---|---|
+| GTSM (raw series) vs GESLA | 1.07 | 0.16 m | 53% | 1.08 |
+| GTSM (harmonic fit) vs GESLA | 1.08 | 0.16 m | 53% | 1.08 |
+| FES2022 at the gauge vs GESLA | 0.99 | 0.05 m | 88% | 0.99 |
+| FES2022 vs GTSM at the GTSM station | 0.92 | 0.16 m | 52% | 0.92 |
+| FES2022 at the gauge vs at the station | 1.00 | 0.01 m | 98% | 1.00 |
+
+- **GTSM's tide is ~7-8% too large; FES2022 matches the gauges.** The earlier "FES lower than
+  GTSM" (§2.16) is GTSM being high, not FES being low. HAT behaves the same (GTSM 1.03-1.05).
+- **Where:** GTSM is high almost everywhere (Mediterranean 1.18, Africa/Indian Ocean 1.19-1.20,
+  NW Europe 1.08-1.09, Baltic 1.10, S America 1.10, Japan 1.06), low on the N American Atlantic
+  and Gulf coast (0.85), right on the N American Pacific coast (1.01). Independent of the tidal
+  range class (1.06-1.09) and of the gauge-station distance (1.03-1.09 for 0-1 km up to >10 km).
+- **Not location:** FES at the gauge equals FES at the GTSM station (ratio 1.000), and GTSM's
+  bias does not grow with distance. **Not method or sampling:** raw GTSM and its harmonic fit
+  agree (1.07 vs 1.08), and GESLA, GTSM and FES go through the same fit/prediction/statistics.
+- **Which constituents:** median amplitude ratio GTSM / GESLA: M2 1.06, S2 1.20, N2 1.03,
+  K1 0.97, O1 1.10, M4 1.02, MS4 1.28. FES / GESLA: all 0.99-1.00 except M4 0.94, MS4 1.04.
+  The spring range is ~M2 + S2, so S2 20% and M2 6% too large give the 7-8% in MHWS. A plausible
+  cause is GTSM's radiational/SAL treatment of S2 (the file lists radiational tides); FES2022
+  assimilates altimetry and gauges, which constrain S2 directly. Not verified beyond this.
+- **FES's failures are local:** 20 of 698 sites miss MHWS by > 0.25 m (GTSM: 124), all at fjord
+  or estuary heads and narrow entrances: Juneau 5.95 vs 2.72 m, Fulford Harbour 1.99 vs 0.89,
+  Queenscliff/Point Lonsdale (Port Phillip entrance), and too low in the upper St Lawrence
+  (Saint-Francois 1.27 vs 2.87). This is the basin-head failure of §2.19, in both directions.
+  The FES native/extrapolated mask does not flag these points.
+- Implication for H1: replacing GTSM's tide by FES's is supported by the gauges on open and
+  most estuarine coasts (FES within 5 cm MAE); at fjord/estuary heads neither source is reliable
+  and a gauge- or plausibility-based rule is needed.
+
+### 0.3 Event shapes and durations (2a, 2b), 21,100 GESLA and 32,100 GTSM annual maxima at 698 sites
+
+Durations (hours; local MSL = 0; B's T = time within f x (peak - MSL) of the peak over +-72 h):
+
+| Source | above MSL, contiguous | above MHW | above MHWS | B's T, f = 0.25 | f = 0.5 | surge above half peak |
+|---|---|---|---|---|---|---|
+| GESLA annual maxima | 9 (34% > 12 h) | 6 | 5 | 15 (68% > 12 h) | 39 (97%) | 14 |
+| GTSM annual maxima | 8 (27%) | 5 | 4 | 15 (69%) | 38 (98%) | 15 |
+| COAST-HG RP100, average tide | 33 (57%) | 7 | 5 | 5 (3%) | 21 (85%) | - |
+| COAST-HG RP100, spring tide | 9 (35%) | 6 | 5 | 5 (1%) | 24 (90%) | - |
+
+- **Above MSL longer than 12 h:** depends on the tidal regime. Contiguous time above MSL,
+  median: spring range < 1 m 20 h (41 h for events with empirical RP >= 10 y), 1-2 m 8 h, 2-4 m
+  7 h, > 4 m 7 h. Where the tide is large, the level drops below MSL every tidal cycle; the
+  contiguous time above MSL is bounded by the tide, not the surge. Where it is small, the surge
+  holds the level above MSL for one to several days.
+- **GTSM reproduces the observed shapes** per site (Spearman rho, median ratio GTSM/GESLA:
+  time above MSL 0.87 / 1.00, B's T at f = 0.25 0.77 / 1.00, surge duration 0.63 / 1.14).
+- **COAST-HG does not:** its peak is ~3x narrower than observed (B's T at f = 0.25: 5 h vs 15 h),
+  and its neighbouring high waters are lower (average-tide variant 0.5-0.6 of the peak at
+  +-12/24 h, observed 0.75-0.85 in macrotidal regimes: annual maxima happen at spring tides,
+  so several consecutive high waters are nearly as high). The difference is not the RP: within
+  a site, B's T at f = 0.25 falls only from 16 to 11 h between RP < 2 y and RP >= 10 y events.
+- **Event size:** larger events stay above MSL longer (rho 0.14-0.25) and their surge lasts
+  longer (surge dur50 12 -> 18 h at 1-2 m range), but their peak is relatively narrower (B's T at
+  f = 0.25 falls with RP, rho -0.1 to -0.24). Figures: `analysis/shapes_profiles.png`,
+  `analysis/shapes_durations.png`.
+
+### 0.4 What duration does to inland levels (2c), synthetic SFINCS floodplains
+
+`duration_experiment.py`: 1-D strips, shore crest at MSL + 0.5 m, slopes 0 / 1e-4 / 3e-4 /
+1e-3, Manning 0.03 / 0.06 / 0.12, peak 2.0 m; hydrographs: steady, 20 synthetic (tide amplitude
+0-1.5 m x surge duration 2-48 h) and 24 observed GESLA events; SFINCS v2.3.0, 540 runs.
+
+- **SFINCS: duration matters only where the terrain allows a long reach.** On 1e-3 (1.5 km to
+  the 2 m contour) every hydrograph floods to the contour with no level loss. On 1e-4 (15 km)
+  the reach is 4.1 km for a 2 h surge and 12.6 km for a 48 h surge; with 1.5 m tide the 48 h
+  surge reaches 7.5 km. Steady forcing fills to the peak level everywhere: in SFINCS the level
+  loss with distance is entirely a duration effect.
+- **Best single predictor of the SFINCS reach** (relative to the steady reach) is the
+  contiguous time above the shore crest (Spearman 0.58-0.65 on the slopes where duration
+  matters), better than B's cumulative T or the excess volume (0.27-0.48).
+- **Eikonal:** its level falls linearly with distance at friction x fsf for every hydrograph,
+  including steady forcing (extent 0.50 of SFINCS's at fsf 12, 0.65 at 7.5). B, with its
+  multiplier clipped to [1, 10], can only add loss: it sharpens the fall for short peaks but
+  cannot remove the loss for long events. Median eikonal/SFINCS extent ratio over all runs:
+  no B (fsf 12) 0.69, B t_ref 12 h 0.65-0.77, B t_ref = time above the shore crest ("longest
+  exposure") 0.58-0.60, B t_ref = T(head) of the median COAST-HG hydrograph ("relative to the
+  calibration hydrograph") 0.64-0.82, the best of the four; level RMSE ranks the same.
+- **Answer on t_ref:** a fixed 12 h is not a physical reference: T is window-dependent
+  (cumulative over the hydrograph) and the water stays above MSL > 12 h in a third of observed
+  events, so the absolute value only fixes where the clip at 1 starts. Scaling by the
+  hydrograph's own longest exposure is worse: it makes every hydrograph's correction depend only
+  on its shape, so a 2 h and a 48 h event of the same shape get the same friction, while SFINCS
+  shows the absolute duration sets the reach. The reference that does best is the T of the
+  calibration hydrograph at the same head, because the friction factor was fitted on SFINCS runs
+  forced with COAST-HG (70 h runs): m = (T_calib(head) / T(head))^alpha. It reduces to 1 for the
+  calibration forcing and, unclipped below 1, would also lower friction for events longer than
+  the calibration ones; the strips suggest that is needed (SFINCS has no loss for long events).
+  Caveats: uniform 1-D strips, uniform friction, no channels or sills; only the ranking and the
+  mechanisms transfer, not the ratios.
+
 ## 1. What the branch does today (duration correction B)
 
 - **Form:** friction x m, with m = clip((t_ref / T)^alpha, 1, 10), alpha = 1, t_ref = 12 h,
@@ -104,7 +248,8 @@ Plan: `handoff_tide_corrected_duration_boundary.md`. Outputs: `.cleanup_baseline
     50 local SFINCS tiles; the other 30 are drawn round-robin over strata.
     GTSM series for ~10,800 stations are stored as int16 mm on disk (22 GB tide, 9 GB surge
     1979-2024), see `extract_gtsm_series.py`.
-16. **MHWS_FES vs MHWS_GTSM (F4, first 50 tiles, 1,483 stations): FES is lower almost
+16. **MHWS_FES vs MHWS_GTSM (F4, first 50 tiles, 1,483 stations; against gauges see §0.2: GTSM
+    is the one that is off): FES is lower almost
     everywhere.** Median MHWS_FES - MHWS_GTSM: -0.07 m below 1 m MHWS, -0.13 m at 1-1.5 m,
     -0.22 m at 1.5-3 m, -1.2 m above 3 m (median ratio 0.87-0.90). Not a datum effect (GTSM tide
     mean +0.02 m) and not sampling (both 10-min, same `tide_statistics`). GTSM is 2-3x FES in the
