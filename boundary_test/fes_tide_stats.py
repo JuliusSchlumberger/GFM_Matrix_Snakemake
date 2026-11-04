@@ -84,6 +84,14 @@ def tile_seeds(tile_id: str) -> tuple[np.ndarray, np.ndarray]:
     return np.column_stack([lon, lat]), np.asarray(values, dtype=float)
 
 
+def _tile_seeds_or_none(tile_id: str):
+    try:
+        return tile_seeds(tile_id)
+    except Exception as exc:  # e.g. a SFINCS grid that does not nest into its subgrid; tile is skipped
+        print(f"seeds {tile_id}: FAILED {exc!r}", flush=True)
+        return None
+
+
 def node_of(lonlat: np.ndarray) -> np.ndarray:
     return np.round(np.round(lonlat / NODE_DEG) * NODE_DEG, KEY_DECIMALS)
 
@@ -215,12 +223,16 @@ def main() -> None:
 
     todo = [t for t in tiles if not (out / "fes_cell_node_map" / f"{t}.parquet").exists()]
     with ProcessPoolExecutor(args.workers) as pool:
-        for tile_id, (ll, seed_level) in zip(todo, pool.map(tile_seeds, todo)):
+        for tile_id, seeds in zip(todo, pool.map(_tile_seeds_or_none, todo)):
+            if seeds is None:
+                continue
+            ll, seed_level = seeds
             nodes = node_of(ll)
             pd.DataFrame({"lon": ll[:, 0], "lat": ll[:, 1], "node_lon": nodes[:, 0], "node_lat": nodes[:, 1],
                           "seed_prod_rp100_m": seed_level}).to_parquet(out / "fes_cell_node_map" / f"{tile_id}.parquet")
             print(f"seeds {tile_id}: {len(ll)}", flush=True)
 
+    tiles = [t for t in tiles if (out / "fes_cell_node_map" / f"{t}.parquet").exists()]
     tile_nodes = {}
     for tile_id in tiles:
         cells = pd.read_parquet(out / "fes_cell_node_map" / f"{tile_id}.parquet")
