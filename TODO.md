@@ -140,12 +140,16 @@ Open:
 - **Duration correction B: reference duration and one-sided clip.** The water stays above MSL
   for more than 12 h in a third of observed annual maxima (microtidal median 20 h, macrotidal 7 h).
   B's T is cumulative over the hydrograph window, and SFINCS shows that the absolute duration,
-  not the shape, sets the reach. On synthetic SFINCS floodplains, t_ref = T of the calibration
-  hydrograph (COAST-HG) at the same head beats 12 h and beats "the hydrograph's longest
-  exposure". The clip at 1 prevents B from removing loss for long events. To decide: the
-  reference (calibration-relative), whether multipliers < 1 are allowed, and which hydrograph
-  source to use. COAST-HG's peak is about 3x narrower than observed and GTSM matches GESLA.
-  Each change needs a recalibration of fsf on the 498 SFINCS tiles (§0.3-0.4).
+  not the shape, sets the reach. On synthetic SFINCS floodplains with fsf refitted per form,
+  m proportional to T^-alpha without the lower clip fits best; the production form (t_ref 12 h,
+  clip >= 1) is close; "the hydrograph's longest exposure" and "T of the calibration hydrograph
+  at the same head" are worse. A constant t_ref is absorbed into fsf once the clip goes. To
+  decide: drop the lower clip, alpha (0.5-1), and the hydrograph source. COAST-HG's neighbouring
+  high waters are too low (B's T 5 h vs 15 h observed) and GTSM matches GESLA. Each change needs
+  a recalibration of fsf on the 498 SFINCS tiles (§0.3-0.4).
+- **COAST-RP at TC-dominated stations** is 0.2-0.25 m below GESLA GEV even with its TC
+  component (Japan/E Asia, US Atlantic+Gulf); GESLA records may also undersample TCs.
+  Decide whether a surge correction treats TC stations separately (§0.25).
 - **fsf grid between 7.5 and 9:** the optimum may lie between the tested values (bias crosses 1
   near 8.7). Refine only if the bias matters more than the last 0.005 CSI.
 - **Pinned scenarios re-run on the next Snakemake call:** the new `flooding` keys and the

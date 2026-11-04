@@ -102,6 +102,20 @@ GESLA GEV: annual maxima of the record with yearly means removed (median 30 year
   of COAST-RP levels lie inside the GESLA 90% interval.
 - By region (RP100): NW Europe +0.19 m (tide excess dominates), N America Atlantic+Gulf -0.29 m,
   Japan/E Asia -0.17 m (tropical cyclones with 30-46 y records on both sides), others within 0.1 m.
+- **TC and ETC:** COAST-RP (the combined file, which includes the TC contribution) is lowest at
+  TC-dominated stations (TC RP100 > ETC RP100, 194 sites: RP10 -0.19 m, RP100 -0.24 m; with the
+  tide excess removed -0.20 m), against -0.04 / -0.08 m at ETC-dominated stations with a TC
+  value and +0.04 / +0.02 m where the TC file has no station. The TC part adds 0.17 m (median)
+  to RP100 at TC-dominated stations and is still too low there (Japan/E Asia -0.25 m,
+  N America Atlantic+Gulf -0.24 m). The ERA5-driven GTSM GEV is lower still (-0.29 m). GESLA
+  records (median 37 y at these sites) may also miss rare TCs, so a GESLA GEV is not an upper
+  bound there.
+- **Fundy, SF Bay:** no GESLA gauge inside Minas Basin or the upper Gulf of California, so the
+  FES heads (§2.19) cannot be checked against gauges. On the outer Bay of Fundy FES matches GESLA
+  MHWS (Saint John 3.50 vs 3.54 m) and GTSM is 25% low (2.64 m); COAST-RP RP100 is 1.2-1.4 m below
+  the GESLA GEV (Saint John 3.45 vs 4.66 m). In SF Bay FES matches (San Francisco 0.74 vs 0.75 m;
+  Redwood City 1.24 vs 1.10 m), GTSM is 10-35% low, and COAST-RP RP100 is 0.3-0.5 m below GESLA.
+  No source overestimates there against gauges; the overestimates are FES at basin heads.
 - Implication for H1: replacing only the tide removes the excess but keeps the surge deficit,
   so on most coasts H1 lowers levels that are already ~0.1 m too low against gauges. A tide
   correction needs the surge part assessed with it.
@@ -124,15 +138,21 @@ Durations (hours; local MSL = 0; B's T = time within f x (peak - MSL) of the pea
   holds the level above MSL for one to several days.
 - **GTSM reproduces the observed shapes** per site (Spearman rho, median ratio GTSM/GESLA:
   time above MSL 0.87 / 1.00, B's T at f = 0.25 0.77 / 1.00, surge duration 0.63 / 1.14).
-- **COAST-HG does not:** its peak is ~3x narrower than observed (B's T at f = 0.25: 5 h vs 15 h),
-  and its neighbouring high waters are lower (average-tide variant 0.5-0.6 of the peak at
-  +-12/24 h, observed 0.75-0.85 in macrotidal regimes: annual maxima happen at spring tides,
-  so several consecutive high waters are nearly as high). The difference is not the RP: within
+- **COAST-HG does not:** its central peak has the observed width, but its neighbouring high
+  waters are lower (spring variant ~0.72 of the peak at +-12/24 h, average variant 0.5-0.6,
+  observed 0.75-0.88 in meso/macrotidal regimes: annual maxima happen at spring tides, so
+  several consecutive high waters are nearly as high). B's T at f = 0.25 counts every hour above
+  0.75 of the peak in the window, so the neighbours drop out of COAST-HG's T (5 h vs 15 h).
+  In microtidal regimes COAST-HG falls below MSL between high waters; observed events do not. The difference is not the RP: within
   a site, B's T at f = 0.25 falls only from 16 to 11 h between RP < 2 y and RP >= 10 y events.
 - **Event size:** larger events stay above MSL longer (rho 0.14-0.25) and their surge lasts
   longer (surge dur50 12 -> 18 h at 1-2 m range), but their peak is relatively narrower (B's T at
-  f = 0.25 falls with RP, rho -0.1 to -0.24). Figures: `analysis/shapes_profiles.png`,
-  `analysis/shapes_durations.png`.
+  f = 0.25 falls with RP, rho -0.1 to -0.24). Per RP class (GESLA, < 2 y -> >= 10 y): surge share
+  of the peak 0.36 -> 0.63 (range < 1 m), 0.15 -> 0.35 (1-2 m), 0.05 -> 0.13 (> 4 m); neighbouring
+  high waters at +-24 h 0.81 -> 0.58 of the peak (< 1 m), 0.86 -> 0.75 (1-2 m), unchanged > 2 m.
+  Rarer events are more surge-dominated, so the tidal neighbours are relatively lower, while the
+  surge holds the level above MSL longer. Figures: `analysis/shapes_profiles.png`,
+  `analysis/shapes_profiles_by_rp.png`, `analysis/shapes_durations.png`.
 
 ### 0.4 What duration does to inland levels (2c), synthetic SFINCS floodplains
 
@@ -154,19 +174,37 @@ Durations (hours; local MSL = 0; B's T = time within f x (peak - MSL) of the pea
   cannot remove the loss for long events. Median eikonal/SFINCS extent ratio over all runs:
   no B (fsf 12) 0.69, B t_ref 12 h 0.65-0.77, B t_ref = time above the shore crest ("longest
   exposure") 0.58-0.60, B t_ref = T(head) of the median COAST-HG hydrograph ("relative to the
-  calibration hydrograph") 0.64-0.82, the best of the four; level RMSE ranks the same.
-- **Answer on t_ref:** a fixed 12 h is not a physical reference: T is window-dependent
-  (cumulative over the hydrograph) and the water stays above MSL > 12 h in a third of observed
-  events, so the absolute value only fixes where the clip at 1 starts. Scaling by the
-  hydrograph's own longest exposure is worse: it makes every hydrograph's correction depend only
-  on its shape, so a 2 h and a 48 h event of the same shape get the same friction, while SFINCS
-  shows the absolute duration sets the reach. The reference that does best is the T of the
-  calibration hydrograph at the same head, because the friction factor was fitted on SFINCS runs
-  forced with COAST-HG (70 h runs): m = (T_calib(head) / T(head))^alpha. It reduces to 1 for the
-  calibration forcing and, unclipped below 1, would also lower friction for events longer than
-  the calibration ones; the strips suggest that is needed (SFINCS has no loss for long events).
-  Caveats: uniform 1-D strips, uniform friction, no channels or sills; only the ranking and the
-  mechanisms transfer, not the ratios.
+  calibration hydrograph") 0.64-0.82. These hold fsf at the tile values (7.5 / 12), so they
+  rank the forms partly by how well each matches that level; see the refit below.
+- **Refit per form** (`duration_refit.py`, 405 runs on sloping strips, fsf grid 1-12, one fsf
+  per form chosen by RMSE of log extent ratio):
+
+  | Form | alpha | best fsf | log RMSE | spread within terrain | ratio, run < 6 h / 6-24 h / > 24 h |
+  |---|---|---|---|---|---|
+  | m = 1 / T, two-sided (lo 0.1) | 1 | 3.0 | 0.140 | 0.098 | 1.00 / 0.98 / 0.93 |
+  | m = 1 / T, two-sided | 0.5 | 4.0 | 0.137 | 0.095 | 1.03 / 0.96 / 0.89 |
+  | t_ref 12 h, clip >= 1 (production) | 1 | 2.5 | 0.148 | 0.095 | 1.02 / 0.99 / 0.92 |
+  | t_ref = own shore exposure, clip >= 1 | 1 | 1.5 | 0.189 | 0.136 | 1.11 / 0.96 / 0.87 |
+  | t_ref = T_calib(head), clip >= 1 | 1 | 2.5 | 0.215 | 0.157 | 1.03 / 1.01 / 0.95 |
+  | t_ref = T_calib(head), two-sided | 1 | 2.5 | 0.245 | 0.164 | 1.06 / 1.03 / 0.98 |
+  | no B | - | 4.0 | 0.192 | 0.140 | 1.08 / 0.97 / 0.88 |
+
+  With fsf free, the calibration-relative reference ranks last of the B forms: its reference
+  varies with head through the COAST-HG shape, which adds a head-dependent friction unrelated to
+  the event. With a two-sided multiplier a constant t_ref is absorbed into fsf, so "12 h" has
+  no meaning of its own; only the clip does. Removing the clip improves the fit slightly (0.148
+  -> 0.140) and flattens the duration dependence. No form removes it (Spearman of ratio vs
+  duration -0.44 to -0.87 within terrain). The strips' optimal fsf (1.5-4) is below the tile
+  value because they have no sub-grid resistance; only the ranking transfers.
+- **Answer on t_ref:** T in B is cumulative over all tidal cycles in the window, not the
+  contiguous time around the peak. A fixed 12 h is not a physical reference; with fsf
+  calibrated, its value only sets where the clip at 1 starts. Scaling by the hydrograph's own
+  longest exposure is worse: a 2 h and a 48 h event of the same shape get the same friction,
+  while SFINCS shows the absolute duration sets the reach. Scaling by the calibration
+  hydrograph's T at the same head is also worse once fsf is refitted. The best form is the
+  simplest: m proportional to T^-alpha (alpha 0.5-1), two-sided, with fsf recalibrated, which
+  is the production form without the lower clip. Caveats: uniform 1-D strips, uniform friction,
+  no channels or sills; only the ranking and the mechanisms transfer, not the ratios.
 
 ## 1. What the branch does today (duration correction B)
 

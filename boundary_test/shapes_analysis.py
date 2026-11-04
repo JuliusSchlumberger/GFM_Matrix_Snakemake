@@ -9,6 +9,7 @@ Tables:
   shapes_rp_trend.csv   per source and range class: Spearman correlation of each measure with the
                         event's empirical return period, pooled over sites (rank within site)
 Figures: shapes_profiles.png (median normalised profile per range class and source),
+shapes_profiles_by_rp.png (the same per empirical-RP class),
 shapes_durations.png (distribution of time above MSL and of B's T against 12 h).
 
 Usage:
@@ -116,6 +117,35 @@ def plot_profiles(ev: pd.DataFrame, prof: np.ndarray, offset: np.ndarray, dest: 
     plt.close(fig)
 
 
+def plot_profiles_by_rp(ev: pd.DataFrame, prof: np.ndarray, offset: np.ndarray, dest: Path) -> None:
+    classes = list(ev.range_class.cat.categories)
+    rp_classes = list(ev.rp_class.cat.categories)
+    shades = ("#a9c8f0", "#6a9fe4", "#2a78d6", "#123f78")
+    fig, axes = plt.subplots(2, len(classes), figsize=(4.2 * len(classes), 7.2), sharex=True, sharey=True)
+    for i, s in enumerate(("gesla", "gtsm")):
+        for ax, rc in zip(axes[i], classes):
+            for rp, color in zip(rp_classes, shades):
+                sel = ((ev.source == s) & (ev.range_class == rc) & (ev.rp_class == rp)).to_numpy()
+                if sel.sum() >= 5:
+                    ax.plot(offset, np.nanmedian(prof[sel], axis=0), color=color, linewidth=1.8,
+                            label=f"RP {rp} y (n={int(sel.sum())})")
+            hg = ((ev.source == "coast_hg_spring") & (ev.range_class == rc)).to_numpy()
+            if hg.sum() >= 5:
+                ax.plot(offset, np.nanmedian(prof[hg], axis=0), color=COLORS["coast_hg_spring"], linewidth=1.4,
+                        linestyle="--", label=f"COAST-HG spring RP100 (n={int(hg.sum())})")
+            ax.axhline(0, color=MUTED, linewidth=1)
+            ax.set(xlim=(-48, 48), ylim=(-1.2, 1.05), title=f"{s.upper()}, GESLA spring range {rc} m",
+                   xlabel="hours from peak" if i == 1 else None)
+            ax.title.set_fontsize(10)
+            _style(ax)
+            ax.legend(frameon=False, fontsize=7, loc="lower center")
+        axes[i, 0].set_ylabel("level / peak (local MSL = 0)")
+    fig.suptitle("Median annual-maximum profile by empirical return period (rank within site)", color=INK, fontsize=11)
+    fig.tight_layout()
+    fig.savefig(dest / "shapes_profiles_by_rp.png", dpi=140)
+    plt.close(fig)
+
+
 def plot_durations(ev: pd.DataFrame, dest: Path) -> None:
     fig, axes = plt.subplots(1, 3, figsize=(15, 4.2))
     for ax, m, title in zip(axes, ("d_above_msl", "t_within_0.25", "t_within_0.5"),
@@ -167,6 +197,7 @@ def main() -> None:
           + trend[trend.measure.isin(["d_above_msl", "t_within_0.25", "t_within_0.5", "surge_dur50"])]
           .round(3).to_string(index=False))
     plot_profiles(ev, prof, offset, dest)
+    plot_profiles_by_rp(ev, prof, offset, dest)
     plot_durations(ev, dest)
 
 
