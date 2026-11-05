@@ -229,7 +229,8 @@ Stratified sample of `sites_levels.csv` (3 random sites per region, seed 0; MHWS
   FES2014 tidal range at every coastline point, and Chaudhuri et al. (2027) join each coastal
   seed to the nearest FES2022b HAT vertex within 20 km. FES2014 does not share the artefact
   (§8.1, test 6): at the same nodes its proxy is 3.6-6.0 m, as EOT20's, so the failure is
-  FES2022's extrapolation into the basin heads.
+  FES2022's extrapolation into the basin heads. FES2014 is therefore the fallback at such nodes
+  (§8.2, tide atlas).
 
 ## 4. Extremes
 
@@ -543,7 +544,7 @@ within each tier. Items 1-4 use only data already extracted for this note; none 
    the maximum of the second atlas within 25 km by more than 50%, then review by hand.
 
    **EOT20 and FES2014 done** (`atlas_check.py`; figures `atlas_gauges.png`, `atlas_nodes_map.png`,
-   `atlas_versions.png`, `atlas_basins.png`; TPXO10 not obtained). FES2014 is the AVISO
+   `atlas_versions.png`, `atlas_basins.png`, `atlas_rule_sensitivity.png`; TPXO10 not obtained). FES2014 is the AVISO
    `fes2014b_elevations_extrapolated` product (34 constituents, 1/16 deg), read like FES2022.
    - *At the gauges* (tide set, same 18.61-y prediction and statistics as §3): EOT20 MHWS median
      ratio 1.00, MAE 0.113 m, 84% within 0.1 m, against FES 0.99 / 0.053 m / 88%. EOT20 is not
@@ -584,20 +585,58 @@ within each tier. Items 1-4 use only data already extracted for this note; none 
      3.6 m; Glacier Bay / Lynn Canal 11.7 / 2.3 / 2.3 m (`atlas_basins.png`). The artefacts are
      therefore FES2022-specific, which answers the version question of this test. In the Arctic
      FES2014 sides with EOT20 as well, but there the two are not independent.
-   - *A version rule.* "FES2022 / FES2014 > 1.5 and FES2022 - FES2014 > 1 m" (proxy) needs the
-     absolute floor because without it the ratio flags microtidal coasts where both amplitudes
-     are centimetres (Sea of Azov 5 vs 2 cm, the Kara Sea). With it, 1,911 nodes in 62 2-deg cells
-     are flagged (1,096 in 40 cells at 2x), 80% of them also EOT20-flagged; about a third are
-     north of 66 N. At the 1,154 gauges the rule fires 4 times: it fixes Skagway (7.46 -> 2.76 m,
-     gauge 2.78 m), Juneau (5.95 -> 3.33 m, gauge 2.72 m) and Port Alberni (2.79 -> 1.36 m, gauge
-     1.28 m), and breaks Trondheim (1.52 -> 0.44 m, gauge 1.37 m). Without the floor, a pure
-     ratio threshold does not help the moderate errors: at 1.5x it flags 6 tide-set gauges, of
-     which 1 is a real FES2022 error, and the hybrid MAE moves from 0.053 to 0.051 m.
-   - *Conclusion.* Neither reference atlas catches the moderate fjord and inlet errors, and both
-     bring their own failures. The gross basin-head artefacts are FES2022's alone and FES2014 is
-     free of them, so FES2014 is the natural fallback: replace FES2022 by FES2014 where the
-     version rule fires, and let a gauge override both where one exists (which covers
-     Trondheim).
+   - *Version rule.* FES2022 is replaced by FES2014 at a node where, on the proxy,
+     A_FES2022 > R x A_FES2014 **and** A_FES2022 - A_FES2014 > D, with R = 1.5 and D = 1 m. The
+     ratio alone flags microtidal coasts where both amplitudes are centimetres (Sea of Azov 5 vs
+     2 cm, the Kara Sea); the floor alone would switch macrotidal coasts where FES2022 is only
+     20-40% higher. With both, 1,911 of the 89,628 nodes in 62 2-deg cells are replaced, 80% of
+     them also flagged by the EOT20 screen, about a third north of 66 N. Evaluated on the proxy at
+     the 905 gauges with all three MHWS values, the rule fires 4 times: Skagway (MHWS 7.46 -> 2.76
+     m, gauge 2.78 m), Juneau (5.95 -> 3.33 m, gauge 2.72 m), Port Alberni (2.79 -> 1.36 m, gauge
+     1.28 m), and Little River BC (1.45 -> 1.29 m, gauge 1.35 m; neutral). Trondheim, where
+     FES2014 is 0.9 m too low, stays on FES2022 (proxy difference 0.93 m).
+   - *Threshold sensitivity* (`atlas_rule_sensitivity.py`, R in 1.1-3, D in 0-2 m; data
+     `atlas_rule_grid.csv`, `atlas_rule_bands.csv`). Three kinds of evidence:
+     - *Which atlas is closer to the gauge, by proxy difference* (FES2022 - FES2014). In every
+       band below 0.75 m, positive or negative, FES2014 is closer at only 33-44% of the gauges and
+       switching loses on average (median gain 0 to -0.31 m); the only site in 0.75-1 m is
+       Trondheim (-0.78 m).
+       Above 1 m FES2014 is closer at all 5 gauges (median gain +1.43 m). FES2022 is the better
+       atlas wherever the two differ by less than about a metre, so the switch must be reserved
+       for larger differences.
+     - *Gauge outcome over the grid.* For D >= 1 m no (R, D) with R <= 2 harms a single gauge
+       (FES2014 further from the gauge by > 5 cm). For D <= 0.75 m harms appear (Trondheim from
+       D < 0.93 m, then the microtidal sites); at D = 0 and R = 1.1 the rule fires 107 times, fixes
+       22 and harms 31. The net gain peaks at D = 1 m (8.8-9.0 m summed over the gauges for
+       R = 1.1-1.5), stays within 0.3 m of that to D = 1.5 m and falls at D = 2 m, where Port
+       Alberni (difference 1.6 m) drops out.
+     - *Known artefacts*, defined without FES2014: the 169 nodes in the four basin boxes whose
+       FES2022 MHWS exceeds 1.25 x the largest observed MHWS there (half the record or upper
+       spring range: Minas 8.15 m, Magellan 5.5 m, Colorado 5.0 m; Skagway 2.8 m). R <= 1.4
+       replaces all of them for D <= 1.25 m, R = 1.5 replaces 167 (the 2 missed are outer
+       Bahía Lomas nodes at FES2022 MHWS 6.95 and 7.28 m, just above the 6.9 m bound), R = 1.75 93%,
+       R = 2 81%, R = 3 46%. For D >= 1.5 m detection drops at every R.
+     - *Size of the change.* At D = 1 m the number of replaced nodes is flat in R between 1.1
+       and 1.5 (2,121 -> 1,911, -10%) and halves by R = 2 (1,096); at R = 1.5 it is steep in D
+       below 1 m (5,255 at D = 0) and moderate above (1,455 at 1.25 m).
+
+     Together this bounds D to about 0.95-1.25 m: below, the gauges are harmed (Trondheim) and the
+     switch enters the range where FES2022 is the better atlas; above, known artefacts start to
+     be missed (from D = 1.5 m) and by D = 2 m the Port Alberni fix is lost. D = 1 m sits at the lower end with a margin of 7 cm over
+     Trondheim. R is a secondary guard: anything in 1.1-1.5 gives the same result at the gauges
+     to within one site, and R >= 1.75 misses known artefacts. R = 1.5 is the conservative end of
+     that plateau. The 210 nodes that R = 1.5 keeps on FES2022 but R = 1.1 would switch lie on
+     macrotidal coasts where FES2022 is 30-45% higher and no gauge decides between them (Hecate
+     Strait, Frobisher Bay and Hudson Strait, the Amazon mouth, Penzhina Bay). There FES2022, the
+     better atlas on average, is kept. The price is Wyndham (FES2014 better by 0.22 m, ratio 1.41)
+     and the 2 marginal Bahía Lomas nodes. The gauge evidence for D rests on few sites (5 above
+     1 m, 1 between 0.75 and 1 m), so the known-artefact set carries the upper bound.
+   - *Decision.* FES2014 is the single reference and fallback atlas; EOT20 is not used further.
+     EOT20 is a residual model on FES2014b, so where altimetry is sparse it repeats FES2014, and
+     where it departs from it it brings its own failures (St Lawrence S2 artefacts, Puget Sound,
+     no values in narrow inlets). FES2022 stays the tide source; the version rule with R = 1.5,
+     D = 1 m replaces it by FES2014 at basin-head nodes, and a gauge overrides both where one
+     exists. Moderate fjord and inlet errors (0.25-1 m) are not caught by any atlas.
 7. **Decompose COAST-HG's error.** Separate COAST-HG into its tide and surge parts and score each
    against the gauge events: is the nb24 deficit a surge that decays too fast, or a tide window
    that is not the gauge's spring tide (daily inequality, neap-spring phase, average-tide
@@ -631,6 +670,9 @@ within each tier. Items 1-4 use only data already extracted for this note; none 
   fallback and (iii) requested as an independent validation layer.
 - **Reference epoch and MSL anomaly.** Keep 2020 (§7). Test 3 puts the interannual-MSL term at
   about 1 cm in the RP levels, so no MSL-anomaly term is added.
+- **Tide atlas.** FES2022, with FES2014 replacing it where the FES2022 / FES2014 proxy ratio
+  exceeds 1.5 and the difference exceeds 1 m, and gauges overriding both (§8.1, test 6). EOT20
+  is not used further.
 - **Hydrograph source.** COAST-HG is retired for both roles once a generator variant passes the
   acceptance test in §8.3. Until then, T from GTSM events (not COAST-HG) where no TC dominates.
 - **Open-data posture.** If the global product is to be open and reproducible, every level input
@@ -650,7 +692,7 @@ errors (§5.2): next-day high water 0.1-0.15 of the peak too low, and T(0.25) 5-
 
 **Generator.** Per station and RP, with levels relative to local MSL:
 - **Tide:** FES2022 at the station, 10 min, ±72 h around a spring high water (FES matches the
-  gauges, §3), after the basin-head filter (test 6).
+  gauges, §3), with the FES2014 version rule at basin-head nodes (test 6).
 - **Surge shape:** selected for the RP from GTSM surge events 1979-2024 (HGRAPHER-RP event
   selection), built on the skew surge rather than the non-tidal residual where the tidal range
   exceeds ~1 m (Environment Agency, 2018). The shape class follows the component that dominates
@@ -755,7 +797,7 @@ each script's docstring for further arguments):
 10. `site_sets.py`
 11. `levels_extremes.py --msl linear`, then `msl_sensitivity.py`
 12. `atlas_check.py` (EOT20 on `<data_root>`; FES2014 unpacked locally into
-    `.cleanup_baseline/fes2014/ocean_tide_extrapolated`)
+    `.cleanup_baseline/fes2014/ocean_tide_extrapolated`), then `atlas_rule_sensitivity.py`
 13. `duration_experiment.py` (local SFINCS)
 14. `duration_analysis.py`
 15. `duration_refit.py`

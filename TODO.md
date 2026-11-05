@@ -141,11 +141,11 @@ Open:
   cost 15 gauges / 6 GTSM stations in `levels_tides.py` (2 tide-set sites) and an unknown share of
   the ~13,600 "invalid" FES nodes in `.cleanup_baseline/boundary_test/fes_nodes.parquet`. Rerun
   `levels_tides.py` and `fes_tide_stats.py` before those outputs are used again.
-- **FES basin-head rule: decide threshold and fallback.** The gross artefacts (Cobequid Bay,
-  Bahia Lomas, Glacier Bay, Colorado delta) are FES2022-only; FES2014 and EOT20 are free of them.
-  Candidate: FES2014 where FES2022 / FES2014 > 1.5 and the difference > 1 m (proxy), gauges
-  override both (FES2014 fails at Trondheim). Moderate inlet errors stay uncaught
-  (`boundary_test/INPUT_ANALYSIS.md` test 6).
+- **Implement the FES version rule in the boundary preparation.** Decided (INPUT_ANALYSIS.md
+  test 6, §8.2): FES2014 replaces FES2022 where the |M2|+|S2|+|K1|+|O1| ratio > 1.5 and the
+  difference > 1 m (`boundary_test/atlas_check.version_flag`), gauges override both. Needs
+  FES2014 unpacked on `<data_root>` (only the archive is there; locally in `.cleanup_baseline`)
+  and a data catalog entry. Moderate inlet errors (0.25-1 m) stay uncaught.
 - **Rerun after the 2020 baseline offset** (`boundary_conditions.slr_baseline_offset_m`, 0.049 m
   regionalised): `run_preparation.py boundary_conditions`, then every tile simulation and the
   analysis. Until then `boundaries.static_station_levels` raises on the old MDT station file.
