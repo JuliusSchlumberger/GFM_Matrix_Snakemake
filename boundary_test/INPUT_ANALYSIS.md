@@ -537,7 +537,7 @@ within each tier. Items 1-4 use only data already extracted for this note; none 
    can take it without code change. Collings et al. (2024) did the same superposition (GTSM
    surge on FES2014 tide) before their RFA, which is a useful precedent.
 6. **FES basin-head rule.** Cross-check the flagged nodes (§3) against FES2014, TPXO10-atlas and
-   EOT20 (catalog entry `eot20_ocean_tide`; EOT20 is a residual model on FES2014b, so where
+   EOT20 (a residual model on FES2014b, so where
    altimetry is sparse it largely tests FES2014 too). If FES2014 lacks the artefact it is an FES2022 extrapolation issue and a version mask
    suffices; if all atlases fail, bound MHWS by the GTSM value where a station exists (GTSM is low
    in Fundy, so conservative in the right direction). Automate: flag any node whose MHWS exceeds
