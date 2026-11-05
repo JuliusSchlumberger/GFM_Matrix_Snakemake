@@ -535,3 +535,32 @@ mdt_cnes_cls22:
       combining drifters, hydrography profiles and high frequency radar data,
       Earth Syst. Sci. Data 18, 2285-2303.
     paper_doi: 10.24400/527896/a01-2023.003 (product); 10.5194/essd-18-2285-2026 (paper)
+
+eot20_ocean_tide:
+  data_type: GeoDataset
+  driver: netcdf
+  # Directory root: one file per constituent, {CONSTITUENT}_ocean_eot20.nc (pyTMD model "EOT20").
+  path: inputs/EOT20/ocean_tides
+  crs: 4326
+  filesystem: local
+  meta:
+    category: ocean
+    description: >
+      EOT20 empirical ocean tide model from multi-mission satellite altimetry (residual tides
+      on FES2014b), 17 constituents on a 1/8 deg grid, amplitude in cm and phase in degrees.
+      Independent second atlas for the FES2022 basin-head check (boundary_test,
+      INPUT_ANALYSIS.md test 6); not used by the production pipeline.
+    source_author: M.G. Hart-Davis, G. Piccioni, D. Dettmering, C. Schwatke, M. Passaro,
+      F. Seitz (DGFI-TUM)
+    source_url: https://www.seanoe.org/data/00683/79489/
+    source_access: open download
+    source_notes: >
+      The SEANOE download (`85762.zip`) holds `ocean_tides.zip` and `load_tides.zip`. Unzip
+      `ocean_tides.zip` into `inputs/EOT20/ocean_tides/`; the load tides are not needed.
+    source_version: EOT20
+    source_license: CC-BY-4.0
+    paper_ref: Hart-Davis et al. (2021), EOT20 - A global Empirical Ocean Tide model from
+      multi-mission satellite altimetry, SEANOE (dataset); Hart-Davis et al. (2021), EOT20 - a
+      global ocean tide model from multi-mission satellite altimetry, Earth Syst. Sci. Data 13,
+      3869-3884.
+    paper_doi: 10.17882/79489 (dataset); 10.5194/essd-13-3869-2021 (paper)
