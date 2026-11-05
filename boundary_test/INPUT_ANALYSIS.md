@@ -540,6 +540,38 @@ within each tier. Items 1-4 use only data already extracted for this note; none 
    suffices; if all atlases fail, bound MHWS by the GTSM value where a station exists (GTSM is low
    in Fundy, so conservative in the right direction). Automate: flag any node whose MHWS exceeds
    the maximum of the second atlas within 25 km by more than 50%, then review by hand.
+
+   **EOT20 done** (`atlas_check.py`; figures `atlas_gauges.png`, `atlas_nodes_map.png`,
+   `atlas_basins.png`; FES2014 and TPXO10 not yet obtained).
+   - *At the gauges* (tide set, same 18.61-y prediction and statistics as §3): EOT20 MHWS median
+     ratio 1.00, MAE 0.113 m, 84% within 0.1 m, against FES 0.99 / 0.053 m / 88%. EOT20 is not
+     defined at 13 gauges (Juneau, Delaware City, the Fraser and Vancouver harbours, among others).
+     Its error is dominated by solar-constituent artefacts in the St Lawrence estuary: at Lauzon,
+     Saint-François and Saint-Joseph-de-la-Rive the atlas files hold S2 of 14-31 m, T2 up to 23 m
+     and S1 up to 18 m, against an M2 of 1.75 m (MHWS 20-41 m). Without those sites the EOT20 MAE
+     is 0.059 m, close to FES. Constituent ratios to the gauges (M2, S2, K1, O1) centre on 1.00
+     for both atlases; EOT20's spread is wider.
+   - *At the 89,628 FES boundary nodes* of the test tiles, screened with the proxy
+     |M2|+|S2|+|K1|+|O1| for both atlases: 3,876 nodes have FES > 1.5 x the largest EOT20 within
+     25 km (1,343 at 2x, 446 at 3x), and 1,595 have no EOT20 value within 25 km. The three
+     basin-head clusters of §3 are caught: Cobequid Bay (FES proxy 12.4 m vs EOT20 6.1 m, 18 of 26
+     nodes), Bahía Lomas (15.7 vs 5.0 m, 44 of 148 nodes). The Colorado-delta node has no EOT20
+     value nearby. Further gross clusters at 2x: Glacier Bay / Lynn Canal (FES MHWS up to 12.2 m vs
+     EOT20 2.3 m; the Skagway and Juneau gauges show FES 7.5 / 6.0 m against 2.8 / 2.7 m observed),
+     Penzhina Bay, Frobisher Bay, the Río Gallegos estuary, central Gulf of California. About half
+     of the flagged nodes lie north of 66 N, where EOT20 (altimetry under sea ice) is the weaker
+     atlas.
+   - *Can a second atlas referee FES?* Not for moderate errors. At the 14 gauges where FES is too
+     high by > 0.25 m and > 25%, EOT20 or GTSM is usually wrong in the same direction (Point
+     Lonsdale, Queenscliff and Long Island Sound with EOT20; Juneau and Skagway with GTSM). The
+     rule FES/EOT20 > 1.5 flags 19 gauges, of which 2 are real FES errors; FES > 1.3 x max(GTSM,
+     EOT20) flags 18 and catches 5 of the 14; requiring both references to disagree flags 4 and
+     catches none. Most flags are places where EOT20 itself fails (Tacoma 0.12 m vs 1.46 m
+     observed, Trondheim, Seattle).
+   - *Conclusion.* A second atlas catches the gross basin-head artefacts (factor 2 and more) but
+     not the moderate fjord and inlet errors, and it brings its own failures. A rule therefore
+     needs a large threshold (2x) plus manual review of the clusters, and gauges wherever they
+     exist.
 7. **Decompose COAST-HG's error.** Separate COAST-HG into its tide and surge parts and score each
    against the gauge events: is the nb24 deficit a surge that decays too fast, or a tide window
    that is not the gauge's spring tide (daily inequality, neap-spring phase, average-tide

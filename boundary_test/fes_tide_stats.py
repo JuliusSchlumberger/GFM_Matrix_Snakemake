@@ -96,20 +96,32 @@ def node_of(lonlat: np.ndarray) -> np.ndarray:
     return np.round(np.round(lonlat / NODE_DEG) * NODE_DEG, KEY_DECIMALS)
 
 
-def extract_constants(model, groups: list[np.ndarray]) -> np.ndarray:
+def extract_constants(model, groups: list[np.ndarray], method: str = "spline") -> np.ndarray:
     """Complex harmonic constants (node, constituent) for the (lon, lat) node groups, stacked.
 
     As `model.extract_constants(crop=True, extrapolate=True)` per group, with each constituent
     grid read once: `pyTMD.io.FES.read_netcdf_file` is swapped for a one-file cache meanwhile.
+    Use method "bilinear" for atlases with land holes (EOT20): a spline across masked cells
+    overshoots by metres next to them.
     """
     fes, original = pyTMD.io.FES, pyTMD.io.FES.read_netcdf_file
     cache: dict = {}
+    window: dict = {}
 
     def cached(path, **kwargs):
         if str(path) not in cache:
             cache.clear()
             cache[str(path)] = original(path, **kwargs)
-        return cache[str(path)]
+        # pyTMD crops and extrapolates the returned grid in place, so each call gets its own copy;
+        # without it every later group sees the damaged grid and comes back NaN. Only the window
+        # around the current group is copied (a global 1/30 deg grid is ~1 GB).
+        hc, lon, lat = cache[str(path)]
+        if window:
+            margin = CROP_BUFFER_DEG + 4 * abs(float(lon[1] - lon[0]))
+            ii = np.flatnonzero((lon >= window["lon0"] - margin) & (lon <= window["lon1"] + margin))
+            jj = np.flatnonzero((lat >= window["lat0"] - margin) & (lat <= window["lat1"] + margin))
+            return hc[jj[0]:jj[-1] + 1, ii[0]:ii[-1] + 1].copy(), lon[ii[0]:ii[-1] + 1].copy(), lat[jj[0]:jj[-1] + 1].copy()
+        return hc.copy(), lon.copy(), lat.copy()
 
     # 0-360 longitudes (the FES grid's) avoid shifting the global grid per crop, except for
     # groups that straddle 0 deg.
@@ -120,9 +132,12 @@ def extract_constants(model, groups: list[np.ndarray]) -> np.ndarray:
     try:
         for k, model_file in enumerate(model.model_file):
             for g, out in zip(groups, hc):
+                window.clear()
+                if (g[:, 0] >= 0).all():  # groups straddling 0 deg keep the global grid
+                    window.update(lon0=g[:, 0].min(), lon1=g[:, 0].max(), lat0=g[:, 1].min(), lat1=g[:, 1].max())
                 amp, ph = fes.extract_constants(g[:, 0], g[:, 1], [model_file], version=model.version,
                                                 compressed=model.compressed, type=model.type, scale=model.scale,
-                                                crop=True, buffer=CROP_BUFFER_DEG, method="spline",
+                                                crop=True, buffer=CROP_BUFFER_DEG, method=method,
                                                 extrapolate=True, cutoff=CUTOFF_KM)
                 out[:, k] = np.ma.filled(amp[:, 0] * np.exp(-1j * ph[:, 0] * np.pi / 180.0), np.nan)
             print(f"  constituent {k + 1}/{len(model.model_file)}", flush=True)

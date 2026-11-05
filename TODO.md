@@ -136,6 +136,14 @@ Open:
   ~2.6 mm/yr trend). COAST-RP inherits the tide excess, but its surge part is about 0.1 m too low
   against GESLA GEV fits, so the two partly cancel (§0.25). Replacing only the tide (H1) would
   lower levels that are already about 0.1 m low. Decide how the surge part is treated before H1.
+- **FES extraction cache bug (fixed in `fes_tide_stats.extract_constants`):** pyTMD altered the
+  cached atlas grid in place, so later extraction groups came back NaN (never wrong values). It
+  cost 15 gauges / 6 GTSM stations in `levels_tides.py` (2 tide-set sites) and an unknown share of
+  the ~13,600 "invalid" FES nodes in `.cleanup_baseline/boundary_test/fes_nodes.parquet`. Rerun
+  `levels_tides.py` and `fes_tide_stats.py` before those outputs are used again.
+- **FES basin-head rule: decide threshold and fallback.** EOT20 flags the gross artefacts
+  (Cobequid Bay, Bahia Lomas, Glacier Bay) but not the moderate inlet errors, and fails itself in
+  the Arctic, Puget Sound and the St Lawrence (`boundary_test/INPUT_ANALYSIS.md` test 6).
 - **Rerun after the 2020 baseline offset** (`boundary_conditions.slr_baseline_offset_m`, 0.049 m
   regionalised): `run_preparation.py boundary_conditions`, then every tile simulation and the
   analysis. Until then `boundaries.static_station_levels` raises on the old MDT station file.
