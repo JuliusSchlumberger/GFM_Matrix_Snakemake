@@ -1,20 +1,25 @@
-"""Test 6: EOT20 as a second tide atlas, at the gauges and at the FES2022 boundary nodes.
+"""Test 6: EOT20 and FES2014 as reference tide atlases, at the gauges and at the FES2022 boundary nodes.
 
-Gauges (all 1,154; scored on the tide set): EOT20 is extracted at the gauge with
-`fes_tide_stats.extract_constants` (bilinear, since EOT20 has land holes; extrapolation to the
-nearest valid cell within CUTOFF_KM), predicted over the same 18.61-y 10-min epoch with its own 17 constituents (Sa / Ssa
-dropped, as the `no_seasonal` variant) and reduced with `tide_statistics` to MHWS. Compared with
-GESLA and FES2022 (`levels_sites.csv`), and per constituent (M2, S2, K1, O1) with the harmonic
-constants of `levels_tides.py`.
+Gauges (all 1,154; scored on the tide set): each reference atlas is extracted at the gauge with
+`fes_tide_stats.extract_constants` (EOT20 bilinear, since it has land holes; FES2014 spline, as
+FES2022; extrapolation to the nearest valid cell within CUTOFF_KM), predicted over the same 18.61-y
+10-min epoch with its own constituents (Sa / Ssa dropped, as the `no_seasonal` variant) and reduced
+with `tide_statistics` to MHWS. Compared with GESLA and FES2022 (`levels_sites.csv`), and per
+constituent (M2, S2, K1, O1) with the harmonic constants of `levels_tides.py`.
 
 FES nodes (the test tiles' boundary nodes, `fes_nodes.parquet`): a full nodal-cycle prediction at
-~90,000 nodes is too slow, so both atlases are screened with the same amplitude proxy
+~90,000 nodes is too slow, so all atlases are screened with the same amplitude proxy
 A = |M2| + |S2| + |K1| + |O1| (about MHWS on semidiurnal and mixed coasts). A node is flagged when
 A_FES > FLAG_RATIO x the largest A_EOT20 within NEIGHBOUR_KM, and unverifiable when EOT20 has no
-value within NEIGHBOUR_KM.
+value within NEIGHBOUR_KM. FES2014 is compared at the node itself (both FES versions are
+extrapolated to the coast): A_FES2022 / A_FES2014 near 1 at a flagged node means the artefact is
+shared by both versions, near A_FES2022 / A_EOT20 means it is specific to FES2022.
+
+FES2014 (`fes2014b_elevations_extrapolated/ocean_tide_extrapolated.tar.xz` from AVISO) is read
+from FES2014_ROOT/fes2014/ocean_tide_extrapolated, the archive unpacked there.
 
 Writes <out-dir>/analysis/{atlas_gauges.csv, atlas_nodes.parquet, atlas_flagged_nodes.csv} and
-atlas_gauges.png, atlas_nodes_map.png, atlas_basins.png.
+atlas_gauges.png, atlas_nodes_map.png, atlas_versions.png, atlas_basins.png.
 
 Usage:
     python boundary_test/atlas_check.py --out-dir .cleanup_baseline/level_sources [--workers 4]
@@ -32,6 +37,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import pyTMD.io  # noqa: E402
+from matplotlib.colors import LogNorm  # noqa: E402
 from sklearn.neighbors import BallTree  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
@@ -42,7 +48,9 @@ from levels_tides import FES_CACHE, GROUP_DEG, levels  # noqa: E402
 from site_sets import GRID, INK, MUTED, _save, _style  # noqa: E402
 
 EOT20_ROOT = Path("P:/11212688-004-global-floodmaps/modelling/inputs")
-EOT20_CACHE = REPO / ".cleanup_baseline" / "eot20_cache"
+FES2014_ROOT = REPO / ".cleanup_baseline"
+REFERENCE_ATLASES = {"eot20": ("EOT20", EOT20_ROOT, "EOT20", "bilinear"),
+                     "fes2014": ("FES2014", FES2014_ROOT, "FES2014_extrapolated", "spline")}
 FES_NODES = REPO / ".cleanup_baseline" / "boundary_test" / "fes_nodes.parquet"
 PROXY = ("m2", "s2", "k1", "o1")
 SEASONAL = ("sa", "ssa")
@@ -52,8 +60,16 @@ EARTH_RADIUS_KM = 6371.0
 POINTS_PER_TASK = 25
 BASINS = {"Minas Basin / Cobequid Bay": (-65.2, -63.2, 44.9, 45.6),
           "Strait of Magellan / Bahia Lomas": (-71.5, -68.0, -53.6, -52.0),
-          "Upper Gulf of California": (-115.3, -113.0, 30.3, 32.2)}
-COLORS = {"fes": "#2a78d6", "eot20": "#eb6834", "gtsm": "#898781"}
+          "Upper Gulf of California": (-115.3, -113.0, 30.3, 32.2),
+          "Glacier Bay / Lynn Canal": (-137.2, -134.6, 58.2, 59.6)}
+COLORS = {"fes": "#2a78d6", "eot20": "#eb6834", "fes2014": "#1f9e89", "gtsm": "#898781"}
+LABELS = {"fes": "FES2022", "eot20": "EOT20", "fes2014": "FES2014"}
+OFF_SCALE_NOTE = {"eot20": "EOT20 S2 artefacts, St Lawrence"}
+
+
+def reference_model(name: str):
+    _, root, model_name, _ = REFERENCE_ATLASES[name]
+    return pyTMD.io.model(str(root)).elevation(model_name)
 
 
 def grouped_constants(model, lonlat: np.ndarray, method: str = "spline") -> np.ndarray:
@@ -74,9 +90,10 @@ def subset_model(model, names: tuple[str, ...]):
     return model
 
 
-def eot20_basis(model) -> tuple[np.ndarray, np.ndarray]:
-    EOT20_CACHE.mkdir(parents=True, exist_ok=True)
-    re_path, im_path = EOT20_CACHE / "basis_re.npy", EOT20_CACHE / "basis_im.npy"
+def atlas_basis(model, name: str) -> tuple[Path, Path]:
+    cache = REPO / ".cleanup_baseline" / f"{name}_cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    re_path, im_path = cache / "basis_re.npy", cache / "basis_im.npy"
     if not re_path.exists():
         b_re, b_im = prediction_basis(list(model.constituents), model)
         np.save(re_path, b_re.astype(np.float32))
@@ -93,38 +110,45 @@ def _levels_task(args) -> list[dict]:
     return [levels(tide[:, j], STEP_MIN * 60.0) if ok[j] else {} for j in range(len(hc))]
 
 
-def gauge_table(out: Path, model, workers: int) -> pd.DataFrame:
+def gauge_table(out: Path, workers: int) -> pd.DataFrame:
     sites = pd.read_csv(out / "analysis" / "levels_sites.csv", index_col=0)
     pairs = pd.read_parquet(out / "pairs.parquet").set_index("file_name").reindex(sites.index)
     lonlat = pairs[["lon", "lat"]].to_numpy(dtype=float)
-    hc = grouped_constants(model, lonlat, "bilinear")
-    cons = list(model.constituents)
-    hc[:, [cons.index(c) for c in SEASONAL]] = 0.0
-    re_path, im_path = eot20_basis(model)
-    tasks = [(re_path, im_path, hc[i:i + POINTS_PER_TASK]) for i in range(0, len(hc), POINTS_PER_TASK)]
-    with ProcessPoolExecutor(workers) as pool:
-        stats = [r for chunk in pool.map(_levels_task, tasks) for r in chunk]
     t = sites[["site_name", "country", "region", "lon", "lat", "quality", "gesla_harm__mhws_m", "gtsm_harm__mhws_m",
                "fes_gauge__mhws_m", "gesla_harm__spring_range_m"]].copy()
-    t["eot20__mhws_m"] = [r.get("mhws_m", np.nan) for r in stats]
-    t["eot20__spring_range_m"] = [r.get("spring_range_m", np.nan) for r in stats]
     saved = np.load(out / "harmonic_constants.npz", allow_pickle=True)  # own output; file_name is an object array
     pos = pd.Series(range(len(saved["file_name"])), index=saved["file_name"]).reindex(sites.index).to_numpy()
     fes_cons = list(saved["constituents"])
     for c in PROXY:
         t[f"gesla__{c}_m"] = np.abs(saved["gesla_harm"][pos, fes_cons.index(c)])
         t[f"fes__{c}_m"] = np.abs(saved["fes_gauge"][pos, fes_cons.index(c)])
-        t[f"eot20__{c}_m"] = np.abs(hc[:, cons.index(c)])
+    for name, (_, _, _, method) in REFERENCE_ATLASES.items():
+        model = reference_model(name)
+        hc = grouped_constants(model, lonlat, method)
+        cons = list(model.constituents)
+        hc[:, [cons.index(c) for c in SEASONAL if c in cons]] = 0.0
+        re_path, im_path = atlas_basis(model, name)
+        tasks = [(re_path, im_path, hc[i:i + POINTS_PER_TASK]) for i in range(0, len(hc), POINTS_PER_TASK)]
+        with ProcessPoolExecutor(workers) as pool:
+            stats = [r for chunk in pool.map(_levels_task, tasks) for r in chunk]
+        t[f"{name}__mhws_m"] = [r.get("mhws_m", np.nan) for r in stats]
+        t[f"{name}__spring_range_m"] = [r.get("spring_range_m", np.nan) for r in stats]
+        for c in PROXY:
+            t[f"{name}__{c}_m"] = np.abs(hc[:, cons.index(c)])
     return t
 
 
-def node_table(model_eot, model_fes) -> pd.DataFrame:
+def node_table() -> pd.DataFrame:
     nodes = pd.read_parquet(FES_NODES)
     nodes = nodes[nodes.valid & nodes.mhws_m.notna()].reset_index(drop=True)
     lonlat = nodes[["node_lon", "node_lat"]].to_numpy(dtype=float)
     out = nodes[["node_lon", "node_lat", "mhws_m"]].rename(columns={"mhws_m": "fes_mhws_m"})
-    for name, model in (("fes", model_fes), ("eot20", model_eot)):
-        hc = grouped_constants(model, lonlat, "bilinear" if name == "eot20" else "spline")
+    models = {"fes": (subset_model(pyTMD.io.model(str(ensure_local_fes(FES_CACHE))).elevation(FES_MODEL), PROXY),
+                      "spline")}
+    models.update({name: (subset_model(reference_model(name), PROXY), method)
+                   for name, (_, _, _, method) in REFERENCE_ATLASES.items()})
+    for name, (model, method) in models.items():
+        hc = grouped_constants(model, lonlat, method)
         out[f"{name}_proxy_m"] = np.abs(hc).sum(axis=1)
         out.loc[~np.isfinite(hc).all(axis=1), f"{name}_proxy_m"] = np.nan
     ok = out.eot20_proxy_m.notna().to_numpy()
@@ -133,6 +157,7 @@ def node_table(model_eot, model_fes) -> pd.DataFrame:
     eot_ok = out.eot20_proxy_m.to_numpy()[ok]
     out["eot20_max_25km_m"] = [eot_ok[n].max() if len(n) else np.nan for n in neighbours]
     out["ratio_fes_eot20"] = out.fes_proxy_m / out.eot20_max_25km_m
+    out["ratio_fes_fes2014"] = out.fes_proxy_m / out.fes2014_proxy_m
     out["status"] = np.where(out.eot20_max_25km_m.isna(), "unverifiable",
                              np.where(out.ratio_fes_eot20 > FLAG_RATIO, "flagged", "ok"))
     return out
@@ -140,28 +165,29 @@ def node_table(model_eot, model_fes) -> pd.DataFrame:
 
 def plot_gauges(t: pd.DataFrame, dest: Path) -> None:
     q = t[t.quality]
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5.2))
-    for ax, (col, label) in zip(axes[:2], (("fes_gauge__mhws_m", "FES2022"), ("eot20__mhws_m", "EOT20"))):
-        ax.scatter(q.gesla_harm__mhws_m, q[col], s=10, color=COLORS["fes" if label == "FES2022" else "eot20"],
-                   alpha=0.7, linewidths=0)
-        hi = float(np.nanmax(q.gesla_harm__mhws_m)) * 1.25
+    panels = [("fes_gauge__mhws_m", "fes")] + [(f"{name}__mhws_m", name) for name in REFERENCE_ATLASES]
+    fig, axes = plt.subplots(1, len(panels) + 1, figsize=(5.3 * (len(panels) + 1), 5.2))
+    hi = float(np.nanmax(q.gesla_harm__mhws_m)) * 1.25
+    for ax, (col, src) in zip(axes, panels):
+        ax.scatter(q.gesla_harm__mhws_m, q[col], s=10, color=COLORS[src], alpha=0.7, linewidths=0)
         ax.plot([0, hi], [0, hi], color=MUTED, linewidth=1)
         d = (q[col] - q.gesla_harm__mhws_m).dropna()
         ratio = (q[col] / q.gesla_harm__mhws_m).median()
         off = int((q[col] > hi).sum())
-        ax.set(xlim=(0, hi), ylim=(0, hi), xlabel="GESLA (gauge) MHWS (m)", ylabel=f"{label} at the gauge MHWS (m)",
-               title=f"{label} vs gauge: median ratio {ratio:.2f}, MAE {d.abs().mean():.3f} m, "
-                     f"within 0.1 m {(d.abs() <= 0.1).mean():.0%} (n={len(d)})"
-                     + (f"\n{off} off scale (EOT20 S2 artefacts, St Lawrence)" if off else ""))
+        note = f"\n{off} off scale" + (f" ({OFF_SCALE_NOTE[src]})" if src in OFF_SCALE_NOTE else "") if off else ""
+        ax.set(xlim=(0, hi), ylim=(0, hi), xlabel="GESLA (gauge) MHWS (m)",
+               ylabel=f"{LABELS[src]} at the gauge MHWS (m)",
+               title=f"{LABELS[src]} vs gauge: median ratio {ratio:.2f}, MAE {d.abs().mean():.3f} m,\n"
+                     f"within 0.1 m {(d.abs() <= 0.1).mean():.0%} (n={len(d)})" + note)
         ax.title.set_fontsize(9)
         _style(ax)
-    ax = axes[2]
+    ax = axes[-1]
     data, labels, colors = [], [], []
     for c in PROXY:
-        for src in ("fes", "eot20"):
+        for src in ("fes", *REFERENCE_ATLASES):
             r = (q[f"{src}__{c}_m"] / q[f"gesla__{c}_m"]).replace([np.inf, -np.inf], np.nan).dropna()
             data.append(r[q.loc[r.index, f"gesla__{c}_m"] > 0.05])
-            labels.append(f"{c.upper()}\n{'FES' if src == 'fes' else 'EOT20'}")
+            labels.append(f"{c.upper()}\n{LABELS[src]}")
             colors.append(COLORS[src])
     bp = ax.boxplot(data, showfliers=False, patch_artist=True, widths=0.6)
     for patch, color in zip(bp["boxes"], colors):
@@ -169,13 +195,13 @@ def plot_gauges(t: pd.DataFrame, dest: Path) -> None:
     for median in bp["medians"]:
         median.set(color=INK)
     ax.axhline(1, color=MUTED, linewidth=1)
-    ax.set_xticks(range(1, len(labels) + 1), labels, fontsize=8)
+    ax.set_xticks(range(1, len(labels) + 1), labels, fontsize=6.5)
     ax.set(ylim=(0.6, 1.4), ylabel="amplitude / gauge amplitude",
            title="Constituent amplitude ratio at the gauges (gauge amplitude > 5 cm)")
     ax.title.set_fontsize(9)
     _style(ax)
-    fig.suptitle("Tide set (quality sites): FES2022 and EOT20 against the gauges, same prediction and statistics",
-                 color=INK)
+    fig.suptitle("Tide set (quality sites): FES2022, EOT20 and FES2014 against the gauges, same prediction and "
+                 "statistics", color=INK)
     fig.tight_layout()
     _save(fig, dest / "atlas_gauges.png")
 
@@ -199,14 +225,42 @@ def plot_nodes_map(nodes: pd.DataFrame, dest: Path) -> None:
     _save(fig, dest / "atlas_nodes_map.png")
 
 
+def plot_versions(nodes: pd.DataFrame, dest: Path) -> None:
+    fig = plt.figure(figsize=(17, 6.2))
+    ax = fig.add_axes([0.04, 0.1, 0.55, 0.8])
+    n = nodes.dropna(subset=["ratio_fes_fes2014"]).sort_values("ratio_fes_fes2014", key=lambda r: np.abs(np.log(r)))
+    sc = ax.scatter(n.node_lon, n.node_lat, c=n.ratio_fes_fes2014, s=4, cmap="RdBu_r", norm=LogNorm(1 / 3, 3),
+                    linewidths=0)
+    fig.colorbar(sc, ax=ax, shrink=0.75, label="FES2022 proxy / FES2014 proxy (log scale)")
+    ax.set(xlim=(-180, 180), ylim=(-60, 85), xlabel="longitude", ylabel="latitude",
+           title="FES2022 against FES2014 at the same boundary node")
+    ax.title.set_fontsize(10)
+    _style(ax)
+    ax = fig.add_axes([0.66, 0.1, 0.32, 0.8])
+    for status, color, size in (("ok", GRID, 3), ("unverifiable", MUTED, 6), ("flagged", "#e34948", 9)):
+        s = nodes[nodes.status == status]
+        ax.scatter(s.fes2014_proxy_m, s.fes_proxy_m, s=size, color=color, linewidths=0, label=f"{status} (n={len(s)})")
+    hi = float(np.nanmax(nodes[["fes_proxy_m", "fes2014_proxy_m"]].to_numpy())) * 1.05
+    ax.plot([0, hi], [0, hi], color=MUTED, linewidth=1)
+    ax.plot([0, hi / FLAG_RATIO], [0, hi], color=MUTED, linewidth=1, linestyle="--")
+    ax.set(xlim=(0, hi), ylim=(0, hi), xlabel="FES2014 proxy (m)", ylabel="FES2022 proxy (m)",
+           title=f"Per node; status from the EOT20 screen, dashed = {FLAG_RATIO} x FES2014")
+    ax.title.set_fontsize(10)
+    ax.legend(frameon=False, fontsize=8, loc="upper left", markerscale=2)
+    _style(ax)
+    _save(fig, dest / "atlas_versions.png")
+
+
 def plot_basins(nodes: pd.DataFrame, gauges: pd.DataFrame, dest: Path) -> None:
-    fig, axes = plt.subplots(2, len(BASINS), figsize=(5.4 * len(BASINS), 9.4))
+    rows = ("fes", *REFERENCE_ATLASES)
+    fig, axes = plt.subplots(len(rows), len(BASINS), figsize=(5.0 * len(BASINS), 4.5 * len(rows)))
     for j, (name, (x0, x1, y0, y1)) in enumerate(BASINS.items()):
         b = nodes[nodes.node_lon.between(x0, x1) & nodes.node_lat.between(y0, y1)]
-        vmax = float(np.nanmax(b[["fes_proxy_m", "eot20_proxy_m"]].to_numpy())) if len(b) else 1.0
-        for i, col in enumerate(("fes_proxy_m", "eot20_proxy_m")):
+        vmax = float(np.nanmax(b[[f"{r}_proxy_m" for r in rows]].to_numpy())) if len(b) else 1.0
+        for i, src in enumerate(rows):
             ax = axes[i, j]
-            sc = ax.scatter(b.node_lon, b.node_lat, c=b[col], s=14, cmap="viridis", vmin=0, vmax=vmax, linewidths=0)
+            sc = ax.scatter(b.node_lon, b.node_lat, c=b[f"{src}_proxy_m"], s=14, cmap="viridis", vmin=0, vmax=vmax,
+                            linewidths=0)
             flagged = b[b.status == "flagged"]
             if i == 0 and len(flagged):
                 ax.scatter(flagged.node_lon, flagged.node_lat, s=40, facecolors="none", edgecolors="#e34948",
@@ -218,12 +272,19 @@ def plot_basins(nodes: pd.DataFrame, gauges: pd.DataFrame, dest: Path) -> None:
                 ax.annotate(f"{r.site_name}: gauge {r.gesla_harm__mhws_m:.2f} m", (r.lon, r.lat), xytext=(4, 4),
                             textcoords="offset points", fontsize=7, color=INK)
             fig.colorbar(sc, ax=ax, shrink=0.8, label="|M2|+|S2|+|K1|+|O1| (m)")
-            ax.set(xlim=(x0, x1), ylim=(y0, y1), title=f"{name}: {'FES2022' if i == 0 else 'EOT20'}")
+            ax.set(xlim=(x0, x1), ylim=(y0, y1), title=f"{name}: {LABELS[src]}")
             ax.title.set_fontsize(10)
             _style(ax)
     fig.suptitle("Amplitude proxy at the FES boundary nodes (triangles: GESLA gauges with their MHWS)", color=INK)
     fig.tight_layout()
     _save(fig, dest / "atlas_basins.png")
+
+
+def plot_all(gauges: pd.DataFrame, nodes: pd.DataFrame, dest: Path) -> None:
+    plot_gauges(gauges, dest)
+    plot_nodes_map(nodes, dest)
+    plot_versions(nodes, dest)
+    plot_basins(nodes, gauges, dest)
 
 
 def main() -> None:
@@ -235,41 +296,36 @@ def main() -> None:
     out = Path(args.out_dir)
     dest = out / "analysis"
     if args.plots_only:
-        gauges = pd.read_csv(dest / "atlas_gauges.csv", index_col=0)
-        nodes = pd.read_parquet(dest / "atlas_nodes.parquet")
-        plot_gauges(gauges, dest)
-        plot_nodes_map(nodes, dest)
-        plot_basins(nodes, gauges, dest)
+        plot_all(pd.read_csv(dest / "atlas_gauges.csv", index_col=0), pd.read_parquet(dest / "atlas_nodes.parquet"),
+                 dest)
         return
-    eot = pyTMD.io.model(str(EOT20_ROOT)).elevation("EOT20")
-    gauges = gauge_table(out, eot, args.workers)
+    gauges = gauge_table(out, args.workers)
     gauges.round(4).to_csv(dest / "atlas_gauges.csv")
     q = gauges[gauges.quality]
-    for col, label in (("fes_gauge__mhws_m", "FES2022"), ("eot20__mhws_m", "EOT20")):
+    for col, src in [("fes_gauge__mhws_m", "fes")] + [(f"{name}__mhws_m", name) for name in REFERENCE_ATLASES]:
         d = (q[col] - q.gesla_harm__mhws_m).dropna()
-        print(f"{label} vs gauge MHWS: median ratio {(q[col] / q.gesla_harm__mhws_m).median():.3f}, "
+        print(f"{LABELS[src]} vs gauge MHWS: median ratio {(q[col] / q.gesla_harm__mhws_m).median():.3f}, "
               f"MAE {d.abs().mean():.3f} m, within 0.1 m {(d.abs() <= 0.1).mean():.2f}, "
               f"> 0.25 m {(d.abs() > 0.25).sum()} (n={len(d)})")
     miss = q[(q.fes_gauge__mhws_m - q.gesla_harm__mhws_m).abs() > 0.25]
-    print("\nat the FES-miss sites\n" + miss[["site_name", "gesla_harm__mhws_m", "fes_gauge__mhws_m", "eot20__mhws_m",
-                                               "gtsm_harm__mhws_m"]].round(2).to_string())
+    print("\nat the FES-miss sites\n" + miss[["site_name", "gesla_harm__mhws_m", "fes_gauge__mhws_m", "fes2014__mhws_m",
+                                               "eot20__mhws_m", "gtsm_harm__mhws_m"]].round(2).to_string())
 
-    fes = subset_model(pyTMD.io.model(str(ensure_local_fes(FES_CACHE))).elevation(FES_MODEL), PROXY)
-    eot_proxy = subset_model(pyTMD.io.model(str(EOT20_ROOT)).elevation("EOT20"), PROXY)
-    nodes = node_table(eot_proxy, fes)
+    nodes = node_table()
     nodes.to_parquet(dest / "atlas_nodes.parquet")
     flagged = nodes[nodes.status == "flagged"].sort_values("ratio_fes_eot20", ascending=False)
     flagged.round(3).to_csv(dest / "atlas_flagged_nodes.csv", index=False)
     print("\nnode status\n" + nodes.status.value_counts().to_string())
+    print("\nFES2022 / FES2014 by status (median, p90, share > FLAG_RATIO)\n"
+          + nodes.groupby("status").ratio_fes_fes2014.agg(
+              ["median", lambda r: r.quantile(0.9), lambda r: (r > FLAG_RATIO).mean()]).round(3).to_string())
     for name, (x0, x1, y0, y1) in BASINS.items():
         b = nodes[nodes.node_lon.between(x0, x1) & nodes.node_lat.between(y0, y1)]
         print(f"\n{name}: {len(b)} nodes, status {b.status.value_counts().to_dict()}, "
-              f"FES MHWS max {b.fes_mhws_m.max():.2f} m, FES proxy max {b.fes_proxy_m.max():.2f} m, "
-              f"EOT20 proxy max {b.eot20_proxy_m.max():.2f} m")
+              f"FES MHWS max {b.fes_mhws_m.max():.2f} m, proxy max FES2022 {b.fes_proxy_m.max():.2f} m, "
+              f"FES2014 {b.fes2014_proxy_m.max():.2f} m, EOT20 {b.eot20_proxy_m.max():.2f} m")
     print("\nflagged nodes, top 25\n" + flagged.head(25).round(2).to_string(index=False))
-    plot_gauges(gauges, dest)
-    plot_nodes_map(nodes, dest)
-    plot_basins(nodes, gauges, dest)
+    plot_all(gauges, nodes, dest)
 
 
 if __name__ == "__main__":
