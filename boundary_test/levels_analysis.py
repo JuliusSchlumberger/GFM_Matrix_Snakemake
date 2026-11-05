@@ -36,17 +36,27 @@ DIST_BINS = (0, 1, 2, 5, 10, 100)
 MAX_DIST_KM = 10.0
 MIN_FIT_YEARS = 3.0
 MIN_EXPLAINED = 0.5
-REGIONS = (  # (name, lon_min, lon_max, lat_min, lat_max); first match wins
-    ("Baltic", 9, 31, 53, 66), ("Mediterranean", -6, 37, 30, 46), ("NW Europe", -12, 31, 43, 72),
-    ("N America Atlantic+Gulf", -100, -50, 15, 70), ("N America Pacific", -170, -100, 15, 72),
-    ("Japan+E Asia", 100, 160, 0, 60), ("Australia+NZ", 110, 180, -50, -8),
-    ("S America", -90, -30, -60, 15), ("Africa+Indian Ocean", -20, 100, -40, 30))
+NORDIC_COUNTRIES = {"NOR", "ISL", "FRO", "SJM"}
+BALTIC_COUNTRIES = {"DEU", "DNK", "SWE", "FIN", "EST", "LVA", "LTU", "POL", "RUS"}
+REGIONS = (  # (name, lon_min, lon_max, lat_min, lat_max); after the country rules, first match wins
+    ("Mediterranean+Black Sea", -6, 42, 30, 47.5), ("NE Atlantic islands", -32, -12, 27, 40),
+    ("NW Europe", -12, 31, 43, 72), ("N America Atlantic+Gulf", -100, -50, 15, 70),
+    ("N America Pacific", -170, -100, 15, 72), ("Japan+E Asia", 100, 160, 0, 60),
+    ("Australia+NZ", 110, 180, -50, -8), ("S America", -90, -30, -60, 15),
+    ("Africa+Indian Ocean", -20, 100, -40, 30))
 INK, MUTED, GRID = "#0b0b0b", "#898781", "#e1e0d9"
 COLORS = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948")
 
 
-def region_of(lon: float, lat: float) -> str:
+def region_of(lon: float, lat: float, country: str) -> str:
+    if country in NORDIC_COUNTRIES:
+        return "Norway+Nordic Seas"
+    if country in BALTIC_COUNTRIES and 9.4 <= lon <= 31 and 53.4 <= lat <= 66:
+        return "Baltic+Kattegat"
     for name, x0, x1, y0, y1 in REGIONS:
+        # The Atlantic coast of Iberia and France (Biscay) falls inside the Mediterranean box.
+        if name.startswith("Mediterranean") and lon < 0 and lat > 40:
+            continue
         if x0 <= lon <= x1 and y0 <= lat <= y1:
             return name
     return "other"
@@ -60,7 +70,7 @@ def wide_table(out: Path) -> pd.DataFrame:
     fit = tl[tl.source == "gesla_harm"].set_index("file_name")[["fit_years", "fit_explained", "fit_rms_m"]]
     pairs = pd.read_parquet(out / "pairs.parquet").set_index("file_name")
     t = pairs[["site_name", "country", "lon", "lat", "gtsm_dist_km"]].join(fit).join(wide)
-    t["region"] = [region_of(x, y) for x, y in zip(t.lon, t.lat)]
+    t["region"] = [region_of(x, y, c) for x, y, c in zip(t.lon, t.lat, t.country)]
     t["range_class"] = pd.cut(t["gesla_harm__spring_range_m"], RANGE_BINS)
     t["dist_class"] = pd.cut(t.gtsm_dist_km, DIST_BINS)
     t["quality"] = (t.fit_years >= MIN_FIT_YEARS) & (t.fit_explained >= MIN_EXPLAINED) & (t.gtsm_dist_km <= MAX_DIST_KM)

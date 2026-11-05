@@ -9,10 +9,14 @@ COAST-RP is relative to GTSM's model MSL; its ETC-only and TC-only files are rea
 Annual maxima need >= YEAR_COVERAGE of a year's hours; GEV by maximum likelihood (scipy), with a
 BOOTSTRAP-member nonparametric bootstrap for the 90% interval of each RP level.
 
-Writes <out-dir>/extremes.parquet (one row per site and source, RP levels in m).
+`--msl linear` removes a linear trend from GESLA instead of the annual means, so interannual MSL
+variability (ENSO, NAO, steric) stays in the annual maxima; GTSM, which has none, is not refitted.
+
+Writes <out-dir>/extremes.parquet (one row per site and source, RP levels in m), or
+<out-dir>/extremes_linear.parquet (GESLA only) with `--msl linear`.
 
 Usage:
-    python boundary_test/levels_extremes.py --out-dir .cleanup_baseline/level_sources [--workers 3]
+    python boundary_test/levels_extremes.py --out-dir .cleanup_baseline/level_sources [--workers 3] [--msl linear]
 """
 
 import argparse
@@ -49,6 +53,11 @@ def annual_maxima(idx: np.ndarray, z: np.ndarray) -> np.ndarray:
     return s.max()[counts >= YEAR_COVERAGE * 8766].to_numpy()
 
 
+def remove_linear_trend(idx: np.ndarray, z: np.ndarray) -> np.ndarray:
+    t = idx.astype(float)
+    return z - np.polyval(np.polyfit(t, z, 1), t)
+
+
 def gev_levels(am: np.ndarray, rng: np.random.Generator) -> dict:
     if len(am) < MIN_ANNUAL_MAXIMA:
         return {"n_annual_maxima": len(am)}
@@ -70,7 +79,7 @@ def gev_levels(am: np.ndarray, rng: np.random.Generator) -> dict:
 
 
 def _site_task(args) -> list[dict]:
-    out, sites, hc_gtsm = args
+    out, sites, hc_gtsm, msl = args
     out = Path(out)
     b_re = np.load(out / "hourly_basis_re.npy", mmap_mode="r")
     b_im = np.load(out / "hourly_basis_im.npy", mmap_mode="r")
@@ -82,8 +91,11 @@ def _site_task(args) -> list[dict]:
     for site, h in zip(sites, hc_gtsm):
         data = np.load(out / "gesla" / f"{site['file_name']}.npz")
         idx, z = on_hourly_grid(data["t"], data["z"])
+        detrend = remove_annual_means if msl == "annual" else remove_linear_trend
         rows.append({"file_name": site["file_name"], "source": "gesla",
-                     **(gev_levels(annual_maxima(idx, remove_annual_means(idx, z)), rng) if len(idx) else {})})
+                     **(gev_levels(annual_maxima(idx, detrend(idx, z)), rng) if len(idx) else {})})
+        if msl != "annual":
+            continue
         x = station_series(surge, pos[site["gtsm_index"]])
         ok = np.isfinite(x)
         if np.isfinite(h).all() and ok.any():
@@ -117,13 +129,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--workers", type=int, default=3)
+    parser.add_argument("--msl", choices=("annual", "linear"), default="annual")
     args = parser.parse_args()
     out = Path(args.out_dir)
     pairs = pd.read_parquet(out / "pairs.parquet")
     hc = np.load(out / "harmonic_constants.npz", allow_pickle=True)  # own output; file_name is an object array
     assert (hc["file_name"] == pairs.file_name.to_numpy()).all()
     sites = pairs[["file_name", "gtsm_index"]].to_dict("records")
-    tasks = [(str(out), sites[i:i + SITES_PER_TASK], hc["gtsm_harm"][i:i + SITES_PER_TASK])
+    tasks = [(str(out), sites[i:i + SITES_PER_TASK], hc["gtsm_harm"][i:i + SITES_PER_TASK], args.msl)
              for i in range(0, len(sites), SITES_PER_TASK)]
     rows = []
     with ProcessPoolExecutor(args.workers) as pool:
@@ -132,6 +145,9 @@ def main() -> None:
             if k % 10 == 0:
                 print(f"  {min((k + 1) * SITES_PER_TASK, len(sites))}/{len(sites)} sites", flush=True)
     gev = pd.DataFrame(rows)
+    if args.msl != "annual":
+        gev.to_parquet(out / f"extremes_{args.msl}.parquet")
+        return
     gev.to_parquet(out / "extremes_gev.parquet")
     table = gev.merge(coast_rp_levels(pairs), on="file_name", how="left")
     table.to_parquet(out / "extremes.parquet")
