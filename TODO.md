@@ -142,7 +142,7 @@ Open:
   The SFINCS calibration runs predate the offset (forcing ~5 cm lower); recalibrating fsf should
   use regenerated forcing (`boundary_test/INPUT_ANALYSIS.md` §7).
 - **Open input-assessment questions** (FES-tide recombination of COAST-RP, surge deficit, FES
-  basin-head rule, TC hydrograph source, absolute MSL + MDT): `boundary_test/INPUT_ANALYSIS.md` §8.
+  basin-head rule, TC hydrograph source; absolute MSL + MDT deferred): `boundary_test/INPUT_ANALYSIS.md` §8.
 - **Duration correction B: reference duration and one-sided clip.** The water stays above MSL
   for more than 12 h in a third of observed annual maxima (microtidal median 20 h, macrotidal 7 h).
   B's T is cumulative over the hydrograph window, and SFINCS shows that the absolute duration,

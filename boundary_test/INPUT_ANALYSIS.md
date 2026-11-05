@@ -516,9 +516,16 @@ within each tier. Items 1-4 use only data already extracted for this note; none 
    of annual means. The difference per region is the size of the interannual-MSL term that the
    production level does not contain; largest expected in the Baltic and NE Pacific. Result:
    about 1 cm at RP10, within the fit noise at RP100.
-4. **Close the absolute-datum test.** For gauges with a SONEL co-located GNSS station and a known
-   gauge datum: GNSS ellipsoidal height - geoid height - gauge MSL should equal the MDT at the
-   station to ~0.1 m. The DEM-geoid part is settled: DeltaDTM is converted to GOCO06s (§7).
+4. **Deferred.** **Close the absolute-datum test.** For gauges with a known tie between the gauge
+   datum and the ellipsoid: ellipsoidal height of gauge MSL - geoid height should equal the MDT at
+   the station to ~0.1 m. The DEM-geoid part is settled: DeltaDTM is converted to GOCO06s (§7).
+   Two routes:
+   - SONEL GNSS at gauges: needs the ULR ellipsoidal height and the antenna-to-gauge-zero tie,
+     and a GESLA series on that same zero; the usable sample is small and assembled by hand.
+   - National datums: NOAA's datum API gives MSL (1983-2001 epoch) relative to NAVD88 at the US
+     gauges; NAVD88 → ellipsoid with NGS GEOID18, then → GOCO06s, correcting the 2-3 cm of
+     sea-level rise between the NOAA and MDT epochs. ODN, NAP and NHN follow the same way with
+     their national geoid models.
 5. **Tide-corrected level by skew-surge convolution** (replaces the earlier "recombine like
    COAST-RP" idea; at the gauges it is the third combination of test 2). Per GTSM station: skew surge from the GTSM-ERA5 series (1979-2024; or
    1950-2024 from GTSM-ERA5-E, Muis et al., 2025), GPD on its tail with a tidal covariate where
