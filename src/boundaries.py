@@ -177,10 +177,11 @@ def static_station_levels(
     waterlevel_name: str,
     baseline_waterlevel_name: str = "SLR_0",
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return (lonlat, level) of the static sea level MDT + SLR fingerprint per COAST-RP station.
+    """Return (lonlat, level) of the static sea level MDT + 2020 offset + SLR fingerprint per station.
 
-    The fingerprint is total(RP, SLR) - total(RP, baseline), so storm tide cancels
-    exactly; MDT NaN -> 0 as in prepare_boundary_conditions.combine_scenarios.
+    The fingerprint is total(RP, SLR) - total(RP, baseline), so storm tide and the 2020 offset
+    cancel in it; the offset is added back from the MDT station file. MDT NaN -> 0 as in
+    prepare_boundary_conditions.combine_scenarios.
     Metres in the DEM datum (GOCO06s geoid).
     """
     def _read(name: str) -> tuple[xr.Dataset, str]:
@@ -199,7 +200,9 @@ def static_station_levels(
             if not np.allclose(lonlat, other_lonlat):
                 raise ValueError("static_station_levels: station order differs between water-level and MDT files")
         fingerprint = ds_slr[var_slr].values.astype(np.float64) - ds_base[var_base].values.astype(np.float64)
-        mdt = np.nan_to_num(ds_mdt["MDT"].values.astype(np.float64), nan=0.0)
+        if "SLR_baseline_offset" not in ds_mdt:
+            raise KeyError(f"{mdt_path} has no SLR_baseline_offset: rerun `run_preparation.py boundary_conditions`")
+        mdt = np.nan_to_num(ds_mdt["MDT"].values.astype(np.float64), nan=0.0) + ds_mdt["SLR_baseline_offset"].values
     finally:
         for ds in (ds_slr, ds_base, ds_mdt):
             ds.close()

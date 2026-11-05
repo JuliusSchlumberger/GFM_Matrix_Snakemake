@@ -91,6 +91,10 @@ boundary_conditions:
   # build the SLR fingerprints. Not an SLR level: those are waterlevel_names below.
   slr_projection: "ssp245" # options: ssp126/ssp245/ssp585
   confidence_level: "medium" # options: low/medium
+  # AR6 global-mean SLR at 2020 over its 1995-2014 baseline (median, all SSPs), regionalised with
+  # the fingerprint and added to every level: SLR_0 is the 2020 sea level, as the analysis SLR axis
+  # (extract_slr_trajectories.py, relative to 2020) assumes. MDT is a 1993-2012 mean (~2 y earlier).
+  slr_baseline_offset_m: 0.049
   coastrp_min_lat: -60  # exclude antarctic stations (no exposure)
 
   # MDT is ADDED to COAST-RP storm-tide levels, re-referencing them from local MSL to the
