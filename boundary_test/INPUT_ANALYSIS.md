@@ -379,10 +379,57 @@ direction. The forms of m were compared on 540 synthetic 1-D SFINCS floodplains
    work in Cobequid Bay, where 23 nodes share the bad value. Options: compare against GTSM where a
    station exists, or bound MHWS by a regional reference spring range; review the flagged nodes by
    hand.
-4. **TC hydrographs:** gauge shapes with surge-only scaling where a gauge is within ~50 km. Beyond
-   that, choose between COAST-HG (closest to observed at TC gauges) and a synthetic TC surge on the
-   local FES tide.
+4. **TC hydrographs:** a Gaussian surge at TC-dominated RPs (§8.1). Gauge shapes, with
+   surge-only scaling, are an option only where a gauge is within ~50 km (30% of TC stations).
 5. Absolute MSL + MDT error at gauges with a geodetic datum tie.
+
+### 8.1 Next step: a per-RP storm-tide hydrograph generator, validated at the gauges
+
+**Goal.** One hydrograph per COAST-RP station and return period that forces SFINCS and sets the T
+of the eikonal duration correction, replacing COAST-HG in both roles.
+
+**Why not re-use the method as is.** COAST-HG is HGRAPHER output (Dullaart et al. 2023): a GTSM
+surge shape scaled to COAST-RP RP100 and laid on a tide. `src/storm_tide_hydrograph.py` ports the
+same method with per-RP shape selection and a spring-tide window, so it may inherit COAST-HG's
+errors (§5.2): next-day high water 0.1-0.15 of the peak too low, and T(0.25) 5-6 h against
+11-17 h observed. The cause has to be found before the generator is adopted.
+
+**Generator.** Per station and RP, with levels relative to local MSL:
+- **Tide:** FES2022 at the station, 10 min, ±72 h around a spring high water (FES matches the
+  gauges, §3).
+- **Surge shape:** selected for the RP from GTSM surge events 1979-2024 (HGRAPHER-RP event
+  selection). The shape class follows the component that dominates COAST-RP at that RP: ETC from
+  GTSM; a Gaussian at TC-dominated RPs, half width 8 h, matching the 15 h median surge duration of
+  the largest events at TC-dominated gauges (§5.4).
+- **Peak:** the surge is scaled so the maximum of tide + surge equals the peak level. The peak
+  level is an input (COAST-RP for now), so a tide-corrected peak (question 1) can replace it
+  without changing the shape code. With an FES tide, the surge amplitude COAST-RP - MHWS_FES
+  absorbs GTSM's tide excess until then.
+- MDT, the 2020 offset and SLR are added downstream; the shape is the same for every SLR scenario.
+
+**Diagnosis of COAST-HG's error.** Swap one component at a time and score each variant at the 698
+quality sites:
+
+| Component | Variant 1 | Variant 2 |
+|---|---|---|
+| Tide window | average tide (COAST-HG) | spring-tide window (FES) |
+| Surge shape | HGRAPHER level-by-level mean of limb durations | empirical mean of the normalised surge residuals of the selected events, centred on their peaks |
+| Surge-tide phasing | surge peak on the spring high water | the phase of the selected GTSM events relative to high water |
+
+**Acceptance test.** Build hydrographs at RP2 and RP10-100 and compare their normalised shapes
+with the gauge events of the matching empirical-RP class (< 2 y; >= 10 y), per tidal-range class:
+- the median T(0.25), T(0.5) and nb24 within ±15% of the gauge medians;
+- the profile RMSE against the gauge no larger than that of GTSM's own events (0.10-0.22, §5.2);
+- the T(0.25) ratio between RP classes reproduced (1.2-1.6, §5.3).
+
+**Outputs.**
+- Per station and RP: a 10-min hydrograph over ±72 h.
+- Per station, RP and water depth: a T lookup (`event_volume.time_within_peak`).
+- The test scores per variant, regime and RP class.
+
+Inputs are the GTSM series, FES constants and GESLA events already extracted for this note; no
+HPC runs are needed. Production use (the global product, SFINCS forcing, fsf recalibration with
+α = 1 and no lower clip on the multiplier) follows only once a variant passes.
 
 ## 9. Reproducing
 
