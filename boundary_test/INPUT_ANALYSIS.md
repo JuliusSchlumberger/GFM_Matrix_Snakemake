@@ -18,7 +18,8 @@ outside this note.
 - **Scripts:** `boundary_test/`.
 - **Per-site data:** `boundary_test/input_analysis_data/` (§11), so the numbers here can be
   checked and re-cut.
-- **Figures:** `.cleanup_baseline/level_sources/analysis/` (local, not in git).
+- **Figures:** `.cleanup_baseline/level_sources/analysis/` (local, not in git); a selection with a
+  summary of the findings is in `input_analysis/boundary_forcing/`.
 - **References:** §12.
 
 ## 1. Datasets
@@ -740,7 +741,7 @@ HPC runs are needed. Production use (the global product, SFINCS forcing, fsf rec
 
 | | This pipeline (GCFM) | Fathom RFA (Collings et al., 2024; Wing et al., 2024) | Chaudhuri et al. (2027) |
 |---|---|---|---|
-| Still-water extremes | COAST-RP: GTSM-ERA5 POT (ETC) + STORM synthetic TCs | RFA after Sweet et al. (2020, 2022): GPD on pooled, normalised daily maxima; gauges where >= 3 within 400 km (851 of 5,975 1° cells), otherwise GTSM-ERA5 (4,555 cells) or single-site GTSM-ERA5 (569 cells); shape capped at 0.35 | skew-surge return levels from a global SSJPM on GTSM-ERA5, bias-corrected at gauges (Alexandre and Chaudhuri, 2025) |
+| Still-water extremes | COAST-RP: GTSM-ERA5 surge (ETC) + STORM synthetic TCs, empirical RPs after a probabilistic surge-tide combination | RFA after Sweet et al. (2020, 2022): GPD on pooled, normalised daily maxima; gauges where >= 3 within 400 km (851 of 5,975 1° cells), otherwise GTSM-ERA5 (4,555 cells) or single-site GTSM-ERA5 (569 cells); shape capped at 0.35 | skew-surge return levels from a global SSJPM on GTSM-ERA5, bias-corrected at gauges (Alexandre and Chaudhuri, 2025) |
 | Tide | GTSM tide inside COAST-RP (7-8% high); FES2022 proposed | FES2014: MHHW/MLLW scale the index flood; GTSM surge laid on FES2014 tide | HAT from FES2022b added to the skew-surge RP level |
 | Vertical reference | model MSL + CNES-CLS22 MDT (GOCO06s) + 2020 offset | 2011 epoch MSL + CNES-CLS18 MDT to EGM2008; RP1 bias-corrected to single-site fits (mean 8 cm) | none: EGM2008 taken as MSL |
 | Waves | none | 20% ERA5 Hs on exposed coasts (50 km fetch test) | none in the published description |
