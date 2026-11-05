@@ -325,10 +325,12 @@ Durations (hours; local MSL = 0; B's T = time within f x (peak - MSL) of the pea
 18. **TC stations:** at tile 2146 (Japan) the RP10-1000 surge targets are 0.6-2.2 m, against
     ERA5-driven GTSM peaks of at most 0.5 m. This confirms the plan's point that ERA5 events do
     not contain the storms that set TC return levels.
-19. **FES2022 is up to 2x too high at the heads of some macrotidal basins.** The native grids
-    (mask 0, not extrapolated) give M2 amplitudes of 10.7 m in Minas Basin, 11.5 m in Bahia Lomas
-    (Strait of Magellan) and 13.7 m in the upper Gulf of California. The real values are about
-    5-6 m, 4-5 m and 2.5-3 m. Resulting MHWS: 14.5 m, 16.3 m, 15.4 m. Gauges on open macrotidal
+19. **FES2022 is about 2x too high at a few basin-head nodes.** The native grids (mask 0, not
+    extrapolated) give M2 amplitudes of 10.7 m at the Cobequid Bay head (Minas Basin), 11.5 m in
+    Bahia Lomas (Strait of Magellan) and 13.7 m at one Colorado-delta node (upper Gulf of
+    California). Resulting MHWS above MSL: 14.5 m, 16.3 m, 15.4 m, about the full observed spring
+    range there (Minas 14.5 m, Strait of Magellan Atlantic side 9 m, uppermost Gulf ~7 m). FES
+    elsewhere in these basins matches the published ranges (`INPUT_ANALYSIS.md` §3). Gauges on open macrotidal
     coasts are fine (Brest M2 2.19 m, Avonmouth MHWS 6.35 m). The native/extrapolated mask does
     not separate these nodes. 29 of 494 tiles have a boundary cell whose H1 level is more than
     2 m above production. These cells are 0.9% of all boundary cells; 2.5% of cells rise by more
