@@ -17,6 +17,7 @@ Usage:
 """
 
 import argparse
+import time
 from pathlib import Path
 
 import matplotlib
@@ -35,6 +36,19 @@ T_REF_HR = 12.0
 SOURCES = ("gesla", "gtsm", "coast_hg_average", "coast_hg_spring")
 COLORS = dict(zip(SOURCES, ("#0b0b0b", "#2a78d6", "#eb6834", "#1baf7a")))
 INK, MUTED, GRID = "#0b0b0b", "#898781", "#e1e0d9"
+
+
+def _save(fig, path: Path) -> None:
+    # Windows intermittently refuses to truncate a PNG another process (viewer, indexer) holds.
+    for attempt in range(5):
+        try:
+            fig.savefig(path, dpi=fig.dpi)
+            break
+        except OSError:
+            if attempt == 4:
+                raise
+            time.sleep(2)
+    plt.close(fig)
 
 
 def _style(ax) -> None:
@@ -113,8 +127,8 @@ def plot_profiles(ev: pd.DataFrame, prof: np.ndarray, offset: np.ndarray, dest: 
     fig.suptitle("Median event profile (IQR shaded): GESLA/GTSM annual maxima with empirical RP >= 5 y, COAST-HG RP100",
                  color=INK, fontsize=11)
     fig.tight_layout()
-    fig.savefig(dest / "shapes_profiles.png", dpi=140)
-    plt.close(fig)
+    fig.set_dpi(140)
+    _save(fig, dest / "shapes_profiles.png")
 
 
 def plot_profiles_by_rp(ev: pd.DataFrame, prof: np.ndarray, offset: np.ndarray, dest: Path) -> None:
@@ -142,8 +156,8 @@ def plot_profiles_by_rp(ev: pd.DataFrame, prof: np.ndarray, offset: np.ndarray, 
         axes[i, 0].set_ylabel("level / peak (local MSL = 0)")
     fig.suptitle("Median annual-maximum profile by empirical return period (rank within site)", color=INK, fontsize=11)
     fig.tight_layout()
-    fig.savefig(dest / "shapes_profiles_by_rp.png", dpi=140)
-    plt.close(fig)
+    fig.set_dpi(140)
+    _save(fig, dest / "shapes_profiles_by_rp.png")
 
 
 def plot_durations(ev: pd.DataFrame, dest: Path) -> None:
@@ -162,8 +176,8 @@ def plot_durations(ev: pd.DataFrame, dest: Path) -> None:
     axes[0].legend(frameon=False, fontsize=8)
     fig.suptitle("Durations per event (dashed: t_ref = 12 h of correction B)", color=INK)
     fig.tight_layout()
-    fig.savefig(dest / "shapes_durations.png", dpi=140)
-    plt.close(fig)
+    fig.set_dpi(140)
+    _save(fig, dest / "shapes_durations.png")
 
 
 def main() -> None:

@@ -134,9 +134,13 @@ Open:
   ~2.6 mm/yr trend). COAST-RP inherits the tide excess, but its surge part is about 0.1 m too low
   against GESLA GEV fits, so the two partly cancel (§0.25). Replacing only the tide (H1) would
   lower levels that are already about 0.1 m low. Decide how the surge part is treated before H1.
-- **Datum epochs in production:** MDT (CNES-CLS22) is a 1993-2012 mean, and COAST-RP is relative
-  to GTSM model MSL. DeltaDTM is more recent. The gap is of order 5 cm of SLR; quantify it and
-  decide whether to correct (§0.1).
+- **SLR_0 is the 1993-2012 MSL, the analysis treats it as 2020:** COAST-RP is relative to model
+  MSL and MDT is a 1993-2012 mean, while `extract_slr_trajectories.py` rebases AR6 to 2020 (AR6
+  2020 = +0.049 m over 1995-2014). Present-day hazard is ~5 cm low and SLR-level years come out
+  ~7-10 y late. Analysis-only fix (no reruns): reference the trajectories to the AR6 baseline.
+  Decide (`boundary_test/INPUT_ANALYSIS.md` §7).
+- **Open input-assessment questions** (GTSM vs COAST-RP/COAST-HG peaks and shapes, FES-tide
+  recombination of COAST-RP, basin-head rule, absolute MSL + MDT): `boundary_test/INPUT_ANALYSIS.md` §8.
 - **Duration correction B: reference duration and one-sided clip.** The water stays above MSL
   for more than 12 h in a third of observed annual maxima (microtidal median 20 h, macrotidal 7 h).
   B's T is cumulative over the hydrograph window, and SFINCS shows that the absolute duration,

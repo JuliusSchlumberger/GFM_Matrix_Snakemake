@@ -17,6 +17,7 @@ Usage:
 """
 
 import argparse
+import time
 from pathlib import Path
 
 import matplotlib
@@ -100,6 +101,19 @@ def comparison_tables(t: pd.DataFrame, dest: Path) -> pd.DataFrame:
     return table
 
 
+def _save(fig, path: Path) -> None:
+    # Windows intermittently refuses to truncate a PNG another process (viewer, indexer) holds.
+    for attempt in range(5):
+        try:
+            fig.savefig(path, dpi=fig.dpi)
+            break
+        except OSError:
+            if attempt == 4:
+                raise
+            time.sleep(2)
+    plt.close(fig)
+
+
 def _style(ax) -> None:
     ax.grid(color=GRID, linewidth=0.6)
     ax.set_axisbelow(True)
@@ -110,14 +124,18 @@ def _style(ax) -> None:
     ax.tick_params(colors=MUTED, labelcolor=INK)
 
 
+SOURCE_LABELS = {"gesla_harm": "GESLA (gauge)", "gtsm_harm": "GTSM", "fes_gauge": "FES2022 at the gauge",
+                 "fes_station": "FES2022 at the GTSM station"}
+# (y, x) pairs: each model against the gauge, then the two models at the same GTSM station.
+MHWS_PANELS = (("gtsm_harm", "gesla_harm"), ("fes_gauge", "gesla_harm"), ("gtsm_harm", "fes_station"))
+
+
 def plot_scatter(t: pd.DataFrame, dest: Path) -> None:
     q = t[t.quality]
-    fig, axes = plt.subplots(2, 3, figsize=(15, 9.5))
-    panels = [("gtsm_raw", "gesla_harm", "mhws_m"), ("fes_gauge", "gesla_harm", "mhws_m"), ("fes_station", "gtsm_harm", "mhws_m"),
-              ("gtsm_raw", "gesla_harm", "spring_range_m"), ("fes_gauge", "gesla_harm", "spring_range_m"),
-              ("fes_station", "gtsm_harm", "spring_range_m")]
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5.2))
     regions = sorted(q.region.unique())
-    for ax, (a, b, level) in zip(axes.ravel(), panels):
+    level = "mhws_m"
+    for ax, (a, b) in zip(axes, MHWS_PANELS):
         for k, r in enumerate(regions):
             g = q[q.region == r]
             # More regions than palette slots: the second pass reuses the hues with a cross marker.
@@ -126,29 +144,32 @@ def plot_scatter(t: pd.DataFrame, dest: Path) -> None:
         hi = float(np.nanmax(q[[f"{a}__{level}", f"{b}__{level}"]].to_numpy())) * 1.05
         ax.plot([0, hi], [0, hi], color=MUTED, linewidth=1)
         s = summary(q[f"{a}__{level}"], q[f"{b}__{level}"])
-        ax.set(xlim=(0, hi), ylim=(0, hi), xlabel=f"{b} {level} (m)", ylabel=f"{a} {level} (m)",
-               title=f"{a} vs {b}: median ratio {s['median_ratio']:.2f}, MAE {s['mae_m']:.2f} m (n={s['n']})")
+        ax.set(xlim=(0, hi), ylim=(0, hi), xlabel=f"{SOURCE_LABELS[b]} MHWS (m)", ylabel=f"{SOURCE_LABELS[a]} MHWS (m)",
+               title=f"{SOURCE_LABELS[a]} vs {SOURCE_LABELS[b]}\nmedian ratio {s['median_ratio']:.2f}, "
+                     f"MAE {s['mae_m']:.2f} m (n={s['n']})")
         ax.title.set_fontsize(9)
         _style(ax)
-    axes[0, 0].legend(frameon=False, fontsize=7)
-    fig.suptitle("Tidal levels relative to local MSL at GESLA sites (station <= 10 km, fit >= 3 y)", color=INK)
+    axes[0].legend(frameon=False, fontsize=7)
+    fig.suptitle("MHWS above local MSL at GESLA sites, same harmonic method for every source "
+                 "(quality sites: station <= 10 km, fit >= 3 y)", color=INK)
     fig.tight_layout()
-    fig.savefig(dest / "levels_scatter.png", dpi=150)
-    plt.close(fig)
+    fig.set_dpi(150)
+    _save(fig, dest / "levels_scatter.png")
 
 
 def plot_maps(t: pd.DataFrame, dest: Path) -> None:
     q = t[t.quality]
-    fig, axes = plt.subplots(2, 1, figsize=(12, 10))
-    for ax, a in zip(axes, ("gtsm_raw", "fes_gauge")):
-        ratio = q[f"{a}__spring_range_m"] / q["gesla_harm__spring_range_m"]
+    fig, axes = plt.subplots(3, 1, figsize=(12, 14))
+    for ax, (a, b) in zip(axes, MHWS_PANELS):
+        ratio = q[f"{a}__mhws_m"] / q[f"{b}__mhws_m"]
         sc = ax.scatter(q.lon, q.lat, c=ratio, s=12, cmap="RdBu_r", vmin=0.6, vmax=1.4, linewidths=0)
-        fig.colorbar(sc, ax=ax, label=f"spring range ratio {a} / GESLA", shrink=0.8)
-        ax.set(xlim=(-180, 180), ylim=(-60, 75), title=f"{a} / GESLA spring range (MHWS - MLWS)")
+        fig.colorbar(sc, ax=ax, label="MHWS ratio", shrink=0.8)
+        ax.set(xlim=(-180, 180), ylim=(-60, 75),
+               title=f"MHWS ratio {SOURCE_LABELS[a]} / {SOURCE_LABELS[b]} (median {ratio.median():.2f})")
         _style(ax)
     fig.tight_layout()
-    fig.savefig(dest / "levels_ratio_maps.png", dpi=150)
-    plt.close(fig)
+    fig.set_dpi(150)
+    _save(fig, dest / "levels_ratio_maps.png")
 
 
 def plot_constituents(c: pd.DataFrame, t: pd.DataFrame, dest: Path) -> pd.DataFrame:
@@ -175,8 +196,8 @@ def plot_constituents(c: pd.DataFrame, t: pd.DataFrame, dest: Path) -> pd.DataFr
     _style(ax)
     ax.legend(frameon=False, fontsize=8)
     fig.tight_layout()
-    fig.savefig(dest / "levels_constituents.png", dpi=150)
-    plt.close(fig)
+    fig.set_dpi(150)
+    _save(fig, dest / "levels_constituents.png")
     return table
 
 
