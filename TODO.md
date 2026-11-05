@@ -124,23 +124,25 @@ Open:
   from `event_volume.DurationCorrection`).
 - **Boundary sources: a rule for FES2022 at fjord and estuary heads.** FES matches GESLA within
   0.05 m MAE on MHWS at 698 gauges, but misses by > 0.25 m at 20, all at fjord/estuary heads or
-  narrow entrances. It is too high in Juneau, Fulford Harbour, Port Phillip, Minas Basin, Bahia
-  Lomas and the upper Gulf of California, and too low in the upper St Lawrence. Decide on a
-  gauge-based or plausibility rule before FES levels go into forcing
-  (`boundary_test/IMPLEMENTATION_NOTES.md` §0.2, §2.19).
+  narrow entrances (too high in Juneau, the Salish Sea, Port Phillip; too low in the upper
+  St Lawrence). Without gauges, a few head nodes are implausible: Cobequid Bay (MHWS 14.5 m above
+  MSL, about the observed spring range), Bahia Lomas (15.5-16.3 m) and one Colorado-delta node
+  (15.4 m); FES elsewhere in Minas Basin, the Strait of Magellan and the upper Gulf of California
+  matches published ranges. Decide on a detection rule before FES levels go into forcing
+  (`boundary_test/INPUT_ANALYSIS.md` §3, §8).
 - **Boundary sources: why GTSM's tide is 7-8% too large.** S2 is +20% and M2 +6% against
   GESLA (FES: ~0%). Check against the GTSM v3 validation and the dataset documentation (radiational
   S2, SAL). Confirm the GTSM tide run's MSL reference epoch (data suggest 1986-2005 + an imposed
   ~2.6 mm/yr trend). COAST-RP inherits the tide excess, but its surge part is about 0.1 m too low
   against GESLA GEV fits, so the two partly cancel (§0.25). Replacing only the tide (H1) would
   lower levels that are already about 0.1 m low. Decide how the surge part is treated before H1.
-- **SLR_0 is the 1993-2012 MSL, the analysis treats it as 2020:** COAST-RP is relative to model
-  MSL and MDT is a 1993-2012 mean, while `extract_slr_trajectories.py` rebases AR6 to 2020 (AR6
-  2020 = +0.049 m over 1995-2014). Present-day hazard is ~5 cm low and SLR-level years come out
-  ~7-10 y late. Analysis-only fix (no reruns): reference the trajectories to the AR6 baseline.
-  Decide (`boundary_test/INPUT_ANALYSIS.md` §7).
-- **Open input-assessment questions** (GTSM vs COAST-RP/COAST-HG peaks and shapes, FES-tide
-  recombination of COAST-RP, basin-head rule, absolute MSL + MDT): `boundary_test/INPUT_ANALYSIS.md` §8.
+- **Rerun after the 2020 baseline offset** (`boundary_conditions.slr_baseline_offset_m`, 0.049 m
+  regionalised): `run_preparation.py boundary_conditions`, then every tile simulation and the
+  analysis. Until then `boundaries.static_station_levels` raises on the old MDT station file.
+  The SFINCS calibration runs predate the offset (forcing ~5 cm lower); recalibrating fsf should
+  use regenerated forcing (`boundary_test/INPUT_ANALYSIS.md` §7).
+- **Open input-assessment questions** (FES-tide recombination of COAST-RP, surge deficit, FES
+  basin-head rule, TC hydrograph source, absolute MSL + MDT): `boundary_test/INPUT_ANALYSIS.md` §8.
 - **Duration correction B: reference duration and one-sided clip.** The water stays above MSL
   for more than 12 h in a third of observed annual maxima (microtidal median 20 h, macrotidal 7 h).
   B's T is cumulative over the hydrograph window, and SFINCS shows that the absolute duration,
