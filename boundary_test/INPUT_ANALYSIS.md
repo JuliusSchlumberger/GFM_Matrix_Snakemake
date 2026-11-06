@@ -792,6 +792,17 @@ and nb24 all lie within ±15% of the gauge medians.
   to the gauge peaks recovers part of it (RP 10: -0.28 vs -0.38). GTSM's own RP 2 events match the
   gauges' T(0.25) (13 vs 14.5 h on 0-1 m, 22.5 vs 22 h above 4 m), so the generator's RP 2 deficit
   comes from its construction (tide window or median shape), not from GTSM.
+- **Where the RP 2 deficit arises** (`generator_validation.py --sample 150 --tag _swap`, ETC RPs;
+  `generator_scores_swap.parquet`). Each station's own GTSM maxima of the RP window are rebuilt
+  one generator step at a time, median T(0.25) at RP 2 (0-1 / 1-2 / 2-4 / >4 m): GTSM event as is
+  13.0 / 15.8 / 17.5 / 21.5 h (gauges 14.2 / 15.2 / 16.5 / 23.0); surge scaled to COAST-RP
+  12.0 / 14.5 / 15.0 / 19.5; surge smoothed 12.5 / 16.0 / 16.5 / 21.5; surge maximum moved onto
+  the high water 11.0 / 15.5 / 15.0 / 21.0; GTSM tide scaled to MHWS_FES 11.0 / 13.5 / 15.5 /
+  19.5; the generator's FES tide window with the event's own surge 9.8 / 11.8 / 17.0 / 19.0;
+  generator 9.5 / 11.5 / 18.0 / 20.0. The loss is spread over steps; the largest are on the tide
+  side (the lower FES tide and the FES high water picked by height alone, ~2 h each on 1-2 m
+  coasts) and, on microtidal coasts, placing the surge maximum on the high water (~1.5 h). The
+  median surge shape instead of the event's own costs under 1 h.
 - **Rejected variants:** keeping the observed surge-tide phasing adds nothing; averaging limb
   durations per level (the HGRAPHER construction) narrows the shape further. Smoothing the residual
   is what helps, by removing the ripple whose highest bump otherwise sets the normalisation.

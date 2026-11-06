@@ -17,6 +17,18 @@ window (`storm_tide_hydrograph.rp_event_selection`):
                    shape is built (removes the tidal-period ripple of the non-tidal residual).
   generator_gauge_peak  diagnostic: as generator, scaled to the median peak of the gauge's own events
                    of that RP window instead of COAST-RP (separates the shape from the peak level).
+  swap_tide, swap_surge, gtsm_event  diagnostics, per GTSM maximum of the RP window (up to
+                   SWAP_EVENTS, ETC RPs only), measures as the median over those events:
+                   swap_tide = the event's own GTSM tide (high water nearest its peak, scaled by
+                   MHWS_FES / MHWS_GTSM) + the generator_smooth surge shape; swap_surge = the
+                   generator's FES tide window + the event's own smoothed surge (normalised on its
+                   maximum); swap_both = the event's own tide and surge, scaled to COAST-RP;
+                   gtsm_event = the event's GTSM level itself. Steps from gtsm_event to swap_both,
+                   one change each: step_scaled (own tide and raw surge in their observed phase,
+                   surge scaled to COAST-RP), step_smoothed (+ 13-h running mean of the surge),
+                   step_recentred (+ surge maximum moved onto the nearest high water); swap_both
+                   adds the MHWS_FES / MHWS_GTSM tide scaling. Which swap recovers
+                   gtsm_event's measures locates a generator deficit in its tide or its surge.
   hgrapher         the HGRAPHER port (`cell_hydrograph`, per_rp): spring high water nearest MHWS,
                    level-by-level mean limb durations of GTSM surge events of matching size.
   coast_hg         COAST-HG spring tide (RP100 only).
@@ -78,6 +90,7 @@ TC_GAUGE_KM, TC_SURGE_SHARE, TC_HALF_WIDTH_HR = 50.0, 0.5, 8.0
 RANGE_BINS = (0, 1, 2, 4, 20)
 NB24_HR = (21, 28)
 RMSE_HR = 48
+SWAP_EVENTS = 8
 SEASONAL = ("sa", "ssa")
 SMOOTH_HR = 13  # one semidiurnal period: removes the tide-surge interaction ripple of the residual
 EARTH_RADIUS_KM = 6371.0
@@ -187,6 +200,11 @@ def _score_site(args) -> tuple[list[dict], dict]:
             if variant == "generator" and len(g_sel_early := rp_event_selection(gauge_ev["rp"], rp)):
                 built["generator_gauge_peak"] = rp_hydrograph(tide_win, shape,
                                                               float(np.median(gauge_ev["peak"][g_sel_early])))["level"]
+        if not is_tc and not no_surge:
+            swaps = _swap_measures(sel[:SWAP_EVENTS], centres, gtsm_tide, surge_win, level_win, c, half_hr, tide_win,
+                                   shape, target, mhws)
+        else:
+            swaps = {}
         if hg_events is None:
             hg_events = storm_events(surge10, BASE_HR, min_peak_m=0.5 * max(coast["rp2"] - mhws["fes"], 0.05))
         spring_win = spring_tide_window(fes, spring, mhws["fes"], BASE_HR)
@@ -210,8 +228,50 @@ def _score_site(args) -> tuple[list[dict], dict]:
                          **m, "rmse_vs_gauge": _rmse(prof, g_med), "gtsm_rmse_vs_gauge": gtsm_rmse,
                          "n_gauge_events": len(g_sel), **{f"gauge_{key}": float(v) for key, v in g_meas.items()}})
             profiles[(site["file_name"], rp, variant)] = prof.astype(np.float32)
+        for variant, m in swaps.items():
+            rows.append({"file_name": site["file_name"], "rp": rp, "variant": variant, "tc": is_tc,
+                         "no_surge_shape": no_surge, "half_window_hr": half_hr, "tide_level_ratio": k,
+                         "n_events": len(sel), **m, "rmse_vs_gauge": np.nan, "gtsm_rmse_vs_gauge": gtsm_rmse,
+                         "n_gauge_events": len(g_sel), **{f"gauge_{key}": float(v) for key, v in g_meas.items()}})
         profiles[(site["file_name"], rp, "gauge")] = g_med.astype(np.float32)
     return rows, profiles
+
+
+def _swap_measures(sel, centres, gtsm_tide, surge_win, level_win, c, half_hr, fes_window, shape,
+                   target, mhws) -> dict:
+    hours = np.arange(-half_hr, half_hr + 1)
+    t10 = np.arange(-half_hr * STEPS_PER_HR, half_hr * STEPS_PER_HR + 1) / STEPS_PER_HR
+    out = {"swap_tide": [], "swap_surge": [], "swap_both": [], "gtsm_event": [], "step_scaled": [],
+           "step_smoothed": [], "step_recentred": []}
+    for j in sel:
+        near = centres[j] + np.arange(-3, 4)
+        hw = int(near[np.argmax(gtsm_tide[near])])
+        if min(hw, centres[j]) - half_hr < 0 or max(hw, centres[j]) + half_hr + 1 > len(gtsm_tide):
+            continue
+        raw = surge_win[j, c - half_hr:c + half_hr + 1]
+        smooth = _running_mean(raw[None, :], SMOOTH_HR)[0]
+        if not (raw[half_hr] > 0 and smooth[half_hr] > 0):
+            continue
+        tide_at_peak = np.interp(t10, hours, gtsm_tide[centres[j] - half_hr:centres[j] + half_hr + 1])
+        tide_at_hw = np.interp(t10, hours, gtsm_tide[hw - half_hr:hw + half_hr + 1])
+        for variant, tide_s, surge_s in (("step_scaled", tide_at_peak, raw / raw[half_hr]),
+                                         ("step_smoothed", tide_at_peak, smooth / smooth[half_hr])):
+            out[variant].append(profile_measures(hourly_profile(
+                rp_hydrograph(tide_s, np.interp(t10, hours, surge_s), target)["level"])))
+        tide = np.interp(t10, hours, gtsm_tide[hw - half_hr:hw + half_hr + 1]) * mhws["fes"] / mhws["gtsm"]
+        out["swap_tide"].append(profile_measures(hourly_profile(rp_hydrograph(tide, shape, target)["level"])))
+        own = _running_mean(surge_win[[j]][:, c - half_hr:c + half_hr + 1], SMOOTH_HR)
+        try:
+            own_shape = median_surge_shape(own)
+        except ValueError:
+            continue
+        out["swap_surge"].append(profile_measures(hourly_profile(rp_hydrograph(fes_window, own_shape, target)["level"])))
+        out["swap_both"].append(profile_measures(hourly_profile(rp_hydrograph(tide, own_shape, target)["level"])))
+        out["step_recentred"].append(profile_measures(hourly_profile(rp_hydrograph(tide_at_hw, own_shape,
+                                                                                    target)["level"])))
+        lev = level_win[j, c - half_hr:c + half_hr + 1]
+        out["gtsm_event"].append(profile_measures(lev / lev[half_hr]))
+    return {v: pd.DataFrame(m).median().to_dict() for v, m in out.items() if m}
 
 
 def _running_mean(windows: np.ndarray, width_hr: int) -> np.ndarray:
@@ -278,6 +338,8 @@ def main() -> None:
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--workers", type=int, default=3)
     parser.add_argument("--limit", type=int, default=None, help="score only the first N sites (trial run)")
+    parser.add_argument("--sample", type=int, default=None, help="score N random sites (seed 0)")
+    parser.add_argument("--tag", default="", help="suffix for the output files")
     args = parser.parse_args()
     out = Path(args.out_dir)
     dest = out / "analysis"
@@ -316,6 +378,9 @@ def main() -> None:
         gtsm_ev = {"rp": ev.rp_empirical_yr[t].to_numpy(), "prof": prof[t]}
         tasks.append((str(out), {"file_name": f, "gtsm_index": int(pairs.loc[f, "gtsm_index"])}, fes_hc, gtsm_hc, mh,
                       coast, tc_shapes.get(f), prof[hg[0]].astype(float) if len(hg) else None, gauge_ev, gtsm_ev))
+    if args.sample:
+        tasks = [tasks[i] for i in np.random.default_rng(0).choice(len(tasks), min(args.sample, len(tasks)),
+                                                                    replace=False)]
     tasks = tasks[:args.limit] if args.limit else tasks
     rows, profiles = [], {}
     with ProcessPoolExecutor(args.workers) as pool:
@@ -325,13 +390,13 @@ def main() -> None:
             if k % 50 == 0:
                 print(f"  {k + 1}/{len(tasks)} sites", flush=True)
     scores = pd.DataFrame(rows)
-    scores.to_parquet(dest / "generator_scores.parquet")
+    scores.to_parquet(dest / f"generator_scores{args.tag}.parquet")
     keys = list(profiles)
-    np.savez(dest / "generator_profiles.npz", file_name=np.array([k[0] for k in keys]),
+    np.savez(dest / f"generator_profiles{args.tag}.npz", file_name=np.array([k[0] for k in keys]),
              rp=np.array([k[1] for k in keys]), variant=np.array([k[2] for k in keys]),
              profile=np.vstack([profiles[k] for k in keys]))
     table = acceptance(scores, sites)
-    table.round(3).to_csv(dest / "generator_acceptance.csv", index=False)
+    table.round(3).to_csv(dest / f"generator_acceptance{args.tag}.csv", index=False)
     with pd.option_context("display.width", 250, "display.max_columns", 30):
         print(table[["variant", "range_class", "rp", "n_sites", "t025_hr", "gauge_t025_hr", "t05_hr", "gauge_t05_hr",
                      "nb24", "gauge_nb24", "rmse_vs_gauge", "gtsm_rmse_vs_gauge", "pass_shape", "pass_rmse"]]
