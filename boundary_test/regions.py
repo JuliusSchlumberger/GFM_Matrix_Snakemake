@@ -1,4 +1,4 @@
-"""IPCC AR6 reference regions (Iturbide et al., 2020) for coastal sites.
+"""IPCC AR6 reference regions (Iturbide et al., 2020) and their continent for coastal sites.
 
 A site takes the nearest AR6 land region within LAND_KM (gauges sit on the coast, often just
 outside the land polygons), otherwise the AR6 ocean region that contains it (remote islands).
@@ -19,20 +19,21 @@ EQUAL_AREA_CRS = 8857  # Equal Earth, metres
 
 
 def ar6_regions(lon, lat) -> pd.DataFrame:
-    """AR6 acronym and name per site, in the input order."""
+    """AR6 acronym, name and continent per site, in the input order."""
     regions = gpd.read_file(AR6_FILE)
     pts = gpd.GeoDataFrame({"i": np.arange(len(lon))}, geometry=gpd.points_from_xy(lon, lat), crs=4326)
-    land = regions[regions.Type.str.contains("Land")][["Acronym", "Name", "geometry"]].to_crs(EQUAL_AREA_CRS)
+    land = regions[regions.Type.str.contains("Land")][["Acronym", "Name", "Continent", "geometry"]].to_crs(EQUAL_AREA_CRS)
     near = gpd.sjoin_nearest(pts.to_crs(EQUAL_AREA_CRS), land, distance_col="dist_m")
     near = near[~near.i.duplicated()].set_index("i")
-    ocean = regions[regions.Type == "Ocean"][["Acronym", "Name", "geometry"]]
+    ocean = regions[regions.Type == "Ocean"][["Acronym", "Name", "Continent", "geometry"]]
     inside = gpd.sjoin(pts, ocean, predicate="within")
     inside = inside[~inside.i.duplicated()].set_index("i")
-    out = pd.DataFrame(index=np.arange(len(lon)), columns=["region", "region_name"], dtype=object)
+    cols = ["region", "region_name", "continent"]
+    out = pd.DataFrame(index=np.arange(len(lon)), columns=cols, dtype=object)
     use_land = near.dist_m <= LAND_KM * 1e3
-    out.loc[near.index[use_land], ["region", "region_name"]] = near.loc[use_land, ["Acronym", "Name"]].to_numpy()
+    out.loc[near.index[use_land], cols] = near.loc[use_land, ["Acronym", "Name", "Continent"]].to_numpy()
     rest = out.region.isna() & out.index.isin(inside.index)
-    out.loc[rest, ["region", "region_name"]] = inside.loc[out.index[rest], ["Acronym", "Name"]].to_numpy()
+    out.loc[rest, cols] = inside.loc[out.index[rest], ["Acronym", "Name", "Continent"]].to_numpy()
     rest = out.region.isna()
-    out.loc[rest, ["region", "region_name"]] = near.loc[out.index[rest], ["Acronym", "Name"]].to_numpy()
+    out.loc[rest, cols] = near.loc[out.index[rest], ["Acronym", "Name", "Continent"]].to_numpy()
     return out

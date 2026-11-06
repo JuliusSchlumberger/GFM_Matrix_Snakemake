@@ -1,18 +1,19 @@
 MHWS (mean high water springs above local mean sea level) at the FES boundary nodes in the four
-basins where FES2022 has gross artefacts. Top row (a-d): FES2022; bottom row (e-h): FES2014, at the
-same nodes; columns are the basins listed below. Circles: nodes that keep FES2022 under the version
-rule; crosses: nodes where the rule replaces FES2022 by FES2014 (fig04, fig06). Triangles: GESLA
-tide gauges, coloured by their observed MHWS. All symbols of a column share the colour scale below
-it. Land: Natural Earth 1:50m, grey.
+basins where FES2022 has gross artefacts. Each grey frame is one basin and holds two maps of the
+same area: FES2022 on top, FES2014 below, at the same nodes. Circles: nodes that keep FES2022 under
+the version rule; crosses: nodes where the rule replaces FES2022 by FES2014 (fig04, fig06).
+Triangles: GESLA tide gauges, coloured by their observed MHWS. Both maps of a frame share the colour
+scale below them. Each map is cropped to its nodes and gauges and drawn with the east-west scale
+corrected for latitude, so shapes are true. Land: Natural Earth 1:50m, grey.
 
-(a/e) Minas Basin / Cobequid Bay: 149 nodes, 34 replaced; FES2022 MHWS max 14.5 m, FES2014 max 7.2
-m; no gauge (b/f) Strait of Magellan / Bahia Lomas: 163 nodes, 48 replaced; FES2022 MHWS max 16.3 m,
-FES2014 max 4.6 m; no gauge (c/g) Upper Gulf of California: 114 nodes, 1 replaced; FES2022 MHWS max
-15.4 m, FES2014 max 3.0 m; no gauge (d/h) Glacier Bay / Lynn Canal: 217 nodes, 106 replaced; FES2022
-MHWS max 12.2 m, FES2014 max 1.8 m; gauges: Juneau 2.72 m, Skagway 2.78 m
+(a, b) Minas Basin / Cobequid Bay: 149 nodes, 34 replaced; FES2022 MHWS max 14.5 m, FES2014 max 7.2
+m; no gauge (c, d) Strait of Magellan / Bahia Lomas: 163 nodes, 48 replaced; FES2022 MHWS max 16.3
+m, FES2014 max 4.6 m; no gauge (e, f) Upper Gulf of California: 114 nodes, 1 replaced; FES2022 MHWS
+max 15.4 m, FES2014 max 3.0 m; no gauge (g, h) Glacier Bay / Lynn Canal: 217 nodes, 106 replaced;
+FES2022 MHWS max 12.2 m, FES2014 max 1.8 m; gauges: Juneau 2.72 m, Skagway 2.78 m
 
-Observed references without a gauge in the box: Minas Basin mean spring range 14.5 m, record 16.3 m
-(MHWS about 7.3 m; Desplanque and Mossman, 2001); Strait of Magellan spring range about 9 m on the
+Observed references without a gauge in the frame: Minas Basin mean spring range 14.5 m, record 16.3
+m (MHWS about 7.3 m; Desplanque and Mossman, 2001); Strait of Magellan spring range about 9 m on the
 Atlantic side (Medeiros and Kjerfve, 1988); Colorado mouth spring range 7-10 m (Archer, 2013).
 
 Reading: FES2022 is plausible over most of each basin but gives MHWS as large as the whole observed
