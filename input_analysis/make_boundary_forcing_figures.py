@@ -840,9 +840,134 @@ def fig06_rule_sensitivity(out: Path, dest: Path) -> None:
         """)
 
 
+GEN_VARIANTS = (("generator_smooth", "generator (smoothed surge)", BLUE, "-"),
+                ("generator", "generator (raw surge)", BLUE, ":"),
+                ("hgrapher", "HGRAPHER port", ORANGE, "-"))
+GEN_RANGES = ((0, 1), (1, 2), (2, 4), (4, 20))
+
+
+def fig10_generator_acceptance(out: Path, dest: Path) -> None:
+    t = pd.read_csv(out / "analysis" / "generator_acceptance.csv")
+    rps = sorted(t.rp.unique())
+    x = np.arange(len(rps))
+    fig, axes = plt.subplots(2, len(GEN_RANGES), figsize=(16, 7.4), sharex=True)
+    for j, (lo, hi) in enumerate(GEN_RANGES):
+        rc = f"({lo}, {hi}]"
+        for i, (col, ylab) in enumerate((("t025_hr", "T(0.25) (h)"), ("nb24", "next-day high water / peak"))):
+            ax = axes[i, j]
+            g = t[(t.range_class == rc) & (t.variant == "generator_smooth")].set_index("rp").reindex(rps)
+            ref = g[f"gauge_{col}"].to_numpy()
+            ax.fill_between(x, 0.85 * ref, 1.15 * ref, color=GRID, alpha=0.8, linewidth=0, label="gauge +-15%")
+            ax.plot(x, ref, color=INK, marker="o", linewidth=1.8, label="gauge (GESLA)")
+            for variant, label, color, style in GEN_VARIANTS:
+                v = t[(t.range_class == rc) & (t.variant == variant)].set_index("rp").reindex(rps)
+                ax.plot(x, v[col], color=color, linestyle=style, marker="o", markersize=4, linewidth=1.5, label=label)
+            hg = t[(t.range_class == rc) & (t.variant == "coast_hg")]
+            if len(hg):
+                ax.scatter([rps.index(100)], hg[col], color=GREEN, marker="D", s=40, zorder=4, label="COAST-HG (RP100)")
+            ax.set_xticks(x, [str(r) for r in rps])
+            if i == 1:
+                ax.set_xlabel("return period (y)")
+            if j == 0:
+                ax.set_ylabel(ylab)
+            _style(ax)
+            draw_panel_letter(ax, "abcdefgh"[i * len(GEN_RANGES) + j])
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=6, frameon=False, fontsize=9)
+    fig.tight_layout(rect=(0, 0.05, 1, 1))
+    _save(fig, dest / "fig10_generator_acceptance.png")
+    passes = t.groupby("variant").pass_shape.sum().astype(int)
+    cells = t.groupby("variant").size()
+    n = t[t.variant == "generator_smooth"].groupby("range_class").n_sites.max()
+    describe(dest / "fig10_generator_acceptance.png", f"""
+        Acceptance test of the per-RP storm-tide hydrograph generator against the tide gauges
+        (boundary_test/generator_validation.py). For every quality site (tide set) hydrographs are
+        built at the paired GTSM station for RP 2, 10, 25, 50 and 100 and compared with the
+        gauge's own annual maxima of the matching empirical return period (within a factor 2 of
+        the target RP; for RP 50 and 100, beyond the 30-46-year records, the gauge's events of RP
+        20-45). Columns: gauges with a spring tidal range of (a, e) 0-1 m, (b, f) 1-2 m, (c, g)
+        2-4 m, (d, h) more than 4 m ({', '.join(str(int(v)) for v in n)} sites). Top row: T(0.25),
+        the hours the water level stays within a quarter of the peak (above mean sea level), the
+        duration of the eikonal correction; bottom row: the next-day high water as a fraction of
+        the peak. Each point is the median over the sites of a class.
+
+        Black: the gauges, with the grey band of +-15% that the acceptance test allows. Blue solid:
+        the generator as decided (FES2022 tide around a high water at the station's own tide
+        level during extremes; surge shape = median normalised GTSM surge of the station's events
+        of that RP window, smoothed by a 13-h running mean that removes the tidal-period ripple of
+        the non-tidal residual; scaled to COAST-RP). Blue dotted: the same without smoothing.
+        Orange: the HGRAPHER port (spring high water nearest MHWS, shape from events of matching
+        surge size). Green diamond: COAST-HG at RP100. At tropical-cyclone RPs the surge shape
+        comes from another quality gauge within 50 km, otherwise a Gaussian; a gauge is never
+        scored with its own shape.
+
+        Cells (tidal class x RP) within +-15% on all three measures (T(0.25), T(0.5), next-day
+        high water): smoothed generator {passes['generator_smooth']} of {cells['generator_smooth']},
+        raw generator {passes['generator']} of {cells['generator']}, HGRAPHER {passes['hgrapher']} of
+        {cells['hgrapher']}, COAST-HG {passes['coast_hg']} of {cells['coast_hg']}. Data:
+        generator_acceptance.csv and generator_scores.parquet.
+
+        Reading: the generator fixes COAST-HG's main error. Its next-day high waters match the
+        gauges in every class, and T(0.25) rises from COAST-HG's 5-6 h to within 10-20% of the
+        gauges, falling with RP as observed. The remaining misses are T(0.25) at RP 2 on
+        microtidal and macrotidal coasts (about 30% too short) and the RP 100 point, which is
+        compared with RP 20-45 gauge events because nothing rarer is observed. Scaling to the gauge
+        events' own peaks instead of COAST-RP leaves the RP 2 deficit unchanged, so it comes from
+        the shape, not from COAST-RP.
+        """)
+
+
+def fig11_generator_profiles(out: Path, dest: Path) -> None:
+    gp = np.load(out / "analysis" / "generator_profiles.npz")
+    sites = _sites(out)
+    rng = pd.Series(gp["file_name"]).map(sites.gesla_harm__spring_range_m).to_numpy()
+    hours = np.arange(gp["profile"].shape[1]) - gp["profile"].shape[1] // 2
+    shown = (((0, 1), 10), ((0, 1), 100), ((2, 4), 10), ((2, 4), 100))
+    styles = (("gauge", "gauge (GESLA)", INK, "-"), ("generator_smooth", "generator (smoothed surge)", BLUE, "-"),
+              ("hgrapher", "HGRAPHER port", ORANGE, "-"), ("coast_hg", "COAST-HG (RP100)", GREEN, "--"))
+    fig, axes = plt.subplots(2, 2, figsize=(12, 7.4), sharex=True, sharey=True)
+    for ax, letter, ((lo, hi), rp) in zip(axes.ravel(), "abcd", shown):
+        in_class = (rng > lo) & (rng <= hi) & (gp["rp"] == rp)
+        for variant, label, color, style in styles:
+            sel = in_class & (gp["variant"] == variant)
+            if sel.any():
+                ax.plot(hours, np.nanmedian(gp["profile"][sel], axis=0), color=color, linestyle=style, linewidth=1.6,
+                        label=label)
+        ax.axhline(0, color=MUTED, linewidth=0.8)
+        ax.set(xlim=(-WINDOW_PLOT_HR, WINDOW_PLOT_HR), ylim=(-1.0, 1.05))
+        _style(ax)
+        draw_panel_letter(ax, letter)
+    for ax in axes[1]:
+        ax.set_xlabel("hours from peak")
+    for ax in axes[:, 0]:
+        ax.set_ylabel("water level / peak")
+    handles, labels = axes[0, 1].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=4, frameon=False, fontsize=9)
+    fig.tight_layout(rect=(0, 0.05, 1, 1))
+    _save(fig, dest / "fig11_generator_profiles.png")
+    describe(dest / "fig11_generator_profiles.png", """
+        Median storm-tide hydrographs over the quality sites, normalised by their peak and
+        centred on it (local mean sea level = 0): (a) spring range 0-1 m at RP 10, (b) 0-1 m at
+        RP 100, (c) 2-4 m at RP 10, (d) 2-4 m at RP 100. Black: the gauges' own annual maxima of the
+        matching empirical-RP window (median profile per site, then median over sites; at RP 100
+        the gauge's RP 20-45 events). Blue: the generator with smoothed surge (as in fig10). Orange:
+        the HGRAPHER port. Green dashed: COAST-HG (RP100 only). How each is built is described with
+        fig10.
+
+        Reading: on the 2-4 m coasts the generator's neighbouring high waters lie on the gauges'
+        (c, d), where the HGRAPHER port and COAST-HG are 0.1-0.15 of the peak lower because their
+        tide window is an MHWS-level spring tide (test 7). On microtidal coasts (a, b) the peaks and
+        neighbouring high waters match, but all synthetic hydrographs drain lower between the high
+        waters than the gauges, the generator to about -0.15 of the peak and COAST-HG to -0.3, where
+        the observed events stay near mean sea level: the observed surge tail that holds the level up
+        30-48 h from the peak (fig09) is not in their shapes.
+        """)
+
+
 FIGURES = {"fig01": fig01_tide_scatter, "fig02": fig02_tide_ratio_maps, "fig03": fig03_constituents,
            "fig04": fig04_fes_versions, "fig05": fig05_basin_heads, "fig06": fig06_rule_sensitivity,
-           "fig07": fig07_coast_rp_regions, "fig08": fig08_profiles_by_rp, "fig09": fig09_surge_by_rp}
+           "fig07": fig07_coast_rp_regions, "fig08": fig08_profiles_by_rp, "fig09": fig09_surge_by_rp,
+           "fig10": fig10_generator_acceptance, "fig11": fig11_generator_profiles}
 
 
 def main() -> None:

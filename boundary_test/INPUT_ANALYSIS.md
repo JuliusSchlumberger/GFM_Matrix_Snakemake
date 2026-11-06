@@ -708,9 +708,11 @@ are decided; where a variant is listed, the acceptance test picks it.
   the matching empirical RP class (HGRAPHER-RP event selection, 1979-2024). For RP >= 50, beyond
   the 46-year record, the shape of the station's largest events (RP 20-45) is used and only its
   amplitude follows the RP; the further fall of T with RP is then carried by the surge's growing
-  share of the peak alone (an assumption, §5.3). Surge definition: non-tidal residual of GTSM
-  (tide + surge run minus tide-only run) and the skew surge as the second variant (Environment
-  Agency, 2018).
+  share of the peak alone (an assumption, §5.3). Surge definition: the non-tidal residual of GTSM
+  (tide + surge run minus tide-only run), smoothed by a 13-h running mean before the shape is
+  built; the smoothing removes the tidal-period ripple that tide-surge interaction leaves in the
+  residual (the role the skew surge has in Environment Agency, 2018; the skew surge itself is not
+  yet tested).
 - **Surge shape, tropical cyclones** (RPs where COAST-RP's TC part dominates): the surge part
   (observed minus predicted tide) of TC-driven gauge events where a quality gauge lies within
   50 km, scaled to the target; otherwise a Gaussian of half width 8 h (the 15 h median surge
@@ -742,6 +744,42 @@ and on the extremes site set of test 1:
 - the median T(0.25), T(0.5) and nb24 within ±15% of the gauge medians;
 - the profile RMSE against the gauge no larger than that of GTSM's own events (0.10-0.22, §5.2);
 - the T(0.25) ratio between RP classes reproduced (1.2-1.6, §5.3).
+
+**Result** (`boundary_test/generator_validation.py`, `src/storm_tide_hydrograph.rp_hydrograph`;
+`generator_acceptance.csv`, `generator_scores.parquet`; summary fig10, fig11). All 698 quality
+sites, RP 2-100, gauge reference = the gauge's own annual maxima of the matching RP window (RP 50
+and 100: its RP 20-45 events). Cells are tidal class x RP (20); a cell passes when T(0.25), T(0.5)
+and nb24 all lie within ±15% of the gauge medians.
+
+| Variant | Cells passing | Median deviation from the gauge, T(0.25) / T(0.5) / nb24 |
+|---|---|---|
+| generator, smoothed surge (adopted) | 14 of 20 | 8% / 5% / 3% |
+| generator, raw residual | 10 of 20 | 9% / 8% / 3% |
+| generator, observed surge-tide phasing | 10 of 20 | 12% / 7% / 4% |
+| generator, shape from mean limb durations | 1 of 20 | 21% / 11% / 5% |
+| HGRAPHER port | 0 of 20 | 46% / 17% / 15% |
+| COAST-HG (RP100 only) | 0 of 4 | 53% / 26% / 8% |
+
+- **COAST-HG's main error is fixed.** The next-day high water matches the gauges in every class
+  (within 6% except microtidal RP 25), and T(0.25) rises from 5-6 h (COAST-HG, HGRAPHER) to within
+  about 10% of the gauges, falling with RP as observed. The T(0.25) ratio RP 2 / RP 10 is 1.0-1.25
+  against the gauges' 1.13-1.19.
+- **Remaining misses:** T(0.25) at RP 2 is about 30% too short on microtidal (10 vs 14.5 h) and
+  macrotidal coasts (16 vs 22 h); microtidal RP 25 is 18-20% too long; the RP 100 point of the
+  1-2 m class is ~15% short, partly because it is compared with RP 20-45 events. Scaling the
+  generator to the gauge events' own peaks instead of COAST-RP leaves the RP 2 deficit unchanged,
+  so it lies in the shape, not in COAST-RP. On microtidal coasts all synthetic hydrographs drain
+  lower between high waters than the gauges (generator about -0.15 of the peak, COAST-HG -0.3):
+  the observed surge tail of test 7 is missing.
+- **Profile RMSE criterion:** passed in 4 of 20 cells for every variant. The benchmark, GTSM's own
+  events, is a median over many events and therefore smoother than any single hydrograph; the
+  generator exceeds it by a median 0.02 m. The criterion as written is too strict for a single
+  synthetic event and should be restated (e.g. no worse than 0.03 m above GTSM's).
+- **Rejected variants:** keeping the observed surge-tide phasing adds nothing; averaging limb
+  durations per level (the HGRAPHER construction) narrows the shape further. Smoothing the residual
+  is what helps, by removing the ripple whose highest bump otherwise sets the normalisation.
+- Tropical-cyclone RPs (13% of the site-RP cases) use a neighbour gauge's surge shape within 50 km,
+  otherwise the Gaussian. Only 2.7% of stations needed the ±120 h window. FES2014 was not applied.
 
 **Outputs.**
 - Per station and RP: a 10-min hydrograph over ±72 h.

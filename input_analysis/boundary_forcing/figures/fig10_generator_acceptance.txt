@@ -1,0 +1,29 @@
+Acceptance test of the per-RP storm-tide hydrograph generator against the tide gauges
+(boundary_test/generator_validation.py). For every quality site (tide set) hydrographs are built at
+the paired GTSM station for RP 2, 10, 25, 50 and 100 and compared with the gauge's own annual maxima
+of the matching empirical return period (within a factor 2 of the target RP; for RP 50 and 100,
+beyond the 30-46-year records, the gauge's events of RP 20-45). Columns: gauges with a spring tidal
+range of (a, e) 0-1 m, (b, f) 1-2 m, (c, g) 2-4 m, (d, h) more than 4 m (201, 259, 159, 79 sites).
+Top row: T(0.25), the hours the water level stays within a quarter of the peak (above mean sea
+level), the duration of the eikonal correction; bottom row: the next-day high water as a fraction of
+the peak. Each point is the median over the sites of a class.
+
+Black: the gauges, with the grey band of +-15% that the acceptance test allows. Blue solid: the
+generator as decided (FES2022 tide around a high water at the station's own tide level during
+extremes; surge shape = median normalised GTSM surge of the station's events of that RP window,
+smoothed by a 13-h running mean that removes the tidal-period ripple of the non-tidal residual;
+scaled to COAST-RP). Blue dotted: the same without smoothing. Orange: the HGRAPHER port (spring high
+water nearest MHWS, shape from events of matching surge size). Green diamond: COAST-HG at RP100. At
+tropical-cyclone RPs the surge shape comes from another quality gauge within 50 km, otherwise a
+Gaussian; a gauge is never scored with its own shape.
+
+Cells (tidal class x RP) within +-15% on all three measures (T(0.25), T(0.5), next-day high water):
+smoothed generator 14 of 20, raw generator 10 of 20, HGRAPHER 0 of 20, COAST-HG 0 of 4. Data:
+generator_acceptance.csv and generator_scores.parquet.
+
+Reading: the generator fixes COAST-HG's main error. Its next-day high waters match the gauges in
+every class, and T(0.25) rises from COAST-HG's 5-6 h to within 10-20% of the gauges, falling with RP
+as observed. The remaining misses are T(0.25) at RP 2 on microtidal and macrotidal coasts (about 30%
+too short) and the RP 100 point, which is compared with RP 20-45 gauge events because nothing rarer
+is observed. Scaling to the gauge events' own peaks instead of COAST-RP leaves the RP 2 deficit
+unchanged, so it comes from the shape, not from COAST-RP.

@@ -222,11 +222,23 @@ HGRAPHER-RP in GCFM_UUdev):
   microtidal coasts).
 - **Surge shape:** the median normalised GTSM surge of the station's events of that RP class; for
   RP >= 50, beyond the 46-year record, the shape of its largest events (RP 20-45), with only the
-  amplitude following the RP. Non-tidal residual, with the skew surge as a variant.
+  amplitude following the RP. The GTSM residual is smoothed by a 13-h running mean first, which
+  removes the tidal-period ripple of tide-surge interaction.
 - **Tropical cyclones:** the scaled surge part of TC-driven gauge events where a gauge lies within
   50 km, otherwise a Gaussian of 8 h half width, until STORM-forced GTSM shapes are available
   (test 10).
 - **Peak:** the surge is scaled so that tide + surge reaches the RP peak level (COAST-RP for now).
+
+**Acceptance test** (fig10, fig11; all 698 quality sites, RP 2-100). A tidal class and RP passes
+when T(0.25), T(0.5) and the next-day high water are all within ±15% of the gauges' own events of
+that RP window. The generator passes 14 of 20 cases, the HGRAPHER port 0 of 20 and COAST-HG 0 of 4;
+its median deviation from the gauges is 8% for T(0.25) against 46-53% for those two. The next-day
+high water now matches the gauges in every class, and T falls with RP as observed. Still missed:
+T(0.25) at RP 2 on microtidal and macrotidal coasts (about 30% too short), and on microtidal coasts
+the levels between high waters (the observed surge tail is missing). Scaling to the gauges' own
+peaks leaves the RP 2 deficit unchanged, so it lies in the shape, not in COAST-RP. Rejected along
+the way: keeping the observed surge-tide phasing (no gain) and building the shape from mean limb
+durations as HGRAPHER does (narrower still).
 
 Neither GESLA nor regional pooling supplies the shapes: GESLA is the yardstick the generator is
 scored against but covers too few stations, and pooling was not analysed for shapes (it appears
@@ -249,7 +261,7 @@ Confirmation on 5-10 real 2-D tiles follows once the generator exists (test 8).
 **Decided:**
 - Tide: FES2022, FES2014 where the version rule fires (MHWS ratio > 1.5 and difference > 1.25 m),
   gauges overriding both. EOT20 not used.
-- Hydrograph: per-RP generator (§5) from GTSM surge shapes on the FES tide at each station's tide
+- Hydrograph: per-RP generator (§5, built and tested: 14 of 20 cases pass) from GTSM surge shapes on the FES tide at each station's tide
   level during extremes, scaled to the RP peak; largest-event shapes for RP >= 50; window
   extended where events outlast ±72 h; gauge shapes, else a Gaussian, at TC stations. COAST-HG is
   retired once a variant passes the acceptance test.
@@ -277,6 +289,8 @@ Confirmation on 5-10 real 2-D tiles follows once the generator exists (test 8).
 | `fig07_coast_rp_vs_gauges` | COAST-RP minus gauge GEV by AR6 region, RP10 and RP100 |
 | `fig08_profiles_by_rp` | storm-tide profiles by RP class, gauges and GTSM, with COAST-HG |
 | `fig09_surge_by_rp` | surge-only profiles and surge durations by RP class, with COAST-HG's surge |
+| `fig10_generator_acceptance` | acceptance test: T(0.25) and next-day high water by RP and tidal class |
+| `fig11_generator_profiles` | median generated hydrographs against the gauges, HGRAPHER and COAST-HG |
 
 ## References
 

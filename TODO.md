@@ -141,11 +141,12 @@ Open:
   cost 15 gauges / 6 GTSM stations in `levels_tides.py` (2 tide-set sites) and an unknown share of
   the ~13,600 "invalid" FES nodes in `.cleanup_baseline/boundary_test/fes_nodes.parquet`. Rerun
   `levels_tides.py` and `fes_tide_stats.py` before those outputs are used again.
-- **Build the per-RP storm-tide hydrograph generator** (`boundary_test/INPUT_ANALYSIS.md` §8.3;
-  design decided: station tide level during extremes from GTSM, largest-event shapes for
-  RP >= 50, window extended where events outlast ±72 h, gauge TC shapes else a Gaussian). Score
-  it with the §8.3 acceptance test against the gauges before it replaces COAST-HG for SFINCS
-  forcing and the eikonal T.
+- **Per-RP hydrograph generator: close the remaining gaps, then run it for all stations.** Built
+  and tested (`src/storm_tide_hydrograph.rp_hydrograph`, `boundary_test/generator_validation.py`;
+  INPUT_ANALYSIS.md §8.3 result): 14 of 20 tidal-class x RP cases pass. Open: T(0.25) at RP 2 ~30%
+  short on micro- and macrotidal coasts; the missing surge tail on microtidal coasts; the skew
+  surge variant; restating the profile-RMSE criterion. Production needs the GTSM surge series of
+  all 23,226 stations and FES at each, then the SFINCS forcing and the eikonal T lookup.
 - **Implement the FES version rule in the boundary preparation.** Decided (INPUT_ANALYSIS.md
   test 6, §8.2): FES2014 replaces FES2022 where the two atlases' MHWS differ by the ratio and
   minimum difference of `boundary_test/atlas_rule_sensitivity.version_flag`; gauges override

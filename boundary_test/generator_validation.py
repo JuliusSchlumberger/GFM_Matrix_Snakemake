@@ -11,11 +11,18 @@ window (`storm_tide_hydrograph.rp_event_selection`):
                    station's GTSM maxima stay above MSL from the peak to either +-72 h edge.
   generator_phase  as generator, but each surge keeps its observed timing relative to the
                    water-level peak.
+  generator_durations  as generator, but the surge shape from the mean time the events stay above
+                   each fraction of their peak (`duration_mean_shape`) instead of the median profile.
+  generator_smooth as generator, with the surge smoothed by a SMOOTH_HR running mean before the
+                   shape is built (removes the tidal-period ripple of the non-tidal residual).
+  generator_gauge_peak  diagnostic: as generator, scaled to the median peak of the gauge's own events
+                   of that RP window instead of COAST-RP (separates the shape from the peak level).
   hgrapher         the HGRAPHER port (`cell_hydrograph`, per_rp): spring high water nearest MHWS,
                    level-by-level mean limb durations of GTSM surge events of matching size.
   coast_hg         COAST-HG spring tide (RP100 only).
 
-The peak is COAST-RP at that RP. At RPs where COAST-RP's TC part exceeds its ETC part the surge is
+The peak is COAST-RP at that RP. Where every selected GTSM maximum has no positive surge (pure
+spring-tide maxima) the generator falls back to the Gaussian and flags no_surge_shape. At RPs where COAST-RP's TC part exceeds its ETC part the surge is
 the median surge of surge-dominated events (surge share >= TC_SURGE_SHARE) at another quality
 gauge within TC_GAUGE_KM, otherwise a Gaussian of TC_HALF_WIDTH_HR; the scored gauge's own events
 are never used (no circularity). FES2014 is not applied: the version rule fires at no quality
@@ -51,6 +58,7 @@ from storm_tide_hydrograph import (  # noqa: E402
     STEPS_PER_HR,
     annual_maximum_events,
     cell_hydrograph,
+    duration_mean_shape,
     gaussian_shape,
     high_water_indices,
     high_water_window,
@@ -71,8 +79,10 @@ RANGE_BINS = (0, 1, 2, 4, 20)
 NB24_HR = (21, 28)
 RMSE_HR = 48
 SEASONAL = ("sa", "ssa")
+SMOOTH_HR = 13  # one semidiurnal period: removes the tide-surge interaction ripple of the residual
 EARTH_RADIUS_KM = 6371.0
-VARIANTS = ("generator", "generator_phase", "hgrapher", "coast_hg")
+VARIANTS = ("generator", "generator_phase", "generator_durations", "generator_smooth", "generator_gauge_peak",
+            "hgrapher", "coast_hg")
 
 
 def profile_measures(prof: np.ndarray) -> dict:
@@ -106,6 +116,14 @@ def _rmse(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def _site_task(args) -> tuple[list[dict], dict]:
+    try:
+        return _score_site(args)
+    except Exception as err:  # one bad site must not stop the pool; it is reported and skipped
+        print(f"  skipped {args[1]['file_name']}: {type(err).__name__}: {err}", flush=True)
+        return [], {}
+
+
+def _score_site(args) -> tuple[list[dict], dict]:
     out, site, fes_hc, gtsm_hc, mhws, coast, tc_shapes, hg_profile, gauge_ev, gtsm_ev = args
     out = Path(out)
     b_re = np.load(out / "hourly_basis_re.npy", mmap_mode="r")
@@ -149,14 +167,26 @@ def _site_task(args) -> tuple[list[dict], dict]:
         k = float(np.nanmedian(tide_ratio[sel]))
         is_tc = bool(np.isfinite(coast[f"tc{rp}"]) and coast[f"tc{rp}"] > coast[f"etc{rp}"])
         tide_win = high_water_window(fes, hw, k * mhws["fes"], half_hr)
-        built = {}
-        for variant, on_max in (("generator", True), ("generator_phase", False)):
+        built, no_surge = {}, False
+        for variant, on_max in (("generator", True), ("generator_phase", False), ("generator_durations", None),
+                                ("generator_smooth", True)):
             if is_tc:
                 shape = tc_shapes if tc_shapes is not None else gaussian_shape(TC_HALF_WIDTH_HR, half_hr)
                 shape = _fit_length(shape, len(tide_win))
             else:
-                shape = median_surge_shape(surge_win[sel][:, c - half_hr:c + half_hr + 1], centre_on_max=on_max)
+                try:
+                    windows = surge_win[sel][:, c - half_hr:c + half_hr + 1]
+                    if variant == "generator_smooth":
+                        windows = _running_mean(windows, SMOOTH_HR)
+                    shape = (duration_mean_shape(windows) if on_max is None
+                             else median_surge_shape(windows, centre_on_max=on_max))
+                except ValueError:  # every selected maximum is a spring tide with no positive surge
+                    shape = gaussian_shape(TC_HALF_WIDTH_HR, half_hr)
+                    no_surge = True
             built[variant] = rp_hydrograph(tide_win, shape, target)["level"]
+            if variant == "generator" and len(g_sel_early := rp_event_selection(gauge_ev["rp"], rp)):
+                built["generator_gauge_peak"] = rp_hydrograph(tide_win, shape,
+                                                              float(np.median(gauge_ev["peak"][g_sel_early])))["level"]
         if hg_events is None:
             hg_events = storm_events(surge10, BASE_HR, min_peak_m=0.5 * max(coast["rp2"] - mhws["fes"], 0.05))
         spring_win = spring_tide_window(fes, spring, mhws["fes"], BASE_HR)
@@ -175,12 +205,18 @@ def _site_task(args) -> tuple[list[dict], dict]:
             prof = hg_profile if variant == "coast_hg" else hourly_profile(lev)
             m = profile_measures(prof)
             rows.append({"file_name": site["file_name"], "rp": rp, "variant": variant, "tc": is_tc,
+                         "no_surge_shape": no_surge,
                          "half_window_hr": half_hr, "tide_level_ratio": k, "n_events": len(sel),
                          **m, "rmse_vs_gauge": _rmse(prof, g_med), "gtsm_rmse_vs_gauge": gtsm_rmse,
                          "n_gauge_events": len(g_sel), **{f"gauge_{key}": float(v) for key, v in g_meas.items()}})
             profiles[(site["file_name"], rp, variant)] = prof.astype(np.float32)
         profiles[(site["file_name"], rp, "gauge")] = g_med.astype(np.float32)
     return rows, profiles
+
+
+def _running_mean(windows: np.ndarray, width_hr: int) -> np.ndarray:
+    kernel = np.ones(width_hr) / width_hr
+    return np.vstack([np.convolve(np.nan_to_num(w), kernel, mode="same") for w in windows])
 
 
 def _fit_length(shape: np.ndarray, n: int) -> np.ndarray:
@@ -276,7 +312,7 @@ def main() -> None:
         hg = ev.index[(ev.file_name == f) & (ev.source == "coast_hg_spring")]
         g = ev.index[(ev.file_name == f) & (ev.source == "gesla")]
         t = ev.index[(ev.file_name == f) & (ev.source == "gtsm")]
-        gauge_ev = {"rp": ev.rp_empirical_yr[g].to_numpy(), "prof": prof[g]}
+        gauge_ev = {"rp": ev.rp_empirical_yr[g].to_numpy(), "prof": prof[g], "peak": ev.peak_m[g].to_numpy()}
         gtsm_ev = {"rp": ev.rp_empirical_yr[t].to_numpy(), "prof": prof[t]}
         tasks.append((str(out), {"file_name": f, "gtsm_index": int(pairs.loc[f, "gtsm_index"])}, fes_hc, gtsm_hc, mh,
                       coast, tc_shapes.get(f), prof[hg[0]].astype(float) if len(hg) else None, gauge_ev, gtsm_ev))

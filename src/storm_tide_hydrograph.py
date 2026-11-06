@@ -234,6 +234,37 @@ def median_surge_shape(windows: np.ndarray, centre_on_max: bool = True, search_h
     return shape / shape[len(shape) // 2]
 
 
+def duration_mean_shape(windows: np.ndarray, search_hr: int = 12) -> np.ndarray:
+    """Surge shape from the mean time each event stays above each fraction of its peak (HGRAPHER).
+
+    `windows`: (n_events, 2 * half + 1) hourly surge in m with the water-level peak at the
+    centre. Each event is taken around its largest surge within +-search_hr of that peak;
+    per limb, the hours above each level of LEVELS (up to the first negative surge) are
+    averaged over the events and turned into a 10-min shape by `surge_shape`. Averaging
+    durations keeps the events' width; a median of aligned profiles narrows the top.
+    """
+    n_hr = windows.shape[1]
+    c = n_hr // 2
+    before, after = [], []
+    for w in windows:
+        seg = w[c - search_hr: c + search_hr + 1]
+        if not np.isfinite(seg).any():
+            continue
+        k = c - search_hr + int(np.nanargmax(seg))
+        peak = w[k]
+        if not peak > 0:
+            continue
+        rise = np.nan_to_num(w[:k + 1][::-1] / peak, nan=-1.0)
+        fall = np.nan_to_num(w[k:] / peak, nan=-1.0)
+        for limb, store in ((rise, before), (fall, after)):
+            neg = np.flatnonzero(limb < 0)
+            limb = limb[:neg[0]] if neg.size else limb
+            store.append((limb[:, None] > LEVELS).sum(axis=0) * STEPS_PER_HR)
+    if not before:
+        raise ValueError("no event with a positive surge at its peak")
+    return surge_shape(np.mean(before, axis=0), np.mean(after, axis=0), c)
+
+
 def rp_hydrograph(tide_window: np.ndarray, shape: np.ndarray, target_level_m: float) -> dict:
     """Storm-tide hydrograph of the per-RP generator: tide window + surge scaled to the target.
 
