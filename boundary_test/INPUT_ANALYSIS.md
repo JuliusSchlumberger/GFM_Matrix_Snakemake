@@ -645,11 +645,48 @@ within each tier. Items 1-4 use only data already extracted for this note; none 
      at the gauges, 16-21 h in GTSM, for every RP class from 0-2 to 20-50 y).
 8. **Duration correction on real tiles.** Confirm "α = 1, no lower clip" on 5-10 real 2-D tiles
    spanning tidal regimes, including a surge-dominated microtidal case, before adopting it.
-9. **Surge-deficit correction.** Once tests 2 and 5 are in, test whether the deficit outside TC
-   regions (~0.1 m) is regional and stable enough for a gauge-calibrated correction: either
-   regional pooling of gauge-minus-model skew-surge bias (as Collings et al., 2024, correct their
-   RP1 bias), or the bias correction of Alexandre and Chaudhuri (2025). Leave-one-out across
-   gauges is the acceptance test.
+9. **Done, with tests 2 and 5 at the gauges** (`surge_correction.py`; `.cleanup_baseline/
+   level_sources/surge_correction/`). **Surge-deficit correction.** Test whether the deficit
+   outside TC regions (~0.1 m) is regional and stable enough for a gauge-calibrated correction,
+   with leave-one-out across gauges as the acceptance test.
+   - *Estimator (tests 2, 5).* Skew surge per tidal cycle (highest level minus the predicted high
+     water), GPD on its declustered exceedances above the 99.5% quantile, convolved with the
+     predicted high waters assuming independence. 618 gauges of the extremes set with >= 15 years
+     (median 34.5) and a harmonic fit, gauge and GTSM on the same years. It reproduces the gauge
+     GEV (convolution - GEV, median +0.006 m RP10, +0.03 m RP100; MAE 0.05 / 0.19 m, the RP100
+     MAE being GEV sampling noise) and COAST-RP's ETC levels from GTSM (+0.03 / +0.04 m; at
+     ETC and no-TC stations +0.00-0.04 m).
+   - *Error decomposition* (median, all 618 gauges, RP10 / RP100): surge (GTSM surge + gauge
+     tide - gauge) -0.08 / -0.13 m, -0.15 / -0.28 m at TC-dominated gauges; GTSM tide +0.04 m
+     (the 7-8% tide excess of §3); FES2022 tide -0.002 m (MAE 0.06 m); the production
+     combination GTSM surge + FES tide -0.09 / -0.14 m (MAE 0.15 / 0.27 m). So the FES tide
+     removes the tide error and leaves the surge deficit uncovered.
+   - *Deficit as a ratio* r = gauge / GTSM skew-surge level at RP10: median 1.19 at the 451
+     non-TC-dominated gauges (10-90%: 0.99-2.12), 1.39 at TC-dominated ones. Regional medians
+     1.08 (N and W Europe) to 1.4-1.5 (W North America, E Asia) and > 2 where surges are small
+     (equatorial Pacific, NW South America). Stable in time: r from the first and second half of
+     each record correlates at 0.85 (median difference 0.10). Regional: r correlates at 0.69 with
+     the nearest other gauge (median 84 km) and ~0.5 out to ~280 km.
+   - *Leave-one-out correction*, r applied to GTSM's positive skew surges, production levels (FES
+     tide) - gauge, 451 non-TC-dominated gauges, median / MAE:
+
+     | Correction | RP10 | RP100 |
+     |---|---|---|
+     | none | -0.069 / 0.140 m | -0.113 / 0.212 m |
+     | global median r | -0.006 / 0.120 m | -0.016 / 0.180 m |
+     | inverse-distance r within 250 km | -0.005 / 0.115 m | -0.027 / 0.173 m |
+     | inverse-distance r within 500 km | -0.004 / 0.115 m | -0.020 / 0.173 m |
+     | inverse-distance r within 1000 km | +0.008 / 0.115 m | -0.003 / 0.169 m |
+
+     With the gauge tide (surge error only) the MAE falls from 0.104 to 0.076 m (RP10) and 0.179
+     to 0.137 m (RP100) at 500 km. At TC-dominated gauges the same correction halves the RP10 bias
+     (-0.149 to -0.044 m) but leaves RP100 at -0.10 m (MAE 0.32 m): the TC deficit is not a
+     ratio on ERA5 surges and stays with test 10.
+   - *Result.* The correction passes: it removes the bias and cuts the MAE by 18% (production) to
+     27% (surge only); the radius between 250 and 1000 km hardly matters, the regional pooling
+     gains ~5% MAE over a global constant. Outside 500 km of a gauge the global median (1.19)
+     applies. Ratios on small-surge coasts (> 2) rest on skew surges of a few decimetres and
+     should be capped before production.
 10. **TC hydrographs and TC tails.** Replace the Gaussian placeholder with surge shapes from the
     STORM-forced GTSM runs behind COAST-RP's TC component (VU / Deltares), which also lets the TC
     deficit be attributed to the wind model or the surge model. Gauge-based surge-only scaling
@@ -937,8 +974,12 @@ each script's docstring for further arguments):
 14. `duration_experiment.py` (local SFINCS)
 15. `duration_analysis.py`
 16. `duration_refit.py`
-17. `export_input_tables.py`
-18. `input_analysis/make_boundary_forcing_figures.py` (the summary figures and their descriptions)
+17. `generator_validation.py` (then `--sample 150 --tag _swap` for the step diagnostics),
+    `surge_tail_check.py`
+18. `sill_experiment.py` (local SFINCS, after `generator_validation.py`), then `sill_analysis.py`
+19. `surge_correction.py`
+20. `export_input_tables.py`
+21. `input_analysis/make_boundary_forcing_figures.py` (the summary figures and their descriptions)
 
 Inputs on `<data_root>` are read only.
 

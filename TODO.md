@@ -167,6 +167,12 @@ Open:
   analysis. Until then `boundaries.static_station_levels` raises on the old MDT station file.
   The SFINCS calibration runs predate the offset (forcing ~5 cm lower); recalibrating fsf should
   use regenerated forcing (`boundary_test/INPUT_ANALYSIS.md` §7).
+- **Surge-deficit correction for production** (test 9 passed, INPUT_ANALYSIS.md §8.1;
+  `boundary_test/surge_correction.py`): build the tide-corrected level of test 5 at all 23,226
+  GTSM stations (GTSM-ERA5 skew surge x r, convolved with the FES tide), r = inverse-distance mean
+  of the gauge ratios within 500 km, else 1.19. Open: cap r on small-surge coasts (ratios > 2 rest
+  on skew surges of a few dm); whether GTSM-ERA5-E (1950-2024) changes r; the tidal covariate where
+  skew surge and tide are dependent (not tested here).
 - **Open input-assessment questions** (FES-tide recombination of COAST-RP, surge deficit, FES
   basin-head rule, TC hydrograph source; absolute MSL + MDT deferred): `boundary_test/INPUT_ANALYSIS.md` §8.
 - **Duration correction B: reference duration and one-sided clip.** The water stays above MSL
@@ -175,13 +181,14 @@ Open:
   not the shape, sets the reach. On synthetic SFINCS floodplains with fsf refitted per form,
   m proportional to T^-alpha without the lower clip fits best; the production form (t_ref 12 h,
   clip >= 1) is close; "the hydrograph's longest exposure" and "T of the calibration hydrograph
-  at the same head" are worse. A constant t_ref is absorbed into fsf once the clip goes. To
-  decide: drop the lower clip, alpha (0.5-1), and the hydrograph source. COAST-HG's neighbouring
-  high waters are too low (B's T 5 h vs 15 h observed) and GTSM matches GESLA. Each change needs
-  a recalibration of fsf on the 498 SFINCS tiles (§0.3-0.4).
+  at the same head" are worse. A constant t_ref is absorbed into fsf once the clip goes.
+  Decided: lower clip dropped (in code), alpha 1, hydrograph source the per-RP generator (COAST-HG's
+  neighbouring high waters are too low: B's T 5 h vs 15 h observed). Needs the recalibration of
+  fsf on the 498 SFINCS tiles (§0.3-0.4).
 - **COAST-RP at TC-dominated stations** is 0.2-0.25 m below GESLA GEV even with its TC
   component (Japan/E Asia, US Atlantic+Gulf); GESLA records may also undersample TCs.
-  Decide whether a surge correction treats TC stations separately (§0.25).
+  Test 9 answers it: the skew-surge ratio correction halves the RP10 bias there but leaves RP100
+  at -0.10 m (MAE 0.32 m), so TC stations need the STORM-based route of test 10.
 - **fsf grid between 7.5 and 9:** the optimum may lie between the tested values (bias crosses 1
   near 8.7). Refine only if the bias matters more than the last 0.005 CSI.
 - **Pinned scenarios re-run on the next Snakemake call:** the new `flooding` keys and the
