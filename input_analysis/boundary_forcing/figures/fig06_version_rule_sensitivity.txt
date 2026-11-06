@@ -23,11 +23,16 @@ colour: that share (white 0%, dark blue 100%). Dotted squares: pairs that replac
 this range of D the result does not depend on D, because the artefacts exceed FES2014 by several
 metres: only R decides.
 
+(c) How many of the 102,935 FES boundary nodes of the test tiles the candidate rule switches to
+FES2014 (cell text; colour on a logarithmic scale, darker = more). At the adopted pair this is 1,287
+nodes, the red crosses of fig04. Pairs that switch more nodes than needed change FES2022 values on
+coasts where no evidence says it is wrong.
+
 Reading off the adopted values: (a) leaves the dotted pairs in the column D = 1.25 m (no worsening,
 all 3 improvements; at D <= 1 m Trondheim is switched wrongly, at D = 1.5 m Port Alberni is no
 longer caught). (b) leaves R <= 1.5 (higher R misses artefacts). Of the pairs left, R = 1.5 is the
-largest, i.e. the one that changes the fewest other nodes (figS1). At the adopted pair: 3
-improvements, 0 worsenings, 178 of 178 artefacts replaced.
+largest, i.e. the one that changes the fewest other nodes (c). At the adopted pair: 3 improvements,
+0 worsenings, 178 of 178 artefacts replaced.
 
 Behind the D bound: comparing the two atlases at all 905 gauges, binned by how much FES2022 exceeds
 FES2014 in MHWS (gain = |FES2022 - GESLA| - |FES2014 - GESLA|, positive when FES2014 is better):

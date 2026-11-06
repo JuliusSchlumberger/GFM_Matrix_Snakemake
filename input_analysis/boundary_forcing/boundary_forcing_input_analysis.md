@@ -107,7 +107,7 @@ overrides both atlases where one exists. The ratio alone would fire on microtida
 MHWS are centimetres; the difference alone would switch macrotidal coasts where FES2022 is only
 moderately higher. The rule replaces 1,287 nodes (1.25%), concentrated at the basin heads.
 
-**Why 1.5 and 1.25 m** (fig06; figS1 for the node counts). The rule was evaluated for R from 1.1
+**Why 1.5 and 1.25 m** (fig06). The rule was evaluated for R from 1.1
 to 3 and D from 0 to 1.5 m against two kinds of evidence:
 
 1. **The 905 gauges with all three MHWS.** Below a difference of 0.5 m FES2014 is not the better
@@ -263,11 +263,10 @@ Confirmation on 5-10 real 2-D tiles follows once the generator exists (test 8).
 | `fig03_tide_constituent_ratios` | constituent amplitude ratios, GTSM and FES2022 against the gauges |
 | `fig04_fes2022_vs_fes2014` | FES2022 / FES2014 MHWS at all boundary nodes, map and scatter with the rule |
 | `fig05_fes_basin_heads` | FES2022 and FES2014 MHWS in the four basins, replaced nodes and gauges |
-| `fig06_version_rule_sensitivity` | rule thresholds against the gauges and the known artefacts |
+| `fig06_version_rule_sensitivity` | rule thresholds against the gauges, the known artefacts and the number of nodes changed |
 | `fig07_coast_rp_vs_gauges` | COAST-RP minus gauge GEV by AR6 region, RP10 and RP100 |
 | `fig08_profiles_by_rp` | storm-tide profiles by RP class, gauges and GTSM, with COAST-HG |
 | `fig09_surge_by_rp` | surge-only profiles and surge durations by RP class, with COAST-HG's surge |
-| `figS1_nodes_replaced` | internal: number of nodes the rule replaces per threshold pair |
 
 ## References
 

@@ -414,11 +414,12 @@ def fig07_coast_rp_regions(out: Path, dest: Path) -> None:
     reg = ar6_regions(sets.loc[d.index, "lon"].to_numpy(), sets.loc[d.index, "lat"].to_numpy())
     reg.index = d.index
     name = (reg.region_name.str.replace("Equatorial.", "Equatorial ", regex=False)
-            .str.replace(".", ". ", regex=False).str.replace("-", " ") + " (" + reg.region + ")")
+            .str.replace(".", ". ", regex=False).str.replace("-", " "))
     counts = name.value_counts()
     small = set(counts.index[counts < MIN_REGION_SITES])
     d["label"] = np.where(name.isin(small), f"other ({len(small)} regions)", name)
     d["continent"] = np.where(name.isin(small), "OTHER", reg.continent)
+    pooled = ", ".join(f"{r} ({counts[r]})" for r in sorted(small))
 
     def stats(g: pd.DataFrame) -> dict:
         return {"n": len(g), **{f"{q}_{rp}": g[rp].quantile(v) for rp in (10, 100)
@@ -431,12 +432,18 @@ def fig07_coast_rp_regions(out: Path, dest: Path) -> None:
             rows.append((label, cont, stats(g[g.label == label])))
     st = pd.DataFrame([r[2] for r in rows], index=[r[0] for r in rows])
     st["continent"] = [r[1] for r in rows]
-    y, labels, ypos, heads = [], [], 0.0, []
+    y, ticks, labels, heads, ypos = [], [], [], [], 0.0
     for k, (label, cont) in enumerate(zip(st.index, st.continent)):
         if k > 0 and cont != st.continent.iloc[k - 1]:
-            ypos += 0.6
-            heads.append((ypos - 0.55, GROUP_LABELS.get(cont, cont.title().replace("-", " "))))
+            ypos += 0.3
+            head = GROUP_LABELS.get(cont, cont.title().replace("-", " "))
+            if head and list(st.index[st.continent == cont]) != [head]:
+                ticks.append(ypos)
+                labels.append(head)
+                heads.append(ypos)
+                ypos += 1
         y.append(ypos)
+        ticks.append(ypos)
         labels.append(label)
         ypos += 1
     y = np.array(y)
@@ -450,11 +457,10 @@ def fig07_coast_rp_regions(out: Path, dest: Path) -> None:
         ax.hlines(y + dy, st[f"p25_{rp}"], st[f"p75_{rp}"], color=RP_COLORS[rp], linewidth=2, alpha=0.5)
         ax.scatter(st[f"med_{rp}"], y + dy, color=RP_COLORS[rp], s=20, zorder=3, label=f"RP{rp}")
     ax.axvline(0, color=MUTED, linewidth=1)
-    for yh, text in heads:
-        ax.axhline(yh - 0.05, color=GRID, linewidth=0.8)
-        if text:
-            ax.text(lo - pad, yh + 0.02, text, fontsize=7.5, color=MUTED, ha="left", va="bottom", style="italic")
-    ax.set_yticks(y, labels, fontsize=8)
+    ax.set_yticks(ticks, labels, fontsize=8)
+    for tick, label in zip(ax.get_yticklabels(), labels):
+        if ticks[labels.index(label)] in heads:
+            tick.set_fontweight("bold")
     ax.set(xlim=(lo - pad, hi + pad), ylim=(ypos - 0.4, -0.6), xlabel="COAST-RP - gauge GEV (m)")
     ax.legend(frameon=False, loc="lower right", fontsize=8)
     _style(ax)
@@ -465,7 +471,7 @@ def fig07_coast_rp_regions(out: Path, dest: Path) -> None:
     plt.setp(ax2.get_yticklabels(), visible=False)
     _style(ax2)
     draw_panel_letter(ax2, "b")
-    fig.subplots_adjust(left=0.3, right=0.98, bottom=0.65 / (0.25 * ypos + 1.4), top=1 - 0.3 / (0.25 * ypos + 1.4))
+    fig.subplots_adjust(left=0.3, right=0.98, bottom=0.65 / (0.25 * ypos + 1.4), top=1 - 0.45 / (0.25 * ypos + 1.4))
     _save(fig, dest / "fig07_coast_rp_vs_gauges.png")
     st.drop(columns="continent").round(3).to_csv(dest / "fig07_coast_rp_vs_gauges_data.csv")
     describe(dest / "fig07_coast_rp_vs_gauges.png", f"""
@@ -482,10 +488,10 @@ def fig07_coast_rp_regions(out: Path, dest: Path) -> None:
         Order: regions are grouped by their AR6 continent in a fixed geographic order (North,
         Central and South America, Europe, the Mediterranean, Africa, Asia, Oceania, the polar land
         regions, then the ocean regions of remote islands: Atlantic, Indian, Pacific, Arctic,
-        Southern), alphabetically within each group; the italic labels name the groups. Each gauge
+        Southern), alphabetically within each group; the bold rows name the groups. Each gauge
         takes the nearest AR6 land region within 200 km, otherwise the AR6 ocean region containing
-        it. Regions with fewer than {MIN_REGION_SITES} sites are pooled in the last row. The
-        numbers are in fig07_coast_rp_vs_gauges_data.csv.
+        it. The {len(small)} regions with fewer than {MIN_REGION_SITES} sites are pooled in the last
+        row: {pooled}. The numbers are in fig07_coast_rp_vs_gauges_data.csv.
 
         Reading: overall COAST-RP is {st.loc['all sites', 'med_10']:+.2f} m (RP10) and
         {st.loc['all sites', 'med_100']:+.2f} m (RP100) relative to the gauges. That near-zero
@@ -563,11 +569,23 @@ FIG05_BASINS = {"Minas Basin / Cobequid Bay": (-65.2, -63.2, 44.9, 45.6),
                 "Upper Gulf of California": (-115.3, -113.0, 30.3, 32.2),
                 "Glacier Bay / Lynn Canal": (-137.2, -134.2, 58.2, 59.6)}
 BASIN_PAD = 0.08
+CLUSTER_EPS_DEG = 0.1  # about three FES2022 grid cells
+RING_PAD_DEG = 0.03
+
+
+def _replaced_clusters(lon: np.ndarray, lat: np.ndarray) -> list[tuple[np.ndarray, np.ndarray]]:
+    from sklearn.cluster import DBSCAN
+
+    if not len(lon):
+        return []
+    labels = DBSCAN(eps=CLUSTER_EPS_DEG, min_samples=1).fit_predict(np.column_stack([lon, lat]))
+    return [(lon[labels == k], lat[labels == k]) for k in np.unique(labels)]
 
 
 def fig05_basin_heads(out: Path, dest: Path) -> None:
     import cartopy.io.shapereader as shpreader
     import geopandas as gpd
+    from matplotlib.patches import Ellipse
     from shapely.geometry import box
 
     n = _nodes(out)
@@ -577,69 +595,80 @@ def fig05_basin_heads(out: Path, dest: Path) -> None:
     for name, (x0, x1, y0, y1) in FIG05_BASINS.items():
         b = n[n.node_lon.between(x0, x1) & n.node_lat.between(y0, y1)]
         gb = g[g.lon.between(x0, x1) & g.lat.between(y0, y1)]
-        lons = np.concatenate([b.node_lon, gb.lon])
-        lats = np.concatenate([b.node_lat, gb.lat])
-        px = max(BASIN_PAD * np.ptp(lons), 0.05)
-        py = max(BASIN_PAD * np.ptp(lats), 0.05)
+        lons, lats = np.concatenate([b.node_lon, gb.lon]), np.concatenate([b.node_lat, gb.lat])
+        px, py = max(BASIN_PAD * np.ptp(lons), 0.05), max(BASIN_PAD * np.ptp(lats), 0.05)
         ext = (lons.min() - px, lons.max() + px, lats.min() - py, lats.max() + py)
         stretch = 1 / np.cos(np.radians(np.mean(ext[2:])))
-        aspect = (ext[1] - ext[0]) / ((ext[3] - ext[2]) * stretch)
-        basins.append((name, b, gb, ext, stretch, aspect))
-    fig_w, left, gap, top, mid, cbar_h = 17.0, 0.25, 0.35, 0.35, 0.32, 0.9
-    map_h = (fig_w - 2 * left - gap * (len(basins) - 1)) / sum(b[5] for b in basins)
-    fig_h = top + 2 * map_h + mid + cbar_h
+        basins.append({"name": name, "b": b, "gb": gb, "ext": ext, "stretch": stretch,
+                       "aspect": (ext[1] - ext[0]) / ((ext[3] - ext[2]) * stretch)})
+    vmax = float(max(np.nanmax(d["b"][["fes2022_mhws_m", "fes2014_mhws_m"]].to_numpy()) for d in basins))
+    norm = Normalize(0, vmax)
+    fig_w, left, gap, top, mid, row_gap, cbar_h = 13.0, 0.25, 0.45, 0.35, 0.32, 0.55, 0.95
+    rows = (basins[:2], basins[2:])
+    heights = [(fig_w - 2 * left - gap) / sum(d["aspect"] for d in row) for row in rows]
+    fig_h = top + sum(2 * h + mid for h in heights) + row_gap + cbar_h
     fig = plt.figure(figsize=(fig_w, fig_h))
-    x = left
-    summary = []
-    for j, (name, b, gb, ext, stretch, aspect) in enumerate(basins):
-        w = aspect * map_h
-        vmax = float(np.nanmax(b[["fes2022_mhws_m", "fes2014_mhws_m"]].to_numpy()))
-        norm = Normalize(0, vmax)
-        clip = land.clip(box(ext[0], ext[2], ext[1], ext[3]))
-        frame = plt.Rectangle(((x - 0.12) / fig_w, (cbar_h - 0.62) / fig_h), (w + 0.24) / fig_w,
-                              (2 * map_h + mid + 0.62 + 0.28) / fig_h, transform=fig.transFigure,
-                              fill=False, edgecolor=GRID, linewidth=1.2)
-        fig.add_artist(frame)
-        sc = None
-        for i, col in enumerate(("fes2022_mhws_m", "fes2014_mhws_m")):
-            y0 = cbar_h + (1 - i) * (map_h + mid)
-            ax = fig.add_axes([x / fig_w, y0 / fig_h, w / fig_w, map_h / fig_h])
-            clip.plot(ax=ax, color=LAND_COLOR, edgecolor="none", zorder=0)
+    y_top = fig_h - top
+    summary, sc = [], None
+    for r, (row, h) in enumerate(zip(rows, heights)):
+        x = left
+        for c, d in enumerate(row):
+            letter = "abcd"[2 * r + c]
+            w = d["aspect"] * h
+            b, gb, ext = d["b"], d["gb"], d["ext"]
+            clip = land.clip(box(ext[0], ext[2], ext[1], ext[3]))
             keep, rep = b[~b.replaced], b[b.replaced]
-            sc = ax.scatter(keep.node_lon, keep.node_lat, c=keep[col], s=14, cmap="viridis", norm=norm,
-                            linewidths=0, zorder=2)
-            ax.scatter(rep.node_lon, rep.node_lat, c=rep[col], s=28, marker="X", cmap="viridis", norm=norm,
-                       linewidths=0.3, edgecolors=INK, zorder=3)
-            ax.scatter(gb.lon, gb.lat, c=gb.gesla_harm__mhws_m, s=70, marker="^", cmap="viridis", norm=norm,
-                       edgecolors=INK, linewidths=0.8, zorder=4)
-            ax.set(xlim=ext[:2], ylim=ext[2:], xticks=[], yticks=[])
-            ax.set_aspect(stretch, adjustable="datalim")
-            for side in ax.spines.values():
-                side.set_edgecolor(MUTED)
-            draw_panel_letter(ax, "abcdefgh"[2 * j + i])
-        cax = fig.add_axes([(x + 0.1 * w) / fig_w, (cbar_h - 0.42) / fig_h, 0.8 * w / fig_w, 0.12 / fig_h])
-        cb = fig.colorbar(sc, cax=cax, orientation="horizontal")
-        cb.set_label("MHWS (m)", fontsize=8)
-        cb.ax.tick_params(labelsize=7.5)
-        summary.append(f"({'aceg'[j]}, {'bdfh'[j]}) {name}: {len(b)} nodes, {int(b.replaced.sum())} replaced; "
-                       f"FES2022 MHWS max {b.fes2022_mhws_m.max():.1f} m, FES2014 max {b.fes2014_mhws_m.max():.1f} m"
-                       + ("; gauges: " + ", ".join(f"{r.site_name} {r.gesla_harm__mhws_m:.2f} m"
-                                                   for r in gb.itertuples()) if len(gb) else "; no gauge"))
-        x += w + gap
+            clusters = _replaced_clusters(rep.node_lon.to_numpy(), rep.node_lat.to_numpy())
+            for i, (col, rep_marker) in enumerate((("fes2022_mhws_m", "X"), ("fes2014_mhws_m", "D"))):
+                y0 = y_top - h - i * (h + mid)
+                ax = fig.add_axes([x / fig_w, y0 / fig_h, w / fig_w, h / fig_h])
+                clip.plot(ax=ax, color=LAND_COLOR, edgecolor="none", zorder=0)
+                sc = ax.scatter(keep.node_lon, keep.node_lat, c=keep[col], s=14, cmap="viridis", norm=norm,
+                                linewidths=0, zorder=2)
+                ax.scatter(rep.node_lon, rep.node_lat, c=rep[col], s=26, marker=rep_marker, cmap="viridis",
+                           norm=norm, linewidths=0.3, edgecolors=INK, zorder=3)
+                ax.scatter(gb.lon, gb.lat, c=gb.gesla_harm__mhws_m, s=120, marker="*", cmap="viridis", norm=norm,
+                           edgecolors=INK, linewidths=0.7, zorder=4)
+                for clon, clat in clusters:
+                    # sqrt(2) makes the axis-aligned ellipse pass through the box corners, so it encloses all nodes
+                    ax.add_patch(Ellipse(((clon.min() + clon.max()) / 2, (clat.min() + clat.max()) / 2),
+                                         np.sqrt(2) * np.ptp(clon) + 2 * RING_PAD_DEG * d["stretch"],
+                                         np.sqrt(2) * np.ptp(clat) + 2 * RING_PAD_DEG, fill=False,
+                                         edgecolor="#e34948", linewidth=1.1, zorder=5))
+                ax.set(xlim=ext[:2], ylim=ext[2:], xticks=[], yticks=[])
+                ax.set_aspect(d["stretch"], adjustable="datalim")
+                for side in ax.spines.values():
+                    side.set_edgecolor(MUTED)
+                draw_panel_letter(ax, f"{letter}{i + 1}")
+            summary.append(f"({letter}1, {letter}2) {d['name']}: {len(b)} nodes, {int(b.replaced.sum())} replaced in "
+                           f"{len(clusters)} cluster(s); FES2022 MHWS max {b.fes2022_mhws_m.max():.1f} m, FES2014 max "
+                           f"{b.fes2014_mhws_m.max():.1f} m"
+                           + ("; gauges: " + ", ".join(f"{q.site_name} {q.gesla_harm__mhws_m:.2f} m"
+                                                       for q in gb.itertuples()) if len(gb) else "; no gauge"))
+            x += w + gap
+        y_top -= 2 * h + mid + row_gap
+    cax = fig.add_axes([0.3, 0.45 / fig_h, 0.4, 0.16 / fig_h])
+    cb = fig.colorbar(sc, cax=cax, orientation="horizontal")
+    cb.set_label("MHWS (m)")
     _save(fig, dest / "fig05_fes_basin_heads.png")
     describe(dest / "fig05_fes_basin_heads.png", f"""
-        MHWS (mean high water springs above local mean sea level) at the FES boundary nodes in
-        the four basins where FES2022 has gross artefacts. Each grey frame is one basin and holds
-        two maps of the same area: FES2022 on top, FES2014 below, at the same nodes. Circles: nodes
-        that keep FES2022 under the version rule; crosses: nodes where the rule replaces FES2022
-        by FES2014 (fig04, fig06). Triangles: GESLA tide gauges, coloured by their observed MHWS.
-        Both maps of a frame share the colour scale below them. Each map is cropped to its nodes
-        and gauges and drawn with the east-west scale corrected for latitude, so shapes are true.
-        Land: Natural Earth 1:50m, grey.
+        MHWS (mean high water springs above local mean sea level) at the FES boundary nodes in the
+        four basins where FES2022 has gross artefacts: (a) Minas Basin / Cobequid Bay, (b) Strait
+        of Magellan / Bahia Lomas, (c) upper Gulf of California, (d) Glacier Bay / Lynn Canal. For
+        each basin the map marked 1 shows FES2022 and the map marked 2 below it FES2014, at the
+        same nodes and over the same area. All maps share the colour scale at the bottom.
+
+        Symbols: circles = nodes that keep FES2022 under the version rule (fig04, fig06). Crosses
+        (maps 1) = FES2022 values the rule discards; diamonds (maps 2) = the FES2014 values that
+        replace them. Red ovals enclose the replaced nodes: nodes closer than about three grid
+        cells form one group, and each oval is the smallest axis-aligned ellipse around the box
+        spanned by the group's westernmost, easternmost, northernmost and southernmost node. Stars = GESLA tide gauges, coloured by their observed
+        MHWS. Each map is cropped to its nodes and gauges and drawn with the east-west scale
+        corrected for latitude, so shapes are true. Land: Natural Earth 1:50m, grey.
 
         {chr(10).join(summary)}
 
-        Observed references without a gauge in the frame: Minas Basin mean spring range 14.5 m,
+        Observed references without a gauge in the map: Minas Basin mean spring range 14.5 m,
         record 16.3 m (MHWS about 7.3 m; Desplanque and Mossman, 2001); Strait of Magellan spring
         range about 9 m on the Atlantic side (Medeiros and Kjerfve, 1988); Colorado mouth spring
         range 7-10 m (Archer, 2013).
@@ -681,14 +710,16 @@ def fig06_rule_sensitivity(out: Path, dest: Path) -> None:
     known = int(grid.known_total.iloc[0])
     grid["known_share"] = grid.known_caught / known
     lim = float(grid.net.abs().max())
-    fig, axes = plt.subplots(1, 2, figsize=(15, 5.8))
+    fig, axes = plt.subplots(1, 3, figsize=(21, 5.8))
     im = _heat(axes[0], grid, "net", lambda r: f"{int(r.gauges_fixed)}/{int(r.gauges_harmed)}", plt.get_cmap("RdBu"),
                TwoSlopeNorm(0, -lim, lim), mark=lambda r: r.gauges_harmed == 0 and r.gauges_fixed == best)
     cb = fig.colorbar(im, ax=axes[0], orientation="horizontal", pad=0.17, shrink=0.6, aspect=30)
     cb.set_label("gauges improved minus gauges made worse")
     _heat(axes[1], grid, "known_share", lambda r: f"{int(r.known_caught)}", plt.get_cmap("Blues"), Normalize(0, 1),
           mark=lambda r: r.known_caught == known)
-    for ax, letter in zip(axes, "ab"):
+    _heat(axes[2], grid, "nodes_replaced", lambda r: f"{int(r.nodes_replaced)}", plt.get_cmap("Oranges"),
+          LogNorm(max(grid.nodes_replaced.min(), 1), grid.nodes_replaced.max()))
+    for ax, letter in zip(axes, "abc"):
         draw_panel_letter(ax, letter)
     fig.tight_layout()
     _save(fig, dest / "fig06_version_rule_sensitivity.png")
@@ -722,11 +753,17 @@ def fig06_rule_sensitivity(out: Path, dest: Path) -> None:
         100%). Dotted squares: pairs that replace all of them. In this range of D the result does
         not depend on D, because the artefacts exceed FES2014 by several metres: only R decides.
 
+        (c) How many of the {len(_nodes(out)):,} FES boundary nodes of the test tiles the candidate
+        rule switches to FES2014 (cell text; colour on a logarithmic scale, darker = more). At the
+        adopted pair this is {int(adopted.nodes_replaced):,} nodes, the red crosses of fig04. Pairs
+        that switch more nodes than needed change FES2022 values on coasts where no evidence says
+        it is wrong.
+
         Reading off the adopted values: (a) leaves the dotted pairs in the column D = 1.25 m (no
         worsening, all {best} improvements; at D <= 1 m Trondheim is switched wrongly, at D = 1.5 m
         Port Alberni is no longer caught). (b) leaves R <= 1.5 (higher R misses artefacts). Of the
         pairs left, R = 1.5 is the largest, i.e. the one that changes the fewest other nodes
-        (figS1). At the adopted pair: {int(adopted.gauges_fixed)} improvements,
+        (c). At the adopted pair: {int(adopted.gauges_fixed)} improvements,
         {int(adopted.gauges_harmed)} worsenings, {int(adopted.known_caught)} of {known} artefacts
         replaced.
 
@@ -738,27 +775,9 @@ def fig06_rule_sensitivity(out: Path, dest: Path) -> None:
         """)
 
 
-def figS1_nodes_replaced(out: Path, dest: Path) -> None:
-    grid = pd.read_csv(out / "analysis" / "atlas_rule_grid.csv")
-    fig, ax = plt.subplots(figsize=(8.5, 5.4))
-    _heat(ax, grid, "nodes_replaced", lambda r: f"{int(r.nodes_replaced)}", plt.get_cmap("Oranges"),
-          LogNorm(max(grid.nodes_replaced.min(), 1), grid.nodes_replaced.max()))
-    fig.tight_layout()
-    _save(fig, dest / "figS1_nodes_replaced.png")
-    total = len(_nodes(out))
-    describe(dest / "figS1_nodes_replaced.png", f"""
-        Internal: number of the {total:,} FES boundary nodes of the test tiles that the version rule
-        switches from FES2022 to FES2014, for each pair of thresholds (R vertical, D horizontal;
-        colour on a logarithmic scale, darker = more nodes). The red frame marks the adopted pair
-        R = {VERSION_RATIO}, D = {VERSION_DIFF_M} m. The rule and the two thresholds are described
-        with fig06.
-        """)
-
-
 FIGURES = {"fig01": fig01_tide_scatter, "fig02": fig02_tide_ratio_maps, "fig03": fig03_constituents,
            "fig04": fig04_fes_versions, "fig05": fig05_basin_heads, "fig06": fig06_rule_sensitivity,
-           "fig07": fig07_coast_rp_regions, "fig08": fig08_profiles_by_rp, "fig09": fig09_surge_by_rp,
-           "figS1": figS1_nodes_replaced}
+           "fig07": fig07_coast_rp_regions, "fig08": fig08_profiles_by_rp, "fig09": fig09_surge_by_rp}
 
 
 def main() -> None:
