@@ -759,13 +759,14 @@ def fig06_rule_sensitivity(out: Path, dest: Path) -> None:
     grid = pd.read_csv(out / "analysis" / "atlas_rule_grid.csv")
     bands = pd.read_csv(out / "analysis" / "atlas_rule_bands.csv", index_col=0)
     scored = grid.gauges_fixed + grid.gauges_harmed
-    grid["share_improved"] = (grid.gauges_fixed / scored).where(scored > 0)
     best = int(grid.loc[grid.gauges_harmed == 0, "gauges_fixed"].max())
+    precision = (grid.gauges_fixed / scored).where(scored > 0, 0.0)
+    grid["score"] = precision * (grid.gauges_fixed / best).clip(upper=1)
     known = int(grid.known_total.iloc[0])
     grid["known_share"] = grid.known_caught / known
     fig, axes = plt.subplots(1, 3, figsize=(21, 5.8))
-    _heat(axes[0], grid, "share_improved", lambda r: f"{int(r.gauges_fixed)}/{int(r.gauges_harmed)}",
-          plt.get_cmap("RdBu"), Normalize(0, 1), mark=lambda r: r.gauges_harmed == 0 and r.gauges_fixed == best)
+    _heat(axes[0], grid, "score", lambda r: f"{int(r.gauges_fixed)}/{int(r.gauges_harmed)}",
+          plt.get_cmap("Blues"), Normalize(0, 1), mark=lambda r: r.gauges_harmed == 0 and r.gauges_fixed == best)
     _heat(axes[1], grid, "known_share", lambda r: f"{int(r.known_caught)}", plt.get_cmap("Blues"), Normalize(0, 1),
           mark=lambda r: r.known_caught == known)
     _heat(axes[2], grid, "nodes_replaced", lambda r: f"{int(r.nodes_replaced)}", plt.get_cmap("Oranges"),
@@ -791,10 +792,12 @@ def fig06_rule_sensitivity(out: Path, dest: Path) -> None:
         FES2022 and FES2014. At every gauge where the rule would switch to FES2014, the switch is
         scored against the gauge's own MHWS: an improvement if FES2014 is closer to the gauge than
         FES2022 by more than 5 cm, a worsening if it is further by more than 5 cm. Cell text:
-        improvements / worsenings. Colour: the share of improvements among the scored switches,
-        improvements / (improvements + worsenings): dark blue = every switch improves, white = as
-        many worsen as improve, dark red = every switch worsens. Cells where the rule switches no
-        gauge by more than 5 cm either way stay white. The gauges with a real FES2022 error (Skagway, Juneau, Port
+        improvements / worsenings. Colour: precision x coverage, from white (0) to dark blue (1).
+        Precision is improvements / (improvements + worsenings), the share of switches that help;
+        coverage is improvements / {best}, capped at 1, the share of the {best} gauges with a gross
+        FES2022 error that the pair fixes. Only a pair that fixes all of them without making any
+        gauge worse reaches 1: 3/0 gives 1.0, 2/0 0.67, 1/0 0.33, 3/1 0.75. Cells where the rule
+        changes no gauge by more than 5 cm either way are white. The gauges with a real FES2022 error (Skagway, Juneau, Port
         Alberni) are the improvements to be had; Trondheim, where FES2014 is wrong, is the main
         worsening to avoid. Dotted squares: pairs with no worsening and the most improvements
         ({best}).
