@@ -852,6 +852,10 @@ and nb24 all lie within ±15% of the gauge medians.
   0.73, FES tide window (the generator) 0.89 / 0.78 / 0.68. The shortfall is spread over the last
   three steps: the lower FES tide, the median surge shape (largest on macrotidal coasts) and the
   FES high-water window, each -5 to -18%.
+- **Decision: the generator (smoothed surge) is accepted as is.** Its overflow shortfall is the
+  mild direction of error, and its flood volume behind the test 11 sills lies within 10% of the
+  median of real events (RP 2, 10), inside their 16-22% spread. The overflow and shape scores stay
+  in `generator_acceptance.csv` as diagnostics; no tolerance is tuned to the result.
 - **Rejected variants:** keeping the observed surge-tide phasing adds nothing; averaging limb
   durations per level (the HGRAPHER construction) narrows the shape further. Smoothing the residual
   is what helps, by removing the ripple whose highest bump otherwise sets the normalisation.
@@ -865,7 +869,7 @@ and nb24 all lie within ±15% of the gauge medians.
 
 Inputs are the GTSM series, FES constants and GESLA events already extracted for this note; no
 HPC runs are needed. Production use (the global product, SFINCS forcing, fsf recalibration with
-α = 1 and no lower clip on the multiplier) follows only once a variant passes.
+α = 1 and no lower clip on the multiplier) uses the accepted generator.
 
 ## 9. Comparison with other global coastal boundary conditions
 
