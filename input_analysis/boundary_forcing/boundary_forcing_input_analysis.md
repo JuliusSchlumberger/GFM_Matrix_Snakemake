@@ -116,6 +116,8 @@ to 3 and D from 0 to 1.5 m against two kinds of evidence:
    FES2014 is wrong (Trondheim, 1.08 m) and below the smallest real FES2022 error that must be
    caught (Port Alberni, 1.43 m). With D = 1.25 m the rule fires at 3 gauges, all fixes: Skagway
    7.46 → 2.76 m (gauge 2.78), Juneau 5.95 → 3.33 m (2.72), Port Alberni 2.79 → 1.36 m (1.28).
+   The MHWS RMSE over the 905 gauges falls from 0.233 m (FES2022 alone) to 0.129 m, the lowest
+   of all pairs.
 2. **178 known artefacts**: basin-head nodes whose FES2022 MHWS exceeds 1.25 × the largest observed
    MHWS of their basin, a set defined without FES2014. Every R up to 1.5 replaces all of them;
    R = 1.75 misses 6, R = 2 misses 27.
