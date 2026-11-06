@@ -803,6 +803,42 @@ and nb24 all lie within ±15% of the gauge medians.
   side (the lower FES tide and the FES high water picked by height alone, ~2 h each on 1-2 m
   coasts) and, on microtidal coasts, placing the surge maximum on the high water (~1.5 h). The
   median surge shape instead of the event's own costs under 1 h.
+- **Flood impact of hydrograph errors (test 11, `boundary_test/sill_experiment.py`,
+  `sill_analysis.py`; `.cleanup_baseline/level_sources/sill_experiment/`).** SFINCS 1-D strips:
+  10 ocean cells, a 3-cell sill with its crest a head of 0.1, 0.25 or 0.5 x peak below the peak,
+  then a closed basin of 2 or 5 km or a 2e-4 slope over 20 km, all at MSL; Manning 0.03 / 0.06.
+  Part A (3,240 runs): per tidal class and RP 2 / 10 / 100, the gauge event closest to the class
+  medians of T(0.25), T(0.5) and nb24, scaled to the class median COAST-RP, then stretched in time
+  (x 0.7-1.3) or with the levels away from the peak shifted by +-0.05 / 0.1 of the peak. Part B
+  (2,910 runs, basin 5 km and slope, n = 0.03): at 6 random sites per class and RP, the generator
+  against up to 6 of the gauge's own events of the RP window, all scaled to the same COAST-RP.
+  - Duration: flood volume changes by 0.6-0.9 x the relative change in duration (stretch 0.9:
+    -6 to -9%; 0.8: -13 to -18%; 0.7: -20 to -28%), extent on the slope by about half that
+    (0.8: -11%), maximum depth by about a quarter (0.8: -5 to -7%). The closed basins fill wall to
+    wall at heads >= 0.25, so their extent does not change. Sensitivity is largest for low sills
+    (head 0.1: volume elasticity ~1) and small for high ones (head 0.5: the hinterland fills to
+    near the peak whatever the duration; stretch 0.7: -6%). The tidal class hardly matters.
+  - Levels away from the peak act one-sidedly: -0.1 of the peak costs -10% volume (median), +0.1
+    adds +46% (head 0.1: +218%), because the neighbouring high waters then overtop low sills too.
+    Too high neighbouring high waters are the costly generator error, too short peaks the mild one.
+  - Predictors: the overflow volume (time integral of the level above the crest) explains the
+    flood volume change (R^2 of log ratios 0.68 part A, 0.57 part B); T(0.25) does not (0.20 both),
+    since it counts whole hours and ignores how far above the threshold the level goes.
+  - Generator against real events (part B, flood volume as a ratio to the median of the gauge's
+    events): RP 2 0.91 / 0.99 / 0.99 / 0.98 and RP 10 1.03 / 0.95 / 0.95 / 0.93 (0-1 / 1-2 / 2-4
+    / >4 m); extent 1.00 and maximum depth 0.97-1.01 in every class. The spread between the
+    gauge's own events (IQR / median) is 0.16-0.22 in volume at RP 2. The generator lies within
+    the range of the real events in 64-86% of the site-domain cases at RP 2 and 10, about what a
+    randomly drawn event of 6 would score (71%). Low sills carry most of the bias (head 0.1:
+    0.83-0.86 against an event spread of 0.31-0.37). The 24-33% short RP 2 T(0.25) on 0-1 and
+    1-2 m coasts thus costs ~9% and ~1% of flood volume, well inside the event-to-event spread.
+    At RP >= 25 the gauges have only 1-2 events per RP window, too few for this comparison.
+- **Acceptance criteria derived from test 11** (replacing the +-15% on T(0.25), T(0.5) and nb24
+  and the +-48 h profile RMSE): per tidal class x RP, the median of the generator's overflow
+  volume above 0.9 and 0.75 x peak within +-10% of the gauge events' median (about +-7-10% in
+  flood volume), with the deviation above the gauges no larger than that below (levels away from
+  the peak that are too high are the costly error). Where gauge events suffice (RP 2, 10), the
+  sill-test flood volume ratio within +-10% as a direct check: met in all 8 cells.
 - **Rejected variants:** keeping the observed surge-tide phasing adds nothing; averaging limb
   durations per level (the HGRAPHER construction) narrows the shape further. Smoothing the residual
   is what helps, by removing the ripple whose highest bump otherwise sets the normalisation.

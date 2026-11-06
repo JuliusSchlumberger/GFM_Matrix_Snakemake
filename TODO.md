@@ -146,10 +146,11 @@ Open:
   INPUT_ANALYSIS.md §8.3 result): 14 of 20 tidal-class x RP cases pass. Open: T(0.25) at RP 2 ~30%
   short on micro- and macrotidal coasts (GTSM's own events are not, so it is the construction:
   tide window or median shape); the low microtidal troughs come from GTSM's surge deficit (test 9),
-  not from the surge tail (test 7b, GTSM's tail is fine); replace the +-15% and the +-48 h profile
-  RMSE by tolerances derived from flood extent and depth (synthetic sill experiment, test 11:
-  `boundary_test/sill_experiment.py`, `sill_analysis.py`). RP 2 diagnosis: swap in GTSM's own
-  event tide (keeping the generator's surge) and the reverse, to find which half loses T(0.25). Production needs the GTSM surge series of
+  not from the surge tail (test 7b, GTSM's tail is fine). Test 11 (SFINCS sill strips, §8.3)
+  shows the RP 2 T(0.25) deficit costs only ~1-9% flood volume, inside the 16-22% spread between
+  real events, so the RP 2 fixes (FES window chosen by its neighbouring high waters, microtidal
+  surge lag) are optional. Next: add the overflow volume above 0.9 and 0.75 x peak to
+  `generator_validation.py` and rescore all sites against the test 11 criteria (+-10%). Production needs the GTSM surge series of
   all 23,226 stations and FES at each, then the SFINCS forcing and the eikonal T lookup.
 - **Implement the FES version rule in the boundary preparation.** Decided (INPUT_ANALYSIS.md
   test 6, §8.2): FES2014 replaces FES2022 where the two atlases' MHWS differ by the ratio and
