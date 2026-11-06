@@ -685,8 +685,8 @@ within each tier. Items 1-4 use only data already extracted for this note; none 
    - *Result.* The correction passes: it removes the bias and cuts the MAE by 18% (production) to
      27% (surge only); the radius between 250 and 1000 km hardly matters, the regional pooling
      gains ~5% MAE over a global constant. Outside 500 km of a gauge the global median (1.19)
-     applies. Ratios on small-surge coasts (> 2) rest on skew surges of a few decimetres and
-     should be capped before production.
+     applies. Ratios on small-surge coasts (> 2) rest on skew surges of a few decimetres; any cap
+     from 1.5 to 2.5 leaves the leave-one-out MAE unchanged, and production caps at 2.0 (§8.4).
 10. **TC hydrographs and TC tails.** Replace the Gaussian placeholder with surge shapes from the
     STORM-forced GTSM runs behind COAST-RP's TC component (VU / Deltares), which also lets the TC
     deficit be attributed to the wind model or the surge model. Gauge-based surge-only scaling
@@ -908,6 +908,83 @@ Inputs are the GTSM series, FES constants and GESLA events already extracted for
 HPC runs are needed. Production use (the global product, SFINCS forcing, fsf recalibration with
 α = 1 and no lower clip on the multiplier) uses the accepted generator.
 
+### 8.4 Level product (ii) at all COAST-RP stations
+
+`build_level_product.py` (output `.cleanup_baseline/level_product/`) builds level product (ii)
+and the accepted generator's hydrographs at the 23,226 COAST-RP stations:
+- `levels.parquet`: one row per station, RPs 2-1000;
+- `hydrographs.npy`: (station, RP, 1441), 10-min steps over ±120 h, NaN outside each station's
+  window;
+- `hydrograph_info.parquet`: window, tide level and shape source per station and RP.
+
+**Construction.**
+- *Stations.* Each COAST-RP station takes the nearest GTSM-ERA5 surge series (all within 0.8 km;
+  1979-2024, hourly) and the FES2022 constants at its position. FES2014 replaces FES2022 at the 56
+  stations that the version rule of §8.2 flags. One station (IBIS_GL_TS_MO_62198) has no FES value
+  and gets no output.
+- *ETC levels.* GTSM skew surges on the hourly FES tide are fitted with a GPD, scaled by r (test
+  9) and convolved with the 10-min FES high waters over a nodal cycle.
+- *Surge ratio r.* r = `ratio_fes`, i.e. gauge / GTSM skew-surge RP10 with the FES tide under
+  both. At the gauges it is equivalent to test 9's `ratio`: median 1.18 vs 1.19, correlation
+  0.97. Each station takes the inverse-distance mean of r at calibration gauges within 500 km
+  (at least 3), otherwise the gauge median, and r is capped at 2.0.
+  - The leave-one-out MAE is the same for any cap between 1.5 and 2.5; 2.0 is about the gauge
+    p90.
+  - Station r: median 1.18, 10-90% 1.07-1.21. 194 stations are capped; 13,583 take the median
+    (no 3 gauges within 500 km).
+- *TC part.* COAST-RP_TC enters as an annual exceedance rate added to the ETC rate, which is
+  COAST-RP's own combination. TC is a gap-filler until test 10.
+- *Hydrographs.* The accepted generator of §8.3. Where the TC rate exceeds the ETC rate at the
+  RP level, the station uses the TC shape: a neighbouring gauge's surge-dominated shape within
+  50 km, else the Gaussian.
+
+**Against COAST-RP** (new - COAST-RP, median and 10-90%, m; number of stations with |difference|
+> 0.5 m in brackets):
+
+| RP | all 23,225 | no TC part (13,978) | TC part (9,247) |
+|---|---|---|---|
+| 2 | -0.005 (-0.33..+0.17) [1,684] | -0.019 (-0.32..+0.11) | +0.015 (-0.20..+0.32) |
+| 10 | +0.028 (-0.23..+0.23) [1,411] | +0.014 (-0.27..+0.16) | +0.046 (-0.20..+0.41) |
+| 100 | +0.051 (-0.21..+0.32) [1,752] | +0.040 (-0.26..+0.22) | +0.069 (-0.17..+0.49) |
+| 1000 | +0.070 (-0.17..+0.50) [2,793] | +0.074 (-0.21..+0.36) | +0.059 (-0.12..+0.76) |
+
+How to read the table, at stations without a TC part:
+- *Two effects of opposite sign.* With r = 1, the ETC level is 0.045-0.08 m below COAST-RP's ETC.
+  That is the FES tide replacing GTSM's tide, which is 7-8% too high (§3). r lifts the level by
+  ~0.09 m at RP100. The net change is about +0.04 m, which is test 9's gauge deficit with the
+  tide error removed.
+- *TC stations.* The positive tail at TC stations comes from r computed on gauges that also feed
+  the ETC part. Test 9 found that TC deficits are not a ratio (§8.1).
+
+Most large differences are COAST-RP errors that the new product corrects:
+- *Southern North Sea and Dover Strait* (Thames, Flanders, the Netherlands, Boulogne): the new
+  levels are 0.6-1.0 m lower than COAST-RP, all of it from the tide. At the test 9 gauges COAST-RP
+  ETC RP100 exceeds the gauge GEV by 0.9-1.1 m (Dunkerque 4.94 vs 4.06 m, Boulogne 6.06 vs
+  4.96 m); GTSM surge + FES tide is within 0.1-0.5 m (4.15, 5.47 m).
+- *Western Baltic* (Danish straits, Kiel Bight): the new levels are 0.5-0.6 m higher. At the 20
+  gauges there, COAST-RP ETC RP100 is 0.3-2.3 m below the gauge GEV, and r = 1.06-1.37.
+- *TC stations* (Gulf of Mexico, E and SE Asia, US Atlantic, Bay of Bengal, NW Australia): 96% of
+  the TC stations with |difference| > 0.5 m at RP100 are higher. The cause is the r of the ETC
+  part, which test 10 must check before TC coasts use the product.
+
+**Hydrographs.**
+- *Shape source* at RP100: GTSM events at 20,672 stations, TC Gaussian at 2,316, TC gauge shape at
+  236, no-surge Gaussian at 1. The TC share grows from 6% at RP2 to 14% at RP1000.
+- *Window and tide.* Median window ±72 h. The median tide at the annual-maximum peaks is 1.2 x
+  MHWS, the same as the k of §8.3.
+- *Peaks.* The peak equals the RP level to 3e-8 m in all but 152 of 209,025 hydrographs. In those
+  152, mostly RP2 at macrotidal or mixed-tide stations, a neighbouring high water within the window
+  already exceeds the RP level, so the generator adds no surge. The peak then overshoots by up to
+  0.19 m (94 cases > 1 cm).
+- *Spurious TC dominance at low RPs.* 232 stations count as TC-dominated at RP2 but not at RP10.
+  There, COAST-RP_TC is flat from RP2 to RP10 (the tide floor of the synthetic tracks) and lies
+  above the ETC RP2. Adding the rates raises RP2 by 0.06 m (median), as in COAST-RP's total, and
+  switches the RP2 shape to the TC one.
+
+All levels are relative to model MSL. MDT, the 2020 offset and SLR are added downstream as for
+COAST-RP (§7). RPs above 250 y extrapolate ~46 years of skew surges and are flagged as such
+(TODO.md).
+
 ## 9. Comparison with other global coastal boundary conditions
 
 | | This pipeline (GCFM) | Fathom RFA (Collings et al., 2024; Wing et al., 2024) | Chaudhuri et al. (2027) |
@@ -980,6 +1057,8 @@ each script's docstring for further arguments):
 19. `surge_correction.py`
 20. `export_input_tables.py`
 21. `input_analysis/make_boundary_forcing_figures.py` (the summary figures and their descriptions)
+22. `build_level_product.py stations`, `extract_gtsm_series.py --stations-csv ... --variable surge`,
+    then `build_level_product.py build` (§8.4; `--out-dir .cleanup_baseline/level_product`, ~1.5 h)
 
 Inputs on `<data_root>` are read only.
 

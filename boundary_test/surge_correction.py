@@ -22,7 +22,9 @@ GTSM's positive skew surges. Predicted per gauge by leave-one-out from the other
 median, or an inverse-distance mean within RADII_KM (gauges on the same GTSM station or within
 SAME_SITE_KM excluded, at least MIN_NEIGHBOURS, else the global median). Scored on the total
 levels with the gauge tide (surge error only) and with the FES tide (production). Stability: r
-from the first and second half of each record.
+from the first and second half of each record. `ratio_fes` is r with GTSM's skew surges taken on
+the hourly FES2022 tide instead of GTSM's own (surge + FES tide minus FES tide), the basis of
+`build_level_product.py`, where GTSM's tide is not available at every station.
 
 Writes <out-dir>/surge_correction/{sites.parquet, estimator.csv, deficit.csv, correction.csv}.
 
@@ -133,14 +135,16 @@ def _site_models(out: Path, site: dict, surge: np.ndarray, surge_idx: np.ndarray
         return None
     n_hours = bases["b_re"].shape[0]
     tides = {k: np.asarray(bases[b + "_re"]) @ site[h].real + np.asarray(bases[b + "_im"]) @ site[h].imag
-             for k, h, b in (("gauge", "hc_gauge", "b"), ("gtsm", "hc_gtsm", "b"), ("fes", "hc_fes", "f"))}
+             for k, h, b in (("gauge", "hc_gauge", "b"), ("gtsm", "hc_gtsm", "b"), ("fes", "hc_fes", "f"),
+                             ("fes_hourly", "hc_fes", "b"))}
     obs = np.full(n_hours, np.nan)
     obs[idx] = remove_annual_means(idx, z)
     gtsm = np.full(n_hours, np.nan)
     gtsm[surge_idx] = station_series(surge, pos[site["gtsm_index"]])
     year = (HOURLY_START + np.arange(n_hours).astype("timedelta64[h]")).astype("datetime64[Y]").astype(int) + 1970
     skew, years = {}, {}
-    for name, total, tide in (("gauge", obs, tides["gauge"]), ("gtsm", gtsm + tides["gtsm"], tides["gtsm"])):
+    for name, total, tide in (("gauge", obs, tides["gauge"]), ("gtsm", gtsm + tides["gtsm"], tides["gtsm"]),
+                              ("gtsmfes", gtsm + tides["fes_hourly"], tides["fes_hourly"])):
         hw, height = high_waters(tide)
         skew[name] = skew_surges(total, hw, height)
         yr = pd.Series(np.isfinite(skew[name])).groupby(year[hw]).mean()
@@ -157,8 +161,11 @@ def _site_models(out: Path, site: dict, surge: np.ndarray, surge_idx: np.ndarray
             ok = keep & np.isfinite(s)
             n_yr = len([y for y in common if (part == "all") or (part == "first") == (y < half)])
             models[(name, part)] = surge_model(s[ok], n_yr)
+    yr, s = years["gtsmfes"][0], skew["gtsmfes"]
+    models[("gtsmfes", "all")] = surge_model(s[np.isin(yr, common) & np.isfinite(s)], len(common))
     steps = {"gauge": 1.0, "gtsm": 1.0, "fes": FES_STEP_MIN / 60.0}
-    return {"models": models, "peaks": {k: tide_peaks(t, steps[k]) for k, t in tides.items()}, "n_years": len(common)}
+    return {"models": models, "peaks": {k: tide_peaks(t, steps[k]) for k, t in tides.items() if k in steps},
+            "n_years": len(common)}
 
 
 def _site_task(args) -> list[dict]:
@@ -276,6 +283,7 @@ def main() -> None:
         for rp in RPS:
             row[f"skew_gauge_rp{rp}_m"] = skew_level(g, rp)
             row[f"skew_gtsm_rp{rp}_m"] = skew_level(t, rp)
+            row[f"skew_gtsmfes_rp{rp}_m"] = skew_level(m["models"][("gtsmfes", "all")], rp)
             row[f"gev_gauge_rp{rp}_m"] = e[f"rp{rp}_m"]
             row[f"coast_rp_etc_rp{rp}_m"] = e.get(f"coast_rp_etc_rp{rp}_m", np.nan)
         for part in ("first", "second"):
@@ -284,6 +292,7 @@ def main() -> None:
         rows.append(row | levels_row(m))
     s = pd.DataFrame(rows).set_index("file_name")
     s["ratio"] = s[f"skew_gauge_rp{RATIO_RP}_m"] / s[f"skew_gtsm_rp{RATIO_RP}_m"]
+    s["ratio_fes"] = s[f"skew_gauge_rp{RATIO_RP}_m"] / s[f"skew_gtsmfes_rp{RATIO_RP}_m"]
     s["calibrate"] = s.station_class != "tc_dominated"
 
     est = []
@@ -295,7 +304,8 @@ def main() -> None:
                          ("gtsm_gaugetide - gauge (surge)", s[f"gtsm_gaugetide_rp{rp}_m"] - ref),
                          ("gtsm_gtsm - gtsm_gaugetide (GTSM tide)", s[f"gtsm_gtsm_rp{rp}_m"] - s[f"gtsm_gaugetide_rp{rp}_m"]),
                          ("gtsm_fes - gtsm_gaugetide (FES tide)", s[f"gtsm_fes_rp{rp}_m"] - s[f"gtsm_gaugetide_rp{rp}_m"]),
-                         ("gtsm_fes - gauge (production)", s[f"gtsm_fes_rp{rp}_m"] - ref)):
+                         ("gtsm_fes - gauge (production)", s[f"gtsm_fes_rp{rp}_m"] - ref),
+                         ("skew surge on FES tide - on GTSM tide", s[f"skew_gtsmfes_rp{rp}_m"] - s[f"skew_gtsm_rp{rp}_m"])):
             for cls, x_c in x.groupby(s.station_class):
                 est.append({"comparison": label, "rp": rp, "station_class": cls, **_stats(x_c)})
             est.append({"comparison": label, "rp": rp, "station_class": "all", **_stats(x)})

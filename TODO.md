@@ -157,12 +157,22 @@ Open:
   analysis. Until then `boundaries.static_station_levels` raises on the old MDT station file.
   The SFINCS calibration runs predate the offset (forcing ~5 cm lower); recalibrating fsf should
   use regenerated forcing (`boundary_test/INPUT_ANALYSIS.md` §7).
-- **Surge-deficit correction for production** (test 9 passed, INPUT_ANALYSIS.md §8.1;
-  `boundary_test/surge_correction.py`): build the tide-corrected level of test 5 at all 23,226
-  GTSM stations (GTSM-ERA5 skew surge x r, convolved with the FES tide), r = inverse-distance mean
-  of the gauge ratios within 500 km, else 1.19. Open: cap r on small-surge coasts (ratios > 2 rest
-  on skew surges of a few dm); whether GTSM-ERA5-E (1950-2024) changes r; the tidal covariate where
-  skew surge and tide are dependent (not tested here).
+- **Level product (ii) built, not wired into production** (`boundary_test/build_level_product.py`,
+  INPUT_ANALYSIS.md §8.4; levels and generator hydrographs at 23,225 COAST-RP stations). r is
+  capped at 2.0 and uses the FES tide. Against COAST-RP: +0.03 m (RP10) and +0.05 m (RP100) median;
+  2,793 stations differ by > 0.5 m at RP1000. Where it departs strongly (southern North Sea -0.6 to
+  -1.0 m, western Baltic +0.5 m) the gauges side with the new product. Open:
+  - the TC part: r inflates the ETC part at TC stations (96% of the > 0.5 m TC cases are higher);
+    test 10 decides;
+  - 232 stations count as TC-dominated at RP2 only, where COAST-RP_TC is flat (tide floor) from
+    RP2 to RP10; consider requiring dominance at RP10 before switching to the TC shape;
+  - 152 of 209,025 hydrographs (mostly RP2, macrotidal) overshoot the RP level by up to 0.19 m,
+    because a neighbouring high water in the window already exceeds it;
+  - IBIS_GL_TS_MO_62198 has no FES value (no output);
+  - whether GTSM-ERA5-E (1950-2024) changes r, and the tidal covariate where skew surge and tide
+    are dependent;
+  - next plan steps: basin-head QA, interpolation to tiles, SFINCS forcing, fsf recalibration,
+    test 8, tile rerun.
 - **Return periods above 250 y: tail of the level product.** COAST-RP grows by 0.11 m per decade
   of RP up to RP100 and 0.083 m from RP500 to RP1000 (median of 22,670 stations); RP1000 - RP100 is
   0.79 x RP100 - RP10 (0.72 above 30 deg latitude, 0.94 below; < 0.5 at 16% of stations). The ETC

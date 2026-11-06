@@ -194,12 +194,12 @@ def _score_site(args) -> tuple[list[dict], dict]:
                                 ("generator_smooth", True)):
             if is_tc:
                 shape = tc_shapes if tc_shapes is not None else gaussian_shape(TC_HALF_WIDTH_HR, half_hr)
-                shape = _fit_length(shape, len(tide_win))
+                shape = fit_length(shape, len(tide_win))
             else:
                 try:
                     windows = surge_win[sel][:, c - half_hr:c + half_hr + 1]
                     if variant == "generator_smooth":
-                        windows = _running_mean(windows, SMOOTH_HR)
+                        windows = running_mean(windows, SMOOTH_HR)
                     shape = (duration_mean_shape(windows) if on_max is None
                              else median_surge_shape(windows, centre_on_max=on_max))
                 except ValueError:  # every selected maximum is a spring tide with no positive surge
@@ -258,7 +258,7 @@ def _swap_measures(sel, centres, gtsm_tide, surge_win, level_win, c, half_hr, fe
         if min(hw, centres[j]) - half_hr < 0 or max(hw, centres[j]) + half_hr + 1 > len(gtsm_tide):
             continue
         raw = surge_win[j, c - half_hr:c + half_hr + 1]
-        smooth = _running_mean(raw[None, :], SMOOTH_HR)[0]
+        smooth = running_mean(raw[None, :], SMOOTH_HR)[0]
         if not (raw[half_hr] > 0 and smooth[half_hr] > 0):
             continue
         tide_at_peak = np.interp(t10, hours, gtsm_tide[centres[j] - half_hr:centres[j] + half_hr + 1])
@@ -269,7 +269,7 @@ def _swap_measures(sel, centres, gtsm_tide, surge_win, level_win, c, half_hr, fe
                 rp_hydrograph(tide_s, np.interp(t10, hours, surge_s), target)["level"])))
         tide = np.interp(t10, hours, gtsm_tide[hw - half_hr:hw + half_hr + 1]) * mhws["fes"] / mhws["gtsm"]
         out["swap_tide"].append(profile_measures(hourly_profile(rp_hydrograph(tide, shape, target)["level"])))
-        own = _running_mean(surge_win[[j]][:, c - half_hr:c + half_hr + 1], SMOOTH_HR)
+        own = running_mean(surge_win[[j]][:, c - half_hr:c + half_hr + 1], SMOOTH_HR)
         try:
             own_shape = median_surge_shape(own)
         except ValueError:
@@ -283,12 +283,12 @@ def _swap_measures(sel, centres, gtsm_tide, surge_win, level_win, c, half_hr, fe
     return {v: pd.DataFrame(m).median().to_dict() for v, m in out.items() if m}
 
 
-def _running_mean(windows: np.ndarray, width_hr: int) -> np.ndarray:
+def running_mean(windows: np.ndarray, width_hr: int) -> np.ndarray:
     kernel = np.ones(width_hr) / width_hr
     return np.vstack([np.convolve(np.nan_to_num(w), kernel, mode="same") for w in windows])
 
 
-def _fit_length(shape: np.ndarray, n: int) -> np.ndarray:
+def fit_length(shape: np.ndarray, n: int) -> np.ndarray:
     if len(shape) == n:
         return shape
     c, h = len(shape) // 2, n // 2
