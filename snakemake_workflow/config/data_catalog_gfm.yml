@@ -535,3 +535,33 @@ mdt_cnes_cls22:
       combining drifters, hydrography profiles and high frequency radar data,
       Earth Syst. Sci. Data 18, 2285-2303.
     paper_doi: 10.24400/527896/a01-2023.003 (product); 10.5194/essd-18-2285-2026 (paper)
+
+fes2014_ocean_tide:
+  data_type: GeoDataset
+  driver: netcdf
+  # Directory: one file per constituent, {constituent}.nc (pyTMD model "FES2014_extrapolated",
+  # read with its file paths remapped to this folder).
+  path: inputs/fes2014/fes2014b_elevations_extrapolated/ocean_tide_extrapolated
+  crs: 4326
+  filesystem: local
+  meta:
+    category: ocean
+    description: >
+      FES2014b ocean tide atlas, extrapolated onto the coast, 34 constituents on a 1/16 deg
+      grid, amplitude in cm and phase in degrees. Fallback for FES2022 at the boundary nodes
+      where the version rule fires (basin-head artefacts of FES2022; boundary_test,
+      INPUT_ANALYSIS.md test 6).
+    source_author: F. H. Lyard, D. J. Allain, M. Cancet, L. Carrère, N. Picot (LEGOS, NOVELTIS,
+      CLS, CNES; AVISO+)
+    source_url: https://www.aviso.altimetry.fr/en/data/products/auxiliary-products/global-tide-fes.html
+    source_access: free registration (AVISO+ account)
+    source_notes: >
+      Download `fes2014b_elevations_extrapolated/ocean_tide_extrapolated.tar.xz` (check it
+      against the shipped .sha256sum) and unpack it in
+      `inputs/fes2014/fes2014b_elevations_extrapolated/`. Use the extrapolated ocean tide, not
+      `load_tide`.
+    source_version: FES2014b
+    source_license: AVISO+ licence agreement (free, registration required)
+    paper_ref: Lyard et al. (2021), FES2014 global ocean tide atlas - design and performance,
+      Ocean Sci. 17, 615-649.
+    paper_doi: 10.5194/os-17-615-2021

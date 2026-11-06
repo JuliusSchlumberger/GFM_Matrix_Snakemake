@@ -1,0 +1,33 @@
+Sensitivity of the FES version rule to its two thresholds. The rule replaces FES2022 by FES2014 at a
+point where MHWS_FES2022 > R x MHWS_FES2014 and MHWS_FES2022 - MHWS_FES2014 > D. Each cell is one
+(R, D) pair: R on the vertical axis, D on the horizontal axis. The red frame marks the adopted pair,
+R = 1.5 and D = 1.25 m.
+
+(a) The rule applied at the GESLA tide gauges (3 firings at the adopted pair; 905 gauges with MHWS
+from GESLA, FES2022 and FES2014). The number in a cell is how many gauges the rule fires at
+("fires": FES2014 would be used there). Each firing is then scored against the gauge's own MHWS: it
+is a fix if FES2014 is closer to the gauge than FES2022 by more than 5 cm, a harm if it is further
+by more than 5 cm, and neutral otherwise. The cell colour is the number of harms (white = none). A
+good pair fires only where FES2022 is badly wrong: few firings, all of them fixes, no harm. Fixes at
+the adopted pair: 3; harms: 0.
+
+(b) The rule applied at the 178 known artefacts: boundary nodes in the four basins of fig05 whose
+FES2022 MHWS exceeds 1.25 x the largest MHWS observed in that basin (Minas 8.15 m, Strait of
+Magellan 5.5 m, Colorado mouth 5.0 m, Lynn Canal 2.8 m; half the record or upper spring range, and
+the Skagway gauge). The factor 1.25 is a margin on the observed value, not a threshold of the rule:
+it defines a reference set of nodes that are wrong without looking at FES2014, so the test is not
+circular. The number in a cell is how many of the 178 the rule replaces, the colour that share
+(white 0%, dark blue 100%). A good pair replaces all of them.
+
+Why D matters most: comparing the two atlases at the gauges, binned by how much FES2022 exceeds
+FES2014 in MHWS. The gain of switching at a gauge is |FES2022 - GESLA| - |FES2014 - GESLA| in MHWS:
+positive when FES2014 is the better value (-inf .. -0.25 m: n=29, FES2014 closer at 31%, median gain
+-0.34 m; -0.25 .. -0.10 m: n=32, FES2014 closer at 44%, median gain -0.04 m; -0.10 .. +0.10 m:
+n=770, FES2014 closer at 41%, median gain -0.00 m; +0.10 .. +0.25 m: n=44, FES2014 closer at 43%,
+median gain -0.03 m; +0.25 .. +0.50 m: n=22, FES2014 closer at 50%, median gain +0.02 m; +0.50 ..
++0.75 m: n=3, FES2014 closer at 0%, median gain -0.64 m; +1.00 .. +inf m: n=5, FES2014 closer at
+80%, median gain +1.43 m). Below about 1 m FES2014 is not the better atlas, so switching there does
+harm; only above about 1 m does it reliably fix FES2022. D therefore must sit above the largest
+difference at which FES2014 is wrong (Trondheim, 1.08 m) and below the smallest at which FES2022 is
+badly wrong and must be caught (Port Alberni, 1.43 m). R is a secondary guard on large-tide coasts;
+the known artefacts bound it from above.

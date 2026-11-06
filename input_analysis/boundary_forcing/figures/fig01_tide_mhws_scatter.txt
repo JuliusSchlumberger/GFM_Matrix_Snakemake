@@ -1,0 +1,22 @@
+Mean high water springs (MHWS, height above local mean sea level) of three tide sources against the
+GESLA tide gauges, at the 698 quality sites of the tide set (harmonic fit over >= 3 years explaining
+>= 50% of the variance, GTSM station within 10 km). Each dot is one gauge; the grey line is 1:1. (a)
+GTSM v3 tide-only run at the paired GTSM station; (b) FES2022 atlas at the gauge position; (c)
+FES2014 atlas at the gauge position. The box gives the median of the ratio source / gauge, the mean
+absolute error (MAE) and the number of sites n.
+
+All sources go through the same chain, so method differences cannot explain what remains: GESLA and
+GTSM series are fitted by least squares with the 34 FES constituents (nodal corrections, inferred
+minor constituents), FES uses its atlas constants, all are predicted over the same 18.61-year nodal
+cycle at 10 min without the seasonal Sa / Ssa terms, and MHWS is computed by the same code
+(src/tide_statistics.py).
+
+Why n differs between the panels: every quality site has a GTSM station, so (a) has all 698. FES
+values are read at the gauge itself and need a valid atlas cell within 20 km. FES2022 has no value
+at none (sites lost to a since-fixed extraction error, filled by rerunning levels_tides.py), FES2014
+none at Vancouver_Bc, Point_Atkinson_BC, Campbell_River_BC (inner harbours outside its 1/16 deg
+ocean mask).
+
+Reading: GTSM's tide is 8% too large in the median, mostly from S2 and M2 (fig03). FES2022 matches
+the gauges best; FES2014 is close but has more scatter, which is why FES2022 is the primary tide
+source and FES2014 only the fallback at basin heads (fig04-fig06).

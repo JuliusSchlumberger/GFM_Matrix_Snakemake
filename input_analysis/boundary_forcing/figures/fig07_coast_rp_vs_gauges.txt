@@ -1,0 +1,18 @@
+COAST-RP storm-tide return levels against the tide gauges, by IPCC AR6 reference region (Iturbide et
+al., 2020). Sites: the record-based extremes set (623 GESLA sites with >= 20 complete years since
+1979 and a GTSM station within 10 km, whatever their tide). Per site the difference is COAST-RP at
+the paired station minus a GEV fit to the gauge's annual maxima (levels relative to local mean sea
+level), at (a) RP10 and (b) RP100. Dot = median over the region's sites, bar = interquartile range;
+negative = COAST-RP too low. (c) Number of sites per region (log scale). The top row pools all
+sites.
+
+Regions: each gauge takes the nearest AR6 land region within 200 km, otherwise the AR6 ocean region
+containing it (remote islands, e.g. Hawaii in the North Pacific Ocean region). Regions with fewer
+than 5 sites are pooled in the last row. Regions are ordered by their RP100 median, most negative
+first. The numbers are in fig07_coast_rp_vs_gauges_data.csv.
+
+Reading: overall COAST-RP is -0.06 m (RP10) and -0.07 m (RP100) relative to the gauges. That near-
+zero median hides two offsetting errors: GTSM's tide is too large (fig01) and its surge too low, so
+with the tide excess removed COAST-RP is about 0.11-0.12 m too low. The largest deficits are in
+tropical-cyclone regions, where 30-40-year gauge records also under-sample cyclones, so the gauge
+GEV is itself uncertain there.

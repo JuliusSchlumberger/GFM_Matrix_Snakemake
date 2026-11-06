@@ -1,7 +1,7 @@
 """Test 6: EOT20 and FES2014 as reference tide atlases, at the gauges and at the FES2022 boundary nodes.
 
-FES2014 is the adopted reference and fallback (the version rule below); EOT20, a residual model on
-FES2014b, is kept here only as the comparison that led to that choice.
+FES2014 is the adopted fallback atlas (the version rule of `atlas_rule_sensitivity.py`, on MHWS);
+EOT20, a residual model on FES2014b, is kept here only as the comparison that led to that choice.
 
 Gauges (all 1,154; scored on the tide set): each reference atlas is extracted at the gauge with
 `fes_tide_stats.extract_constants` (EOT20 bilinear, since it has land holes; FES2014 spline, as
@@ -15,12 +15,10 @@ FES nodes (the test tiles' boundary nodes, `fes_nodes.parquet`): a full nodal-cy
 A = |M2| + |S2| + |K1| + |O1| (about MHWS on semidiurnal and mixed coasts). A node is flagged when
 A_FES > FLAG_RATIO x the largest A_EOT20 within NEIGHBOUR_KM, and unverifiable when EOT20 has no
 value within NEIGHBOUR_KM. FES2014 is compared at the node itself (both FES versions are
-extrapolated to the coast). Version rule: FES2022 is replaced by FES2014 where
-A_FES2022 > VERSION_RATIO x A_FES2014 and A_FES2022 - A_FES2014 > VERSION_DIFF_M
-(`atlas_rule_sensitivity.py` scans both thresholds).
+extrapolated to the coast).
 
-FES2014 (`fes2014b_elevations_extrapolated/ocean_tide_extrapolated.tar.xz` from AVISO) is read
-from FES2014_ROOT/fes2014/ocean_tide_extrapolated, the archive unpacked there.
+Each reference atlas is read from the folder that holds its constituent files (catalog entries
+`fes2014_ocean_tide` and, for the record of this test, EOT20 under inputs/EOT20/ocean_tides).
 
 Writes <out-dir>/analysis/{atlas_gauges.csv, atlas_nodes.parquet, atlas_flagged_nodes.csv} and
 atlas_gauges.png, atlas_nodes_map.png, atlas_versions.png, atlas_basins.png.
@@ -51,16 +49,14 @@ from fes_tide_stats import FES_MODEL, STEP_MIN, ensure_local_fes, extract_consta
 from levels_tides import FES_CACHE, GROUP_DEG, levels  # noqa: E402
 from site_sets import GRID, INK, MUTED, _save, _style  # noqa: E402
 
-EOT20_ROOT = Path("P:/11212688-004-global-floodmaps/modelling/inputs")
-FES2014_ROOT = REPO / ".cleanup_baseline"
-REFERENCE_ATLASES = {"eot20": ("EOT20", EOT20_ROOT, "EOT20", "bilinear"),
-                     "fes2014": ("FES2014", FES2014_ROOT, "FES2014_extrapolated", "spline")}
+INPUTS = Path("P:/11212688-004-global-floodmaps/modelling/inputs")
+REFERENCE_ATLASES = {"eot20": ("EOT20", INPUTS / "EOT20" / "ocean_tides", "EOT20", "bilinear"),
+                     "fes2014": ("FES2014", INPUTS / "fes2014" / "fes2014b_elevations_extrapolated"
+                                 / "ocean_tide_extrapolated", "FES2014_extrapolated", "spline")}
 FES_NODES = REPO / ".cleanup_baseline" / "boundary_test" / "fes_nodes.parquet"
 PROXY = ("m2", "s2", "k1", "o1")
 SEASONAL = ("sa", "ssa")
 FLAG_RATIO = 1.5
-VERSION_RATIO = 1.5
-VERSION_DIFF_M = 1.0
 NEIGHBOUR_KM = 25.0
 EARTH_RADIUS_KM = 6371.0
 POINTS_PER_TASK = 25
@@ -73,14 +69,12 @@ LABELS = {"fes": "FES2022", "eot20": "EOT20", "fes2014": "FES2014"}
 OFF_SCALE_NOTE = {"eot20": "EOT20 S2 artefacts, St Lawrence"}
 
 
-def version_flag(fes_proxy, fes2014_proxy, ratio: float = VERSION_RATIO, diff_m: float = VERSION_DIFF_M):
-    """Flag where FES2022 is replaced by FES2014; NaN in either proxy never flags."""
-    return (fes_proxy > ratio * fes2014_proxy) & (fes_proxy - fes2014_proxy > diff_m)
-
-
 def reference_model(name: str):
-    _, root, model_name, _ = REFERENCE_ATLASES[name]
-    return pyTMD.io.model(str(root)).elevation(model_name)
+    _, files_dir, model_name, _ = REFERENCE_ATLASES[name]
+    # pyTMD expects its own folder layout; the inputs keep the provider's, so the file paths are remapped.
+    model = pyTMD.io.model(verify=False).elevation(model_name)
+    model.model_file = [files_dir / Path(f).name for f in model.model_file]
+    return model
 
 
 def grouped_constants(model, lonlat: np.ndarray, method: str = "spline") -> np.ndarray:
@@ -171,7 +165,6 @@ def node_table() -> pd.DataFrame:
     out["ratio_fes_fes2014"] = out.fes_proxy_m / out.fes2014_proxy_m
     out["status"] = np.where(out.eot20_max_25km_m.isna(), "unverifiable",
                              np.where(out.ratio_fes_eot20 > FLAG_RATIO, "flagged", "ok"))
-    out["version_flag"] = version_flag(out.fes_proxy_m, out.fes2014_proxy_m)
     return out
 
 
@@ -220,18 +213,14 @@ def plot_gauges(t: pd.DataFrame, dest: Path) -> None:
 
 def plot_nodes_map(nodes: pd.DataFrame, dest: Path) -> None:
     fig, ax = plt.subplots(figsize=(13, 6.5))
-    missing = nodes.fes2014_proxy_m.isna()
-    classes = ((~nodes.version_flag & ~missing, GRID, 2, "FES2022 kept"),
-               (missing, MUTED, 8, "no FES2014 value"),
-               (nodes.version_flag, "#e34948", 18, "replaced by FES2014"))
-    for mask, color, size, label in classes:
-        s = nodes[mask]
-        ax.scatter(s.node_lon, s.node_lat, s=size, color=color, linewidths=0, label=f"{label} (n={len(s)})")
+    for status, color, size in (("ok", GRID, 2), ("unverifiable", MUTED, 8), ("flagged", "#e34948", 18)):
+        s = nodes[nodes.status == status]
+        ax.scatter(s.node_lon, s.node_lat, s=size, color=color, linewidths=0, label=f"{status} (n={len(s)})")
     for name, (x0, x1, y0, y1) in BASINS.items():
         ax.add_patch(plt.Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False, edgecolor=INK, linewidth=0.8))
     ax.set(xlim=(-180, 180), ylim=(-60, 85), xlabel="longitude", ylabel="latitude",
-           title=f"FES2022 boundary nodes of the test tiles: version rule, FES2022 proxy > {VERSION_RATIO} x FES2014 "
-                 f"and > FES2014 + {VERSION_DIFF_M:.1f} m")
+           title=f"FES2022 boundary nodes of the test tiles: flagged = FES proxy > {FLAG_RATIO} x the largest EOT20 "
+                 f"proxy within {NEIGHBOUR_KM:.0f} km")
     ax.title.set_fontsize(10)
     ax.legend(frameon=False, fontsize=8, loc="lower left", markerscale=2)
     _style(ax)
@@ -251,18 +240,13 @@ def plot_versions(nodes: pd.DataFrame, dest: Path) -> None:
     ax.title.set_fontsize(10)
     _style(ax)
     ax = fig.add_axes([0.66, 0.1, 0.32, 0.8])
-    for mask, color, size, label in ((~nodes.version_flag & (nodes.status != "flagged"), GRID, 3, "kept"),
-                                     (~nodes.version_flag & (nodes.status == "flagged"), "#eb6834", 6,
-                                      "kept, EOT20-flagged"),
-                                     (nodes.version_flag, "#e34948", 9, "replaced by FES2014")):
-        s = nodes[mask]
-        ax.scatter(s.fes2014_proxy_m, s.fes_proxy_m, s=size, color=color, linewidths=0, label=f"{label} (n={len(s)})")
+    for status, color, size in (("ok", GRID, 3), ("unverifiable", MUTED, 6), ("flagged", "#e34948", 9)):
+        s = nodes[nodes.status == status]
+        ax.scatter(s.fes2014_proxy_m, s.fes_proxy_m, s=size, color=color, linewidths=0, label=f"{status} (n={len(s)})")
     hi = float(np.nanmax(nodes[["fes_proxy_m", "fes2014_proxy_m"]].to_numpy())) * 1.05
-    x = np.linspace(0, hi, 200)
     ax.plot([0, hi], [0, hi], color=MUTED, linewidth=1)
-    ax.plot(x, np.maximum(VERSION_RATIO * x, x + VERSION_DIFF_M), color=INK, linewidth=1, linestyle="--")
     ax.set(xlim=(0, hi), ylim=(0, hi), xlabel="FES2014 proxy (m)", ylabel="FES2022 proxy (m)",
-           title=f"Per node; dashed = rule boundary ({VERSION_RATIO} x and + {VERSION_DIFF_M:.1f} m)")
+           title="Per node; status from the EOT20 screen")
     ax.title.set_fontsize(10)
     ax.legend(frameon=False, fontsize=8, loc="upper left", markerscale=2)
     _style(ax)
@@ -279,10 +263,10 @@ def plot_basins(nodes: pd.DataFrame, gauges: pd.DataFrame, dest: Path) -> None:
             ax = axes[i, j]
             sc = ax.scatter(b.node_lon, b.node_lat, c=b[f"{src}_proxy_m"], s=14, cmap="viridis", vmin=0, vmax=vmax,
                             linewidths=0)
-            flagged = b[b.version_flag]
+            flagged = b[b.status == "flagged"]
             if i == 0 and len(flagged):
                 ax.scatter(flagged.node_lon, flagged.node_lat, s=40, facecolors="none", edgecolors="#e34948",
-                           linewidths=1.0, label=f"replaced by FES2014 (n={len(flagged)})")
+                           linewidths=1.0, label=f"EOT20-flagged (n={len(flagged)})")
                 ax.legend(frameon=False, fontsize=8, loc="lower left")
             g = gauges[gauges.lon.between(x0, x1) & gauges.lat.between(y0, y1)]
             ax.scatter(g.lon, g.lat, marker="^", s=40, color=INK)
@@ -314,9 +298,8 @@ def main() -> None:
     out = Path(args.out_dir)
     dest = out / "analysis"
     if args.plots_only:
-        nodes = pd.read_parquet(dest / "atlas_nodes.parquet")
-        nodes["version_flag"] = version_flag(nodes.fes_proxy_m, nodes.fes2014_proxy_m)
-        plot_all(pd.read_csv(dest / "atlas_gauges.csv", index_col=0), nodes, dest)
+        plot_all(pd.read_csv(dest / "atlas_gauges.csv", index_col=0), pd.read_parquet(dest / "atlas_nodes.parquet"),
+                 dest)
         return
     gauges = gauge_table(out, args.workers)
     gauges.round(4).to_csv(dest / "atlas_gauges.csv")
@@ -332,7 +315,6 @@ def main() -> None:
 
     nodes = node_table()
     nodes.to_parquet(dest / "atlas_nodes.parquet")
-    print(f"version rule: {int(nodes.version_flag.sum())} nodes replaced by FES2014")
     flagged = nodes[nodes.status == "flagged"].sort_values("ratio_fes_eot20", ascending=False)
     flagged.round(3).to_csv(dest / "atlas_flagged_nodes.csv", index=False)
     print("\nnode status\n" + nodes.status.value_counts().to_string())

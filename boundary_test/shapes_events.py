@@ -15,8 +15,9 @@ among the site's annual maxima ((n + 1) / rank). COAST-HG gives one RP100 event 
 tide variants, 10-min series sampled hourly). GTSM tide: re-predicted from its harmonic fit.
 MHW and MHWS: each source's own levels (`tide_levels.parquet`, variant full).
 
-Writes <out-dir>/events.parquet and <out-dir>/event_profiles.npz (level / peak per event, hourly
-offsets -WINDOW_HR..WINDOW_HR; row i belongs to events row i).
+Writes <out-dir>/events.parquet and <out-dir>/event_profiles.npz (level / peak per event and the
+surge residual in m, hourly offsets -WINDOW_HR..WINDOW_HR; row i belongs to events row i). The
+surge is the observed level minus the site's harmonic tide (GESLA) or the CDS surge series (GTSM).
 
 Usage:
     python boundary_test/shapes_events.py --out-dir .cleanup_baseline/level_sources [--workers 3]
@@ -75,10 +76,11 @@ def event_metrics(level: np.ndarray, surge: np.ndarray | None, centre: int, mhw:
     return row
 
 
-def series_events(level: np.ndarray, surge: np.ndarray | None, mhw: float, mhws: float) -> tuple[list[dict], list]:
+def series_events(level: np.ndarray, surge: np.ndarray | None, mhw: float,
+                  mhws: float) -> tuple[list[dict], list, list]:
     """Annual-maximum events of a full-length hourly series (NaN where missing)."""
     years = (HOURLY_START + np.arange(N_HOURS).astype("timedelta64[h]")).astype("datetime64[Y]").astype(int) + 1970
-    rows, profiles = [], []
+    rows, profiles, surges = [], [], []
     df = pd.DataFrame({"z": level, "year": years})
     good = df.groupby("year").z.count() >= YEAR_COVERAGE * 8766
     for year in good[good].index:
@@ -90,12 +92,13 @@ def series_events(level: np.ndarray, surge: np.ndarray | None, mhw: float, mhws:
         w = level[lo:hi]
         rows.append({"year": int(year), **event_metrics(w, None if surge is None else surge[lo:hi], WINDOW_HR, mhw, mhws)})
         profiles.append((w / level[centre]).astype(np.float32))
+        surges.append((np.full(len(w), np.nan) if surge is None else surge[lo:hi]).astype(np.float32))
     if rows:
         peaks = np.array([r["peak_m"] for r in rows])
         rank = (-peaks).argsort().argsort() + 1
         for r, k in zip(rows, rank):
             r["rp_empirical_yr"] = (len(rows) + 1) / k
-    return rows, profiles
+    return rows, profiles, surges
 
 
 def _full_hourly(idx: np.ndarray, z: np.ndarray) -> np.ndarray:
@@ -104,7 +107,7 @@ def _full_hourly(idx: np.ndarray, z: np.ndarray) -> np.ndarray:
     return full
 
 
-def _site_task(args) -> tuple[list[dict], list]:
+def _site_task(args) -> tuple[list[dict], list, list]:
     out, sites, hc, levels = args
     out = Path(out)
     b_re = np.load(out / "hourly_basis_re.npy", mmap_mode="r")
@@ -112,7 +115,7 @@ def _site_task(args) -> tuple[list[dict], list]:
     surge_st, surge_time, surge = load_series(out, "surge")
     pos = dict(zip(surge_st.gtsm_index, range(len(surge_st))))
     surge_idx, _ = on_hourly_grid(surge_time.to_numpy(), np.zeros(len(surge_time)))
-    rows, profiles = [], []
+    rows, profiles, surges = [], [], []
     for site in sites:
         f = site["file_name"]
         for source in ("gesla", "gtsm"):
@@ -131,13 +134,15 @@ def _site_task(args) -> tuple[list[dict], list]:
                 level = _full_hourly(idx, z)
             else:
                 level = _full_hourly(surge_idx, station_series(surge, pos[site["gtsm_index"]])) + tide
-            r, p = series_events(level, level - tide, lev.get("mhw_m", np.nan), lev.get("mhws_m", np.nan))
+            r, p, s = series_events(level, level - tide, lev.get("mhw_m", np.nan), lev.get("mhws_m", np.nan))
             rows += [{"file_name": f, "source": source, **x} for x in r]
             profiles += p
-    return rows, profiles
+            surges += s
+    return rows, profiles, surges
 
 
-def coast_hg_events(pairs: pd.DataFrame, levels: dict) -> tuple[list[dict], list]:
+def coast_hg_events(pairs: pd.DataFrame, levels: dict) -> tuple[list[dict], list, list]:
+    """COAST-HG events; the dataset holds total level only, so the surge rows are NaN."""
     rows, profiles = [], []
     with netCDF4.Dataset(COAST_HG) as ds:
         for var, label in (("hydrograph_average_tide_signal", "coast_hg_average"),
@@ -153,7 +158,7 @@ def coast_hg_events(pairs: pd.DataFrame, levels: dict) -> tuple[list[dict], list
                 rows.append({"file_name": f, "source": label, "rp_empirical_yr": 100.0,
                              **event_metrics(win, None, WINDOW_HR, lev.get("mhw_m", np.nan), lev.get("mhws_m", np.nan))})
                 profiles.append((win / win[WINDOW_HR]).astype(np.float32))
-    return rows, profiles
+    return rows, profiles, [np.full(2 * WINDOW_HR + 1, np.nan, dtype=np.float32)] * len(profiles)
 
 
 def main() -> None:
@@ -170,16 +175,18 @@ def main() -> None:
     levels = {(r.file_name, r.source): {"mhw_m": r.mhw_m, "mhws_m": r.mhws_m} for r in tl.itertuples()}
     sites = [{"file_name": f, "gtsm_index": g, "row": i} for i, (f, g) in enumerate(zip(pairs.file_name, pairs.gtsm_index))]
     tasks = [(str(out), sites[i:i + SITES_PER_TASK], hc, levels) for i in range(0, len(sites), SITES_PER_TASK)]
-    rows, profiles = coast_hg_events(pairs, levels)
+    rows, profiles, surges = coast_hg_events(pairs, levels)
     with ProcessPoolExecutor(args.workers) as pool:
-        for k, (r, p) in enumerate(pool.map(_site_task, tasks)):
+        for k, (r, p, s) in enumerate(pool.map(_site_task, tasks)):
             rows += r
             profiles += p
+            surges += s
             if k % 10 == 0:
                 print(f"  {min((k + 1) * SITES_PER_TASK, len(sites))}/{len(sites)} sites", flush=True)
     events = pd.DataFrame(rows)
     events.to_parquet(out / "events.parquet")
-    np.savez(out / "event_profiles.npz", profiles=np.vstack(profiles), offset_hr=np.arange(-WINDOW_HR, WINDOW_HR + 1))
+    np.savez(out / "event_profiles.npz", profiles=np.vstack(profiles), surge_m=np.vstack(surges),
+             offset_hr=np.arange(-WINDOW_HR, WINDOW_HR + 1))
     print(events.groupby("source")[["d_above_msl", "t_within_0.25", "t_within_0.5"]].median().round(1).to_string())
 
 

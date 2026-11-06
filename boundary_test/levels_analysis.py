@@ -6,7 +6,7 @@ Comparisons (`tide_levels.parquet`, variant `no_seasonal` so GESLA's Sa/Ssa does
   fes_station vs gtsm_harm             the two models at the same point (model difference only)
   fes_gauge vs fes_station             FES2022 between gauge and GTSM station (location only)
 Per comparison: median difference and ratio, MAE, share within 0.1 m, per GESLA spring-range
-class, per region and per gauge-to-station distance class. Constituent ratios (M2, S2, K1, O1,
+class, per IPCC AR6 region (`regions.ar6_regions`) and per gauge-to-station distance class. Constituent ratios (M2, S2, K1, O1,
 M4) show which part of the tide carries a difference. Quality filter: >= 3 fitted years, fit
 explains >= 50% of the variance, station within MAX_DIST_KM.
 
@@ -17,6 +17,7 @@ Usage:
 """
 
 import argparse
+import sys
 import time
 from pathlib import Path
 
@@ -27,6 +28,9 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from regions import ar6_regions  # noqa: E402
+
 LEVELS = ("mhws_m", "mhw_m", "mlw_m", "mlws_m", "hat_m", "lat_m", "spring_range_m")
 COMPARISONS = (("gtsm_raw", "gesla_harm"), ("gtsm_harm", "gesla_harm"), ("fes_gauge", "gesla_harm"),
                ("fes_station", "gtsm_harm"), ("fes_gauge", "fes_station"))
@@ -36,30 +40,8 @@ DIST_BINS = (0, 1, 2, 5, 10, 100)
 MAX_DIST_KM = 10.0
 MIN_FIT_YEARS = 3.0
 MIN_EXPLAINED = 0.5
-NORDIC_COUNTRIES = {"NOR", "ISL", "FRO", "SJM"}
-BALTIC_COUNTRIES = {"DEU", "DNK", "SWE", "FIN", "EST", "LVA", "LTU", "POL", "RUS"}
-REGIONS = (  # (name, lon_min, lon_max, lat_min, lat_max); after the country rules, first match wins
-    ("Mediterranean+Black Sea", -6, 42, 30, 47.5), ("NE Atlantic islands", -32, -12, 27, 40),
-    ("NW Europe", -12, 31, 43, 72), ("N America Atlantic+Gulf", -100, -50, 15, 70),
-    ("N America Pacific", -170, -100, 15, 72), ("Japan+E Asia", 100, 160, 0, 60),
-    ("Australia+NZ", 110, 180, -50, -8), ("S America", -90, -30, -60, 15),
-    ("Africa+Indian Ocean", -20, 100, -40, 30))
 INK, MUTED, GRID = "#0b0b0b", "#898781", "#e1e0d9"
 COLORS = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948")
-
-
-def region_of(lon: float, lat: float, country: str) -> str:
-    if country in NORDIC_COUNTRIES:
-        return "Norway+Nordic Seas"
-    if country in BALTIC_COUNTRIES and 9.4 <= lon <= 31 and 53.4 <= lat <= 66:
-        return "Baltic+Kattegat"
-    for name, x0, x1, y0, y1 in REGIONS:
-        # The Atlantic coast of Iberia and France (Biscay) falls inside the Mediterranean box.
-        if name.startswith("Mediterranean") and lon < 0 and lat > 40:
-            continue
-        if x0 <= lon <= x1 and y0 <= lat <= y1:
-            return name
-    return "other"
 
 
 def wide_table(out: Path) -> pd.DataFrame:
@@ -70,7 +52,8 @@ def wide_table(out: Path) -> pd.DataFrame:
     fit = tl[tl.source == "gesla_harm"].set_index("file_name")[["fit_years", "fit_explained", "fit_rms_m"]]
     pairs = pd.read_parquet(out / "pairs.parquet").set_index("file_name")
     t = pairs[["site_name", "country", "lon", "lat", "gtsm_dist_km"]].join(fit).join(wide)
-    t["region"] = [region_of(x, y, c) for x, y, c in zip(t.lon, t.lat, t.country)]
+    regions = ar6_regions(t.lon.to_numpy(), t.lat.to_numpy())
+    t["region"] = (regions.region_name + " (" + regions.region + ")").to_numpy()
     t["range_class"] = pd.cut(t["gesla_harm__spring_range_m"], RANGE_BINS)
     t["dist_class"] = pd.cut(t.gtsm_dist_km, DIST_BINS)
     t["quality"] = (t.fit_years >= MIN_FIT_YEARS) & (t.fit_explained >= MIN_EXPLAINED) & (t.gtsm_dist_km <= MAX_DIST_KM)

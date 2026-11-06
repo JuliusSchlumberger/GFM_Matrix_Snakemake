@@ -1,0 +1,4 @@
+Internal: number of the 102,935 FES boundary nodes of the test tiles that the version rule switches
+from FES2022 to FES2014, for each pair of thresholds (R vertical, D horizontal; colour on a
+logarithmic scale, darker = more nodes). The red frame marks the adopted pair R = 1.5, D = 1.25 m.
+The rule and the two thresholds are described with fig06.

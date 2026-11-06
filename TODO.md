@@ -142,10 +142,14 @@ Open:
   the ~13,600 "invalid" FES nodes in `.cleanup_baseline/boundary_test/fes_nodes.parquet`. Rerun
   `levels_tides.py` and `fes_tide_stats.py` before those outputs are used again.
 - **Implement the FES version rule in the boundary preparation.** Decided (INPUT_ANALYSIS.md
-  test 6, §8.2): FES2014 replaces FES2022 where the |M2|+|S2|+|K1|+|O1| ratio > 1.5 and the
-  difference > 1 m (`boundary_test/atlas_check.version_flag`), gauges override both. Needs
-  FES2014 unpacked on `<data_root>` (only the archive is there; locally in `.cleanup_baseline`)
-  and a data catalog entry. Moderate inlet errors (0.25-1 m) stay uncaught.
+  test 6, §8.2): FES2014 replaces FES2022 where the two atlases' MHWS differ by the ratio and
+  minimum difference of `boundary_test/atlas_rule_sensitivity.version_flag`; gauges override
+  both. FES2014 is on `<data_root>` (catalog entry `fes2014_ocean_tide`). How far a gauge
+  value reaches is undefined. Moderate inlet errors (0.25-1 m) stay uncaught.
+- **Remove code and outputs no longer used by the input analysis.** Sweep `boundary_test/`
+  (superseded scripts and plot functions, e.g. the EOT20 parts of `atlas_check.py` once test 6
+  is closed), the diagnostic figures and tables under `.cleanup_baseline/level_sources/analysis/`
+  that no summary figure or table reads.
 - **Rerun after the 2020 baseline offset** (`boundary_conditions.slr_baseline_offset_m`, 0.049 m
   regionalised): `run_preparation.py boundary_conditions`, then every tile simulation and the
   analysis. Until then `boundaries.static_station_levels` raises on the old MDT station file.

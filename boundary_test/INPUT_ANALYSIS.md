@@ -49,12 +49,11 @@ Definitions used throughout:
   from 100 bootstrap refits.
 - **TC-dominated station:** one whose COAST-RP TC-only RP100 exceeds its ETC-only RP100 (3,050
   of 23,226 stations).
-- **Regions:** country rules, then longitude-latitude boxes (`levels_analysis.region_of`, first
-  match wins). "Norway+Nordic Seas" holds Norway, Iceland, the Faroes and Svalbard;
-  "Baltic+Kattegat" holds the Baltic-coast countries east of 9.4 E; "Mediterranean+Black Sea"
-  excludes the Atlantic coast north of 40 N (Biscay belongs to NW Europe); "NE Atlantic islands"
-  holds the Canaries, Madeira and the Azores. The tide set has no Baltic site at all: every
-  Baltic gauge fails the harmonic-fit filter (§2).
+- **Regions:** the IPCC AR6 reference regions (Iturbide et al., 2020; `regions.ar6_regions`). A
+  site takes the nearest AR6 land region within 200 km, otherwise the AR6 ocean region that
+  contains it (remote islands, e.g. Hawaii in the North Pacific Ocean region). The Baltic and
+  Norway are part of N.Europe (NEU); the Atlantic coasts of France and Iberia of
+  West&Central-Europe (WCE).
 
 ## 2. Common reference frame
 
@@ -87,8 +86,8 @@ Two properties of this frame were tested (§8.1, tests 1 and 3):
   steric) is part of the flood level, and COAST-RP (barotropic, fixed MSL) cannot represent it.
   Test 3 refits the gauge GEV with a linear trend removed instead of annual means: the RP10 level
   rises by a median 0.010 m (interquartile 0.003-0.019 m), the RP100 level by 0.007 m (within
-  the fit noise, -0.03..+0.03 m). The largest regional RP10 effects are S America (+0.023 m),
-  N America Pacific (+0.018 m) and the Baltic (+0.014 m). The seasonal cycle stays in both fits.
+  the fit noise, -0.03..+0.03 m). The largest regional RP10 effects are C.Australia (+0.044 m,
+  5 sites), the Equatorial Pacific (+0.026 m) and N.W.South-America (+0.024 m). The seasonal cycle stays in both fits.
   The term is an order of magnitude below the surge deficit, so the production level needs no
   MSL-anomaly term (`msl_sensitivity.png`).
 
@@ -104,62 +103,43 @@ Figures: `levels_scatter.png` (GTSM vs gauge, FES vs gauge, GTSM vs FES; MHWS), 
 | GTSM vs FES2022 at the GTSM station | 1.08 | 0.16 m | 52% |
 | FES2022 at the gauge vs at the GTSM station | 1.00 | 0.01 m | 98% |
 
-Median MHWS ratio per region (the colour scale of the maps):
+Median MHWS ratio per AR6 region with >= 5 quality sites (the colour scale of the maps; the 15
+smaller regions and a stratified sample of sites are in `input_analysis_data/tables.md`):
 
-| region | n | GTSM / gauge | FES / gauge | GTSM / FES | gauge spring range (m) |
+| region | n | gtsm_gesla | fes_gesla | gtsm_fes | spring_range_m |
 |---|---|---|---|---|---|
-| Africa+Indian Ocean | 45 | 1.21 | 1.00 | 1.21 | 1.65 |
-| Australia+NZ | 100 | 1.05 | 0.99 | 1.06 | 1.44 |
-| Japan+E Asia | 146 | 1.07 | 0.99 | 1.08 | 1.30 |
-| Mediterranean+Black Sea | 16 | 1.22 | 1.00 | 1.22 | 0.52 |
-| N America Atlantic+Gulf | 109 | 0.85 | 1.01 | 0.88 | 1.03 |
-| N America Pacific | 79 | 1.01 | 1.00 | 1.01 | 1.78 |
-| NE Atlantic islands | 11 | 1.17 | 1.00 | 1.18 | 2.04 |
-| NW Europe | 87 | 1.10 | 0.99 | 1.10 | 4.38 |
-| Norway+Nordic Seas | 22 | 1.08 | 0.99 | 1.10 | 2.20 |
-| S America | 38 | 1.10 | 0.99 | 1.13 | 1.28 |
-| other | 45 | 1.09 | 1.00 | 1.10 | 1.07 |
-
-Stratified sample of `sites_levels.csv` (3 random sites per region, seed 0; MHWS in m):
-
-| site | country | region | lon | lat | spring range | MHWS gauge | MHWS GTSM | MHWS FES | GTSM/gauge | FES/gauge | GTSM/FES |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| Dakar | SEN | Africa+Indian Ocean | -17.42 | 14.68 | 1.31 | 0.65 | 0.61 | 0.64 | 0.94 | 0.99 | 0.95 |
-| East_London | ZAF | Africa+Indian Ocean | 27.92 | -33.00 | 1.62 | 0.81 | 1.00 | 0.81 | 1.23 | 1.00 | 1.23 |
-| Hiron_Point | BGD | Africa+Indian Ocean | 89.47 | 21.78 | 2.41 | 1.18 | 1.44 | 1.28 | 1.22 | 1.09 | 1.13 |
-| Cooktown | AUS | Australia+NZ | 145.25 | -15.45 | 1.85 | 0.92 | 0.87 | 0.89 | 0.94 | 0.96 | 0.97 |
-| Lord_Howe_Island | AUS | Australia+NZ | 159.06 | -31.52 | 1.64 | 0.82 | 0.86 | 0.82 | 1.05 | 0.99 | 1.06 |
-| Port_Adelaide_Outer_Harbor | AUS | Australia+NZ | 138.48 | -34.78 | 1.94 | 0.97 | 1.11 | 0.92 | 1.15 | 0.94 | 1.22 |
-| Kainan | JPN | Japan+E Asia | 135.19 | 34.14 | 1.45 | 0.72 | 0.94 | 0.65 | 1.30 | 0.90 | 1.45 |
-| Maizuru | JPN | Japan+E Asia | 135.32 | 35.45 | 0.19 | 0.10 | 0.11 | 0.10 | 1.09 | 1.07 | 1.02 |
-| Naze | JPN | Japan+E Asia | 129.50 | 28.40 | 1.69 | 0.84 | 0.81 | 0.80 | 0.97 | 0.95 | 1.02 |
-| Ajaccio_Aspretto | FRA | Mediterranean+Black Sea | 8.76 | 41.92 | 0.24 | 0.12 | 0.14 | 0.11 | 1.18 | 0.91 | 1.29 |
-| Ceuta | ESP | Mediterranean+Black Sea | -5.32 | 35.90 | 0.88 | 0.45 | 0.52 | 0.44 | 1.17 | 0.98 | 1.22 |
-| Venezia | ITA | Mediterranean+Black Sea | 12.43 | 45.42 | 0.81 | 0.39 | 0.47 | 0.40 | 1.22 | 1.03 | 1.19 |
-| Bedford_Institute | CAN | N America Atlantic+Gulf | -63.62 | 44.68 | 1.65 | 0.84 | 0.69 | 0.80 | 0.82 | 0.95 | 0.86 |
-| Pensacola | USA | N America Atlantic+Gulf | -87.21 | 30.40 | 0.54 | 0.27 | 0.30 | 0.30 | 1.09 | 1.11 | 0.98 |
-| Tadoussac | CAN | N America Atlantic+Gulf | -69.71 | 48.14 | 4.31 | 2.18 | 3.37 | 2.14 | 1.55 | 0.98 | 1.57 |
-| Campbell_River_BC | CAN | N America Pacific | -125.25 | 50.04 | 2.06 | 1.09 | 1.48 | 1.26 | 1.36 | 1.15 | 1.23 |
-| Port_Orford | USA | N America Pacific | -124.50 | 42.74 | 2.03 | 0.98 | 0.99 | 0.99 | 1.01 | 1.01 | 1.00 |
-| Queen_Charlotte_City | CAN | N America Pacific | -132.07 | 53.25 | 5.63 | 2.73 | 2.89 | 2.50 | 1.06 | 0.92 | 1.15 |
-| FuerteventuraTG | ESP | NE Atlantic islands | -13.85 | 28.50 | 2.33 | 1.18 | 1.39 | 1.17 | 1.19 | 1.00 | 1.19 |
-| Funchal | PRT | NE Atlantic islands | -16.91 | 32.64 | 2.04 | 1.03 | 1.21 | 1.04 | 1.17 | 1.01 | 1.16 |
-| Pluz | ESP | NE Atlantic islands | -15.41 | 28.15 | 2.15 | 1.09 | 1.27 | 1.09 | 1.17 | 1.00 | 1.17 |
-| Lowestoft | GBR | NW Europe | 1.75 | 52.47 | 1.85 | 0.84 | 0.88 | 0.82 | 1.05 | 0.97 | 1.07 |
-| Newlyn | GBR | NW Europe | -5.54 | 50.10 | 4.72 | 2.33 | 2.62 | 2.29 | 1.12 | 0.98 | 1.15 |
-| St_Helier_Jersey | GBR | NW Europe | -2.12 | 49.18 | 9.71 | 4.97 | 5.40 | 4.87 | 1.09 | 0.98 | 1.11 |
-| AndenesTG | NOR | Norway+Nordic Seas | 16.14 | 69.33 | 1.85 | 0.92 | 0.99 | 0.91 | 1.07 | 0.99 | 1.08 |
-| Ny_alesund | NOR | Norway+Nordic Seas | 11.94 | 78.93 | 1.30 | 0.65 | 0.71 | 0.63 | 1.11 | 0.97 | 1.14 |
-| Vardo | NOR | Norway+Nordic Seas | 31.10 | 70.38 | 2.73 | 1.34 | 1.24 | 1.36 | 0.92 | 1.01 | 0.91 |
-| Esmeraldas | ECU | S America | -79.65 | 0.99 | 2.98 | 1.49 | 1.63 | 1.48 | 1.09 | 0.99 | 1.11 |
-| Matarani | PER | S America | -72.11 | -17.00 | 0.87 | 0.44 | 0.56 | 0.44 | 1.25 | 0.99 | 1.26 |
-| San_Felix | CHL | S America | -80.11 | -26.29 | 0.74 | 0.38 | 0.46 | 0.37 | 1.21 | 0.99 | 1.22 |
-| Kerguelen | FRA | other | 70.22 | -49.34 | 1.56 | 0.78 | 0.82 | 0.77 | 1.05 | 0.98 | 1.07 |
-| Lombrum | PNG | other | 147.38 | -2.04 | 0.69 | 0.30 | 0.29 | 0.32 | 0.97 | 1.05 | 0.93 |
-| Nuku_Hiva | FRA | other | -140.08 | -8.93 | 1.20 | 0.61 | 0.68 | 0.60 | 1.12 | 1.00 | 1.13 |
+| C.Australia (CAU) | 5 | 1.22 | 1.00 | 1.23 | 0.95 |
+| C.North-America (CNA) | 8 | 1.16 | 1.16 | 1.01 | 0.49 |
+| Caribbean (CAR) | 15 | 0.96 | 1.01 | 0.95 | 0.32 |
+| E.Asia (EAS) | 108 | 1.07 | 0.99 | 1.08 | 1.28 |
+| E.Australia (EAU) | 24 | 1.03 | 0.98 | 1.05 | 1.38 |
+| E.North-America (ENA) | 76 | 0.79 | 1.00 | 0.80 | 1.37 |
+| E.Southern-Africa (ESAF) | 6 | 1.22 | 0.99 | 1.23 | 1.74 |
+| Equatorial.Indian-Ocean (EIO) | 6 | 1.12 | 1.00 | 1.14 | 0.88 |
+| Equatorial.Pacific-Ocean (EPO) | 22 | 1.08 | 1.00 | 1.07 | 1.10 |
+| Mediterranean (MED) | 27 | 1.17 | 1.00 | 1.19 | 1.20 |
+| N.Atlantic-Ocean (NAO) | 5 | 1.10 | 0.99 | 1.09 | 1.10 |
+| N.Australia (NAU) | 14 | 0.98 | 1.01 | 0.97 | 2.13 |
+| N.Central-America (NCA) | 14 | 1.04 | 0.99 | 1.02 | 0.96 |
+| N.E.North-America (NEN) | 5 | 0.91 | 1.00 | 0.78 | 2.15 |
+| N.Europe (NEU) | 78 | 1.08 | 0.99 | 1.10 | 3.37 |
+| N.Pacific-Ocean (NPO) | 24 | 0.99 | 0.99 | 0.99 | 0.60 |
+| N.W.North-America (NWN) | 20 | 1.07 | 0.99 | 1.08 | 3.42 |
+| N.W.South-America (NWS) | 12 | 1.11 | 1.00 | 1.10 | 1.55 |
+| New-Zealand (NZ) | 16 | 1.07 | 0.99 | 1.09 | 1.89 |
+| S.Australia (SAU) | 30 | 1.11 | 1.00 | 1.14 | 0.70 |
+| S.Central-America (SCA) | 7 | 1.10 | 1.01 | 1.11 | 1.20 |
+| S.E.Asia (SEA) | 32 | 1.14 | 1.01 | 1.10 | 1.60 |
+| S.Indian-Ocean (SIO) | 5 | 1.37 | 1.00 | 1.38 | 0.57 |
+| S.Pacific-Ocean (SPO) | 20 | 1.07 | 0.98 | 1.20 | 1.03 |
+| S.W.South-America (SWS) | 9 | 1.21 | 0.99 | 1.20 | 0.94 |
+| Sahara (SAH) | 8 | 1.19 | 1.00 | 1.19 | 2.10 |
+| W.North-America (WNA) | 36 | 0.99 | 1.01 | 0.99 | 1.92 |
+| W.Southern-Africa (WSAF) | 11 | 1.26 | 1.00 | 1.26 | 1.56 |
+| West&Central-Europe (WCE) | 23 | 1.12 | 1.00 | 1.11 | 5.20 |
 
 - **GTSM's tide is 7-8% too large; FES2022 matches the gauges.** GTSM is too large almost
-  everywhere and too small on the N American Atlantic and Gulf coast. The GTSM/FES map reproduces
+  everywhere and too small on the east coast of North America (ENA 0.79). The GTSM/FES map reproduces
   the GTSM/gauge map, so FES can stand in for gauges where none exist (except in the basins below).
 - **Not a location or method effect:** FES is the same at the gauge and at the GTSM station, the
   GTSM bias does not grow with gauge-station distance, and the raw GTSM series and its harmonic
@@ -259,9 +239,10 @@ and to 46 years of GTSM (surge + harmonic tide). Data: `sites_extremes.csv`.
   surge and tide (§8.1, tests 2 and 5).
 - **Extremes set (test 1).** On the record-based set (623 sites with a GEV fit) COAST-RP - gauge
   is -0.061 / -0.072 m (RP10 / RP100), MAE 0.21 / 0.35 m, against -0.059 / -0.064 m on the tide
-  set. The Baltic, absent from the tide set, is -0.04 m at RP10 and -0.17 m at RP100 (42 sites,
-  MAE 0.49 m); the Mediterranean MAE at RP100 falls from 0.56 m (15 sites) to 0.11 m (29 sites)
-  once its microtidal gauges are in. Figure `sets_extremes.png`, data `sets_extremes.csv`.
+  set. The regions that gain the surge-dominated gauges change most: the Mediterranean (MED)
+  RP100 MAE falls from 0.41 m (26 sites) to 0.14 m (39 sites) once its microtidal gauges are in,
+  and N.Europe (NEU, with the Baltic) moves from +0.12 to +0.04 m at RP100 (73 to 101 sites).
+  By region: summary fig07 (`input_analysis/boundary_forcing/`), data `sets_extremes.csv`.
 - **COAST-RP against the gauges, by station class:**
 
   | Station class | Sites | COAST-RP - gauge GEV, RP10 / RP100 |
@@ -345,8 +326,9 @@ Data: `sites_shapes.csv`.
 - **GTSM reproduces observed shapes:** per site, Spearman rho 0.87 and median ratio 1.00 for
   time above MSL. T(0.25) gives rho 0.77, ratio 1.00.
 - **Extremes set (test 1).** With the surge-dominated coasts in, the microtidal (< 1 m range)
-  median contiguous time above MSL rises from 20 h to 45 h (80% of events > 12 h). The Baltic
-  median is 122 h and the Mediterranean 90 h; both run into the ±72 h event window, so the true
+  median contiguous time above MSL rises from 20 h to 45 h (80% of events > 12 h). In
+  N.Europe (with the Baltic) and the Mediterranean the median rises from 8 to 23 h and from 7 to
+  21.5 h, with upper quartiles of 107 and 125 h that run into the ±72 h event window, so the true
   durations are longer. T(0.25) hardly changes (14 h), and classes above 1 m are unchanged
   (`sets_durations.png`, `sets_durations.csv`). The top-event comparison of §5.2 gives the same
   ranking on the extremes set (`sets_top_events.csv`): GTSM closest to the gauge, COAST-HG's
@@ -586,62 +568,79 @@ within each tier. Items 1-4 use only data already extracted for this note; none 
      3.6 m; Glacier Bay / Lynn Canal 11.7 / 2.3 / 2.3 m (`atlas_basins.png`). The artefacts are
      therefore FES2022-specific, which answers the version question of this test. In the Arctic
      FES2014 sides with EOT20 as well, but there the two are not independent.
-   - *Version rule.* FES2022 is replaced by FES2014 at a node where, on the proxy,
-     A_FES2022 > R x A_FES2014 **and** A_FES2022 - A_FES2014 > D, with R = 1.5 and D = 1 m. The
-     ratio alone flags microtidal coasts where both amplitudes are centimetres (Sea of Azov 5 vs
-     2 cm, the Kara Sea); the floor alone would switch macrotidal coasts where FES2022 is only
-     20-40% higher. With both, 1,911 of the 89,628 nodes in 62 2-deg cells are replaced, 80% of
-     them also flagged by the EOT20 screen, about a third north of 66 N. Evaluated on the proxy at
-     the 905 gauges with all three MHWS values, the rule fires 4 times: Skagway (MHWS 7.46 -> 2.76
-     m, gauge 2.78 m), Juneau (5.95 -> 3.33 m, gauge 2.72 m), Port Alberni (2.79 -> 1.36 m, gauge
-     1.28 m), and Little River BC (1.45 -> 1.29 m, gauge 1.35 m; neutral). Trondheim, where
-     FES2014 is 0.9 m too low, stays on FES2022 (proxy difference 0.93 m).
-   - *Threshold sensitivity* (`atlas_rule_sensitivity.py`, R in 1.1-3, D in 0-2 m; data
-     `atlas_rule_grid.csv`, `atlas_rule_bands.csv`). Three kinds of evidence:
-     - *Which atlas is closer to the gauge, by proxy difference* (FES2022 - FES2014). In every
-       band below 0.75 m, positive or negative, FES2014 is closer at only 33-44% of the gauges and
-       switching loses on average (median gain 0 to -0.31 m); the only site in 0.75-1 m is
-       Trondheim (-0.78 m).
-       Above 1 m FES2014 is closer at all 5 gauges (median gain +1.43 m). FES2022 is the better
-       atlas wherever the two differ by less than about a metre, so the switch must be reserved
-       for larger differences.
-     - *Gauge outcome over the grid.* For D >= 1 m no (R, D) with R <= 2 harms a single gauge
-       (FES2014 further from the gauge by > 5 cm). For D <= 0.75 m harms appear (Trondheim from
-       D < 0.93 m, then the microtidal sites); at D = 0 and R = 1.1 the rule fires 107 times, fixes
-       22 and harms 31. The net gain peaks at D = 1 m (8.8-9.0 m summed over the gauges for
-       R = 1.1-1.5), stays within 0.3 m of that to D = 1.5 m and falls at D = 2 m, where Port
-       Alberni (difference 1.6 m) drops out.
-     - *Known artefacts*, defined without FES2014: the 169 nodes in the four basin boxes whose
-       FES2022 MHWS exceeds 1.25 x the largest observed MHWS there (half the record or upper
-       spring range: Minas 8.15 m, Magellan 5.5 m, Colorado 5.0 m; Skagway 2.8 m). R <= 1.4
-       replaces all of them for D <= 1.25 m, R = 1.5 replaces 167 (the 2 missed are outer
-       Bahía Lomas nodes at FES2022 MHWS 6.95 and 7.28 m, just above the 6.9 m bound), R = 1.75 93%,
-       R = 2 81%, R = 3 46%. For D >= 1.5 m detection drops at every R.
-     - *Size of the change.* At D = 1 m the number of replaced nodes is flat in R between 1.1
-       and 1.5 (2,121 -> 1,911, -10%) and halves by R = 2 (1,096); at R = 1.5 it is steep in D
-       below 1 m (5,255 at D = 0) and moderate above (1,455 at 1.25 m).
+   - *Version rule, on MHWS* (`atlas_node_mhws.py`, `atlas_rule_sensitivity.py`). FES2022 and
+     FES2014 are predicted at all 103,228 boundary nodes (102,935 with both values) over the same
+     18.61-y cycle and reduced to MHWS as at the gauges, so the rule works in the quantity that
+     forces the model. FES2022 is replaced by FES2014 at a node where MHWS_FES2022 > R x
+     MHWS_FES2014 **and** MHWS_FES2022 - MHWS_FES2014 > D, with **R = 1.5 and D = 1.25 m**. The
+     ratio alone flags microtidal coasts where both MHWS are centimetres; the difference alone
+     would switch macrotidal coasts where FES2022 is only 20-40% higher. At the adopted pair 1,287
+     nodes (1.25%) are replaced. At the 905 gauges with all three MHWS the rule fires 3 times, all
+     fixes: Skagway (7.46 -> 2.76 m, gauge 2.78 m), Juneau (5.95 -> 3.33 m, gauge 2.72 m) and Port
+     Alberni (2.79 -> 1.36 m, gauge 1.28 m).
+   - *Threshold sensitivity* (R in 1.1-3, D in 0-1.5 m; `atlas_rule_grid.csv`,
+     `atlas_rule_bands.csv`; summary fig06 and figS1 in `input_analysis/boundary_forcing/`):
+     - *Which atlas is closer to the gauge, by MHWS difference FES2022 - FES2014.* In every band
+       below 0.5 m FES2014 is closer at only 31-50% of the gauges and switching gains nothing or
+       loses (median gain of |FES2022 - gauge| - |FES2014 - gauge| from -0.34 to +0.02 m); the
+       three sites at 0.5-0.75 m all lose (median -0.64 m). Above 1 m FES2014 is closer at 4 of 5 gauges, median
+       gain +1.43 m; the fifth is Trondheim, where FES2014 (and EOT20) is 0.9 m too low.
+     - *Gauge outcome over the grid.* No pair with D < 1.25 m avoids harm: Trondheim's difference
+       is 1.08 m, and below 0.75 m the microtidal sites add more (40 harms at D = 0, R = 1.1).
+       From D = 1.25 m no pair harms a gauge, and every R <= 1.75 fires at the same 3 sites. At
+       D = 1.5 m Port Alberni (difference 1.43 m) drops out.
+     - *Known artefacts,* defined without FES2014: the 178 nodes in the four basin boxes whose
+       FES2022 MHWS exceeds 1.25 x the largest observed MHWS there (Minas 8.15 m, Magellan 5.5 m,
+       Colorado 5.0 m, Skagway 2.8 m). Every R <= 1.5 replaces all 178 at every D up to 1.5 m;
+       R = 1.75 replaces 172, R = 2 151, R = 3 63.
+     - *Size of the change.* At D = 1.25 m the number of replaced nodes falls from 1,464 (R = 1.1)
+       to 1,287 (R = 1.5) and 1,066 (R = 1.75).
 
-     Together this bounds D to about 0.95-1.25 m: below, the gauges are harmed (Trondheim) and the
-     switch enters the range where FES2022 is the better atlas; above, known artefacts start to
-     be missed (from D = 1.5 m) and by D = 2 m the Port Alberni fix is lost. D = 1 m sits at the lower end with a margin of 7 cm over
-     Trondheim. R is a secondary guard: anything in 1.1-1.5 gives the same result at the gauges
-     to within one site, and R >= 1.75 misses known artefacts. R = 1.5 is the conservative end of
-     that plateau. The 210 nodes that R = 1.5 keeps on FES2022 but R = 1.1 would switch lie on
-     macrotidal coasts where FES2022 is 30-45% higher and no gauge decides between them (Hecate
-     Strait, Frobisher Bay and Hudson Strait, the Amazon mouth, Penzhina Bay). There FES2022, the
-     better atlas on average, is kept. The price is Wyndham (FES2014 better by 0.22 m, ratio 1.41)
-     and the 2 marginal Bahía Lomas nodes. The gauge evidence for D rests on few sites (5 above
-     1 m, 1 between 0.75 and 1 m), so the known-artefact set carries the upper bound.
+     D is therefore bounded to 1.08-1.43 m by two gauges (Trondheim below, Port Alberni above),
+     and 1.25 m sits in the middle. R is a secondary guard: everything from 1.1 to 1.5 gives the
+     same gauge result and catches all known artefacts, R >= 1.75 misses some. R = 1.5 is the
+     cautious end of that range, keeping FES2022 on macrotidal coasts where it is 10-50% higher
+     and no gauge decides. The gauge evidence rests on few sites (5 with a difference above 1 m),
+     so the known-artefact set carries the ratio bound.
    - *Decision.* FES2014 is the single reference and fallback atlas; EOT20 is not used further.
      EOT20 is a residual model on FES2014b, so where altimetry is sparse it repeats FES2014, and
      where it departs from it it brings its own failures (St Lawrence S2 artefacts, Puget Sound,
      no values in narrow inlets). FES2022 stays the tide source; the version rule with R = 1.5,
-     D = 1 m replaces it by FES2014 at basin-head nodes, and a gauge overrides both where one
-     exists. Moderate fjord and inlet errors (0.25-1 m) are not caught by any atlas.
-7. **Decompose COAST-HG's error.** Separate COAST-HG into its tide and surge parts and score each
+     D = 1.25 m (MHWS) replaces it by FES2014 at basin-head nodes, and a gauge overrides both where
+     one exists. Moderate fjord and inlet errors (0.25-1 m) are not caught by any atlas.
+7. **Done** (`coast_hg_decompose.py`; data `coast_hg_vs_events.csv`; summary fig09).
+   **Decompose COAST-HG's error.** Separate COAST-HG into its tide and surge parts and score each
    against the gauge events: is the nb24 deficit a surge that decays too fast, or a tide window
-   that is not the gauge's spring tide (daily inequality, neap-spring phase, average-tide
-   variant)? The answer fixes the generator design before it is built (§8.3).
+   that is not the gauge's spring tide? COAST-HG holds the total only; its tide is recovered as
+   the stretch of the station's GTSM harmonic tide (hourly, 1979-2024) that best matches the
+   hydrograph where the surge has died out (|t| >= 48 h; spring variant), or jointly with a
+   multiple of the spring variant's surge shape over the whole window (average variant). The
+   spring fit matches to 4-8% of MHWS, so COAST-HG's spring tide is a real GTSM tide stretch.
+   Per quality site, medians, against the gauge's annual maxima of empirical RP >= 10 y (their
+   tide = level - non-tidal residual):
+
+   | Spring range | Source | nb24 | nb24, tide part | nb24, surge part | tide at peak / MHWS | surge above half max |
+   |---|---|---|---|---|---|---|
+   | < 1 m | COAST-HG spring | 0.61 | 0.39 | 0.20 | 1.14 | 35 h |
+   | | gauge | 0.59 | 0.37 | 0.18 | 1.26 | 18.5 h |
+   | 1-2 m | COAST-HG spring | 0.73 | 0.59 | 0.12 | 1.05 | 22 h |
+   | | gauge | 0.81 | 0.66 | 0.12 | 1.28 | 19 h |
+   | 2-4 m | COAST-HG spring | 0.75 | 0.64 | 0.10 | 1.07 | 20 h |
+   | | gauge | 0.87 | 0.77 | 0.09 | 1.25 | 15 h |
+   | > 4 m | COAST-HG spring | 0.73 | 0.70 | 0.03 | 1.03 | 10 h |
+   | | gauge | 0.88 | 0.83 | 0.04 | 1.18 | 9.5 h |
+
+   - **The deficit is in the tide window, not the surge.** Above a 1 m range the surge parts of
+     the next-day high water agree, and COAST-HG's surge lasts as long as the observed one or
+     longer; the whole nb24 deficit sits in the tide part. Observed extremes coincide with tides
+     of 1.18-1.28 x MHWS (the largest springs of the nodal cycle); COAST-HG's tide window reaches
+     1.03-1.07 x MHWS and assigns the rest of the RP100 level to the surge, so its neighbouring
+     tides are relatively lower. The average-tide variant is lower still (tide 0.56-0.78 x MHWS).
+   - **The surge tail is the second, smaller difference.** Observed surges still hold 0.2-0.35 of
+     their maximum 30-48 h from the peak; COAST-HG's surge is back to zero by about ±35 h. On
+     microtidal coasts that tail is what keeps the observed troughs near MSL.
+   - The surge core itself barely changes with RP (median duration above half the maximum 15-18 h
+     at the gauges, 16-21 h in GTSM, for every RP class from 0-2 to 20-50 y).
 8. **Duration correction on real tiles.** Confirm "α = 1, no lower clip" on 5-10 real 2-D tiles
    spanning tidal regimes, including a surge-dominated microtidal case, before adopting it.
 9. **Surge-deficit correction.** Once tests 2 and 5 are in, test whether the deficit outside TC
@@ -671,8 +670,8 @@ within each tier. Items 1-4 use only data already extracted for this note; none 
   fallback and (iii) requested as an independent validation layer.
 - **Reference epoch and MSL anomaly.** Keep 2020 (§7). Test 3 puts the interannual-MSL term at
   about 1 cm in the RP levels, so no MSL-anomaly term is added.
-- **Tide atlas.** FES2022, with FES2014 replacing it where the FES2022 / FES2014 proxy ratio
-  exceeds 1.5 and the difference exceeds 1 m, and gauges overriding both (§8.1, test 6). EOT20
+- **Tide atlas.** FES2022, with FES2014 replacing it where the FES2022 / FES2014 MHWS ratio
+  exceeds 1.5 and the difference exceeds 1.25 m, and gauges overriding both (§8.1, test 6). EOT20
   is not used further.
 - **Hydrograph source.** COAST-HG is retired for both roles once a generator variant passes the
   acceptance test in §8.3. Until then, T from GTSM events (not COAST-HG) where no TC dominates.
@@ -687,13 +686,16 @@ of the eikonal duration correction, replacing COAST-HG in both roles.
 
 **Why not re-use the method as is.** COAST-HG is HGRAPHER output (Dullaart et al., 2023): a GTSM
 surge shape scaled to COAST-RP RP100 and laid on a tide. `src/storm_tide_hydrograph.py` ports the
-same method with per-RP shape selection and a spring-tide window, so it may inherit COAST-HG's
-errors (§5.2): next-day high water 0.1-0.15 of the peak too low, and T(0.25) 5-6 h against
-11-17 h observed. The cause has to be found before the generator is adopted (§8.1, test 7).
+same method with per-RP shape selection and a spring-tide window, so it would inherit
+COAST-HG's main error (§5.2): next-day high water 0.1-0.15 of the peak too low, and T(0.25) 5-6 h
+against 11-17 h observed. Test 7 traces it to the tide window: observed extremes ride on tides of
+1.18-1.28 x MHWS, an MHWS-level spring window gives 1.03-1.07.
 
 **Generator.** Per station and RP, with levels relative to local MSL:
-- **Tide:** FES2022 at the station, 10 min, ±72 h around a spring high water (FES matches the
-  gauges, §3), with the FES2014 version rule at basin-head nodes (test 6).
+- **Tide:** FES2022 at the station, 10 min, ±72 h around a high water as high as the tides that
+  coincide with observed extremes (about 1.2-1.3 x MHWS, test 7; the station's own distribution
+  from its GTSM events where available), with the FES2014 version rule at basin-head nodes
+  (test 6). A plain MHWS-level spring window reproduces COAST-HG's deficit.
 - **Surge shape:** selected for the RP from GTSM surge events 1979-2024 (HGRAPHER-RP event
   selection), built on the skew surge rather than the non-tidal residual where the tidal range
   exceeds ~1 m (Environment Agency, 2018). The shape class follows the component that dominates
@@ -716,7 +718,7 @@ quality sites:
 
 | Component | Variant 1 | Variant 2 |
 |---|---|---|
-| Tide window | average tide (COAST-HG) | spring-tide window (FES) |
+| Tide window | MHWS-level spring window (as COAST-HG; test 7: the cause of its deficit) | the tide level of the observed extremes (about 1.2-1.3 x MHWS) |
 | Surge shape | HGRAPHER level-by-level mean of limb durations | empirical mean of the normalised surge residuals of the selected events, centred on their peaks |
 | Surge definition | non-tidal residual | skew surge |
 | Surge-tide phasing | surge peak on the spring high water | the phase of the selected GTSM events relative to high water |
@@ -797,12 +799,14 @@ each script's docstring for further arguments):
 9. `sources_compare.py`
 10. `site_sets.py`
 11. `levels_extremes.py --msl linear`, then `msl_sensitivity.py`
-12. `atlas_check.py` (EOT20 on `<data_root>`; FES2014 unpacked locally into
-    `.cleanup_baseline/fes2014/ocean_tide_extrapolated`), then `atlas_rule_sensitivity.py`
-13. `duration_experiment.py` (local SFINCS)
-14. `duration_analysis.py`
-15. `duration_refit.py`
-16. `export_input_tables.py`
+12. `atlas_check.py` (EOT20 and FES2014 on `<data_root>`), `atlas_node_mhws.py`, then
+    `atlas_rule_sensitivity.py`
+13. `coast_hg_decompose.py` (after `shapes_events.py`)
+14. `duration_experiment.py` (local SFINCS)
+15. `duration_analysis.py`
+16. `duration_refit.py`
+17. `export_input_tables.py`
+18. `input_analysis/make_boundary_forcing_figures.py` (the summary figures and their descriptions)
 
 Inputs on `<data_root>` are read only.
 
@@ -933,6 +937,10 @@ https://doi.org/10.1029/2006JC004033
 Idier, D., Bertin, X., Thompson, P. and Pickering, M. D. (2019). Interactions between mean sea
 level, tide, surge, waves and flooding: Mechanisms and contributions to sea level variations at
 the coast. Surveys in Geophysics, 40, 1603-1630. https://doi.org/10.1007/s10712-019-09549-5
+
+Iturbide, M., Gutiérrez, J. M., Alves, L. M., Bedia, J., et al. (2020). An update of IPCC climate
+reference regions for subcontinental analysis of climate model data: definition and aggregated
+datasets. Earth System Science Data, 12, 2959-2970. https://doi.org/10.5194/essd-12-2959-2020
 
 Lyard, F. H., Allain, D. J., Cancet, M., Carrère, L. and Picot, N. (2021). FES2014 global ocean
 tide atlas: design and performance. Ocean Science, 17, 615-649.
