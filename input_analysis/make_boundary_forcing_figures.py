@@ -450,7 +450,7 @@ def fig07_coast_rp_regions(out: Path, dest: Path) -> None:
     lo = float(st[["p25_10", "p25_100"]].min().min())
     hi = float(st[["p75_10", "p75_100"]].max().max())
     pad = 0.06 * (hi - lo)
-    fig = plt.figure(figsize=(10.5, 0.25 * ypos + 1.4))
+    fig = plt.figure(figsize=(9.2, 0.25 * ypos + 1.4))
     gs = fig.add_gridspec(1, 2, width_ratios=(1, 0.3), wspace=0.12)
     ax = fig.add_subplot(gs[0, 0])
     for rp, dy in ((10, -0.17), (100, 0.17)):
@@ -471,7 +471,7 @@ def fig07_coast_rp_regions(out: Path, dest: Path) -> None:
     plt.setp(ax2.get_yticklabels(), visible=False)
     _style(ax2)
     draw_panel_letter(ax2, "b")
-    fig.subplots_adjust(left=0.3, right=0.98, bottom=0.65 / (0.25 * ypos + 1.4), top=1 - 0.45 / (0.25 * ypos + 1.4))
+    fig.subplots_adjust(left=0.2, right=0.98, bottom=0.65 / (0.25 * ypos + 1.4), top=1 - 0.45 / (0.25 * ypos + 1.4))
     _save(fig, dest / "fig07_coast_rp_vs_gauges.png")
     st.drop(columns="continent").round(3).to_csv(dest / "fig07_coast_rp_vs_gauges_data.csv")
     describe(dest / "fig07_coast_rp_vs_gauges.png", f"""
@@ -741,7 +741,8 @@ def _heat(ax, grid: pd.DataFrame, col: str, text, cmap, norm, mark=None) -> obje
             level = float(norm(m[i, j]))
             if isinstance(norm, BoundaryNorm):
                 level /= max(norm.Ncmap - 1, 1)
-            dark = abs(level - 0.5) > 0.3 if isinstance(norm, TwoSlopeNorm) else level > 0.6
+            diverging = isinstance(norm, TwoSlopeNorm) or cmap.name in ("RdBu", "RdBu_r")
+            dark = abs(level - 0.5) > 0.3 if diverging else level > 0.6
             ax.text(j, i, text(row), ha="center", va="center", fontsize=7.5, color="white" if dark else INK)
             if mark is not None and mark(row):
                 ax.add_patch(plt.Rectangle((j - 0.42, i - 0.42), 0.84, 0.84, fill=False, edgecolor=INK,
@@ -757,16 +758,14 @@ def _heat(ax, grid: pd.DataFrame, col: str, text, cmap, norm, mark=None) -> obje
 def fig06_rule_sensitivity(out: Path, dest: Path) -> None:
     grid = pd.read_csv(out / "analysis" / "atlas_rule_grid.csv")
     bands = pd.read_csv(out / "analysis" / "atlas_rule_bands.csv", index_col=0)
-    grid["net"] = grid.gauges_fixed - grid.gauges_harmed
+    scored = grid.gauges_fixed + grid.gauges_harmed
+    grid["share_improved"] = (grid.gauges_fixed / scored).where(scored > 0)
     best = int(grid.loc[grid.gauges_harmed == 0, "gauges_fixed"].max())
     known = int(grid.known_total.iloc[0])
     grid["known_share"] = grid.known_caught / known
-    lim = float(grid.net.abs().max())
     fig, axes = plt.subplots(1, 3, figsize=(21, 5.8))
-    im = _heat(axes[0], grid, "net", lambda r: f"{int(r.gauges_fixed)}/{int(r.gauges_harmed)}", plt.get_cmap("RdBu"),
-               TwoSlopeNorm(0, -lim, lim), mark=lambda r: r.gauges_harmed == 0 and r.gauges_fixed == best)
-    cb = fig.colorbar(im, ax=axes[0], orientation="horizontal", pad=0.17, shrink=0.6, aspect=30)
-    cb.set_label("gauges improved minus gauges made worse")
+    _heat(axes[0], grid, "share_improved", lambda r: f"{int(r.gauges_fixed)}/{int(r.gauges_harmed)}",
+          plt.get_cmap("RdBu"), Normalize(0, 1), mark=lambda r: r.gauges_harmed == 0 and r.gauges_fixed == best)
     _heat(axes[1], grid, "known_share", lambda r: f"{int(r.known_caught)}", plt.get_cmap("Blues"), Normalize(0, 1),
           mark=lambda r: r.known_caught == known)
     _heat(axes[2], grid, "nodes_replaced", lambda r: f"{int(r.nodes_replaced)}", plt.get_cmap("Oranges"),
@@ -776,6 +775,7 @@ def fig06_rule_sensitivity(out: Path, dest: Path) -> None:
     fig.tight_layout()
     _save(fig, dest / "fig06_version_rule_sensitivity.png")
     adopted = grid[(grid.ratio == VERSION_RATIO) & (grid.diff_m == VERSION_DIFF_M)].iloc[0]
+    nodes_r1 = int(grid[(grid.ratio == 1.0) & (grid.diff_m == VERSION_DIFF_M)].nodes_replaced.iloc[0])
     band_lines = "; ".join(f"{idx} m: n={int(b.n)}, FES2014 closer at {b.fes2014_closer:.0%}, median gain "
                            f"{b.median_gain_m:+.2f} m" for idx, b in bands.iterrows())
     describe(dest / "fig06_version_rule_sensitivity.png", f"""
@@ -791,8 +791,10 @@ def fig06_rule_sensitivity(out: Path, dest: Path) -> None:
         FES2022 and FES2014. At every gauge where the rule would switch to FES2014, the switch is
         scored against the gauge's own MHWS: an improvement if FES2014 is closer to the gauge than
         FES2022 by more than 5 cm, a worsening if it is further by more than 5 cm. Cell text:
-        improvements / worsenings. Colour: improvements minus worsenings (blue = net better, red =
-        net worse, white = no effect). The gauges with a real FES2022 error (Skagway, Juneau, Port
+        improvements / worsenings. Colour: the share of improvements among the scored switches,
+        improvements / (improvements + worsenings): dark blue = every switch improves, white = as
+        many worsen as improve, dark red = every switch worsens. Cells where the rule switches no
+        gauge by more than 5 cm either way stay white. The gauges with a real FES2022 error (Skagway, Juneau, Port
         Alberni) are the improvements to be had; Trondheim, where FES2014 is wrong, is the main
         worsening to avoid. Dotted squares: pairs with no worsening and the most improvements
         ({best}).
@@ -813,9 +815,13 @@ def fig06_rule_sensitivity(out: Path, dest: Path) -> None:
 
         Reading off the adopted values: (a) leaves the dotted pairs in the column D = 1.25 m (no
         worsening, all {best} improvements; at D <= 1 m Trondheim is switched wrongly, at D = 1.5 m
-        Port Alberni is no longer caught). (b) leaves R <= 1.5 (higher R misses artefacts). Of the
-        pairs left, R = 1.5 is the largest, i.e. the one that changes the fewest other nodes
-        (c). At the adopted pair: {int(adopted.gauges_fixed)} improvements,
+        Port Alberni is no longer caught). (b) leaves R <= 1.5 (higher R misses artefacts). The
+        row R = 1 switches the ratio condition off, so only D decides: from R = 1 to R = 1.5 panels
+        (a) and (b) are identical, i.e. the ratio changes nothing at the gauges or at the known
+        artefacts. It only changes how many other nodes are switched (c: {nodes_r1:,} at R = 1,
+        {int(adopted.nodes_replaced):,} at R = {VERSION_RATIO}, for D = {VERSION_DIFF_M} m). R is
+        therefore a precaution for coasts without evidence, not a value the data pin down; R = 1.5
+        is the largest ratio that still replaces every known artefact. At the adopted pair: {int(adopted.gauges_fixed)} improvements,
         {int(adopted.gauges_harmed)} worsenings, {int(adopted.known_caught)} of {known} artefacts
         replaced.
 

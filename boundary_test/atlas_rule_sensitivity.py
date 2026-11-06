@@ -31,7 +31,7 @@ from atlas_check import BASINS  # noqa: E402
 
 VERSION_RATIO = 1.5
 VERSION_DIFF_M = 1.25
-RATIOS = (1.1, 1.2, 1.3, 1.4, 1.5, 1.75, 2.0, 2.5, 3.0)
+RATIOS = (1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.75, 2.0, 2.5, 3.0)
 DIFFS_M = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.75, 1.0, 1.25, 1.5)
 MARGIN_M = 0.05
 DIFF_BANDS_M = (-np.inf, -0.25, -0.1, 0.1, 0.25, 0.5, 0.75, 1.0, np.inf)
