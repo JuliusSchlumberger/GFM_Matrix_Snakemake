@@ -9,7 +9,7 @@ coasts. The extremes set keeps every site with >= MIN_GOOD_YEARS complete years 
   top events the 3 largest events per site (`sources_compare.top_event_table`)
 
 Writes <out-dir>/analysis/{site_sets.csv, sets_extremes.csv, sets_durations.csv,
-sets_top_events.csv} and sets_map.png, sets_extremes.png, sets_durations.png.
+sets_top_events.csv} and sets_durations.png.
 
 Usage:
     python boundary_test/site_sets.py --out-dir .cleanup_baseline/level_sources
@@ -131,50 +131,6 @@ def top_events_table(ev: pd.DataFrame, profiles: np.ndarray, offset: np.ndarray,
     return pd.concat(rows, ignore_index=True)
 
 
-def plot_map(sites: pd.DataFrame, dest: Path) -> None:
-    fig, ax = plt.subplots(figsize=(13, 6.5))
-    for label, color in MEMBERSHIP_COLORS.items():
-        s = sites[sites.membership == label]
-        ax.scatter(s.lon, s.lat, s=14 if label == "both" else 22, color=color, linewidths=0,
-                   alpha=0.6 if label == "both" else 0.95, label=f"{label} (n={len(s)})")
-    rest = sites[sites.membership == "neither"]
-    ax.scatter(rest.lon, rest.lat, s=8, facecolors="none", edgecolors=MUTED, linewidths=0.6,
-               label=f"neither (n={len(rest)})")
-    ax.set(xlim=(-180, 180), ylim=(-60, 80), xlabel="longitude", ylabel="latitude",
-           title="GESLA sites by set: tide set (harmonic fit) vs extremes set (record length)")
-    ax.legend(frameon=False, fontsize=8, loc="lower left")
-    _style(ax)
-    fig.tight_layout()
-    _save(fig, dest / "sets_map.png")
-
-
-def plot_extremes(table: pd.DataFrame, dest: Path) -> None:
-    t = table[(table.comparison == "COAST-RP - GESLA") & (table.grouping.isin(["all", "region"]))]
-    groups = (t[(t.set == "extremes") & (t.rp == 100)].sort_values("median_m").group.tolist())
-    groups = ["all"] + [g for g in groups if g != "all"]
-    fig, axes = plt.subplots(1, 2, figsize=(14, 0.42 * len(groups) + 1.8), sharey=True)
-    y = np.arange(len(groups))
-    for ax, rp in zip(axes, (10, 100)):
-        for k, set_name in enumerate(SETS):
-            s = t[(t.set == set_name) & (t.rp == rp)].set_index("group").reindex(groups)
-            yy = y + (k - 0.5) * 0.32
-            ax.hlines(yy, s.p25_m, s.p75_m, color=SET_COLORS[set_name], linewidth=2.2, alpha=0.6)
-            ax.scatter(s.median_m, yy, s=36, color=SET_COLORS[set_name], zorder=3, label=SET_LABELS[set_name])
-            for yi, (m, n) in zip(yy, zip(s.median_m, s.n)):
-                if np.isfinite(m):
-                    ax.annotate(f"{int(n)}", (m, yi), xytext=(4, -3), textcoords="offset points", fontsize=7,
-                                color=MUTED)
-        ax.axvline(0, color=MUTED, linewidth=1)
-        ax.set(yticks=y, yticklabels=groups, xlabel=f"COAST-RP - GESLA GEV, RP{rp} (m)",
-               title=f"RP{rp}: median (dot) and interquartile range (bar); label = sites")
-        ax.title.set_fontsize(10)
-        ax.invert_yaxis()
-        _style(ax)
-    axes[0].legend(frameon=False, fontsize=8, loc="lower left")
-    fig.tight_layout()
-    _save(fig, dest / "sets_extremes.png")
-
-
 def plot_durations(table: pd.DataFrame, dest: Path) -> None:
     t = table[(table.grouping == "region") & (table.source == "gesla")]
     groups = t[t.set == "extremes"].sort_values("d_above_msl_median_hr", ascending=False).group.tolist()
@@ -237,8 +193,6 @@ def main() -> None:
           .round(2).to_string())
     print("\ntop events by range class (medians)\n" + top.groupby(["set", "range_class", "source"])
           [["nb24", "t_0.25_hr", "rmse_vs_gesla"]].median().round(2).to_string())
-    plot_map(sites, dest)
-    plot_extremes(extremes, dest)
     plot_durations(durations, dest)
 
 

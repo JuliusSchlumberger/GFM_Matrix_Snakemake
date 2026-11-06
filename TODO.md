@@ -158,10 +158,11 @@ Open:
   minimum difference of `boundary_test/atlas_rule_sensitivity.version_flag`; gauges override
   both. FES2014 is on `<data_root>` (catalog entry `fes2014_ocean_tide`). How far a gauge
   value reaches is undefined. Moderate inlet errors (0.25-1 m) stay uncaught.
-- **Remove code and outputs no longer used by the input analysis.** Sweep `boundary_test/`
-  (superseded scripts and plot functions, e.g. the EOT20 parts of `atlas_check.py` once test 6
-  is closed), the diagnostic figures and tables under `.cleanup_baseline/level_sources/analysis/`
-  that no summary figure or table reads.
+- **SFINCS-tile boundary test: keep or close?** Its scripts (`station_inventory.py`,
+  `select_test_tiles.py`, `build_boundary_product.py`, `run_boundary_test.py`, `sfincs_local.py`,
+  `analyse_boundary_test.py`, `gtsm_tide_stats.py`) and ~31 GB under `.cleanup_baseline/boundary_test/`
+  serve only that test (H2 re-score open). Closing it would free them; `fes_nodes.parquet` and
+  `gesla_sites.parquet` there stay (input analysis).
 - **Rerun after the 2020 baseline offset** (`boundary_conditions.slr_baseline_offset_m`, 0.049 m
   regionalised): `run_preparation.py boundary_conditions`, then every tile simulation and the
   analysis. Until then `boundaries.static_station_levels` raises on the old MDT station file.

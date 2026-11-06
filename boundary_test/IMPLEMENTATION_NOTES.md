@@ -152,7 +152,7 @@ Durations (hours; local MSL = 0; B's T = time within f x (peak - MSL) of the pea
   high waters at +-24 h 0.81 -> 0.58 of the peak (< 1 m), 0.86 -> 0.75 (1-2 m), unchanged > 2 m.
   Rarer events are more surge-dominated, so the tidal neighbours are relatively lower, while the
   surge holds the level above MSL longer. Figures: `analysis/shapes_profiles.png`,
-  `analysis/shapes_profiles_by_rp.png`, `analysis/shapes_durations.png`.
+  `input_analysis/boundary_forcing/figures/fig08_profiles_by_rp.png`, `analysis/shapes_durations.png`.
 
 ### 0.4 What duration does to inland levels (2c), synthetic SFINCS floodplains
 
@@ -279,9 +279,8 @@ Durations (hours; local MSL = 0; B's T = time within f x (peak - MSL) of the pea
     (`validation/{NewBrunswick,England}/new_inputs/boundary_forcing` do not exist). GCFM_UUdev is
     not cloned locally; read-only from its public GitHub copy.
 
-12. **F6a result (decision 3).** 1,085 GTSM stations around the 20 test tiles, 1950-2024,
-    in `.cleanup_baseline/boundary_test/F6a_surge_duration_vs_peak.png` and
-    `surge_duration_summary.csv`:
+12. **F6a result (decision 3).** 1,085 GTSM stations around the 20 test tiles, 1950-2024
+    (`surge_duration_diagnostic.py`, in git history up to commit 35f697a):
     - dur50 rises with the surge peak only for small events. Above about 0.2-0.4 m it levels
       off at 10-60 h, and at several stations it falls for the largest events.
     - A log-linear tau(peak) fit over all events is driven by the small, short events and
@@ -376,7 +375,6 @@ New (this repo only; GCFM_UUdev untouched; `sfincs_tiles/` untouched):
 | `boundary_test/gesla_inventory.py` | deduplicated GESLA sites | done |
 | `boundary_test/select_test_tiles.py` | strata and provisional picks | done (proxy MHWS) |
 | `boundary_test/extract_gtsm_series.py` | surge / tide series at test stations | done |
-| `boundary_test/surge_duration_diagnostic.py` | F6a: dur50 vs surge peak, above_record onset | done, see §2.12 |
 | `boundary_test/fes_tide_stats.py` | FES prediction (pyTMD) at boundary cells -> MHWS etc. | waits for FES |
 | `boundary_test/build_boundary_product.py` | S_RP, L_RP, hydrographs per boundary cell | waits for FES |
 | `boundary_test/run_boundary_test.py` | eikonal runs 1-4 on test tiles, scoring (`--against-local-h1`) | after product |

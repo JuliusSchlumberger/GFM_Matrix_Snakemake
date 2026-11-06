@@ -10,7 +10,7 @@ class, per IPCC AR6 region (`regions.ar6_regions`) and per gauge-to-station dist
 M4) show which part of the tide carries a difference. Quality filter: >= 3 fitted years, fit
 explains >= 50% of the variance, station within MAX_DIST_KM.
 
-Writes <out-dir>/analysis/levels_*.csv and levels_*.png.
+Writes <out-dir>/analysis/levels_*.csv.
 
 Usage:
     python boundary_test/levels_analysis.py --out-dir .cleanup_baseline/level_sources
@@ -18,15 +18,10 @@ Usage:
 
 import argparse
 import sys
-import time
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
+import numpy as np
+import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from regions import ar6_regions  # noqa: E402
@@ -40,8 +35,6 @@ DIST_BINS = (0, 1, 2, 5, 10, 100)
 MAX_DIST_KM = 10.0
 MIN_FIT_YEARS = 3.0
 MIN_EXPLAINED = 0.5
-INK, MUTED, GRID = "#0b0b0b", "#898781", "#e1e0d9"
-COLORS = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948")
 
 
 def wide_table(out: Path) -> pd.DataFrame:
@@ -94,78 +87,7 @@ def comparison_tables(t: pd.DataFrame, dest: Path) -> pd.DataFrame:
     return table
 
 
-def _save(fig, path: Path) -> None:
-    # Windows intermittently refuses to truncate a PNG another process (viewer, indexer) holds.
-    for attempt in range(5):
-        try:
-            fig.savefig(path, dpi=fig.dpi)
-            break
-        except OSError:
-            if attempt == 4:
-                raise
-            time.sleep(2)
-    plt.close(fig)
-
-
-def _style(ax) -> None:
-    ax.grid(color=GRID, linewidth=0.6)
-    ax.set_axisbelow(True)
-    for side in ("top", "right"):
-        ax.spines[side].set_visible(False)
-    for side in ("left", "bottom"):
-        ax.spines[side].set_color(MUTED)
-    ax.tick_params(colors=MUTED, labelcolor=INK)
-
-
-SOURCE_LABELS = {"gesla_harm": "GESLA (gauge)", "gtsm_harm": "GTSM", "fes_gauge": "FES2022 at the gauge",
-                 "fes_station": "FES2022 at the GTSM station"}
-# (y, x) pairs: each model against the gauge, then the two models at the same GTSM station.
-MHWS_PANELS = (("gtsm_harm", "gesla_harm"), ("fes_gauge", "gesla_harm"), ("gtsm_harm", "fes_station"))
-
-
-def plot_scatter(t: pd.DataFrame, dest: Path) -> None:
-    q = t[t.quality]
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5.2))
-    regions = sorted(q.region.unique())
-    level = "mhws_m"
-    for ax, (a, b) in zip(axes, MHWS_PANELS):
-        for k, r in enumerate(regions):
-            g = q[q.region == r]
-            # More regions than palette slots: the second pass reuses the hues with a cross marker.
-            ax.scatter(g[f"{b}__{level}"], g[f"{a}__{level}"], s=12, color=COLORS[k % len(COLORS)], alpha=0.7,
-                       marker="o" if k < len(COLORS) else "x", linewidths=0 if k < len(COLORS) else 0.9, label=r)
-        hi = float(np.nanmax(q[[f"{a}__{level}", f"{b}__{level}"]].to_numpy())) * 1.05
-        ax.plot([0, hi], [0, hi], color=MUTED, linewidth=1)
-        s = summary(q[f"{a}__{level}"], q[f"{b}__{level}"])
-        ax.set(xlim=(0, hi), ylim=(0, hi), xlabel=f"{SOURCE_LABELS[b]} MHWS (m)", ylabel=f"{SOURCE_LABELS[a]} MHWS (m)",
-               title=f"{SOURCE_LABELS[a]} vs {SOURCE_LABELS[b]}\nmedian ratio {s['median_ratio']:.2f}, "
-                     f"MAE {s['mae_m']:.2f} m (n={s['n']})")
-        ax.title.set_fontsize(9)
-        _style(ax)
-    axes[0].legend(frameon=False, fontsize=7)
-    fig.suptitle("MHWS above local MSL at GESLA sites, same harmonic method for every source "
-                 "(quality sites: station <= 10 km, fit >= 3 y)", color=INK)
-    fig.tight_layout()
-    fig.set_dpi(150)
-    _save(fig, dest / "levels_scatter.png")
-
-
-def plot_maps(t: pd.DataFrame, dest: Path) -> None:
-    q = t[t.quality]
-    fig, axes = plt.subplots(3, 1, figsize=(12, 14))
-    for ax, (a, b) in zip(axes, MHWS_PANELS):
-        ratio = q[f"{a}__mhws_m"] / q[f"{b}__mhws_m"]
-        sc = ax.scatter(q.lon, q.lat, c=ratio, s=12, cmap="RdBu_r", vmin=0.6, vmax=1.4, linewidths=0)
-        fig.colorbar(sc, ax=ax, label="MHWS ratio", shrink=0.8)
-        ax.set(xlim=(-180, 180), ylim=(-60, 75),
-               title=f"MHWS ratio {SOURCE_LABELS[a]} / {SOURCE_LABELS[b]} (median {ratio.median():.2f})")
-        _style(ax)
-    fig.tight_layout()
-    fig.set_dpi(150)
-    _save(fig, dest / "levels_ratio_maps.png")
-
-
-def plot_constituents(c: pd.DataFrame, t: pd.DataFrame, dest: Path) -> pd.DataFrame:
+def constituent_ratios(c: pd.DataFrame, t: pd.DataFrame, dest: Path) -> pd.DataFrame:
     q = c.loc[c.index.intersection(t[t.quality].index)]
     rows = []
     for a, b in (("gtsm_harm", "gesla_harm"), ("fes_gauge", "gesla_harm"), ("fes_station", "gtsm_harm")):
@@ -176,21 +98,6 @@ def plot_constituents(c: pd.DataFrame, t: pd.DataFrame, dest: Path) -> pd.DataFr
                          "p25": r.quantile(0.25), "p75": r.quantile(0.75)})
     table = pd.DataFrame(rows)
     table.to_csv(dest / "levels_constituent_ratios.csv", index=False)
-    fig, ax = plt.subplots(figsize=(9, 4.5))
-    comps = table.comparison.unique()
-    x = np.arange(len(CONSTITUENTS))
-    for k, comp in enumerate(comps):
-        g = table[table.comparison == comp].set_index("constituent").loc[list(CONSTITUENTS)]
-        ax.errorbar(x + (k - 1) * 0.22, g.median_ratio, yerr=[g.median_ratio - g.p25, g.p75 - g.median_ratio], fmt="o",
-                    color=COLORS[k], capsize=3, label=comp)
-    ax.axhline(1, color=MUTED, linewidth=1)
-    ax.set(xticks=x, xticklabels=[c.upper() for c in CONSTITUENTS], ylabel="amplitude ratio (median, IQR)",
-           title="Constituent amplitude ratios at GESLA sites (reference amplitude > 2 cm)")
-    _style(ax)
-    ax.legend(frameon=False, fontsize=8)
-    fig.tight_layout()
-    fig.set_dpi(150)
-    _save(fig, dest / "levels_constituents.png")
     return table
 
 
@@ -252,10 +159,8 @@ def main() -> None:
         print(table[(table.level == "mhws_m") & table.group.str.startswith("dist")].pivot(
             index="group", columns="comparison", values="median_ratio").round(3).to_string())
     print("\nconstituent ratios")
-    print(plot_constituents(constituent_table(out, t.index), t, dest).pivot(
+    print(constituent_ratios(constituent_table(out, t.index), t, dest).pivot(
         index="constituent", columns="comparison", values="median_ratio").round(3).to_string())
-    plot_scatter(t, dest)
-    plot_maps(t, dest)
     ex = extremes_table(out, t, dest)
     if ex is not None:
         print("\nextremes (m)\n" + ex.round(3).to_string(index=False))

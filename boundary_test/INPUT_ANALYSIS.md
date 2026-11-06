@@ -93,8 +93,8 @@ Two properties of this frame were tested (§8.1, tests 1 and 3):
 
 ## 3. Tidal levels
 
-Figures: `levels_scatter.png` (GTSM vs gauge, FES vs gauge, GTSM vs FES; MHWS), `levels_ratio_maps.png`
-(the same ratios as maps), `levels_constituents.png`. Data: `sites_levels.csv`.
+Figures: summary fig01 (GTSM vs gauge, FES vs gauge, GTSM vs FES; MHWS), fig02 (the same ratios as
+maps), fig03 (constituents). Data: `sites_levels.csv`.
 
 | Comparison (MHWS) | Median ratio | MAE | Within 0.1 m |
 |---|---|---|---|
@@ -309,7 +309,7 @@ Duration measures, in hours, for levels relative to local MSL:
 - **Neighbouring high water (nb12, nb24):** the highest level / peak 9-16 h and 21-28 h from the
   peak, averaged over both sides.
 
-Figures: `shapes_profiles.png`, `shapes_profiles_by_rp.png`, `shapes_durations.png`.
+Figures: `shapes_profiles.png`, summary fig08 (profiles by RP), `shapes_durations.png`.
 Data: `sites_shapes.csv`.
 
 ### 5.1 All annual maxima
@@ -526,8 +526,8 @@ within each tier. Items 1-4 use only data already extracted for this note; none 
    in Fundy, so conservative in the right direction). Automate: flag any node whose MHWS exceeds
    the maximum of the second atlas within 25 km by more than 50%, then review by hand.
 
-   **EOT20 and FES2014 done** (`atlas_check.py`; figures `atlas_gauges.png`, `atlas_nodes_map.png`,
-   `atlas_versions.png`, `atlas_basins.png`, `atlas_rule_sensitivity.png`; TPXO10 not obtained). FES2014 is the AVISO
+   **EOT20 and FES2014 done** (`atlas_check.py`, which keeps the FES2014 part; the EOT20 screen is
+   in its git history up to commit 35f697a; summary fig04-fig06; TPXO10 not obtained). FES2014 is the AVISO
    `fes2014b_elevations_extrapolated` product (34 constituents, 1/16 deg), read like FES2022.
    - *At the gauges* (tide set, same 18.61-y prediction and statistics as §3): EOT20 MHWS median
      ratio 1.00, MAE 0.113 m, 84% within 0.1 m, against FES 0.99 / 0.053 m / 88%. EOT20 is not
@@ -565,7 +565,7 @@ within each tier. Items 1-4 use only data already extracted for this note; none 
      above 1.5) and 1.84 at the EOT20-flagged nodes (93% above 1.5). In all four basins FES2014
      matches EOT20 and only FES2022 has the hot spots: Cobequid Bay proxy max FES2022 12.4 m,
      FES2014 6.0 m, EOT20 6.1 m; Bahía Lomas 15.7 / 4.9 / 5.0 m; the Colorado-delta node 17.1 /
-     3.6 m; Glacier Bay / Lynn Canal 11.7 / 2.3 / 2.3 m (`atlas_basins.png`). The artefacts are
+     3.6 m; Glacier Bay / Lynn Canal 11.7 / 2.3 / 2.3 m (fig05). The artefacts are
      therefore FES2022-specific, which answers the version question of this test. In the Arctic
      FES2014 sides with EOT20 as well, but there the two are not independent.
    - *Version rule, on MHWS* (`atlas_node_mhws.py`, `atlas_rule_sensitivity.py`). FES2022 and
@@ -968,7 +968,7 @@ each script's docstring for further arguments):
 9. `sources_compare.py`
 10. `site_sets.py`
 11. `levels_extremes.py --msl linear`, then `msl_sensitivity.py`
-12. `atlas_check.py` (EOT20 and FES2014 on `<data_root>`), `atlas_node_mhws.py`, then
+12. `atlas_check.py` (FES2014 on `<data_root>`), `atlas_node_mhws.py`, then
     `atlas_rule_sensitivity.py`
 13. `coast_hg_decompose.py` (after `shapes_events.py`)
 14. `duration_experiment.py` (local SFINCS)
@@ -988,7 +988,7 @@ Inputs on `<data_root>` are read only.
 `boundary_test/input_analysis_data/`, written by `export_input_tables.py`. There is one row per
 quality site (698), keyed by the GESLA file name; levels are in m above local MSL.
 
-- **`sites_levels.csv`**: the data of `levels_scatter.png` and `levels_ratio_maps.png`.
+- **`sites_levels.csv`**: the data of fig01 and fig02.
   - Site information: site, country, region, lon, lat, `gtsm_dist_km`, `fit_years`.
   - Levels: `spring_range_gesla_m`, and MHWS of GESLA, GTSM, FES at the gauge and FES at the
     GTSM station.
