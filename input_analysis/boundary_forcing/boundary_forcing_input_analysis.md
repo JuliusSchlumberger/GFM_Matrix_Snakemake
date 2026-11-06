@@ -215,13 +215,17 @@ surge part, but only 30% of TC stations have a gauge within 50 km and the scale 
 Retire COAST-HG for both roles and generate one hydrograph per station and RP (§8.3, after
 HGRAPHER-RP in GCFM_UUdev):
 
-- **Tide:** FES2022 at the station (FES2014 where the version rule fires), ±72 h around a high
-  water as high as the tides that coincide with observed extremes, about 1.2-1.3 × MHWS rather than
-  an MHWS-level spring window (test 7).
-- **Surge shape:** selected for that RP from the GTSM surge events of 1979-2024 at the station,
-  built on the skew surge where the tidal range exceeds ~1 m. At RPs where COAST-RP's TC part
-  dominates, a STORM-forced GTSM shape (test 10), with a Gaussian of 8 h half width as the
-  placeholder. Gauge surge shapes are a local option near gauges.
+- **Tide:** FES2022 at the station (FES2014 where the version rule fires), around a high water
+  at the station's own tide level during extremes: the median tide-at-peak / MHWS of its GTSM
+  annual maxima of the same RP class (1.18-1.28 × MHWS by regime, test 7), applied to the FES MHWS.
+- **Window:** ±72 h, extended to ±120 h where the station's events outlast it (surge-dominated
+  microtidal coasts).
+- **Surge shape:** the median normalised GTSM surge of the station's events of that RP class; for
+  RP >= 50, beyond the 46-year record, the shape of its largest events (RP 20-45), with only the
+  amplitude following the RP. Non-tidal residual, with the skew surge as a variant.
+- **Tropical cyclones:** the scaled surge part of TC-driven gauge events where a gauge lies within
+  50 km, otherwise a Gaussian of 8 h half width, until STORM-forced GTSM shapes are available
+  (test 10).
 - **Peak:** the surge is scaled so that tide + surge reaches the RP peak level (COAST-RP for now).
 
 Neither GESLA nor regional pooling supplies the shapes: GESLA is the yardstick the generator is
@@ -245,8 +249,10 @@ Confirmation on 5-10 real 2-D tiles follows once the generator exists (test 8).
 **Decided:**
 - Tide: FES2022, FES2014 where the version rule fires (MHWS ratio > 1.5 and difference > 1.25 m),
   gauges overriding both. EOT20 not used.
-- Hydrograph: per-RP generator from GTSM surge shapes on the FES tide at the tide level of observed
-  extremes, scaled to the RP peak; COAST-HG retired once a variant passes the acceptance test.
+- Hydrograph: per-RP generator (§5) from GTSM surge shapes on the FES tide at each station's tide
+  level during extremes, scaled to the RP peak; largest-event shapes for RP >= 50; window
+  extended where events outlast ±72 h; gauge shapes, else a Gaussian, at TC stations. COAST-HG is
+  retired once a variant passes the acceptance test.
 - Duration correction: α = 1, fsf calibrated on SFINCS.
 - Zero-SLR scenario at the 2020 sea level: the AR6 rise from 1995-2014 to 2020 (0.049 m,
   regionalised with the SLR fingerprints) is added to the boundary level.

@@ -693,25 +693,36 @@ COAST-HG's main error (§5.2): next-day high water 0.1-0.15 of the peak too low,
 against 11-17 h observed. Test 7 traces it to the tide window: observed extremes ride on tides of
 1.18-1.28 x MHWS, an MHWS-level spring window gives 1.03-1.07.
 
-**Generator.** Per station and RP, with levels relative to local MSL:
-- **Tide:** FES2022 at the station, 10 min, ±72 h around a high water as high as the tides that
-  coincide with observed extremes (about 1.2-1.3 x MHWS, test 7; the station's own distribution
-  from its GTSM events where available), with the FES2014 version rule at basin-head nodes
-  (test 6). A plain MHWS-level spring window reproduces COAST-HG's deficit.
-- **Surge shape:** selected for the RP from GTSM surge events 1979-2024 (HGRAPHER-RP event
-  selection), built on the skew surge rather than the non-tidal residual where the tidal range
-  exceeds ~1 m (Environment Agency, 2018). The shape class follows the component that dominates
-  COAST-RP at that RP: ETC from GTSM; at TC-dominated RPs a STORM-forced GTSM shape (test 10),
-  with a Gaussian of half width 8 h (matching the 15 h median surge duration at TC-dominated
-  gauges, §5.4) as the placeholder until those runs are available.
+**Generator.** Per station and RP, with levels relative to local MSL. The design choices below
+are decided; where a variant is listed, the acceptance test picks it.
+- **Tide:** FES2022 at the station (FES2014 where the version rule of test 6 fires), 10 min,
+  around a high water whose height is the station's own tide level during extremes: the median
+  of tide-at-peak / MHWS over the station's GTSM annual maxima of the same RP class, applied to
+  the FES MHWS. As a ratio, GTSM's tide excess cancels. Test 7 found 1.18-1.28 x MHWS by tidal
+  regime against COAST-HG's ~1.05; a plain MHWS-level spring window reproduces COAST-HG's
+  deficit.
+- **Window:** ±72 h by default, extended (to ±120 h) at stations whose GTSM events are censored
+  by the ±72 h window, i.e. still above MSL at its edges (surge-dominated microtidal coasts such
+  as the Baltic and Mediterranean, §5.1), so that T and the SFINCS forcing see the full duration.
+- **Surge shape, extratropical:** the median normalised GTSM surge of the station's events of
+  the matching empirical RP class (HGRAPHER-RP event selection, 1979-2024). For RP >= 50, beyond
+  the 46-year record, the shape of the station's largest events (RP 20-45) is used and only its
+  amplitude follows the RP; the further fall of T with RP is then carried by the surge's growing
+  share of the peak alone (an assumption, §5.3). Surge definition: non-tidal residual of GTSM
+  (tide + surge run minus tide-only run) and the skew surge as the second variant (Environment
+  Agency, 2018).
+- **Surge shape, tropical cyclones** (RPs where COAST-RP's TC part dominates): the surge part
+  (observed minus predicted tide) of TC-driven gauge events where a quality gauge lies within
+  50 km, scaled to the target; otherwise a Gaussian of half width 8 h (the 15 h median surge
+  duration at TC-dominated gauges, §5.4). STORM-forced GTSM shapes replace the Gaussian once
+  available (test 10). Limits: about 30% of TC stations have a gauge within 50 km, the scale
+  factors spread from 0.6 to 1.9, and hourly gauge data under-resolve the sharpest peaks.
 - **Peak:** the surge is scaled so the maximum of tide + surge equals the peak level. The peak
   level is an input (COAST-RP for now), so the tide-corrected peak of test 5 can replace it
-  without changing the shape code. With an FES tide, the surge amplitude COAST-RP - MHWS_FES
+  without changing the shape code. With an FES tide, the surge amplitude COAST-RP - tide
   absorbs GTSM's tide excess until then.
-- **Phasing:** surge peak on the spring high water is the conservative default; tide-surge
-  interaction shifts the largest surges away from high water on shallow shelves (Horsburgh and
-  Wilson, 2007), so the observed phase distribution of the selected GTSM events is the second
-  variant.
+- **Phasing:** surge peak on the selected high water is the default; the observed phase of the
+  selected GTSM events relative to high water (Horsburgh and Wilson, 2007) is the second variant.
 - MDT, the 2020 offset and SLR are added downstream; the shape is the same for every SLR scenario
   (tides themselves change with SLR, Haigh et al., 2020, which is a known simplification).
 
