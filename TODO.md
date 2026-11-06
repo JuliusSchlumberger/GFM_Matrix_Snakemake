@@ -163,6 +163,12 @@ Open:
   of the gauge ratios within 500 km, else 1.19. Open: cap r on small-surge coasts (ratios > 2 rest
   on skew surges of a few dm); whether GTSM-ERA5-E (1950-2024) changes r; the tidal covariate where
   skew surge and tide are dependent (not tested here).
+- **Return periods above 250 y: tail of the level product.** COAST-RP grows by 0.11 m per decade
+  of RP up to RP100 and 0.083 m from RP500 to RP1000 (median of 22,670 stations); RP1000 - RP100 is
+  0.79 x RP100 - RP10 (0.72 above 30 deg latitude, 0.94 below; < 0.5 at 16% of stations). The ETC
+  tail extrapolates ~40 y of ERA5 by 25x, and the surge correction is validated to RP100 only.
+  Keep RP250-1000 (EAI tail term, FLOPROS standards above 250 y) but flag them as extrapolated;
+  extend `surge_correction.RPS` to 1000 and compare the convolution's GPD tail against COAST-RP's.
 - **Open input-assessment questions** (FES-tide recombination of COAST-RP, surge deficit, FES
   basin-head rule, TC hydrograph source; absolute MSL + MDT deferred): `boundary_test/INPUT_ANALYSIS.md` §8.
 - **Duration correction B: reference duration and one-sided clip.** The water stays above MSL
