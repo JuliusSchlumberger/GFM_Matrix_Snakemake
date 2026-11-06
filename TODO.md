@@ -121,12 +121,6 @@ Open:
   Then define one set of names (HC-bathtub, attenuated bathtub, eikonal / eikonal + B), use them
   in `sfincs_tiles/`, `review_critiques/` and `validation/`, and re-score every baseline on the
   same tiles. `sfincs_tiles/` changes need your go-ahead, and none while an HPC batch runs.
-- **Duration T in the boundary test (H2): check B's definition against the plan's.** The handoff
-  defines T(z_cell) as the time the hydrograph stays above the cell's ground level; B uses the time
-  the hydrograph stays within (local level - spill level) of its peak. The boundary test keeps B's
-  definition (decided). To check: re-score H2/H1H2 on the representative tiles with the plan's
-  T(z_cell) and compare CSI/bias per stratum (`boundary_test/run_boundary_test.py`, multiplier
-  from `event_volume.DurationCorrection`).
 - **Boundary sources: a rule for FES2022 at fjord and estuary heads.** FES matches GESLA within
   0.05 m MAE on MHWS at 698 gauges, but misses by > 0.25 m at 20, all at fjord/estuary heads or
   narrow entrances (too high in Juneau, the Salish Sea, Port Phillip; too low in the upper
@@ -158,11 +152,6 @@ Open:
   minimum difference of `boundary_test/atlas_rule_sensitivity.version_flag`; gauges override
   both. FES2014 is on `<data_root>` (catalog entry `fes2014_ocean_tide`). How far a gauge
   value reaches is undefined. Moderate inlet errors (0.25-1 m) stay uncaught.
-- **SFINCS-tile boundary test: keep or close?** Its scripts (`station_inventory.py`,
-  `select_test_tiles.py`, `build_boundary_product.py`, `run_boundary_test.py`, `sfincs_local.py`,
-  `analyse_boundary_test.py`, `gtsm_tide_stats.py`) and ~31 GB under `.cleanup_baseline/boundary_test/`
-  serve only that test (H2 re-score open). Closing it would free them; `fes_nodes.parquet` and
-  `gesla_sites.parquet` there stay (input analysis).
 - **Rerun after the 2020 baseline offset** (`boundary_conditions.slr_baseline_offset_m`, 0.049 m
   regionalised): `run_preparation.py boundary_conditions`, then every tile simulation and the
   analysis. Until then `boundaries.static_station_levels` raises on the old MDT station file.

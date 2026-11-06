@@ -3,6 +3,14 @@
 Plan: `handoff_tide_corrected_duration_boundary.md`. Outputs: `.cleanup_baseline/boundary_test/`
 (local; P: stays read-only). Nothing here changes the production DAG.
 
+The SFINCS-tile test (H1/H2 on the test tiles, §2.20) is closed: superseded by the gauge-based
+tests (`INPUT_ANALYSIS.md`), and its forcing predates the surge correction, the duration
+multiplier form and the 2020 baseline offset. Its scripts (`station_inventory`,
+`select_test_tiles`, `build_boundary_product`, `run_boundary_test`, `sfincs_local`,
+`analyse_boundary_test`, `gtsm_tide_stats`) are in git history up to commit e6d8ee1.
+`fes_tide_stats.py` and `extract_gtsm_series.py` stay: they build `fes_nodes.parquet` and the
+GTSM series of the input analysis.
+
 ## 0. Analysis plan: sources first, then shapes, then model comparisons
 
 No eikonal-vs-SFINCS comparison is designed until steps 1 and 2 are done; the runs in §2.20 are
@@ -371,29 +379,15 @@ New (this repo only; GCFM_UUdev untouched; `sfincs_tiles/` untouched):
 | `src/tide_statistics.py` | MHWS, MHW, HW99, HAT, high waters | done, tested |
 | `src/storm_tide_hydrograph.py` | HGRAPHER-RP port; spring-tide window; per_rp / pooled tau(peak) / gaussian shapes; `scale_to_peak`; `time_above` | done, tested |
 | `src/along_water.py` | water-path distance (Dijkstra, 8-conn.) + IDW with haversine fallback | done, tested |
-| `boundary_test/station_inventory.py` | COAST-RP + TC/ETC + GTSM match + COAST-HG spring HW proxy | done |
 | `boundary_test/gesla_inventory.py` | deduplicated GESLA sites | done |
-| `boundary_test/select_test_tiles.py` | strata and provisional picks | done (proxy MHWS) |
 | `boundary_test/extract_gtsm_series.py` | surge / tide series at test stations | done |
 | `boundary_test/fes_tide_stats.py` | FES prediction (pyTMD) at boundary cells -> MHWS etc. | waits for FES |
-| `boundary_test/build_boundary_product.py` | S_RP, L_RP, hydrographs per boundary cell | waits for FES |
-| `boundary_test/run_boundary_test.py` | eikonal runs 1-4 on test tiles, scoring (`--against-local-h1`) | after product |
-| `boundary_test/sfincs_local.py` | SFINCS with H1 forcing (shifted bzs), local exe | done (39 tiles) |
-| `boundary_test/analyse_boundary_test.py` | per-stratum scores, F2, F4, F9, H1 shift map | done |
 | `boundary_test/daigle_extract.py` | §4a | waits for PDF |
-
-Config: none in `config.yml`; the driver takes its settings from a `boundary_test:` block in its
-own YAML once the product exists.
 
 ## 4. Decisions still open
 
-- Tile list review: `.cleanup_baseline/boundary_test/test_tiles_representative.csv` (strata
-  from the proxy MHWS; re-stratify for reporting with FES MHWS).
 - TC Gaussian width: 8 h HWHM fixed, or scaled by the TC/ETC RP100 ratio.
 - Per-RP vs pooled shape: F6a favours per-RP selection (§2.12); confirm.
 - CHS chart datum -> CGVD2013 at Saint John; source of N_CGG2013.
 - QA for MHWS_FES at basin heads (§2.19): cap by the nearest gauge, by a ratio to the
   interpolated MHWS_GTSM, or keep the production level where the two differ by more than X m.
-- Finish or rescope the stopped batches: 290 eikonal tiles and 11 local SFINCS tiles remain;
-  1627, 2657 were interrupted mid-run.
-- F3, F6, F7, F8 and the depth metrics are not produced yet (the runs keep no depth maps).
