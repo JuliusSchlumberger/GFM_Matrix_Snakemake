@@ -147,7 +147,9 @@ Open:
   short on micro- and macrotidal coasts (GTSM's own events are not, so it is the construction:
   tide window or median shape); the low microtidal troughs come from GTSM's surge deficit (test 9),
   not from the surge tail (test 7b, GTSM's tail is fine); replace the +-15% and the +-48 h profile
-  RMSE by tolerances derived from flood extent and depth (synthetic sill experiment). Production needs the GTSM surge series of
+  RMSE by tolerances derived from flood extent and depth (synthetic sill experiment, test 11:
+  `boundary_test/sill_experiment.py`, `sill_analysis.py`). RP 2 diagnosis: swap in GTSM's own
+  event tide (keeping the generator's surge) and the reverse, to find which half loses T(0.25). Production needs the GTSM surge series of
   all 23,226 stations and FES at each, then the SFINCS forcing and the eikonal T lookup.
 - **Implement the FES version rule in the boundary preparation.** Decided (INPUT_ANALYSIS.md
   test 6, §8.2): FES2014 replaces FES2022 where the two atlases' MHWS differ by the ratio and
