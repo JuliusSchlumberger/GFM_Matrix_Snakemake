@@ -22,7 +22,7 @@ import cartopy.feature as cfeature  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
-from matplotlib.colors import BoundaryNorm, LogNorm, Normalize, TwoSlopeNorm  # noqa: E402
+from matplotlib.colors import LogNorm, Normalize  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
@@ -738,11 +738,8 @@ def _heat(ax, grid: pd.DataFrame, col: str, text, cmap, norm, mark=None) -> obje
     for i, r in enumerate(ratios):
         for j, d in enumerate(diffs):
             row = grid[(grid.ratio == r) & (grid.diff_m == d)].iloc[0]
-            level = float(norm(m[i, j]))
-            if isinstance(norm, BoundaryNorm):
-                level /= max(norm.Ncmap - 1, 1)
-            diverging = isinstance(norm, TwoSlopeNorm) or cmap.name in ("RdBu", "RdBu_r")
-            dark = abs(level - 0.5) > 0.3 if diverging else level > 0.6
+            rgb = im.cmap(im.norm(m[i, j]))[:3] if np.isfinite(m[i, j]) else (1.0, 1.0, 1.0)
+            dark = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2] < 0.5
             ax.text(j, i, text(row), ha="center", va="center", fontsize=7.5, color="white" if dark else INK)
             if mark is not None and mark(row):
                 ax.add_patch(plt.Rectangle((j - 0.42, i - 0.42), 0.84, 0.84, fill=False, edgecolor=INK,
@@ -758,15 +755,19 @@ def _heat(ax, grid: pd.DataFrame, col: str, text, cmap, norm, mark=None) -> obje
 def fig06_rule_sensitivity(out: Path, dest: Path) -> None:
     grid = pd.read_csv(out / "analysis" / "atlas_rule_grid.csv")
     bands = pd.read_csv(out / "analysis" / "atlas_rule_bands.csv", index_col=0)
-    scored = grid.gauges_fixed + grid.gauges_harmed
     best = int(grid.loc[grid.gauges_harmed == 0, "gauges_fixed"].max())
-    precision = (grid.gauges_fixed / scored).where(scored > 0, 0.0)
-    grid["score"] = precision * (grid.gauges_fixed / best).clip(upper=1)
     known = int(grid.known_total.iloc[0])
     grid["known_share"] = grid.known_caught / known
     fig, axes = plt.subplots(1, 3, figsize=(21, 5.8))
-    _heat(axes[0], grid, "score", lambda r: f"{int(r.gauges_fixed)}/{int(r.gauges_harmed)}",
-          plt.get_cmap("Blues"), Normalize(0, 1), mark=lambda r: r.gauges_harmed == 0 and r.gauges_fixed == best)
+    g = pd.read_csv(out / "analysis" / "atlas_gauges.csv", index_col=0).dropna(
+        subset=["gesla_harm__mhws_m", "fes_gauge__mhws_m", "fes2014__mhws_m"])
+    rmse22 = float(np.sqrt(((g.fes_gauge__mhws_m - g.gesla_harm__mhws_m) ** 2).mean()))
+    rmse14 = float(np.sqrt(((g.fes2014__mhws_m - g.gesla_harm__mhws_m) ** 2).mean()))
+    im = _heat(axes[0], grid, "hybrid_rmse_m", lambda r: f"{int(r.gauges_fixed)}/{int(r.gauges_harmed)}",
+               plt.get_cmap("Blues_r"), Normalize(float(grid.hybrid_rmse_m.min()),
+                                                  float(grid.loc[grid.ratio <= 1.75, "hybrid_rmse_m"].max())), mark=lambda r: r.gauges_harmed == 0 and r.gauges_fixed == best)
+    cb = fig.colorbar(im, ax=axes[0], orientation="horizontal", pad=0.17, shrink=0.6, aspect=30, extend="max")
+    cb.set_label("RMSE of MHWS against GESLA, 905 gauges (m)")
     _heat(axes[1], grid, "known_share", lambda r: f"{int(r.known_caught)}", plt.get_cmap("Blues"), Normalize(0, 1),
           mark=lambda r: r.known_caught == known)
     _heat(axes[2], grid, "nodes_replaced", lambda r: f"{int(r.nodes_replaced)}", plt.get_cmap("Oranges"),
@@ -792,12 +793,15 @@ def fig06_rule_sensitivity(out: Path, dest: Path) -> None:
         FES2022 and FES2014. At every gauge where the rule would switch to FES2014, the switch is
         scored against the gauge's own MHWS: an improvement if FES2014 is closer to the gauge than
         FES2022 by more than 5 cm, a worsening if it is further by more than 5 cm. Cell text:
-        improvements / worsenings. Colour: precision x coverage, from white (0) to dark blue (1).
-        Precision is improvements / (improvements + worsenings), the share of switches that help;
-        coverage is improvements / {best}, capped at 1, the share of the {best} gauges with a gross
-        FES2022 error that the pair fixes. Only a pair that fixes all of them without making any
-        gauge worse reaches 1: 3/0 gives 1.0, 2/0 0.67, 1/0 0.33, 3/1 0.75. Cells where the rule
-        changes no gauge by more than 5 cm either way are white. The gauges with a real FES2022 error (Skagway, Juneau, Port
+        improvements / worsenings. Colour: the root-mean-square error (RMSE) of MHWS against GESLA
+        over all 905 gauges when the candidate rule is applied, i.e. FES2014 where it fires and
+        FES2022 elsewhere; darker = lower error. The scale spans the pairs with R <= 1.75
+        ({grid.hybrid_rmse_m.min():.3f}-{grid.loc[grid.ratio <= 1.75, "hybrid_rmse_m"].max():.3f} m);
+        worse pairs (R >= 2, up to {grid.hybrid_rmse_m.max():.3f} m) are white. RMSE squares the
+        errors, so it is dominated by the few gross ones: FES2022 alone is {rmse22:.3f} m mostly
+        because of Skagway (error 4.7 m), and FES2014 alone would be {rmse14:.3f} m although its mean
+        absolute error is larger than FES2022's (fig01). It therefore measures exactly what the
+        rule is for: removing gross errors without adding new ones. The gauges with a real FES2022 error (Skagway, Juneau, Port
         Alberni) are the improvements to be had; Trondheim, where FES2014 is wrong, is the main
         worsening to avoid. Dotted squares: pairs with no worsening and the most improvements
         ({best}).
@@ -816,8 +820,8 @@ def fig06_rule_sensitivity(out: Path, dest: Path) -> None:
         that switch more nodes than needed change FES2022 values on coasts where no evidence says
         it is wrong.
 
-        Reading off the adopted values: (a) leaves the dotted pairs in the column D = 1.25 m (no
-        worsening, all {best} improvements; at D <= 1 m Trondheim is switched wrongly, at D = 1.5 m
+        Reading off the adopted values: (a) leaves the dotted pairs in the column D = 1.25 m (lowest
+        RMSE, {adopted.hybrid_rmse_m:.3f} m; no worsening, all {best} improvements; at D <= 1 m Trondheim is switched wrongly, at D = 1.5 m
         Port Alberni is no longer caught). (b) leaves R <= 1.5 (higher R misses artefacts). The
         row R = 1 switches the ratio condition off, so only D decides: from R = 1 to R = 1.5 panels
         (a) and (b) are identical, i.e. the ratio changes nothing at the gauges or at the known

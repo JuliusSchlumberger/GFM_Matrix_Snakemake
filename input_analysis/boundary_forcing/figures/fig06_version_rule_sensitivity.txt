@@ -9,15 +9,16 @@ m.
 (a) What the candidate rule does at the 905 GESLA tide gauges that have MHWS from GESLA, FES2022 and
 FES2014. At every gauge where the rule would switch to FES2014, the switch is scored against the
 gauge's own MHWS: an improvement if FES2014 is closer to the gauge than FES2022 by more than 5 cm, a
-worsening if it is further by more than 5 cm. Cell text: improvements / worsenings. Colour:
-precision x coverage, from white (0) to dark blue (1). Precision is improvements / (improvements +
-worsenings), the share of switches that help; coverage is improvements / 3, capped at 1, the share
-of the 3 gauges with a gross FES2022 error that the pair fixes. Only a pair that fixes all of them
-without making any gauge worse reaches 1: 3/0 gives 1.0, 2/0 0.67, 1/0 0.33, 3/1 0.75. Cells where
-the rule changes no gauge by more than 5 cm either way are white. The gauges with a real FES2022
-error (Skagway, Juneau, Port Alberni) are the improvements to be had; Trondheim, where FES2014 is
-wrong, is the main worsening to avoid. Dotted squares: pairs with no worsening and the most
-improvements (3).
+worsening if it is further by more than 5 cm. Cell text: improvements / worsenings. Colour: the
+root-mean-square error (RMSE) of MHWS against GESLA over all 905 gauges when the candidate rule is
+applied, i.e. FES2014 where it fires and FES2022 elsewhere; darker = lower error. The scale spans
+the pairs with R <= 1.75 (0.129-0.138 m); worse pairs (R >= 2, up to 0.235 m) are white. RMSE
+squares the errors, so it is dominated by the few gross ones: FES2022 alone is 0.233 m mostly
+because of Skagway (error 4.7 m), and FES2014 alone would be 0.153 m although its mean absolute
+error is larger than FES2022's (fig01). It therefore measures exactly what the rule is for: removing
+gross errors without adding new ones. The gauges with a real FES2022 error (Skagway, Juneau, Port
+Alberni) are the improvements to be had; Trondheim, where FES2014 is wrong, is the main worsening to
+avoid. Dotted squares: pairs with no worsening and the most improvements (3).
 
 (b) What the candidate rule does at 178 known artefacts: boundary nodes in the four basins of fig05
 whose FES2022 MHWS exceeds 1.25 x the largest MHWS observed in that basin (Minas 8.15 m, Strait of
@@ -32,15 +33,15 @@ FES2014 (cell text; colour on a logarithmic scale, darker = more). At the adopte
 nodes, the red crosses of fig04. Pairs that switch more nodes than needed change FES2022 values on
 coasts where no evidence says it is wrong.
 
-Reading off the adopted values: (a) leaves the dotted pairs in the column D = 1.25 m (no worsening,
-all 3 improvements; at D <= 1 m Trondheim is switched wrongly, at D = 1.5 m Port Alberni is no
-longer caught). (b) leaves R <= 1.5 (higher R misses artefacts). The row R = 1 switches the ratio
-condition off, so only D decides: from R = 1 to R = 1.5 panels (a) and (b) are identical, i.e. the
-ratio changes nothing at the gauges or at the known artefacts. It only changes how many other nodes
-are switched (c: 1,464 at R = 1, 1,287 at R = 1.5, for D = 1.25 m). R is therefore a precaution for
-coasts without evidence, not a value the data pin down; R = 1.5 is the largest ratio that still
-replaces every known artefact. At the adopted pair: 3 improvements, 0 worsenings, 178 of 178
-artefacts replaced.
+Reading off the adopted values: (a) leaves the dotted pairs in the column D = 1.25 m (lowest RMSE,
+0.129 m; no worsening, all 3 improvements; at D <= 1 m Trondheim is switched wrongly, at D = 1.5 m
+Port Alberni is no longer caught). (b) leaves R <= 1.5 (higher R misses artefacts). The row R = 1
+switches the ratio condition off, so only D decides: from R = 1 to R = 1.5 panels (a) and (b) are
+identical, i.e. the ratio changes nothing at the gauges or at the known artefacts. It only changes
+how many other nodes are switched (c: 1,464 at R = 1, 1,287 at R = 1.5, for D = 1.25 m). R is
+therefore a precaution for coasts without evidence, not a value the data pin down; R = 1.5 is the
+largest ratio that still replaces every known artefact. At the adopted pair: 3 improvements, 0
+worsenings, 178 of 178 artefacts replaced.
 
 Behind the D bound: comparing the two atlases at all 905 gauges, binned by how much FES2022 exceeds
 FES2014 in MHWS (gain = |FES2022 - GESLA| - |FES2014 - GESLA|, positive when FES2014 is better):

@@ -7,7 +7,8 @@ of evidence:
 
 - Gauges (all sites with GESLA, FES2022 and FES2014 MHWS; `atlas_gauges.csv`): the rule is
   evaluated on the two atlases' MHWS at the gauge. A firing is a fix when FES2014 is closer to
-  the gauge MHWS by more than MARGIN_M, harm when it is further by more than MARGIN_M.
+  the gauge MHWS by more than MARGIN_M, harm when it is further by more than MARGIN_M; the MAE and
+  RMSE of MHWS against GESLA over all of them, with FES2014 used where the rule fires.
 - Known artefacts (`atlas_node_mhws.parquet`): nodes in the four basin boxes whose FES2022 MHWS
   exceeds IMPLAUSIBLE_FACTOR x the largest observed MHWS there (half the record or upper spring
   range, INPUT_ANALYSIS §3). The set is defined without FES2014, so detection is not circular.
@@ -78,7 +79,8 @@ def grid_table(g: pd.DataFrame, nodes: pd.DataFrame, known: pd.Series) -> pd.Dat
             rows.append({"ratio": r, "diff_m": d, "gauges_fired": int(fire.sum()),
                          "gauges_fixed": int((fire & (g.e14 < g.e22 - MARGIN_M)).sum()),
                          "gauges_harmed": int((fire & (g.e14 > g.e22 + MARGIN_M)).sum()),
-                         "hybrid_mae_m": float(hybrid.mean()), "nodes_replaced": int(node_fire.sum()),
+                         "hybrid_mae_m": float(hybrid.mean()), "hybrid_rmse_m": float(np.sqrt((hybrid ** 2).mean())),
+                         "nodes_replaced": int(node_fire.sum()),
                          "known_caught": int((node_fire & known).sum()), "known_total": int(known.sum())})
     return pd.DataFrame(rows)
 
