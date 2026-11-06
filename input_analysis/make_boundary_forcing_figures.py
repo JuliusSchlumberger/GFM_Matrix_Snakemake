@@ -582,6 +582,46 @@ def _replaced_clusters(lon: np.ndarray, lat: np.ndarray) -> list[tuple[np.ndarra
     return [(lon[labels == k], lat[labels == k]) for k in np.unique(labels)]
 
 
+PAGE_IN = (16.0, 10.0)
+GAP_IN, PAIR_GAP_IN, ROW_GAP_IN, TOP_IN, CBAR_IN, SIDE_IN = 0.45, 0.32, 0.5, 0.35, 0.95, 0.25
+
+
+def _row_height(row: list[tuple[int, bool]], aspects: list[float], width: float) -> float:
+    """Box height that makes a row of basin pairs exactly `width` wide (side pairs: 2 maps across)."""
+    side = [aspects[k] for k, s in row if s]
+    stacked = [aspects[k] for k, s in row if not s]
+    free = width - GAP_IN * (len(row) - 1) - PAIR_GAP_IN * len(side) + PAIR_GAP_IN * sum(stacked) / 2
+    return free / (2 * sum(side) + sum(stacked) / 2)
+
+
+def _basin_layout(aspects: list[float]) -> list[list[tuple[int, bool]]]:
+    """Rows of (basin, side_by_side) that make the smallest map largest on PAGE_IN."""
+    import itertools
+
+    def score(rows):
+        width = PAGE_IN[0] - 2 * SIDE_IN
+        heights, maps = [], []
+        for row in rows:
+            h = _row_height(row, aspects, width)
+            heights.append(h)
+            maps += [(h if side else (h - PAIR_GAP_IN) / 2) for _, side in row]
+        free = PAGE_IN[1] - TOP_IN - CBAR_IN - ROW_GAP_IN * (len(rows) - 1)
+        scale = min(1.0, free / sum(heights))
+        return min(m * scale * (m * scale * aspects[k]) for m, (k, _) in zip(maps, (b for r in rows for b in r)))
+
+    best, best_rows = -1.0, None
+    n = len(aspects)
+    for order in itertools.permutations(range(n)):
+        for sides in itertools.product((False, True), repeat=n):
+            boxes = list(zip(order, sides))
+            for split in range(1, n + 1):
+                rows = [boxes[:split], boxes[split:]] if split < n else [boxes]
+                value = score(rows)
+                if value > best:
+                    best, best_rows = value, rows
+    return best_rows
+
+
 def fig05_basin_heads(out: Path, dest: Path) -> None:
     import cartopy.io.shapereader as shpreader
     import geopandas as gpd
@@ -601,27 +641,36 @@ def fig05_basin_heads(out: Path, dest: Path) -> None:
         stretch = 1 / np.cos(np.radians(np.mean(ext[2:])))
         basins.append({"name": name, "b": b, "gb": gb, "ext": ext, "stretch": stretch,
                        "aspect": (ext[1] - ext[0]) / ((ext[3] - ext[2]) * stretch)})
+    rows = _basin_layout([d["aspect"] for d in basins])
+    width = PAGE_IN[0] - 2 * SIDE_IN
+    heights = [_row_height(row, [d["aspect"] for d in basins], width) for row in rows]
+    free = PAGE_IN[1] - TOP_IN - CBAR_IN - ROW_GAP_IN * (len(rows) - 1)
+    scale = min(1.0, free / sum(heights))
+    heights = [h * scale for h in heights]
+    fig_w, fig_h = PAGE_IN[0], TOP_IN + sum(heights) + ROW_GAP_IN * (len(rows) - 1) + CBAR_IN
     vmax = float(max(np.nanmax(d["b"][["fes2022_mhws_m", "fes2014_mhws_m"]].to_numpy()) for d in basins))
     norm = Normalize(0, vmax)
-    fig_w, left, gap, top, mid, row_gap, cbar_h = 13.0, 0.25, 0.45, 0.35, 0.32, 0.55, 0.95
-    rows = (basins[:2], basins[2:])
-    heights = [(fig_w - 2 * left - gap) / sum(d["aspect"] for d in row) for row in rows]
-    fig_h = top + sum(2 * h + mid for h in heights) + row_gap + cbar_h
     fig = plt.figure(figsize=(fig_w, fig_h))
-    y_top = fig_h - top
-    summary, sc = [], None
-    for r, (row, h) in enumerate(zip(rows, heights)):
-        x = left
-        for c, d in enumerate(row):
-            letter = "abcd"[2 * r + c]
-            w = d["aspect"] * h
+    y_top = fig_h - TOP_IN
+    summary, sc, position = [], None, 0
+    for row, h in zip(rows, heights):
+        row_w = sum((basins[k]["aspect"] * 2 * h + PAIR_GAP_IN if side else basins[k]["aspect"] * (h - PAIR_GAP_IN) / 2)
+                    for k, side in row) + GAP_IN * (len(row) - 1)
+        x = (fig_w - row_w) / 2
+        for k, side in row:
+            d = basins[k]
+            letter = "abcd"[position]
+            position += 1
+            map_h = h if side else (h - PAIR_GAP_IN) / 2
+            map_w = d["aspect"] * map_h
             b, gb, ext = d["b"], d["gb"], d["ext"]
             clip = land.clip(box(ext[0], ext[2], ext[1], ext[3]))
             keep, rep = b[~b.replaced], b[b.replaced]
             clusters = _replaced_clusters(rep.node_lon.to_numpy(), rep.node_lat.to_numpy())
             for i, (col, rep_marker) in enumerate((("fes2022_mhws_m", "X"), ("fes2014_mhws_m", "D"))):
-                y0 = y_top - h - i * (h + mid)
-                ax = fig.add_axes([x / fig_w, y0 / fig_h, w / fig_w, h / fig_h])
+                ax_x = x + (i * (map_w + PAIR_GAP_IN) if side else 0)
+                ax_y = y_top - map_h - (0 if side else i * (map_h + PAIR_GAP_IN))
+                ax = fig.add_axes([ax_x / fig_w, ax_y / fig_h, map_w / fig_w, map_h / fig_h])
                 clip.plot(ax=ax, color=LAND_COLOR, edgecolor="none", zorder=0)
                 sc = ax.scatter(keep.node_lon, keep.node_lat, c=keep[col], s=14, cmap="viridis", norm=norm,
                                 linewidths=0, zorder=2)
@@ -637,34 +686,37 @@ def fig05_basin_heads(out: Path, dest: Path) -> None:
                                          edgecolor="#e34948", linewidth=1.1, zorder=5))
                 ax.set(xlim=ext[:2], ylim=ext[2:], xticks=[], yticks=[])
                 ax.set_aspect(d["stretch"], adjustable="datalim")
-                for side in ax.spines.values():
-                    side.set_edgecolor(MUTED)
+                for spine in ax.spines.values():
+                    spine.set_edgecolor(MUTED)
                 draw_panel_letter(ax, f"{letter}{i + 1}")
             summary.append(f"({letter}1, {letter}2) {d['name']}: {len(b)} nodes, {int(b.replaced.sum())} replaced in "
                            f"{len(clusters)} cluster(s); FES2022 MHWS max {b.fes2022_mhws_m.max():.1f} m, FES2014 max "
                            f"{b.fes2014_mhws_m.max():.1f} m"
                            + ("; gauges: " + ", ".join(f"{q.site_name} {q.gesla_harm__mhws_m:.2f} m"
                                                        for q in gb.itertuples()) if len(gb) else "; no gauge"))
-            x += w + gap
-        y_top -= 2 * h + mid + row_gap
+            x += (2 * map_w + PAIR_GAP_IN if side else map_w) + GAP_IN
+        y_top -= h + ROW_GAP_IN
     cax = fig.add_axes([0.3, 0.45 / fig_h, 0.4, 0.16 / fig_h])
     cb = fig.colorbar(sc, cax=cax, orientation="horizontal")
     cb.set_label("MHWS (m)")
     _save(fig, dest / "fig05_fes_basin_heads.png")
+    names = "; ".join(s.split(":")[0] for s in summary)
     describe(dest / "fig05_fes_basin_heads.png", f"""
         MHWS (mean high water springs above local mean sea level) at the FES boundary nodes in the
-        four basins where FES2022 has gross artefacts: (a) Minas Basin / Cobequid Bay, (b) Strait
-        of Magellan / Bahia Lomas, (c) upper Gulf of California, (d) Glacier Bay / Lynn Canal. For
-        each basin the map marked 1 shows FES2022 and the map marked 2 below it FES2014, at the
-        same nodes and over the same area. All maps share the colour scale at the bottom.
+        four basins where FES2022 has gross artefacts: {names}. For each basin the map marked 1
+        shows FES2022 and the map marked 2 next to it (beside or below) FES2014, at the same nodes
+        and over the same area. All maps share the colour scale at the bottom. The arrangement is
+        the one that makes the smallest map largest on the page, so the basins are not in a fixed
+        geographic order.
 
         Symbols: circles = nodes that keep FES2022 under the version rule (fig04, fig06). Crosses
         (maps 1) = FES2022 values the rule discards; diamonds (maps 2) = the FES2014 values that
         replace them. Red ovals enclose the replaced nodes: nodes closer than about three grid
         cells form one group, and each oval is the smallest axis-aligned ellipse around the box
-        spanned by the group's westernmost, easternmost, northernmost and southernmost node. Stars = GESLA tide gauges, coloured by their observed
-        MHWS. Each map is cropped to its nodes and gauges and drawn with the east-west scale
-        corrected for latitude, so shapes are true. Land: Natural Earth 1:50m, grey.
+        spanned by the group's westernmost, easternmost, northernmost and southernmost node.
+        Stars = GESLA tide gauges, coloured by their observed MHWS. Each map is cropped to its nodes
+        and gauges and drawn with the east-west scale corrected for latitude, so shapes are true.
+        Land: Natural Earth 1:50m, grey.
 
         {chr(10).join(summary)}
 
