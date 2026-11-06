@@ -144,8 +144,10 @@ Open:
 - **Per-RP hydrograph generator: close the remaining gaps, then run it for all stations.** Built
   and tested (`src/storm_tide_hydrograph.rp_hydrograph`, `boundary_test/generator_validation.py`;
   INPUT_ANALYSIS.md §8.3 result): 14 of 20 tidal-class x RP cases pass. Open: T(0.25) at RP 2 ~30%
-  short on micro- and macrotidal coasts; the missing surge tail on microtidal coasts; the skew
-  surge variant; restating the profile-RMSE criterion. Production needs the GTSM surge series of
+  short on micro- and macrotidal coasts (GTSM's own events are not, so it is the construction:
+  tide window or median shape); the low microtidal troughs come from GTSM's surge deficit (test 9),
+  not from the surge tail (test 7b, GTSM's tail is fine); replace the +-15% and the +-48 h profile
+  RMSE by tolerances derived from flood extent and depth (synthetic sill experiment). Production needs the GTSM surge series of
   all 23,226 stations and FES at each, then the SFINCS forcing and the eikonal T lookup.
 - **Implement the FES version rule in the boundary preparation.** Decided (INPUT_ANALYSIS.md
   test 6, §8.2): FES2014 replaces FES2022 where the two atlases' MHWS differ by the ratio and

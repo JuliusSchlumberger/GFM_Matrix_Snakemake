@@ -776,6 +776,22 @@ and nb24 all lie within ±15% of the gauge medians.
   events, is a median over many events and therefore smoother than any single hydrograph; the
   generator exceeds it by a median 0.02 of the peak. The criterion as written is too strict for a
   single synthetic event and should be restated (e.g. no more than 0.03 of the peak above GTSM's).
+- **Profile RMSE in metres** (x COAST-RP peak, per site, median): generator 10-19 cm on 0-1 m
+  coasts, 16-26 cm on 1-2 m, 25-36 cm on 2-4 m, 36-56 cm above 4 m; above GTSM's own events by
+  0-4 cm except RP 2 on 2-4 m coasts (8 cm) and above 4 m (9-13 cm). The RMSE over +-48 h weighs
+  low water as much as the peak, so on macrotidal coasts it is dominated by tidal phase; it says
+  little about the part of the hydrograph that floods.
+- **Surge tail and RP 2 (test 7b, `boundary_test/surge_tail_check.py`; `surge_tail_check.csv`).**
+  Same sites and years, surge residual normalised as the generator does. GTSM's surge tail is not
+  shorter than the gauges': at +-36 h it keeps 0.31-0.46 of the surge peak against the gauges'
+  0.28-0.31 (raw; RP >= 10: 0.33-0.42 vs 0.19-0.30). No GESLA tail correction is needed. The
+  microtidal levels between high waters are too low already in GTSM's own events (-0.38 vs -0.20
+  of the peak; RP >= 10: -0.27 vs -0.09) because GTSM's surge is too small (RP >= 10 surge maximum
+  0.37 vs 0.54 m, 0.55 vs 0.68 of the peak): with less surge in the peak the tide dominates the
+  normalised profile. That is the surge-deficit correction of test 9, not a shape issue; scaling
+  to the gauge peaks recovers part of it (RP 10: -0.28 vs -0.38). GTSM's own RP 2 events match the
+  gauges' T(0.25) (13 vs 14.5 h on 0-1 m, 22.5 vs 22 h above 4 m), so the generator's RP 2 deficit
+  comes from its construction (tide window or median shape), not from GTSM.
 - **Rejected variants:** keeping the observed surge-tide phasing adds nothing; averaging limb
   durations per level (the HGRAPHER construction) narrows the shape further. Smoothing the residual
   is what helps, by removing the ripple whose highest bump otherwise sets the normalisation.
