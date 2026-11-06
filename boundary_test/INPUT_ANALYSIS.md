@@ -579,7 +579,7 @@ within each tier. Items 1-4 use only data already extracted for this note; none 
      fixes: Skagway (7.46 -> 2.76 m, gauge 2.78 m), Juneau (5.95 -> 3.33 m, gauge 2.72 m) and Port
      Alberni (2.79 -> 1.36 m, gauge 1.28 m).
    - *Threshold sensitivity* (R in 1.1-3, D in 0-1.5 m; `atlas_rule_grid.csv`,
-     `atlas_rule_bands.csv`; summary fig06 and figS1 in `input_analysis/boundary_forcing/`):
+     `atlas_rule_bands.csv`; summary fig06 in `input_analysis/boundary_forcing/`):
      - *Which atlas is closer to the gauge, by MHWS difference FES2022 - FES2014.* In every band
        below 0.5 m FES2014 is closer at only 31-50% of the gauges and switching gains nothing or
        loses (median gain of |FES2022 - gauge| - |FES2014 - gauge| from -0.34 to +0.02 m); the
