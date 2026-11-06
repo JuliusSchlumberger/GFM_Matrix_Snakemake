@@ -839,6 +839,19 @@ and nb24 all lie within ±15% of the gauge medians.
   flood volume), with the deviation above the gauges no larger than that below (levels away from
   the peak that are too high are the costly error). Where gauge events suffice (RP 2, 10), the
   sill-test flood volume ratio within +-10% as a direct check: met in all 8 cells.
+- **Overflow scores, all sites** (`generator_validation.py`, ex090 / ex075 = time integral of the
+  peak-normalised level above 0.9 / 0.75, ratio of the medians to the gauge events'). The adopted
+  generator passes 6 of 20 cells (the +-15% shape test: 14). It never exceeds the gauges by more
+  than 10%, so the costly error is absent; it falls short instead: ex090 0.93-1.10 on 0-1 m coasts,
+  0.80-0.89 on 1-2 m, 0.74-0.79 on 2-4 m, 0.61-0.94 above 4 m (lowest at RP 2-10); ex075 0.74-1.08.
+  GTSM's own events pass 12 of 20: at RP >= 25 the
+  gauges have 1-2 events per window and GTSM differs by +16-20% on 0-1 m and >4 m coasts, so
+  +-10% is below the noise of the reference there. Rebuilding GTSM's events step by step (ex090,
+  1-2 / 2-4 / >4 m, RP 10): scaled 1.07 / 0.97 / 1.01, smoothed 1.24 / 1.19 / 1.12, recentred
+  1.12 / 1.09 / 0.99, tide scaled to MHWS_FES 1.01 / 0.94 / 0.81, median surge shape 0.95 / 0.83 /
+  0.73, FES tide window (the generator) 0.89 / 0.78 / 0.68. The shortfall is spread over the last
+  three steps: the lower FES tide, the median surge shape (largest on macrotidal coasts) and the
+  FES high-water window, each -5 to -18%.
 - **Rejected variants:** keeping the observed surge-tide phasing adds nothing; averaging limb
   durations per level (the HGRAPHER construction) narrows the shape further. Smoothing the residual
   is what helps, by removing the ripple whose highest bump otherwise sets the normalisation.

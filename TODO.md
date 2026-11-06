@@ -149,8 +149,11 @@ Open:
   not from the surge tail (test 7b, GTSM's tail is fine). Test 11 (SFINCS sill strips, §8.3)
   shows the RP 2 T(0.25) deficit costs only ~1-9% flood volume, inside the 16-22% spread between
   real events, so the RP 2 fixes (FES window chosen by its neighbouring high waters, microtidal
-  surge lag) are optional. Next: add the overflow volume above 0.9 and 0.75 x peak to
-  `generator_validation.py` and rescore all sites against the test 11 criteria (+-10%). Production needs the GTSM surge series of
+  surge lag) are optional. On the overflow criterion (ex090 / ex075 within +-10%, §8.3) the
+  generator passes 6 of 20 cells, always short, never over: ex090 -20 to -25% on 2-4 m coasts,
+  -30 to -40% above 4 m at RP 2-10. Decide: accept a one-sided tolerance (short is the mild error),
+  or close the gap (tide scaling, surge shape and FES window each cost 5-18%); widen the tolerance
+  at RP >= 25, where 1-2 gauge events per window put GTSM's own events 16-20% off. Production needs the GTSM surge series of
   all 23,226 stations and FES at each, then the SFINCS forcing and the eikonal T lookup.
 - **Implement the FES version rule in the boundary preparation.** Decided (INPUT_ANALYSIS.md
   test 6, §8.2): FES2014 replaces FES2022 where the two atlases' MHWS differ by the ratio and

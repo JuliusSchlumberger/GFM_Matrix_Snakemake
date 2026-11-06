@@ -42,8 +42,14 @@ gauge's own FES value in this set beyond Juneau, Skagway and Port Alberni.
 
 Measures per hydrograph and per gauge event, on the hourly +-72 h profile relative to local MSL
 and normalised by its peak: T(0.25), T(0.5) (hours within f x peak of the peak) and nb24 (highest
-level / peak 21-28 h from the peak, both sides averaged); profile RMSE against the gauge's median
-profile over +-48 h, with GTSM's own events of the same RP window as the benchmark.
+level / peak 21-28 h from the peak, both sides averaged), ex090 and ex075 (time integral of the
+normalised level above 0.9 and 0.75, in peak-hours; test 11 found this overflow volume, not T,
+predicts flood volume behind a sill); profile RMSE against the gauge's median profile over +-48 h,
+with GTSM's own events of the same RP window as the benchmark.
+
+Acceptance per tidal class x RP: pass_overflow when the median ex090 and ex075 lie within
+OVERFLOW_TOL of the gauge medians (test 11: about +-7-10% in flood volume); pass_shape (T(0.25),
+T(0.5), nb24 within +-15%) and pass_rmse are kept for comparison.
 
 Writes <out-dir>/analysis/{generator_scores.parquet, generator_acceptance.csv} and
 generator_profiles.npz (hourly normalised profiles per site, RP and variant).
@@ -92,6 +98,8 @@ NB24_HR = (21, 28)
 RMSE_HR = 48
 SWAP_EVENTS = 8
 SEASONAL = ("sa", "ssa")
+OVERFLOW_TOL = 0.10
+EXCESS_LEVELS = (0.9, 0.75)
 SMOOTH_HR = 13  # one semidiurnal period: removes the tide-surge interaction ripple of the residual
 EARTH_RADIUS_KM = 6371.0
 VARIANTS = ("generator", "generator_phase", "generator_durations", "generator_smooth", "generator_gauge_peak",
@@ -99,7 +107,7 @@ VARIANTS = ("generator", "generator_phase", "generator_durations", "generator_sm
 
 
 def profile_measures(prof: np.ndarray) -> dict:
-    """T(0.25), T(0.5) and nb24 of an hourly profile normalised to 1 at its centre."""
+    """T(0.25), T(0.5), nb24 and ex090 / ex075 of an hourly profile normalised to 1 at its centre."""
     c = len(prof) // 2
     finite = np.where(np.isfinite(prof), prof, -np.inf)
     nb = []
@@ -109,7 +117,8 @@ def profile_measures(prof: np.ndarray) -> dict:
         if np.isfinite(seg).any():
             nb.append(np.nanmax(seg))
     return {"t025_hr": float((finite >= 0.75).sum()), "t05_hr": float((finite >= 0.5).sum()),
-            "nb24": float(np.mean(nb)) if nb else np.nan}
+            "nb24": float(np.mean(nb)) if nb else np.nan,
+            **{f"ex{round(100 * f):03d}": float(np.clip(finite - f, 0.0, None).sum()) for f in EXCESS_LEVELS}}
 
 
 def hourly_profile(level10: np.ndarray) -> np.ndarray:
@@ -316,7 +325,7 @@ def acceptance(scores: pd.DataFrame, sites: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for (variant, rc, rp), g in s.groupby(["variant", "range_class", "rp"], observed=True):
         row = {"variant": variant, "range_class": str(rc), "rp": rp, "n_sites": len(g)}
-        for m in ("t025_hr", "t05_hr", "nb24"):
+        for m in ("t025_hr", "t05_hr", "nb24", "ex090", "ex075"):
             row[m] = g[m].median()
             row[f"gauge_{m}"] = g[f"gauge_{m}"].median()
             row[f"{m}_ratio"] = row[m] / row[f"gauge_{m}"]
@@ -324,6 +333,7 @@ def acceptance(scores: pd.DataFrame, sites: pd.DataFrame) -> pd.DataFrame:
         row["gtsm_rmse_vs_gauge"] = g.gtsm_rmse_vs_gauge.median()
         row["pass_shape"] = all(abs(row[f"{m}_ratio"] - 1) <= 0.15 for m in ("t025_hr", "t05_hr", "nb24"))
         row["pass_rmse"] = row["rmse_vs_gauge"] <= row["gtsm_rmse_vs_gauge"]
+        row["pass_overflow"] = all(abs(row[f"{m}_ratio"] - 1) <= OVERFLOW_TOL for m in ("ex090", "ex075"))
         rows.append(row)
     t = pd.DataFrame(rows)
     rp_ratio = t[t.rp.isin([2, 10])].pivot_table(index=["variant", "range_class"], columns="rp", values=["t025_hr",
@@ -399,7 +409,8 @@ def main() -> None:
     table.round(3).to_csv(dest / f"generator_acceptance{args.tag}.csv", index=False)
     with pd.option_context("display.width", 250, "display.max_columns", 30):
         print(table[["variant", "range_class", "rp", "n_sites", "t025_hr", "gauge_t025_hr", "t05_hr", "gauge_t05_hr",
-                     "nb24", "gauge_nb24", "rmse_vs_gauge", "gtsm_rmse_vs_gauge", "pass_shape", "pass_rmse"]]
+                     "nb24", "gauge_nb24", "ex090_ratio", "ex075_ratio", "pass_shape", "pass_rmse",
+                     "pass_overflow"]]
               .round(2).to_string(index=False))
 
 
