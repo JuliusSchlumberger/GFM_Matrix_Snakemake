@@ -211,9 +211,10 @@ simulation: # Used by: preprocessing rules
     # Correction B (event_volume.DurationCorrection): where the first solve's water stands
     # above the spill level (the sill behind a ridge, else the ground) for only T hours of the
     # COAST-HG storm-tide peak, the attenuation rate is multiplied by (t_ref_h / T)^alpha,
-    # clipped to [1, max_multiplier], and the tile is solved again (~2x runtime).
-    # alpha 1, t_ref 12 h: review_critiques/calibration_experiments.py (CSI insensitive to
-    # t_ref 6-24 h). COAST-HG is RP100 only; its shape is used for every RP and SLR.
+    # capped at max_multiplier with no lower clip, and the tile is solved again (~2x runtime).
+    # m ∝ T^-alpha, alpha 1: 1-D SFINCS refit (boundary_test/duration_refit.py); t_ref_h only
+    # sets where m = 1 and is absorbed into friction_scale_factor.
+    # COAST-HG is RP100 only; its shape is used for every RP and SLR.
     duration_correction:
       enabled: true
       alpha: 1.0

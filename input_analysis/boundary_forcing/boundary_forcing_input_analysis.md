@@ -249,8 +249,8 @@ it reproduces the fall of T(0.25) with RP.
 
 ## 6. What this means for the eikonal duration correction
 
-The friction multiplier is m = clip((t_ref / T)^α, 1, 10): a longer T gives a smaller m, less
-friction and a longer reach. On 540 synthetic 1-D SFINCS floodplains, with the friction factor fsf
+The friction multiplier is m = (t_ref / T)^α, capped at 10 with no lower clip: a longer T gives a
+smaller m, less friction and a longer reach. On 540 synthetic 1-D SFINCS floodplains, with the friction factor fsf
 refitted per form, m ∝ T^-α without a lower clip fits best (log-extent RMSE 0.140 against 0.148
 for the production form); α = 0.5 and 1 perform alike, and a constant t_ref is absorbed into fsf.
 The agreed setting is α = 1 with fsf calibrated on SFINCS, with T from the per-RP hydrographs of §5.

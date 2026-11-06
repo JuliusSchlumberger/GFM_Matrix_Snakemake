@@ -81,7 +81,7 @@ def test_duration_multiplier_penalises_short_head_over_sill_only() -> None:
     # Inside the basin the head over the 1.5 m sill is 0.3 m, shorter than the head over
     # the local ground near the coast (up to 1.5 m), so the basin gets the larger multiplier.
     assert mult[:, 20].mean() > mult[:, 1].mean()
-    assert (mult >= 1.0).all()
+    assert (mult > 0.0).all() and (mult <= 10.0).all()
 
 
 def _correction(h: np.ndarray, t_ref_h: float = 12.0) -> DurationCorrection:
@@ -109,11 +109,11 @@ def test_solver_duration_correction_dries_basin_behind_sill_under_short_peak() -
     assert diag["n_duration_corrected_cells"] > 0
 
 
-def test_solver_duration_correction_is_identity_for_long_events() -> None:
+def test_solver_duration_correction_extends_flood_for_long_events() -> None:
     dem, _ = _transect()
     plain, _ = _solve(dem)
-    # Water stands above every head for >= t_ref: multiplier 1 everywhere.
+    # Water stands above every head for longer than t_ref: multiplier < 1, less attenuation.
     long = np.concatenate([np.zeros(5), np.full(200, 1.8), np.zeros(5)])
     corrected, diag = _solve(dem, _correction(long, t_ref_h=6.0))
-    assert np.array_equal(plain, corrected)
-    assert diag["n_duration_corrected_cells"] == 0
+    assert corrected.sum() >= plain.sum()
+    assert diag["mean_duration_multiplier"] < 1.0

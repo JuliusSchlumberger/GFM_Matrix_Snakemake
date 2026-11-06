@@ -60,6 +60,11 @@ Decided and implemented:
   RP100 tiles: pooled CSI 0.742 -> 0.763 on 498 random tiles (median tile unchanged; the gain comes
   from a minority of overflooded basins), false alarms down; t_ref 6-24 h changes CSI by < 0.01. The
   weir volume cap (A) changed nothing and stays in `src/event_volume.py` only for the experiments.
+  These numbers are for the clipped form clip((t_ref/T)^alpha, 1, 10). The multiplier is now
+  (t_ref/T)^alpha with no lower clip (1-D refit, INPUT_ANALYSIS.md §6), which changes results:
+  recalibrate friction_scale_factor with B on SFINCS (HPC), confirm on 5-10 real tiles (test 8),
+  then rerun the tile simulations. Snakemake does not see the change (config values unchanged),
+  so existing eikonal outputs must be removed or rerun explicitly.
 - **Land-cover friction (critique 2):** kept, described as a land-cover-indexed attenuation rate
   (docs/methods_02 §2.2, code comments; config keys and file names unchanged). Land-cover and
   uniform attenuation are within 0.005 pooled CSI on 498 random tiles, with and without B.

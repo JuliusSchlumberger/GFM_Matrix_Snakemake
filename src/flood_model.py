@@ -263,9 +263,9 @@ def flood_depth_dense(
     would carry the highest coastal level everywhere), and only the storm tide on top
     attenuates inland of the new shore.
 
-    `duration_correction` (event_volume.DurationCorrection) multiplies friction where the
-    first solve's water stands above the spill level only briefly during the storm-tide
-    peak, and solves again with that friction.
+    `duration_correction` (event_volume.DurationCorrection) scales friction by how long the
+    first solve's water stands above the spill level during the storm-tide peak (up where
+    briefly, down where long), and solves again with that friction.
     """
     using_seeds = seed_rows is not None or seed_cols is not None or seed_values is not None
     if using_seeds and boundaries is not None:
@@ -372,7 +372,7 @@ def flood_depth_dense(
         sources = mask == ocean_code
         sources[coastline_rows, coastline_cols] = True
         multiplier = duration_correction.multiplier(depth_from(waterlevel), dem, sources, transform)
-        corrected = multiplier > 1.0
+        corrected = multiplier != 1.0
         waterlevel, diagnostics = solve(friction * multiplier)
         diagnostics["n_duration_corrected_cells"] = int(corrected.sum())
         diagnostics["mean_duration_multiplier"] = float(multiplier[corrected].mean()) if corrected.any() else 1.0

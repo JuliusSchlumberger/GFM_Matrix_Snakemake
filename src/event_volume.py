@@ -168,7 +168,11 @@ def duration_friction_multiplier(
     alpha: float,
     max_multiplier: float = 10.0,
 ) -> np.ndarray:
-    """Return a per-cell friction multiplier (T_ref / T)^alpha, clipped to [1, max_multiplier].
+    """Return a per-cell friction multiplier (T_ref / T)^alpha, capped at max_multiplier.
+
+    No lower clip: water that stands longer than T_ref gets less friction and reaches further
+    (1-D SFINCS refit, boundary_test/INPUT_ANALYSIS.md §6: m ∝ T^-alpha fits best, T_ref is absorbed into
+    friction_scale_factor).
 
     T is how long the water level stands above the controlling elevation (the spill
     level: local ground on rising terrain, the sill crest behind one), from a first
@@ -189,7 +193,7 @@ def duration_friction_multiplier(
         if sel.any():
             duration[sel] = time_within_peak(h, dt_s, head[sel])
     duration = np.maximum(duration, dt_s)
-    mult[rows, cols] = np.clip((t_ref_s / duration) ** alpha, 1.0, max_multiplier)
+    mult[rows, cols] = np.minimum((t_ref_s / duration) ** alpha, max_multiplier)
     return mult
 
 
