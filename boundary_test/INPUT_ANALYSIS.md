@@ -742,7 +742,8 @@ quality sites:
 with the gauge events of the matching empirical-RP class (< 2 y; >= 10 y), per tidal-range class
 and on the extremes site set of test 1:
 - the median T(0.25), T(0.5) and nb24 within ±15% of the gauge medians;
-- the profile RMSE against the gauge no larger than that of GTSM's own events (0.10-0.22, §5.2);
+- the profile RMSE against the gauge (peak-normalised profiles, +-48 h, as a fraction of the peak) no
+  larger than that of GTSM's own events (0.10-0.22, §5.2);
 - the T(0.25) ratio between RP classes reproduced (1.2-1.6, §5.3).
 
 **Result** (`boundary_test/generator_validation.py`, `src/storm_tide_hydrograph.rp_hydrograph`;
@@ -773,8 +774,8 @@ and nb24 all lie within ±15% of the gauge medians.
   the observed surge tail of test 7 is missing.
 - **Profile RMSE criterion:** passed in 4 of 20 cells for every variant. The benchmark, GTSM's own
   events, is a median over many events and therefore smoother than any single hydrograph; the
-  generator exceeds it by a median 0.02 m. The criterion as written is too strict for a single
-  synthetic event and should be restated (e.g. no worse than 0.03 m above GTSM's).
+  generator exceeds it by a median 0.02 of the peak. The criterion as written is too strict for a
+  single synthetic event and should be restated (e.g. no more than 0.03 of the peak above GTSM's).
 - **Rejected variants:** keeping the observed surge-tide phasing adds nothing; averaging limb
   durations per level (the HGRAPHER construction) narrows the shape further. Smoothing the residual
   is what helps, by removing the ripple whose highest bump otherwise sets the normalisation.
