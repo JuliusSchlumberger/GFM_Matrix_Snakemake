@@ -120,8 +120,10 @@ to 3 and D from 0 to 1.5 m against two kinds of evidence:
    MHWS of their basin, a set defined without FES2014. Every R up to 1.5 replaces all of them;
    R = 1.75 misses 6, R = 2 misses 27.
 
-R from 1.1 to 1.5 gives the same result on both counts; 1.5 is the cautious end and keeps FES2022
-on macrotidal coasts where it is 10-50% higher and no gauge decides. The gauge evidence rests on
+The data do not pin R down: from R = 1 (ratio condition off, D alone) to R = 1.5 the result is
+the same on both counts. R only changes how many other nodes switch (1,464 at R = 1, 1,287 at
+R = 1.5): the 177 nodes in between lie on macrotidal coasts where FES2022 is up to 50% higher and
+no gauge decides, and R = 1.5 is the cautious choice that keeps FES2022 there. The gauge evidence rests on
 few sites (5 with a difference above 1 m).
 
 **No atlas catches the moderate errors.** Where FES2022 is too high by 0.25-1 m (fjords, inlets),

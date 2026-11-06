@@ -578,7 +578,7 @@ within each tier. Items 1-4 use only data already extracted for this note; none 
      nodes (1.25%) are replaced. At the 905 gauges with all three MHWS the rule fires 3 times, all
      fixes: Skagway (7.46 -> 2.76 m, gauge 2.78 m), Juneau (5.95 -> 3.33 m, gauge 2.72 m) and Port
      Alberni (2.79 -> 1.36 m, gauge 1.28 m).
-   - *Threshold sensitivity* (R in 1.1-3, D in 0-1.5 m; `atlas_rule_grid.csv`,
+   - *Threshold sensitivity* (R in 1-3, D in 0-1.5 m; `atlas_rule_grid.csv`,
      `atlas_rule_bands.csv`; summary fig06 in `input_analysis/boundary_forcing/`):
      - *Which atlas is closer to the gauge, by MHWS difference FES2022 - FES2014.* In every band
        below 0.5 m FES2014 is closer at only 31-50% of the gauges and switching gains nothing or
@@ -597,10 +597,12 @@ within each tier. Items 1-4 use only data already extracted for this note; none 
        to 1,287 (R = 1.5) and 1,066 (R = 1.75).
 
      D is therefore bounded to 1.08-1.43 m by two gauges (Trondheim below, Port Alberni above),
-     and 1.25 m sits in the middle. R is a secondary guard: everything from 1.1 to 1.5 gives the
-     same gauge result and catches all known artefacts, R >= 1.75 misses some. R = 1.5 is the
-     cautious end of that range, keeping FES2022 on macrotidal coasts where it is 10-50% higher
-     and no gauge decides. The gauge evidence rests on few sites (5 with a difference above 1 m),
+     and 1.25 m sits in the middle. R is not pinned down by the data: everything from R = 1 (the
+     ratio condition switched off, D alone) to R = 1.5 gives the same gauge result and catches all
+     known artefacts, and R >= 1.75 misses some. Within that range R only changes how many other
+     nodes are switched (1,464 at R = 1, 1,287 at R = 1.5, for D = 1.25 m): the 177 nodes in
+     between lie on macrotidal coasts where FES2022 is up to 50% and more than 1.25 m higher and
+     no gauge decides. R = 1.5 is the cautious choice that keeps FES2022 there. The gauge evidence rests on few sites (5 with a difference above 1 m),
      so the known-artefact set carries the ratio bound.
    - *Decision.* FES2014 is the single reference and fallback atlas; EOT20 is not used further.
      EOT20 is a residual model on FES2014b, so where altimetry is sparse it repeats FES2014, and
