@@ -6,7 +6,11 @@ tide is a spring-tide window of the local tide (FES2022 or GTSM tidal_elevation)
 the average tide cycle; the surge target per RP is level - MHWS; and the shape is either
 selected per RP from events (HGRAPHER-RP), pooled over all events with a fitted time scale
 tau(peak), or a Gaussian for tropical-cyclone stations. Main entry: `cell_hydrograph`.
-Levels are relative to local MSL, as COAST-RP; MDT and SLR are added by the caller.
+
+The per-RP generator of INPUT_ANALYSIS §8.3 (`rp_hydrograph`) instead takes the surge shape
+from the station's annual maxima of matching empirical return period and lays it on a high
+water at the station's own tide level during extremes. Levels are relative to local MSL, as
+COAST-RP; MDT and SLR are added by the caller.
 """
 
 import numpy as np
@@ -18,6 +22,10 @@ LEVELS = np.round(np.arange(0, 1.0001, 0.005), 3)
 EVENT_SEPARATION_HR = 72
 MSL_WINDOW_HR = 8766  # 1 year
 SHAPE_MODES = ("per_rp", "pooled", "gaussian")
+HIGH_WATER_SEPARATION_HR = 6
+RP_WINDOW_FACTOR = 2.0
+RECORD_RP_YR = 50.0  # beyond the ~46-y GTSM record no event of that RP class exists
+LARGEST_EVENT_RP_YR = 20.0
 
 
 def fill_short_gaps(series: pd.Series, max_gap_hr: int = 3) -> pd.Series | None:
@@ -36,8 +44,10 @@ def to_10min(series: pd.Series) -> np.ndarray:
     return series.resample("10min").interpolate("cubic").values
 
 
-def storm_events(surge10: np.ndarray, half_window_hr: float) -> dict:
+def storm_events(surge10: np.ndarray, half_window_hr: float, min_peak_m: float = 0.0) -> dict:
     """Find surge peaks >= 72 h apart and the time spent above each fraction of the peak.
+
+    Peaks below min_peak_m are skipped (they cannot be selected for a larger target).
 
     Returns arrays over events: surge_peak_m, index (10-min position), dur_before /
     dur_after (n_events, len(LEVELS)) in 10-min steps above each level per limb, and
@@ -45,6 +55,7 @@ def storm_events(surge10: np.ndarray, half_window_hr: float) -> dict:
     """
     half = int(round(half_window_hr * STEPS_PER_HR))
     peaks, _ = ss.find_peaks(surge10, distance=EVENT_SEPARATION_HR * STEPS_PER_HR)
+    peaks = peaks[surge10[peaks] >= min_peak_m]
     out = {k: [] for k in ("surge_peak_m", "index", "dur_before", "dur_after")}
     for s in peaks:
         peak = surge10[s]
@@ -134,12 +145,104 @@ def spring_tide_window(tide10: np.ndarray, spring_idx: np.ndarray, mhws_m: float
     the one nearest MHWS makes the window's high water consistent with the MHWS used in
     the surge target.
     """
+    return high_water_window(tide10, spring_idx, mhws_m, half_window_hr)
+
+
+def high_water_window(tide10: np.ndarray, hw_idx: np.ndarray, target_m: float,
+                      half_window_hr: float) -> np.ndarray:
+    """Return the tide on +-half_window_hr around the high water in `hw_idx` closest to target_m."""
     half = int(round(half_window_hr * STEPS_PER_HR))
-    valid = spring_idx[(spring_idx - half >= 0) & (spring_idx + half < len(tide10))]
+    valid = hw_idx[(hw_idx - half >= 0) & (hw_idx + half < len(tide10))]
     if valid.size == 0:
-        raise ValueError("tide series shorter than the hydrograph window around every spring high water")
-    centre = int(valid[np.argmin(np.abs(tide10[valid] - mhws_m))])
+        raise ValueError("tide series shorter than the hydrograph window around every high water")
+    centre = int(valid[np.argmin(np.abs(tide10[valid] - target_m))])
     return tide10[centre - half: centre + half + 1]
+
+
+def high_water_indices(tide10: np.ndarray) -> np.ndarray:
+    """10-min positions of all tidal high waters (local maxima at least 6 h apart)."""
+    return ss.find_peaks(tide10, distance=HIGH_WATER_SEPARATION_HR * STEPS_PER_HR)[0]
+
+
+def annual_maximum_events(level: np.ndarray, years: np.ndarray, half_window_hr: int,
+                          min_year_coverage: float = 0.8, min_window_coverage: float = 0.9) -> pd.DataFrame:
+    """Annual maxima of an hourly water-level series, with their empirical return period.
+
+    `years`: calendar year of every hour. A year counts when >= min_year_coverage of it is
+    present; its maximum is kept when its +-half_window_hr window is >= min_window_coverage
+    complete. Empirical RP = (n + 1) / rank among the n kept maxima. Returns centre (hour
+    index), peak_m and rp_yr.
+    """
+    rows = []
+    for year in np.unique(years):
+        sel = np.flatnonzero(years == year)
+        if np.isfinite(level[sel]).mean() < min_year_coverage:
+            continue
+        centre = int(sel[np.nanargmax(level[sel])])
+        lo, hi = centre - half_window_hr, centre + half_window_hr + 1
+        if lo < 0 or hi > len(level) or np.isfinite(level[lo:hi]).mean() < min_window_coverage:
+            continue
+        rows.append({"centre": centre, "peak_m": float(level[centre])})
+    events = pd.DataFrame(rows, columns=["centre", "peak_m"])
+    rank = events.peak_m.rank(ascending=False, method="first")
+    return events.assign(rp_yr=(len(events) + 1) / rank)
+
+
+def rp_event_selection(rp_yr: np.ndarray, target_rp_yr: float) -> np.ndarray:
+    """Indices of events whose empirical RP is within RP_WINDOW_FACTOR of the target RP.
+
+    Targets at or beyond RECORD_RP_YR take the events with RP >= LARGEST_EVENT_RP_YR: the
+    record holds nothing rarer, so the largest observed events give the shape.
+    """
+    if target_rp_yr >= RECORD_RP_YR:
+        return np.flatnonzero(rp_yr >= LARGEST_EVENT_RP_YR)
+    return np.flatnonzero((rp_yr > target_rp_yr / RP_WINDOW_FACTOR) & (rp_yr <= target_rp_yr * RP_WINDOW_FACTOR))
+
+
+def median_surge_shape(windows: np.ndarray, centre_on_max: bool = True, search_hr: int = 12) -> np.ndarray:
+    """Median normalised surge (1 at the centre) of hourly event windows, resampled to 10 min.
+
+    `windows`: (n_events, 2 * half + 1) surge in m with the water-level peak at the centre.
+    With centre_on_max each event is first shifted so that its largest surge within
+    +-search_hr of the water-level peak sits at the centre (surge peak placed on the high
+    water); otherwise the observed phase between surge and water-level peak is kept.
+    """
+    n_hr = windows.shape[1]
+    c = n_hr // 2
+    shaped = []
+    for w in windows:
+        seg = w[c - search_hr: c + search_hr + 1]
+        if not np.isfinite(seg).any():
+            continue
+        k = c - search_hr + int(np.nanargmax(seg)) if centre_on_max else c
+        if not w[k] > 0:
+            continue
+        shift = c - k
+        out = np.full(n_hr, np.nan)
+        if shift >= 0:
+            out[shift:] = w[:n_hr - shift]
+        else:
+            out[:shift] = w[-shift:]
+        shaped.append(out / w[k])
+    if not shaped:
+        raise ValueError("no event with a positive surge at its peak")
+    median = np.nanmedian(np.vstack(shaped), axis=0)
+    median = np.where(np.isfinite(median), median, 0.0)
+    hours = np.arange(n_hr) - c
+    steps = np.arange(-c * STEPS_PER_HR, c * STEPS_PER_HR + 1) / STEPS_PER_HR
+    shape = np.interp(steps, hours, median)
+    return shape / shape[len(shape) // 2]
+
+
+def rp_hydrograph(tide_window: np.ndarray, shape: np.ndarray, target_level_m: float) -> dict:
+    """Storm-tide hydrograph of the per-RP generator: tide window + surge scaled to the target.
+
+    `tide_window` and `shape` share the 10-min axis with the selected high water / surge peak
+    at the centre. Returns time_hr, level and amplitude_m (surge scale).
+    """
+    level, amplitude = scale_to_peak(tide_window, shape, target_level_m)
+    half = len(level) // 2
+    return {"time_hr": np.arange(-half, half + 1) / STEPS_PER_HR, "level": level, "amplitude_m": amplitude}
 
 
 def scale_to_peak(tide: np.ndarray, shape: np.ndarray, target_m: float) -> tuple[np.ndarray, float]:
