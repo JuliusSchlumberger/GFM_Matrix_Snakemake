@@ -10,7 +10,7 @@ CLI names and config.yml preparation.* switches):
   tile_generation     - connectivity-first domain manifest -> tile_grid.path
                         (scenario-independent)
   storm_tide_product  - storm-tide RP levels + per-RP hydrographs from GESLA, GTSM,
-                        FES and IBTrACS (only with boundary_conditions.storm_tide_source:
+                        FES and COAST-RP (only with boundary_conditions.storm_tide_source:
                         gfm_product, unless named explicitly; ~6 h)
   boundary_conditions - storm-tide levels + SLR fingerprint scenario NetCDFs
   sync_gtsm           - download raw hourly GTSM reanalysis water levels (opt-in
@@ -185,7 +185,7 @@ def main() -> None:
         "storm_tide_product" in selected and cfg["boundary_conditions"]["storm_tide_source"] == "gfm_product")
     if product_wanted:
         results["storm_tide_product"] = _run_step(
-            prepare_storm_tide_product.run, "Storm-tide product (GESLA + GTSM + FES + IBTrACS)",
+            prepare_storm_tide_product.run, "Storm-tide product (GESLA + GTSM + FES + COAST-RP)",
             args.fail_fast, config=cfg, force=args.force,
         )
     else:

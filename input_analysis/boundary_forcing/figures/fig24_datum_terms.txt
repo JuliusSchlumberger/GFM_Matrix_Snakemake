@@ -1,0 +1,19 @@
+The terms that turn a storm-tide level (above local MSL) into the total level of the WL_scenarios
+files, at the 22,670 stations north of 60 S: total = storm tide + MDT + 2020 offset + SLR
+fingerprint (`preparation/prepare_boundary_conditions.py`). (a) The mean dynamic topography, local
+MSL above the geoid of the DEM (CNES-CLS22, 1993-2012 mean). (b) The 2020 offset: AR6's global-mean
+rise from 1995-2014 to 2020 (0.049 m), spread regionally with the SLR fingerprint, so that SLR 0
+means the sea level of 2020 rather than of the MDT epoch. (c) The change of the RP100 level at SLR 0
+between the former WL_scenarios (COAST-RP + MDT) and the current ones (storm-tide product + MDT +
+2020 offset); the MDT is the same in both and cancels. (d) Distribution of the change and its two
+parts.
+
+Reading: the MDT spans -0.08 to 1.14 m (5-95%), highest in the Indo-Pacific warm pool and lowest in
+the North Atlantic, the Arctic and the Southern Ocean; it is the largest datum term. The offset is
+5.6 cm at the median station (0.8 to 7.2 cm): near zero or negative where land still rises after the
+last glaciation (Hudson Bay, the Baltic, Alaska), above the global 4.9 cm on the US Gulf and
+Atlantic coasts and in South-east Asia. The change of the WL_scenarios level is dominated by the
+storm-tide product (median +4.9 cm, 5-95% -0.31 to +0.48 m, its pattern as in fig12); the offset
+adds a few centimetres almost everywhere (median total +10.3 cm). The step at zero in (d) is 93
+stations whose product level equals COAST-RP: the 15 GTSM fallbacks and tropical stations where
+COAST-RP's TC part alone sets RP100 and therefore sets the product's RP100 too.

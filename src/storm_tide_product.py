@@ -7,8 +7,9 @@ inverse-distance mean, within IDW_RADIUS_KM, of the GESLA gauges' ratio of gauge
 skew surge at RATIO_RP (non-TC-dominated gauges, at least MIN_NEIGHBOURS, else their median),
 capped at R_CAP. Atlas: FES2022, FES2014 where `tide_prediction.consistent_version_flag` fires.
 TC: COAST-RP_TC's annual exceedance rate is added to the ETC rate, as COAST-RP combines its
-own two parts; at stations with a TC part, cycles near an IBTrACS storm leave the ETC fit so no
-cyclone counts twice. RP levels solve rate(z) = -ln(1 - 1/RP), m above local MSL.
+own two parts. The ETC fit keeps the cyclones of the ERA5 record: both TC sources are too low at
+the gauges and counting them in both matches the gauges best (INPUT_ANALYSIS.md §8.6). RP
+levels solve rate(z) = -ln(1 - 1/RP), m above local MSL.
 Hydrographs: the FES tide around the high water nearest the median tide-at-peak of the
 station's annual maxima of the RP window, plus their median 13-h smoothed surge, scaled so the
 peak is the RP level (`storm_tide_hydrograph.rp_hydrograph`); a gauge's surge-dominated shape
@@ -52,9 +53,6 @@ MIN_NEIGHBOURS = 3
 R_CAP = 2.0  # ratios above it rest on skew surges of a few decimetres
 SHAPE_CAP = 0.35  # GPD shape bound: Fathom RFA's cap (Collings et al., 2024), ~p95 of GTSM at the gauges
 GTSM_QA_JUMPS = 5  # hourly residual jumps > SPIKE_M that mark a station's GTSM series unusable
-TC_MASK_KM = 300.0  # cycles with a tropical storm (>= TC_MIN_WIND_KT) this close leave the ETC fit
-TC_MASK_HR = 24
-TC_MIN_WIND_KT = 34.0
 # Hydrographs (accepted generator, INPUT_ANALYSIS.md §8.3)
 BASE_HR, EXTENDED_HR = 72, 120
 CENSORED_SHARE = 0.25  # share of annual maxima above MSL over a whole +-BASE_HR half: use EXTENDED_HR
@@ -302,25 +300,6 @@ def station_tc_shapes(stations: pd.DataFrame, donors: pd.DataFrame, shapes: np.n
             if dist <= TC_GAUGE_KM}
 
 
-def tc_hours(stations: pd.DataFrame, n_hours: int, ibtracs_path: Path, start: np.datetime64,
-             radius_km: float = TC_MASK_KM, half_hr: int = TC_MASK_HR, min_wind_kt: float = TC_MIN_WIND_KT) -> dict:
-    """Station -> hourly indices within half_hr of a tropical storm (>= min_wind_kt) passing within radius_km."""
-    tracks = pd.read_csv(ibtracs_path, usecols=["ISO_TIME", "LAT", "LON", "WMO_WIND", "USA_WIND"], skiprows=[1],
-                         na_values=[" "], low_memory=False)
-    wind = tracks[["WMO_WIND", "USA_WIND"]].apply(pd.to_numeric, errors="coerce").max(axis=1)
-    tracks = tracks[wind >= min_wind_kt]
-    hour = ((pd.to_datetime(tracks.ISO_TIME).to_numpy() - np.datetime64(start)) // np.timedelta64(1, "h")).astype(int)
-    tree = BallTree(np.radians(tracks[["LAT", "LON"]].to_numpy(dtype=float)), metric="haversine")
-    near = tree.query_radius(np.radians(stations[["lat", "lon"]].to_numpy()), r=radius_km / EARTH_RADIUS_KM)
-    spread = np.arange(-half_hr, half_hr + 1)
-    out = {}
-    for st, idx in zip(stations.index, near):
-        if len(idx):
-            h = np.unique((hour[idx][:, None] + spread).ravel())
-            out[st] = h[(h >= 0) & (h < n_hours)]
-    return out
-
-
 def running_mean(windows: np.ndarray, width_hr: int) -> np.ndarray:
     kernel = np.ones(width_hr) / width_hr
     return np.vstack([np.convolve(np.nan_to_num(w), kernel, mode="same") for w in windows])
@@ -375,7 +354,8 @@ def station_product(st: dict, g: np.ndarray, th: np.ndarray, t10: np.ndarray,
     cover = pd.Series(np.isfinite(skew)).groupby(years[hw]).mean()
     keep_years = cover.index[cover >= YEAR_COVERAGE]
     ok = np.isin(years[hw], keep_years) & np.isfinite(skew)
-    tc_cycles = np.isin(hw, st["tc_hours"]) if st["tc_hours"] is not None else np.zeros(len(hw), bool)
+    # tc_hours (cycles left out of the ETC fit) is set only by the cyclone-mask test, boundary_test/open_guesses.py
+    tc_cycles = np.isin(hw, st["tc_hours"]) if st.get("tc_hours") is not None else np.zeros(len(hw), bool)
     row["tc_masked_share"] = float(tc_cycles[ok].mean())
     model = surge_model(skew[ok & ~tc_cycles], len(keep_years), max_shape=st.get("shape_cap", SHAPE_CAP))
     corrected = scaled(model, st["r"])
@@ -506,7 +486,7 @@ def export_levels(lev: pd.DataFrame, coast_rp_path: Path, dest: Path) -> None:
                                            {"units": "m", "long_name": f"storm tide, return period {rp} y",
                                             "vertical_reference": "local mean sea level"})
     data["level_source"] = ("stations", source.astype(str))
-    for col in ("r", "atlas", "gpd_shape", "tc_masked_share"):
+    for col in ("r", "atlas", "gpd_shape"):
         data[col] = ("stations", lev[col].to_numpy())
     ds = xr.Dataset(data, coords={"station_id": ("stations", coast.station_id.values),
                                   "station_x_coordinate": ("stations", coast.station_x_coordinate.values),

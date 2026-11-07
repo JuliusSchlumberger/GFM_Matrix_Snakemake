@@ -8,6 +8,6 @@ one (k = 5, power 3). Production also restricts the neighbours to the tile's oce
 this global test does not.
 
 Reading: fewer neighbours or a higher power interpolate the level field better than the former k =
-15, power 2, by about 1.5 cm of MAE (7.0 cm there, 5.7 cm at k = 5, power 3, 5.5 cm at best, 7.0 cm
+15, power 2, by about 1.5 cm of MAE (7.1 cm there, 5.8 cm at k = 5, power 3, 5.6 cm at best, 7.2 cm
 for the nearest station). The error is set by station spacing: 2 cm where stations are within 5 km,
 8-12 cm at 10-50 km and about 20 cm beyond 50 km.

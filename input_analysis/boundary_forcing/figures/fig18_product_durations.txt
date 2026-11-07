@@ -6,6 +6,6 @@ T(0.25) and T(0.5) by spring tidal range. (c) T(0.25) at RP100, product over COA
 product's peak is wider.
 
 Reading: the product's peaks are wider than COAST-HG's: median T(0.25) 12 h against 6 h at RP100 and
-T(0.5) 35 h against 23 h. T falls with RP (T(0.25) 13 h at RP2, 11 h at RP1000), as the gauges show
+T(0.5) 36 h against 23 h. T falls with RP (T(0.25) 13 h at RP2, 11 h at RP1000), as the gauges show
 (fig10), which a single COAST-HG shape cannot. The duration correction B reads T from these
 hydrographs, so a longer T lowers its friction multiplier.

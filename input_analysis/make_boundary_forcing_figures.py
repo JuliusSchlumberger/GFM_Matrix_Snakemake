@@ -24,6 +24,7 @@ import cartopy.feature as cfeature  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
+import xarray as xr  # noqa: E402
 from matplotlib.colors import LogNorm, Normalize  # noqa: E402
 from sklearn.neighbors import BallTree  # noqa: E402
 
@@ -1017,11 +1018,13 @@ def fig12_level_product_maps(product: Path, dest: Path) -> None:
         Reading: most of the coast moves by less than 0.2 m. The large departures are regional:
         lower in the southern North Sea and Dover Strait, where GTSM's tide is too large and the
         FES tide replaces it; lower in Hudson Bay, the Canadian Arctic and parts of Indonesia; higher
-        in the western Baltic, on the US Atlantic coast, in Japan and East China, where r is above
-        1.25, and in macrotidal basins where GTSM's tide is too small (Ungava Bay, Amazon mouth,
-        King Sound). At the gauges the new levels are still below the gauge on TC coasts (fig14),
-        so the increases there are not an overcorrection. Uniform r marks coasts without 3 gauges
-        within 500 km.
+        in the western Baltic, in Japan and East China, where r is above 1.25, in macrotidal basins
+        where GTSM's tide is too small (Ungava Bay, Amazon mouth, King Sound), and on hurricane and
+        typhoon coasts (US Gulf and south-east coasts, East China), where the ERA5 cyclones stay in
+        the ETC fit and add to COAST-RP's TC part. At the TC-dominated gauges this centres the
+        levels on the gauge (median -0.03 m against COAST-RP's -0.25 m) but widens the spread: one in
+        ten is 0.5 m or more above it (fig14, fig21). Uniform r marks coasts without 3 gauges within
+        500 km.
         """)
 
 
@@ -1240,7 +1243,7 @@ def fig17_level_product_qa(product: Path, dest: Path) -> None:
     fig.tight_layout(rect=(0, 0.04, 1, 1))
     _save(fig, dest / "fig17_level_product_qa.png")
     describe(dest / "fig17_level_product_qa.png", """
-        The three failure modes the level product's QA removes, one station each. Left: the hourly
+        Two failure modes the level product's QA removes, and one it keeps, one station each. Left: the hourly
         FES tide (blue), GTSM-ERA5 surge residual (orange) and their sum (dotted) around the
         station's largest skew surge before QA; grey crosses mark every local maximum of the tide
         (the high waters before QA), green circles the high waters that remain when a maximum must
@@ -1253,9 +1256,9 @@ def fig17_level_product_qa(product: Path, dest: Path) -> None:
         residual jumps by up to 12 m within an hour (a numerical artefact of the model there).
         Despiking (hours more than 2 m from their 5-h median) removes the shortest spikes but not
         all; stations with 5 or more such jumps take COAST-RP's levels instead. (e, f) Mississippi
-        delta: Katrina and other hurricanes are in the ERA5 record. With COAST-RP's synthetic TC
-        part added on top they would count twice, so cycles within 24 h of a tropical storm
-        (IBTrACS, >= 34 kt) passing within 300 km leave the ETC fit at stations with a TC part.
+        delta: Katrina and other hurricanes are in the ERA5 record and stay in the ETC fit, although
+        COAST-RP's synthetic TC part is added on top. Removing them makes TC coasts worse at the
+        gauges (fig21), because both TC sources are too low.
         """)
 
 
@@ -1444,8 +1447,9 @@ def fig20_gpd_cap(product: Path, dest: Path) -> None:
         up to RP100 (all gauges, MAE {m.loc['none', 'mae'] * 100:.1f} cm without a cap,
         {m.loc['0.35 (production)', 'mae'] * 100:.1f} cm at 0.35, {m.loc['0.2', 'mae'] * 100:.1f} cm
         at 0.2): the gauges rarely sit where GTSM's tail is heavy, and RP100 is still close to the
-        data. The cap acts on RP1000 at the few heavy-tailed stations: without it RP1000 rises by
-        up to 9.7 m (0.5: 4.1 m), and 0.2 lowers it by up to 3.1 m. The gauges' own shapes (median
+        data. The cap acts on RP1000 at the heavy-tailed stations, most of them on coasts a major
+        hurricane or typhoon struck in 1979-2024: without it RP1000 rises by up to 12.9 m (0.5:
+        8.0 m), and 0.2 lowers it by up to 3.9 m. The gauges' own shapes (median
         0.01, standard deviation 0.25) spread more widely than GTSM's (-0.03, 0.19), so they do not
         fix a cap; 0.35 bounds the extreme cases only.
         """)
@@ -1474,24 +1478,27 @@ def fig21_tc_mask(product: Path, dest: Path) -> None:
     _save(fig, dest / "fig21_tc_mask.png")
     s = sc[(sc.gauges == "TC-dominated gauges") & (sc.rp == 100)].set_index("level")
     describe(dest / "fig21_tc_mask.png", f"""
-        The tropical-cyclone mask: at stations with a COAST-RP TC part, tidal cycles near an
-        IBTrACS storm leave the ETC fit, so a cyclone does not count twice (in the ERA5 surge
-        record and in COAST-RP's synthetic TC part). Bars: median of station minus gauge at RP10
+        A tropical-cyclone mask, tested and not used in production: at stations with a COAST-RP TC
+        part, tidal cycles near an IBTrACS storm would leave the ETC fit, so a cyclone would not
+        count twice (in the ERA5 surge record and in COAST-RP's synthetic TC part). Bars: median of station minus gauge at RP10
         and RP100 at the ratio gauges, r left one out; ticks: MAE. (a) TC-dominated gauges, (b)
-        gauges whose station has a TC part. Variants: no mask; production (300 km, +-24 h, >= 34
-        kt); 150 and 500 km; +-12 and +-48 h; hurricane strength (>= 64 kt) only.
+        gauges whose station has a TC part. Variants: no mask (production); 300 km, +-24 h, >= 34
+        kt; 150 and 500 km; +-12 and +-48 h; hurricane strength (>= 64 kt) only.
 
         Reading: the mask makes the TC coasts worse at the gauges. Without it the TC-dominated
-        gauges' RP100 median is {s.loc['no mask', 'median'] * 100:.0f} cm and the MAE
-        {s.loc['no mask', 'mae'] * 100:.0f} cm; with production's mask
-        {s.loc['300 km, +-24 h, 34 kt (production)', 'median'] * 100:.0f} cm and
-        {s.loc['300 km, +-24 h, 34 kt (production)', 'mae'] * 100:.0f} cm. A smaller radius (150 km)
+        gauges' RP100 median is {s.loc['no mask (production)', 'median'] * 100:.0f} cm and the MAE
+        {s.loc['no mask (production)', 'mae'] * 100:.0f} cm; with a 300 km mask
+        {s.loc['300 km, +-24 h, 34 kt', 'median'] * 100:.0f} cm and
+        {s.loc['300 km, +-24 h, 34 kt', 'mae'] * 100:.0f} cm. A smaller radius (150 km)
         lies between; the time window and the wind threshold hardly matter. Without the mask a
         cyclone counts in the ERA5 record and again in COAST-RP's TC part, yet the levels match
         the gauges better: both TC sources are too low (GTSM-ERA5 resolves cyclones coarsely,
         COAST-RP's TC part is 0.2-0.25 m below the gauges, §8.1), and the double count makes up
-        for it. Removing it is right in principle and wrong on the gauges until test 10
-        (STORM-forced GTSM) replaces the TC part.
+        for it. The price is a wider spread: without the mask one in ten TC-dominated gauges is
+        {s.loc['no mask (production)', 'p90'] * 100:.0f} cm or more below its station, with the 300 km
+        mask {s.loc['300 km, +-24 h, 34 kt', 'p90'] * 100:.0f} cm, because a cyclone of the 46-year
+        record raises the ETC tail where it struck. Production keeps the cyclones in the ETC fit
+        until test 10 (STORM-forced GTSM) replaces the TC part.
         """)
 
 
@@ -1620,6 +1627,77 @@ def fig23_peak_offsets(product: Path, dest: Path) -> None:
         """)
 
 
+def fig24_datum_terms(processed: Path, dest: Path) -> None:
+    mdt = xr.open_dataset(processed / "MDT_mapped_on_coastal_points.nc")
+    coast = xr.open_dataset(processed / "COAST-RP_preprocessed.nc")
+    product = xr.open_dataset(processed / "GFM_storm_tide_levels_preprocessed.nc")
+    t = pd.DataFrame({"lon": mdt.station_x_coordinate.values, "lat": mdt.station_y_coordinate.values,
+                      "mdt": mdt.MDT.values, "offset": mdt.SLR_baseline_offset.values,
+                      "level_change": product.storm_tide_rp_0100.values - coast.storm_tide_rp_0100.values})
+    t = t[t.lat > PRODUCTION_MIN_LAT]
+    t["change"] = t.level_change + t.offset
+    unchanged = int((t.level_change.abs() < 1e-4).sum())
+    panels = (("mdt", Normalize(-1.5, 1.5), "MDT CNES-CLS22, MSL above the GOCO06s geoid (m)",
+               [-1.5, -0.75, 0, 0.75, 1.5]),
+              ("offset", Normalize(-0.12, 0.12), "2020 offset, MSL rise 1995-2014 to 2020 (m)",
+               [-0.12, -0.06, 0, 0.06, 0.12]),
+              ("change", Normalize(-0.5, 0.5), "WL_scenarios RP100 at SLR 0, new - former (m)",
+               [-0.5, -0.25, 0, 0.25, 0.5]))
+    fig = plt.figure(figsize=(10, 19))
+    for k, (col, norm, label, ticks) in enumerate(panels):
+        v = t[col].dropna()
+        v = v.iloc[np.argsort(np.abs(v.to_numpy()))]
+        ax = fig.add_axes([0.02, 0.775 - k * 0.235, 0.96, 0.2], projection=MAP_PROJ)
+        ax.set_global()
+        _land(ax)
+        sc = ax.scatter(t.loc[v.index, "lon"], t.loc[v.index, "lat"], c=v, s=3, cmap="RdBu_r", norm=norm,
+                        linewidths=0, transform=PC, zorder=2)
+        ax.spines["geo"].set_edgecolor(MUTED)
+        draw_panel_letter(ax, "abc"[k])
+        cax = fig.add_axes([0.25, 0.765 - k * 0.235, 0.5, 0.007])
+        cb = fig.colorbar(sc, cax=cax, orientation="horizontal", extend="both")
+        cb.ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+        cb.set_ticks(ticks, labels=[f"{x:g}" for x in ticks])
+        cb.set_label(label)
+    ax = fig.add_axes([0.1, 0.05, 0.85, 0.18])
+    for col, color, name in (("offset", GREEN, "2020 offset"), ("level_change", BLUE, "product - COAST-RP"),
+                             ("change", INK, "total change")):
+        x = np.sort(t[col].dropna().to_numpy())
+        ax.plot(x, np.arange(1, x.size + 1) / x.size, color=color, linewidth=2, label=name)
+    ax.axvline(0, color=MUTED, linewidth=0.8)
+    ax.set(xlim=(-0.8, 0.8), xlabel="RP100 at SLR 0 (m)", ylabel="share of stations")
+    ax.legend(frameon=False, fontsize=9, loc="upper left")
+    _style(ax)
+    draw_panel_letter(ax, "d")
+    _save(fig, dest / "fig24_datum_terms.png")
+    q = t[["mdt", "offset", "level_change", "change"]].quantile([0.05, 0.5, 0.95])
+    describe(dest / "fig24_datum_terms.png", f"""
+        The terms that turn a storm-tide level (above local MSL) into the total level of the
+        WL_scenarios files, at the {len(t):,} stations north of 60 S: total = storm tide + MDT +
+        2020 offset + SLR fingerprint (`preparation/prepare_boundary_conditions.py`). (a) The mean
+        dynamic topography, local MSL above the geoid of the DEM (CNES-CLS22, 1993-2012 mean). (b)
+        The 2020 offset: AR6's global-mean rise from 1995-2014 to 2020 (0.049 m), spread regionally
+        with the SLR fingerprint, so that SLR 0 means the sea level of 2020 rather than of the MDT
+        epoch. (c) The change of the RP100 level at SLR 0 between the former WL_scenarios (COAST-RP
+        + MDT) and the current ones (storm-tide product + MDT + 2020 offset); the MDT is the same in
+        both and cancels. (d) Distribution of the change and its two parts.
+
+        Reading: the MDT spans {q.mdt[0.05]:.2f} to {q.mdt[0.95]:.2f} m (5-95%), highest in the
+        Indo-Pacific warm pool and lowest in the North Atlantic, the Arctic and the Southern Ocean;
+        it is the largest datum term. The offset is {q.offset[0.5] * 100:.1f} cm at the median
+        station ({q.offset[0.05] * 100:.1f} to {q.offset[0.95] * 100:.1f} cm): near zero or negative
+        where land still rises after the last glaciation (Hudson Bay, the Baltic, Alaska), above the
+        global 4.9 cm on the US Gulf and Atlantic coasts and in South-east Asia. The change of the WL_scenarios level is dominated by the
+        storm-tide product (median {q.level_change[0.5] * 100:+.1f} cm, 5-95% {q.level_change[0.05]:+.2f}
+        to {q.level_change[0.95]:+.2f} m, its pattern as in fig12); the offset adds a few centimetres
+        almost everywhere (median total {q.change[0.5] * 100:+.1f} cm). The step at zero in (d) is
+        {unchanged:,} stations whose product level equals COAST-RP: the 15 GTSM fallbacks and
+        tropical stations where COAST-RP's TC part alone sets RP100 and therefore sets the
+        product's RP100 too.
+        """)
+
+
+PROCESSED_FIGURES = {"fig24": fig24_datum_terms}
 FIGURES = {"fig01": fig01_tide_scatter, "fig02": fig02_tide_ratio_maps, "fig03": fig03_constituents,
            "fig04": fig04_fes_versions, "fig05": fig05_basin_heads, "fig06": fig06_rule_sensitivity,
            "fig07": fig07_coast_rp_regions, "fig08": fig08_profiles_by_rp, "fig09": fig09_surge_by_rp,
@@ -1637,13 +1715,19 @@ def main() -> None:
     parser.add_argument("--out-dir", default=str(REPO / ".cleanup_baseline" / "level_sources"))
     parser.add_argument("--dest", default=str(REPO / "input_analysis" / "boundary_forcing" / "figures"))
     parser.add_argument("--product-dir", default=str(REPO / ".cleanup_baseline" / "level_product"))
-    parser.add_argument("--only", nargs="*", choices=sorted({**FIGURES, **PRODUCT_FIGURES}), default=None)
+    parser.add_argument("--processed-dir", default=None,
+                        help="processed_inputs with the boundary_conditions files (fig24); default: product-dir's parent")
+    parser.add_argument("--only", nargs="*", choices=sorted({**FIGURES, **PRODUCT_FIGURES, **PROCESSED_FIGURES}),
+                        default=None)
     args = parser.parse_args()
     out, dest = Path(args.out_dir), Path(args.dest)
+    processed = Path(args.processed_dir) if args.processed_dir else Path(args.product_dir).parent
     dest.mkdir(parents=True, exist_ok=True)
-    for name in args.only or {**FIGURES, **PRODUCT_FIGURES}:
+    for name in args.only or {**FIGURES, **PRODUCT_FIGURES, **PROCESSED_FIGURES}:
         if name in FIGURES:
             FIGURES[name](out, dest)
+        elif name in PROCESSED_FIGURES:
+            PROCESSED_FIGURES[name](processed, dest)
         else:
             PRODUCT_FIGURES[name](Path(args.product_dir), dest)
         print(f"wrote {name}", flush=True)

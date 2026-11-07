@@ -4,9 +4,10 @@ level minus the gauge's convolution at the ratio gauges, r left one out, for eac
 TC-dominated gauges; MAE solid, median dashed). (c) RP1000 at the stations with a shape above 0.2,
 relative to production, against the station's shape.
 
-Reading: the cap binds at 149 stations. At the gauges it makes no measurable difference up to RP100
-(all gauges, MAE 22.4 cm without a cap, 22.6 cm at 0.35, 22.7 cm at 0.2): the gauges rarely sit
-where GTSM's tail is heavy, and RP100 is still close to the data. The cap acts on RP1000 at the few
-heavy-tailed stations: without it RP1000 rises by up to 9.7 m (0.5: 4.1 m), and 0.2 lowers it by up
-to 3.1 m. The gauges' own shapes (median 0.01, standard deviation 0.25) spread more widely than
-GTSM's (-0.03, 0.19), so they do not fix a cap; 0.35 bounds the extreme cases only.
+Reading: the cap binds at 833 stations. At the gauges it makes no measurable difference up to RP100
+(all gauges, MAE 21.6 cm without a cap, 21.7 cm at 0.35, 21.5 cm at 0.2): the gauges rarely sit
+where GTSM's tail is heavy, and RP100 is still close to the data. The cap acts on RP1000 at the
+heavy-tailed stations, most of them on coasts a major hurricane or typhoon struck in 1979-2024:
+without it RP1000 rises by up to 12.9 m (0.5: 8.0 m), and 0.2 lowers it by up to 3.9 m. The gauges'
+own shapes (median 0.01, standard deviation 0.25) spread more widely than GTSM's (-0.03, 0.19), so
+they do not fix a cap; 0.35 bounds the extreme cases only.

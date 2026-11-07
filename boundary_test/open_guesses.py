@@ -5,8 +5,8 @@ Stages (each writes <product-dir>/open_guesses/<stage>*.parquet for the figure s
             RP100 / RP1000 at the stations the cap touches, for caps none / 0.5 / 0.35 / 0.25 / 0.2
   despike   GTSM residual jumps per station: largest hourly jump and the number above 1-3 m,
             i.e. how many stations each (jump, count) threshold sends to COAST-RP
-  tc_mask   the IBTrACS mask: radius, time window, wind threshold and no mask, scored at the
-            gauges with a COAST-RP TC part
+  tc_mask   an IBTrACS mask on the ETC fit (production has none): radius, time window, wind
+            threshold, scored at the gauges with a COAST-RP TC part
   fes_rule  FES2022 / FES2014 MHWS at the gauges and at the stations the version rule flags
   peaks     hydrographs whose maximum is not at time 0: how many, how far, and the tide's
             diurnal inequality there
@@ -35,8 +35,8 @@ import tide_prediction as tp  # noqa: E402
 
 CAPS = {"none": None, "0.5": 0.5, "0.35 (production)": 0.35, "0.25": 0.25, "0.2": 0.2}
 CAP_SAMPLE_MIN_SHAPE = 0.2  # stations whose MLE shape any tested cap would bind
-TC_MASKS = {"no mask": None,
-            "300 km, +-24 h, 34 kt (production)": {},
+TC_MASKS = {"no mask (production)": None,
+            "300 km, +-24 h, 34 kt": {},
             "150 km, +-24 h, 34 kt": {"radius_km": 150.0},
             "500 km, +-24 h, 34 kt": {"radius_km": 500.0},
             "300 km, +-12 h, 34 kt": {"half_hr": 12},
@@ -49,8 +49,6 @@ ROWS_PER_READ = 400
 def _station_inputs(check: GaugeCheck, ks: np.ndarray) -> list[dict]:
     st = check.stations.iloc[ks]
     shapes = stp.station_tc_shapes(st, check.donors, check.shapes)
-    hours = stp.tc_hours(st[st.station_id.isin(check.tc_levels.index)], len(tp.hourly_times()),
-                         Path(check.cfg["storm_tide_product"]["ibtracs_path"]), tp.HOURLY_START)
     todo = []
     for j, k in enumerate(ks):
         idx, s = check.stations.index[k], check.stations.iloc[k]
@@ -58,7 +56,7 @@ def _station_inputs(check: GaugeCheck, ks: np.ndarray) -> list[dict]:
         todo.append({"station": j, "gtsm_index": int(s.gtsm_index), "atlas": a, "coast_rp": check.coast[k],
                      "hc": check.hc[a][k], "mhws_m": float(check.mh[a][k]), "r": float(check.lev.r.iloc[k]),
                      "tc": check.tc_levels.loc[s.station_id].to_numpy() if s.station_id in check.tc_levels.index
-                     else None, "tc_shape": shapes.get(idx), "tc_hours": hours.get(idx)})
+                     else None, "tc_shape": shapes.get(idx)})
     return todo
 
 
@@ -76,9 +74,8 @@ def cap(check: GaugeCheck, dest: Path, workers: int) -> None:
     ks = np.flatnonzero((lev.gpd_shape_mle > CAP_SAMPLE_MIN_SHAPE).to_numpy() & (lev.level_source == "product").to_numpy())
     print(f"cap: {len(ks)} stations with MLE shape > {CAP_SAMPLE_MIN_SHAPE}", flush=True)
     todo = _station_inputs(check, ks)
-    hours = check.tc_hours()
     for name, value in CAPS.items():
-        res = check.table(check.levels(workers, hours, shape_cap=value))
+        res = check.table(check.levels(workers, shape_cap=value))
         gauge_rows.append(scores(res, {name: "new_loo"}))
         res[[f"new_loo_rp{rp}_m" for rp in (10, 100)] + ["gauge_rp100_m", "station_class"]].assign(cap=name) \
             .to_parquet(dest / f"cap_gauges_{name.split()[0]}.parquet")

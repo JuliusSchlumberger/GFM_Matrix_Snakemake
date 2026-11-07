@@ -4,7 +4,7 @@
 Entry point: run(config), via `python run_preparation.py storm_tide_product`; read when
 boundary_conditions.storm_tide_source is gfm_product. Method: src/storm_tide_product.py and
 boundary_test/INPUT_ANALYSIS.md §8.4-8.5. Raw inputs: GESLA-4.1, GTSM-ERA5 surge residual,
-FES2022 and FES2014, COAST-RP (+ _ETC, _TC), IBTrACS (config `storm_tide_product`).
+FES2022 and FES2014, COAST-RP (+ _ETC, _TC) (config `storm_tide_product`).
 
 Writes into storm_tide_product.cache_dir (~30 GB; may live off the data root) copies of raw
 inputs and what depends on them alone: FES2022 decompressed, tide bases, GTSM series at the
@@ -171,9 +171,6 @@ def run(config: dict, force: bool = True) -> None:
     ratios = stp.station_ratios(stations, gauges)
     tc_levels = stp.coast_rp_levels(coast_rp.parent / "COAST-RP_TC.nc")
     tc_levels = tc_levels[np.isfinite(tc_levels).all(axis=1)]
-    with_tc = stations[stations.station_id.isin(tc_levels.index)]
-    n_hours = len(tp.hourly_times())
-    tc_hours = stp.tc_hours(with_tc, n_hours, Path(cfg["ibtracs_path"]), tp.HOURLY_START)
     donors = pd.read_parquet(paths.gauges / "tc_donors.parquet")
     tc_shapes = stp.station_tc_shapes(stations, donors, np.load(paths.gauges / "tc_donor_shapes.npy"))
     coast = stp.coast_rp_levels(coast_rp).to_numpy()
@@ -181,7 +178,7 @@ def run(config: dict, force: bool = True) -> None:
     for k, (st, s) in enumerate(stations.iterrows()):
         a = "fes2014" if atlas["use14"][k] else "fes2022"
         todo.append({"station": st, "gtsm_index": int(s.gtsm_index), "atlas": a, "coast_rp": coast[k],
-                     "tc_hours": tc_hours.get(st), "hc": atlas["hc"][a][k], "mhws_m": float(atlas["mhws"][a][k]),
+                     "hc": atlas["hc"][a][k], "mhws_m": float(atlas["mhws"][a][k]),
                      "r": float(ratios.r.iloc[k]),
                      "tc": tc_levels.loc[s.station_id].to_numpy() if s.station_id in tc_levels.index else None,
                      "tc_shape": tc_shapes.get(st)})

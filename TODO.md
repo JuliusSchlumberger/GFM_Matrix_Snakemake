@@ -148,13 +148,13 @@ Open:
   `boundary_test/INPUT_ANALYSIS.md` §8.4-8.5). The source drives the scenario levels
   (`prepare_boundary_conditions`), the eikonal seeds and static level, correction B's hydrographs
   (`boundaries.storm_tide_hydrograph_path`) and the SFINCS forcing shapes (`sfincs_tiles/gfm_config`).
-  Done on `<data_root>` (2026-11-07): IBTrACS in `inputs/IBTrACS/`; `run_preparation.py
-  storm_tide_product boundary_conditions` (76 + 3 min; the ~30 GB cache sits on this machine via
-  `config_local.yml` `storm_tide_product.cache_dir`, P: has ~35 GB free); `WL_scenarios` now holds
-  the product's levels (marker `storm_tide_source.txt`; level + MDT + 2020 offset checked to 1e-15
-  m at all 22,670 stations); scenario configs re-materialized here. Left:
-  1. re-materialize on Hydrax and set `storm_tide_product.cache_dir` in `config_hpc.yml` before
-     any product run there (default: under processed_inputs on the same storage);
+  Done on `<data_root>` (2026-11-07): `run_preparation.py storm_tide_product
+  boundary_conditions` without the TC mask, cache (~29 GB) under
+  `processed_inputs/storm_tide_product/cache` for both machines; `WL_scenarios` holds the
+  product's levels (marker `storm_tide_source.txt`; level + MDT + 2020 offset checked at all
+  22,670 stations; the former files predate the 2020 offset, fig24); scenario configs
+  re-materialized here. Left:
+  1. re-materialize the scenario configs on Hydrax;
   2. Snakemake: the station caches re-run (their scenario NetCDFs are inputs) and with them every
      tile; then the SFINCS forcing, the fsf recalibration on the 498 tiles
      (`sfincs_tiles/generate_calibration_jobs.py stage1|stage2` on Hydrax), test 8 and the tile rerun.
@@ -170,11 +170,9 @@ Open:
   `slr_baseline_offset_m`).
 - **Storm-tide product: decisions taken as estimates (open questions; tested in
   `boundary_test/INPUT_ANALYSIS.md` §8.6, fig19-fig23).**
-  - TC mask (decide): at the gauges the mask makes TC coasts worse (TC-dominated RP100 median
-    -0.17 m with it, -0.03 m without; MAE 0.39 vs 0.36 m; stations with a TC part -0.07 vs
-    -0.02 m). Without it a cyclone counts twice (ERA5 record + COAST-RP TC part), which makes up
-    for both sources being too low. Proposal: drop the mask (`TC_MASK_KM` = 0, or skip
-    `tc_hours`) until test 10 replaces the TC part; a 150 km radius is the halfway option.
+  - No TC mask (decided): ERA5 cyclones stay in the ETC fit and count again in COAST-RP's TC part,
+    which matches the gauges best because both sources are too low (§8.6). Retest the mask
+    (`boundary_test/open_guesses.py tc_mask`) when test 10 replaces the TC part.
   - Interpolation: `knn` 5, `idw_power` 3 (config default now; leave-one-out RP100 MAE 5.7 cm
     against 7.0 cm for k 15 / power 2, fewest stations off by > 0.5 m). The test predicts a station
     from neighbours farther away than a coastline cell's, so it overstates the error; the ranking
@@ -193,9 +191,12 @@ Open:
   - Gauge ratios without GTSM's own tide: production fits r on gauge vs GTSM-on-FES skew surges
     and takes the common years of those two series; test 9 also required GTSM's harmonic tide
     (`gtsm_harm`) and its years. The port's gauge set may differ by a few sites.
-  - GPD shape cap 0.35 (`SHAPE_CAP`, Fathom RFA's cap; binds at 149 stations): kept. The gauges
-    cannot tell caps apart (RP100 MAE 0.224-0.227 m from none to 0.2); at RP1000 no cap adds up
-    to 9.7 m at heavy-tailed stations, 0.2 removes up to 3.1 m. Above RP100 nothing checks it.
+  - GPD shape cap 0.35 (`SHAPE_CAP`, Fathom RFA's cap): kept, and without the TC mask it sets the
+    RP250-RP1000 tail at 832 stations, mostly hurricane/typhoon coasts (Hangzhou Bay RP1000
+    12.6 m against COAST-RP's 4.8 m). The gauges cannot tell caps apart (RP100 MAE
+    0.215-0.217 m from none to 0.2); at RP1000 no cap adds up to 12.9 m, 0.2 removes up to
+    3.9 m. Above RP100 nothing checks it; test 10 (STORM-forced GTSM) is the check for the
+    cyclone tail.
   - GTSM despike (|residual - 5-h median| > 2 m; >= 5 jumps > 2 m -> COAST-RP levels, 15
     Arafura stations): kept; 3-5 jumps give the same 15, and 1 m would catch real North Sea
     surges.

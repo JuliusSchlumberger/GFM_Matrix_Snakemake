@@ -280,24 +280,26 @@ Confirmation on 5-10 real 2-D tiles follows once the generator exists (test 8).
 
 The decisions above are built into one product at the 23,226 COAST-RP stations, made by the
 preparation step `run_preparation.py storm_tide_product` from the raw inputs (GESLA, GTSM-ERA5,
-FES2022/2014, COAST-RP, IBTrACS; `src/storm_tide_product.py`, details in
+FES2022/2014, COAST-RP; `src/storm_tide_product.py`, details in
 `boundary_test/INPUT_ANALYSIS.md` §8.4-8.5): GTSM-ERA5 skew surges on the FES tide, scaled by the
 gauge ratio r and convolved with the FES high waters, plus COAST-RP's TC part as a rate; per-RP
 generator hydrographs at every station. `boundary_conditions.storm_tide_source` switches every
 model between it (default) and COAST-RP / COAST-HG.
 
-- **QA** (fig17): four failure modes of a first build: low-water bumps of shallow-water tides
-  taken as high waters, GTSM residual spikes, tropical cyclones counted twice, and heavy GPD
-  tails. They were removed by dropping weak maxima in the low-water band, despiking (15 Arafura
-  stations fall back to COAST-RP), an IBTrACS mask at stations with a TC part, and a GPD shape cap
-  of 0.35.
-- **Against COAST-RP** (fig12, fig13): median +0.03 m at RP100 (10-90%: -0.22 to +0.23 m). The FES
+- **QA** (fig17): three failure modes of a first build: low-water bumps of shallow-water tides
+  taken as high waters, GTSM residual spikes and heavy GPD tails. They were removed by dropping
+  weak maxima in the low-water band, despiking (15 Arafura stations fall back to COAST-RP) and a
+  GPD shape cap of 0.35. Tropical cyclones of the ERA5 record stay in the ETC fit, although
+  COAST-RP's TC part counts them again (fig21).
+- **Against COAST-RP** (fig12, fig13): median +0.05 m at RP100 (10-90%: -0.22 to +0.29 m). The FES
   tide lowers the levels by 0.05-0.08 m and r raises them by 0.06-0.09 m. Large departures are
-  regional: lower in the southern North Sea, higher in the western Baltic and the macrotidal
-  basins where GTSM's tide is too small.
+  regional: lower in the southern North Sea, higher in the western Baltic, the macrotidal
+  basins where GTSM's tide is too small, and on coasts a major hurricane or typhoon struck in
+  1979-2024 (Gulf of Mexico, Hangzhou Bay), where the GPD shape cap of 0.35 then sets the
+  RP1000 tail (832 stations).
 - **Against the gauges** (fig14; 618 gauges, r left one out): RP100 MAE 0.16 m against
-  COAST-RP's 0.24 m at ETC gauges; the median bias falls to a third, and at TC gauges from
-  -0.25 to -0.17 m.
+  COAST-RP's 0.24 m at ETC gauges, median bias near zero; at TC gauges the median moves from
+  -0.25 to -0.03 m, with a wide spread (10-90%: -0.59 to +0.51 m).
 - **Hydrographs** (fig15, fig18): every maximum equals the RP level. The peaks are 2-4x wider
   than COAST-HG's (median T(0.25) 12 h against 6 h at RP100) and narrow with the RP, as at the
   gauges.
@@ -310,8 +312,8 @@ model between it (default) and COAST-RP / COAST-HG.
   - the shape cap, the despike thresholds and the FES version rule hold, with one wrong FES flag
     at the Saguenay mouth;
   - off-centre hydrograph maxima are cosmetic;
-  - the cyclone mask lowers TC coasts by 0.14 m at RP100 and moves them away from the gauges,
-    because both cyclone sources are too low; whether to keep it is open.
+  - a cyclone mask would lower TC coasts by 0.14 m at RP100 and move them away from the gauges,
+    because both cyclone sources are too low; production has none until test 10.
 
 ## Figures
 
@@ -340,6 +342,7 @@ model between it (default) and COAST-RP / COAST-HG.
 | `fig21_tc_mask` | gauge scores at TC coasts for variants of the cyclone mask |
 | `fig22_fes_rule` | FES2022 / FES2014 MHWS against the gauges where the version rule fires or is grown |
 | `fig23_peak_offsets` | hydrographs whose maximum is off the centre high water: share, offset, excess |
+| `fig24_datum_terms` | MDT, 2020 offset and the change of the WL_scenarios level (product + offset against COAST-RP) |
 
 ## References
 
