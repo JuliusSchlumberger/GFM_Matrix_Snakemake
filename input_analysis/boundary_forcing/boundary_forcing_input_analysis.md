@@ -306,6 +306,12 @@ model between it (default) and COAST-RP / COAST-HG.
   < 5 km, ~20 cm > 50 km).
 - Neighbours on one FES artefact are made consistent: the version rule is grown by 25 km, which
   adds 10 stations.
+- **The estimated rules, tested** (fig19-fig23, INPUT_ANALYSIS.md §8.6):
+  - the shape cap, the despike thresholds and the FES version rule hold, with one wrong FES flag
+    at the Saguenay mouth;
+  - off-centre hydrograph maxima are cosmetic;
+  - the cyclone mask lowers TC coasts by 0.14 m at RP100 and moves them away from the gauges,
+    because both cyclone sources are too low; whether to keep it is open.
 
 ## Figures
 
@@ -329,6 +335,11 @@ model between it (default) and COAST-RP / COAST-HG.
 | `fig16_station_interpolation` | leave-one-out interpolation error by neighbours, power and station spacing |
 | `fig17_level_product_qa` | the QA failure modes at three stations, skew surges before and after |
 | `fig18_product_durations` | T(0.25) and T(0.5) of the product's hydrographs against COAST-HG |
+| `fig19_despike` | GTSM residual jumps per station and the stations each QA threshold sends to COAST-RP |
+| `fig20_gpd_cap` | GPD shapes of GTSM and the gauges; gauge scores and RP1000 for each shape cap |
+| `fig21_tc_mask` | gauge scores at TC coasts for variants of the cyclone mask |
+| `fig22_fes_rule` | FES2022 / FES2014 MHWS against the gauges where the version rule fires or is grown |
+| `fig23_peak_offsets` | hydrographs whose maximum is off the centre high water: share, offset, excess |
 
 ## References
 

@@ -162,6 +162,9 @@ storm_tide_product:
   gtsm_dir: "{root}/inputs/GTSM_storm_tide_hourly"  # GTSM-ERA5 storm_surge_residual/*.nc, hourly
   fes2022_dir: "{root}/inputs/fes2022b/ocean_tide_extrapolated"  # *.nc.xz, decompressed once
   ibtracs_path: "{root}/inputs/IBTrACS/ibtracs.since1980.list.v04r01.csv"  # NOAA IBTrACS v04r01
+  # ~30 GB of raw-input copies (GTSM series 18 GB, FES2022 5 GB, GESLA 4 GB); a local disk in
+  # config_local.yml keeps them off the data root.
+  cache_dir: "{processed_inputs_dir}/storm_tide_product/cache"
   workers: 4
 
 # ── RASTER FORMAT ──────────────────────────────────────────────────────────────

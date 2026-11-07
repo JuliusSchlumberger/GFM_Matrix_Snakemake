@@ -25,6 +25,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from matplotlib.colors import LogNorm, Normalize  # noqa: E402
+from sklearn.neighbors import BallTree  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
@@ -1316,6 +1317,309 @@ def fig18_product_durations(product: Path, dest: Path) -> None:
         """)
 
 
+GUESS_NEAR_GAUGE_KM = 150.0
+
+
+def _guesses(product: Path) -> Path:
+    return product / "open_guesses"
+
+
+def fig19_despike(product: Path, dest: Path) -> None:
+    d = pd.read_parquet(_guesses(product) / "despike.parquet")
+    d = d[d.lat > PRODUCTION_MIN_LAT]
+    fig = plt.figure(figsize=(12, 9.2))
+    grid = fig.add_gridspec(2, 2, height_ratios=(1, 1.2))
+    ax = fig.add_subplot(grid[0, 0])
+    bins = np.logspace(np.log10(0.01), np.log10(20), 60)
+    ax.hist(d.max_jump_m.clip(0.01), bins=bins, color=BLUE)
+    for m in (1, 2, 3):
+        ax.axvline(m, color=MUTED, linestyle=":" if m != 2 else "--", linewidth=1)
+    ax.set(xscale="log", yscale="log", xlabel="largest hourly change of the GTSM surge residual (m)",
+           ylabel="stations")
+    _style(ax)
+    draw_panel_letter(ax, "a")
+    ax = fig.add_subplot(grid[0, 1])
+    counts = (1, 2, 3, 5, 10, 20)
+    table = np.array([[int((d[f"jumps_gt_{m:g}m"] >= n).sum()) for n in counts] for m in (1.0, 2.0, 3.0)])
+    ax.imshow(table, cmap="Blues", norm=LogNorm(1, max(table.max(), 2)), aspect="auto")
+    for (r, c), v in np.ndenumerate(table):
+        ax.text(c, r, f"{v:,}", ha="center", va="center", fontsize=9,
+                color="white" if v > np.sqrt(table.max()) else INK, fontweight="bold" if (r, c) == (1, 3) else None)
+    ax.set(xticks=range(len(counts)), xticklabels=[f">= {n}" for n in counts], yticks=range(3),
+           yticklabels=["> 1 m", "> 2 m", "> 3 m"], xlabel="hourly jumps per station (46 years)",
+           ylabel="jump threshold")
+    ax.set_title("stations sent to COAST-RP levels (bold: production)", fontsize=9, color=INK)
+    draw_panel_letter(ax, "b")
+    ax = fig.add_subplot(grid[1, :], projection=MAP_PROJ)
+    ax.set_global()
+    _land(ax)
+    j = d[d.jumps_gt_1m > 0].sort_values("jumps_gt_1m")
+    sc = ax.scatter(j.lon, j.lat, c=j.jumps_gt_1m, s=8, cmap="viridis", norm=LogNorm(1, max(j.jumps_gt_1m.max(), 2)),
+                    transform=PC, zorder=2, linewidths=0)
+    fb = d[d.level_source == "coast_rp"]
+    ax.scatter(fb.lon, fb.lat, s=40, facecolor="none", edgecolor=ORANGE, linewidths=1.2, transform=PC, zorder=3)
+    ax.spines["geo"].set_edgecolor(MUTED)
+    cb = fig.colorbar(sc, ax=ax, orientation="horizontal", fraction=0.04, pad=0.03, shrink=0.5)
+    cb.set_label("hourly jumps > 1 m (orange rings: stations on COAST-RP levels)")
+    draw_panel_letter(ax, "c")
+    fig.tight_layout()
+    _save(fig, dest / "fig19_despike.png")
+    n1 = int((d.jumps_gt_1m > 0).sum())
+    describe(dest / "fig19_despike.png", f"""
+        Jumps in the GTSM-ERA5 surge residual at the {len(d):,} stations north of 60 S (1979-2024,
+        hourly). (a) Each station's largest change from one hour to the next. (b) How many stations
+        a QA rule "at least N jumps above X m" would send to COAST-RP's levels; production uses 5
+        jumps above 2 m (bold). (c) Stations with any jump above 1 m, coloured by their number,
+        and the stations on COAST-RP levels (orange rings).
+
+        Reading: the median station's largest jump is {d.max_jump_m.median() * 100:.0f} cm and
+        {n1:,} stations ever change by more than 1 m within an hour. Above 2 m the jumps are few
+        and clustered on the Arafura coast of New Guinea, where they reach {d.max_jump_m.max():.0f} m,
+        far beyond any storm. With a 2 m threshold, 3 to 5 required jumps pick the same 15
+        stations, so the result does not hang on the exact count; despiking (hours more than 2 m
+        from their 5-h median) cleans the 7 with only one or two. A 1 m threshold would also take
+        real fast surges: outside the Arafura cluster, the stations with 20 or more jumps above 1 m
+        are in the southern North Sea
+        and the German Bight, where storm surges rise by a metre within an hour.
+        """)
+
+
+def fig20_gpd_cap(product: Path, dest: Path) -> None:
+    g = _guesses(product)
+    sc = pd.read_parquet(g / "cap_scores.parquet")
+    st = pd.read_parquet(g / "cap_stations.parquet")
+    shapes = pd.read_parquet(g / "cap_gauge_shapes.parquet")
+    lev = _product(product)
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.6))
+    ax = axes[0]
+    bins = np.linspace(-1.0, 1.5, 51)
+    ax.hist(lev.gpd_shape_mle.dropna().clip(-1, 1.5), bins=bins, density=True, color=BLUE, alpha=0.7,
+            label=f"GTSM on FES, {lev.gpd_shape_mle.notna().sum():,} stations")
+    ax.hist(shapes.shape_gauge.dropna().clip(-1, 1.5), bins=bins, density=True, histtype="step", color=INK,
+            linewidth=1.5, label=f"gauges, {shapes.shape_gauge.notna().sum()}")
+    for c in (0.2, 0.25, 0.35, 0.5):
+        ax.axvline(c, color=ORANGE if c == 0.35 else MUTED, linestyle="--", linewidth=1)
+    ax.set(xlabel="GPD shape (maximum likelihood)", ylabel="density")
+    ax.legend(frameon=False, fontsize=8)
+    _style(ax)
+    draw_panel_letter(ax, "a")
+    ax = axes[1]
+    caps = list(dict.fromkeys(sc.level))
+    x = np.arange(len(caps))
+    for k, (label, color) in enumerate((("non-TC-dominated gauges", BLUE), ("TC-dominated gauges", ORANGE))):
+        s = sc[(sc.gauges == label) & (sc.rp == 100)].set_index("level").reindex(caps)
+        ax.plot(x, s["mae"] * 100, color=color, marker="o", label=f"{label}: MAE")
+        ax.plot(x, s["median"] * 100, color=color, marker="s", linestyle="--", label=f"{label}: median")
+    ax.axhline(0, color=MUTED, linewidth=0.8)
+    ax.set(xticks=x, xticklabels=[c.replace(" (production)", "\n(production)") for c in caps], xlabel="shape cap",
+           ylabel="RP100 station - gauge (cm)")
+    ax.legend(frameon=False, fontsize=7, loc="center")
+    _style(ax)
+    draw_panel_letter(ax, "b")
+    ax = axes[2]
+    prod = st[st.cap == "0.35 (production)"].set_index("station")
+    for c, color in (("none", INK), ("0.5", MUTED), ("0.25", GREEN), ("0.2", BLUE)):
+        s = st[st.cap == c].set_index("station")
+        dd = (s.rp1000_m - prod.rp1000_m.reindex(s.index)).dropna()
+        ax.scatter(prod.shape_mle.reindex(dd.index), dd, s=6, color=color, label=f"cap {c}", alpha=0.7, linewidths=0)
+    ax.axhline(0, color=MUTED, linewidth=0.8)
+    ax.set(xlabel="station GPD shape (maximum likelihood)", ylabel="RP1000 minus production (m)",
+           ylim=(-3.5, 10.0))
+    ax.legend(frameon=False, fontsize=8, markerscale=2)
+    _style(ax)
+    draw_panel_letter(ax, "c")
+    fig.tight_layout()
+    _save(fig, dest / "fig20_gpd_cap.png")
+    m = sc[(sc.rp == 100) & (sc.gauges == "all")].set_index("level")
+    n35 = int((lev.gpd_shape_mle > 0.35).sum())
+    describe(dest / "fig20_gpd_cap.png", f"""
+        The GPD shape cap. (a) Maximum-likelihood shapes of the GTSM-on-FES skew surges at all
+        stations and of the gauges' own skew surges (test 9), with the tested caps (orange:
+        production, 0.35). (b) RP100 level minus the gauge's convolution at the ratio gauges, r
+        left one out, for each cap (non-TC- and TC-dominated gauges; MAE solid, median dashed).
+        (c) RP1000 at the stations with a shape above 0.2, relative to production, against the
+        station's shape.
+
+        Reading: the cap binds at {n35} stations. At the gauges it makes no measurable difference
+        up to RP100 (all gauges, MAE {m.loc['none', 'mae'] * 100:.1f} cm without a cap,
+        {m.loc['0.35 (production)', 'mae'] * 100:.1f} cm at 0.35, {m.loc['0.2', 'mae'] * 100:.1f} cm
+        at 0.2): the gauges rarely sit where GTSM's tail is heavy, and RP100 is still close to the
+        data. The cap acts on RP1000 at the few heavy-tailed stations: without it RP1000 rises by
+        up to 9.7 m (0.5: 4.1 m), and 0.2 lowers it by up to 3.1 m. The gauges' own shapes (median
+        0.01, standard deviation 0.25) spread more widely than GTSM's (-0.03, 0.19), so they do not
+        fix a cap; 0.35 bounds the extreme cases only.
+        """)
+
+
+def fig21_tc_mask(product: Path, dest: Path) -> None:
+    sc = pd.read_parquet(_guesses(product) / "tc_mask_scores.parquet")
+    variants = list(dict.fromkeys(sc.level))
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4.8), sharey=True)
+    for ax, letter, label in zip(axes, "ab", ("TC-dominated gauges", "stations with a TC part")):
+        y = np.arange(len(variants))
+        for k, (rp, color) in enumerate(((10, BLUE), (100, ORANGE))):
+            s = sc[(sc.gauges == label) & (sc.rp == rp)].set_index("level").reindex(variants)
+            ax.barh(y + (k - 0.5) * 0.38, s["median"] * 100, 0.36, color=color, label=f"RP{rp} median")
+            ax.scatter(s["mae"] * 100, y + (k - 0.5) * 0.38, marker="|", s=120, color=INK,
+                       label="MAE" if k == 0 else None)
+        ax.axvline(0, color=MUTED, linewidth=0.8)
+        ax.set(yticks=y, yticklabels=variants, xlabel="station - gauge (cm)",
+               title=f"{label} (n = {int(sc[(sc.gauges == label)].n.iloc[0])})")
+        ax.title.set_fontsize(9)
+        ax.invert_yaxis()
+        ax.legend(frameon=False, fontsize=8)
+        _style(ax)
+        draw_panel_letter(ax, letter)
+    fig.tight_layout()
+    _save(fig, dest / "fig21_tc_mask.png")
+    s = sc[(sc.gauges == "TC-dominated gauges") & (sc.rp == 100)].set_index("level")
+    describe(dest / "fig21_tc_mask.png", f"""
+        The tropical-cyclone mask: at stations with a COAST-RP TC part, tidal cycles near an
+        IBTrACS storm leave the ETC fit, so a cyclone does not count twice (in the ERA5 surge
+        record and in COAST-RP's synthetic TC part). Bars: median of station minus gauge at RP10
+        and RP100 at the ratio gauges, r left one out; ticks: MAE. (a) TC-dominated gauges, (b)
+        gauges whose station has a TC part. Variants: no mask; production (300 km, +-24 h, >= 34
+        kt); 150 and 500 km; +-12 and +-48 h; hurricane strength (>= 64 kt) only.
+
+        Reading: the mask makes the TC coasts worse at the gauges. Without it the TC-dominated
+        gauges' RP100 median is {s.loc['no mask', 'median'] * 100:.0f} cm and the MAE
+        {s.loc['no mask', 'mae'] * 100:.0f} cm; with production's mask
+        {s.loc['300 km, +-24 h, 34 kt (production)', 'median'] * 100:.0f} cm and
+        {s.loc['300 km, +-24 h, 34 kt (production)', 'mae'] * 100:.0f} cm. A smaller radius (150 km)
+        lies between; the time window and the wind threshold hardly matter. Without the mask a
+        cyclone counts in the ERA5 record and again in COAST-RP's TC part, yet the levels match
+        the gauges better: both TC sources are too low (GTSM-ERA5 resolves cyclones coarsely,
+        COAST-RP's TC part is 0.2-0.25 m below the gauges, §8.1), and the double count makes up
+        for it. Removing it is right in principle and wrong on the gauges until test 10
+        (STORM-forced GTSM) replaces the TC part.
+        """)
+
+
+def fig22_fes_rule(product: Path, dest: Path) -> None:
+    g = _guesses(product)
+    gauges = pd.read_parquet(g / "fes_rule_gauges.parquet").dropna()
+    st = pd.read_parquet(g / "fes_rule_stations.parquet")
+    f = st[st.atlas == "fes2014"].copy()
+    d, i = BallTree(np.radians(gauges[["lat", "lon"]].to_numpy()), metric="haversine").query(
+        np.radians(f[["lat", "lon"]].to_numpy()), k=1)
+    f["gauge_km"], f["gauge_mhws_m"] = d[:, 0] * 6371.0, gauges.mhws_gauge_m.to_numpy()[i[:, 0]]
+    f["gauge"] = gauges.index[i[:, 0]]
+    near = f[f.gauge_km <= GUESS_NEAR_GAUGE_KM]
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.8))
+    ax = axes[0]
+    e22 = gauges.mhws_fes2022_m - gauges.mhws_gauge_m
+    e14 = gauges.mhws_fes2014_m - gauges.mhws_gauge_m
+    flag = np.asarray(version_flag(gauges.mhws_fes2022_m, gauges.mhws_fes2014_m), dtype=bool)
+    ax.scatter(e22[~flag], e14[~flag], s=8, color=MUTED, linewidths=0, label="rule silent")
+    ax.scatter(e22[flag], e14[flag], s=40, color=ORANGE, label="rule fires")
+    lim = (-1.5, 5.0)
+    ax.plot(lim, lim, color=MUTED, linewidth=0.8)
+    ax.set(xlim=lim, ylim=(-1.5, 1.5), xlabel="FES2022 - gauge MHWS (m)", ylabel="FES2014 - gauge MHWS (m)")
+    ax.legend(frameon=False, fontsize=8)
+    _style(ax)
+    draw_panel_letter(ax, "a")
+    ax = axes[1]
+    for flagged, marker, label in ((True, "o", "rule"), (False, "^", "grown to neighbours")):
+        s = near[near.rule_flag == flagged]
+        ax.scatter(s.gauge_mhws_m, s.mhws_fes2022_m, marker=marker, s=30, color=BLUE, label=f"FES2022 ({label})")
+        ax.scatter(s.gauge_mhws_m, s.mhws_fes2014_m, marker=marker, s=30, facecolor="none", edgecolor=ORANGE,
+                   label=f"FES2014 ({label})")
+    hi = float(near[["mhws_fes2022_m", "gauge_mhws_m"]].max().max()) * 1.05
+    ax.plot([0, hi], [0, hi], color=MUTED, linewidth=0.8)
+    ax.set(xlim=(0, hi), ylim=(0, hi), xlabel=f"nearest gauge MHWS (m), within {GUESS_NEAR_GAUGE_KM:.0f} km",
+           ylabel="station MHWS (m)")
+    for gauge, grp in near.groupby("gauge"):
+        ax.annotate(gauge.split("-")[0].replace("_", " "), (grp.gauge_mhws_m.iloc[0], grp.mhws_fes2022_m.max()),
+                    fontsize=7, color=INK, xytext=(3, 3), textcoords="offset points")
+    ax.legend(frameon=False, fontsize=7)
+    _style(ax)
+    draw_panel_letter(ax, "b")
+    ax = axes[2]
+    far = f[f.gauge_km > GUESS_NEAR_GAUGE_KM]
+    ax.scatter(far.mhws_fes2014_m, far.mhws_fes2022_m, s=25, color=INK)
+    x = np.linspace(0, 7, 50)
+    ax.plot(x, np.maximum(VERSION_RATIO * x, x + VERSION_DIFF_M), color=ORANGE, linewidth=1, label="rule boundary")
+    ax.set(xlabel="FES2014 MHWS (m)", ylabel="FES2022 MHWS (m)", title=f"{len(far)} stations without a gauge")
+    ax.title.set_fontsize(9)
+    ax.legend(frameon=False, fontsize=8)
+    _style(ax)
+    draw_panel_letter(ax, "c")
+    fig.tight_layout()
+    _save(fig, dest / "fig22_fes_rule.png")
+    n_rule, n_grown = int(f.rule_flag.sum()), int((~f.rule_flag).sum())
+    describe(dest / "fig22_fes_rule.png", f"""
+        The FES version rule (FES2014 where FES2022's MHWS exceeds it by a factor
+        {VERSION_RATIO} and by {VERSION_DIFF_M} m) and its growth to neighbours on the same
+        artefact. It sets FES2014 at {len(f)} stations ({n_rule} by the rule, {n_grown} by the
+        growth). (a) At the {len(gauges)} GESLA gauges: FES2022 and FES2014 MHWS minus the gauge's
+        own; orange where the rule would fire. (b) The FES2014 stations with a gauge within
+        {GUESS_NEAR_GAUGE_KM:.0f} km: both atlases' MHWS at the station against the gauge's
+        (circles: the rule, triangles: grown). (c) The FES2014 stations without such a gauge, with
+        the rule's boundary.
+
+        Reading: where the rule can be checked it is right: at the {int(flag.sum())} gauges where
+        it fires (Juneau, Skagway, Port Alberni), FES2022 is 1.5-4.7 m too high and FES2014 within
+        0.1 m (0.6 m at Juneau). The
+        flagged stations near gauges sit with FES2014 at the gauge's level (Varangerfjord against
+        Vardo 1.35 m, Le Crouesty, Karachi for Sonmiani, Kukup, Port Stanley for the Falklands).
+        Sao Marcos Bay: the Ponta da Madeira gauge inside the bay reads 2.62 m, so the outer
+        stations' FES2014 (2.1 m) is the plausible value, not FES2022 (3.2-3.8 m). One flag is
+        wrong: at the Saguenay mouth the Tadoussac gauge (2.18 m) sides with FES2022 (2.65 m)
+        over FES2014 (1.38 m). Without gauges (c), most flags are FES2022 artefacts of known
+        basins (Magellan, Gulf of California, Ungava), but some sit in real macrotidal gulfs
+        (Khambhat, Incheon) where neither atlas is checked.
+        """)
+
+
+def fig23_peak_offsets(product: Path, dest: Path) -> None:
+    p = pd.read_parquet(_guesses(product) / "peaks.parquet")
+    p = p[p.lat > PRODUCTION_MIN_LAT]
+    off = p[p.offset_hr != 0]
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.6))
+    ax = axes[0]
+    classes = pd.cut(p.form_factor, [0, 0.25, 1.5, 3, 100], labels=["semidiurnal", "mixed, mainly semid.",
+                                                                     "mixed, mainly diurnal", "diurnal"])
+    share = p.assign(off=p.offset_hr != 0, cls=classes).pivot_table(index="rp", columns="cls", values="off",
+                                                                     aggfunc="mean", observed=True) * 100
+    for (cls, color) in zip(share.columns, (BLUE, GREEN, ORANGE, INK)):
+        ax.plot(np.arange(len(share)), share[cls], marker="o", color=color, label=str(cls))
+    ax.set(xticks=np.arange(len(share)), xticklabels=share.index, xlabel="return period (y)",
+           ylabel="hydrographs with the maximum off time 0 (%)")
+    ax.legend(frameon=False, fontsize=8, title="tide (form factor)", title_fontsize=8)
+    _style(ax)
+    draw_panel_letter(ax, "a")
+    ax = axes[1]
+    ax.hist(off.offset_hr.clip(-60, 60), bins=np.arange(-60.5, 61, 1), color=BLUE)
+    ax.set(xlabel="hours from time 0 to the maximum", ylabel="hydrographs")
+    _style(ax)
+    draw_panel_letter(ax, "b")
+    ax = axes[2]
+    ax.hist(off.excess_m.clip(0, 1.0), bins=50, color=BLUE)
+    ax.set(xlabel="maximum minus the level at time 0 (m)", ylabel="hydrographs", yscale="log")
+    _style(ax)
+    draw_panel_letter(ax, "c")
+    fig.tight_layout()
+    _save(fig, dest / "fig23_peak_offsets.png")
+    rp100 = p[p.rp == 100]
+    describe(dest / "fig23_peak_offsets.png", f"""
+        Hydrographs whose maximum is not at time 0, the high water the generator's surge is
+        centred on. (a) Their share by return period and tidal type (form factor (K1 + O1) /
+        (M2 + S2) of the FES tide). (b) Where the maximum falls instead. (c) How far it exceeds the
+        level at time 0. Every maximum equals the RP level, which is what the SFINCS forcing and
+        correction B use.
+
+        Reading: {len(off) / len(p):.1%} of all hydrographs and {(rp100.offset_hr != 0).mean():.1%}
+        at RP100 peak elsewhere, most often at RP2 in semidiurnal tides. In 64% the maximum is
+        one day away (+-24.8 h), in 19% one tidal cycle (+-12.4 h), in 8% within the hour around
+        time 0: the window's centre high water is the median tide at the annual maxima, but a
+        neighbouring high water (diurnal inequality, spring-neap cycle) is higher, and the slowly
+        varying surge lifts it above the centre. Half of them exceed the time-0 level by less
+        than {off.excess_m.median() * 100:.1f} cm, 99% by less than {off.excess_m.quantile(0.99) * 100:.0f} cm.
+        The event stays physical: the storm's maximum lands on the highest high water within it,
+        and the maximum is the RP level in every case.
+        """)
+
+
 FIGURES = {"fig01": fig01_tide_scatter, "fig02": fig02_tide_ratio_maps, "fig03": fig03_constituents,
            "fig04": fig04_fes_versions, "fig05": fig05_basin_heads, "fig06": fig06_rule_sensitivity,
            "fig07": fig07_coast_rp_regions, "fig08": fig08_profiles_by_rp, "fig09": fig09_surge_by_rp,
@@ -1323,7 +1627,9 @@ FIGURES = {"fig01": fig01_tide_scatter, "fig02": fig02_tide_ratio_maps, "fig03":
 PRODUCT_FIGURES = {"fig12": fig12_level_product_maps, "fig13": fig13_level_product_by_rp,
                    "fig14": fig14_level_product_gauges, "fig15": fig15_level_product_hydrographs,
                    "fig16": fig16_station_interpolation, "fig17": fig17_level_product_qa,
-                   "fig18": fig18_product_durations}
+                   "fig18": fig18_product_durations,
+                   "fig19": fig19_despike, "fig20": fig20_gpd_cap, "fig21": fig21_tc_mask, "fig22": fig22_fes_rule,
+                   "fig23": fig23_peak_offsets}
 
 
 def main() -> None:

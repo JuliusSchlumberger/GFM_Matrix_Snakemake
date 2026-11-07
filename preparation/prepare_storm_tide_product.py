@@ -6,14 +6,14 @@ boundary_conditions.storm_tide_source is gfm_product. Method: src/storm_tide_pro
 boundary_test/INPUT_ANALYSIS.md §8.4-8.5. Raw inputs: GESLA-4.1, GTSM-ERA5 surge residual,
 FES2022 and FES2014, COAST-RP (+ _ETC, _TC), IBTrACS (config `storm_tide_product`).
 
-Writes into boundary_conditions.storm_tide_product_dir:
-  cache/        copies of raw inputs and what depends on them alone (FES2022 decompressed, tide
-                bases, GTSM series at the stations and gauges, GESLA records, FES constants
-                and MHWS at the stations); deterministic, kept across runs
+Writes into storm_tide_product.cache_dir (~30 GB; may live off the data root) copies of raw
+inputs and what depends on them alone: FES2022 decompressed, tide bases, GTSM series at the
+stations and gauges, GESLA records, FES constants and MHWS at the stations; deterministic, kept
+across runs. Into boundary_conditions.storm_tide_product_dir (~2.5 GB):
   gauges/       gauge table (ratio, class, tidal MHWS) and TC donor shapes
   stations.csv, levels.parquet, hydrographs.npy, hydrograph_info.parquet, and the two product
   files (boundaries.PRODUCT_*_FILENAME).
-force=True (default) recomputes everything but cache/; ~6 h on 4 workers, most of it the GTSM
+force=True (default) recomputes everything but the cache; ~6 h on 4 workers, most of it the GTSM
 extraction (552 monthly files read in full) and the per-station build.
 """
 
@@ -40,9 +40,9 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 class _Paths:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, cache: Path):
         self.root = root
-        self.cache = root / "cache"
+        self.cache = cache
         self.fes2022 = self.cache / "fes2022"
         self.bases = {
             "fes2022": (self.cache / "fes2022_hourly_re.npy", self.cache / "fes2022_hourly_im.npy",
@@ -139,7 +139,7 @@ def run(config: dict, force: bool = True) -> None:
     """Write the storm-tide product files (and intermediates) into storm_tide_product_dir."""
     cfg = config["storm_tide_product"]
     workers = int(cfg["workers"])
-    paths = _Paths(Path(config["boundary_conditions"]["storm_tide_product_dir"]))
+    paths = _Paths(Path(config["boundary_conditions"]["storm_tide_product_dir"]), Path(cfg["cache_dir"]))
     paths.cache.mkdir(parents=True, exist_ok=True)
     catalog = get_data_catalog(_REPO_ROOT / config["paths"]["hydromt_data_catalog"], root=config["paths"]["root"])
     coast_rp = Path(catalog.get_source("coast_rp").path)

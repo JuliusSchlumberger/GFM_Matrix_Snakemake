@@ -302,16 +302,17 @@ def station_tc_shapes(stations: pd.DataFrame, donors: pd.DataFrame, shapes: np.n
             if dist <= TC_GAUGE_KM}
 
 
-def tc_hours(stations: pd.DataFrame, n_hours: int, ibtracs_path: Path, start: np.datetime64) -> dict:
-    """Station -> hourly indices within TC_MASK_HR of a tropical storm passing within TC_MASK_KM."""
+def tc_hours(stations: pd.DataFrame, n_hours: int, ibtracs_path: Path, start: np.datetime64,
+             radius_km: float = TC_MASK_KM, half_hr: int = TC_MASK_HR, min_wind_kt: float = TC_MIN_WIND_KT) -> dict:
+    """Station -> hourly indices within half_hr of a tropical storm (>= min_wind_kt) passing within radius_km."""
     tracks = pd.read_csv(ibtracs_path, usecols=["ISO_TIME", "LAT", "LON", "WMO_WIND", "USA_WIND"], skiprows=[1],
                          na_values=[" "], low_memory=False)
     wind = tracks[["WMO_WIND", "USA_WIND"]].apply(pd.to_numeric, errors="coerce").max(axis=1)
-    tracks = tracks[wind >= TC_MIN_WIND_KT]
+    tracks = tracks[wind >= min_wind_kt]
     hour = ((pd.to_datetime(tracks.ISO_TIME).to_numpy() - np.datetime64(start)) // np.timedelta64(1, "h")).astype(int)
     tree = BallTree(np.radians(tracks[["LAT", "LON"]].to_numpy(dtype=float)), metric="haversine")
-    near = tree.query_radius(np.radians(stations[["lat", "lon"]].to_numpy()), r=TC_MASK_KM / EARTH_RADIUS_KM)
-    spread = np.arange(-TC_MASK_HR, TC_MASK_HR + 1)
+    near = tree.query_radius(np.radians(stations[["lat", "lon"]].to_numpy()), r=radius_km / EARTH_RADIUS_KM)
+    spread = np.arange(-half_hr, half_hr + 1)
     out = {}
     for st, idx in zip(stations.index, near):
         if len(idx):
@@ -361,7 +362,8 @@ def station_product(st: dict, g: np.ndarray, th: np.ndarray, t10: np.ndarray,
     """RP levels (row), hydrographs (RP, N_STEPS) and their sources for one station.
 
     `g`: hourly GTSM surge residual (m, NaN missing); `th` / `t10`: the station's FES tide,
-    hourly on the same axis and 10-min over one nodal cycle.
+    hourly on the same axis and 10-min over one nodal cycle. `st` may set "shape_cap" (None: no
+    cap) in place of SHAPE_CAP.
     """
     row = {"station": st["station"], "atlas": st["atlas"], "mhws_m": st["mhws_m"]}
     hyd = np.full((len(RPS), N_STEPS), np.nan, dtype=np.float32)
@@ -375,7 +377,7 @@ def station_product(st: dict, g: np.ndarray, th: np.ndarray, t10: np.ndarray,
     ok = np.isin(years[hw], keep_years) & np.isfinite(skew)
     tc_cycles = np.isin(hw, st["tc_hours"]) if st["tc_hours"] is not None else np.zeros(len(hw), bool)
     row["tc_masked_share"] = float(tc_cycles[ok].mean())
-    model = surge_model(skew[ok & ~tc_cycles], len(keep_years), max_shape=SHAPE_CAP)
+    model = surge_model(skew[ok & ~tc_cycles], len(keep_years), max_shape=st.get("shape_cap", SHAPE_CAP))
     corrected = scaled(model, st["r"])
     v, w, cyc = tide_peaks(t10, STEP_MIN / 60.0, HW_PROMINENCE)
     row.update({"n_years": len(keep_years), "gpd_shape": model["shape"], "gpd_shape_mle": model["shape_mle"],

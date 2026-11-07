@@ -1092,6 +1092,68 @@ narrower than COAST-HG only where the TC Gaussian replaces the shape (Gulf of Me
 Caribbean, Pacific islands). Correction B reads T from these hydrographs, so the longer T lowers
 its friction multiplier. That is why fsf must be recalibrated with the product.
 
+### 8.6 The product's estimated rules, tested
+
+`open_guesses.py` (fig19-fig23) varies each rule that was set by estimate. Where it can, it
+scores the variant at the 618 ratio gauges with r left one out. The reference is test 9: the
+convolution of the gauge's own skew surges with its own tide.
+
+| rule | variants | at the gauges (RP100 station - gauge, median / MAE) | outcome |
+|---|---|---|---|
+| GPD shape cap 0.35 (fig20) | none, 0.5, 0.35, 0.25, 0.2 | all gauges: MAE 0.224-0.227 m for every cap | keep; it only bounds RP1000 |
+| despike 2 m, >= 5 jumps (fig19) | 1-3 m, 1-20 jumps | not testable at gauges | keep |
+| TC mask 300 km, +-24 h, 34 kt (fig21) | none; 150 / 500 km; +-12 / 48 h; 64 kt | TC-dominated: none -0.03 / 0.36 m, production -0.17 / 0.39 m | open: the gauges favour no mask |
+| FES version rule and its growth (fig22) | at gauges and stations near gauges | FES2014 matches the gauge where the rule fires | keep; one wrong flag |
+| hydrograph maximum off time 0 (fig23) | diagnosis | not a level question | keep; cosmetic |
+
+- *Shape cap.* The cap binds at 149 stations. At the gauges no cap and a cap of 0.2 differ by
+  3 mm of MAE: RP100 is still close to the data and the gauges rarely sit where GTSM's tail is
+  heavy. It matters at RP1000. Without it, the heavy-tailed stations rise by up to 9.7 m, and
+  by up to 4.1 m with 0.5; a cap of 0.2 lowers them by up to 3.1 m. The gauges' own shapes
+  (median 0.01, standard deviation 0.25) are no narrower than GTSM's (-0.03, 0.19), so they do
+  not fix the value. 0.35 stays as a bound on the extremes.
+- *Despike.* The median station's largest hourly change in the GTSM residual is 0.17 m.
+  - 22 stations have a jump above 2 m. 15 of them have 3 or more, and the same 15 are picked
+    for any count from 3 to 5. They are the Arafura cluster, with jumps up to 13 m.
+  - A 1 m threshold would also catch real fast surges: outside Arafura, the stations with
+    20 or more jumps above 1 m are in the southern North Sea and the German Bight.
+- *TC mask.* The mask makes the TC coasts worse at the gauges.
+  - TC-dominated gauges at RP100: median -0.03 m and MAE 0.36 m without the mask, against
+    -0.17 m and 0.39 m with production's. Stations with a TC part: -0.02 m and 0.25 m against
+    -0.07 m and 0.27 m. Non-TC gauges are unchanged.
+  - A 150 km radius lies between the two; the time window and the wind threshold hardly
+    matter.
+  - Without the mask a cyclone counts twice: once in the ERA5 record and again in COAST-RP's
+    TC part. It still matches the gauges better, because both sources are too low. GTSM-ERA5
+    resolves cyclones coarsely, and COAST-RP's TC part is 0.2-0.25 m below the gauges (§8.1).
+    The double count makes up for that.
+  - The mask is right in principle and wrong on the gauges until test 10 (STORM-forced GTSM)
+    replaces the TC part. Whether to drop it is in TODO.md.
+- *FES version rule.* Where gauges exist, the rule is right.
+  - It fires at 3 of 912 gauges (Juneau, Skagway, Port Alberni). There FES2022 is 1.5-4.7 m
+    too high and FES2014 within 0.1 m (0.6 m at Juneau).
+  - Flagged stations near a gauge sit at the gauge's level with FES2014: Varangerfjord against
+    Vardø (1.35 m), Le Crouesty, Sonmiani against Karachi, Kukup, and the Falklands against
+    Port Stanley.
+  - In São Marcos Bay, the Ponta da Madeira gauge inside the bay reads 2.62 m. The outer
+    stations' FES2014 (2.1 m) is therefore plausible and FES2022 (3.2-3.8 m) is not; the doubt
+    of §8.5 is resolved in favour of the rule.
+  - One original flag is wrong. At the Saguenay mouth the Tadoussac gauge (2.18 m, 30 km)
+    sides with FES2022 (2.65 m) over FES2014 (1.38 m). A gauge veto on the rule itself, not
+    only on its growth, would catch it.
+  - 41 flagged stations have no gauge within 150 km. Most are FES2022 artefacts of known
+    basins (Magellan, Gulf of California, Ungava). Some lie in real macrotidal gulfs (Khambhat,
+    Incheon), where neither atlas is checked.
+- *Hydrograph maxima off time 0.* 4.1% of all hydrographs and 3.2% at RP100 peak away from the
+  centre high water, most often at RP2 in semidiurnal tides.
+  - Where the maximum falls instead: 64% a day away (±24.8 h), 19% one tidal cycle away
+    (±12.4 h), 8% within the hour.
+  - The centre is the median tide at the annual maxima. A neighbouring high water (diurnal
+    inequality, spring-neap cycle) is higher, and the slowly varying surge lifts it above the
+    centre.
+  - Half exceed the time-0 level by less than 1.6 cm and 99% by less than 21 cm. The maximum
+    is the RP level in every case, which is what SFINCS and correction B use.
+
 ## 9. Comparison with other global coastal boundary conditions
 
 | | This pipeline (GCFM) | Fathom RFA (Collings et al., 2024; Wing et al., 2024) | Chaudhuri et al. (2027) |
@@ -1167,8 +1229,9 @@ each script's docstring for further arguments):
 22. `preparation/run_preparation.py storm_tide_product` (§8.4; ~6 h on 4 workers, into
     `boundary_conditions.storm_tide_product_dir`)
 23. `level_product_gauges.py`, `level_product_qa.py` (`--product-dir`), `station_interpolation.py`,
-    `product_durations.py` (`--out-dir` = that directory), then the figure script with
-    `--product-dir` for fig12-fig18
+    `product_durations.py` (`--out-dir` = that directory), `open_guesses.py cap despike tc_mask
+    fes_rule peaks` (`--product-dir`, §8.6), then the figure script with `--product-dir` for
+    fig12-fig23
 
 Inputs on `<data_root>` are read only.
 

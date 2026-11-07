@@ -41,15 +41,16 @@ def main() -> None:
     args = parser.parse_args()
     out = Path(args.product_dir)
     cfg = load_config(args.config, args.override)
+    cache = Path(cfg["storm_tide_product"]["cache_dir"])
     catalog = get_data_catalog(REPO / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
     coast_rp = Path(catalog.get_source("coast_rp").path)
     stations = pd.read_csv(out / "stations.csv", index_col="station")
-    st_tab, time, series = load_series(out / "cache" / "gtsm_surge_stations")
+    st_tab, time, series = load_series(cache / "gtsm_surge_stations")
     pos = dict(zip(st_tab.gtsm_index, range(len(st_tab))))
-    hc = np.load(out / "cache" / "fes_constants.npz")["fes2022"]
-    hc[:, seasonal_columns(fes2022_model(out / "cache" / "fes2022"))] = 0.0
-    b_re = np.load(out / "cache" / "fes2022_hourly_re.npy", mmap_mode="r")
-    b_im = np.load(out / "cache" / "fes2022_hourly_im.npy", mmap_mode="r")
+    hc = np.load(cache / "fes_constants.npz")["fes2022"]
+    hc[:, seasonal_columns(fes2022_model(cache / "fes2022"))] = 0.0
+    b_re = np.load(cache / "fes2022_hourly_re.npy", mmap_mode="r")
+    b_im = np.load(cache / "fes2022_hourly_im.npy", mmap_mode="r")
     idx, _ = on_hourly_grid(time.to_numpy(), np.zeros(len(time)))
     tc_ids = set(coast_rp_levels(coast_rp.parent / "COAST-RP_TC.nc").dropna().index)
     with_tc = stations.loc[[k for k in EXAMPLES if stations.station_id[k] in tc_ids]]

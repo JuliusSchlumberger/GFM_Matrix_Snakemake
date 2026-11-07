@@ -148,14 +148,15 @@ Open:
   `boundary_test/INPUT_ANALYSIS.md` §8.4-8.5). The source drives the scenario levels
   (`prepare_boundary_conditions`), the eikonal seeds and static level, correction B's hydrographs
   (`boundaries.storm_tide_hydrograph_path`) and the SFINCS forcing shapes (`sfincs_tiles/gfm_config`).
-  Your steps, in order:
-  1. copy the IBTrACS since-1980 list (`.cleanup_baseline/ibtracs/ibtracs.since1980.list.v04r01.csv`,
-     NOAA NCEI IBTrACS v04r01) to `{root}/inputs/IBTrACS/`;
-  2. `python preparation/run_preparation.py storm_tide_product` (~6 h on 4 workers, writes
-     `{root}/processed_inputs/storm_tide_product/`, ~45 GB of it in `cache/`: the GTSM series alone
-     is ~19 GB), then `run_preparation.py boundary_conditions`;
-  3. Snakemake: the station caches re-run (their scenario NetCDFs are inputs now) and with them
-     every tile; then the SFINCS forcing, the fsf recalibration on the 498 tiles
+  Done on `<data_root>` (2026-11-07): IBTrACS in `inputs/IBTrACS/`; `run_preparation.py
+  storm_tide_product boundary_conditions` (76 + 3 min; the ~30 GB cache sits on this machine via
+  `config_local.yml` `storm_tide_product.cache_dir`, P: has ~35 GB free); `WL_scenarios` now holds
+  the product's levels (marker `storm_tide_source.txt`; level + MDT + 2020 offset checked to 1e-15
+  m at all 22,670 stations); scenario configs re-materialized here. Left:
+  1. re-materialize on Hydrax and set `storm_tide_product.cache_dir` in `config_hpc.yml` before
+     any product run there (default: under processed_inputs on the same storage);
+  2. Snakemake: the station caches re-run (their scenario NetCDFs are inputs) and with them every
+     tile; then the SFINCS forcing, the fsf recalibration on the 498 tiles
      (`sfincs_tiles/generate_calibration_jobs.py stage1|stage2` on Hydrax), test 8 and the tile rerun.
   One processed_inputs tree serves every config of a data root: once it holds product levels,
   configs pinned to `coast_rp` (bangkok_chao_phraya, calibration_500_tiles, deltas_*) stop at
@@ -167,7 +168,13 @@ Open:
   `--rerun-triggers mtime` skips them. Re-materialize the scenario configs on both machines
   (`snakemake_workflow/scripts/materialize_configs.py`; the checked-in bangkok one also lacks
   `slr_baseline_offset_m`).
-- **Storm-tide product: decisions taken as estimates (open questions).**
+- **Storm-tide product: decisions taken as estimates (open questions; tested in
+  `boundary_test/INPUT_ANALYSIS.md` §8.6, fig19-fig23).**
+  - TC mask (decide): at the gauges the mask makes TC coasts worse (TC-dominated RP100 median
+    -0.17 m with it, -0.03 m without; MAE 0.39 vs 0.36 m; stations with a TC part -0.07 vs
+    -0.02 m). Without it a cyclone counts twice (ERA5 record + COAST-RP TC part), which makes up
+    for both sources being too low. Proposal: drop the mask (`TC_MASK_KM` = 0, or skip
+    `tc_hours`) until test 10 replaces the TC part; a 150 km radius is the halfway option.
   - Interpolation: `knn` 5, `idw_power` 3 (config default now; leave-one-out RP100 MAE 5.7 cm
     against 7.0 cm for k 15 / power 2, fewest stations off by > 0.5 m). The test predicts a station
     from neighbours farther away than a coastline cell's, so it overstates the error; the ranking
@@ -186,24 +193,27 @@ Open:
   - Gauge ratios without GTSM's own tide: production fits r on gauge vs GTSM-on-FES skew surges
     and takes the common years of those two series; test 9 also required GTSM's harmonic tide
     (`gtsm_harm`) and its years. The port's gauge set may differ by a few sites.
-  - GPD shape cap 0.35 (`SHAPE_CAP`, Fathom RFA's cap; binds at 149 stations). A lower cap
-    (0.2-0.25) would also bound the RP1000 tail; not tested against gauges above RP100.
-  - GTSM despike: |residual - 5-h median| > 2 m; >= 5 hourly jumps > 2 m send a station to
-    COAST-RP levels (15 stations, Arafura coast). Thresholds set by eye on that cluster.
-  - TC mask: IBTrACS since 1980, >= 34 kt, within 300 km, +-24 h, only at stations with a COAST-RP
-    TC part. Storms outside COAST-RP's TC basins stay in the ETC fit; 300 km may be wide for small
-    storms and narrow for large ones.
+  - GPD shape cap 0.35 (`SHAPE_CAP`, Fathom RFA's cap; binds at 149 stations): kept. The gauges
+    cannot tell caps apart (RP100 MAE 0.224-0.227 m from none to 0.2); at RP1000 no cap adds up
+    to 9.7 m at heavy-tailed stations, 0.2 removes up to 3.1 m. Above RP100 nothing checks it.
+  - GTSM despike (|residual - 5-h median| > 2 m; >= 5 jumps > 2 m -> COAST-RP levels, 15
+    Arafura stations): kept; 3-5 jumps give the same 15, and 1 m would catch real North Sea
+    surges.
   - TC shape below RP10 requires TC dominance at RP10 (`TC_SHAPE_MIN_RP`).
-  - FES version rule grown to neighbours (`tide_prediction.consistent_version_flag`: 25 km, ratio
-    1.5, 0.25 m; gauge veto 50 km where FES2022 is within 0.25 m of GESLA): 10 stations. Doubtful
-    in Sao Marcos Bay (id_coast_glob_15677, FES2022 MHWS 3.2 m looks right); the original rule's
-    flag there may be wrong too. Gauges do not override the atlas choice.
+  - FES version rule and its growth (`tide_prediction.consistent_version_flag`): right wherever
+    a gauge checks it (Juneau, Skagway, Port Alberni, Vardo, Le Crouesty, Karachi, Kukup, Port
+    Stanley; Sao Marcos resolved: Ponta da Madeira 2.62 m inside the bay supports FES2014 at the
+    outer stations). One wrong flag: id_coast_glob_11746 at the Saguenay mouth (Tadoussac gauge
+    2.18 m, FES2022 2.65 m, FES2014 1.38 m). Option: apply the gauge veto to the rule itself, not
+    only to its growth. 41 flagged stations have no gauge within 150 km; Khambhat and Incheon are
+    real macrotidal gulfs where neither atlas is checked.
   - No gauge override of the levels; r carries the gauges' information only through the surge.
   - The hydrographs of the 15 COAST-RP-fallback stations are Gaussian on the FES tide.
-  - 3% of the RP100 hydrographs peak at a neighbouring high water (+-12.4 h) rather than at
-    time 0, by up to 0.76 m above the time-0 value; the maximum is the RP level in all of them,
-    which is what SFINCS's offset and B use. The window move of `high_water_window` leaves the
-    surge centred on a lower high water there.
+  - Hydrograph maxima off time 0 (4.1% overall, 3.2% at RP100; 64% one day away, 19% one
+    tidal cycle): a neighbouring high water of the diurnal inequality or spring-neap cycle is
+    higher than the centre one; median excess 1.6 cm, 99% < 21 cm. Kept: the maximum is the RP
+    level, which is what SFINCS and B use; recentring the window on the maximum would only be
+    cosmetic.
 - **Per-RP hydrograph generator** (`src/storm_tide_hydrograph.rp_hydrograph`, generator_smooth;
   INPUT_ANALYSIS.md §8.3): its flood volume behind the test 11 sills is within 10% of real events
   at RP 2 and 10, although it falls short on overflow above 0.9 x peak (-20 to -40% on 2-4 m and
