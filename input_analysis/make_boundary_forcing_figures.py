@@ -1,12 +1,14 @@
 """Draw the figures of the boundary-forcing input analysis, each with a .txt description.
 
 Reads the tables written by the `boundary_test/` scripts (INPUT_ANALYSIS.md §10) from
-<out-dir>/ and <out-dir>/analysis/, and writes figNN_*.png + figNN_*.txt into --dest. Figures
-carry no titles; everything a reader needs to decode them is in the description file.
+<out-dir>/ and <out-dir>/analysis/ (fig12-17: the level product in --product-dir),
+and writes figNN_*.png + figNN_*.txt into --dest. Figures carry no titles;
+everything a reader needs to decode them is in the description file.
 
 Usage:
     python input_analysis/make_boundary_forcing_figures.py [--only fig01 fig07]
-        [--out-dir .cleanup_baseline/level_sources] [--dest input_analysis/boundary_forcing/figures]
+        [--out-dir .cleanup_baseline/level_sources] [--product-dir .cleanup_baseline/level_product]
+        [--dest input_analysis/boundary_forcing/figures]
 """
 
 import argparse
@@ -964,22 +966,317 @@ def fig11_generator_profiles(out: Path, dest: Path) -> None:
         """)
 
 
+PRODUCT_RPS = (2, 5, 10, 25, 50, 100, 250, 500, 1000)
+PRODUCTION_MIN_LAT = -60.0  # prepare_boundary_conditions drops the Antarctic ice-shelf stations
+EXAMPLE_SITES = (("Dunkerque (macrotidal)", 2.37, 51.05), ("Kiel (microtidal, surge)", 10.28, 54.50),
+                 ("Galveston (TC)", -94.79, 29.31), ("Hiron Point, Bangladesh (TC)", 89.48, 21.78))
+EXAMPLE_RPS = ((10, "#9ecae1"), (100, "#3182bd"), (1000, "#08306b"))
+
+
+def _product(product: Path) -> pd.DataFrame:
+    lev = pd.read_parquet(product / "levels.parquet")
+    lev["has_tc"] = np.isfinite(lev.coast_rp_tc_rp100_m)
+    return lev
+
+
+def fig12_level_product_maps(product: Path, dest: Path) -> None:
+    lev = _product(product)
+    lev = lev[lev.lat > PRODUCTION_MIN_LAT]
+    d = (lev.rp100_m - lev.coast_rp_rp100_m).dropna()
+    d = d.iloc[np.argsort(np.abs(d.to_numpy()))]
+    r = lev.r.iloc[np.argsort(np.abs(np.log(lev.r.to_numpy())))]
+    panels = ((d, "RdBu_r", Normalize(-0.5, 0.5), "RP100 level, new - COAST-RP (m)", [-0.5, -0.25, 0, 0.25, 0.5],
+               ["-0.5", "-0.25", "0", "0.25", "0.5"]),
+              (r, "PuOr_r", LogNorm(1 / 1.5, 1.5), "surge ratio r (gauge / GTSM skew surge at RP10)",
+               [1 / 1.5, 0.8, 1, 1.25, 1.5], ["0.67", "0.8", "1", "1.25", "1.5"]))
+    fig = plt.figure(figsize=(10, 10.6))
+    for k, (values, cmap, norm, label, ticks, ticklabels) in enumerate(panels):
+        ax = fig.add_axes([0.02, 0.56 - k * 0.48, 0.96, 0.42], projection=MAP_PROJ)
+        ax.set_global()
+        _land(ax)
+        sc = ax.scatter(lev.loc[values.index, "lon"], lev.loc[values.index, "lat"], c=values, s=3, cmap=cmap,
+                        norm=norm, linewidths=0, transform=PC, zorder=2)
+        ax.spines["geo"].set_edgecolor(MUTED)
+        draw_panel_letter(ax, "ab"[k])
+        cax = fig.add_axes([0.25, 0.54 - k * 0.48, 0.5, 0.014])
+        cb = fig.colorbar(sc, cax=cax, orientation="horizontal", extend="both")
+        cb.ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+        cb.set_ticks(ticks, labels=ticklabels)
+        cb.set_label(label)
+    _save(fig, dest / "fig12_level_product_maps.png")
+    describe(dest / "fig12_level_product_maps.png", f"""
+        The level product (ii) at the {d.size:,} COAST-RP stations north of 60 S, the ones production
+        uses (Equal Earth projection; land in grey). (a) RP100 level of the new product minus COAST-RP's total RP100
+        level: red = the new product is higher; differences beyond ±0.5 m take the end colours
+        ({int((d.abs() > 0.5).sum()):,} stations). Stations closest to zero are drawn first. (b) The
+        surge ratio r applied to the GTSM skew surges: the inverse-distance mean of the gauge ratios
+        within 500 km (at least 3 gauges), otherwise the gauge median ({lev.r.median():.2f}), capped
+        at 2. Orange = GTSM's surge is too small (r > 1); logarithmic scale, r above 1.5 in the end colour.
+
+        Reading: most of the coast moves by less than 0.2 m. The large departures are regional:
+        lower in the southern North Sea and Dover Strait, where GTSM's tide is too large and the
+        FES tide replaces it; lower in Hudson Bay, the Canadian Arctic and parts of Indonesia; higher
+        in the western Baltic, on the US Atlantic coast, in Japan and East China, where r is above
+        1.25, and in macrotidal basins where GTSM's tide is too small (Ungava Bay, Amazon mouth,
+        King Sound). At the gauges the new levels are still below the gauge on TC coasts (fig14),
+        so the increases there are not an overcorrection. Uniform r marks coasts without 3 gauges
+        within 500 km.
+        """)
+
+
+def fig13_level_product_by_rp(product: Path, dest: Path) -> None:
+    lev = _product(product)
+    comparisons = (("rp{}_m", "coast_rp_rp{}_m", "total: new - COAST-RP", INK, "-"),
+                   ("etc_raw_rp{}_m", "coast_rp_etc_rp{}_m", "ETC with r = 1 (FES tide only) - COAST-RP ETC",
+                    BLUE, "--"),
+                   ("etc_rp{}_m", "coast_rp_etc_rp{}_m", "ETC with r - COAST-RP ETC", ORANGE, "-"))
+    x = np.arange(len(PRODUCT_RPS))
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.8), sharey=True)
+    for ax, letter, (label, sel) in zip(axes, "ab", (("no TC part", ~lev.has_tc), ("TC part", lev.has_tc))):
+        ax.axvspan(x[PRODUCT_RPS.index(250)] - 0.5, x[-1] + 0.3, color=GRID, alpha=0.5, linewidth=0)
+        for col, ref, name, color, style in comparisons:
+            q = np.stack([(lev[col.format(rp)] - lev[ref.format(rp)])[sel].dropna().quantile([0.1, 0.5, 0.9])
+                          for rp in PRODUCT_RPS])
+            if color == INK:
+                ax.fill_between(x, q[:, 0], q[:, 2], color=INK, alpha=0.1, linewidth=0, label="total, 10-90%")
+            ax.plot(x, q[:, 1], color=color, linestyle=style, linewidth=2, marker="o", markersize=4, label=name)
+        ax.axhline(0, color=MUTED, linewidth=0.8)
+        ax.set(xticks=x, xticklabels=[str(rp) for rp in PRODUCT_RPS], xlabel="return period (y)",
+               xlim=(x[0] - 0.3, x[-1] + 0.3))
+        ax.text(0.03, 0.97, f"{label} ({int(sel.sum()):,} stations)", transform=ax.transAxes, va="top",
+                fontsize=9, color=INK)
+        _style(ax)
+        draw_panel_letter(ax, letter)
+    axes[0].set_ylabel("difference, median over stations (m)")
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=2, frameon=False, fontsize=9)
+    fig.tight_layout(rect=(0, 0.1, 1, 1))
+    _save(fig, dest / "fig13_level_product_by_rp.png")
+    describe(dest / "fig13_level_product_by_rp.png", """
+        The new level product against COAST-RP per return period, (a) at stations without a TC
+        component in COAST-RP, (b) at stations with one. Lines are medians over stations of three
+        differences. Black: the total level (grey band: 10-90% of stations). Blue dashed: the ETC
+        level with r = 1 minus COAST-RP's ETC level, i.e. only the FES tide replacing GTSM's.
+        Orange: the ETC level with the surge ratio r minus COAST-RP's ETC level. Shaded: RPs above
+        250 y, which extrapolate ~46 years of skew surges.
+
+        Reading: without TC (a), the FES tide lowers the levels by 0.05-0.08 m (GTSM's tide is 7-8%
+        too large) and r raises them by about 0.09 m, so the total rises by 0.01-0.07 m; orange and
+        black coincide because there is no TC part. With TC (b), r is applied to the ETC part only
+        while the TC part is COAST-RP's, so the total rises less than the ETC part at high RPs, where
+        TC dominates the combined rate.
+        """)
+
+
+def fig14_level_product_gauges(product: Path, dest: Path) -> None:
+    g = pd.read_parquet(product / "gauge_check.parquet")
+    groups = (("ETC-dominated gauges", g.station_class != "tc_dominated", BLUE),
+              ("TC-dominated gauges", g.station_class == "tc_dominated", ORANGE))
+    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
+    for row, rp in enumerate((10, 100)):
+        ref = g[f"gauge_rp{rp}_m"]
+        hi = float(np.nanmax(g[[f"gauge_rp{rp}_m", f"coast_rp_rp{rp}_m", f"new_loo_rp{rp}_m"]].to_numpy())) * 1.03
+        for ax, letter, (col, label) in zip(axes[row], "abcd"[2 * row:],
+                                            (("coast_rp", "COAST-RP"), ("new_loo", "new product, r left out"))):
+            ax.plot([0, hi], [0, hi], color=MUTED, linewidth=1)
+            lines = ["station - gauge: median / MAE"]
+            for name, sel, color in groups:
+                e = (g[f"{col}_rp{rp}_m"] - ref)[sel].dropna()
+                ax.scatter(ref[sel], g.loc[sel, f"{col}_rp{rp}_m"], s=10, color=color, alpha=0.6, linewidths=0,
+                           label=name)
+                lines.append(f"{name.split()[0]}: {e.median():+.3f} / {e.abs().mean():.3f} m (n = {len(e)})")
+            draw_caption_box(ax, lines, loc="lower right")
+            ax.set(xlim=(0, hi), ylim=(0, hi), aspect="equal", xlabel=f"gauge RP{rp} (m)",
+                   ylabel=f"{label} RP{rp} (m)")
+            _style(ax)
+            draw_panel_letter(ax, letter)
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=2, frameon=False, fontsize=9)
+    fig.tight_layout(rect=(0, 0.04, 1, 1))
+    _save(fig, dest / "fig14_level_product_gauges.png")
+    describe(dest / "fig14_level_product_gauges.png", f"""
+        RP levels at the test 9 gauges that have a COAST-RP station within 25 km ({len(g)} gauges)
+        against the gauge's own skew-surge convolution (gauge surge on the gauge tide, the reference
+        of test 9). Left: COAST-RP's total level at the nearest station. Right: the new product at
+        that station with r rebuilt without the gauge (leave-one-out), so that no gauge calibrates
+        itself. Top RP10, bottom RP100. Blue: gauges where ETC dominates; orange: TC-dominated gauges
+        (COAST-RP's TC level above its ETC level at RP100). Boxes: median and mean absolute error of
+        station - gauge per group. Levels in m above local mean sea level.
+        """)
+
+
+def fig15_level_product_hydrographs(product: Path, dest: Path) -> None:
+    lev = _product(product)
+    info = pd.read_parquet(product / "hydrograph_info.parquet").set_index(["station", "rp"])
+    hyd = np.load(product / "hydrographs.npy", mmap_mode="r")
+    hours = (np.arange(hyd.shape[2]) - hyd.shape[2] // 2) / 6.0
+    fig, axes = plt.subplots(2, 2, figsize=(12, 7.6), sharex=True)
+    for ax, letter, (name, lon, lat) in zip(axes.ravel(), "abcd", EXAMPLE_SITES):
+        k = int(np.argmin(((lev.lon - lon) * np.cos(np.radians(lat))) ** 2 + (lev.lat - lat) ** 2))
+        st = lev.index[k]
+        for rp, color in EXAMPLE_RPS:
+            source = info.loc[(st, rp), "shape_source"].replace("_", " ")
+            ax.plot(hours, hyd[k, PRODUCT_RPS.index(rp)], color=color, linewidth=1.5, label=f"RP{rp} ({source})")
+            ax.axhline(lev.loc[st, f"coast_rp_rp{rp}_m"], color=color, linestyle=":", linewidth=1.2,
+                       label="COAST-RP at the same RP" if rp == EXAMPLE_RPS[-1][0] else None)
+        ax.axhline(0, color=MUTED, linewidth=0.8)
+        y0, y1 = ax.get_ylim()
+        ax.set(xlim=(-72, 72), ylim=(y0, y1 + 0.45 * (y1 - y0)))
+        ax.text(0.02, 0.97, f"{name}\n{lev.loc[st, 'station_id']}, r = {lev.loc[st, 'r']:.2f}",
+                transform=ax.transAxes, va="top", fontsize=8.5, color=INK)
+        ax.legend(frameon=False, fontsize=8, loc="upper right")
+        _style(ax)
+        draw_panel_letter(ax, letter)
+    for ax in axes[1]:
+        ax.set_xlabel("hours from peak")
+    for ax in axes[:, 0]:
+        ax.set_ylabel("water level above MSL (m)")
+    fig.tight_layout()
+    _save(fig, dest / "fig15_level_product_hydrographs.png")
+    describe(dest / "fig15_level_product_hydrographs.png", """
+        Storm-tide hydrographs of the level product at four example stations (the COAST-RP station
+        nearest each named place) for RP10, RP100 and RP1000, 10-min steps, ±72 h around the peak.
+        Each peak is the product's RP level; dotted lines mark COAST-RP's total level at the same RP.
+        The legend names the surge shape: gtsm events (median smoothed surge of the station's GTSM
+        annual maxima of matching empirical RP), tc gauge (median surge-dominated event of a gauge
+        within 50 km), tc gaussian (Gaussian placeholder where there is no such gauge).
+
+        Reading: at Dunkerque the levels are 0.6-0.85 m below COAST-RP, which carries GTSM's too-large
+        tide; at Kiel they are 0.3-0.9 m above it, where the Baltic gauges side with the new product
+        (fig14). At the TC-dominated Galveston and Hiron Point the RP100 and RP1000 levels are
+        COAST-RP's (its TC rate dominates there); only the shape is new.
+        """)
+
+
+def fig16_station_interpolation(product: Path, dest: Path) -> None:
+    table = pd.read_csv(product / "interpolation.csv")
+    spacing = pd.read_csv(product / "interpolation_spacing.csv", index_col=0)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.6))
+    ax = axes[0]
+    t100 = table[table.rp == 100]
+    nearest = float(t100[t100.k == 1].mae_m.iloc[0])
+    for power, color in ((1, GREEN), (2, BLUE), (3, ORANGE)):
+        sel = t100[(t100.power == power) & (t100.k > 1)]
+        ax.plot(sel.k, sel.mae_m * 100, color=color, marker="o", markersize=4, linewidth=1.8, label=f"IDW power {power}")
+    ax.axhline(nearest * 100, color=INK, linestyle="--", linewidth=1, label="nearest station")
+    prod = t100[(t100.k == 15) & (t100.power == 2)].mae_m.iloc[0] * 100
+    best = float(t100.mae_m.min())
+    ax.annotate("production\n(k = 15, power 2)", (15, prod), xytext=(17, prod + 1.2), fontsize=8, color=INK,
+                arrowprops={"arrowstyle": "-", "color": MUTED})
+    ax.set(xscale="log", xticks=[2, 3, 5, 8, 15, 30], xticklabels=["2", "3", "5", "8", "15", "30"],
+           xlabel="neighbours k", ylabel="RP100 leave-one-out MAE (cm)")
+    ax.legend(frameon=False, fontsize=8)
+    _style(ax)
+    draw_panel_letter(ax, "a")
+    ax = axes[1]
+    x = np.arange(len(spacing))
+    edges = [s.strip("(]").split(", ") for s in spacing.index]
+    labels = [(f"{float(lo):g}-{float(hi):g}" if hi != "inf" else f"> {float(lo):g}") + f"\n(n = {n:,})"
+              for (lo, hi), n in zip(edges, spacing.stations)]
+    width = 0.27
+    for j, (col, color) in enumerate((("nearest", INK), ("k = 5, p = 2", BLUE), ("k = 15, p = 2 (production)", ORANGE))):
+        ax.bar(x + (j - 1) * width, spacing[col] * 100, width * 0.92, color=color, label=col)
+    ax.set(xticks=x, xticklabels=labels, xlabel="distance to the nearest other station (km)",
+           ylabel="RP100 leave-one-out MAE (cm)")
+    ax.legend(frameon=False, fontsize=8)
+    _style(ax)
+    draw_panel_letter(ax, "b")
+    fig.tight_layout()
+    _save(fig, dest / "fig16_station_interpolation.png")
+    describe(dest / "fig16_station_interpolation.png", f"""
+        How well the level at a coastline cell can be interpolated from the stations around it,
+        tested by leaving each station out and predicting its RP100 level (new product) from the
+        others ({int(spacing.stations.sum()):,} stations north of 60 S). (a) Mean absolute error of
+        inverse-distance weighting over the k nearest stations (haversine distance, floored at 1 km)
+        for three weighting powers, and of the nearest station alone (dashed). (b) The error by
+        the distance from the left-out station to its nearest neighbour, for the nearest station,
+        k = 5 and production's k = 15 (both power 2). Production also restricts the neighbours to
+        the tile's ocean component, which this global test does not.
+
+        Reading: fewer neighbours or a higher power interpolate the level field better than
+        production's k = 15, power 2, but the gain is about 1.5 cm of MAE ({prod:.1f} cm at
+        production, {best * 100:.1f} cm at best, {nearest * 100:.1f} cm for the nearest station).
+        The error is set by station spacing: 2 cm where stations are within 5 km, 8-12 cm at
+        10-50 km and about 20 cm beyond 50 km.
+        """)
+
+
+def fig17_level_product_qa(product: Path, dest: Path) -> None:
+    qa = np.load(product / "qa_examples.npz")
+    fig, axes = plt.subplots(3, 2, figsize=(12, 9.6), gridspec_kw={"width_ratios": (1.6, 1)})
+    for row, (k, label) in enumerate(zip(qa["stations"], qa["labels"])):
+        ax = axes[row, 0]
+        tide, residual = qa[f"{k}_tide"], qa[f"{k}_residual"]
+        hours = np.arange(len(tide)) - len(tide) // 2
+        ax.plot(hours, tide, color=BLUE, linewidth=1.4, label="FES tide")
+        ax.plot(hours, residual, color=ORANGE, linewidth=1.4, label="GTSM surge residual")
+        ax.plot(hours, tide + residual, color=INK, linewidth=1, linestyle=":", label="sum")
+        ax.scatter(qa[f"{k}_hw_old"], tide[qa[f"{k}_hw_old"] + len(tide) // 2], marker="x", color=MUTED, s=30,
+                   zorder=3, label="high waters, every local maximum")
+        ax.scatter(qa[f"{k}_hw_new"], tide[qa[f"{k}_hw_new"] + len(tide) // 2], marker="o", facecolor="none",
+                   edgecolor=GREEN, s=50, zorder=3, label="high waters, prominent only")
+        ax.text(0.01, 0.97, label, transform=ax.transAxes, va="top", fontsize=9, color=INK)
+        ax.set(xlim=(hours[0], hours[-1]), ylabel="m above MSL")
+        _style(ax)
+        draw_panel_letter(ax, "ace"[row])
+        ax = axes[row, 1]
+        for name, color, text in (("old", MUTED, "before"), ("new", GREEN, "after")):
+            v = qa[f"{k}_ranked_{name}"]
+            ax.plot(np.arange(1, len(v) + 1), v, color=color, marker=".", linestyle="none", markersize=4,
+                    label=f"{text} QA")
+        ax.set(xscale="log", ylabel="skew surge (m)")
+        _style(ax)
+        draw_panel_letter(ax, "bdf"[row])
+    axes[2, 0].set_xlabel("hours from the largest skew surge (before QA)")
+    axes[2, 1].set_xlabel("rank")
+    axes[0, 1].legend(frameon=False, fontsize=8)
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=5, frameon=False, fontsize=8)
+    fig.tight_layout(rect=(0, 0.04, 1, 1))
+    _save(fig, dest / "fig17_level_product_qa.png")
+    describe(dest / "fig17_level_product_qa.png", """
+        The three failure modes the level product's QA removes, one station each. Left: the hourly
+        FES tide (blue), GTSM-ERA5 surge residual (orange) and their sum (dotted) around the
+        station's largest skew surge before QA; grey crosses mark every local maximum of the tide
+        (the high waters before QA), green circles the high waters that remain when a maximum must
+        have a prominence of at least 10% of the 25-h tidal range. Right: the 300 largest skew
+        surges before (grey) and after (green) QA.
+
+        (a, b) Ungava Bay: the shallow-water tide has a second low-water bump. Taken as a high
+        water, it makes the next real high water a "surge" of several metres, and those spurious
+        skew surges set the GPD tail (shape 1.1 before, -0.1 after). (c, d) Arafura coast: GTSM's
+        residual jumps by up to 12 m within an hour (a numerical artefact of the model there).
+        Despiking (hours more than 2 m from their 5-h median) removes the shortest spikes but not
+        all; stations with 5 or more such jumps take COAST-RP's levels instead. (e, f) Mississippi
+        delta: Katrina and other hurricanes are in the ERA5 record. With COAST-RP's synthetic TC
+        part added on top they would count twice, so cycles within 24 h of a tropical storm
+        (IBTrACS, >= 34 kt) passing within 300 km leave the ETC fit at stations with a TC part.
+        """)
+
+
 FIGURES = {"fig01": fig01_tide_scatter, "fig02": fig02_tide_ratio_maps, "fig03": fig03_constituents,
            "fig04": fig04_fes_versions, "fig05": fig05_basin_heads, "fig06": fig06_rule_sensitivity,
            "fig07": fig07_coast_rp_regions, "fig08": fig08_profiles_by_rp, "fig09": fig09_surge_by_rp,
            "fig10": fig10_generator_acceptance, "fig11": fig11_generator_profiles}
+PRODUCT_FIGURES = {"fig12": fig12_level_product_maps, "fig13": fig13_level_product_by_rp,
+                   "fig14": fig14_level_product_gauges, "fig15": fig15_level_product_hydrographs,
+                   "fig16": fig16_station_interpolation, "fig17": fig17_level_product_qa}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out-dir", default=str(REPO / ".cleanup_baseline" / "level_sources"))
     parser.add_argument("--dest", default=str(REPO / "input_analysis" / "boundary_forcing" / "figures"))
-    parser.add_argument("--only", nargs="*", choices=sorted(FIGURES), default=None)
+    parser.add_argument("--product-dir", default=str(REPO / ".cleanup_baseline" / "level_product"))
+    parser.add_argument("--only", nargs="*", choices=sorted({**FIGURES, **PRODUCT_FIGURES}), default=None)
     args = parser.parse_args()
     out, dest = Path(args.out_dir), Path(args.dest)
     dest.mkdir(parents=True, exist_ok=True)
-    for name in args.only or FIGURES:
-        FIGURES[name](out, dest)
+    for name in args.only or {**FIGURES, **PRODUCT_FIGURES}:
+        if name in FIGURES:
+            FIGURES[name](out, dest)
+        else:
+            PRODUCT_FIGURES[name](Path(args.product_dir), dest)
         print(f"wrote {name}", flush=True)
 
 

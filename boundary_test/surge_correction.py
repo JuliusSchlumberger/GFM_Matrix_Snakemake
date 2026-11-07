@@ -39,6 +39,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.ndimage import maximum_filter1d, minimum_filter1d
+from scipy.signal import find_peaks
 from scipy.stats import genpareto
 from sklearn.neighbors import BallTree
 
@@ -63,9 +65,21 @@ COMBINATIONS = {"gauge_gauge": ("gauge", "gauge"), "gtsm_gtsm": ("gtsm", "gtsm")
                 "gtsm_gaugetide": ("gtsm", "gauge")}
 
 
-def high_waters(tide: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Indices of the hourly predicted high waters and their parabola-refined heights."""
-    i = np.flatnonzero((tide[1:-1] > tide[:-2]) & (tide[1:-1] >= tide[2:])) + 1
+def high_waters(tide: np.ndarray, min_prominence: float | None = None,
+                steps_per_hr: int = 1) -> tuple[np.ndarray, np.ndarray]:
+    """Indices of the predicted high waters and their parabola-refined heights.
+
+    With `min_prominence`, a local maximum counts only when its prominence is at least that
+    fraction of the tidal range over the surrounding 25 h, which drops the low-water bumps of
+    shallow-water tides (double low waters) that are otherwise taken for high waters.
+    """
+    if min_prominence is None:
+        i = np.flatnonzero((tide[1:-1] > tide[:-2]) & (tide[1:-1] >= tide[2:])) + 1
+    else:
+        span = 25 * steps_per_hr + 1
+        local_range = maximum_filter1d(tide, span) - minimum_filter1d(tide, span)
+        i, props = find_peaks(tide, prominence=0)
+        i = i[props["prominences"] >= min_prominence * local_range[i]]
     a, b, c = tide[i - 1], tide[i], tide[i + 1]
     curv = a - 2 * b + c
     return i, b - np.where(curv < 0, (c - a) ** 2 / (8 * curv), 0.0)
@@ -79,15 +93,22 @@ def skew_surges(total: np.ndarray, hw: np.ndarray, hw_height: np.ndarray) -> np.
     return np.where(gaps == 0, peak - hw_height, np.nan)
 
 
-def surge_model(s: np.ndarray, n_years: float) -> dict:
-    """Empirical body + GPD tail of per-cycle skew surges, with the extremal index."""
+def surge_model(s: np.ndarray, n_years: float, max_shape: float | None = None) -> dict:
+    """Empirical body + GPD tail of per-cycle skew surges, with the extremal index.
+
+    With `max_shape`, a fitted shape above it is fixed at max_shape and the scale refitted.
+    """
     u = float(np.quantile(s, THRESHOLD_Q))
     exc = np.flatnonzero(s > u)
     starts = np.r_[0, np.flatnonzero(np.diff(exc) > RUN_CYCLES) + 1]
     cmax = np.maximum.reduceat(s[exc], starts)
     c, _, scale = genpareto.fit(cmax - u, floc=0)
+    shape_mle = float(c)
+    if max_shape is not None and c > max_shape:
+        c, _, scale = genpareto.fit(cmax - u, f0=max_shape, floc=0)
     return {"sorted": np.sort(s), "u": u, "p_u": len(exc) / len(s), "shape": float(c), "scale": float(scale),
-            "theta": len(starts) / len(exc), "cycles_per_yr": len(s) / n_years, "n_years": n_years}
+            "shape_mle": shape_mle, "theta": len(starts) / len(exc), "cycles_per_yr": len(s) / n_years,
+            "n_years": n_years}
 
 
 def scaled(model: dict, r: float) -> dict:
@@ -121,9 +142,10 @@ def skew_level(model: dict, rp: float) -> float:
     return float(model["u"] + genpareto.isf(p, model["shape"], 0, model["scale"])) if p < 1 else np.nan
 
 
-def tide_peaks(tide: np.ndarray, step_hr: float) -> tuple[np.ndarray, np.ndarray, float]:
+def tide_peaks(tide: np.ndarray, step_hr: float,
+               min_prominence: float | None = None) -> tuple[np.ndarray, np.ndarray, float]:
     """High-water heights binned to 1 cm (values, weights) and high waters per year."""
-    _, h = high_waters(tide)
+    _, h = high_waters(tide, min_prominence, int(round(1.0 / step_hr)))
     v, n = np.unique(np.round(h, 2), return_counts=True)
     return v, n / n.sum(), len(h) / (len(tide) * step_hr / 8766.0)
 

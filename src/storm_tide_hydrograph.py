@@ -16,6 +16,7 @@ COAST-RP; MDT and SLR are added by the caller.
 import numpy as np
 import pandas as pd
 import scipy.signal as ss
+from scipy.ndimage import maximum_filter1d
 
 STEPS_PER_HR = 6  # 10-min, as HGRAPHER
 LEVELS = np.round(np.arange(0, 1.0001, 0.005), 3)
@@ -149,12 +150,19 @@ def spring_tide_window(tide10: np.ndarray, spring_idx: np.ndarray, mhws_m: float
 
 
 def high_water_window(tide10: np.ndarray, hw_idx: np.ndarray, target_m: float,
-                      half_window_hr: float) -> np.ndarray:
-    """Return the tide on +-half_window_hr around the high water in `hw_idx` closest to target_m."""
+                      half_window_hr: float, ceiling_m: float | None = None) -> np.ndarray:
+    """Return the tide on +-half_window_hr around the high water in `hw_idx` closest to target_m.
+
+    With `ceiling_m`, only high waters whose whole window stays below it qualify (all of them
+    when none does), so that a surge scaled to a peak of ceiling_m sits on the centre high water.
+    """
     half = int(round(half_window_hr * STEPS_PER_HR))
     valid = hw_idx[(hw_idx - half >= 0) & (hw_idx + half < len(tide10))]
     if valid.size == 0:
         raise ValueError("tide series shorter than the hydrograph window around every high water")
+    if ceiling_m is not None:
+        below = valid[maximum_filter1d(tide10, 2 * half + 1)[valid] < ceiling_m]
+        valid = below if below.size else valid
     centre = int(valid[np.argmin(np.abs(tide10[valid] - target_m))])
     return tide10[centre - half: centre + half + 1]
 

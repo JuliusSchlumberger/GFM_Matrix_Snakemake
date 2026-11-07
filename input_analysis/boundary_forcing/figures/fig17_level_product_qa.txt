@@ -1,0 +1,15 @@
+The three failure modes the level product's QA removes, one station each. Left: the hourly FES tide
+(blue), GTSM-ERA5 surge residual (orange) and their sum (dotted) around the station's largest skew
+surge before QA; grey crosses mark every local maximum of the tide (the high waters before QA),
+green circles the high waters that remain when a maximum must have a prominence of at least 10% of
+the 25-h tidal range. Right: the 300 largest skew surges before (grey) and after (green) QA.
+
+(a, b) Ungava Bay: the shallow-water tide has a second low-water bump. Taken as a high water, it
+makes the next real high water a "surge" of several metres, and those spurious skew surges set the
+GPD tail (shape 1.1 before, -0.1 after). (c, d) Arafura coast: GTSM's residual jumps by up to 12 m
+within an hour (a numerical artefact of the model there). Despiking (hours more than 2 m from their
+5-h median) removes the shortest spikes but not all; stations with 5 or more such jumps take COAST-
+RP's levels instead. (e, f) Mississippi delta: Katrina and other hurricanes are in the ERA5 record.
+With COAST-RP's synthetic TC part added on top they would count twice, so cycles within 24 h of a
+tropical storm (IBTrACS, >= 34 kt) passing within 300 km leave the ETC fit at stations with a TC
+part.

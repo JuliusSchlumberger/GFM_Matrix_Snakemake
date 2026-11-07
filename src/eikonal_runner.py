@@ -55,6 +55,7 @@ def run_eikonal_python(
     friction_scale_factor: float = 1.0,
     static_stations: tuple[np.ndarray, np.ndarray] | None = None,
     duration_config: dict[str, Any] | None = None,
+    return_period: int | None = None,
 ) -> dict:
     """Run `flood_model.flood_depth_dense` in-process, write depth, return diagnostics.
 
@@ -65,7 +66,8 @@ def run_eikonal_python(
     SFINCS-calibrated factor (docs/methods_02). Raises MemoryError on OOM.
     `static_stations` = (lonlat, level) from `boundaries.static_station_levels`
     switches on two-component SLR propagation; `duration_config`
-    (`simulation.flooding.duration_correction`) with `enabled` switches on correction B.
+    (`simulation.flooding.duration_correction`) with `enabled` switches on correction B;
+    `return_period` (years) picks its hydrograph when the file holds one per RP.
     """
     with retry_transient_io(rasterio.open, dem_path) as src:
         dem = decode_dem_cm(src.read(1))
@@ -90,7 +92,7 @@ def run_eikonal_python(
 
     duration_correction = None
     if duration_config is not None and duration_config["enabled"]:
-        duration_correction = build_duration_correction(duration_config, dem.shape, transform, crs)
+        duration_correction = build_duration_correction(duration_config, dem.shape, transform, crs, return_period)
 
     waterdepth, diagnostics = flood_depth_dense(
         dem, mask, friction, transform,
@@ -111,9 +113,12 @@ def run_eikonal_python(
 
 
 def build_duration_correction(
-    duration_config: dict[str, Any], shape: tuple[int, int], transform, crs=None,
+    duration_config: dict[str, Any], shape: tuple[int, int], transform, crs=None, return_period: int | None = None,
 ) -> DurationCorrection:
-    """Build correction B for one tile from `simulation.flooding.duration_correction`."""
+    """Build correction B for one tile from `simulation.flooding.duration_correction`.
+
+    `return_period` (years) selects the hydrograph when `coast_hg_path` holds one per RP.
+    """
     xs, ys = rasterio.transform.xy(transform, [0, 0, shape[0] - 1, shape[0] - 1], [0, shape[1] - 1, 0, shape[1] - 1])
     xs, ys = np.asarray(xs, dtype=np.float64), np.asarray(ys, dtype=np.float64)
     grid_crs = None if crs is None or rasterio.crs.CRS.from_user_input(crs).to_epsg() == 4326 else crs
@@ -121,6 +126,7 @@ def build_duration_correction(
         xs, ys = rasterio.warp.transform(grid_crs, "EPSG:4326", xs, ys)
     lonlat, series, dt_s = retry_transient_io(
         load_coast_hg, duration_config["coast_hg_path"], (min(xs), min(ys), max(xs), max(ys)),
+        return_period=return_period,
     )
     return DurationCorrection(
         lonlat, series, dt_s, t_ref_s=duration_config["t_ref_h"] * 3600.0, alpha=duration_config["alpha"],
@@ -323,6 +329,7 @@ def run_tile_scenario(
                 friction_scale_factor=flooding_config["friction_scale_factor"],
                 static_stations=static_stations,
                 duration_config=flooding_config["duration_correction"],
+                return_period=int(return_period.removeprefix("RP")),
             )
         except MemoryError:
             mark_tile_oom(oom_dir, tile_id, reason="MemoryError in flood_depth_dense - tile too large")

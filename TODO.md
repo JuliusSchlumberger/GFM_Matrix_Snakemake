@@ -121,7 +121,9 @@ Open:
   Then define one set of names (HC-bathtub, attenuated bathtub, eikonal / eikonal + B), use them
   in `sfincs_tiles/`, `review_critiques/` and `validation/`, and re-score every baseline on the
   same tiles. `sfincs_tiles/` changes need your go-ahead, and none while an HPC batch runs.
-- **Boundary sources: a rule for FES2022 at fjord and estuary heads.** FES matches GESLA within
+- **Boundary sources: a rule for FES2022 at fjord and estuary heads.** Partly answered by the
+  version rule (FES2014 where FES2022 is implausible) and its neighbour growth in the level
+  product (§8.5); the cases below where neither atlas fits stay open. FES matches GESLA within
   0.05 m MAE on MHWS at 698 gauges, but misses by > 0.25 m at 20, all at fjord/estuary heads or
   narrow entrances (too high in Juneau, the Salish Sea, Port Phillip; too low in the upper
   St Lawrence). Without gauges, a few head nodes are implausible: Cobequid Bay (MHWS 14.5 m above
@@ -140,14 +142,15 @@ Open:
   cost 15 gauges / 6 GTSM stations in `levels_tides.py` (2 tide-set sites) and an unknown share of
   the ~13,600 "invalid" FES nodes in `.cleanup_baseline/boundary_test/fes_nodes.parquet`. Rerun
   `levels_tides.py` and `fes_tide_stats.py` before those outputs are used again.
-- **Per-RP hydrograph generator: run it for all stations.** Accepted as is
+- **Per-RP hydrograph generator: run for all stations** (level product, §8.4; wiring in the switch
+  entry below). Accepted as is
   (`src/storm_tide_hydrograph.rp_hydrograph`, generator_smooth; INPUT_ANALYSIS.md §8.3): its
   flood volume behind the test 11 sills is within 10% of real events at RP 2 and 10, although it
   falls short on overflow above 0.9 x peak (-20 to -40% on 2-4 m and >4 m coasts, never over).
   Known, not pursued: RP 2 T(0.25) ~30% short (costs 1-9% flood volume); the low microtidal troughs
-  belong to GTSM's surge deficit (test 9). Production needs the GTSM surge series of all 23,226
-  stations and FES at each, then the SFINCS forcing and the eikonal T lookup.
-- **Implement the FES version rule in the boundary preparation.** Decided (INPUT_ANALYSIS.md
+  belong to GTSM's surge deficit (test 9).
+- **FES version rule: in the level product** (`build_level_product.consistent_version_flag`, 66
+  stations); production gets it through the product's levels. Decided (INPUT_ANALYSIS.md
   test 6, §8.2): FES2014 replaces FES2022 where the two atlases' MHWS differ by the ratio and
   minimum difference of `boundary_test/atlas_rule_sensitivity.version_flag`; gauges override
   both. FES2014 is on `<data_root>` (catalog entry `fes2014_ocean_tide`). How far a gauge
@@ -157,22 +160,48 @@ Open:
   analysis. Until then `boundaries.static_station_levels` raises on the old MDT station file.
   The SFINCS calibration runs predate the offset (forcing ~5 cm lower); recalibrating fsf should
   use regenerated forcing (`boundary_test/INPUT_ANALYSIS.md` §7).
-- **Level product (ii) built, not wired into production** (`boundary_test/build_level_product.py`,
-  INPUT_ANALYSIS.md §8.4; levels and generator hydrographs at 23,225 COAST-RP stations). r is
-  capped at 2.0 and uses the FES tide. Against COAST-RP: +0.03 m (RP10) and +0.05 m (RP100) median;
-  2,793 stations differ by > 0.5 m at RP1000. Where it departs strongly (southern North Sea -0.6 to
-  -1.0 m, western Baltic +0.5 m) the gauges side with the new product. Open:
-  - the TC part: r inflates the ETC part at TC stations (96% of the > 0.5 m TC cases are higher);
-    test 10 decides;
-  - 232 stations count as TC-dominated at RP2 only, where COAST-RP_TC is flat (tide floor) from
-    RP2 to RP10; consider requiring dominance at RP10 before switching to the TC shape;
-  - 152 of 209,025 hydrographs (mostly RP2, macrotidal) overshoot the RP level by up to 0.19 m,
-    because a neighbouring high water in the window already exceeds it;
-  - IBIS_GL_TS_MO_62198 has no FES value (no output);
-  - whether GTSM-ERA5-E (1950-2024) changes r, and the tidal covariate where skew surge and tide
-    are dependent;
-  - next plan steps: basin-head QA, interpolation to tiles, SFINCS forcing, fsf recalibration,
-    test 8, tile rerun.
+- **Level product (ii): switch production to it** (built and exported; `boundary_test/INPUT_ANALYSIS.md`
+  §8.4-8.5, fig12-fig17). At 618 gauges (r left one out) it halves COAST-RP's RP100 bias
+  (-0.03 vs -0.07 m at ETC gauges, MAE 0.17 vs 0.25 m), also at TC-dominated gauges
+  (-0.17 vs -0.25 m). Files: `.cleanup_baseline/level_product/GFM_storm_tide_levels.nc` (COAST-RP
+  format) and `GFM_storm_tide_hydrographs.nc` (per-RP generator hydrographs). Steps, all yours
+  (each writes to `<data_root>` or changes a catalog/config default):
+  1. copy both files to `{root}/inputs/` (suggested: `inputs/GFM_storm_tide/`);
+  2. point `coast_rp` in `data_catalog_gfm.yml` at the levels file and
+     `simulation.flooding.duration_correction.coast_hg_path` at the hydrographs file; replace the
+     config comment "COAST-HG is RP100 only ..." (the RP of each scenario is used now);
+  3. remove `COAST-RP_preprocessed.nc`, the `COAST-RP_EWL_{RP}_{SLR}.nc` scenario files, the
+     `WL_scenarios_cache` and the tile `boundaries_*.gpkg` (`combine_scenarios` skips existing files);
+  4. `run_preparation.py boundary_conditions`, then the SFINCS forcing (below), the fsf
+     recalibration (HPC), test 8 and the tile rerun.
+- **SFINCS forcing from the level product** (`sfincs_tiles/build_line_forcing.py`, needs your
+  go-ahead and no HPC batch running). Specified, not made: per boundary point take the RP100
+  hydrograph of the nearest product station (`GFM_storm_tide_hydrographs.nc`, RP 100) instead of
+  `rp100_level_m` + the nearest COAST-HG shape, trimmed of NaN to the common ±72 h window; the peak
+  then equals the product's RP100 level, so `rp100_level_m` and the shape come from one source.
+  `connected_forcing.py` (interior points) takes the same series. Then recalibrate fsf on the 498
+  tiles (`sfincs_tiles/generate_calibration_jobs.py stage1|stage2` on Hydrax) and run test 8.
+- **Level product: decisions taken as estimates (open questions).**
+  - GPD shape cap 0.35 (`SHAPE_CAP`; Fathom RFA's cap; binds at 222 stations). A lower cap
+    (0.2-0.25) would also bound the RP1000 tail; not tested against gauges above RP100.
+  - High waters need a prominence >= 10% of the 25-h tidal range (`HW_PROMINENCE`). Test 9's
+    gauges were built with every local maximum; rerun test 9 with the same rule to confirm r.
+  - GTSM despike: |residual - 5-h median| > 2 m; >= 5 hourly jumps > 2 m send a station to
+    COAST-RP levels (15 stations, Arafura coast). The thresholds are set by eye on that cluster.
+  - TC mask: IBTrACS since 1980, >= 34 kt, within 300 km, +-24 h, only at stations with a COAST-RP
+    TC part. Storms outside COAST-RP's TC basins stay in the ETC fit; 300 km may be wide for
+    small storms and narrow for large ones.
+  - TC shape below RP10 requires TC dominance at RP10 (`TC_SHAPE_MIN_RP`).
+  - FES version rule grown to neighbours (`consistent_version_flag`: 25 km, ratio 1.5, 0.25 m;
+    gauge veto 50 km where FES2022 is within 0.25 m of GESLA): 10 stations. Doubtful in
+    São Marcos Bay (id_coast_glob_15677, FES2022 MHWS 3.2 m looks right); the original rule's
+    flag there may be wrong too. Gauges do not override the atlas choice in the product.
+  - Interpolation: keep production's `knn` 15 (config default, LOO RP100 MAE 7.0 cm) or lower it to
+    3-5 (5.6-5.9 cm)? The gain is small next to the 8-20 cm spacing error at > 10 km; asks for a
+    config change.
+  - No gauge override of the levels (a station next to a gauge does not take the gauge's level);
+    r carries the gauges' information only through the surge.
+  - The hydrographs of the 15 COAST-RP-fallback stations are Gaussian on the FES tide.
 - **Return periods above 250 y: tail of the level product.** COAST-RP grows by 0.11 m per decade
   of RP up to RP100 and 0.083 m from RP500 to RP1000 (median of 22,670 stations); RP1000 - RP100 is
   0.79 x RP100 - RP10 (0.72 above 30 deg latitude, 0.94 below; < 0.5 at 16% of stations). The ETC

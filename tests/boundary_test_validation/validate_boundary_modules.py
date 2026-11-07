@@ -135,3 +135,13 @@ def test_rp_hydrograph_reaches_the_target_on_a_high_water_at_the_chosen_level() 
     shape = gaussian_shape(8.0, 72.0)
     out = rp_hydrograph(window, shape, 2.5)
     assert abs(out["level"].max() - 2.5) < 1e-6 and out["amplitude_m"] > 0
+
+
+def test_high_water_window_ceiling_keeps_neighbouring_high_waters_below_the_target() -> None:
+    tide = _tide()
+    hw = high_water_indices(tide)
+    assert high_water_window(tide, hw, 1.25, 72.0).max() >= 1.28
+    window = high_water_window(tide, hw, 1.25, 72.0, ceiling_m=1.28)
+    assert window.max() < 1.28
+    out = rp_hydrograph(window, gaussian_shape(8.0, 72.0), 1.28)
+    assert abs(out["level"].max() - 1.28) < 1e-6 and out["amplitude_m"] > 0

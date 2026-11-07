@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import xarray as xr
 from affine import Affine
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -14,6 +15,7 @@ from event_volume import (  # noqa: E402
     basin_volume_cap,
     duration_friction_multiplier,
     level_pool_level,
+    load_coast_hg,
     spill_level,
     time_within_peak,
     weir_inflow_volume,
@@ -117,3 +119,19 @@ def test_solver_duration_correction_extends_flood_for_long_events() -> None:
     corrected, diag = _solve(dem, _correction(long, t_ref_h=6.0))
     assert corrected.sum() >= plain.sum()
     assert diag["mean_duration_multiplier"] < 1.0
+
+
+def test_load_coast_hg_slices_the_generator_file_at_the_return_period(tmp_path) -> None:
+    steps = np.arange(7) * np.timedelta64(600, "s")
+    curve = np.array([np.nan, 0.5, 1.5, 2.0, 1.5, 0.5, np.nan])
+    hyd = np.stack([np.stack([curve, curve + 1.0]), np.stack([curve * 2, curve * 2 + 1.0])])
+    xr.Dataset({"storm_tide_hydrograph": (("stations", "return_period", "time"), hyd)},
+               coords={"station_x_coordinate": ("stations", [100.0, 100.5]),
+                       "station_y_coordinate": ("stations", [10.0, 10.0]),
+                       "return_period": [10, 100], "time": steps}).to_netcdf(tmp_path / "gen.nc")
+    lonlat, series, dt_s = load_coast_hg(tmp_path / "gen.nc", (99.9, 9.9, 100.6, 10.1), return_period=100)
+    assert dt_s == 600.0 and len(lonlat) == 2
+    assert np.isneginf(series[:, 0]).all() and series[1].max() == 5.0
+    t = time_within_peak(series[0], DT, np.array([0.6]))
+    assert t[0] == 3 * DT
+

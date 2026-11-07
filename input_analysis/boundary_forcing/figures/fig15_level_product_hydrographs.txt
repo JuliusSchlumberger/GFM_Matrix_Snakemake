@@ -1,0 +1,11 @@
+Storm-tide hydrographs of the level product at four example stations (the COAST-RP station nearest
+each named place) for RP10, RP100 and RP1000, 10-min steps, ±72 h around the peak. Each peak is the
+product's RP level; dotted lines mark COAST-RP's total level at the same RP. The legend names the
+surge shape: gtsm events (median smoothed surge of the station's GTSM annual maxima of matching
+empirical RP), tc gauge (median surge-dominated event of a gauge within 50 km), tc gaussian
+(Gaussian placeholder where there is no such gauge).
+
+Reading: at Dunkerque the levels are 0.6-0.85 m below COAST-RP, which carries GTSM's too-large tide;
+at Kiel they are 0.3-0.9 m above it, where the Baltic gauges side with the new product (fig14). At
+the TC-dominated Galveston and Hiron Point the RP100 and RP1000 levels are COAST-RP's (its TC rate
+dominates there); only the shape is new.

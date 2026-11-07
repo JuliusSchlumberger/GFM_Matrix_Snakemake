@@ -200,6 +200,8 @@ def duration_friction_multiplier(
 # COAST-HG RP100 storm-tide hydrographs; only the shape around the peak is used, so the
 # tide phase variant and the vertical datum do not matter.
 COAST_HG_VARIABLE = "hydrograph_average_tide_signal"
+# Per-RP generator hydrographs (boundary_test/export_level_product.py): (stations, return_period, time).
+GENERATOR_VARIABLE = "storm_tide_hydrograph"
 
 # Stations within this distance (deg) of the tile bounds are loaded.
 COAST_HG_BUFFER_DEG = 1.0
@@ -263,11 +265,14 @@ def load_coast_hg(
     nc_path: str | Path,
     bounds_lonlat: tuple[float, float, float, float],
     buffer_deg: float = COAST_HG_BUFFER_DEG,
+    return_period: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray, float]:
-    """Return (station lonlat, series (n, t) m, dt s) of COAST-HG stations near `bounds_lonlat`.
+    """Return (station lonlat, series (n, t) m, dt s) of hydrograph stations near `bounds_lonlat`.
 
     `bounds_lonlat` = (lon_min, lat_min, lon_max, lat_max). Falls back to the nearest station
-    when none lies within the buffer (tiles far from any GTSM output point).
+    when none lies within the buffer (tiles far from any GTSM output point). Reads COAST-HG, or
+    a generator file (GENERATOR_VARIABLE) sliced at `return_period`; its samples outside a
+    station's window are NaN and become -inf, which time_within_peak never counts.
     """
     with xr.open_dataset(nc_path) as ds:
         lon = ds["station_x_coordinate"].values.astype(np.float64)
@@ -278,7 +283,13 @@ def load_coast_hg(
         if sel.size == 0:
             centre = np.radians([[(lat_min + lat_max) / 2, (lon_min + lon_max) / 2]])
             sel = BallTree(np.radians(np.column_stack([lat, lon])), metric="haversine").query(centre, k=1)[1][0]
-        series = ds[COAST_HG_VARIABLE].isel(stations=sel).values.astype(np.float64)
+        if GENERATOR_VARIABLE in ds:
+            if return_period is None:
+                raise ValueError(f"{nc_path} holds per-RP hydrographs; a return period is required")
+            series = ds[GENERATOR_VARIABLE].sel(return_period=return_period).isel(stations=sel).values
+            series = np.where(np.isnan(series), -np.inf, series.astype(np.float64))
+        else:
+            series = ds[COAST_HG_VARIABLE].isel(stations=sel).values.astype(np.float64)
         dt_s = float(np.median(np.diff(ds["time"].values)) / np.timedelta64(1, "s"))
-    keep = np.isfinite(series).all(axis=1)
+    keep = np.isfinite(series).any(axis=1) & ~np.isnan(series).any(axis=1)
     return np.column_stack([lon[sel], lat[sel]])[keep], series[keep], dt_s
