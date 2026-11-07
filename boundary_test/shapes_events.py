@@ -35,7 +35,7 @@ import pandas as pd
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "boundary_test"))
 from extract_gtsm_series import load_series, station_series  # noqa: E402
-from levels_tides import HOURLY_END, HOURLY_START, on_hourly_grid  # noqa: E402
+from tide_prediction import HOURLY_END, HOURLY_START, on_hourly_grid  # noqa: E402
 
 COAST_HG = Path("P:/11212688-004-global-floodmaps/modelling/inputs/COAST_HG/COAST-HG_RP100.nc")
 WINDOW_HR = 72  # +-72 h, the length of a COAST-HG hydrograph (149 h)

@@ -2,7 +2,7 @@
 
 Each station's RP level is predicted from the other stations by inverse-distance weighting of
 the k nearest (power p; haversine distance floored at 1 km), as `flood_model.idw_seed_values_at`
-does for the eikonal seeds (production: k = 15, p = 2), and by the nearest station alone. The
+does for the eikonal seeds (`simulation.flooding.knn`, `idw_power`), and by the nearest station alone. The
 error between stations bounds the interpolation error at the coastline cells between them.
 Production also restricts the neighbours to the tile's ocean component; that is not reproduced
 here. Stations below PRODUCTION_MIN_LAT are left out, as in the preparation.
@@ -12,7 +12,7 @@ the nearest other station) and interpolation_outliers.csv (stations whose RP100 
 OUTLIER_M from the k = 5, p = 2 prediction).
 
 Usage:
-    python boundary_test/station_interpolation.py --out-dir .cleanup_baseline/level_product
+    python boundary_test/station_interpolation.py --out-dir <storm_tide_product_dir>
 """
 
 import argparse
@@ -64,7 +64,7 @@ def main() -> None:
     bins = pd.cut(spacing, SPACING_BINS_KM)
     v = lev.rp100_m.to_numpy()
     by_spacing = []
-    for name, k, power in (("nearest", 1, 1), ("k = 5, p = 2", 5, 2), ("k = 15, p = 2 (production)", 15, 2)):
+    for name, k, power in (("nearest", 1, 1), ("k = 15, p = 2 (former)", 15, 2), ("k = 5, p = 3 (production)", 5, 3)):
         e = np.abs(loo_predictions(lonlat, v, k, power) - v)
         by_spacing.append(pd.Series(e).groupby(bins, observed=True).mean().rename(name))
     by_spacing = pd.concat(by_spacing, axis=1)

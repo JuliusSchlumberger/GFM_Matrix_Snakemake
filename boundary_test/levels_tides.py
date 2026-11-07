@@ -29,89 +29,26 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pyTMD.arguments
 import pyTMD.io
-import pyTMD.predict
-import timescale.time
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "boundary_test"))
 from extract_gtsm_series import load_series, station_series  # noqa: E402
-from fes_tide_stats import FES_MODEL, STEP_MIN, ensure_local_fes, extract_constants  # noqa: E402
-from tide_statistics import high_water_statistics  # noqa: E402
+from fes_tide_stats import FES_MODEL, STEP_MIN, ensure_local_fes  # noqa: E402
+from tide_prediction import (  # noqa: E402
+    cached_basis, fit_constants, hourly_times, levels, on_hourly_grid)
+from tide_prediction import grouped_constants as fes_constants  # noqa: E402
 
 FES_CACHE = REPO / ".cleanup_baseline" / "fes2022_cache"
-HOURLY_START = np.datetime64("1979-01-01T00:00")
-HOURLY_END = np.datetime64("2025-01-01T00:00")
-FIT_YEARS = (1996, 2014)  # the GTSM tide period
-MIN_FIT_YEARS = 3.0  # >= 1 y separates S2/K2/T2; 3 y keeps the long-period terms stable
 SEASONAL = ("sa", "ssa")
-GROUP_DEG = 5.0
 SITES_PER_TASK = 20
 
 
 def hourly_basis(model, cache: Path) -> tuple[np.ndarray, np.ndarray]:
-    """(B_re, B_im) at every hour HOURLY_START..HOURLY_END, built as `prediction_basis`."""
-    if not (cache / "hourly_basis_re.npy").exists():
-        constituents = list(model.constituents)
-        hours = np.arange(HOURLY_START, HOURLY_END, np.timedelta64(1, "h"))
-        ts = timescale.time.Timescale().from_datetime(hours)
-        pu, pf, G = pyTMD.arguments.arguments(ts.tide + pyTMD.predict._mjd_tide, constituents,
-                                              deltat=ts.tt_ut1, corrections=model.corrections)
-        th = G * np.pi / 180.0 + pu
-        b_re, b_im = pf * np.cos(th), -pf * np.sin(th)
-        for k in range(len(constituents)):
-            for unit, dst in ((1.0, b_re), (1j, b_im)):
-                z = np.ma.zeros((1, len(constituents)), dtype=np.complex128)
-                z[0, k] = unit
-                dst[:, k] += np.ma.filled(pyTMD.predict.infer_minor(ts.tide, z, constituents, deltat=ts.tt_ut1,
-                                                                    corrections=model.corrections,
-                                                                    minor=model.minor), 0.0)
-        np.save(cache / "hourly_basis_im.npy", b_im)
-        np.save(cache / "hourly_basis_re.npy", b_re)
-    return (np.load(cache / "hourly_basis_re.npy", mmap_mode="r"), np.load(cache / "hourly_basis_im.npy", mmap_mode="r"))
-
-
-def on_hourly_grid(t: np.ndarray, z: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Hour index and value of the samples that fall on a full hour inside the basis period."""
-    t = t.astype("datetime64[s]")
-    full = (t.astype(np.int64) % 3600 == 0) & (t >= HOURLY_START) & (t < HOURLY_END) & np.isfinite(z)
-    idx = ((t[full] - HOURLY_START.astype("datetime64[s]")).astype(np.int64) // 3600)
-    return idx, z[full].astype(np.float64)
-
-
-def remove_annual_means(idx: np.ndarray, z: np.ndarray) -> np.ndarray:
-    year = (HOURLY_START + idx.astype("timedelta64[h]")).astype("datetime64[Y]")
-    return z - pd.Series(z).groupby(year).transform("mean").to_numpy()
-
-
-def fit_constants(idx: np.ndarray, z: np.ndarray, b_re, b_im) -> tuple[np.ndarray, dict]:
-    """Least-squares complex constants (constituent,) for an hourly sample set, and fit info."""
-    years = (HOURLY_START + idx.astype("timedelta64[h]")).astype("datetime64[Y]").astype(int) + 1970
-    window = (years >= FIT_YEARS[0]) & (years <= FIT_YEARS[1])
-    use = window if window.sum() >= MIN_FIT_YEARS * 8766 else np.ones_like(window)
-    idx, z = idx[use], z[use]
-    nan_info = {"fit_years": len(idx) / 8766.0, "fit_in_window": bool(use is window)}
-    if len(idx) < MIN_FIT_YEARS * 8766:
-        return np.full(b_re.shape[1], np.nan + 0j), nan_info
-    z = remove_annual_means(idx, z)
-    order = np.argsort(idx)
-    idx, z = idx[order], z[order]
-    a = np.hstack([np.asarray(b_re[idx]), np.asarray(b_im[idx]), np.ones((len(idx), 1))])
-    x, *_ = np.linalg.lstsq(a, z, rcond=None)
-    nc = b_re.shape[1]
-    resid = z - a @ x
-    return x[:nc] + 1j * x[nc:2 * nc], {**nan_info, "fit_rms_m": float(resid.std()),
-                                        "fit_explained": float(1.0 - resid.var() / z.var())}
-
-
-def levels(tide: np.ndarray, dt_s: float) -> dict:
-    hi = high_water_statistics(tide, dt_s)
-    lo = high_water_statistics(-tide, dt_s)
-    return {"mhws_m": hi["mhws_m"], "mhw_m": hi["mhw_m"], "hat_m": hi["hat_m"], "mlws_m": -lo["mhws_m"],
-            "mlw_m": -lo["mhw_m"], "lat_m": -lo["hat_m"], "spring_range_m": hi["mhws_m"] + lo["mhws_m"],
-            "n_spring_high_waters": hi["n_spring_high_waters"]}
+    """(B_re, B_im) at every hour HOURLY_START..HOURLY_END, cached in `cache`."""
+    paths = cached_basis(model, hourly_times(), cache / "hourly_basis_re.npy", cache / "hourly_basis_im.npy")
+    return tuple(np.load(p, mmap_mode="r") for p in paths)
 
 
 def _predict_task(args) -> list[dict]:
@@ -151,18 +88,6 @@ def _gtsm_raw_task(args) -> list[dict]:
 def _annual(x: np.ndarray, year: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     m = pd.Series(x).groupby(year).mean().dropna()
     return m.index.to_numpy(dtype=float), m.to_numpy()
-
-
-def fes_constants(model, lonlat: np.ndarray) -> np.ndarray:
-    """FES2022 constants (point, constituent) at arbitrary points, cropped per GROUP_DEG cell."""
-    cell = np.floor(lonlat / GROUP_DEG).astype(int)
-    _, inverse = np.unique(cell, axis=0, return_inverse=True)
-    inverse = inverse.ravel()
-    groups = [np.flatnonzero(inverse == g) for g in range(inverse.max() + 1)]
-    hc = extract_constants(model, [lonlat[g] for g in groups])
-    out = np.empty_like(hc)
-    out[np.concatenate(groups)] = hc
-    return out
 
 
 def main() -> None:

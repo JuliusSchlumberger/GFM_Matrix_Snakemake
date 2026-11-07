@@ -16,62 +16,28 @@ Usage:
 """
 
 import argparse
-from concurrent.futures import ProcessPoolExecutor
+import sys
 from pathlib import Path
 
 import geopandas as gpd
-import netCDF4
 import numpy as np
 import pandas as pd
 from sklearn.neighbors import BallTree
 
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "src"))
+from gtsm_series import FOLDERS, extract_series, gtsm_stations, station_series  # noqa: E402, F401 (re-exported)
+from gtsm_series import load_series as _load_series  # noqa: E402
+
 GTSM_DIR = Path("P:/11212688-004-global-floodmaps/modelling/inputs/GTSM_storm_tide_hourly")
 BASE = Path("P:/11212688-004-global-floodmaps/modelling/calibration_roughness_SFINCS")
-# Surge from 1979, the ERA5 period of COAST-RP and HGRAPHER-RP; tide: every downloaded year.
-FOLDERS = {"surge": ("storm_surge_residual", "reanalysis_surge_hourly_*_v3.nc", "surge", 1979),
-           "tide": ("tidal_elevation", "historical_tide_*_v1.nc", "tide", None)}
-SLAB_GAP = 2000
 MATCH_KM = 0.1
 EARTH_RADIUS_KM = 6371.0
-MISSING = np.iinfo(np.int16).min
 
 
 def load_series(out: Path, variable: str) -> tuple[pd.DataFrame, pd.DatetimeIndex, np.ndarray]:
     """Return the stations table, the time axis and the (station, time) int16 mm memmap."""
-    d = out / f"gtsm_{variable}"
-    return (pd.read_parquet(d / "stations.parquet"), pd.DatetimeIndex(np.load(d / "time.npy")),
-            np.load(d / "series.npy", mmap_mode="r"))
-
-
-def station_series(series: np.ndarray, j: int) -> np.ndarray:
-    """Station j of a `load_series` memmap in m, NaN where missing."""
-    raw = np.asarray(series[j])
-    return np.where(raw == MISSING, np.nan, raw / 1000.0)
-
-
-def _file_year(path: Path) -> int:
-    return int(path.stem.split("_")[3])
-
-
-def _read_month(args) -> tuple[np.ndarray, np.ndarray]:
-    path, var, station_idx = args
-    order = np.argsort(station_idx)
-    sorted_idx = station_idx[order]
-    with netCDF4.Dataset(path) as ds:
-        v = ds[var]
-        time = netCDF4.num2date(ds["time"][:], ds["time"].units, only_use_cftime_datetimes=False,
-                                only_use_python_datetimes=True)
-        out = np.empty((len(station_idx), len(time)), dtype=np.int16)
-        start = 0
-        while start < len(sorted_idx):
-            stop = start + 1
-            while stop < len(sorted_idx) and sorted_idx[stop] - sorted_idx[stop - 1] < SLAB_GAP:
-                stop += 1
-            lo = int(sorted_idx[start])
-            slab = np.ma.filled(v[:, lo: int(sorted_idx[stop - 1]) + 1], np.nan)[:, sorted_idx[start:stop] - lo]
-            out[order[start:stop]] = np.where(np.isfinite(slab), np.round(slab * 1000.0), MISSING).T
-            start = stop
-    return np.asarray(time, dtype="datetime64[s]"), out
+    return _load_series(out / f"gtsm_{variable}")
 
 
 def test_station_indices(tiles: pd.DataFrame, gtsm_lonlat: np.ndarray) -> pd.DataFrame:
@@ -97,53 +63,13 @@ def main() -> None:
     parser.add_argument("--variable", choices=list(FOLDERS), default="surge")
     parser.add_argument("--workers", type=int, default=6)
     args = parser.parse_args()
-    folder, pattern, var, first_year = FOLDERS[args.variable]
-    files = [f for f in sorted((GTSM_DIR / folder).glob(pattern)) if first_year is None or _file_year(f) >= first_year]
-    if not files:
-        raise FileNotFoundError(f"no {pattern} under {GTSM_DIR / folder}")
-    with netCDF4.Dataset(files[0]) as ds:
-        lonlat = np.column_stack([ds["station_x_coordinate"][:], ds["station_y_coordinate"][:]]).astype(float)
-        ids = np.asarray(ds["stations"][:]).astype(int)
-    lengths = []
-    for f in files:
-        with netCDF4.Dataset(f) as ds:
-            lengths.append(ds.dimensions["time"].size)
     out = Path(args.out_dir)
+    lonlat, _ = gtsm_stations(GTSM_DIR, args.variable)
     stations = (test_station_indices(pd.read_csv(args.tiles_csv, dtype={"tile_id": str}), lonlat) if args.tiles_csv
                 else pd.read_csv(args.stations_csv))
-    unique_idx = np.unique(stations.gtsm_index.to_numpy())
-
-    d = out / f"gtsm_{args.variable}"
-    d.mkdir(exist_ok=True)
-    series = np.lib.format.open_memmap(d / "series.npy.part", mode="w+", dtype=np.int16,
-                                       shape=(len(unique_idx), sum(lengths)))
-    times, pos = [], 0
-    with ProcessPoolExecutor(args.workers) as pool:
-        for k, (time, block) in enumerate(pool.map(_read_month, [(str(f), var, unique_idx) for f in files])):
-            keep = time > times[-1][-1] if times else np.ones(len(time), dtype=bool)  # monthly files may overlap
-            series[:, pos: pos + keep.sum()] = block[:, keep]
-            times.append(time[keep])
-            pos += int(keep.sum())
-            if k % 24 == 0:
-                print(f"  {k + 1}/{len(files)} files", flush=True)
-    series.flush()
-    del series
-    if pos == sum(lengths):
-        (d / "series.npy.part").replace(d / "series.npy")
-    else:
-        final = np.lib.format.open_memmap(d / "series.npy", mode="w+", dtype=np.int16, shape=(len(unique_idx), pos))
-        part = np.load(d / "series.npy.part", mmap_mode="r")
-        for j in range(0, len(unique_idx), 500):
-            final[j: j + 500] = part[j: j + 500, :pos]
-        final.flush()
-        del final, part
-        (d / "series.npy.part").unlink()
-    np.save(d / "time.npy", np.concatenate(times))
-    pd.DataFrame({"gtsm_index": unique_idx, "gtsm_station": ids[unique_idx], "lon": lonlat[unique_idx, 0],
-                  "lat": lonlat[unique_idx, 1]}).to_parquet(d / "stations.parquet")
+    extract_series(GTSM_DIR, stations.gtsm_index.to_numpy(), out / f"gtsm_{args.variable}", args.workers, args.variable)
     if args.tiles_csv:
         stations.to_csv(out / "test_station_tiles.csv", index=False)
-    print(f"{len(unique_idx)} stations, {len(files)} files, {pos} steps")
 
 
 if __name__ == "__main__":

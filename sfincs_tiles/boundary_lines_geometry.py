@@ -24,9 +24,8 @@ from shapely.ops import linemerge, substring, unary_union
 
 OCEAN_CODE = 1
 TILE_STATIONS_GPKG = "inputs/boundaries_RP100_SLR_0.gpkg"
-COAST_HG_NC = "inputs/COAST_HG/COAST-HG_RP100.nc"
 MAX_HG_MATCH_DEG = 0.5  # same backstop build_line_forcing.py uses
-MIN_FORCING_STATIONS = 2  # used stations with a COAST-HG hydrograph a tile needs
+MIN_FORCING_STATIONS = 2  # used stations with a hydrograph a tile needs
 MASK_VRT = "inputs/DeltaDTM_masks/deltadtm_mask.vrt"
 MAX_MASK_PX = 3000            # mask decimated to at most this many px per side
 MIN_OCEAN_AREA_KM2 = 0.5
@@ -677,9 +676,10 @@ def _tile_stations(tile_dir: Path) -> gpd.GeoDataFrame:
 _HG_XY = {}
 
 
-def _n_with_coast_hg(root: Path, lonlat: np.ndarray) -> int:
-    if "xy" not in _HG_XY:
-        with xr.open_dataset(root / COAST_HG_NC) as ds:
+def _n_with_hydrograph(hydrograph_nc: Path, lonlat: np.ndarray) -> int:
+    if _HG_XY.get("path") != hydrograph_nc:
+        _HG_XY["path"] = hydrograph_nc
+        with xr.open_dataset(hydrograph_nc) as ds:
             _HG_XY["xy"] = np.column_stack([ds.station_x_coordinate.values, ds.station_y_coordinate.values])
             _HG_XY["tree"] = cKDTree(_HG_XY["xy"])
     if len(lonlat) == 0:

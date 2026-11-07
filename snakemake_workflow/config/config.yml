@@ -29,7 +29,8 @@ preparation: # Used by: preparation/run_preparation.py
   build_deltadtm_vrt:  true   # build deltadtm.vrt / deltadtm_mask.vrt (relative source paths);
   # separate from sync_deltadtm so the mosaics can be rebuilt without re-downloading
   tile_generation:     true   # build the connectivity-first domain manifest -> tile_grid.path
-  boundary_conditions: true   # COAST-RP + SLR fingerprint scenario NetCDFs
+  storm_tide_product:  true   # storm-tide levels + hydrographs from GESLA, GTSM, FES, IBTrACS (~6 h)
+  boundary_conditions: true   # storm-tide levels + SLR fingerprint scenario NetCDFs
 
 # ── TILE GENERATION (connectivity-first domains) ──────────────────────────────
 # Algorithms: src/connectivity_tiling.py; design: docs/methods_01_tile_processing_and_waterlevels.md §3.
@@ -87,6 +88,17 @@ tile_split: # Used by: run_eikonal_dag.py to split OOM tiles and re-run Snakemak
 boundary_conditions:
   waterlevel_nc_dir: "{processed_inputs_dir}/WL_scenarios"
 
+  # Storm-tide levels (per station and RP, local MSL) and hydrographs for every model: eikonal
+  # seeds and static level, duration correction B, SFINCS forcing. Both sources share COAST-RP's
+  # stations, so MDT, SLR fingerprints and the station search are the same.
+  #   gfm_product: GTSM-ERA5 skew surges on the FES tide, scaled by the gauge surge ratio, plus
+  #     COAST-RP's TC part; one hydrograph per RP (run_preparation.py storm_tide_product, which
+  #     writes storm_tide_product_dir; boundary_test/INPUT_ANALYSIS.md §8.4-8.5)
+  #   coast_rp: COAST-RP levels (data catalog `coast_rp`) and COAST-HG's RP100 hydrograph for
+  #     every RP (simulation.flooding.duration_correction.coast_hg_path)
+  storm_tide_source: "gfm_product"
+  storm_tide_product_dir: "{processed_inputs_dir}/storm_tide_product"
+
   # IPCC AR6 regional SLR projection (SSP-RCP code) and confidence level used to
   # build the SLR fingerprints. Not an SLR level: those are waterlevel_names below.
   slr_projection: "ssp245" # options: ssp126/ssp245/ssp585
@@ -141,6 +153,17 @@ boundary_conditions:
   # neighbour; a precompute from frozen geometry was rejected (overlaps span up to hundreds of km).
   # boundaries.sample_waterlevel_at_points is the point-lookup primitive for it.
 
+# ── STORM-TIDE PRODUCT (storm_tide_source: gfm_product) ───────────────────────
+# Used by: preparation/prepare_storm_tide_product.py. Raw inputs; COAST-RP and FES2014 come from
+# the data catalog (`coast_rp`, `fes2014_ocean_tide`). Intermediates and the two product files
+# go to boundary_conditions.storm_tide_product_dir. Constants: src/storm_tide_product.py.
+storm_tide_product:
+  gesla_dir: "{root}/inputs/GESLA4.1_ALL"           # GESLA-4.1 data files + GESLA4-1_ALL.csv
+  gtsm_dir: "{root}/inputs/GTSM_storm_tide_hourly"  # GTSM-ERA5 storm_surge_residual/*.nc, hourly
+  fes2022_dir: "{root}/inputs/fes2022b/ocean_tide_extrapolated"  # *.nc.xz, decompressed once
+  ibtracs_path: "{root}/inputs/IBTrACS/ibtracs.since1980.list.v04r01.csv"  # NOAA IBTrACS v04r01
+  workers: 4
+
 # ── RASTER FORMAT ──────────────────────────────────────────────────────────────
 raster_format:
   driver: "GTiff"
@@ -168,7 +191,12 @@ simulation: # Used by: preprocessing rules
 
   flooding:
     resolution: 30       # output raster resolution in metres
-    knn: 15              # number of nearest water level stations used
+    # Station interpolation of every water level onto the tile (coastline seeds and the static
+    # level), for either storm_tide_source: inverse-distance weighting over the knn nearest
+    # stations, weights distance^-idw_power. Leave-one-out at 22,670 stations, RP100 MAE: k 5 /
+    # power 3 5.7 cm, k 15 / power 2 7.0 cm (boundary_test/INPUT_ANALYSIS.md §8.5).
+    knn: 5
+    idw_power: 3
     # "friction" = the land-cover-indexed attenuation rate (water-level loss per metre), with
     # class values n / 100 from the land-cover roughness table (docs/methods_02 §2.2).
     # Rate for cells with no land use class.
@@ -214,7 +242,8 @@ simulation: # Used by: preprocessing rules
     # capped at max_multiplier with no lower clip, and the tile is solved again (~2x runtime).
     # m ∝ T^-alpha, alpha 1: 1-D SFINCS refit (boundary_test/duration_refit.py); t_ref_h only
     # sets where m = 1 and is absorbed into friction_scale_factor.
-    # COAST-HG is RP100 only; its shape is used for every RP and SLR.
+    # The hydrographs come from boundary_conditions.storm_tide_source: the product's per-RP file,
+    # or coast_hg_path (COAST-HG, RP100 only, its shape used for every RP and SLR).
     duration_correction:
       enabled: true
       alpha: 1.0

@@ -908,16 +908,18 @@ Inputs are the GTSM series, FES constants and GESLA events already extracted for
 HPC runs are needed. Production use (the global product, SFINCS forcing, fsf recalibration with
 α = 1 and no lower clip on the multiplier) uses the accepted generator.
 
-### 8.4 Level product (ii) at all COAST-RP stations
+### 8.4 Level product (ii) at all COAST-RP stations: the storm-tide product
 
-`build_level_product.py` (output `.cleanup_baseline/level_product/`) builds level product (ii)
-and the accepted generator's hydrographs at the 23,226 COAST-RP stations:
+The production step `run_preparation.py storm_tide_product` (`src/storm_tide_product.py`,
+`preparation/prepare_storm_tide_product.py`) builds level product (ii) and the accepted
+generator's hydrographs at the 23,226 COAST-RP stations from the raw inputs (GESLA, GTSM-ERA5,
+FES2022, FES2014, COAST-RP, IBTrACS), into `boundary_conditions.storm_tide_product_dir`:
 - `levels.parquet`: one row per station, RPs 2-1000;
 - `hydrographs.npy`: (station, RP, 1441), 10-min steps over ±120 h, NaN outside each station's
   window;
-- `hydrograph_info.parquet`: window, tide level and shape source per station and RP.
-
-`export_level_product.py` writes them as production inputs (§8.5).
+- `hydrograph_info.parquet`: window, tide level and shape source per station and RP;
+- `gauges/gauges.parquet`: the gauge ratios r, station class and tidal MHWS of the GESLA gauges;
+- the two production files of §8.5.
 
 **Construction.**
 - *Stations.* Each COAST-RP station takes the nearest GTSM-ERA5 surge series (all within 0.8 km;
@@ -934,7 +936,7 @@ and the accepted generator's hydrographs at the 23,226 COAST-RP stations:
   (at least 3), otherwise the gauge median, and r is capped at 2.0.
   - The leave-one-out MAE is the same for any cap between 1.5 and 2.5; 2.0 is about the gauge
     p90.
-  - Station r: median 1.18. 194 stations are capped; 13,583 take the median (no 3 gauges within
+  - Station r: median 1.18. 203 stations are capped; 13,583 take the median (no 3 gauges within
     500 km).
 - *TC part.* COAST-RP_TC enters as an annual exceedance rate added to the ETC rate, which is
   COAST-RP's own combination. TC is a gap-filler until test 10.
@@ -947,10 +949,10 @@ caused them (fig17):
 
 | failure mode | where | fix | stations affected |
 |---|---|---|---|
-| A second low-water bump of the shallow-water tide counts as a high water; the next real high water then reads as a skew surge of several metres | Ungava Bay, Hudson Strait, Amazon mouth | only maxima with a prominence of ≥ 10% of the 25-h tidal range are high waters (`HW_PROMINENCE`) | largest skew surge at Ungava 4.5 → 0.8 m |
+| A second low-water bump of the shallow-water tide counts as a high water; the next real high water then reads as a skew surge of several metres | Ungava Bay, Hudson Strait, Amazon mouth | a maximum in the lowest quarter of the 25-h tidal range with a prominence < 10% of that range is not a high water (`skew_surge.HW_PROMINENCE`); weak lesser high waters of mixed tides stay | largest skew surge at Ungava 4.5 → 0.8 m |
 | GTSM residual spikes of up to 12 m within an hour (a model artefact) | Arafura coast, New Guinea (137-139°E, 5-8°S) | hours more than 2 m from their 5-h median are dropped; a station with ≥ 5 hourly jumps > 2 m takes COAST-RP's levels and a Gaussian shape (`level_source = coast_rp`) | 15 |
 | Tropical cyclones in the ERA5 record count twice: once in the ETC fit and once in COAST-RP_TC | Mississippi delta (Katrina), every TC coast | at stations with a TC part, cycles within ±24 h of an IBTrACS storm (≥ 34 kt, since 1980) passing within 300 km leave the ETC fit | 9,247 stations; median 0.3% of cycles removed, at most 4.7% |
-| A heavy GPD tail fitted to a few large events | scattered | GPD shape capped at 0.35 and the scale refitted (Fathom RFA's cap; about the gauges' p95) | 222 |
+| A heavy GPD tail fitted to a few large events | scattered | GPD shape capped at 0.35 and the scale refitted (Fathom RFA's cap; about the gauges' p95) | 149 |
 
 Two further QA steps:
 - *Peak overshoot.* Where a neighbouring high water in the window already exceeded the RP level,
@@ -964,15 +966,15 @@ Two further QA steps:
 
 | RP | all 23,226 | no TC part (13,979) | TC part (9,247) |
 |---|---|---|---|
-| 2 | -0.012 (-0.26..+0.15) [1,195] | -0.022 (-0.34..+0.10) | +0.003 (-0.21..+0.29) |
-| 10 | +0.015 (-0.24..+0.19) [1,203] | +0.012 (-0.29..+0.15) | +0.019 (-0.21..+0.32) |
-| 100 | +0.022 (-0.23..+0.22) [1,271] | +0.035 (-0.28..+0.21) | +0.009 (-0.18..+0.27) |
-| 1000 | +0.023 (-0.18..+0.32) [1,740] | +0.069 (-0.23..+0.33) | +0.000 (-0.13..+0.26) |
+| 2 | -0.009 (-0.25..+0.15) [1,180] | -0.019 (-0.33..+0.11) | +0.005 (-0.20..+0.30) |
+| 10 | +0.018 (-0.23..+0.20) [1,230] | +0.014 (-0.28..+0.16) | +0.023 (-0.21..+0.34) |
+| 100 | +0.026 (-0.22..+0.23) [1,316] | +0.039 (-0.27..+0.22) | +0.012 (-0.18..+0.29) |
+| 1000 | +0.028 (-0.17..+0.33) [1,816] | +0.073 (-0.22..+0.35) | +0.000 (-0.13..+0.28) |
 
 How to read the table (fig12, fig13):
-- *Two effects of opposite sign.* With r = 1, the ETC level is 0.05-0.085 m below COAST-RP's ETC
+- *Two effects of opposite sign.* With r = 1, the ETC level is 0.05-0.08 m below COAST-RP's ETC
   at stations without a TC part. That is the FES tide replacing GTSM's tide, which is 7-8% too high
-  (§3). r lifts the level by 0.06-0.09 m. The net change is +0.01 to +0.07 m, which is test 9's
+  (§3). r lifts the level by 0.06-0.09 m. The net change is -0.02 to +0.07 m, which is test 9's
   gauge deficit with the tide error removed.
 - *TC stations.* With the TC cycles masked, the ETC part moves as at the other stations. The
   total hardly changes at RP100 and above, because COAST-RP's TC rate dominates there.
@@ -983,12 +985,12 @@ Station - gauge, median / MAE in m:
 
 | | RP10 COAST-RP | RP10 new | RP100 COAST-RP | RP100 new |
 |---|---|---|---|---|
-| ETC-dominated gauges (451) | -0.018 / 0.180 | -0.013 / 0.105 | -0.068 / 0.245 | -0.031 / 0.166 |
-| TC-dominated gauges (167) | -0.192 / 0.242 | -0.093 / 0.139 | -0.248 / 0.442 | -0.168 / 0.389 |
-| stations with a TC part (323) | -0.130 / 0.218 | -0.047 / 0.121 | -0.181 / 0.345 | -0.083 / 0.274 |
+| ETC-dominated gauges (451) | -0.017 / 0.179 | -0.005 / 0.107 | -0.068 / 0.244 | -0.021 / 0.164 |
+| TC-dominated gauges (167) | -0.192 / 0.239 | -0.088 / 0.137 | -0.247 / 0.443 | -0.165 / 0.391 |
+| stations with a TC part (323) | -0.128 / 0.216 | -0.036 / 0.119 | -0.181 / 0.342 | -0.072 / 0.269 |
 
-The new product's MAE is 30-45% below COAST-RP's at ETC gauges. Its median bias is about half
-of COAST-RP's everywhere. Even the TC-dominated gauges improve: the ETC part alone, with r = 1, is 0.47 m low at RP100;
+The new product's MAE is 33-40% below COAST-RP's at ETC gauges. Its median bias is a third to
+a half of COAST-RP's everywhere. Even the TC-dominated gauges improve: the ETC part alone, with r = 1, is 0.47 m low at RP100;
 with COAST-RP_TC and r it is 0.17 m low.
 
 So r does not overcorrect at TC coasts; they remain too low, and test 10 stays the route for TC
@@ -1007,8 +1009,8 @@ Where the new product departs strongly from COAST-RP, the gauges side with the n
   6.78 m.
 
 **Hydrographs** (fig15).
-- *Shape source* at RP100: GTSM events at 19,132 stations, TC Gaussian at 3,508, TC gauge shape at
-  570, the GTSM-QA Gaussian at 15, the no-surge Gaussian at 1. The TC share grows from 5.5% at RP2
+- *Shape source* at RP100: GTSM events at 19,288 stations, TC Gaussian at 3,354, TC gauge shape at
+  568, the GTSM-QA Gaussian at 15, the no-surge Gaussian at 1. The TC share grows from 5% at RP2
   to 22% at RP1000. It is larger than before the TC mask, because the masked ETC part is lower.
 - *Window and tide.* Median window ±72 h. The median tide at the annual-maximum peaks is 1.2 x
   MHWS, the same as the k of §8.3.
@@ -1020,22 +1022,30 @@ COAST-RP (§7). RPs above 250 y extrapolate ~46 years of skew surges and are fla
 ### 8.5 From stations to tiles: interpolation, FES consistency and the production switch
 
 **Interpolation** (`station_interpolation.py`, fig16). Production seeds each tile's coastline
-cells by inverse-distance weighting over the k = 15 nearest stations of the same ocean component,
-power 2 (`flood_model.idw_seed_values_at`, `knn`). A leave-one-out test over the 22,670 stations
+cells by inverse-distance weighting over the k nearest stations of the same ocean component
+(`flood_model.idw_seed_values_at`; k = 15 and power 2 until this test). A leave-one-out test over the 22,670 stations
 north of 60 S shows how well a coastline cell between stations is predicted. It is global, i.e.
 without the ocean-component restriction.
 
 | RP100 | MAE (cm) | p90 \|error\| (cm) | stations > 0.5 m |
 |---|---|---|---|
 | nearest station | 7.0 | 17.8 | 556 |
-| k = 15, power 2 (production) | 7.0 | 18.5 | 470 |
+| k = 15, power 2 (former production) | 7.0 | 18.5 | 470 |
 | k = 5, power 2 | 5.9 | 15.1 | 379 |
 | k = 3, power 3 | 5.6 | 13.8 | 380 |
+
+| k = 5, power 3 (production) | 5.7 | 14.3 | 377 |
 
 - The gain from fewer neighbours is about 1.5 cm.
 - The spacing of the stations sets the error: 2 cm within 5 km, 3-4 cm at 5-10 km, 8-12 cm at
   10-50 km and about 20 cm beyond 50 km.
-- Production keeps k = 15, a config default. Whether to lower it is an open question (TODO.md).
+- Production uses k = 5 and power 3 (`simulation.flooding.knn`, `idw_power`) for both sources,
+  for the coastline seeds and the static level. k = 5 is barely worse than k = 2-3 and has the
+  fewest stations off by more than 0.5 m; it depends less on a single bad station.
+- The test predicts a station from neighbours that are farther away than a coastline cell's,
+  so it overstates the error. The ranking should hold.
+- `src/along_water.py` (IDW over water-path distances) would address the errors across
+  headlands and at estuary heads. It is built and unit-tested but not yet scored (TODO.md).
 
 **FES consistency** (the basin-head QA of the plan). The 73 stations whose level differs by more
 than 1 m from the k = 5 prediction are mostly real gradients:
@@ -1058,23 +1068,29 @@ The rule adds 10 stations: Varangerfjord, Labrador, Suriname, Maranhão, Sonmian
 group and the Falklands. One of them is doubtful: in São Marcos Bay (Maranhão) FES2022's MHWS of
 3.2 m matches the published spring range better than FES2014's 2.1 m (TODO.md).
 
-**Production switch** (prepared, not made). `export_level_product.py` writes two files:
+**Production switch.** `boundary_conditions.storm_tide_source` (`gfm_product`, the default, or
+`coast_rp`) selects the source for every model. The product step writes two files:
 - `GFM_storm_tide_levels.nc`: COAST-RP's stations, order, coordinates and `storm_tide_rp_XXXX`
   variables, plus `level_source`, r, atlas, `gpd_shape` and `tc_masked_share`.
-  `prepare_boundary_conditions.preprocess_coastrp` reads it unchanged and keeps the same 22,670
-  stations north of 60 S.
+  `prepare_boundary_conditions` reads it in place of COAST-RP and keeps the same 22,670
+  stations north of 60 S; MDT, the 2020 offset and SLR are added as before.
 - `GFM_storm_tide_hydrographs.nc`: `storm_tide_hydrograph` (station, return period, time).
-  `event_volume.load_coast_hg` slices it at the scenario's RP when `duration_correction.coast_hg_path`
-  points to it; `eikonal_runner` passes the RP.
+  Correction B reads it at the scenario's RP (`event_volume.load_coast_hg`). The SFINCS forcing
+  takes its RP100 hydrograph, cut to COAST-HG's time axis, and shifts it to the tile boundary's
+  level as before (`sfincs_tiles/build_line_forcing.py`).
 
-The switch itself is in TODO.md:
-1. Copy both files to `<data_root>`.
-2. Point the `coast_rp` catalog entry and `coast_hg_path` at them.
-3. Clear the cached preprocessed COAST-RP and the scenario and boundary files.
-4. Regenerate the SFINCS forcing.
-5. Recalibrate fsf.
-6. Run test 8.
-7. Rerun the tiles.
+A marker next to the scenario NetCDFs records which source they hold. A config asking for the
+other source stops at the station cache instead of reading them. What is left to run (the product
+on `<data_root>`, the SFINCS forcing, the fsf recalibration, test 8, the tile rerun) is listed in
+TODO.md.
+
+**Durations** (`product_durations.py`, fig18). Production with COAST-HG uses one RP100
+hydrograph per station for every RP. The product's hydrographs are wider over nearly the whole
+coast: median T(0.25) 12 h against 6 h at RP100, and T(0.5) 35 h against 23 h. T falls with the
+RP, as the gauges show (fig10): T(0.25) is 13 h at RP2 and 11 h at RP1000. The product is
+narrower than COAST-HG only where the TC Gaussian replaces the shape (Gulf of Mexico, the
+Caribbean, Pacific islands). Correction B reads T from these hydrographs, so the longer T lowers
+its friction multiplier. That is why fsf must be recalibrated with the product.
 
 ## 9. Comparison with other global coastal boundary conditions
 
@@ -1148,12 +1164,11 @@ each script's docstring for further arguments):
 19. `surge_correction.py`
 20. `export_input_tables.py`
 21. `input_analysis/make_boundary_forcing_figures.py` (the summary figures and their descriptions)
-22. `build_level_product.py stations`, `extract_gtsm_series.py --stations-csv ... --variable surge`,
-    `build_level_product.py build`, then `build_level_product.py gauges` (§8.4;
-    `--out-dir .cleanup_baseline/level_product`, ~2.5 h on 3 workers; IBTrACS since-1980 list in
-    `.cleanup_baseline/ibtracs/`)
-23. `level_product_qa.py`, `station_interpolation.py`, `export_level_product.py` (§8.4-8.5; same
-    `--out-dir`), then the figure script again for fig12-fig17
+22. `preparation/run_preparation.py storm_tide_product` (§8.4; ~6 h on 4 workers, into
+    `boundary_conditions.storm_tide_product_dir`)
+23. `level_product_gauges.py`, `level_product_qa.py` (`--product-dir`), `station_interpolation.py`,
+    `product_durations.py` (`--out-dir` = that directory), then the figure script with
+    `--product-dir` for fig12-fig18
 
 Inputs on `<data_root>` are read only.
 

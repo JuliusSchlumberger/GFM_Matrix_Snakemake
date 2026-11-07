@@ -146,11 +146,22 @@ single small islet).
 ## 4. Water-level boundary conditions
 
 **Extreme water levels.** The water levels used to force the coastal
-domains come from COAST-RP, a global dataset of storm-tide extreme water
-levels at coastal stations, available for a range of return periods (2
-to 1000 years). Antarctic stations are excluded, since the underlying
-storm-tide estimates are considered unreliable there and the coastline is
-not populated.
+domains are storm-tide extreme water levels at the ~23,000 coastal stations
+of COAST-RP, for return periods of 2 to 1000 years, from one of two sources
+(`boundary_conditions.storm_tide_source`):
+
+- the storm-tide product (default), built by the preparation step from raw
+  data: skew surges of the GTSM-ERA5 surge reanalysis laid on the FES tide
+  atlas, scaled by the ratio of gauge to model surge at nearby GESLA tide
+  gauges, combined with COAST-RP's tropical-cyclone part, with one storm-tide
+  hydrograph per station and return period;
+- COAST-RP itself, with the COAST-HG 100-year hydrograph shape for every
+  return period.
+
+The method and its validation against the gauges are in
+`boundary_test/INPUT_ANALYSIS.md` §8. Antarctic stations are excluded, since
+the underlying storm-tide estimates are considered unreliable there and the
+coastline is not populated.
 
 **Vertical reference correction.** The elevation data and the water-level
 data are not natively expressed relative to the same reference surface,
@@ -196,14 +207,16 @@ by straight-line distance but is separated from the domain by land (for
 example, on the far shore of a narrow strait or isthmus) is excluded.
 The water levels of the remaining, ocean-connected stations are
 interpolated onto the domain's own coastal cells to produce its boundary
-forcing. An ocean-fronting domain that finds no ocean-connected station
+forcing, by inverse-distance weighting over the nearest stations
+(`simulation.flooding.knn` and `idw_power`; the same setting interpolates the
+static sea level). An ocean-fronting domain that finds no ocean-connected station
 at all within its search area (a short or sparsely-gauged stretch of
 coast) is not dropped from the simulation set - it is instead assigned an
 explicitly empty boundary forcing, which is a known limitation for the
 small number of domains this affects.
 
 **Hinterland domains.** Domains with no ocean edge of their own do not
-draw on COAST-RP stations at all. Instead, once their lower-distance
+draw on storm-tide stations at all. Instead, once their lower-distance
 neighbour domain(s) (section 3) have already been simulated for a given
 scenario, the flood water levels those neighbours produced along the
 shared domain edge are used directly as the boundary condition for the

@@ -20,20 +20,14 @@ Usage:
 """
 
 import argparse
-import lzma
-import shutil
 import sys
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pyTMD.arguments
 import pyTMD.io
-import pyTMD.io.FES
-import pyTMD.predict
 import rasterio.transform
-import timescale.time
 from pyproj import Transformer
 
 REPO = Path(__file__).resolve().parents[1]
@@ -41,35 +35,24 @@ sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "review_critiques"))
 from storm_tide_hydrograph import STEPS_PER_HR  # noqa: E402
 from tide_statistics import high_water_statistics, spring_high_waters  # noqa: E402
+from tide_prediction import extract_constants, nodal_times, tide_basis  # noqa: E402
+from tide_prediction import ensure_local_fes as _ensure_local_fes  # noqa: E402
 
 FES_SOURCE = Path("P:/11212688-004-global-floodmaps/modelling/inputs/fes2022b/ocean_tide_extrapolated")
 FES_MODEL = "FES2022_extrapolated"
 NODE_DEG = 1.0 / 30.0
-CUTOFF_KM = 20.0
-NODAL_CYCLE_YR = 18.61
-START = np.datetime64("1996-01-01T00:00")
 STEP_MIN = 60 // STEPS_PER_HR  # 10 min, the step of the synthetic hydrographs
+def ensure_local_fes(cache: Path) -> Path:
+    return _ensure_local_fes(FES_SOURCE, cache)
+
+
+def prediction_basis(constituents: list, model) -> tuple[np.ndarray, np.ndarray]:
+    return tide_basis(model, nodal_times())
+
+
 WINDOW_HR = 72  # plan §5.E: 6-day window centred on a spring high water
 NODES_PER_TASK = 40
 KEY_DECIMALS = 6
-CROP_BUFFER_DEG = 0.5  # > CUTOFF_KM, so extrapolation sees every valid cell within the cutoff
-
-
-def ensure_local_fes(cache: Path) -> Path:
-    """Decompress the FES2022 .nc.xz files into cache/fes2022b/ocean_tide_extrapolated once."""
-    dest = cache / "fes2022b" / "ocean_tide_extrapolated"
-    dest.mkdir(parents=True, exist_ok=True)
-    for src in sorted(FES_SOURCE.iterdir()):
-        name = src.name[:-3] if src.name.endswith(".xz") else src.name
-        target = dest / name
-        if target.exists() or not name.endswith(".nc"):
-            continue
-        tmp = target.with_suffix(".nc.part")
-        opener = lzma.open if src.name.endswith(".xz") else open
-        with opener(src, "rb") as fin, open(tmp, "wb") as fout:
-            shutil.copyfileobj(fin, fout, length=16 << 20)
-        tmp.replace(target)
-    return cache
 
 
 def tile_seeds(tile_id: str) -> tuple[np.ndarray, np.ndarray]:
@@ -94,79 +77,6 @@ def _tile_seeds_or_none(tile_id: str):
 
 def node_of(lonlat: np.ndarray) -> np.ndarray:
     return np.round(np.round(lonlat / NODE_DEG) * NODE_DEG, KEY_DECIMALS)
-
-
-def extract_constants(model, groups: list[np.ndarray], method: str = "spline") -> np.ndarray:
-    """Complex harmonic constants (node, constituent) for the (lon, lat) node groups, stacked.
-
-    As `model.extract_constants(crop=True, extrapolate=True)` per group, with each constituent
-    grid read once: `pyTMD.io.FES.read_netcdf_file` is swapped for a one-file cache meanwhile.
-    Use method "bilinear" for atlases with land holes (EOT20): a spline across masked cells
-    overshoots by metres next to them.
-    """
-    fes, original = pyTMD.io.FES, pyTMD.io.FES.read_netcdf_file
-    cache: dict = {}
-    window: dict = {}
-
-    def cached(path, **kwargs):
-        if str(path) not in cache:
-            cache.clear()
-            cache[str(path)] = original(path, **kwargs)
-        # pyTMD crops and extrapolates the returned grid in place, so each call gets its own copy;
-        # without it every later group sees the damaged grid and comes back NaN. Only the window
-        # around the current group is copied (a global 1/30 deg grid is ~1 GB).
-        hc, lon, lat = cache[str(path)]
-        if window:
-            margin = CROP_BUFFER_DEG + 4 * abs(float(lon[1] - lon[0]))
-            ii = np.flatnonzero((lon >= window["lon0"] - margin) & (lon <= window["lon1"] + margin))
-            jj = np.flatnonzero((lat >= window["lat0"] - margin) & (lat <= window["lat1"] + margin))
-            return hc[jj[0]:jj[-1] + 1, ii[0]:ii[-1] + 1].copy(), lon[ii[0]:ii[-1] + 1].copy(), lat[jj[0]:jj[-1] + 1].copy()
-        return hc.copy(), lon.copy(), lat.copy()
-
-    # 0-360 longitudes (the FES grid's) avoid shifting the global grid per crop, except for
-    # groups that straddle 0 deg.
-    groups = [np.column_stack([np.where(g[:, 0] < 0, g[:, 0] + 360, g[:, 0]), g[:, 1]])
-              if np.ptp(np.where(g[:, 0] < 0, g[:, 0] + 360, g[:, 0])) < 180 else g for g in groups]
-    hc = [np.full((len(g), len(model.model_file)), np.nan + 1j * np.nan) for g in groups]
-    fes.read_netcdf_file = cached
-    try:
-        for k, model_file in enumerate(model.model_file):
-            for g, out in zip(groups, hc):
-                window.clear()
-                if (g[:, 0] >= 0).all():  # groups straddling 0 deg keep the global grid
-                    window.update(lon0=g[:, 0].min(), lon1=g[:, 0].max(), lat0=g[:, 1].min(), lat1=g[:, 1].max())
-                amp, ph = fes.extract_constants(g[:, 0], g[:, 1], [model_file], version=model.version,
-                                                compressed=model.compressed, type=model.type, scale=model.scale,
-                                                crop=True, buffer=CROP_BUFFER_DEG, method=method,
-                                                extrapolate=True, cutoff=CUTOFF_KM)
-                out[:, k] = np.ma.filled(amp[:, 0] * np.exp(-1j * ph[:, 0] * np.pi / 180.0), np.nan)
-            print(f"  constituent {k + 1}/{len(model.model_file)}", flush=True)
-    finally:
-        fes.read_netcdf_file = original
-    return np.vstack(hc)
-
-
-def prediction_basis(constituents: list, model) -> tuple[np.ndarray, np.ndarray]:
-    """Return (B_re, B_im), (time, constituent): tide = B_re @ hc.real + B_im @ hc.imag.
-
-    Major part as `pyTMD.predict.time_series`; minor part from `pyTMD.predict.infer_minor`
-    evaluated on unit constants, which is exact because the inference is linear in them.
-    """
-    steps = np.arange(int(NODAL_CYCLE_YR * 365.25 * 24 * 60 / STEP_MIN))
-    ts = timescale.time.Timescale().from_datetime(START + (steps * STEP_MIN).astype("timedelta64[m]"))
-    pu, pf, G = pyTMD.arguments.arguments(ts.tide + pyTMD.predict._mjd_tide, constituents,
-                                          deltat=ts.tt_ut1, corrections=model.corrections)
-    th = G * np.pi / 180.0 + pu
-    b_re, b_im = pf * np.cos(th), -pf * np.sin(th)
-    del pu, pf, G, th
-    nc = len(constituents)
-    for k in range(nc):
-        for unit, dst in ((1.0, b_re), (1j, b_im)):
-            z = np.ma.zeros((1, nc), dtype=np.complex128)
-            z[0, k] = unit
-            dst[:, k] += np.ma.filled(pyTMD.predict.infer_minor(ts.tide, z, constituents, deltat=ts.tt_ut1,
-                                                                corrections=model.corrections, minor=model.minor), 0.0)
-    return b_re, b_im
 
 
 def spring_window(series: np.ndarray, dt_s: float, mhws_m: float) -> np.ndarray:

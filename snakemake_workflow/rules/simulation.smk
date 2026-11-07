@@ -7,7 +7,7 @@ rule run_eikonal:
     `mem_mb` (eikonal_runner.estimate_eikonal_mem_mb) lets Snakemake throttle
     concurrency under `--resources mem_mb=<N>`; leave headroom (~80% of RAM).
 
-    hop_distance == 0 tiles use COAST-RP/IDW forcing; hop_distance >= 1 tiles
+    hop_distance == 0 tiles use station/IDW forcing (boundary_conditions.storm_tide_source); hop_distance >= 1 tiles
     are seeded from non-zero cells of strictly-lower-hop overlapping tiles for
     the SAME scenario. With no stations / no flooded seeds, an all-ZERO
     waterdepth is written ("definitely dry") and logged to
@@ -40,6 +40,7 @@ rule run_eikonal:
         n_scenarios_per_tile=len(RETURN_PERIODS) * len(WATERLEVEL_NAMES),
         flooding_config=config["simulation"]["flooding"],
         static_level_inputs=static_level_inputs(config),
+        hydrograph_path=str(storm_tide_hydrograph_path(config)),
     resources:
         # Deliberately generous; over-estimating only reduces concurrency.
         mem_mb=lambda wildcards, input: estimate_eikonal_mem_mb(

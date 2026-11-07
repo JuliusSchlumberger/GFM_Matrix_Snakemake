@@ -13,37 +13,22 @@ Usage:
 """
 
 import argparse
+import sys
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from gesla import extract_record  # noqa: E402
 
 GESLA_DIR = Path("P:/11212688-004-global-floodmaps/modelling/inputs/GESLA4.1_ALL")
 FIRST_YEAR = 1979  # start of the GTSM ERA5 surge series
-GOOD_QC = (1, 2)
-YEAR_COVERAGE = 0.8
 
 
 def read_site(args) -> dict:
     file_name, tz_hr, out = args
-    target = Path(out) / "gesla" / f"{file_name}.npz"
-    if not target.exists():
-        df = pd.read_csv(GESLA_DIR / file_name, comment="#", sep=r"\s+", header=None,
-                         names=["date", "time", "z", "qc", "use"], dtype={"date": str, "time": str})
-        df = df[(df.use == 1) & df.qc.isin(GOOD_QC) & (df.date.str[:4].astype(int) >= FIRST_YEAR)]
-        t = pd.to_datetime(df.date + " " + df.time, format="%Y/%m/%d %H:%M:%S") - pd.Timedelta(hours=float(tz_hr))
-        np.savez(target, t=t.to_numpy(dtype="datetime64[s]"), z=df.z.to_numpy(dtype=np.float32))
-    data = np.load(target)
-    t = data["t"]
-    if len(t) < 2:
-        return {"file_name": file_name, "n_samples": len(t), "good_years": 0, "step_min": np.nan}
-    step = np.median(np.diff(t).astype(float)) / 60.0
-    years = t.astype("datetime64[Y]").astype(int) + 1970
-    counts = pd.Series(years).value_counts()
-    good = int((counts >= YEAR_COVERAGE * 365.25 * 24 * 60 / step).sum())
-    return {"file_name": file_name, "n_samples": len(t), "good_years": good, "step_min": step,
-            "first": str(t[0]), "last": str(t[-1])}
+    return extract_record(GESLA_DIR, file_name, tz_hr, Path(out) / "gesla" / f"{file_name}.npz")
 
 
 def main() -> None:

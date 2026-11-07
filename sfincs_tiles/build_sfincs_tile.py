@@ -199,7 +199,8 @@ def _create_mask(sf: SfincsModel, tile_gdf: gpd.GeoDataFrame, boundary_lines_gpk
             print(f"      {n} new boundary cell(s) on land (native mask) set back to active")
 
 
-# Hours on COAST-HG's shared synthetic time axis (storm peak at t=74.5 h).
+# Hours on the forcing time axis (build_line_forcing: COAST-HG's, storm peak at t=74.5 h, for
+# either storm_tide_source).
 TRUNCATE_WINDOW_HR_DEFAULT = (40.0, 110.0)
 
 # 120 m grid / 4 = 30 m subgrid = DeltaDTM's native resolution; finer would let
@@ -224,8 +225,8 @@ def build_sfincs_tile(
 ) -> Path:
     """Build and write the SFINCS model to `root`/`base_dir_name`/`tile_id`/sfincs_model.
 
-    `truncate_window_hr` is (start, end) h on the COAST-HG time axis; None keeps the
-    full ~148.8 h. `tref` defaults to 2026-01-01 (only elapsed time matters).
+    `truncate_window_hr` is (start, end) h on the forcing time axis (peak at 74.5 h); None
+    keeps the full ~148.8 h. `tref` defaults to 2026-01-01 (only elapsed time matters).
     Raises RuntimeError if the boundary line yields no waterlevel-boundary cells.
     """
     if boundary_lines_gpkg is None:
@@ -411,7 +412,7 @@ def main() -> None:
     parser.add_argument("--subgrid-nrmax", type=int, default=SUBGRID_NRMAX_DEFAULT)
     parser.add_argument(
         "--no-truncate", action="store_true",
-        help="use the full ~148.8h COAST-HG hydrograph instead of the default "
+        help="use the full ~148.8h forcing hydrograph instead of the default "
              f"{TRUNCATE_WINDOW_HR_DEFAULT} window - for A/B comparison only.",
     )
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS", help="output root directory name under paths.root (default: calibration_roughness_SFINCS)")

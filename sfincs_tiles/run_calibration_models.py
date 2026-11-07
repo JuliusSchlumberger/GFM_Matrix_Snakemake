@@ -135,11 +135,12 @@ def solver_inputs(dem: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, np.nda
             np.where(nodata, np.int8(LAND_CODE), mask).astype(mask.dtype))
 
 
-def production_seeds(mask, transform, crs, boundaries: gpd.GeoDataFrame, knn: int, river_code: int):
+def production_seeds(mask, transform, crs, boundaries: gpd.GeoDataFrame, knn: int, river_code: int,
+                     idw_power: float = 2.0):
     """Return (rows, cols, level_m) eikonal seeds on the subgrid coastline, or None if none.
 
-    Each cell gets the inverse-distance-squared average of its `knn` nearest connected
-    stations (flood_model.idw_seed_values_at, as production), computed in lon/lat.
+    Each cell gets the inverse-distance average (weights distance^-idw_power) of its `knn` nearest
+    connected stations (flood_model.idw_seed_values_at, as production), computed in lon/lat.
     """
     coast = subgrid_coastline_mask(mask, OCEAN_CODE, river_code)
     rows, cols = np.nonzero(coast)
@@ -150,7 +151,8 @@ def production_seeds(mask, transform, crs, boundaries: gpd.GeoDataFrame, knn: in
     st = boundaries.to_crs("EPSG:4326")
     values = decode_waterlevel_cm(st[WATERLEVEL_NAME].to_numpy())
     seeds = idw_seed_values_at(np.column_stack([lon, lat]), rows, cols,
-                               np.column_stack([st.geometry.x, st.geometry.y]), values, knn, mask, OCEAN_CODE)
+                               np.column_stack([st.geometry.x, st.geometry.y]), values, knn, mask, OCEAN_CODE,
+                               idw_power)
     return rows.astype(np.int64), cols.astype(np.int64), seeds.astype(np.float32)
 
 
@@ -203,12 +205,13 @@ def main() -> None:
     if not todo:
         print(f"tile {args.tile_id}: eikonal sweep already done")
         return
-    seeds = production_seeds(mask, transform, crs, boundaries, int(flooding["knn"]), river_code)
+    seeds = production_seeds(mask, transform, crs, boundaries, int(flooding["knn"]), river_code,
+                             float(flooding["idw_power"]))
     if seeds is None:
         raise SystemExit(f"tile {args.tile_id}: no coastline cell on the subgrid - nothing to seed")
     seed_rows, seed_cols, seed_values = seeds
     print(f"tile {args.tile_id}: {len(seed_rows)} coastline seed cell(s), levels "
-          f"{seed_values.min():.2f}-{seed_values.max():.2f} m (knn={flooding['knn']}, connected stations)", flush=True)
+          f"{seed_values.min():.2f}-{seed_values.max():.2f} m (knn={flooding['knn']}, power {flooding['idw_power']}, connected stations)", flush=True)
 
     solver_dem, solver_mask = solver_inputs(dem, mask)
     diag_path = out_dir / "eikonal_solver_diagnostics.json"

@@ -22,13 +22,13 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pyTMD.io
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "boundary_test"))
-from fes_tide_stats import STEP_MIN, extract_constants, prediction_basis  # noqa: E402
-from levels_tides import GROUP_DEG, levels  # noqa: E402
+from fes_tide_stats import STEP_MIN, prediction_basis  # noqa: E402
+from tide_prediction import fes2014_model, grouped_constants  # noqa: E402
+from tide_prediction import levels  # noqa: E402
 
 INPUTS = Path("P:/11212688-004-global-floodmaps/modelling/inputs")
 REFERENCE_ATLASES = {"fes2014": ("FES2014", INPUTS / "fes2014" / "fes2014b_elevations_extrapolated"
@@ -43,22 +43,7 @@ BASINS = {"Minas Basin / Cobequid Bay": (-65.2, -63.2, 44.9, 45.6),
 
 
 def reference_model(name: str):
-    _, files_dir, model_name, _ = REFERENCE_ATLASES[name]
-    # pyTMD expects its own folder layout; the inputs keep the provider's, so the file paths are remapped.
-    model = pyTMD.io.model(verify=False).elevation(model_name)
-    model.model_file = [files_dir / Path(f).name for f in model.model_file]
-    return model
-
-
-def grouped_constants(model, lonlat: np.ndarray, method: str = "spline") -> np.ndarray:
-    cell = np.floor(lonlat / GROUP_DEG).astype(int)
-    _, inverse = np.unique(cell, axis=0, return_inverse=True)
-    inverse = inverse.ravel()
-    groups = [np.flatnonzero(inverse == g) for g in range(inverse.max() + 1)]
-    hc = extract_constants(model, [lonlat[g] for g in groups], method)
-    out = np.empty_like(hc)
-    out[np.concatenate(groups)] = hc
-    return out
+    return fes2014_model(REFERENCE_ATLASES[name][1])
 
 
 def atlas_basis(model, name: str) -> tuple[Path, Path]:

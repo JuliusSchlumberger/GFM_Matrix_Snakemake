@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Build COAST-RP station water levels per return period and SLR scenario.
+"""Build station water levels per return period and SLR scenario at the COAST-RP stations.
 
 Entry point: run(config), via `python run_preparation.py boundary_conditions`.
 total_wl = storm_tide(RP) + MDT + baseline_offset + SLR_fingerprint(target_slr), in metres.
+storm_tide is COAST-RP's or the storm-tide product's (boundary_conditions.storm_tide_source);
+both share COAST-RP's stations and local-MSL reference.
 baseline_offset lifts MSL from the MDT epoch to 2020 (boundary_conditions.slr_baseline_offset_m,
 regionalised like the fingerprints), so SLR_0 is the 2020 sea level that the analysis SLR axis
 starts from.
@@ -27,6 +29,7 @@ import numpy as np
 import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from boundaries import STORM_TIDE_SOURCE_MARKER, storm_tide_levels_path, storm_tide_source  # noqa: E402
 from config_utils import get_data_catalog, merged_waterlevel_names, retry_transient_io  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -366,7 +369,11 @@ def run(config: dict, force: bool = True) -> None:
     catalog = get_data_catalog(
         _REPO_ROOT / config["paths"]["hydromt_data_catalog"], root=config["paths"]["root"]
     )
-    coastrp_raw  = Path(catalog.get_source("coast_rp").path)
+    source = storm_tide_source(config)
+    levels_raw = storm_tide_levels_path(config, catalog.get_source("coast_rp").path)
+    if not levels_raw.exists():
+        raise FileNotFoundError(f"{levels_raw} missing: run `run_preparation.py storm_tide_product` first "
+                                "(or set boundary_conditions.storm_tide_source: coast_rp)")
 
     slr_projection = wl_cfg["slr_projection"]
     confidence   = wl_cfg.get("confidence_level", "medium")
@@ -384,9 +391,16 @@ def run(config: dict, force: bool = True) -> None:
             path.unlink()
             logger.info("  Deleted %s (force=True)", path.name)
 
-    preprocessed_path = proc_dir / "COAST-RP_preprocessed.nc"
+    # The scenario files keep their names across sources; the marker stops a resumed run
+    # (force=False) from mixing them.
+    marker = out_dir / STORM_TIDE_SOURCE_MARKER
+    if not force and marker.exists() and marker.read_text().strip() != source:
+        raise RuntimeError(f"{out_dir} holds {marker.read_text().strip()} levels, the config asks for {source}: "
+                           "rerun without --skip-existing")
+    preprocessed_path = proc_dir / ("COAST-RP_preprocessed.nc" if source == "coast_rp"
+                                    else "GFM_storm_tide_levels_preprocessed.nc")
     _maybe_delete(preprocessed_path)
-    ds_coastrp = preprocess_coastrp(coastrp_raw, preprocessed_path, coastrp_min_lat)
+    ds_coastrp = preprocess_coastrp(levels_raw, preprocessed_path, coastrp_min_lat)
 
     mdt_cfg = wl_cfg["mdt_correction"]
     mdt_path = Path(catalog.get_source("mdt_cnes_cls22").path)
@@ -422,6 +436,7 @@ def run(config: dict, force: bool = True) -> None:
         for f in out_dir.glob(glob_pattern):
             f.unlink()
             logger.info("  Deleted %s (force=True)", f.name)
+    retry_transient_io(marker.write_text, source)
     combine_scenarios(
         ds_coastrp, ds_slr, out_dir, return_periods, target_slr_m,
         nc_filename_template, nc_variable_template, mdt_arr=mdt_arr, baseline_offset_arr=baseline_offset_arr,

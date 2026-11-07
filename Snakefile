@@ -40,7 +40,7 @@ def _retrying_makedirs(name, mode=0o777, exist_ok=False, _retries=5, _delay_s=15
 os.makedirs = _retrying_makedirs
 
 sys.path.insert(0, os.path.join(workflow.basedir, "src"))
-from boundaries import static_level_inputs  # noqa: E402
+from boundaries import static_level_inputs, storm_tide_hydrograph_path  # noqa: E402
 from eikonal_runner import estimate_eikonal_mem_mb  # noqa: E402
 from config_utils import _expand_paths, get_data_catalog, merged_waterlevel_names  # noqa: E402
 from tiles import build_chunk_grid  # noqa: E402

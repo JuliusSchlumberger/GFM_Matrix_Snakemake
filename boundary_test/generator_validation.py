@@ -71,7 +71,8 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "boundary_test"))
 from extract_gtsm_series import load_series, station_series  # noqa: E402
-from levels_tides import FES_CACHE, HOURLY_START, on_hourly_grid  # noqa: E402
+from levels_tides import FES_CACHE  # noqa: E402
+from tide_prediction import HOURLY_START, on_hourly_grid  # noqa: E402
 from storm_tide_hydrograph import (  # noqa: E402
     STEPS_PER_HR,
     annual_maximum_events,
@@ -87,6 +88,7 @@ from storm_tide_hydrograph import (  # noqa: E402
     storm_events,
     to_10min,
 )
+from storm_tide_product import fit_length, running_mean  # noqa: E402
 from tide_statistics import spring_high_waters  # noqa: E402
 
 TARGET_RPS = (2, 10, 25, 50, 100)
@@ -281,21 +283,6 @@ def _swap_measures(sel, centres, gtsm_tide, surge_win, level_win, c, half_hr, fe
         lev = level_win[j, c - half_hr:c + half_hr + 1]
         out["gtsm_event"].append(profile_measures(lev / lev[half_hr]))
     return {v: pd.DataFrame(m).median().to_dict() for v, m in out.items() if m}
-
-
-def running_mean(windows: np.ndarray, width_hr: int) -> np.ndarray:
-    kernel = np.ones(width_hr) / width_hr
-    return np.vstack([np.convolve(np.nan_to_num(w), kernel, mode="same") for w in windows])
-
-
-def fit_length(shape: np.ndarray, n: int) -> np.ndarray:
-    if len(shape) == n:
-        return shape
-    c, h = len(shape) // 2, n // 2
-    if len(shape) > n:
-        return shape[c - h:c + h + 1]
-    pad = h - c
-    return np.pad(shape, pad)
 
 
 def gauge_tc_shapes(ev: pd.DataFrame, prof: np.ndarray, surge: np.ndarray, sites: pd.DataFrame) -> dict:

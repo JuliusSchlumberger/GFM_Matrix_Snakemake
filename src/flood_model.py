@@ -52,11 +52,12 @@ def static_level_grid(
     stations_lonlat: np.ndarray,
     station_values: np.ndarray,
     k: int = 5,
+    idw_power: float = 2.0,
 ) -> np.ndarray:
     """Interpolate the static sea level (m, DEM datum) onto the tile grid.
 
-    Inverse-distance-squared k-NN of the station values on a STATIC_LEVEL_COARSEN
-    grid, bilinearly upsampled. Station values are MDT + SLR fingerprint
+    Inverse-distance k-NN (weights distance^-idw_power) of the station values on a
+    STATIC_LEVEL_COARSEN grid, bilinearly upsampled. Station values are MDT + SLR fingerprint
     (`boundaries.static_station_levels`); `transform` must be EPSG:4326.
     """
     rows = np.arange(0, shape[0] + STATIC_LEVEL_COARSEN, STATIC_LEVEL_COARSEN).clip(max=shape[0] - 1)
@@ -66,7 +67,7 @@ def static_level_grid(
     xs, ys = rasterio.transform.xy(transform, rr.ravel(), cc.ravel())
     cell_latlon_rad = np.radians(np.column_stack([ys, xs]))
     coarse = _idw_nearest_k(
-        cell_latlon_rad, np.radians(stations_lonlat[:, ::-1]), station_values, min(k, len(station_values)),
+        cell_latlon_rad, np.radians(stations_lonlat[:, ::-1]), station_values, min(k, len(station_values)), idw_power,
     ).reshape(rr.shape)
     # Bilinear in index space between the coarse sample rows/cols.
     r_full, c_full = np.arange(shape[0]), np.arange(shape[1])
@@ -143,10 +144,11 @@ def _idw_seed_values(
     k: int,
     mask: np.ndarray,
     ocean_code: int,
+    idw_power: float = 2.0,
 ) -> np.ndarray:
     xs, ys = rasterio.transform.xy(transform, rows, cols)
     return idw_seed_values_at(np.column_stack([xs, ys]), rows, cols, stations_lonlat, station_values,
-                              k, mask, ocean_code)
+                              k, mask, ocean_code, idw_power)
 
 
 def idw_seed_values_at(
@@ -158,8 +160,9 @@ def idw_seed_values_at(
     k: int,
     mask: np.ndarray,
     ocean_code: int,
+    idw_power: float = 2.0,
 ) -> np.ndarray:
-    """Inverse-distance-squared k-NN (haversine) seed values at (lon, lat) cells.
+    """Inverse-distance k-NN (haversine, weights distance^-idw_power) seed values at (lon, lat) cells.
 
     Positions are (lon, lat) degrees (EPSG:4326; transform projected grids
     first). Each cell uses only stations in its own 8-connected ocean
@@ -177,7 +180,7 @@ def idw_seed_values_at(
     cell_components = components[rows, cols]
 
     if n_components <= 1:
-        return _idw_nearest_k(cell_latlon_rad, station_latlon_rad, station_values, k)
+        return _idw_nearest_k(cell_latlon_rad, station_latlon_rad, station_values, k, idw_power)
 
     seed_tree = BallTree(cell_latlon_rad, metric="haversine")
     _, nearest_seed = seed_tree.query(station_latlon_rad, k=1)
@@ -192,7 +195,7 @@ def idw_seed_values_at(
         else:
             sub_values, sub_latlon = station_values, station_latlon_rad
         k_eff = min(k, len(sub_values))
-        result[cell_sel] = _idw_nearest_k(cell_latlon_rad[cell_sel], sub_latlon, sub_values, k_eff)
+        result[cell_sel] = _idw_nearest_k(cell_latlon_rad[cell_sel], sub_latlon, sub_values, k_eff, idw_power)
     return result
 
 
@@ -201,6 +204,7 @@ def _idw_nearest_k(
     station_latlon_rad: np.ndarray,
     station_values: np.ndarray,
     k: int,
+    idw_power: float = 2.0,
 ) -> np.ndarray:
     tree = BallTree(station_latlon_rad, metric="haversine")
     dist, idx = tree.query(cell_latlon_rad, k=k)
@@ -208,7 +212,7 @@ def _idw_nearest_k(
     # dist=0 guard (core.jl propagates Inf); a coincident station dominates either way.
     dist_m = np.where(dist_m == 0.0, np.finfo(np.float64).tiny, dist_m)
 
-    weights = dist_m**-2
+    weights = dist_m**-idw_power
     values = station_values[idx]
     return (values * weights).sum(axis=1) / weights.sum(axis=1)
 
@@ -225,6 +229,7 @@ def flood_depth_dense(
     seed_values: np.ndarray | None = None,
     resolution: float = 30.0,
     k: int = 5,
+    idw_power: float = 2.0,
     variable: str = "waterlevel",
     ocean_code: int = 1,
     river_code: int | None = None,
@@ -244,7 +249,7 @@ def flood_depth_dense(
     free. `resolution` is pixel size in metres.
 
     Forcing: either `boundaries` (wave-0: stations IDW-seeded onto
-    `coastline_mask`) or seed_rows/seed_cols/seed_values (hop>=1: absolute
+    `coastline_mask` over the k nearest, weights distance^-idw_power) or seed_rows/seed_cols/seed_values (hop>=1: absolute
     water levels from a neighbour's wet cells, bypassing coastline/IDW).
     `sweep_budget` (non-coupling only): fixed sweep count; 3 = Aqueduct.
 
@@ -297,7 +302,7 @@ def flood_depth_dense(
         station_values = boundaries[variable].to_numpy()
         initial = _idw_seed_values(
             coastline_rows, coastline_cols, transform, stations_lonlat, station_values,
-            min(k, len(station_values)), mask, ocean_code,
+            min(k, len(station_values)), mask, ocean_code, idw_power,
         )
 
     static_wet = None

@@ -9,7 +9,10 @@ CLI names and config.yml preparation.* switches):
   build_deltadtm_vrt  - build DEM/mask VRT mosaics with relative source paths
   tile_generation     - connectivity-first domain manifest -> tile_grid.path
                         (scenario-independent)
-  boundary_conditions - COAST-RP + SLR fingerprint scenario NetCDFs
+  storm_tide_product  - storm-tide RP levels + per-RP hydrographs from GESLA, GTSM,
+                        FES and IBTrACS (only with boundary_conditions.storm_tide_source:
+                        gfm_product, unless named explicitly; ~6 h)
+  boundary_conditions - storm-tide levels + SLR fingerprint scenario NetCDFs
   sync_gtsm           - download raw hourly GTSM reanalysis water levels (opt-in
                         only - name it explicitly; not part of the default step set)
   ea_coastal_dtm      - download the EA LIDAR Composite DTM 1m (2022) for coastal
@@ -52,6 +55,7 @@ import ea_coastal_dtm  # noqa: E402
 import fix_ocean_mask_with_osm_land  # noqa: E402
 import noaa_sfbay_lidar  # noqa: E402
 import prepare_boundary_conditions  # noqa: E402
+import prepare_storm_tide_product  # noqa: E402
 import scotland_lidar_dem  # noqa: E402
 import sync_deltadtm  # noqa: E402
 import sync_gtsm_water_levels  # noqa: E402
@@ -61,6 +65,7 @@ ALL_STEPS = [
     "fix_ocean_mask",
     "build_deltadtm_vrt",
     "tile_generation",
+    "storm_tide_product",
     "boundary_conditions",
     "sync_gtsm",
     "ea_coastal_dtm",
@@ -110,11 +115,11 @@ def main() -> None:
     parser.add_argument("--config", default=_default_cfg,
                         help=f"path to config.yml (default: {_default_cfg})")
     parser.add_argument("--skip-existing", dest="force", action="store_false", default=True,
-                        help="reuse the boundary_conditions step's cached intermediate/scenario "
-                             "files instead of recomputing them (default: always recompute - "
-                             "see prepare_boundary_conditions.run's own docstring for why a silent "
-                             "cache-hit here is dangerous); the tile-grid steps have no equivalent "
-                             "cache to bypass, so this flag only affects boundary_conditions")
+                        help="reuse the storm_tide_product and boundary_conditions steps' cached "
+                             "intermediate/scenario files instead of recomputing them (default: always "
+                             "recompute - see prepare_boundary_conditions.run's own docstring for why a "
+                             "silent cache-hit here is dangerous); the tile-grid steps have no equivalent "
+                             "cache to bypass")
     parser.add_argument("--fail-fast", action="store_true",
                         help="abort on first failed step")
     args = parser.parse_args()
@@ -176,9 +181,19 @@ def main() -> None:
     else:
         print("\n  [ SKIP ] Tile generation")
 
+    product_wanted = "storm_tide_product" in args.steps or (
+        "storm_tide_product" in selected and cfg["boundary_conditions"]["storm_tide_source"] == "gfm_product")
+    if product_wanted:
+        results["storm_tide_product"] = _run_step(
+            prepare_storm_tide_product.run, "Storm-tide product (GESLA + GTSM + FES + IBTrACS)",
+            args.fail_fast, config=cfg, force=args.force,
+        )
+    else:
+        print("\n  [ SKIP ] Storm-tide product")
+
     if "boundary_conditions" in selected:
         results["boundary_conditions"] = _run_step(
-            prepare_boundary_conditions.run, "Boundary conditions (COAST-RP + SLR fingerprints)",
+            prepare_boundary_conditions.run, "Boundary conditions (storm-tide levels + SLR fingerprints)",
             args.fail_fast, config=cfg, force=args.force,
         )
     else:

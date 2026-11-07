@@ -30,7 +30,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "boundary_test"))
 from map_style import LAND_COLOR, draw_caption_box, draw_panel_letter  # noqa: E402
-from atlas_rule_sensitivity import VERSION_DIFF_M, VERSION_RATIO, version_flag  # noqa: E402
+from tide_prediction import VERSION_DIFF_M, VERSION_RATIO, version_flag  # noqa: E402
 from regions import ar6_regions  # noqa: E402
 from site_sets import GRID, INK, MUTED, _save, _style  # noqa: E402
 
@@ -1159,9 +1159,12 @@ def fig16_station_interpolation(product: Path, dest: Path) -> None:
         sel = t100[(t100.power == power) & (t100.k > 1)]
         ax.plot(sel.k, sel.mae_m * 100, color=color, marker="o", markersize=4, linewidth=1.8, label=f"IDW power {power}")
     ax.axhline(nearest * 100, color=INK, linestyle="--", linewidth=1, label="nearest station")
-    prod = t100[(t100.k == 15) & (t100.power == 2)].mae_m.iloc[0] * 100
+    former = t100[(t100.k == 15) & (t100.power == 2)].mae_m.iloc[0] * 100
+    prod = t100[(t100.k == 5) & (t100.power == 3)].mae_m.iloc[0] * 100
     best = float(t100.mae_m.min())
-    ax.annotate("production\n(k = 15, power 2)", (15, prod), xytext=(17, prod + 1.2), fontsize=8, color=INK,
+    ax.annotate("former\n(k = 15, power 2)", (15, former), xytext=(17, former + 1.2), fontsize=8, color=INK,
+                arrowprops={"arrowstyle": "-", "color": MUTED})
+    ax.annotate("production\n(k = 5, power 3)", (5, prod), xytext=(2.3, prod + 2.4), fontsize=8, color=INK,
                 arrowprops={"arrowstyle": "-", "color": MUTED})
     ax.set(xscale="log", xticks=[2, 3, 5, 8, 15, 30], xticklabels=["2", "3", "5", "8", "15", "30"],
            xlabel="neighbours k", ylabel="RP100 leave-one-out MAE (cm)")
@@ -1174,7 +1177,7 @@ def fig16_station_interpolation(product: Path, dest: Path) -> None:
     labels = [(f"{float(lo):g}-{float(hi):g}" if hi != "inf" else f"> {float(lo):g}") + f"\n(n = {n:,})"
               for (lo, hi), n in zip(edges, spacing.stations)]
     width = 0.27
-    for j, (col, color) in enumerate((("nearest", INK), ("k = 5, p = 2", BLUE), ("k = 15, p = 2 (production)", ORANGE))):
+    for j, (col, color) in enumerate((("nearest", INK), ("k = 15, p = 2 (former)", MUTED), ("k = 5, p = 3 (production)", BLUE))):
         ax.bar(x + (j - 1) * width, spacing[col] * 100, width * 0.92, color=color, label=col)
     ax.set(xticks=x, xticklabels=labels, xlabel="distance to the nearest other station (km)",
            ylabel="RP100 leave-one-out MAE (cm)")
@@ -1190,12 +1193,13 @@ def fig16_station_interpolation(product: Path, dest: Path) -> None:
         inverse-distance weighting over the k nearest stations (haversine distance, floored at 1 km)
         for three weighting powers, and of the nearest station alone (dashed). (b) The error by
         the distance from the left-out station to its nearest neighbour, for the nearest station,
-        k = 5 and production's k = 15 (both power 2). Production also restricts the neighbours to
-        the tile's ocean component, which this global test does not.
+        the former production setting (k = 15, power 2) and the current one (k = 5, power 3).
+        Production also restricts the neighbours to the tile's ocean component, which this global
+        test does not.
 
-        Reading: fewer neighbours or a higher power interpolate the level field better than
-        production's k = 15, power 2, but the gain is about 1.5 cm of MAE ({prod:.1f} cm at
-        production, {best * 100:.1f} cm at best, {nearest * 100:.1f} cm for the nearest station).
+        Reading: fewer neighbours or a higher power interpolate the level field better than the
+        former k = 15, power 2, by about 1.5 cm of MAE ({former:.1f} cm there, {prod:.1f} cm at
+        k = 5, power 3, {best * 100:.1f} cm at best, {nearest * 100:.1f} cm for the nearest station).
         The error is set by station spacing: 2 cm where stations are within 5 km, 8-12 cm at
         10-50 km and about 20 cm beyond 50 km.
         """)
@@ -1254,13 +1258,72 @@ def fig17_level_product_qa(product: Path, dest: Path) -> None:
         """)
 
 
+DURATION_RANGES = ((0, 1), (1, 2), (2, 4), (4, 20))
+DURATION_SERIES = (("coast_hg", "COAST-HG RP100 (every RP)", INK, "--"), ("rp2", "product RP2", "#9ecae1", "-"),
+                   ("rp10", "product RP10", "#6baed6", "-"), ("rp100", "product RP100", "#3182bd", "-"),
+                   ("rp1000", "product RP1000", "#08306b", "-"))
+
+
+def fig18_product_durations(product: Path, dest: Path) -> None:
+    d = pd.read_parquet(product / "durations.parquet")
+    d = d[d.lat > PRODUCTION_MIN_LAT]
+    spring = 2 * d.mhws_m
+    fig = plt.figure(figsize=(12, 9.4))
+    grid = fig.add_gridspec(2, 2, height_ratios=(1, 1.15))
+    for j, (m, label) in enumerate((("t025_hr", "T(0.25) (h)"), ("t05_hr", "T(0.5) (h)"))):
+        ax = fig.add_subplot(grid[0, j])
+        x = np.arange(len(DURATION_RANGES))
+        width = 0.16
+        for s, (key, name, color, _) in enumerate(DURATION_SERIES):
+            med = [d[f"{key}_{m}"][(spring > lo) & (spring <= hi)].median() for lo, hi in DURATION_RANGES]
+            ax.bar(x + (s - 2) * width, med, width * 0.9, color=color if key != "coast_hg" else MUTED, label=name)
+        ax.set(xticks=x, xticklabels=[f"{lo}-{hi} m" if hi < 20 else f"> {lo} m" for lo, hi in DURATION_RANGES],
+               xlabel="spring tidal range (2 x MHWS, FES)", ylabel=f"median {label}")
+        if j == 0:
+            ax.legend(frameon=False, fontsize=8)
+        _style(ax)
+        draw_panel_letter(ax, "ab"[j])
+    ratio = (d.rp100_t025_hr / d.coast_hg_t025_hr).replace([np.inf, 0], np.nan).dropna()
+    ratio = ratio.iloc[np.argsort(np.abs(np.log(ratio.to_numpy())))]
+    ax = fig.add_subplot(grid[1, :], projection=MAP_PROJ)
+    ax.set_global()
+    _land(ax)
+    sc = ax.scatter(d.loc[ratio.index, "lon"], d.loc[ratio.index, "lat"], c=ratio, s=3, cmap="PuOr_r",
+                    norm=LogNorm(1 / 4, 4), linewidths=0, transform=PC, zorder=2)
+    ax.spines["geo"].set_edgecolor(MUTED)
+    draw_panel_letter(ax, "c")
+    cb = fig.colorbar(sc, ax=ax, orientation="horizontal", extend="both", fraction=0.04, pad=0.03, shrink=0.5)
+    cb.ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+    cb.set_ticks([0.25, 0.5, 1, 2, 4], labels=["1/4", "1/2", "1", "2", "4"])
+    cb.set_label("T(0.25) at RP100, product / COAST-HG")
+    fig.tight_layout()
+    _save(fig, dest / "fig18_product_durations.png")
+    med = {f"{k}_{m}": d[f"{k}_{m}"].median() for k, *_ in DURATION_SERIES for m in ("t025_hr", "t05_hr")}
+    describe(dest / "fig18_product_durations.png", f"""
+        Peak durations of the two hydrograph products at the {len(d):,} COAST-RP stations north of
+        60 S. T(f) = hours the hydrograph stays within f x peak of its peak (hourly +-72 h profile
+        normalised by the peak, relative to local MSL; as in the acceptance test of fig10).
+        COAST-HG has one RP100 hydrograph per station, which production uses for every RP; the
+        level product has one per RP. (a, b) Median T(0.25) and T(0.5) by spring tidal range.
+        (c) T(0.25) at RP100, product over COAST-HG; orange = the product's peak is wider.
+
+        Reading: the product's peaks are wider than COAST-HG's: median T(0.25)
+        {med["rp100_t025_hr"]:.0f} h against {med["coast_hg_t025_hr"]:.0f} h at RP100 and T(0.5)
+        {med["rp100_t05_hr"]:.0f} h against {med["coast_hg_t05_hr"]:.0f} h. T falls with RP
+        (T(0.25) {med["rp2_t025_hr"]:.0f} h at RP2, {med["rp1000_t025_hr"]:.0f} h at RP1000), as the
+        gauges show (fig10), which a single COAST-HG shape cannot. The duration correction B reads
+        T from these hydrographs, so a longer T lowers its friction multiplier.
+        """)
+
+
 FIGURES = {"fig01": fig01_tide_scatter, "fig02": fig02_tide_ratio_maps, "fig03": fig03_constituents,
            "fig04": fig04_fes_versions, "fig05": fig05_basin_heads, "fig06": fig06_rule_sensitivity,
            "fig07": fig07_coast_rp_regions, "fig08": fig08_profiles_by_rp, "fig09": fig09_surge_by_rp,
            "fig10": fig10_generator_acceptance, "fig11": fig11_generator_profiles}
 PRODUCT_FIGURES = {"fig12": fig12_level_product_maps, "fig13": fig13_level_product_by_rp,
                    "fig14": fig14_level_product_gauges, "fig15": fig15_level_product_hydrographs,
-                   "fig16": fig16_station_interpolation, "fig17": fig17_level_product_qa}
+                   "fig16": fig16_station_interpolation, "fig17": fig17_level_product_qa,
+                   "fig18": fig18_product_durations}
 
 
 def main() -> None:

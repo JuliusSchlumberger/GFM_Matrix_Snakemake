@@ -155,6 +155,50 @@ def save_boundary_points(stations: gpd.GeoDataFrame, output_path: str | Path, co
 
 # Written by preparation/prepare_boundary_conditions.py into paths.processed_inputs_dir.
 MDT_STATIONS_FILENAME = "MDT_mapped_on_coastal_points.nc"
+# Written by preparation/prepare_storm_tide_product.py into boundary_conditions.storm_tide_product_dir.
+PRODUCT_LEVELS_FILENAME = "GFM_storm_tide_levels.nc"
+PRODUCT_HYDROGRAPHS_FILENAME = "GFM_storm_tide_hydrographs.nc"
+STORM_TIDE_SOURCES = ("gfm_product", "coast_rp")
+# Written by prepare_boundary_conditions.py next to the scenario NetCDFs: the source they hold.
+STORM_TIDE_SOURCE_MARKER = "storm_tide_source.txt"
+
+
+def storm_tide_source(config: dict) -> str:
+    source = config["boundary_conditions"]["storm_tide_source"]
+    if source not in STORM_TIDE_SOURCES:
+        raise ValueError(f"boundary_conditions.storm_tide_source must be one of {STORM_TIDE_SOURCES}, not {source!r}")
+    return source
+
+
+def check_scenario_source(waterlevel_nc_dir: str | Path, source: str) -> None:
+    """Raise when the scenario NetCDFs in `waterlevel_nc_dir` were built from another source.
+
+    One processed_inputs tree serves every config of a data root, so a config pinned to the
+    other source must not silently read them.
+    """
+    marker = Path(waterlevel_nc_dir) / STORM_TIDE_SOURCE_MARKER
+    held = marker.read_text().strip() if marker.exists() else "coast_rp"
+    if held != source:
+        raise RuntimeError(f"{waterlevel_nc_dir} holds {held} levels, the config asks for {source}: run "
+                           "`run_preparation.py boundary_conditions` with this config, or use the matching source")
+
+
+def storm_tide_levels_path(config: dict, coast_rp_path: str | Path) -> Path:
+    """Return the RP-level NetCDF (COAST-RP layout) of `boundary_conditions.storm_tide_source`."""
+    if storm_tide_source(config) == "coast_rp":
+        return Path(coast_rp_path)
+    return Path(config["boundary_conditions"]["storm_tide_product_dir"]) / PRODUCT_LEVELS_FILENAME
+
+
+def storm_tide_hydrograph_path(config: dict) -> Path:
+    """Return the hydrograph NetCDF of `boundary_conditions.storm_tide_source`.
+
+    gfm_product: `storm_tide_hydrograph` (stations, return_period, time); coast_rp: COAST-HG,
+    one RP100 hydrograph per station (`event_volume.load_coast_hg` reads both).
+    """
+    if storm_tide_source(config) == "coast_rp":
+        return Path(config["simulation"]["flooding"]["duration_correction"]["coast_hg_path"])
+    return Path(config["boundary_conditions"]["storm_tide_product_dir"]) / PRODUCT_HYDROGRAPHS_FILENAME
 
 
 def static_level_inputs(config: dict) -> dict:

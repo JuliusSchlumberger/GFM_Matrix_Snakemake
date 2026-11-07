@@ -3,10 +3,11 @@ leaving each station out and predicting its RP100 level (new product) from the o
 stations north of 60 S). (a) Mean absolute error of inverse-distance weighting over the k nearest
 stations (haversine distance, floored at 1 km) for three weighting powers, and of the nearest
 station alone (dashed). (b) The error by the distance from the left-out station to its nearest
-neighbour, for the nearest station, k = 5 and production's k = 15 (both power 2). Production also
-restricts the neighbours to the tile's ocean component, which this global test does not.
+neighbour, for the nearest station, the former production setting (k = 15, power 2) and the current
+one (k = 5, power 3). Production also restricts the neighbours to the tile's ocean component, which
+this global test does not.
 
-Reading: fewer neighbours or a higher power interpolate the level field better than production's k =
-15, power 2, but the gain is about 1.5 cm of MAE (6.9 cm at production, 5.4 cm at best, 6.9 cm for
-the nearest station). The error is set by station spacing: 2 cm where stations are within 5 km, 8-12
-cm at 10-50 km and about 20 cm beyond 50 km.
+Reading: fewer neighbours or a higher power interpolate the level field better than the former k =
+15, power 2, by about 1.5 cm of MAE (7.0 cm there, 5.7 cm at k = 5, power 3, 5.5 cm at best, 7.0 cm
+for the nearest station). The error is set by station spacing: 2 cm where stations are within 5 km,
+8-12 cm at 10-50 km and about 20 cm beyond 50 km.

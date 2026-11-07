@@ -36,6 +36,7 @@ result = run_tile_scenario(
     flooding_config=snakemake.params.flooding_config,
     ocean_code=snakemake.params.ocean_code, river_code=snakemake.params.river_code,
     static_level_inputs=snakemake.params.static_level_inputs,
+    hydrograph_path=snakemake.params.hydrograph_path,
 )
 
 # Locally only a genuine solve gets a run-timing record.

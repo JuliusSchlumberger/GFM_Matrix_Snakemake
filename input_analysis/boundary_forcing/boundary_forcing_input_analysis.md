@@ -276,32 +276,36 @@ Confirmation on 5-10 real 2-D tiles follows once the generator exists (test 8).
   correction), 10 (STORM-GTSM TC shapes; needs the STORM-forced runs), 8 (real tiles, after the
   generator). Deferred: test 4 (absolute MSL + MDT against geodetic gauge datums); wave setup.
 
-## 8. The level product at all COAST-RP stations
+## 8. The storm-tide product at all COAST-RP stations
 
-The decisions above are built into one product at the 23,226 COAST-RP stations
-(`boundary_test/build_level_product.py`; details in `boundary_test/INPUT_ANALYSIS.md` §8.4-8.5):
-GTSM-ERA5 skew surges on the FES tide, scaled by the gauge ratio r and convolved with the FES high
-waters, plus COAST-RP's TC part as a rate; per-RP generator hydrographs at every station.
+The decisions above are built into one product at the 23,226 COAST-RP stations, made by the
+preparation step `run_preparation.py storm_tide_product` from the raw inputs (GESLA, GTSM-ERA5,
+FES2022/2014, COAST-RP, IBTrACS; `src/storm_tide_product.py`, details in
+`boundary_test/INPUT_ANALYSIS.md` §8.4-8.5): GTSM-ERA5 skew surges on the FES tide, scaled by the
+gauge ratio r and convolved with the FES high waters, plus COAST-RP's TC part as a rate; per-RP
+generator hydrographs at every station. `boundary_conditions.storm_tide_source` switches every
+model between it (default) and COAST-RP / COAST-HG.
 
-- **QA** (fig17): four failure modes of a first build: double low waters taken as high waters,
-  GTSM residual spikes, tropical cyclones counted twice, and heavy GPD tails. They were removed by
-  prominent high waters only, despiking (15 Arafura stations fall back to COAST-RP), an IBTrACS
-  mask at stations with a TC part, and a GPD shape cap of 0.35.
-- **Against COAST-RP** (fig12, fig13): median +0.02 m at RP100 (10-90%: -0.23 to +0.22 m). The FES
+- **QA** (fig17): four failure modes of a first build: low-water bumps of shallow-water tides
+  taken as high waters, GTSM residual spikes, tropical cyclones counted twice, and heavy GPD
+  tails. They were removed by dropping weak maxima in the low-water band, despiking (15 Arafura
+  stations fall back to COAST-RP), an IBTrACS mask at stations with a TC part, and a GPD shape cap
+  of 0.35.
+- **Against COAST-RP** (fig12, fig13): median +0.03 m at RP100 (10-90%: -0.22 to +0.23 m). The FES
   tide lowers the levels by 0.05-0.08 m and r raises them by 0.06-0.09 m. Large departures are
   regional: lower in the southern North Sea, higher in the western Baltic and the macrotidal
   basins where GTSM's tide is too small.
-- **Against the gauges** (fig14; 618 gauges, r left one out): RP100 MAE 0.17 m against
-  COAST-RP's 0.25 m at ETC gauges; the median bias is halved, also at TC gauges, which stay
-  0.17 m low.
-- **Hydrographs** (fig15): every peak equals the RP level.
-- **Interpolation** (fig16): leave-one-out RP100 MAE 7.0 cm with production's 15 neighbours,
-  5.6 cm with 3; the error grows with station spacing (2 cm < 5 km, ~20 cm > 50 km).
+- **Against the gauges** (fig14; 618 gauges, r left one out): RP100 MAE 0.16 m against
+  COAST-RP's 0.24 m at ETC gauges; the median bias falls to a third, and at TC gauges from
+  -0.25 to -0.17 m.
+- **Hydrographs** (fig15, fig18): every maximum equals the RP level. The peaks are 2-4x wider
+  than COAST-HG's (median T(0.25) 12 h against 6 h at RP100) and narrow with the RP, as at the
+  gauges.
+- **Interpolation** (fig16): leave-one-out RP100 MAE 5.7 cm with production's k = 5, power 3,
+  against 7.0 cm with the former k = 15, power 2; the error grows with station spacing (2 cm
+  < 5 km, ~20 cm > 50 km).
 - Neighbours on one FES artefact are made consistent: the version rule is grown by 25 km, which
   adds 10 stations.
-
-Production can read both export files unchanged; switching the catalog and config, regenerating
-the SFINCS forcing and recalibrating fsf are listed in TODO.md.
 
 ## Figures
 
@@ -324,6 +328,7 @@ the SFINCS forcing and recalibrating fsf are listed in TODO.md.
 | `fig15_level_product_hydrographs` | product hydrographs at Dunkerque, Kiel, Galveston and Hiron Point |
 | `fig16_station_interpolation` | leave-one-out interpolation error by neighbours, power and station spacing |
 | `fig17_level_product_qa` | the QA failure modes at three stations, skew surges before and after |
+| `fig18_product_durations` | T(0.25) and T(0.5) of the product's hydrographs against COAST-HG |
 
 ## References
 

@@ -47,7 +47,8 @@ N_TILES_WANTED_DEFAULT = 500  # only reachable in a single sequential run, not p
 DEFAULT_EPSILON_M = 0.03  # = simulation.flooding.waterlevel_epsilon_m
 
 
-def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor: float, on_no_stations: str = "dry"):
+def load_tile(tile_id: int, model_outputs: Path, knn: int, idw_power: float, friction_scale_factor: float,
+              on_no_stations: str = "dry"):
     """Load a tile's decoded solver inputs and IDW-seeded coastline values.
 
     Shared by the calibration studies (run_obstacle_coupling_study.py,
@@ -110,7 +111,7 @@ def load_tile(tile_id: int, model_outputs: Path, knn: int, friction_scale_factor
     )
     initial = _idw_seed_values(
         coastline_rows, coastline_cols, transform, stations_lonlat, station_values,
-        min(knn, len(station_values)), mask, OCEAN_CODE,
+        min(knn, len(station_values)), mask, OCEAN_CODE, idw_power,
     )
     max_waterlevel = float(station_values.max())
     return dem, mask, friction, coastline, coastline_rows, coastline_cols, initial, max_waterlevel
@@ -147,7 +148,7 @@ def _depth_change_metrics(depth_prev: np.ndarray, depth_curr: np.ndarray, n_cell
 
 
 def run_tile_sweep_trace(
-    tile_id: int, max_sweeps: int, model_outputs: Path, knn: int, friction_scale_factor: float,
+    tile_id: int, max_sweeps: int, model_outputs: Path, knn: int, idw_power: float, friction_scale_factor: float,
     epsilon: float,
 ) -> tuple[list[dict], bool, bool]:
     """Trace one tile sweep by sweep; return (rows, is_wet, round_converged).
@@ -156,7 +157,7 @@ def run_tile_sweep_trace(
     complete round's max raw change reached <= epsilon before max_sweeps.
     """
     dem, mask, friction, coastline, seed_rows, seed_cols, initial, _ = load_tile(
-        tile_id, model_outputs, knn, friction_scale_factor,
+        tile_id, model_outputs, knn, idw_power, friction_scale_factor,
     )
     seed_values = -initial
     dtype = friction.dtype
@@ -246,6 +247,7 @@ def main() -> None:
     # Not root/model_outputs: calibration studies keep their own model_outputs tree.
     model_outputs = Path(cfg["simulation"]["model_outputs"])
     knn = int(cfg["simulation"]["flooding"]["knn"])
+    idw_power = float(cfg["simulation"]["flooding"]["idw_power"])
     friction_scale_factor = float(cfg["simulation"]["flooding"]["friction_scale_factor"])
     print(f"model_outputs={model_outputs}  knn={knn}  friction_scale_factor={friction_scale_factor}  "
           f"max_sweeps={MAX_SWEEPS} ({MAX_ROUNDS_CEILING} rounds)  epsilon={args.epsilon}  "
@@ -262,7 +264,7 @@ def main() -> None:
             writer.writeheader()
             try:
                 tile_rows, is_wet, round_converged = run_tile_sweep_trace(
-                    tile_id, MAX_SWEEPS, model_outputs, knn, friction_scale_factor, args.epsilon,
+                    tile_id, MAX_SWEEPS, model_outputs, knn, idw_power, friction_scale_factor, args.epsilon,
                 )
                 for row in tile_rows:
                     print(f"  sweeps={row['sweep_count']:3d}  cum_time={row['cum_time_s']}s  "

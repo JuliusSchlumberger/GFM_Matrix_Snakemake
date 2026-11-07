@@ -10,6 +10,8 @@ from pathlib import Path
 
 import yaml
 
+PRODUCT_HYDROGRAPHS_FILENAME = "GFM_storm_tide_hydrographs.nc"  # = boundaries.PRODUCT_HYDROGRAPHS_FILENAME
+
 
 def read_root(config_path: Path) -> Path:
     """Return ``paths.root`` from `config_path`, overridden by a sibling config_local.yml."""
@@ -28,6 +30,39 @@ def read_root(config_path: Path) -> Path:
     if not root:
         raise ValueError(f"{config_path}: paths.root is not set - create snakemake_workflow/config/config_local.yml (copy config_local.yml.example) or pass a config that sets it (config_hpc.yml / a materialized scenario config)")
     return Path(root)
+
+
+def _load_config(config_path: Path) -> dict:
+    with open(config_path, encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    local_path = config_path.parent / "config_local.yml"
+    if local_path.exists():
+        with open(local_path, encoding="utf-8") as f:
+            local_cfg = yaml.safe_load(f) or {}
+        for key, val in local_cfg.items():
+            cfg[key] = {**cfg[key], **val} if isinstance(val, dict) and isinstance(cfg.get(key), dict) else val
+    return cfg
+
+
+def _expand(path: str, root: Path, processed_inputs_dir: str) -> Path:
+    return Path(path.replace("{processed_inputs_dir}", processed_inputs_dir).replace("{root}", str(root)))
+
+
+def storm_tide_hydrograph_path(config_path: Path) -> Path:
+    """Return the hydrograph NetCDF of ``boundary_conditions.storm_tide_source``.
+
+    YAML-only copy of src/boundaries.storm_tide_hydrograph_path (same file names), for the
+    hydromt-sfincs-dev env.
+    """
+    cfg = _load_config(config_path)
+    root = read_root(config_path)
+    proc = str(cfg["paths"]["processed_inputs_dir"]).replace("{root}", str(root))
+    source = cfg["boundary_conditions"]["storm_tide_source"]
+    if source == "coast_rp":
+        return _expand(cfg["simulation"]["flooding"]["duration_correction"]["coast_hg_path"], root, proc)
+    if source != "gfm_product":
+        raise ValueError(f"boundary_conditions.storm_tide_source must be gfm_product or coast_rp, not {source!r}")
+    return _expand(cfg["boundary_conditions"]["storm_tide_product_dir"], root, proc) / PRODUCT_HYDROGRAPHS_FILENAME
 
 
 def resolve_catalog_path(catalog_path: Path, root: Path, source_name: str) -> Path:

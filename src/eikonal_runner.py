@@ -41,6 +41,7 @@ def run_eikonal_python(
     k: int,
     variable: str,
     *,
+    idw_power: float = 2.0,
     boundaries_path: str | Path | None = None,
     seed_rows: np.ndarray | None = None,
     seed_cols: np.ndarray | None = None,
@@ -56,6 +57,7 @@ def run_eikonal_python(
     static_stations: tuple[np.ndarray, np.ndarray] | None = None,
     duration_config: dict[str, Any] | None = None,
     return_period: int | None = None,
+    hydrograph_path: str | Path | None = None,
 ) -> dict:
     """Run `flood_model.flood_depth_dense` in-process, write depth, return diagnostics.
 
@@ -64,10 +66,13 @@ def run_eikonal_python(
     required correction, not a tuning knob: the solver treats friction as
     cost per grid step (x30 for DeltaDTM's ~30 m pixel) times a x0.25
     SFINCS-calibrated factor (docs/methods_02). Raises MemoryError on OOM.
+    `k` and `idw_power` set the station interpolation of both the coastline seeds and the
+    static level.
     `static_stations` = (lonlat, level) from `boundaries.static_station_levels`
     switches on two-component SLR propagation; `duration_config`
     (`simulation.flooding.duration_correction`) with `enabled` switches on correction B;
-    `return_period` (years) picks its hydrograph when the file holds one per RP.
+    `return_period` (years) picks its hydrograph when the file holds one per RP;
+    `hydrograph_path` (`boundaries.storm_tide_hydrograph_path`) replaces `coast_hg_path`.
     """
     with retry_transient_io(rasterio.open, dem_path) as src:
         dem = decode_dem_cm(src.read(1))
@@ -88,17 +93,18 @@ def run_eikonal_python(
 
     static_level = None
     if static_stations is not None:
-        static_level = static_level_grid(dem.shape, transform, *static_stations)
+        static_level = static_level_grid(dem.shape, transform, *static_stations, k=k, idw_power=idw_power)
 
     duration_correction = None
     if duration_config is not None and duration_config["enabled"]:
-        duration_correction = build_duration_correction(duration_config, dem.shape, transform, crs, return_period)
+        duration_correction = build_duration_correction(duration_config, dem.shape, transform, crs, return_period,
+                                                        hydrograph_path)
 
     waterdepth, diagnostics = flood_depth_dense(
         dem, mask, friction, transform,
         boundaries=boundaries,
         seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
-        resolution=resolution, k=k, variable=variable,
+        resolution=resolution, k=k, idw_power=idw_power, variable=variable,
         ocean_code=ocean_code, river_code=river_code,
         obstacle_coupling=obstacle_coupling,
         max_outer_iterations=max_outer_iterations,
@@ -114,10 +120,12 @@ def run_eikonal_python(
 
 def build_duration_correction(
     duration_config: dict[str, Any], shape: tuple[int, int], transform, crs=None, return_period: int | None = None,
+    hydrograph_path: str | Path | None = None,
 ) -> DurationCorrection:
     """Build correction B for one tile from `simulation.flooding.duration_correction`.
 
-    `return_period` (years) selects the hydrograph when `coast_hg_path` holds one per RP.
+    Hydrographs from `hydrograph_path`, else `coast_hg_path`; `return_period` (years) selects
+    the hydrograph when the file holds one per RP.
     """
     xs, ys = rasterio.transform.xy(transform, [0, 0, shape[0] - 1, shape[0] - 1], [0, shape[1] - 1, 0, shape[1] - 1])
     xs, ys = np.asarray(xs, dtype=np.float64), np.asarray(ys, dtype=np.float64)
@@ -125,7 +133,7 @@ def build_duration_correction(
     if grid_crs is not None:
         xs, ys = rasterio.warp.transform(grid_crs, "EPSG:4326", xs, ys)
     lonlat, series, dt_s = retry_transient_io(
-        load_coast_hg, duration_config["coast_hg_path"], (min(xs), min(ys), max(xs), max(ys)),
+        load_coast_hg, hydrograph_path or duration_config["coast_hg_path"], (min(xs), min(ys), max(xs), max(ys)),
         return_period=return_period,
     )
     return DurationCorrection(
@@ -223,6 +231,7 @@ def run_tile_scenario(
     river_code: int,
     stage_boundaries: bool = False,
     static_level_inputs: dict[str, str] | None = None,
+    hydrograph_path: str | None = None,
 ) -> dict[str, Any]:
     """Solve, skip or placeholder one (tile, return period, SLR scenario) and write its raster.
 
@@ -317,6 +326,7 @@ def run_tile_scenario(
             diagnostics = run_eikonal_python(
                 dem_path, mask_path, friction_path, output_path,
                 resolution=flooding_config["resolution"], k=flooding_config["knn"],
+                idw_power=flooding_config["idw_power"],
                 variable=waterlevel_name,
                 boundaries_path=None if hop_distance >= 1 else read_boundaries_path,
                 seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
@@ -330,6 +340,7 @@ def run_tile_scenario(
                 static_stations=static_stations,
                 duration_config=flooding_config["duration_correction"],
                 return_period=int(return_period.removeprefix("RP")),
+                hydrograph_path=hydrograph_path,
             )
         except MemoryError:
             mark_tile_oom(oom_dir, tile_id, reason="MemoryError in flood_depth_dense - tile too large")

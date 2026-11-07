@@ -31,7 +31,7 @@ from rasters import WATERDEPTH_NODATA_INT16, encode_dem_cm, encode_friction_int1
 D, M, N = 0.0003, 10, 12
 SCN, SLR = "RP100_SLR_0", "SLR_0"
 RASTER_CONFIG = {"driver": "GTiff", "compression": "deflate", "predictor": 3, "nodata": -9999}
-FLOODING = {"resolution": 30.0, "knn": 5, "max_rounds": 40, "waterlevel_epsilon_m": 0.03,
+FLOODING = {"resolution": 30.0, "knn": 5, "idw_power": 2.0, "max_rounds": 40, "waterlevel_epsilon_m": 0.03,
             "friction_scale_factor": 1.0,
             "obstacle_coupling": {"enabled": False, "max_outer_iterations": 3, "outer_convergence_pct": 0.01},
             "slr_propagation": "attenuated", "duration_correction": {"enabled": False}}

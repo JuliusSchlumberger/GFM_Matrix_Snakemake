@@ -137,12 +137,12 @@ def _depth_change_metrics(depth_prev: np.ndarray, depth_curr: np.ndarray) -> dic
 
 
 def run_tile_trace(
-    tile_id: int, model_outputs: Path, knn: int, friction_scale_factor: float,
+    tile_id: int, model_outputs: Path, knn: int, idw_power: float, friction_scale_factor: float,
     max_outer: int, inner_max_rounds: int, epsilon: float, outer_convergence_pct: float,
 ) -> list[dict]:
     """Trace the unblocked baseline and each outer iteration; one row per solve."""
     dem, mask, friction, coastline, seed_rows, seed_cols, initial, max_waterlevel = load_tile(
-        tile_id, model_outputs, knn, friction_scale_factor, on_no_stations="raise",
+        tile_id, model_outputs, knn, idw_power, friction_scale_factor, on_no_stations="raise",
     )
     seed_values = -initial
     dtype = friction.dtype
@@ -283,6 +283,7 @@ def main() -> None:
     model_outputs = Path(cfg["simulation"]["model_outputs"])
     flooding_cfg = cfg["simulation"]["flooding"]
     knn = int(flooding_cfg["knn"])
+    idw_power = float(flooding_cfg["idw_power"])
     friction_scale_factor = float(flooding_cfg["friction_scale_factor"])
     max_outer = args.max_outer_iterations if args.max_outer_iterations is not None else DEFAULT_MAX_OUTER
     inner_max_rounds = args.max_rounds if args.max_rounds is not None else DEFAULT_INNER_MAX_ROUNDS
@@ -300,7 +301,7 @@ def main() -> None:
             writer.writeheader()
             try:
                 tile_rows = run_tile_trace(
-                    tile_id, model_outputs, knn, friction_scale_factor,
+                    tile_id, model_outputs, knn, idw_power, friction_scale_factor,
                     max_outer, inner_max_rounds, epsilon, outer_convergence_pct,
                 )
                 for row in tile_rows:

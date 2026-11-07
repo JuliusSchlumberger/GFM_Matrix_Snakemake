@@ -33,7 +33,7 @@ from sklearn.neighbors import BallTree
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "boundary_test"))
 from extract_gtsm_series import load_series, station_series  # noqa: E402
-from levels_tides import HOURLY_START, on_hourly_grid, remove_annual_means  # noqa: E402
+from tide_prediction import HOURLY_START, on_hourly_grid, remove_annual_means  # noqa: E402
 
 INPUTS = Path("P:/11212688-004-global-floodmaps/modelling/inputs/COAST-RP_dataset")
 RPS = (2, 10, 50, 100)
