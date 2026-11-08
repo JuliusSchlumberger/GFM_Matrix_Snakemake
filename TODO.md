@@ -225,7 +225,21 @@ Open:
      native. At 916 gauges, FES MHWS at the gauge vs IDW of the 5 nearest stations' FES MHWS: MAE
      0.061 vs 0.062 m, local closer at 51%; the 16 gauges where they differ by > 0.2 m split evenly
      (fjords: Juneau, Skagway FES 6-7 m against 2.7 m). Gauges sit near stations, so they do not
-     test the estuary heads; those need a tide reference other than FES.
+     test the estuary heads. GESLA's short records do: upper Fundy gauges agree with FES in open
+    water and at Burntcoat Head (observed 0.1-99.9% range 15.2 m, FES spring range 16.1 m), while
+    FES is too high in the tidal rivers (Hantsport 13.8 m observed vs 19.3 m; Moncton 8.3 m vs
+    21 m). Some records are in feet (Five Islands, Diligent River), sparse (Burntcoat) or dry at
+    low water (Moncton, Joggins). No GESLA gauge in the inner Forth. Next: the same check on all
+    GESLA records, then a gauge-based correction of FES like r, and test 4 on top.
+    All GESLA (first 2 years per record, M2 by least squares; 2,717 gauges after coverage >= 70%,
+    no drying floor; `open_guesses/fes_check/fes_vs_gesla_all.parquet`): FES M2 MAE 0.12 m, 385
+    gauges off by > 25%, FES at the gauge and IDW of the stations equally good (local closer 53%).
+    Large errors in both directions: St Lawrence (Quebec, Ile aux Coudres FES 0.8 vs 1.8-2.0 m),
+    Bangladesh (Khepupara 0.06 vs 0.87 m), Alaska/BC fjords, Ungava, Fundy tidal rivers. Gauge
+    correction (median log gauge/FES M2 ratio of the other gauges within R, gauge left out):
+    MAE 0.121 -> 0.099 / 0.089 / 0.095 / 0.103 / 0.116 m for R 10 / 25 / 50 / 100 / 200 km; at
+    gauges with neighbours within 25 km 0.152 -> 0.100 m, 91 gauges worse by > 0.1 m. Feet
+    records (old MEDS) still need a filter.
   5. Global rerun with flags (tail-uncertain, TC-coast, fallback-r); test 10 afterwards revises
      the flagged stations. The 1950-1978 surge months are on `<data_root>`
      (`inputs/GTSM_storm_tide_hourly/storm_surge_residual`, all 900 months).
@@ -240,7 +254,8 @@ Open:
      0.02 / 0.08 at 300 km, 0.02 / 0.05 at 1000 km. Cap and no cap score the same (<= 3 mm); pooling
      does not change the gauge scores (RP10-100 MAE within 3 mm), so the radius rests on stability.
      Masked without a shift, TC-dominated gauges: RP100 median -0.16 m, MAE 0.389 m (production
-     -0.03 / 0.361 m). Decision open (user): radius (300 km proposed), drop the cap.
+     -0.03 / 0.361 m). Decided (user, 2026-11-08): pool at 300 km, drop the cap, and shift the
+     COAST-RP_TC levels per cyclone basin (test 2's basin fit, 0.18-0.25 m) with the mask on.
 - **Storm-tide product: decisions taken as estimates (open questions; tested in
   `boundary_test/INPUT_ANALYSIS.md` §8.6, fig19-fig23).**
   - No TC mask (decided): ERA5 cyclones stay in the ETC fit and count again in COAST-RP's TC part,
