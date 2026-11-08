@@ -10,6 +10,13 @@ Stages (each writes <product-dir>/open_guesses/<stage>*.parquet for the figure s
   fes_rule  FES2022 / FES2014 MHWS at the gauges and at the stations the version rule flags
   peaks     hydrographs whose maximum is not at time 0: how many, how far, and the tide's
             diurnal inequality there
+  tc_scale  the IBTrACS mask with COAST-RP_TC raised (scaled or shifted) against the double count;
+            the raise is fitted per cyclone basin and applied leaving that basin out
+  tc_jumps  every station with a TC part rebuilt masked with the TC part shifted by TC_JUMPS_SHIFT_M:
+            RP100 differences between neighbouring stations, cap use and RP1000 against production
+  r_variants  the gauge ratio r, left one out: production; fallback 1 or a covariate fit on
+            GTSM's RP10 skew surge where fewer than MIN_NEIGHBOURS gauges are near; calibration
+            without gauges whose GTSM skew surge is below R_MIN_SKEW_M; an additive offset
   shape_noise  the stations' MLE GPD shapes against the shapes a light tail (shape 0, or the
             median shape) gives from each station's number of storms: is the heavy tail noise?
 Gauge reference: test 9's convolution of the gauge's own skew surges on its own tide.
@@ -32,7 +39,7 @@ sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "boundary_test"))
 from config_utils import get_data_catalog, load_config  # noqa: E402
 from gtsm_series import MISSING, load_series  # noqa: E402
-from level_product_gauges import GaugeCheck, scores  # noqa: E402
+from level_product_gauges import GAUGE_RPS, GaugeCheck, scores, tc_hours  # noqa: E402
 import skew_surge as ss  # noqa: E402
 import storm_tide_product as stp  # noqa: E402
 import tide_prediction as tp  # noqa: E402
@@ -52,6 +59,11 @@ NOISE_N_GRID = np.unique(np.geomspace(10, 400, 32).round().astype(int))
 NOISE_REPS = 2000
 NOISE_THRESHOLDS = (0.2, 0.35, 0.5)
 CYCLE_COUNT_HOURS = 2 * 8766  # two years of the hourly tide set the cycles per year
+TC_RAISES = {"tc_scale": (1.0, 1.1, 1.2, 1.3, 1.4), "tc_shift_m": (0.0, 0.1, 0.2, 0.3, 0.4)}
+TC_JUMPS_SHIFT_M = 0.24  # the basin-left-out shift of tc_scale (0.18-0.25 m)
+NEIGHBOUR_KM = 25.0
+R_MIN_SKEW_M = 0.2  # below it the ratio rests on a GTSM skew surge of a few decimetres
+BASIN_KM = 300.0  # a gauge's basin: the most frequent IBTrACS basin of the track points this close
 
 
 def _station_inputs(check: GaugeCheck, ks: np.ndarray) -> list[dict]:
@@ -180,6 +192,156 @@ def peaks(check: GaugeCheck, dest: Path) -> None:
     print((p.assign(off=p.offset_hr != 0).groupby("rp").off.mean() * 100).round(1).to_string(), flush=True)
 
 
+def _gauge_basins(check: GaugeCheck, gauges: pd.DataFrame) -> pd.Series:
+    from sklearn.neighbors import BallTree
+    tracks = pd.read_csv(check.cfg["storm_tide_product"]["ibtracs_path"], usecols=["BASIN", "LAT", "LON"],
+                         skiprows=[1], keep_default_na=False, low_memory=False)
+    tree = BallTree(np.radians(tracks[["LAT", "LON"]].to_numpy(dtype=float)), metric="haversine")
+    near = tree.query_radius(np.radians(gauges[["lat", "lon"]].to_numpy()), r=BASIN_KM / stp.EARTH_RADIUS_KM)
+    basin = tracks.BASIN.to_numpy()
+    return pd.Series([pd.Series(basin[i]).mode().iloc[0] if len(i) else "none" for i in near], index=gauges.index)
+
+
+def _loo_basin(levels: dict, gauge_rp100: pd.Series, basin: pd.Series, fit: np.ndarray) -> pd.Series:
+    """Per gauge: the raise that zeroes the median RP100 bias at the `fit` gauges of the other basins."""
+    values = np.array(sorted(levels))
+    err = np.stack([levels[v]["new_loo_rp100_m"] - gauge_rp100 for v in values])
+    raise_ = pd.Series(np.nan, index=gauge_rp100.index)
+    for b in basin.unique():
+        bias = np.median(err[:, fit & (basin != b).to_numpy()], axis=1)
+        raise_[(basin == b).to_numpy()] = (float(np.interp(0.0, bias, values)) if np.all(np.diff(bias) > 0)
+                                           else values[np.argmin(np.abs(bias))])
+    return raise_
+
+
+def tc_scale(check: GaugeCheck, dest: Path, workers: int) -> None:
+    hours = check.tc_hours()
+    base = check.table(check.levels(workers))
+    gauges = pd.read_parquet(check.out / "gauges" / "gauges.parquet")
+    basin = _gauge_basins(check, gauges.loc[base.index])
+    tc_dom = (base.station_class == "tc_dominated").to_numpy()
+    out = base[["station_class", "has_tc"] + [f"gauge_rp{rp}_m" for rp in GAUGE_RPS]
+               + [f"new_loo_rp{rp}_m" for rp in GAUGE_RPS]].rename(
+        columns={f"new_loo_rp{rp}_m": f"double_count_rp{rp}_m" for rp in GAUGE_RPS})
+    out["basin"] = basin
+    for key, values in TC_RAISES.items():
+        levels = {}
+        for v in values:
+            levels[v] = check.table(check.levels(workers, hours, **{key: v}))
+            out[f"masked_{key}_{v:g}_rp100_m"] = levels[v].new_loo_rp100_m
+            print(f"  masked, {key} {v:g}", flush=True)
+        values = np.array(sorted(levels))
+        out[f"{key}_loo_basin"] = raise_ = _loo_basin(levels, base.gauge_rp100_m, basin, tc_dom)
+        for rp in GAUGE_RPS:
+            lev = np.stack([levels[v][f"new_loo_rp{rp}_m"] for v in values])
+            out[f"masked_{key}_loo_basin_rp{rp}_m"] = [np.interp(x, values, lev[:, j]) for j, x in enumerate(raise_)]
+    out.to_parquet(dest / "tc_scale.parquet")
+    cols = {"double count (production)": "double_count"} | {f"masked + {k}, basin left out": f"masked_{k}_loo_basin"
+                                                            for k in TC_RAISES}
+    s = scores(out, cols)
+    s.to_parquet(dest / "tc_scale_scores.parquet")
+    print(out.groupby("basin").agg(gauges=("station_class", "size"), tc_dominated=("station_class",
+          lambda c: (c == "tc_dominated").sum()), **{k: (f"{k}_loo_basin", "first") for k in TC_RAISES}).to_string(),
+          flush=True)
+    print(s[s.gauges.isin(["TC-dominated gauges", "stations with a TC part", "non-TC-dominated gauges"])
+            & (s.rp == 100)].to_string(index=False), flush=True)
+
+
+def tc_jumps(check: GaugeCheck, dest: Path, workers: int) -> None:
+    from sklearn.neighbors import BallTree
+    lev = check.lev
+    ks = np.flatnonzero(lev.station_id.isin(check.tc_levels.index).to_numpy() & (lev.level_source == "product").to_numpy())
+    st = check.stations.iloc[ks]
+    hours = tc_hours(st, len(tp.hourly_times()), Path(check.cfg["storm_tide_product"]["ibtracs_path"]), tp.HOURLY_START)
+    todo = [{**s, "tc_hours": hours.get(check.stations.index[k]), "tc_shift_m": TC_JUMPS_SHIFT_M}
+            for s, k in zip(_station_inputs(check, ks), ks)]
+    print(f"tc_jumps: {len(todo)} stations", flush=True)
+    built = _build(check, todo, workers)
+    out = lev.iloc[ks][["station_id", "lon", "lat", "gpd_shape_mle", "rp100_m", "rp1000_m", "coast_rp_rp1000_m"]].copy()
+    out["masked_rp100_m"] = built.rp100_m.to_numpy()
+    out["masked_rp1000_m"] = built.rp1000_m.to_numpy()
+    out["masked_shape_mle"] = built.gpd_shape_mle.to_numpy()
+    out.to_parquet(dest / "tc_jumps.parquet")
+    xy = np.radians(out[["lat", "lon"]].to_numpy())
+    d, i = BallTree(xy, metric="haversine").query(xy, k=2)
+    pair = d[:, 1] * stp.EARTH_RADIUS_KM <= NEIGHBOUR_KM
+    for name, col in (("double count (production)", "rp100_m"), ("masked + shift", "masked_rp100_m")):
+        z = out[col].to_numpy()
+        jump = np.abs(z - z[i[:, 1]])[pair]
+        print(f"{name}: nearest-neighbour |dRP100| within {NEIGHBOUR_KM:.0f} km ({pair.sum()} stations): median "
+              f"{np.median(jump):.3f}, p90 {np.quantile(jump, 0.9):.3f}, p99 {np.quantile(jump, 0.99):.3f}, "
+              f"> 0.5 m {np.sum(jump > 0.5)}", flush=True)
+    for name, col in (("production", "gpd_shape_mle"), ("masked", "masked_shape_mle")):
+        print(f"{name}: MLE shape > {stp.SHAPE_CAP} at {(out[col] > stp.SHAPE_CAP).sum()} stations", flush=True)
+    print("RP1000 - COAST-RP RP1000, p50 / p99 / max: " + "; ".join(
+        f"{c}: {np.nanquantile(out[c] - out.coast_rp_rp1000_m, 0.5):.2f} / "
+        f"{np.nanquantile(out[c] - out.coast_rp_rp1000_m, 0.99):.2f} / {np.nanmax(out[c] - out.coast_rp_rp1000_m):.2f}"
+        for c in ("rp1000_m", "masked_rp1000_m")), flush=True)
+
+
+def _idw(at: pd.DataFrame, cal: pd.DataFrame, value: str) -> tuple[float, int]:
+    """IDW of `value` over `cal` within the production radius at one site, and the neighbour count."""
+    from sklearn.neighbors import BallTree
+    tree = BallTree(np.radians(cal[["lat", "lon"]].to_numpy()), metric="haversine")
+    i, d = tree.query_radius(np.radians(at[["lat", "lon"]].to_numpy()), r=stp.IDW_RADIUS_KM / stp.EARTH_RADIUS_KM,
+                             return_distance=True)
+    i, d = i[0], d[0]
+    if len(i) < stp.MIN_NEIGHBOURS:
+        return np.nan, len(i)
+    w = 1.0 / np.maximum(d * stp.EARTH_RADIUS_KM, 1.0)
+    return float(np.sum(w * cal[value].to_numpy()[i]) / w.sum()), len(i)
+
+
+def r_variants(check: GaugeCheck, dest: Path, workers: int) -> None:
+    gauges = pd.read_parquet(check.out / "gauges" / "gauges.parquet")
+    gauges["offset_m"] = gauges.skew_gauge_m - gauges.skew_gtsmfes_m
+    cal_all = gauges[gauges.calibrate & np.isfinite(gauges.ratio_fes)]
+    names = check.meta.file_name.to_numpy()
+    keys = {v: [] for v in ("fallback 1", "covariate fallback", f"calibration skew >= {R_MIN_SKEW_M:g} m", "additive")}
+    neighbours = []
+    for name in names:
+        at, cal = gauges.loc[[name]], cal_all.drop(index=name, errors="ignore")
+        r, n = _idw(at, cal, "ratio_fes")
+        neighbours.append(n)
+        fit = np.polyfit(np.log(cal.skew_gtsmfes_m), np.log(cal.ratio_fes), 1)
+        cov = float(np.exp(np.polyval(fit, np.log(at.skew_gtsmfes_m.iloc[0]))))
+        keys["fallback 1"].append({"r": min(r, stp.R_CAP) if n >= stp.MIN_NEIGHBOURS else 1.0})
+        keys["covariate fallback"].append({"r": min(r if n >= stp.MIN_NEIGHBOURS else cov, stp.R_CAP)})
+        big = cal[cal.skew_gtsmfes_m >= R_MIN_SKEW_M]
+        rb, nb = _idw(at, big, "ratio_fes")
+        keys[f"calibration skew >= {R_MIN_SKEW_M:g} m"].append(
+            {"r": min(rb if nb >= stp.MIN_NEIGHBOURS else float(big.ratio_fes.median()), stp.R_CAP)})
+        d, nd = _idw(at, cal, "offset_m")
+        keys["additive"].append({"surge_offset_m": d if nd >= stp.MIN_NEIGHBOURS else float(cal.offset_m.median())})
+    base_todo = check.todo
+    out = check.table(check.levels(workers))
+    out["neighbours"] = neighbours
+    out = out.rename(columns={f"new_loo_rp{rp}_m": f"production_rp{rp}_m" for rp in GAUGE_RPS})
+    for variant, extra in keys.items():
+        check.todo = [{**s, **e} for s, e in zip(base_todo, extra)]
+        loo = check.table(check.levels(workers))
+        for rp in GAUGE_RPS:
+            out[f"{variant}_rp{rp}_m"] = loo[f"new_loo_rp{rp}_m"]
+        out[f"{variant}_value"] = [next(iter(e.values())) for e in extra]
+        print(f"  {variant}", flush=True)
+    check.todo = base_todo
+    out.to_parquet(dest / "r_variants.parquet")
+    rows = []
+    sparse = out.neighbours < stp.MIN_NEIGHBOURS
+    for label, sel in (("non-TC-dominated", out.station_class != "tc_dominated"),
+                       (f"non-TC-dominated, < {stp.MIN_NEIGHBOURS} gauges within 500 km",
+                        (out.station_class != "tc_dominated") & sparse)):
+        for rp in (10, 100):
+            for variant in ["production", *keys]:
+                e = (out[f"{variant}_rp{rp}_m"] - out[f"gauge_rp{rp}_m"])[sel].dropna()
+                rows.append({"gauges": label, "rp": rp, "variant": variant, "n": len(e), "median": e.median(),
+                             "mae": e.abs().mean(), "p10": e.quantile(0.1), "p90": e.quantile(0.9)})
+    s = pd.DataFrame(rows).round(3)
+    s.to_parquet(dest / "r_variants_scores.parquet")
+    print(f"covariate: log r = {fit[0]:.3f} log skew + {fit[1]:.3f}", flush=True)
+    print(s.to_string(index=False), flush=True)
+
+
 def _null_shapes(args) -> np.ndarray:
     n, shape0, seed = args
     rng = np.random.default_rng(seed)
@@ -242,7 +404,8 @@ def shape_noise(check: GaugeCheck, dest: Path, workers: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("stages", nargs="+", choices=("cap", "despike", "tc_mask", "fes_rule", "peaks", "shape_noise"))
+    parser.add_argument("stages", nargs="+", choices=("cap", "despike", "tc_mask", "fes_rule", "peaks", "shape_noise",
+                                                       "tc_scale", "tc_jumps", "r_variants"))
     parser.add_argument("--product-dir", required=True)
     parser.add_argument("--sources-dir", default=".cleanup_baseline/level_sources")
     parser.add_argument("--config", default=str(REPO / "snakemake_workflow" / "config" / "config.yml"))
@@ -255,8 +418,9 @@ def main() -> None:
     check = GaugeCheck(out, Path(args.sources_dir), load_config(args.config, args.override))
     for stage in args.stages:
         print(f"== {stage}", flush=True)
-        if stage in ("cap", "tc_mask", "fes_rule", "shape_noise"):
-            {"cap": cap, "tc_mask": tc_mask, "fes_rule": fes_rule, "shape_noise": shape_noise}[stage](
+        if stage in ("cap", "tc_mask", "fes_rule", "shape_noise", "tc_scale", "tc_jumps", "r_variants"):
+            {"cap": cap, "tc_mask": tc_mask, "fes_rule": fes_rule, "shape_noise": shape_noise,
+             "tc_scale": tc_scale, "tc_jumps": tc_jumps, "r_variants": r_variants}[stage](
                 check, dest, args.workers)
         else:
             {"despike": despike, "peaks": peaks}[stage](check, dest)

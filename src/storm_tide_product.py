@@ -30,7 +30,7 @@ from sklearn.neighbors import BallTree
 from gesla import extract_record
 from gtsm_series import load_series, station_series
 from skew_surge import (
-    HW_PROMINENCE, SPIKE_M, annual_rate, despike, exceedance, high_waters, scaled, skew_level, skew_surges,
+    HW_PROMINENCE, SPIKE_M, annual_rate, despike, exceedance, high_waters, scaled, shifted, skew_level, skew_surges,
     surge_model, tide_peaks)
 from storm_tide_hydrograph import (
     STEPS_PER_HR, annual_maximum_events, gaussian_shape, high_water_indices, high_water_window, median_surge_shape,
@@ -342,7 +342,9 @@ def station_product(st: dict, g: np.ndarray, th: np.ndarray, t10: np.ndarray,
 
     `g`: hourly GTSM surge residual (m, NaN missing); `th` / `t10`: the station's FES tide,
     hourly on the same axis and 10-min over one nodal cycle. `st` may set "shape_cap" (None: no
-    cap) in place of SHAPE_CAP.
+    cap) in place of SHAPE_CAP, and "tc_scale" / "tc_shift_m" applied to the COAST-RP_TC levels
+    (m above MSL) before they become a rate; "surge_offset_m" adds a gauge offset to the positive
+    skew surges in place of the ratio r.
     """
     row = {"station": st["station"], "atlas": st["atlas"], "mhws_m": st["mhws_m"]}
     hyd = np.full((len(RPS), N_STEPS), np.nan, dtype=np.float32)
@@ -358,14 +360,15 @@ def station_product(st: dict, g: np.ndarray, th: np.ndarray, t10: np.ndarray,
     tc_cycles = np.isin(hw, st["tc_hours"]) if st.get("tc_hours") is not None else np.zeros(len(hw), bool)
     row["tc_masked_share"] = float(tc_cycles[ok].mean())
     model = surge_model(skew[ok & ~tc_cycles], len(keep_years), max_shape=st.get("shape_cap", SHAPE_CAP))
-    corrected = scaled(model, st["r"])
+    corrected = shifted(model, st["surge_offset_m"]) if "surge_offset_m" in st else scaled(model, st["r"])
     v, w, cyc = tide_peaks(t10, STEP_MIN / 60.0, HW_PROMINENCE)
     row.update({"n_years": len(keep_years), "gpd_shape": model["shape"], "gpd_shape_mle": model["shape_mle"],
                 "gpd_scale": model["scale"], "theta": model["theta"]})
 
     def etc_rate(m):
         return lambda z: cyc * m["theta"] * float(np.sum(w * exceedance(m, z - v)))
-    tc = _tc_rate(st["tc"]) if st["tc"] is not None else (lambda z: 0.0)
+    tc = (_tc_rate(st["tc"] * st.get("tc_scale", 1.0) + st.get("tc_shift_m", 0.0)) if st["tc"] is not None
+          else (lambda z: 0.0))
     lo, hi = float(v.min()), float(v.max()) + 20.0
     for rp, target in zip(RPS, annual_rate(RPS)):
         row[f"etc_raw_rp{rp}_m"] = _solve(etc_rate(model), target, lo, hi)

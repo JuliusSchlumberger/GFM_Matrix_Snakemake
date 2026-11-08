@@ -84,6 +84,13 @@ def scaled(model: dict, r: float) -> dict:
             else model["u"], "scale": model["scale"] * r}
 
 
+def shifted(model: dict, d: float) -> dict:
+    """The model of S + d for S > 0 (the negative skew surges stay as they are)."""
+    srt = model["sorted"]
+    return {**model, "sorted": np.sort(np.where(srt > 0, srt + d, srt)), "u": model["u"] + d if model["u"] > 0
+            else model["u"]}
+
+
 def exceedance(model: dict, s: np.ndarray) -> np.ndarray:
     srt = model["sorted"]
     body = 1.0 - np.searchsorted(srt, s, side="right") / len(srt)

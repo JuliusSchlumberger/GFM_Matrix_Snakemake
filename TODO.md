@@ -183,6 +183,21 @@ Open:
   3. Gauge ratio r: open-coast calibration set (drop estuary/harbour/tidal-river gauges),
      multiplicative vs additive, median vs covariate fallback (shelf width, latitude, GTSM cell
      size) or 1 with a flag; leave-one-out on the 451 calibration and the 98 sparse gauges.
+  Results (2026-11-08, `open_guesses.py shape_noise | tc_scale | tc_jumps | r_variants`, review brief):
+  - 1: not noise. Stations with a TC part: 753 MLE shapes > 0.35 against 6 expected from a light
+    tail at their storm counts (91 separate 5-deg cells); without a TC part 70 against 15. The cap
+    question is decision 2.
+  - 2: masked fit + COAST-RP_TC shifted by 0.24 m (fitted per basin, basin left out; 0.18 m WP):
+    TC-dominated RP100 MAE 0.363 vs 0.361 m, 10-90% -0.64..+0.42 vs -0.59..+0.51; shapes > 0.35
+    753 -> 69; RP1000 - COAST-RP p99 2.06 -> 1.16 m, max 8.4 -> 3.2 m; neighbour jumps unchanged;
+    RP2 MAE (all gauges) 0.088 -> 0.104 m because the shift also lifts COAST-RP_TC's flat tide
+    floor. Scaling instead of shifting is worse (MAE 0.413). Next variant: a shift tapering to 0
+    below RP10. Decision open (user).
+  - 3: covariate fallback r = 1.03 x S10^-0.32 (GTSM RP10 skew surge, m; cap 2) where < 3 gauges
+    within 500 km: sparse gauges RP100 MAE 0.226 -> 0.194 m, bias -0.11 -> -0.03 m; all 451
+    0.163 -> 0.157 m. Fallback 1 worse; dropping gauges with S10 < 0.2 m no effect; additive
+    offset +3 cm RP10 bias. The high ratios are open-ocean islands and Peru-Chile (S10 ~0.1 m),
+    not estuaries. Decision open (user).
   4. Tile interpolation: interpolate skew-surge levels and convolve with the local FES tide at
      the tile boundary, vs total-level IDW, on the stations whose current error exceeds 0.2 m.
   5. Global rerun with flags (tail-uncertain, TC-coast, fallback-r); GTSM-ERA5-E (1950-2024)
