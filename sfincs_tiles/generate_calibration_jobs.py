@@ -22,12 +22,18 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from calibration_split import split_group  # noqa: E402
 from gfm_config import check_site_roots, read_root, site_paths  # noqa: E402
 
 # Site paths: single definition in site_env.sh (env-overridable), shared with the shell drivers.
 _HX = site_paths()
 LINUX_DATA_ROOT = _HX["GFM_DATA_ROOT"]
 LINUX_CODE_ROOT = _HX["GFM_CODE_ROOT"]
+# Eikonal solves per tile, in units of the 10-solve sweep of eikonal_min_per_mcell, by phase and
+# split group (run_calibration_models.phase_runs; a duration run solves twice, bathtubs ~free).
+RUN_LOAD = {("sweep", "calibration"): 1.8, ("sweep", "validation"): 0.05,
+            ("duration", "calibration"): 2.0, ("duration", "validation"): 0.05,
+            ("selected", "calibration"): 0.05, ("selected", "validation"): 0.6}
 GFM_PY = _HX["GFM_PYTHON"]
 HYDROMT_PY = _HX["GFM_SFINCS_PYTHON"]
 DONE_MARKER = "calibration_run.done"
@@ -128,7 +134,7 @@ def cmd_stage2(args) -> None:
     """Write the stage-2 sbatch jobs for unfinished tiles; submit them with --submit.
 
     Per-tile minutes = overhead_min + active Mcells (pre-flight) x
-    (sfincs_min_per_mcell + eikonal_min_per_mcell).
+    (sfincs_min_per_mcell + eikonal_min_per_mcell x RUN_LOAD[phase, group]).
     """
     _, sbatch = _hpc_view(args)
     root = read_root(Path(args.config))
@@ -141,7 +147,8 @@ def cmd_stage2(args) -> None:
             continue
         pf = base / "boundary_lines" / "preflight" / f"{tid}.json"
         mcells = json.loads(pf.read_text()).get("n_active", 0) / 1e6 if pf.exists() else FALLBACK_MCELLS
-        est = args.overhead_min + mcells * (args.sfincs_min_per_mcell + args.eikonal_min_per_mcell)
+        load = RUN_LOAD[(args.phase, split_group(tid))]
+        est = args.overhead_min + mcells * (args.sfincs_min_per_mcell + args.eikonal_min_per_mcell * load)
         tiles.append((tid, est))
     if not tiles:
         print(f"Nothing to do: {n_done} tile(s) already done.")
@@ -169,7 +176,7 @@ def cmd_stage2(args) -> None:
             f"# {len(tids)} tile(s), estimated {load[j] / 60:.1f} h (generate_calibration_jobs.py stage2)",
             "while read -r TILE; do",
             '  [ -n "$TILE" ] || continue',
-            f'  BASE_DIR_NAME={args.base_dir_name} SFINCS_THREADS={sbatch["cpus_per_task"]} '
+            f'  BASE_DIR_NAME={args.base_dir_name} SFINCS_THREADS={sbatch["cpus_per_task"]} CAL_PHASE={args.phase} '
             f'bash {LINUX_CODE_ROOT}/sfincs_tiles/run_final_tile.sh "$TILE" </dev/null',
             f"done < {lout}/tiles_{j:03d}.txt", ""]
         (out_dir / f"{name}.sbatch").write_text("\n".join(lines), newline="\n")
@@ -202,7 +209,9 @@ def main() -> None:
     parser.add_argument("--overhead-min", type=float, default=35.0)  # inputs, model build + subgrid, postprocessing
     parser.add_argument("--sfincs-min-per-mcell", type=float, default=12.5)  # p90 over 550 SFINCS runs, 4 threads
     parser.add_argument("--eikonal-min-per-mcell", type=float, default=10.0,
-                        help="all 10 friction points together, per million active SFINCS cells (rough)")
+                        help="10 eikonal solves, per million active SFINCS cells (rough); scaled by RUN_LOAD")
+    parser.add_argument("--phase", choices=["sweep", "duration", "selected"], default="sweep",
+                        help="stage2: run_calibration_models.py phase (CAL_PHASE of run_final_tile.sh)")
     parser.add_argument("--time-margin", type=float, default=1.5)
     parser.add_argument("--submit", action="store_true", help="stage2: sbatch the jobs right away")
     args = parser.parse_args()

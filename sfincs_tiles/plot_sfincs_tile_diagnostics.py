@@ -1,12 +1,12 @@
 """Draw per-tile SFINCS diagnostic figures into {base_dir_name}/{tile_id}/figures/.
 
-Figures: mask, boundary_forcing, biggest_disagreement (largest eikonal-only or
-SFINCS-only patch), coastrp_forcing. Reads sfincs.msk/ind raw, so it runs in `gfm`.
+Figures: mask, boundary_forcing, biggest_disagreement (largest model-only or
+SFINCS-only patch of one run), coastrp_forcing. Reads sfincs.msk/ind raw, so it runs in `gfm`.
 
 Usage:
     python plot_sfincs_tile_diagnostics.py --tile-id 1693 --base-dir-name calibration_roughness_SFINCS
     python plot_sfincs_tile_diagnostics.py --tile-id 1974 --base-dir-name calibration_roughness_SFINCS \
-        --friction-scale-factor 12
+        --run-key eikonal_landcover_fsf0.25
     # one figure only, into another directory under another name:
     python plot_sfincs_tile_diagnostics.py --tile-id 1974 --base-dir-name calibration_roughness_SFINCS \
         --figures coastrp_forcing --fig-dir <dir> --out-name underprediction_1974_forcing_comparison.png
@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -34,6 +35,7 @@ from scipy import ndimage
 from scipy.spatial import cKDTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from calibration_paths import SELECTION_NAME  # noqa: E402
 from gfm_config import read_root  # noqa: E402
 from sfincs_grid import read_sfincs_mask  # noqa: E402
 from plot_worst_tiles_panel import (  # noqa: E402
@@ -190,12 +192,12 @@ def plot_boundary_forcing(mask2d: np.ndarray, transform: rasterio.Affine, crs: s
     print(f"Wrote {out_path}")
 
 
-def plot_biggest_disagreement(tile_dir: Path, out_path: Path, friction_scale_factor: float) -> None:
+def plot_biggest_disagreement(tile_dir: Path, out_path: Path, run_key: str) -> None:
     """Zoom on the largest contiguous eikonal-only or SFINCS-only patch.
 
     Writes nothing (prints SKIP) without usable subgrid data or without disagreement.
     """
-    cls = build_classification(tile_dir, friction_scale_factor)
+    cls = build_classification(tile_dir, run_key)
     if cls is None:
         print(f"SKIP {out_path}: no usable SFINCS/eikonal subgrid data for this tile")
         return
@@ -480,9 +482,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tile-id", required=True)
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
-    parser.add_argument("--friction-scale-factor", type=float, default=None,
-                        help="biggest_disagreement: which friction point's eikonal raster to compare against "
-                             "(default: the config's simulation.flooding.friction_scale_factor)")
+    parser.add_argument("--run-key", default=None,
+                        help="biggest_disagreement: which run to compare against "
+                             "(default: the best variant's run in variant_selection.json)")
     parser.add_argument("--config", default=str(Path(__file__).resolve().parent.parent
                                                  / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--figures", nargs="+", choices=FIGURES, default=FIGURES,
@@ -523,12 +525,11 @@ def main() -> None:
     if "boundary_forcing" in args.figures:
         plot_boundary_forcing(mask2d, transform, crs, sfincs_dir, out_path("boundary_forcing"))
     if "biggest_disagreement" in args.figures:
-        fsf = args.friction_scale_factor
-        if fsf is None:
-            # config.yml holds the per-metre rate; the calibration outputs are named by the
-            # effective factor on DeltaDTM's 30 m grid
-            fsf = float(cfg["simulation"]["flooding"]["friction_scale_factor"]) * 30.0
-        plot_biggest_disagreement(tile_dir, out_path("biggest_disagreement"), fsf)
+        key = args.run_key
+        if key is None:
+            selection = json.loads((root / args.base_dir_name / SELECTION_NAME).read_text())
+            key = selection["variants"][selection["best_variant"]]["run_key"]
+        plot_biggest_disagreement(tile_dir, out_path("biggest_disagreement"), key)
     if "coastrp_forcing" in args.figures:
         plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs, out_path("coastrp_forcing"),
                              knn=int(cfg["simulation"]["flooding"]["knn"]),

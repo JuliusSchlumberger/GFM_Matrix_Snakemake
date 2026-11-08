@@ -1,10 +1,19 @@
-"""Run the bathtub and the eikonal friction sweep for one calibration tile on SFINCS's 30 m subgrid.
+"""Run the flood-model variants for one calibration tile on SFINCS's 30 m subgrid.
 
-Solver settings come from config simulation.flooding; coastline and station weighting
-are production's (flood_model). Outputs go to outputs/, tagged by friction scale factor.
+Phases (src/flood_variants.py names the variants; every phase also runs both bathtubs):
+  sweep     calibration tiles: straight_line and eikonal_uniform over UNIFORM_RATES_M_PER_KM,
+            eikonal_landcover over FRICTION_SCALE_FACTORS
+  duration  calibration tiles: both duration variants over DURATION_ALPHAS, at the parameter
+            variant_selection.json picked for their base variant
+  selected  every tile: each variant at its run in variant_selection.json
+A tile's group is calibration_split.split_group. Seeds, coastline and solver settings are
+production's (flood_model, config simulation.flooding); the forcing is the SFINCS run's, the
+duration correction takes its boundary hydrographs. No static (two-component) level: the
+SFINCS runs have no separate SLR part. Existing outputs are skipped.
 
 Usage:
-    python run_calibration_models.py --config <resolved_config.yml> --base-dir-name calibration_roughness_SFINCS --tile-id 1122
+    python run_calibration_models.py --config <resolved_config.yml> --tile-id 1122 --phase sweep
+    python run_calibration_models.py --config <resolved_config.yml> --tile-id 1122 --run eikonal_uniform:0.1
 """
 
 from __future__ import annotations
@@ -17,6 +26,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import rasterio
 import yaml
 from pyproj import Transformer
@@ -24,13 +34,17 @@ from rasterio.warp import Resampling, reproject
 from scipy import ndimage
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from event_volume import DurationCorrection  # noqa: E402
 from flood_model import flood_depth_dense, idw_seed_values_at  # noqa: E402
+from flood_variants import VARIANTS, run_key, variant_flooding  # noqa: E402
 from rasters import WATERDEPTH_NODATA_INT16, decode_waterlevel_cm, encode_waterdepth_cm  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from calibration_paths import (  # noqa: E402
-    FRICTION_SCALE_FACTORS, RETURN_PERIOD, WATERLEVEL_NAME, bathtub_path, eikonal_path,
+    DURATION_ALPHAS, FRICTION_SCALE_FACTORS, RETURN_PERIOD, RUNS_NAME, SELECTION_NAME, UNIFORM_RATES_M_PER_KM,
+    WATERLEVEL_NAME, run_path,
 )
+from calibration_split import split_group  # noqa: E402
 from gfm_config import read_root  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
 
@@ -77,18 +91,6 @@ def build_inputs_from_sfincs_subgrid(
     mask = np.where(valid_code, mask_f, np.float32(NODATA_CODE)).astype(np.int8)
 
     return dem, mask, friction, transform, crs
-
-
-def compute_bathtub_depth(dem: np.ndarray, mask: np.ndarray, max_waterlevel_m: float) -> np.ndarray:
-    """Flood every land cell below one flat level (m): no friction or propagation.
-
-    Unpruned on disk; compute_calibration_result prunes it to ocean-connected cells
-    (flood_agreement.prune_to_ocean_connected) before scoring.
-
-    `max_waterlevel_m` is the tile's highest boundary station value, not interpolated.
-    """
-    depth = np.maximum(np.float32(max_waterlevel_m) - dem, np.float32(0.0))
-    return np.where(mask == LAND_CODE, depth, np.float32(0.0)).astype(np.float32)
 
 
 def _write_waterdepth(waterdepth: np.ndarray, transform, crs, output_path: Path) -> None:
@@ -166,14 +168,58 @@ def _jsonable(o):
     return o
 
 
+HYDRO_WINDOW_HR = (40.0, 110.0)  # build_sfincs_tile.TRUNCATE_WINDOW_HR_DEFAULT: the simulated window
+PHASES = ("sweep", "duration", "selected")
+BATHTUBS = ("bathtub", "bathtub_connected")
+
+
+def phase_runs(phase: str, group: str, selection: dict | None) -> list[tuple[str, float | None, float | None]]:
+    """Return the (variant, parameter, alpha) runs of `phase` on a tile of `group`."""
+    runs = [(name, None, None) for name in BATHTUBS]
+    if phase == "sweep" and group == "calibration":
+        runs += [(v, r, None) for v in ("straight_line", "eikonal_uniform") for r in UNIFORM_RATES_M_PER_KM]
+        runs += [("eikonal_landcover", f, None) for f in FRICTION_SCALE_FACTORS]
+    elif phase == "duration" and group == "calibration":
+        for name in ("eikonal_uniform_duration", "eikonal_landcover_duration"):
+            parameter = selection["variants"][name.removesuffix("_duration")]["parameter"]
+            runs += [(name, parameter, a) for a in DURATION_ALPHAS]
+    elif phase == "selected":
+        runs += [(name, v["parameter"], v["alpha"]) for name, v in selection["variants"].items()
+                 if name not in BATHTUBS]
+    return runs
+
+
+def parse_run(spec: str) -> tuple[str, float | None, float | None]:
+    """Parse VARIANT[:PARAMETER[:ALPHA]]."""
+    name, *rest = spec.split(":")
+    if name not in VARIANTS:
+        raise SystemExit(f"--run {spec}: unknown variant {name!r} (one of {', '.join(VARIANTS)})")
+    values = [float(x) if x else None for x in rest] + [None, None]
+    return name, values[0], values[1]
+
+
+def sfincs_duration_correction(sfincs_dir: Path, crs, duration_config: dict) -> DurationCorrection:
+    """Build correction B from the SFINCS run's own boundary hydrographs (matched points)."""
+    hydro = pd.read_csv(sfincs_dir / "corrected_hydrographs.csv")
+    hydro = hydro[(hydro.elapsed_hr >= HYDRO_WINDOW_HR[0]) & (hydro.elapsed_hr <= HYDRO_WINDOW_HR[1])]
+    points = gpd.read_file(sfincs_dir / "matched_boundary_points.gpkg").to_crs("EPSG:4326")
+    series = np.vstack([hydro[str(i)].to_numpy(dtype=np.float64) for i in range(len(points))])
+    return DurationCorrection(
+        np.column_stack([points.geometry.x, points.geometry.y]), series,
+        float(np.median(np.diff(hydro.elapsed_hr))) * 3600.0,
+        t_ref_s=float(duration_config["t_ref_h"]) * 3600.0, alpha=float(duration_config["alpha"]),
+        max_multiplier=float(duration_config["max_multiplier"]), crs=crs)
+
+
 def main() -> None:
-    """Run the bathtub and/or eikonal sweep for one tile, skipping existing outputs."""
+    """Run one phase (or the --run list) for one tile, skipping existing outputs."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tile-id", required=True)
     parser.add_argument("--config", required=True, help="config.yml or the base dir's resolved_config.yml")
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
-    parser.add_argument("--friction-scale-factors", type=float, nargs="+", default=list(FRICTION_SCALE_FACTORS))
-    parser.add_argument("--models", nargs="+", choices=["bathtub", "eikonal"], default=["bathtub", "eikonal"])
+    parser.add_argument("--phase", choices=PHASES, default="sweep")
+    parser.add_argument("--run", action="append", default=None, metavar="VARIANT[:PARAMETER[:ALPHA]]",
+                        help="run these instead of the phase (repeatable)")
     parser.add_argument("--overwrite", action="store_true", help="redo outputs that already exist")
     args = parser.parse_args()
 
@@ -183,57 +229,74 @@ def main() -> None:
     flooding = config["simulation"]["flooding"]
     oc = flooding["obstacle_coupling"]
     river_code = int(config["tile_generation"]["river_code"])
-    tile_dir = root / args.base_dir_name / args.tile_id
+    base_dir = root / args.base_dir_name
+    tile_dir = base_dir / args.tile_id
     out_dir = tile_dir / "outputs"
     sfincs_dir = tile_dir / "sfincs_model"
-    native_mask_path = tile_dir / "inputs" / "mask.tif"
+    group = split_group(args.tile_id)
+
+    if args.run:
+        runs = [parse_run(spec) for spec in args.run]
+    else:
+        selection_path = base_dir / SELECTION_NAME
+        selection = json.loads(selection_path.read_text()) if selection_path.exists() else None
+        if args.phase != "sweep" and selection is None:
+            raise SystemExit(f"phase {args.phase} needs {selection_path} (compute_variant_metrics.py)")
+        runs = phase_runs(args.phase, group, selection)
+    todo = [r for r in runs if args.overwrite or not run_path(out_dir, run_key(*r)).exists()]
+    if not todo:
+        print(f"tile {args.tile_id} ({group}): {len(runs)} run(s) of phase {args.phase} already done")
+        return
+
     boundaries = retry_transient_io(gpd.read_file, tile_dir / "inputs" / f"boundaries_{RETURN_PERIOD}_{WATERLEVEL_NAME}.gpkg")
     if boundaries.empty:
-        raise SystemExit(f"tile {args.tile_id}: no COAST-RP station in boundaries_{RETURN_PERIOD}_{WATERLEVEL_NAME}.gpkg")
-
+        raise SystemExit(f"tile {args.tile_id}: no station in boundaries_{RETURN_PERIOD}_{WATERLEVEL_NAME}.gpkg")
     dem, mask, base_friction, transform, crs = build_inputs_from_sfincs_subgrid(
-        sfincs_dir, native_mask_path, friction_scale_factor=1.0, default_friction=float(flooding["default_friction"]))
-
-    if "bathtub" in args.models and (args.overwrite or not bathtub_path(out_dir).exists()):
-        level = float(decode_waterlevel_cm(boundaries[WATERLEVEL_NAME].to_numpy()).max())
-        _write_waterdepth(compute_bathtub_depth(dem, mask, level), transform, crs, bathtub_path(out_dir))
-        print(f"tile {args.tile_id}: bathtub at {level:.3f} m -> {bathtub_path(out_dir).name}", flush=True)
-
-    if "eikonal" not in args.models:
-        return
-    todo = [f for f in args.friction_scale_factors if args.overwrite or not eikonal_path(out_dir, f).exists()]
-    if not todo:
-        print(f"tile {args.tile_id}: eikonal sweep already done")
-        return
+        sfincs_dir, tile_dir / "inputs" / "mask.tif", friction_scale_factor=1.0,
+        default_friction=float(flooding["default_friction"]))
+    cell_m = float(np.hypot(transform.a, transform.d))
     seeds = production_seeds(mask, transform, crs, boundaries, int(flooding["knn"]), river_code,
                              float(flooding["idw_power"]))
     if seeds is None:
         raise SystemExit(f"tile {args.tile_id}: no coastline cell on the subgrid - nothing to seed")
     seed_rows, seed_cols, seed_values = seeds
-    print(f"tile {args.tile_id}: {len(seed_rows)} coastline seed cell(s), levels "
-          f"{seed_values.min():.2f}-{seed_values.max():.2f} m (knn={flooding['knn']}, power {flooding['idw_power']}, connected stations)", flush=True)
+    print(f"tile {args.tile_id} ({group}): {len(todo)} run(s), {len(seed_rows)} coastline seed cell(s), levels "
+          f"{seed_values.min():.2f}-{seed_values.max():.2f} m", flush=True)
 
     solver_dem, solver_mask = solver_inputs(dem, mask)
-    diag_path = out_dir / "eikonal_solver_diagnostics.json"
-    all_diag = json.loads(diag_path.read_text()) if diag_path.exists() else {}
-    for fsf in todo:
+    runs_path = out_dir / RUNS_NAME
+    all_runs = json.loads(runs_path.read_text()) if runs_path.exists() else {}
+    for name, parameter, alpha in todo:
+        spec = VARIANTS[name]
+        v_flooding = variant_flooding(flooding, name, parameter, alpha)
+        rate_m_per_m = float(v_flooding["uniform_attenuation_m_per_km"]) / 1000.0
+        if spec["friction_source"] == "uniform":
+            friction = np.full(dem.shape, rate_m_per_m * cell_m, dtype=np.float32)
+        else:
+            friction = base_friction * np.float32(float(v_flooding["friction_scale_factor"]) * cell_m)
+        duration = (sfincs_duration_correction(sfincs_dir, crs, v_flooding["duration_correction"])
+                    if spec["duration"] else None)
         t0 = time.monotonic()
         waterdepth, diagnostics = flood_depth_dense(
-            solver_dem, solver_mask, base_friction * np.float32(fsf), transform,
+            solver_dem, solver_mask, friction, transform,
             seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
+            resolution=cell_m, k=int(flooding["knn"]), idw_power=float(flooding["idw_power"]),
             ocean_code=OCEAN_CODE, river_code=river_code,
             obstacle_coupling=bool(oc["enabled"]),
             max_outer_iterations=int(oc["max_outer_iterations"]),
             outer_convergence_pct=float(oc["outer_convergence_pct"]),
             max_rounds=int(flooding["max_rounds"]),
             waterlevel_epsilon_m=float(flooding["waterlevel_epsilon_m"]),
+            duration_correction=duration, model=spec["model"], attenuation_m_per_m=rate_m_per_m,
         )
-        _write_waterdepth(waterdepth, transform, crs, eikonal_path(out_dir, fsf))
+        key = run_key(name, parameter, alpha)
+        _write_waterdepth(waterdepth, transform, crs, run_path(out_dir, key))
         runtime = time.monotonic() - t0
-        all_diag[f"fsf_{fsf:g}"] = {**_jsonable(diagnostics), "runtime_s": round(runtime, 1)}
-        diag_path.write_text(json.dumps(all_diag, indent=1))
-        print(f"tile {args.tile_id}: eikonal fsf {fsf:g} - {int((waterdepth > 0).sum())} flooded cell(s), "
-              f"{runtime:.0f} s -> {eikonal_path(out_dir, fsf).name}", flush=True)
+        all_runs[key] = {"variant": name, "parameter": parameter, "alpha": alpha,
+                         "solver": _jsonable(diagnostics), "runtime_s": round(runtime, 1)}
+        runs_path.write_text(json.dumps(all_runs, indent=1))
+        print(f"tile {args.tile_id}: {key} - {int((waterdepth > 0).sum())} flooded cell(s), {runtime:.0f} s",
+              flush=True)
 
 
 if __name__ == "__main__":

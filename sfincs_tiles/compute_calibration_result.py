@@ -1,4 +1,4 @@
-"""Write a tile's calibration_result.json: SFINCS vs bathtub vs eikonal on the 30 m subgrid.
+"""Write a tile's calibration_result.json: every flood-model run vs SFINCS on the 30 m subgrid.
 
 Needs hydromt-sfincs-dev (reads sfincs.msk through SfincsModel).
 
@@ -23,12 +23,11 @@ from rasterio.warp import Resampling, reproject
 from scipy import ndimage
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from calibration_paths import (  # noqa: E402
-    FRICTION_SCALE_FACTORS, WATERLEVEL_NAME, bathtub_path, decode_waterdepth_cm, eikonal_path,
-)
+from calibration_paths import RUNS_NAME, decode_waterdepth_cm, run_path  # noqa: E402
+from calibration_split import split_group  # noqa: E402
 from flood_agreement import (  # noqa: E402
     DEPTH_CATEGORY_EDGES, DEPTH_CORR_FINE_EDGES, WET_THRESHOLD_M, confusion_counts, depth_corr_sufficient_stats,
-    depth_joint_hist, metrics_from_counts, prune_to_ocean_connected,
+    depth_joint_hist, metrics_from_counts,
 )
 from gfm_config import read_root  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
@@ -71,15 +70,14 @@ def _compare(depth: np.ndarray, wet: np.ndarray, ref: dict) -> dict:
     return out
 
 
-def compute_result(tile_dir: Path, fsfs: list[float], flooding: dict, river_code: int,
-                   core_mask: np.ndarray | None = None) -> dict:
+def compute_result(tile_dir: Path, flooding: dict, core_mask: np.ndarray | None = None) -> dict:
     """Build one tile's calibration_result dict vs SFINCS's hmax_subgrid.tif.
 
     Scoring area: real land (mask.tif == LAND_CODE) active in SFINCS
     (sfincs.msk > 0, each 120 m cell -> its 4x4 subgrid pixels); inactive land
     is left out of every count, the model rasters themselves are not masked.
-    Bathtub is pruned to coast-connected flooding first; eikonal and SFINCS are
-    connected by construction. `flooding` is copied verbatim into "settings".
+    Every run of outputs/model_runs.json is scored as written (the connectivity rule is part
+    of the model). `flooding` is copied verbatim into "settings".
 
     Parameters
     ----------
@@ -125,41 +123,30 @@ def compute_result(tile_dir: Path, fsfs: list[float], flooding: dict, river_code
                       boundary_dist_max_km=float(d.max()))
 
     result = {
-        "tile_id": tile_dir.name, "built": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "tile_id": tile_dir.name, "group": split_group(tile_dir.name), "built": time.strftime("%Y-%m-%d %H:%M:%S"),
         **({"dedup": True} if core_mask is not None else {}),
         "settings": {"wet_threshold_m": WET_THRESHOLD_M, "subgrid_res_m": float(abs(transform.a)),
-                     "friction_scale_factors": list(fsfs), "flooding": flooding},
+                     "flooding": flooding},
         "domain": domain,
         "sfincs": {"flooded_km2": float(ref["sfincs_wet"].sum() * cell_km2),
                    "depth": _depth_stats(sfincs_depth, ref["sfincs_wet"])},
-        "bathtub": None, "eikonal": {},
+        "runs": {},
     }
 
-    bp = bathtub_path(out_dir)
-    if bp.exists():
-        depth, _, _, bshape = decode_waterdepth_cm(bp)
-        if bshape == shape:
-            wet = prune_to_ocean_connected(land & np.isfinite(depth) & (depth > WET_THRESHOLD_M), mog,
-                                           ocean_code=OCEAN_CODE, land_code=LAND_CODE, river_code=river_code) & score
-            boundaries = gpd.read_file(tile_dir / "inputs" / "boundaries_RP100_SLR_0.gpkg")
-            # SLR_0 is int16 cm (rasters.decode_waterlevel_cm, not importable in this env)
-            result["bathtub"] = {"level_m": float(boundaries[WATERLEVEL_NAME].max()) / 100.0,
-                                 "flooded_km2": float(wet.sum() * cell_km2), "depth": _depth_stats(depth, wet),
-                                 "vs_sfincs": _compare(depth, wet, ref)}
-
-    diag_path = out_dir / "eikonal_solver_diagnostics.json"
-    diag = json.loads(diag_path.read_text()) if diag_path.exists() else {}
-    for fsf in fsfs:
-        p = eikonal_path(out_dir, fsf)
+    runs_path = out_dir / RUNS_NAME
+    runs = json.loads(runs_path.read_text()) if runs_path.exists() else {}
+    for key, meta in runs.items():
+        p = run_path(out_dir, key)
         if not p.exists():
             continue
-        depth, _, _, eshape = decode_waterdepth_cm(p)
-        if eshape != shape:
+        depth, _, _, rshape = decode_waterdepth_cm(p)
+        if rshape != shape:
             continue
         wet = score & np.isfinite(depth) & (depth > WET_THRESHOLD_M)
-        key = f"fsf_{fsf:g}"
-        result["eikonal"][key] = {"flooded_km2": float(wet.sum() * cell_km2), "depth": _depth_stats(depth, wet),
-                                  "vs_sfincs": _compare(depth, wet, ref), "solver": diag.get(key)}
+        result["runs"][key] = {"variant": meta["variant"], "parameter": meta["parameter"], "alpha": meta["alpha"],
+                               "flooded_km2": float(wet.sum() * cell_km2), "depth": _depth_stats(depth, wet),
+                               "vs_sfincs": _compare(depth, wet, ref), "solver": meta.get("solver"),
+                               "runtime_s": meta.get("runtime_s")}
     return result
 
 
@@ -168,22 +155,18 @@ def main() -> None:
     parser.add_argument("--config", required=True)
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
     parser.add_argument("--tile-id", required=True)
-    parser.add_argument("--friction-scale-factors", type=float, nargs="+", default=list(FRICTION_SCALE_FACTORS))
     args = parser.parse_args()
 
     with open(args.config, encoding="utf-8") as f:
         config = yaml.safe_load(f)
     root = read_root(Path(args.config))
     tile_dir = root / args.base_dir_name / args.tile_id
-    result = compute_result(tile_dir, args.friction_scale_factors, config["simulation"]["flooding"],
-                            int(config["tile_generation"]["river_code"]))
+    result = compute_result(tile_dir, config["simulation"]["flooding"])
     out = tile_dir / "outputs" / "calibration_result.json"
     retry_transient_io(out.write_text, json.dumps(result, indent=1), encoding="utf-8")
-    e = result["eikonal"]
-    csi = ", ".join(f"{k[4:]}:{v['vs_sfincs']['CSI']:.3f}" for k, v in e.items())
-    print(f"tile {args.tile_id}: sfincs {result['sfincs']['flooded_km2']:.1f} km2 "
-          f"(inactive land {result['domain']['sfincs_inactive_land_km2']:.1f} km2 excluded); "
-          f"bathtub CSI {result['bathtub']['vs_sfincs']['CSI'] if result['bathtub'] else None}; eikonal CSI {csi} -> {out}")
+    csi = ", ".join(f"{k}:{v['vs_sfincs']['CSI']:.3f}" for k, v in result["runs"].items())
+    print(f"tile {args.tile_id} ({result['group']}): sfincs {result['sfincs']['flooded_km2']:.1f} km2 "
+          f"(inactive land {result['domain']['sfincs_inactive_land_km2']:.1f} km2 excluded); CSI {csi} -> {out}")
 
 
 if __name__ == "__main__":

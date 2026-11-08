@@ -1,11 +1,11 @@
-"""Plot the lowest-CSI EA-bathtub vs SFINCS tiles, one panel per over-predicting model.
+"""Plot the lowest-CSI tiles of one flood-model run vs SFINCS, one panel per over-predicting model.
 
 Maps are on SFINCS's native subgrid over SFINCS-active land, pixel-for-pixel what
 CSI counts. --min-union-km2 keeps a few noisy pixels from crowding out real
 disagreement. Needs only rasterio/scipy/matplotlib.
 
 Usage:
-    python plot_worst_tiles_panel.py --base-dir-name calibration_roughness_SFINCS --friction-scale-factor 12 \
+    python plot_worst_tiles_panel.py --base-dir-name calibration_roughness_SFINCS --run-key eikonal_landcover_fsf0.25 \
         [--n-panel-tiles 6] [--min-union-km2 50]
 """
 
@@ -27,7 +27,7 @@ from matplotlib.patches import Patch
 from rasterio.warp import Resampling, reproject
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from calibration_paths import decode_waterdepth_cm, eikonal_path  # noqa: E402
+from calibration_paths import decode_waterdepth_cm, run_path  # noqa: E402
 from flood_agreement import WET_THRESHOLD_M  # noqa: E402
 from gfm_config import read_root  # noqa: E402
 from sfincs_grid import active_on_subgrid  # noqa: E402
@@ -43,18 +43,18 @@ LAND_CODE = 0
 # Repo-wide convention: SFINCS=A_ONLY/blue, EA-bathtub=B_ONLY/red, matched=AGREE/green.
 DRY, MATCHED, EIKONAL_ONLY, SFINCS_ONLY = 0, 1, 2, 3
 CATEGORY_COLORS = [LAND_COLOR, AGREE_COLOR, B_ONLY_COLOR, A_ONLY_COLOR]
-CATEGORY_LABELS = [LAND_LABEL, "Agree (both wet)", "EA-bathtub only", "SFINCS only"]
+CATEGORY_LABELS = [LAND_LABEL, "Agree (both wet)", "Model only", "SFINCS only"]
 OFF_DOMAIN_COLOR = WATER_COLOR
 
 
-def build_classification(tile_dir: Path, friction_scale_factor: float) -> np.ndarray | None:
-    """Classify SFINCS vs eikonal wet/dry agreement on SFINCS's native subgrid.
+def build_classification(tile_dir: Path, run_key: str) -> np.ndarray | None:
+    """Classify SFINCS vs run `run_key` wet/dry agreement on SFINCS's native subgrid.
 
     Masked outside SFINCS-active land; None if an input is missing or shapes differ.
     Rows keep the subgrid's own (south-up) order.
     """
     hmax_subgrid_path = tile_dir / "sfincs_model" / "hmax_subgrid.tif"
-    ek_path = eikonal_path(tile_dir / "outputs", friction_scale_factor)
+    ek_path = run_path(tile_dir / "outputs", run_key)
     native_mask_path = tile_dir / "inputs" / "mask.tif"
     if not (hmax_subgrid_path.exists() and ek_path.exists() and native_mask_path.exists()):
         return None
@@ -120,7 +120,10 @@ def _caption_corner(cls: np.ma.MaskedArray, box_w: float = 0.5, box_h: float = 0
     return min(windows, key=lambda k: score(windows[k]))
 
 
-def _make_panel(worst, base_dir: Path, out_path: Path, friction_scale_factor: float) -> None:
+def _make_panel(worst, base_dir: Path, out_path: Path, run_key: str) -> None:
+    if worst.empty:
+        print(f"SKIP {out_path.name}: no eligible tile")
+        return
     ncols = 3
     nrows = int(np.ceil(len(worst) / ncols))
     fig, axes = plt.subplots(nrows, ncols, figsize=(4.5 * ncols, 4.5 * nrows))
@@ -129,7 +132,7 @@ def _make_panel(worst, base_dir: Path, out_path: Path, friction_scale_factor: fl
 
     for ax, row in zip(axes.flat, worst.itertuples()):
         tile_dir = base_dir / str(row.tile_id)
-        cls = build_classification(tile_dir, friction_scale_factor)
+        cls = build_classification(tile_dir, run_key)
         ax.set_facecolor(OFF_DOMAIN_COLOR)
         corner = "upper left"
         if cls is None:
@@ -164,7 +167,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(repo_root / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
-    parser.add_argument("--friction-scale-factor", type=float, required=True, help="the friction point to rank and plot")
+    parser.add_argument("--run-key", required=True, help="the run to rank and plot (variant_runs_per_tile.csv)")
     parser.add_argument("--n-panel-tiles", type=int, default=6, help="tiles in the panel")
     parser.add_argument("--min-eikonal-only-km2", type=float, default=50.0,
                         help="EA-bathtub-over-predicting panel: the EA-bathtub-only area itself must be at least this")
@@ -181,16 +184,16 @@ def main() -> None:
     raster_dir = read_root(Path(args.config)) / (args.raster_base_dir_name or args.base_dir_name)
     fig_dir = base_dir / "figures"
     fig_dir.mkdir(parents=True, exist_ok=True)
-    fsf = args.friction_scale_factor
+    key = args.run_key
 
-    per_tile_path = base_dir / "friction_sweep_per_tile_metrics.csv"
+    per_tile_path = base_dir / "variant_runs_per_tile.csv"
     per_tile = pd.read_csv(per_tile_path)
-    df = per_tile[per_tile["friction_scale_factor"] == fsf].copy()
-    df = df.rename(columns={"CSI": "csi", "sfincs_only_km2": "eikonal_sfincs_only_km2"})
+    df = per_tile[per_tile["run_key"] == key].copy()
+    df = df.rename(columns={"CSI": "csi", "model_only_km2": "eikonal_only_km2", "sfincs_only_km2": "eikonal_sfincs_only_km2"})
     df["union_km2"] = df["matched_km2"] + df["eikonal_only_km2"] + df["eikonal_sfincs_only_km2"]
     df = df[np.isfinite(df["csi"]) & (df["union_km2"] >= args.min_union_km2)]
     print(f"{len(df)} tile(s) with union area >= {args.min_union_km2} km2 eligible "
-          f"(friction_scale_factor={fsf:g}, from {per_tile_path.name})")
+          f"({key}, from {per_tile_path.name})")
 
     n = args.n_panel_tiles
     sfincs_over = df[df["eikonal_sfincs_only_km2"] > df["eikonal_only_km2"]].sort_values("csi").head(n)
@@ -203,7 +206,7 @@ def main() -> None:
     print(f"\nWorst {len(eikonal_over)} tile(s), EA-bathtub over-predicting:")
     print(eikonal_over[cols].to_string(index=False))
 
-    sfx = f"_fsf{fsf:g}"
+    sfx = f"_{key}"
     selection = pd.concat([sfincs_over[cols].assign(panel="sfincs_overpredicts"),
                            eikonal_over[cols].assign(panel="eikonal_overpredicts")])
     selection["rank"] = selection.groupby("panel").cumcount() + 1
@@ -211,8 +214,8 @@ def main() -> None:
     selection[["panel", "rank", *cols]].to_csv(selection_path, index=False)
     print(f"Wrote {selection_path}")
 
-    _make_panel(sfincs_over, raster_dir, fig_dir / f"worst_tiles_panel_sfincs_overpredicts{sfx}.png", fsf)
-    _make_panel(eikonal_over, raster_dir, fig_dir / f"worst_tiles_panel_eikonal_overpredicts{sfx}.png", fsf)
+    _make_panel(sfincs_over, raster_dir, fig_dir / f"worst_tiles_panel_sfincs_overpredicts{sfx}.png", key)
+    _make_panel(eikonal_over, raster_dir, fig_dir / f"worst_tiles_panel_eikonal_overpredicts{sfx}.png", key)
 
 
 if __name__ == "__main__":

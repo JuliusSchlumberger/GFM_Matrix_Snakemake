@@ -28,7 +28,6 @@ from pyproj import Transformer
 from scipy.spatial import cKDTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from calibration_paths import FRICTION_SCALE_FACTORS  # noqa: E402
 from compute_calibration_result import compute_result  # noqa: E402
 from gfm_config import read_root  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
@@ -61,10 +60,7 @@ def _core_mask(shape: tuple, transform, crs, this_tile_id: str, tree: cKDTree, t
     return nearest_tile_id == this_tile_id
 
 
-def compute_result_dedup(
-    tile_dir: Path, fsfs: list[float], flooding: dict, river_code: int,
-    tree: cKDTree, tile_ids: np.ndarray,
-) -> dict:
+def compute_result_dedup(tile_dir: Path, flooding: dict, tree: cKDTree, tile_ids: np.ndarray) -> dict:
     """Build one tile's calibration_result dict, restricted to its Voronoi core.
 
     `compute_calibration_result.compute_result` with the core mask (on the
@@ -73,14 +69,14 @@ def compute_result_dedup(
     with retry_transient_io(rasterio.open, tile_dir / "sfincs_model" / "hmax_subgrid.tif") as src:
         transform, crs, shape = src.transform, src.crs, src.shape
     core = _core_mask(shape, transform, crs, tile_dir.name, tree, tile_ids)
-    return compute_result(tile_dir, fsfs, flooding, river_code, core_mask=core)
+    return compute_result(tile_dir, flooding, core_mask=core)
 
 
 def _process_one(args_tuple) -> tuple[str, str | None]:
-    tile_dir, out_tile_dir, fsfs, flooding, river_code, tree, tile_ids = args_tuple
+    tile_dir, out_tile_dir, flooding, tree, tile_ids = args_tuple
     tile_id = tile_dir.name
     try:
-        result = compute_result_dedup(tile_dir, fsfs, flooding, river_code, tree, tile_ids)
+        result = compute_result_dedup(tile_dir, flooding, tree, tile_ids)
     except Exception as exc:
         return tile_id, f"{type(exc).__name__}: {exc}"
     out_dir = out_tile_dir / "outputs"
@@ -95,7 +91,6 @@ def main() -> None:
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
     parser.add_argument("--out-dir-name", default="calibration_roughness_SFINCS_dedup")
     parser.add_argument("--tile-id", default=None, help="single tile only (default: every tile in tile_ids.txt)")
-    parser.add_argument("--friction-scale-factors", type=float, nargs="+", default=list(FRICTION_SCALE_FACTORS))
     parser.add_argument("--workers", type=int, default=4)
     args = parser.parse_args()
 
@@ -117,10 +112,9 @@ def main() -> None:
     print(f"{len(tile_list)} tile(s) to process -> {out_base_dir}", flush=True)
 
     flooding = config["simulation"]["flooding"]
-    river_code = int(config["tile_generation"]["river_code"])
 
     jobs = [
-        (base_dir / tid, out_base_dir / tid, args.friction_scale_factors, flooding, river_code, tree, tile_ids)
+        (base_dir / tid, out_base_dir / tid, flooding, tree, tile_ids)
         for tid in tile_list
         if (base_dir / tid / "sfincs_model" / "hmax_subgrid.tif").exists()
     ]

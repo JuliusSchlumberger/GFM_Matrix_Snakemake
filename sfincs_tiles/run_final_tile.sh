@@ -1,16 +1,18 @@
 #!/bin/bash
-# Run the SFINCS calibration (stage 2) for ONE tile: inputs -> SFINCS model -> eikonal sweep
+# Run the SFINCS calibration (stage 2) for ONE tile: inputs -> SFINCS model -> flood-model runs
 # -> SFINCS run -> calibration_result.json. Inputs are copied, not symlinked (read from Windows too).
 # Idempotent: each step is skipped when its output exists. A failure appends to
 # outputs/calibration_run.failed (cleared on success) and exits 0 so the job's tile loop continues.
 # calibration_run.done skips the tile; calibration_run.step holds the running step.
-# Usage: BASE_DIR_NAME=calibration_roughness_SFINCS SFINCS_THREADS=4 bash run_final_tile.sh <tile_id>
+# CAL_PHASE (sweep | duration | selected, default sweep) picks run_calibration_models.py's phase.
+# Usage: BASE_DIR_NAME=calibration_roughness_SFINCS SFINCS_THREADS=4 CAL_PHASE=sweep bash run_final_tile.sh <tile_id>
 set -uo pipefail
 unset PROJ_LIB PROJ_DATA GDAL_DATA
 
 TILE_ID="${1:?usage: run_final_tile.sh <tile_id>}"
 BASE_DIR_NAME="${BASE_DIR_NAME:-calibration_roughness_SFINCS}"
 SFINCS_THREADS="${SFINCS_THREADS:-4}"
+CAL_PHASE="${CAL_PHASE:-sweep}"
 
 SITE_ENV="$(dirname "${BASH_SOURCE[0]}")/site_env.sh"
 [ -f "$SITE_ENV" ] || { echo "sfincs_tiles/site_env.sh not found: copy sfincs_tiles/site_env.example.sh to sfincs_tiles/site_env.sh and fill in your site values" >&2; exit 1; }
@@ -87,10 +89,10 @@ if [ ! -f "$SM/sfincs.inp" ] || [ ! -f "$SM/subgrid/dep_subgrid.tif" ]; then
     --boundary-lines-gpkg "$LINES" --config "$CONFIG" || fail "build_sfincs_tile.py failed"
 fi
 
-# Each friction factor is skipped when its raster exists.
-step "eikonal_sweep"
+# Each run is skipped when its raster exists.
+step "models_$CAL_PHASE"
 "$GFM_PY" run_calibration_models.py --tile-id "$TILE_ID" --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
-  || fail "run_calibration_models.py failed"
+  --phase "$CAL_PHASE" || fail "run_calibration_models.py --phase $CAL_PHASE failed"
 
 if [ ! -f "$SM/sfincs_map.nc" ]; then
   step "sfincs_run"

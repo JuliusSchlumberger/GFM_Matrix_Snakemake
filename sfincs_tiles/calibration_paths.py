@@ -9,17 +9,19 @@ from pathlib import Path
 
 RETURN_PERIOD = "RP100"
 WATERLEVEL_NAME = "SLR_0"
-FRICTION_SCALE_FACTORS = (3.0, 6.0, 9.0, 12.0, 15.0, 18.0, 21.0, 24.0, 27.0, 30.0)
+# Sweep grids of the calibration group: land-cover friction_scale_factor (per metre, x the
+# subgrid cell size) and uniform attenuation (m/km); duration exponents at the best of each.
+FRICTION_SCALE_FACTORS = (0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6, 0.8)
+UNIFORM_RATES_M_PER_KM = (0.05, 0.075, 0.1, 0.125, 0.15, 0.2, 0.3, 0.45)
+DURATION_ALPHAS = (0.25, 0.5, 0.75, 1.0, 1.5)
+RUNS_NAME = "model_runs.json"  # per tile: run key -> variant, parameter, alpha, solver diagnostics
+SELECTION_NAME = "variant_selection.json"  # per base dir: the calibrated run of each variant
+_RUN_SUFFIX = f"_waterdepth_{RETURN_PERIOD}_{WATERLEVEL_NAME}.tif"
 
 
-def eikonal_path(out_dir: Path, fsf: float) -> Path:
-    """Return the tile's eikonal waterdepth raster path for friction scale factor `fsf`."""
-    return out_dir / f"eikonal_on_subgrid_waterdepth_{RETURN_PERIOD}_{WATERLEVEL_NAME}_fsf{fsf:g}.tif"
-
-
-def bathtub_path(out_dir: Path) -> Path:
-    """Return the tile's bathtub waterdepth raster path."""
-    return out_dir / f"bathtub_waterdepth_{RETURN_PERIOD}_{WATERLEVEL_NAME}.tif"
+def run_path(out_dir: Path, key: str) -> Path:
+    """Return the waterdepth raster path of run `key` (flood_variants.run_key)."""
+    return out_dir / f"{key}{_RUN_SUFFIX}"
 
 
 WATERDEPTH_SCALE = 100.0  # waterdepth rasters are int16 cm

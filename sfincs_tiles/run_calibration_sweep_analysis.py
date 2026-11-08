@@ -1,7 +1,7 @@
 """Run the SFINCS calibration analysis on whatever tiles have a calibration_result.json.
 
-Steps (subprocesses): 1 compute_friction_sweep_metrics.py; 2 pick the best fsf by
-pooled CSI (or --select-by bias); 3 plot_worst_tiles_panel.py; 4
+Steps (subprocesses): 1 compute_variant_metrics.py (run tables, variant_selection.json);
+2 the best variant's run by pooled CSI (or --select-by bias); 3 plot_worst_tiles_panel.py; 4
 plot_validation_results.py; 5 plot_sfincs_tile_diagnostics.py forcing figures for
 the worst tiles (or all, --forcing-checks-all) into figures/forcing_checks/.
 
@@ -20,6 +20,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -32,6 +33,7 @@ _THIS_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _THIS_DIR.parent
 
 sys.path.insert(0, str(_THIS_DIR))
+from calibration_paths import SELECTION_NAME  # noqa: E402
 from gfm_config import read_root  # noqa: E402
 
 
@@ -76,49 +78,45 @@ def main() -> None:
             shutil.copyfile(root / args.raster_base_dir_name / "tile_selection_metadata.csv", meta)
             print(f"copied tile_selection_metadata.csv from {args.raster_base_dir_name}")
     if args.forcing_checks_only:
-        _forcing_checks(python, args, root, _best_fsf(root, args))
+        _forcing_checks(python, args, root, _best_run(root, args))
         return
 
-    _run([python, str(_THIS_DIR / "compute_friction_sweep_metrics.py"), *common, *subset])
-    best_fsf = _best_fsf(root, args)
+    _run([python, str(_THIS_DIR / "compute_variant_metrics.py"), *common, *subset, "--select-by", args.select_by])
+    best = _best_run(root, args)
     _run([python, str(_THIS_DIR / "plot_worst_tiles_panel.py"), *common, *raster,
-          "--friction-scale-factor", f"{best_fsf:g}", "--n-panel-tiles", str(args.n_panel_tiles),
+          "--run-key", best, "--n-panel-tiles", str(args.n_panel_tiles),
           "--min-union-km2", str(args.min_union_km2)])
-    _run([python, str(_THIS_DIR / "plot_validation_results.py"), *common, *subset,
-          "--friction-scale-factor", f"{best_fsf:g}"])
-    _forcing_checks(python, args, root, best_fsf)
+    _run([python, str(_THIS_DIR / "plot_validation_results.py"), *common, *subset, "--run-key", best])
+    _forcing_checks(python, args, root, best)
 
 
-def _best_fsf(root: Path, args) -> float:
-    pooled = pd.read_csv(root / args.base_dir_name / "friction_sweep_pooled_metrics.csv")
-    if args.select_by == "CSI":
-        best = pooled.loc[pooled["CSI"].idxmax()]
-    else:
-        best = pooled.loc[(pooled["bias"] - 1.0).abs().idxmin()]
-    best_fsf = float(best["friction_scale_factor"])
-    print(f"\nBest sweep point by {args.select_by}: friction_scale_factor={best_fsf:g}, CSI={best['CSI']:.4f}, "
-          f"bias={best['bias']:.4f}, n_tiles_scored={int(best['n_tiles_scored'])}")
-    return best_fsf
+def _best_run(root: Path, args) -> str:
+    selection = json.loads((root / args.base_dir_name / SELECTION_NAME).read_text())
+    variant = selection["best_variant"]
+    e = selection["variants"][variant]
+    print(f"\nBest variant by {selection['select_by']} on the calibration group: {variant}, run {e['run_key']}, "
+          f"CSI={e['calibration']['CSI']:.4f}, bias={e['calibration']['bias']:.4f}")
+    return e["run_key"]
 
 
-def _eikonal_prediction(row) -> str:
-    if row.eikonal_only_km2 > row.sfincs_only_km2:
+def _model_prediction(row) -> str:
+    if row.model_only_km2 > row.sfincs_only_km2:
         return "overprediction"
-    if row.sfincs_only_km2 > row.eikonal_only_km2:
+    if row.sfincs_only_km2 > row.model_only_km2:
         return "underprediction"
     return "agreement"
 
 
-def _forcing_checks(python: str, args, root: Path, best_fsf: float) -> None:
+def _forcing_checks(python: str, args, root: Path, key: str) -> None:
     # A failing tile is reported at the end (exit 1) instead of aborting the rest.
     base = root / args.base_dir_name
     out_dir = base / "figures" / "forcing_checks"
-    per_tile = pd.read_csv(base / "friction_sweep_per_tile_metrics.csv")
-    rows = per_tile[per_tile["friction_scale_factor"] == best_fsf].sort_values("tile_id")
+    per_tile = pd.read_csv(base / "variant_runs_per_tile.csv")
+    rows = per_tile[per_tile["run_key"] == key].sort_values("tile_id")
     if args.tile_ids_file:
         rows = rows[rows["tile_id"].astype(str).isin(Path(args.tile_ids_file).read_text().split())]
     if not args.forcing_checks_all:
-        sel_path = base / "figures" / f"worst_tiles_selection_fsf{best_fsf:g}.csv"
+        sel_path = base / "figures" / f"worst_tiles_selection_{key}.csv"
         if not sel_path.exists():
             raise SystemExit(f"{sel_path} missing - run the full analysis (step 3) first, or use --forcing-checks-all")
         rows = rows[rows["tile_id"].isin(pd.read_csv(sel_path)["tile_id"])]
@@ -126,11 +124,11 @@ def _forcing_checks(python: str, args, root: Path, best_fsf: float) -> None:
     figures = ["coastrp_forcing", "boundary_forcing"]
 
     def run_one(row) -> tuple[str, bool]:
-        prefix = f"{_eikonal_prediction(row)}_{int(row.tile_id)}"
+        prefix = f"{_model_prediction(row)}_{int(row.tile_id)}"
         cmd = [python, str(_THIS_DIR / "plot_sfincs_tile_diagnostics.py"),
                "--config", args.config, "--tile-id", str(int(row.tile_id)),
                "--base-dir-name", args.raster_base_dir_name or args.base_dir_name,
-               "--figures", *figures, "--fig-dir", str(out_dir), "--out-prefix", prefix]
+               "--figures", *figures, "--fig-dir", str(out_dir), "--out-prefix", prefix, "--run-key", key]
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode != 0:
             print(f"  tile {int(row.tile_id)} FAILED: {(res.stderr or '').strip().splitlines()[-1:]}", flush=True)
