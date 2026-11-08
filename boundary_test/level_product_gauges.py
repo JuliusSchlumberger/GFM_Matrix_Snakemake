@@ -28,7 +28,7 @@ import storm_tide_product as stp  # noqa: E402
 import tide_prediction as tp  # noqa: E402
 
 GAUGE_MAX_KM = 25.0
-TC_MASK_KM = 300.0  # cyclone-mask test: cycles with a tropical storm (>= TC_MIN_WIND_KT) this close leave the ETC fit
+TC_MASK_KM = 300.0  # cyclone-mask test: cycles with a tropical storm this close leave the ETC fit
 TC_MASK_HR = 24
 TC_MIN_WIND_KT = 34.0
 GAUGE_RPS = (2, 10, 50, 100)
@@ -37,11 +37,17 @@ GROUPS = ("all", "non-TC-dominated gauges", "TC-dominated gauges", "stations wit
 
 def tc_hours(stations: pd.DataFrame, n_hours: int, ibtracs_path: Path, start: np.datetime64,
              radius_km: float = TC_MASK_KM, half_hr: int = TC_MASK_HR, min_wind_kt: float = TC_MIN_WIND_KT) -> dict:
-    """Station -> hourly indices within half_hr of a tropical storm (>= min_wind_kt) passing within radius_km."""
-    tracks = pd.read_csv(ibtracs_path, usecols=["ISO_TIME", "LAT", "LON", "WMO_WIND", "USA_WIND"], skiprows=[1],
-                         na_values=[" "], low_memory=False)
+    """Station -> hourly indices within half_hr of a tropical storm passing within radius_km.
+
+    A storm counts where its wind is >= min_wind_kt, and along its whole track where no wind is on
+    record: most pre-1979 South Indian, South Pacific and North Indian tracks carry none, while
+    84-95% of the storms there reach 34 kt since 1979.
+    """
+    tracks = pd.read_csv(ibtracs_path, usecols=["SID", "ISO_TIME", "LAT", "LON", "WMO_WIND", "USA_WIND"],
+                         skiprows=[1], na_values=[" "], low_memory=False)
     wind = tracks[["WMO_WIND", "USA_WIND"]].apply(pd.to_numeric, errors="coerce").max(axis=1)
-    tracks = tracks[wind >= min_wind_kt]
+    no_wind = ~wind.notna().groupby(tracks.SID).transform("any")
+    tracks = tracks[(wind >= min_wind_kt) | no_wind]
     hour = ((pd.to_datetime(tracks.ISO_TIME).to_numpy() - np.datetime64(start)) // np.timedelta64(1, "h")).astype(int)
     tree = BallTree(np.radians(tracks[["LAT", "LON"]].to_numpy(dtype=float)), metric="haversine")
     near = tree.query_radius(np.radians(stations[["lat", "lon"]].to_numpy()), r=radius_km / stp.EARTH_RADIUS_KM)

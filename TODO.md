@@ -215,13 +215,32 @@ Open:
     `*_materialized.yml` still name `ibtracs.since1980` until they are re-materialized.
   4. Tile interpolation: interpolate skew-surge levels and convolve with the local FES tide at
      the tile boundary, vs total-level IDW, on the stations whose current error exceeds 0.2 m.
+     Coastline seeds are total-level IDW of the stations now, so an estuary never exceeds its
+     nearest stations (Fundy: Cape Enrage MHWS 5.0 m forces Shepody Bay and Cumberland Basin).
+     FES2022 (extrapolated grid) at coastline points: Hopewell Cape MHWS 7.6 m, Joggins 6.2 m
+     (plausible), but Petitcodiac / Amherst Point 12.8 / 11.5 m (spring range 22-23 m, above
+     Fundy's ~16 m maximum) and Rosyth 1.55 m below Leith 2.51 m: extrapolated cells in narrow
+     estuaries are not usable as they are. Native cells do not help: `inputs/fes2022b/mask_fes2022B.nc`
+     (0 native, 1 extrapolated) marks Amherst Point M2 8.4-9.3 m and Rosyth 1.15 m (Leith 1.80 m) as
+     native. At 916 gauges, FES MHWS at the gauge vs IDW of the 5 nearest stations' FES MHWS: MAE
+     0.061 vs 0.062 m, local closer at 51%; the 16 gauges where they differ by > 0.2 m split evenly
+     (fjords: Juneau, Skagway FES 6-7 m against 2.7 m). Gauges sit near stations, so they do not
+     test the estuary heads; those need a tide reference other than FES.
   5. Global rerun with flags (tail-uncertain, TC-coast, fallback-r); test 10 afterwards revises
      the flagged stations. The 1950-1978 surge months are on `<data_root>`
      (`inputs/GTSM_storm_tide_hourly/storm_surge_residual`, all 900 months).
   6. Regionally pooled GPD shape (`open_guesses.py pooled_shape`): on 1950-2024 with the mask, each
      station's shape maximises the summed profile likelihood of the stations within 100 / 300 /
      1000 km (scale per station); stability 1979-2024 vs 1950-2024 and gauge scores against the
-     cap. Running.
+     cap. Result (mask also covers IBTrACS storms without any wind on record, i.e. most pre-1979
+     SI/SP/NI tracks; the wind-only run is kept in `open_guesses/pooled_shape_wind_only`):
+     shapes > 0.35 at stations with a TC part 753 (production) -> 6 (75 yr, masked, per station),
+     0 pooled at 100-1000 km; without a TC part 32 -> 3 (100-300 km). Change of a station's shape
+     from 1979-2024 to 1950-2024 (|full - late| p50 / p90): 0.06 / 0.16 alone, 0.04 / 0.11 at 100 km,
+     0.02 / 0.08 at 300 km, 0.02 / 0.05 at 1000 km. Cap and no cap score the same (<= 3 mm); pooling
+     does not change the gauge scores (RP10-100 MAE within 3 mm), so the radius rests on stability.
+     Masked without a shift, TC-dominated gauges: RP100 median -0.16 m, MAE 0.389 m (production
+     -0.03 / 0.361 m). Decision open (user): radius (300 km proposed), drop the cap.
 - **Storm-tide product: decisions taken as estimates (open questions; tested in
   `boundary_test/INPUT_ANALYSIS.md` §8.6, fig19-fig23).**
   - No TC mask (decided): ERA5 cyclones stay in the ETC fit and count again in COAST-RP's TC part,
