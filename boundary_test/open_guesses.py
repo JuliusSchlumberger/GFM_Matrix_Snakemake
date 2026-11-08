@@ -30,6 +30,9 @@ Stages (each writes <product-dir>/open_guesses/<stage>*.parquet for the figure s
             stations' levels) against IDW of their skew-surge distributions (quantile average)
             convolved with the local FES tide at the gauge, each with and without the gauge tide
             correction (gauge left out)
+  coastline_nodes  the production forcing with coastline nodes (src/coastline_nodes.py): IDW of the
+            knn nearest stations and nodes together, as the tile seeds take them, for the tide at the
+            tide-correction gauges and the levels at the ratio gauges (gauge left out of every factor)
   shape_noise  the stations' MLE GPD shapes against the shapes a light tail (shape 0, or the
             median shape) gives from each station's number of storms: is the heavy tail noise?
 Gauge reference: test 9's convolution of the gauge's own skew surges on its own tide.
@@ -786,6 +789,190 @@ def tile_interpolation(check: GaugeCheck, dest: Path, workers: int) -> None:
     print(s[s.gauges.isin(["all", "non-TC-dominated gauges"]) & s.rp.isin([2, 100])].to_string(index=False), flush=True)
 
 
+def _node_eval_task(args) -> list[dict]:
+    chunk, store, bases = args
+    surge_st, surge_time, surge = load_series(Path(store))
+    pos = dict(zip(surge_st.gtsm_index, range(len(surge_st))))
+    surge_idx, _ = tp.on_hourly_grid(surge_time.to_numpy(), np.zeros(len(surge_time)))
+    loaded = {a: [np.load(p, mmap_mode="r") for p in bases[a]] for a in bases}
+    n_hours = loaded["fes2022"][0].shape[0]
+    years = tp.hour_years(np.arange(n_hours))
+    built: dict = {}
+
+    def station(st: dict):
+        if st["key"] not in built:
+            b = loaded[st["atlas"]]
+            th = tp.predict(b[0], b[1], st["hc"][None, :])[:, 0]
+            g = np.full(n_hours, np.nan)
+            g[surge_idx] = station_series(surge, pos[st["gtsm_index"]])
+            _, raw, corrected, _ = stp.station_surge_model(st, g, th, years)
+            built[st["key"]] = (raw, corrected, tp.predict(b[2], b[3], st["hc"][None, :])[:, 0])
+        return built[st["key"]]
+
+    out = []
+    for gauge in chunk:
+        levels = []
+        for e in gauge["entities"]:
+            if e["kind"] == "station":
+                raw, corrected, t10 = station(e["st"])
+                levels.append(stp.rp_levels(raw, corrected, t10 * e["factor"], e["st"]["tc"]))
+            else:
+                corr = [station(st)[1] for st in e["stations"]]
+                tcs = [st["tc"] for st in e["stations"]]
+                tc = None
+                if tcs[0] is not None:
+                    wt = e["weights"] * np.array([t is not None for t in tcs])
+                    tc = np.sum([wk * t for t, wk in zip(tcs, wt) if t is not None], axis=0) / wt.sum()
+                blend = _blend(corr, e["weights"])
+                b = loaded[e["atlas"]]
+                t10 = tp.predict(b[2], b[3], e["hc"][None, :])[:, 0] * e["factor"]
+                levels.append(stp.rp_levels(blend, blend, t10, tc))
+        row = {"file_name": gauge["file_name"], "node_weight": gauge["node_weight"]}
+        for rp in stp.RPS:
+            row[f"nodes_rp{rp}_m"] = float(np.sum([wk * lv[f"rp{rp}_m"] for lv, wk in zip(levels, gauge["weights"])]))
+        out.append(row)
+    return out
+
+
+def coastline_nodes(check: GaugeCheck, dest: Path, workers: int) -> None:
+    from concurrent.futures import ProcessPoolExecutor
+    from sklearn.neighbors import BallTree
+    import coastline_nodes as cn
+    root = dest / "coastline_nodes"
+    root.mkdir(exist_ok=True)
+    node_file = check.cache / "coastline_nodes.parquet"
+    if not node_file.exists():
+        node_file = root / "coastline_nodes.parquet"
+        if not node_file.exists():
+            catalog = get_data_catalog(REPO / check.cfg["paths"]["hydromt_data_catalog"], root=check.cfg["paths"]["root"])
+            cn.coastline_nodes(Path(catalog.get_source("deltadtm_mask").path).parent,
+                               check.cfg["tile_generation"]["ocean_code"], check.cfg["tile_generation"]["river_code"],
+                               workers).to_parquet(node_file)
+    nodes = pd.read_parquet(node_file)
+    n_lonlat = nodes[["lon", "lat"]].to_numpy(dtype=float)
+    catalog = get_data_catalog(REPO / check.cfg["paths"]["hydromt_data_catalog"], root=check.cfg["paths"]["root"])
+    models = {"fes2022": tp.fes2022_model(check.cache / "fes2022"),
+              "fes2014": tp.fes2014_model(Path(catalog.get_source("fes2014_ocean_tide").path))}
+    tg = pd.read_parquet(dest / "tide_correction" / "gauges.parquet")
+    k_near, power = check.cfg["simulation"]["flooding"]["knn"], float(check.cfg["simulation"]["flooding"]["idw_power"])
+    lev = check.lev[check.lev.level_source == "product"]
+    st_lonlat = lev[["lon", "lat"]].to_numpy(dtype=float)
+    st_atlas = lev.atlas.to_numpy()
+    st_tree = BallTree(np.radians(st_lonlat[:, ::-1]), metric="haversine")
+    meta = check.meta
+    rg = pd.read_parquet(check.out / "gauges" / "gauges.parquet").loc[meta.file_name]
+    tg_lonlat, rg_lonlat = tg[["lon", "lat"]].to_numpy(dtype=float), rg[["lon", "lat"]].to_numpy(dtype=float)
+    # the seed at a point: IDW over the knn nearest of the stations and nodes together
+    both = np.vstack([st_lonlat, n_lonlat])
+    both_tree = BallTree(np.radians(both[:, ::-1]), metric="haversine")
+    seeds = {}
+    for name, q in (("tide", tg_lonlat), ("ratio", rg_lonlat)):
+        d, i = both_tree.query(np.radians(q[:, ::-1]), k=k_near)
+        w = np.maximum(d * stp.EARTH_RADIUS_KM, 1e-3) ** -power
+        seeds[name] = (i, w / w.sum(axis=1, keepdims=True))
+    used = np.unique(np.concatenate([seeds[n][0].ravel() for n in seeds]))
+    used_nodes = used[used >= len(st_lonlat)] - len(st_lonlat)
+    print(f"{len(nodes)} coastline nodes, {len(used_nodes)} of them seed a gauge", flush=True)
+    node_atlas = st_atlas[st_tree.query(np.radians(n_lonlat[used_nodes][:, ::-1]), k=1)[1][:, 0]]
+    node_hc = {}
+    for a, m in models.items():
+        sel = node_atlas == a
+        if sel.any():
+            h = tp.fill_masked(tp.grouped_constants(m, n_lonlat[used_nodes[sel]]), n_lonlat[used_nodes[sel]])
+            h[:, tp.seasonal_columns(m)] = 0.0
+            node_hc.update(dict(zip(used_nodes[sel], h)))
+    node_atlas = dict(zip(used_nodes, node_atlas))
+    # tide gauges for the correction; each evaluated gauge's own site is left out of every factor
+    gt = pd.read_parquet(check.out / "gauges" / "tide_gauges.parquet" if (check.out / "gauges" / "tide_gauges.parquet").exists()
+                         else dest / "tide_correction" / "tide_gauges.parquet")
+    gt = gt[gt.usable].reset_index(drop=True)
+    gt_lonlat = gt[["lon", "lat"]].to_numpy(dtype=float)
+    lr = {a: gt[f"log_ratio_{a}"].to_numpy() for a in models}
+    gt_tree = BallTree(np.radians(gt_lonlat[:, ::-1]), metric="haversine")
+
+    def entity_lonlat_atlas(e: int):
+        return (st_lonlat[e], st_atlas[e]) if e < len(st_lonlat) else (n_lonlat[e - len(st_lonlat)],
+                                                                        node_atlas[e - len(st_lonlat)])
+
+    def factor(e: int, own: np.ndarray) -> float:
+        ll, a = entity_lonlat_atlas(e)
+        near = gt_tree.query_radius(np.radians(ll[None, ::-1]), r=tdc.CORRECTION_KM / stp.EARTH_RADIUS_KM)[0]
+        keep = np.setdiff1d(near, own)
+        keep = keep[np.isfinite(lr[a][keep])]
+        return float(np.exp(np.median(lr[a][keep]))) if len(keep) else 1.0
+
+    c = np.load(check.cache / "fes_constants.npz")
+    st_all = check.stations[["lon", "lat"]].to_numpy(dtype=float)
+    spos = check.stations.index.get_indexer(lev.index)
+    amp_st = {a: tdc.fes_amplitude(tp.fill_masked(c[a], st_all), list(m.constituents))[spos] for a, m in models.items()}
+    amp_station = np.where(st_atlas == "fes2014", amp_st["fes2014"], amp_st["fes2022"])
+    amp_node = {n: float(tdc.fes_amplitude(node_hc[n][None, :], list(models[node_atlas[n]].constituents))[0])
+                for n in used_nodes}
+    i, w = seeds["tide"]
+    own_tg = gt_tree.query_radius(np.radians(tg_lonlat[:, ::-1]), r=DEDUP_KM / stp.EARTH_RADIUS_KM)
+    amp = np.array([[amp_station[e] if e < len(st_lonlat) else amp_node[e - len(st_lonlat)] for e in row] for row in i])
+    f = np.array([[factor(e, own_tg[j]) for e in row] for j, row in enumerate(i)])
+    tg["amp_nodes_m"] = (amp * w).sum(axis=1)
+    tg["amp_nodes_corrected_m"] = (amp * f * w).sum(axis=1)
+    tg["node_weight"] = (w * (i >= len(st_lonlat))).sum(axis=1)
+    tg.to_parquet(root / "tide_gauges.parquet")
+    cols = {"stations (current forcing)": "amp_station_idw_m", "stations, corrected": "amp_station_idw_corrected_m",
+            "stations + nodes": "amp_nodes_m", "stations + nodes, corrected": "amp_nodes_corrected_m",
+            "FES at the gauge, corrected within 25 km": "amp_corrected_25km_m"}
+    rows = []
+    for label, sel in (("all", np.ones(len(tg), bool)), ("gauge tide > 2 m", tg.amp_gauge_m.to_numpy() > 2),
+                       ("> 10 km from a station", tg.near_km.to_numpy() > 10)):
+        for name, col in cols.items():
+            e = (tg[col] - tg.amp_gauge_m)[sel]
+            rows.append({"gauges": label, "tide": name, "n": int(sel.sum()), "median_m": e.median(),
+                         "mae_m": e.abs().mean()})
+    s = pd.DataFrame(rows).round(3)
+    s.to_parquet(root / "tide_scores.parquet")
+    print(s.to_string(index=False), flush=True)
+
+    todo_all = _station_inputs(check, check.stations.index.get_indexer(lev.index))
+    for k, st in enumerate(todo_all):
+        st["key"] = k
+    i, w = seeds["ratio"]
+    own_rg = gt_tree.query_radius(np.radians(rg_lonlat[:, ::-1]), r=DEDUP_KM / stp.EARTH_RADIUS_KM)
+    tasks = []
+    for j, name in enumerate(meta.file_name):
+        entities = []
+        for e in i[j]:
+            if e < len(st_lonlat):
+                entities.append({"kind": "station", "st": todo_all[e], "factor": factor(e, own_rg[j])})
+                continue
+            n = e - len(st_lonlat)
+            dn, nb = st_tree.query(np.radians(n_lonlat[[n], ::-1]), k=k_near)
+            wn = np.maximum(dn[0] * stp.EARTH_RADIUS_KM, 1e-3) ** -power
+            entities.append({"kind": "node", "hc": node_hc[n], "atlas": node_atlas[n], "factor": factor(e, own_rg[j]),
+                             "stations": [todo_all[k] for k in nb[0]], "weights": wn / wn.sum()})
+        tasks.append({"file_name": name, "entities": entities, "weights": w[j],
+                      "node_weight": float((w[j] * (i[j] >= len(st_lonlat))).sum())})
+    order = np.lexsort((rg_lonlat[:, 1], rg_lonlat[:, 0]))  # neighbouring gauges share stations within a chunk
+    tasks = [tasks[k] for k in order]
+    bases = {a: tuple(str(check.cache / f"{a}_{kind}.npy") for kind in ("hourly_re", "hourly_im", "nodal_re", "nodal_im"))
+             for a in models}
+    chunks = [(tasks[n:n + INTERP_CHUNK], str(check.cache / "gtsm_surge_stations"), bases)
+              for n in range(0, len(tasks), INTERP_CHUNK)]
+    rows = []
+    with ProcessPoolExecutor(workers) as pool:
+        for k, res in enumerate(pool.map(_node_eval_task, chunks)):
+            rows += res
+            print(f"  {min((k + 1) * INTERP_CHUNK, len(tasks))}/{len(tasks)} gauges", flush=True)
+    built = pd.DataFrame(rows).set_index("file_name")
+    table = pd.read_parquet(dest / "tile_interpolation" / "gauges.parquet")
+    for rp in GAUGE_RPS:
+        table[f"nodes_rp{rp}_m"] = built[f"nodes_rp{rp}_m"].reindex(table.index)
+    table["node_weight"] = built.node_weight.reindex(table.index)
+    table.to_parquet(root / "gauges.parquet")
+    variants = {"stations (current forcing)": "current", "stations, corrected": "current_tide_corrected",
+                "stations + nodes, corrected": "nodes"}
+    s = scores(table, variants)
+    s.to_parquet(root / "scores.parquet")
+    print(s[s.gauges.isin(["all", "non-TC-dominated gauges"]) & s.rp.isin([2, 100])].to_string(index=False), flush=True)
+
+
 def _null_shapes(args) -> np.ndarray:
     n, shape0, seed = args
     rng = np.random.default_rng(seed)
@@ -851,7 +1038,7 @@ def main() -> None:
     parser.add_argument("stages", nargs="+", choices=("cap", "despike", "tc_mask", "fes_rule", "peaks", "shape_noise",
                                                        "tc_scale", "tc_jumps", "r_variants", "long_record",
                                                        "pooled_shape", "tide_correction",
-                                                       "tile_interpolation"))
+                                                       "tile_interpolation", "coastline_nodes"))
     parser.add_argument("--product-dir", required=True)
     parser.add_argument("--sources-dir", default=".cleanup_baseline/level_sources")
     parser.add_argument("--config", default=str(REPO / "snakemake_workflow" / "config" / "config.yml"))
@@ -865,11 +1052,11 @@ def main() -> None:
     for stage in args.stages:
         print(f"== {stage}", flush=True)
         if stage in ("cap", "tc_mask", "fes_rule", "shape_noise", "tc_scale", "tc_jumps", "r_variants",
-                     "long_record", "pooled_shape", "tide_correction", "tile_interpolation"):
+                     "long_record", "pooled_shape", "tide_correction", "tile_interpolation", "coastline_nodes"):
             {"cap": cap, "tc_mask": tc_mask, "fes_rule": fes_rule, "shape_noise": shape_noise,
              "tc_scale": tc_scale, "tc_jumps": tc_jumps, "r_variants": r_variants, "long_record": long_record,
              "pooled_shape": pooled_shape, "tide_correction": tide_correction,
-             "tile_interpolation": tile_interpolation}[stage](check, dest, args.workers)
+             "tile_interpolation": tile_interpolation, "coastline_nodes": coastline_nodes}[stage](check, dest, args.workers)
         else:
             {"despike": despike, "peaks": peaks}[stage](check, dest)
 

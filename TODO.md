@@ -246,10 +246,21 @@ Open:
     feet filtered by a 20 m range) and `tile_interpolation` (test 4 at the 618 ratio gauges: the
     decomposition alone scores as the current IDW, RP100 0.195 vs 0.194 m; where the tide
     correction exceeds 10% (72 gauges) RP100 0.377 -> 0.332 m with corrected station tides, 0.350 m
-    with the corrected local tide). fig25-fig28, input analysis section 9. Decision open (user):
-    build the decomposition into the tiles (a coastal node set), or keep station IDW with the
-    corrected station tides. The ratio gauges lie <= 10 km from a station; estuary heads are
-    tested for the tide only.
+    with the corrected local tide). fig25-fig28, input analysis section 9. The ratio gauges lie
+    <= 10 km from a station; estuary heads are tested for the tide only.
+    Decided (user, 2026-11-08): build the decomposition into the tiles. Built: coastline nodes
+    (`src/coastline_nodes.py`, one per FES2022 grid cell of DeltaDTM coastline) appended to the
+    product levels file; each node blends its knn nearest stations' corrected skew-surge models
+    and convolves them with its own gauge-corrected FES tide; the seeds take IDW over stations and
+    nodes together. Scored by `open_guesses.py coastline_nodes`. Open:
+    - Nodes have no hydrograph: the duration correction takes the nearest station's, whose tide
+      range can be smaller (estuary heads), so the time near the peak is too long there.
+    - A node blends stations by distance only, across an isthmus too (Chignecto: Fundy and
+      Northumberland Strait stations); the tide is the node's own.
+    - SFINCS must not be forced at the nodes: `boundary_lines_geometry._tile_stations` reads the
+      tile's production station file, which will hold them after the rebuild. Keep only
+      level_source != coastline_node there (needs the level source in the tile file), so SFINCS
+      makes the estuary tide itself. Not changed yet: sfincs_tiles/ may have an HPC batch running.
   5. Global rerun with flags (tail-uncertain, TC-coast, fallback-r); test 10 afterwards revises
      the flagged stations. The 1950-1978 surge months are on `<data_root>`
      (`inputs/GTSM_storm_tide_hourly/storm_surge_residual`, all 900 months).

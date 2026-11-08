@@ -27,6 +27,7 @@ from pathlib import Path
 
 import numpy as np
 import xarray as xr
+from scipy.spatial import cKDTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from boundaries import STORM_TIDE_SOURCE_MARKER, storm_tide_levels_path, storm_tide_source  # noqa: E402
@@ -174,6 +175,24 @@ def compute_mdt_correction(
     return ds_mdt
 
 
+def nearest_slr_m(slr_lonlat: np.ndarray, slr_mm: np.ndarray, station_lonlat: np.ndarray) -> np.ndarray:
+    """Return the AR6 value (mm -> m) nearest each station inside the open +/-1 deg box around it, else NaN.
+
+    Nearest in plain (lon, lat) degrees, the first location on ties.
+    """
+    ok = np.isfinite(slr_mm) & np.isfinite(slr_lonlat).all(axis=1)
+    pts, vals = slr_lonlat[ok], slr_mm[ok]
+    out = np.full(len(station_lonlat), np.nan)
+    # Every point of the open 1-degree box lies within sqrt(2) of the station.
+    for k, cand in enumerate(cKDTree(pts).query_ball_point(station_lonlat, r=np.sqrt(2.0))):
+        cand = np.sort(np.asarray(cand, dtype=int))
+        d = pts[cand] - station_lonlat[k]
+        cand, d = cand[(np.abs(d) < 1.0).all(axis=1)], d[(np.abs(d) < 1.0).all(axis=1)]
+        if len(cand):
+            out[k] = vals[cand[np.argmin(np.sqrt(d[:, 0] * d[:, 0] + d[:, 1] * d[:, 1]))]] / 1000.0
+    return out
+
+
 def compute_slr_fingerprints(
     ds_coastrp: xr.Dataset,
     slr_dir: Path,
@@ -207,8 +226,6 @@ def compute_slr_fingerprints(
     n_stations = int(ds_coastrp.dims["stations"])
     logger.info("Step 3: Computing SLR fingerprints for %d stations…", n_stations)
 
-    from shapely.geometry import Point
-
     ds_gauge, ds_grid = _load_slr_dataset(slr_dir, scenario, confidence)
     ds_gauge = ds_gauge.sel(years=2100, quantiles=0.5, drop=True)
     ds_grid  = ds_grid.sel(years=2100, quantiles=0.5, drop=True)
@@ -221,36 +238,12 @@ def compute_slr_fingerprints(
         scenario, confidence, mean_ori_m,
     )
 
-    slr_base: list[float] = []
-    n_uniform_fallback = 0
-
-    for ii in range(n_stations):
-        p_lon = float(ds_coastrp.station_x_coordinate.values[ii])
-        p_lat = float(ds_coastrp.station_y_coordinate.values[ii])
-        pt = Point(p_lon, p_lat)
-
-        local = ds_combined.where(
-            (ds_combined.lon > p_lon - 1) & (ds_combined.lon < p_lon + 1)
-            & (ds_combined.lat > p_lat - 1) & (ds_combined.lat < p_lat + 1),
-            drop=True,
-        )
-        local = local.where(~np.isnan(local.sea_level_change), drop=True)
-
-        if len(local.locations) == 0:
-            slr_base.append(mean_ori_m)
-            n_uniform_fallback += 1
-        else:
-            slr_pts = [
-                Point(float(local.lon[i]), float(local.lat[i]))
-                for i in range(len(local.lon))
-            ]
-            idx = int(np.argmin([pt.distance(sp) for sp in slr_pts]))
-            slr_base.append(float(local.sea_level_change[idx].values) / 1000.0)
-
-        if ii % 2000 == 0:
-            logger.info("  SLR fingerprint: %d / %d stations processed", ii, n_stations)
-
+    station_lonlat = np.column_stack([ds_coastrp.station_x_coordinate.values, ds_coastrp.station_y_coordinate.values])
+    slr_base = nearest_slr_m(np.column_stack([ds_combined.lon.values, ds_combined.lat.values]),
+                             ds_combined.sea_level_change.values, station_lonlat)
     ds_combined.close()
+    n_uniform_fallback = int(np.isnan(slr_base).sum())
+    slr_base = np.where(np.isnan(slr_base), mean_ori_m, slr_base)
 
     if n_uniform_fallback:
         logger.warning(

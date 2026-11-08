@@ -8,12 +8,14 @@ FES2022 and FES2014, COAST-RP (+ _ETC, _TC) (config `storm_tide_product`).
 
 Writes into storm_tide_product.cache_dir (~30 GB; may live off the data root) copies of raw
 inputs and what depends on them alone: FES2022 decompressed, tide bases, GTSM series at the
-stations and gauges, GESLA records, FES constants and MHWS at the stations; deterministic, kept
-across runs. Into boundary_conditions.storm_tide_product_dir (~2.5 GB):
+stations and gauges, GESLA records, FES constants and MHWS at the stations, the coastline nodes
+and their FES constants; deterministic, kept across runs. Into
+boundary_conditions.storm_tide_product_dir (~3 GB):
   gauges/       gauge table (ratio, class, tidal MHWS), TC donor shapes and the tide-correction
                 gauges (tide_gauges.parquet: short harmonic fits of every coastal GESLA site)
-  stations.csv, levels.parquet, hydrographs.npy, hydrograph_info.parquet, and the two product
-  files (boundaries.PRODUCT_*_FILENAME).
+  stations.csv, levels.parquet, hydrographs.npy, hydrograph_info.parquet, surge_models.npy
+  (stp.model_vector per station), node_levels.parquet, and the two product files
+  (boundaries.PRODUCT_*_FILENAME; the levels file holds the stations, then the coastline nodes).
 force=True (default) recomputes everything but the cache; ~6 h on 4 workers, most of it the GTSM
 extraction (552 monthly files read in full) and the per-station build.
 """
@@ -26,9 +28,11 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from sklearn.neighbors import BallTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from boundaries import PRODUCT_HYDROGRAPHS_FILENAME, PRODUCT_LEVELS_FILENAME  # noqa: E402
+from coastline_nodes import coastline_nodes  # noqa: E402
 from config_utils import get_data_catalog  # noqa: E402
 from gesla import coastal_sites  # noqa: E402
 from gtsm_series import extract_series, gtsm_stations  # noqa: E402
@@ -63,6 +67,10 @@ class _Paths:
         self.levels = root / "levels.parquet"
         self.hydrographs = root / "hydrographs.npy"
         self.info = root / "hydrograph_info.parquet"
+        self.coastline_nodes = self.cache / "coastline_nodes.parquet"
+        self.node_constants = self.cache / "node_fes_constants.npz"
+        self.surge_models = root / "surge_models.npy"
+        self.node_levels = root / "node_levels.parquet"
 
 
 def _bases(models: dict, paths: _Paths, atlases) -> None:
@@ -159,6 +167,68 @@ def station_atlas(paths: _Paths, stations: pd.DataFrame, models: dict, gauges: p
     return {"hc": hc, "mhws": {a: mh[a] for a in hc}, "use14": use14, "tide_factor": factor, "tide_gauges": count}
 
 
+def node_levels(config: dict, paths: _Paths, models: dict, todo: list[dict], lev: pd.DataFrame,
+                tide_gauges: pd.DataFrame, workers: int) -> pd.DataFrame:
+    """RP levels at the coastline nodes from the stations' surge models (`stp.build_nodes`).
+
+    A node takes the atlas of its nearest station and the surge models of the
+    simulation.flooding knn nearest product stations, weights distance^-idw_power, as the seeds
+    weight the stations. Its TC levels are the same weighting over those of the neighbours with a
+    TC part, if the nearest has one. Its tide is corrected by the gauges around the node itself.
+    """
+    if not paths.coastline_nodes.exists():
+        catalog = get_data_catalog(_REPO_ROOT / config["paths"]["hydromt_data_catalog"], root=config["paths"]["root"])
+        mask_dir = Path(catalog.get_source("deltadtm_mask").path).parent
+        logger.info("Coastline nodes from the DeltaDTM masks in %s", mask_dir)
+        coastline_nodes(mask_dir, config["tile_generation"]["ocean_code"], config["tile_generation"]["river_code"],
+                        workers).to_parquet(paths.coastline_nodes)
+    nodes = pd.read_parquet(paths.coastline_nodes)
+    lonlat = nodes[["lon", "lat"]].to_numpy(dtype=float)
+    if not paths.node_constants.exists():
+        logger.info("FES2022 and FES2014 constants at %d coastline nodes", len(nodes))
+        np.savez(paths.node_constants, fes2022=tp.grouped_constants(models["fes2022"], lonlat),
+                 fes2014=tp.grouped_constants(models["fes2014"], lonlat))
+    c = np.load(paths.node_constants)
+    st_lonlat = lev[["lon", "lat"]].to_numpy(dtype=float)
+    nearest_station, _ = stp.nearest(st_lonlat, lonlat)
+    atlas = np.array([todo[k]["atlas"] for k in nearest_station])
+    vectors = np.load(paths.surge_models, mmap_mode="r")
+    usable = np.flatnonzero((lev.level_source == "product").to_numpy() & np.isfinite(vectors[:, 0]))
+    flooding = config["simulation"]["flooding"]
+    d, i = BallTree(np.radians(st_lonlat[usable][:, ::-1]), metric="haversine").query(
+        np.radians(lonlat[:, ::-1]), k=int(flooding["knn"]))
+    neighbours = usable[i]
+    w = np.maximum(d * stp.EARTH_RADIUS_KM, 1e-3) ** -float(flooding["idw_power"])
+    w /= w.sum(axis=1, keepdims=True)
+    tc_used = np.full((len(todo), len(stp.RPS)), np.nan)
+    for k, st in enumerate(todo):
+        if st["tc"] is not None:
+            tc_used[k] = st["tc"] * st.get("tc_scale", 1.0) + st.get("tc_shift_m", 0.0)
+    hc = np.empty((len(nodes), c["fes2022"].shape[1]), dtype=complex)
+    factor, count = np.ones(len(nodes)), np.zeros(len(nodes), dtype=int)
+    glonlat = tide_gauges[["lon", "lat"]].to_numpy(dtype=float)
+    for a in ("fes2022", "fes2014"):
+        sel = atlas == a
+        if not sel.any():
+            continue
+        h = tp.fill_masked(c[a], lonlat)
+        h[:, tp.seasonal_columns(models[a])] = 0.0
+        factor[sel], count[sel] = tc.correction_factors(lonlat[sel], glonlat, tide_gauges[f"log_ratio_{a}"].to_numpy())
+        hc[sel] = h[sel] * factor[sel, None]
+    todo_nodes = []
+    for j in range(len(nodes)):
+        tc_nb = tc_used[neighbours[j]]
+        has_tc = np.isfinite(tc_nb[:, 0])
+        tc_node = (w[j, has_tc] @ tc_nb[has_tc]) / w[j, has_tc].sum() if has_tc[0] else None
+        todo_nodes.append({"node": j, "atlas": atlas[j], "hc": hc[j], "neighbours": neighbours[j], "weights": w[j],
+                           "tc": tc_node})
+    logger.info("Levels at %d coastline nodes (%d tide-corrected)", len(nodes), int((count > 0).sum()))
+    out = nodes.join(stp.build_nodes(todo_nodes, paths.surge_models, paths.bases, workers))
+    out["atlas"], out["tide_factor"], out["tide_gauges"] = atlas, factor, count
+    out["nearest_station_km"] = d[:, 0] * stp.EARTH_RADIUS_KM
+    return out
+
+
 def run(config: dict, force: bool = True) -> None:
     """Write the storm-tide product files (and intermediates) into storm_tide_product_dir."""
     cfg = config["storm_tide_product"]
@@ -170,7 +240,7 @@ def run(config: dict, force: bool = True) -> None:
     if force:
         for p in [paths.gauges / n for n in ("gauges.parquet", "gauge_constants.npz", "tc_donors.parquet",
                                              "tc_donor_shapes.npy", "tide_gauges.parquet")] + [
-                paths.stations, paths.levels, paths.hydrographs, paths.info,
+                paths.stations, paths.levels, paths.hydrographs, paths.info, paths.surge_models, paths.node_levels,
                 paths.root / PRODUCT_LEVELS_FILENAME, paths.root / PRODUCT_HYDROGRAPHS_FILENAME]:
             if p.exists():
                 p.unlink()
@@ -213,8 +283,13 @@ def run(config: dict, force: bool = True) -> None:
     hyd = np.lib.format.open_memmap(paths.hydrographs, mode="w+", dtype=np.float32,
                                     shape=(len(stations), len(stp.RPS), stp.N_STEPS))
     hyd[:] = np.nan
-    rows, info = stp.build_stations(todo, paths.gtsm_stations, paths.bases, hyd, workers)
+    vectors = np.lib.format.open_memmap(paths.surge_models, mode="w+", dtype=np.float32,
+                                        shape=(len(stations), len(stp.BLEND_QUANTILES) + len(stp.MODEL_FIELDS)))
+    vectors[:] = np.nan
+    rows, info = stp.build_stations(todo, paths.gtsm_stations, paths.bases, hyd, workers, vectors)
     hyd.flush()
+    vectors.flush()
+    del vectors
     pd.DataFrame(info).to_parquet(paths.info)
     # station_id is not unique in COAST-RP (offshore "currents_*" points), so its rows join by position
     etc = stp.coast_rp_levels(coast_rp.parent / "COAST-RP_ETC.nc")
@@ -226,7 +301,9 @@ def run(config: dict, force: bool = True) -> None:
         lev[f"coast_rp_etc_rp{rp}_m"] = etc[rp].to_numpy()
         lev[f"coast_rp_tc_rp{rp}_m"] = tc_levels[rp].reindex(lev.station_id).to_numpy()
     lev.to_parquet(paths.levels)
-    stp.export_levels(lev, coast_rp, paths.root / PRODUCT_LEVELS_FILENAME)
+    nodes = node_levels(config, paths, models, todo, lev, tide_gauges, workers)
+    nodes.to_parquet(paths.node_levels)
+    stp.export_levels(lev, coast_rp, paths.root / PRODUCT_LEVELS_FILENAME, nodes)
     stp.export_hydrographs(lev, np.load(paths.hydrographs, mmap_mode="r"), paths.root / PRODUCT_HYDROGRAPHS_FILENAME)
     logger.info("Storm-tide product written to %s", paths.root)
 

@@ -14,7 +14,13 @@ Hydrographs: the FES tide around the high water nearest the median tide-at-peak 
 station's annual maxima of the RP window, plus their median 13-h smoothed surge, scaled so the
 peak is the RP level (`storm_tide_hydrograph.rp_hydrograph`); a gauge's surge-dominated shape
 or a Gaussian where the TC rate dominates.
-Method and validation: boundary_test/INPUT_ANALYSIS.md §8.3-8.5. Stages are run by
+Coastline nodes (`coastline_nodes`, one per FES2022 grid cell of DeltaDTM coastline) carry the
+local tide between the stations: the inverse-distance blend of the nearest stations' corrected
+skew-surge models (quantiles and GPD parameters averaged) and TC levels, convolved with the
+node's own gauge-corrected FES tide. They have no hydrograph; the duration correction takes the
+nearest station's.
+Method and validation: boundary_test/INPUT_ANALYSIS.md §8.3-8.5,
+input_analysis/boundary_forcing/boundary_forcing_input_analysis.md §9. Stages are run by
 preparation/prepare_storm_tide_product.py.
 """
 
@@ -64,6 +70,10 @@ EVENT_WINDOW_HR = 72
 EVENT_WINDOW_COVERAGE = 0.9
 N_STEPS = 2 * EXTENDED_HR * STEPS_PER_HR + 1
 TASK_SIZE = 25
+# Coastline nodes
+BLEND_QUANTILES = np.linspace(0.0, 1.0, 2001)
+MODEL_FIELDS = ("u", "p_u", "shape", "scale", "theta")
+NODE_LEVEL_SOURCE = "coastline_node"
 
 
 def coast_rp_levels(path: Path) -> pd.DataFrame:
@@ -336,6 +346,18 @@ def _solve(rate, target: float, lo: float, hi: float) -> float:
     return 0.5 * (lo + hi)
 
 
+def model_vector(model: dict) -> np.ndarray:
+    """A skew-surge model as the BLEND_QUANTILES of its sample followed by MODEL_FIELDS."""
+    return np.concatenate([np.quantile(model["sorted"], BLEND_QUANTILES), [model[k] for k in MODEL_FIELDS]])
+
+
+def blended_model(vectors: np.ndarray, w: np.ndarray) -> dict:
+    """The weighted quantile average of `model_vector` rows, GPD parameters averaged (w sums to 1)."""
+    v = np.asarray(w, dtype=np.float64) @ np.asarray(vectors, dtype=np.float64)
+    q = len(BLEND_QUANTILES)
+    return {"sorted": v[:q], **{k: float(x) for k, x in zip(MODEL_FIELDS, v[q:])}}
+
+
 def station_surge_model(st: dict, g: np.ndarray, th: np.ndarray, years: np.ndarray) -> tuple[dict, dict, dict, np.ndarray]:
     """Row fields, raw and gauge-corrected skew-surge models and the despiked surge of one station.
 
@@ -363,10 +385,11 @@ def station_surge_model(st: dict, g: np.ndarray, th: np.ndarray, years: np.ndarr
     return row, model, corrected, g
 
 
-def rp_levels(model: dict, corrected: dict, t10: np.ndarray, tc_levels: np.ndarray | None) -> dict:
+def rp_levels(model: dict | None, corrected: dict, t10: np.ndarray, tc_levels: np.ndarray | None) -> dict:
     """ETC (raw and corrected) and total RP levels (m) of skew-surge models on the 10-min tide t10.
 
     `tc_levels`: COAST-RP_TC levels at RPS (m above MSL), added as a rate; None for no TC part.
+    `model` None leaves out the raw ETC levels.
     """
     v, w, cyc = tide_peaks(t10, STEP_MIN / 60.0, HW_PROMINENCE)
 
@@ -376,7 +399,8 @@ def rp_levels(model: dict, corrected: dict, t10: np.ndarray, tc_levels: np.ndarr
     lo, hi = float(v.min()), float(v.max()) + 20.0
     out = {}
     for rp, target in zip(RPS, annual_rate(RPS)):
-        out[f"etc_raw_rp{rp}_m"] = _solve(etc_rate(model), target, lo, hi)
+        if model is not None:
+            out[f"etc_raw_rp{rp}_m"] = _solve(etc_rate(model), target, lo, hi)
         out[f"etc_rp{rp}_m"] = _solve(etc_rate(corrected), target, lo, hi)
         out[f"rp{rp}_m"] = z = _solve(lambda x: etc_rate(corrected)(x) + tc(x), target, lo, hi)
         out[f"tc_dominant_rp{rp}"] = bool(tc(z) > etc_rate(corrected)(z))
@@ -384,8 +408,8 @@ def rp_levels(model: dict, corrected: dict, t10: np.ndarray, tc_levels: np.ndarr
 
 
 def station_product(st: dict, g: np.ndarray, th: np.ndarray, t10: np.ndarray,
-                    years: np.ndarray) -> tuple[dict, np.ndarray, list]:
-    """RP levels (row), hydrographs (RP, N_STEPS) and their sources for one station.
+                    years: np.ndarray) -> tuple[dict, np.ndarray, list, np.ndarray]:
+    """RP levels (row), hydrographs (RP, N_STEPS), their sources and the corrected `model_vector`.
 
     `t10`: the station's FES tide, 10-min over one nodal cycle; `g`, `th`, `years` and the `st` keys
     as in `station_surge_model`, plus "tc_scale" / "tc_shift_m" applied to the COAST-RP_TC levels
@@ -406,8 +430,9 @@ def station_product(st: dict, g: np.ndarray, th: np.ndarray, t10: np.ndarray,
 
     level = g + th
     ev = annual_maximum_events(level, years, EXTENDED_HR)
+    vector = model_vector(corrected)
     if len(ev) < MIN_EVENTS:
-        return row, hyd, info
+        return row, hyd, info, vector
     centres = ev.centre.to_numpy()
     win = np.arange(-EXTENDED_HR, EXTENDED_HR + 1)
     surge_win, level_win = g[centres[:, None] + win], level[centres[:, None] + win]
@@ -441,7 +466,7 @@ def station_product(st: dict, g: np.ndarray, th: np.ndarray, t10: np.ndarray,
         hyd[j, pad:pad + len(lev)] = lev
         info.append({"station": st["station"], "rp": rp, "half_window_hr": half_hr,
                      "tide_level_ratio": tide_level / st["mhws_m"], "n_events": len(sel), "shape_source": source})
-    return row, hyd, info
+    return row, hyd, info, vector
 
 
 def _station_task(args):
@@ -469,8 +494,9 @@ def _station_task(args):
     return results
 
 
-def build_stations(todo: list[dict], store: Path, bases: dict, hyd: np.ndarray, workers: int) -> tuple[list, list]:
-    """Run `station_product` for every station input in `todo`, writing hyd[row] in place.
+def build_stations(todo: list[dict], store: Path, bases: dict, hyd: np.ndarray, workers: int,
+                   models: np.ndarray | None = None) -> tuple[list, list]:
+    """Run `station_product` for every station input in `todo`, writing hyd[row] (and models[row]) in place.
 
     `bases`: atlas -> (hourly re, hourly im, 10-min re, 10-min im) .npy paths.
     """
@@ -478,13 +504,48 @@ def build_stations(todo: list[dict], store: Path, bases: dict, hyd: np.ndarray, 
     rows, info = [], []
     with ProcessPoolExecutor(workers) as pool:
         for k, res in enumerate(pool.map(_station_task, tasks)):
-            for row, h, i in res:
+            for row, h, i, vector in res:
                 rows.append(row)
                 info += i
                 hyd[row["station"]] = h
+                if models is not None:
+                    models[row["station"]] = vector
             if k % 20 == 0:
                 print(f"  {min((k + 1) * TASK_SIZE, len(todo))}/{len(todo)} stations", flush=True)
     return rows, info
+
+
+def _node_task(args) -> list[dict]:
+    chunk, models_path, bases = args
+    models = np.load(models_path, mmap_mode="r")
+    rows = []
+    for atlas in bases:
+        nodes = [n for n in chunk if n["atlas"] == atlas]
+        if not nodes:
+            continue
+        b = [np.load(p, mmap_mode="r") for p in bases[atlas][2:]]
+        t10_all = predict(b[0], b[1], np.vstack([n["hc"] for n in nodes]))
+        for j, n in enumerate(nodes):
+            m = blended_model(models[n["neighbours"]], n["weights"])
+            rows.append({"node": n["node"], "gpd_shape": m["shape"], **rp_levels(None, m, t10_all[:, j], n["tc"])})
+    return rows
+
+
+def build_nodes(todo: list[dict], models_path: Path, bases: dict, workers: int) -> pd.DataFrame:
+    """RP levels (m above local MSL) at the coastline nodes in `todo`, indexed by node.
+
+    Each node: "node", "hc" (its corrected FES constants), "atlas", "neighbours" (rows of the
+    `models_path` array of station `model_vector`s), "weights" (summing to 1), "tc" (COAST-RP_TC
+    levels at RPS, or None).
+    """
+    tasks = [(todo[i:i + TASK_SIZE], str(models_path), bases) for i in range(0, len(todo), TASK_SIZE)]
+    rows = []
+    with ProcessPoolExecutor(workers) as pool:
+        for k, res in enumerate(pool.map(_node_task, tasks)):
+            rows += res
+            if k % 200 == 0:
+                print(f"  {min((k + 1) * TASK_SIZE, len(todo))}/{len(todo)} nodes", flush=True)
+    return pd.DataFrame(rows).set_index("node").sort_index()
 
 
 def fes2022_ok_gauges(pairs: pd.DataFrame, mhws_gauge: np.ndarray, mhws_fes: np.ndarray) -> np.ndarray:
@@ -493,10 +554,12 @@ def fes2022_ok_gauges(pairs: pd.DataFrame, mhws_gauge: np.ndarray, mhws_fes: np.
     return pairs.loc[ok, ["lon", "lat"]].to_numpy(dtype=float)
 
 
-def export_levels(lev: pd.DataFrame, coast_rp_path: Path, dest: Path) -> None:
+def export_levels(lev: pd.DataFrame, coast_rp_path: Path, dest: Path, nodes: pd.DataFrame | None = None) -> None:
     """Write the levels in COAST-RP's layout (stations, order, coordinates, storm_tide_rp_XXXX).
 
-    Stations without a product level keep COAST-RP's (`level_source`). RP1 is not produced.
+    Stations without a product level keep COAST-RP's (`level_source`). The coastline `nodes`
+    (lon, lat, atlas, gpd_shape, rp*_m) follow the COAST-RP stations, station_id "node_<n>".
+    RP1 is not produced.
     """
     coast = xr.open_dataset(coast_rp_path)
     assert len(lev) == coast.sizes["stations"] and (lev.station_id.to_numpy() == coast.station_id.values.astype(str)).all()
@@ -519,10 +582,24 @@ def export_levels(lev: pd.DataFrame, coast_rp_path: Path, dest: Path) -> None:
                     attrs={"title": "GFM storm-tide return levels", "source": "src/storm_tide_product.py",
                            "return_periods_y": list(RPS)})
     coast.close()
+    n_nodes = 0 if nodes is None else len(nodes)
+    if n_nodes:
+        node_data = {name: ("stations", nodes[f"rp{rp}_m"].to_numpy(dtype=np.float64), data[name][2])
+                     for rp in RPS for name in [f"storm_tide_rp_{rp:04d}"]}
+        node_data.update({"level_source": ("stations", np.full(n_nodes, NODE_LEVEL_SOURCE)),
+                          "r": ("stations", np.full(n_nodes, np.nan)), "atlas": ("stations", nodes.atlas.to_numpy()),
+                          "gpd_shape": ("stations", nodes.gpd_shape.to_numpy())})
+        node_ds = xr.Dataset(node_data, coords={
+            "station_id": ("stations", np.array([f"node_{n}" for n in nodes.index])),
+            "station_x_coordinate": ("stations", nodes.lon.to_numpy()),
+            "station_y_coordinate": ("stations", nodes.lat.to_numpy())})
+        ds = xr.concat([ds.assign_coords(station_id=ds.station_id.astype(str)), node_ds], dim="stations",
+                       combine_attrs="override")
     tmp = dest.with_suffix(".nc.part")
     ds.to_netcdf(tmp)
     tmp.replace(dest)
-    print(f"{dest.name}: {len(lev)} stations, {int((source == 'coast_rp').sum())} with COAST-RP levels", flush=True)
+    print(f"{dest.name}: {len(lev)} stations, {int((source == 'coast_rp').sum())} with COAST-RP levels, "
+          f"{n_nodes} coastline nodes", flush=True)
 
 
 def export_hydrographs(lev: pd.DataFrame, hyd: np.ndarray, dest: Path) -> None:

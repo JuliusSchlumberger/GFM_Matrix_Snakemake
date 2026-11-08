@@ -6,12 +6,16 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "preparation"))
 from boundaries import storm_tide_hydrograph_path, storm_tide_levels_path  # noqa: E402
 from flood_model import _idw_nearest_k  # noqa: E402
 from skew_surge import HW_PROMINENCE, high_waters  # noqa: E402
-from storm_tide_product import R_CAP, station_ratios  # noqa: E402
+from prepare_boundary_conditions import nearest_slr_m  # noqa: E402
+from storm_tide_product import (  # noqa: E402
+    BLEND_QUANTILES, NODE_LEVEL_SOURCE, R_CAP, RPS, blended_model, export_levels, model_vector, station_ratios)
 from tide_prediction import consistent_version_flag  # noqa: E402
 
 HOURS = np.arange(24 * 30, dtype=float)
@@ -70,3 +74,39 @@ def test_storm_tide_source_picks_the_files() -> None:
     cfg["boundary_conditions"]["storm_tide_source"] = "coastrp"
     with pytest.raises(ValueError):
         storm_tide_hydrograph_path(cfg)
+
+
+def test_blended_model_averages_quantiles_and_gpd_parameters() -> None:
+    a = {"sorted": np.linspace(0.0, 1.0, 101), "u": 0.9, "p_u": 0.1, "shape": 0.1, "scale": 0.2, "theta": 0.5}
+    b = {"sorted": np.linspace(1.0, 3.0, 51), "u": 2.8, "p_u": 0.1, "shape": -0.1, "scale": 0.4, "theta": 0.7}
+    m = blended_model(np.vstack([model_vector(a), model_vector(b)]), np.array([0.75, 0.25]))
+    assert len(m["sorted"]) == len(BLEND_QUANTILES)
+    assert m["sorted"][0] == pytest.approx(0.25) and m["sorted"][-1] == pytest.approx(1.5)
+    assert m["shape"] == pytest.approx(0.05) and m["theta"] == pytest.approx(0.55)
+
+
+def test_export_levels_appends_the_coastline_nodes(tmp_path: Path) -> None:
+    coast = xr.Dataset({f"storm_tide_rp_{rp:04d}": ("stations", [1.0, 2.0]) for rp in RPS},
+                       coords={"station_id": ("stations", ["a", "b"]), "station_x_coordinate": ("stations", [0.0, 1.0]),
+                               "station_y_coordinate": ("stations", [50.0, 50.0])})
+    coast.to_netcdf(tmp_path / "coast_rp.nc")
+    lev = pd.DataFrame({"station_id": ["a", "b"], "level_source": ["product", None], "r": [1.1, np.nan],
+                        "atlas": ["fes2022", "fes2022"], "gpd_shape": [0.1, np.nan],
+                        **{f"rp{rp}_m": [3.0, np.nan] for rp in RPS}})
+    nodes = pd.DataFrame({"lon": [0.5], "lat": [50.1], "atlas": ["fes2014"], "gpd_shape": [0.05],
+                          **{f"rp{rp}_m": [4.0] for rp in RPS}}, index=pd.Index([7], name="node"))
+    export_levels(lev, tmp_path / "coast_rp.nc", tmp_path / "levels.nc", nodes)
+    with xr.open_dataset(tmp_path / "levels.nc") as ds:
+        assert ds.station_id.values.tolist() == ["a", "b", "node_7"]
+        assert ds.storm_tide_rp_0100.values.tolist() == [3.0, 2.0, 4.0]
+        assert ds.level_source.values.tolist() == ["product", "coast_rp", NODE_LEVEL_SOURCE]
+        assert ds.station_x_coordinate.values[2] == 0.5
+
+
+def test_slr_lookup_takes_the_nearest_value_inside_the_open_one_degree_box() -> None:
+    slr_lonlat = np.array([[0.9, 0.9], [1.0, 0.0], [0.5, 0.5], [0.2, 0.0]])
+    slr_mm = np.array([100.0, 200.0, 300.0, np.nan])
+    station = np.array([[0.0, 0.0], [10.0, 10.0]])
+    # [1.0, 0.0] lies on the box edge, [0.2, 0.0] has no value
+    assert nearest_slr_m(slr_lonlat, slr_mm, station)[0] == pytest.approx(0.3)
+    assert np.isnan(nearest_slr_m(slr_lonlat, slr_mm, station)[1])
