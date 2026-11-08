@@ -240,6 +240,16 @@ Open:
     MAE 0.121 -> 0.099 / 0.089 / 0.095 / 0.103 / 0.116 m for R 10 / 25 / 50 / 100 / 200 km; at
     gauges with neighbours within 25 km 0.152 -> 0.100 m, 91 gauges worse by > 0.1 m. Feet
     records (old MEDS) still need a filter.
+    Built: `src/tide_correction.py` in the product (25 km; `levels.parquet` tide_factor /
+    tide_gauges), stage `open_guesses.py tide_correction` (2,373 usable sites: amplitude MAE FES at
+    the gauge 0.185, current forcing 0.157, stations corrected 0.139, local corrected 0.133 m;
+    feet filtered by a 20 m range) and `tile_interpolation` (test 4 at the 618 ratio gauges: the
+    decomposition alone scores as the current IDW, RP100 0.195 vs 0.194 m; where the tide
+    correction exceeds 10% (72 gauges) RP100 0.377 -> 0.332 m with corrected station tides, 0.350 m
+    with the corrected local tide). fig25-fig28, input analysis section 9. Decision open (user):
+    build the decomposition into the tiles (a coastal node set), or keep station IDW with the
+    corrected station tides. The ratio gauges lie <= 10 km from a station; estuary heads are
+    tested for the tide only.
   5. Global rerun with flags (tail-uncertain, TC-coast, fallback-r); test 10 afterwards revises
      the flagged stations. The 1950-1978 surge months are on `<data_root>`
      (`inputs/GTSM_storm_tide_hourly/storm_surge_residual`, all 900 months).

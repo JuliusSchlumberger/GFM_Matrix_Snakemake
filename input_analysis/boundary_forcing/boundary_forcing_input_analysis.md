@@ -260,7 +260,8 @@ Confirmation on 5-10 real 2-D tiles follows once the generator exists (test 8).
 
 **Decided:**
 - Tide: FES2022, FES2014 where the version rule fires (MHWS ratio > 1.5 and difference > 1.25 m),
-  gauges overriding both. EOT20 not used.
+  gauges overriding both: scaled by the median gauge/FES amplitude ratio of the GESLA gauges within
+  25 km (§9). EOT20 not used.
 - Hydrograph: per-RP generator (§5, built and tested: 14 of 20 cases pass) from GTSM surge shapes on the FES tide at each station's tide
   level during extremes, scaled to the RP peak; largest-event shapes for RP >= 50; window
   extended where events outlast ±72 h; gauge shapes, else a Gaussian, at TC stations. COAST-HG is
@@ -270,8 +271,7 @@ Confirmation on 5-10 real 2-D tiles follows once the generator exists (test 8).
   regionalised with the SLR fingerprints) is added to the boundary level.
 
 **Open:**
-- The FES version rule is in the level product (§8), not yet in production; how far a gauge
-  override reaches is undefined.
+- The FES version rule is in the level product (§8), not yet in production.
 - Tests not yet run: 2+5 (skew-surge convolution, one estimator three ways), 9 (surge-deficit
   correction), 10 (STORM-GTSM TC shapes; needs the STORM-forced runs), 8 (real tiles, after the
   generator). Deferred: test 4 (absolute MSL + MDT against geodetic gauge datums); wave setup.
@@ -315,6 +315,38 @@ model between it (default) and COAST-RP / COAST-HG.
   - a cyclone mask would lower TC coasts by 0.14 m at RP100 and move them away from the gauges,
     because both cyclone sources are too low; production has none until test 10.
 
+## 9. Review of the estimated rules and test 4
+
+The tail, cyclone and gauge-ratio rules of §8 were estimates; they were reviewed with the tests
+below (`boundary_test/open_guesses.py`, stage names in brackets).
+
+- **Record length** (`long_record`, fig25): every station rebuilt on GTSM-ERA5 1950-2024 with the
+  §8 method. At stations with a COAST-RP TC part the number of GPD shapes above 0.35 barely moves
+  (753 in 46 years, 737 in 75), but a third of them swap: single storms set the shape (Hangzhou
+  Bay and the Pilbara gain up to 3.2 m at RP1000 from 1950-1978 storms). Without a TC part the
+  heavy shapes halve (70 to 33). ERA5 before 1979 shows no storm deficit (median ratio of the
+  1950-1978 and 1979-2024 skew-surge RP10: 1.00).
+- **Cyclone mask and pooled shape** (`pooled_shape`, fig26): on 1950-2024, cycles within 300 km
+  and 24 h of an IBTrACS tropical storm (>= 34 kt, or anywhere on a track with no wind on record:
+  most pre-1979 South Indian, South Pacific and North Indian tracks) leave the extratropical fit.
+  Shapes above 0.35 at TC stations fall to 6. Pooling the shape over the stations within a radius
+  (summed profile likelihood, scale per station) cuts the change a station's shape
+  undergoes when 1950-1978 is added to a third (median 0.06 alone, 0.02 at 300 km). The cap and the radius do
+  not move the gauge scores. Masked, the TC-dominated gauges are 0.16 m low at RP100: COAST-RP's
+  TC part alone is too low.
+- **Gauge tide correction** (`tide_correction`, fig27): FES against short harmonic fits of 2,373
+  coastal GESLA sites. FES at the gauge has a tide-amplitude MAE of 0.185 m and the current forcing
+  (IDW of the stations) 0.157 m; errors reach a factor of 2-5 in the St Lawrence, Bangladesh, the
+  Alaskan fjords, Ungava and the Fundy tidal rivers. Scaling FES by the median gauge/FES ratio of
+  the other gauges within 25 km gives 0.133 m (10 / 50 / 100 km: 0.146 / 0.146 / 0.157 m). This
+  is the gauge override of §7.
+- **Test 4, tile interpolation** (`tile_interpolation`, fig28): at the 618 ratio gauges the
+  decomposition (IDW of the stations' skew-surge distributions on the local FES tide) scores as
+  the current IDW of station levels (RP100 MAE 0.195 against 0.194 m). The gain comes from the
+  tide correction: where it exceeds 10% (72 gauges) RP100 MAE drops from 0.377 to 0.332 m with
+  corrected station tides and to 0.350 m with the corrected local tide. The ratio gauges lie at
+  most 10 km from a station, so estuary heads farther away are tested for the tide only (fig27).
+
 ## Figures
 
 | Figure | Shows |
@@ -343,6 +375,10 @@ model between it (default) and COAST-RP / COAST-HG.
 | `fig22_fes_rule` | FES2022 / FES2014 MHWS against the gauges where the version rule fires or is grown |
 | `fig23_peak_offsets` | hydrographs whose maximum is off the centre high water: share, offset, excess |
 | `fig24_datum_terms` | MDT, 2020 offset and the change of the WL_scenarios level (product + offset against COAST-RP) |
+| `fig25_long_record` | GPD shapes and RP1000 on 1950-2024 against 1979-2024; ERA5 before and after 1979 |
+| `fig26_pooled_shape` | shape stability and heavy shapes against the pooling radius; gauge scores of the variants |
+| `fig27_tide_correction` | FES tide amplitude against GESLA, uncorrected and gauge-corrected; MAE by radius |
+| `fig28_tile_interpolation` | test 4: station-level IDW against surge IDW on the local tide, with and without the tide correction |
 
 ## References
 

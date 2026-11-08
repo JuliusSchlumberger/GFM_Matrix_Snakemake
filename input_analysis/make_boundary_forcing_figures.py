@@ -1854,6 +1854,39 @@ def fig27_tide_correction(product: Path, dest: Path) -> None:
         """)
 
 
+def fig28_tile_interpolation(product: Path, dest: Path) -> None:
+    t = pd.read_parquet(_guesses(product) / "tile_interpolation" / "gauges.parquet")
+    variants = {"current": "IDW of station levels (current)", "current_tide_corrected": "same, station tides corrected",
+                "decomposed": "IDW surge + local FES tide", "decomposed_tide_corrected": "same, local tide corrected"}
+    groups = {"all gauges": np.ones(len(t), bool), "station > 5 km away": (t.station_km > 5).to_numpy(),
+              "tide correction > 10%": ((t.tide_factor - 1).abs() > 0.1).to_numpy()}
+    colors = (MUTED, INK, ORANGE, BLUE)
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4.6))
+    for ax, rp, letter in ((axes[0], 2, "a"), (axes[1], 100, "b")):
+        x = np.arange(len(groups))
+        for k, (col, label) in enumerate(variants.items()):
+            mae = [(t[f"{col}_rp{rp}_m"] - t[f"gauge_rp{rp}_m"])[sel].abs().mean() for sel in groups.values()]
+            ax.bar(x + (k - 1.5) * 0.2, mae, width=0.19, color=colors[k], label=label)
+        ax.set_xticks(x, [f"{g}\n(n = {int(s.sum())})" for g, s in groups.items()], fontsize=8)
+        ax.set(ylabel=f"RP{rp} MAE against the gauges (m)")
+        _style(ax)
+        draw_panel_letter(ax, letter)
+    axes[0].legend(frameon=False, fontsize=8)
+    fig.tight_layout()
+    _save(fig, dest / "fig28_tile_interpolation.png")
+    describe(dest / "fig28_tile_interpolation.png", f"""
+        Test 4, how the coastline level between stations is formed, at the {len(t)} ratio gauges.
+        Current: inverse-distance weighting (k = 5, power 3) of the nearest stations' RP levels.
+        Decomposed: the same weighting of the stations' skew-surge distributions (quantiles and GPD
+        parameters averaged), convolved with the FES tide at the gauge. Each with the gauge tide
+        correction (median gauge/FES amplitude ratio of the gauges within 25 km, the gauge's own site
+        left out) on the stations' or the local tide. The stations' r and surge models are
+        production's. The gauges lie {t.station_km.median():.1f} km (median) and at most
+        {t.station_km.max():.0f} km from a station, so the estuary heads far from any station are
+        not tested here (fig27 tests the tide alone there). (a) RP2, (b) RP100.
+        """)
+
+
 PROCESSED_FIGURES = {"fig24": fig24_datum_terms}
 FIGURES = {"fig01": fig01_tide_scatter, "fig02": fig02_tide_ratio_maps, "fig03": fig03_constituents,
            "fig04": fig04_fes_versions, "fig05": fig05_basin_heads, "fig06": fig06_rule_sensitivity,
@@ -1865,7 +1898,7 @@ PRODUCT_FIGURES = {"fig12": fig12_level_product_maps, "fig13": fig13_level_produ
                    "fig18": fig18_product_durations,
                    "fig19": fig19_despike, "fig20": fig20_gpd_cap, "fig21": fig21_tc_mask, "fig22": fig22_fes_rule,
                    "fig23": fig23_peak_offsets, "fig25": fig25_long_record, "fig26": fig26_pooled_shape,
-                   "fig27": fig27_tide_correction}
+                   "fig27": fig27_tide_correction, "fig28": fig28_tile_interpolation}
 
 
 def main() -> None:
