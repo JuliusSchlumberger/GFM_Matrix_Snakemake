@@ -1,0 +1,8 @@
+GPD shape pooled over neighbouring stations, on 1950-2024 with the IBTrACS mask (cycles within 300
+km and 24 h of a tropical storm >= 34 kt, or anywhere on a track with no wind on record, leave the
+extratropical fit). A station's pooled shape maximises the summed profile likelihood of the stations
+within the radius; the scale stays per station. (a) How much a station's shape changes when
+1950-1978 is added (stability against single storms). (b) Stations whose shape exceeds 0.35 (23211
+stations). (c) RP100 MAE at the ratio gauges (r left out) for the production product and the
+1950-2024 variants: masking moves the TC-dominated gauges low (COAST-RP's TC part alone is too low),
+pooling and the cap do not change the scores.

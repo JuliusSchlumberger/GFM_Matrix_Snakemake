@@ -336,20 +336,16 @@ def _solve(rate, target: float, lo: float, hi: float) -> float:
     return 0.5 * (lo + hi)
 
 
-def station_product(st: dict, g: np.ndarray, th: np.ndarray, t10: np.ndarray,
-                    years: np.ndarray) -> tuple[dict, np.ndarray, list]:
-    """RP levels (row), hydrographs (RP, N_STEPS) and their sources for one station.
+def station_surge_model(st: dict, g: np.ndarray, th: np.ndarray, years: np.ndarray) -> tuple[dict, dict, dict, np.ndarray]:
+    """Row fields, raw and gauge-corrected skew-surge models and the despiked surge of one station.
 
-    `g`: hourly GTSM surge residual (m, NaN missing); `th` / `t10`: the station's FES tide,
-    hourly on the same axis and 10-min over one nodal cycle. `st` may set "shape_cap" (None: no
-    cap) in place of SHAPE_CAP, "pooled_shape" as a fixed GPD shape, and "tc_scale" / "tc_shift_m"
-    applied to the COAST-RP_TC levels (m above MSL) before they become a rate; "surge_offset_m" adds a gauge offset to the positive
-    skew surges in place of the ratio r.
+    `g`: hourly GTSM surge residual (m, NaN missing); `th`: the station's hourly FES tide on the same
+    axis. `st` may set "shape_cap" (None: no cap) in place of SHAPE_CAP, "pooled_shape" as a fixed
+    GPD shape, and "surge_offset_m" adds a gauge offset to the positive skew surges in place of the
+    ratio r.
     """
     row = {"station": st["station"], "atlas": st["atlas"], "mhws_m": st["mhws_m"]}
-    hyd = np.full((len(RPS), N_STEPS), np.nan, dtype=np.float32)
-    info = []
-    row["gtsm_jumps"] = jumps = int(np.sum(np.abs(np.diff(g)) > SPIKE_M))
+    row["gtsm_jumps"] = int(np.sum(np.abs(np.diff(g)) > SPIKE_M))
     g = despike(g)
     hw, h = high_waters(th, HW_PROMINENCE)
     skew = skew_surges(g + th, hw, h)
@@ -362,20 +358,45 @@ def station_product(st: dict, g: np.ndarray, th: np.ndarray, t10: np.ndarray,
     model = surge_model(skew[ok & ~tc_cycles], len(keep_years), max_shape=st.get("shape_cap", SHAPE_CAP),
                         shape=st.get("pooled_shape"))
     corrected = shifted(model, st["surge_offset_m"]) if "surge_offset_m" in st else scaled(model, st["r"])
-    v, w, cyc = tide_peaks(t10, STEP_MIN / 60.0, HW_PROMINENCE)
     row.update({"n_years": len(keep_years), "gpd_shape": model["shape"], "gpd_shape_mle": model["shape_mle"],
                 "gpd_scale": model["scale"], "theta": model["theta"]})
+    return row, model, corrected, g
+
+
+def rp_levels(model: dict, corrected: dict, t10: np.ndarray, tc_levels: np.ndarray | None) -> dict:
+    """ETC (raw and corrected) and total RP levels (m) of skew-surge models on the 10-min tide t10.
+
+    `tc_levels`: COAST-RP_TC levels at RPS (m above MSL), added as a rate; None for no TC part.
+    """
+    v, w, cyc = tide_peaks(t10, STEP_MIN / 60.0, HW_PROMINENCE)
 
     def etc_rate(m):
         return lambda z: cyc * m["theta"] * float(np.sum(w * exceedance(m, z - v)))
-    tc = (_tc_rate(st["tc"] * st.get("tc_scale", 1.0) + st.get("tc_shift_m", 0.0)) if st["tc"] is not None
-          else (lambda z: 0.0))
+    tc = _tc_rate(tc_levels) if tc_levels is not None else (lambda z: 0.0)
     lo, hi = float(v.min()), float(v.max()) + 20.0
+    out = {}
     for rp, target in zip(RPS, annual_rate(RPS)):
-        row[f"etc_raw_rp{rp}_m"] = _solve(etc_rate(model), target, lo, hi)
-        row[f"etc_rp{rp}_m"] = _solve(etc_rate(corrected), target, lo, hi)
-        row[f"rp{rp}_m"] = z = _solve(lambda x: etc_rate(corrected)(x) + tc(x), target, lo, hi)
-        row[f"tc_dominant_rp{rp}"] = bool(tc(z) > etc_rate(corrected)(z))
+        out[f"etc_raw_rp{rp}_m"] = _solve(etc_rate(model), target, lo, hi)
+        out[f"etc_rp{rp}_m"] = _solve(etc_rate(corrected), target, lo, hi)
+        out[f"rp{rp}_m"] = z = _solve(lambda x: etc_rate(corrected)(x) + tc(x), target, lo, hi)
+        out[f"tc_dominant_rp{rp}"] = bool(tc(z) > etc_rate(corrected)(z))
+    return out
+
+
+def station_product(st: dict, g: np.ndarray, th: np.ndarray, t10: np.ndarray,
+                    years: np.ndarray) -> tuple[dict, np.ndarray, list]:
+    """RP levels (row), hydrographs (RP, N_STEPS) and their sources for one station.
+
+    `t10`: the station's FES tide, 10-min over one nodal cycle; `g`, `th`, `years` and the `st` keys
+    as in `station_surge_model`, plus "tc_scale" / "tc_shift_m" applied to the COAST-RP_TC levels
+    (m above MSL) before they become a rate.
+    """
+    row, model, corrected, g = station_surge_model(st, g, th, years)
+    hyd = np.full((len(RPS), N_STEPS), np.nan, dtype=np.float32)
+    info = []
+    jumps = row["gtsm_jumps"]
+    tc_levels = st["tc"] * st.get("tc_scale", 1.0) + st.get("tc_shift_m", 0.0) if st["tc"] is not None else None
+    row.update(rp_levels(model, corrected, t10, tc_levels))
     # GTSM's residual is numerically broken here (jumps of metres within an hour): COAST-RP's level
     row["level_source"] = "coast_rp" if jumps >= GTSM_QA_JUMPS else "product"
     if jumps >= GTSM_QA_JUMPS:

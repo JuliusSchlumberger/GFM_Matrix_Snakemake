@@ -1697,6 +1697,163 @@ def fig24_datum_terms(processed: Path, dest: Path) -> None:
         """)
 
 
+def fig25_long_record(product: Path, dest: Path) -> None:
+    d = pd.read_parquet(_guesses(product) / "long_record" / "long_record.parquet")
+    tc = d.tc_part.to_numpy()
+    fig = plt.figure(figsize=(17, 5.0))
+    grid = fig.add_gridspec(1, 3, width_ratios=[1, 1, 1.6])
+    ax = fig.add_subplot(grid[0])
+    for sel, color, label in ((~tc, MUTED, "no TC part"), (tc, ORANGE, "TC part")):
+        ax.scatter(d.gpd_shape_mle[sel], d.long_gpd_shape_mle[sel], s=3, color=color, linewidths=0, alpha=0.5,
+                   label=label)
+    lim = (-0.8, 1.2)
+    ax.plot(lim, lim, color=INK, linewidth=0.6)
+    for v in (0.35,):
+        ax.axvline(v, color=GRID, linewidth=0.8)
+        ax.axhline(v, color=GRID, linewidth=0.8)
+    ax.set(xlim=lim, ylim=lim, xlabel="GPD shape (MLE), 1979-2024", ylabel="GPD shape (MLE), 1950-2024")
+    ax.legend(frameon=False, fontsize=8, markerscale=4)
+    _style(ax)
+    draw_panel_letter(ax, "a")
+    ax = fig.add_subplot(grid[1])
+    bins = np.linspace(-1.0, 1.0, 81)
+    for sel, color, label in ((~tc, MUTED, "no TC part"), (tc, ORANGE, "TC part")):
+        ax.hist((d.long_rp1000_m - d.rp1000_m)[sel].clip(-1, 1), bins=bins, color=color, alpha=0.6, label=label)
+    ax.set(xlabel="RP1000 level, 1950-2024 minus 1979-2024 (m; clipped at +-1)", ylabel="stations")
+    ax.legend(frameon=False, fontsize=8)
+    _style(ax)
+    draw_panel_letter(ax, "b")
+    ax = fig.add_subplot(grid[2], projection=MAP_PROJ)
+    ratio = d.early_skew_rp10_m / d.late_skew_rp10_m
+    cell = pd.DataFrame({"lon": (d.lon // 5) * 5 + 2.5, "lat": (d.lat // 5) * 5 + 2.5, "r": ratio}).dropna()
+    cell = cell.groupby(["lon", "lat"]).r.median().reset_index()
+    _land(ax)
+    sc = ax.scatter(cell.lon, cell.lat, c=cell.r, s=9, cmap="RdBu_r", norm=Normalize(0.8, 1.2), transform=PC)
+    ax.set_global()
+    fig.colorbar(sc, ax=ax, shrink=0.8, label="skew-surge RP10, 1950-1978 / 1979-2024")
+    draw_panel_letter(ax, "c")
+    fig.tight_layout()
+    _save(fig, dest / "fig25_long_record.png")
+    a, b = d.gpd_shape_mle > 0.35, d.long_gpd_shape_mle > 0.35
+    describe(dest / "fig25_long_record.png", f"""
+        Every product station rebuilt on GTSM-ERA5 1950-2024 with the production method of the
+        1979-2024 product (no cyclone mask, the same gauge ratio r, shape cap 0.35); only the record
+        length differs. (a) Maximum-likelihood GPD shape of the declustered skew surges, 1979-2024
+        against 1950-2024 (grey lines: 0.35). Stations with a COAST-RP TC part: {int(a[tc].sum())}
+        shapes above 0.35 in 46 years, {int(b[tc].sum())} in 75 years, {int((a & b)[tc].sum())} in both;
+        without a TC part {int(a[~tc].sum())} and {int(b[~tc].sum())}. The heavy tails at cyclone
+        stations stay, but which stations carry them changes: single storms set the shape.
+        (b) Change of the product's RP1000 level. (c) Median per 5-degree cell of the ratio of the
+        skew-surge RP10 fitted to 1950-1978 and to 1979-2024 (ERA5 before and after satellite
+        assimilation; median {np.nanmedian(ratio):.3f}).
+        """)
+
+
+def fig26_pooled_shape(product: Path, dest: Path) -> None:
+    g = _guesses(product) / "pooled_shape"
+    st = pd.read_parquet(g / "stations.parquet")
+    sc = pd.read_parquet(g / "scores.parquet")
+    radii = [0, 100, 300, 1000]
+    x = np.arange(len(radii))
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4.8), gridspec_kw={"width_ratios": [1, 1, 1.3]})
+    ax = axes[0]
+    for sel, color, label in ((~st.tc_part, MUTED, "no TC part"), (st.tc_part, ORANGE, "TC part")):
+        s = st[sel]
+        dd = [np.abs(s[f"shape_{km}km_full"] - s[f"shape_{km}km_late"]) for km in radii]
+        ax.plot(x, [v.median() for v in dd], "o-", color=color, label=f"{label}, median")
+        ax.plot(x, [v.quantile(0.9) for v in dd], "o--", color=color, label=f"{label}, p90")
+    ax.set(xlabel="pooling radius (km; 0 = station alone)", ylabel="|shape 1950-2024 - shape 1979-2024|")
+    ax.set_xticks(x, [str(r) for r in radii])
+    ax.legend(frameon=False, fontsize=8)
+    _style(ax)
+    draw_panel_letter(ax, "a")
+    ax = axes[1]
+    for sel, color, label in ((~st.tc_part, MUTED, "no TC part"), (st.tc_part, ORANGE, "TC part")):
+        s = st[sel]
+        ax.plot(x, [(s[f"shape_{km}km_full"] > 0.35).sum() for km in radii], "o-", color=color, label=label)
+    ax.axhline(0, color=GRID, linewidth=0.8)
+    ax.set(xlabel="pooling radius (km; 0 = station alone)", ylabel="stations with shape > 0.35 (1950-2024)")
+    ax.set_xticks(x, [str(r) for r in radii])
+    ax.legend(frameon=False, fontsize=8)
+    _style(ax)
+    draw_panel_letter(ax, "b")
+    ax = axes[2]
+    levels = sc.level.unique().tolist()
+    y = np.arange(len(levels))
+    for k, (grp, color) in enumerate((("non-TC-dominated gauges", MUTED), ("TC-dominated gauges", ORANGE))):
+        s = sc[(sc.gauges == grp) & (sc.rp == 100)].set_index("level").reindex(levels)
+        ax.barh(y + (k - 0.5) * 0.38, s.mae, height=0.36, color=color, label=grp)
+    ax.set_yticks(y, levels, fontsize=7)
+    ax.invert_yaxis()
+    ax.set(xlabel="RP100 MAE against the gauges (m)", xlim=(0, 0.5))
+    ax.legend(frameon=False, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.14), ncol=2)
+    _style(ax)
+    draw_panel_letter(ax, "c")
+    fig.tight_layout()
+    _save(fig, dest / "fig26_pooled_shape.png")
+    describe(dest / "fig26_pooled_shape.png", f"""
+        GPD shape pooled over neighbouring stations, on 1950-2024 with the IBTrACS mask (cycles within
+        300 km and 24 h of a tropical storm >= 34 kt, or anywhere on a track with no wind on record,
+        leave the extratropical fit). A station's pooled shape maximises the summed profile
+        likelihood of the stations within the radius; the scale stays per station. (a) How much a
+        station's shape changes when 1950-1978 is added (stability against single storms).
+        (b) Stations whose shape exceeds 0.35 ({len(st)} stations). (c) RP100 MAE at the ratio
+        gauges (r left out) for the production product and the 1950-2024 variants: masking moves
+        the TC-dominated gauges low (COAST-RP's TC part alone is too low), pooling and the cap do
+        not change the scores.
+        """)
+
+
+def fig27_tide_correction(product: Path, dest: Path) -> None:
+    g = _guesses(product) / "tide_correction"
+    gt = pd.read_parquet(g / "gauges.parquet")
+    sc = pd.read_parquet(g / "scores.parquet")
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5.0))
+    lim = (0.02, 12.0)
+    for ax, col, letter, label in ((axes[0], "amp_fes_m", "a", "FES at the gauge"),
+                                   (axes[1], "amp_corrected_25km_m", "b", "FES at the gauge, corrected within 25 km")):
+        far = gt.near_km > 10
+        ax.scatter(gt.amp_gauge_m[~far], gt[col][~far], s=5, color=MUTED, linewidths=0, label="gauge <= 10 km from a station")
+        ax.scatter(gt.amp_gauge_m[far], gt[col][far], s=7, color=BLUE, linewidths=0, label="gauge > 10 km from a station")
+        ax.plot(lim, lim, color=INK, linewidth=0.6)
+        for f in (0.75, 1.25):
+            ax.plot(lim, np.multiply(lim, f), color=GRID, linewidth=0.8)
+        ax.set(xscale="log", yscale="log", xlim=lim, ylim=lim, xlabel="gauge tide amplitude (m)",
+               ylabel=f"{label} (m)")
+        ax.legend(frameon=False, fontsize=8, markerscale=2, loc="upper left")
+        _style(ax)
+        draw_panel_letter(ax, letter)
+    ax = axes[2]
+    km = [10, 25, 50, 100, 200]
+    for grp, color in (("all", INK), ("gauge tide > 2 m", ORANGE), ("> 10 km from a station", BLUE)):
+        s = sc[sc.gauges == grp].set_index("tide")
+        ax.plot(km, [s.mae_m[f"FES at the gauge, corrected within {k} km"] for k in km], "o-", color=color, label=grp)
+        ax.axhline(s.mae_m["station IDW (current forcing)"], color=color, linestyle="--", linewidth=0.9)
+        ax.axhline(s.mae_m["FES at the gauge"], color=color, linestyle=":", linewidth=0.9)
+    ax.set(xscale="log", xlabel="correction radius (km)", ylabel="tide amplitude MAE (m)")
+    ax.set_xticks(km, [str(k) for k in km])
+    ax.legend(frameon=False, fontsize=8, title="solid: corrected; dashed: current forcing;\ndotted: FES uncorrected",
+              title_fontsize=7)
+    _style(ax)
+    draw_panel_letter(ax, "c")
+    fig.tight_layout()
+    _save(fig, dest / "fig27_tide_correction.png")
+    a = sc[sc.gauges == "all"].set_index("tide").mae_m
+    describe(dest / "fig27_tide_correction.png", f"""
+        FES tide against {len(gt)} usable coastal GESLA sites (first two years of each record,
+        least-squares M2, S2, N2, K1, O1 and M4; records that dry at low water, are sparse, or exceed
+        a 20 m range (feet) are left out). Tide amplitude = the sum of the M2, S2, N2, K1 and O1
+        amplitudes. (a) FES (the atlas of the nearest station) at the gauge against the gauge; grey
+        lines at +-25%. (b) The same, scaled by the median gauge/FES ratio of the other gauges
+        within 25 km (the gauge and its site left out). (c) MAE against the correction radius; dashed:
+        the current forcing (IDW of the 5 nearest stations' FES tide), dotted: FES at the gauge
+        uncorrected. All gauges: FES at the gauge {a['FES at the gauge']:.3f} m, current forcing
+        {a['station IDW (current forcing)']:.3f} m, stations corrected
+        {a['station IDW, stations corrected']:.3f} m, FES at the gauge corrected within 25 km
+        {a['FES at the gauge, corrected within 25 km']:.3f} m.
+        """)
+
+
 PROCESSED_FIGURES = {"fig24": fig24_datum_terms}
 FIGURES = {"fig01": fig01_tide_scatter, "fig02": fig02_tide_ratio_maps, "fig03": fig03_constituents,
            "fig04": fig04_fes_versions, "fig05": fig05_basin_heads, "fig06": fig06_rule_sensitivity,
@@ -1707,7 +1864,8 @@ PRODUCT_FIGURES = {"fig12": fig12_level_product_maps, "fig13": fig13_level_produ
                    "fig16": fig16_station_interpolation, "fig17": fig17_level_product_qa,
                    "fig18": fig18_product_durations,
                    "fig19": fig19_despike, "fig20": fig20_gpd_cap, "fig21": fig21_tc_mask, "fig22": fig22_fes_rule,
-                   "fig23": fig23_peak_offsets}
+                   "fig23": fig23_peak_offsets, "fig25": fig25_long_record, "fig26": fig26_pooled_shape,
+                   "fig27": fig27_tide_correction}
 
 
 def main() -> None:

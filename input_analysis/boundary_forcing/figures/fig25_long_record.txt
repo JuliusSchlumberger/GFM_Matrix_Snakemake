@@ -1,0 +1,8 @@
+Every product station rebuilt on GTSM-ERA5 1950-2024 with the production method of the 1979-2024
+product (no cyclone mask, the same gauge ratio r, shape cap 0.35); only the record length differs.
+(a) Maximum-likelihood GPD shape of the declustered skew surges, 1979-2024 against 1950-2024 (grey
+lines: 0.35). Stations with a COAST-RP TC part: 753 shapes above 0.35 in 46 years, 737 in 75 years,
+508 in both; without a TC part 70 and 33. The heavy tails at cyclone stations stay, but which
+stations carry them changes: single storms set the shape. (b) Change of the product's RP1000 level.
+(c) Median per 5-degree cell of the ratio of the skew-surge RP10 fitted to 1950-1978 and to
+1979-2024 (ERA5 before and after satellite assimilation; median 1.002).

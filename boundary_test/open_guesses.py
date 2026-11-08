@@ -23,6 +23,13 @@ Stages (each writes <product-dir>/open_guesses/<stage>*.parquet for the figure s
   pooled_shape  on 1950-2024 with the IBTrACS mask (no shift): each station's GPD shape pooled
             over the stations within POOL_KM (summed profile likelihood, scale per station),
             its stability between 1979-2024 and 1950-2024, and the levels at the gauges
+  tide_correction  FES tide amplitude against short harmonic fits of every usable coastal GESLA
+            site: FES at the gauge, the current forcing (IDW of the stations), and both corrected by
+            the other gauges within TIDE_KM (gauge left out)
+  tile_interpolation  test 4 at the ratio gauges: the current forcing (IDW of the knn nearest
+            stations' levels) against IDW of their skew-surge distributions (quantile average)
+            convolved with the local FES tide at the gauge, each with and without the gauge tide
+            correction (gauge left out)
   shape_noise  the stations' MLE GPD shapes against the shapes a light tail (shape 0, or the
             median shape) gives from each station's number of storms: is the heavy tail noise?
 Gauge reference: test 9's convolution of the gauge's own skew surges on its own tide.
@@ -44,10 +51,12 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "boundary_test"))
 from config_utils import get_data_catalog, load_config  # noqa: E402
+from gesla import DEDUP_KM  # noqa: E402
 from gtsm_series import MISSING, extract_series, load_series, station_series  # noqa: E402
 from level_product_gauges import GAUGE_RPS, GaugeCheck, scores, tc_hours  # noqa: E402
 import skew_surge as ss  # noqa: E402
 import storm_tide_product as stp  # noqa: E402
+import tide_correction as tdc  # noqa: E402
 import tide_prediction as tp  # noqa: E402
 
 CAPS = {"none": None, "0.5": 0.5, "0.35 (production)": 0.35, "0.25": 0.25, "0.2": 0.2}
@@ -73,6 +82,9 @@ EARLY_YEARS = (1950, 1978)  # the months before the product's store
 R_MIN_SKEW_M = 0.2  # below it the ratio rests on a GTSM skew surge of a few decimetres
 BASIN_KM = 300.0  # a gauge's basin: the most frequent IBTrACS basin of the track points this close
 POOL_KM = (100.0, 300.0, 1000.0)
+TIDE_KM = (10.0, 25.0, 50.0, 100.0, 200.0)
+BLEND_QUANTILES = np.linspace(0.0, 1.0, 2001)
+INTERP_CHUNK = 20
 SHAPE_GRID = np.round(np.arange(-0.5, 0.805, 0.01), 2)
 
 
@@ -586,6 +598,194 @@ def pooled_shape(check: GaugeCheck, dest: Path, workers: int) -> None:
           .to_string(index=False), flush=True)
 
 
+def tide_correction(check: GaugeCheck, dest: Path, workers: int) -> None:
+    from sklearn.neighbors import BallTree
+    root = dest / "tide_correction"
+    root.mkdir(exist_ok=True)
+    catalog = get_data_catalog(REPO / check.cfg["paths"]["hydromt_data_catalog"], root=check.cfg["paths"]["root"])
+    models = {"fes2022": tp.fes2022_model(check.cache / "fes2022"),
+              "fes2014": tp.fes2014_model(Path(catalog.get_source("fes2014_ocean_tide").path))}
+    table = check.out / "gauges" / "tide_gauges.parquet"
+    if not table.exists():
+        table = root / "tide_gauges.parquet"
+        if not table.exists():
+            tdc.gauge_table(Path(check.cfg["storm_tide_product"]["gesla_dir"]), models, workers).to_parquet(table)
+    gt = pd.read_parquet(table)
+    gt = gt[gt.usable].reset_index(drop=True)
+    lev = check.lev[check.lev.level_source == "product"]
+    st_lonlat = lev[["lon", "lat"]].to_numpy(dtype=float)
+    g_lonlat = gt[["lon", "lat"]].to_numpy(dtype=float)
+    d, i = BallTree(np.radians(st_lonlat[:, ::-1]), metric="haversine").query(np.radians(g_lonlat[:, ::-1]),
+                                                                            k=check.cfg["simulation"]["flooding"]["knn"])
+    w = np.maximum(d * stp.EARTH_RADIUS_KM, 1e-3) ** -float(check.cfg["simulation"]["flooding"]["idw_power"])
+    w /= w.sum(axis=1, keepdims=True)
+    atlas = lev.atlas.to_numpy()[i[:, 0]]  # a gauge takes the atlas of its nearest station
+    gt["atlas"] = atlas
+    gt["near_km"] = d[:, 0] * stp.EARTH_RADIUS_KM
+    gt["amp_gauge_m"] = tdc.tide_amplitude(gt)
+    gt["amp_fes_m"] = np.where(atlas == "fes2014", gt.amp_fes2014_m, gt.amp_fes2022_m)
+    lr = np.where(atlas == "fes2014", gt.log_ratio_fes2014, gt.log_ratio_fes2022)
+    c = np.load(check.cache / "fes_constants.npz")
+    st_all = check.stations[["lon", "lat"]].to_numpy(dtype=float)
+    pos = check.stations.index.get_indexer(lev.index)
+    amp = {a: tdc.fes_amplitude(tp.fill_masked(c[a], st_all), list(m.constituents))[pos] for a, m in models.items()}
+    amp_station = np.where(lev.atlas.to_numpy() == "fes2014", amp["fes2014"], amp["fes2022"])
+    gt["amp_station_idw_m"] = (amp_station[i] * w).sum(axis=1)
+    for km in TIDE_KM:
+        f, n = tdc.correction_factors(g_lonlat, g_lonlat, lr, km, exclude_km=DEDUP_KM)
+        gt[f"amp_corrected_{km:g}km_m"], gt[f"neighbours_{km:g}km"] = gt.amp_fes_m * f, n
+    # the current forcing with corrected stations; the gauge (and its site) is left out of every factor
+    g_tree = BallTree(np.radians(g_lonlat[:, ::-1]), metric="haversine")
+    same_site = g_tree.query_radius(np.radians(g_lonlat[:, ::-1]), r=DEDUP_KM / stp.EARTH_RADIUS_KM)
+    used = np.unique(i)
+    near = dict(zip(used, g_tree.query_radius(np.radians(st_lonlat[used, ::-1]),
+                                              r=tdc.CORRECTION_KM / stp.EARTH_RADIUS_KM)))
+    factor = np.ones(i.shape)
+    for j in range(len(gt)):
+        for m, k in enumerate(i[j]):
+            keep = np.setdiff1d(near[k], same_site[j])
+            keep = keep[np.isfinite(lr[keep])]
+            if len(keep):
+                factor[j, m] = np.exp(np.median(lr[keep]))
+    gt["amp_station_idw_corrected_m"] = (amp_station[i] * factor * w).sum(axis=1)
+    gt.to_parquet(root / "gauges.parquet")
+    cols = {"FES at the gauge": "amp_fes_m", "station IDW (current forcing)": "amp_station_idw_m",
+            "station IDW, stations corrected": "amp_station_idw_corrected_m"} | {
+        f"FES at the gauge, corrected within {km:g} km": f"amp_corrected_{km:g}km_m" for km in TIDE_KM}
+    rows = []
+    for label, sel in (("all", np.ones(len(gt), bool)), ("gauge tide > 2 m", gt.amp_gauge_m.to_numpy() > 2),
+                       ("> 10 km from a station", gt.near_km.to_numpy() > 10)):
+        for name, col in cols.items():
+            e, rel = (gt[col] - gt.amp_gauge_m)[sel], (gt[col] / gt.amp_gauge_m - 1)[sel]
+            rows.append({"gauges": label, "tide": name, "n": int(sel.sum()), "median_m": e.median(),
+                         "mae_m": e.abs().mean(), "off_25pct": int((rel.abs() > 0.25).sum())})
+    s = pd.DataFrame(rows).round(3)
+    s.to_parquet(root / "scores.parquet")
+    print(s.to_string(index=False), flush=True)
+
+
+def _blend(models: list[dict], w: np.ndarray) -> dict:
+    out = {"sorted": np.sum([wk * np.quantile(m["sorted"], BLEND_QUANTILES) for m, wk in zip(models, w)], axis=0)}
+    for k in ("u", "p_u", "shape", "scale", "theta"):
+        out[k] = float(np.sum([wk * m[k] for m, wk in zip(models, w)]))
+    return out
+
+
+def _interp_task(args) -> list[dict]:
+    chunk, store, bases = args
+    surge_st, surge_time, surge = load_series(Path(store))
+    pos = dict(zip(surge_st.gtsm_index, range(len(surge_st))))
+    surge_idx, _ = tp.on_hourly_grid(surge_time.to_numpy(), np.zeros(len(surge_time)))
+    loaded = {a: [np.load(p, mmap_mode="r") for p in bases[a]] for a in bases}
+    n_hours = loaded["fes2022"][0].shape[0]
+    years = tp.hour_years(np.arange(n_hours))
+    out = []
+    for gauge in chunk:
+        models, raws, station_levels, station_levels_corr, tcs = [], [], [], [], []
+        for st, f in zip(gauge["stations"], gauge["station_factors"]):
+            b = loaded[st["atlas"]]
+            th, t10 = tp.predict(b[0], b[1], st["hc"][None, :])[:, 0], tp.predict(b[2], b[3], st["hc"][None, :])[:, 0]
+            g = np.full(n_hours, np.nan)
+            g[surge_idx] = station_series(surge, pos[st["gtsm_index"]])
+            _, raw, corrected, _ = stp.station_surge_model(st, g, th, years)
+            raws.append(raw)
+            models.append(corrected)
+            tcs.append(st["tc"])
+            station_levels.append(stp.rp_levels(raw, corrected, t10, st["tc"]))
+            station_levels_corr.append(stp.rp_levels(raw, corrected, t10 * f, st["tc"]) if f != 1.0
+                                       else station_levels[-1])
+        w = gauge["weights"]
+        row = {"file_name": gauge["file_name"]}
+        for name, levels in (("current", station_levels), ("current_tide_corrected", station_levels_corr)):
+            for rp in stp.RPS:
+                row[f"{name}_rp{rp}_m"] = float(np.sum([wk * lv[f"rp{rp}_m"] for lv, wk in zip(levels, w)]))
+        has_tc = [t is not None for t in tcs]
+        tc = None
+        if has_tc[0]:
+            wt = w * np.array(has_tc)
+            tc = np.sum([wk * t for t, wk in zip(tcs, wt) if t is not None], axis=0) / wt.sum()
+        raw_b, corr_b = _blend(raws, w), _blend(models, w)
+        b = loaded[gauge["atlas"]]
+        t10 = tp.predict(b[2], b[3], gauge["hc"][None, :])[:, 0]
+        for name, factor in (("decomposed", 1.0), ("decomposed_tide_corrected", gauge["factor"])):
+            lv = stp.rp_levels(raw_b, corr_b, t10 * factor, tc)
+            for rp in stp.RPS:
+                row[f"{name}_rp{rp}_m"] = lv[f"rp{rp}_m"]
+        out.append(row)
+    return out
+
+
+def tile_interpolation(check: GaugeCheck, dest: Path, workers: int) -> None:
+    from concurrent.futures import ProcessPoolExecutor
+    from sklearn.neighbors import BallTree
+    root = dest / "tile_interpolation"
+    root.mkdir(exist_ok=True)
+    tide_gauges = check.out / "gauges" / "tide_gauges.parquet"
+    if not tide_gauges.exists():
+        tide_gauges = dest / "tide_correction" / "tide_gauges.parquet"
+    gt = pd.read_parquet(tide_gauges)
+    gt = gt[gt.usable].reset_index(drop=True)
+    gt_lonlat = gt[["lon", "lat"]].to_numpy(dtype=float)
+    catalog = get_data_catalog(REPO / check.cfg["paths"]["hydromt_data_catalog"], root=check.cfg["paths"]["root"])
+    models = {"fes2022": tp.fes2022_model(check.cache / "fes2022"),
+              "fes2014": tp.fes2014_model(Path(catalog.get_source("fes2014_ocean_tide").path))}
+    lev = check.lev[check.lev.level_source == "product"]
+    k_near, power = check.cfg["simulation"]["flooding"]["knn"], float(check.cfg["simulation"]["flooding"]["idw_power"])
+    st_lonlat = lev[["lon", "lat"]].to_numpy(dtype=float)
+    meta = check.meta
+    gauges = pd.read_parquet(check.out / "gauges" / "gauges.parquet").loc[meta.file_name]
+    g_lonlat = gauges[["lon", "lat"]].to_numpy(dtype=float)
+    d, i = BallTree(np.radians(st_lonlat[:, ::-1]), metric="haversine").query(np.radians(g_lonlat[:, ::-1]), k=k_near)
+    w = np.maximum(d * stp.EARTH_RADIUS_KM, 1e-3) ** -power
+    w /= w.sum(axis=1, keepdims=True)
+    pos = check.stations.index.get_indexer(lev.index)
+    todo_all = _station_inputs(check, pos)
+    atlas = lev.atlas.to_numpy()
+    hc_gauge = {a: tp.fill_masked(tp.grouped_constants(m, g_lonlat), g_lonlat) for a, m in models.items()}
+    for a, m in models.items():
+        hc_gauge[a][:, tp.seasonal_columns(m)] = 0.0
+    lr = {a: gt[f"log_ratio_{a}"].to_numpy() for a in models}
+    gt_tree = BallTree(np.radians(gt_lonlat[:, ::-1]), metric="haversine")
+    tasks = []
+    for j, name in enumerate(meta.file_name):
+        a = atlas[i[j, 0]]
+        f, _ = tdc.correction_factors(g_lonlat[[j]], gt_lonlat, lr[a], exclude_km=DEDUP_KM)
+        own = gt_tree.query_radius(np.radians(g_lonlat[[j], ::-1]), r=DEDUP_KM / stp.EARTH_RADIUS_KM)[0]
+        sf = []
+        for k in i[j]:
+            keep = np.ones(len(gt), bool)
+            keep[own] = False
+            fk, _ = tdc.correction_factors(st_lonlat[[k]], gt_lonlat[keep], lr[atlas[k]][keep])
+            sf.append(float(fk[0]))
+        tasks.append({"file_name": name, "atlas": a, "hc": hc_gauge[a][j], "factor": float(f[0]), "weights": w[j],
+                      "stations": [todo_all[k] for k in i[j]], "station_factors": sf})
+    bases = {a: tuple(str(check.cache / f"{a}_{kind}.npy") for kind in ("hourly_re", "hourly_im", "nodal_re", "nodal_im"))
+             for a in models}
+    chunks = [(tasks[n:n + INTERP_CHUNK], str(check.cache / "gtsm_surge_stations"), bases)
+              for n in range(0, len(tasks), INTERP_CHUNK)]
+    rows = []
+    with ProcessPoolExecutor(workers) as pool:
+        for k, res in enumerate(pool.map(_interp_task, chunks)):
+            rows += res
+            print(f"  {min((k + 1) * INTERP_CHUNK, len(tasks))}/{len(tasks)} gauges", flush=True)
+    built = pd.DataFrame(rows).set_index("file_name")
+    loo = built[[f"current_rp{rp}_m" for rp in stp.RPS]].rename(columns=lambda c: c.replace("current_", ""))
+    for rp in stp.RPS:
+        loo[f"etc_raw_rp{rp}_m"] = np.nan
+    table = check.table(loo)
+    variants = {"current: IDW of station levels": "current", "current, station tides corrected": "current_tide_corrected",
+                "decomposed: IDW surge + local FES tide": "decomposed",
+                "decomposed, local tide corrected": "decomposed_tide_corrected"}
+    for col in variants.values():
+        for rp in GAUGE_RPS:
+            table[f"{col}_rp{rp}_m"] = built[f"{col}_rp{rp}_m"].reindex(table.index)
+    table["tide_factor"] = [t["factor"] for t in tasks]
+    table.to_parquet(root / "gauges.parquet")
+    s = scores(table, variants)
+    s.to_parquet(root / "scores.parquet")
+    print(s[s.gauges.isin(["all", "non-TC-dominated gauges"]) & s.rp.isin([2, 100])].to_string(index=False), flush=True)
+
+
 def _null_shapes(args) -> np.ndarray:
     n, shape0, seed = args
     rng = np.random.default_rng(seed)
@@ -650,7 +850,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("stages", nargs="+", choices=("cap", "despike", "tc_mask", "fes_rule", "peaks", "shape_noise",
                                                        "tc_scale", "tc_jumps", "r_variants", "long_record",
-                                                       "pooled_shape"))
+                                                       "pooled_shape", "tide_correction",
+                                                       "tile_interpolation"))
     parser.add_argument("--product-dir", required=True)
     parser.add_argument("--sources-dir", default=".cleanup_baseline/level_sources")
     parser.add_argument("--config", default=str(REPO / "snakemake_workflow" / "config" / "config.yml"))
@@ -664,10 +865,11 @@ def main() -> None:
     for stage in args.stages:
         print(f"== {stage}", flush=True)
         if stage in ("cap", "tc_mask", "fes_rule", "shape_noise", "tc_scale", "tc_jumps", "r_variants",
-                     "long_record", "pooled_shape"):
+                     "long_record", "pooled_shape", "tide_correction", "tile_interpolation"):
             {"cap": cap, "tc_mask": tc_mask, "fes_rule": fes_rule, "shape_noise": shape_noise,
              "tc_scale": tc_scale, "tc_jumps": tc_jumps, "r_variants": r_variants, "long_record": long_record,
-             "pooled_shape": pooled_shape}[stage](check, dest, args.workers)
+             "pooled_shape": pooled_shape, "tide_correction": tide_correction,
+             "tile_interpolation": tile_interpolation}[stage](check, dest, args.workers)
         else:
             {"despike": despike, "peaks": peaks}[stage](check, dest)
 

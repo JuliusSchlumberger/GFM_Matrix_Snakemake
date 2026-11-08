@@ -10,7 +10,8 @@ Writes into storm_tide_product.cache_dir (~30 GB; may live off the data root) co
 inputs and what depends on them alone: FES2022 decompressed, tide bases, GTSM series at the
 stations and gauges, GESLA records, FES constants and MHWS at the stations; deterministic, kept
 across runs. Into boundary_conditions.storm_tide_product_dir (~2.5 GB):
-  gauges/       gauge table (ratio, class, tidal MHWS) and TC donor shapes
+  gauges/       gauge table (ratio, class, tidal MHWS), TC donor shapes and the tide-correction
+                gauges (tide_gauges.parquet: short harmonic fits of every coastal GESLA site)
   stations.csv, levels.parquet, hydrographs.npy, hydrograph_info.parquet, and the two product
   files (boundaries.PRODUCT_*_FILENAME).
 force=True (default) recomputes everything but the cache; ~6 h on 4 workers, most of it the GTSM
@@ -32,6 +33,7 @@ from config_utils import get_data_catalog  # noqa: E402
 from gesla import coastal_sites  # noqa: E402
 from gtsm_series import extract_series, gtsm_stations  # noqa: E402
 import storm_tide_product as stp  # noqa: E402
+import tide_correction as tc  # noqa: E402
 import tide_prediction as tp  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -54,6 +56,7 @@ class _Paths:
         self.gtsm_gauges = self.cache / "gtsm_surge_gauges"
         self.records = self.cache / "gesla"
         self.gauges = root / "gauges"
+        self.tide_gauges = self.gauges / "tide_gauges.parquet"
         self.stations = root / "stations.csv"
         self.constants = self.cache / "fes_constants.npz"
         self.mhws = self.cache / "fes_mhws.npz"
@@ -113,9 +116,24 @@ def gauge_table(cfg: dict, paths: _Paths, coast_rp: Path, gtsm_lonlat: np.ndarra
     return table
 
 
+def tide_gauge_table(cfg: dict, paths: _Paths, models: dict, workers: int) -> pd.DataFrame:
+    """Short harmonic fits of the coastal GESLA sites and their tide ratio to both FES atlases."""
+    if paths.tide_gauges.exists():
+        return pd.read_parquet(paths.tide_gauges)
+    paths.gauges.mkdir(parents=True, exist_ok=True)
+    logger.info("Tide-correction gauges: harmonic fits of the coastal GESLA sites, FES at them")
+    gt = tc.gauge_table(Path(cfg["gesla_dir"]), models, workers)
+    gt.to_parquet(paths.tide_gauges)
+    logger.info("%d tide gauges, %d usable", len(gt), int(gt.usable.sum()))
+    return gt
+
+
 def station_atlas(paths: _Paths, stations: pd.DataFrame, models: dict, gauges: pd.DataFrame,
-                  workers: int) -> dict:
-    """FES constants (Sa/Ssa zeroed), MHWS of both atlases and the atlas choice per station."""
+                  tide_gauges: pd.DataFrame, workers: int) -> dict:
+    """FES constants (Sa/Ssa zeroed), MHWS of both atlases, the atlas choice and the tide factor per station.
+
+    The factor (tide_correction) scales the chosen atlas's constants; MHWS scales with it.
+    """
     lonlat = stations[["lon", "lat"]].to_numpy(dtype=float)
     if not paths.constants.exists():
         logger.info("FES2022 and FES2014 constants at %d stations", len(stations))
@@ -132,7 +150,13 @@ def station_atlas(paths: _Paths, stations: pd.DataFrame, models: dict, gauges: p
     ok = stp.fes2022_ok_gauges(gauges.reset_index(), gauges.mhws_gauge_m.to_numpy(), gauges.mhws_fes2022_m.to_numpy())
     use14 = tp.consistent_version_flag(mh["fes2022"], mh["fes2014"], lonlat, ok)
     logger.info("FES2014 at %d stations", int(use14.sum()))
-    return {"hc": hc, "mhws": {a: mh[a] for a in hc}, "use14": use14}
+    glonlat = tide_gauges[["lon", "lat"]].to_numpy(dtype=float)
+    factor, count = np.ones(len(stations)), np.zeros(len(stations), dtype=int)
+    for a, sel in (("fes2014", use14), ("fes2022", ~use14)):
+        factor[sel], count[sel] = tc.correction_factors(lonlat[sel], glonlat, tide_gauges[f"log_ratio_{a}"].to_numpy())
+    logger.info("Tide corrected at %d stations (factor p10/p50/p90 %s)", int((count > 0).sum()),
+                np.round(np.quantile(factor[count > 0], [0.1, 0.5, 0.9]), 2) if (count > 0).any() else "-")
+    return {"hc": hc, "mhws": {a: mh[a] for a in hc}, "use14": use14, "tide_factor": factor, "tide_gauges": count}
 
 
 def run(config: dict, force: bool = True) -> None:
@@ -145,7 +169,7 @@ def run(config: dict, force: bool = True) -> None:
     coast_rp = Path(catalog.get_source("coast_rp").path)
     if force:
         for p in [paths.gauges / n for n in ("gauges.parquet", "gauge_constants.npz", "tc_donors.parquet",
-                                             "tc_donor_shapes.npy")] + [
+                                             "tc_donor_shapes.npy", "tide_gauges.parquet")] + [
                 paths.stations, paths.levels, paths.hydrographs, paths.info,
                 paths.root / PRODUCT_LEVELS_FILENAME, paths.root / PRODUCT_HYDROGRAPHS_FILENAME]:
             if p.exists():
@@ -167,7 +191,8 @@ def run(config: dict, force: bool = True) -> None:
         logger.info("GTSM surge at %d stations", stations.gtsm_index.nunique())
         extract_series(Path(cfg["gtsm_dir"]), stations.gtsm_index.to_numpy(), paths.gtsm_stations, workers)
 
-    atlas = station_atlas(paths, stations, models, gauges, workers)
+    tide_gauges = tide_gauge_table(cfg, paths, models, workers)
+    atlas = station_atlas(paths, stations, models, gauges, tide_gauges, workers)
     ratios = stp.station_ratios(stations, gauges)
     tc_levels = stp.coast_rp_levels(coast_rp.parent / "COAST-RP_TC.nc")
     tc_levels = tc_levels[np.isfinite(tc_levels).all(axis=1)]
@@ -177,8 +202,9 @@ def run(config: dict, force: bool = True) -> None:
     todo = []
     for k, (st, s) in enumerate(stations.iterrows()):
         a = "fes2014" if atlas["use14"][k] else "fes2022"
+        f = atlas["tide_factor"][k]
         todo.append({"station": st, "gtsm_index": int(s.gtsm_index), "atlas": a, "coast_rp": coast[k],
-                     "hc": atlas["hc"][a][k], "mhws_m": float(atlas["mhws"][a][k]),
+                     "hc": atlas["hc"][a][k] * f, "mhws_m": float(atlas["mhws"][a][k] * f),
                      "r": float(ratios.r.iloc[k]),
                      "tc": tc_levels.loc[s.station_id].to_numpy() if s.station_id in tc_levels.index else None,
                      "tc_shape": tc_shapes.get(st)})
@@ -194,6 +220,7 @@ def run(config: dict, force: bool = True) -> None:
     etc = stp.coast_rp_levels(coast_rp.parent / "COAST-RP_ETC.nc")
     lev = stations.join(ratios).join(pd.DataFrame(rows).set_index("station"))
     lev["mhws_fes2022_m"], lev["mhws_fes2014_m"] = atlas["mhws"]["fes2022"], atlas["mhws"]["fes2014"]
+    lev["tide_factor"], lev["tide_gauges"] = atlas["tide_factor"], atlas["tide_gauges"]
     for j, rp in enumerate(stp.RPS):
         lev[f"coast_rp_rp{rp}_m"] = coast[:, j]
         lev[f"coast_rp_etc_rp{rp}_m"] = etc[rp].to_numpy()
