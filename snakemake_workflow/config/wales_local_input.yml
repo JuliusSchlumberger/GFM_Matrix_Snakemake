@@ -1,0 +1,42 @@
+# Wales local-input validation: real NRW LIDAR DEM + EA design sea levels, both kept in
+# their native ODN datum (native_datum=native, data_catalog_local_input.yml - TODO.md: no
+# GOCO06s bridge needed, same reasoning as England - confirmed via LiDAR_Guidance_2018.pdf),
+# over a small, bounded fine tile cluster covering ONE named benchmark region only
+# (preparation/build_wales_fine_tiles.py --region severn_estuary) - this is a validation
+# sample, NOT a full-Wales build (TODO.md: test the sample, including hop-distance
+# propagation, before committing to the full country). Diffed against wales_global_input.yml,
+# which uses the exact same tile_grid.path (TODO.md D5). Scenario override layer on
+# config.yml + config_local.yml (config_utils.materialize_config).
+
+tile_grid:
+  path: "{processed_inputs_dir}/mask/validation/wales_fine_tiles_severn_estuary.gpkg"
+
+paths:
+  hydromt_data_catalog:
+    - "snakemake_workflow/config/data_catalog_gfm.yml"
+    - "snakemake_workflow/config/data_catalog_local_input.yml"
+
+boundary_conditions:
+  # Present-day only (TODO.md D4): EA's design sea levels have no SLR scenario.
+  waterlevel_names: ["SLR_0"]
+  # Isolated from the shared global COAST-RP cache - see england_local_input.yml's matching
+  # override and its own comment for why sharing the default directory is unsafe.
+  stations_cache_dir: "{root}/wales_local_input/processed_inputs/WL_scenarios_cache"
+
+adaptation:
+  # WATERLEVEL_NAMES (Snakefile) is the UNION of boundary_conditions.waterlevel_names and
+  # adaptation.slr_intensities - must also be restricted to SLR_0, same reasoning as England.
+  slr_intensities: []
+
+simulation:
+  dem_source_manifest: "{processed_inputs_dir}/mask/validation/wales_fine_dem_source_manifest_severn_estuary.csv"
+  model_outputs: "{root}/wales_local_input/model_outputs"
+postprocessing:
+  merged_outputs: "{root}/wales_local_input/merged_results"
+visualization:
+  output_dir: "{root}/wales_local_input/figures"
+validation:
+  # Isolated from the shared default - see england_local_input.yml's matching override.
+  output_dir: "{root}/wales_local_input/validation"
+hpc:
+  jobs_dir: "{root}/wales_local_input/model_outputs/hpc_jobs"
