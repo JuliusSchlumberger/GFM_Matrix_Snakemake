@@ -10,6 +10,8 @@ Stages (each writes <product-dir>/open_guesses/<stage>*.parquet for the figure s
   fes_rule  FES2022 / FES2014 MHWS at the gauges and at the stations the version rule flags
   peaks     hydrographs whose maximum is not at time 0: how many, how far, and the tide's
             diurnal inequality there
+  shape_noise  the stations' MLE GPD shapes against the shapes a light tail (shape 0, or the
+            median shape) gives from each station's number of storms: is the heavy tail noise?
 Gauge reference: test 9's convolution of the gauge's own skew surges on its own tide.
 
 Usage:
@@ -23,6 +25,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.stats import genpareto
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
@@ -30,6 +33,7 @@ sys.path.insert(0, str(REPO / "boundary_test"))
 from config_utils import get_data_catalog, load_config  # noqa: E402
 from gtsm_series import MISSING, load_series  # noqa: E402
 from level_product_gauges import GaugeCheck, scores  # noqa: E402
+import skew_surge as ss  # noqa: E402
 import storm_tide_product as stp  # noqa: E402
 import tide_prediction as tp  # noqa: E402
 
@@ -44,6 +48,10 @@ TC_MASKS = {"no mask (production)": None,
             "300 km, +-24 h, 64 kt": {"min_wind_kt": 64.0}}
 JUMPS_M = (1.0, 2.0, 3.0)
 ROWS_PER_READ = 400
+NOISE_N_GRID = np.unique(np.geomspace(10, 400, 32).round().astype(int))
+NOISE_REPS = 2000
+NOISE_THRESHOLDS = (0.2, 0.35, 0.5)
+CYCLE_COUNT_HOURS = 2 * 8766  # two years of the hourly tide set the cycles per year
 
 
 def _station_inputs(check: GaugeCheck, ks: np.ndarray) -> list[dict]:
@@ -172,9 +180,69 @@ def peaks(check: GaugeCheck, dest: Path) -> None:
     print((p.assign(off=p.offset_hr != 0).groupby("rp").off.mean() * 100).round(1).to_string(), flush=True)
 
 
+def _null_shapes(args) -> np.ndarray:
+    n, shape0, seed = args
+    rng = np.random.default_rng(seed)
+    return np.array([genpareto.fit(genpareto.rvs(shape0, size=n, random_state=rng), floc=0)[0]
+                     for _ in range(NOISE_REPS)])
+
+
+def _cycles_per_year(check: GaugeCheck) -> np.ndarray:
+    out = np.full(len(check.lev), np.nan)
+    for atlas in ("fes2022", "fes2014"):
+        ks = np.flatnonzero((check.lev.atlas == atlas).to_numpy())
+        b_re, b_im = (np.load(check.cache / f"{atlas}_hourly_{p}.npy", mmap_mode="r")[:CYCLE_COUNT_HOURS]
+                      for p in ("re", "im"))
+        for i in range(0, len(ks), 2000):
+            k = ks[i:i + 2000]
+            tide = tp.predict(b_re, b_im, np.nan_to_num(check.hc[atlas][k]))
+            out[k] = [len(ss.high_waters(tide[:, j], ss.HW_PROMINENCE)[0]) for j in range(len(k))]
+    return out * 8766 / CYCLE_COUNT_HOURS
+
+
+def shape_noise(check: GaugeCheck, dest: Path, workers: int) -> None:
+    from concurrent.futures import ProcessPoolExecutor
+    lev = check.lev
+    cycles = _cycles_per_year(check)
+    cycles[cycles == 0] = np.nanmedian(cycles)
+    n = np.maximum(np.round(lev.theta * (1 - ss.THRESHOLD_Q) * cycles * lev.n_years), 5).astype(int)
+    product = (lev.level_source == "product").to_numpy()
+    nulls = {"0": 0.0, "median": float(lev.gpd_shape_mle[product].median())}
+    with ProcessPoolExecutor(workers) as pool:
+        sims = {name: dict(zip(NOISE_N_GRID, pool.map(_null_shapes, [(int(m), s0, int(m)) for m in NOISE_N_GRID])))
+                for name, s0 in nulls.items()}
+    grid = NOISE_N_GRID.astype(float)
+    st = lev[["station_id", "lon", "lat", "n_years", "theta", "gpd_shape_mle", "gpd_shape"]].copy()
+    st["cycles_per_yr"], st["n_storms"] = cycles, n
+    st["tc_part"] = st.station_id.isin(check.tc_levels.index).to_numpy()
+    st = st[product]
+    for name, sim in sims.items():
+        # P(MLE shape >= observed) and P(MLE shape > threshold) under the null, interpolated in log n
+        p_obs = np.array([[np.mean(sim[m] >= x) for m in NOISE_N_GRID] for x in st.gpd_shape_mle])
+        st[f"p_null_{name}"] = [np.interp(np.log(v), np.log(grid), row) for v, row in zip(st.n_storms, p_obs)]
+        for th in NOISE_THRESHOLDS:
+            curve = np.array([np.mean(sim[m] > th) for m in NOISE_N_GRID])
+            st[f"null_{name}_gt_{th:g}"] = np.interp(np.log(st.n_storms), np.log(grid), curve)
+    st.to_parquet(dest / "shape_noise.parquet")
+    pd.DataFrame([{"null": name, "n_storms": m, "median": np.median(s), "sd": np.std(s),
+                   **{f"gt_{th:g}": np.mean(s > th) for th in NOISE_THRESHOLDS}}
+                  for name, sim in sims.items() for m, s in sim.items()]).to_parquet(dest / "shape_noise_null.parquet")
+    for label, sel in (("all", np.ones(len(st), bool)), ("TC part", st.tc_part.to_numpy()),
+                       ("no TC part", ~st.tc_part.to_numpy())):
+        s = st[sel]
+        line = [f"{label} ({len(s)}): n_storms median {s.n_storms.median():.0f}, MLE shape median "
+                f"{s.gpd_shape_mle.median():.3f} sd {s.gpd_shape_mle.std():.3f}"]
+        for th in NOISE_THRESHOLDS:
+            line.append(f"  > {th:g}: observed {(s.gpd_shape_mle > th).sum()}, expected "
+                        + ", ".join(f"null {k} {s[f'null_{k}_gt_{th:g}'].sum():.0f}" for k in nulls))
+        line.append("  share with p < 0.05: " + ", ".join(f"null {k} {(s[f'p_null_{k}'] < 0.05).mean():.3f}"
+                                                          for k in nulls))
+        print("\n".join(line), flush=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("stages", nargs="+", choices=("cap", "despike", "tc_mask", "fes_rule", "peaks"))
+    parser.add_argument("stages", nargs="+", choices=("cap", "despike", "tc_mask", "fes_rule", "peaks", "shape_noise"))
     parser.add_argument("--product-dir", required=True)
     parser.add_argument("--sources-dir", default=".cleanup_baseline/level_sources")
     parser.add_argument("--config", default=str(REPO / "snakemake_workflow" / "config" / "config.yml"))
@@ -187,8 +255,9 @@ def main() -> None:
     check = GaugeCheck(out, Path(args.sources_dir), load_config(args.config, args.override))
     for stage in args.stages:
         print(f"== {stage}", flush=True)
-        if stage in ("cap", "tc_mask", "fes_rule"):
-            {"cap": cap, "tc_mask": tc_mask, "fes_rule": fes_rule}[stage](check, dest, args.workers)
+        if stage in ("cap", "tc_mask", "fes_rule", "shape_noise"):
+            {"cap": cap, "tc_mask": tc_mask, "fes_rule": fes_rule, "shape_noise": shape_noise}[stage](
+                check, dest, args.workers)
         else:
             {"despike": despike, "peaks": peaks}[stage](check, dest)
 

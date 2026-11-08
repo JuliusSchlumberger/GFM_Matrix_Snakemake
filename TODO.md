@@ -168,6 +168,28 @@ Open:
   `--rerun-triggers mtime` skips them. Re-materialize the scenario configs on both machines
   (`snakemake_workflow/scripts/materialize_configs.py`; the checked-in bangkok one also lacks
   `slr_baseline_offset_m`).
+- **Storm-tide product: external review of decisions 1-3 (review brief, 2026-11-08).** Order,
+  each step gated on the one before; the production rerun waits for steps 1-4.
+  1. GPD shape cap: parametric bootstrap of the station shapes (`open_guesses.py shape_noise`).
+     Gate: if a light tail reproduces the heavy shapes, replace the cap by a regionally pooled
+     shape (~500 km, TC and non-TC pooled separately, station threshold and scale); score capped
+     vs regional at gauges with > 60 y. Add a per-station 5-95% band above RP100 and a
+     tail-uncertain flag (shape > 0.2 or cap binding).
+  2. Cyclone mask: masked ETC fit + COAST-RP_TC scaled by a basin gauge ratio r_TC (N Atlantic,
+     NW Pacific, N Indian, Australia/S Pacific; leave one basin out) against the double count, on
+     median, MAE, 10-90% and the RP100 jump between neighbouring stations with and without an
+     ERA5 landfall. Adopt if MAE within 0.02 m and spread and jumps smaller; else keep with a
+     TC-coast flag. US coast: rescore against US-CoastEX (Morim et al., 2025).
+  3. Gauge ratio r: open-coast calibration set (drop estuary/harbour/tidal-river gauges),
+     multiplicative vs additive, median vs covariate fallback (shelf width, latitude, GTSM cell
+     size) or 1 with a flag; leave-one-out on the 451 calibration and the 98 sparse gauges.
+  4. Tile interpolation: interpolate skew-surge levels and convolve with the local FES tide at
+     the tile boundary, vs total-level IDW, on the stations whose current error exceeds 0.2 m.
+  5. Global rerun with flags (tail-uncertain, TC-coast, fallback-r); GTSM-ERA5-E (1950-2024)
+     tail check and test 10 afterwards revise the flagged stations. The 1950-1978 surge months
+     are already on `<data_root>` (`inputs/GTSM_storm_tide_hourly/storm_surge_residual`, all 900
+     months); `gtsm_series.FOLDERS` and `tide_prediction.HOURLY_START` start at 1979, so the
+     check needs a 1950 station cache (~+12 GB) and FES basis.
 - **Storm-tide product: decisions taken as estimates (open questions; tested in
   `boundary_test/INPUT_ANALYSIS.md` §8.6, fig19-fig23).**
   - No TC mask (decided): ERA5 cyclones stay in the ETC fit and count again in COAST-RP's TC part,
