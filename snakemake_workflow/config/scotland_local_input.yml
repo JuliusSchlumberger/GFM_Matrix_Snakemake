@@ -32,6 +32,7 @@ adaptation:
 
 simulation:
   model_outputs: "{root}/scotland_local_input/model_outputs"
+  preprocessing_inputs_dir: null  # own per-tile inputs under model_outputs
 postprocessing:
   merged_outputs: "{root}/scotland_local_input/merged_results"
 visualization:

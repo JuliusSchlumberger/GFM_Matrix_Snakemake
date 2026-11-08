@@ -40,6 +40,7 @@ adaptation:
 simulation:
   dem_source_manifest: "{processed_inputs_dir}/mask/validation/sf_bay_fine_dem_source_manifest_alameda.csv"
   model_outputs: "{root}/sf_bay_local_input/model_outputs"
+  preprocessing_inputs_dir: null  # own per-tile inputs under model_outputs
 postprocessing:
   merged_outputs: "{root}/sf_bay_local_input/merged_results"
 visualization:

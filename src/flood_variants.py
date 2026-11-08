@@ -60,3 +60,34 @@ def run_key(name: str, parameter: float | None = None, alpha: float | None = Non
     if spec["duration"] and alpha is not None:
         key += f"_a{alpha:g}"
     return key
+
+
+# Scenario output locations a variant run gets its own copy of; tile inputs stay shared.
+# validation.flood_totals_dir is derived from a run's merged outputs, so it moves only from
+# under them.
+OUTPUT_KEYS = (("simulation", "model_outputs"), ("postprocessing", "merged_outputs"),
+               ("visualization", "output_dir"), ("validation", "output_dir"), ("hpc", "jobs_dir"))
+DERIVED_KEYS = (("validation", "flood_totals_dir"),)
+
+
+def variant_config(config: dict, name: str, parameter: float | None = None, alpha: float | None = None) -> dict:
+    """Return a copy of a (materialized) scenario config running variant `name`.
+
+    Outputs move to "<dir>__<name>" (a path under the scenario's model_outputs or
+    merged_outputs moves with it); the per-tile inputs stay where the scenario keeps them.
+    """
+    out = copy.deepcopy(config)
+    sim = out["simulation"]
+    sim["preprocessing_inputs_dir"] = sim.get("preprocessing_inputs_dir") or sim["model_outputs"]
+    sim["flooding"] = variant_flooding(sim["flooding"], name, parameter, alpha)
+    roots = [config["simulation"]["model_outputs"], config["postprocessing"]["merged_outputs"]]
+    for section, key in OUTPUT_KEYS + DERIVED_KEYS:
+        value = (config.get(section) or {}).get(key)
+        if not value:
+            continue
+        root = next((r for r in roots if value == r or value.startswith(r + "/")), None)
+        if root:
+            out[section][key] = f"{root}__{name}{value[len(root):]}"
+        elif (section, key) in OUTPUT_KEYS:
+            out[section][key] = f"{value}__{name}"
+    return out

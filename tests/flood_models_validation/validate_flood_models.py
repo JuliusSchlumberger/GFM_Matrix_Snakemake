@@ -90,3 +90,26 @@ def test_variant_flooding_sets_model_parameter_and_duration() -> None:
     assert run_key("eikonal_landcover_duration", 0.25, 1.0) == "eikonal_landcover_duration_fsf0.25_a1"
     assert run_key("straight_line", 0.2) == "straight_line_rate0.2"
     assert len(VARIANTS) == 7
+
+
+def test_variant_config_moves_outputs_and_keeps_inputs() -> None:
+    from flood_variants import variant_config
+
+    config = {"simulation": {"model_outputs": "{root}/x/model_outputs", "preprocessing_inputs_dir": None,
+                             "flooding": {"model": "eikonal", "friction_source": "landcover",
+                                          "friction_scale_factor": 0.25, "uniform_attenuation_m_per_km": 0.2,
+                                          "duration_correction": {"enabled": True, "alpha": 1.0}}},
+              "postprocessing": {"merged_outputs": "{root}/x/merged"},
+              "visualization": {"output_dir": "{root}/x/figures"},
+              "validation": {"output_dir": "{root}/x/validation", "flood_totals_dir": "{root}/global/flood_totals"},
+              "hpc": {"jobs_dir": "{root}/x/model_outputs/hpc_jobs"}}
+    v = variant_config(config, "straight_line", 0.15)
+    assert v["simulation"]["model_outputs"] == "{root}/x/model_outputs__straight_line"
+    assert v["simulation"]["preprocessing_inputs_dir"] == "{root}/x/model_outputs"
+    assert v["hpc"]["jobs_dir"] == "{root}/x/model_outputs__straight_line/hpc_jobs"
+    assert v["postprocessing"]["merged_outputs"] == "{root}/x/merged__straight_line"
+    assert v["validation"]["output_dir"] == "{root}/x/validation__straight_line"
+    assert v["validation"]["flood_totals_dir"] == "{root}/global/flood_totals"
+    assert v["simulation"]["flooding"]["model"] == "straight_line"
+    assert v["simulation"]["flooding"]["uniform_attenuation_m_per_km"] == 0.15
+    assert config["simulation"]["model_outputs"] == "{root}/x/model_outputs"
