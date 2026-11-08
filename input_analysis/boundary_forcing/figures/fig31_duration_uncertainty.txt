@@ -1,0 +1,8 @@
+Uncertainty of the hydrograph durations T(0.25) and T(0.5): hours the level stays within 25% / 50%
+of its peak (above MSL) of the peak. (a, b) By MHWS class at the GESLA gauges: the production
+generator (13-h smoothed GTSM surge shape on the FES tide) at RP2 (698 sites) and RP100 (568 sites)
+against the median of the gauge's own events in the same RP window; GTSM-ERA5's annual-maximum
+events against the gauge's; and the spread of the gauge's annual maxima (IQR / median), the natural
+event-to-event variability around any design shape. Generator RP2 median T(0.25) -18% (MAE 28%),
+T(0.5) -9%; RP100 T(0.25) -13% (MAE 48%; the gauge medians rest on few events). (c, d) Product RP100
+against COAST-HG per station (log scale): the method choice alone.

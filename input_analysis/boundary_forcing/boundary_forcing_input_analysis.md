@@ -346,6 +346,19 @@ below (`boundary_test/open_guesses.py`, stage names in brackets).
   tide correction: where it exceeds 10% (72 gauges) RP100 MAE drops from 0.377 to 0.332 m with
   corrected station tides and to 0.350 m with the corrected local tide. The ratio gauges lie at
   most 10 km from a station, so estuary heads farther away are tested for the tide only (fig27).
+- **Coastline nodes** (`coastline_nodes`, `src/coastline_nodes.py`): one node per FES2022 grid
+  cell of DeltaDTM coastline (455,337) blends its 5 nearest stations' corrected skew-surge models
+  on its own gauge-corrected tide; the seeds take IDW over stations and nodes. Tide amplitude
+  MAE at 2,373 sites: 0.131 m (stations corrected 0.139, uncorrected nodes 0.183 m); > 10 km from
+  a station 0.230 against 0.249 m. RP100 at the 618 ratio gauges 0.192 m (stations corrected
+  0.190 m).
+- **Uncertainty** (`input_analysis/boundary_uncertainty.py`, fig29-fig31): RP100 standard
+  uncertainty median 0.14 m (p90 0.41 m), root sum of the gauge ratio r (largest at 72% of
+  stations), GPD sampling (0.08 m per station, 0.02 m pooled), tide, record length and the TC
+  part. Largest where big surges meet sparse gauges (Gulf of Mexico 0.8 m) and on cyclone coasts
+  (0.34 m). GTSM-ERA5 alone is 0.14 m low at RP100 (MAE 0.27 m), r = 1.22 at the median gauge.
+  Durations: T(0.25) / T(0.5) at RP2 -18% / -9% against the gauges' events, within their
+  event-to-event spread except on macrotidal coasts.
 
 ## Figures
 
@@ -379,6 +392,9 @@ below (`boundary_test/open_guesses.py`, stage names in brackets).
 | `fig26_pooled_shape` | shape stability and heavy shapes against the pooling radius; gauge scores of the variants |
 | `fig27_tide_correction` | FES tide amplitude against GESLA, uncorrected and gauge-corrected; MAE by radius |
 | `fig28_tile_interpolation` | test 4: station-level IDW against surge IDW on the local tide, with and without the tide correction |
+| `fig29_level_uncertainty` | RP100 level uncertainty per component and the dominant component per 5-degree cell |
+| `fig30_surge_accuracy` | gauge ratio r, its leave-one-out error, and GTSM / COAST-RP / product RP100 against the gauges |
+| `fig31_duration_uncertainty` | T(0.25) and T(0.5) of the generator, GTSM and COAST-HG against the gauges' events |
 
 ## References
 

@@ -1,0 +1,8 @@
+Accuracy of the GTSM-ERA5 surge signal at the 618 ratio gauges (>= 20 complete years since 1979, <=
+10 km from a GTSM station). (a) r = the gauge's skew surge at RP10 / GTSM's skew surge on the FES
+tide at RP10: median 1.22, p10-p90 1.01-2.01; GTSM-ERA5 underestimates the surge at 91% of the
+gauges. (b) RP100 level minus the gauge's (test 9 convolution of its own skew surges on its own
+tide), by gauge class: COAST-RP, GTSM alone (r = 1, no TC part), the product with r left out, and
+the decided product (IBTrACS mask, basin shift of COAST-RP_TC, left out per basin). (c) How well r
+is predicted where there is no gauge: r from the neighbouring gauges (gauge left out) against the
+gauge's own. (d) GTSM alone and the decided product by AR6 region (>= 10 gauges).

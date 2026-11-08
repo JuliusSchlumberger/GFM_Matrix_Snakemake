@@ -1892,13 +1892,198 @@ FIGURES = {"fig01": fig01_tide_scatter, "fig02": fig02_tide_ratio_maps, "fig03":
            "fig04": fig04_fes_versions, "fig05": fig05_basin_heads, "fig06": fig06_rule_sensitivity,
            "fig07": fig07_coast_rp_regions, "fig08": fig08_profiles_by_rp, "fig09": fig09_surge_by_rp,
            "fig10": fig10_generator_acceptance, "fig11": fig11_generator_profiles}
+UNCERTAINTY_COMPONENTS = {"surge_signal": ("gauge ratio r (surge signal)", BLUE), "sampling_pooled": ("GPD sampling", GREEN),
+                          "tide": ("tide (FES)", "#8e5bd0"), "tc": ("TC part", ORANGE), "record": ("record length", MUTED)}
+RANGE_GROUPS = ["(0.0, 1.0]", "(1.0, 2.0]", "(2.0, 4.0]", "(4.0, 20.0]"]
+
+
+def _range_bars(ax, df: pd.DataFrame, col: str, offset: float, color: str, label: str) -> None:
+    for k, grp in enumerate(RANGE_GROUPS):
+        e = df.loc[df.range_class == grp, col].dropna()
+        if len(e):
+            ax.plot([k + offset] * 2, e.quantile([0.1, 0.9]), color=color, linewidth=1.2)
+            ax.plot(k + offset, e.median(), "o", color=color, markersize=5, label=label if k == 0 else None)
+
+
+def fig29_level_uncertainty(product: Path, dest: Path) -> None:
+    st = pd.read_parquet(_guesses(product) / "uncertainty" / "stations.parquet")
+    fig = plt.figure(figsize=(16, 8.4))
+    norm = LogNorm(0.01, 1.0)
+    panels = (("combined_m", "combined (root sum of squares)"), ("surge_signal_m", "gauge ratio r"),
+              ("sampling_pooled_m", "GPD sampling, pooled shape"), ("tide_m", "tide (FES vs gauges)"),
+              ("tc_m", "TC part (where it dominates RP100)"))
+    for n, (col, title) in enumerate(panels):
+        ax = fig.add_subplot(2, 3, n + 1, projection=MAP_PROJ)
+        _land(ax)
+        sc = ax.scatter(st.lon, st.lat, c=st[col].clip(lower=0.01), s=1.5, cmap="YlOrRd", norm=norm, transform=PC,
+                        linewidths=0)
+        ax.set_global()
+        ax.set_title(f"({'abcde'[n]}) {title}: median {st[col].median():.2f} m", fontsize=9)
+    fig.subplots_adjust(left=0.01, right=0.99, top=0.95, bottom=0.14, wspace=0.04, hspace=0.12)
+    cax = fig.add_axes([0.06, 0.07, 0.55, 0.018])
+    fig.colorbar(sc, cax=cax, orientation="horizontal", label="RP100 level uncertainty (m)")
+    ax = fig.add_subplot(2, 3, 6, projection=MAP_PROJ)
+    _land(ax)
+    cell = pd.DataFrame({"lon": (st.lon // 5) * 5 + 2.5, "lat": (st.lat // 5) * 5 + 2.5, "d": st.dominant})
+    cell = cell.groupby(["lon", "lat"]).d.agg(lambda s: s.value_counts().index[0]).reset_index()
+    for key, (label, color) in UNCERTAINTY_COMPONENTS.items():
+        s = cell[cell.d == key]
+        ax.scatter(s.lon, s.lat, s=14, marker="s", color=color, transform=PC, label=f"{label} ({len(s)} cells)")
+    ax.set_global()
+    ax.set_title("(f) largest component per 5-degree cell (most stations)", fontsize=9)
+    ax.legend(frameon=False, fontsize=7, loc="upper left", bbox_to_anchor=(0.0, -0.02), ncol=2)
+    _save(fig, dest / "fig29_level_uncertainty.png")
+    q = st[[f"{c}_m" for c in ("sampling_station", *UNCERTAINTY_COMPONENTS, "combined")]].quantile([0.5, 0.9]).round(3)
+    share = st.dominant.value_counts(normalize=True).round(2)
+    describe(dest / "fig29_level_uncertainty.png", f"""
+        Uncertainty of the RP100 storm-tide level at {len(st)} product stations, by source (m; one
+        standard error or a typical absolute error; input_analysis/boundary_uncertainty.py).
+        (b) Gauge ratio r: the leave-one-out error of r at the ratio gauges around the station
+        (median of the 5 nearest within 500 km; beyond, that of the gauges with fewer than 3
+        neighbours), times the surge part of the level (RP100 ETC level - MHWS). (c) GPD sampling on
+        1950-2024 with the IBTrACS mask and the 300 km pooled shape: delta method on the return
+        level, the scale's variance given the shape plus the pooled shape's profile-likelihood
+        standard error. (d) Tide: relative amplitude error of the tide gauges around the station
+        (gauge-corrected where one lies within 25 km, FES otherwise) times MHWS. (e) TC part: the
+        |RP100 error| of the TC-dominated gauges nearby (masked, basin shift left out), at stations
+        where the TC part dominates RP100. (a) Root sum of squares of (b)-(e) and the record-length
+        change (|RP100 1950-2024 - 1979-2024|). (f) The largest component per 5-degree cell.
+        Medians / p90 (m): r {q.loc[0.5, 'surge_signal_m']} / {q.loc[0.9, 'surge_signal_m']},
+        sampling pooled {q.loc[0.5, 'sampling_pooled_m']} / {q.loc[0.9, 'sampling_pooled_m']}
+        (per-station shape {q.loc[0.5, 'sampling_station_m']} / {q.loc[0.9, 'sampling_station_m']}),
+        tide {q.loc[0.5, 'tide_m']} / {q.loc[0.9, 'tide_m']}, TC {q.loc[0.5, 'tc_m']} / {q.loc[0.9, 'tc_m']},
+        record {q.loc[0.5, 'record_m']} / {q.loc[0.9, 'record_m']}, combined {q.loc[0.5, 'combined_m']} /
+        {q.loc[0.9, 'combined_m']}. Largest component (share of stations): r {share.get('surge_signal', 0)},
+        TC {share.get('tc', 0)}, tide {share.get('tide', 0)}, sampling {share.get('sampling_pooled', 0)},
+        record {share.get('record', 0)}.
+        """)
+
+
+def fig30_surge_accuracy(product: Path, dest: Path) -> None:
+    g = pd.read_parquet(_guesses(product) / "uncertainty" / "gauges_surge.parquet")
+    fig = plt.figure(figsize=(16, 8.4))
+    ax = fig.add_subplot(2, 2, 1, projection=MAP_PROJ)
+    _land(ax)
+    sc = ax.scatter(g.lon, g.lat, c=g.ratio_fes, s=10, cmap="RdBu_r", norm=LogNorm(0.5, 2.0), transform=PC,
+                    linewidths=0.2, edgecolors=INK)
+    ax.set_global()
+    fig.colorbar(sc, ax=ax, shrink=0.7, label="r = gauge / GTSM-on-FES skew surge, RP10")
+    draw_panel_letter(ax, "a")
+    ax = fig.add_subplot(2, 2, 2)
+    classes = ["no_tc", "etc_with_tc", "tc_dominated"]
+    for k, (col, color, label) in enumerate((("coast_rp", MUTED, "COAST-RP"), ("raw", ORANGE, "GTSM, r = 1, no TC"),
+                                             ("product", BLUE, "product (r left out)"),
+                                             ("decided", GREEN, "masked + basin shift (left out)"))):
+        for j, cls in enumerate(classes):
+            e = g.loc[g.station_class == cls, f"{col}_rp100_err_m"]
+            x = j + (k - 1.5) * 0.18
+            ax.plot([x, x], e.quantile([0.1, 0.9]), color=color, linewidth=1.4)
+            ax.plot(x, e.median(), "o", color=color, markersize=5, label=label if j == 0 else None)
+    ax.axhline(0, color=GRID, linewidth=0.8)
+    ax.set_xticks(range(3), [f"{c}\n(n = {(g.station_class == c).sum()})" for c in classes])
+    ax.set(ylabel="RP100 level - gauge (m): median, p10-p90")
+    ax.legend(frameon=False, fontsize=8)
+    _style(ax)
+    draw_panel_letter(ax, "b")
+    ax = fig.add_subplot(2, 2, 3)
+    bins = np.linspace(-0.8, 0.8, 41)
+    for sel, color, label in ((g.neighbours >= 3, BLUE, "3 or more gauges near"),
+                              (g.neighbours < 3, ORANGE, "fewer than 3 (median fallback)")):
+        ax.hist(g.r_loo_err[sel].clip(-0.8, 0.8), bins=bins, color=color, alpha=0.6,
+                label=f"{label}: n {int(sel.sum())}, MAE {g.r_loo_err[sel].abs().mean():.2f}")
+    ax.set(xlabel="r predicted without the gauge / gauge's r - 1", ylabel="gauges")
+    ax.legend(frameon=False, fontsize=8)
+    _style(ax)
+    draw_panel_letter(ax, "c")
+    ax = fig.add_subplot(2, 2, 4)
+    size = g.groupby("region").size()
+    keep = size[size >= 10].index
+    order = g[g.region.isin(keep)].groupby("region").raw_rp100_err_m.median().sort_values().index
+    y = np.arange(len(order))
+    for col, color, label, off in (("raw_rp100_err_m", ORANGE, "GTSM, r = 1, no TC", -0.15),
+                                   ("decided_rp100_err_m", GREEN, "decided product", 0.15)):
+        s = g.groupby("region")[col].quantile([0.1, 0.5, 0.9]).unstack().loc[order]
+        ax.hlines(y + off, s[0.1], s[0.9], color=color, linewidth=1.4)
+        ax.plot(s[0.5], y + off, "o", color=color, markersize=5, label=label)
+    ax.axvline(0, color=GRID, linewidth=0.8)
+    ax.set_yticks(y, [f"{r} ({size[r]})" for r in order], fontsize=7)
+    ax.set(xlabel="RP100 level - gauge (m): median, p10-p90")
+    ax.legend(frameon=False, fontsize=8)
+    _style(ax)
+    draw_panel_letter(ax, "d")
+    fig.tight_layout()
+    _save(fig, dest / "fig30_surge_accuracy.png")
+    r = g.ratio_fes
+    describe(dest / "fig30_surge_accuracy.png", f"""
+        Accuracy of the GTSM-ERA5 surge signal at the {len(g)} ratio gauges (>= 20 complete years since
+        1979, <= 10 km from a GTSM station). (a) r = the gauge's skew surge at RP10 / GTSM's skew surge
+        on the FES tide at RP10: median {r.median():.2f}, p10-p90 {r.quantile(0.1):.2f}-{r.quantile(0.9):.2f};
+        GTSM-ERA5 underestimates the surge at {(r > 1).mean():.0%} of the gauges. (b) RP100 level minus
+        the gauge's (test 9 convolution of its own skew surges on its own tide), by gauge class:
+        COAST-RP, GTSM alone (r = 1, no TC part), the product with r left out, and the decided
+        product (IBTrACS mask, basin shift of COAST-RP_TC, left out per basin). (c) How well r is
+        predicted where there is no gauge: r from the neighbouring gauges (gauge left out) against
+        the gauge's own. (d) GTSM alone and the decided product by AR6 region (>= 10 gauges).
+        """)
+
+
+def fig31_duration_uncertainty(product: Path, dest: Path) -> None:
+    u = _guesses(product) / "uncertainty"
+    d = pd.read_parquet(u / "gauges_duration.parquet")
+    st = pd.read_parquet(u / "stations.parquet")
+    label = {"t025": "T(0.25)", "t05": "T(0.5)"}
+    fig = plt.figure(figsize=(16, 8.4))
+    sites = d[d.rp == 2].drop_duplicates("file_name")
+    for n, f in enumerate(("t025", "t05")):
+        ax = fig.add_subplot(2, 2, n + 1)
+        _range_bars(ax, d[d.rp == 2], f"{f}_err_rel", -0.24, BLUE, "product RP2 / gauge events - 1")
+        _range_bars(ax, d[d.rp == 100], f"{f}_err_rel", -0.08, ORANGE, "product RP100 / gauge events - 1")
+        _range_bars(ax, sites.assign(v=sites[f"gtsm_{f}_median_hr"] / sites[f"gesla_{f}_median_hr"] - 1), "v",
+                    0.08, GREEN, "GTSM / gauge annual maxima - 1")
+        _range_bars(ax, sites, f"gesla_{f}_iqr_rel", 0.24, MUTED, "gauge event spread (IQR / median)")
+        ax.axhline(0, color=GRID, linewidth=0.8)
+        ax.set_xticks(range(len(RANGE_GROUPS)), [f"MHWS {g} m" for g in RANGE_GROUPS], fontsize=8)
+        ax.set(ylabel=f"{label[f]}: relative (median, p10-p90)", ylim=(-1, 1.5))
+        if n == 0:
+            ax.legend(frameon=False, fontsize=7)
+        _style(ax)
+        draw_panel_letter(ax, "ab"[n])
+    for n, f in enumerate(("t025", "t05")):
+        ax = fig.add_subplot(2, 2, n + 3, projection=MAP_PROJ)
+        _land(ax)
+        ratio = st[f"rp100_{f}_hr"] / st[f"coast_hg_{f}_hr"]
+        sc = ax.scatter(st.lon, st.lat, c=ratio, s=1.5, cmap="RdBu_r", norm=LogNorm(0.25, 4.0), transform=PC,
+                        linewidths=0)
+        ax.set_global()
+        fig.colorbar(sc, ax=ax, shrink=0.7, label=f"product RP100 / COAST-HG, {label[f]}")
+        draw_panel_letter(ax, "cd"[n])
+    fig.tight_layout()
+    _save(fig, dest / "fig31_duration_uncertainty.png")
+    r2, r100 = d[d.rp == 2], d[d.rp == 100]
+    describe(dest / "fig31_duration_uncertainty.png", f"""
+        Uncertainty of the hydrograph durations T(0.25) and T(0.5): hours the level stays within 25% /
+        50% of its peak (above MSL) of the peak. (a, b) By MHWS class at the GESLA gauges: the
+        production generator (13-h smoothed GTSM surge shape on the FES tide) at RP2 ({r2.file_name.nunique()}
+        sites) and RP100 ({r100.file_name.nunique()} sites) against the median of the gauge's own events
+        in the same RP window; GTSM-ERA5's annual-maximum events against the gauge's; and the spread of
+        the gauge's annual maxima (IQR / median), the natural event-to-event variability around any
+        design shape. Generator RP2 median T(0.25) {r2.t025_err_rel.median():+.0%} (MAE
+        {r2.t025_err_rel.abs().mean():.0%}), T(0.5) {r2.t05_err_rel.median():+.0%}; RP100 T(0.25)
+        {r100.t025_err_rel.median():+.0%} (MAE {r100.t025_err_rel.abs().mean():.0%}; the gauge medians rest
+        on few events). (c, d) Product RP100 against COAST-HG per station (log scale): the method choice
+        alone.
+        """)
+
+
 PRODUCT_FIGURES = {"fig12": fig12_level_product_maps, "fig13": fig13_level_product_by_rp,
                    "fig14": fig14_level_product_gauges, "fig15": fig15_level_product_hydrographs,
                    "fig16": fig16_station_interpolation, "fig17": fig17_level_product_qa,
                    "fig18": fig18_product_durations,
                    "fig19": fig19_despike, "fig20": fig20_gpd_cap, "fig21": fig21_tc_mask, "fig22": fig22_fes_rule,
                    "fig23": fig23_peak_offsets, "fig25": fig25_long_record, "fig26": fig26_pooled_shape,
-                   "fig27": fig27_tide_correction, "fig28": fig28_tile_interpolation}
+                   "fig27": fig27_tide_correction, "fig28": fig28_tile_interpolation,
+                   "fig29": fig29_level_uncertainty, "fig30": fig30_surge_accuracy,
+                   "fig31": fig31_duration_uncertainty}
 
 
 def main() -> None:
