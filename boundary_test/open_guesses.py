@@ -20,6 +20,9 @@ Stages (each writes <product-dir>/open_guesses/<stage>*.parquet for the figure s
   long_record  every station rebuilt on GTSM-ERA5 1950-2024 (the 1950-1978 months joined to the
             product's 1979-2024 store): GPD shape, cap use and RP levels against the product, and
             each period's own skew-surge fit (an ERA5 homogeneity check)
+  pooled_shape  on 1950-2024 with the IBTrACS mask (no shift): each station's GPD shape pooled
+            over the stations within POOL_KM (summed profile likelihood, scale per station),
+            its stability between 1979-2024 and 1950-2024, and the levels at the gauges
   shape_noise  the stations' MLE GPD shapes against the shapes a light tail (shape 0, or the
             median shape) gives from each station's number of storms: is the heavy tail noise?
 Gauge reference: test 9's convolution of the gauge's own skew surges on its own tide.
@@ -69,6 +72,8 @@ LONG_START = np.datetime64("1950-01-01T00:00")
 EARLY_YEARS = (1950, 1978)  # the months before the product's store
 R_MIN_SKEW_M = 0.2  # below it the ratio rests on a GTSM skew surge of a few decimetres
 BASIN_KM = 300.0  # a gauge's basin: the most frequent IBTrACS basin of the track points this close
+POOL_KM = (100.0, 300.0, 1000.0)
+SHAPE_GRID = np.round(np.arange(-0.5, 0.805, 0.01), 2)
 
 
 def _station_inputs(check: GaugeCheck, ks: np.ndarray) -> list[dict]:
@@ -347,27 +352,29 @@ def r_variants(check: GaugeCheck, dest: Path, workers: int) -> None:
     print(s.to_string(index=False), flush=True)
 
 
-def _period_fit(skew: np.ndarray, hw_years: np.ndarray, lo: int, hi: int) -> dict:
+def _kept(skew: np.ndarray, hw_years: np.ndarray, lo: int, hi: int) -> tuple[np.ndarray, int]:
     sel = (hw_years >= lo) & (hw_years <= hi)
     cover = pd.Series(np.isfinite(skew[sel])).groupby(hw_years[sel]).mean()
     keep = cover.index[cover >= stp.YEAR_COVERAGE]
-    ok = sel & np.isin(hw_years, keep) & np.isfinite(skew)
-    if len(keep) < 10:
-        return {"n_years": len(keep), "shape": np.nan, "skew_rp10_m": np.nan, "skew_rp100_m": np.nan}
-    m = ss.surge_model(skew[ok], len(keep))
-    return {"n_years": len(keep), "shape": m["shape"], "skew_rp10_m": ss.skew_level(m, 10),
+    return sel & np.isin(hw_years, keep) & np.isfinite(skew), len(keep)
+
+
+def _period_fit(skew: np.ndarray, hw_years: np.ndarray, lo: int, hi: int) -> dict:
+    ok, n_years = _kept(skew, hw_years, lo, hi)
+    if n_years < 10:
+        return {"n_years": n_years, "shape": np.nan, "skew_rp10_m": np.nan, "skew_rp100_m": np.nan}
+    m = ss.surge_model(skew[ok], n_years)
+    return {"n_years": n_years, "shape": m["shape"], "skew_rp10_m": ss.skew_level(m, 10),
             "skew_rp100_m": ss.skew_level(m, 100)}
 
 
-def _long_task(args) -> list[dict]:
-    chunk, stores, bases, n_hours = args
+def _long_stations(chunk, stores, bases, n_hours):
     loaded = []
     for store in stores:
         st_tab, time, series = load_series(Path(store))
         idx = ((time.to_numpy().astype("datetime64[h]") - LONG_START) // np.timedelta64(1, "h")).astype(int)
         loaded.append((dict(zip(st_tab.gtsm_index, range(len(st_tab)))), idx, series))
     years = (LONG_START + np.arange(n_hours).astype("timedelta64[h]")).astype("datetime64[Y]").astype(int) + 1970
-    out = []
     for atlas in bases:
         sts = [s for s in chunk if s["atlas"] == atlas]
         if not sts:
@@ -379,21 +386,33 @@ def _long_task(args) -> list[dict]:
             g = np.full(n_hours, np.nan)
             for pos, idx, series in loaded:
                 g[idx] = station_series(series, pos[st["gtsm_index"]])
-            try:
-                row, _, _ = stp.station_product(st, g, th_all[:, j], t10_all[:, j], years)
-            except Exception as err:  # one bad station must not stop the pool; it is reported and skipped
-                print(f"  skipped station {st['station']}: {type(err).__name__}: {err}", flush=True)
-                continue
-            hw, h = ss.high_waters(th_all[:, j], ss.HW_PROMINENCE)
-            skew = ss.skew_surges(ss.despike(g) + th_all[:, j], hw, h)
-            for name, (lo, hi) in (("early", EARLY_YEARS), ("late", (1979, 2024))):
-                row.update({f"{name}_{k}": v for k, v in _period_fit(skew, years[hw], lo, hi).items()})
-            out.append(row)
+            yield st, g, th_all[:, j], t10_all[:, j], years
+
+
+def _product_row(st, g, th, t10, years) -> dict | None:
+    try:
+        return stp.station_product(st, g, th, t10, years)[0]
+    except Exception as err:  # one bad station must not stop the pool; it is reported and skipped
+        print(f"  skipped station {st['station']}: {type(err).__name__}: {err}", flush=True)
+        return None
+
+
+def _long_task(args) -> list[dict]:
+    out = []
+    for st, g, th, t10, years in _long_stations(*args):
+        row = _product_row(st, g, th, t10, years)
+        if row is None:
+            continue
+        hw, h = ss.high_waters(th, ss.HW_PROMINENCE)
+        skew = ss.skew_surges(ss.despike(g) + th, hw, h)
+        for name, (lo, hi) in (("early", EARLY_YEARS), ("late", (EARLY_YEARS[1] + 1, int(years[-1])))):
+            row.update({f"{name}_{k}": v for k, v in _period_fit(skew, years[hw], lo, hi).items()})
+        out.append(row)
     return out
 
 
-def long_record(check: GaugeCheck, dest: Path, workers: int) -> None:
-    from concurrent.futures import ProcessPoolExecutor
+def _long_inputs(check: GaugeCheck, dest: Path, workers: int) -> tuple[tuple[str, str], dict, int]:
+    """Surge stores (1950-1978, the product's 1979-2024) and FES bases on the 1950-2024 hourly axis."""
     root = dest / "long_record"
     early = root / "gtsm_surge_1950_1978"
     main_store = check.cache / "gtsm_surge_stations"
@@ -407,19 +426,28 @@ def long_record(check: GaugeCheck, dest: Path, workers: int) -> None:
               "fes2014": tp.fes2014_model(Path(catalog.get_source("fes2014_ocean_tide").path))}
     bases = {a: (*tp.cached_basis(models[a], times, root / f"{a}_hourly_re.npy", root / f"{a}_hourly_im.npy"),
                  check.cache / f"{a}_nodal_re.npy", check.cache / f"{a}_nodal_im.npy") for a in models}
-    bases = {a: tuple(str(p) for p in v) for a, v in bases.items()}
-    lev = check.lev
-    ks = np.flatnonzero((lev.level_source == "product").to_numpy())
-    todo = _station_inputs(check, ks)
-    tasks = [(todo[i:i + stp.TASK_SIZE], (str(early), str(main_store)), bases, len(times))
-             for i in range(0, len(todo), stp.TASK_SIZE)]
-    rows = []
+    return (str(early), str(main_store)), {a: tuple(str(p) for p in v) for a, v in bases.items()}, len(times)
+
+
+def _run_long(task, todo: list[dict], stores, bases, n_hours: int, workers: int) -> list:
+    from concurrent.futures import ProcessPoolExecutor
+    tasks = [(todo[i:i + stp.TASK_SIZE], stores, bases, n_hours) for i in range(0, len(todo), stp.TASK_SIZE)]
+    out = []
     with ProcessPoolExecutor(workers) as pool:
-        for k, res in enumerate(pool.map(_long_task, tasks)):
-            rows += res
+        for k, res in enumerate(pool.map(task, tasks)):
+            out += res
             if k % 40 == 0:
                 print(f"  {min((k + 1) * stp.TASK_SIZE, len(todo))}/{len(todo)} stations", flush=True)
-    built = pd.DataFrame(rows).set_index("station").sort_index()
+    return out
+
+
+def long_record(check: GaugeCheck, dest: Path, workers: int) -> None:
+    stores, bases, n_hours = _long_inputs(check, dest, workers)
+    root = dest / "long_record"
+    lev = check.lev
+    ks = np.flatnonzero((lev.level_source == "product").to_numpy())
+    built = pd.DataFrame(_run_long(_long_task, _station_inputs(check, ks), stores, bases, n_hours, workers)) \
+        .set_index("station").sort_index()
     keep = ["station_id", "lon", "lat", "gpd_shape_mle", "gpd_shape", "rp100_m", "rp1000_m", "etc_rp100_m",
             "etc_rp1000_m"]
     out = lev.iloc[ks[built.index]][keep].copy()
@@ -439,6 +467,123 @@ def long_record(check: GaugeCheck, dest: Path, workers: int) -> None:
               f"RP1000 change {np.nanquantile(s.long_rp1000_m - s.rp1000_m, [0.1, 0.5, 0.9]).round(3)}; "
               f"early/late skew RP10 median {np.nanmedian(s.early_skew_rp10_m / s.late_skew_rp10_m):.3f}",
               flush=True)
+
+
+def _profile_loglik(x: np.ndarray) -> np.ndarray:
+    """GPD log-likelihood of excesses x at each SHAPE_GRID shape, maximised over the scale."""
+    xi = SHAPE_GRID[:, None]
+    lo = np.log(np.maximum(np.where(SHAPE_GRID < 0, -SHAPE_GRID * x.max() * (1 + 1e-9), 0.0), 1e-4 * x.mean()))
+    hi = np.full(len(SHAPE_GRID), np.log(20.0 * x.max()))
+
+    def loglik(log_scale):
+        s = np.exp(log_scale)[:, None]
+        z = 1.0 + xi * x[None, :] / s
+        with np.errstate(divide="ignore", invalid="ignore"):
+            core = np.where(xi == 0, x[None, :] / s, (1.0 + 1.0 / xi) * np.log(z))
+            v = -len(x) * np.log(s[:, 0]) - core.sum(axis=1)
+        return np.where((z > 0).all(axis=1) & np.isfinite(v), v, -np.inf)
+
+    golden = (np.sqrt(5.0) - 1.0) / 2.0  # the profile is unimodal in log scale
+    for _ in range(60):
+        c, d = hi - golden * (hi - lo), lo + golden * (hi - lo)
+        left = loglik(c) >= loglik(d)
+        hi, lo = np.where(left, d, hi), np.where(left, lo, c)
+    return loglik((lo + hi) / 2.0)
+
+
+def _pool_task(args) -> list:
+    out = []
+    for st, g, th, t10, years in _long_stations(*args):
+        row = _product_row(st, g, th, t10, years)
+        if row is None:
+            continue
+        hw, h = ss.high_waters(th, ss.HW_PROMINENCE)
+        skew = ss.skew_surges(ss.despike(g) + th, hw, h)
+        masked = np.isin(hw, st["tc_hours"]) if st.get("tc_hours") is not None else np.zeros(len(hw), bool)
+        prof = {}
+        for name, lo in (("full", EARLY_YEARS[0]), ("late", EARLY_YEARS[1] + 1)):
+            ok, _ = _kept(skew, years[hw], lo, int(years[-1]))
+            prof[name] = _profile_loglik(ss.cluster_excesses(skew[ok & ~masked])[1])
+        out.append((row, prof))
+    return out
+
+
+def _pooled_shapes(lonlat: np.ndarray, prof: np.ndarray, query: np.ndarray, radius_km: float) -> np.ndarray:
+    from sklearn.neighbors import BallTree
+    near = BallTree(np.radians(lonlat[:, ::-1]), metric="haversine").query_radius(
+        np.radians(query[:, ::-1]), r=radius_km / stp.EARTH_RADIUS_KM)
+    return np.array([SHAPE_GRID[np.argmax(prof[j].sum(axis=0))] for j in near])
+
+
+def _long_tc_hours(check: GaugeCheck, stations: pd.DataFrame, n_hours: int) -> dict:
+    with_tc = stations[stations.station_id.isin(check.tc_levels.index)]
+    return tc_hours(with_tc, n_hours, Path(check.cfg["storm_tide_product"]["ibtracs_path"]), LONG_START)
+
+
+def pooled_shape(check: GaugeCheck, dest: Path, workers: int) -> None:
+    stores, bases, n_hours = _long_inputs(check, dest, workers)
+    root = dest / "pooled_shape"
+    root.mkdir(exist_ok=True)
+    lev = check.lev
+    ks = np.flatnonzero((lev.level_source == "product").to_numpy())
+    if not (root / "profiles.npz").exists():
+        hours = _long_tc_hours(check, check.stations.iloc[ks], n_hours)
+        todo = [{**s, "tc_hours": hours.get(check.stations.index[k])}
+                for s, k in zip(_station_inputs(check, ks), ks)]
+        res = _run_long(_pool_task, todo, stores, bases, n_hours, workers)
+        built = pd.DataFrame([r for r, _ in res]).set_index("station")
+        np.savez(root / "profiles.npz", station=built.index.to_numpy(),
+                 full=np.vstack([p["full"] for _, p in res]), late=np.vstack([p["late"] for _, p in res]))
+        built.to_parquet(root / "masked_rows.parquet")
+    prof = np.load(root / "profiles.npz")
+    built = pd.read_parquet(root / "masked_rows.parquet").loc[prof["station"]]
+    out = lev.iloc[ks[prof["station"]]][["station_id", "lon", "lat", "gpd_shape_mle", "rp100_m", "rp1000_m"]].copy()
+    out["tc_part"] = out.station_id.isin(check.tc_levels.index).to_numpy()
+    for c in ("gpd_shape_mle", "rp100_m", "rp1000_m", "tc_masked_share"):
+        out[f"masked_{c}"] = built[c].to_numpy()
+    lonlat = out[["lon", "lat"]].to_numpy(dtype=float)
+    for name in ("full", "late"):
+        out[f"shape_0km_{name}"] = SHAPE_GRID[np.argmax(prof[name], axis=1)]
+        for km in POOL_KM:
+            out[f"shape_{km:g}km_{name}"] = _pooled_shapes(lonlat, prof[name], lonlat, km)
+    out.to_parquet(root / "stations.parquet")
+    for label, sel in (("TC part", out.tc_part.to_numpy()), ("no TC part", ~out.tc_part.to_numpy())):
+        s = out[sel]
+        for km in (0.0, *POOL_KM):
+            a, b = s[f"shape_{km:g}km_late"], s[f"shape_{km:g}km_full"]
+            print(f"{label} ({len(s)}), {km:g} km: shape p10/p50/p90 {np.quantile(b, [0.1, 0.5, 0.9]).round(2)}, "
+                  f"> 0.35 late {(a > 0.35).sum()} / full {(b > 0.35).sum()} / both {((a > 0.35) & (b > 0.35)).sum()}"
+                  f"; |full - late| p50 {np.median(np.abs(b - a)):.3f} p90 {np.quantile(np.abs(b - a), 0.9):.3f}",
+                  flush=True)
+
+    gauge_st = check.stations.loc[check.meta.station.to_numpy()]
+    hours = _long_tc_hours(check, check.picked.drop_duplicates(), n_hours)
+    variants = {"75 yr, double count, cap 0.35": {}, "75 yr, masked, cap 0.35": {"mask": True},
+                "75 yr, masked, no cap": {"mask": True, "shape_cap": None}}
+    for km in POOL_KM:
+        shapes = _pooled_shapes(lonlat, prof["full"], gauge_st[["lon", "lat"]].to_numpy(dtype=float), km)
+        variants[f"75 yr, masked, pooled {km:g} km, no cap"] = {"mask": True, "shape_cap": None, "pooled_shape": shapes}
+    table = check.table(check.levels(workers))
+    table = table.rename(columns={f"new_loo_rp{rp}_m": f"production_rp{rp}_m" for rp in GAUGE_RPS})
+    cols = {"46 yr, double count, cap 0.35 (production)": "production"}
+    for k, (name, v) in enumerate(variants.items()):
+        todo = []
+        for j, s in enumerate(check.todo):
+            extra = {key: (val[j] if key == "pooled_shape" else val) for key, val in v.items() if key != "mask"}
+            todo.append({**s, **extra, "tc_hours": hours.get(s["station_index"]) if v.get("mask") else None})
+        rows = pd.DataFrame(_run_long(_long_task, todo, stores, bases, n_hours, workers)).set_index("station")
+        rows.index = check.meta.file_name.to_numpy()[rows.index]
+        for rp in GAUGE_RPS:
+            table[f"v{k}_rp{rp}_m"] = rows[f"rp{rp}_m"].reindex(table.index)
+        if "pooled_shape" in v:
+            table[f"v{k}_shape"] = pd.Series(v["pooled_shape"], index=check.meta.file_name.to_numpy())
+        cols[name] = f"v{k}"
+        print(f"  {name}", flush=True)
+    table.to_parquet(root / "gauges.parquet")
+    s = scores(table, cols)
+    s.to_parquet(root / "scores.parquet")
+    print(s[s.gauges.isin(["TC-dominated gauges", "non-TC-dominated gauges"]) & s.rp.isin([10, 100])]
+          .to_string(index=False), flush=True)
 
 
 def _null_shapes(args) -> np.ndarray:
@@ -504,7 +649,8 @@ def shape_noise(check: GaugeCheck, dest: Path, workers: int) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("stages", nargs="+", choices=("cap", "despike", "tc_mask", "fes_rule", "peaks", "shape_noise",
-                                                       "tc_scale", "tc_jumps", "r_variants", "long_record"))
+                                                       "tc_scale", "tc_jumps", "r_variants", "long_record",
+                                                       "pooled_shape"))
     parser.add_argument("--product-dir", required=True)
     parser.add_argument("--sources-dir", default=".cleanup_baseline/level_sources")
     parser.add_argument("--config", default=str(REPO / "snakemake_workflow" / "config" / "config.yml"))
@@ -518,10 +664,10 @@ def main() -> None:
     for stage in args.stages:
         print(f"== {stage}", flush=True)
         if stage in ("cap", "tc_mask", "fes_rule", "shape_noise", "tc_scale", "tc_jumps", "r_variants",
-                     "long_record"):
+                     "long_record", "pooled_shape"):
             {"cap": cap, "tc_mask": tc_mask, "fes_rule": fes_rule, "shape_noise": shape_noise,
-             "tc_scale": tc_scale, "tc_jumps": tc_jumps, "r_variants": r_variants, "long_record": long_record}[stage](
-                check, dest, args.workers)
+             "tc_scale": tc_scale, "tc_jumps": tc_jumps, "r_variants": r_variants, "long_record": long_record,
+             "pooled_shape": pooled_shape}[stage](check, dest, args.workers)
         else:
             {"despike": despike, "peaks": peaks}[stage](check, dest)
 

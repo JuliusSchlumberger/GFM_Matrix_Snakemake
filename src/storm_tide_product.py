@@ -342,8 +342,8 @@ def station_product(st: dict, g: np.ndarray, th: np.ndarray, t10: np.ndarray,
 
     `g`: hourly GTSM surge residual (m, NaN missing); `th` / `t10`: the station's FES tide,
     hourly on the same axis and 10-min over one nodal cycle. `st` may set "shape_cap" (None: no
-    cap) in place of SHAPE_CAP, and "tc_scale" / "tc_shift_m" applied to the COAST-RP_TC levels
-    (m above MSL) before they become a rate; "surge_offset_m" adds a gauge offset to the positive
+    cap) in place of SHAPE_CAP, "pooled_shape" as a fixed GPD shape, and "tc_scale" / "tc_shift_m"
+    applied to the COAST-RP_TC levels (m above MSL) before they become a rate; "surge_offset_m" adds a gauge offset to the positive
     skew surges in place of the ratio r.
     """
     row = {"station": st["station"], "atlas": st["atlas"], "mhws_m": st["mhws_m"]}
@@ -359,7 +359,8 @@ def station_product(st: dict, g: np.ndarray, th: np.ndarray, t10: np.ndarray,
     # tc_hours (cycles left out of the ETC fit) is set only by the cyclone-mask test, boundary_test/open_guesses.py
     tc_cycles = np.isin(hw, st["tc_hours"]) if st.get("tc_hours") is not None else np.zeros(len(hw), bool)
     row["tc_masked_share"] = float(tc_cycles[ok].mean())
-    model = surge_model(skew[ok & ~tc_cycles], len(keep_years), max_shape=st.get("shape_cap", SHAPE_CAP))
+    model = surge_model(skew[ok & ~tc_cycles], len(keep_years), max_shape=st.get("shape_cap", SHAPE_CAP),
+                        shape=st.get("pooled_shape"))
     corrected = shifted(model, st["surge_offset_m"]) if "surge_offset_m" in st else scaled(model, st["r"])
     v, w, cyc = tide_peaks(t10, STEP_MIN / 60.0, HW_PROMINENCE)
     row.update({"n_years": len(keep_years), "gpd_shape": model["shape"], "gpd_shape_mle": model["shape_mle"],

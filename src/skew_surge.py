@@ -59,21 +59,31 @@ def skew_surges(total: np.ndarray, hw: np.ndarray, hw_height: np.ndarray) -> np.
     return np.where(gaps == 0, peak - hw_height, np.nan)
 
 
-def surge_model(s: np.ndarray, n_years: float, max_shape: float | None = None) -> dict:
-    """Empirical body + GPD tail of per-cycle skew surges, with the extremal index.
-
-    With `max_shape`, a fitted shape above it is fixed at max_shape and the scale refitted.
-    """
+def cluster_excesses(s: np.ndarray) -> tuple[float, np.ndarray, int]:
+    """Threshold, declustered cluster-maximum excesses above it and the number of exceedances."""
     u = float(np.quantile(s, THRESHOLD_Q))
     exc = np.flatnonzero(s > u)
     starts = np.r_[0, np.flatnonzero(np.diff(exc) > RUN_CYCLES) + 1]
-    cmax = np.maximum.reduceat(s[exc], starts)
-    c, _, scale = genpareto.fit(cmax - u, floc=0)
+    return u, np.maximum.reduceat(s[exc], starts) - u, len(exc)
+
+
+def surge_model(s: np.ndarray, n_years: float, max_shape: float | None = None,
+                shape: float | None = None) -> dict:
+    """Empirical body + GPD tail of per-cycle skew surges, with the extremal index.
+
+    `shape` fixes the GPD shape (e.g. a regionally pooled one) and fits only the scale. With
+    `max_shape`, a shape above it is fixed at max_shape and the scale refitted.
+    """
+    u, x, n_exc = cluster_excesses(s)
+    c, _, scale = genpareto.fit(x, floc=0)
     shape_mle = float(c)
-    if max_shape is not None and c > max_shape:
-        c, _, scale = genpareto.fit(cmax - u, f0=max_shape, floc=0)
-    return {"sorted": np.sort(s), "u": u, "p_u": len(exc) / len(s), "shape": float(c), "scale": float(scale),
-            "shape_mle": shape_mle, "theta": len(starts) / len(exc), "cycles_per_yr": len(s) / n_years,
+    target = c if shape is None else shape
+    if max_shape is not None and target > max_shape:
+        target = max_shape
+    if target != c:
+        c, _, scale = genpareto.fit(x, f0=target, floc=0)
+    return {"sorted": np.sort(s), "u": u, "p_u": n_exc / len(s), "shape": float(c), "scale": float(scale),
+            "shape_mle": shape_mle, "theta": len(x) / n_exc, "cycles_per_yr": len(s) / n_years,
             "n_years": n_years}
 
 

@@ -192,7 +192,9 @@ Open:
     753 -> 69; RP1000 - COAST-RP p99 2.06 -> 1.16 m, max 8.4 -> 3.2 m; neighbour jumps unchanged;
     RP2 MAE (all gauges) 0.088 -> 0.104 m because the shift also lifts COAST-RP_TC's flat tide
     floor. Scaling instead of shifting is worse (MAE 0.413). No tapered shift or other device that
-    exists only to improve the fit (user, 2026-11-08). Decision open (user).
+    exists only to improve the fit (user, 2026-11-08). Decided (user, 2026-11-08): mask on, no shift
+    and no scale. Masked without a shift: TC-dominated RP100 median -0.165 m, MAE 0.391 m (double
+    count -0.027 / 0.361 m); non-TC-dominated unchanged (0.164 vs 0.163 m).
   - 3: covariate fallback r = 1.03 x S10^-0.32 (GTSM RP10 skew surge, m; cap 2) where < 3 gauges
     within 500 km: sparse gauges RP100 MAE 0.226 -> 0.194 m, bias -0.11 -> -0.03 m; all 451
     0.163 -> 0.157 m. Fallback 1 worse; dropping gauges with S10 < 0.2 m no effect; additive
@@ -207,14 +209,19 @@ Open:
     TC-dominated 0.361 vs 0.364 m. Early/late skew RP10 median 1.00 (TC part 1.04, no TC part
     0.985): no pre-1979 storm deficit in ERA5. A longer record does not replace the cap at TC
     stations; justified options are the COAST-RP_TC tail (masked, decision 2) or a regionally
-    pooled GPD shape. Recommendation: keep the 46-year record. Decision open (user).
+    pooled GPD shape. Decided (user, 2026-11-08): use the 1950-2024 record in production (store,
+    FES basis and IBTrACS mask from 1950; IBTrACS before the satellite era is less complete).
+    `storm_tide_product.ibtracs_path` is the full IBTrACS (`ibtracs.ALL.list.v04r01.csv`, 1842 on); the
+    `*_materialized.yml` still name `ibtracs.since1980` until they are re-materialized.
   4. Tile interpolation: interpolate skew-surge levels and convolve with the local FES tide at
      the tile boundary, vs total-level IDW, on the stations whose current error exceeds 0.2 m.
   5. Global rerun with flags (tail-uncertain, TC-coast, fallback-r); test 10 afterwards revises
      the flagged stations. The 1950-1978 surge months are on `<data_root>`
      (`inputs/GTSM_storm_tide_hourly/storm_surge_residual`, all 900 months).
-  6. Regionally pooled GPD shape (regional frequency analysis) as the alternative to the cap at
-     stations with a TC part; not started.
+  6. Regionally pooled GPD shape (`open_guesses.py pooled_shape`): on 1950-2024 with the mask, each
+     station's shape maximises the summed profile likelihood of the stations within 100 / 300 /
+     1000 km (scale per station); stability 1979-2024 vs 1950-2024 and gauge scores against the
+     cap. Running.
 - **Storm-tide product: decisions taken as estimates (open questions; tested in
   `boundary_test/INPUT_ANALYSIS.md` §8.6, fig19-fig23).**
   - No TC mask (decided): ERA5 cyclones stay in the ETC fit and count again in COAST-RP's TC part,
