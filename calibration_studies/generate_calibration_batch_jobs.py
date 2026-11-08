@@ -4,11 +4,14 @@ One process per node runs its tile slice sequentially (amortizes env setup and
 Numba JIT). Tiles are LPT bin-packed on pixel count (bbox area_deg2 * 3600**2,
 EPSG:4326 ~1-arcsecond DeltaDTM); --time is a no-early-exit worst case.
 Build wet_tiles_selected.txt afterwards with aggregate_wet_tiles.py.
-Partition, mem, cpus and account default to hpc.sbatch (config_hpc.yml).
+Partition, mem, cpus and account default to hpc.sbatch (config_hpc.yml). --friction-source
+picks the study's friction (land cover at the config's friction_scale_factor, or a uniform
+rate); each source writes to its own <out_subdir>_<source> folder.
 
 Usage:
     python generate_calibration_batch_jobs.py sweep_budget
     python generate_calibration_batch_jobs.py obstacle_coupling --tile-ids-file <wet_tiles_selected.txt>
+    python generate_calibration_batch_jobs.py sweep_budget --friction-source uniform --uniform-attenuation-m-per-km 0.2
     python generate_calibration_batch_jobs.py sweep_budget --study-dir-name calibration_500_tiles
     bash <printed submit script path>
 """
@@ -49,7 +52,7 @@ SCRIPTS = {
         "out_subdir": "obstacle_coupling",
         # (max_outer+1) x inner_max_rounds x 4 sweeps at the 15/40 defaults, no early exit.
         "worst_case_sweeps_per_tile": 16 * 40 * SWEEPS_PER_ROUND,
-        "default_tile_ids_file": "sweep_budget/wet_tiles_selected.txt",
+        "default_tile_ids_file": "sweep_budget_{source}/wet_tiles_selected.txt",
     },
 }
 
@@ -111,6 +114,9 @@ def main() -> None:
     parser.add_argument("--mem", default=None, help="default: hpc.sbatch.mem")
     parser.add_argument("--cpus-per-task", type=int, default=None, help="default: hpc.sbatch.cpus_per_task")
     parser.add_argument("--account", default=None, help="default: hpc.sbatch.account")
+    parser.add_argument("--friction-source", choices=["landcover", "uniform"], default="landcover")
+    parser.add_argument("--uniform-attenuation-m-per-km", type=float, default=None,
+                        help="with --friction-source uniform (default: the config's uniform_attenuation_m_per_km)")
     parser.add_argument(
         "--extra-args", default="",
         help="extra CLI args forwarded verbatim to each node's script call, e.g. '--epsilon 0.03' "
@@ -138,7 +144,12 @@ def main() -> None:
     study_root_local = local_root / args.study_dir_name
     study_root_linux = f"{linux_root}/{args.study_dir_name}"
 
-    tile_ids_file = Path(args.tile_ids_file) if args.tile_ids_file else study_root_local / spec["default_tile_ids_file"]
+    out_subdir = f"{spec['out_subdir']}_{args.friction_source}"
+    friction_args = f"--friction-source {args.friction_source}" + (
+        f" --uniform-attenuation-m-per-km {args.uniform_attenuation_m_per_km:g}"
+        if args.uniform_attenuation_m_per_km is not None else "")
+    tile_ids_file = (Path(args.tile_ids_file) if args.tile_ids_file
+                     else study_root_local / spec["default_tile_ids_file"].format(source=args.friction_source))
     all_tile_ids = [line.strip() for line in tile_ids_file.read_text().splitlines() if line.strip()]
     if not all_tile_ids:
         raise ValueError(f"no tile IDs in {tile_ids_file}")
@@ -162,7 +173,7 @@ def main() -> None:
     linux_jobs_dir = f"{study_root_linux}/hpc_jobs"
     retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
-    retry_transient_io((study_root_local / spec["out_subdir"]).mkdir, parents=True, exist_ok=True)
+    retry_transient_io((study_root_local / out_subdir).mkdir, parents=True, exist_ok=True)
 
     # Nodes get the pre-merged Linux-path config so they need no override files.
     resolved_config_path = study_root_local / "resolved_config.yml"
@@ -170,8 +181,8 @@ def main() -> None:
     print(f"Wrote {resolved_config_path} (Linux path view, for --config on every node)")
     linux_config_path = f"{study_root_linux}/resolved_config.yml"
 
-    out_dir_linux = f"{study_root_linux}/{spec['out_subdir']}"
-    batch_name_prefix = f"calib_{args.study}_batch"
+    out_dir_linux = f"{study_root_linux}/{out_subdir}"
+    batch_name_prefix = f"calib_{args.study}_{args.friction_source}_batch"
 
     script_paths = []
     for i, batch_tiles in enumerate(batches):
@@ -199,7 +210,7 @@ def main() -> None:
             "set -uo pipefail",
             "unset PROJ_LIB PROJ_DATA GDAL_DATA",  # as the sfincs_tiles jobs: no stale PROJ/GDAL data dirs
             f'"{gfm_py_linux}" "{linux_code_root}/calibration_studies/{spec["script_name"]}" --out-dir "{out_dir_linux}" '
-            f'--config "{linux_config_path}" --tile-ids {" ".join(batch_tiles)} {args.extra_args}',
+            f'--config "{linux_config_path}" {friction_args} --tile-ids {" ".join(batch_tiles)} {args.extra_args}',
             "",
         ]
         script_path = local_jobs_dir / f"{name}.sbatch"

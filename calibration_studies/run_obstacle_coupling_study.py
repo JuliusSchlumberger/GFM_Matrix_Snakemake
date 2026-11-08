@@ -36,7 +36,7 @@ from flood_model import OBSTACLE_BLOCK_FRICTION as BLOCK_FRICTION  # noqa: E402
 from flood_model import prune_to_coast_connected  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from run_sweep_budget_study import OCEAN_CODE, TILES, load_tile  # noqa: E402
+from run_sweep_budget_study import OCEAN_CODE, TILES, friction_settings, load_tile  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTER_EPSILON_M = 0.03  # = simulation.flooding.waterlevel_epsilon_m
@@ -137,12 +137,12 @@ def _depth_change_metrics(depth_prev: np.ndarray, depth_curr: np.ndarray) -> dic
 
 
 def run_tile_trace(
-    tile_id: int, model_outputs: Path, knn: int, idw_power: float, friction_scale_factor: float,
+    tile_id: int, model_outputs: Path, knn: int, idw_power: float, friction_kw: dict,
     max_outer: int, inner_max_rounds: int, epsilon: float, outer_convergence_pct: float,
 ) -> list[dict]:
     """Trace the unblocked baseline and each outer iteration; one row per solve."""
     dem, mask, friction, coastline, seed_rows, seed_cols, initial, max_waterlevel = load_tile(
-        tile_id, model_outputs, knn, idw_power, friction_scale_factor, on_no_stations="raise",
+        tile_id, model_outputs, knn, idw_power, **friction_kw, on_no_stations="raise",
     )
     seed_values = -initial
     dtype = friction.dtype
@@ -269,6 +269,10 @@ def main() -> None:
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--tile-ids", type=int, nargs="*", default=None)
+    parser.add_argument("--friction-source", choices=["landcover", "uniform"], default=None,
+                        help="default: config simulation.flooding.friction_source")
+    parser.add_argument("--uniform-attenuation-m-per-km", type=float, default=None,
+                        help="uniform rate (default: config simulation.flooding.uniform_attenuation_m_per_km)")
     parser.add_argument("--max-outer-iterations", type=int, default=None, help=f"default: {DEFAULT_MAX_OUTER} (production uses config simulation.flooding.obstacle_coupling.max_outer_iterations)")
     parser.add_argument("--max-rounds", type=int, default=None, help=f"default: {DEFAULT_INNER_MAX_ROUNDS} (production uses config simulation.flooding.max_rounds)")
     parser.add_argument("--epsilon", type=float, default=None, help=f"default: {DEFAULT_OUTER_EPSILON_M} (matches production's own config simulation.flooding.waterlevel_epsilon_m)")
@@ -284,14 +288,12 @@ def main() -> None:
     flooding_cfg = cfg["simulation"]["flooding"]
     knn = int(flooding_cfg["knn"])
     idw_power = float(flooding_cfg["idw_power"])
-    # friction_scale_factor is config.yml's bare per-metre rate; these tiles are always
-    # DeltaDTM's own 30 m grid, so the production rescale (x pixel_size_m) is just x30 here.
-    friction_scale_factor = float(flooding_cfg["friction_scale_factor"]) * 30.0
+    friction = friction_settings(flooding_cfg, args.friction_source, args.uniform_attenuation_m_per_km)
     max_outer = args.max_outer_iterations if args.max_outer_iterations is not None else DEFAULT_MAX_OUTER
     inner_max_rounds = args.max_rounds if args.max_rounds is not None else DEFAULT_INNER_MAX_ROUNDS
     epsilon = args.epsilon if args.epsilon is not None else DEFAULT_OUTER_EPSILON_M
     outer_convergence_pct = args.outer_convergence_pct if args.outer_convergence_pct is not None else float(flooding_cfg["obstacle_coupling"]["outer_convergence_pct"])
-    print(f"model_outputs={model_outputs}  knn={knn}  friction_scale_factor={friction_scale_factor}  "
+    print(f"model_outputs={model_outputs}  knn={knn}  friction={friction}  "
           f"max_outer={max_outer}  inner_max_rounds={inner_max_rounds}  epsilon={epsilon}  "
           f"outer_convergence_pct={outer_convergence_pct}", flush=True)
 
@@ -303,7 +305,7 @@ def main() -> None:
             writer.writeheader()
             try:
                 tile_rows = run_tile_trace(
-                    tile_id, model_outputs, knn, idw_power, friction_scale_factor,
+                    tile_id, model_outputs, knn, idw_power, friction,
                     max_outer, inner_max_rounds, epsilon, outer_convergence_pct,
                 )
                 for row in tile_rows:

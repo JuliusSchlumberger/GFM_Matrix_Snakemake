@@ -37,6 +37,22 @@ WATERLEVEL_NAME = "SLR_0"
 OCEAN_CODE = 1
 RIVER_CODE = 3
 
+# DeltaDTM's grid step (m): these tiles are always on it, so friction per step = rate x 30.
+CELL_M = 30.0
+
+
+def friction_settings(flooding: dict, friction_source: str | None, uniform_m_per_km: float | None) -> dict:
+    """Return load_tile's friction keywords for a friction source (None: the config's).
+
+    Land cover: friction_scale_factor x CELL_M on friction.tif; uniform: rate x CELL_M per cell.
+    """
+    source = friction_source or flooding["friction_source"]
+    if source == "uniform":
+        rate = uniform_m_per_km if uniform_m_per_km is not None else float(flooding["uniform_attenuation_m_per_km"])
+        return {"friction_scale_factor": 1.0, "uniform_friction": rate / 1000.0 * CELL_M}
+    return {"friction_scale_factor": float(flooding["friction_scale_factor"]) * CELL_M, "uniform_friction": None}
+
+
 # Smoke-test fallback when no --tile-ids are given.
 TILES = [2083, 2514, 1421, 2569, 2858, 2314, 753]
 
@@ -48,7 +64,7 @@ DEFAULT_EPSILON_M = 0.03  # = simulation.flooding.waterlevel_epsilon_m
 
 
 def load_tile(tile_id: int, model_outputs: Path, knn: int, idw_power: float, friction_scale_factor: float,
-              on_no_stations: str = "dry"):
+              on_no_stations: str = "dry", uniform_friction: float | None = None):
     """Load a tile's decoded solver inputs and IDW-seeded coastline values.
 
     Shared by the calibration studies (run_obstacle_coupling_study.py,
@@ -61,6 +77,8 @@ def load_tile(tile_id: int, model_outputs: Path, knn: int, idw_power: float, fri
         reports DRY; production's NO_STATIONS_REASON), "raise" raises ValueError
         (studies whose tile list should already exclude such tiles; BallTree would
         crash on them).
+    uniform_friction : float, optional
+        Friction per grid step everywhere instead of friction.tif x friction_scale_factor.
 
     Returns
     -------
@@ -89,6 +107,8 @@ def load_tile(tile_id: int, model_outputs: Path, knn: int, idw_power: float, fri
     # decode -> scale -> floor, as in eikonal_runner: a zero-friction cell floors
     # to 0.001 regardless of friction_scale_factor.
     friction = friction * friction_scale_factor
+    if uniform_friction is not None:
+        friction = np.full_like(friction, uniform_friction)
     friction = np.where(friction > 0, friction, friction.dtype.type(0.001))
     coastline = coastline_mask(mask, ocean_code=OCEAN_CODE, river_code=RIVER_CODE)
     coastline_rows, coastline_cols = np.nonzero(coastline)
@@ -148,7 +168,7 @@ def _depth_change_metrics(depth_prev: np.ndarray, depth_curr: np.ndarray, n_cell
 
 
 def run_tile_sweep_trace(
-    tile_id: int, max_sweeps: int, model_outputs: Path, knn: int, idw_power: float, friction_scale_factor: float,
+    tile_id: int, max_sweeps: int, model_outputs: Path, knn: int, idw_power: float, friction_kw: dict,
     epsilon: float,
 ) -> tuple[list[dict], bool, bool]:
     """Trace one tile sweep by sweep; return (rows, is_wet, round_converged).
@@ -157,7 +177,7 @@ def run_tile_sweep_trace(
     complete round's max raw change reached <= epsilon before max_sweeps.
     """
     dem, mask, friction, coastline, seed_rows, seed_cols, initial, _ = load_tile(
-        tile_id, model_outputs, knn, idw_power, friction_scale_factor,
+        tile_id, model_outputs, knn, idw_power, **friction_kw,
     )
     seed_values = -initial
     dtype = friction.dtype
@@ -225,6 +245,10 @@ def main() -> None:
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--tile-ids", type=int, nargs="*", default=None)
+    parser.add_argument("--friction-source", choices=["landcover", "uniform"], default=None,
+                        help="default: config simulation.flooding.friction_source")
+    parser.add_argument("--uniform-attenuation-m-per-km", type=float, default=None,
+                        help="uniform rate (default: config simulation.flooding.uniform_attenuation_m_per_km)")
     parser.add_argument("--epsilon", type=float, default=DEFAULT_EPSILON_M, help=f"round-level convergence threshold (default: {DEFAULT_EPSILON_M}, production's own simulation.flooding.waterlevel_epsilon_m)")
     parser.add_argument("--n-tiles-wanted", type=int, default=N_TILES_WANTED_DEFAULT, help=f"stop early once this many wet tiles are found, in this process's own single-process run only (default: {N_TILES_WANTED_DEFAULT})")
     parser.add_argument(
@@ -248,10 +272,8 @@ def main() -> None:
     model_outputs = Path(cfg["simulation"]["model_outputs"])
     knn = int(cfg["simulation"]["flooding"]["knn"])
     idw_power = float(cfg["simulation"]["flooding"]["idw_power"])
-    # friction_scale_factor is config.yml's bare per-metre rate; these tiles are always
-    # DeltaDTM's own 30 m grid, so the production rescale (x pixel_size_m) is just x30 here.
-    friction_scale_factor = float(cfg["simulation"]["flooding"]["friction_scale_factor"]) * 30.0
-    print(f"model_outputs={model_outputs}  knn={knn}  friction_scale_factor={friction_scale_factor}  "
+    friction = friction_settings(cfg["simulation"]["flooding"], args.friction_source, args.uniform_attenuation_m_per_km)
+    print(f"model_outputs={model_outputs}  knn={knn}  friction={friction}  "
           f"max_sweeps={MAX_SWEEPS} ({MAX_ROUNDS_CEILING} rounds)  epsilon={args.epsilon}  "
           f"n_tiles_wanted={n_tiles_wanted}", flush=True)
 
@@ -266,7 +288,7 @@ def main() -> None:
             writer.writeheader()
             try:
                 tile_rows, is_wet, round_converged = run_tile_sweep_trace(
-                    tile_id, MAX_SWEEPS, model_outputs, knn, idw_power, friction_scale_factor, args.epsilon,
+                    tile_id, MAX_SWEEPS, model_outputs, knn, idw_power, friction, args.epsilon,
                 )
                 for row in tile_rows:
                     print(f"  sweeps={row['sweep_count']:3d}  cum_time={row['cum_time_s']}s  "
