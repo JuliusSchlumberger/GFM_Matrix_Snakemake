@@ -27,8 +27,8 @@ from merge import EIKONAL_NODATA
 DEM_SCALE = 100  # cm per metre
 DEM_NODATA_M = 99.0
 
-# Friction (Manning's n / 100) spans ~0.0001-0.0012; x1e6 keeps n's 2 significant
-# digits with ~27x headroom below int16's max.
+# Friction (the land-cover-indexed attenuation rate, m/m = lookup-table n / 100) spans
+# ~0.0001-0.0012; x1e6 keeps 2 significant digits with ~27x headroom below int16's max.
 FRICTION_SCALE = 1_000_000
 
 # int16 max doubles as the "not computed" sentinel (int16 twin of merge.EIKONAL_NODATA).
@@ -75,8 +75,8 @@ def decode_dem_cm(dem_int16: np.ndarray) -> np.ndarray:
 
 
 def encode_friction_int16(friction: np.ndarray) -> np.ndarray:
-    """Encode per-metre friction (Manning's n / 100) as int16 x `FRICTION_SCALE`."""
-    return _encode_int16(friction, FRICTION_SCALE, "Friction", "within the land-cover lookup table's Manning's n / 100 range")
+    """Encode the per-metre attenuation rate (lookup-table n / 100) as int16 x `FRICTION_SCALE`."""
+    return _encode_int16(friction, FRICTION_SCALE, "Friction", "within the land-cover lookup table's n / 100 range")
 
 
 def decode_friction_int16(friction_int16: np.ndarray) -> np.ndarray:
@@ -590,10 +590,12 @@ def compute_friction(
     dem: xr.DataArray,
     default_friction: float,
 ) -> xr.DataArray:
-    """Map land use onto the DEM grid and convert it to per-metre friction (int16).
+    """Map land use onto the DEM grid as the land-cover-indexed attenuation rate (int16).
 
-    Friction = Manning's n / 100 via `lookup_source` (index `copernicus_worldcover`,
-    column `manning_n`); unclassified cells get `default_friction` (same per-metre
+    Rate = n / 100 per metre, with n the class value of `lookup_source` (a Manning's n
+    roughness table, index `copernicus_worldcover`, column `manning_n`): the table sets
+    the relative class values only, calibration the absolute rate. Unclassified cells
+    get `default_friction` (same per-metre
     convention, should match `flooding.default_friction`). The per-grid-step
     correction the eikonal solver needs is applied at runtime via
     `simulation.flooding.friction_scale_factor`, not here.

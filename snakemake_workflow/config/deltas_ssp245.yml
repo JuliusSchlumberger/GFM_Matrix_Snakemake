@@ -6,8 +6,9 @@ tile_grid:
 
 simulation:
   flooding:
-    friction_scale_factor: 0.3  # computed with effective 9.0 = 0.3 x 30 (config.yml: 0.4 x 30 = 12.0)
+    friction_scale_factor: 0.3  # computed with effective 9.0 = 0.3 x 30 (config.yml: 0.25 x 30 = 7.5)
   model_outputs: "{root}/deltas_floodmaps/ssp245/model_outputs"
+  preprocessing_inputs_dir: null  # own per-tile inputs under model_outputs
 
 postprocessing:
   merged_outputs: "{root}/deltas_floodmaps/ssp245/merged_results"

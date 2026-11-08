@@ -21,7 +21,8 @@ friction against the hydrodynamic model SFINCS.
 | Validation scores (HR, FAR, CSI, bias) | per benchmark region | `<data_root>/validation/` |
 
 Scenarios: return periods 2, 5, 10, 25, 50, 100, 250, 500 and 1000 years; sea-level-rise levels
-0, 0.5, 1.0, 1.5 and 2.0 m on top of present-day storm tide (COAST-RP), with spatial fingerprints
+0, 0.5, 1.0, 1.5 and 2.0 m on top of present-day storm tide (`boundary_conditions.storm_tide_source`:
+the gauge-corrected GTSM-ERA5 + FES product, or COAST-RP), with spatial fingerprints
 from the IPCC AR6 projections (`boundary_conditions.slr_projection`, default SSP2-4.5).
 Population change follows the SSP projections to 2100.
 

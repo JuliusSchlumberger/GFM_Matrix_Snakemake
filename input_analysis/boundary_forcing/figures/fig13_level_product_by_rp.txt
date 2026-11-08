@@ -1,0 +1,11 @@
+The new level product against COAST-RP per return period, (a) at stations without a TC component in
+COAST-RP, (b) at stations with one. Lines are medians over stations of three differences. Black: the
+total level (grey band: 10-90% of stations). Blue dashed: the ETC level with r = 1 minus COAST-RP's
+ETC level, i.e. only the FES tide replacing GTSM's. Orange: the ETC level with the surge ratio r
+minus COAST-RP's ETC level. Shaded: RPs above 250 y, which extrapolate ~46 years of skew surges.
+
+Reading: without TC (a), the FES tide lowers the levels by 0.05-0.08 m (GTSM's tide is 7-8% too
+large) and r raises them by about 0.09 m, so the total rises by 0.01-0.07 m; orange and black
+coincide because there is no TC part. With TC (b), r is applied to the ETC part only while the TC
+part is COAST-RP's, so the total rises less than the ETC part at high RPs, where TC dominates the
+combined rate.

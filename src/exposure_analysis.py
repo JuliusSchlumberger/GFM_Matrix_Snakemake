@@ -206,19 +206,62 @@ def _redistribute_by_country(
     return apply_country_shares(capacity, share, geo_ids, iso_lookup, iso_index)
 
 
+def design_return_period_grid(
+    geo_ids: np.ndarray,
+    rp_applied: dict[int, int],
+    minimum_rp: int,
+) -> np.ndarray:
+    """Return the per-cell design return period, at least `minimum_rp`.
+
+    Cells without a geogunit, or whose geogunit has no FLOPROS entry, get `minimum_rp`.
+    """
+    max_gid = max(max(rp_applied, default=0), int(geo_ids.max(initial=0))) + 1
+    lookup = np.full(max_gid, minimum_rp, dtype="int64")
+    for gid, rp in rp_applied.items():
+        if gid >= 0:
+            lookup[gid] = max(int(rp), minimum_rp)
+    out = np.full(geo_ids.shape, minimum_rp, dtype="int64")
+    valid = geo_ids >= 0
+    out[valid] = lookup[geo_ids[valid]]
+    return out
+
+
+def water_level_exceedance(
+    station_levels: dict[tuple[int, str], np.ndarray],
+    station_idx: np.ndarray,
+    design_rp: np.ndarray,
+    design_slr: str,
+    keys: list[tuple[int, str]],
+) -> dict[tuple[int, str], np.ndarray]:
+    """Flag cells whose event water level exceeds the design level, per (RP, SLR) key.
+
+    Levels are total water levels (storm tide + MDT + SLR, m) per COAST-RP station;
+    `station_idx` maps each cell to its nearest station. Design level =
+    level(design_rp, design_slr). A defence holds while the event level is <= the
+    design level, independently of how far the undefended flood reaches inland.
+    """
+    design = np.zeros(station_idx.shape, dtype="float64")
+    for rp in np.unique(design_rp):
+        sel = design_rp == rp
+        design[sel] = station_levels[(int(rp), design_slr)][station_idx[sel]]
+    return {key: station_levels[key][station_idx] > design for key in keys}
+
+
 def protect_exposure_grid(
     ff: np.ndarray,
     adapt_prot_frac: np.ndarray,
     population: np.ndarray,
+    exceeded: np.ndarray | None = None,
 ) -> np.ndarray:
     """Compute per-cell protect (and baseline) exposure for one (RP, SLR) scenario.
 
-    Binary: 0 where ``ff <= adapt_prot_frac``, else ``ff * population`` (a defence
-    is fully breached beyond its design flood fraction). Baseline is this with the
-    design threshold built at SLR_0, so protect can never exceed baseline.
+    Binary: 0 where the defence holds, else ``ff * population`` (fully breached).
+    It holds where ``ff <= adapt_prot_frac`` (flood-fraction rule), or where
+    `exceeded` (water-level rule, `water_level_exceedance`) is False. Baseline is
+    this with the design threshold built at SLR_0, so protect can never exceed baseline.
     """
     ff_s = _safe(ff)
-    exposed_mask = ff_s > _safe(adapt_prot_frac)
+    exposed_mask = ff_s > _safe(adapt_prot_frac) if exceeded is None else exceeded
     return np.where(exposed_mask, ff_s * population, 0.0)
 
 
@@ -290,6 +333,7 @@ def compute_avoid(
     redirected: np.ndarray,
     growth_factor: "float | np.ndarray",
     existing_prot_frac: "np.ndarray | None" = None,
+    existing_exceeded: "np.ndarray | None" = None,
 ) -> np.ndarray:
     """Compute per-cell avoid (or protect + avoid) exposure for one (RP, SLR) scenario.
 
@@ -298,7 +342,8 @@ def compute_avoid(
     protect + avoid (equals protect at g <= 1). Sum of: E0 exposed under its own
     protection scaled by min(1, g); in-place growth outside the design floodplain;
     redirected growth. Growth terms use retreat's (ff - apf) / (1 - apf) exceedance
-    on the increment max(0, g - 1).
+    on the increment max(0, g - 1). `existing_exceeded` (water-level rule) replaces
+    ``ff > existing protection`` for the E0 term.
     """
     ff_s = _safe(ff)
     apf = _safe(adapt_prot_frac)
@@ -307,7 +352,7 @@ def compute_avoid(
 
     avoid_exp = np.zeros_like(population)
 
-    exposed = ff_s > epf
+    exposed = ff_s > epf if existing_exceeded is None else existing_exceeded
     term1_scale = np.minimum(g, 1.0)
     avoid_exp[exposed] = ff_s[exposed] * population[exposed] * term1_scale[exposed]
 

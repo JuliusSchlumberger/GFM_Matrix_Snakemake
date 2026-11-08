@@ -1,0 +1,26 @@
+COAST-RP storm-tide return levels against the tide gauges, by IPCC AR6 reference region (Iturbide et
+al., 2020). Both sides are total still-water levels (tide plus surge) relative to local mean sea
+level: COAST-RP at the paired GTSM station, and a GEV fit to the gauge's annual maxima. Sites: the
+record-based extremes set (623 GESLA sites with >= 20 complete years since 1979 and a GTSM station
+within 10 km, whatever their tide).
+
+(a) COAST-RP minus gauge per region: dot = median over the region's sites, bar = interquartile
+range; blue = RP10, orange = RP100. Negative = COAST-RP too low. (b) Number of sites per region (log
+scale). The top row pools all sites.
+
+Order: regions are grouped by their AR6 continent in a fixed geographic order (North, Central and
+South America, Europe, the Mediterranean, Africa, Asia, Oceania, the polar land regions, then the
+ocean regions of remote islands: Atlantic, Indian, Pacific, Arctic, Southern), alphabetically within
+each group; the bold rows name the groups. Each gauge takes the nearest AR6 land region within 200
+km, otherwise the AR6 ocean region containing it. The 13 regions with fewer than 5 sites are pooled
+in the last row: Arctic Ocean (2), E. Antarctica (1), E. Southern Africa (2), Equatorial Indian
+Ocean (4), N. Atlantic Ocean (4), N. E. North America (2), N. E. South America (1), Russian Far East
+(2), S. Asia (3), S. Central America (3), S. E. South America (2), S. Eastern Africa (2), W.
+Antarctica (1). The numbers are in fig07_coast_rp_vs_gauges_data.csv.
+
+Reading: overall COAST-RP is -0.06 m (RP10) and -0.07 m (RP100) relative to the gauges. That near-
+zero median hides two offsetting errors: GTSM's tide is too large (fig01) and its surge too low, so
+with the tide excess removed COAST-RP is about 0.11-0.12 m too low. COAST-RP is lowest in tropical-
+cyclone regions (eastern North America, East Asia, the Caribbean, the Pacific), where 30-40-year
+gauge records also under-sample cyclones, and too high in West and Central Europe, where GTSM's tide
+excess dominates.

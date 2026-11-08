@@ -141,14 +141,22 @@ _stations_cache_dir = config["boundary_conditions"].get("stations_cache_dir") or
 
 
 rule cache_waterlevel_stations:
-    """Cache one scenario's global COAST-RP water-level stations as a GeoPackage.
+    """Cache one scenario's global water-level stations as a GeoPackage.
 
     The source NetCDF has no tile dimension, so parsing it once replaces a
     per-tile re-read. Not temp(): reused across runs. Shared, non-tile output:
     on HPC it must be built in the build_shared_inputs step
     (generate_hpc_preprocess_job.py) before any --nolock batch starts, to
-    avoid concurrent-write races.
+    avoid concurrent-write races. The scenario NetCDF is an input, so rebuilding the levels
+    (run_preparation.py boundary_conditions) re-runs the cache and every tile downstream.
     """
+    input:
+        scenario_nc=lambda wildcards: os.path.join(
+            config["boundary_conditions"]["waterlevel_nc_dir"],
+            config["boundary_conditions"]["nc_filename_template"].format(
+                return_period=wildcards.return_period, waterlevel_name=wildcards.waterlevel_name,
+            ),
+        ),
     output:
         stations_cache=os.path.join(
             _stations_cache_dir, "stations_{return_period}_{waterlevel_name}.gpkg",

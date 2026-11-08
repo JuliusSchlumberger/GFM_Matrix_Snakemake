@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""Build COAST-RP station water levels per return period and SLR scenario.
+"""Build station water levels per return period and SLR scenario at the COAST-RP stations.
 
 Entry point: run(config), via `python run_preparation.py boundary_conditions`.
-total_wl = storm_tide(RP) + MDT + SLR_fingerprint(target_slr), in metres.
+total_wl = storm_tide(RP) + MDT + baseline_offset + SLR_fingerprint(target_slr), in metres.
+storm_tide is COAST-RP's or the storm-tide product's (boundary_conditions.storm_tide_source);
+both share COAST-RP's stations and local-MSL reference.
+baseline_offset lifts MSL from the MDT epoch to 2020 (boundary_conditions.slr_baseline_offset_m,
+regionalised like the fingerprints), so SLR_0 is the 2020 sea level that the analysis SLR axis
+starts from.
 Antarctic stations (lat < coastrp_min_lat) are dropped. SLR fingerprints are
 scaled from IPCC AR6 regional projections (DOI: 10.5281/zenodo.5914710).
 
@@ -22,8 +27,10 @@ from pathlib import Path
 
 import numpy as np
 import xarray as xr
+from scipy.spatial import cKDTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from boundaries import STORM_TIDE_SOURCE_MARKER, storm_tide_levels_path, storm_tide_source  # noqa: E402
 from config_utils import get_data_catalog, merged_waterlevel_names, retry_transient_io  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -168,12 +175,31 @@ def compute_mdt_correction(
     return ds_mdt
 
 
+def nearest_slr_m(slr_lonlat: np.ndarray, slr_mm: np.ndarray, station_lonlat: np.ndarray) -> np.ndarray:
+    """Return the AR6 value (mm -> m) nearest each station inside the open +/-1 deg box around it, else NaN.
+
+    Nearest in plain (lon, lat) degrees, the first location on ties.
+    """
+    ok = np.isfinite(slr_mm) & np.isfinite(slr_lonlat).all(axis=1)
+    pts, vals = slr_lonlat[ok], slr_mm[ok]
+    out = np.full(len(station_lonlat), np.nan)
+    # Every point of the open 1-degree box lies within sqrt(2) of the station.
+    for k, cand in enumerate(cKDTree(pts).query_ball_point(station_lonlat, r=np.sqrt(2.0))):
+        cand = np.sort(np.asarray(cand, dtype=int))
+        d = pts[cand] - station_lonlat[k]
+        cand, d = cand[(np.abs(d) < 1.0).all(axis=1)], d[(np.abs(d) < 1.0).all(axis=1)]
+        if len(cand):
+            out[k] = vals[cand[np.argmin(np.sqrt(d[:, 0] * d[:, 0] + d[:, 1] * d[:, 1]))]] / 1000.0
+    return out
+
+
 def compute_slr_fingerprints(
     ds_coastrp: xr.Dataset,
     slr_dir: Path,
     scenario: str,
     confidence: str,
     target_slr_m: list[float],
+    baseline_offset_m: float,
     slr_base_path: Path,
     fingerprints_path: Path,
 ) -> xr.Dataset:
@@ -182,13 +208,14 @@ def compute_slr_fingerprints(
     base(station) = nearest sea_level_change (mm -> m; year 2100, median) from the
     combined gauge + gridded AR6 data; fingerprint = base / global_mean_2100 * T.
     Stations with no valid SLR within +/-1 deg get the uniform global mean, so
-    the output is NaN-free.
+    the output is NaN-free. `SLR_baseline_offset` is the same scaling for
+    baseline_offset_m (global-mean rise from the MDT epoch to 2020).
     """
     #NOTE: check if the ration between station SLR and global mean changes significantly if using different timehorizons or SSP secnarios?
     if fingerprints_path.exists():
         cached = retry_transient_io(xr.open_dataset, fingerprints_path)
-        required_keys = {f"SLR_{int(t * 1000)}mm" for t in target_slr_m}
-        if required_keys.issubset(set(cached.data_vars)):
+        required_keys = {f"SLR_{int(t * 1000)}mm" for t in target_slr_m} | {"SLR_baseline_offset"}
+        if required_keys.issubset(set(cached.data_vars)) and cached.attrs.get("baseline_offset_m") == baseline_offset_m:
             logger.info("SLR fingerprints already exist — loading.")
             return cached
         cached.close()
@@ -198,8 +225,6 @@ def compute_slr_fingerprints(
 
     n_stations = int(ds_coastrp.dims["stations"])
     logger.info("Step 3: Computing SLR fingerprints for %d stations…", n_stations)
-
-    from shapely.geometry import Point
 
     ds_gauge, ds_grid = _load_slr_dataset(slr_dir, scenario, confidence)
     ds_gauge = ds_gauge.sel(years=2100, quantiles=0.5, drop=True)
@@ -213,36 +238,12 @@ def compute_slr_fingerprints(
         scenario, confidence, mean_ori_m,
     )
 
-    slr_base: list[float] = []
-    n_uniform_fallback = 0
-
-    for ii in range(n_stations):
-        p_lon = float(ds_coastrp.station_x_coordinate.values[ii])
-        p_lat = float(ds_coastrp.station_y_coordinate.values[ii])
-        pt = Point(p_lon, p_lat)
-
-        local = ds_combined.where(
-            (ds_combined.lon > p_lon - 1) & (ds_combined.lon < p_lon + 1)
-            & (ds_combined.lat > p_lat - 1) & (ds_combined.lat < p_lat + 1),
-            drop=True,
-        )
-        local = local.where(~np.isnan(local.sea_level_change), drop=True)
-
-        if len(local.locations) == 0:
-            slr_base.append(mean_ori_m)
-            n_uniform_fallback += 1
-        else:
-            slr_pts = [
-                Point(float(local.lon[i]), float(local.lat[i]))
-                for i in range(len(local.lon))
-            ]
-            idx = int(np.argmin([pt.distance(sp) for sp in slr_pts]))
-            slr_base.append(float(local.sea_level_change[idx].values) / 1000.0)
-
-        if ii % 2000 == 0:
-            logger.info("  SLR fingerprint: %d / %d stations processed", ii, n_stations)
-
+    station_lonlat = np.column_stack([ds_coastrp.station_x_coordinate.values, ds_coastrp.station_y_coordinate.values])
+    slr_base = nearest_slr_m(np.column_stack([ds_combined.lon.values, ds_combined.lat.values]),
+                             ds_combined.sea_level_change.values, station_lonlat)
     ds_combined.close()
+    n_uniform_fallback = int(np.isnan(slr_base).sum())
+    slr_base = np.where(np.isnan(slr_base), mean_ori_m, slr_base)
 
     if n_uniform_fallback:
         logger.warning(
@@ -270,6 +271,8 @@ def compute_slr_fingerprints(
         else:
             scaled = np.zeros(n_stations, dtype=np.float64)
         fp_vars[key] = (["stations"], scaled)
+    fp_vars["SLR_baseline_offset"] = (["stations"], slr_arr * baseline_offset_m / mean_ori_m if mean_ori_m > 0
+                                      else np.full(n_stations, baseline_offset_m))
 
     ds_fp = xr.Dataset(
         fp_vars,
@@ -277,7 +280,7 @@ def compute_slr_fingerprints(
             "station_x_coordinate": ds_coastrp.station_x_coordinate,
             "station_y_coordinate": ds_coastrp.station_y_coordinate,
         },
-        attrs=ds_base.attrs,
+        attrs={**ds_base.attrs, "baseline_offset_m": baseline_offset_m},
     )
     retry_transient_io(ds_fp.to_netcdf, fingerprints_path)
     logger.info("  SLR fingerprints saved → %s", fingerprints_path)
@@ -293,8 +296,9 @@ def combine_scenarios(
     nc_filename_template: str,
     nc_variable_template: str,
     mdt_arr: np.ndarray,
+    baseline_offset_arr: np.ndarray,
 ) -> None:
-    """Write total_wl = storm_tide(RP) + MDT + SLR_fingerprint per (RP, SLR) [m].
+    """Write total_wl = storm_tide(RP) + MDT + baseline_offset + SLR_fingerprint per (RP, SLR) [m].
 
     File and variable names come from boundary_conditions.nc_*_template, shared
     with extract_boundaries.py. MDT NaN -> 0 (no correction); output is NaN-free.
@@ -302,7 +306,7 @@ def combine_scenarios(
     """
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
 
-    mdt_arr = np.nan_to_num(mdt_arr.astype(np.float64), nan=0.0)
+    msl_2020 = np.nan_to_num(mdt_arr.astype(np.float64), nan=0.0) + baseline_offset_arr
 
     coord_template = {
         "station_x_coordinate": ds_coastrp.station_x_coordinate,
@@ -327,7 +331,7 @@ def combine_scenarios(
 
             rp_key = f"storm_tide_rp_{int(rp):04d}"
             storm_tide = ds_coastrp[rp_key].values.astype(np.float64)
-            total_wl = (storm_tide + mdt_arr) + slr_arr
+            total_wl = (storm_tide + msl_2020) + slr_arr
 
             ds_scen = xr.Dataset(
                 {variable: (["stations"], total_wl)},
@@ -358,7 +362,11 @@ def run(config: dict, force: bool = True) -> None:
     catalog = get_data_catalog(
         _REPO_ROOT / config["paths"]["hydromt_data_catalog"], root=config["paths"]["root"]
     )
-    coastrp_raw  = Path(catalog.get_source("coast_rp").path)
+    source = storm_tide_source(config)
+    levels_raw = storm_tide_levels_path(config, catalog.get_source("coast_rp").path)
+    if not levels_raw.exists():
+        raise FileNotFoundError(f"{levels_raw} missing: run `run_preparation.py storm_tide_product` first "
+                                "(or set boundary_conditions.storm_tide_source: coast_rp)")
 
     slr_projection = wl_cfg["slr_projection"]
     confidence   = wl_cfg.get("confidence_level", "medium")
@@ -376,9 +384,16 @@ def run(config: dict, force: bool = True) -> None:
             path.unlink()
             logger.info("  Deleted %s (force=True)", path.name)
 
-    preprocessed_path = proc_dir / "COAST-RP_preprocessed.nc"
+    # The scenario files keep their names across sources; the marker stops a resumed run
+    # (force=False) from mixing them.
+    marker = out_dir / STORM_TIDE_SOURCE_MARKER
+    if not force and marker.exists() and marker.read_text().strip() != source:
+        raise RuntimeError(f"{out_dir} holds {marker.read_text().strip()} levels, the config asks for {source}: "
+                           "rerun without --skip-existing")
+    preprocessed_path = proc_dir / ("COAST-RP_preprocessed.nc" if source == "coast_rp"
+                                    else "GFM_storm_tide_levels_preprocessed.nc")
     _maybe_delete(preprocessed_path)
-    ds_coastrp = preprocess_coastrp(coastrp_raw, preprocessed_path, coastrp_min_lat)
+    ds_coastrp = preprocess_coastrp(levels_raw, preprocessed_path, coastrp_min_lat)
 
     mdt_cfg = wl_cfg["mdt_correction"]
     mdt_path = Path(catalog.get_source("mdt_cnes_cls22").path)
@@ -397,8 +412,15 @@ def run(config: dict, force: bool = True) -> None:
     _maybe_delete(fingerprints_path)
     ds_slr = compute_slr_fingerprints(
         ds_coastrp, slr_dir, slr_projection, confidence,
-        target_slr_m, slr_base_path, fingerprints_path,
+        target_slr_m, float(wl_cfg["slr_baseline_offset_m"]), slr_base_path, fingerprints_path,
     )
+    baseline_offset_arr = ds_slr["SLR_baseline_offset"].values.astype(np.float64)
+    # The static level (boundaries.static_station_levels) reads MDT + offset from this file.
+    ds_mdt = ds_mdt.load()
+    ds_mdt.close()
+    ds_mdt["SLR_baseline_offset"] = (["stations"], baseline_offset_arr,
+                                     {"units": "m", "long_name": "regional SLR from the MDT epoch to 2020"})
+    retry_transient_io(ds_mdt.to_netcdf, mdt_mapped_path)
 
     nc_filename_template = wl_cfg["nc_filename_template"]
     nc_variable_template = wl_cfg["nc_variable_template"]
@@ -407,9 +429,10 @@ def run(config: dict, force: bool = True) -> None:
         for f in out_dir.glob(glob_pattern):
             f.unlink()
             logger.info("  Deleted %s (force=True)", f.name)
+    retry_transient_io(marker.write_text, source)
     combine_scenarios(
         ds_coastrp, ds_slr, out_dir, return_periods, target_slr_m,
-        nc_filename_template, nc_variable_template, mdt_arr=mdt_arr,
+        nc_filename_template, nc_variable_template, mdt_arr=mdt_arr, baseline_offset_arr=baseline_offset_arr,
     )
 
     logger.info("All done. Run the Snakemake workflow next.")

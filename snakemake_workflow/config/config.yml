@@ -33,7 +33,8 @@ preparation: # Used by: preparation/run_preparation.py
   build_deltadtm_vrt:  true   # build deltadtm.vrt / deltadtm_mask.vrt (relative source paths);
   # separate from sync_deltadtm so the mosaics can be rebuilt without re-downloading
   tile_generation:     true   # build the connectivity-first domain manifest -> tile_grid.path
-  boundary_conditions: true   # COAST-RP + SLR fingerprint scenario NetCDFs
+  storm_tide_product:  true   # storm-tide levels + hydrographs from GESLA, GTSM, FES, IBTrACS (~6 h)
+  boundary_conditions: true   # storm-tide levels + SLR fingerprint scenario NetCDFs
 
 # ── TILE GENERATION (connectivity-first domains) ──────────────────────────────
 # Algorithms: src/connectivity_tiling.py; design: docs/methods_01_tile_processing_and_waterlevels.md §3.
@@ -91,10 +92,25 @@ tile_split: # Used by: run_eikonal_dag.py to split OOM tiles and re-run Snakemak
 boundary_conditions:
   waterlevel_nc_dir: "{processed_inputs_dir}/WL_scenarios"
 
+  # Storm-tide levels (per station and RP, local MSL) and hydrographs for every model: eikonal
+  # seeds and static level, duration correction B, SFINCS forcing. Both sources share COAST-RP's
+  # stations, so MDT, SLR fingerprints and the station search are the same.
+  #   gfm_product: GTSM-ERA5 skew surges on the FES tide, scaled by the gauge surge ratio, plus
+  #     COAST-RP's TC part; one hydrograph per RP (run_preparation.py storm_tide_product, which
+  #     writes storm_tide_product_dir; boundary_test/INPUT_ANALYSIS.md §8.4-8.5)
+  #   coast_rp: COAST-RP levels (data catalog `coast_rp`) and COAST-HG's RP100 hydrograph for
+  #     every RP (simulation.flooding.duration_correction.coast_hg_path)
+  storm_tide_source: "gfm_product"
+  storm_tide_product_dir: "{processed_inputs_dir}/storm_tide_product"
+
   # IPCC AR6 regional SLR projection (SSP-RCP code) and confidence level used to
   # build the SLR fingerprints. Not an SLR level: those are waterlevel_names below.
   slr_projection: "ssp245" # options: ssp126/ssp245/ssp585
   confidence_level: "medium" # options: low/medium
+  # AR6 global-mean SLR at 2020 over its 1995-2014 baseline (median, all SSPs), regionalised with
+  # the fingerprint and added to every level: SLR_0 is the 2020 sea level, as the analysis SLR axis
+  # (extract_slr_trajectories.py, relative to 2020) assumes. MDT is a 1993-2012 mean (~2 y earlier).
+  slr_baseline_offset_m: 0.049
   coastrp_min_lat: -60  # exclude antarctic stations (no exposure)
 
   # MDT is ADDED to COAST-RP storm-tide levels, re-referencing them from local MSL to the
@@ -141,6 +157,21 @@ boundary_conditions:
   # neighbour; a precompute from frozen geometry was rejected (overlaps span up to hundreds of km).
   # boundaries.sample_waterlevel_at_points is the point-lookup primitive for it.
 
+# ── STORM-TIDE PRODUCT (storm_tide_source: gfm_product) ───────────────────────
+# Used by: preparation/prepare_storm_tide_product.py. Raw inputs; COAST-RP and FES2014 come from
+# the data catalog (`coast_rp`, `fes2014_ocean_tide`). Intermediates and the two product files
+# go to boundary_conditions.storm_tide_product_dir. Constants: src/storm_tide_product.py.
+storm_tide_product:
+  gesla_dir: "{root}/inputs/GESLA4.1_ALL"           # GESLA-4.1 data files + GESLA4-1_ALL.csv
+  gtsm_dir: "{root}/inputs/GTSM_storm_tide_hourly"  # GTSM-ERA5 storm_surge_residual/*.nc, hourly
+  fes2022_dir: "{root}/inputs/fes2022b/ocean_tide_extrapolated"  # *.nc.xz, decompressed once
+  # NOAA IBTrACS v04r01; read only by the cyclone-mask test (boundary_test/open_guesses.py)
+  ibtracs_path: "{root}/inputs/IBTrACS/ibtracs.ALL.list.v04r01.csv"
+  # ~30 GB derived from the raw inputs: GTSM series regrouped per station (18 GB), FES2022
+  # decompressed (5 GB), GESLA records (4 GB), tide bases; shared with the HPC.
+  cache_dir: "{processed_inputs_dir}/storm_tide_product/cache"
+  workers: 4
+
 # ── RASTER FORMAT ──────────────────────────────────────────────────────────────
 raster_format:
   driver: "GTiff"
@@ -151,8 +182,10 @@ raster_format:
 
 # ── FLOOD SIMULATION ──────────────────────────────────────────────────────────
 simulation: # Used by: preprocessing rules
-  model_outputs: "{root}/model_outputs"  # per-tile "{tile_id}/inputs" and "{tile_id}/results"
-  preprocessing_inputs_dir: null # when set, per-tile preprocessing inputs are read/written there instead of model_outputs
+  # Results of two-component propagation with correction B; the attenuated results stay in
+  # {root}/model_outputs, which also keeps the per-tile inputs (preprocessing_inputs_dir).
+  model_outputs: "{root}/model_outputs_v2"  # per-tile "{tile_id}/results"
+  preprocessing_inputs_dir: "{root}/model_outputs" # when set, per-tile preprocessing inputs are read/written there instead of model_outputs
   dem_source_manifest: null # optional per-tile dem_source override CSV (tile_id,dem_source); local-input validation (TODO.md)
 
   # Solver: src/flood_model.py flood_depth_dense (round-based, capped at flooding.max_rounds).
@@ -170,17 +203,24 @@ simulation: # Used by: preprocessing rules
 
   flooding:
     resolution: 30       # output raster resolution in metres
-    knn: 15              # number of nearest water level stations used
-    # Default Manning's n roughness (÷ 100) for cells with no land use class.
+    # Station interpolation of every water level onto the tile (coastline seeds and the static
+    # level), for either storm_tide_source: inverse-distance weighting over the knn nearest
+    # stations, weights distance^-idw_power. Leave-one-out at 22,670 stations, RP100 MAE: k 5 /
+    # power 3 5.7 cm, k 15 / power 2 7.0 cm (boundary_test/INPUT_ANALYSIS.md §8.5).
+    knn: 5
+    idw_power: 3
+    # "friction" = the land-cover-indexed attenuation rate (water-level loss per metre), with
+    # class values n / 100 from the land-cover roughness table (docs/methods_02 §2.2).
+    # Rate for cells with no land use class.
     default_friction: 0.002
-    # Runtime multiplier on the decoded friction raster (n/100), not baked into compute_friction.py.
+    # Runtime multiplier on the decoded attenuation rate, not baked into compute_friction.py.
     # Not a free tuning knob: friction is a per-metre rate but src/eikonal.py uses it as the cost
     # of one grid step, so the tile's own pixel_size_m (grid step in m) is a required unit
     # correction, applied in eikonal_runner.py as friction_scale_factor x pixel_size_m. This
-    # constant is the bare SFINCS-calibrated factor: 0.4 x 30 (DeltaDTM grid step) = 12.0
-    # (1000 tiles: CSI 0.743, bias 1.05 vs CSI 0.732, bias 1.21 at 0.4 x 30 x 9/12 = 9.0). See
-    # docs/methods_02_flood_depth.md §2.1.
-    friction_scale_factor: 0.4
+    # constant is the bare SFINCS-calibrated factor: 0.25 x 30 (DeltaDTM grid step) = 7.5 with
+    # duration_correction on (498 tiles: CSI 0.763, bias 1.08 vs CSI 0.757, bias 0.98 at 0.3 x 30
+    # = 9.0); without it the optimum is 0.4 x 30 = 12.0. See docs/methods_02_flood_depth.md §2.2.
+    friction_scale_factor: 0.25
 
     # Max rounds (4 directional sweeps each, early exit on convergence) per solve, also per inner
     # solve under obstacle_coupling. 40: sweep-budget study (docs/methods_03_calibration_sensitivity.md
@@ -203,6 +243,27 @@ simulation: # Used by: preprocessing rules
       max_outer_iterations: 4
       outer_convergence_pct: 0.01  # stop early once < this % of the tile's cells are newly blocked in an outer iteration
 
+    # SLR propagation (flood_model.flood_depth_dense). two_component: the static level MDT + SLR
+    # fingerprint (no tide) spreads over coast-connected land below it without attenuation and
+    # acts as sea; only the storm tide on top attenuates inland of that new shore.
+    # attenuated: the total level (storm tide + MDT + SLR) attenuates from the coastline.
+    slr_propagation: "two_component"
+
+    # Correction B (event_volume.DurationCorrection): where the first solve's water stands
+    # above the spill level (the sill behind a ridge, else the ground) for only T hours of the
+    # COAST-HG storm-tide peak, the attenuation rate is multiplied by (t_ref_h / T)^alpha,
+    # capped at max_multiplier with no lower clip, and the tile is solved again (~2x runtime).
+    # m ∝ T^-alpha, alpha 1: 1-D SFINCS refit (boundary_test/duration_refit.py); t_ref_h only
+    # sets where m = 1 and is absorbed into friction_scale_factor.
+    # The hydrographs come from boundary_conditions.storm_tide_source: the product's per-RP file,
+    # or coast_hg_path (COAST-HG, RP100 only, its shape used for every RP and SLR).
+    duration_correction:
+      enabled: true
+      alpha: 1.0
+      t_ref_h: 12.0
+      max_multiplier: 10.0
+      coast_hg_path: "{root}/inputs/COAST_HG/COAST-HG_RP100.nc"
+
   # Peak-memory estimate for run_eikonal's `resources: mem_mb` (eikonal_runner.estimate_eikonal_mem_mb).
   # Calibrated on 7 tiles, deliberately generous; retune from production telemetry.
   eikonal_mem_estimate:
@@ -219,7 +280,7 @@ simulation: # Used by: preprocessing rules
 hpc:
   n_nodes: 40                                        # shared budget across
   # every batch per wave, split evenly by tile count
-  jobs_dir: "{root}/model_outputs/hpc_jobs"           # generated sbatch scripts, resolved_config.yml, submit_waves.sh, logs/
+  jobs_dir: "{root}/model_outputs_v2/hpc_jobs"           # generated sbatch scripts, resolved_config.yml, submit_waves.sh, logs/
   single_preprocess_job: false # true: generate_hpc_preprocess_job.py writes one job for all tiles instead of node batches
   # Site SLURM values (partition, mem, env_activate_cmd, wave_tiers, *_sbatch) are left empty here:
   # they come from config_hpc.yml (copy config_hpc.example.yml), which the HPC generators require.
@@ -259,7 +320,7 @@ hpc:
 
 postprocessing:
   # Root directory for combined (multi-tile) rasters, VRTs and plots.
-  merged_outputs: "{root}/merged_results"
+  merged_outputs: "{root}/merged_results_v2"
   chunk_size_deg: 5 # spatial chunk size (degrees) for merging
   block_size: 2048 # side length (pixels) of the write blocks inside each chunk
 
@@ -277,6 +338,10 @@ postprocessing:
 protection: # Used by: analysis/compute_exposure_analysis.py
   baseline_waterlevel_name: "SLR_0" # SLR level at which the protection standard holds
   default_rp: 5 # minimum protection level assumed where no FLOPROS protection standards are available
+  # flood_fraction: a defence holds where the event floods no more of the cell than the design event.
+  # water_level: it holds where the event water level at the nearest COAST-RP station is <= the design level.
+  rule: "flood_fraction"
+  minimum_rp: 2 # water_level rule only: lowest design RP, also for cells without a geogunit
 
 exposure: # Used by: scripts/prepare_exposure_grid_chunk.py
   exceedance_threshold_m: 0.10 # Minimum flood depth (m) for a fine pixel to count as "flooded"
@@ -333,7 +398,7 @@ analysis: # Used by: analysis/run_analysis.py
 
 # ── VISUALISATION ─────────────────────────────────────────────────────────────
 visualization:
-  output_dir: "{root}/figures"
+  output_dir: "{root}/figures_v2"
 
   # ── Burning-ember ────────────────────────────────────────
   # The growth matrices span a wider space than the ember figures show, so pathways can be
@@ -467,7 +532,7 @@ visualization:
 validation:
   benchmark_catalog: "snakemake_workflow/config/data_catalog_validation.yml"
   benchmark_root: "{root}/inputs/validation" # NOT the GFM catalog's own {root}
-  output_dir: "{root}/validation"
+  output_dir: "{root}/validation_v2"
   return_period: "RP100" # scalar RP: "RP100" wildcard form (see boundary_conditions.return_periods)
   waterlevel_name: "SLR_0"
   primary_threshold_m: 0.01 # model wet-cell depth threshold for scoring. Deliberately not
@@ -491,7 +556,7 @@ validation:
   # only by validate_country_national_coverage to clip a region bbox to the country's own cells, so
   # neighbouring-country flooding is not scored as false positive
   iso_lookup_source: "flopros_protection_standards" # data_catalog_gfm.yml key - geogunit_107-ID-indexed, "ISO" column
-  flood_totals_dir: "{root}/merged_results/exposure/flood_totals" # flood_totals_{ISO}.csv from
+  flood_totals_dir: "{root}/merged_results_v2/exposure/flood_totals" # flood_totals_{ISO}.csv from
   # analysis/compute_flood_totals.py, read for model_total_wet_km2. Must match run_analysis.py's
   # exposure output dir + "/flood_totals" if its --out-dir is overridden
   plots:

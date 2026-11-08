@@ -1,0 +1,27 @@
+Median storm-tide profile of the annual maxima, by empirical return period (RP), at the quality tide
+gauges. Every event is cut out of the record with +-72 h around its peak (+-48 h shown), expressed
+relative to local mean sea level (horizontal line at 0) and divided by its peak, so each event
+starts at 1 at hour 0. Each line is the median over all events of a class at every hour. Rows: (a,
+b) GESLA gauge records, (c, d) GTSM (surge + harmonic tide) at the paired station, 1979-2024.
+Columns: gauges with a spring tidal range of 0-1 m (a, c) and 2-4 m (b, d). Blue shades: RP classes
+from light (RP 0-2 y) to dark (RP 20-50 y). Dashed green: the COAST-HG spring-tide RP100 hydrograph
+at the paired stations (201 / 159 sites), the shape the pipeline uses for every RP.
+
+Empirical RP: each event's rank among its site's annual maxima, RP = (n + 1) / rank with n the
+number of complete years. With 30-46 years of record the largest RP is about 45, so the top class
+holds RP 20-~45 events. GESLA events per class (0-1 m / 2-4 m range): RP 0-2 y: 3117 / 2438; RP 2-5
+y: 1867 / 1455; RP 5-10 y: 626 / 492; RP 10-20 y: 300 / 238; RP 20-50 y: 225 / 170.
+
+Why the curves look so smooth and aligned: the peak sits at hour 0 and equals 1 by construction, the
+median over hundreds to thousands of events removes the individual noise, and the semidiurnal tide
+(period 12.42 h) puts the neighbouring high waters of nearly every event at the same hours. The
+event-to-event spread around these medians is considerable but not drawn.
+
+Reading: rarer events are more surge-dominated, so their neighbouring high waters are lower relative
+to the peak, most clearly in the microtidal class (a, c), where the next-day high water falls from
+about 0.8 to 0.55 of the peak. On microtidal coasts COAST-HG's next-day high water lies within the
+observed range, but between the high waters it drains to about -0.3 of the peak where observed
+events stay near mean sea level. On meso- and macrotidal coasts (b, d) COAST-HG's neighbouring high
+waters are lower than every observed class. Both mean a shorter time near the peak, i.e. a shorter T
+for the eikonal duration correction. Test 7 (fig09) traces the meso- and macrotidal deficit to
+COAST-HG's tide window, not to its surge.

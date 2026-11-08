@@ -3,8 +3,9 @@
 Without them a lagoon, a bay behind a shortcut or an archipelago the line gave
 up on is forced only from line nodes further out. Each station is snapped to the
 nearest open-water pixel of the native mask; level = its own MDT-corrected
-COAST-RP RP100 level; hydrograph = nearest COAST-HG station in the same
-8-connected DeltaDTM ocean body over the production station search box.
+RP100 level; hydrograph = nearest hydrograph station (COAST-HG or the storm-tide product,
+build_line_forcing.read_hydrographs) in the same 8-connected DeltaDTM ocean body over the
+production station search box.
 build_sfincs_tile.py rings each point's small inactive core with boundary cells.
 """
 
@@ -26,7 +27,7 @@ import build_station_boundary_lines as bsl  # noqa: E402
 
 STATION_OCEAN_TOL_M = 2000.0   # station -> nearest open-water pixel of the tile's native mask
 LINE_CLEARANCE_M = 1000.0      # stations this close to the boundary line are already forced by it
-SAME_POSITION_DEG = 0.01       # a COAST-HG station this close counts as at the station itself
+SAME_POSITION_DEG = 0.01       # a hydrograph station this close counts as at the station itself
 SEARCH_BUFFER_DEG, SEARCH_MIN_SIZE_DEG = 1.0, 2.0  # production station search box (config boundary_conditions)
 
 
@@ -69,12 +70,12 @@ def _label_at(labels, tr, lon, lat, r_px: int) -> int:
 
 
 def interior_points(lines_gpkg: Path, tile_dir: Path, root: Path, hg_xy: np.ndarray) -> gpd.GeoDataFrame:
-    """Return the interior forcing points (EPSG:4326) with their matched COAST-HG station.
+    """Return the interior forcing points (EPSG:4326) with their matched hydrograph station.
 
     Skips stations in the line's inactive (sea-side) faces or within
-    LINE_CLEARANCE_M of the line. `hg_xy` is COAST-HG (lon, lat), shape (n, 2).
+    LINE_CLEARANCE_M of the line. `hg_xy` is the hydrograph stations' (lon, lat), shape (n, 2).
     """
-    cols = ["station", "station_index", "rp100_level_m", "coast_hg_station", "coast_hg_dist_deg", "kind"]
+    cols = ["station", "station_index", "rp100_level_m", "hydrograph_station", "hydrograph_dist_deg", "kind"]
     empty = gpd.GeoDataFrame({c: [] for c in cols}, geometry=[], crs="EPSG:4326")
     st = gpd.read_file(lines_gpkg, layer="stations")
     tile = gpd.read_file(tile_dir / "inputs" / "tile_geometry.gpkg").to_crs("EPSG:4326")
@@ -102,7 +103,7 @@ def interior_points(lines_gpkg: Path, tile_dir: Path, root: Path, hg_xy: np.ndar
         if gpd.GeoSeries([pt], crs="EPSG:4326").to_crs(utm).iloc[0].distance(line_utm) < LINE_CLEARANCE_M:
             continue
         d, j = tree.query([r.geometry.x, r.geometry.y])
-        if d > SAME_POSITION_DEG:  # COAST-RP and COAST-HG share most positions; else match by water body
+        if d > SAME_POSITION_DEG:  # level and hydrograph stations share most positions; else match by water body
             if labels is None:
                 labels, ltr = _components(root, tile)
             r_px = int(np.ceil(STATION_OCEAN_TOL_M / (abs(ltr.e) * 110570.0)))
@@ -111,11 +112,11 @@ def interior_points(lines_gpkg: Path, tile_dir: Path, root: Path, hg_xy: np.ndar
             inbox = np.nonzero((hg_xy[:, 0] >= b[0]) & (hg_xy[:, 0] <= b[2]) & (hg_xy[:, 1] >= b[1]) & (hg_xy[:, 1] <= b[3]))[0]
             same = [k for k in inbox if own and _label_at(labels, ltr, hg_xy[k, 0], hg_xy[k, 1], r_px) == own]
             if not same:
-                print(f"  station {r['station']}: no hydrologically connected COAST-HG station in the search box - skipped")
+                print(f"  station {r['station']}: no hydrologically connected hydrograph station in the search box - skipped")
                 continue
             dd = np.hypot(hg_xy[same, 0] - r.geometry.x, hg_xy[same, 1] - r.geometry.y)
             j, d = int(same[int(np.argmin(dd))]), float(dd.min())
         rows.append({"station": int(r["station"]), "station_index": int(r["station_index"]),
-                     "rp100_level_m": float(r["rp100_level_m"]), "coast_hg_station": int(j),
-                     "coast_hg_dist_deg": round(float(d), 4), "kind": "interior", "geometry": pt})
+                     "rp100_level_m": float(r["rp100_level_m"]), "hydrograph_station": int(j),
+                     "hydrograph_dist_deg": round(float(d), 4), "kind": "interior", "geometry": pt})
     return gpd.GeoDataFrame(rows, crs="EPSG:4326") if rows else empty

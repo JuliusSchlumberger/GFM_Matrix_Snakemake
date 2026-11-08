@@ -5,3 +5,11 @@ population_growth:
 visualization:
   growth_rates: {max: 1.5, min: -0.5}
   slr_interp: {max_mm: 1500, n_points: 100}
+simulation:
+  flooding:  # computed with attenuated SLR propagation and no duration correction (config.yml: two_component, B on)
+    slr_propagation: attenuated
+    duration_correction: {enabled: false}
+    knn: 15  # COAST-RP seeds over the 15 nearest stations, inverse-distance squared
+    idw_power: 2
+boundary_conditions:  # computed with COAST-RP levels and COAST-HG hydrographs
+  storm_tide_source: coast_rp

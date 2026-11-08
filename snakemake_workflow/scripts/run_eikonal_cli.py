@@ -19,6 +19,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
+from boundaries import static_level_inputs, storm_tide_hydrograph_path  # noqa: E402
 from eikonal_runner import log_run_timing, run_tile_scenario  # noqa: E402
 from config_utils import path_ready  # noqa: E402
 
@@ -85,6 +86,8 @@ def main() -> None:
         # Staged to node-local scratch: GDAL/OGR's SQLite lock on a gpkg can
         # hang indefinitely on the shared data root from a cluster compute node.
         stage_boundaries=True,
+        static_level_inputs=static_level_inputs(config),
+        hydrograph_path=str(storm_tide_hydrograph_path(config)),
     )
     # elapsed = this whole invocation.
     if result["outcome"] == "solved":

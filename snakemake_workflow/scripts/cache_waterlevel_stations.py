@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from boundaries import load_waterlevel_stations  # noqa: E402
+from boundaries import check_scenario_source, load_waterlevel_stations  # noqa: E402
 from config_utils import retry_transient_io  # noqa: E402
 
 bc_cfg = snakemake.params.bc_cfg  # noqa: F821
@@ -19,6 +19,7 @@ variable = bc_cfg["nc_variable_template"].format(
     return_period=return_period, waterlevel_name=waterlevel_name
 )
 nc_path = Path(bc_cfg["waterlevel_nc_dir"]) / nc_filename
+check_scenario_source(bc_cfg["waterlevel_nc_dir"], bc_cfg["storm_tide_source"])
 
 stations = load_waterlevel_stations(
     nc_path,

@@ -52,13 +52,13 @@ def main() -> None:
 
     cfg = load_config(args.config)
     tile_grid = load_tile_grid(cfg["tile_grid"]["path"])
-    model_outputs = Path(cfg["simulation"]["model_outputs"])
+    inputs_root = Path(cfg["simulation"].get("preprocessing_inputs_dir") or cfg["simulation"]["model_outputs"])
     mask_vrt = Path(cfg["paths"]["root"]) / "inputs" / "DeltaDTM_masks" / "deltadtm_mask.vrt"
 
     frames = []
     missing = []
     for tid in sorted(tile_grid["tile_id"].astype(int)):
-        bpath = model_outputs / str(tid) / "inputs" / f"boundaries_{args.return_period}_{args.waterlevel_name}.gpkg"
+        bpath = inputs_root / str(tid) / "inputs" / f"boundaries_{args.return_period}_{args.waterlevel_name}.gpkg"
         if not bpath.exists():
             missing.append(tid)
             continue

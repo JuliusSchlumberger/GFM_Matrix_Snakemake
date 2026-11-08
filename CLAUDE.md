@@ -74,6 +74,8 @@ Never write to, move, or delete anything under `<data_root>` or the model output
   (Snakemake) and `run_eikonal_cli.py` (HPC) are thin wrappers - change behaviour there, not in them.
 - Docstrings and comments follow the documentation standard below.
 - Stale code and one-off diagnostics are deleted (git history keeps them), not archived.
+- Open questions, deferred decisions and work still to tackle go to `TODO.md` by default,
+  not only into chat.
 
 ## Documentation standard
 

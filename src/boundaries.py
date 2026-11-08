@@ -153,6 +153,106 @@ def save_boundary_points(stations: gpd.GeoDataFrame, output_path: str | Path, co
     retry_transient_io(stations.to_file, output_path, driver="GPKG")
 
 
+# Written by preparation/prepare_boundary_conditions.py into paths.processed_inputs_dir.
+MDT_STATIONS_FILENAME = "MDT_mapped_on_coastal_points.nc"
+# Written by preparation/prepare_storm_tide_product.py into boundary_conditions.storm_tide_product_dir.
+PRODUCT_LEVELS_FILENAME = "GFM_storm_tide_levels.nc"
+PRODUCT_HYDROGRAPHS_FILENAME = "GFM_storm_tide_hydrographs.nc"
+STORM_TIDE_SOURCES = ("gfm_product", "coast_rp")
+# Written by prepare_boundary_conditions.py next to the scenario NetCDFs: the source they hold.
+STORM_TIDE_SOURCE_MARKER = "storm_tide_source.txt"
+
+
+def storm_tide_source(config: dict) -> str:
+    source = config["boundary_conditions"]["storm_tide_source"]
+    if source not in STORM_TIDE_SOURCES:
+        raise ValueError(f"boundary_conditions.storm_tide_source must be one of {STORM_TIDE_SOURCES}, not {source!r}")
+    return source
+
+
+def check_scenario_source(waterlevel_nc_dir: str | Path, source: str) -> None:
+    """Raise when the scenario NetCDFs in `waterlevel_nc_dir` were built from another source.
+
+    One processed_inputs tree serves every config of a data root, so a config pinned to the
+    other source must not silently read them.
+    """
+    marker = Path(waterlevel_nc_dir) / STORM_TIDE_SOURCE_MARKER
+    held = marker.read_text().strip() if marker.exists() else "coast_rp"
+    if held != source:
+        raise RuntimeError(f"{waterlevel_nc_dir} holds {held} levels, the config asks for {source}: run "
+                           "`run_preparation.py boundary_conditions` with this config, or use the matching source")
+
+
+def storm_tide_levels_path(config: dict, coast_rp_path: str | Path) -> Path:
+    """Return the RP-level NetCDF (COAST-RP layout) of `boundary_conditions.storm_tide_source`."""
+    if storm_tide_source(config) == "coast_rp":
+        return Path(coast_rp_path)
+    return Path(config["boundary_conditions"]["storm_tide_product_dir"]) / PRODUCT_LEVELS_FILENAME
+
+
+def storm_tide_hydrograph_path(config: dict) -> Path:
+    """Return the hydrograph NetCDF of `boundary_conditions.storm_tide_source`.
+
+    gfm_product: `storm_tide_hydrograph` (stations, return_period, time); coast_rp: COAST-HG,
+    one RP100 hydrograph per station (`event_volume.load_coast_hg` reads both).
+    """
+    if storm_tide_source(config) == "coast_rp":
+        return Path(config["simulation"]["flooding"]["duration_correction"]["coast_hg_path"])
+    return Path(config["boundary_conditions"]["storm_tide_product_dir"]) / PRODUCT_HYDROGRAPHS_FILENAME
+
+
+def static_level_inputs(config: dict) -> dict:
+    """Return the `static_station_levels` file arguments (all but RP and SLR) for a config."""
+    bc = config["boundary_conditions"]
+    return {
+        "waterlevel_nc_dir": bc["waterlevel_nc_dir"],
+        "nc_filename_template": bc["nc_filename_template"],
+        "nc_variable_template": bc["nc_variable_template"],
+        "mdt_path": str(Path(config["paths"]["processed_inputs_dir"]) / MDT_STATIONS_FILENAME),
+    }
+
+
+def static_station_levels(
+    waterlevel_nc_dir: str | Path,
+    nc_filename_template: str,
+    nc_variable_template: str,
+    mdt_path: str | Path,
+    return_period: str,
+    waterlevel_name: str,
+    baseline_waterlevel_name: str = "SLR_0",
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return (lonlat, level) of the static sea level MDT + 2020 offset + SLR fingerprint per station.
+
+    The fingerprint is total(RP, SLR) - total(RP, baseline), so storm tide and the 2020 offset
+    cancel in it; the offset is added back from the MDT station file. MDT NaN -> 0 as in
+    prepare_boundary_conditions.combine_scenarios.
+    Metres in the DEM datum (GOCO06s geoid).
+    """
+    def _read(name: str) -> tuple[xr.Dataset, str]:
+        fmt = {"return_period": return_period, "waterlevel_name": name}
+        path = Path(waterlevel_nc_dir) / nc_filename_template.format(**fmt)
+        ds = retry_transient_io(xr.open_dataset, path)
+        return ds, nc_variable_template.format(**fmt)
+
+    ds_slr, var_slr = _read(waterlevel_name)
+    ds_base, var_base = _read(baseline_waterlevel_name)
+    ds_mdt = retry_transient_io(xr.open_dataset, mdt_path)
+    try:
+        lonlat = np.column_stack([ds_slr["station_x_coordinate"].values, ds_slr["station_y_coordinate"].values])
+        for other in (ds_base, ds_mdt):
+            other_lonlat = np.column_stack([other["station_x_coordinate"].values, other["station_y_coordinate"].values])
+            if not np.allclose(lonlat, other_lonlat):
+                raise ValueError("static_station_levels: station order differs between water-level and MDT files")
+        fingerprint = ds_slr[var_slr].values.astype(np.float64) - ds_base[var_base].values.astype(np.float64)
+        if "SLR_baseline_offset" not in ds_mdt:
+            raise KeyError(f"{mdt_path} has no SLR_baseline_offset: rerun `run_preparation.py boundary_conditions`")
+        mdt = np.nan_to_num(ds_mdt["MDT"].values.astype(np.float64), nan=0.0) + ds_mdt["SLR_baseline_offset"].values
+    finally:
+        for ds in (ds_slr, ds_base, ds_mdt):
+            ds.close()
+    return lonlat, mdt + fingerprint
+
+
 def collect_neighbor_wave_seeds(
     target_dem_path: str | Path,
     source_paths: list[tuple[str | Path, str | Path, str | Path]],

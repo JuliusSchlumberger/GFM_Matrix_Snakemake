@@ -1,0 +1,13 @@
+Jumps in the GTSM-ERA5 surge residual at the 22,670 stations north of 60 S (1979-2024, hourly). (a)
+Each station's largest change from one hour to the next. (b) How many stations a QA rule "at least N
+jumps above X m" would send to COAST-RP's levels; production uses 5 jumps above 2 m (bold). (c)
+Stations with any jump above 1 m, coloured by their number, and the stations on COAST-RP levels
+(orange rings).
+
+Reading: the median station's largest jump is 17 cm and 219 stations ever change by more than 1 m
+within an hour. Above 2 m the jumps are few and clustered on the Arafura coast of New Guinea, where
+they reach 13 m, far beyond any storm. With a 2 m threshold, 3 to 5 required jumps pick the same 15
+stations, so the result does not hang on the exact count; despiking (hours more than 2 m from their
+5-h median) cleans the 7 with only one or two. A 1 m threshold would also take real fast surges:
+outside the Arafura cluster, the stations with 20 or more jumps above 1 m are in the southern North
+Sea and the German Bight, where storm surges rise by a metre within an hour.

@@ -1,0 +1,14 @@
+Median storm-tide hydrographs over the quality sites, normalised by their peak and centred on it
+(local mean sea level = 0): (a) spring range 0-1 m at RP 10, (b) 0-1 m at RP 100, (c) 2-4 m at RP
+10, (d) 2-4 m at RP 100. Black: the gauges' own annual maxima of the matching empirical-RP window
+(median profile per site, then median over sites; at RP 100 the gauge's RP 20-45 events). Blue: the
+generator with smoothed surge (as in fig10). Orange: the HGRAPHER port. Green dashed: COAST-HG
+(RP100 only). How each is built is described with fig10.
+
+Reading: on the 2-4 m coasts the generator's neighbouring high waters lie on the gauges' (c, d),
+where the HGRAPHER port and COAST-HG are 0.1-0.15 of the peak lower because their tide window is an
+MHWS-level spring tide (test 7). On microtidal coasts (a, b) the peaks and neighbouring high waters
+match, but all synthetic hydrographs drain lower between the high waters than the gauges, the
+generator to about -0.15 of the peak and COAST-HG to -0.3, where the observed events stay near mean
+sea level: the observed surge tail that holds the level up 30-48 h from the peak (fig09) is not in
+their shapes.

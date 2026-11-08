@@ -1,0 +1,12 @@
+Hydrographs whose maximum is not at time 0, the high water the generator's surge is centred on. (a)
+Their share by return period and tidal type (form factor (K1 + O1) / (M2 + S2) of the FES tide). (b)
+Where the maximum falls instead. (c) How far it exceeds the level at time 0. Every maximum equals
+the RP level, which is what the SFINCS forcing and correction B use.
+
+Reading: 4.1% of all hydrographs and 3.3% at RP100 peak elsewhere, most often at RP2 in semidiurnal
+tides. In 64% the maximum is one day away (+-24.8 h), in 19% one tidal cycle (+-12.4 h), in 8%
+within the hour around time 0: the window's centre high water is the median tide at the annual
+maxima, but a neighbouring high water (diurnal inequality, spring-neap cycle) is higher, and the
+slowly varying surge lifts it above the centre. Half of them exceed the time-0 level by less than
+1.6 cm, 99% by less than 20 cm. The event stays physical: the storm's maximum lands on the highest
+high water within it, and the maximum is the RP level in every case.

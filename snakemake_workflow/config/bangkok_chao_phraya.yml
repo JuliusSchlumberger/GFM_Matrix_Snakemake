@@ -11,6 +11,7 @@ tile_grid:
 # Isolated output paths, separate from production.
 simulation:
   model_outputs: "{root}/bangkok_chao_phraya/model_outputs"
+  preprocessing_inputs_dir: null  # own per-tile inputs under model_outputs
 postprocessing:
   merged_outputs: "{root}/bangkok_chao_phraya/merged_results"
 visualization:

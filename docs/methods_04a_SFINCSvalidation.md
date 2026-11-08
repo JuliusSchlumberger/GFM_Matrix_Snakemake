@@ -27,7 +27,7 @@ Earlier SFINCS set-ups forced the model along the open-sea tile edge. Because of
 4. Line ends inside the tile are extended to the tile edge (along the coast where not rugged), lines are untangled and shortcut where the coast-following path is much longer than a land-clearing straight link, and open-sea stretches of the tile edge that no line closes off become boundary themselves.
 5. The lines split the tile: faces that are mostly ocean become **inactive** (the sea side), the rest stays active.
 
-**Suitability.** A tile's line is *suitable* when the split has no conflict - at most 2 % of the tile's land falls in inactive faces, at most 50 % of its ocean stays active (the sea is closed off) and no line ends inside the tile - and at least 2 stations on the line have a COAST-HG hydrograph within 0.5°. Conflicting tiles are rebuilt "straight-first" once; if still conflicting they are excluded. Every tile gets an inspection figure in `boundary_lines/figures/` (suitable) or `figures_unsuitable/`.
+**Suitability.** A tile's line is *suitable* when the split has no conflict - at most 2 % of the tile's land falls in inactive faces, at most 50 % of its ocean stays active (the sea is closed off) and no line ends inside the tile - and at least 2 stations on the line have a hydrograph within 0.5°. Conflicting tiles are rebuilt "straight-first" once; if still conflicting they are excluded. Every tile gets an inspection figure in `boundary_lines/figures/` (suitable) or `figures_unsuitable/`.
 
 ## Tile selection
 
@@ -59,7 +59,7 @@ Coverage gaps in the DeltaDTM validity mask default to land - correct for a data
 
 ### Boundary forcing
 
-`build_line_forcing.py` places one forcing point per station used on the line, at the station's offshore node. Each point gets the average-tide hydrograph of the nearest COAST-HG station (≤ 0.5°), shifted so that its peak equals the station's MDT-corrected COAST-RP RP100 level (`offset = level - hydrograph max`, added to the whole series). SFINCS interpolates between neighbouring points along the boundary. The hydrograph is truncated from ~149 h to the 40-110 h window around the storm peak.
+`build_line_forcing.py` places one forcing point per station used on the line, at the station's offshore node. Each point gets the RP100 hydrograph of the nearest hydrograph station (≤ 0.5°), shifted so that its peak equals the station's MDT-corrected RP100 level (`offset = level - hydrograph max`, added to the whole series). Levels and hydrographs follow `boundary_conditions.storm_tide_source`: the storm-tide product's levels and per-RP hydrographs (`gfm_product`), or COAST-RP's levels with COAST-HG's average-tide hydrograph (`coast_rp`). The product's hydrographs are cut to COAST-HG's ~149 h axis with the peak at 74.5 h. SFINCS interpolates between neighbouring points along the boundary. The hydrograph is truncated to the 40-110 h window around the storm peak.
 
 ### Model assembly
 

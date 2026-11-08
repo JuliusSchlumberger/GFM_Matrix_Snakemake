@@ -14,10 +14,14 @@ from typing import Any
 import geopandas as gpd
 import numpy as np
 import rasterio
+import rasterio.crs
+import rasterio.transform
+import rasterio.warp
 
-from boundaries import collect_neighbor_wave_seeds
+from boundaries import collect_neighbor_wave_seeds, static_station_levels
 from config_utils import path_ready, retry_transient_io
-from flood_model import WATERLEVEL_EPSILON_M, flood_depth_dense
+from event_volume import DurationCorrection, load_coast_hg
+from flood_model import WATERLEVEL_EPSILON_M, flood_depth_dense, static_level_grid
 from rasters import (
     decode_dem_cm,
     decode_friction_int16,
@@ -37,6 +41,7 @@ def run_eikonal_python(
     k: int,
     variable: str,
     *,
+    idw_power: float = 2.0,
     boundaries_path: str | Path | None = None,
     seed_rows: np.ndarray | None = None,
     seed_cols: np.ndarray | None = None,
@@ -50,24 +55,32 @@ def run_eikonal_python(
     waterlevel_epsilon_m: float = WATERLEVEL_EPSILON_M,
     friction_scale_factor: float = 1.0,
     pixel_size_m: float | None = None,
+    static_stations: tuple[np.ndarray, np.ndarray] | None = None,
+    duration_config: dict[str, Any] | None = None,
+    return_period: int | None = None,
+    hydrograph_path: str | Path | None = None,
 ) -> dict:
     """Run `flood_model.flood_depth_dense` in-process, write depth, return diagnostics.
 
     Inputs are int16-encoded on disk (DEM and water levels in cm) and decoded
-    to float32 m. `friction_scale_factor` (production 0.4, config.yml) is a
+    to float32 m. `friction_scale_factor` (production 0.25, config.yml) is a
     bare SFINCS-calibrated per-metre rate, not a tuning knob: the solver
     treats friction as cost per grid step, so it must be scaled by the
-    tile's own grid step in metres (`pixel_size_m`) before use - `0.4 x 30`
-    for a DeltaDTM tile (docs/methods_02). Raises MemoryError on OOM.
-
-    `pixel_size_m=None` (the default) resolves to 30.0 (DeltaDTM/production's
-    own grid step) - every existing call site that doesn't pass a real value
-    gets production's unchanged 12.0 effective factor. A tile backed by a
-    local high-res DEM source passes its own real `pixel_size_m` instead.
+    tile's own grid step in metres (`pixel_size_m`; None = 30.0, DeltaDTM's)
+    before use - `0.25 x 30` for a DeltaDTM tile (docs/methods_02). Raises
+    MemoryError on OOM.
+    `k` and `idw_power` set the station interpolation of both the coastline seeds and the
+    static level.
+    `static_stations` = (lonlat, level) from `boundaries.static_station_levels`
+    switches on two-component SLR propagation; `duration_config`
+    (`simulation.flooding.duration_correction`) with `enabled` switches on correction B;
+    `return_period` (years) picks its hydrograph when the file holds one per RP;
+    `hydrograph_path` (`boundaries.storm_tide_hydrograph_path`) replaces `coast_hg_path`.
     """
     with retry_transient_io(rasterio.open, dem_path) as src:
         dem = decode_dem_cm(src.read(1))
         transform = src.transform
+        crs = src.crs
     with retry_transient_io(rasterio.open, mask_path) as src:
         mask = src.read(1)
     with retry_transient_io(rasterio.open, friction_path) as src:
@@ -82,20 +95,58 @@ def run_eikonal_python(
     else:
         boundaries = None
 
+    static_level = None
+    if static_stations is not None:
+        static_level = static_level_grid(dem.shape, transform, *static_stations, k=k, idw_power=idw_power)
+
+    duration_correction = None
+    if duration_config is not None and duration_config["enabled"]:
+        duration_correction = build_duration_correction(duration_config, dem.shape, transform, crs, return_period,
+                                                        hydrograph_path)
+
     waterdepth, diagnostics = flood_depth_dense(
         dem, mask, friction, transform,
         boundaries=boundaries,
         seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
-        resolution=resolution, k=k, variable=variable,
+        resolution=resolution, k=k, idw_power=idw_power, variable=variable,
         ocean_code=ocean_code, river_code=river_code,
         obstacle_coupling=obstacle_coupling,
         max_outer_iterations=max_outer_iterations,
         max_rounds=max_rounds,
         outer_convergence_pct=outer_convergence_pct,
         waterlevel_epsilon_m=waterlevel_epsilon_m,
+        static_level=static_level,
+        duration_correction=duration_correction,
     )
     save_waterdepth_raster(dem_path, waterdepth, output_path)
     return diagnostics
+
+
+def build_duration_correction(
+    duration_config: dict[str, Any], shape: tuple[int, int], transform, crs=None, return_period: int | None = None,
+    hydrograph_path: str | Path | None = None,
+) -> DurationCorrection:
+    """Build correction B for one tile from `simulation.flooding.duration_correction`.
+
+    Hydrographs from `hydrograph_path`, else `coast_hg_path`; `return_period` (years) selects
+    the hydrograph when the file holds one per RP.
+    """
+    xs, ys = rasterio.transform.xy(transform, [0, 0, shape[0] - 1, shape[0] - 1], [0, shape[1] - 1, 0, shape[1] - 1])
+    xs, ys = np.asarray(xs, dtype=np.float64), np.asarray(ys, dtype=np.float64)
+    grid_crs = None if crs is None or rasterio.crs.CRS.from_user_input(crs).to_epsg() == 4326 else crs
+    if grid_crs is not None:
+        xs, ys = rasterio.warp.transform(grid_crs, "EPSG:4326", xs, ys)
+    lonlat, series, dt_s = retry_transient_io(
+        load_coast_hg, hydrograph_path or duration_config["coast_hg_path"], (min(xs), min(ys), max(xs), max(ys)),
+        return_period=return_period,
+    )
+    return DurationCorrection(
+        lonlat, series, dt_s, t_ref_s=duration_config["t_ref_h"] * 3600.0, alpha=duration_config["alpha"],
+        max_multiplier=duration_config["max_multiplier"], crs=grid_crs,
+    )
+
+
+SLR_PROPAGATION_MODES = ("attenuated", "two_component")
 
 
 def estimate_eikonal_mem_mb(dem_path: str | Path, mem_estimate_cfg: dict[str, Any]) -> int:
@@ -184,6 +235,8 @@ def run_tile_scenario(
     river_code: int,
     stage_boundaries: bool = False,
     pixel_size_m: float | None = None,
+    static_level_inputs: dict[str, str] | None = None,
+    hydrograph_path: str | None = None,
 ) -> dict[str, Any]:
     """Solve, skip or placeholder one (tile, return period, SLR scenario) and write its raster.
 
@@ -192,13 +245,19 @@ def run_tile_scenario(
     stations, or no wet cell in any neighbour output -> zero raster. A missing
     neighbour dem/mask/waterdepth raises FileNotFoundError and writes nothing.
     MemoryError -> OOM marker + nodata. `stage_boundaries` copies the
-    GeoPackage to node-local scratch first (HPC). Timing is left to callers.
-    `pixel_size_m` (default None) is this tile's real DEM pixel size - e.g. a
-    local high-res DEM source resolved by the caller's own per-tile manifest;
-    None (every production tile) resolves to 30.0 (DeltaDTM's own grid step).
+    GeoPackage to node-local scratch first (HPC). `flooding_config["slr_propagation"]`
+    "two_component" builds the static level from `static_level_inputs`
+    (`boundaries.static_level_inputs`); "attenuated" ignores them. `pixel_size_m` is the
+    tile's real DEM pixel size (a local high-res DEM source); None = 30.0, DeltaDTM's.
+    Timing is left to callers.
     Returns {"outcome": "oom_premarked" | "skip_no_inundation" | "oom" | "solved", ...}.
     """
     scenario_name = f"{return_period}_{waterlevel_name}"
+    slr_propagation = flooding_config["slr_propagation"]
+    if slr_propagation not in SLR_PROPAGATION_MODES:
+        raise ValueError(f"simulation.flooding.slr_propagation: {slr_propagation!r} not in {SLR_PROPAGATION_MODES}")
+    if slr_propagation == "two_component" and static_level_inputs is None:
+        raise ValueError("slr_propagation 'two_component' needs static_level_inputs")
     skipped_dir = os.path.join(model_outputs, "skipped_tiles")
     oom_dir = os.path.join(model_outputs, "oom_tiles")
 
@@ -265,11 +324,16 @@ def run_tile_scenario(
         # Indexed, not .get(): every config layers on config.yml, which sets all
         # of these, so a missing key is a broken config, not a reason to default.
         oc_config = flooding_config["obstacle_coupling"]
+        static_stations = None
+        if slr_propagation == "two_component":
+            static_stations = static_station_levels(**static_level_inputs, return_period=return_period,
+                                                    waterlevel_name=waterlevel_name)
         start = time.perf_counter()
         try:
             diagnostics = run_eikonal_python(
                 dem_path, mask_path, friction_path, output_path,
                 resolution=flooding_config["resolution"], k=flooding_config["knn"],
+                idw_power=flooding_config["idw_power"],
                 variable=waterlevel_name,
                 boundaries_path=None if hop_distance >= 1 else read_boundaries_path,
                 seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
@@ -281,6 +345,10 @@ def run_tile_scenario(
                 waterlevel_epsilon_m=flooding_config["waterlevel_epsilon_m"],
                 friction_scale_factor=flooding_config["friction_scale_factor"],
                 pixel_size_m=pixel_size_m,
+                static_stations=static_stations,
+                duration_config=flooding_config["duration_correction"],
+                return_period=int(return_period.removeprefix("RP")),
+                hydrograph_path=hydrograph_path,
             )
         except MemoryError:
             mark_tile_oom(oom_dir, tile_id, reason="MemoryError in flood_depth_dense - tile too large")

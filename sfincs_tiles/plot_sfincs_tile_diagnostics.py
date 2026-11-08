@@ -274,7 +274,7 @@ def _order_along_coast(lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np
     return np.array(order), np.concatenate([[0.0], np.cumsum(steps)])
 
 
-def _coastrp_context(tile_dir: Path, knn: int, river_code: int) -> dict:
+def _coastrp_context(tile_dir: Path, knn: int, river_code: int, idw_power: float = 2.0) -> dict:
     from flood_model import _idw_seed_values, coastline_mask  # src/, heavy imports only needed here
 
     with rasterio.open(tile_dir / "inputs" / "mask.tif") as src:
@@ -286,7 +286,7 @@ def _coastrp_context(tile_dir: Path, knn: int, river_code: int) -> dict:
     coast = coastline_mask(mask_native, ocean_code=OCEAN_CODE, river_code=river_code)
     c_rows, c_cols = np.nonzero(coast)
     seed = _idw_seed_values(c_rows, c_cols, native_transform, np.column_stack([st_lon, st_lat]), level_m,
-                            min(knn, len(level_m)), mask_native, OCEAN_CODE)
+                            min(knn, len(level_m)), mask_native, OCEAN_CODE, idw_power)
     c_lon, c_lat = (np.asarray(v) for v in rasterio.transform.xy(native_transform, c_rows, c_cols))
     inside = ((st_lon >= bounds.left) & (st_lon <= bounds.right) & (st_lat >= bounds.bottom) & (st_lat <= bounds.top))
     # COAST-RP points follow a coarser coastline and often sit a few hundred m on land
@@ -407,17 +407,18 @@ def _legend_corner_map(ctx: dict, extra_lon=(), extra_lat=(), box_w: float = 0.5
 
 
 def plot_coastrp_forcing(tile_dir: Path, sfincs_dir: Path, mask2d: np.ndarray, transform: rasterio.Affine,
-                         crs: str, out_path: Path, knn: int, river_code: int) -> None:
+                         crs: str, out_path: Path, knn: int, river_code: int, idw_power: float = 2.0) -> None:
     """Plot COAST-RP RP100 levels vs. the eikonal IDW seed and SFINCS forcing/zsmax.
 
     `knn` is the eikonal seed's number of nearest stations.
     """
     with plt.rc_context({"font.size": 14, "axes.labelsize": 15, "xtick.labelsize": 13, "ytick.labelsize": 13}):
-        _plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs, out_path, knn, river_code)
+        _plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs, out_path, knn, river_code, idw_power)
 
 
-def _plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs, out_path, knn, river_code) -> None:
-    ctx = _coastrp_context(tile_dir, knn, river_code)
+def _plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs, out_path, knn, river_code,
+                          idw_power: float = 2.0) -> None:
+    ctx = _coastrp_context(tile_dir, knn, river_code, idw_power)
     level_m = ctx["level_m"]
     vmax = float(np.ceil(level_m.max() * 2) / 2)
     cmap = plt.get_cmap("YlOrRd")
@@ -524,11 +525,14 @@ def main() -> None:
     if "biggest_disagreement" in args.figures:
         fsf = args.friction_scale_factor
         if fsf is None:
-            fsf = float(cfg["simulation"]["flooding"]["friction_scale_factor"])
+            # config.yml holds the per-metre rate; the calibration outputs are named by the
+            # effective factor on DeltaDTM's 30 m grid
+            fsf = float(cfg["simulation"]["flooding"]["friction_scale_factor"]) * 30.0
         plot_biggest_disagreement(tile_dir, out_path("biggest_disagreement"), fsf)
     if "coastrp_forcing" in args.figures:
         plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs, out_path("coastrp_forcing"),
                              knn=int(cfg["simulation"]["flooding"]["knn"]),
+                             idw_power=float(cfg["simulation"]["flooding"]["idw_power"]),
                              river_code=int(cfg["tile_generation"]["river_code"]))
 
 

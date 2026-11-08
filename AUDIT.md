@@ -55,7 +55,8 @@ All on branch `cleanup` (~50 commits ahead of `main`, not merged).
 - Removed scenarios: thailand_bangkok, gbr_wales_scotland_friction9; references to
   the earlier SFINCS studies (validation_sfincs*, sfincs_calibration*) removed from
   code, comments and docs.
-- `friction_scale_factor` 12.0 documented as production (30 x 0.4); calibration
+- `friction_scale_factor` 7.5 documented as production (30 x 0.25, with the
+  duration correction; 12.0 without it); calibration
   scripts share `flood_model.OBSTACLE_BLOCK_FRICTION`; `build_overview_table.py`
   reads the published values from `compare_against_published.py`.
 - Data catalogs: one `meta` schema per entry (description, source_author,

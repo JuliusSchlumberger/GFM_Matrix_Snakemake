@@ -1,0 +1,16 @@
+The FES version rule (FES2014 where FES2022's MHWS exceeds it by a factor 1.5 and by 1.25 m) and its
+growth to neighbours on the same artefact. It sets FES2014 at 66 stations (56 by the rule, 10 by the
+growth). (a) At the 912 GESLA gauges: FES2022 and FES2014 MHWS minus the gauge's own; orange where
+the rule would fire. (b) The FES2014 stations with a gauge within 150 km: both atlases' MHWS at the
+station against the gauge's (circles: the rule, triangles: grown). (c) The FES2014 stations without
+such a gauge, with the rule's boundary.
+
+Reading: where the rule can be checked it is right: at the 3 gauges where it fires (Juneau, Skagway,
+Port Alberni), FES2022 is 1.5-4.7 m too high and FES2014 within 0.1 m (0.6 m at Juneau). The flagged
+stations near gauges sit with FES2014 at the gauge's level (Varangerfjord against Vardo 1.35 m, Le
+Crouesty, Karachi for Sonmiani, Kukup, Port Stanley for the Falklands). Sao Marcos Bay: the Ponta da
+Madeira gauge inside the bay reads 2.62 m, so the outer stations' FES2014 (2.1 m) is the plausible
+value, not FES2022 (3.2-3.8 m). One flag is wrong: at the Saguenay mouth the Tadoussac gauge (2.18
+m) sides with FES2022 (2.65 m) over FES2014 (1.38 m). Without gauges (c), most flags are FES2022
+artefacts of known basins (Magellan, Gulf of California, Ungava), but some sit in real macrotidal
+gulfs (Khambhat, Incheon) where neither atlas is checked.

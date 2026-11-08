@@ -1,0 +1,30 @@
+MHWS (mean high water springs above local mean sea level) at the FES boundary nodes in the four
+basins where FES2022 has gross artefacts: (a1, a2) Minas Basin / Cobequid Bay; (b1, b2) Upper Gulf
+of California; (c1, c2) Strait of Magellan / Bahia Lomas; (d1, d2) Glacier Bay / Lynn Canal. For
+each basin the map marked 1 shows FES2022 and the map marked 2 next to it (beside or below) FES2014,
+at the same nodes and over the same area. All maps share the colour scale at the bottom. The
+arrangement is the one that makes the smallest map largest on the page, so the basins are not in a
+fixed geographic order.
+
+Symbols: circles = nodes that keep FES2022 under the version rule (fig04, fig06). Crosses (maps 1) =
+FES2022 values the rule discards; diamonds (maps 2) = the FES2014 values that replace them. Red
+ovals enclose the replaced nodes: nodes closer than about three grid cells form one group, and each
+oval is the smallest axis-aligned ellipse around the box spanned by the group's westernmost,
+easternmost, northernmost and southernmost node. Stars = GESLA tide gauges, coloured by their
+observed MHWS. Each map is cropped to its nodes and gauges and drawn with the east-west scale
+corrected for latitude, so shapes are true. Land: Natural Earth 1:50m, grey.
+
+(a1, a2) Minas Basin / Cobequid Bay: 149 nodes, 34 replaced in 2 cluster(s); FES2022 MHWS max 14.5
+m, FES2014 max 7.2 m; no gauge (b1, b2) Upper Gulf of California: 114 nodes, 1 replaced in 1
+cluster(s); FES2022 MHWS max 15.4 m, FES2014 max 3.0 m; no gauge (c1, c2) Strait of Magellan / Bahia
+Lomas: 163 nodes, 48 replaced in 2 cluster(s); FES2022 MHWS max 16.3 m, FES2014 max 4.6 m; no gauge
+(d1, d2) Glacier Bay / Lynn Canal: 217 nodes, 106 replaced in 3 cluster(s); FES2022 MHWS max 12.2 m,
+FES2014 max 1.8 m; gauges: Juneau 2.72 m, Skagway 2.78 m
+
+Observed references without a gauge in the map: Minas Basin mean spring range 14.5 m, record 16.3 m
+(MHWS about 7.3 m; Desplanque and Mossman, 2001); Strait of Magellan spring range about 9 m on the
+Atlantic side (Medeiros and Kjerfve, 1988); Colorado mouth spring range 7-10 m (Archer, 2013).
+
+Reading: FES2022 is plausible over most of each basin but gives MHWS as large as the whole observed
+spring range at a few head nodes; FES2014 shows none of these hot spots and stays within the
+observed ranges. The rule replaces exactly those head nodes.

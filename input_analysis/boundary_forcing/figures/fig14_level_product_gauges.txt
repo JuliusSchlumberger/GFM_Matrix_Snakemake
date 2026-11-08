@@ -1,0 +1,7 @@
+RP levels at the test 9 gauges that have a COAST-RP station within 25 km (618 gauges) against the
+gauge's own skew-surge convolution (gauge surge on the gauge tide, the reference of test 9). Left:
+COAST-RP's total level at the nearest station. Right: the new product at that station with r rebuilt
+without the gauge (leave-one-out), so that no gauge calibrates itself. Top RP10, bottom RP100. Blue:
+gauges where ETC dominates; orange: TC-dominated gauges (COAST-RP's TC level above its ETC level at
+RP100). Boxes: median and mean absolute error of station - gauge per group. Levels in m above local
+mean sea level.

@@ -1,0 +1,31 @@
+Surge-only hydrographs of the annual maxima by empirical return period, at the quality tide gauges.
+The surge is the water level minus the astronomical tide: for GESLA the record minus the site's
+harmonic tide prediction (the non-tidal residual), for GTSM the ERA5-forced surge series at the
+paired station. For each annual maximum the largest surge within +-12 h of the water-level peak is
+taken (the storm that made the annual maximum), the series is shifted so that this surge maximum
+sits at hour 0 and divided by it. Events with a surge maximum below 0.1 m are left out (pure spring-
+tide maxima). (a) GESLA and (b) GTSM: median normalised surge per RP class (blue shades as in
+fig08); the dotted line marks half the maximum. (c) The duration the surge stays above half its
+maximum, per event: boxes = interquartile range, line = median, whiskers = 1.5 x IQR; black GESLA,
+blue GTSM. Dashed green: the surge part of COAST-HG's spring-tide RP100 hydrograph at 698 paired
+stations, separated from its tide in test 7 (boundary_test/coast_hg_decompose.py); median duration
+22 h.
+
+Median duration above half the maximum (h), GESLA by RP class: 15, 18, 18, 17, 18; GTSM: 16, 19, 20,
+21, 20. Events per class, GESLA: 9352, 6092, 2109, 1024, 751; GTSM: 13363, 8608, 3189, 1304, 1338.
+
+On macrotidal coasts the non-tidal residual carries tide-surge interaction (oscillations at tidal
+periods), which makes the GESLA surges look shorter and noisier than the GTSM surges; GTSM's surge
+comes from a tide + surge run minus a tide-only run and has the same effect in weaker form. The
+bumps at about +-12 and +-24 h in (a) and (b) are this residual tide, not separate surges.
+
+Reading: the surge itself hardly changes with return period. Its core (above half the maximum) lasts
+about the same in every class, and COAST-HG's surge core matches it. What differs is the tail:
+observed surges still hold 0.2-0.35 of their maximum 30-48 h from the peak (set-up that outlasts the
+storm, and successive storms), whereas COAST-HG's surge is back to zero by about +-35 h. That tail
+is small next to the tide on meso- and macrotidal coasts. Test 7 shows where COAST-HG's low
+neighbouring high waters (fig08) come from: on coasts with a spring range above 1 m the surge parts
+of the next-day high water agree (0.03-0.12 of the peak for COAST-HG and gauges), but the tide parts
+do not (0.59-0.70 for COAST-HG against 0.66-0.83 at the gauges), because observed extremes coincide
+with tides of 1.18-1.28 x MHWS while COAST-HG's tide window reaches 1.03-1.07 x MHWS and the rest of
+the RP100 level is assigned to the surge. Data: coast_hg_vs_events.csv.

@@ -12,9 +12,11 @@ import numpy as np
 import rasterio.transform
 from affine import Affine
 from scipy import ndimage
+from scipy.spatial import cKDTree
 from sklearn.neighbors import BallTree
 
 from eikonal import solve_eikonal_dense
+from event_volume import DurationCorrection
 
 
 LAND_CODE = 0
@@ -38,6 +40,60 @@ WATERLEVEL_EPSILON_M = 0.03
 
 # Prohibitive even in float32 for any path crossing a blocked cell.
 OBSTACLE_BLOCK_FRICTION = 9999.0
+
+# Grid step (cells) of the coarse grid the static level is interpolated on before bilinear
+# upsampling; the level (MDT + SLR fingerprint) varies over tens of km.
+STATIC_LEVEL_COARSEN = 32
+
+
+def static_level_grid(
+    shape: tuple[int, int],
+    transform: Affine,
+    stations_lonlat: np.ndarray,
+    station_values: np.ndarray,
+    k: int = 5,
+    idw_power: float = 2.0,
+) -> np.ndarray:
+    """Interpolate the static sea level (m, DEM datum) onto the tile grid.
+
+    Inverse-distance k-NN (weights distance^-idw_power) of the station values on a
+    STATIC_LEVEL_COARSEN grid, bilinearly upsampled. Station values are MDT + SLR fingerprint
+    (`boundaries.static_station_levels`); `transform` must be EPSG:4326.
+    """
+    rows = np.arange(0, shape[0] + STATIC_LEVEL_COARSEN, STATIC_LEVEL_COARSEN).clip(max=shape[0] - 1)
+    cols = np.arange(0, shape[1] + STATIC_LEVEL_COARSEN, STATIC_LEVEL_COARSEN).clip(max=shape[1] - 1)
+    rows, cols = np.unique(rows), np.unique(cols)
+    rr, cc = np.meshgrid(rows, cols, indexing="ij")
+    xs, ys = rasterio.transform.xy(transform, rr.ravel(), cc.ravel())
+    cell_latlon_rad = np.radians(np.column_stack([ys, xs]))
+    coarse = _idw_nearest_k(
+        cell_latlon_rad, np.radians(stations_lonlat[:, ::-1]), station_values, min(k, len(station_values)), idw_power,
+    ).reshape(rr.shape)
+    # Bilinear in index space between the coarse sample rows/cols.
+    r_full, c_full = np.arange(shape[0]), np.arange(shape[1])
+    r_pos = np.interp(r_full, rows, np.arange(len(rows)))
+    c_pos = np.interp(c_full, cols, np.arange(len(cols)))
+    return ndimage.map_coordinates(
+        coarse, np.meshgrid(r_pos, c_pos, indexing="ij"), order=1, mode="nearest",
+    ).astype(np.float64)
+
+
+def static_inundation(
+    dem: np.ndarray,
+    mask: np.ndarray,
+    static_level: np.ndarray,
+    sources: np.ndarray,
+    ocean_code: int = 1,
+) -> np.ndarray:
+    """Mark land cells below the static level that connect to `sources` through such cells.
+
+    `dem` is the effective DEM (m); `sources` the coastline or hop>=1 seed cells.
+    These cells are permanently inundated: a static sea level does not attenuate.
+    Rivers and lakes are excluded: their effective DEM is 0 m, so they would carry the
+    sea level (and the coastal storm tide seeded on it) up the whole river network.
+    """
+    below = (dem < static_level) & (mask == LAND_CODE)
+    return prune_to_coast_connected(below, sources)
 
 
 def coastline_mask(mask: np.ndarray, ocean_code: int = 1, river_code: int | None = None) -> np.ndarray:
@@ -88,10 +144,11 @@ def _idw_seed_values(
     k: int,
     mask: np.ndarray,
     ocean_code: int,
+    idw_power: float = 2.0,
 ) -> np.ndarray:
     xs, ys = rasterio.transform.xy(transform, rows, cols)
     return idw_seed_values_at(np.column_stack([xs, ys]), rows, cols, stations_lonlat, station_values,
-                              k, mask, ocean_code)
+                              k, mask, ocean_code, idw_power)
 
 
 def idw_seed_values_at(
@@ -103,8 +160,9 @@ def idw_seed_values_at(
     k: int,
     mask: np.ndarray,
     ocean_code: int,
+    idw_power: float = 2.0,
 ) -> np.ndarray:
-    """Inverse-distance-squared k-NN (haversine) seed values at (lon, lat) cells.
+    """Inverse-distance k-NN (haversine, weights distance^-idw_power) seed values at (lon, lat) cells.
 
     Positions are (lon, lat) degrees (EPSG:4326; transform projected grids
     first). Each cell uses only stations in its own 8-connected ocean
@@ -122,7 +180,7 @@ def idw_seed_values_at(
     cell_components = components[rows, cols]
 
     if n_components <= 1:
-        return _idw_nearest_k(cell_latlon_rad, station_latlon_rad, station_values, k)
+        return _idw_nearest_k(cell_latlon_rad, station_latlon_rad, station_values, k, idw_power)
 
     seed_tree = BallTree(cell_latlon_rad, metric="haversine")
     _, nearest_seed = seed_tree.query(station_latlon_rad, k=1)
@@ -137,7 +195,7 @@ def idw_seed_values_at(
         else:
             sub_values, sub_latlon = station_values, station_latlon_rad
         k_eff = min(k, len(sub_values))
-        result[cell_sel] = _idw_nearest_k(cell_latlon_rad[cell_sel], sub_latlon, sub_values, k_eff)
+        result[cell_sel] = _idw_nearest_k(cell_latlon_rad[cell_sel], sub_latlon, sub_values, k_eff, idw_power)
     return result
 
 
@@ -146,6 +204,7 @@ def _idw_nearest_k(
     station_latlon_rad: np.ndarray,
     station_values: np.ndarray,
     k: int,
+    idw_power: float = 2.0,
 ) -> np.ndarray:
     tree = BallTree(station_latlon_rad, metric="haversine")
     dist, idx = tree.query(cell_latlon_rad, k=k)
@@ -153,7 +212,7 @@ def _idw_nearest_k(
     # dist=0 guard (core.jl propagates Inf); a coincident station dominates either way.
     dist_m = np.where(dist_m == 0.0, np.finfo(np.float64).tiny, dist_m)
 
-    weights = dist_m**-2
+    weights = dist_m**-idw_power
     values = station_values[idx]
     return (values * weights).sum(axis=1) / weights.sum(axis=1)
 
@@ -170,6 +229,7 @@ def flood_depth_dense(
     seed_values: np.ndarray | None = None,
     resolution: float = 30.0,
     k: int = 5,
+    idw_power: float = 2.0,
     variable: str = "waterlevel",
     ocean_code: int = 1,
     river_code: int | None = None,
@@ -179,6 +239,8 @@ def flood_depth_dense(
     max_rounds: int = 40,
     outer_convergence_pct: float = 0.01,
     waterlevel_epsilon_m: float = WATERLEVEL_EPSILON_M,
+    static_level: np.ndarray | None = None,
+    duration_correction: DurationCorrection | None = None,
 ) -> tuple[np.ndarray, dict]:
     """Solve flood depth (m) on the full dense tile; 0.0 where not flooded.
 
@@ -187,7 +249,7 @@ def flood_depth_dense(
     free. `resolution` is pixel size in metres.
 
     Forcing: either `boundaries` (wave-0: stations IDW-seeded onto
-    `coastline_mask`) or seed_rows/seed_cols/seed_values (hop>=1: absolute
+    `coastline_mask` over the k nearest, weights distance^-idw_power) or seed_rows/seed_cols/seed_values (hop>=1: absolute
     water levels from a neighbour's wet cells, bypassing coastline/IDW).
     `sweep_budget` (non-coupling only): fixed sweep count; 3 = Aqueduct.
 
@@ -197,6 +259,18 @@ def flood_depth_dense(
     solve and block cells with waterlevel <= elevation until the newly blocked
     share < `outer_convergence_pct` percent. Terminates because raising
     friction only lowers eikonal values, so the blocked set only grows.
+
+    `static_level` (m, tile grid, `static_level_grid`) switches on two-component
+    propagation: cells below it and connected to the coastline/seeds are permanently
+    inundated (`static_inundation`) and become seeds, moving the shoreline inland. Each
+    gets max(static level, level of its nearest original seed), so the static part does
+    not attenuate, the storm tide stays local to its own coast (a zero-friction new sea
+    would carry the highest coastal level everywhere), and only the storm tide on top
+    attenuates inland of the new shore.
+
+    `duration_correction` (event_volume.DurationCorrection) scales friction by how long the
+    first solve's water stands above the spill level during the storm-tide peak (up where
+    briefly, down where long), and solves again with that friction.
     """
     using_seeds = seed_rows is not None or seed_cols is not None or seed_values is not None
     if using_seeds and boundaries is not None:
@@ -228,17 +302,29 @@ def flood_depth_dense(
         station_values = boundaries[variable].to_numpy()
         initial = _idw_seed_values(
             coastline_rows, coastline_cols, transform, stations_lonlat, station_values,
-            min(k, len(station_values)), mask, ocean_code,
+            min(k, len(station_values)), mask, ocean_code, idw_power,
         )
 
-    if not obstacle_coupling:
-        t = solve_eikonal_dense(
-            friction, coastline_rows, coastline_cols, -initial, waterlevel_epsilon_m,
-            max_rounds=max_rounds, sweep_budget=sweep_budget,
-        )
-        waterlevel = -t[1:, 1:]
-        diagnostics = {"obstacle_coupling": False}
-    else:
+    static_wet = None
+    if static_level is not None:
+        static_wet = static_inundation(dem, mask, static_level, coastline, ocean_code)
+        if static_wet.any():
+            s_rows, s_cols = np.nonzero(static_wet)
+            nearest = cKDTree(np.column_stack([coastline_rows, coastline_cols])).query(
+                np.column_stack([s_rows, s_cols]))[1]
+            s_values = np.maximum(static_level[s_rows, s_cols], np.asarray(initial)[nearest])
+            coastline_rows = np.concatenate([coastline_rows, s_rows])
+            coastline_cols = np.concatenate([coastline_cols, s_cols])
+            initial = np.concatenate([np.asarray(initial, dtype=np.float64), s_values])
+            station_values = np.concatenate([np.asarray(station_values, dtype=np.float64), s_values])
+
+    def solve(friction: np.ndarray) -> tuple[np.ndarray, dict]:
+        if not obstacle_coupling:
+            t = solve_eikonal_dense(
+                friction, coastline_rows, coastline_cols, -initial, waterlevel_epsilon_m,
+                max_rounds=max_rounds, sweep_budget=sweep_budget,
+            )
+            return -t[1:, 1:], {"obstacle_coupling": False}
         dtype = friction.dtype
         n_cells = dem.size
         max_waterlevel = float(station_values.max())
@@ -271,8 +357,7 @@ def flood_depth_dense(
                 break
             friction_b = np.where(blocked, dtype.type(OBSTACLE_BLOCK_FRICTION), friction)
             prev_blocked = blocked
-        waterlevel = -t[1:, 1:]
-        diagnostics = {
+        return -t[1:, 1:], {
             "obstacle_coupling": True,
             "outer_iterations_used": n_outer,
             "outer_converged": outer_converged,
@@ -281,9 +366,23 @@ def flood_depth_dense(
             "final_max_change": inner_diag.get("max_change"),
         }
 
-    flood = (waterlevel > dem) & (mask != ocean_code)
-    flood = prune_to_coast_connected(flood, coastline)
+    def depth_from(waterlevel: np.ndarray) -> np.ndarray:
+        flood = prune_to_coast_connected((waterlevel > dem) & (mask != ocean_code), coastline)
+        depth = np.zeros_like(dem)
+        depth[flood] = waterlevel[flood] - dem[flood]
+        return depth
 
-    waterdepth = np.zeros_like(dem)
-    waterdepth[flood] = waterlevel[flood] - dem[flood]
-    return waterdepth, diagnostics
+    waterlevel, diagnostics = solve(friction)
+    if duration_correction is not None:
+        sources = mask == ocean_code
+        sources[coastline_rows, coastline_cols] = True
+        multiplier = duration_correction.multiplier(depth_from(waterlevel), dem, sources, transform)
+        corrected = multiplier != 1.0
+        waterlevel, diagnostics = solve(friction * multiplier)
+        diagnostics["n_duration_corrected_cells"] = int(corrected.sum())
+        diagnostics["mean_duration_multiplier"] = float(multiplier[corrected].mean()) if corrected.any() else 1.0
+
+    if static_wet is not None:
+        diagnostics["n_static_wet_cells"] = int(static_wet.sum())
+
+    return depth_from(waterlevel), diagnostics

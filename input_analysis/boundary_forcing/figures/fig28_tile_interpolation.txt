@@ -1,0 +1,8 @@
+Test 4, how the coastline level between stations is formed, at the 618 ratio gauges. Current:
+inverse-distance weighting (k = 5, power 3) of the nearest stations' RP levels. Decomposed: the same
+weighting of the stations' skew-surge distributions (quantiles and GPD parameters averaged),
+convolved with the FES tide at the gauge. Each with the gauge tide correction (median gauge/FES
+amplitude ratio of the gauges within 25 km, the gauge's own site left out) on the stations' or the
+local tide. The stations' r and surge models are production's. The gauges lie 1.4 km (median) and at
+most 16 km from a station, so the estuary heads far from any station are not tested here (fig27
+tests the tide alone there). (a) RP2, (b) RP100.

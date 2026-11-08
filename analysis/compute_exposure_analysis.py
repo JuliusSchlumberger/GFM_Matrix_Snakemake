@@ -13,22 +13,26 @@ import argparse
 import os
 import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import xarray as xr
+from sklearn.neighbors import BallTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import _chunk_is_populated, _read_band, discover_chunk_ids  # noqa: E402
+from _common import _chunk_is_populated, _read_band, _read_band_and_transform, discover_chunk_ids  # noqa: E402
 from config_utils import get_data_catalog, load_config, merged_waterlevel_names, retry_transient_io  # noqa: E402
 from population_growth import load_ssp_growth_factors, interpolate_growth_factor  # noqa: E402
 from validation import load_iso_lookup  # noqa: E402
 from analysis_figures import load_slr_trajectories  # noqa: E402
 from exposure_analysis import (                                 # noqa: E402
     build_adapt_protection_fraction,
+    design_return_period_grid,
     protect_exposure_grid,
+    water_level_exceedance,
     compute_retreat,
     compute_avoid,
     compute_country_eai,
@@ -67,6 +71,8 @@ class ChunkData:
     pop: people per cell (nodata -> 0.0); geo: geogunit id (nodata -> -1);
     ff: flood fraction 0-1 per available (return_period, slr_scenario), missing
     files omitted; iso_index: `(iso_list, iso_idx, cell_idx)` from _build_iso_index.
+    station_idx / design_rp: nearest COAST-RP station and design RP per cell, set only
+    under the water-level protection rule.
     """
 
     cid: str
@@ -74,6 +80,64 @@ class ChunkData:
     geo: np.ndarray
     ff: dict[tuple[int, str], np.ndarray]
     iso_index: tuple[list[str], np.ndarray, np.ndarray]
+    station_idx: "np.ndarray | None" = None
+    design_rp: "np.ndarray | None" = None
+    exceed_cache: dict = field(default_factory=dict)
+
+
+@dataclass
+class WaterLevelProtection:
+    """Hold COAST-RP station water levels for the water-level protection rule.
+
+    levels: (RP, SLR) -> total water level per station (m; storm tide + MDT + SLR).
+    station_lonlat: (n, 2) in degrees. minimum_rp: lowest design return period.
+    rp_applied: geogunit id -> FLOPROS-snapped design RP.
+    """
+
+    levels: dict[tuple[int, str], np.ndarray]
+    station_lonlat: np.ndarray
+    minimum_rp: int
+    rp_applied: dict[int, int]
+
+
+def load_water_level_protection(
+    bc: dict, return_periods: list[int], slr_scenarios: list[str], rp_applied: dict[int, int], minimum_rp: int,
+) -> WaterLevelProtection:
+    """Read the per-(RP, SLR) station water-level NetCDFs written by prepare_boundary_conditions."""
+    levels: dict[tuple[int, str], np.ndarray] = {}
+    lonlat = None
+    for rp in return_periods:
+        for slr in slr_scenarios:
+            fmt = {"return_period": f"RP{rp}", "waterlevel_name": slr}
+            path = Path(bc["waterlevel_nc_dir"]) / bc["nc_filename_template"].format(**fmt)
+            with retry_transient_io(xr.open_dataset, path) as ds:
+                levels[(rp, slr)] = ds[bc["nc_variable_template"].format(**fmt)].values.astype("float64")
+                if lonlat is None:
+                    lonlat = np.column_stack([ds["station_x_coordinate"].values, ds["station_y_coordinate"].values])
+    return WaterLevelProtection(levels=levels, station_lonlat=lonlat, minimum_rp=minimum_rp, rp_applied=rp_applied)
+
+
+def _nearest_station_idx(transform, shape: tuple[int, int], station_lonlat: np.ndarray, cells: np.ndarray) -> np.ndarray:
+    # Haversine on (lat, lon) radians; only `cells` (flat indices) are queried, the rest stay 0.
+    rows, cols = np.unravel_index(cells, shape)
+    lon = transform.c + (cols + 0.5) * transform.a
+    lat = transform.f + (rows + 0.5) * transform.e
+    idx = np.zeros(shape[0] * shape[1], dtype="int64")
+    if cells.size:
+        tree = BallTree(np.radians(station_lonlat[:, ::-1]), metric="haversine")
+        idx[cells] = tree.query(np.radians(np.column_stack([lat, lon])), k=1, return_distance=False)[:, 0]
+    return idx.reshape(shape)
+
+
+def _exceedance(c: ChunkData, wlp: "WaterLevelProtection | None", design_slr: "str | None") -> "dict | None":
+    # (RP, SLR) -> cells whose event level exceeds the design level; None under the flood-fraction rule.
+    if wlp is None or design_slr is None:
+        return None
+    if design_slr not in c.exceed_cache:
+        c.exceed_cache[design_slr] = water_level_exceedance(
+            wlp.levels, c.station_idx, c.design_rp, design_slr, list(c.ff),
+        )
+    return c.exceed_cache[design_slr]
 
 
 def _load_chunk(
@@ -83,8 +147,9 @@ def _load_chunk(
     return_periods: list[int],
     slr_scenarios: list[str],
     iso_lookup: dict[int, str],
+    wlp: "WaterLevelProtection | None" = None,
 ) -> ChunkData:
-    pop = _read_band(chunks_dir / f"exposure_population_grid_{cid}.tif", "float64", 0.0)
+    pop, transform = _read_band_and_transform(chunks_dir / f"exposure_population_grid_{cid}.tif", "float64", 0.0)
     pop[~np.isfinite(pop)] = 0.0
 
     geo = _read_band(chunks_dir / f"exposure_geogunit_grid_{cid}.tif", "int32", -1)
@@ -97,7 +162,14 @@ def _load_chunk(
             if p.exists() and p.stat().st_size > 0:
                 ff[(rp, slr)] = _safe(_read_band(p, "float64", -1.0))
 
-    return ChunkData(cid=cid, pop=pop, geo=geo, ff=ff, iso_index=_build_iso_index(geo, iso_lookup))
+    chunk = ChunkData(cid=cid, pop=pop, geo=geo, ff=ff, iso_index=_build_iso_index(geo, iso_lookup))
+    if wlp is not None:
+        any_wet = np.zeros(pop.shape, dtype=bool)
+        for grid in ff.values():
+            any_wet |= grid > 0
+        chunk.station_idx = _nearest_station_idx(transform, pop.shape, wlp.station_lonlat, np.flatnonzero(any_wet))
+        chunk.design_rp = design_return_period_grid(geo, wlp.rp_applied, wlp.minimum_rp)
+    return chunk
 
 
 def pass1_shares(
@@ -140,12 +212,13 @@ def _stream_eai(
     slr_scenarios: list[str],
     iso_lookup: dict[int, str],
     exposure_fn,
+    wlp: "WaterLevelProtection | None" = None,
 ) -> pd.DataFrame:
     # Exact: _trapezoid_eai has fixed weights, so Σ_chunks trapezoid == trapezoid(Σ_chunks).
     total = pd.DataFrame()
     for cid in chunk_ids:
-        c = _load_chunk(cid, chunks_dir, flood_frac_dir, return_periods, slr_scenarios, iso_lookup)
-        grids = {key: exposure_fn(c, ff) for key, ff in c.ff.items()}
+        c = _load_chunk(cid, chunks_dir, flood_frac_dir, return_periods, slr_scenarios, iso_lookup, wlp)
+        grids = {key: exposure_fn(c, key, ff) for key, ff in c.ff.items()}
         chunk_eai = compute_country_eai(
             grids, return_periods, slr_scenarios, c.geo, iso_lookup, iso_index=c.iso_index,
         )
@@ -219,8 +292,10 @@ def _init_avoid_worker(
     slr_interp_mm: np.ndarray,
     slr_traj: "pd.DataFrame | None",
     slr_baseline: str = "SLR_0",
+    wlp: "WaterLevelProtection | None" = None,
 ) -> None:
     _AVOID_CTX.update(
+        wlp=wlp,
         slr_baseline=slr_baseline,
         chunk_ids=chunk_ids,
         chunks_dir=chunks_dir,
@@ -240,13 +315,15 @@ def _avoid_exposure_fn(
     chunk: ChunkData, ff: np.ndarray, apf: np.ndarray,
     growth_by_iso: dict[str, float], redirected_share: dict[str, float],
     existing_pf: "np.ndarray | None" = None,
+    existing_exceeded: "np.ndarray | None" = None,
 ) -> np.ndarray:
     # existing_pf: baseline protection for avoid, None (= design apf) for protect + avoid.
     iso_list, iso_idx, cell_idx = chunk.iso_index
     g = scatter_country_values(growth_by_iso, iso_list, iso_idx, cell_idx, chunk.geo.shape, default=1.0)
     cap = np.maximum(0.0, 1.0 - apf)
     redirected = apply_country_shares(cap, redirected_share, chunk.geo, _AVOID_CTX["iso_lookup"], chunk.iso_index)
-    return compute_avoid(ff, apf, chunk.pop, redirected, g, existing_prot_frac=existing_pf)
+    return compute_avoid(ff, apf, chunk.pop, redirected, g, existing_prot_frac=existing_pf,
+                         existing_exceeded=existing_exceeded)
 
 
 def _avoid_apf_pair(c: ChunkData, variant: str, slr_int: str) -> tuple[np.ndarray, "np.ndarray | None"]:
@@ -255,6 +332,13 @@ def _avoid_apf_pair(c: ChunkData, variant: str, slr_int: str) -> tuple[np.ndarra
     if not AVOID_VARIANTS[variant]:
         return apf, None
     return apf, build_adapt_protection_fraction(c.ff, ctx["return_periods"], ctx["slr_baseline"], ctx["rp_applied"], c.geo)
+
+
+def _avoid_existing_exceeded(c: ChunkData, key: tuple[int, str], variant: str, slr_int: str) -> "np.ndarray | None":
+    # Existing population keeps baseline protection (avoid) or gets the design one (protect + avoid).
+    existing = _AVOID_CTX["slr_baseline"] if AVOID_VARIANTS[variant] else slr_int
+    exceeded = _exceedance(c, _AVOID_CTX["wlp"], existing)
+    return None if exceeded is None else exceeded[key]
 
 
 def _avoid_ssp_worker_task(
@@ -275,13 +359,14 @@ def _avoid_ssp_worker_task(
     }
     share_avoid = {iso: share_retreat[iso] * max(0.0, growth_by_iso.get(iso, 1.0) - 1.0) for iso in share_retreat}
 
-    def exposure_fn(c: ChunkData, ff: np.ndarray) -> np.ndarray:
+    def exposure_fn(c: ChunkData, key: tuple[int, str], ff: np.ndarray) -> np.ndarray:
         apf, existing_pf = _avoid_apf_pair(c, variant, slr_int)
-        return _avoid_exposure_fn(c, ff, apf, growth_by_iso, share_avoid, existing_pf)
+        return _avoid_exposure_fn(c, ff, apf, growth_by_iso, share_avoid, existing_pf,
+                                  _avoid_existing_exceeded(c, key, variant, slr_int))
 
     avoid_eai = _stream_eai(
         ctx["chunk_ids"], ctx["chunks_dir"], ctx["flood_frac_dir"],
-        ctx["return_periods"], ctx["waterlevel_names"], ctx["iso_lookup"], exposure_fn,
+        ctx["return_periods"], ctx["slr_scenarios"], ctx["iso_lookup"], exposure_fn, ctx["wlp"],
     )
 
     traj_years = slr_traj.index.to_numpy(dtype=float)
@@ -304,13 +389,14 @@ def _avoid_growth_matrix_worker_task(
     share_avoid = {iso: v * max(0.0, growth_factor - 1.0) for iso, v in share_retreat.items()}
     growth_by_iso_const = {iso: growth_factor for iso in ctx["iso_lookup"].values()}
 
-    def exposure_fn(c: ChunkData, ff: np.ndarray) -> np.ndarray:
+    def exposure_fn(c: ChunkData, key: tuple[int, str], ff: np.ndarray) -> np.ndarray:
         apf, existing_pf = _avoid_apf_pair(c, variant, slr_int)
-        return _avoid_exposure_fn(c, ff, apf, growth_by_iso_const, share_avoid, existing_pf)
+        return _avoid_exposure_fn(c, ff, apf, growth_by_iso_const, share_avoid, existing_pf,
+                                  _avoid_existing_exceeded(c, key, variant, slr_int))
 
     avoid_eai = _stream_eai(
         ctx["chunk_ids"], ctx["chunks_dir"], ctx["flood_frac_dir"],
-        ctx["return_periods"], ctx["waterlevel_names"], ctx["iso_lookup"], exposure_fn,
+        ctx["return_periods"], ctx["slr_scenarios"], ctx["iso_lookup"], exposure_fn, ctx["wlp"],
     )
     dense = interpolate_eai_linear(avoid_eai, ctx["slr_mm_sorted"], ctx["slr_interp_mm"])
     dense.columns = [f"EAI_{c}_g{g_pct}" for c in dense.columns]
@@ -346,6 +432,7 @@ class AnalysisContext:
     iso_lookup: dict[int, str]
     chunks_dir: Path
     flood_frac_dir: Path
+    water_level_protection: "WaterLevelProtection | None" = None
 
 
 def load_analysis_context(cfg: dict) -> AnalysisContext:
@@ -404,6 +491,13 @@ def load_analysis_context(cfg: dict) -> AnalysisContext:
     xlsx_path = Path(catalog.get_source("ssp_population_growth_factors").path)
     growth_df = load_ssp_growth_factors(xlsx_path) if xlsx_path.exists() else None
 
+    if prot_cfg["rule"] == "water_level":
+        wlp = load_water_level_protection(bc, return_periods, slr_scenarios, rp_applied, int(prot_cfg["minimum_rp"]))
+    elif prot_cfg["rule"] == "flood_fraction":
+        wlp = None
+    else:
+        raise ValueError(f"protection.rule must be flood_fraction or water_level, not {prot_cfg['rule']!r}")
+
     merged_dir = Path(cfg["postprocessing"]["merged_outputs"])
     return AnalysisContext(
         return_periods=return_periods, slr_scenarios=slr_scenarios, slr_mm_sorted=slr_mm_sorted,
@@ -411,6 +505,7 @@ def load_analysis_context(cfg: dict) -> AnalysisContext:
         growth_rates=growth_rates, slr_interp_mm=slr_interp_mm, growth_df=growth_df, slr_traj=slr_traj,
         rp_applied=rp_applied, iso_lookup=iso_lookup,
         chunks_dir=merged_dir / "chunks", flood_frac_dir=merged_dir / "chunks" / "flood_fraction",
+        water_level_protection=wlp,
     )
 
 
@@ -549,6 +644,7 @@ def pass2_all_tasks(
     rp_applied: dict[int, int],
     iso_lookup: dict[int, str],
     tasks: list[ExposureTask],
+    wlp: "WaterLevelProtection | None" = None,
 ) -> dict[str, pd.DataFrame]:
     """Compute every task's partial per-country EAI for this batch of chunks.
 
@@ -562,7 +658,7 @@ def pass2_all_tasks(
     for cid in chunk_ids:
         if not _chunk_is_populated(chunks_dir, cid):
             continue
-        c = _load_chunk(cid, chunks_dir, flood_frac_dir, return_periods, slr_scenarios, iso_lookup)
+        c = _load_chunk(cid, chunks_dir, flood_frac_dir, return_periods, slr_scenarios, iso_lookup, wlp)
         iso_list, iso_idx, cell_idx = c.iso_index
         pop_cells = c.pop.ravel()[cell_idx]
         ff_cells = {key: ff.ravel()[cell_idx] for key, ff in c.ff.items()}
@@ -577,26 +673,37 @@ def pass2_all_tasks(
 
         sub_cache: dict[tuple, tuple] = {}
 
+        def _exceeded_cells(intensity: "str | None") -> "dict | None":
+            exceeded = _exceedance(c, wlp, intensity)
+            return None if exceeded is None else {key: m.ravel()[cell_idx] for key, m in exceeded.items()}
+
         for task in tasks:
             sub_key = (task.design_intensity, task.existing_intensity)
             if sub_key not in sub_cache:
                 apf_cells = _apf_cells(task.design_intensity)
                 epf_cells = _apf_cells(task.existing_intensity) if task.existing_intensity else None
+                design_exc = _exceeded_cells(task.design_intensity)
+                existing_exc = _exceeded_cells(task.existing_intensity or task.design_intensity)
                 can_exceed = np.zeros(len(cell_idx), dtype=bool)
-                for ff in ff_cells.values():
+                for key, ff in ff_cells.items():
                     can_exceed |= _safe(ff) > _safe(apf_cells)
                     if epf_cells is not None:
                         can_exceed |= _safe(ff) > _safe(epf_cells)
+                    if design_exc is not None:
+                        can_exceed |= (design_exc[key] | existing_exc[key]) & (_safe(ff) > 0)
                 keep = np.nonzero(can_exceed)[0]
                 sub_cache[sub_key] = (
                     iso_idx[keep], pop_cells[keep], apf_cells[keep],
                     epf_cells[keep] if epf_cells is not None else None,
                     {key: ff[keep] for key, ff in ff_cells.items()},
+                    None if design_exc is None else {key: m[keep] for key, m in design_exc.items()},
+                    None if existing_exc is None else {key: m[keep] for key, m in existing_exc.items()},
                 )
-            iso_k, pop_k, apf_k, epf_k, ff_k = sub_cache[sub_key]
+            iso_k, pop_k, apf_k, epf_k, ff_k, dexc_k, eexc_k = sub_cache[sub_key]
 
             if task.kind in ("baseline", "protect"):
-                weights = {key: protect_exposure_grid(ff, apf_k, pop_k) for key, ff in ff_k.items()}
+                weights = {key: protect_exposure_grid(ff, apf_k, pop_k, None if dexc_k is None else dexc_k[key])
+                           for key, ff in ff_k.items()}
             elif task.kind == "retreat":
                 cap = np.maximum(0.0, 1.0 - apf_k)
                 share = np.array([task.share_retreat.get(iso, 0.0) for iso in iso_list], dtype="float64")
@@ -609,7 +716,8 @@ def pass2_all_tasks(
                 cap = np.maximum(0.0, 1.0 - apf_k)
                 share = np.array([task.redirected_share.get(iso, 0.0) for iso in iso_list], dtype="float64")
                 redirected = cap * share[iso_k]
-                weights = {key: compute_avoid(ff, apf_k, pop_k, redirected, g, existing_prot_frac=epf_k)
+                weights = {key: compute_avoid(ff, apf_k, pop_k, redirected, g, existing_prot_frac=epf_k,
+                                              existing_exceeded=None if eexc_k is None else eexc_k[key])
                            for key, ff in ff_k.items()}
 
             chunk_eai = compute_country_eai_from_cells(weights, return_periods, slr_scenarios, iso_list, iso_k)
@@ -710,6 +818,8 @@ def main() -> None:
     growth_df, slr_traj = ctx.growth_df, ctx.slr_traj
     rp_applied, iso_lookup = ctx.rp_applied, ctx.iso_lookup
     chunks_dir, flood_frac_dir = ctx.chunks_dir, ctx.flood_frac_dir
+    wlp = ctx.water_level_protection
+    print(f"Protection rule: {'water level' if wlp is not None else 'flood fraction'}")
     if slr_traj is None:
         traj_path = cfg["visualization"]["slr_trajectories_csv"]
         print(f"  WARNING: SLR trajectories not found at {traj_path}; File 3 (*_ssp.csv) will be skipped.")
@@ -740,12 +850,13 @@ def main() -> None:
     else:
         print("\nComputing BASELINE exposure…")
 
-        def _baseline_fn(c: ChunkData, ff: np.ndarray) -> np.ndarray:
+        def _baseline_fn(c: ChunkData, key: tuple[int, str], ff: np.ndarray) -> np.ndarray:
             apf = build_adapt_protection_fraction(c.ff, return_periods, slr_baseline, rp_applied, c.geo)
-            return protect_exposure_grid(ff, apf, c.pop)
+            exceeded = _exceedance(c, wlp, slr_baseline)
+            return protect_exposure_grid(ff, apf, c.pop, None if exceeded is None else exceeded[key])
 
         baseline_eai = _stream_eai(
-            chunk_ids, chunks_dir, flood_frac_dir, return_periods, slr_scenarios, iso_lookup, _baseline_fn,
+            chunk_ids, chunks_dir, flood_frac_dir, return_periods, slr_scenarios, iso_lookup, _baseline_fn, wlp,
         )
         _write_base_scenario_files(
             "baseline", baseline_eai, out_dir, slr_mm_sorted, slr_interp_mm, growth_rates,
@@ -759,12 +870,13 @@ def main() -> None:
             continue
         print(f"\nComputing PROTECT exposure ({slr_int})…")
 
-        def _protect_fn(c: ChunkData, ff: np.ndarray, slr_int=slr_int) -> np.ndarray:
+        def _protect_fn(c: ChunkData, key: tuple[int, str], ff: np.ndarray, slr_int=slr_int) -> np.ndarray:
             apf = build_adapt_protection_fraction(c.ff, return_periods, slr_int, rp_applied, c.geo)
-            return protect_exposure_grid(ff, apf, c.pop)
+            exceeded = _exceedance(c, wlp, slr_int)
+            return protect_exposure_grid(ff, apf, c.pop, None if exceeded is None else exceeded[key])
 
         protect_eai = _stream_eai(
-            chunk_ids, chunks_dir, flood_frac_dir, return_periods, slr_scenarios, iso_lookup, _protect_fn,
+            chunk_ids, chunks_dir, flood_frac_dir, return_periods, slr_scenarios, iso_lookup, _protect_fn, wlp,
         )
         _write_base_scenario_files(
             label, protect_eai, out_dir, slr_mm_sorted, slr_interp_mm, growth_rates,
@@ -787,7 +899,8 @@ def main() -> None:
             continue
         print(f"Computing RETREAT exposure ({slr_int})…")
 
-        def _retreat_fn(c: ChunkData, ff: np.ndarray, slr_int=slr_int, share_retreat=share_retreat) -> np.ndarray:
+        def _retreat_fn(c: ChunkData, key: tuple[int, str], ff: np.ndarray, slr_int=slr_int,
+                        share_retreat=share_retreat) -> np.ndarray:
             apf = build_adapt_protection_fraction(c.ff, return_periods, slr_int, rp_applied, c.geo)
             cap = np.maximum(0.0, 1.0 - apf)
             redistributed = apply_country_shares(cap, share_retreat, c.geo, iso_lookup, c.iso_index)
@@ -868,7 +981,7 @@ def main() -> None:
 
     init_args = (chunk_ids, chunks_dir, flood_frac_dir, iso_lookup, rp_applied,
                  return_periods, slr_scenarios, growth_df,
-                 slr_mm_sorted, slr_interp_mm, slr_traj, slr_baseline)
+                 slr_mm_sorted, slr_interp_mm, slr_traj, slr_baseline, wlp)
     if n_workers == 1:
         _init_avoid_worker(*init_args)
         for v, slr_int, ssp, yr in ssp_tasks:

@@ -1,0 +1,8 @@
+FES tide against 2373 usable coastal GESLA sites (first two years of each record, least-squares M2,
+S2, N2, K1, O1 and M4; records that dry at low water, are sparse, or exceed a 20 m range (feet) are
+left out). Tide amplitude = the sum of the M2, S2, N2, K1 and O1 amplitudes. (a) FES (the atlas of
+the nearest station) at the gauge against the gauge; grey lines at +-25%. (b) The same, scaled by
+the median gauge/FES ratio of the other gauges within 25 km (the gauge and its site left out). (c)
+MAE against the correction radius; dashed: the current forcing (IDW of the 5 nearest stations' FES
+tide), dotted: FES at the gauge uncorrected. All gauges: FES at the gauge 0.185 m, current forcing
+0.157 m, stations corrected 0.139 m, FES at the gauge corrected within 25 km 0.133 m.

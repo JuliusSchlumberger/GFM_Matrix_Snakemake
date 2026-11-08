@@ -64,7 +64,7 @@ from shapely.geometry import MultiLineString, Point, box
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from gfm_config import read_root  # noqa: E402
+from gfm_config import read_root, storm_tide_hydrograph_path, storm_tide_product_levels_path  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -88,7 +88,7 @@ from boundary_lines_geometry import (  # noqa: E402,F401
     _edge_fallback,
     _finalize,
     _merge_lines,
-    _n_with_coast_hg,
+    _n_with_hydrograph,
     _read_mask_window,
     _search_box,
     _tile_stations,
@@ -97,11 +97,14 @@ from boundary_lines_plot import _plot  # noqa: E402
 
 
 def build_tile(root: Path, tile_dir: Path, out_dir: Path, buffer_deg: float, overwrite: bool,
-               plot: str = "suitable", min_size_deg: float = 0.0) -> dict:
+               plot: str = "suitable", min_size_deg: float = 0.0, hydrograph_nc: Path | None = None,
+               levels_nc: Path | None = None) -> dict:
     """Build one tile's boundary line, write {tile_id}.gpkg and return its summary row.
 
     An existing gpkg is kept unless `overwrite` (it may hold hand edits). Suitable
-    means no domain conflicts and >= MIN_FORCING_STATIONS used stations with COAST-HG.
+    means no domain conflicts and >= MIN_FORCING_STATIONS used stations with a hydrograph
+    in `hydrograph_nc` (`gfm_config.storm_tide_hydrograph_path`) within MAX_HG_MATCH_DEG.
+    The coastline nodes of `levels_nc` (`gfm_config.storm_tide_product_levels_path`) are left out.
     `plot` is "all", "suitable" or "none".
     """
     tile_id = tile_dir.name
@@ -112,7 +115,7 @@ def build_tile(root: Path, tile_dir: Path, out_dir: Path, buffer_deg: float, ove
     utm_crs = tile.estimate_utm_crs()
     area_utm = gpd.GeoSeries([box(*bounds)], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
 
-    stations = _tile_stations(tile_dir)
+    stations = _tile_stations(tile_dir, levels_nc)
     row.update(n_stations=len(stations),
                n_stations_in_tile=int(stations.within(tile.geometry.iloc[0]).sum()))
 
@@ -215,7 +218,7 @@ def build_tile(root: Path, tile_dir: Path, out_dir: Path, buffer_deg: float, ove
                    ocean_active_pct=round(100 * split["ocean_active_frac"], 1),
                    ocean_enclosed_pct=round(100 * split["ocean_enclosed_frac"], 1))
         used = stations[status == "used"]
-        n_forcing = _n_with_coast_hg(root, np.column_stack([used.geometry.x, used.geometry.y]))
+        n_forcing = _n_with_hydrograph(hydrograph_nc, np.column_stack([used.geometry.x, used.geometry.y]))
         row.update(n_used_stations=len(used), n_forcing_stations=n_forcing,
                    suitable=best["n_conflicts"] == 0 and n_forcing >= MIN_FORCING_STATIONS)
         row["status"] = "written"
@@ -252,12 +255,13 @@ def _running_marker(out_dir: Path, tile_id) -> Path:
 
 
 def _safe_build(args):
-    root, tile_dir, out_dir, buffer_deg, overwrite, plot, min_size_deg = args
+    root, tile_dir, out_dir, buffer_deg, overwrite, plot, min_size_deg, hydrograph_nc, levels_nc = args
     marker = _running_marker(out_dir, tile_dir.name)
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(str(os.getpid()))  # tells the parent which tiles were in flight if this worker dies
     try:
-        row = build_tile(root, tile_dir, out_dir, buffer_deg, overwrite, plot, min_size_deg)
+        row = build_tile(root, tile_dir, out_dir, buffer_deg, overwrite, plot, min_size_deg, hydrograph_nc,
+                         levels_nc)
     except Exception as exc:  # one broken tile must not stop the batch
         row = {"tile_id": int(tile_dir.name), "status": f"error: {exc!r}",
                "traceback": traceback.format_exc(limit=3)}
@@ -391,7 +395,10 @@ def main() -> None:
         print(f"--skip-existing: {n0 - len(tile_dirs)} tile(s) already done")
     print(f"{len(tile_dirs)} tile(s) -> {out_dir}", flush=True)
 
-    jobs = [(root, d, out_dir, buffer_deg, args.overwrite, args.plot, min_size_deg) for d in tile_dirs]
+    hydrograph_nc = storm_tide_hydrograph_path(Path(args.config))
+    levels_nc = storm_tide_product_levels_path(Path(args.config))
+    jobs = [(root, d, out_dir, buffer_deg, args.overwrite, args.plot, min_size_deg, hydrograph_nc, levels_nc)
+            for d in tile_dirs]
     rows = _run_jobs(jobs, args.workers, out_dir)
     if rows:
         print()

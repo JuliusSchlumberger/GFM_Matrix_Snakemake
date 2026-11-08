@@ -1,0 +1,17 @@
+The level product (ii) at the 22,670 COAST-RP stations north of 60 S, the ones production uses
+(Equal Earth projection; land in grey). (a) RP100 level of the new product minus COAST-RP's total
+RP100 level: red = the new product is higher; differences beyond ±0.5 m take the end colours (1,472
+stations). Stations closest to zero are drawn first. (b) The surge ratio r applied to the GTSM skew
+surges: the inverse-distance mean of the gauge ratios within 500 km (at least 3 gauges), otherwise
+the gauge median (1.18), capped at 2. Orange = GTSM's surge is too small (r > 1); logarithmic scale,
+r above 1.5 in the end colour.
+
+Reading: most of the coast moves by less than 0.2 m. The large departures are regional: lower in the
+southern North Sea and Dover Strait, where GTSM's tide is too large and the FES tide replaces it;
+lower in Hudson Bay, the Canadian Arctic and parts of Indonesia; higher in the western Baltic, in
+Japan and East China, where r is above 1.25, in macrotidal basins where GTSM's tide is too small
+(Ungava Bay, Amazon mouth, King Sound), and on hurricane and typhoon coasts (US Gulf and south-east
+coasts, East China), where the ERA5 cyclones stay in the ETC fit and add to COAST-RP's TC part. At
+the TC-dominated gauges this centres the levels on the gauge (median -0.03 m against COAST-RP's
+-0.25 m) but widens the spread: one in ten is 0.5 m or more above it (fig14, fig21). Uniform r marks
+coasts without 3 gauges within 500 km.

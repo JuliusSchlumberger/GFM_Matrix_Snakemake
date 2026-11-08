@@ -1,0 +1,16 @@
+A tropical-cyclone mask, tested and not used in production: at stations with a COAST-RP TC part,
+tidal cycles near an IBTrACS storm would leave the ETC fit, so a cyclone would not count twice (in
+the ERA5 surge record and in COAST-RP's synthetic TC part). Bars: median of station minus gauge at
+RP10 and RP100 at the ratio gauges, r left one out; ticks: MAE. (a) TC-dominated gauges, (b) gauges
+whose station has a TC part. Variants: no mask (production); 300 km, +-24 h, >= 34 kt; 150 and 500
+km; +-12 and +-48 h; hurricane strength (>= 64 kt) only.
+
+Reading: the mask makes the TC coasts worse at the gauges. Without it the TC-dominated gauges' RP100
+median is -3 cm and the MAE 36 cm; with a 300 km mask -16 cm and 39 cm. A smaller radius (150 km)
+lies between; the time window and the wind threshold hardly matter. Without the mask a cyclone
+counts in the ERA5 record and again in COAST-RP's TC part, yet the levels match the gauges better:
+both TC sources are too low (GTSM-ERA5 resolves cyclones coarsely, COAST-RP's TC part is 0.2-0.25 m
+below the gauges, §8.1), and the double count makes up for it. The price is a wider spread: without
+the mask one in ten TC-dominated gauges is 51 cm or more below its station, with the 300 km mask 24
+cm, because a cyclone of the 46-year record raises the ETC tail where it struck. Production keeps
+the cyclones in the ETC fit until test 10 (STORM-forced GTSM) replaces the TC part.

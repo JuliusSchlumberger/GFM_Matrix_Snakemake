@@ -43,7 +43,7 @@ Without arguments it rebuilds every known scenario (`bangkok_chao_phraya`, `cali
 `*_materialized.yml` are generated: rerun the script after editing `config.yml`, `config_local.yml` or the override, never hand-edit them.
 Only Snakemake reads `GFM_CONFIG_PATH`; without it, Snakemake uses `config.yml` + `config_local.yml`, and the Python scripts take the config as `--config <config.yml>`.
 A scenario writes its outputs where its override sets `simulation.model_outputs`, `postprocessing.merged_outputs` and `visualization.output_dir`.
-`<scenario>_pins.yml` fixes the values the scenario's published outputs were computed with (e.g. `friction_scale_factor: 9.0` for Bangkok): keep it to reproduce them, or delete its keys to follow `config.yml`.
+`<scenario>_pins.yml` fixes the values the scenario's published outputs were computed with (e.g. `friction_scale_factor: 0.3`, effective 9.0, for Bangkok): keep it to reproduce them, or delete its keys to follow `config.yml`.
 
 ## 3. Snakemake DAG
 

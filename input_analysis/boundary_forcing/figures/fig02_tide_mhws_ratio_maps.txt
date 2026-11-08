@@ -1,0 +1,12 @@
+The MHWS ratios of fig01 as maps (Equal Earth projection; land in grey). Each dot is one quality
+tide gauge; its colour is the ratio of the source's MHWS to the gauge's MHWS on a logarithmic scale
+centred on 1: red = source too large, blue = too small, white = equal. Ratios beyond 0.67 or 1.5
+take the end colours. Dots closest to 1 are drawn first so that departures stay visible where gauges
+cluster. (a) GTSM v3 tide; (b) FES2022.
+
+Reading: GTSM is too large almost everywhere (Africa and the Mediterranean ~20%, NW Europe ~10%) and
+too small on the North American Atlantic and Gulf coast. FES2022 is close to 1 nearly everywhere;
+its remaining departures sit in estuaries, fjords and narrow entrances (upper St Lawrence, Long
+Island Sound, the Salish Sea, Port Phillip entrance, Juneau). FES2022 read at the GTSM station
+instead of the gauge gives the same values (MAE 0.01 m), so the GTSM pattern is a model bias, not a
+location effect.

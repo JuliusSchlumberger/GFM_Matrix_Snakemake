@@ -45,13 +45,367 @@ study scripts and `build_tile_subset_by_id.py` are options now (`--out-dir`, `--
 `--fig-dir`, `--tile-ids`, `--tile-ids-file`, `--out`). Notebooks or scripts outside the repo that
 import renamed modules (pipeline_plots, analysis_figures, exposure_grid, ...) need the same update.
 
+## Reviewer critiques (branch `review-critiques`)
+
+Evidence: `review_critiques/` scripts; results, figures and the summary page source in
+`.cleanup_baseline/review_critiques/`.
+
+Decided and implemented:
+- **SLR propagation (critique 1a):** `simulation.flooding.slr_propagation: two_component` is the
+  default. The static level S = MDT + SLR fingerprint spreads by coast connectivity without
+  attenuation and acts as sea; only the storm tide on top attenuates. Bangkok tiles: 1.8-2.7x the
+  attenuated flooded area from +0.5 m SLR, identical at SLR 0.
+- **Duration correction B (critique 3):** `simulation.flooding.duration_correction` on, alpha 1,
+  t_ref 12 h, COAST-HG shape of the nearest station per cell, second solve (~2x runtime). On SFINCS
+  RP100 tiles: pooled CSI 0.742 -> 0.763 on 498 random tiles (median tile unchanged; the gain comes
+  from a minority of overflooded basins), false alarms down; t_ref 6-24 h changes CSI by < 0.01. The
+  weir volume cap (A) changed nothing and stays in `src/event_volume.py` only for the experiments.
+  These numbers are for the clipped form clip((t_ref/T)^alpha, 1, 10). The multiplier is now
+  (t_ref/T)^alpha with no lower clip (1-D refit, INPUT_ANALYSIS.md §6), which changes results:
+  recalibrate friction_scale_factor with B on SFINCS (HPC), confirm on 5-10 real tiles (test 8),
+  then rerun the tile simulations. Snakemake does not see the change (config values unchanged),
+  so existing eikonal outputs must be removed or rerun explicitly.
+- **Land-cover friction (critique 2):** kept, described as a land-cover-indexed attenuation rate
+  (docs/methods_02 §2.2, code comments; config keys and file names unchanged). Land-cover and
+  uniform attenuation are within 0.005 pooled CSI on 498 random tiles, with and without B.
+- **friction_scale_factor with B:** 7.5 (498 random RP100 tiles, pooled CSI 0.763, bias 1.08;
+  9.0 gives 0.757, bias 0.98). Without B the optimum stays 12.0 (CSI 0.742). Results in
+  `.cleanup_baseline/review_critiques/calibration/representative/`, figures R1/R2.
+- **Straight-line baseline** (level = nearest seed level - rate x Euclidean distance, no solver;
+  `--stage distance`): best pooled CSI 0.713 coast-connected (0.10 m/km), 0.668 without
+  connectivity, against 0.739 eikonal uniform and 0.763 eikonal + B. Median tile within 0.006;
+  worse by > 0.2 CSI on 3-4% of tiles (sills, basins, ridges). Figure R3.
+- **Outputs:** new results go to `{root}/model_outputs_v2`, `merged_results_v2`, `figures_v2`,
+  `validation_v2`; per-tile inputs stay in `{root}/model_outputs` (`preprocessing_inputs_dir`).
+  Bangkok, deltas and calibration_500_tiles pin `attenuated` and B off in their `*_pins.yml` and
+  set `preprocessing_inputs_dir: null` (own inputs).
+- **Protection rule:** `protection.rule: flood_fraction | water_level` (implemented, default
+  flood_fraction; `minimum_rp` 2 applies to the water-level rule only).
+- **Permanent inundation:** to be counted in EAI by anchoring the exceedance curve at p = 1 with
+  the permanently inundated exposure, and reported as a separate metric (not implemented yet, see
+  Open).
+
+Open:
+- **Bathtub baselines: review all implementations and make them consistent (to do before any
+  bathtub vs eikonal comparison goes into the paper).** Each was written for a different study, and
+  each makes its own choices, so their scores are not directly comparable:
+  - HC-bathtub: `sfincs_tiles/run_calibration_models.compute_bathtub_depth`. One flat level, the
+    tile's highest station value, not interpolated. The depth file is unpruned; it is pruned only at
+    scoring (`sfincs_tiles/compute_calibration_result.py` via
+    `flood_agreement.prune_to_ocean_connected`).
+  - Straight-line attenuated bathtub: `review_critiques/calibration_experiments.run_tile_distance`.
+    Level = the nearest production seed (IDW of 15 stations) minus rate x Euclidean distance.
+    Pruned with `flood_model.prune_to_coast_connected` on the seed cells, on the effective DEM.
+  - Static inundation: `flood_model.static_inundation`, a connected flat-level bathtub at
+    S = MDT + SLR inside the two-component solve. Land cells only; rivers and lakes are not
+    conduits.
+  - Spill level: `event_volume.spill_level`, a priority-flood bathtub (minimax elevation from the
+    sea) used by correction B.
+  - Naming: the eikonal solver is labelled "EA-bathtub" in `sfincs_tiles/` (calibration_results,
+    plots, docs/methods_04a) and in `analysis/summarize_run_timings.py`. Literature references:
+    Vafeidis et al. 2019 and the Flow-tub rate (0.2 m/km) in docs/methods_02.
+
+  They differ in:
+  - the water-level source (tile maximum, nearest seed, or IDW);
+  - the connectivity rule: two pruning functions, with different coastline definitions and
+    river cells as conduits or not;
+  - the DEM (raw or effective, no-data handling);
+  - whether pruning is applied to the depth raster or only to the score;
+  - the names used for them.
+
+  Goal: one shared implementation, e.g. `src/bathtub.py`, with:
+  - a level field: flat, nearest-seed or IDW, optionally minus rate x distance;
+  - one connectivity rule;
+  - the same DEM, seeds and wet threshold as the eikonal solver.
+
+  Then define one set of names (HC-bathtub, attenuated bathtub, eikonal / eikonal + B), use them
+  in `sfincs_tiles/`, `review_critiques/` and `validation/`, and re-score every baseline on the
+  same tiles. `sfincs_tiles/` changes need your go-ahead, and none while an HPC batch runs.
+- **Boundary sources: a rule for FES2022 at fjord and estuary heads.** Partly answered by the
+  version rule (FES2014 where FES2022 is implausible) and its neighbour growth in the level
+  product (§8.5); the cases below where neither atlas fits stay open. FES matches GESLA within
+  0.05 m MAE on MHWS at 698 gauges, but misses by > 0.25 m at 20, all at fjord/estuary heads or
+  narrow entrances (too high in Juneau, the Salish Sea, Port Phillip; too low in the upper
+  St Lawrence). Without gauges, a few head nodes are implausible: Cobequid Bay (MHWS 14.5 m above
+  MSL, about the observed spring range), Bahia Lomas (15.5-16.3 m) and one Colorado-delta node
+  (15.4 m); FES elsewhere in Minas Basin, the Strait of Magellan and the upper Gulf of California
+  matches published ranges. Decide on a detection rule before FES levels go into forcing
+  (`boundary_test/INPUT_ANALYSIS.md` §3, §8).
+- **Boundary sources: why GTSM's tide is 7-8% too large.** S2 is +20% and M2 +6% against
+  GESLA (FES: ~0%). Check against the GTSM v3 validation and the dataset documentation (radiational
+  S2, SAL). Confirm the GTSM tide run's MSL reference epoch (data suggest 1986-2005 + an imposed
+  ~2.6 mm/yr trend). COAST-RP inherits the tide excess, but its surge part is about 0.1 m too low
+  against GESLA GEV fits, so the two partly cancel (§0.25). Replacing only the tide (H1) would
+  lower levels that are already about 0.1 m low. Decide how the surge part is treated before H1.
+- **FES extraction cache bug (fixed in `fes_tide_stats.extract_constants`):** pyTMD altered the
+  cached atlas grid in place, so later extraction groups came back NaN (never wrong values). It
+  cost 15 gauges / 6 GTSM stations in `levels_tides.py` (2 tide-set sites) and an unknown share of
+  the ~13,600 "invalid" FES nodes in `.cleanup_baseline/boundary_test/fes_nodes.parquet`. Rerun
+  `levels_tides.py` and `fes_tide_stats.py` before those outputs are used again.
+- **Storm-tide product: run it on `<data_root>` and switch production** (implemented:
+  `boundary_conditions.storm_tide_source: gfm_product` is the default; `src/storm_tide_product.py`,
+  `preparation/prepare_storm_tide_product.py`; method and gauge validation in
+  `boundary_test/INPUT_ANALYSIS.md` §8.4-8.5). The source drives the scenario levels
+  (`prepare_boundary_conditions`), the eikonal seeds and static level, correction B's hydrographs
+  (`boundaries.storm_tide_hydrograph_path`) and the SFINCS forcing shapes (`sfincs_tiles/gfm_config`).
+  Done on `<data_root>` (2026-11-07): `run_preparation.py storm_tide_product
+  boundary_conditions` without the TC mask, cache (~29 GB) under
+  `processed_inputs/storm_tide_product/cache` for both machines; `WL_scenarios` holds the
+  product's levels (marker `storm_tide_source.txt`; level + MDT + 2020 offset checked at all
+  22,670 stations; the former files predate the 2020 offset, fig24); scenario configs
+  re-materialized here. Left:
+  1. re-materialize the scenario configs on Hydrax;
+  2. Snakemake: the station caches re-run (their scenario NetCDFs are inputs) and with them every
+     tile; then the SFINCS forcing, the fsf recalibration on the 498 tiles
+     (`sfincs_tiles/generate_calibration_jobs.py stage1|stage2` on Hydrax), test 8 and the tile rerun.
+  One processed_inputs tree serves every config of a data root: once it holds product levels,
+  configs pinned to `coast_rp` (bangkok_chao_phraya, calibration_500_tiles, deltas_*) stop at
+  `boundaries.check_scenario_source` until `boundary_conditions` is rebuilt for them.
+- **Pinned scenarios and the new keys:** the scenario pins keep `storm_tide_source: coast_rp`,
+  `knn: 15`, `idw_power: 2`; the dry run of bangkok_chao_phraya (re-materialized) has 599 jobs
+  against the 480 baseline, from changed params (new keys in the `boundary_conditions` and
+  `flooding` dicts, `hydrograph_path`) and the station cache's new input; results are identical.
+  `--rerun-triggers mtime` skips them. Re-materialize the scenario configs on both machines
+  (`snakemake_workflow/scripts/materialize_configs.py`; the checked-in bangkok one also lacks
+  `slr_baseline_offset_m`).
+- **Storm-tide product: external review of decisions 1-3 (review brief, 2026-11-08).** Order,
+  each step gated on the one before; the production rerun waits for steps 1-4.
+  1. GPD shape cap: parametric bootstrap of the station shapes (`open_guesses.py shape_noise`).
+     Gate: if a light tail reproduces the heavy shapes, replace the cap by a regionally pooled
+     shape (~500 km, TC and non-TC pooled separately, station threshold and scale); score capped
+     vs regional at gauges with > 60 y. Add a per-station 5-95% band above RP100 and a
+     tail-uncertain flag (shape > 0.2 or cap binding).
+  2. Cyclone mask: masked ETC fit + COAST-RP_TC scaled by a basin gauge ratio r_TC (N Atlantic,
+     NW Pacific, N Indian, Australia/S Pacific; leave one basin out) against the double count, on
+     median, MAE, 10-90% and the RP100 jump between neighbouring stations with and without an
+     ERA5 landfall. Adopt if MAE within 0.02 m and spread and jumps smaller; else keep with a
+     TC-coast flag. US coast: rescore against US-CoastEX (Morim et al., 2025).
+  3. Gauge ratio r: open-coast calibration set (drop estuary/harbour/tidal-river gauges),
+     multiplicative vs additive, median vs covariate fallback (shelf width, latitude, GTSM cell
+     size) or 1 with a flag; leave-one-out on the 451 calibration and the 98 sparse gauges.
+  Results (2026-11-08, `open_guesses.py shape_noise | tc_scale | tc_jumps | r_variants`, review brief):
+  - 1: not noise. Stations with a TC part: 753 MLE shapes > 0.35 against 6 expected from a light
+    tail at their storm counts (91 separate 5-deg cells); without a TC part 70 against 15. The cap
+    question is decision 2.
+  - 2: masked fit + COAST-RP_TC shifted by 0.24 m (fitted per basin, basin left out; 0.18 m WP):
+    TC-dominated RP100 MAE 0.363 vs 0.361 m, 10-90% -0.64..+0.42 vs -0.59..+0.51; shapes > 0.35
+    753 -> 69; RP1000 - COAST-RP p99 2.06 -> 1.16 m, max 8.4 -> 3.2 m; neighbour jumps unchanged;
+    RP2 MAE (all gauges) 0.088 -> 0.104 m because the shift also lifts COAST-RP_TC's flat tide
+    floor. Scaling instead of shifting is worse (MAE 0.413). No tapered shift or other device that
+    exists only to improve the fit (user, 2026-11-08). Decided (user, 2026-11-08): mask on, no shift
+    and no scale. Masked without a shift: TC-dominated RP100 median -0.165 m, MAE 0.391 m (double
+    count -0.027 / 0.361 m); non-TC-dominated unchanged (0.164 vs 0.163 m).
+  - 3: covariate fallback r = 1.03 x S10^-0.32 (GTSM RP10 skew surge, m; cap 2) where < 3 gauges
+    within 500 km: sparse gauges RP100 MAE 0.226 -> 0.194 m, bias -0.11 -> -0.03 m; all 451
+    0.163 -> 0.157 m. Fallback 1 worse; dropping gauges with S10 < 0.2 m no effect; additive
+    offset +3 cm RP10 bias. The high ratios are open-ocean islands and Peru-Chile (S10 ~0.1 m),
+    not estuaries. Decided (user, 2026-11-08): covariate fallback, fitted on all calibration
+    gauges in `storm_tide_product.ratio_covariate`; the station's own GTSM RP10 skew surge sets it.
+    Leave-one-out r MAE at the 197 sparse gauges 23% -> 15% (fig30c). It overshoots on calm coasts
+    where GTSM is right: East Africa (Zanzibar r 0.79, Lamu 1.08, S10 ~0.24 m) gets r ~1.6, so the
+    surge-signal uncertainty there is 0.59 m (fig29). Check the regional residuals of the power law
+    after the rebuild.
+  - 1950-2024 tail check (`open_guesses.py long_record`; all 23,211 stations rebuilt on 75 years,
+    method unchanged; 1950-1978 store and FES basis in `.cleanup_baseline/storm_tide_product/
+    open_guesses/long_record`): the cyclone tail stays. TC-part shapes > 0.35: 753 -> 737, the
+    75-year median at those stations still 0.40; 245 drop out and 229 enter, so single storms set
+    the shape (Hangzhou Bay, Pilbara RP1000 up to +3.2 m from 1950-78 storms). Without a TC part
+    70 -> 33 (ETC heavy shapes mostly noise). Gauge RP100 MAE 0.195 (46 yr) vs 0.202 m (75 yr),
+    TC-dominated 0.361 vs 0.364 m. Early/late skew RP10 median 1.00 (TC part 1.04, no TC part
+    0.985): no pre-1979 storm deficit in ERA5. A longer record does not replace the cap at TC
+    stations; justified options are the COAST-RP_TC tail (masked, decision 2) or a regionally
+    pooled GPD shape. Decided (user, 2026-11-08): use the 1950-2024 record in production (store,
+    FES basis and IBTrACS mask from 1950; IBTrACS before the satellite era is less complete).
+    `storm_tide_product.ibtracs_path` is the full IBTrACS (`ibtracs.ALL.list.v04r01.csv`, 1842 on); the
+    `*_materialized.yml` still name `ibtracs.since1980` until they are re-materialized.
+  4. Tile interpolation: interpolate skew-surge levels and convolve with the local FES tide at
+     the tile boundary, vs total-level IDW, on the stations whose current error exceeds 0.2 m.
+     Coastline seeds are total-level IDW of the stations now, so an estuary never exceeds its
+     nearest stations (Fundy: Cape Enrage MHWS 5.0 m forces Shepody Bay and Cumberland Basin).
+     FES2022 (extrapolated grid) at coastline points: Hopewell Cape MHWS 7.6 m, Joggins 6.2 m
+     (plausible), but Petitcodiac / Amherst Point 12.8 / 11.5 m (spring range 22-23 m, above
+     Fundy's ~16 m maximum) and Rosyth 1.55 m below Leith 2.51 m: extrapolated cells in narrow
+     estuaries are not usable as they are. Native cells do not help: `inputs/fes2022b/mask_fes2022B.nc`
+     (0 native, 1 extrapolated) marks Amherst Point M2 8.4-9.3 m and Rosyth 1.15 m (Leith 1.80 m) as
+     native. At 916 gauges, FES MHWS at the gauge vs IDW of the 5 nearest stations' FES MHWS: MAE
+     0.061 vs 0.062 m, local closer at 51%; the 16 gauges where they differ by > 0.2 m split evenly
+     (fjords: Juneau, Skagway FES 6-7 m against 2.7 m). Gauges sit near stations, so they do not
+     test the estuary heads. GESLA's short records do: upper Fundy gauges agree with FES in open
+    water and at Burntcoat Head (observed 0.1-99.9% range 15.2 m, FES spring range 16.1 m), while
+    FES is too high in the tidal rivers (Hantsport 13.8 m observed vs 19.3 m; Moncton 8.3 m vs
+    21 m). Some records are in feet (Five Islands, Diligent River), sparse (Burntcoat) or dry at
+    low water (Moncton, Joggins). No GESLA gauge in the inner Forth. Next: the same check on all
+    GESLA records, then a gauge-based correction of FES like r, and test 4 on top.
+    All GESLA (first 2 years per record, M2 by least squares; 2,717 gauges after coverage >= 70%,
+    no drying floor; `open_guesses/fes_check/fes_vs_gesla_all.parquet`): FES M2 MAE 0.12 m, 385
+    gauges off by > 25%, FES at the gauge and IDW of the stations equally good (local closer 53%).
+    Large errors in both directions: St Lawrence (Quebec, Ile aux Coudres FES 0.8 vs 1.8-2.0 m),
+    Bangladesh (Khepupara 0.06 vs 0.87 m), Alaska/BC fjords, Ungava, Fundy tidal rivers. Gauge
+    correction (median log gauge/FES M2 ratio of the other gauges within R, gauge left out):
+    MAE 0.121 -> 0.099 / 0.089 / 0.095 / 0.103 / 0.116 m for R 10 / 25 / 50 / 100 / 200 km; at
+    gauges with neighbours within 25 km 0.152 -> 0.100 m, 91 gauges worse by > 0.1 m. Feet
+    records (old MEDS) still need a filter.
+    Built: `src/tide_correction.py` in the product (25 km; `levels.parquet` tide_factor /
+    tide_gauges), stage `open_guesses.py tide_correction` (2,373 usable sites: amplitude MAE FES at
+    the gauge 0.185, current forcing 0.157, stations corrected 0.139, local corrected 0.133 m;
+    feet filtered by a 20 m range) and `tile_interpolation` (test 4 at the 618 ratio gauges: the
+    decomposition alone scores as the current IDW, RP100 0.195 vs 0.194 m; where the tide
+    correction exceeds 10% (72 gauges) RP100 0.377 -> 0.332 m with corrected station tides, 0.350 m
+    with the corrected local tide). fig25-fig28, input analysis section 9. The ratio gauges lie
+    <= 10 km from a station; estuary heads are tested for the tide only.
+    Decided (user, 2026-11-08): build the decomposition into the tiles. Built: coastline nodes
+    (`src/coastline_nodes.py`, one per FES2022 grid cell of DeltaDTM coastline) appended to the
+    product levels file; each node blends its knn nearest stations' corrected skew-surge models
+    and convolves them with its own gauge-corrected FES tide; the seeds take IDW over stations and
+    nodes together. Scored by `open_guesses.py coastline_nodes`. Open:
+    - Nodes have no hydrograph: the duration correction takes the nearest station's, whose tide
+      range can be smaller (estuary heads), so the time near the peak is too long there.
+    - A node blends stations by distance only, across an isthmus too (Chignecto: Fundy and
+      Northumberland Strait stations); the tide is the node's own.
+    - The SFINCS boundary lines leave the nodes out (`boundary_lines_geometry._tile_stations`,
+      matched by position against the product's level file), so SFINCS makes the estuary tide
+      itself. Rebuild the lines after the product rebuild.
+  5. Global rerun with flags (tail-uncertain, TC-coast, fallback-r); test 10 afterwards revises
+     the flagged stations. The 1950-1978 surge months are on `<data_root>`
+     (`inputs/GTSM_storm_tide_hourly/storm_surge_residual`, all 900 months).
+  6. Regionally pooled GPD shape (`open_guesses.py pooled_shape`): on 1950-2024 with the mask, each
+     station's shape maximises the summed profile likelihood of the stations within 100 / 300 /
+     1000 km (scale per station); stability 1979-2024 vs 1950-2024 and gauge scores against the
+     cap. Result (mask also covers IBTrACS storms without any wind on record, i.e. most pre-1979
+     SI/SP/NI tracks; the wind-only run is kept in `open_guesses/pooled_shape_wind_only`):
+     shapes > 0.35 at stations with a TC part 753 (production) -> 6 (75 yr, masked, per station),
+     0 pooled at 100-1000 km; without a TC part 32 -> 3 (100-300 km). Change of a station's shape
+     from 1979-2024 to 1950-2024 (|full - late| p50 / p90): 0.06 / 0.16 alone, 0.04 / 0.11 at 100 km,
+     0.02 / 0.08 at 300 km, 0.02 / 0.05 at 1000 km. Cap and no cap score the same (<= 3 mm); pooling
+     does not change the gauge scores (RP10-100 MAE within 3 mm), so the radius rests on stability.
+     Masked without a shift, TC-dominated gauges: RP100 median -0.16 m, MAE 0.389 m (production
+     -0.03 / 0.361 m). Decided (user, 2026-11-08): pool at 300 km, drop the cap, and shift the
+     COAST-RP_TC levels per cyclone basin (test 2's basin fit, 0.18-0.25 m) with the mask on.
+- **Storm-tide product: decisions taken as estimates (open questions; tested in
+  `boundary_test/INPUT_ANALYSIS.md` §8.6, fig19-fig23).**
+  - No TC mask (decided): ERA5 cyclones stay in the ETC fit and count again in COAST-RP's TC part,
+    which matches the gauges best because both sources are too low (§8.6). Retest the mask
+    (`boundary_test/open_guesses.py tc_mask`) when test 10 replaces the TC part.
+  - Interpolation: `knn` 5, `idw_power` 3 (config default now; leave-one-out RP100 MAE 5.7 cm
+    against 7.0 cm for k 15 / power 2, fewest stations off by > 0.5 m). The test predicts a station
+    from neighbours farther away than a coastline cell's, so it overstates the error; the ranking
+    should hold.
+  - Along-water interpolation (`src/along_water.py`: water-path distance, built and unit-tested,
+    never wired or scored): most of the 73 stations > 1 m off the k 5 prediction sit across
+    headlands, at estuary heads or in sparse macrotidal basins, where a water-path distance would
+    help. Score it with the same leave-one-out test in those regions before wiring it.
+  - High waters (`skew_surge.high_waters`): a maximum in the lowest quarter of the 25-h range with
+    a prominence < 10% of it is a low-water bump, not a high water (Ungava: largest skew surge
+    4.5 -> 0.8 m). Test 9 rerun: dropping every weak maximum instead scores 5 mm better at RP100
+    (MAE 0.168 vs 0.174 m, 451 calibration gauges) but also drops real lesser high waters of
+    mixed tides; the low-band rule changes 26 gauge ratios by > 0.05 (the all-maxima rule 77).
+    Weak maxima in mixed / diurnal tides (Sandakan, Kapingamarangi) carry part of GTSM's largest
+    skew surges: GTSM's RP10 skew surge at Sandakan halves with either rule, the gauge's does not.
+  - Gauge ratios without GTSM's own tide: production fits r on gauge vs GTSM-on-FES skew surges
+    and takes the common years of those two series; test 9 also required GTSM's harmonic tide
+    (`gtsm_harm`) and its years. The port's gauge set may differ by a few sites.
+  - GPD shape cap 0.35 (`SHAPE_CAP`, Fathom RFA's cap): kept, and without the TC mask it sets the
+    RP250-RP1000 tail at 832 stations, mostly hurricane/typhoon coasts (Hangzhou Bay RP1000
+    12.6 m against COAST-RP's 4.8 m). The gauges cannot tell caps apart (RP100 MAE
+    0.215-0.217 m from none to 0.2); at RP1000 no cap adds up to 12.9 m, 0.2 removes up to
+    3.9 m. Above RP100 nothing checks it; test 10 (STORM-forced GTSM) is the check for the
+    cyclone tail.
+  - GTSM despike (|residual - 5-h median| > 2 m; >= 5 jumps > 2 m -> COAST-RP levels, 15
+    Arafura stations): kept; 3-5 jumps give the same 15, and 1 m would catch real North Sea
+    surges.
+  - TC shape below RP10 requires TC dominance at RP10 (`TC_SHAPE_MIN_RP`).
+  - FES version rule and its growth (`tide_prediction.consistent_version_flag`): right wherever
+    a gauge checks it (Juneau, Skagway, Port Alberni, Vardo, Le Crouesty, Karachi, Kukup, Port
+    Stanley; Sao Marcos resolved: Ponta da Madeira 2.62 m inside the bay supports FES2014 at the
+    outer stations). One wrong flag: id_coast_glob_11746 at the Saguenay mouth (Tadoussac gauge
+    2.18 m, FES2022 2.65 m, FES2014 1.38 m). Option: apply the gauge veto to the rule itself, not
+    only to its growth. 41 flagged stations have no gauge within 150 km; Khambhat and Incheon are
+    real macrotidal gulfs where neither atlas is checked.
+  - No gauge override of the levels; r carries the gauges' information only through the surge.
+  - The hydrographs of the 15 COAST-RP-fallback stations are Gaussian on the FES tide.
+  - Hydrograph maxima off time 0 (4.1% overall, 3.2% at RP100; 64% one day away, 19% one
+    tidal cycle): a neighbouring high water of the diurnal inequality or spring-neap cycle is
+    higher than the centre one; median excess 1.6 cm, 99% < 21 cm. Kept: the maximum is the RP
+    level, which is what SFINCS and B use; recentring the window on the maximum would only be
+    cosmetic.
+- **Per-RP hydrograph generator** (`src/storm_tide_hydrograph.rp_hydrograph`, generator_smooth;
+  INPUT_ANALYSIS.md §8.3): its flood volume behind the test 11 sills is within 10% of real events
+  at RP 2 and 10, although it falls short on overflow above 0.9 x peak (-20 to -40% on 2-4 m and
+  >4 m coasts, never over). Known, not pursued: RP 2 T(0.25) ~30% short (costs 1-9% flood
+  volume); the low microtidal troughs belong to GTSM's surge deficit (test 9). Against COAST-HG
+  (fig18) its peaks are 2-4x wider (median T(0.25) 12 vs 6 h at RP100), which lowers B's
+  multiplier.
+- **FES version rule** (decided, INPUT_ANALYSIS.md test 6, §8.2): FES2014 replaces FES2022 where
+  the two atlases' MHWS differ by the ratio and minimum difference of
+  `tide_prediction.version_flag`; it reaches production through the product's levels. How far a
+  gauge value reaches is undefined. Moderate inlet errors (0.25-1 m) stay uncaught.
+- **Rerun after the 2020 baseline offset** (`boundary_conditions.slr_baseline_offset_m`, 0.049 m
+  regionalised): `run_preparation.py boundary_conditions`, then every tile simulation and the
+  analysis. Until then `boundaries.static_station_levels` raises on the old MDT station file.
+  The SFINCS calibration runs predate the offset (forcing ~5 cm lower); recalibrating fsf should
+  use regenerated forcing (`boundary_test/INPUT_ANALYSIS.md` §7).
+- **Return periods above 250 y: tail of the storm-tide product.** COAST-RP grows by 0.11 m per decade
+  of RP up to RP100 and 0.083 m from RP500 to RP1000 (median of 22,670 stations); RP1000 - RP100 is
+  0.79 x RP100 - RP10 (0.72 above 30 deg latitude, 0.94 below; < 0.5 at 16% of stations). The ETC
+  tail extrapolates ~40 y of ERA5 by 25x, and the surge correction is validated to RP100 only.
+  Keep RP250-1000 (EAI tail term, FLOPROS standards above 250 y) but flag them as extrapolated;
+  extend `surge_correction.RPS` to 1000 and compare the convolution's GPD tail against COAST-RP's.
+- **Open input-assessment questions** (FES-tide recombination of COAST-RP, surge deficit, FES
+  basin-head rule, TC hydrograph source; absolute MSL + MDT deferred): `boundary_test/INPUT_ANALYSIS.md` §8.
+- **Duration correction B: reference duration and one-sided clip.** The water stays above MSL
+  for more than 12 h in a third of observed annual maxima (microtidal median 20 h, macrotidal 7 h).
+  B's T is cumulative over the hydrograph window, and SFINCS shows that the absolute duration,
+  not the shape, sets the reach. On synthetic SFINCS floodplains with fsf refitted per form,
+  m proportional to T^-alpha without the lower clip fits best; the production form (t_ref 12 h,
+  clip >= 1) is close; "the hydrograph's longest exposure" and "T of the calibration hydrograph
+  at the same head" are worse. A constant t_ref is absorbed into fsf once the clip goes.
+  Decided: lower clip dropped (in code), alpha 1, hydrograph source the per-RP generator (COAST-HG's
+  neighbouring high waters are too low: B's T 5 h vs 15 h observed). Needs the recalibration of
+  fsf on the 498 SFINCS tiles (§0.3-0.4).
+- **COAST-RP at TC-dominated stations** is 0.2-0.25 m below GESLA GEV even with its TC
+  component (Japan/E Asia, US Atlantic+Gulf); GESLA records may also undersample TCs.
+  Test 9 answers it: the skew-surge ratio correction halves the RP10 bias there but leaves RP100
+  at -0.10 m (MAE 0.32 m), so TC stations need the STORM-based route of test 10.
+- **fsf grid between 7.5 and 9:** the optimum may lie between the tested values (bias crosses 1
+  near 8.7). Refine only if the bias matters more than the last 0.005 CSI.
+- **HPC calibration tooling uses neither the static level nor B:** `sfincs_tiles/run_calibration_models.py` calls
+  `flood_depth_dense` without the static level or B, so stage-1/2 calibration results describe the
+  old physics. Wire it when `sfincs_tiles/` may be touched.
+- **`run_eikonal_dag.py` OOM tile split:** `tile_split.split_tile` reads the mask from
+  `model_outputs/<tile>/inputs`; with `preprocessing_inputs_dir` set it raises FileNotFoundError
+  instead of splitting. Pass the inputs dir if splits are needed in production.
+- **Permanent inundation p = 1 anchor:** implement with the static-flood extent of the
+  two-component solve (flood_depth_dense diagnostic `n_static_wet_cells` only counts it now).
+- **Tide in the static level:** decide later whether S = MDT + SLR (current choice) should also
+  include a tidal high water (MHHW). Needs a tide dataset (GTSM tide statistics or FES2014); COAST-RP
+  cannot separate tide from surge.
+- **`protection.default_rp: 5`** for geogunits without FLOPROS values vs the RP2 minimum: keep 5?
+- **Flood-fraction rule never exposes saturated cells:** where the design event already floods the
+  whole cell (ff = 1), no larger event or SLR can exceed the design flood fraction, so the cell stays
+  protected forever. Bangkok case: 33% of the population in the design floodplain sits in such cells.
+  Production uses this rule; the water-level rule does not have the flaw.
+- **Water-level rule + binary breach is harsh under SLR:** over all COAST-RP stations the median RP100
+  standard drops to "fails every year" by ~0.25 m SLR (RP1000 by ~0.4 m), and a defence then counts
+  as fully breached. Bangkok: protect at the +1 m design equals no adaptation from +1.5 m. Freeboard
+  or an overtopping volume would soften this before the water-level rule is adopted.
+- **SLR fingerprints scale vertical land motion with global SLR (production issue, left as is for
+  now):** `prepare_boundary_conditions.compute_slr_fingerprints` takes the nearest AR6 point within
+  1 deg (tide gauges included), whose 2100 total relative SLR contains VLM, and scales it by T / GMSL.
+  Upper Gulf of Thailand stations (13.46 N, 100.2-100.7 E) get 5.16 m at T = 1.5 m; the global
+  0.1-99.9 percentiles are -3.9 / +4.3 m. Affects both propagation variants.
+- **Materialized configs on the cluster:** re-materialize after pulling (new keys `protection.rule`,
+  `protection.minimum_rp`, `flooding.slr_propagation`, `flooding.duration_correction`, new paths).
+- **Cluster runs (not planned for now):** SFINCS at +1 m / +2 m SLR (benchmark for 1a) and at
+  RP10 / RP1000 on ~100 tiles (transferability, critique 1b, now with B on; RP100 COAST-HG shape
+  shifted to each RP peak).
+
 ## Known behaviour
 
 - `friction_scale_factor` (config.yml) is a bare per-metre rate, rescaled by a tile's own
-  `pixel_size_m` (eikonal_runner.py) - production 0.4 x 30 (DeltaDTM) = 12.0 effective. Outputs
-  kept as computed at effective 9.0 (deltas, bangkok_chao_phraya; pinned as 0.3) and effective 30.0
-  (calibration_500_tiles; pinned as 1.0) predate this rescale and are unaffected by it (always 30 m
-  tiles); each config says so.
+  `pixel_size_m` (eikonal_runner.py) - production 0.25 x 30 (DeltaDTM) = 7.5 effective, with
+  correction B. Outputs kept as computed at effective 9.0 (deltas, bangkok_chao_phraya; pinned as
+  0.3) and effective 30.0 (calibration_500_tiles; pinned as 1.0) predate this rescale and are
+  unaffected by it (always 30 m tiles); each config says so.
 - A hop>=1 triple whose neighbour output is missing fails without writing output. Local multi-hop
   `snakemake simulate` / `run_eikonal_dag.py` can therefore fail when Snakemake schedules a hop-1
   tile before its neighbours (the rule does not declare neighbour inputs); rerun, or run wave by

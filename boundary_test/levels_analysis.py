@@ -1,0 +1,171 @@
+"""Step 1b/1d: compare the tidal levels of GESLA, GTSM and FES2022 and attribute the differences.
+
+Comparisons (`tide_levels.parquet`, variant `no_seasonal` so GESLA's Sa/Ssa does not enter):
+  gtsm_raw / gtsm_harm vs gesla_harm   GTSM against the gauge
+  fes_gauge vs gesla_harm              FES2022 against the gauge, at the gauge position
+  fes_station vs gtsm_harm             the two models at the same point (model difference only)
+  fes_gauge vs fes_station             FES2022 between gauge and GTSM station (location only)
+Per comparison: median difference and ratio, MAE, share within 0.1 m, per GESLA spring-range
+class, per IPCC AR6 region (`regions.ar6_regions`) and per gauge-to-station distance class. Constituent ratios (M2, S2, K1, O1,
+M4) show which part of the tide carries a difference. Quality filter: >= 3 fitted years, fit
+explains >= 50% of the variance, station within MAX_DIST_KM.
+
+Writes <out-dir>/analysis/levels_*.csv.
+
+Usage:
+    python boundary_test/levels_analysis.py --out-dir .cleanup_baseline/level_sources
+"""
+
+import argparse
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from regions import ar6_regions  # noqa: E402
+
+LEVELS = ("mhws_m", "mhw_m", "mlw_m", "mlws_m", "hat_m", "lat_m", "spring_range_m")
+COMPARISONS = (("gtsm_raw", "gesla_harm"), ("gtsm_harm", "gesla_harm"), ("fes_gauge", "gesla_harm"),
+               ("fes_station", "gtsm_harm"), ("fes_gauge", "fes_station"))
+CONSTITUENTS = ("m2", "s2", "n2", "k1", "o1", "m4", "ms4")
+RANGE_BINS = (0, 1, 2, 4, 8, 20)
+DIST_BINS = (0, 1, 2, 5, 10, 100)
+MAX_DIST_KM = 10.0
+MIN_FIT_YEARS = 3.0
+MIN_EXPLAINED = 0.5
+
+
+def wide_table(out: Path) -> pd.DataFrame:
+    tl = pd.read_parquet(out / "tide_levels.parquet")
+    tl = tl[(tl.variant == "no_seasonal") | (tl.source == "gtsm_raw")]
+    wide = tl.pivot_table(index="file_name", columns="source", values=list(LEVELS))
+    wide.columns = [f"{s}__{v}" for v, s in wide.columns]
+    fit = tl[tl.source == "gesla_harm"].set_index("file_name")[["fit_years", "fit_explained", "fit_rms_m"]]
+    pairs = pd.read_parquet(out / "pairs.parquet").set_index("file_name")
+    t = pairs[["site_name", "country", "lon", "lat", "gtsm_dist_km"]].join(fit).join(wide)
+    regions = ar6_regions(t.lon.to_numpy(), t.lat.to_numpy())
+    t["region"] = (regions.region_name + " (" + regions.region + ")").to_numpy()
+    t["range_class"] = pd.cut(t["gesla_harm__spring_range_m"], RANGE_BINS)
+    t["dist_class"] = pd.cut(t.gtsm_dist_km, DIST_BINS)
+    t["quality"] = (t.fit_years >= MIN_FIT_YEARS) & (t.fit_explained >= MIN_EXPLAINED) & (t.gtsm_dist_km <= MAX_DIST_KM)
+    return t
+
+
+def constituent_table(out: Path, sites: pd.Index) -> pd.DataFrame:
+    hc = np.load(out / "harmonic_constants.npz", allow_pickle=True)  # own output; file_name is an object array
+    names = list(hc["constituents"])
+    rows = pd.DataFrame(index=pd.Index(hc["file_name"], name="file_name"))
+    for source in ("gesla_harm", "gtsm_harm", "fes_gauge", "fes_station"):
+        for c in CONSTITUENTS:
+            rows[f"{source}__{c}"] = np.abs(hc[source][:, names.index(c)])
+    return rows.loc[rows.index.intersection(sites)]
+
+
+def summary(a: pd.Series, b: pd.Series) -> dict:
+    ok = a.notna() & b.notna()
+    d, ratio = (a - b)[ok], (a / b)[ok & (b.abs() > 0.05)]
+    return {"n": int(ok.sum()), "median_diff_m": d.median(), "p10_diff_m": d.quantile(0.1),
+            "p90_diff_m": d.quantile(0.9), "mae_m": d.abs().mean(), "within_0.1m": (d.abs() <= 0.1).mean(),
+            "median_ratio": ratio.median()}
+
+
+def comparison_tables(t: pd.DataFrame, dest: Path) -> pd.DataFrame:
+    q = t[t.quality]
+    rows = []
+    for a, b in COMPARISONS:
+        for level in LEVELS:
+            base = {"comparison": f"{a} vs {b}", "level": level}
+            rows.append({**base, "group": "all", **summary(q[f"{a}__{level}"], q[f"{b}__{level}"])})
+            for key in ("range_class", "region", "dist_class"):
+                src = t[(t.fit_years >= MIN_FIT_YEARS) & (t.fit_explained >= MIN_EXPLAINED)] if key == "dist_class" else q
+                for g, sub in src.groupby(key, observed=True):
+                    rows.append({**base, "group": f"{key}={g}", **summary(sub[f"{a}__{level}"], sub[f"{b}__{level}"])})
+    table = pd.DataFrame(rows)
+    table.to_csv(dest / "levels_comparisons.csv", index=False)
+    return table
+
+
+def constituent_ratios(c: pd.DataFrame, t: pd.DataFrame, dest: Path) -> pd.DataFrame:
+    q = c.loc[c.index.intersection(t[t.quality].index)]
+    rows = []
+    for a, b in (("gtsm_harm", "gesla_harm"), ("fes_gauge", "gesla_harm"), ("fes_station", "gtsm_harm")):
+        for k in CONSTITUENTS:
+            ok = q[f"{b}__{k}"] > 0.02
+            r = (q[f"{a}__{k}"] / q[f"{b}__{k}"])[ok]
+            rows.append({"comparison": f"{a} vs {b}", "constituent": k, "n": int(ok.sum()), "median_ratio": r.median(),
+                         "p25": r.quantile(0.25), "p75": r.quantile(0.75)})
+    table = pd.DataFrame(rows)
+    table.to_csv(dest / "levels_constituent_ratios.csv", index=False)
+    return table
+
+
+def extremes_table(out: Path, t: pd.DataFrame, dest: Path) -> pd.DataFrame | None:
+    """COAST-RP vs GEV fits to GESLA and GTSM annual maxima (`levels_extremes.py`), quality sites."""
+    if not (out / "extremes.parquet").exists():
+        return None
+    ex = pd.read_parquet(out / "extremes.parquet")
+    g = ex[ex.source == "gesla"].set_index("file_name")
+    m = ex[ex.source == "gtsm"].set_index("file_name")
+    q = t[t.quality].index.intersection(g.index).intersection(m.index)
+    g, m = g.loc[q], m.loc[q]
+    tide_excess = (t.loc[q, "gtsm_raw__mhws_m"] - t.loc[q, "gesla_harm__mhws_m"])
+    rows = []
+    for rp in (10, 100):
+        crp = g[f"coast_rp_rp{rp}_m"]
+        pairs = {"COAST-RP vs GESLA GEV": (crp, g[f"rp{rp}_m"]), "GTSM GEV vs GESLA GEV": (m[f"rp{rp}_m"], g[f"rp{rp}_m"]),
+                 "COAST-RP vs GTSM GEV": (crp, m[f"rp{rp}_m"])}
+        for name, (a, b) in pairs.items():
+            ok = a.notna() & b.notna()
+            d = (a - b)[ok]
+            row = {"rp": rp, "comparison": name, "n": int(ok.sum()), "median_diff_m": d.median(),
+                   "mae_m": d.abs().mean(), "p10_diff_m": d.quantile(0.1), "p90_diff_m": d.quantile(0.9),
+                   "corr_with_gtsm_tide_excess": d.corr(tide_excess[ok])}
+            if name == "COAST-RP vs GESLA GEV":
+                inside = (crp >= g[f"rp{rp}_p05_m"]) & (crp <= g[f"rp{rp}_p95_m"])
+                row["share_inside_gesla_90ci"] = inside[ok].mean()
+                row["median_diff_m_minus_tide_excess"] = (d - tide_excess[ok]).median()
+            rows.append(row)
+    table = pd.DataFrame(rows)
+    table.to_csv(dest / "levels_extremes.csv", index=False)
+    by_region = pd.DataFrame({"region": t.loc[q, "region"], "d100": g["coast_rp_rp100_m"] - g["rp100_m"]})
+    by_region.groupby("region").d100.agg(["count", "median"]).to_csv(dest / "levels_extremes_by_region.csv")
+    return table
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--out-dir", required=True)
+    args = parser.parse_args()
+    out = Path(args.out_dir)
+    dest = out / "analysis"
+    dest.mkdir(exist_ok=True)
+    t = wide_table(out)
+    t.to_csv(dest / "levels_sites.csv")
+    print(f"{len(t)} sites, {int(t.quality.sum())} pass the quality filter")
+    table = comparison_tables(t, dest)
+    with pd.option_context("display.width", 200):
+        for level in ("mhws_m", "spring_range_m", "hat_m"):
+            print(f"\n{level}")
+            print(table[(table.level == level) & (table.group == "all")].drop(columns=["level", "group"]).round(3).to_string(index=False))
+        print("\nMHWS by GESLA spring range")
+        print(table[(table.level == "mhws_m") & table.group.str.startswith("range")].pivot(
+            index="group", columns="comparison", values="median_ratio").round(3).to_string())
+        print("\nMHWS by region")
+        print(table[(table.level == "mhws_m") & table.group.str.startswith("region")].pivot(
+            index="group", columns="comparison", values="median_ratio").round(3).to_string())
+        print("\nMHWS by gauge-station distance")
+        print(table[(table.level == "mhws_m") & table.group.str.startswith("dist")].pivot(
+            index="group", columns="comparison", values="median_ratio").round(3).to_string())
+    print("\nconstituent ratios")
+    print(constituent_ratios(constituent_table(out, t.index), t, dest).pivot(
+        index="constituent", columns="comparison", values="median_ratio").round(3).to_string())
+    ex = extremes_table(out, t, dest)
+    if ex is not None:
+        print("\nextremes (m)\n" + ex.round(3).to_string(index=False))
+        print(pd.read_csv(dest / "levels_extremes_by_region.csv").round(3).to_string(index=False))
+
+
+if __name__ == "__main__":
+    main()

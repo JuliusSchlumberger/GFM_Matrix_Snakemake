@@ -1,0 +1,11 @@
+Amplitude of the main tidal constituents relative to the gauge, at the quality tide gauges. For each
+constituent the dot is the median over sites of source amplitude / gauge amplitude and the bar the
+interquartile range; blue = GTSM v3 tide (harmonic fit of the tide-only run at the paired station),
+orange = FES2022 at the gauge. Only sites where the gauge amplitude of that constituent exceeds 2 cm
+enter (n per constituent from 118 to 692), because ratios of near-zero amplitudes are noise.
+
+M2, S2, N2: semidiurnal; K1, O1: diurnal; M4, MS4: shallow-water overtides.
+
+Reading: GTSM's S2 is about 20% and M2 about 6% too large, against 0.99-1.00 for FES2022. The spring
+range is roughly M2 + S2, so this is the source of GTSM's MHWS excess in fig01. The likely cause is
+GTSM v3's uncalibrated bathymetry and bottom friction (Wang et al., 2022).
