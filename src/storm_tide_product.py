@@ -4,8 +4,9 @@ ETC levels: skew surges of the GTSM-ERA5 surge residual (1979-2024) on the hourl
 GPD on their declustered tail (shape capped at SHAPE_CAP), positive skew surges scaled by the
 gauge ratio r, convolved with the FES high waters of one nodal cycle (`skew_surge`). r is the
 inverse-distance mean, within IDW_RADIUS_KM, of the GESLA gauges' ratio of gauge to GTSM-on-FES
-skew surge at RATIO_RP (non-TC-dominated gauges, at least MIN_NEIGHBOURS, else their median),
-capped at R_CAP. Atlas: FES2022, FES2014 where `tide_prediction.consistent_version_flag` fires.
+skew surge at RATIO_RP (non-TC-dominated gauges, at least MIN_NEIGHBOURS); with fewer, the
+gauges' power law of r in the station's own GTSM-on-FES skew surge at RATIO_RP (`ratio_covariate`:
+r falls as the surge grows, the large ratios sit where GTSM's surge is a decimetre). Capped at R_CAP. Atlas: FES2022, FES2014 where `tide_prediction.consistent_version_flag` fires.
 TC: COAST-RP_TC's annual exceedance rate is added to the ETC rate, as COAST-RP combines its
 own two parts. The ETC fit keeps the cyclones of the ERA5 record: both TC sources are too low at
 the gauges and counting them in both matches the gauges best (INPUT_ANALYSIS.md §8.6). RP
@@ -284,20 +285,37 @@ def tc_donors(pairs: pd.DataFrame, hc_full: np.ndarray, records: Path, hourly: t
 
 
 def station_ratios(stations: pd.DataFrame, gauges: pd.DataFrame) -> pd.DataFrame:
-    """Gauge ratio r per station: IDW within IDW_RADIUS_KM, else the gauge median, capped."""
+    """Uncapped IDW gauge ratio per station within IDW_RADIUS_KM; NaN below MIN_NEIGHBOURS gauges."""
     cal = gauges[gauges.calibrate & np.isfinite(gauges.ratio_fes)]
     tree = BallTree(np.radians(cal[["lat", "lon"]].to_numpy()), metric="haversine")
     idx, dist = tree.query_radius(np.radians(stations[["lat", "lon"]].to_numpy()), r=IDW_RADIUS_KM / EARTH_RADIUS_KM,
                                   return_distance=True)
-    median = float(cal.ratio_fes.median())
     ratio = cal.ratio_fes.to_numpy()
-    r, n = np.full(len(stations), median), np.zeros(len(stations), dtype=int)
+    r, n = np.full(len(stations), np.nan), np.zeros(len(stations), dtype=int)
     for k, (i, d) in enumerate(zip(idx, dist)):
         n[k] = len(i)
         if len(i) >= MIN_NEIGHBOURS:
             w = 1.0 / np.maximum(d * EARTH_RADIUS_KM, 1.0)
             r[k] = float(np.sum(w * ratio[i]) / w.sum())
-    return pd.DataFrame({"r_uncapped": r, "r": np.minimum(r, R_CAP), "r_neighbours": n}, index=stations.index)
+    return pd.DataFrame({"r_idw": r, "r_neighbours": n}, index=stations.index)
+
+
+def ratio_covariate(gauges: pd.DataFrame) -> tuple[float, float]:
+    """(slope, intercept) of ln r against ln S10 over the calibration gauges.
+
+    S10: the gauge's GTSM-on-FES skew surge at RATIO_RP (m). Least squares in log-log space.
+    """
+    cal = gauges[gauges.calibrate & np.isfinite(gauges.ratio_fes) & (gauges.skew_gtsmfes_m > 0)]
+    slope, intercept = np.polyfit(np.log(cal.skew_gtsmfes_m), np.log(cal.ratio_fes), 1)
+    return float(slope), float(intercept)
+
+
+def station_ratio(st: dict, model: dict) -> float:
+    """Uncapped r of a station: st["r_idw"], else st["r_covariate"] at the model's RATIO_RP skew surge."""
+    if np.isfinite(st["r_idw"]):
+        return st["r_idw"]
+    slope, intercept = st["r_covariate"]
+    return float(np.exp(intercept + slope * np.log(skew_level(model, RATIO_RP))))
 
 
 def station_tc_shapes(stations: pd.DataFrame, donors: pd.DataFrame, shapes: np.ndarray) -> dict:
@@ -363,8 +381,8 @@ def station_surge_model(st: dict, g: np.ndarray, th: np.ndarray, years: np.ndarr
 
     `g`: hourly GTSM surge residual (m, NaN missing); `th`: the station's hourly FES tide on the same
     axis. `st` may set "shape_cap" (None: no cap) in place of SHAPE_CAP, "pooled_shape" as a fixed
-    GPD shape, and "surge_offset_m" adds a gauge offset to the positive skew surges in place of the
-    ratio r.
+    GPD shape, "r" as a fixed ratio in place of `station_ratio` ("r_idw", "r_covariate"), and
+    "surge_offset_m" adds a gauge offset to the positive skew surges in place of the ratio.
     """
     row = {"station": st["station"], "atlas": st["atlas"], "mhws_m": st["mhws_m"]}
     row["gtsm_jumps"] = int(np.sum(np.abs(np.diff(g)) > SPIKE_M))
@@ -379,7 +397,12 @@ def station_surge_model(st: dict, g: np.ndarray, th: np.ndarray, years: np.ndarr
     row["tc_masked_share"] = float(tc_cycles[ok].mean())
     model = surge_model(skew[ok & ~tc_cycles], len(keep_years), max_shape=st.get("shape_cap", SHAPE_CAP),
                         shape=st.get("pooled_shape"))
-    corrected = shifted(model, st["surge_offset_m"]) if "surge_offset_m" in st else scaled(model, st["r"])
+    if "surge_offset_m" in st:
+        corrected = shifted(model, st["surge_offset_m"])
+    else:
+        row["r_uncapped"] = st["r"] if "r" in st else station_ratio(st, model)
+        row["r"] = min(row["r_uncapped"], R_CAP)
+        corrected = scaled(model, row["r"])
     row.update({"n_years": len(keep_years), "gpd_shape": model["shape"], "gpd_shape_mle": model["shape_mle"],
                 "gpd_scale": model["scale"], "theta": model["theta"]})
     return row, model, corrected, g

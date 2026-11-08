@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 
 PRODUCT_HYDROGRAPHS_FILENAME = "GFM_storm_tide_hydrographs.nc"  # = boundaries.PRODUCT_HYDROGRAPHS_FILENAME
+PRODUCT_LEVELS_FILENAME = "GFM_storm_tide_levels.nc"  # = boundaries.PRODUCT_LEVELS_FILENAME
 
 
 def read_root(config_path: Path) -> Path:
@@ -63,6 +64,16 @@ def storm_tide_hydrograph_path(config_path: Path) -> Path:
     if source != "gfm_product":
         raise ValueError(f"boundary_conditions.storm_tide_source must be gfm_product or coast_rp, not {source!r}")
     return _expand(cfg["boundary_conditions"]["storm_tide_product_dir"], root, proc) / PRODUCT_HYDROGRAPHS_FILENAME
+
+
+def storm_tide_product_levels_path(config_path: Path) -> Path | None:
+    """Return the product's level NetCDF, or None when ``storm_tide_source`` is coast_rp."""
+    cfg = _load_config(config_path)
+    if cfg["boundary_conditions"]["storm_tide_source"] != "gfm_product":
+        return None
+    root = read_root(config_path)
+    proc = str(cfg["paths"]["processed_inputs_dir"]).replace("{root}", str(root))
+    return _expand(cfg["boundary_conditions"]["storm_tide_product_dir"], root, proc) / PRODUCT_LEVELS_FILENAME
 
 
 def resolve_catalog_path(catalog_path: Path, root: Path, source_name: str) -> Path:

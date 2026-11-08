@@ -9,6 +9,6 @@ around the station (gauge-corrected where one lies within 25 km, FES otherwise) 
 part: the |RP100 error| of the TC-dominated gauges nearby (masked, basin shift left out), at
 stations where the TC part dominates RP100. (a) Root sum of squares of (b)-(e) and the record-length
 change (|RP100 1950-2024 - 1979-2024|). (f) The largest component per 5-degree cell. Medians / p90
-(m): r 0.114 / 0.327, sampling pooled 0.024 / 0.059 (per-station shape 0.079 / 0.209), tide 0.019 /
-0.081, TC 0.0 / 0.204, record 0.013 / 0.069, combined 0.143 / 0.41. Largest component (share of
-stations): r 0.72, TC 0.08, tide 0.07, sampling 0.07, record 0.06.
+(m): r 0.069 / 0.189, sampling pooled 0.024 / 0.059 (per-station shape 0.079 / 0.209), tide 0.019 /
+0.081, TC 0.0 / 0.204, record 0.013 / 0.069, combined 0.108 / 0.31. Largest component (share of
+stations): r 0.65, TC 0.1, tide 0.09, sampling 0.08, record 0.07.

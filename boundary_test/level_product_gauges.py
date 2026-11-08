@@ -94,12 +94,13 @@ class GaugeCheck:
         self.todo, meta = [], []
         for name, k, dist in zip(ratio_gauges[near], i[near, 0], d[near, 0] * stp.EARTH_RADIUS_KM):
             st = stations.index[k]
-            r = float(stp.station_ratios(stations.iloc[[k]], gauges.drop(index=name)).r.iloc[0])
+            others = gauges.drop(index=name)
+            r = float(stp.station_ratios(stations.iloc[[k]], others).r_idw.iloc[0])
             a = self.lev.atlas.loc[st]
             sid = stations.station_id.loc[st]
             self.todo.append({"station": len(self.todo), "gtsm_index": int(stations.gtsm_index.loc[st]), "atlas": a,
                               "coast_rp": coast[k], "station_index": st, "hc": hc[a][k], "mhws_m": float(mh[a][k]),
-                              "r": r, "tc": self.tc_levels.loc[sid].to_numpy() if sid in self.tc_levels.index else None,
+                              "r_idw": r, "r_covariate": stp.ratio_covariate(others), "tc": self.tc_levels.loc[sid].to_numpy() if sid in self.tc_levels.index else None,
                               "tc_shape": tc_shapes.get(st)})
             meta.append({"file_name": name, "station": st, "station_km": dist, "r_loo": r})
         self.meta = pd.DataFrame(meta)

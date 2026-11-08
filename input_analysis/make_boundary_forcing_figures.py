@@ -1012,8 +1012,8 @@ def fig12_level_product_maps(product: Path, dest: Path) -> None:
         level: red = the new product is higher; differences beyond ±0.5 m take the end colours
         ({int((d.abs() > 0.5).sum()):,} stations). Stations closest to zero are drawn first. (b) The
         surge ratio r applied to the GTSM skew surges: the inverse-distance mean of the gauge ratios
-        within 500 km (at least 3 gauges), otherwise the gauge median ({lev.r.median():.2f}), capped
-        at 2. Orange = GTSM's surge is too small (r > 1); logarithmic scale, r above 1.5 in the end colour.
+        within 500 km (at least 3 gauges), otherwise the gauges' power law of r in the station's GTSM
+        RP10 skew surge, capped at 2. Orange = GTSM's surge is too small (r > 1); logarithmic scale, r above 1.5 in the end colour.
 
         Reading: most of the coast moves by less than 0.2 m. The large departures are regional:
         lower in the southern North Sea and Dover Strait, where GTSM's tide is too large and the
@@ -1988,7 +1988,7 @@ def fig30_surge_accuracy(product: Path, dest: Path) -> None:
     ax = fig.add_subplot(2, 2, 3)
     bins = np.linspace(-0.8, 0.8, 41)
     for sel, color, label in ((g.neighbours >= 3, BLUE, "3 or more gauges near"),
-                              (g.neighbours < 3, ORANGE, "fewer than 3 (median fallback)")):
+                              (g.neighbours < 3, ORANGE, "fewer than 3 (covariate fallback)")):
         ax.hist(g.r_loo_err[sel].clip(-0.8, 0.8), bins=bins, color=color, alpha=0.6,
                 label=f"{label}: n {int(sel.sum())}, MAE {g.r_loo_err[sel].abs().mean():.2f}")
     ax.set(xlabel="r predicted without the gauge / gauge's r - 1", ylabel="gauges")
@@ -2022,8 +2022,8 @@ def fig30_surge_accuracy(product: Path, dest: Path) -> None:
         the gauge's (test 9 convolution of its own skew surges on its own tide), by gauge class:
         COAST-RP, GTSM alone (r = 1, no TC part), the product with r left out, and the decided
         product (IBTrACS mask, basin shift of COAST-RP_TC, left out per basin). (c) How well r is
-        predicted where there is no gauge: r from the neighbouring gauges (gauge left out) against
-        the gauge's own. (d) GTSM alone and the decided product by AR6 region (>= 10 gauges).
+        predicted where there is no gauge: r from the neighbouring gauges, or the covariate power law
+        where fewer than 3 lie within 500 km (gauge left out of both), against the gauge's own. (d) GTSM alone and the decided product by AR6 region (>= 10 gauges).
         """)
 
 

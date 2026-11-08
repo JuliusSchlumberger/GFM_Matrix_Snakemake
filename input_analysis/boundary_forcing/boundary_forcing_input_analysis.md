@@ -353,10 +353,12 @@ below (`boundary_test/open_guesses.py`, stage names in brackets).
   a station 0.230 against 0.249 m. RP100 at the 618 ratio gauges 0.192 m (stations corrected
   0.190 m).
 - **Uncertainty** (`input_analysis/boundary_uncertainty.py`, fig29-fig31): RP100 standard
-  uncertainty median 0.14 m (p90 0.41 m), root sum of the gauge ratio r (largest at 72% of
+  uncertainty median 0.11 m (p90 0.31 m), root sum of the gauge ratio r (largest at 65% of
   stations), GPD sampling (0.08 m per station, 0.02 m pooled), tide, record length and the TC
-  part. Largest where big surges meet sparse gauges (Gulf of Mexico 0.8 m) and on cyclone coasts
-  (0.34 m). GTSM-ERA5 alone is 0.14 m low at RP100 (MAE 0.27 m), r = 1.22 at the median gauge.
+  part. Largest where big surges meet sparse gauges (Gulf of Mexico 0.40 m) and on cyclone coasts
+  (0.27 m against 0.10 m). GTSM-ERA5 alone is 0.14 m low at RP100 (MAE 0.27 m), r = 1.22 at the
+  median gauge. Where fewer than 3 gauges lie within 500 km, r follows the gauges' power law in
+  the GTSM RP10 skew surge (leave-one-out error 15% against 10% with neighbours).
   Durations: T(0.25) / T(0.5) at RP2 -18% / -9% against the gauges' events, within their
   event-to-event spread except on macrotidal coasts.
 

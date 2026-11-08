@@ -25,6 +25,8 @@ from shapely.ops import linemerge, substring, unary_union
 OCEAN_CODE = 1
 TILE_STATIONS_GPKG = "inputs/boundaries_RP100_SLR_0.gpkg"
 MAX_HG_MATCH_DEG = 0.5  # same backstop build_line_forcing.py uses
+NODE_LEVEL_SOURCE = "coastline_node"  # = storm_tide_product.NODE_LEVEL_SOURCE
+SAME_POSITION_DEG = 1e-6  # tile station files copy the level file's coordinates
 MIN_FORCING_STATIONS = 2  # used stations with a hydrograph a tile needs
 MASK_VRT = "inputs/DeltaDTM_masks/deltadtm_mask.vrt"
 MAX_MASK_PX = 3000            # mask decimated to at most this many px per side
@@ -665,12 +667,33 @@ def _search_box(tile: gpd.GeoDataFrame, buffer_deg: float, min_size_deg: float) 
             max(maxx + buffer_deg, cx + half), min(max(maxy + buffer_deg, cy + half), 89.0))
 
 
-def _tile_stations(tile_dir: Path) -> gpd.GeoDataFrame:
-    # production's selection (search box + ocean connectivity), MDT-corrected, int16 cm
+_NODES = {}
+
+
+def _node_tree(levels_nc: Path | None) -> cKDTree | None:
+    if levels_nc is None:
+        return None
+    if _NODES.get("path") != levels_nc:
+        with xr.open_dataset(levels_nc) as ds:
+            node = ds.level_source.values.astype(str) == NODE_LEVEL_SOURCE
+            xy = np.column_stack([ds.station_x_coordinate.values[node], ds.station_y_coordinate.values[node]])
+        _NODES.update(path=levels_nc, tree=cKDTree(xy) if len(xy) else None)
+    return _NODES["tree"]
+
+
+def _tile_stations(tile_dir: Path, levels_nc: Path | None = None) -> gpd.GeoDataFrame:
+    # production's selection (search box + ocean connectivity), MDT-corrected, int16 cm. The product's
+    # coastline nodes (in `levels_nc`) carry the coastal tide for the eikonal seeds but have no
+    # hydrograph; offshore the line takes the stations only. station_index stays the gpkg row.
     st = gpd.read_file(tile_dir / TILE_STATIONS_GPKG).to_crs("EPSG:4326").reset_index(drop=True)
     level = st["SLR_0"].to_numpy(dtype=np.float64) / 100.0
-    return gpd.GeoDataFrame({"station_index": np.arange(len(st)), "rp100_level_m": level},
-                            geometry=st.geometry.values, crs="EPSG:4326")
+    keep = np.ones(len(st), dtype=bool)
+    tree = _node_tree(levels_nc)
+    if tree is not None and len(st):
+        d, _ = tree.query(np.column_stack([st.geometry.x, st.geometry.y]))
+        keep = d > SAME_POSITION_DEG
+    return gpd.GeoDataFrame({"station_index": np.arange(len(st))[keep], "rp100_level_m": level[keep]},
+                            geometry=st.geometry.values[keep], crs="EPSG:4326").reset_index(drop=True)
 
 
 _HG_XY = {}

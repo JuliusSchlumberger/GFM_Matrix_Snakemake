@@ -30,7 +30,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "boundary_test"))
 from regions import ar6_regions  # noqa: E402
-from storm_tide_product import EARTH_RADIUS_KM, R_CAP  # noqa: E402
+from storm_tide_product import EARTH_RADIUS_KM, MIN_NEIGHBOURS, R_CAP  # noqa: E402
 import tide_correction as tdc  # noqa: E402
 
 SHAPE_GRID = np.round(np.arange(-0.5, 0.805, 0.01), 2)  # as open_guesses.pooled_shape's profiles
@@ -48,6 +48,7 @@ GAUGE_KM = 500.0  # gauges further away say nothing about the station's r or tid
 TC_GAUGE_KM = 1500.0  # TC errors are basin-scale (one basin shift per basin)
 COMPONENTS = ("sampling_pooled", "record", "surge_signal", "tc", "tide")
 CELL_DEG = 5.0
+R_VARIANT = "covariate fallback"  # the production rule for r in open_guesses.r_variants
 
 
 def _tree(lonlat: np.ndarray) -> BallTree:
@@ -150,10 +151,10 @@ def station_components(product: Path, cache: Path, sources: Path) -> pd.DataFram
     rv = pd.read_parquet(g / "r_variants.parquet")
     gg = pd.read_parquet(product / "gauges" / "gauges.parquet").reindex(rv.index)
     r_gauge = np.minimum(gg.ratio_fes.to_numpy(), R_CAP)
-    log_err = np.abs(np.log(rv.r_loo.to_numpy() / r_gauge))
+    log_err = np.abs(np.log(rv[f"{R_VARIANT}_value"].to_numpy() / r_gauge))
     g_lonlat = gg[["lon", "lat"]].to_numpy(dtype=float)
     rel = np.expm1(_near_median(g_lonlat, log_err, lonlat, GAUGE_KM))
-    fallback = np.expm1(np.nanmedian(log_err[rv.neighbours.to_numpy() < 3]))
+    fallback = np.expm1(np.nanmedian(log_err[rv.neighbours.to_numpy() < MIN_NEIGHBOURS]))
     out["r_err_rel"] = np.where(np.isfinite(rel), rel, fallback)
     surge_part = np.maximum(lev.etc_rp100_m.to_numpy() - lev.mhws_m.to_numpy(), 0.0)
     out["surge_signal_m"] = out.r_err_rel * surge_part
@@ -205,11 +206,11 @@ def gauge_surge_accuracy(product: Path) -> pd.DataFrame:
     gg = pd.read_parquet(product / "gauges" / "gauges.parquet").reindex(rv.index)
     out = gg[["lon", "lat", "mhws_gauge_m", "n_years", "skew_gauge_m", "skew_gtsmfes_m", "ratio_fes"]].copy()
     out["region"], out["station_class"], out["neighbours"] = rv.region, rv.station_class, rv.neighbours
-    out["r_loo"] = rv.r_loo
-    out["r_loo_err"] = rv.r_loo / np.minimum(gg.ratio_fes, R_CAP) - 1
+    out["r_loo"] = rv[f"{R_VARIANT}_value"]
+    out["r_loo_err"] = out.r_loo / np.minimum(gg.ratio_fes, R_CAP) - 1
     for rp in (2, 10, 100):
         out[f"raw_rp{rp}_err_m"] = rv[f"new_loo_r1_rp{rp}_m"] - rv[f"gauge_rp{rp}_m"]
-        out[f"product_rp{rp}_err_m"] = rv[f"production_rp{rp}_m"] - rv[f"gauge_rp{rp}_m"]
+        out[f"product_rp{rp}_err_m"] = rv[f"{R_VARIANT}_rp{rp}_m"] - rv[f"gauge_rp{rp}_m"]
         out[f"coast_rp_rp{rp}_err_m"] = rv[f"coast_rp_rp{rp}_m"] - rv[f"gauge_rp{rp}_m"]
     tc = pd.read_parquet(g / "tc_scale.parquet").reindex(rv.index)
     out["basin"] = tc.basin

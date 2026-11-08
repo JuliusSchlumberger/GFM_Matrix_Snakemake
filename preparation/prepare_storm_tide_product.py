@@ -264,6 +264,7 @@ def run(config: dict, force: bool = True) -> None:
     tide_gauges = tide_gauge_table(cfg, paths, models, workers)
     atlas = station_atlas(paths, stations, models, gauges, tide_gauges, workers)
     ratios = stp.station_ratios(stations, gauges)
+    covariate = stp.ratio_covariate(gauges)
     tc_levels = stp.coast_rp_levels(coast_rp.parent / "COAST-RP_TC.nc")
     tc_levels = tc_levels[np.isfinite(tc_levels).all(axis=1)]
     donors = pd.read_parquet(paths.gauges / "tc_donors.parquet")
@@ -275,7 +276,7 @@ def run(config: dict, force: bool = True) -> None:
         f = atlas["tide_factor"][k]
         todo.append({"station": st, "gtsm_index": int(s.gtsm_index), "atlas": a, "coast_rp": coast[k],
                      "hc": atlas["hc"][a][k] * f, "mhws_m": float(atlas["mhws"][a][k] * f),
-                     "r": float(ratios.r.iloc[k]),
+                     "r_idw": float(ratios.r_idw.iloc[k]), "r_covariate": covariate,
                      "tc": tc_levels.loc[s.station_id].to_numpy() if s.station_id in tc_levels.index else None,
                      "tc_shape": tc_shapes.get(st)})
 

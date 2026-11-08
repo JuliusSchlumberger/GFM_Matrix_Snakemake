@@ -2,6 +2,7 @@
 
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -15,7 +16,8 @@ from flood_model import _idw_nearest_k  # noqa: E402
 from skew_surge import HW_PROMINENCE, high_waters  # noqa: E402
 from prepare_boundary_conditions import nearest_slr_m  # noqa: E402
 from storm_tide_product import (  # noqa: E402
-    BLEND_QUANTILES, NODE_LEVEL_SOURCE, R_CAP, RPS, blended_model, export_levels, model_vector, station_ratios)
+    BLEND_QUANTILES, NODE_LEVEL_SOURCE, RPS, blended_model, export_levels, model_vector, ratio_covariate, station_ratio,
+    station_ratios)
 from tide_prediction import consistent_version_flag  # noqa: E402
 
 HOURS = np.arange(24 * 30, dtype=float)
@@ -53,14 +55,25 @@ def test_idw_power_weights_the_nearest_station_more() -> None:
     assert p3 == pytest.approx(27 / 28)
 
 
-def test_station_ratio_takes_the_gauge_median_without_neighbours_and_is_capped() -> None:
+def test_station_ratio_needs_three_gauges() -> None:
     gauges = pd.DataFrame({"lat": [0.0, 0.1, 0.2, 40.0], "lon": [0.0, 0.0, 0.0, 0.0],
                            "ratio_fes": [3.0, 3.0, 3.0, 1.1], "calibrate": True})
     stations = pd.DataFrame({"lat": [0.05, -40.0], "lon": [0.0, 0.0]})
     r = station_ratios(stations, gauges)
-    assert r.r.iloc[0] == R_CAP
-    assert r.r_neighbours.iloc[1] == 0
-    assert r.r_uncapped.iloc[1] == pytest.approx(3.0)
+    assert r.r_idw.iloc[0] == pytest.approx(3.0)
+    assert np.isnan(r.r_idw.iloc[1]) and r.r_neighbours.iloc[1] == 0
+
+
+def test_ratio_covariate_recovers_a_power_law_and_falls_back_to_it() -> None:
+    s10 = np.array([0.1, 0.2, 0.5, 1.0, 2.0])
+    gauges = pd.DataFrame({"skew_gtsmfes_m": s10, "ratio_fes": 1.03 * s10 ** -0.32, "calibrate": True})
+    slope, intercept = ratio_covariate(gauges)
+    assert slope == pytest.approx(-0.32) and np.exp(intercept) == pytest.approx(1.03)
+    model = {"sorted": np.linspace(0.0, 1.0, 100)}
+    st = {"r_idw": np.nan, "r_covariate": (slope, intercept)}
+    with patch("storm_tide_product.skew_level", return_value=0.1):
+        assert station_ratio(st, model) == pytest.approx(1.03 * 0.1 ** -0.32)
+        assert station_ratio({**st, "r_idw": 1.2}, model) == 1.2
 
 
 def test_storm_tide_source_picks_the_files() -> None:

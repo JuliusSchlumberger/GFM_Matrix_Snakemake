@@ -199,7 +199,12 @@ Open:
     within 500 km: sparse gauges RP100 MAE 0.226 -> 0.194 m, bias -0.11 -> -0.03 m; all 451
     0.163 -> 0.157 m. Fallback 1 worse; dropping gauges with S10 < 0.2 m no effect; additive
     offset +3 cm RP10 bias. The high ratios are open-ocean islands and Peru-Chile (S10 ~0.1 m),
-    not estuaries. Decision open (user).
+    not estuaries. Decided (user, 2026-11-08): covariate fallback, fitted on all calibration
+    gauges in `storm_tide_product.ratio_covariate`; the station's own GTSM RP10 skew surge sets it.
+    Leave-one-out r MAE at the 197 sparse gauges 23% -> 15% (fig30c). It overshoots on calm coasts
+    where GTSM is right: East Africa (Zanzibar r 0.79, Lamu 1.08, S10 ~0.24 m) gets r ~1.6, so the
+    surge-signal uncertainty there is 0.59 m (fig29). Check the regional residuals of the power law
+    after the rebuild.
   - 1950-2024 tail check (`open_guesses.py long_record`; all 23,211 stations rebuilt on 75 years,
     method unchanged; 1950-1978 store and FES basis in `.cleanup_baseline/storm_tide_product/
     open_guesses/long_record`): the cyclone tail stays. TC-part shapes > 0.35: 753 -> 737, the
@@ -257,10 +262,9 @@ Open:
       range can be smaller (estuary heads), so the time near the peak is too long there.
     - A node blends stations by distance only, across an isthmus too (Chignecto: Fundy and
       Northumberland Strait stations); the tide is the node's own.
-    - SFINCS must not be forced at the nodes: `boundary_lines_geometry._tile_stations` reads the
-      tile's production station file, which will hold them after the rebuild. Keep only
-      level_source != coastline_node there (needs the level source in the tile file), so SFINCS
-      makes the estuary tide itself. Not changed yet: sfincs_tiles/ may have an HPC batch running.
+    - The SFINCS boundary lines leave the nodes out (`boundary_lines_geometry._tile_stations`,
+      matched by position against the product's level file), so SFINCS makes the estuary tide
+      itself. Rebuild the lines after the product rebuild.
   5. Global rerun with flags (tail-uncertain, TC-coast, fallback-r); test 10 afterwards revises
      the flagged stations. The 1950-1978 surge months are on `<data_root>`
      (`inputs/GTSM_storm_tide_hourly/storm_surge_residual`, all 900 months).

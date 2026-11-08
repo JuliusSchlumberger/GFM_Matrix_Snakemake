@@ -14,8 +14,9 @@ from shapely.geometry import Point
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "sfincs_tiles"))
 
+from boundary_lines_geometry import NODE_LEVEL_SOURCE, TILE_STATIONS_GPKG, _tile_stations  # noqa: E402
 from build_line_forcing import COAST_HG_PEAK_HR, COAST_HG_STEPS, build_line_forcing, read_hydrographs  # noqa: E402
-from gfm_config import storm_tide_hydrograph_path  # noqa: E402
+from gfm_config import storm_tide_hydrograph_path, storm_tide_product_levels_path  # noqa: E402
 
 LON, LAT = 10.0, 50.0
 STEP = np.timedelta64(600, "s")
@@ -77,6 +78,26 @@ def test_config_picks_the_hydrograph_file_of_the_storm_tide_source() -> None:
         path.write_text(yaml.safe_dump(cfg))
         assert storm_tide_hydrograph_path(path) == Path(
             "/data/processed_inputs/storm_tide_product/GFM_storm_tide_hydrographs.nc")
+        assert storm_tide_product_levels_path(path) == Path(
+            "/data/processed_inputs/storm_tide_product/GFM_storm_tide_levels.nc")
         cfg["boundary_conditions"]["storm_tide_source"] = "coast_rp"
         path.write_text(yaml.safe_dump(cfg))
         assert storm_tide_hydrograph_path(path) == Path("/data/inputs/COAST_HG/COAST-HG_RP100.nc")
+        assert storm_tide_product_levels_path(path) is None
+
+
+def test_boundary_line_stations_leave_out_the_coastline_nodes() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        lon, lat = np.array([10.0, 10.1, 10.2]), np.array([50.0, 50.0, 50.0])
+        levels = Path(tmp) / "levels.nc"
+        xr.Dataset({"level_source": ("stations", np.array(["gtsm_era5", NODE_LEVEL_SOURCE, "coast_rp"]))},
+                   coords={"station_x_coordinate": ("stations", lon),
+                           "station_y_coordinate": ("stations", lat)}).to_netcdf(levels)
+        tile = Path(tmp) / "1"
+        (tile / TILE_STATIONS_GPKG).parent.mkdir(parents=True)
+        gpd.GeoDataFrame({"SLR_0": np.array([120, 130, 140], dtype=np.int16)},
+                         geometry=gpd.points_from_xy(lon, lat), crs="EPSG:4326").to_file(tile / TILE_STATIONS_GPKG)
+        st = _tile_stations(tile, levels)
+        assert st.station_index.tolist() == [0, 2]
+        assert np.allclose(st.rp100_level_m, [1.2, 1.4])
+        assert len(_tile_stations(tile)) == 3
