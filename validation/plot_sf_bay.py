@@ -13,16 +13,16 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import rasterio
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
+from config_utils import get_data_catalog, load_config  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from plot_agreement_map import (  # noqa: E402
     _draw_annotation_box,
     _draw_background,
     plot_agreement_map,
+    read_decimated,
 )
 from validate_sf_bay import OUTPUT_TAG  # noqa: E402
 
@@ -35,16 +35,17 @@ def plot_depth_difference(
     output_path: Path, diff_range_m: float, figsize, dpi: int, metrics: dict | None = None,
 ) -> None:
     """Map model minus CoSMoS depth (m), symmetric colour range +-`diff_range_m`."""
-    with retry_transient_io(rasterio.open, diff_path) as src:
-        diff = src.read(1)
-        bounds, transform = src.bounds, src.transform
+    diff, nodata, bounds, transform = read_decimated(diff_path)
     fig, ax = plt.subplots(figsize=figsize)
     _draw_background(
         ax, [bounds.left, bounds.bottom, bounds.right, bounds.top], transform, diff.shape,
         gfm_catalog, permanent_water_source, permanent_water_codes,
     )
+    masked = np.ma.masked_invalid(diff)
+    if nodata is not None:
+        masked = np.ma.masked_equal(masked, nodata)
     im = ax.imshow(
-        np.ma.masked_invalid(diff), extent=(bounds.left, bounds.right, bounds.bottom, bounds.top),
+        masked, extent=(bounds.left, bounds.right, bounds.bottom, bounds.top),
         cmap="RdBu_r", vmin=-diff_range_m, vmax=diff_range_m, origin="upper", zorder=1,
     )
     fig.colorbar(im, ax=ax, shrink=0.8, extend="both", label="Model - CoSMoS depth (m)")

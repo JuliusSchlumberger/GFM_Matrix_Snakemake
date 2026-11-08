@@ -1,0 +1,50 @@
+# SF Bay local-input validation: NOAA LIDAR DEM (NAVD88/GEOID18, bridged to GOCO06s via
+# native_datum=navd88_geoid18 - data_catalog_local_input.yml, TODO.md) over a small, bounded
+# fine tile cluster covering Alameda County only (preparation/build_sf_bay_fine_tiles.py
+# --region alameda) - a validation sample, NOT a full-SF-Bay build. Boundary forcing stays
+# GLOBAL COAST-RP (California/new_inputs/boundary_forcing/datasource.txt = "CoastRP") -
+# unlike Wales/England, no boundary_conditions override and no
+# cache_local_waterlevel_stations.py run.
+#
+# No sf_bay_global_input.yml / no separate global-input run (user, 2026-11-06, same lesson
+# as Scotland): since the DEM and boundary don't change tile geometry or boundary source
+# for the GLOBAL side, production's own already-computed merged chunks (global DeltaDTM +
+# COAST-RP) are the global baseline as-is - read live via
+# `validate_sf_bay.py --config snakemake_workflow/config/config.yml --bbox ... --benchmark-path ...`,
+# never rerun. Scenario override layer on config.yml + config_local.yml
+# (config_utils.materialize_config).
+
+tile_grid:
+  path: "{processed_inputs_dir}/mask/validation/sf_bay_fine_tiles_alameda.gpkg"
+
+paths:
+  hydromt_data_catalog:
+    - "snakemake_workflow/config/data_catalog_gfm.yml"
+    - "snakemake_workflow/config/data_catalog_local_input.yml"
+
+# validate_sf_bay.py scores exactly one scenario against the CoSMoS Alameda benchmark
+# (RP100, SLR000 - its own module docstring/OUTPUT_TAG) - restrict to that single
+# combination, same reasoning/pattern as calibration_500_tiles.yml and every other
+# local-input scenario config (wales/england/scotland_local_input.yml): this is a
+# calibration/comparison sample against a local benchmark, not a production hazard run,
+# so it must not fan out across config.yml's full return_periods x waterlevel_names grid.
+boundary_conditions:
+  return_periods: [100]
+  waterlevel_names: ["SLR_0"]
+adaptation:
+  # WATERLEVEL_NAMES (Snakefile) is the UNION of boundary_conditions.waterlevel_names and
+  # adaptation.slr_intensities - must also be restricted to SLR_0, same reasoning as
+  # Wales/England/Scotland's own local-input configs.
+  slr_intensities: []
+
+simulation:
+  dem_source_manifest: "{processed_inputs_dir}/mask/validation/sf_bay_fine_dem_source_manifest_alameda.csv"
+  model_outputs: "{root}/sf_bay_local_input/model_outputs"
+postprocessing:
+  merged_outputs: "{root}/sf_bay_local_input/merged_results"
+visualization:
+  output_dir: "{root}/sf_bay_local_input/figures"
+validation:
+  output_dir: "{root}/sf_bay_local_input/validation"
+hpc:
+  jobs_dir: "{root}/sf_bay_local_input/model_outputs/hpc_jobs"

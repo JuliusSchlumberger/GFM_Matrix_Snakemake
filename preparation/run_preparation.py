@@ -14,9 +14,12 @@ CLI names and config.yml preparation.* switches):
                         only - name it explicitly; not part of the default step set)
   ea_coastal_dtm      - download the EA LIDAR Composite DTM 1m (2022) for coastal
                         England (opt-in only, same reason as sync_gtsm)
-  noaa_sfbay_lidar    - download the 2025 SF Bay-Delta DEM (NOAA), clipped to the
-                        existing SF Bay scoring domain, converted to metres
-                        (opt-in only, same reason as sync_gtsm)
+  england_dtm_goco06s - convert the EA coastal DTM (ODN via OSGM15) to GOCO06s,
+                        per tile (opt-in only, same reason as sync_gtsm; needs
+                        ea_coastal_dtm's output already on disk)
+  sf_bay_usgs10m_dem  - reproject the (hand-downloaded) USGS 3DEP 10m DEM for SF Bay
+                        to the repo's working grid (opt-in only, same reason as
+                        sync_gtsm)
   scotland_lidar_dem  - download Scottish public-sector LIDAR DTM tiles for the
                         Firth of Forth region (opt-in only, same reason as sync_gtsm)
 
@@ -48,11 +51,12 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 import build_deltadtm_vrt  # noqa: E402
 import build_tile_manifest  # noqa: E402
+import convert_england_dtm_to_goco06s  # noqa: E402
 import ea_coastal_dtm  # noqa: E402
 import fix_ocean_mask_with_osm_land  # noqa: E402
-import noaa_sfbay_lidar  # noqa: E402
 import prepare_boundary_conditions  # noqa: E402
 import scotland_lidar_dem  # noqa: E402
+import sf_bay_usgs10m_dem  # noqa: E402
 import sync_deltadtm  # noqa: E402
 import sync_gtsm_water_levels  # noqa: E402
 
@@ -64,17 +68,21 @@ ALL_STEPS = [
     "boundary_conditions",
     "sync_gtsm",
     "ea_coastal_dtm",
-    "noaa_sfbay_lidar",
+    "england_dtm_goco06s",
+    "sf_bay_usgs10m_dem",
     "scotland_lidar_dem",
 ]
 
 # Opt-in only: excluded from the default step set even though no config.yml
 # preparation.* switch says so (see main()'s `selected` below) - a 75-year,
-# two-variable, credentialed CDS download (sync_gtsm) and three many-tile
-# coastal LIDAR downloads (ea_coastal_dtm, noaa_sfbay_lidar, scotland_lidar_dem)
-# should never start just because someone ran `run_preparation.py` with no
-# arguments.
-_OPT_IN_STEPS = {"sync_gtsm", "ea_coastal_dtm", "noaa_sfbay_lidar", "scotland_lidar_dem"}
+# two-variable, credentialed CDS download (sync_gtsm), two many-tile coastal
+# LIDAR downloads (ea_coastal_dtm, scotland_lidar_dem), a many-tile vertical-datum
+# conversion (england_dtm_goco06s) and a large single-raster reproject
+# (sf_bay_usgs10m_dem) should never start just because someone ran
+# `run_preparation.py` with no arguments.
+_OPT_IN_STEPS = {
+    "sync_gtsm", "ea_coastal_dtm", "england_dtm_goco06s", "sf_bay_usgs10m_dem", "scotland_lidar_dem",
+}
 
 
 def _run_step(fn, label: str, fail_fast: bool, **kwargs) -> bool:
@@ -202,14 +210,23 @@ def main() -> None:
         print("\n  [ SKIP ] Download EA coastal LIDAR DTM (opt-in - name it explicitly: "
               "run_preparation.py ea_coastal_dtm)")
 
-    if "noaa_sfbay_lidar" in selected:
-        results["noaa_sfbay_lidar"] = _run_step(
-            noaa_sfbay_lidar.run, "Download NOAA 2025 SF Bay-Delta LIDAR DEM",
+    if "england_dtm_goco06s" in selected:
+        results["england_dtm_goco06s"] = _run_step(
+            convert_england_dtm_to_goco06s.run, "Convert England coastal DTM (ODN/OSGM15) to GOCO06s",
             args.fail_fast, config=cfg,
         )
     else:
-        print("\n  [ SKIP ] Download NOAA SF Bay LIDAR DEM (opt-in - name it explicitly: "
-              "run_preparation.py noaa_sfbay_lidar)")
+        print("\n  [ SKIP ] Convert England coastal DTM to GOCO06s (opt-in - name it explicitly: "
+              "run_preparation.py england_dtm_goco06s)")
+
+    if "sf_bay_usgs10m_dem" in selected:
+        results["sf_bay_usgs10m_dem"] = _run_step(
+            sf_bay_usgs10m_dem.run, "Reproject USGS 3DEP 10m DEM for SF Bay",
+            args.fail_fast, config=cfg,
+        )
+    else:
+        print("\n  [ SKIP ] Reproject USGS 3DEP 10m SF Bay DEM (opt-in - name it explicitly: "
+              "run_preparation.py sf_bay_usgs10m_dem)")
 
     if "scotland_lidar_dem" in selected:
         results["scotland_lidar_dem"] = _run_step(

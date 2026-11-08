@@ -22,6 +22,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import rasterio
+import rasterio.enums
 from affine import Affine
 from matplotlib.colors import BoundaryNorm, ListedColormap
 from matplotlib.patches import Patch
@@ -83,6 +84,29 @@ def _draw_annotation_box(ax: plt.Axes, lines: list[str]) -> None:
     )
 
 
+def read_decimated(path: str | Path, max_dim: int = 2000):
+    """Read band 1 decimated to at most `max_dim` pixels on its longer side.
+
+    A figure a few inches across at normal DPI never needs a tile's full
+    native resolution in memory - a large local-input merge (e.g. SF Bay's
+    ~51000x46000 1m native grid) can OOM a plain `src.read(1)` otherwise.
+    `Resampling.nearest` (exact values, no blending) avoids mixing nodata
+    into a real neighbour under `Resampling.average`. Returns `(data,
+    bounds, transform)`; `bounds` is unaffected by decimation.
+    """
+    with retry_transient_io(rasterio.open, path) as src:
+        scale = max(src.width, src.height) / max_dim
+        out_shape = (
+            (src.height, src.width) if scale <= 1.0
+            else (max(1, round(src.height / scale)), max(1, round(src.width / scale)))
+        )
+        data = src.read(1, out_shape=out_shape, resampling=rasterio.enums.Resampling.nearest)
+        bounds = src.bounds
+        transform = src.transform * Affine.scale(src.width / out_shape[1], src.height / out_shape[0])
+        nodata = src.nodata
+    return data, nodata, bounds, transform
+
+
 def _draw_background(
     ax: plt.Axes,
     bbox: list[float],
@@ -113,11 +137,8 @@ def _draw_agreement_panel(
     permanent_water_source: str | None,
     permanent_water_codes: list[int] | None,
 ) -> tuple[float, float, float, float]:
-    with retry_transient_io(rasterio.open, raster_path) as src:
-        data = src.read(1)
-        bounds = src.bounds
-        transform = src.transform
-        nodata = src.nodata if src.nodata is not None else _CAT_NODATA_DEFAULT
+    data, nodata, bounds, transform = read_decimated(raster_path)
+    nodata = nodata if nodata is not None else _CAT_NODATA_DEFAULT
 
     masked = np.ma.masked_equal(data, nodata)
     cmap = ListedColormap(["none", colors["agree"], colors["under"], colors["over"]])
