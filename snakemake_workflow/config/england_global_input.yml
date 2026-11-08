@@ -1,0 +1,20 @@
+# England global-input baseline: pure production behaviour (global DeltaDTM DEM,
+# global COAST-RP boundaries), over the exact same tile subset as
+# england_local_input.yml (TODO.md D5) - isolates the input-data contribution
+# when the two are diffed. Scenario override layer on config.yml + config_local.yml
+# (config_utils.materialize_config).
+
+tile_grid:
+  path: "{processed_inputs_dir}/mask/validation/england_fine_tiles.gpkg"
+
+simulation:
+  model_outputs: "{root}/england_global_input/model_outputs"
+postprocessing:
+  merged_outputs: "{root}/england_global_input/merged_results"
+visualization:
+  output_dir: "{root}/england_global_input/figures"
+validation:
+  # Isolated from the shared default - see england_local_input.yml's matching override.
+  output_dir: "{root}/england_global_input/validation"
+hpc:
+  jobs_dir: "{root}/england_global_input/model_outputs/hpc_jobs"

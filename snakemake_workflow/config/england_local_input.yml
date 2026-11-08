@@ -1,0 +1,49 @@
+# England local-input validation: real EA LIDAR DEM + EA design sea levels, both kept in
+# their native ODN datum (native_datum=native, data_catalog_local_input.yml - TODO.md: no
+# GOCO06s bridge, confirmed unnecessary since both legs already share a datum), over a fine,
+# overlapping tile grid built from EA's own 5km tiles (preparation/build_england_fine_tiles.py)
+# - production's own tile_grid is sized for 30m data and is infeasible at England's native 1m
+# resolution (TODO.md). Diffed against england_global_input.yml, which uses the exact same
+# tile_grid.path (TODO.md D5). Scenario override layer on config.yml + config_local.yml
+# (config_utils.materialize_config).
+
+tile_grid:
+  path: "{processed_inputs_dir}/mask/validation/england_fine_tiles.gpkg"
+
+paths:
+  hydromt_data_catalog:
+    - "snakemake_workflow/config/data_catalog_gfm.yml"
+    - "snakemake_workflow/config/data_catalog_local_input.yml"
+
+boundary_conditions:
+  # Present-day only (TODO.md D4): EA's design sea levels have no SLR scenario.
+  waterlevel_names: ["SLR_0"]
+  # Isolated from the shared global COAST-RP cache (preprocessing.smk's default
+  # {processed_inputs_dir}/WL_scenarios_cache) - this scenario's SLR_0 cache holds
+  # EA-derived, ODN->GOCO06s-bridged stations instead, pre-written by
+  # preparation/cache_local_waterlevel_stations.py at exactly the path
+  # cache_waterlevel_stations would otherwise produce. Sharing the default
+  # directory would corrupt the real global SLR_0 cache every other scenario reads.
+  stations_cache_dir: "{root}/england_local_input/processed_inputs/WL_scenarios_cache"
+
+adaptation:
+  # WATERLEVEL_NAMES (Snakefile) is the UNION of boundary_conditions.waterlevel_names
+  # and adaptation.slr_intensities - must also be restricted to SLR_0, or production's
+  # default SLR_500/SLR_1000 adaptation levels leak back in with no local cache for them.
+  slr_intensities: []
+
+simulation:
+  dem_source_manifest: "{processed_inputs_dir}/mask/validation/england_fine_dem_source_manifest.csv"
+  model_outputs: "{root}/england_local_input/model_outputs"
+postprocessing:
+  merged_outputs: "{root}/england_local_input/merged_results"
+visualization:
+  output_dir: "{root}/england_local_input/figures"
+validation:
+  # Isolated from the shared default ({root}/validation) for the same reason as
+  # boundary_conditions.stations_cache_dir above - england_global_input's own metrics CSVs
+  # would otherwise collide with these at the exact same filename (standalone_metrics_path
+  # does not key by scenario, only by benchmark/RP/SLR).
+  output_dir: "{root}/england_local_input/validation"
+hpc:
+  jobs_dir: "{root}/england_local_input/model_outputs/hpc_jobs"

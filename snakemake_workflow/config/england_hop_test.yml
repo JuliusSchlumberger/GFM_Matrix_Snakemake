@@ -1,0 +1,32 @@
+# England hop-propagation test: a small, self-contained real cluster near The Wash estuary
+# (Lincolnshire), hop_distance 0-5, recomputed fresh for just this subset (not reused from the
+# all-England build - confirmed identical either way, so no external dependency was cut off).
+# Purpose: validate collect_neighbor_wave_seeds end-to-end for england_lidar_dem tiles - never
+# exercised before (the Isles of Scilly test was all hop=0). Local-input only (no global
+# counterpart needed - this test is about the hop mechanism, not a local-vs-global comparison).
+# Scenario override layer on config.yml + config_local.yml (config_utils.materialize_config).
+
+tile_grid:
+  path: "{processed_inputs_dir}/mask/validation/england_fine_tiles_wash_hop_test.gpkg"
+
+paths:
+  hydromt_data_catalog:
+    - "snakemake_workflow/config/data_catalog_gfm.yml"
+    - "snakemake_workflow/config/data_catalog_local_input.yml"
+
+boundary_conditions:
+  waterlevel_names: ["SLR_0"]
+  stations_cache_dir: "{root}/england_hop_test/processed_inputs/WL_scenarios_cache"
+
+adaptation:
+  slr_intensities: []
+
+simulation:
+  dem_source_manifest: "{processed_inputs_dir}/mask/validation/england_fine_dem_source_manifest_wash_hop_test.csv"
+  model_outputs: "{root}/england_hop_test/model_outputs"
+postprocessing:
+  merged_outputs: "{root}/england_hop_test/merged_results"
+visualization:
+  output_dir: "{root}/england_hop_test/figures"
+hpc:
+  jobs_dir: "{root}/england_hop_test/model_outputs/hpc_jobs"

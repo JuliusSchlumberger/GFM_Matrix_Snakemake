@@ -2,7 +2,7 @@
 
 Soft confusion matrix (`v.confusion_counts_soft`) at validation.primary_threshold_m,
 per `meta.regions` bbox, plus a blended "ALL" row. CSI_tol/HR_tol/FAR_tol
-(`validation.coastline_tolerance_cells`) are a boundary-registration diagnostic
+(`validation.coastline_tolerance_m`) are a boundary-registration diagnostic
 only, read next to pct_disagreement_forgiven. Design: docs/methods_04b_MapsValidation.md.
 
 Writes metrics_{ISO}_{RP}_{SLR}.csv and agreement_{ISO}_{region}_{RP}_{SLR}.tif
@@ -206,7 +206,13 @@ def validate_country_national_coverage(
     primary_threshold_m = float(val_cfg["primary_threshold_m"])
     supersample = int(val_cfg["benchmark_supersample"])
     wet_fraction = float(val_cfg["benchmark_wet_fraction"])
-    tolerance_cells = int(val_cfg["coastline_tolerance_cells"])
+    # coastline_tolerance_m is stored as metres (config.yml), not cells - converted here at
+    # the model's own reference resolution (30.0 m, every production/merged output). A scored
+    # raster at a genuinely different resolution (e.g. a future local-input run) would need
+    # this converted via that raster's own real pixel size instead - not attempted here, since
+    # these rasters are geographic (EPSG:4326) and would need the same cos(lat)-aware
+    # degrees->metres conversion pixel_area_km2_grid already does, not a flat ratio.
+    tolerance_cells = round(float(val_cfg["coastline_tolerance_m"]) / 30.0)
     pp_chunk_deg = float(cfg["postprocessing"]["chunk_size_deg"])
     merged_chunks_dir = Path(cfg["postprocessing"]["merged_outputs"]) / "chunks"
     permanent_water_source = val_cfg["permanent_water_source"]
@@ -465,12 +471,25 @@ def main() -> None:
              "(e.g. a country-validation run over a handful of tiles) that was never run "
              "through merge_chunk, see that function's own docstring.",
     )
+    parser.add_argument("--rp", default=None,
+                        help="override validation.return_period (e.g. RP250) - default "
+                             "uses the config's own value")
+    parser.add_argument("--slr", default=None,
+                        help="override validation.waterlevel_name - default uses the "
+                             "config's own value")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
     val_cfg = cfg["validation"]
+    if args.rp is not None:
+        val_cfg["return_period"] = args.rp
+    if args.slr is not None:
+        val_cfg["waterlevel_name"] = args.slr
 
-    gfm_catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
+    _catalog_paths = cfg["paths"]["hydromt_data_catalog"]
+    if isinstance(_catalog_paths, str):
+        _catalog_paths = [_catalog_paths]
+    gfm_catalog = get_data_catalog([_REPO_ROOT / p for p in _catalog_paths], root=cfg["paths"]["root"])
     bench_catalog = get_data_catalog(
         _REPO_ROOT / val_cfg["benchmark_catalog"], root=val_cfg["benchmark_root"],
     )
@@ -500,7 +519,7 @@ def main() -> None:
             print(
                 f"\n[{row['region']}] Primary threshold ({val_cfg['primary_threshold_m']}m):\n"
                 f"  HR={row['HR']:.3f} FAR={row['FAR']:.3f} CSI={row['CSI']:.3f} EB={row['EB']:.3f}\n"
-                f"  CSI_tol={row['CSI_tol']:.3f} (tolerance={val_cfg['coastline_tolerance_cells']} cell(s), "
+                f"  CSI_tol={row['CSI_tol']:.3f} (tolerance={val_cfg['coastline_tolerance_m']}m, "
                 f"{row['pct_disagreement_forgiven']:.1f}% of strict disagreement forgiven - diagnostic only, "
                 "not the headline number)\n"
                 f"  benchmark_wet_outside_model_domain_pct={row['benchmark_wet_outside_model_domain_pct']:.1f}%"

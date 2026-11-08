@@ -171,13 +171,25 @@ def download_wcs(tiles, outdir):
 
 def mosaic(outdir):
     from osgeo import gdal
-    tifs = sorted(str(p) for p in outdir.rglob("*.tif"))
-    # No srcNodata/VRTNodata override: each downloaded tile already carries its
-    # own correct nodata tag from the WCS service (-3.4028235e+38, float32's
-    # sentinel min - NOT the old ArcGIS exportImage methods' -9999), so GDAL
-    # picks it up from the source files directly.
+    all_tifs = sorted(str(p) for p in outdir.rglob("*.tif"))
+    # The WCS service returns a tile's "no survey coverage here" response (e.g. a
+    # 5 km square entirely over open sea) as an all-zero raster with NO nodata tag
+    # at all, rather than a properly nodata-flagged empty raster - confirmed
+    # empirically, not assumed. Those tiles' literal 0.0 would otherwise mosaic in
+    # as "valid" data (a fake near-sea-level plain); detect and drop them here so
+    # the VRT's own per-source NODATA override (which only masks the real tiles'
+    # -3.4028235e+38 sentinel) never has to paper over a tile that lacks it.
+    tifs = []
+    dropped = 0
+    for tif in all_tifs:
+        ds = gdal.Open(tif)
+        if ds.GetRasterBand(1).GetNoDataValue() is None:
+            dropped += 1
+            continue
+        tifs.append(tif)
     gdal.BuildVRT(str(outdir / "dtm_1m_2022_coastal.vrt"), tifs)
-    print(f"{len(tifs)} rasters -> {outdir / 'dtm_1m_2022_coastal.vrt'}")
+    print(f"{len(tifs)} rasters -> {outdir / 'dtm_1m_2022_coastal.vrt'} "
+          f"({dropped} no-coverage tiles dropped)")
 
 
 # ------------------------------------------------------------- run(config) --

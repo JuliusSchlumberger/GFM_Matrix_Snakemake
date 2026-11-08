@@ -132,7 +132,10 @@ def main() -> None:
     val_cfg = cfg["validation"]
     slr = val_cfg["waterlevel_name"]
 
-    gfm_catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
+    _catalog_paths = cfg["paths"]["hydromt_data_catalog"]
+    if isinstance(_catalog_paths, str):
+        _catalog_paths = [_catalog_paths]
+    gfm_catalog = get_data_catalog([_REPO_ROOT / p for p in _catalog_paths], root=cfg["paths"]["root"])
     bench_catalog = get_data_catalog(_REPO_ROOT / val_cfg["benchmark_catalog"], root=val_cfg["benchmark_root"])
     v.fix_catalog_meta_encoding(bench_catalog, _REPO_ROOT / val_cfg["benchmark_catalog"])
 

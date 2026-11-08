@@ -17,7 +17,7 @@ size - a block spans at most a few km of latitude, so this is a small approximat
 same spirit as pixel_area_km2_grid's own per-row approximation elsewhere). The buffer
 is computed independently per processing block (8192 px for England, per-chunk for
 Wales): a benchmark polygon within 1 km of a block edge can make this undercount the
-buffer there slightly, same edge-effect the existing coastline_tolerance_cells
+buffer there slightly, same edge-effect the existing coastline_tolerance_m
 diagnostic already accepts.
 
 Prints a before/after table; writes nothing (no CSVs, no agreement rasters).
