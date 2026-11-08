@@ -9,6 +9,8 @@ Review the printed core-vs-closure report before using the output.
 
 Usage:
     python select_country_tiles.py --config <config.yml> [--out-dir <dir>]
+    python select_country_tiles.py --config <config.yml> \\
+        --benchmark-key scotland_sepa_coastal_m --region firth_of_forth
 """
 
 import argparse
@@ -62,6 +64,17 @@ def _core_tile_ids(tile_grid: gpd.GeoDataFrame, catalog, country_isos: list[str]
     return core
 
 
+def _core_tile_ids_single_region(tile_grid: gpd.GeoDataFrame, catalog, benchmark_key: str, region_name: str) -> set[int]:
+    meta = catalog.get_source(benchmark_key).meta or {}
+    regions = meta.get("regions") or {}
+    if region_name not in regions:
+        raise KeyError(f"{benchmark_key} has no region {region_name!r}; available: {sorted(regions)}")
+    region_geom = shapely_box(*regions[region_name])
+    hits = tile_grid[tile_grid.geometry.intersects(region_geom)]
+    print(f"  region processed: {benchmark_key}:{region_name} ({len(hits)} tiles)")
+    return set(hits["tile_id"].astype(int))
+
+
 def _hop_distance_closure(tile_grid: gpd.GeoDataFrame, core_ids: set[int]) -> set[int]:
     # Fixed point: a newly added lower-hop tile may itself be hop>=1.
     closure = set(core_ids)
@@ -86,6 +99,29 @@ def _hop_distance_closure(tile_grid: gpd.GeoDataFrame, core_ids: set[int]) -> se
     return closure
 
 
+def _build_and_write(group_name: str, core_ids: set[int], tile_grid: gpd.GeoDataFrame, out_dir: Path) -> None:
+    closure_ids = _hop_distance_closure(tile_grid, core_ids)
+
+    pulled_in = closure_ids - core_ids
+    hop_counts: dict[int, int] = {}
+    for tid in closure_ids:
+        hop = int(tile_grid.loc[tile_grid["tile_id"] == tid, "hop_distance"].iloc[0])
+        hop_counts[hop] = hop_counts.get(hop, 0) + 1
+
+    print(f"  core tiles: {len(core_ids)}")
+    print(f"  closure tiles: {len(closure_ids)} ({len(pulled_in)} pulled in as pure dependency)")
+    print(f"  by hop_distance: {dict(sorted(hop_counts.items()))}")
+    if core_ids and len(closure_ids) > 2 * len(core_ids):
+        print("  ** WARNING: closure is more than 2x core size - review before using **")
+
+    subset = tile_grid.loc[
+        tile_grid["tile_id"].isin(closure_ids), ["tile_id", "hop_distance", "geometry"]
+    ].copy()
+    out_path = out_dir / f"{group_name}_tiles.gpkg"
+    subset.to_file(out_path, driver="GPKG")
+    print(f"  wrote {out_path} ({len(subset)} tiles)\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     default_config = _REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"
@@ -101,7 +137,19 @@ def main() -> None:
              f"{', '.join(GROUPS)}). Pass this to add/refresh one group without "
              f"touching another, already-complete group's own output file.",
     )
+    parser.add_argument(
+        "--benchmark-key", default=None,
+        help="restrict to exactly one benchmark's one named region instead of a GROUPS "
+             "country-iso set (e.g. a cheap local-input validation sample) - requires "
+             "--region too; ignores --groups when given.",
+    )
+    parser.add_argument(
+        "--region", default=None,
+        help="named region of --benchmark-key to use as the core (required with --benchmark-key)",
+    )
     args = parser.parse_args()
+    if args.benchmark_key is not None and args.region is None:
+        parser.error("--benchmark-key requires --region")
     groups = {k: GROUPS[k] for k in args.groups} if args.groups else GROUPS
 
     cfg = load_config(args.config)
@@ -118,29 +166,17 @@ def main() -> None:
     out_dir = Path(args.out_dir) if args.out_dir else Path(cfg["paths"]["processed_inputs_dir"]) / "mask" / "calibration"
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    if args.benchmark_key is not None:
+        group_name = f"{args.benchmark_key}_{args.region}"
+        print(f"=== {group_name} ===")
+        core_ids = _core_tile_ids_single_region(tile_grid, bench_catalog, args.benchmark_key, args.region)
+        _build_and_write(group_name, core_ids, tile_grid, out_dir)
+        return
+
     for group_name, country_isos in groups.items():
         print(f"=== {group_name} ({'+'.join(country_isos)}) ===")
         core_ids = _core_tile_ids(tile_grid, bench_catalog, country_isos)
-        closure_ids = _hop_distance_closure(tile_grid, core_ids)
-
-        pulled_in = closure_ids - core_ids
-        hop_counts: dict[int, int] = {}
-        for tid in closure_ids:
-            hop = int(tile_grid.loc[tile_grid["tile_id"] == tid, "hop_distance"].iloc[0])
-            hop_counts[hop] = hop_counts.get(hop, 0) + 1
-
-        print(f"  core tiles: {len(core_ids)}")
-        print(f"  closure tiles: {len(closure_ids)} ({len(pulled_in)} pulled in as pure dependency)")
-        print(f"  by hop_distance: {dict(sorted(hop_counts.items()))}")
-        if core_ids and len(closure_ids) > 2 * len(core_ids):
-            print("  ** WARNING: closure is more than 2x core size - review before using **")
-
-        subset = tile_grid.loc[
-            tile_grid["tile_id"].isin(closure_ids), ["tile_id", "hop_distance", "geometry"]
-        ].copy()
-        out_path = out_dir / f"{group_name}_tiles.gpkg"
-        subset.to_file(out_path, driver="GPKG")
-        print(f"  wrote {out_path} ({len(subset)} tiles)\n")
+        _build_and_write(group_name, core_ids, tile_grid, out_dir)
 
 
 if __name__ == "__main__":

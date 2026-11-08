@@ -1,0 +1,42 @@
+# Scotland local-input validation: global DeltaDTM DEM unchanged, only the boundary
+# forcing swaps to EA's GB-wide design sea levels (ea_coastal_design_sea_levels, native
+# ODN), bridged to GOCO06s via the odn_osgm15 datum bridge (mandatory here, unlike
+# England/Wales's native-ODN no-op - TODO.md). Tile grid is the exact production
+# DeltaDTM tile subset for one benchmark region (preparation/select_country_tiles.py
+# --benchmark-key scotland_sepa_coastal_m --region firth_of_forth), not a freshly built
+# fine-tile grid - this is a validation sample, NOT a full-Scotland build. No
+# scotland_global_input.yml: the global-input comparison reads production's own existing
+# merged chunks/metrics directly (plot_local_vs_global_agreement.py --global-config
+# snakemake_workflow/config/config.yml), since the DEM never changes here. Scenario
+# override layer on config.yml + config_local.yml (config_utils.materialize_config).
+
+tile_grid:
+  path: "{processed_inputs_dir}/mask/calibration/scotland_sepa_coastal_m_firth_of_forth_tiles.gpkg"
+
+paths:
+  hydromt_data_catalog:
+    - "snakemake_workflow/config/data_catalog_gfm.yml"
+    - "snakemake_workflow/config/data_catalog_local_input.yml"
+
+boundary_conditions:
+  # Present-day only (TODO.md D4): EA's design sea levels have no SLR scenario.
+  waterlevel_names: ["SLR_0"]
+  # Isolated from the shared global COAST-RP cache - see england_local_input.yml's matching
+  # override and its own comment for why sharing the default directory is unsafe.
+  stations_cache_dir: "{root}/scotland_local_input/processed_inputs/WL_scenarios_cache"
+
+adaptation:
+  # WATERLEVEL_NAMES (Snakefile) is the UNION of boundary_conditions.waterlevel_names and
+  # adaptation.slr_intensities - must also be restricted to SLR_0, same reasoning as England/Wales.
+  slr_intensities: []
+
+simulation:
+  model_outputs: "{root}/scotland_local_input/model_outputs"
+postprocessing:
+  merged_outputs: "{root}/scotland_local_input/merged_results"
+visualization:
+  output_dir: "{root}/scotland_local_input/figures"
+validation:
+  output_dir: "{root}/scotland_local_input/validation"
+hpc:
+  jobs_dir: "{root}/scotland_local_input/model_outputs/hpc_jobs"
