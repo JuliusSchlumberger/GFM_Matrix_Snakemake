@@ -20,10 +20,12 @@ SLAB_GAP = 2000
 MISSING = np.iinfo(np.int16).min
 
 
-def gtsm_files(gtsm_dir: Path, variable: str = "surge") -> list[Path]:
+def gtsm_files(gtsm_dir: Path, variable: str = "surge", years: tuple[int, int] | None = None) -> list[Path]:
+    """Monthly files from FOLDERS' first year on, or within `years` (first, last; inclusive)."""
     folder, pattern, _, first_year = FOLDERS[variable]
+    lo, hi = years if years is not None else (first_year, None)
     files = [f for f in sorted((Path(gtsm_dir) / folder).glob(pattern))
-             if first_year is None or int(f.stem.split("_")[3]) >= first_year]
+             if (lo is None or int(f.stem.split("_")[3]) >= lo) and (hi is None or int(f.stem.split("_")[3]) <= hi)]
     if not files:
         raise FileNotFoundError(f"no {pattern} under {Path(gtsm_dir) / folder}")
     return files
@@ -72,9 +74,9 @@ def _read_month(args) -> tuple[np.ndarray, np.ndarray]:
 
 
 def extract_series(gtsm_dir: Path, gtsm_indices: np.ndarray, store: Path, workers: int = 4,
-                   variable: str = "surge") -> None:
+                   variable: str = "surge", years: tuple[int, int] | None = None) -> None:
     """Write the series of the GTSM stations `gtsm_indices` (unique, sorted) to `store`."""
-    files = gtsm_files(gtsm_dir, variable)
+    files = gtsm_files(gtsm_dir, variable, years)
     var = FOLDERS[variable][2]
     lonlat, ids = gtsm_stations(gtsm_dir, variable)
     lengths = []

@@ -17,6 +17,9 @@ Stages (each writes <product-dir>/open_guesses/<stage>*.parquet for the figure s
   r_variants  the gauge ratio r, left one out: production; fallback 1 or a covariate fit on
             GTSM's RP10 skew surge where fewer than MIN_NEIGHBOURS gauges are near; calibration
             without gauges whose GTSM skew surge is below R_MIN_SKEW_M; an additive offset
+  long_record  every station rebuilt on GTSM-ERA5 1950-2024 (the 1950-1978 months joined to the
+            product's 1979-2024 store): GPD shape, cap use and RP levels against the product, and
+            each period's own skew-surge fit (an ERA5 homogeneity check)
   shape_noise  the stations' MLE GPD shapes against the shapes a light tail (shape 0, or the
             median shape) gives from each station's number of storms: is the heavy tail noise?
 Gauge reference: test 9's convolution of the gauge's own skew surges on its own tide.
@@ -38,7 +41,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "boundary_test"))
 from config_utils import get_data_catalog, load_config  # noqa: E402
-from gtsm_series import MISSING, load_series  # noqa: E402
+from gtsm_series import MISSING, extract_series, load_series, station_series  # noqa: E402
 from level_product_gauges import GAUGE_RPS, GaugeCheck, scores, tc_hours  # noqa: E402
 import skew_surge as ss  # noqa: E402
 import storm_tide_product as stp  # noqa: E402
@@ -62,6 +65,8 @@ CYCLE_COUNT_HOURS = 2 * 8766  # two years of the hourly tide set the cycles per 
 TC_RAISES = {"tc_scale": (1.0, 1.1, 1.2, 1.3, 1.4), "tc_shift_m": (0.0, 0.1, 0.2, 0.3, 0.4)}
 TC_JUMPS_SHIFT_M = 0.24  # the basin-left-out shift of tc_scale (0.18-0.25 m)
 NEIGHBOUR_KM = 25.0
+LONG_START = np.datetime64("1950-01-01T00:00")
+EARLY_YEARS = (1950, 1978)  # the months before the product's store
 R_MIN_SKEW_M = 0.2  # below it the ratio rests on a GTSM skew surge of a few decimetres
 BASIN_KM = 300.0  # a gauge's basin: the most frequent IBTrACS basin of the track points this close
 
@@ -342,6 +347,100 @@ def r_variants(check: GaugeCheck, dest: Path, workers: int) -> None:
     print(s.to_string(index=False), flush=True)
 
 
+def _period_fit(skew: np.ndarray, hw_years: np.ndarray, lo: int, hi: int) -> dict:
+    sel = (hw_years >= lo) & (hw_years <= hi)
+    cover = pd.Series(np.isfinite(skew[sel])).groupby(hw_years[sel]).mean()
+    keep = cover.index[cover >= stp.YEAR_COVERAGE]
+    ok = sel & np.isin(hw_years, keep) & np.isfinite(skew)
+    if len(keep) < 10:
+        return {"n_years": len(keep), "shape": np.nan, "skew_rp10_m": np.nan, "skew_rp100_m": np.nan}
+    m = ss.surge_model(skew[ok], len(keep))
+    return {"n_years": len(keep), "shape": m["shape"], "skew_rp10_m": ss.skew_level(m, 10),
+            "skew_rp100_m": ss.skew_level(m, 100)}
+
+
+def _long_task(args) -> list[dict]:
+    chunk, stores, bases, n_hours = args
+    loaded = []
+    for store in stores:
+        st_tab, time, series = load_series(Path(store))
+        idx = ((time.to_numpy().astype("datetime64[h]") - LONG_START) // np.timedelta64(1, "h")).astype(int)
+        loaded.append((dict(zip(st_tab.gtsm_index, range(len(st_tab)))), idx, series))
+    years = (LONG_START + np.arange(n_hours).astype("timedelta64[h]")).astype("datetime64[Y]").astype(int) + 1970
+    out = []
+    for atlas in bases:
+        sts = [s for s in chunk if s["atlas"] == atlas]
+        if not sts:
+            continue
+        b = [np.load(p, mmap_mode="r") for p in bases[atlas]]
+        hc = np.vstack([s["hc"] for s in sts])
+        th_all, t10_all = tp.predict(b[0], b[1], hc), tp.predict(b[2], b[3], hc)
+        for j, st in enumerate(sts):
+            g = np.full(n_hours, np.nan)
+            for pos, idx, series in loaded:
+                g[idx] = station_series(series, pos[st["gtsm_index"]])
+            try:
+                row, _, _ = stp.station_product(st, g, th_all[:, j], t10_all[:, j], years)
+            except Exception as err:  # one bad station must not stop the pool; it is reported and skipped
+                print(f"  skipped station {st['station']}: {type(err).__name__}: {err}", flush=True)
+                continue
+            hw, h = ss.high_waters(th_all[:, j], ss.HW_PROMINENCE)
+            skew = ss.skew_surges(ss.despike(g) + th_all[:, j], hw, h)
+            for name, (lo, hi) in (("early", EARLY_YEARS), ("late", (1979, 2024))):
+                row.update({f"{name}_{k}": v for k, v in _period_fit(skew, years[hw], lo, hi).items()})
+            out.append(row)
+    return out
+
+
+def long_record(check: GaugeCheck, dest: Path, workers: int) -> None:
+    from concurrent.futures import ProcessPoolExecutor
+    root = dest / "long_record"
+    early = root / "gtsm_surge_1950_1978"
+    main_store = check.cache / "gtsm_surge_stations"
+    if not (early / "series.npy").exists():
+        st_tab, _, _ = load_series(main_store)
+        extract_series(Path(check.cfg["storm_tide_product"]["gtsm_dir"]), st_tab.gtsm_index.to_numpy(), early,
+                       workers, years=EARLY_YEARS)
+    times = np.arange(LONG_START, tp.HOURLY_END, np.timedelta64(1, "h"))
+    catalog = get_data_catalog(REPO / check.cfg["paths"]["hydromt_data_catalog"], root=check.cfg["paths"]["root"])
+    models = {"fes2022": tp.fes2022_model(check.cache / "fes2022"),
+              "fes2014": tp.fes2014_model(Path(catalog.get_source("fes2014_ocean_tide").path))}
+    bases = {a: (*tp.cached_basis(models[a], times, root / f"{a}_hourly_re.npy", root / f"{a}_hourly_im.npy"),
+                 check.cache / f"{a}_nodal_re.npy", check.cache / f"{a}_nodal_im.npy") for a in models}
+    bases = {a: tuple(str(p) for p in v) for a, v in bases.items()}
+    lev = check.lev
+    ks = np.flatnonzero((lev.level_source == "product").to_numpy())
+    todo = _station_inputs(check, ks)
+    tasks = [(todo[i:i + stp.TASK_SIZE], (str(early), str(main_store)), bases, len(times))
+             for i in range(0, len(todo), stp.TASK_SIZE)]
+    rows = []
+    with ProcessPoolExecutor(workers) as pool:
+        for k, res in enumerate(pool.map(_long_task, tasks)):
+            rows += res
+            if k % 40 == 0:
+                print(f"  {min((k + 1) * stp.TASK_SIZE, len(todo))}/{len(todo)} stations", flush=True)
+    built = pd.DataFrame(rows).set_index("station").sort_index()
+    keep = ["station_id", "lon", "lat", "gpd_shape_mle", "gpd_shape", "rp100_m", "rp1000_m", "etc_rp100_m",
+            "etc_rp1000_m"]
+    out = lev.iloc[ks[built.index]][keep].copy()
+    out["tc_part"] = out.station_id.isin(check.tc_levels.index).to_numpy()
+    for c in ("gpd_shape_mle", "gpd_shape", "n_years", "rp100_m", "rp1000_m", "etc_rp100_m", "etc_rp1000_m"):
+        out[f"long_{c}"] = built[c].to_numpy()
+    for c in built.columns:
+        if c.startswith(("early_", "late_")):
+            out[c] = built[c].to_numpy()
+    out.to_parquet(root / "long_record.parquet")
+    for label, sel in (("all", np.ones(len(out), bool)), ("TC part", out.tc_part.to_numpy()),
+                       ("no TC part", ~out.tc_part.to_numpy())):
+        s = out[sel]
+        print(f"{label} ({len(s)}): MLE shape median {s.gpd_shape_mle.median():.3f} -> {s.long_gpd_shape_mle.median():.3f}"
+              f", > 0.35 {(s.gpd_shape_mle > 0.35).sum()} -> {(s.long_gpd_shape_mle > 0.35).sum()}; "
+              f"RP100 change p10/p50/p90 {np.nanquantile(s.long_rp100_m - s.rp100_m, [0.1, 0.5, 0.9]).round(3)}; "
+              f"RP1000 change {np.nanquantile(s.long_rp1000_m - s.rp1000_m, [0.1, 0.5, 0.9]).round(3)}; "
+              f"early/late skew RP10 median {np.nanmedian(s.early_skew_rp10_m / s.late_skew_rp10_m):.3f}",
+              flush=True)
+
+
 def _null_shapes(args) -> np.ndarray:
     n, shape0, seed = args
     rng = np.random.default_rng(seed)
@@ -405,7 +504,7 @@ def shape_noise(check: GaugeCheck, dest: Path, workers: int) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("stages", nargs="+", choices=("cap", "despike", "tc_mask", "fes_rule", "peaks", "shape_noise",
-                                                       "tc_scale", "tc_jumps", "r_variants"))
+                                                       "tc_scale", "tc_jumps", "r_variants", "long_record"))
     parser.add_argument("--product-dir", required=True)
     parser.add_argument("--sources-dir", default=".cleanup_baseline/level_sources")
     parser.add_argument("--config", default=str(REPO / "snakemake_workflow" / "config" / "config.yml"))
@@ -418,9 +517,10 @@ def main() -> None:
     check = GaugeCheck(out, Path(args.sources_dir), load_config(args.config, args.override))
     for stage in args.stages:
         print(f"== {stage}", flush=True)
-        if stage in ("cap", "tc_mask", "fes_rule", "shape_noise", "tc_scale", "tc_jumps", "r_variants"):
+        if stage in ("cap", "tc_mask", "fes_rule", "shape_noise", "tc_scale", "tc_jumps", "r_variants",
+                     "long_record"):
             {"cap": cap, "tc_mask": tc_mask, "fes_rule": fes_rule, "shape_noise": shape_noise,
-             "tc_scale": tc_scale, "tc_jumps": tc_jumps, "r_variants": r_variants}[stage](
+             "tc_scale": tc_scale, "tc_jumps": tc_jumps, "r_variants": r_variants, "long_record": long_record}[stage](
                 check, dest, args.workers)
         else:
             {"despike": despike, "peaks": peaks}[stage](check, dest)

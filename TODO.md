@@ -191,20 +191,30 @@ Open:
     TC-dominated RP100 MAE 0.363 vs 0.361 m, 10-90% -0.64..+0.42 vs -0.59..+0.51; shapes > 0.35
     753 -> 69; RP1000 - COAST-RP p99 2.06 -> 1.16 m, max 8.4 -> 3.2 m; neighbour jumps unchanged;
     RP2 MAE (all gauges) 0.088 -> 0.104 m because the shift also lifts COAST-RP_TC's flat tide
-    floor. Scaling instead of shifting is worse (MAE 0.413). Next variant: a shift tapering to 0
-    below RP10. Decision open (user).
+    floor. Scaling instead of shifting is worse (MAE 0.413). No tapered shift or other device that
+    exists only to improve the fit (user, 2026-11-08). Decision open (user).
   - 3: covariate fallback r = 1.03 x S10^-0.32 (GTSM RP10 skew surge, m; cap 2) where < 3 gauges
     within 500 km: sparse gauges RP100 MAE 0.226 -> 0.194 m, bias -0.11 -> -0.03 m; all 451
     0.163 -> 0.157 m. Fallback 1 worse; dropping gauges with S10 < 0.2 m no effect; additive
     offset +3 cm RP10 bias. The high ratios are open-ocean islands and Peru-Chile (S10 ~0.1 m),
     not estuaries. Decision open (user).
+  - 1950-2024 tail check (`open_guesses.py long_record`; all 23,211 stations rebuilt on 75 years,
+    method unchanged; 1950-1978 store and FES basis in `.cleanup_baseline/storm_tide_product/
+    open_guesses/long_record`): the cyclone tail stays. TC-part shapes > 0.35: 753 -> 737, the
+    75-year median at those stations still 0.40; 245 drop out and 229 enter, so single storms set
+    the shape (Hangzhou Bay, Pilbara RP1000 up to +3.2 m from 1950-78 storms). Without a TC part
+    70 -> 33 (ETC heavy shapes mostly noise). Gauge RP100 MAE 0.195 (46 yr) vs 0.202 m (75 yr),
+    TC-dominated 0.361 vs 0.364 m. Early/late skew RP10 median 1.00 (TC part 1.04, no TC part
+    0.985): no pre-1979 storm deficit in ERA5. A longer record does not replace the cap at TC
+    stations; justified options are the COAST-RP_TC tail (masked, decision 2) or a regionally
+    pooled GPD shape. Recommendation: keep the 46-year record. Decision open (user).
   4. Tile interpolation: interpolate skew-surge levels and convolve with the local FES tide at
      the tile boundary, vs total-level IDW, on the stations whose current error exceeds 0.2 m.
-  5. Global rerun with flags (tail-uncertain, TC-coast, fallback-r); GTSM-ERA5-E (1950-2024)
-     tail check and test 10 afterwards revise the flagged stations. The 1950-1978 surge months
-     are already on `<data_root>` (`inputs/GTSM_storm_tide_hourly/storm_surge_residual`, all 900
-     months); `gtsm_series.FOLDERS` and `tide_prediction.HOURLY_START` start at 1979, so the
-     check needs a 1950 station cache (~+12 GB) and FES basis.
+  5. Global rerun with flags (tail-uncertain, TC-coast, fallback-r); test 10 afterwards revises
+     the flagged stations. The 1950-1978 surge months are on `<data_root>`
+     (`inputs/GTSM_storm_tide_hourly/storm_surge_residual`, all 900 months).
+  6. Regionally pooled GPD shape (regional frequency analysis) as the alternative to the cap at
+     stations with a TC part; not started.
 - **Storm-tide product: decisions taken as estimates (open questions; tested in
   `boundary_test/INPUT_ANALYSIS.md` §8.6, fig19-fig23).**
   - No TC mask (decided): ERA5 cyclones stay in the ETC fit and count again in COAST-RP's TC part,
