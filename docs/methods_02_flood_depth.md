@@ -15,7 +15,11 @@ land-cover-indexed attenuation rate acting as a spatially varying
 propagation cost. This formulation is solved numerically with the Fast Sweeping
 Method (Zhao, 2005), giving a flood water level (and
 hence depth) at every cell in a single, non-iterative-in-time pass per
-scenario. 
+scenario. Simpler models from the same seeds - a bathtub, a connected
+bathtub and a straight-line attenuation - and a uniform instead of a
+land-cover rate are selectable for comparison (`simulation.flooding.model`,
+`friction_source`; `src/flood_variants.py`, calibrated against SFINCS in
+methods_04a). 
 
 ## 2. Conceptual basis
 

@@ -4,13 +4,10 @@
 
 The GFM production pipeline estimates coastal inundation with an eikonal-equation solver: a friction-cost attenuation model that propagates storm-tide water levels inland from the coast, trading physical completeness for global-scale runtime. This pipeline compares it against SFINCS, a hydrodynamic (shallow-water) model, on 1,000 tiles of the production tile grid. It does two things at once:
 
-- **calibrates** the eikonal's global `friction_scale_factor` (fsf): the eikonal is run at fsf = 3, 6, …, 30 and the value with the best pooled agreement with SFINCS is selected;
-- **validates** the model at that value, against SFINCS and against a plain bathtub.
+- **calibrates** each flood-model variant's parameter (friction factor, uniform rate, duration exponent) on the calibration tiles, picking the value with the best pooled agreement with SFINCS;
+- **validates** every variant at its selected value on the other tiles, which took no part in the fit.
 
-Three models are compared against SFINCS on every tile:
-- **HC-bathtub** (hydraulically-connected bathtub): `max(station water level) - elevation`, no friction or propagation, restricted to flooding with an ocean-connected path (`flood_agreement.prune_to_ocean_connected`) so interior basins with no hydraulic path to the sea don't count.
-- **EA-bathtub** (eikonal-attenuated bathtub): the production eikonal solver, run directly on SFINCS's own subgrid DEM/roughness to isolate physics/numerics differences from any grid/projection/elevation-source difference - once per fsf.
-- **SFINCS** itself, the reference.
+The variants (bathtub, connected bathtub, straight-line attenuation, eikonal with a uniform or a land-cover rate, each eikonal with or without the duration correction) are listed under [Flood-model variants](#flood-model-variants). All run directly on SFINCS's own subgrid DEM/roughness to isolate physics/numerics differences from any grid/projection/elevation-source difference; SFINCS itself is the reference.
 
 The run lives in `{root}/calibration_roughness_SFINCS` (overlap-corrected results in `{root}/calibration_roughness_SFINCS_dedup`, see Comparison); all scripts are in `sfincs_tiles/`.
 
@@ -74,10 +71,10 @@ SFINCS v2.4.0 then runs in its container on node-local scratch, and `run_sfincs_
 
 ## Eikonal and bathtub on the SFINCS subgrid
 
-`run_calibration_models.py` runs both on SFINCS's own 30 m subgrid (`dep_subgrid.tif`, `manning_subgrid.tif`), with the native mask reprojected onto it:
-- **Coastline and seeds as in production:** the coastline is `flood_model.coastline_mask`'s rule (ocean within 1 cell of land/river, in an ocean body reaching the domain edge - on the rotated grid also the no-data corners outside the tile), and each coastline cell gets the inverse-distance-squared average of its `knn` = 15 nearest **ocean-connected** stations (`flood_model.idw_seed_values_at`, the function production uses).
-- **Solver settings from the main config** (`simulation.flooding`): `max_rounds` 40, `waterlevel_epsilon_m` 0.03, obstacle coupling with `max_outer_iterations` 4. Friction = subgrid Manning's n × fsf, for fsf = 3, 6, …, 30. Outputs: `eikonal_on_subgrid_waterdepth_RP100_SLR_0_fsf<X>.tif`, solver diagnostics per fsf in `eikonal_solver_diagnostics.json`.
-- **Bathtub:** the tile's highest station level minus elevation on land.
+`run_calibration_models.py` runs the variants on SFINCS's own 30 m subgrid (`dep_subgrid.tif`, `manning_subgrid.tif`), with the native mask reprojected onto it:
+- **Coastline and seeds as in production:** the coastline is `flood_model.coastline_mask`'s rule (ocean within 1 cell of land/river, in an ocean body reaching the domain edge - on the rotated grid also the no-data corners outside the tile), and each coastline cell gets the inverse-distance average (`knn`, `idw_power` of `simulation.flooding`) of its nearest **ocean-connected** stations (`flood_model.idw_seed_values_at`, the function production uses). Every variant starts from these seeds.
+- **Solver settings from the main config** (`simulation.flooding`): `max_rounds`, `waterlevel_epsilon_m`, obstacle coupling with `max_outer_iterations`. Land-cover friction = subgrid Manning's n / 100 × friction_scale_factor × the subgrid cell size; uniform friction = rate × cell size. Outputs: `<run key>_waterdepth_RP100_SLR_0.tif` (`flood_variants.run_key`, e.g. `eikonal_landcover_fsf0.25`), run settings and solver diagnostics in `model_runs.json`.
+- **Duration correction:** from the hydrographs SFINCS was forced with (`corrected_hydrographs.csv` at `matched_boundary_points.gpkg`, its simulated window).
 
 ## Comparison
 
@@ -89,17 +86,47 @@ SFINCS v2.4.0 then runs in its container on node-local scratch, and `run_sfincs_
 
 **Overlap correction.** Neighbouring production tiles overlap (the deliberate boundary-condition buffer), so pooling the per-tile areas counts any (mis)agreement in an overlap zone once per overlapping tile; for the selected tiles the summed footprints exceed their union by a factor 1.237. `compute_calibration_result_dedup.py` re-derives every `calibration_result.json` with the same per-cell comparison, except that the scoring area is first intersected with the tile's **Voronoi core** - the cells closer to its own centre than to any other selected tile's centre (centroids from `tile_selection.gpkg`, in EPSG:6933; all selected tiles take part, so a tile without a result still claims its core). Every cell thus counts for exactly one tile, the same idea as production's one-winning-tile-per-cell merge (`src/merge.py`). The results go to a separate base directory, `calibration_roughness_SFINCS_dedup`, in the same `<tile>/outputs/calibration_result.json` layout (with `core_fraction_of_active_land` added to the domain stats); the raw directory is not touched.
 
+## Flood-model variants
+
+Seven variants (`src/flood_variants.py`) are run on the same seeds, coastline, solver settings
+and subgrid, and scored as written:
+
+| Variant | Propagation | Parameter |
+|---|---|---|
+| `bathtub` | IDW of the seed levels against the DEM | - |
+| `bathtub_connected` | the same, kept where connected to the coastline | - |
+| `straight_line` | max over seeds of level - rate x straight-line distance, connected | uniform rate (m/km) |
+| `eikonal_uniform` | eikonal with obstacle coupling, uniform rate | uniform rate (m/km) |
+| `eikonal_landcover` | eikonal with obstacle coupling, land-cover rate | friction_scale_factor (per m) |
+| `eikonal_*_duration` | the above plus the duration correction, from the SFINCS run's own boundary hydrographs | the base variant's parameter, alpha |
+
+The tiles are split by a hash of the tile id into a **calibration** group (30 %) and a
+**validation** group (70 %), `calibration_split.py`; a tile never changes group when tiles are
+added, and `calibration_split_balance.csv` compares the groups by latitude band, size, ocean and
+river share and SFINCS flood area. `run_calibration_models.py` runs in three phases:
+
+1. `sweep` - on calibration tiles, `straight_line` and `eikonal_uniform` over the uniform rates and
+   `eikonal_landcover` over the friction factors (`calibration_paths`); the bathtubs everywhere.
+2. `duration` - on calibration tiles, both duration variants over the alphas, each at the
+   parameter its base variant was selected with.
+3. `selected` - every variant at its selected run, on all tiles.
+
+After each phase `compute_variant_metrics.py` pools the runs per group and writes
+`variant_selection.json`: per variant the calibration-group run with the best pooled CSI (or
+|bias - 1|), its validation-group score, and the best variant. The validation group scores the
+selected runs only, so its numbers are out of sample.
+
 ## Analysis
 
 `run_calibration_sweep_analysis.py` is the single entry point; it reads only the per-tile result files (`calibration_results.py`), so it can be rerun at any time on whatever tiles have finished:
 
-1. `compute_friction_sweep_metrics.py` - eikonal vs SFINCS per tile and pooled per fsf (`friction_sweep_per_tile_metrics.csv`, `friction_sweep_pooled_metrics.csv`).
-2. The fsf with the best pooled CSI is chosen (`--select-by bias`: |bias - 1| closest to 0).
-3. `plot_worst_tiles_panel.py` - 3×3 panels of the lowest-CSI tiles at that fsf (union area ≥ 50 km²), split by which model over-predicts, mapped over SFINCS-active land.
-4. `plot_validation_results.py` - extent scatter, CSI histogram (per-tile and pooled), depth scatter, global agreement map, misalignment vs tile land area, pooled depth correlation, depth-bin alignment heatmap, and `metrics_overview_table_fsf<X>.csv` (HC-bathtub and EA-bathtub vs SFINCS, extent + depth).
-5. **Forcing checks** for every tile (`plot_sfincs_tile_diagnostics.py`, into `figures/forcing_checks/`, named `{overprediction,underprediction,agreement}_<tile>_...` from the eikonal's point of view): the boundary cells, forcing points and hydrographs (`_boundary_forcing.png`), and the COAST-RP forcing comparison (`_forcing_comparison.png`). The latter maps the station levels and the eikonal coastline seeds, and plots - for each station inside the tile with ocean within 2 km - the station level, the eikonal seed and SFINCS's peak water level, both read at the same point: the coastline cell nearest the station, if within 10 km. By default only the tiles of the worst-tile panels (`worst_tiles_selection_fsf<X>.csv`) get these; `--forcing-checks-all` does every scored tile.
+1. `compute_variant_metrics.py` - every run vs SFINCS per tile and pooled per group (`variant_runs_per_tile.csv`, `variant_runs_pooled.csv`) and `variant_selection.json`.
+2. The best variant's selected run is plotted (`--select-by bias`: |bias - 1| closest to 0).
+3. `plot_worst_tiles_panel.py` - 3×3 panels of the lowest-CSI tiles of that run (union area ≥ 50 km²), split by which model over-predicts, mapped over SFINCS-active land.
+4. `plot_validation_results.py` - the run against the selected connected bathtub: extent scatter, CSI histogram (per-tile and pooled), depth scatter, global agreement map, misalignment vs tile land area, pooled depth correlation, depth-bin alignment heatmap, and `metrics_overview_table_<run>.csv` (every selected run vs SFINCS, extent + depth); `--group calibration|validation` restricts to one group.
+5. **Forcing checks** for every tile (`plot_sfincs_tile_diagnostics.py`, into `figures/forcing_checks/`, named `{overprediction,underprediction,agreement}_<tile>_...` from the run's point of view): the boundary cells, forcing points and hydrographs (`_boundary_forcing.png`), and the COAST-RP forcing comparison (`_forcing_comparison.png`). The latter maps the station levels and the eikonal coastline seeds, and plots - for each station inside the tile with ocean within 2 km - the station level, the eikonal seed and SFINCS's peak water level, both read at the same point: the coastline cell nearest the station, if within 10 km. By default only the tiles of the worst-tile panels (`worst_tiles_selection_<run>.csv`) get these; `--forcing-checks-all` does every scored tile.
 
-The analysis is run twice, once per base directory, and each run writes its CSVs, tables and `figures/` into its own directory. On `calibration_roughness_SFINCS` all metrics count the overlap zones once per tile; on `calibration_roughness_SFINCS_dedup` (with `--raster-base-dir-name calibration_roughness_SFINCS`) the per-tile and pooled metrics, the fsf selection, the validation figures and the overview table are overlap-corrected, while the map-based figures (worst-tile panels, forcing checks) read their rasters and inputs from the raw directory, which is the only one that holds them.
+The analysis is run twice, once per base directory, and each run writes its CSVs, tables and `figures/` into its own directory. On `calibration_roughness_SFINCS` all metrics count the overlap zones once per tile; on `calibration_roughness_SFINCS_dedup` (with `--raster-base-dir-name calibration_roughness_SFINCS`) the per-tile and pooled metrics, the variant selection, the validation figures and the overview table are overlap-corrected, while the map-based figures (worst-tile panels, forcing checks) read their rasters and inputs from the raw directory, which is the only one that holds them.
 
 ## HPC pipeline
 
@@ -107,11 +134,11 @@ Two stages, chained on Slurm (`generate_calibration_jobs.py`), all jobs on the p
 
 - **Stage 1** - 10 jobs, each one interleaved shard of the candidate pool: screen → boundary lines (4 worker processes) → SFINCS mask pre-flight.
 - **Bridge** - one job that starts when every stage-1 job has ended: collects the line results, runs the tile selection (+ maps) and submits stage 2.
-- **Stage 2** - 20 jobs over the 1,000 tiles, balanced by an estimated runtime from the pre-flight's active cell count (largest tiles first in every job). Per tile, `run_final_tile.sh`: copy inputs → DEM/mask, elevation, roughness → line forcing → SFINCS model build → bathtub + eikonal sweep → SFINCS run → postprocessing → `calibration_result.json`.
+- **Stage 2** - 20 jobs over the 1,000 tiles, balanced by an estimated runtime from the pre-flight's active cell count (largest tiles first in every job). Per tile, `run_final_tile.sh`: copy inputs → DEM/mask, elevation, roughness → line forcing → SFINCS model build → flood-model runs of one phase (`CAL_PHASE`) → SFINCS run → postprocessing → `calibration_result.json`.
 
 Every step is skipped when its output exists, so a resubmitted tile resumes where it stopped. A tile records its current step in `outputs/calibration_run.step`, its success in `calibration_run.done` and failures in `calibration_run.failed`; `check_calibration_progress.py` reports both stages per job.
 
-`rerun_calibration.sh` redoes part of the run in place after a code change, relying on this skip logic: per selected tile it deletes the done/failed/step markers (which re-queues the tile) plus the artefacts to be redone, then write and submit the stage-2 jobs via `generate_calibration_jobs.py stage2`. `--part eikonal` (eikonal-side changes) deletes the `eikonal_on_subgrid_waterdepth_*_fsf*.tif` rasters and `eikonal_solver_diagnostics.json`, so only the eikonal sweep and `calibration_result.json` are redone; a post job (after all stage-2 jobs) then runs `compute_calibration_result_dedup.py` and the analysis on both base directories. `--part sfincs` (forcing/mask changes) deletes `sfincs.inp`, so line forcing → SFINCS model build → SFINCS run → postprocessing → `calibration_result.json` are redone; the dedup and the two analyses are then run by hand. Two conda environments are called by full interpreter path: `gfm` (eikonal, bathtub, lines, selection) and `hydromt-sfincs-dev` (SFINCS build/postprocessing, pre-flight, comparison); their specs are `environment.yml` and `environment_sfincs.yml`.
+`rerun_calibration.sh` redoes part of the run in place after a code change, relying on this skip logic: per selected tile it deletes the done/failed/step markers (which re-queues the tile) plus the artefacts to be redone, then write and submit the stage-2 jobs via `generate_calibration_jobs.py stage2`. `--part models` (model-side changes) runs one phase (`PHASE`); existing runs are kept unless `RESET_RUNS=1` deletes every `*_waterdepth_RP100_SLR_0*.tif`, `model_runs.json` and `calibration_result.json` first; a post job (after all stage-2 jobs) then runs `compute_calibration_result_dedup.py` and the analysis on both base directories, which writes the selection the next phase needs. `--part sfincs` (forcing/mask changes) deletes `sfincs.inp`, so line forcing → SFINCS model build → SFINCS run → postprocessing → `calibration_result.json` are redone; the dedup and the two analyses are then run by hand. Two conda environments are called by full interpreter path: `gfm` (flood models, lines, selection) and `hydromt-sfincs-dev` (SFINCS build/postprocessing, pre-flight, comparison); their specs are `environment.yml` and `environment_sfincs.yml`.
 
 ## Structural limitations (not bugs)
 

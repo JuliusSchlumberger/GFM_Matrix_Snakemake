@@ -13,7 +13,7 @@ the code is done; what remains needs you, the HPC cluster or `<data_root>`.
    the examples hold the example site's values), then `python snakemake_workflow/scripts/materialize_configs.py` (the cluster
    checkout is not under `<data_root>`, so it cannot be done from the local machine). Configs with the old keys
    `slr_scenario` / `slr_scenarios` fail with KeyError.
-3. **On the cluster:** `DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part eikonal` once, to check the
+3. **On the cluster:** `DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part models` once, to check the
    shell drivers (only tested locally with stubbed sbatch/python). Paths live in
    `sfincs_tiles/site_env.sh`; keep its roots in sync with `config_hpc.yml`.
 4. **Cluster `gfm` env:** `mamba install -n gfm pytest=8.4.2 ruff=0.12.0`.
@@ -86,41 +86,34 @@ Decided and implemented:
   Open).
 
 Open:
-- **Bathtub baselines: review all implementations and make them consistent (to do before any
-  bathtub vs eikonal comparison goes into the paper).** Each was written for a different study, and
-  each makes its own choices, so their scores are not directly comparable:
-  - HC-bathtub: `sfincs_tiles/run_calibration_models.compute_bathtub_depth`. One flat level, the
-    tile's highest station value, not interpolated. The depth file is unpruned; it is pruned only at
-    scoring (`sfincs_tiles/compute_calibration_result.py` via
-    `flood_agreement.prune_to_ocean_connected`).
-  - Straight-line attenuated bathtub: `review_critiques/calibration_experiments.run_tile_distance`.
-    Level = the nearest production seed (IDW of 15 stations) minus rate x Euclidean distance.
-    Pruned with `flood_model.prune_to_coast_connected` on the seed cells, on the effective DEM.
-  - Static inundation: `flood_model.static_inundation`, a connected flat-level bathtub at
-    S = MDT + SLR inside the two-component solve. Land cells only; rivers and lakes are not
-    conduits.
-  - Spill level: `event_volume.spill_level`, a priority-flood bathtub (minimax elevation from the
-    sea) used by correction B.
-  - Naming: the eikonal solver is labelled "EA-bathtub" in `sfincs_tiles/` (calibration_results,
-    plots, docs/methods_04a) and in `analysis/summarize_run_timings.py`. Literature references:
-    Vafeidis et al. 2019 and the Flow-tub rate (0.2 m/km) in docs/methods_02.
-
-  They differ in:
-  - the water-level source (tile maximum, nearest seed, or IDW);
-  - the connectivity rule: two pruning functions, with different coastline definitions and
-    river cells as conduits or not;
-  - the DEM (raw or effective, no-data handling);
-  - whether pruning is applied to the depth raster or only to the score;
-  - the names used for them.
-
-  Goal: one shared implementation, e.g. `src/bathtub.py`, with:
-  - a level field: flat, nearest-seed or IDW, optionally minus rate x distance;
-  - one connectivity rule;
-  - the same DEM, seeds and wet threshold as the eikonal solver.
-
-  Then define one set of names (HC-bathtub, attenuated bathtub, eikonal / eikonal + B), use them
-  in `sfincs_tiles/`, `review_critiques/` and `validation/`, and re-score every baseline on the
-  same tiles. `sfincs_tiles/` changes need your go-ahead, and none while an HPC batch runs.
+- **Flood-model comparison and calibration (branch `model-variants`).** Seven variants share
+  seeds, coastline, static level and wet rule (`src/flood_variants.py`, `flood_model.FLOOD_MODELS`):
+  bathtub, connected bathtub (IDW of the seed levels), straight-line attenuation (exact max over
+  seeds of level - rate x distance), eikonal with a uniform or a land-cover rate (obstacle
+  coupling), and both eikonals with the duration correction. Built and tested; the steps below
+  run with the new storm-tide forcing (user, 2026-11-09):
+  1. Hydrax: product rebuild with coastline nodes, SFINCS forcing and runs, then
+     `calibration_split.py` (30 % calibration / 70 % validation by tile-id hash; check
+     `calibration_split_balance.csv`).
+  2. Solver studies per friction source (`generate_calibration_batch_jobs.py sweep_budget |
+     obstacle_coupling --friction-source landcover` at friction_scale_factor 0.25, and
+     `--friction-source uniform --uniform-attenuation-m-per-km 0.2`); set `max_rounds` and
+     `obstacle_coupling.max_outer_iterations` per friction source in the variant configs.
+  3. `RESET_RUNS=1 PHASE=sweep bash sfincs_tiles/rerun_calibration.sh --part models`: friction
+     factor and uniform rate on the calibration tiles; post job writes variant_selection.json.
+  4. `PHASE=duration ...`: alpha of both duration variants at their base variant's value.
+  5. `PHASE=selected ...`: every variant at its selected run on all tiles; validation-group
+     scores in variant_selection.json and `plot_validation_results.py --group validation`.
+  6. Best variant (pooled CSI on the calibration group) -> config.yml `simulation.flooding`
+     (model, friction_source, parameter, alpha); production run on Hydrax.
+  7. Local cases: `materialize_configs.py <scenario> --variants all --selection
+     <variant_selection.json>` for england/wales/scotland/sf_bay local and global input; run and
+     score each `<scenario>__<variant>_materialized.yml` with the scenario's usual commands.
+  Open: the grids in `sfincs_tiles/calibration_paths.py` (10 friction factors 0.1-0.8, 8 rates
+  0.05-0.45 m/km, alphas 0.25-1.5) widen if an optimum lands on an edge; the SFINCS harness has
+  no static (two-component) level, as the SFINCS runs have no separate SLR part; New Brunswick
+  has no local-input scenario yet; `straight_line` treats lon/lat cells as square, as the
+  eikonal step does.
 - **Boundary sources: a rule for FES2022 at fjord and estuary heads.** Partly answered by the
   version rule (FES2014 where FES2022 is implausible) and its neighbour growth in the level
   product (§8.5); the cases below where neither atlas fits stay open. FES matches GESLA within

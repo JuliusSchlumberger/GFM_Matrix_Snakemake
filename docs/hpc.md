@@ -176,11 +176,13 @@ The HPC results sit at the paths `run_eikonal` writes, so Snakemake treats the s
 
 ```
 python sfincs_tiles/generate_calibration_jobs.py stage1          # then: bash <printed submit_chain.sh>
-bash sfincs_tiles/rerun_calibration.sh --part eikonal|sfincs
-python calibration_studies/generate_calibration_batch_jobs.py sweep_budget|obstacle_coupling
+PHASE=sweep|duration|selected bash sfincs_tiles/rerun_calibration.sh --part models
+bash sfincs_tiles/rerun_calibration.sh --part sfincs
+python calibration_studies/generate_calibration_batch_jobs.py sweep_budget|obstacle_coupling --friction-source landcover|uniform
 ```
 
 `stage1` writes the candidate shards and their screen, boundary-line and pre-flight jobs plus a bridge job that selects the tiles and runs `stage2 --submit`, which spreads the unfinished tiles over jobs.
 Results land in `<data_root>/calibration_roughness_SFINCS/` (`--base-dir-name`).
-`rerun_calibration.sh` reruns part of a finished calibration in place: `--part eikonal` only the eikonal sweep (with `POST=1`, the default, followed by the dedup and sweep analyses), `--part sfincs` the forcing, SFINCS model build and run (run the analyses by hand afterwards); `DRY_RUN=1` reports what it would reset.
+`rerun_calibration.sh` reruns part of a finished calibration in place: `--part models` one phase of the flood-model runs (`PHASE`, default `sweep`; `RESET_RUNS=1` deletes every model raster first; with `POST=1`, the default, followed by the dedup and the analyses, which write `variant_selection.json` for the next phase), `--part sfincs` the forcing, SFINCS model build and run (run the analyses by hand afterwards); `DRY_RUN=1` reports what it would reset.
+The phases and the calibration/validation split are in [methods_04a](methods_04a_SFINCSvalidation.md#flood-model-variants).
 Calibration resources come from `hpc.calibration_sbatch`, roots, pythons and the container from `site_env.sh`; the solver studies default to `hpc.sbatch`.
