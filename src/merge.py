@@ -1,8 +1,13 @@
 """Merge per-tile flood depth rasters into spatial-chunk rasters.
 
-All tiles share one pixel grid (same DEM mosaic), so tile/chunk offsets are
-whole-pixel and no resampling is needed. EIKONAL_NODATA marks cells the eikonal
-model did not compute; 0.0 means computed, not flooded.
+`merge_tile_rasters_chunk` assumes every tile natively shares one EPSG:4326 pixel
+grid with the chunk grid itself (chunk_bounds are always EPSG:4326 -
+build_chunk_grid), so merging is whole-pixel offsetting, no resampling - true of
+every deltadtm-sourced tile. A local-input source in its own projected native CRS
+(e.g. England's EPSG:27700 LIDAR) instead uses `merge_tile_rasters_native`, scored
+against a national benchmark directly in that native CRS (TODO.md) rather than
+reprojecting the merged raster onto the global grid. EIKONAL_NODATA marks cells
+the eikonal model did not compute; 0.0 means computed, not flooded.
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ from typing import Any
 import numpy as np
 import rasterio
 from affine import Affine
+from rasterio.crs import CRS
 
 from config_utils import retry_transient_io
 from rasterio.windows import Window
@@ -122,6 +128,9 @@ def _tile_id_from_path(path: str) -> int:
     return int(Path(path).parents[1].name)
 
 
+_EPSG_4326 = CRS.from_epsg(4326)
+
+
 def merge_tile_rasters_chunk(
     tile_rasters: list[str | Path],
     chunk_bounds: tuple[float, float, float, float],
@@ -138,14 +147,105 @@ def merge_tile_rasters_chunk(
     ocean-connectivity check is therefore sole authority on boundary assignment.
 
     Also writes an int32 provenance raster (winning tile_id, PROVENANCE_NODATA
-    where uncovered). ``chunk_bounds`` is (minx, miny, maxx, maxy) in tile CRS.
-    Peak memory ~ block_size**2 x tiles_per_block. Outputs are written to temp
-    files and os.replace-d so a killed job cannot leave a truncated file that
-    Snakemake treats as complete.
+    where uncovered). ``chunk_bounds`` is (minx, miny, maxx, maxy) in EPSG:4326
+    (build_chunk_grid's own convention - every chunk_id names a 4326 cell) - every
+    tile must already natively share EPSG:4326 (true of every deltadtm-sourced
+    tile). A tile in a different, projected native CRS (checked from the data
+    itself, not configured - e.g. a local-input DEM source such as England's
+    EPSG:27700 LIDAR) raises rather than silently producing a degenerate output:
+    reprojecting a merged flood-depth raster this large onto the global chunk
+    grid is expensive and unnecessary when the comparison it feeds (a national
+    benchmark, itself a vector) can instead be scored directly in the tiles' own
+    native CRS - see `merge_tile_rasters_native` and TODO.md.
     """
     if not tile_rasters:
         raise ValueError("tile_rasters must not be empty")
 
+    native_crss = set()
+    for path in tile_rasters:
+        with retry_transient_io(rasterio.open, path) as src:
+            native_crss.add(src.crs)
+    if native_crss != {_EPSG_4326}:
+        raise ValueError(
+            f"merge_tile_rasters_chunk: tile(s) not natively EPSG:4326 ({native_crss}) - "
+            f"this chunk-grid merge assumes every tile already shares one EPSG:4326 pixel "
+            f"grid (build_chunk_grid). Use merge_tile_rasters_native for a local-input "
+            f"source in its own projected CRS instead."
+        )
+
+    _merge_tiles_in_native_grid(
+        tile_rasters, chunk_bounds, waterdepth_output_path, provenance_output_path,
+        block_size, raster_config,
+    )
+
+
+def merge_tile_rasters_native(
+    tile_rasters: list[str | Path],
+    waterdepth_output_path: str | Path,
+    provenance_output_path: str | Path,
+    block_size: int,
+    raster_config: dict[str, Any],
+) -> None:
+    """Merge per-tile water depths (m) by per-cell maximum, in the tiles' own native CRS.
+
+    For a local-input source whose tiles share one projected CRS (e.g. England's
+    EPSG:27700 LIDAR-derived fine tiles) rather than the global EPSG:4326 chunk
+    grid `merge_tile_rasters_chunk` assumes. Output covers the union of all tile
+    bounds, at the tiles' own full native resolution - never reprojected or
+    resampled onto a different grid. A national benchmark (typically a vector)
+    can be scored directly against this by reprojecting the vector into the same
+    native CRS instead - cheap, versus reprojecting this raster (TODO.md).
+    """
+    if not tile_rasters:
+        raise ValueError("tile_rasters must not be empty")
+
+    native_crss = set()
+    for path in tile_rasters:
+        with retry_transient_io(rasterio.open, path) as src:
+            native_crss.add(src.crs)
+    if len(native_crss) > 1:
+        raise ValueError(
+            f"merge_tile_rasters_native: tiles span multiple native CRSs ({native_crss}) - "
+            f"not supported, every tile passed in must already share one native CRS"
+        )
+
+    native_bounds = _union_bounds(tile_rasters)
+    _merge_tiles_in_native_grid(
+        tile_rasters, native_bounds, waterdepth_output_path, provenance_output_path,
+        block_size, raster_config,
+    )
+
+
+def _union_bounds(tile_rasters: list[str | Path]) -> tuple[float, float, float, float]:
+    minx = miny = np.inf
+    maxx = maxy = -np.inf
+    for path in tile_rasters:
+        with retry_transient_io(rasterio.open, path) as src:
+            b = src.bounds
+            minx, miny = min(minx, b.left), min(miny, b.bottom)
+            maxx, maxy = max(maxx, b.right), max(maxy, b.top)
+    return minx, miny, maxx, maxy
+
+
+def _merge_tiles_in_native_grid(
+    tile_rasters: list[str | Path],
+    chunk_bounds: tuple[float, float, float, float],
+    waterdepth_output_path: str | Path,
+    provenance_output_path: str | Path,
+    block_size: int,
+    raster_config: dict[str, Any],
+) -> None:
+    """Merge per-tile water depths (m) by per-cell maximum, on the tiles' own shared grid.
+
+    `chunk_bounds` must be in the SAME CRS/grid the tiles themselves already share
+    (whole-pixel offsets only, no resampling) - the EPSG:4326 chunk grid for every
+    deltadtm-sourced tile, or a native-CRS bounding envelope for a foreign-CRS one
+    (merge_tile_rasters_chunk's dispatch). Also writes an int32 provenance raster
+    (winning tile_id, PROVENANCE_NODATA where uncovered). Peak memory ~
+    block_size**2 x tiles_per_block. Outputs are written to temp files and
+    os.replace-d so a killed job cannot leave a truncated file that Snakemake
+    treats as complete.
+    """
     with retry_transient_io(rasterio.open, tile_rasters[0]) as ref:
         ref_transform = ref.transform
         crs = ref.crs

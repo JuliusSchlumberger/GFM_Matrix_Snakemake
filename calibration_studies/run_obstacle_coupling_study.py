@@ -283,7 +283,9 @@ def main() -> None:
     model_outputs = Path(cfg["simulation"]["model_outputs"])
     flooding_cfg = cfg["simulation"]["flooding"]
     knn = int(flooding_cfg["knn"])
-    friction_scale_factor = float(flooding_cfg["friction_scale_factor"])
+    # friction_scale_factor is config.yml's bare per-metre rate; these tiles are always
+    # DeltaDTM's own 30 m grid, so the production rescale (x pixel_size_m) is just x30 here.
+    friction_scale_factor = float(flooding_cfg["friction_scale_factor"]) * 30.0
     max_outer = args.max_outer_iterations if args.max_outer_iterations is not None else DEFAULT_MAX_OUTER
     inner_max_rounds = args.max_rounds if args.max_rounds is not None else DEFAULT_INNER_MAX_ROUNDS
     epsilon = args.epsilon if args.epsilon is not None else DEFAULT_OUTER_EPSILON_M

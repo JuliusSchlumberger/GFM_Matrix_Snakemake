@@ -5,6 +5,7 @@ preprocess, simulate, postprocess, all. E.g. `snakemake all --cores 4
 --resources mem_mb=8000`; set mem_mb to ~80% of physical RAM.
 """
 
+import csv
 import os
 import sys
 import time
@@ -114,11 +115,39 @@ _PROTECTION_BASELINE_SLR = config["protection"]["baseline_waterlevel_name"]
 
 
 # Resolved at parse time so the geoid rules can reference concrete .gfc paths.
-# The EGM2008 -> GOCO06s correction is always applied.
+# The EGM2008 -> GOCO06s correction is always applied. hydromt_data_catalog may be
+# a single path (every production scenario) or a list layering e.g. a local-input
+# validation catalog on top (TODO.md) - config_utils.get_data_catalog accepts both.
+_catalog_config_paths = config["paths"]["hydromt_data_catalog"]
+if isinstance(_catalog_config_paths, str):
+    _catalog_config_paths = [_catalog_config_paths]
 _data_catalog = get_data_catalog(
-    os.path.join(workflow.basedir, config["paths"]["hydromt_data_catalog"]), root=config["paths"]["root"]
+    [os.path.join(workflow.basedir, p) for p in _catalog_config_paths], root=config["paths"]["root"]
 )
 _vc_cfg = config["vertical_datum_correction"]
+
+# Per-tile dem_source override for the local-input validation framework
+# (TODO.md): "deltadtm" (today's unconditional behaviour) for every tile
+# unless simulation.dem_source_manifest names a CSV (tile_id,dem_source) -
+# e.g. build_england_validation_tiles.py's output. dem_source's own catalog
+# meta (native_datum, pixel_size_m, hybrid_grid_raster_path) travels with it
+# so the three can never drift apart; a source with no such meta key falls
+# back to deltadtm's own production defaults (egm2008, 30.0, none).
+_dem_source_manifest_path = config["simulation"].get("dem_source_manifest")
+_dem_source_by_tile: dict[int, str] = {}
+if _dem_source_manifest_path:
+    with open(_dem_source_manifest_path, newline="") as _f:
+        _dem_source_by_tile = {int(row["tile_id"]): row["dem_source"] for row in csv.DictReader(_f)}
+
+
+def _dem_source_for_tile(tile_id) -> str:
+    return _dem_source_by_tile.get(int(tile_id), "deltadtm")
+
+
+def _dem_source_meta_for_tile(tile_id, key, default):
+    meta = _data_catalog.get_source(_dem_source_for_tile(tile_id)).meta or {}
+    value = meta.get(key, default)
+    return value.format(root=config["paths"]["root"]) if isinstance(value, str) else value
 
 
 include: "snakemake_workflow/rules/common.smk"

@@ -25,6 +25,13 @@ SCENARIOS = [
     "calibration_500_tiles",
     "deltas_ssp126",
     "deltas_ssp245",
+    "england_local_input",
+    "england_global_input",
+    "england_hop_test",
+    "wales_local_input",
+    "wales_global_input",
+    "scotland_local_input",
+    "sf_bay_local_input",
 ]
 
 

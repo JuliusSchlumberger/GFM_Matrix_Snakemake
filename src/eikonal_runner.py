@@ -49,14 +49,21 @@ def run_eikonal_python(
     outer_convergence_pct: float = 0.01,
     waterlevel_epsilon_m: float = WATERLEVEL_EPSILON_M,
     friction_scale_factor: float = 1.0,
+    pixel_size_m: float | None = None,
 ) -> dict:
     """Run `flood_model.flood_depth_dense` in-process, write depth, return diagnostics.
 
     Inputs are int16-encoded on disk (DEM and water levels in cm) and decoded
-    to float32 m. `friction_scale_factor` (production 12.0, config.yml) is a
-    required correction, not a tuning knob: the solver treats friction as
-    cost per grid step (x30 for DeltaDTM's ~30 m pixel) times a x0.4
-    SFINCS-calibrated factor (docs/methods_02). Raises MemoryError on OOM.
+    to float32 m. `friction_scale_factor` (production 0.4, config.yml) is a
+    bare SFINCS-calibrated per-metre rate, not a tuning knob: the solver
+    treats friction as cost per grid step, so it must be scaled by the
+    tile's own grid step in metres (`pixel_size_m`) before use - `0.4 x 30`
+    for a DeltaDTM tile (docs/methods_02). Raises MemoryError on OOM.
+
+    `pixel_size_m=None` (the default) resolves to 30.0 (DeltaDTM/production's
+    own grid step) - every existing call site that doesn't pass a real value
+    gets production's unchanged 12.0 effective factor. A tile backed by a
+    local high-res DEM source passes its own real `pixel_size_m` instead.
     """
     with retry_transient_io(rasterio.open, dem_path) as src:
         dem = decode_dem_cm(src.read(1))
@@ -65,8 +72,9 @@ def run_eikonal_python(
         mask = src.read(1)
     with retry_transient_io(rasterio.open, friction_path) as src:
         friction = decode_friction_int16(src.read(1))
-    if friction_scale_factor != 1.0:
-        friction = friction * friction_scale_factor
+    effective_friction_scale_factor = friction_scale_factor * (pixel_size_m if pixel_size_m is not None else 30.0)
+    if effective_friction_scale_factor != 1.0:
+        friction = friction * effective_friction_scale_factor
 
     if boundaries_path is not None:
         boundaries = retry_transient_io(gpd.read_file, boundaries_path)
@@ -175,6 +183,7 @@ def run_tile_scenario(
     ocean_code: int,
     river_code: int,
     stage_boundaries: bool = False,
+    pixel_size_m: float | None = None,
 ) -> dict[str, Any]:
     """Solve, skip or placeholder one (tile, return period, SLR scenario) and write its raster.
 
@@ -184,6 +193,9 @@ def run_tile_scenario(
     neighbour dem/mask/waterdepth raises FileNotFoundError and writes nothing.
     MemoryError -> OOM marker + nodata. `stage_boundaries` copies the
     GeoPackage to node-local scratch first (HPC). Timing is left to callers.
+    `pixel_size_m` (default None) is this tile's real DEM pixel size - e.g. a
+    local high-res DEM source resolved by the caller's own per-tile manifest;
+    None (every production tile) resolves to 30.0 (DeltaDTM's own grid step).
     Returns {"outcome": "oom_premarked" | "skip_no_inundation" | "oom" | "solved", ...}.
     """
     scenario_name = f"{return_period}_{waterlevel_name}"
@@ -268,6 +280,7 @@ def run_tile_scenario(
                 outer_convergence_pct=oc_config["outer_convergence_pct"],
                 waterlevel_epsilon_m=flooding_config["waterlevel_epsilon_m"],
                 friction_scale_factor=flooding_config["friction_scale_factor"],
+                pixel_size_m=pixel_size_m,
             )
         except MemoryError:
             mark_tile_oom(oom_dir, tile_id, reason="MemoryError in flood_depth_dense - tile too large")

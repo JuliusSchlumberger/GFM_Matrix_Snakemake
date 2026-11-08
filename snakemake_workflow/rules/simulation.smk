@@ -39,6 +39,9 @@ rule run_eikonal:
         river_code=config["tile_generation"]["river_code"],
         n_scenarios_per_tile=len(RETURN_PERIODS) * len(WATERLEVEL_NAMES),
         flooding_config=config["simulation"]["flooding"],
+        # This tile's real DEM pixel size (local-input validation, TODO.md);
+        # 30.0 (deltadtm's own grid step) for every tile without a dem_source_manifest.
+        pixel_size_m=lambda wildcards: _dem_source_meta_for_tile(wildcards.tile_id, "pixel_size_m", 30.0),
     resources:
         # Deliberately generous; over-estimating only reduces concurrency.
         mem_mb=lambda wildcards, input: estimate_eikonal_mem_mb(

@@ -92,9 +92,36 @@ def build_tile_index(mask_dir: Path) -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame(rows, geometry="geometry", crs="EPSG:4326")
 
 
+def _cached_open(path: Path, open_cache: dict | None):
+    """Open `path` (OVERVIEW_LEVEL="NONE"), reusing an already-open handle from `open_cache`.
+
+    `open_cache=None` preserves the original open-read-close-per-call behaviour exactly
+    (every existing caller that doesn't pass a cache). With a cache dict, the handle is
+    kept open across many calls (e.g. many nearby domains sharing one 1deg mask tile) -
+    the read+resample call itself is unchanged, so output is bit-identical either way;
+    this only avoids re-opening the same file repeatedly (real cost on a networked
+    data_root - retry_transient_io's own docstring flags SMB blips on it).
+    """
+    if open_cache is None:
+        return _open_mask_tile(path, OVERVIEW_LEVEL="NONE")
+    key = str(path)
+    src = open_cache.get(key)
+    if src is None:
+        src = _open_mask_tile(path, OVERVIEW_LEVEL="NONE")
+        open_cache[key] = src
+    return src
+
+
+def close_open_cache(open_cache: dict) -> None:
+    """Close every handle `_cached_open` opened into `open_cache` (call once, when done)."""
+    for src in open_cache.values():
+        src.close()
+    open_cache.clear()
+
+
 def _mosaic_nearest_coarse(
     bbox: tuple[float, float, float, float], mask_index: dict, dem_index: dict | None, resolution_m: float,
-    allowed_coords: set[str] | None = None,
+    allowed_coords: set[str] | None = None, open_cache: dict | None = None,
 ) -> tuple[np.ndarray, np.ndarray, Affine] | None:
     # Nearest (not a MIN pool) for elevation too, giving
     # unbiased samples for fraction estimates. `allowed_coords` restricts reads to a
@@ -131,21 +158,29 @@ def _mosaic_nearest_coarse(
             continue
         any_coverage = True
 
-        with _open_mask_tile(mask_path, OVERVIEW_LEVEL="NONE") as src:
+        src = _cached_open(mask_path, open_cache)
+        try:
             src_window = from_bounds(ix0, iy0, ix1, iy1, src.transform)
             mask_out[r0:r0 + h, c0:c0 + w] = retry_transient_io(
                 src.read, 1, window=src_window, boundless=True, fill_value=255,
                 out_shape=(h, w), resampling=Resampling.nearest,
             )
+        finally:
+            if open_cache is None:
+                src.close()
 
         dem_path = dem_index.get(coord) if dem_index is not None else None
         if dem_path is not None:
-            with _open_mask_tile(dem_path, OVERVIEW_LEVEL="NONE") as src:
+            src = _cached_open(dem_path, open_cache)
+            try:
                 src_window = from_bounds(ix0, iy0, ix1, iy1, src.transform)
                 dem_out[r0:r0 + h, c0:c0 + w] = retry_transient_io(
                     src.read, 1, window=src_window, boundless=True, fill_value=-9999.0,
                     out_shape=(h, w), resampling=Resampling.nearest,
                 )
+            finally:
+                if open_cache is None:
+                    src.close()
 
     if not any_coverage:
         return None
@@ -443,9 +478,12 @@ def merge_small_domains_tiered(
 
 # Phase 5 - hop-distance BFS within one component_id
 
-def _domain_touches_ocean(bbox: tuple[float, float, float, float], mask_index: dict, cfg: ConnectivityConfig) -> bool:
+def _domain_touches_ocean(
+    bbox: tuple[float, float, float, float], mask_index: dict, cfg: ConnectivityConfig,
+    open_cache: dict | None = None,
+) -> bool:
     # Only the mask decides ocean contact, so no DEM tiles are read (dem_index=None).
-    result = _mosaic_nearest_coarse(bbox, mask_index, None, cfg.coarse_resolution_m)
+    result = _mosaic_nearest_coarse(bbox, mask_index, None, cfg.coarse_resolution_m, open_cache=open_cache)
     if result is None:
         return False
     mask_samples, _dem_samples, _transform = result
@@ -472,17 +510,24 @@ def compute_hop_distances(
     print(f"  compute_hop_distances: checking ocean adjacency for {n} domain(s)...", flush=True)
     t0 = time.time()
     touches_ocean = []
-    for i, d in enumerate(domains):
-        touches_ocean.append(_domain_touches_ocean(d.bbox, mask_index, cfg))
-        if (i + 1) % 250 == 0 or (i + 1) == n:
-            elapsed = time.time() - t0
-            rate = (i + 1) / elapsed if elapsed > 0 else 0
-            eta_s = (n - (i + 1)) / rate if rate > 0 else float("nan")
-            print(
-                f"  PROGRESS: {i + 1}/{n} domain(s) checked ({100 * (i + 1) / n:.1f}%) "
-                f"elapsed={elapsed:.0f}s ETA={eta_s / 60:.1f} min",
-                flush=True,
-            )
+    # Many nearby domains share the same underlying 1deg mask tile; keep handles open
+    # across the loop instead of re-opening per domain (real cost on a networked
+    # data_root) - the read+resample call itself is unchanged, so results are identical.
+    open_cache: dict = {}
+    try:
+        for i, d in enumerate(domains):
+            touches_ocean.append(_domain_touches_ocean(d.bbox, mask_index, cfg, open_cache))
+            if (i + 1) % 250 == 0 or (i + 1) == n:
+                elapsed = time.time() - t0
+                rate = (i + 1) / elapsed if elapsed > 0 else 0
+                eta_s = (n - (i + 1)) / rate if rate > 0 else float("nan")
+                print(
+                    f"  PROGRESS: {i + 1}/{n} domain(s) checked ({100 * (i + 1) / n:.1f}%) "
+                    f"elapsed={elapsed:.0f}s ETA={eta_s / 60:.1f} min",
+                    flush=True,
+                )
+    finally:
+        close_open_cache(open_cache)
     print(f"  ocean-adjacency check done, t={time.time() - t0:.0f}s - building domain-adjacency graph...", flush=True)
 
     t1 = time.time()

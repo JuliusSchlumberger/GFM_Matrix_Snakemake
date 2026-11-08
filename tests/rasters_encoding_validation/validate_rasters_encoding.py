@@ -21,6 +21,7 @@ from rasters import (  # noqa: E402
     _compute_dem_gap_fill,
     average_pool_to_grid,
     decode_friction_int16,
+    derive_local_water_mask,
     encode_dem_cm,
     relabel_small_isolated_ocean_patches,
     resolve_offshore_mask_gaps_via_gebco,
@@ -192,6 +193,119 @@ def test_relabel_small_isolated_ocean_patches_keeps_large_component() -> None:
     print()
 
 
+def test_derive_local_water_mask_edge_nodata_votes_ocean() -> None:
+    print("=== derive_local_water_mask: edge-touching nodata blob, majority-ocean vote -> ocean ===")
+    nodata = -9999.0
+    dem_raw = np.full((5, 5), 10.0, dtype=np.float32)
+    dem_raw[:, 0:2] = nodata  # touches the left edge
+    global_mask_on_grid = np.zeros((5, 5), dtype=np.uint8)
+    global_mask_on_grid[:, 0:2] = 1  # ocean-coded there
+
+    mask_out, diag = derive_local_water_mask(dem_raw, nodata, global_mask_on_grid)
+
+    assert np.all(mask_out[:, 0:2] == 1), f"edge nodata with majority-ocean vote should become ocean, got {mask_out}"
+    assert np.all(mask_out[:, 2:] == 0), f"valid LIDAR cells must stay land, got {mask_out}"
+    assert diag == {"n_edge_components": 1, "n_defaulted_to_ocean": 0}, diag
+    print(f"PASS: mask=\n{mask_out}, diag={diag}")
+    print()
+
+
+def test_derive_local_water_mask_edge_nodata_votes_river_not_ocean() -> None:
+    print("=== derive_local_water_mask: edge-touching nodata blob, majority-river vote -> river, not ocean ===")
+    nodata = -9999.0
+    dem_raw = np.full((5, 5), 10.0, dtype=np.float32)
+    dem_raw[:, 0:2] = nodata  # touches the left edge
+    global_mask_on_grid = np.zeros((5, 5), dtype=np.uint8)
+    global_mask_on_grid[:, 0:2] = 3  # river-coded there, not ocean
+
+    mask_out, diag = derive_local_water_mask(dem_raw, nodata, global_mask_on_grid)
+
+    assert np.all(mask_out[:, 0:2] == 3), (
+        f"a river-coded edge nodata blob must stay river, not be seeded as ocean, got {mask_out}"
+    )
+    assert diag["n_defaulted_to_ocean"] == 0, diag
+    print(f"PASS: mask=\n{mask_out}, diag={diag}")
+    print()
+
+
+def test_derive_local_water_mask_interior_nodata_stays_land() -> None:
+    print("=== derive_local_water_mask: small interior (non-edge) nodata speck stays land ===")
+    nodata = -9999.0
+    dem_raw = np.full((5, 5), 10.0, dtype=np.float32)
+    dem_raw[2, 2] = nodata  # interior, does not touch any edge
+    global_mask_on_grid = np.full((5, 5), 1, dtype=np.uint8)  # even if the global mask says ocean everywhere
+
+    mask_out, diag = derive_local_water_mask(dem_raw, nodata, global_mask_on_grid)
+
+    assert mask_out[2, 2] == 0, f"interior nodata speck must stay land regardless of the global mask, got {mask_out}"
+    assert diag["n_edge_components"] == 0, diag
+    print(f"PASS: mask=\n{mask_out}, diag={diag}")
+    print()
+
+
+def test_derive_local_water_mask_valid_cell_stays_land_despite_ocean_mask_vote() -> None:
+    print("=== derive_local_water_mask: valid LIDAR cell stays land even where the global mask says ocean ===")
+    nodata = -9999.0
+    dem_raw = np.full((3, 3), 0.3, dtype=np.float32)  # all valid, hydro-flattened near-sea-level
+    global_mask_on_grid = np.full((3, 3), 1, dtype=np.uint8)  # global mask calls all of it ocean
+
+    mask_out, diag = derive_local_water_mask(dem_raw, nodata, global_mask_on_grid)
+
+    assert np.all(mask_out == 0), (
+        f"valid (non-nodata) LIDAR data must be trusted as land at its own elevation, got {mask_out}"
+    )
+    assert diag == {"n_edge_components": 0, "n_defaulted_to_ocean": 0}, diag
+    print(f"PASS: mask=\n{mask_out}, diag={diag}")
+    print()
+
+
+def test_derive_local_water_mask_edge_flat_fill_votes_ocean() -> None:
+    print("=== derive_local_water_mask: edge-touching flat-fill (0.0m) blob, majority-ocean vote -> ocean ===")
+    nodata = -999999.0
+    dem_raw = np.full((5, 5), 10.0, dtype=np.float32)
+    dem_raw[:, 0:2] = 0.0  # a seamless DEM's open-water fill value, touches the left edge
+    global_mask_on_grid = np.zeros((5, 5), dtype=np.uint8)
+    global_mask_on_grid[:, 0:2] = 1  # ocean-coded there
+
+    mask_out, diag = derive_local_water_mask(dem_raw, nodata, global_mask_on_grid, flat_fill_value=0.0)
+
+    assert np.all(mask_out[:, 0:2] == 1), f"edge flat-fill with majority-ocean vote should become ocean, got {mask_out}"
+    assert np.all(mask_out[:, 2:] == 0), f"valid DEM cells must stay land, got {mask_out}"
+    assert diag == {"n_edge_components": 1, "n_defaulted_to_ocean": 0}, diag
+    print(f"PASS: mask=\n{mask_out}, diag={diag}")
+    print()
+
+
+def test_derive_local_water_mask_interior_flat_fill_stays_land() -> None:
+    print("=== derive_local_water_mask: small interior (non-edge) flat-fill patch stays land ===")
+    nodata = -999999.0
+    dem_raw = np.full((5, 5), 10.0, dtype=np.float32)
+    dem_raw[2, 2] = 0.0  # interior, does not touch any edge
+    global_mask_on_grid = np.full((5, 5), 1, dtype=np.uint8)  # even if the global mask says ocean everywhere
+
+    mask_out, diag = derive_local_water_mask(dem_raw, nodata, global_mask_on_grid, flat_fill_value=0.0)
+
+    assert mask_out[2, 2] == 0, f"interior flat-fill patch must stay land regardless of the global mask, got {mask_out}"
+    assert diag["n_edge_components"] == 0, diag
+    print(f"PASS: mask=\n{mask_out}, diag={diag}")
+    print()
+
+
+def test_derive_local_water_mask_flat_fill_none_ignores_zero_elevation() -> None:
+    print("=== derive_local_water_mask: flat_fill_value=None (default) treats a real 0.0m cell as land ===")
+    nodata = -9999.0
+    dem_raw = np.full((5, 5), 10.0, dtype=np.float32)
+    dem_raw[:, 0] = 0.0  # a real, valid 0.0m elevation cell on the edge - not a water signal here
+    global_mask_on_grid = np.full((5, 5), 1, dtype=np.uint8)
+
+    mask_out, diag = derive_local_water_mask(dem_raw, nodata, global_mask_on_grid)
+
+    assert np.all(mask_out == 0), f"with flat_fill_value=None, 0.0m elevation must not be treated as water, got {mask_out}"
+    assert diag == {"n_edge_components": 0, "n_defaulted_to_ocean": 0}, diag
+    print(f"PASS: mask=\n{mask_out}, diag={diag}")
+    print()
+
+
 def test_save_waterdepth_raster_creates_missing_output_directory() -> None:
     """run_eikonal_cli.py, unlike Snakemake, does not create results/ beforehand."""
     print("=== save_waterdepth_raster: creates its own output directory if missing ===")
@@ -262,6 +376,13 @@ def main() -> None:
     test_resolve_offshore_mask_gaps_via_gebco_positive_gebco_stays_land()
     test_relabel_small_isolated_ocean_patches_relabels_small_component()
     test_relabel_small_isolated_ocean_patches_keeps_large_component()
+    test_derive_local_water_mask_edge_nodata_votes_ocean()
+    test_derive_local_water_mask_edge_nodata_votes_river_not_ocean()
+    test_derive_local_water_mask_interior_nodata_stays_land()
+    test_derive_local_water_mask_valid_cell_stays_land_despite_ocean_mask_vote()
+    test_derive_local_water_mask_edge_flat_fill_votes_ocean()
+    test_derive_local_water_mask_interior_flat_fill_stays_land()
+    test_derive_local_water_mask_flat_fill_none_ignores_zero_elevation()
     test_save_waterdepth_raster_creates_missing_output_directory()
     test_average_pool_to_grid_closed_form_correctness()
     print("All rasters.py encoding/gap-fill validation checks passed.")

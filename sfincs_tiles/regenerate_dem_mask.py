@@ -39,8 +39,8 @@ def regenerate_dem_mask(tile_id: str, root: Path, base_dir_name: str, config: di
     dem = retry_transient_io(
         extract_dem, data_catalog, "deltadtm", bbox, mask_source="deltadtm_mask",
         geoid_offset_raster=geoid_offset_raster,
-        min_hard_fill_component_size=gap_fill_cfg["min_hard_fill_component_size"],
-        interp_max_search_distance=gap_fill_cfg["interp_max_search_distance"],
+        min_hard_fill_component_size_m2=gap_fill_cfg["min_hard_fill_component_size_m2"],
+        interp_max_search_distance_m=gap_fill_cfg["interp_max_search_distance_m"],
         interp_smoothing_iterations=gap_fill_cfg["interp_smoothing_iterations"],
         land_fill_value_m=gap_fill_cfg["land_fill_value_m"],
         gebco_source="gebco",

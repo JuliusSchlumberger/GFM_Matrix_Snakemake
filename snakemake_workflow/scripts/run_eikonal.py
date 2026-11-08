@@ -35,6 +35,7 @@ result = run_tile_scenario(
     raster_config=snakemake.params.raster_config,
     flooding_config=snakemake.params.flooding_config,
     ocean_code=snakemake.params.ocean_code, river_code=snakemake.params.river_code,
+    pixel_size_m=snakemake.params.pixel_size_m,
 )
 
 # Locally only a genuine solve gets a run-timing record.

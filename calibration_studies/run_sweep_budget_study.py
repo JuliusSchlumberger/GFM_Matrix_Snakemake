@@ -246,7 +246,9 @@ def main() -> None:
     # Not root/model_outputs: calibration studies keep their own model_outputs tree.
     model_outputs = Path(cfg["simulation"]["model_outputs"])
     knn = int(cfg["simulation"]["flooding"]["knn"])
-    friction_scale_factor = float(cfg["simulation"]["flooding"]["friction_scale_factor"])
+    # friction_scale_factor is config.yml's bare per-metre rate; these tiles are always
+    # DeltaDTM's own 30 m grid, so the production rescale (x pixel_size_m) is just x30 here.
+    friction_scale_factor = float(cfg["simulation"]["flooding"]["friction_scale_factor"]) * 30.0
     print(f"model_outputs={model_outputs}  knn={knn}  friction_scale_factor={friction_scale_factor}  "
           f"max_sweeps={MAX_SWEEPS} ({MAX_ROUNDS_CEILING} rounds)  epsilon={args.epsilon}  "
           f"n_tiles_wanted={n_tiles_wanted}", flush=True)

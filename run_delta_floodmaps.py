@@ -40,10 +40,17 @@ def _chunked(items: list, size: int):
         yield items[i:i + size]
 
 
-def run_simulate_stage(materialized: Path, cores: int, mem_mb: int | None, env: dict) -> bool:
+def run_simulate_stage(
+    materialized: Path, cores: int, mem_mb: int | None, env: dict,
+    return_periods: list[str] | None = None, waterlevel_names: list[str] | None = None,
+) -> bool:
     """Run `simulate` wave by wave in ascending hop_distance, blocking per wave.
 
     Targets match the Snakefile's _SIMULATION_OUTPUTS, split by hop_distance.
+    `return_periods`/`waterlevel_names` (e.g. ["RP100", "RP250"] / ["SLR_0"]) restrict the
+    eikonal solve to a subset of the config's own full lists - needed whenever those lists
+    weren't already narrowed by a scenario override (unrestricted `return_periods` is the
+    production default even on a local-input/global-input baseline config, TODO.md D4/D5).
     """
     sys.path.insert(0, str(REPO_ROOT / "src"))
     import geopandas as gpd
@@ -53,8 +60,10 @@ def run_simulate_stage(materialized: Path, cores: int, mem_mb: int | None, env: 
     tile_grid = gpd.read_file(cfg["tile_grid"]["path"])
     tile_grid["tile_id"] = tile_grid["tile_id"].astype(int)
     model_outputs = cfg["simulation"]["model_outputs"]
-    return_periods = [f"RP{rp}" for rp in cfg["boundary_conditions"]["return_periods"]]
-    waterlevel_names = merged_waterlevel_names(cfg["boundary_conditions"], cfg["adaptation"])
+    if return_periods is None:
+        return_periods = [f"RP{rp}" for rp in cfg["boundary_conditions"]["return_periods"]]
+    if waterlevel_names is None:
+        waterlevel_names = merged_waterlevel_names(cfg["boundary_conditions"], cfg["adaptation"])
 
     resources = ["--resources", f"mem_mb={mem_mb}"] if mem_mb else []
     waves = sorted(tile_grid["hop_distance"].unique().tolist())

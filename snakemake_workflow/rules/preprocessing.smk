@@ -24,6 +24,20 @@ rule compute_geoid_offset_raster:
         "../scripts/compute_geoid_offset_raster.py"
 
 
+rule compute_goco06s_absolute_raster:
+    """Compute GOCO06s's own absolute geoid-height field once, as a GeoTIFF.
+
+    Needed by a local DEM source's vertical-datum bridge (e.g. odn_osgm15), not by
+    any deltadtm tile - see extract_dem's native_datum / vertical_datum.py.
+    """
+    input:
+        goco06s_gfc=_data_catalog.get_source("goco06s").path,
+    output:
+        absolute_raster=_vc_cfg["goco06s_absolute_raster_path"],
+    script:
+        "../scripts/compute_goco06s_absolute_raster.py"
+
+
 rule extract_tile_geometry:
     """Extract a single tile's geometry from the overlapping tile grid."""
     output:
@@ -50,7 +64,13 @@ rule compute_model_bbox:
 
 
 rule extract_dem:
-    """Clip the DEM to the model bbox and geoid-correct it (EGM2008 -> GOCO06s)."""
+    """Clip the DEM to the model bbox and geoid-correct it to GOCO06s.
+
+    `dem_source` is `deltadtm` (native_datum egm2008) for every tile unless
+    `simulation.dem_source_manifest` names it otherwise - see Snakefile's
+    `_dem_source_for_tile`/`_dem_source_meta_for_tile` (local-input
+    validation, TODO.md).
+    """
     input:
         model_bbox=rules.compute_model_bbox.output.model_bbox,
         geoid_offset_raster=rules.compute_geoid_offset_raster.output.offset_raster,
@@ -62,12 +82,22 @@ rule extract_dem:
         data_catalog_root=config["paths"]["root"],
         raster_config=config["raster_format"],
         dem_gap_fill_cfg=config["simulation"]["dem_gap_fill"],
+        dem_source=lambda wc: _dem_source_for_tile(wc.tile_id),
+        native_datum=lambda wc: _dem_source_meta_for_tile(wc.tile_id, "native_datum", "egm2008"),
+        pixel_size_m=lambda wc: _dem_source_meta_for_tile(wc.tile_id, "pixel_size_m", 30.0),
+        hybrid_grid_raster=lambda wc: _dem_source_meta_for_tile(wc.tile_id, "hybrid_grid_raster_path", None),
+        goco06s_absolute_raster=_vc_cfg["goco06s_absolute_raster_path"],
+        flat_fill_value=lambda wc: _dem_source_meta_for_tile(wc.tile_id, "flat_fill_value", None),
     script:
         "../scripts/extract_dem.py"
 
 
 rule extract_dem_mask:
-    """Clip the DEM-validity mask and reproject it onto the DEM grid for a single tile."""
+    """Clip the DEM-validity mask and reproject it onto the DEM grid for a single tile.
+
+    A local dem_source (TODO.md local-input validation) derives its own mask
+    from its raw nodata footprint instead - see `rasters.extract_local_dem_mask`.
+    """
     input:
         dem=rules.extract_dem.output.dem,
         gebco=_data_catalog.get_source("gebco").path,
@@ -77,6 +107,8 @@ rule extract_dem_mask:
         data_catalog=config["paths"]["hydromt_data_catalog"],
         data_catalog_root=config["paths"]["root"],
         raster_config=config["raster_format"],
+        dem_source=lambda wc: _dem_source_for_tile(wc.tile_id),
+        flat_fill_value=lambda wc: _dem_source_meta_for_tile(wc.tile_id, "flat_fill_value", None),
     script:
         "../scripts/extract_dem_mask.py"
 
@@ -100,7 +132,12 @@ rule compute_friction:
 # (~5 s each, ~45x per tile) only for this static path dominated tile runtime.
 _deltadtm_mask_dir = os.path.dirname(_data_catalog.get_source("deltadtm_mask").path)
 
-_stations_cache_dir = os.path.join(config["paths"]["processed_inputs_dir"], "WL_scenarios_cache")
+# Override (boundary_conditions.stations_cache_dir) for a scenario whose waterlevel_name
+# values are not the shared global COAST-RP cache (e.g. a local-input validation run
+# pre-seeding its own stations_*.gpkg under an isolated directory) - see TODO.md.
+_stations_cache_dir = config["boundary_conditions"].get("stations_cache_dir") or os.path.join(
+    config["paths"]["processed_inputs_dir"], "WL_scenarios_cache"
+)
 
 
 rule cache_waterlevel_stations:

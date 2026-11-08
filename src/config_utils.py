@@ -231,19 +231,25 @@ def materialize_config(
 
 
 def get_data_catalog(
-    catalog_path: str | Path,
+    catalog_path: str | Path | list[str | Path],
     logger_name: str = "snakemake_workflow",
     root: str | Path | None = None,
 ) -> hydromt.DataCatalog:
     """Return a HydroMT DataCatalog loaded from `catalog_path`.
 
-    `root` overrides the catalog's own root for relative source paths (pass
-    config paths.root). The three get_* read methods are wrapped with
+    `catalog_path` may be a list of paths, loaded in order onto one
+    DataCatalog (confirmed: hydromt.DataCatalog.from_yml merges sources
+    across repeated calls rather than replacing them) - a later catalog's
+    source wins on a key collision. `root` overrides the catalog's own root
+    for relative source paths (pass config paths.root) and applies to every
+    path in the list. The three get_* read methods are wrapped with
     `retry_transient_io` on this instance only.
     """
     logger = setuplog(logger_name, log_level=10)
     catalog = hydromt.DataCatalog(logger=logger)
-    catalog.from_yml(str(catalog_path), root=str(root) if root is not None else None)
+    paths = [catalog_path] if isinstance(catalog_path, (str, Path)) else catalog_path
+    for p in paths:
+        catalog.from_yml(str(p), root=str(root) if root is not None else None)
 
     for _method_name in ("get_rasterdataset", "get_dataframe", "get_geodataframe"):
         _orig = getattr(catalog, _method_name)

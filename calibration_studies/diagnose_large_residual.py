@@ -103,7 +103,9 @@ def main():
     cfg = load_config(args.config)
     model_outputs = Path(cfg["simulation"]["model_outputs"])
     knn = int(cfg["simulation"]["flooding"]["knn"])
-    friction_scale_factor = float(cfg["simulation"]["flooding"]["friction_scale_factor"])
+    # friction_scale_factor is config.yml's bare per-metre rate; these tiles are always
+    # DeltaDTM's own 30 m grid, so the production rescale (x pixel_size_m) is just x30 here.
+    friction_scale_factor = float(cfg["simulation"]["flooding"]["friction_scale_factor"]) * 30.0
 
     for tile_id in args.tile_ids:
         diagnose(tile_id, model_outputs, knn, friction_scale_factor)

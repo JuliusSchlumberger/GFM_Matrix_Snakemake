@@ -186,18 +186,25 @@ def permanent_water_mask(land_use: np.ndarray, exclude_codes: tuple[int, ...]) -
     return np.isin(land_use, np.asarray(exclude_codes))
 
 
+_READ_PAD_DEG = 0.02  # >= 2 WRI geogunit (30 arcsec) pixels, so nearest-reproject never
+# runs out of source data right at a block's edge (seen as a false-exclusion line at
+# every _BLOCK_SIZE boundary in block-chunked native-CRS scoring, TODO.md).
+
+
 def _read_categorical_on_grid(
     gfm_catalog, source: str, bbox: list[float], out_transform: Affine, out_shape: tuple[int, int],
     dst_crs="EPSG:4326", dtype: str = "float64", variables: list[str] | None = None,
 ) -> np.ndarray | None:
     """Read a categorical catalog raster, nearest-reprojected onto a target grid.
 
-    `bbox` is the EPSG:4326 read extent. Cells without a source value are -1;
-    returns None when the source has no data there (hydromt NoDataException or
-    an empty read); other read errors raise. `dtype` float32 halves memory on
-    very large grids (SF Bay at 2 m).
+    `bbox` is the EPSG:4326 read extent (padded by `_READ_PAD_DEG` for the actual
+    catalog read, so the destination grid's edge pixels still have real nearest-
+    neighbour source data). Cells without a source value are -1; returns None when
+    the source has no data there (hydromt NoDataException or an empty read); other
+    read errors raise. `dtype` float32 halves memory on very large grids (SF Bay at 2 m).
     """
-    read_kwargs = {"bbox": bbox}
+    read_bbox = [bbox[0] - _READ_PAD_DEG, bbox[1] - _READ_PAD_DEG, bbox[2] + _READ_PAD_DEG, bbox[3] + _READ_PAD_DEG]
+    read_kwargs = {"bbox": read_bbox}
     if variables is not None:
         read_kwargs["variables"] = variables
     try:
@@ -221,13 +228,17 @@ def _read_categorical_on_grid(
 def read_permanent_water_mask(
     gfm_catalog, permanent_water_source: str, permanent_water_codes,
     bbox: list[float], out_transform: Affine, out_shape: tuple[int, int],
+    dst_crs="EPSG:4326",
 ) -> np.ndarray:
-    """Read a categorical permanent-water raster, nearest-reprojected to an EPSG:4326 grid.
+    """Read a categorical permanent-water raster, nearest-reprojected onto `out_transform`.
 
     Source: DeltaDTM mask (~25-31 m) or Copernicus land use (~100 m), always
     coarser than the model grid. Returns all-False where the source has no data.
+    `bbox` is always EPSG:4326 (the catalog read extent - hydromt's own
+    convention); `dst_crs` is the window's own CRS when it is not EPSG:4326
+    (e.g. a local-input source scored in its native projected CRS, TODO.md).
     """
-    dst = _read_categorical_on_grid(gfm_catalog, permanent_water_source, bbox, out_transform, out_shape)
+    dst = _read_categorical_on_grid(gfm_catalog, permanent_water_source, bbox, out_transform, out_shape, dst_crs=dst_crs)
     if dst is None:
         return np.zeros(out_shape, dtype=bool)
     return permanent_water_mask(dst, tuple(permanent_water_codes))
@@ -246,14 +257,16 @@ def read_country_mask(
     gfm_catalog, geogunit_source: str, iso_lookup: dict[int, str], country_iso: str,
     bbox: list[float], out_transform: Affine, out_shape: tuple[int, int],
     geogunit_ids: list[int] | None = None,
+    dst_crs="EPSG:4326",
 ) -> np.ndarray:
     """Mask cells whose WRI geogunit resolves to `country_iso` (or `geogunit_ids`).
 
     Keeps a rectangular bbox from scoring neighbouring countries' flooding as
     false positives. Nearest reprojection; all-False where the source has no data.
+    `dst_crs` - see read_permanent_water_mask.
     """
     dst = _read_categorical_on_grid(
-        gfm_catalog, geogunit_source, bbox, out_transform, out_shape, variables=["Geogunits"],
+        gfm_catalog, geogunit_source, bbox, out_transform, out_shape, dst_crs=dst_crs, variables=["Geogunits"],
     )
     if dst is None:
         return np.zeros(out_shape, dtype=bool)
@@ -271,20 +284,26 @@ def window_scoring_domain(
     geogunit_source: str, iso_lookup: dict[int, str], country_iso: str,
     bbox: list[float], out_transform: Affine, model_domain: np.ndarray,
     geogunit_ids: list[int] | None = None,
+    dst_crs="EPSG:4326",
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return (in_scope, domain_mask) for one EPSG:4326 model window.
+    """Return (in_scope, domain_mask) for one model window.
 
     in_scope = not permanent water and inside the country (`country_iso` or
     `geogunit_ids`, see read_country_mask), so a region bbox overlapping
     neighbouring territory does not score its flooding as false positives;
-    domain_mask = `model_domain & in_scope`.
+    domain_mask = `model_domain & in_scope`. `bbox` is always EPSG:4326 (the
+    catalog read extent); `out_transform`/`dst_crs` are the window's own grid -
+    EPSG:4326 by default, or a local-input source's native projected CRS
+    (TODO.md), in which case `bbox` must still be that same window reprojected
+    to EPSG:4326, not the window's own native-CRS bounds.
     """
     water_mask = read_permanent_water_mask(
         gfm_catalog, permanent_water_source, permanent_water_codes, bbox, out_transform, model_domain.shape,
+        dst_crs=dst_crs,
     )
     in_country = read_country_mask(
         gfm_catalog, geogunit_source, iso_lookup, country_iso, bbox, out_transform, model_domain.shape,
-        geogunit_ids=geogunit_ids,
+        geogunit_ids=geogunit_ids, dst_crs=dst_crs,
     )
     in_scope = ~water_mask & in_country
     return in_scope, model_domain & in_scope

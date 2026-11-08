@@ -6,10 +6,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import get_data_catalog  # noqa: E402
-from rasters import compute_friction, load_raster, save_raster  # noqa: E402
+from rasters import compute_friction, dem_bounds_4326, load_raster, save_raster  # noqa: E402
 
 dem = load_raster(snakemake.input.dem)  # noqa: F821
-bbox = list(dem.raster.bounds)  # model domain bbox encoded in the saved DEM
+bbox = dem_bounds_4326(dem)  # model domain bbox encoded in the saved DEM
 
 data_catalog = get_data_catalog(snakemake.params.data_catalog, root=snakemake.params.data_catalog_root)  # noqa: F821
 friction = compute_friction(

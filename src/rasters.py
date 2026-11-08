@@ -15,7 +15,7 @@ from hydromt.exceptions import NoDataException
 from affine import Affine
 from rasterio.features import rasterize
 from rasterio.fill import fillnodata
-from rasterio.warp import Resampling, reproject
+from rasterio.warp import Resampling, reproject, transform_bounds
 from scipy import ndimage
 
 from config_utils import atomic_write, retry_transient_io
@@ -141,6 +141,17 @@ def load_raster(path: str | Path) -> xr.DataArray:
 def get_tile_bbox(tile: gpd.GeoDataFrame) -> list[float]:
     """Return ``[minx, miny, maxx, maxy]`` of a single-row tile GeoDataFrame."""
     return tile.total_bounds.tolist()
+
+
+def dem_bounds_4326(dem: xr.DataArray) -> list[float]:
+    """Return `dem`'s own bounds reprojected to EPSG:4326, for `get_rasterdataset(bbox=...)`.
+
+    HydroMT interprets `bbox` as EPSG:4326 regardless of the source's own CRS - a
+    no-op for every deltadtm tile (already EPSG:4326), but required for a local
+    DEM source in a projected CRS (e.g. England's EPSG:27700 LIDAR), where
+    `dem.raster.bounds` on its own is in the wrong units entirely.
+    """
+    return list(transform_bounds(dem.raster.crs, "EPSG:4326", *dem.raster.bounds))
 
 
 def compute_model_bbox(
@@ -326,29 +337,161 @@ def relabel_small_isolated_ocean_patches(
     return corrected, {"n_relabeled": int(to_relabel.sum()), "n_components_relabeled": int(len(small_labels))}
 
 
+def derive_local_water_mask(
+    dem_raw: np.ndarray,
+    nodata: float,
+    global_mask_on_grid: np.ndarray,
+    ocean_code: int = 1,
+    lake_code: int = 2,
+    river_code: int = 3,
+    land_code: int = 0,
+    flat_fill_value: float | None = None,
+) -> tuple[np.ndarray, dict]:
+    """Classify a local DEM tile's mask from its own water footprint, not the global mask.
+
+    Every valid (non-nodata, non-`flat_fill_value`) cell is land, trusting the
+    source's own elevation directly: a topographic LIDAR survey does not cover
+    open water (nodata marks it), so non-nodata is normally the only test that
+    matters for distinguishing real terrain from an unresolved water body -
+    unlike the global mask's land/water boundary, which is coarser than a
+    1m-class LIDAR footprint and can misclassify part of a feature (e.g. a
+    diked basin) as land. A seamless nationwide DEM (e.g. USGS 3DEP) instead
+    fills open water with a flat reference elevation rather than leaving
+    nodata (confirmed for SF Bay's USGS10m source: no nodata anywhere, but
+    open bay water reads exactly 0.0 m) - `flat_fill_value` (e.g. `0.0`) adds
+    that value, alongside nodata, as a second water-candidate signal; `None`
+    (default) keeps the original nodata-only behaviour.
+    Neither signal touching the tile edge is an ordinary small gap/flat patch
+    -> land. An edge-touching candidate component is unresolved water; its
+    *type* (ocean/lake/river) is still decided by majority vote against
+    `global_mask_on_grid`, since "which kind of water body is this" stays a
+    reliable question for the global mask even where "exactly which pixels are
+    water" is not - this keeps a lake/river tile edge from being seeded with
+    ocean boundary forcing. A component with no water-coded vote at all
+    defaults to ocean (edge-touching unsurveyed/flat-filled water is, by
+    construction, water) - `diag["n_defaulted_to_ocean"]` reports how often
+    this happens.
+    """
+    is_candidate = dem_raw == nodata
+    if flat_fill_value is not None:
+        is_candidate = is_candidate | (dem_raw == flat_fill_value)
+    mask_out = np.full(dem_raw.shape, land_code, dtype=np.uint8)
+    if not is_candidate.any():
+        return mask_out, {"n_edge_components": 0, "n_defaulted_to_ocean": 0}
+
+    structure_8 = np.ones((3, 3), dtype=bool)
+    labels, _n = ndimage.label(is_candidate, structure=structure_8)
+    edge_labels = set(np.unique(np.concatenate(
+        [labels[0, :], labels[-1, :], labels[:, 0], labels[:, -1]]
+    ))) - {0}
+
+    water_codes = (ocean_code, lake_code, river_code)
+    n_defaulted = 0
+    for lbl in edge_labels:
+        component = labels == lbl
+        votes = global_mask_on_grid[component]
+        votes = votes[np.isin(votes, water_codes)]
+        if votes.size == 0:
+            code = ocean_code
+            n_defaulted += 1
+        else:
+            vals, counts = np.unique(votes, return_counts=True)
+            code = int(vals[np.argmax(counts)])
+        mask_out[component] = code
+
+    return mask_out, {"n_edge_components": len(edge_labels), "n_defaulted_to_ocean": n_defaulted}
+
+
+def extract_local_dem_mask(
+    data_catalog: hydromt.DataCatalog,
+    dem_source: str,
+    bbox: list[float],
+    dem: xr.DataArray,
+    global_mask_source: str = "deltadtm_mask",
+    flat_fill_value: float | None = None,
+) -> xr.DataArray:
+    """Derive a local-input tile's mask from `dem_source`'s own water footprint.
+
+    Re-fetches `dem_source` raw (unfilled) at `bbox` and resamples it onto
+    `dem`'s exact grid (nearest) before classifying - a bbox round trip does
+    not reproduce `dem`'s grid pixel-for-pixel when `dem_source` is in a
+    projected CRS (`bbox` is EPSG:4326; re-fetching with it snaps to a
+    slightly different extent than the original fetch did), so this must
+    realign rather than assume the two already match. Classifies with
+    `derive_local_water_mask`, which only consults `global_mask_source` as a
+    coarse ocean/lake/river label for the DEM's own water footprint, never
+    to define where that footprint is.
+    """
+    da_raw = data_catalog.get_rasterdataset(dem_source, bbox=bbox)
+    dem_raw_vals = da_raw.raster.reproject_like(dem, method="nearest").values.squeeze()
+
+    da_mask = data_catalog.get_rasterdataset(global_mask_source, bbox=bbox)
+    da_mask.raster.set_nodata(255)
+    global_mask_vals = da_mask.raster.reproject_like(dem, method="nearest").values.squeeze()
+
+    mask_vals, diag = derive_local_water_mask(
+        dem_raw_vals, da_raw.raster.nodata, global_mask_vals, flat_fill_value=flat_fill_value,
+    )
+    if diag["n_defaulted_to_ocean"]:
+        print(
+            f"  derive_local_water_mask: {diag['n_edge_components']} edge-touching water "
+            f"candidate component(s), {diag['n_defaulted_to_ocean']} with no ocean/lake/river "
+            "vote - defaulted to ocean.", flush=True,
+        )
+    return dem.copy(data=mask_vals.reshape(dem.shape))
+
+
 def extract_dem(
     data_catalog: hydromt.DataCatalog,
     dem_source: str,
     bbox: list[float],
     mask_source: str,
     geoid_offset_raster: str | Path,
-    min_hard_fill_component_size: int = 10,
-    interp_max_search_distance: float = 100.0,
+    min_hard_fill_component_size_m2: float = 9000.0,
+    interp_max_search_distance_m: float = 3000.0,
     interp_smoothing_iterations: int = 0,
     land_fill_value_m: float = DEM_NODATA_M,
     gebco_source: str = "gebco",
+    pixel_size_m: float = 30.0,
+    native_datum: str = "egm2008",
+    hybrid_grid_raster: str | Path | None = None,
+    goco06s_absolute_raster: str | Path | None = None,
+    derive_mask_from_dem: bool = False,
+    flat_fill_value: float | None = None,
 ) -> xr.DataArray:
     """Clip the DEM to `bbox`, geoid-correct it and fill every missing cell.
 
-    Returns int16 centimetres (`encode_dem_cm`). The EGM2008 -> GOCO06s offset
-    (`geoid_offset_raster`) is added to valid DeltaDTM cells only. Fill values follow
-    the DeltaDTM mask (mask nodata resolved via `resolve_offshore_mask_gaps_via_gebco`):
+    Returns int16 centimetres (`encode_dem_cm`). `dem_source`'s vertical-datum
+    offset to GOCO06s is added to valid cells only, via `native_datum` and
+    `vertical_datum.compute_vertical_datum_offset` - `"egm2008"` (default,
+    every production/DeltaDTM tile) uses `geoid_offset_raster` unchanged; a
+    local DEM source in a different native datum (e.g. `"odn_osgm15"`) passes
+    its own `hybrid_grid_raster`/`goco06s_absolute_raster` instead. An
+    unrecognized `native_datum` raises `NotImplementedError` rather than
+    silently applying the EGM2008 offset to a DEM in a different datum.
+    Fill values follow the DeltaDTM mask (mask nodata resolved via
+    `resolve_offshore_mask_gaps_via_gebco`):
 
-    - missing land, 4-connected gap < `min_hard_fill_component_size` cells:
-      interpolated (`fillnodata`, radius `interp_max_search_distance` pixels);
+    - missing land, 4-connected gap smaller than `min_hard_fill_component_size_m2`
+      (converted to cells via `pixel_size_m`): interpolated (`fillnodata`, radius
+      `interp_max_search_distance_m` converted to pixels);
     - larger missing-land gaps: `land_fill_value_m` (99 m, never floods);
     - missing ocean/lake/river: 0.0, so flooding propagates through water.
+
+    `pixel_size_m` is `dem_source`'s own real pixel size (30.0, deltadtm's,
+    by default) - a local high-res source passes its own declared value
+    (data catalog `pixel_size_m` meta) so these two physical thresholds keep
+    the same real-world meaning regardless of the DEM's native resolution.
+
+    `derive_mask_from_dem=True` (local-input tiles) replaces `mask_source`'s
+    role entirely - see `derive_local_water_mask` - rather than reprojecting
+    and GEBCO-gap-resolving the global mask onto `dem_source`'s grid.
+    `flat_fill_value` is passed through to `derive_local_water_mask` for
+    sources (e.g. USGS 3DEP) that fill open water with a flat elevation
+    instead of leaving it nodata; ignored unless `derive_mask_from_dem=True`.
     """
+    min_hard_fill_component_size = round(min_hard_fill_component_size_m2 / pixel_size_m**2)
+    interp_max_search_distance = interp_max_search_distance_m / pixel_size_m
     da = data_catalog.get_rasterdataset(dem_source, bbox=bbox)
 
     # VRT coverage gaps read as NaN, not the nodata sentinel, and would bypass gap
@@ -356,25 +499,47 @@ def extract_dem(
     if np.isnan(da.values).any():
         da = da.copy(data=np.where(np.isnan(da.values), da.raster.nodata, da.values))
 
-    from vertical_datum import sample_geoid_offset
+    # Captured before the vertical-datum offset below, which is added to every valid
+    # cell including a flat-fill one (e.g. 0.0 m open water) - derive_local_water_mask
+    # must see the DEM's own raw encoding, not an already-shifted value.
+    raw_vals_for_mask = da.values.squeeze().copy()
+
+    from vertical_datum import compute_vertical_datum_offset
 
     valid_dem = (da.values != da.raster.nodata)
-    offset = sample_geoid_offset(
-        geoid_offset_raster, da.raster.transform, da.raster.crs,
+    offset = compute_vertical_datum_offset(
+        native_datum, da.raster.transform, da.raster.crs,
         da.raster.height, da.raster.width,
+        geoid_offset_raster=geoid_offset_raster,
+        hybrid_grid_raster=hybrid_grid_raster,
+        goco06s_absolute_raster=goco06s_absolute_raster,
     ).reshape(da.shape)
     corrected = np.where(valid_dem, da.values + offset, da.values).astype(da.dtype)
     da = da.copy(data=corrected)
 
-    da_mask = data_catalog.get_rasterdataset(mask_source, bbox=bbox)
-    da_mask.raster.set_nodata(255)  # uint8 nodata; mirrors extract_dem_mask
-    mask_vals = da_mask.raster.reproject_like(da, method="nearest").values.squeeze()
+    if derive_mask_from_dem:
+        da_mask = data_catalog.get_rasterdataset(mask_source, bbox=bbox)
+        da_mask.raster.set_nodata(255)
+        global_mask_vals = da_mask.raster.reproject_like(da, method="nearest").values.squeeze()
+        mask_vals, diag = derive_local_water_mask(
+            raw_vals_for_mask, da.raster.nodata, global_mask_vals, flat_fill_value=flat_fill_value,
+        )
+        if diag["n_defaulted_to_ocean"]:
+            print(
+                f"  derive_local_water_mask: {diag['n_edge_components']} edge-touching water "
+                f"candidate component(s), {diag['n_defaulted_to_ocean']} with no ocean/lake/river "
+                "vote - defaulted to ocean.", flush=True,
+            )
+    else:
+        da_mask = data_catalog.get_rasterdataset(mask_source, bbox=bbox)
+        da_mask.raster.set_nodata(255)  # uint8 nodata; mirrors extract_dem_mask
+        mask_vals = da_mask.raster.reproject_like(da, method="nearest").values.squeeze()
 
-    da_gebco = data_catalog.get_rasterdataset(gebco_source, bbox=_buffer_bbox_for_coarse_source(bbox))
-    gebco_vals = da_gebco.raster.reproject_like(da, method="nearest").values.squeeze()
-    mask_vals, _ = resolve_offshore_mask_gaps_via_gebco(
-        mask_vals, 255, gebco_vals, da_gebco.raster.nodata,
-    )
+        da_gebco = data_catalog.get_rasterdataset(gebco_source, bbox=_buffer_bbox_for_coarse_source(bbox))
+        gebco_vals = da_gebco.raster.reproject_like(da, method="nearest").values.squeeze()
+        mask_vals, _ = resolve_offshore_mask_gaps_via_gebco(
+            mask_vals, 255, gebco_vals, da_gebco.raster.nodata,
+        )
 
     # Mask codes: 0 land, 1 ocean, 2 lake, 3 river.
     is_land = mask_vals == 0
