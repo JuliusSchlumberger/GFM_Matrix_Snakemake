@@ -221,6 +221,15 @@ simulation: # Used by: preprocessing rules
     # duration_correction on (498 tiles: CSI 0.763, bias 1.08 vs CSI 0.757, bias 0.98 at 0.3 x 30
     # = 9.0); without it the optimum is 0.4 x 30 = 12.0. See docs/methods_02_flood_depth.md §2.2.
     friction_scale_factor: 0.25
+    # Flood model (flood_model.FLOOD_MODELS): eikonal, bathtub, bathtub_connected or straight_line.
+    # src/flood_variants.py names the compared combinations of model, friction source and
+    # duration correction.
+    model: "eikonal"
+    # Attenuation rate of the eikonal: landcover (friction.tif x friction_scale_factor) or uniform.
+    friction_source: "landcover"
+    # Uniform attenuation (m/km) for friction_source uniform and model straight_line; 0.2 is the
+    # Flow-tub rate (Kasmalkar et al., 2024).
+    uniform_attenuation_m_per_km: 0.2
 
     # Max rounds (4 directional sweeps each, early exit on convergence) per solve, also per inner
     # solve under obstacle_coupling. 40: sweep-budget study (docs/methods_03_calibration_sensitivity.md

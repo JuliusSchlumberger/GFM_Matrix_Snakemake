@@ -32,7 +32,8 @@ D, M, N = 0.0003, 10, 12
 SCN, SLR = "RP100_SLR_0", "SLR_0"
 RASTER_CONFIG = {"driver": "GTiff", "compression": "deflate", "predictor": 3, "nodata": -9999}
 FLOODING = {"resolution": 30.0, "knn": 5, "idw_power": 2.0, "max_rounds": 40, "waterlevel_epsilon_m": 0.03,
-            "friction_scale_factor": 1.0,
+            "friction_scale_factor": 1.0, "model": "eikonal", "friction_source": "landcover",
+            "uniform_attenuation_m_per_km": 0.2,
             "obstacle_coupling": {"enabled": False, "max_outer_iterations": 3, "outer_convergence_pct": 0.01},
             "slr_propagation": "attenuated", "duration_correction": {"enabled": False}}
 

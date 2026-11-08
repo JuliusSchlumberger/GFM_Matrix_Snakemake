@@ -21,7 +21,7 @@ import rasterio.warp
 from boundaries import collect_neighbor_wave_seeds, static_station_levels
 from config_utils import path_ready, retry_transient_io
 from event_volume import DurationCorrection, load_coast_hg
-from flood_model import WATERLEVEL_EPSILON_M, flood_depth_dense, static_level_grid
+from flood_model import FLOOD_MODELS, WATERLEVEL_EPSILON_M, flood_depth_dense, static_level_grid
 from rasters import (
     decode_dem_cm,
     decode_friction_int16,
@@ -59,6 +59,9 @@ def run_eikonal_python(
     duration_config: dict[str, Any] | None = None,
     return_period: int | None = None,
     hydrograph_path: str | Path | None = None,
+    model: str = "eikonal",
+    friction_source: str = "landcover",
+    uniform_attenuation_m_per_km: float | None = None,
 ) -> dict:
     """Run `flood_model.flood_depth_dense` in-process, write depth, return diagnostics.
 
@@ -73,21 +76,30 @@ def run_eikonal_python(
     static level.
     `static_stations` = (lonlat, level) from `boundaries.static_station_levels`
     switches on two-component SLR propagation; `duration_config`
-    (`simulation.flooding.duration_correction`) with `enabled` switches on correction B;
+    (`simulation.flooding.duration_correction`) with `enabled` switches on correction B (eikonal only);
     `return_period` (years) picks its hydrograph when the file holds one per RP;
     `hydrograph_path` (`boundaries.storm_tide_hydrograph_path`) replaces `coast_hg_path`.
+    `model` is a `flood_model.FLOOD_MODELS` entry. `friction_source` "uniform" replaces the
+    land-cover rate by `uniform_attenuation_m_per_km` everywhere (also the straight_line rate).
     """
+    if friction_source not in FRICTION_SOURCES:
+        raise ValueError(f"simulation.flooding.friction_source: {friction_source!r} not in {FRICTION_SOURCES}")
+    cell_m = pixel_size_m if pixel_size_m is not None else resolution
     with retry_transient_io(rasterio.open, dem_path) as src:
         dem = decode_dem_cm(src.read(1))
         transform = src.transform
         crs = src.crs
     with retry_transient_io(rasterio.open, mask_path) as src:
         mask = src.read(1)
-    with retry_transient_io(rasterio.open, friction_path) as src:
-        friction = decode_friction_int16(src.read(1))
-    effective_friction_scale_factor = friction_scale_factor * (pixel_size_m if pixel_size_m is not None else 30.0)
-    if effective_friction_scale_factor != 1.0:
-        friction = friction * effective_friction_scale_factor
+    uniform_m_per_m = None if uniform_attenuation_m_per_km is None else uniform_attenuation_m_per_km / 1000.0
+    if friction_source == "uniform":
+        friction = np.full(dem.shape, uniform_m_per_m * cell_m, dtype=np.float32)
+    else:
+        with retry_transient_io(rasterio.open, friction_path) as src:
+            friction = decode_friction_int16(src.read(1))
+        effective_friction_scale_factor = friction_scale_factor * cell_m
+        if effective_friction_scale_factor != 1.0:
+            friction = friction * effective_friction_scale_factor
 
     if boundaries_path is not None:
         boundaries = retry_transient_io(gpd.read_file, boundaries_path)
@@ -100,7 +112,7 @@ def run_eikonal_python(
         static_level = static_level_grid(dem.shape, transform, *static_stations, k=k, idw_power=idw_power)
 
     duration_correction = None
-    if duration_config is not None and duration_config["enabled"]:
+    if model == "eikonal" and duration_config is not None and duration_config["enabled"]:
         duration_correction = build_duration_correction(duration_config, dem.shape, transform, crs, return_period,
                                                         hydrograph_path)
 
@@ -108,7 +120,7 @@ def run_eikonal_python(
         dem, mask, friction, transform,
         boundaries=boundaries,
         seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
-        resolution=resolution, k=k, idw_power=idw_power, variable=variable,
+        resolution=cell_m, k=k, idw_power=idw_power, variable=variable,
         ocean_code=ocean_code, river_code=river_code,
         obstacle_coupling=obstacle_coupling,
         max_outer_iterations=max_outer_iterations,
@@ -117,6 +129,8 @@ def run_eikonal_python(
         waterlevel_epsilon_m=waterlevel_epsilon_m,
         static_level=static_level,
         duration_correction=duration_correction,
+        model=model,
+        attenuation_m_per_m=uniform_m_per_m,
     )
     save_waterdepth_raster(dem_path, waterdepth, output_path)
     return diagnostics
@@ -147,6 +161,7 @@ def build_duration_correction(
 
 
 SLR_PROPAGATION_MODES = ("attenuated", "two_component")
+FRICTION_SOURCES = ("landcover", "uniform")
 
 
 def estimate_eikonal_mem_mb(dem_path: str | Path, mem_estimate_cfg: dict[str, Any]) -> int:
@@ -258,6 +273,8 @@ def run_tile_scenario(
         raise ValueError(f"simulation.flooding.slr_propagation: {slr_propagation!r} not in {SLR_PROPAGATION_MODES}")
     if slr_propagation == "two_component" and static_level_inputs is None:
         raise ValueError("slr_propagation 'two_component' needs static_level_inputs")
+    if flooding_config["model"] not in FLOOD_MODELS:
+        raise ValueError(f"simulation.flooding.model: {flooding_config['model']!r} not in {FLOOD_MODELS}")
     skipped_dir = os.path.join(model_outputs, "skipped_tiles")
     oom_dir = os.path.join(model_outputs, "oom_tiles")
 
@@ -349,6 +366,9 @@ def run_tile_scenario(
                 duration_config=flooding_config["duration_correction"],
                 return_period=int(return_period.removeprefix("RP")),
                 hydrograph_path=hydrograph_path,
+                model=flooding_config["model"],
+                friction_source=flooding_config["friction_source"],
+                uniform_attenuation_m_per_km=flooding_config["uniform_attenuation_m_per_km"],
             )
         except MemoryError:
             mark_tile_oom(oom_dir, tile_id, reason="MemoryError in flood_depth_dense - tile too large")
