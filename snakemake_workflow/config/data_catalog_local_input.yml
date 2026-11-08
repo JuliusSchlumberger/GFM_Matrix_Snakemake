@@ -1,0 +1,197 @@
+# Alternative local high-resolution input data for the local-input validation
+# framework (see TODO.md). Layered on top of data_catalog_gfm.yml in paths.hydromt_data_catalog
+# (not merged into it, so production's own catalog path never changes) - loaded with the SAME
+# root as that catalog (paths.root), so every relative `path:` below is spelled out in full
+# from there (inputs/validation/{region}/new_inputs/...), not against validation.benchmark_root
+# (a different root, used only by validation/*.py's own data_catalog_validation.yml).
+#
+# Every [ASSERTED] value below was not verified against the dataset's own
+# authoritative source this session - see TODO.md for the full list to check
+# before relying on any of these entries for a real validation run.
+
+england_lidar_dem:
+  data_type: RasterDataset
+  driver: raster
+  path: inputs/validation/England/new_inputs/lidar_dem/dtm_1m_2022_coastal.vrt
+  crs: 27700
+  filesystem: local
+  nodata: -3.4028235e+38
+  meta:
+    category: topography
+    description: >
+      EA LIDAR Composite DTM 1m (2022), fetched tile-by-tile via WCS 2.0.1
+      (preparation/ea_coastal_dtm.py) over a 30 km coastal buffer, mosaicked as
+      a VRT over 5604 tiles. Local-input counterpart to deltadtm for England.
+    vertical_reference: ODN (Newlyn) via OSGM15 - confirmed via the EA Survey
+      Data Catalogue's vertical-accuracy page (absolute height error <=15cm
+      RMSE, relative <=5cm; OSGM15 used for surveys after 2016-08-26, which
+      this 2022-labelled dataset postdates). Used natively, NOT bridged to
+      GOCO06s (native_datum below) - England's local-input boundary levels
+      (ea_coastal_design_sea_levels, below) are ALSO native ODN, so DEM and
+      boundary are already mutually consistent; bridging both would only add
+      the geoid grids' own resampling noise to freeboard. See TODO.md.
+    native_datum: native # extract_dem's per-tile dem_source/native_datum/pixel_size_m lookup - no-op (TODO.md)
+    hybrid_grid_raster_path: "{root}/inputs/validation/England/new_inputs/lidar_dem/uk_os_OSGM15_GB.tif" # unused while native_datum=native; kept for a future mixed-source scenario
+    pixel_size_m: 1
+    nodata_value: -3.4028235e+38
+    source_author: Environment Agency
+    source_url: https://www.data.gov.uk/dataset/f0db0249-f17b-4036-9e65-309148c97ce4/national-lidar-programme
+    source_access: open download (WCS 2.0.1, no credentials)
+    source_notes: >
+      python preparation/run_preparation.py ea_coastal_dtm (opt-in step). 30 km
+      coastal buffer chosen so 0% of the EA FZ3-sea benchmark falls outside it.
+    source_version: created 2019-03-25, revised 2023-12-15, page last updated
+      2025-09-12 (quarterly update cadence)
+    source_license: Open Government Licence v3.0 (confirmed on the dataset page)
+
+ea_coastal_design_sea_levels:
+  data_type: GeoDataFrame
+  driver: vector
+  path: inputs/validation/England/new_inputs/boundary_forcing/Coastal_Design_Sea_Levels_Coastal_Flood_Boundary_Extreme_Sea_Levels.shp
+  crs: 27700
+  filesystem: local
+  meta:
+    category: ocean
+    description: >
+      EA "Coastal Design Sea Levels - Coastal Flood Boundary Extreme Sea
+      Levels" (2018 update), GB-wide present-day extreme sea level estimates.
+      Local-input counterpart to coast_rp for England/Scotland/Wales, present
+      day / SLR_0 only (no SLR variants in this product).
+    vertical_reference: >
+      ODN (Newlyn) for the great majority of sites, confirmed via the
+      dataset's own report text (heights above mean sea level at Newlyn
+      1950-1968; GPS heights converted to ODN via OSGM15, previously OSGM02).
+      NAMED EXCEPTION: Stornoway, Lerwick and St Mary's use their own LOCAL
+      datums, not ODN - do not apply the odn_osgm15 bridge to those three
+      stations; exclude or handle them separately in any loader.
+    source_author: "Environment Agency (2018 update: EA/SEPA/NRW/NI DfI
+      Coastal Flood Forecasting partnership)"
+    source_url: https://www.data.gov.uk/dataset/73834283-7dc4-488a-9583-a920072d9a9d/coastal-design-sea-levels-coastal-flood-boundary-extreme-sea-levels-2018
+    source_access: open download
+    source_notes: >
+      GB-wide, reused unchanged for Scotland and Wales. Attributes are 16
+      annual exceedance probabilities + 5%/95% confidence bounds + MHWS/HAT
+      (some sites only) - NOT named return periods; a loader must map
+      probability -> return period (e.g. 1/50yr <-> 2% annual exceedance)
+      before use. [ASSERTED] the "Copyright Associated British Ports
+      2010-2014" access constraint noted on the dataset page does not
+      restrict redistribution of derived outputs - NEEDS VERIFICATION.
+    source_version: 2018 update, revised 2021-06-17
+    source_license: Open Government Licence v3.0 (confirmed on the dataset page)
+
+wales_lidar_dem:
+  data_type: RasterDataset
+  driver: raster
+  path: inputs/validation/Wales/new_inputs/lidar_dem/wales_dtm_32bit_cog.tif
+  crs: 27700  # confirmed via gdalinfo this session (OSGB36/British National Grid)
+  filesystem: local
+  nodata: -9999
+  meta:
+    category: topography
+    description: >
+      Single 45GB COG DTM covering Wales (191007 x 233000 px), from NRW's
+      LiDAR tile catalogue archive, resampled to a uniform 1m grid (confirmed
+      via gdalinfo - source tiles vary 0.25-2m by tile/date per NRW's own
+      catalogue metadata, but this composite COG is uniform). Local-input
+      counterpart to deltadtm for Wales.
+    vertical_reference: "ODN (Ordnance Datum Newlyn) - confirmed via
+      LiDAR_Guidance_2018.pdf (NRW, Oct 2018, alongside the COG in
+      new_inputs/lidar_dem/): 'All our data is OSGB36 British National Grid,
+      with elevations recorded above Ordnance Datum Newlyn.' Same convention
+      as England's ea_coastal_design_sea_levels boundary forcing (also native
+      ODN), so DEM and boundary are mutually consistent here too - used
+      natively, NOT bridged to GOCO06s (native_datum below), same reasoning
+      as england_lidar_dem."
+    native_datum: native # DEM and boundary both native ODN - see vertical_reference above
+    pixel_size_m: 1  # confirmed via gdalinfo this session (geoTransform: 1.0 x, -1.0 y)
+    nodata_value: -9999
+    source_author: Natural Resources Wales
+    source_url: https://datamap.gov.wales/maps/lidar-viewer/metadata_detail
+    source_access: open download
+    source_notes: >
+      45GB single COG - confirm whether a windowed/overview read is needed
+      rather than a VRT given the size, before wiring into any simulation run.
+    source_version: NRW LiDAR tile catalogue archive, published/updated 2024-09-27
+    source_license: "Open Government Licence - confirmed via LiDAR_Guidance_2018.pdf:
+      'After receiving data captured in the previous year, we publish the
+      data under the terms of the Open Government Licence on Lle Geo-Portal.'
+      The tile catalogue's separate '(c) Natural Resources Wales and Database
+      Right. All rights reserved' attribution line is standard OGL copyright
+      notice (asserting ownership while granting the OGL usage rights), not
+      a conflicting restriction."
+
+sf_bay_lidar_dem:
+  data_type: RasterDataset
+  driver: raster
+  path: inputs/validation/California/new_inputs/lidar_dem/sfbay_dem_usgs10m.tif
+  crs: 26910
+  filesystem: local
+  nodata: -999999
+  meta:
+    category: topography
+    description: >
+      USGS 3D Elevation Program 1/3 arc-second (10m) DEM, distributed by
+      OpenTopography (collection OT.012021.4269.1), hand-downloaded for the SF
+      Bay region (requires a personal OpenTopography API key) and reprojected
+      to EPSG:26910 (preparation/sf_bay_usgs10m_dem.py). Local-input
+      counterpart to deltadtm for SF Bay. Replaces the earlier NOAA 2025 1m
+      hydro-flattened LIDAR DEM, which was the wrong source for this region.
+    vertical_reference: NAVD88 (GEOID18) - this product's 2021 vintage and the
+      independently-downloaded us_noaa_g2018u0.tif (NGS GEOID18 CONUS grid,
+      inputs/validation/California/new_inputs/lidar_dem/) both corroborate
+      GEOID18. Bridged to GOCO06s via native_datum=navd88_geoid18 (GEOID18 +
+      the mandatory NAD83(2011) -> ITRF2014 Helmert shift, applied together by
+      pyproj - see preparation/compute_navd88_itrf2014_shift_raster.py and
+      TODO.md). Boundary forcing stays global COAST-RP for this region
+      (datasource.txt), so unlike England/Wales this bridge is mandatory, not
+      a no-op.
+    native_datum: navd88_geoid18
+    hybrid_grid_raster_path: "{root}/inputs/validation/California/new_inputs/lidar_dem/navd88_itrf2014_shift.tif"
+    flat_fill_value: 0.0  # USGS 3DEP has no nodata at all; open water is filled with 0.0 m -
+      # derive_local_water_mask treats an edge-connected 0.0m component as unresolved water,
+      # same as a nodata component for the old NOAA source (confirmed empirically this session).
+    pixel_size_m: 10
+    nodata_value: -999999
+    source_author: United States Geological Survey
+    source_url: https://doi.org/10.5069/G98K778D ; https://portal.opentopography.org/datasetMetadata?otCollectionID=OT.012021.4269.1
+    source_access: OpenTopography API (personal free API key required; USGS10m
+      dataset, 25,000 km^2/request cap - the SF Bay download fits one request)
+    source_notes: >
+      Raw download output_USGS10m.tif (NAD83 geographic, EPSG:4269) covers
+      ~1.05x1.10 deg (W -122.75, S 37.20, E -121.70, N 38.30) - the broader SF
+      Bay region, not just the Alameda sample's flood-extent AOI, so future
+      SF Bay county samples can reuse it without a new download.
+    source_version: United States Geological Survey (2021). United States
+      Geological Survey 3D Elevation Program 1/3 arc-second Digital Elevation
+      Model. Distributed by OpenTopography. https://doi.org/10.5069/G98K778D.
+    source_license: US Government Public Domain
+
+new_brunswick_sea_level_rise_reports:
+  data_type: DataFrame
+  driver: csv
+  path: inputs/validation/NewBrunswick/new_inputs/boundary_forcing/sea_level_rise_extracted.csv  # [ASSERTED PATH - does not exist yet, see source_notes]
+  filesystem: local
+  meta:
+    category: ocean
+    description: >
+      Extreme/design sea levels to be extracted from two NB government PDF
+      reports on sea-level-rise and flood estimates. Local-input counterpart
+      to coast_rp for New Brunswick, present day / SLR_0 only. NOT YET
+      EXTRACTED - this entry documents the intended output of a PDF-table-
+      extraction step that has not been written yet; the path above does not
+      exist on disk.
+    vertical_reference: "[ASSERTED, unverified] CGVD2013, matching the
+      existing new_brunswick_present_day_1in100yr benchmark entry's own
+      convention (data_catalog_validation.yml) - not confirmed against the
+      PDFs themselves. NEEDS VERIFICATION."
+    source_author: Government of New Brunswick
+    source_url: https://open.canada.ca/data/en/dataset/a3edf193-5c56-4b38-bcc5-c8708c60ce38/resource/587898fe-4b24-4f8f-871f-630a9f4c2e48
+    source_access: open download
+    source_notes: >
+      Two source PDFs under new_inputs/boundary_forcing/. No extraction
+      script exists yet. Before writing one, re-check the live state of the
+      review-critiques worktree's boundary_test/ for reusable PDF/tide
+      tooling rather than duplicating it.
+    source_version: "[fill in from each PDF's own publication date - NEEDS VERIFICATION]"
+    source_license: "[ASSERTED] Government of New Brunswick open data terms
+      - not confirmed. NEEDS VERIFICATION."
