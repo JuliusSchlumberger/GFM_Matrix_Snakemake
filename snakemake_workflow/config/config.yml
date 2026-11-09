@@ -140,6 +140,7 @@ boundary_conditions:
 
   waterlevel_names: # SLR levels "SLR_<mm>" = the waterlevel_name wildcard values
     - "SLR_0"
+    - "SLR_370"
     - "SLR_500"
     - "SLR_1000"
     - "SLR_1500"

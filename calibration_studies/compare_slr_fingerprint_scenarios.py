@@ -44,7 +44,7 @@ def _load_scenario_fingerprints(
     ds_fp = compute_slr_fingerprints(
         ds_coastrp, slr_dir, scenario, confidence, [TARGET_SLR_M], slr_base_path, fingerprints_path,
     )
-    key = f"SLR_{int(TARGET_SLR_M * 1000)}mm"
+    key = f"SLR_{round(TARGET_SLR_M * 1000)}mm"
     return ds_fp[key].values.astype(np.float64)
 
 

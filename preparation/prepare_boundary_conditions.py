@@ -213,7 +213,7 @@ def compute_slr_fingerprints(
     """
     if fingerprints_path.exists():
         cached = retry_transient_io(xr.open_dataset, fingerprints_path)
-        required_keys = {f"SLR_{int(t * 1000)}mm" for t in target_slr_m} | {"SLR_baseline_offset"}
+        required_keys = {f"SLR_{round(t * 1000)}mm" for t in target_slr_m} | {"SLR_baseline_offset"}
         if required_keys.issubset(set(cached.data_vars)) and cached.attrs.get("baseline_offset_m") == baseline_offset_m:
             logger.info("SLR fingerprints already exist — loading.")
             return cached
@@ -264,7 +264,7 @@ def compute_slr_fingerprints(
     slr_arr = np.array(slr_base, dtype=np.float64)
     fp_vars: dict[str, tuple] = {}
     for targ in target_slr_m:
-        key = f"SLR_{int(targ * 1000)}mm"
+        key = f"SLR_{round(targ * 1000)}mm"
         if mean_ori_m > 0:
             scaled = slr_arr * targ / mean_ori_m
         else:
@@ -314,12 +314,12 @@ def combine_scenarios(
 
     n_written = 0
     for targ in target_slr_m:
-        slr_key = f"SLR_{int(targ * 1000)}mm"
+        slr_key = f"SLR_{round(targ * 1000)}mm"
         slr_arr = ds_slr[slr_key].values.astype(np.float64)
 
         for rp in return_periods:
             return_period = f"RP{int(rp)}"
-            waterlevel_name = f"SLR_{int(targ * 1000)}"
+            waterlevel_name = f"SLR_{round(targ * 1000)}"
             filename = nc_filename_template.format(return_period=return_period, waterlevel_name=waterlevel_name)
             variable = nc_variable_template.format(return_period=return_period, waterlevel_name=waterlevel_name)
             out_path = out_dir / filename

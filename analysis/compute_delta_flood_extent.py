@@ -33,7 +33,6 @@ from rasters import decode_waterdepth_cm, polygon_domain_mask  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 RETURN_PERIOD = "RP100"
-SLR_SCENARIOS = ["SLR_0", "SLR_500", "SLR_1000", "SLR_1500", "SLR_2000"]
 SCENARIOS_DEFAULT = ["ssp126", "ssp245"]
 VOLGA_ID = 44  # zero tile coverage in both scenarios
 
@@ -108,7 +107,7 @@ def merge_in_memory(model_outputs: Path, slr: str, out_w: int, out_h: int,
     return np.where(covered, best, np.nan).astype("float32")
 
 
-def score_delta(delta_row, candidate_tiles: list[int], model_outputs: Path) -> dict:
+def score_delta(delta_row, candidate_tiles: list[int], model_outputs: Path, slr_scenarios: list[str]) -> dict:
     """Score one delta's flooded area per SLR on its bbox merge grid.
 
     Flooded = merged depth > 0 inside the tile-covered delta polygon. n_tiles
@@ -127,7 +126,7 @@ def score_delta(delta_row, candidate_tiles: list[int], model_outputs: Path) -> d
     if not slr0_rasters:
         return {"n_tiles": 0, "delta_area_km2_modeled": 0.0,
                 "delta_area_km2_shapefile": float(delta_row["Area"]),
-                "pct_delta_covered_by_model": 0.0, "flooded_km2_by_slr": {slr: 0.0 for slr in SLR_SCENARIOS}}
+                "pct_delta_covered_by_model": 0.0, "flooded_km2_by_slr": {slr: 0.0 for slr in slr_scenarios}}
 
     out_transform, out_w, out_h, geometry = _tile_geometry(slr0_rasters, bbox)
 
@@ -136,7 +135,7 @@ def score_delta(delta_row, candidate_tiles: list[int], model_outputs: Path) -> d
     modeled_km2 = 0.0
     domain = None
     area_grid = None
-    for slr in SLR_SCENARIOS:
+    for slr in slr_scenarios:
         depth = merge_in_memory(model_outputs, slr, out_w, out_h, geometry)
         if depth is None:
             per_slr_flooded_km2[slr] = 0.0
@@ -201,6 +200,7 @@ def main() -> None:
     for scenario in args.scenarios:
         cfg = load_config(Path(args.config_dir) / f"deltas_{scenario}_materialized.yml")
         model_outputs = Path(cfg["simulation"]["model_outputs"])
+        slr_scenarios = cfg["boundary_conditions"]["waterlevel_names"]
         print(f"\n=== {scenario} (model_outputs={model_outputs}) ===", flush=True)
 
         for i, (_, delta_row) in enumerate(deltas.iterrows(), start=1):
@@ -210,7 +210,7 @@ def main() -> None:
             print(f"  [{i}/{n_deltas}] delta {delta_id:2d} ({delta_name}): "
                   f"{len(candidate_tiles)} candidate tile(s) - merging...", flush=True)
             t0 = time.time()
-            result = score_delta(delta_row, candidate_tiles, model_outputs)
+            result = score_delta(delta_row, candidate_tiles, model_outputs, slr_scenarios)
             elapsed = time.time() - t0
             modeled_km2 = result["delta_area_km2_modeled"]
 
@@ -219,7 +219,7 @@ def main() -> None:
                   f"({result['pct_delta_covered_by_model']:.1f}% covered) - {elapsed:.1f}s "
                   f"[{(time.time() - t_start) / 60:.1f}min elapsed]", flush=True)
 
-            for slr in SLR_SCENARIOS:
+            for slr in slr_scenarios:
                 flooded_km2 = result["flooded_km2_by_slr"][slr]
                 # vs the tile-covered outline, not the shapefile Area (see pct_delta_covered_by_model)
                 pct_flooded = 100.0 * flooded_km2 / modeled_km2 if modeled_km2 > 0 else float("nan")
