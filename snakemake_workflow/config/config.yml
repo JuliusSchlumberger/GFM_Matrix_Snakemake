@@ -159,7 +159,7 @@ boundary_conditions:
   # Not implemented: hop>=1 tiles drawing extra virtual stations from a lower-hop neighbour's
   # simulated wet cells in the overlap. Needs the neighbour's results, so it must run after that
   # neighbour; a precompute from frozen geometry was rejected (overlaps span up to hundreds of km).
-  # boundaries.sample_waterlevel_at_points is the point-lookup primitive for it.
+  # boundaries.collect_neighbor_wave_seeds implements it.
 
 # ── STORM-TIDE PRODUCT (storm_tide_source: gfm_product) ───────────────────────
 # Used by: preparation/prepare_storm_tide_product.py. Raw inputs; COAST-RP and FES2014 come from

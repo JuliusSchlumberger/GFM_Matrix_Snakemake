@@ -86,8 +86,10 @@ Decided and implemented:
   Open).
 
 Open:
-- **Consistency audit (2026-11-09), open after the pins removal, own deltas station caches and
-  the shared pixel-size lookup.** Before the full rerun:
+- **SLR fingerprint ratio:** does the ratio of station SLR to global-mean SLR
+  (`prepare_boundary_conditions` fingerprints, 2100 median) change much with the time horizon or
+  the SSP? The fingerprints assume it does not.
+- **Consistency audit (2026-11-09): what stays open after the fixes on `model-variants`.**
   - Obstacle coupling blocks cells the inner solve never reached (t = 99, `flood_model.py` outer
     loop), unlike the obstacle-coupling study (`reached`). Kept as is (user, 2026-11-09).
   - England/Wales local input (and the hop test) keep DEM and EA levels in ODN; two_component
@@ -97,13 +99,6 @@ Open:
   - Every documented run path passes `--rerun-triggers mtime` (run_eikonal_dag.py, HPC
     generators, run_bangkok_case_study.bat), so config changes never rerun outputs there; the
     rerun needs clean output directories. CLAUDE.md / docs/hpc.md describe the profile only.
-  - Not declared as inputs although they change results: the hydrograph NetCDF (duration
-    correction), the MDT station file and SLR_0 NetCDF (static level), the tile-grid contents, the
-    DeltaDTM/land-cover sources (fix_ocean_mask edits in place). `boundary_conditions` is passed
-    whole as a param (any edit reruns everything when params trigger).
-  - `generate_hpc_preprocess_job.py` hard-codes the global station cache, ignoring
-    `stations_cache_dir`; `coastline_nodes.parquet` is not cleared by `force` and ignores the mask
-    codes; `compute_goco06s_absolute_raster` is unreachable (extract_dem takes it as a param).
   - After the reruns (user, 2026-11-09), docs behind the code: methods_02 §4.1 (knn 5 / power 3, edge-connected ocean, IDW per ocean
     component), §2.4 and config.yml:263 (per-RP product hydrographs), §4.4 and
     flood_model.py:37 (no 0.10 m wet threshold; validation at 0.01 m), §4.5 (lakes and rivers
@@ -111,11 +106,6 @@ Open:
     2020 baseline offset); methods_04a (SFINCS harness without a static level; old fsf units in
     "Structural limitations"); README outputs (`*_v2`); eikonal.py:211 epsilon; the 0.25 friction
     provenance (fitted with knn 15 / power 2, no static level) until the recalibration.
-  - Hygiene: code defaults differing from config (idw_power 2.0, max_outer_iterations 3,
-    rasters.extract_dem fill sizes, sync_deltadtm delete_zips .get False); study constants
-    (epsilon, 40 rounds, CELL_M 30); hard-coded P:/ paths in review_critiques/ and boundary_test/;
-    duplicate decode_waterdepth (rasters / merge); dead flood_agreement.prune_to_ocean_connected;
-    dangling references (config.yml:158, event_volume.py:203, flood_agreement.py:10, boundaries.py:27).
 - **Flood-model comparison and calibration (branch `model-variants`).** Seven variants share
   seeds, coastline, static level and wet rule (`src/flood_variants.py`, `flood_model.FLOOD_MODELS`):
   bathtub, connected bathtub (IDW of the seed levels), straight-line attenuation (exact max over

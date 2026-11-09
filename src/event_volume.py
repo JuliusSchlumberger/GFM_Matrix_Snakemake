@@ -200,7 +200,7 @@ def duration_friction_multiplier(
 # COAST-HG RP100 storm-tide hydrographs; only the shape around the peak is used, so the
 # tide phase variant and the vertical datum do not matter.
 COAST_HG_VARIABLE = "hydrograph_average_tide_signal"
-# Per-RP generator hydrographs (boundary_test/export_level_product.py): (stations, return_period, time).
+# Per-RP product hydrographs (storm_tide_product.export_hydrographs): (stations, return_period, time).
 GENERATOR_VARIABLE = "storm_tide_hydrograph"
 
 # Stations within this distance (deg) of the tile bounds are loaded.

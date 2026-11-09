@@ -24,7 +24,7 @@ _STRUCTURE_8 = np.ones((3, 3), dtype=bool)
 def load_waterlevel_stations(nc_path: str | Path, variable: str, x_var: str, y_var: str, column_name: str) -> gpd.GeoDataFrame:
     """Load COAST-RP_EWL water level stations from NetCDF as a GeoDataFrame.
 
-    `column_name` must match the Aqueduct TOML `waterlevels.name`. Water levels are
+    `column_name` is the scenario's waterlevel_name (the boundary column). Water levels are
     float64 metres, geometries EPSG:4326. NaN stations are dropped (the eikonal
     model cannot handle missing boundary values).
     """

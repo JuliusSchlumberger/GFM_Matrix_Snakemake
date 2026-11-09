@@ -211,7 +211,6 @@ def compute_slr_fingerprints(
     the output is NaN-free. `SLR_baseline_offset` is the same scaling for
     baseline_offset_m (global-mean rise from the MDT epoch to 2020).
     """
-    #NOTE: check if the ration between station SLR and global mean changes significantly if using different timehorizons or SSP secnarios?
     if fingerprints_path.exists():
         cached = retry_transient_io(xr.open_dataset, fingerprints_path)
         required_keys = {f"SLR_{int(t * 1000)}mm" for t in target_slr_m} | {"SLR_baseline_offset"}
