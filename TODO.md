@@ -87,17 +87,16 @@ Decided and implemented:
 
 Open:
 - **Hydrax reruns: eikonal studies (500 tiles), SFINCS calibration (1,500 tiles), local
-  comparisons, global run (2026-11-09).** Everything runs from `hpc/plans/hydrax_rerun.yml` under
+  comparisons (2026-11-09).** Everything runs from `hpc/plans/hydrax_rerun.yml` under
   `hpc/harness.py` (120 cores): product -> materialize -> production inputs -> studies, SFINCS
-  (stage 1 -> sweep + post job -> duration), local base runs + validation, local variants, global
-  run + national-map validation. Open:
+  (stage 1 -> sweep + post job -> duration), local base runs + validation, local variants (all,
+  user). The global production run and its national-map validation (Scotland, New Brunswick)
+  come later, separately (user). Open:
   - The harness has not met SLURM yet: run `hpc/plans/smoke.yml` on Hydrax first.
   - The plan's helper functions and `hpc_config` assume no `config_local.yml` on Hydrax (root from
     `config_hpc.yml` via `load_hpc_config`); check before the first run.
   - Variant runs take `calibration_roughness_SFINCS/variant_selection.json` (raw pooling); the
     overlap-corrected `_dedup` selection is the alternative (user to decide).
-  - `postprocessing.merge_only` (local scenarios) is read with a default of false; add the default
-    to config.yml if it should be listed there (config default: ask).
   - Scotland local input stays paused; Scotland and New Brunswick are scored from the global run.
   - All-England local/global: 1,836 tiles, 14 hop waves, ~3,700 solves per scenario and variant;
     the variant step multiplies that by the variant count.

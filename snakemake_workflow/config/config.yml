@@ -336,6 +336,9 @@ postprocessing:
   merged_outputs: "{root}/merged_results_v2"
   chunk_size_deg: 5 # spatial chunk size (degrees) for merging
   block_size: 2048 # side length (pixels) of the write blocks inside each chunk
+  # HPC postprocess chain (generate_hpc_postprocess_job.py): true writes the merged rasters only,
+  # no exposure or flood totals (validation scenarios).
+  merge_only: false
 
   plots:
     enabled: true # to plot merged maps (plot_merged_results)

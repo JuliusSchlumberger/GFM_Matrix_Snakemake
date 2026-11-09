@@ -230,7 +230,7 @@ def main() -> None:
     return_periods = [f"RP{rp}" for rp in local_config["boundary_conditions"]["return_periods"]]
     waterlevel_names = merged_waterlevel_names(local_config["boundary_conditions"], local_config["adaptation"])
     baseline_slr = local_config["protection"]["baseline_waterlevel_name"]
-    merge_only = local_config["postprocessing"].get("merge_only", False)
+    merge_only = local_config["postprocessing"]["merge_only"]
     native_merge = bool(local_config["simulation"].get("dem_source_manifest"))
     if native_merge and not merge_only:
         raise ValueError(

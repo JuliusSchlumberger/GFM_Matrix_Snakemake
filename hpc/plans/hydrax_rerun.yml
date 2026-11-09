@@ -1,7 +1,6 @@
 # Hydrax rerun under one 120-core budget: storm-tide product -> production inputs -> eikonal solver
 # studies (500 tiles, land cover and uniform), SFINCS calibration (1,500 tiles, both groups, two
-# phases), local comparisons (England all, Wales Severn, SF Bay, hop test; base and variants),
-# global production run and its national-map validation (Scotland, Wales, England, New Brunswick).
+# phases), local comparisons (England all, Wales Severn, SF Bay, hop test; base and variants).
 # Step order is also release priority. Steps marked destructive delete old outputs on <data_root>;
 # they run only with --allow-destructive.
 #   python hpc/harness.py run --plan hpc/plans/hydrax_rerun.yml --allow-destructive
@@ -12,6 +11,12 @@ state_dir: /p/11212688-004-global-floodmaps/modelling/hpc_harness/hydrax_rerun
 cwd: /u/schlumbe/gfm_code
 env:
   HDF5_USE_FILE_LOCKING: "FALSE"
+  # SFINCS post job (site_env.sh CAL_*): the dedup rescoring of every run on 1,500 tiles needs
+  # ~1 day on 4 workers, so 16 workers with a 1-day limit.
+  CAL_PARTITION: 16vcpu
+  CAL_CPUS: "16"
+  CAL_MEM: 120G
+  CAL_TIME: "1-00:00:00"
 preamble: |
   source sfincs_tiles/site_env.sh
   PY="$GFM_PYTHON"
@@ -34,7 +39,7 @@ preamble: |
 steps:
   # ── storm-tide product (2026-11-08 decisions, basin shifts fitted in the build) ──
   - id: product
-    job: {partition: 24vcpu, cpus_per_task: 24, mem: 168G, time: "2-00:00:00"}
+    job: {partition: 16vcpu, cpus_per_task: 16, mem: 120G, time: "2-00:00:00"}
     run: |
       "$PY" preparation/run_preparation.py storm_tide_product boundary_conditions --config "$(hpc_config $C/config.yml)"
 
@@ -177,20 +182,3 @@ steps:
         "$PY" snakemake_workflow/scripts/generate_hpc_preprocess_job.py --config "$f" --calibration
         bash "$(jobs_dir "$f")/submit_preprocess_and_dispatch.sh"
       done
-
-  # ── global production run (lowest priority) and its national-map validation ──
-  - id: production_simulate
-    after: [production_preprocess]
-    run: |
-      "$PY" snakemake_workflow/scripts/generate_hpc_simulation_jobs.py --config $C/config.yml
-      bash "$(jobs_dir $C/config.yml)/submit_waves.sh"
-
-  - id: production_validation
-    after: [production_simulate]
-    job: {partition: 4vcpu, cpus_per_task: 4, mem: 30G, time: "2-00:00:00"}
-    run: |
-      GL=$(hpc_config $C/config.yml)
-      "$PY" validation/run_validation.py --config "$GL" --countries GBR CAN
-      SF_BENCH="zip://$R/inputs/validation/California/alameda_flooding_slr000.zip!flooding/v2.1/county_alameda_flddepth_slr000_w100.tif"
-      "$PY" validation/validate_sf_bay.py --config "$GL" --bbox -122.355 37.45 -121.99 37.91 --benchmark-path "$SF_BENCH" \
-          --benchmark-scale-m 0.01 --out-dir "$R/sf_bay_local_input/validation/USA_alameda_sample_global_baseline"
