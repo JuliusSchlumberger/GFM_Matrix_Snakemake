@@ -90,13 +90,10 @@ Open:
   the shared pixel-size lookup.** Before the full rerun:
   - Obstacle coupling blocks cells the inner solve never reached (t = 99, `flood_model.py` outer
     loop), unlike the obstacle-coupling study (`reached`). Kept as is (user, 2026-11-09).
-  - Decide: england/wales local input keep DEM and EA levels in ODN, but two_component adds a
-    static level (MDT + offset + fingerprint) in the GOCO06s frame (`boundaries.static_station_levels`).
-    Attenuated propagation for the ODN scenarios (and their global-input twins), or a datum shift
-    of the static level?
-  - The EA-seeded station caches (`preparation/cache_local_waterlevel_stations.py`) sit at the
-    output path of rule `cache_waterlevel_stations`, whose input (the global NetCDFs) is newer:
-    the next run overwrites the EA levels with global ones. Guard or separate rule.
+  - England/Wales local input (and the hop test) keep DEM and EA levels in ODN; two_component
+    still adds the static level MDT + 2020 offset in the GOCO06s frame
+    (`boundaries.static_station_levels`). Kept (user, 2026-11-09): if these scenarios
+    overestimate systematically, check this offset first.
   - Every documented run path passes `--rerun-triggers mtime` (run_eikonal_dag.py, HPC
     generators, run_bangkok_case_study.bat), so config changes never rerun outputs there; the
     rerun needs clean output directories. CLAUDE.md / docs/hpc.md describe the profile only.

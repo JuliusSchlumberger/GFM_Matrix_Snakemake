@@ -8,6 +8,10 @@
 # which uses the exact same tile_grid.path (TODO.md D5). Scenario override layer on
 # config.yml + config_local.yml (config_utils.materialize_config).
 
+# Two-component SLR propagation adds the static level MDT + 2020 offset (boundaries.static_station_levels)
+# in the GOCO06s frame to this ODN scenario's sea; it is kept, so a systematic overestimation here
+# may come from that offset between the two datums (TODO.md).
+
 tile_grid:
   path: "{processed_inputs_dir}/mask/validation/wales_fine_tiles_severn_estuary.gpkg"
 
@@ -22,6 +26,7 @@ boundary_conditions:
   # Isolated from the shared global COAST-RP cache - see england_local_input.yml's matching
   # override and its own comment for why sharing the default directory is unsafe.
   stations_cache_dir: "{root}/wales_local_input/processed_inputs/WL_scenarios_cache"
+  stations_cache_prebuilt: true  # preparation/cache_local_waterlevel_stations.py
 
 adaptation:
   # WATERLEVEL_NAMES (Snakefile) is the UNION of boundary_conditions.waterlevel_names and

@@ -6,6 +6,10 @@
 # counterpart needed - this test is about the hop mechanism, not a local-vs-global comparison).
 # Scenario override layer on config.yml + config_local.yml (config_utils.materialize_config).
 
+# Two-component SLR propagation adds the static level MDT + 2020 offset (boundaries.static_station_levels)
+# in the GOCO06s frame to this ODN scenario's sea; it is kept, so a systematic overestimation here
+# may come from that offset between the two datums (TODO.md).
+
 tile_grid:
   path: "{processed_inputs_dir}/mask/validation/england_fine_tiles_wash_hop_test.gpkg"
 
@@ -17,6 +21,7 @@ paths:
 boundary_conditions:
   waterlevel_names: ["SLR_0"]
   stations_cache_dir: "{root}/england_hop_test/processed_inputs/WL_scenarios_cache"
+  stations_cache_prebuilt: true  # preparation/cache_local_waterlevel_stations.py
 
 adaptation:
   slr_intensities: []

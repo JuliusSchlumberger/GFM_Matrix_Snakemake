@@ -91,6 +91,10 @@ tile_split: # Used by: run_eikonal_dag.py to split OOM tiles and re-run Snakemak
 # Used by: prepare_boundary_conditions.py (scenario files), extract_boundaries.py (per-tile stations).
 boundary_conditions:
   waterlevel_nc_dir: "{processed_inputs_dir}/WL_scenarios"
+  # true: the scenario's stations_{RP}_{SLR}.gpkg caches are written outside the workflow
+  # (local design levels, preparation/cache_local_waterlevel_stations.py) and are never rebuilt
+  # from waterlevel_nc_dir; set together with stations_cache_dir.
+  stations_cache_prebuilt: false
 
   # Storm-tide levels (per station and RP, local MSL) and hydrographs for every model: eikonal
   # seeds and static level, duration correction B, SFINCS forcing. Both sources share COAST-RP's

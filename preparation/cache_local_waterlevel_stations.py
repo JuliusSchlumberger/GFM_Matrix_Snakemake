@@ -13,14 +13,12 @@ DEM and only swaps the boundary) - `--boundary-native-datum` bridges the station
 bypassing the `--local-dem-key` lookup entirely, since the stations' own native datum (ODN)
 has nothing to do with whatever datum a paired DEM happens to use.
 
-Bypasses rule cache_waterlevel_stations (global COAST-RP) for this one scenario: writes
-directly to the path that rule would otherwise produce, under
-boundary_conditions.stations_cache_dir (an isolated directory for this scenario, not the
-shared global cache every other scenario reads - see TODO.md). Run once, manually, before
-`snakemake preprocess|simulate|all` on the scenario's materialized config; Snakemake then
-finds each output already present and skips cache_waterlevel_stations for this scenario.
-Not tracked as a Snakemake dependency on the EA shapefile: rerun manually if that source
-changes.
+Writes the station caches under boundary_conditions.stations_cache_dir (an isolated
+directory for this scenario, not the shared global cache every other scenario reads). The
+scenario sets boundary_conditions.stations_cache_prebuilt, so the workflow takes these files
+as inputs and never rebuilds them from the global levels. Run once, manually, before
+`snakemake preprocess|simulate|all` on the scenario's materialized config; rerun it if the EA
+shapefile changes.
 
 Usage:
     python cache_local_waterlevel_stations.py --config <england_local_input_materialized.yml>

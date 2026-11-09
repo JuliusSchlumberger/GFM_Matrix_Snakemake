@@ -24,6 +24,7 @@ boundary_conditions:
   # Isolated from the shared global COAST-RP cache - see england_local_input.yml's matching
   # override and its own comment for why sharing the default directory is unsafe.
   stations_cache_dir: "{root}/scotland_local_input/processed_inputs/WL_scenarios_cache"
+  stations_cache_prebuilt: true  # preparation/cache_local_waterlevel_stations.py
 
 adaptation:
   # WATERLEVEL_NAMES (Snakefile) is the UNION of boundary_conditions.waterlevel_names and

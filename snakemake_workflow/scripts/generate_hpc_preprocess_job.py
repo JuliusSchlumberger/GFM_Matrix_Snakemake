@@ -137,10 +137,14 @@ def main() -> None:
 
     # Shared, non-tile outputs: must be built before any --nolock batch starts.
     linux_shared_targets = [linux_config["vertical_datum_correction"]["offset_raster_path"]]
-    linux_stations_cache_dir = f"{linux_config['paths']['processed_inputs_dir']}/WL_scenarios_cache"
-    for rp in return_periods:
-        for slr in waterlevel_names:
-            linux_shared_targets.append(f"{linux_stations_cache_dir}/stations_{rp}_{slr}.gpkg")
+    linux_bc = linux_config["boundary_conditions"]
+    # As preprocessing.smk: the scenario's own stations_cache_dir, nothing to build when prebuilt.
+    linux_stations_cache_dir = (linux_bc.get("stations_cache_dir")
+                                or f"{linux_config['paths']['processed_inputs_dir']}/WL_scenarios_cache")
+    if not linux_bc["stations_cache_prebuilt"]:
+        for rp in return_periods:
+            for slr in waterlevel_names:
+                linux_shared_targets.append(f"{linux_stations_cache_dir}/stations_{rp}_{slr}.gpkg")
 
     shared_targets_path = local_jobs_dir / "shared_targets.txt"
     with open(shared_targets_path, "w", encoding="utf-8", newline="\n") as f:

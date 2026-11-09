@@ -138,9 +138,15 @@ _deltadtm_mask_dir = os.path.dirname(_data_catalog.get_source("deltadtm_mask").p
 _stations_cache_dir = config["boundary_conditions"].get("stations_cache_dir") or os.path.join(
     config["paths"]["processed_inputs_dir"], "WL_scenarios_cache"
 )
+_stations_cache = os.path.join(_stations_cache_dir, "stations_{return_period}_{waterlevel_name}.gpkg")
+_bc = config["boundary_conditions"]
 
 
-rule cache_waterlevel_stations:
+# stations_cache_prebuilt: the caches are written outside the workflow (local design levels,
+# preparation/cache_local_waterlevel_stations.py) and are plain inputs, never rebuilt from the
+# global NetCDFs; a missing one stops the run.
+if not _bc["stations_cache_prebuilt"]:
+  rule cache_waterlevel_stations:
     """Cache one scenario's global water-level stations as a GeoPackage.
 
     The source NetCDF has no tile dimension, so parsing it once replaces a
@@ -152,17 +158,16 @@ rule cache_waterlevel_stations:
     """
     input:
         scenario_nc=lambda wildcards: os.path.join(
-            config["boundary_conditions"]["waterlevel_nc_dir"],
-            config["boundary_conditions"]["nc_filename_template"].format(
+            _bc["waterlevel_nc_dir"],
+            _bc["nc_filename_template"].format(
                 return_period=wildcards.return_period, waterlevel_name=wildcards.waterlevel_name,
             ),
         ),
     output:
-        stations_cache=os.path.join(
-            _stations_cache_dir, "stations_{return_period}_{waterlevel_name}.gpkg",
-        ),
+        stations_cache=_stations_cache,
     params:
-        bc_cfg=config["boundary_conditions"],
+        bc_cfg={k: _bc[k] for k in ("waterlevel_nc_dir", "nc_filename_template", "nc_variable_template",
+                                    "station_x_var", "station_y_var", "storm_tide_source")},
     script:
         "../scripts/cache_waterlevel_stations.py"
 
@@ -171,14 +176,15 @@ rule extract_boundaries:
     """Extract water level boundary points for a single tile, return period and SLR scenario."""
     input:
         tile_geometry=rules.extract_tile_geometry.output.tile_geometry,
-        stations_cache=rules.cache_waterlevel_stations.output.stations_cache,
+        stations_cache=_stations_cache,
     output:
         boundaries=os.path.join(
             _preprocessing_inputs_dir, "{tile_id}", "inputs",
             "boundaries_{return_period}_{waterlevel_name}.gpkg",
         ),
     params:
-        bc_cfg=config["boundary_conditions"],
+        bc_cfg={k: _bc[k] for k in ("station_search_buffer_deg", "station_search_min_size_deg",
+                                    "connectivity_resolution_m", "connectivity_water_fraction_threshold")},
         mask_dir=_deltadtm_mask_dir,
     script:
         "../scripts/extract_boundaries.py"
