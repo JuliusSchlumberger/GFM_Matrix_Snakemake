@@ -1,5 +1,24 @@
 """Rules for running the eikonal flood model."""
 
+_flooding = config["simulation"]["flooding"]
+
+
+def _hydrograph_input(wildcards):
+    # The duration correction's hydrographs change the result (eikonal only).
+    on = _flooding["model"] == "eikonal" and _flooding["duration_correction"]["enabled"]
+    return [str(storm_tide_hydrograph_path(config))] if on else []
+
+
+def _static_level_input(wildcards):
+    # Two-component propagation: the scenario and SLR_0 NetCDFs and the MDT station file
+    # (boundaries.static_station_levels).
+    if _flooding["slr_propagation"] != "two_component":
+        return []
+    s = static_level_inputs(config)
+    names = sorted({wildcards.waterlevel_name, "SLR_0"})
+    return [os.path.join(s["waterlevel_nc_dir"], s["nc_filename_template"].format(
+        return_period=wildcards.return_period, waterlevel_name=n)) for n in names] + [s["mdt_path"]]
+
 
 rule run_eikonal:
     """Run the flood model for a single tile, return period and SLR scenario.
@@ -22,6 +41,9 @@ rule run_eikonal:
         mask=rules.extract_dem_mask.output.mask,
         friction=rules.compute_friction.output.friction,
         boundaries=rules.extract_boundaries.output.boundaries,
+        tile_grid=config["tile_grid"]["path"],  # hop_distance and the hop>=1 neighbours
+        hydrograph=_hydrograph_input,
+        static_level=_static_level_input,
     output:
         waterdepth=os.path.join(
             config["simulation"]["model_outputs"], "{tile_id}", "results",

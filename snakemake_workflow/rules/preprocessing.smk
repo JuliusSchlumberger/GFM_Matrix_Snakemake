@@ -40,10 +40,10 @@ rule compute_goco06s_absolute_raster:
 
 rule extract_tile_geometry:
     """Extract a single tile's geometry from the overlapping tile grid."""
+    input:
+        tile_grid=config["tile_grid"]["path"],
     output:
         tile_geometry=os.path.join(_preprocessing_inputs_dir, "{tile_id}", "inputs", "tile_geometry.gpkg"),
-    params:
-        tile_grid_path=config["tile_grid"]["path"],
     script:
         "../scripts/extract_tile_geometry.py"
 
@@ -75,6 +75,12 @@ rule extract_dem:
         model_bbox=rules.compute_model_bbox.output.model_bbox,
         geoid_offset_raster=rules.compute_geoid_offset_raster.output.offset_raster,
         gebco=_data_catalog.get_source("gebco").path,
+        # Only the ODN/NAVD88 bridges need GOCO06s's absolute geoid (vertical_datum.py).
+        goco06s_absolute_raster=lambda wc: (
+            [rules.compute_goco06s_absolute_raster.output.absolute_raster]
+            if _dem_source_meta_for_tile(wc.tile_id, "native_datum", "egm2008") in ("odn_osgm15", "navd88_geoid18")
+            else []
+        ),
     output:
         dem=os.path.join(_preprocessing_inputs_dir, "{tile_id}", "inputs", "dem.tif"),
     params:
@@ -86,7 +92,6 @@ rule extract_dem:
         native_datum=lambda wc: _dem_source_meta_for_tile(wc.tile_id, "native_datum", "egm2008"),
         pixel_size_m=lambda wc: _dem_source_meta_for_tile(wc.tile_id, "pixel_size_m", DELTADTM_PIXEL_SIZE_M),
         hybrid_grid_raster=lambda wc: _dem_source_meta_for_tile(wc.tile_id, "hybrid_grid_raster_path", None),
-        goco06s_absolute_raster=_vc_cfg["goco06s_absolute_raster_path"],
         flat_fill_value=lambda wc: _dem_source_meta_for_tile(wc.tile_id, "flat_fill_value", None),
     script:
         "../scripts/extract_dem.py"

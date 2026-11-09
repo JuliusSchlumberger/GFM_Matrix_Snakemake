@@ -31,7 +31,7 @@ dem = extract_dem(
     pixel_size_m=snakemake.params.pixel_size_m,  # noqa: F821
     native_datum=snakemake.params.native_datum,  # noqa: F821
     hybrid_grid_raster=snakemake.params.hybrid_grid_raster,  # noqa: F821
-    goco06s_absolute_raster=snakemake.params.goco06s_absolute_raster,  # noqa: F821
+    goco06s_absolute_raster=snakemake.input.goco06s_absolute_raster or None,  # noqa: F821
     derive_mask_from_dem=(dem_source != "deltadtm"),
     flat_fill_value=snakemake.params.flat_fill_value,  # noqa: F821
 )

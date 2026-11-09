@@ -16,7 +16,8 @@ boundary_conditions.storm_tide_product_dir (~3 GB):
   stations.csv, levels.parquet, hydrographs.npy, hydrograph_info.parquet, surge_models.npy
   (stp.model_vector per station), node_levels.parquet, and the two product files
   (boundaries.PRODUCT_*_FILENAME; the levels file holds the stations, then the coastline nodes).
-force=True (default) recomputes everything but the cache; ~6 h on 4 workers, most of it the GTSM
+force=True (default) recomputes everything outside the cache, and the cached coastline nodes
+(they follow the masks, which fix_ocean_mask edits in place); ~6 h on 4 workers, most of it the GTSM
 extraction (552 monthly files read in full) and the per-station build.
 """
 
@@ -241,6 +242,7 @@ def run(config: dict, force: bool = True) -> None:
         for p in [paths.gauges / n for n in ("gauges.parquet", "gauge_constants.npz", "tc_donors.parquet",
                                              "tc_donor_shapes.npy", "tide_gauges.parquet")] + [
                 paths.stations, paths.levels, paths.hydrographs, paths.info, paths.surge_models, paths.node_levels,
+                paths.coastline_nodes,
                 paths.root / PRODUCT_LEVELS_FILENAME, paths.root / PRODUCT_HYDROGRAPHS_FILENAME]:
             if p.exists():
                 p.unlink()
