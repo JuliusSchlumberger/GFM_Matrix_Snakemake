@@ -2,7 +2,8 @@
 
 stage1 (local): candidate shards + per-shard screen/boundary-line/pre-flight jobs
 and a bridge job (afterany) that selects tiles and runs `stage2 --submit`.
-stage2: spreads unfinished tiles over jobs, longest-processing-time-first.
+stage2: spreads unfinished tiles over jobs, longest-processing-time-first, plus a post job
+(afterany) that writes variant_selection.json, the dedup and both analyses.
 
 Usage:
     python generate_calibration_jobs.py stage1            # then on the cluster: bash .../hpc_jobs_stage1/submit_chain.sh
@@ -22,18 +23,15 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from calibration_split import split_group  # noqa: E402
 from gfm_config import check_site_roots, read_root, site_paths  # noqa: E402
 
 # Site paths: single definition in site_env.sh (env-overridable), shared with the shell drivers.
 _HX = site_paths()
 LINUX_DATA_ROOT = _HX["GFM_DATA_ROOT"]
 LINUX_CODE_ROOT = _HX["GFM_CODE_ROOT"]
-# Eikonal solves per tile, in units of the 10-solve sweep of eikonal_min_per_mcell, by phase and
-# split group (run_calibration_models.phase_runs; a duration run solves twice, bathtubs ~free).
-RUN_LOAD = {("sweep", "calibration"): 1.8, ("sweep", "validation"): 0.05,
-            ("duration", "calibration"): 2.0, ("duration", "validation"): 0.05,
-            ("selected", "calibration"): 0.05, ("selected", "validation"): 0.6}
+# Eikonal solves per tile, in units of the 10-solve sweep of eikonal_min_per_mcell, by phase
+# (run_calibration_models.phase_runs; a duration run solves twice, bathtubs ~free).
+RUN_LOAD = {"sweep": 1.8, "duration": 2.0}
 GFM_PY = _HX["GFM_PYTHON"]
 HYDROMT_PY = _HX["GFM_SFINCS_PYTHON"]
 DONE_MARKER = "calibration_run.done"
@@ -147,7 +145,7 @@ def cmd_stage2(args) -> None:
             continue
         pf = base / "boundary_lines" / "preflight" / f"{tid}.json"
         mcells = json.loads(pf.read_text()).get("n_active", 0) / 1e6 if pf.exists() else FALLBACK_MCELLS
-        load = RUN_LOAD[(args.phase, split_group(tid))]
+        load = RUN_LOAD[args.phase]
         est = args.overhead_min + mcells * (args.sfincs_min_per_mcell + args.eikonal_min_per_mcell * load)
         tiles.append((tid, est))
     if not tiles:
@@ -186,12 +184,42 @@ def cmd_stage2(args) -> None:
     print(f"{len(tiles)} tile(s) to run ({n_done} already done) over {len(jobs)} job(s) on {sbatch['partition']}")
     print(f"estimated hours per job: {loads[0] / 60:.1f}-{loads[-1] / 60:.1f} (x{args.time_margin:g} margin for --time; "
           f"total {sum(loads) / 60:.0f} h)")
+    post = write_post_job(out_dir, args.base_dir_name, args.dedup_dir_name, args.phase) if args.post else None
     if args.submit:
-        for n in names:
-            subprocess.run(["sbatch", f"{lout}/{n}.sbatch"], check=True)
-        print(f"submitted {len(names)} stage-2 job(s)")
+        ids = [subprocess.run(["sbatch", "--parsable", f"{lout}/{n}.sbatch"], check=True, capture_output=True,
+                              text=True).stdout.strip().split(";")[0] for n in names]
+        print(f"submitted {len(ids)} stage-2 job(s), phase {args.phase}: {' '.join(ids)}")
+        if post:
+            res = subprocess.run(["sbatch", "--parsable", f"--dependency=afterany:{':'.join(ids)}",
+                                  f"{lout}/{post.name}"], check=True, capture_output=True, text=True)
+            print(f"post job (selection, dedup, analyses; after all of the above): {res.stdout.strip()}")
     else:
-        print(f"submit with: bash {lout}/submit_all.sh")
+        print(f"submit with: bash {lout}/submit_all.sh" + (f", then {lout}/{post.name} after them" if post else ""))
+
+
+def write_post_job(out_dir: Path, base_dir_name: str, dedup_dir_name: str, phase: str) -> Path:
+    """Write the post job of a phase: analysis (variant_selection.json), dedup, dedup analysis.
+
+    Resources from site_env.sh (CAL_*). The progress report and the raw analysis must not stop
+    the rest; they run before the dedup, which ends the job when it fails.
+    """
+    lb = f"{LINUX_DATA_ROOT}/{base_dir_name}"
+    cfg, logs = f"{lb}/resolved_config.yml", f"{lb}/hpc_jobs_stage2/logs"
+    lines = [
+        "#!/bin/bash", f"#SBATCH --job-name=cal_post_{phase}", f"#SBATCH --partition={_HX['CAL_PARTITION']}",
+        f"#SBATCH --cpus-per-task={_HX['CAL_CPUS']}", f"#SBATCH --mem={_HX['CAL_MEM']}",
+        f"#SBATCH --time={_HX['CAL_TIME']}", f"#SBATCH --output={logs}/cal_post_{phase}_%j.out",
+        f"#SBATCH --error={logs}/cal_post_{phase}_%j.err", "",
+        "set -uo pipefail", "unset PROJ_LIB PROJ_DATA GDAL_DATA", f'cd "{LINUX_CODE_ROOT}/sfincs_tiles" || exit 1',
+        f"{GFM_PY} check_calibration_progress.py --config {cfg} --base-dir-name {base_dir_name}",
+        f"{GFM_PY} run_calibration_sweep_analysis.py --config {cfg} --base-dir-name {base_dir_name}",
+        f"{HYDROMT_PY} compute_calibration_result_dedup.py --config {cfg} --base-dir-name {base_dir_name} "
+        f"--out-dir-name {dedup_dir_name} --workers {_HX['CAL_CPUS']} || exit 1",
+        f"{GFM_PY} run_calibration_sweep_analysis.py --config {cfg} --base-dir-name {dedup_dir_name} "
+        f"--raster-base-dir-name {base_dir_name}", ""]
+    path = out_dir / f"post_models_{phase}.sbatch"
+    path.write_text("\n".join(lines), newline="\n")
+    return path
 
 
 def main() -> None:
@@ -202,7 +230,7 @@ def main() -> None:
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
     parser.add_argument("--n-jobs", type=int, default=None, help="default: 10 for stage1, 20 for stage2")
     parser.add_argument("--stage2-jobs", type=int, default=20, help="stage1: forwarded to the bridge's stage2 call")
-    parser.add_argument("--n-tiles", type=int, default=1000)
+    parser.add_argument("--n-tiles", type=int, default=1500)
     parser.add_argument("--partition", default=None, help="default: hpc.calibration_sbatch.partition")
     parser.add_argument("--mem", default=None, help="default: hpc.calibration_sbatch.mem")
     parser.add_argument("--stage1-hours", type=int, default=24)
@@ -210,13 +238,17 @@ def main() -> None:
     parser.add_argument("--sfincs-min-per-mcell", type=float, default=12.5)  # p90 over 550 SFINCS runs, 4 threads
     parser.add_argument("--eikonal-min-per-mcell", type=float, default=10.0,
                         help="10 eikonal solves, per million active SFINCS cells (rough); scaled by RUN_LOAD")
-    parser.add_argument("--phase", choices=["sweep", "duration", "selected"], default="sweep",
+    parser.add_argument("--phase", choices=["sweep", "duration"], default="sweep",
                         help="stage2: run_calibration_models.py phase (CAL_PHASE of run_final_tile.sh)")
     parser.add_argument("--time-margin", type=float, default=1.5)
     parser.add_argument("--submit", action="store_true", help="stage2: sbatch the jobs right away")
+    parser.add_argument("--no-post", dest="post", action="store_false",
+                        help="stage2: no post job (variant selection, dedup, analyses) after the jobs")
+    parser.add_argument("--dedup-dir-name", default=None, help="stage2 post job: default <base-dir-name>_dedup")
     args = parser.parse_args()
     if args.n_jobs is None:
         args.n_jobs = 10 if args.command == "stage1" else 20
+    args.dedup_dir_name = args.dedup_dir_name or f"{args.base_dir_name}_dedup"
     {"stage1": cmd_stage1, "stage2": cmd_stage2}[args.command](args)
 
 

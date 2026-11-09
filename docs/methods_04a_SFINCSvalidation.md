@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The GFM production pipeline estimates coastal inundation with an eikonal-equation solver: a friction-cost attenuation model that propagates storm-tide water levels inland from the coast, trading physical completeness for global-scale runtime. This pipeline compares it against SFINCS, a hydrodynamic (shallow-water) model, on 1,000 tiles of the production tile grid. It does two things at once:
+The GFM production pipeline estimates coastal inundation with an eikonal-equation solver: a friction-cost attenuation model that propagates storm-tide water levels inland from the coast, trading physical completeness for global-scale runtime. This pipeline compares it against SFINCS, a hydrodynamic (shallow-water) model, on 1,500 tiles of the production tile grid. It does two things at once:
 
 - **calibrates** each flood-model variant's parameter (friction factor, uniform rate, duration exponent) on the calibration tiles, picking the value with the best pooled agreement with SFINCS;
 - **validates** every variant at its selected value on the other tiles, which took no part in the fit.
@@ -36,7 +36,7 @@ Selection runs on the HPC as stage 1 of the pipeline (`select_calibration_tiles.
 | screen | production inputs present in `model_outputs/` (`mask.tif`, `tile_geometry.gpkg`) and ≥ 1 COAST-RP station | 3,632 |
 | boundary line | line built and suitable (above); 158 tiles had < 2 usable stations, 40 failed to build | 2,090 |
 | pre-flight | the SFINCS grid + mask builds from the line with ≥ 1 boundary cell (`preflight_sfincs_mask.py`) | 2,088 |
-| sample | spatially stratified: round-robin over shuffled 15° lon/lat bins, seed 0 | **1,000** |
+| sample | spatially stratified: round-robin over shuffled 15° lon/lat bins, seed 0 | **1,500** |
 
 No size, river-fraction, ocean-fraction or latitude filter is applied. The funnel is recorded per candidate in `candidates/candidate_funnel.csv`; the selection in `tile_ids.txt`, `tile_selection_metadata.csv` and `tile_selection.gpkg`; `figures/tile_selection_map.png` maps every candidate by funnel stage and `figures/tile_selection_histograms.png` compares the selected, eligible and screened populations.
 
@@ -103,18 +103,20 @@ and subgrid, and scored as written:
 The tiles are split by a hash of the tile id into a **calibration** group (30 %) and a
 **validation** group (70 %), `calibration_split.py`; a tile never changes group when tiles are
 added, and `calibration_split_balance.csv` compares the groups by latitude band, size, ocean and
-river share and SFINCS flood area. `run_calibration_models.py` runs in three phases:
+river share and SFINCS flood area. `run_calibration_models.py` runs in two phases, each on every
+tile of both groups:
 
-1. `sweep` - on calibration tiles, `straight_line` and `eikonal_uniform` over the uniform rates and
-   `eikonal_landcover` over the friction factors (`calibration_paths`); the bathtubs everywhere.
-2. `duration` - on calibration tiles, both duration variants over the alphas, each at the
-   parameter its base variant was selected with.
-3. `selected` - every variant at its selected run, on all tiles.
+1. `sweep` - the bathtubs, `straight_line` and `eikonal_uniform` over the uniform rates and
+   `eikonal_landcover` over the friction factors (`calibration_paths`).
+2. `duration` - both duration variants over the alphas, each at the parameter its base variant
+   was selected with.
 
-After each phase `compute_variant_metrics.py` pools the runs per group and writes
-`variant_selection.json`: per variant the calibration-group run with the best pooled CSI (or
-|bias - 1|), its validation-group score, and the best variant. The validation group scores the
-selected runs only, so its numbers are out of sample.
+After each phase a post job (`generate_calibration_jobs.py stage2`) runs `compute_variant_metrics.py`,
+which pools every run per group and writes `variant_selection.json`: per variant the
+calibration-group run with the best pooled CSI (or |bias - 1|), its validation-group score, and
+the best variant. Only the calibration group picks the runs; the validation group has the same
+per-run table, so the selected run's validation score and the shape of each sweep are out of
+sample.
 
 ## Analysis
 
@@ -134,7 +136,7 @@ Two stages, chained on Slurm (`generate_calibration_jobs.py`), all jobs on the p
 
 - **Stage 1** - 10 jobs, each one interleaved shard of the candidate pool: screen → boundary lines (4 worker processes) → SFINCS mask pre-flight.
 - **Bridge** - one job that starts when every stage-1 job has ended: collects the line results, runs the tile selection (+ maps) and submits stage 2.
-- **Stage 2** - 20 jobs over the 1,000 tiles, balanced by an estimated runtime from the pre-flight's active cell count (largest tiles first in every job). Per tile, `run_final_tile.sh`: copy inputs → DEM/mask, elevation, roughness → line forcing → SFINCS model build → flood-model runs of one phase (`CAL_PHASE`) → SFINCS run → postprocessing → `calibration_result.json`.
+- **Stage 2** - 20 jobs over the 1,500 tiles, balanced by an estimated runtime from the pre-flight's active cell count (largest tiles first in every job). Per tile, `run_final_tile.sh`: copy inputs → DEM/mask, elevation, roughness → line forcing → SFINCS model build → flood-model runs of one phase (`CAL_PHASE`) → SFINCS run → postprocessing → `calibration_result.json`.
 
 Every step is skipped when its output exists, so a resubmitted tile resumes where it stopped. A tile records its current step in `outputs/calibration_run.step`, its success in `calibration_run.done` and failures in `calibration_run.failed`; `check_calibration_progress.py` reports both stages per job.
 

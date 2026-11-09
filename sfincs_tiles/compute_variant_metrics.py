@@ -3,7 +3,7 @@
 Writes {base}/variant_runs_{per_tile,pooled}.csv and {base}/variant_selection.json: per
 variant the calibration-group run with the best pooled CSI (or |bias - 1|), its validation
 score, and the best variant. run_calibration_models.py reads the selection for its
-duration and selected phases. {base}/variant_runs_depth_accuracy.csv reports each run's depth
+duration phase. {base}/variant_runs_depth_accuracy.csv reports each run's depth
 agreement (within 10-50 cm, bias, MAE per SFINCS depth class, area and population); it does not
 enter the selection.
 

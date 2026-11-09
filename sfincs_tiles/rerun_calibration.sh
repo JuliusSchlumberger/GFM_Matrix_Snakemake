@@ -1,16 +1,15 @@
 #!/bin/bash
 # Rerun part of the final calibration in place on the cluster, after syncing the code to $GFM_CODE_ROOT.
 #   --part models   deletes the tile markers and runs one phase of run_calibration_models.py
-#                   (PHASE=sweep | duration | selected, default sweep; existing runs are kept,
+#                   (PHASE=sweep | duration, default sweep; existing runs are kept,
 #                   RESET_RUNS=1 deletes every model raster and result first); POST=1 adds an
-#                   afterany job running the dedup and the analysis (variant_selection.json) for both
-#                   base dirs. duration and selected need the selection of the phase before.
-#   --part sfincs   deletes markers + sfincs.inp, rebuilds forcing -> SFINCS model/run -> result;
-#                   run the dedup and the analysis by hand afterwards.
+#                   afterany job running the analysis (variant_selection.json) and the dedup for both
+#                   base dirs. duration needs the sweep's selection.
+#   --part sfincs   deletes markers + sfincs.inp, rebuilds forcing -> SFINCS model/run -> result
+#                   -> sweep phase, with the post job.
 # Usage:
 #   RESET_RUNS=1 bash sfincs_tiles/rerun_calibration.sh --part models   # sweep from scratch + post job
-#   PHASE=duration bash sfincs_tiles/rerun_calibration.sh --part models
-#   PHASE=selected N_JOBS=40 bash sfincs_tiles/rerun_calibration.sh --part models
+#   PHASE=duration N_JOBS=40 bash sfincs_tiles/rerun_calibration.sh --part models
 #   POST=0 bash sfincs_tiles/rerun_calibration.sh --part models         # no post job
 #   bash sfincs_tiles/rerun_calibration.sh --part sfincs
 #   DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part <part>      # only report what would be reset
@@ -44,7 +43,6 @@ if [ "$PART" = "models" ]; then
   POST="${POST:-1}"
   PHASE="${PHASE:-sweep}"
   RESET_RUNS="${RESET_RUNS:-0}"
-  HYDROMT_PY="$GFM_SFINCS_PYTHON"
   CONFIG="$BASE/resolved_config.yml"
 
   [ -f "$BASE/tile_ids.txt" ] || { echo "no $BASE/tile_ids.txt" >&2; exit 1; }
@@ -89,50 +87,11 @@ if [ "$PART" = "models" ]; then
   cd "$CODE"
   JOBS="$BASE/hpc_jobs_stage2"
   rm -f "$JOBS"/final_*.sbatch "$JOBS"/tiles_*.txt  # stale job files of an earlier run would be submitted below
+  POST_FLAG=""
+  [ "$POST" = "1" ] || POST_FLAG="--no-post"
   "$GFM_PY" generate_calibration_jobs.py stage2 --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \
-      --n-jobs "$N_JOBS" --sfincs-min-per-mcell 0 --overhead-min 5 --phase "$PHASE"
-
-  shopt -s nullglob
-  sbatches=("$JOBS"/final_*.sbatch)
-  shopt -u nullglob
-  if [ "${#sbatches[@]}" -eq 0 ]; then
-    echo "no final_*.sbatch written in $JOBS (nothing to rerun?) - nothing submitted"
-    exit 0
-  fi
-  ids=()
-  for f in "${sbatches[@]}"; do
-    ids+=("$(sbatch --parsable "$f")")
-  done
-  echo "submitted ${#ids[@]} model job(s), phase $PHASE: ${ids[*]}"
-
-  if [ "$POST" = "1" ]; then
-    post="$JOBS/post_models_$PHASE.sbatch"
-    cat > "$post" <<EOF
-#!/bin/bash
-#SBATCH --job-name=cal_post_$PHASE
-#SBATCH --partition=$CAL_PARTITION
-#SBATCH --cpus-per-task=$CAL_CPUS
-#SBATCH --mem=$CAL_MEM
-#SBATCH --time=$CAL_TIME
-#SBATCH --output=$JOBS/logs/cal_post_${PHASE}_%j.out
-#SBATCH --error=$JOBS/logs/cal_post_${PHASE}_%j.err
-
-# No -e: the progress report and the non-dedup analysis must not stop the rest; they run
-# before the dedup, which the dedup analysis reads and which ends the job when it fails.
-set -uo pipefail
-unset PROJ_LIB PROJ_DATA GDAL_DATA
-cd "$CODE" || exit 1
-"$GFM_PY" check_calibration_progress.py --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME"
-"$GFM_PY" run_calibration_sweep_analysis.py --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME"
-"$HYDROMT_PY" compute_calibration_result_dedup.py --config "$CONFIG" --base-dir-name "$BASE_DIR_NAME" \\
-    --out-dir-name "$DEDUP_DIR_NAME" --workers $CAL_CPUS || exit 1
-"$GFM_PY" run_calibration_sweep_analysis.py --config "$CONFIG" --base-dir-name "$DEDUP_DIR_NAME" \\
-    --raster-base-dir-name "$BASE_DIR_NAME"
-EOF
-    dep=$(IFS=:; echo "${ids[*]}")
-    pid=$(sbatch --parsable --dependency=afterany:"$dep" "$post")
-    echo "post job (dedup + both analyses, after all of the above): $pid"
-  fi
+      --n-jobs "$N_JOBS" --sfincs-min-per-mcell 0 --overhead-min 5 --phase "$PHASE" \
+      --dedup-dir-name "$DEDUP_DIR_NAME" --submit $POST_FLAG
   echo "progress: $GFM_PY $CODE/check_calibration_progress.py --config $CONFIG --base-dir-name $BASE_DIR_NAME"
 else
   [ -f "$BASE/tile_ids.txt" ] || { echo "no $BASE/tile_ids.txt" >&2; exit 1; }

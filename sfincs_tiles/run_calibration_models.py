@@ -169,23 +169,24 @@ def _jsonable(o):
 
 
 HYDRO_WINDOW_HR = (40.0, 110.0)  # build_sfincs_tile.TRUNCATE_WINDOW_HR_DEFAULT: the simulated window
-PHASES = ("sweep", "duration", "selected")
+PHASES = ("sweep", "duration")
 BATHTUBS = ("bathtub", "bathtub_connected")
 
 
-def phase_runs(phase: str, group: str, selection: dict | None) -> list[tuple[str, float | None, float | None]]:
-    """Return the (variant, parameter, alpha) runs of `phase` on a tile of `group`."""
+def phase_runs(phase: str, selection: dict | None) -> list[tuple[str, float | None, float | None]]:
+    """Return the (variant, parameter, alpha) runs of `phase`, the same on every tile.
+
+    Both groups run every run, so the validation group gets the same per-run table; only the
+    calibration group's pooled scores pick the runs (calibration_results.select_runs).
+    """
     runs = [(name, None, None) for name in BATHTUBS]
-    if phase == "sweep" and group == "calibration":
+    if phase == "sweep":
         runs += [(v, r, None) for v in ("straight_line", "eikonal_uniform") for r in UNIFORM_RATES_M_PER_KM]
         runs += [("eikonal_landcover", f, None) for f in FRICTION_SCALE_FACTORS]
-    elif phase == "duration" and group == "calibration":
+    elif phase == "duration":
         for name in ("eikonal_uniform_duration", "eikonal_landcover_duration"):
             parameter = selection["variants"][name.removesuffix("_duration")]["parameter"]
             runs += [(name, parameter, a) for a in DURATION_ALPHAS]
-    elif phase == "selected":
-        runs += [(name, v["parameter"], v["alpha"]) for name, v in selection["variants"].items()
-                 if name not in BATHTUBS]
     return runs
 
 
@@ -242,7 +243,7 @@ def main() -> None:
         selection = json.loads(selection_path.read_text()) if selection_path.exists() else None
         if args.phase != "sweep" and selection is None:
             raise SystemExit(f"phase {args.phase} needs {selection_path} (compute_variant_metrics.py)")
-        runs = phase_runs(args.phase, group, selection)
+        runs = phase_runs(args.phase, selection)
     todo = [r for r in runs if args.overwrite or not run_path(out_dir, run_key(*r)).exists()]
     if not todo:
         print(f"tile {args.tile_id} ({group}): {len(runs)} run(s) of phase {args.phase} already done")
