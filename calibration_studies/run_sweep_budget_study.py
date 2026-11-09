@@ -37,20 +37,18 @@ WATERLEVEL_NAME = "SLR_0"
 OCEAN_CODE = 1
 RIVER_CODE = 3
 
-# DeltaDTM's grid step (m): these tiles are always on it, so friction per step = rate x 30.
-CELL_M = 30.0
-
-
 def friction_settings(flooding: dict, friction_source: str | None, uniform_m_per_km: float | None) -> dict:
     """Return load_tile's friction keywords for a friction source (None: the config's).
 
-    Land cover: friction_scale_factor x CELL_M on friction.tif; uniform: rate x CELL_M per cell.
+    Per grid step, as production on DeltaDTM tiles: land cover friction_scale_factor x
+    flooding.resolution on friction.tif; uniform rate x resolution per cell.
     """
+    cell_m = float(flooding["resolution"])
     source = friction_source or flooding["friction_source"]
     if source == "uniform":
         rate = uniform_m_per_km if uniform_m_per_km is not None else float(flooding["uniform_attenuation_m_per_km"])
-        return {"friction_scale_factor": 1.0, "uniform_friction": rate / 1000.0 * CELL_M}
-    return {"friction_scale_factor": float(flooding["friction_scale_factor"]) * CELL_M, "uniform_friction": None}
+        return {"friction_scale_factor": 1.0, "uniform_friction": rate / 1000.0 * cell_m}
+    return {"friction_scale_factor": float(flooding["friction_scale_factor"]) * cell_m, "uniform_friction": None}
 
 
 # Smoke-test fallback when no --tile-ids are given.
@@ -60,7 +58,6 @@ SWEEPS_PER_ROUND = 4  # one full cycle of _ORTHANT_ORDER
 MAX_ROUNDS_CEILING = 100
 MAX_SWEEPS = MAX_ROUNDS_CEILING * SWEEPS_PER_ROUND
 N_TILES_WANTED_DEFAULT = 500  # only reachable in a single sequential run, not per HPC node
-DEFAULT_EPSILON_M = 0.03  # = simulation.flooding.waterlevel_epsilon_m
 
 
 def load_tile(tile_id: int, model_outputs: Path, knn: int, idw_power: float, friction_scale_factor: float,
@@ -249,7 +246,8 @@ def main() -> None:
                         help="default: config simulation.flooding.friction_source")
     parser.add_argument("--uniform-attenuation-m-per-km", type=float, default=None,
                         help="uniform rate (default: config simulation.flooding.uniform_attenuation_m_per_km)")
-    parser.add_argument("--epsilon", type=float, default=DEFAULT_EPSILON_M, help=f"round-level convergence threshold (default: {DEFAULT_EPSILON_M}, production's own simulation.flooding.waterlevel_epsilon_m)")
+    parser.add_argument("--epsilon", type=float, default=None,
+                        help="round-level convergence threshold (default: simulation.flooding.waterlevel_epsilon_m)")
     parser.add_argument("--n-tiles-wanted", type=int, default=N_TILES_WANTED_DEFAULT, help=f"stop early once this many wet tiles are found, in this process's own single-process run only (default: {N_TILES_WANTED_DEFAULT})")
     parser.add_argument(
         "--write-wet-tiles-summary", action="store_true",
@@ -273,6 +271,8 @@ def main() -> None:
     knn = int(cfg["simulation"]["flooding"]["knn"])
     idw_power = float(cfg["simulation"]["flooding"]["idw_power"])
     friction = friction_settings(cfg["simulation"]["flooding"], args.friction_source, args.uniform_attenuation_m_per_km)
+    if args.epsilon is None:
+        args.epsilon = float(cfg["simulation"]["flooding"]["waterlevel_epsilon_m"])
     print(f"model_outputs={model_outputs}  knn={knn}  friction={friction}  "
           f"max_sweeps={MAX_SWEEPS} ({MAX_ROUNDS_CEILING} rounds)  epsilon={args.epsilon}  "
           f"n_tiles_wanted={n_tiles_wanted}", flush=True)

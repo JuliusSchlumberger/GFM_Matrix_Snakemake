@@ -83,7 +83,8 @@ def test_study_friction_settings() -> None:
     sys.path.insert(0, str(REPO_ROOT / "calibration_studies"))
     from run_sweep_budget_study import friction_settings
 
-    flooding = {"friction_source": "landcover", "friction_scale_factor": 0.25, "uniform_attenuation_m_per_km": 0.2}
+    flooding = {"friction_source": "landcover", "friction_scale_factor": 0.25, "uniform_attenuation_m_per_km": 0.2,
+                "resolution": 30}
     assert friction_settings(flooding, None, None) == {"friction_scale_factor": 7.5, "uniform_friction": None}
     uniform = friction_settings(flooding, "uniform", None)
     assert uniform["friction_scale_factor"] == 1.0 and np.isclose(uniform["uniform_friction"], 0.006)

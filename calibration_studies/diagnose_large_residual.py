@@ -23,11 +23,10 @@ from run_sweep_budget_study import load_tile  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 INNER_MAX_ROUNDS = 25
-EPSILON = 0.03  # matches production's simulation.flooding.waterlevel_epsilon_m
 
 
 def diagnose(tile_id: int, model_outputs: Path, knn: int, idw_power: float, friction_scale_factor: float,
-             n_rounds=INNER_MAX_ROUNDS):
+             epsilon: float, n_rounds=INNER_MAX_ROUNDS):
     """Run inner sweep rounds and print the largest-update cell per round."""
     print(f"\n=== tile {tile_id} ===", flush=True)
     dem, mask, friction, _, seed_rows, seed_cols, initial, max_waterlevel = load_tile(
@@ -73,8 +72,8 @@ def diagnose(tile_id: int, model_outputs: Path, knn: int, idw_power: float, fric
               f"friction={entry['friction_here']:.4f}  dem={entry['dem_here']:.4f}  "
               f"static_blocked={entry['static_blocked_here']}  "
               f"t: {entry['t_before']:.6f} -> {entry['t_after']:.6f}", flush=True)
-        if round_max <= EPSILON:
-            print(f"  converged at round {r+1} (round_max <= epsilon={EPSILON})", flush=True)
+        if round_max <= epsilon:
+            print(f"  converged at round {r+1} (round_max <= epsilon={epsilon})", flush=True)
             break
 
     locs = [(h["row"], h["col"]) for h in history]
@@ -105,12 +104,12 @@ def main():
     model_outputs = Path(cfg["simulation"]["model_outputs"])
     knn = int(cfg["simulation"]["flooding"]["knn"])
     idw_power = float(cfg["simulation"]["flooding"]["idw_power"])
-    # friction_scale_factor is config.yml's bare per-metre rate; these tiles are always
-    # DeltaDTM's own 30 m grid, so the production rescale (x pixel_size_m) is just x30 here.
-    friction_scale_factor = float(cfg["simulation"]["flooding"]["friction_scale_factor"]) * 30.0
+    flooding = cfg["simulation"]["flooding"]
+    # Per grid step, as production on DeltaDTM tiles: the per-metre factor x flooding.resolution.
+    friction_scale_factor = float(flooding["friction_scale_factor"]) * float(flooding["resolution"])
 
     for tile_id in args.tile_ids:
-        diagnose(tile_id, model_outputs, knn, idw_power, friction_scale_factor)
+        diagnose(tile_id, model_outputs, knn, idw_power, friction_scale_factor, float(flooding["waterlevel_epsilon_m"]))
 
 
 if __name__ == "__main__":

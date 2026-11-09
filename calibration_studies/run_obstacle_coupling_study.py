@@ -39,9 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from run_sweep_budget_study import OCEAN_CODE, TILES, friction_settings, load_tile  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUTER_EPSILON_M = 0.03  # = simulation.flooding.waterlevel_epsilon_m
 DEFAULT_MAX_OUTER = 15  # beyond production's default, to find where tiles stop needing more
-DEFAULT_INNER_MAX_ROUNDS = 40  # methods_03 §2: most tiles converge or freeze extent by round 40
 # Not config-driven on purpose; pass --max-outer-iterations/--max-rounds to match config.yml.
 
 # t only decreases from the unseeded 99.0 (eikonal.solve_eikonal_dense) once seeds reach a cell.
@@ -274,8 +272,8 @@ def main() -> None:
     parser.add_argument("--uniform-attenuation-m-per-km", type=float, default=None,
                         help="uniform rate (default: config simulation.flooding.uniform_attenuation_m_per_km)")
     parser.add_argument("--max-outer-iterations", type=int, default=None, help=f"default: {DEFAULT_MAX_OUTER} (production uses config simulation.flooding.obstacle_coupling.max_outer_iterations)")
-    parser.add_argument("--max-rounds", type=int, default=None, help=f"default: {DEFAULT_INNER_MAX_ROUNDS} (production uses config simulation.flooding.max_rounds)")
-    parser.add_argument("--epsilon", type=float, default=None, help=f"default: {DEFAULT_OUTER_EPSILON_M} (matches production's own config simulation.flooding.waterlevel_epsilon_m)")
+    parser.add_argument("--max-rounds", type=int, default=None, help="default: config simulation.flooding.max_rounds")
+    parser.add_argument("--epsilon", type=float, default=None, help="default: config simulation.flooding.waterlevel_epsilon_m")
     parser.add_argument("--outer-convergence-pct", type=float, default=None, help="default: config simulation.flooding.obstacle_coupling.outer_convergence_pct")
     args = parser.parse_args()
 
@@ -290,8 +288,8 @@ def main() -> None:
     idw_power = float(flooding_cfg["idw_power"])
     friction = friction_settings(flooding_cfg, args.friction_source, args.uniform_attenuation_m_per_km)
     max_outer = args.max_outer_iterations if args.max_outer_iterations is not None else DEFAULT_MAX_OUTER
-    inner_max_rounds = args.max_rounds if args.max_rounds is not None else DEFAULT_INNER_MAX_ROUNDS
-    epsilon = args.epsilon if args.epsilon is not None else DEFAULT_OUTER_EPSILON_M
+    inner_max_rounds = args.max_rounds if args.max_rounds is not None else int(flooding_cfg["max_rounds"])
+    epsilon = args.epsilon if args.epsilon is not None else float(flooding_cfg["waterlevel_epsilon_m"])
     outer_convergence_pct = args.outer_convergence_pct if args.outer_convergence_pct is not None else float(flooding_cfg["obstacle_coupling"]["outer_convergence_pct"])
     print(f"model_outputs={model_outputs}  knn={knn}  friction={friction}  "
           f"max_outer={max_outer}  inner_max_rounds={inner_max_rounds}  epsilon={epsilon}  "
