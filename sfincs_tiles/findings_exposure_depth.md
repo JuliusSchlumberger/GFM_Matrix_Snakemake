@@ -183,8 +183,10 @@ Depth, exact, both-wet (area / population): within 10 cm 0.31 / 0.27, 20 cm 0.51
 production merged chunks the saved scores used (`merged_results`), output local
 (`.cleanup_baseline/exposure_depth/stage3/`). `exposure_validation_report.py`: table T3, X8, X9.
 Replication of the saved area counts: exact for New Brunswick, Scotland and Wales (Severn hits
-+1.7 %); England does NOT reproduce (FZ3 hits +130 %, misses +270 %, same benchmark file date as
-the saved run): its numbers below are not used for conclusions until the difference is found.
++1.7 %); England does NOT reproduce (FZ3 hits +130 %, misses +270 %): the England flood-zone
+files were rewritten some hours after the saved scores, so the saved run likely used an earlier
+download. The England numbers below use the current files but are kept out of the conclusions
+until that is confirmed.
 
 CSI (area at 0.01 m / population at 0.10 m) and population bias (model / benchmark exposed):
 
