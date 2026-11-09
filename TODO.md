@@ -88,10 +88,8 @@ Decided and implemented:
 Open:
 - **Consistency audit (2026-11-09), open after the pins removal, own deltas station caches and
   the shared pixel-size lookup.** Before the full rerun:
-  - Decide (result-changing): obstacle coupling blocks cells the inner solve never reached
-    (t = 99 -> waterlevel -99 m <= dem, `flood_model.py` outer loop), permanently; the
-    obstacle-coupling study excludes them (`run_obstacle_coupling_study.py`, `reached`) and its
-    "converges within 4" was measured that way. Add the `reached` guard to production?
+  - Obstacle coupling blocks cells the inner solve never reached (t = 99, `flood_model.py` outer
+    loop), unlike the obstacle-coupling study (`reached`). Kept as is (user, 2026-11-09).
   - Decide: england/wales local input keep DEM and EA levels in ODN, but two_component adds a
     static level (MDT + offset + fingerprint) in the GOCO06s frame (`boundaries.static_station_levels`).
     Attenuated propagation for the ODN scenarios (and their global-input twins), or a datum shift
