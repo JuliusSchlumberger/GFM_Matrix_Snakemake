@@ -294,16 +294,17 @@ def report(args) -> None:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from exposure_depth_pass import DENSITY_LABELS, DIFF_EDGES, SFINCS_CLASS_EDGES
 
-    out = Path(args.out_dir)
-    tiles_dir = out / "tiles"
+    tiles_dir = Path(args.out_dir) / "tiles"
+    ids = pass_tile_ids(Path(args.out_dir), args.all_tiles)
+    out = _report_dir(args)
     meta, arrays = [], {}
-    for j in sorted(tiles_dir.glob("*.json")):
-        info = json.loads(j.read_text())
+    for tid in ids:
+        info = json.loads((tiles_dir / f"{tid}.json").read_text())
         meta.append(info)
-        arrays[info["tile_id"]] = dict(np.load(j.with_suffix(".npz")))
+        arrays[info["tile_id"]] = dict(np.load(tiles_dir / f"{tid}.npz"))
     meta = pd.DataFrame(meta)
-    subset = pd.read_csv(out / "subset_tiles.csv")
-    meta = meta.merge(subset[["tile_id", "density", "density_class"]].astype({"tile_id": str}), on="tile_id")
+    density = pd.read_csv(Path(args.out_dir) / "tile_density.csv")
+    meta = meta.merge(density[["tile_id", "density", "density_class"]].astype({"tile_id": str}), on="tile_id")
 
     rows = []
     for w in ("area", "pop"):
@@ -414,7 +415,22 @@ DENOMINATORS = {"both_wet": ("both flood", "#9ecae1"), "reference_wet": ("refere
                 "either_wet": ("either floods", "#a50f15")}
 
 
-def sfincs_cdfs(tiles_dir: Path) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+def pass_tile_ids(stage1_dir: Path, all_tiles: bool) -> list[str]:
+    """Tiles of the stage-1 pass to pool: the stratified subset, or every passed tile."""
+    done = sorted(p.stem for p in (stage1_dir / "tiles").glob("*.npz"))
+    if all_tiles:
+        return done
+    subset = set(pd.read_csv(stage1_dir / "subset_tiles.csv").tile_id.astype(str))
+    return [t for t in done if t in subset]
+
+
+def _report_dir(args) -> Path:
+    out = Path(args.out_dir) / ("full" if args.all_tiles else "")
+    out.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+def sfincs_cdfs(tiles_dir: Path, ids: list[str]) -> dict[str, tuple[np.ndarray, np.ndarray]]:
     """Cumulative share within tau per denominator and weight: (lower, upper) bound arrays.
 
     Both-wet cells from the 1 cm difference histograms (bin fully within tau). A one-sided cell
@@ -424,8 +440,8 @@ def sfincs_cdfs(tiles_dir: Path) -> dict[str, tuple[np.ndarray, np.ndarray]]:
     from exposure_depth_pass import DEPTH_EDGES, DIFF_EDGES
 
     acc = {}
-    for npz in tiles_dir.glob("*.npz"):
-        for k, v in np.load(npz).items():
+    for tid in ids:
+        for k, v in np.load(tiles_dir / f"{tid}.npz").items():
             acc[k] = acc.get(k, 0) + v
     inside = np.maximum(np.abs(DIFF_EDGES[:-1]), np.abs(DIFF_EDGES[1:]))
     upper = np.concatenate((DEPTH_EDGES, [np.inf]))
@@ -449,15 +465,16 @@ def sfincs_cdfs(tiles_dir: Path) -> dict[str, tuple[np.ndarray, np.ndarray]]:
 
 def cdf(args) -> None:
     """Plot the cumulative depth agreement against SFINCS and, if given, SF Bay CoSMoS."""
-    out = Path(args.out_dir)
-    sf = sfincs_cdfs(out / "tiles")
+    ids = pass_tile_ids(Path(args.out_dir), args.all_tiles)
+    out = _report_dir(args)
+    sf = sfincs_cdfs(Path(args.out_dir) / "tiles", ids)
     bay = pd.read_csv(args.sf_bay_cdf) if args.sf_bay_cdf else None
     rows = {"tau_m": CDF_TAUS_M}
     for k, (lo, hi) in sf.items():
         rows[f"{k}_low"], rows[f"{k}_high"] = lo, hi
     pd.DataFrame(rows).to_csv(out / "sfincs_depth_cdf.csv", index=False)
 
-    panels = [("a", "eikonal vs SFINCS (92 tiles, same DEM and forcing)", sf)]
+    panels = [("a", f"eikonal vs SFINCS ({len(ids)} tiles, same DEM and forcing)", sf)]
     if bay is not None:
         panels.append(("b", "eikonal vs CoSMoS, SF Bay (includes DEM and forcing differences)",
                        {c: (bay[c].to_numpy(), bay[c].to_numpy()) for c in bay.columns if c != "tau_m"}))
@@ -492,6 +509,8 @@ def main() -> None:
     parser.add_argument("--dedup-dir-name", default="calibration_roughness_SFINCS_dedup")
     parser.add_argument("--fsf", type=float, default=12.0, help="friction factor of the result files (old layout: effective)")
     parser.add_argument("--out-dir", required=True)
+    parser.add_argument("--all-tiles", action="store_true",
+                        help="report/cdf: every passed tile (into <out-dir>/full) instead of the subset")
     parser.add_argument("--sf-bay-cdf", default=None, help="cdf: sf_bay_depth_cdf.csv of sf_bay_depth_reliability.py")
     args = parser.parse_args()
     {"stage0": stage0, "report": report, "cdf": cdf}[args.stage](args)
