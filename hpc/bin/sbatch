@@ -1,0 +1,7 @@
+#!/bin/bash
+# sbatch stand-in, first on PATH inside hpc/harness.py steps and their jobs: queue the submission
+# for the harness controller. Outside the harness it passes straight through to the real sbatch.
+if [ -z "${GFM_HARNESS_QUEUE:-}" ]; then
+  exec "${GFM_REAL_SBATCH:-/usr/bin/sbatch}" "$@"
+fi
+exec "$GFM_HARNESS_PYTHON" "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../harness.py" enqueue -- "$@"

@@ -1,0 +1,27 @@
+# A few minutes on 1-core jobs: the stand-in, placeholder dependencies, a job that submits a job,
+# an afterok that can never be met, and the budget. Run before a real plan on a new cluster:
+#   python hpc/harness.py run --plan hpc/plans/smoke.yml --poll-s 10
+# Expected: steps fan_out and child done, never_runs DEP_NEVER, at most 2 jobs at once.
+name: smoke
+max_cores: 2
+state_dir: ${GFM_DATA_ROOT}/hpc_harness/smoke
+cwd: ${GFM_DATA_ROOT}/hpc_harness/smoke
+env:
+  JOB_HEAD: "#!/bin/bash\n#SBATCH --partition=1vcpu\n#SBATCH --cpus-per-task=1\n#SBATCH --mem=1G\n#SBATCH --time=0-00:05:00"
+steps:
+  - id: fan_out
+    run: |
+      mkdir -p jobs
+      printf "$JOB_HEAD\nsleep 30\n" > jobs/a.sbatch
+      printf "$JOB_HEAD\nexit 1\n" > jobs/fails.sbatch
+      printf "$JOB_HEAD\nsleep 5\n" > jobs/grandchild.sbatch
+      printf "$JOB_HEAD\nsbatch jobs/grandchild.sbatch\n" > jobs/b.sbatch
+      printf "$JOB_HEAD\necho never\n" > jobs/never.sbatch
+      a=$(sbatch --parsable jobs/a.sbatch)
+      f=$(sbatch --parsable jobs/fails.sbatch)
+      sbatch --parsable --dependency=afterany:$a:$f jobs/b.sbatch
+      sbatch --dependency=afterok:$f jobs/never.sbatch
+  - id: child
+    after: [fan_out]
+    job: {partition: 1vcpu, cpus_per_task: 1, mem: 1G, time: "0-00:05:00"}
+    run: echo "after fan_out on $(hostname)"

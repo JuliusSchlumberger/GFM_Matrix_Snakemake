@@ -176,13 +176,32 @@ The HPC results sit at the paths `run_eikonal` writes, so Snakemake treats the s
 
 ```
 python sfincs_tiles/generate_calibration_jobs.py stage1          # then: bash <printed submit_chain.sh>
-PHASE=sweep|duration|selected bash sfincs_tiles/rerun_calibration.sh --part models
+PHASE=sweep|duration bash sfincs_tiles/rerun_calibration.sh --part models
 bash sfincs_tiles/rerun_calibration.sh --part sfincs
 python calibration_studies/generate_calibration_batch_jobs.py sweep_budget|obstacle_coupling --friction-source landcover|uniform
 ```
 
-`stage1` writes the candidate shards and their screen, boundary-line and pre-flight jobs plus a bridge job that selects the tiles and runs `stage2 --submit`, which spreads the unfinished tiles over jobs.
+`stage1` writes the candidate shards and their screen, boundary-line and pre-flight jobs plus a bridge job that selects the tiles and runs `stage2 --submit`, which spreads the unfinished tiles over jobs and adds a post job (variant selection, dedup, analyses).
 Results land in `<data_root>/calibration_roughness_SFINCS/` (`--base-dir-name`).
-`rerun_calibration.sh` reruns part of a finished calibration in place: `--part models` one phase of the flood-model runs (`PHASE`, default `sweep`; `RESET_RUNS=1` deletes every model raster first; with `POST=1`, the default, followed by the dedup and the analyses, which write `variant_selection.json` for the next phase), `--part sfincs` the forcing, SFINCS model build and run (run the analyses by hand afterwards); `DRY_RUN=1` reports what it would reset.
+`rerun_calibration.sh` reruns part of a finished calibration in place: `--part models` one phase of the flood-model runs (`PHASE`, default `sweep`; `RESET_RUNS=1` deletes every model raster first; with `POST=1`, the default, followed by the dedup and the analyses, which write `variant_selection.json` for the next phase), `--part sfincs` the forcing, SFINCS model build and run, then the sweep phase with its post job; `DRY_RUN=1` reports what it would reset.
 The phases and the calibration/validation split are in [methods_04a](methods_04a_SFINCSvalidation.md#flood-model-variants).
 Calibration resources come from `hpc.calibration_sbatch`, roots, pythons and the container from `site_env.sh`; the solver studies default to `hpc.sbatch`.
+
+## One core budget for several runs
+
+`hpc/harness.py` runs a plan (`hpc/plans/*.yml`) of steps under one core budget (`max_cores`).
+A step is a launcher command run on the login node, or a job (`job:`), and waits for the steps in its `after:` list.
+Inside a step and every job it starts, `hpc/bin/sbatch` stands first on PATH and queues each submission, answering with a placeholder job id; the controller submits a queued job once its dependencies have ended and its cores fit (a `<N>vcpu` partition counts N).
+The generators, submit scripts and self-submitting jobs therefore run unchanged.
+Steps marked `destructive` (deleting old outputs) run only with `--allow-destructive`.
+
+```
+tmux new -s harness
+python hpc/harness.py run --plan hpc/plans/smoke.yml --poll-s 10   # once per cluster: a few minutes
+python hpc/harness.py run --plan hpc/plans/<plan>.yml [--allow-destructive] [--only a,b]
+python hpc/harness.py status --plan hpc/plans/<plan>.yml           # from another shell
+python hpc/harness.py retry|mark-done --plan ... <step>             # after a failed or interrupted step
+```
+
+State (step states, queued jobs, logs) lives in the plan's `state_dir`, so a stopped controller resumes where it was; a launcher step that was running when the controller stopped comes back as `interrupted` (retry or mark-done it).
+A job asking for more cores than the budget is refused (`TOO_BIG`), and one with an `afterok` on a failed job is never submitted (`DEP_NEVER`).
