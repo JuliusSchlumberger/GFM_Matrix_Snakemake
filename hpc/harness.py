@@ -5,7 +5,8 @@ every job it starts, `hpc/bin/sbatch` stands first on PATH: it queues the submis
 with a placeholder job id, so existing generators, submit scripts and self-submitting jobs work
 unchanged. The controller submits a queued job once its dependencies have ended and its cores
 fit the budget (partition `<N>vcpu` counts N, else cpus-per-task x ntasks), translating
-placeholder ids. A step is done when its command and every job it queued have ended.
+placeholder ids. A step is done when its command and every job it queued have ended. The plan's
+`preamble` (shell) runs before every step's command.
 
 Usage (on the cluster login node, in tmux; GFM_REAL_SBATCH if sbatch is not /usr/bin/sbatch):
     python hpc/harness.py run --plan hpc/plans/hydrax_rerun.yml [--allow-destructive] [--only a,b]
@@ -271,7 +272,7 @@ def job_script(plan: dict, step: dict) -> Path:
     lines = ["#!/bin/bash", f"#SBATCH --job-name=h_{step['id']}", f"#SBATCH --output={logs}/{step['id']}_%j.out",
              f"#SBATCH --error={logs}/{step['id']}_%j.err"]
     lines += [f"#SBATCH --{k.replace('_', '-')}={v}" for k, v in job.items()]
-    lines += ["set -eo pipefail", step["run"]]
+    lines += ["set -eo pipefail", plan.get("preamble", ""), step["run"]]
     path = plan["state_dir"] / "steps" / f"{step['id']}.sbatch"
     path.write_text("\n".join(lines) + "\n")
     return path
@@ -304,7 +305,8 @@ class Controller:
             self.states[sid] = {"status": "running", "job_task": fake, "started": time.time()}
         else:
             log = open(self.plan["state_dir"] / "logs" / f"{sid}.log", "a")
-            self.procs[sid] = subprocess.Popen(["bash", "-c", "set -eo pipefail\n" + step["run"]], env=env, cwd=cwd,
+            script = "\n".join(["set -eo pipefail", self.plan.get("preamble", ""), step["run"]])
+            self.procs[sid] = subprocess.Popen(["bash", "-c", script], env=env, cwd=cwd,
                                                stdout=log, stderr=subprocess.STDOUT)
             self.states[sid] = {"status": "running", "started": time.time()}
         self.log(f"step {sid} started")
