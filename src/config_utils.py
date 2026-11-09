@@ -1,5 +1,6 @@
 """Shared config-parsing and data-catalog helpers used across the workflow."""
 
+import csv
 import os
 import time
 from functools import partial
@@ -288,3 +289,36 @@ def return_period_years(label: str) -> int:
     if not (s.startswith("RP") and s[2:].isdigit()):
         raise ValueError(f'return period {label!r} is not of the form "RP<years>"')
     return int(s[2:])
+
+
+def dem_source_by_tile(config: dict) -> dict[int, str]:
+    """Return tile_id -> dem_source from simulation.dem_source_manifest (empty: all deltadtm)."""
+    manifest = config["simulation"].get("dem_source_manifest")
+    if not manifest:
+        return {}
+    with open(manifest, newline="") as f:
+        return {int(row["tile_id"]): row["dem_source"] for row in csv.DictReader(f)}
+
+
+def dem_source_meta(catalog: hydromt.DataCatalog, source: str, key: str, default: Any, root: str | Path) -> Any:
+    """Return catalog meta `key` of a DEM source ({root} expanded), else `default`."""
+    value = (catalog.get_source(source).meta or {}).get(key, default)
+    return value.format(root=str(root)) if isinstance(value, str) else value
+
+
+def tile_pixel_size_m(config: dict, tile_id: int | str, repo_root: str | Path) -> float:
+    """Return a tile's DEM grid step (m): its dem_source's pixel_size_m, 30.0 for DeltaDTM.
+
+    The friction unit correction of eikonal_runner.run_eikonal_python; builds the data
+    catalog only when the tile is in a dem_source_manifest.
+    """
+    source = dem_source_by_tile(config).get(int(tile_id))
+    if source is None:
+        return DELTADTM_PIXEL_SIZE_M
+    paths = config["paths"]["hydromt_data_catalog"]
+    paths = [paths] if isinstance(paths, str) else paths
+    catalog = get_data_catalog([Path(repo_root) / q for q in paths], root=config["paths"]["root"])
+    return float(dem_source_meta(catalog, source, "pixel_size_m", DELTADTM_PIXEL_SIZE_M, config["paths"]["root"]))
+
+
+DELTADTM_PIXEL_SIZE_M = 30.0  # DeltaDTM's 1-arcsecond grid step, the production friction cell size

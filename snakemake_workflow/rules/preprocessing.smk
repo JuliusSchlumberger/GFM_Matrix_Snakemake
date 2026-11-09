@@ -84,7 +84,7 @@ rule extract_dem:
         dem_gap_fill_cfg=config["simulation"]["dem_gap_fill"],
         dem_source=lambda wc: _dem_source_for_tile(wc.tile_id),
         native_datum=lambda wc: _dem_source_meta_for_tile(wc.tile_id, "native_datum", "egm2008"),
-        pixel_size_m=lambda wc: _dem_source_meta_for_tile(wc.tile_id, "pixel_size_m", 30.0),
+        pixel_size_m=lambda wc: _dem_source_meta_for_tile(wc.tile_id, "pixel_size_m", DELTADTM_PIXEL_SIZE_M),
         hybrid_grid_raster=lambda wc: _dem_source_meta_for_tile(wc.tile_id, "hybrid_grid_raster_path", None),
         goco06s_absolute_raster=_vc_cfg["goco06s_absolute_raster_path"],
         flat_fill_value=lambda wc: _dem_source_meta_for_tile(wc.tile_id, "flat_fill_value", None),

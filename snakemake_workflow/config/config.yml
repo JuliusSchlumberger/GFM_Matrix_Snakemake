@@ -202,7 +202,7 @@ simulation: # Used by: preprocessing rules
     land_fill_value_m: 99
 
   flooding:
-    resolution: 30       # output raster resolution in metres
+    resolution: 30       # grid step (m) when a tile has no pixel_size_m; outputs follow the DEM grid
     # Station interpolation of every water level onto the tile (coastline seeds and the static
     # level), for either storm_tide_source: inverse-distance weighting over the knn nearest
     # stations, weights distance^-idw_power. Leave-one-out at 22,670 stations, RP100 MAE: k 5 /

@@ -165,3 +165,19 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def test_tile_pixel_size_comes_from_the_dem_source_manifest(tmp_path) -> None:
+    from config_utils import DELTADTM_PIXEL_SIZE_M, tile_pixel_size_m
+
+    config = {"simulation": {"dem_source_manifest": None}, "paths": {}}
+    assert tile_pixel_size_m(config, 7, tmp_path) == DELTADTM_PIXEL_SIZE_M
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text("tile_id,dem_source\n7,local_dem\n")
+    catalog = tmp_path / "catalog.yml"
+    catalog.write_text("local_dem:\n  path: '{root}/dem.tif'\n  data_type: RasterDataset\n  driver: raster\n"
+                       "  meta:\n    pixel_size_m: 2\n")
+    config = {"simulation": {"dem_source_manifest": str(manifest)},
+              "paths": {"hydromt_data_catalog": "catalog.yml", "root": str(tmp_path)}}
+    assert tile_pixel_size_m(config, 7, tmp_path) == 2.0
+    assert tile_pixel_size_m(config, 8, tmp_path) == DELTADTM_PIXEL_SIZE_M

@@ -86,8 +86,8 @@ Settings are layered; later files override earlier ones:
 1. `snakemake_workflow/config/config.yml`: every pipeline setting (tracked).
 2. `config_local.yml`: this machine's `paths.root` and `paths.code_root` (gitignored; copy the
    `.example`).
-3. `<scenario>.yml` plus `<scenario>_pins.yml` (values a scenario's existing outputs were
-   computed with), merged into `<scenario>_materialized.yml` by
+3. `<scenario>.yml` (tile set, outputs, scenario scope; the model follows `config.yml`),
+   merged into `<scenario>_materialized.yml` by
    `snakemake_workflow/scripts/materialize_configs.py` and selected with `GFM_CONFIG_PATH`.
 4. On a cluster: `config_hpc.yml` (gitignored; copy `config_hpc.example.yml`) holds the cluster
    paths, partitions and environment activation; the SFINCS calibration also needs

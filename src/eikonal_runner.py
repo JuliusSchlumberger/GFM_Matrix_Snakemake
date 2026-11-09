@@ -69,7 +69,7 @@ def run_eikonal_python(
     to float32 m. `friction_scale_factor` (production 0.25, config.yml) is a
     bare SFINCS-calibrated per-metre rate, not a tuning knob: the solver
     treats friction as cost per grid step, so it must be scaled by the
-    tile's own grid step in metres (`pixel_size_m`; None = 30.0, DeltaDTM's)
+    tile's own grid step in metres (`pixel_size_m`; None = `resolution`)
     before use - `0.25 x 30` for a DeltaDTM tile (docs/methods_02). Raises
     MemoryError on OOM.
     `k` and `idw_power` set the station interpolation of both the coastline seeds and the
@@ -263,7 +263,7 @@ def run_tile_scenario(
     GeoPackage to node-local scratch first (HPC). `flooding_config["slr_propagation"]`
     "two_component" builds the static level from `static_level_inputs`
     (`boundaries.static_level_inputs`); "attenuated" ignores them. `pixel_size_m` is the
-    tile's real DEM pixel size (a local high-res DEM source); None = 30.0, DeltaDTM's.
+    tile's real DEM pixel size (a local high-res DEM source); None = flooding `resolution`.
     Timing is left to callers.
     Returns {"outcome": "oom_premarked" | "skip_no_inundation" | "oom" | "solved", ...}.
     """

@@ -33,7 +33,7 @@ Size: ~31,600 lines of Python/Snakemake/shell in 189 tracked files.
 Scenario configs in `snakemake_workflow/config/`: `config.yml` (single source of
 truth), `config_local.yml` (gitignored, machine paths), `config_hpc.yml` (gitignored, HPC site values;
 from `config_hpc.example.yml`),
-`<scenario>.yml` + `<scenario>_pins.yml` -> generated `<scenario>_materialized.yml`
+`<scenario>.yml` -> generated `<scenario>_materialized.yml`
 (bangkok_chao_phraya, calibration_500_tiles, deltas_ssp126, deltas_ssp245;
 the former deltas_design scenario was removed on 2026-10-21, deltas are flood-hazard only).
 `profiles/default/config.yaml` sets Snakemake rerun triggers (see section 4).

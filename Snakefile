@@ -5,7 +5,6 @@ preprocess, simulate, postprocess, all. E.g. `snakemake all --cores 4
 --resources mem_mb=8000`; set mem_mb to ~80% of physical RAM.
 """
 
-import csv
 import os
 import sys
 import time
@@ -43,7 +42,10 @@ os.makedirs = _retrying_makedirs
 sys.path.insert(0, os.path.join(workflow.basedir, "src"))
 from boundaries import static_level_inputs, storm_tide_hydrograph_path  # noqa: E402
 from eikonal_runner import estimate_eikonal_mem_mb  # noqa: E402
-from config_utils import _expand_paths, get_data_catalog, merged_waterlevel_names  # noqa: E402
+from config_utils import (  # noqa: E402
+    DELTADTM_PIXEL_SIZE_M, _expand_paths, dem_source_by_tile, dem_source_meta, get_data_catalog,
+    merged_waterlevel_names,
+)
 from tiles import build_chunk_grid  # noqa: E402
 
 # GFM_CONFIG_PATH selects a materialized scenario config via the `configfile:`
@@ -134,11 +136,7 @@ _vc_cfg = config["vertical_datum_correction"]
 # meta (native_datum, pixel_size_m, hybrid_grid_raster_path) travels with it
 # so the three can never drift apart; a source with no such meta key falls
 # back to deltadtm's own production defaults (egm2008, 30.0, none).
-_dem_source_manifest_path = config["simulation"].get("dem_source_manifest")
-_dem_source_by_tile: dict[int, str] = {}
-if _dem_source_manifest_path:
-    with open(_dem_source_manifest_path, newline="") as _f:
-        _dem_source_by_tile = {int(row["tile_id"]): row["dem_source"] for row in csv.DictReader(_f)}
+_dem_source_by_tile = dem_source_by_tile(config)
 
 
 def _dem_source_for_tile(tile_id) -> str:
@@ -146,9 +144,7 @@ def _dem_source_for_tile(tile_id) -> str:
 
 
 def _dem_source_meta_for_tile(tile_id, key, default):
-    meta = _data_catalog.get_source(_dem_source_for_tile(tile_id)).meta or {}
-    value = meta.get(key, default)
-    return value.format(root=config["paths"]["root"]) if isinstance(value, str) else value
+    return dem_source_meta(_data_catalog, _dem_source_for_tile(tile_id), key, default, config["paths"]["root"])
 
 
 include: "snakemake_workflow/rules/common.smk"

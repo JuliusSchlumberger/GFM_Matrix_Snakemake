@@ -5,8 +5,6 @@ tile_grid:
   path: "{processed_inputs_dir}/mask/deltas_global_tiles.gpkg"
 
 simulation:
-  flooding:
-    friction_scale_factor: 0.3  # computed with effective 9.0 = 0.3 x 30 (config.yml: 0.25 x 30 = 7.5)
   model_outputs: "{root}/deltas_floodmaps/ssp245/model_outputs"
   preprocessing_inputs_dir: null  # own per-tile inputs under model_outputs
 
@@ -15,10 +13,15 @@ postprocessing:
 
 visualization:
   output_dir: "{root}/deltas_floodmaps/ssp245/figures"
+  growth_rates: {max: 1.5, min: -0.5}
+  slr_interp: {max_mm: 1500, n_points: 100}
 
 boundary_conditions:
   slr_projection: "ssp245"
   waterlevel_nc_dir: "{root}/deltas_floodmaps/ssp245/WL_scenarios"
+  # Own station caches: the shared {processed_inputs_dir}/WL_scenarios_cache holds production's
+  # levels under the same file names.
+  stations_cache_dir: "{root}/deltas_floodmaps/ssp245/WL_scenarios_cache"
   return_periods: [100]
 
 adaptation:
@@ -28,3 +31,8 @@ adaptation:
 hpc:
   n_nodes: 8
   jobs_dir: "{root}/deltas_floodmaps/ssp245/model_outputs/hpc_jobs"
+
+# Deliverable scope (figures and the population years reported).
+analysis: {plot_timeseries: true}
+population_growth:
+  output_years: [2025, 2030, 2035, 2040, 2045, 2050, 2060, 2075, 2100]

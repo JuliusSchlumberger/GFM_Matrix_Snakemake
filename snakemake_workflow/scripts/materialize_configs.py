@@ -1,8 +1,6 @@
 """Materialize scenario configs: `config/<name>.yml` -> `config/<name>_materialized.yml`.
 
-Each output is config.yml + config_local.yml + the override + optional `<name>_pins.yml`
-(values pinned to what the scenario's existing outputs were computed with), deep-merged
-like load_config. Point GFM_CONFIG_PATH at it. --variants adds, per scenario,
+Each output is config.yml + config_local.yml + the override, deep-merged like load_config. Point GFM_CONFIG_PATH at it. --variants adds, per scenario,
 `<name>__<variant>_materialized.yml`: the scenario running a flood-model variant
 (flood_variants.variant_config) at its run in the SFINCS calibration's variant_selection.json,
 with its own outputs and the scenario's tile inputs.
@@ -63,10 +61,8 @@ def main() -> None:
         override_path = _CONFIG_DIR / f"{name}.yml"
         if not override_path.exists():
             raise FileNotFoundError(f"{override_path} does not exist")
-        pins_path = _CONFIG_DIR / f"{name}_pins.yml"
-        overrides = [override_path] + ([pins_path] if pins_path.exists() else [])
         out_path = out_dir / f"{name}_materialized.yml"
-        merged = materialize_config(_CONFIG_DIR / "config.yml", overrides, out_path)
+        merged = materialize_config(_CONFIG_DIR / "config.yml", [override_path], out_path)
         print(f"wrote {out_path}")
         for variant in variants:
             run = selection.get(variant)

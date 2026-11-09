@@ -16,5 +16,14 @@ postprocessing:
   merged_outputs: "{root}/bangkok_chao_phraya/merged_results"
 visualization:
   output_dir: "{root}/bangkok_chao_phraya/figures"
+  growth_rates: {max: 1.5, min: -0.5}
+  slr_interp: {max_mm: 1500, n_points: 100}
 hpc:
   jobs_dir: "{root}/bangkok_chao_phraya/model_outputs/hpc_jobs"
+
+# Deliverable scope: adaptation levels, figures and the population years reported.
+adaptation:
+  slr_intensities: [SLR_500, SLR_1000, SLR_1500]
+analysis: {plot_timeseries: true}
+population_growth:
+  output_years: [2025, 2030, 2035, 2040, 2045, 2050, 2060, 2075, 2100]

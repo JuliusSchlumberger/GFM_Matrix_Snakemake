@@ -27,7 +27,7 @@ A failed step is reported and the rest continue unless `--fail-fast`.
 
 ## 2. Scenario configs
 
-A scenario is an override file `snakemake_workflow/config/<scenario>.yml` (plus optional `<scenario>_pins.yml`) layered on `config.yml` + `config_local.yml`.
+A scenario is an override file `snakemake_workflow/config/<scenario>.yml` layered on `config.yml` + `config_local.yml`; it sets only its tile set, output locations, scenario scope and deliverables, so every scenario runs the model as `config.yml` sets it.
 Build the merged config, then point `GFM_CONFIG_PATH` at it:
 
 ```
@@ -43,7 +43,6 @@ Without arguments it rebuilds every known scenario (`bangkok_chao_phraya`, `cali
 `*_materialized.yml` are generated: rerun the script after editing `config.yml`, `config_local.yml` or the override, never hand-edit them.
 Only Snakemake reads `GFM_CONFIG_PATH`; without it, Snakemake uses `config.yml` + `config_local.yml`, and the Python scripts take the config as `--config <config.yml>`.
 A scenario writes its outputs where its override sets `simulation.model_outputs`, `postprocessing.merged_outputs` and `visualization.output_dir`.
-`<scenario>_pins.yml` fixes the values the scenario's published outputs were computed with (e.g. `friction_scale_factor: 0.3`, effective 9.0, for Bangkok): keep it to reproduce them, or delete its keys to follow `config.yml`.
 
 ## 3. Snakemake DAG
 

@@ -77,8 +77,8 @@ Decided and implemented:
   worse by > 0.2 CSI on 3-4% of tiles (sills, basins, ridges). Figure R3.
 - **Outputs:** new results go to `{root}/model_outputs_v2`, `merged_results_v2`, `figures_v2`,
   `validation_v2`; per-tile inputs stay in `{root}/model_outputs` (`preprocessing_inputs_dir`).
-  Bangkok, deltas and calibration_500_tiles pin `attenuated` and B off in their `*_pins.yml` and
-  set `preprocessing_inputs_dir: null` (own inputs).
+  Every scenario follows config.yml's model settings (no pins: the whole pipeline is rerun,
+  user 2026-11-09) and sets `preprocessing_inputs_dir: null` (own inputs).
 - **Protection rule:** `protection.rule: flood_fraction | water_level` (implemented, default
   flood_fraction; `minimum_rp` 2 applies to the water-level rule only).
 - **Permanent inundation:** to be counted in EAI by anchoring the exceedance curve at p = 1 with
@@ -86,6 +86,41 @@ Decided and implemented:
   Open).
 
 Open:
+- **Consistency audit (2026-11-09), open after the pins removal, own deltas station caches and
+  the shared pixel-size lookup.** Before the full rerun:
+  - Decide (result-changing): obstacle coupling blocks cells the inner solve never reached
+    (t = 99 -> waterlevel -99 m <= dem, `flood_model.py` outer loop), permanently; the
+    obstacle-coupling study excludes them (`run_obstacle_coupling_study.py`, `reached`) and its
+    "converges within 4" was measured that way. Add the `reached` guard to production?
+  - Decide: england/wales local input keep DEM and EA levels in ODN, but two_component adds a
+    static level (MDT + offset + fingerprint) in the GOCO06s frame (`boundaries.static_station_levels`).
+    Attenuated propagation for the ODN scenarios (and their global-input twins), or a datum shift
+    of the static level?
+  - The EA-seeded station caches (`preparation/cache_local_waterlevel_stations.py`) sit at the
+    output path of rule `cache_waterlevel_stations`, whose input (the global NetCDFs) is newer:
+    the next run overwrites the EA levels with global ones. Guard or separate rule.
+  - Every documented run path passes `--rerun-triggers mtime` (run_eikonal_dag.py, HPC
+    generators, run_bangkok_case_study.bat), so config changes never rerun outputs there; the
+    rerun needs clean output directories. CLAUDE.md / docs/hpc.md describe the profile only.
+  - Not declared as inputs although they change results: the hydrograph NetCDF (duration
+    correction), the MDT station file and SLR_0 NetCDF (static level), the tile-grid contents, the
+    DeltaDTM/land-cover sources (fix_ocean_mask edits in place). `boundary_conditions` is passed
+    whole as a param (any edit reruns everything when params trigger).
+  - `generate_hpc_preprocess_job.py` hard-codes the global station cache, ignoring
+    `stations_cache_dir`; `coastline_nodes.parquet` is not cleared by `force` and ignores the mask
+    codes; `compute_goco06s_absolute_raster` is unreachable (extract_dem takes it as a param).
+  - Docs behind the code: methods_02 §4.1 (knn 5 / power 3, edge-connected ocean, IDW per ocean
+    component), §2.4 and config.yml:263 (per-RP product hydrographs), §4.4 and
+    flood_model.py:37 (no 0.10 m wet threshold; validation at 0.01 m), §4.5 (lakes and rivers
+    are not excluded); methods_01 §4 (hop seeds from the whole overlap; coastline nodes; the
+    2020 baseline offset); methods_04a (SFINCS harness without a static level; old fsf units in
+    "Structural limitations"); README outputs (`*_v2`); eikonal.py:211 epsilon; the 0.25 friction
+    provenance (fitted with knn 15 / power 2, no static level) until the recalibration.
+  - Hygiene: code defaults differing from config (idw_power 2.0, max_outer_iterations 3,
+    rasters.extract_dem fill sizes, sync_deltadtm delete_zips .get False); study constants
+    (epsilon, 40 rounds, CELL_M 30); hard-coded P:/ paths in review_critiques/ and boundary_test/;
+    duplicate decode_waterdepth (rasters / merge); dead flood_agreement.prune_to_ocean_connected;
+    dangling references (config.yml:158, event_volume.py:203, flood_agreement.py:10, boundaries.py:27).
 - **Flood-model comparison and calibration (branch `model-variants`).** Seven variants share
   seeds, coastline, static level and wet rule (`src/flood_variants.py`, `flood_model.FLOOD_MODELS`):
   bathtub, connected bathtub (IDW of the seed levels), straight-line attenuation (exact max over
@@ -151,16 +186,10 @@ Open:
   2. Snakemake: the station caches re-run (their scenario NetCDFs are inputs) and with them every
      tile; then the SFINCS forcing, the fsf recalibration on the 498 tiles
      (`sfincs_tiles/generate_calibration_jobs.py stage1|stage2` on Hydrax), test 8 and the tile rerun.
-  One processed_inputs tree serves every config of a data root: once it holds product levels,
-  configs pinned to `coast_rp` (bangkok_chao_phraya, calibration_500_tiles, deltas_*) stop at
-  `boundaries.check_scenario_source` until `boundary_conditions` is rebuilt for them.
-- **Pinned scenarios and the new keys:** the scenario pins keep `storm_tide_source: coast_rp`,
-  `knn: 15`, `idw_power: 2`; the dry run of bangkok_chao_phraya (re-materialized) has 599 jobs
-  against the 480 baseline, from changed params (new keys in the `boundary_conditions` and
-  `flooding` dicts, `hydrograph_path`) and the station cache's new input; results are identical.
-  `--rerun-triggers mtime` skips them. Re-materialize the scenario configs on both machines
-  (`snakemake_workflow/scripts/materialize_configs.py`; the checked-in bangkok one also lacks
-  `slr_baseline_offset_m`).
+  One processed_inputs tree serves every config of a data root; the deltas scenarios build their
+  own WL_scenarios and station caches (`boundary_conditions.waterlevel_nc_dir`,
+  `stations_cache_dir`) with `run_preparation.py boundary_conditions` and their config.
+  Re-materialize the scenario configs on both machines (`materialize_configs.py`).
 - **Storm-tide product: external review of decisions 1-3 (review brief, 2026-11-08).** Order,
   each step gated on the one before; the production rerun waits for steps 1-4.
   1. GPD shape cap: parametric bootstrap of the station shapes (`open_guesses.py shape_noise`).
