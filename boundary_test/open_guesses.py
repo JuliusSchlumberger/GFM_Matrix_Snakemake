@@ -226,12 +226,8 @@ def _loo_basin(levels: dict, gauge_rp100: pd.Series, basin: pd.Series, fit: np.n
     """Per gauge: the raise that zeroes the median RP100 bias at the `fit` gauges of the other basins."""
     values = np.array(sorted(levels))
     err = np.stack([levels[v]["new_loo_rp100_m"] - gauge_rp100 for v in values])
-    raise_ = pd.Series(np.nan, index=gauge_rp100.index)
-    for b in basin.unique():
-        bias = np.median(err[:, fit & (basin != b).to_numpy()], axis=1)
-        raise_[(basin == b).to_numpy()] = (float(np.interp(0.0, bias, values)) if np.all(np.diff(bias) > 0)
-                                           else values[np.argmin(np.abs(bias))])
-    return raise_
+    per, all_value = stp.loo_basin_fit(values, err[:, fit], basin.to_numpy()[fit])
+    return basin.map(lambda b: per.get(b, all_value)).astype(float)
 
 
 def tc_scale(check: GaugeCheck, dest: Path, workers: int) -> None:

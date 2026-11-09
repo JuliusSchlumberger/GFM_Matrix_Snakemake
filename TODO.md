@@ -322,21 +322,21 @@ Open:
   1950-2024 (the 1950-1978 store `gtsm_surge_stations_1950_1978` and a 1950-2024 FES basis in the
   cache), IBTrACS mask at stations with a COAST-RP TC part (`tc_hours`), shape pooled at 300 km
   over all stations except the GTSM-QA ones (`shape_profiles.parquet`, `pooled_shapes`; TC and
-  non-TC pooled together, as `pooled_shape` tested it), no cap, COAST-RP_TC + `TC_SHIFT_M` of the
+  non-TC pooled together, as `pooled_shape` tested it), no cap, COAST-RP_TC + the fitted shift of the
   station's basin (`station_basins`), flags `flag_tail_uncertain` / `flag_tc_coast` /
   `flag_fallback_r` in `levels.parquet` and the levels file. Open:
-  - The basin shifts are test 2's values (`open_guesses.py tc_scale`: 1979-2024, cap 0.35, no
-    pooling), hard-coded in `TC_SHIFT_M`. Wanted (user, 2026-11-09): refit them inside the
-    production build on the new fit. Blocked: `tc_scale` scores against test 9's gauge
-    reference (`gauge_gauge_rp100_m` of `boundary_test/surge_correction.py`, the gauge's own
-    skew surges on its own harmonic tide; local `.cleanup_baseline/level_sources`), which the
-    build does not compute. It has the GESLA records, gauge constants and station classes, so the
-    reference could be ported into `prepare_storm_tide_product` (gauge set and years may differ
-    slightly from test 9). The fit itself does not depend on a prior shift: it rebuilds the
-    gauges' stations (r left out, mask on) with trial shifts 0-0.4 m on the raw COAST-RP_TC and
-    interpolates where the median RP100 bias of the other basins' TC-dominated gauges is zero;
-    five rebuilds of ~620 stations are needed because the TC and ETC rates combine nonlinearly.
-    Decide: port the reference into the build, or keep the hard-coded shifts.
+  - Basin shifts refit in the build (user, 2026-11-09; `prepare_storm_tide_product.tc_shift_fit`,
+    `stp.loo_basin_fit`, written to `tc_shifts.csv` / `tc_shift_gauges.parquet`): the
+    TC-dominated gauges' stations rebuilt as in production (1950-2024, mask, pooled shape, r
+    without the gauge) at trial shifts 0-0.4 m on the raw COAST-RP_TC, against the gauge's own
+    skew-surge convolution at RP100 (`gauge_rp100_m` from `stp._ratio_site`). Differences from
+    test 9's reference (`surge_correction.py gauge_gauge_rp100_m`): gauge set = the build's ratio
+    gauges (>= 20 good years since 1979, GTSM point <= 10 km) instead of `site_sets.extremes`;
+    gauge tide from the build's own harmonic fit (`gauge_constants.npz`) instead of
+    `gesla_harm`; years = gauge years with GTSM-on-FES coverage instead of GTSM-own-tide
+    coverage (both 1979-2024, >= 15 years); station class from the gauge's COAST-RP station
+    instead of `extremes.parquet`; station tides carry the gauge tide correction. Check the
+    fitted shifts against test 2's 0.18-0.25 m after the rebuild.
   - Flags (decided, user 2026-11-09): tail-uncertain = the pooled shape used > 0.2; TC-coast = a
     COAST-RP TC part (`tc_dominant_rp*` is also in `levels.parquet`); fallback-r = fewer than 3
     gauges within 500 km. Nodes: own shape and TC part, fallback-r if any blended station has it.

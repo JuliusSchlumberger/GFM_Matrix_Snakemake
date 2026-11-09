@@ -137,6 +137,17 @@ def skew_level(model: dict, rp: float) -> float:
     return float(model["u"] + genpareto.isf(p, model["shape"], 0, model["scale"])) if p < 1 else np.nan
 
 
+def total_level(model: dict, peaks: np.ndarray, weights: np.ndarray, cycles_per_yr: float, rp: float) -> float:
+    """Level (m) whose lambda(z) over the high waters (`tide_peaks`) is -ln(1 - 1/rp)."""
+    target = -np.log1p(-1.0 / rp)
+    lo, hi = peaks.min(), peaks.max() + 20.0
+    for _ in range(50):
+        z = 0.5 * (lo + hi)
+        rate = cycles_per_yr * model["theta"] * np.sum(weights * exceedance(model, z - peaks))
+        lo, hi = (z, hi) if rate > target else (lo, z)
+    return 0.5 * (lo + hi)
+
+
 def tide_peaks(tide: np.ndarray, step_hr: float,
                min_prominence: float | None = None) -> tuple[np.ndarray, np.ndarray, float]:
     """High-water heights binned to 1 cm (values, weights) and high waters per year."""

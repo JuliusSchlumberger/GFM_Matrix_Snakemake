@@ -48,7 +48,7 @@ from fes_tide_stats import STEP_MIN as FES_STEP_MIN  # noqa: E402
 from levels_tides import FES_CACHE, SEASONAL  # noqa: E402
 from tide_prediction import HOURLY_START, on_hourly_grid, remove_annual_means  # noqa: E402
 from skew_surge import (  # noqa: E402
-    HW_PROMINENCE, exceedance, high_waters, scaled, skew_level, skew_surges, surge_model, tide_peaks)
+    HW_PROMINENCE, high_waters, scaled, skew_level, skew_surges, surge_model, tide_peaks, total_level)
 
 RPS = (2, 10, 50, 100)
 YEAR_COVERAGE = 0.8
@@ -61,16 +61,6 @@ SITES_PER_TASK = 10
 EARTH_RADIUS_KM = 6371.0
 COMBINATIONS = {"gauge_gauge": ("gauge", "gauge"), "gtsm_gtsm": ("gtsm", "gtsm"), "gtsm_fes": ("gtsm", "fes"),
                 "gtsm_gaugetide": ("gtsm", "gauge")}
-
-
-def total_level(model: dict, peaks: np.ndarray, weights: np.ndarray, cycles_per_yr: float, rp: float) -> float:
-    target = -np.log1p(-1.0 / rp)
-    lo, hi = peaks.min(), peaks.max() + 20.0
-    for _ in range(50):
-        z = 0.5 * (lo + hi)
-        rate = cycles_per_yr * model["theta"] * np.sum(weights * exceedance(model, z - peaks))
-        lo, hi = (z, hi) if rate > target else (lo, z)
-    return 0.5 * (lo + hi)
 
 
 def _site_models(out: Path, site: dict, surge: np.ndarray, surge_idx: np.ndarray, pos: dict, bases: dict) -> dict | None:

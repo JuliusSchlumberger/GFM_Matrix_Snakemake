@@ -14,12 +14,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "preparation"))
 from boundaries import storm_tide_hydrograph_path, storm_tide_levels_path  # noqa: E402
 from flood_model import _idw_nearest_k  # noqa: E402
-from skew_surge import HW_PROMINENCE, high_waters, profile_loglik  # noqa: E402
+from skew_surge import HW_PROMINENCE, high_waters, profile_loglik, skew_level, total_level  # noqa: E402
 from prepare_boundary_conditions import nearest_slr_m  # noqa: E402
 from storm_tide_product import (  # noqa: E402
-    BLEND_QUANTILES, FLAG_COLUMNS, NODE_LEVEL_SOURCE, RPS, SHAPE_GRID, TC_SHIFT_ALL_M, TC_SHIFT_M, blended_model,
-    export_levels, model_vector, pooled_shapes, ratio_covariate, station_basins, station_flags, station_ratio,
-    station_ratios, station_records, station_surge_model, tc_hours, tc_input_levels, tc_shift_m)
+    BLEND_QUANTILES, FLAG_COLUMNS, NODE_LEVEL_SOURCE, RPS, SHAPE_GRID, blended_model, export_levels, loo_basin_fit,
+    model_vector, pooled_shapes, ratio_covariate, station_basins, station_flags, station_ratio, station_ratios,
+    station_records, station_surge_model, tc_hours, tc_input_levels, trial_root)
 from tide_prediction import consistent_version_flag  # noqa: E402
 
 HOURS = np.arange(24 * 30, dtype=float)
@@ -182,12 +182,39 @@ def test_cyclone_mask_drops_the_masked_cycles_from_the_fit() -> None:
     assert open_model["sorted"].max() > 2.5 > model["sorted"].max()
 
 
-def test_tc_shift_follows_the_basin_and_reaches_the_tc_levels() -> None:
-    assert tc_shift_m("WP") == TC_SHIFT_M["WP"] and tc_shift_m("EP") == tc_shift_m("none") == TC_SHIFT_ALL_M
-    assert all(0.18 <= v <= 0.26 for v in [*TC_SHIFT_M.values(), TC_SHIFT_ALL_M])
-    st = {"tc": np.array([1.0, 2.0]), "tc_shift_m": tc_shift_m("NA")}
-    assert tc_input_levels(st) == pytest.approx([1.0 + TC_SHIFT_M["NA"], 2.0 + TC_SHIFT_M["NA"]])
+def test_tc_shift_reaches_the_tc_levels() -> None:
+    assert tc_input_levels({"tc": np.array([1.0, 2.0]), "tc_shift_m": 0.2}) == pytest.approx([1.2, 2.2])
     assert tc_input_levels({"tc": None}) is None
+
+
+def test_trial_root_interpolates_a_rising_bias_and_otherwise_takes_the_nearest_trial() -> None:
+    trials = np.array([0.0, 0.1, 0.2, 0.3, 0.4])
+    assert trial_root(trials, np.array([-0.25, -0.15, -0.05, 0.05, 0.15])) == pytest.approx(0.25)
+    assert trial_root(trials, np.array([0.1, 0.2, 0.3, 0.4, 0.5])) == 0.0  # clamped to the range
+    assert trial_root(trials, np.array([-0.2, -0.03, -0.03, 0.1, 0.2])) == pytest.approx(0.1)
+
+
+def test_loo_basin_fit_leaves_the_basin_out_and_falls_back_to_all_gauges() -> None:
+    trials = np.array([0.0, 0.1, 0.2, 0.3, 0.4])
+    # each gauge's error rises with the shift; its zero sits at the gauge's own 'true' shift
+    true = {"NA": 0.3, "WP": 0.1, "SP": 0.2}
+    basin = np.array(["NA", "NA", "NA", "WP", "WP", "SP"])
+    err = trials[:, None] - np.array([true[b] for b in basin])[None, :]
+    per, all_value = loo_basin_fit(trials, err, basin)
+    assert all_value == pytest.approx(np.median([0.3, 0.3, 0.3, 0.1, 0.1, 0.2]))
+    assert per["NA"] == pytest.approx(0.1)  # median of WP, WP, SP
+    assert per["WP"] == pytest.approx(0.3)  # median of NA x3, SP
+    assert per["SP"] == pytest.approx(0.3)
+    assert per.get("EP", all_value) == all_value
+    lone, lone_all = loo_basin_fit(trials, err[:, :3], basin[:3])
+    assert lone["NA"] == lone_all == pytest.approx(0.3)
+
+
+def test_total_level_of_a_constant_tide_is_the_skew_surge_level() -> None:
+    model = {"sorted": np.linspace(-0.5, 0.5, 1001), "u": 0.4, "p_u": 0.1, "shape": 0.0, "scale": 0.1, "theta": 1.0,
+             "cycles_per_yr": 705.0}
+    z = total_level(model, np.array([1.0]), np.array([1.0]), 705.0, 100)
+    assert z == pytest.approx(1.0 + skew_level(model, 100), abs=1e-6)
 
 
 def _ibtracs(path: Path, rows: list[tuple]) -> Path:
@@ -238,3 +265,26 @@ def test_station_records_join_the_early_and_main_surge_stores(tmp_path: Path) ->
     assert g.tolist() == [1.0] * 12 + [2.0] * 12 + [3.0] * 24
     assert th.tolist() == [1.0] * n_hours and t10.tolist() == [1.0] * 6
     assert years[0] == 1950 and len(years) == n_hours
+
+
+def test_tc_shift_fit_scores_the_tc_dominated_gauges_at_their_nearest_station(tmp_path: Path) -> None:
+    import prepare_storm_tide_product as prep
+    stations = pd.DataFrame({"lon": [-80.0, 120.0, 0.0], "lat": [25.0, 20.0, 50.0]})
+    gauges = pd.DataFrame({"lon": [-80.05, 120.05, 0.0, 60.0], "lat": [25.0, 20.0, 50.0, 0.0],
+                           "station_class": ["tc_dominated", "tc_dominated", "no_tc", "tc_dominated"],
+                           "calibrate": [False, False, True, False], "ratio_fes": [1.1, 1.2, 1.0, 1.0],
+                           "skew_gtsmfes_m": [0.5, 0.6, 0.4, 0.3], "n_years": 30, "first_year": 1990,
+                           "last_year": 2019, "gauge_rp100_m": [2.3, 3.1, 1.0, 1.0]},
+                          index=["us", "cn", "uk", "far"])
+    todo = [{"station": k, "tc": None} for k in range(3)]
+    trials = np.array([0.0, 0.1, 0.2, 0.3, 0.4])
+    # station RP100 = 2.0 / 3.0 + shift: zero bias at 0.3 (us) and 0.1 (cn)
+    levels = pd.DataFrame([2.0 + trials, 3.0 + trials], columns=list(trials))
+    with patch("storm_tide_product.trial_levels", return_value=levels) as tl, \
+            patch("storm_tide_product.station_basins", return_value=np.array(["NA", "WP"], dtype=object)):
+        shifts, all_shift = prep.tc_shift_fit(prep._Paths(tmp_path, tmp_path), stations, todo, gauges, tmp_path,
+                                              [], 1)
+    assert [i["station"] for i in tl.call_args[0][0]] == [0, 1]  # "far" has no station within 25 km
+    assert shifts == {"NA": pytest.approx(0.1), "WP": pytest.approx(0.3)} and all_shift == pytest.approx(0.2)
+    table = pd.read_csv(tmp_path / "tc_shifts.csv", keep_default_na=False)
+    assert table.basin.tolist() == ["NA", "WP", "all"] and table.gauges.tolist() == [1, 1, 2]

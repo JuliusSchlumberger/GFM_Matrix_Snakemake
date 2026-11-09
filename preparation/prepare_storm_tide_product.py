@@ -14,7 +14,8 @@ boundary_conditions.storm_tide_product_dir (~3 GB):
   gauges/       gauge table (ratio, class, tidal MHWS), TC donor shapes and the tide-correction
                 gauges (tide_gauges.parquet: short harmonic fits of every coastal GESLA site)
   stations.csv, shape_profiles.parquet (GPD profile likelihood per station, for the pooled
-  shape), levels.parquet, hydrographs.npy, hydrograph_info.parquet, surge_models.npy
+  shape), tc_shifts.csv and tc_shift_gauges.parquet (the per-basin COAST-RP_TC shift fit and its
+  gauges, `tc_shift_fit`), levels.parquet, hydrographs.npy, hydrograph_info.parquet, surge_models.npy
   (stp.model_vector per station), node_levels.parquet, and the two product files
   (boundaries.PRODUCT_*_FILENAME; the levels file holds the stations, then the coastline nodes).
 force=True (default) recomputes everything outside the cache, and the cached coastline nodes
@@ -79,6 +80,8 @@ class _Paths:
         self.surge_models = root / "surge_models.npy"
         self.node_levels = root / "node_levels.parquet"
         self.shape_profiles = root / "shape_profiles.parquet"
+        self.tc_shifts = root / "tc_shifts.csv"
+        self.tc_shift_gauges = root / "tc_shift_gauges.parquet"
 
 
 def _bases(models: dict, paths: _Paths, atlases) -> None:
@@ -243,6 +246,48 @@ def node_levels(config: dict, paths: _Paths, models: dict, todo: list[dict], lev
     return out
 
 
+def tc_shift_fit(paths: _Paths, stations: pd.DataFrame, todo: list[dict], gauges: pd.DataFrame,
+                 ibtracs_path: Path, stores, workers: int) -> tuple[dict, float]:
+    """COAST-RP_TC shift (m) per IBTrACS basin and over all basins (`stp.loo_basin_fit`).
+
+    Each TC-dominated gauge with a reference level takes the nearest station within
+    stp.GAUGE_STATION_KM, rebuilt as in `todo` (mask, pooled shape) with r computed without the
+    gauge, at every stp.TC_TRIAL_SHIFTS_M. Writes tc_shifts.csv and tc_shift_gauges.parquet.
+    """
+    ref_col = f"gauge_rp{stp.REFERENCE_RP}_m"
+    if ref_col not in gauges:
+        raise ValueError(f"{paths.gauges / 'gauges.parquet'} has no {ref_col}; rebuild it with force=True")
+    tcd = gauges[(gauges.station_class == "tc_dominated") & np.isfinite(gauges[ref_col])]
+    k, dist = stp.nearest(stations[["lon", "lat"]].to_numpy(dtype=float), tcd[["lon", "lat"]].to_numpy(dtype=float))
+    near = dist <= stp.GAUGE_STATION_KM
+    tcd = tcd[near].assign(station=k[near], station_km=dist[near])
+    inputs = []
+    for j, (name, g) in enumerate(tcd.iterrows()):
+        others = gauges.drop(index=name)
+        st = int(g.station)
+        r = float(stp.station_ratios(stations.iloc[[st]], others).r_idw.iloc[0])
+        inputs.append({**todo[st], "station": j, "r_idw": r, "r_covariate": stp.ratio_covariate(others)})
+    logger.info("COAST-RP_TC shift fit at %d TC-dominated gauges", len(inputs))
+    trials = np.array(stp.TC_TRIAL_SHIFTS_M)
+    lev = stp.trial_levels(inputs, stores, paths.station_bases, workers, trials, stp.RECORD_START)
+    tcd = tcd.iloc[lev.index]
+    tcd["basin"] = stp.station_basins(tcd[["lon", "lat"]].to_numpy(dtype=float), ibtracs_path)
+    err = lev.to_numpy().T - tcd[ref_col].to_numpy()
+    shifts, all_shift = stp.loo_basin_fit(trials, err, tcd.basin.to_numpy())
+    out = tcd[["station", "station_km", "basin", "n_years", "first_year", "last_year", ref_col]].copy()
+    for t, col in zip(trials, lev.columns):
+        out[f"rp{stp.REFERENCE_RP}_shift_{t:g}_m"] = lev[col].to_numpy()
+    out.to_parquet(paths.tc_shift_gauges)
+    counts = tcd.basin.value_counts()
+    table = pd.DataFrame([{"basin": b, "shift_m": v, "gauges": int(counts[b]), "fit_gauges": int(len(tcd) - counts[b])}
+                          for b, v in shifts.items()]
+                         + [{"basin": "all", "shift_m": all_shift, "gauges": len(tcd), "fit_gauges": len(tcd)}])
+    table.to_csv(paths.tc_shifts, index=False)  # read it with keep_default_na=False: "NA" is the North Atlantic
+    logger.info("COAST-RP_TC shifts (m; other basins use 'all'), gauge years %d-%d:\n%s",
+                int(tcd.first_year.min()), int(tcd.last_year.max()), table.round(3).to_string(index=False))
+    return shifts, all_shift
+
+
 def run(config: dict, force: bool = True) -> None:
     """Write the storm-tide product files (and intermediates) into storm_tide_product_dir."""
     cfg = config["storm_tide_product"]
@@ -254,7 +299,7 @@ def run(config: dict, force: bool = True) -> None:
     if force:
         for p in [paths.gauges / n for n in ("gauges.parquet", "gauge_constants.npz", "tc_donors.parquet",
                                              "tc_donor_shapes.npy", "tide_gauges.parquet")] + [
-                paths.stations, paths.shape_profiles, paths.levels, paths.hydrographs, paths.info,
+                paths.stations, paths.shape_profiles, paths.tc_shifts, paths.tc_shift_gauges, paths.levels, paths.hydrographs, paths.info,
                 paths.surge_models, paths.node_levels, paths.coastline_nodes,
                 paths.root / PRODUCT_LEVELS_FILENAME, paths.root / PRODUCT_HYDROGRAPHS_FILENAME]:
             if p.exists():
@@ -303,8 +348,7 @@ def run(config: dict, force: bool = True) -> None:
                 "hc": atlas["hc"][a][k] * f, "mhws_m": float(atlas["mhws"][a][k] * f),
                 "r_idw": float(ratios.r_idw.iloc[k]), "r_covariate": covariate, "tc": None, "tc_shape": tc_shapes.get(st)}
         if has_tc[k]:
-            item.update({"tc": tc_levels.loc[s.station_id].to_numpy(), "tc_hours": mask_hours.get(st),
-                         "tc_shift_m": stp.tc_shift_m(basin[k])})
+            item.update({"tc": tc_levels.loc[s.station_id].to_numpy(), "tc_hours": mask_hours.get(st)})
         todo.append(item)
 
     if not paths.shape_profiles.exists():
@@ -321,6 +365,9 @@ def run(config: dict, force: bool = True) -> None:
                                prof.loc[pool].drop(columns="gtsm_jumps").to_numpy(), lonlat)
     for item, shape in zip(todo, pooled):
         item["pooled_shape"] = shape
+    shifts, all_shift = tc_shift_fit(paths, stations, todo, gauges, Path(cfg["ibtracs_path"]), stores, workers)
+    for k in np.flatnonzero(has_tc):
+        todo[k]["tc_shift_m"] = shifts.get(basin[k], all_shift)
 
     logger.info("Levels and hydrographs at %d stations", len(todo))
     hyd = np.lib.format.open_memmap(paths.hydrographs, mode="w+", dtype=np.float32,

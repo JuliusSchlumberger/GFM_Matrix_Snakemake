@@ -943,8 +943,9 @@ FES2022, FES2014, COAST-RP), into `boundary_conditions.storm_tide_product_dir`:
     p90.
   - Station r: median 1.18. 203 stations are capped; 13,583 take the power law (no 3 gauges within
     500 km).
-- *TC part.* COAST-RP_TC, raised by the shift of its IBTrACS basin (0.18 m West Pacific to
-  0.25 m North Atlantic, fitted at the TC-dominated gauges of the other basins), enters as an
+- *TC part.* COAST-RP_TC, raised by the shift of its IBTrACS basin (fitted in the build at the
+  TC-dominated gauges of the other basins against the gauge's own skew-surge convolution, trial
+  shifts 0-0.4 m; 0.18-0.25 m on the 1979-2024 capped fit), enters as an
   annual exceedance rate added to the ETC rate, which is COAST-RP's own combination. TC is a
   gap-filler until test 10.
 - *Flags* (levels file): tail-uncertain (GPD shape > 0.2), TC-coast (a COAST-RP TC part) and

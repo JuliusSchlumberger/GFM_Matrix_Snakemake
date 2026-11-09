@@ -12,9 +12,9 @@ MIN_NEIGHBOURS); with fewer, the gauges' power law of r in the station's own GTS
 surge at RATIO_RP (`ratio_covariate`: r falls as the surge grows, the large ratios sit where
 GTSM's surge is a decimetre). Capped at R_CAP. Atlas: FES2022, FES2014 where
 `tide_prediction.consistent_version_flag` fires.
-TC: COAST-RP_TC's levels, raised by its cyclone basin's TC_SHIFT_M (COAST-RP_TC is low at the
-gauges), become an annual exceedance rate added to the ETC rate, as COAST-RP combines its own
-two parts. RP levels solve rate(z) = -ln(1 - 1/RP), m above local MSL.
+TC: COAST-RP_TC's levels, raised by its cyclone basin's shift (COAST-RP_TC is low at the
+gauges; `loo_basin_fit`), become an annual exceedance rate added to the ETC rate, as COAST-RP
+combines its own two parts. RP levels solve rate(z) = -ln(1 - 1/RP), m above local MSL.
 Flags (`station_flags`): tail_uncertain (GPD shape > TAIL_UNCERTAIN_SHAPE), tc_coast (a COAST-RP_TC
 part), fallback_r (r from the covariate fallback).
 Hydrographs: the FES tide around the high water nearest the median tide-at-peak of the
@@ -44,7 +44,7 @@ from gesla import extract_record
 from gtsm_series import load_series, station_series
 from skew_surge import (
     HW_PROMINENCE, SPIKE_M, annual_rate, cluster_excesses, despike, exceedance, high_waters, profile_loglik, scaled,
-    shifted, skew_level, skew_surges, surge_model, tide_peaks)
+    shifted, skew_level, skew_surges, surge_model, tide_peaks, total_level)
 from storm_tide_hydrograph import (
     STEPS_PER_HR, annual_maximum_events, gaussian_shape, high_water_indices, high_water_window, median_surge_shape,
     rp_event_selection, rp_hydrograph)
@@ -79,11 +79,11 @@ FLAG_COLUMNS = ("flag_tail_uncertain", "flag_tc_coast", "flag_fallback_r")
 # no wind is on record (most pre-1979 South Indian, South Pacific and North Indian tracks)
 TC_MASK_KM, TC_MASK_HR, TC_MIN_WIND_KT = 300.0, 24, 34.0
 BASIN_KM = 300.0  # a station's basin: the most frequent IBTrACS basin of the track points this close
-# COAST-RP_TC shift (m) per IBTrACS basin (open_guesses.py tc_scale, tc_scale.parquet
-# tc_shift_m_loo_basin): it zeroes the median RP100 bias of the masked fit at the TC-dominated
-# gauges of the other basins; basins without such gauges (EP, SA, none) take the fit over all.
-TC_SHIFT_M = {"NA": 0.253, "WP": 0.183, "SP": 0.234, "SI": 0.242, "NI": 0.240}
-TC_SHIFT_ALL_M = 0.237
+# COAST-RP_TC shift fit: trial shifts (m) scored at the TC-dominated gauges against the gauge's
+# own skew-surge convolution at REFERENCE_RP; a gauge takes the nearest station within GAUGE_STATION_KM
+TC_TRIAL_SHIFTS_M = (0.0, 0.1, 0.2, 0.3, 0.4)
+REFERENCE_RP = 100
+GAUGE_STATION_KM = 25.0
 # Hydrographs (accepted generator, INPUT_ANALYSIS.md §8.3)
 BASE_HR, EXTENDED_HR = 72, 120
 CENSORED_SHARE = 0.25  # share of annual maxima above MSL over a whole +-BASE_HR half: use EXTENDED_HR
@@ -221,12 +221,15 @@ def _ratio_site(site: dict, records: Path, surge, surge_idx: np.ndarray, pos: di
     common = sorted(years["gauge"][1] & years["gtsmfes"][1])
     if len(common) < MIN_YEARS:
         return None
-    level = {}
+    model, level = {}, {}
     for name in ("gauge", "gtsmfes"):
         yr, s = years[name][0], skew[name]
-        level[name] = skew_level(surge_model(s[np.isin(yr, common) & np.isfinite(s)], len(common)), RATIO_RP)
-    return {"file_name": site["file_name"], "n_years": len(common), "skew_gauge_m": level["gauge"],
-            "skew_gtsmfes_m": level["gtsmfes"], "ratio_fes": level["gauge"] / level["gtsmfes"]}
+        model[name] = surge_model(s[np.isin(yr, common) & np.isfinite(s)], len(common))
+        level[name] = skew_level(model[name], RATIO_RP)
+    reference = total_level(model["gauge"], *tide_peaks(tg, 1.0, HW_PROMINENCE), REFERENCE_RP)
+    return {"file_name": site["file_name"], "n_years": len(common), "first_year": common[0], "last_year": common[-1],
+            "skew_gauge_m": level["gauge"], "skew_gtsmfes_m": level["gtsmfes"],
+            "ratio_fes": level["gauge"] / level["gtsmfes"], f"gauge_rp{REFERENCE_RP}_m": reference}
 
 
 def _ratio_task(args) -> list[dict]:
@@ -390,9 +393,62 @@ def station_basins(lonlat: np.ndarray, ibtracs_path: Path) -> np.ndarray:
     return np.array(out, dtype=object)
 
 
-def tc_shift_m(basin: str) -> float:
-    """COAST-RP_TC shift (m) of an IBTrACS basin."""
-    return TC_SHIFT_M.get(basin, TC_SHIFT_ALL_M)
+def trial_root(trials: np.ndarray, bias: np.ndarray) -> float:
+    """Trial value where `bias` (one per trial) crosses zero.
+
+    Linear interpolation where the bias rises strictly with the trial (clamped to the trial range),
+    else the trial with the smallest |bias|.
+    """
+    if np.all(np.diff(bias) > 0):
+        return float(np.interp(0.0, bias, trials))
+    return float(trials[np.argmin(np.abs(bias))])
+
+
+def loo_basin_fit(trials, err: np.ndarray, basin: np.ndarray) -> tuple[dict, float]:
+    """Per basin, the trial value zeroing the median error of the other basins' gauges; and over all gauges.
+
+    `err`: (trial, gauge) level - gauge reference (m); `basin`: per gauge. A basin with no other
+    basin's gauges takes the all-gauge value, as does any basin without gauges (dict.get default).
+    """
+    trials, err, basin = np.asarray(trials, dtype=float), np.asarray(err, dtype=float), np.asarray(basin)
+    all_value = trial_root(trials, np.median(err, axis=1))
+    per = {}
+    for b in np.unique(basin):
+        other = basin != b
+        per[str(b)] = trial_root(trials, np.median(err[:, other], axis=1)) if other.any() else all_value
+    return per, all_value
+
+
+def _trial_task(args) -> list:
+    chunk, stores, bases, start, trials = args
+    out = []
+    for st, g, th, t10, years in station_records(chunk, stores, bases, start):
+        try:
+            row, _, corrected, _ = station_surge_model(st, g, th, years)
+            if row["gtsm_jumps"] >= GTSM_QA_JUMPS:
+                z = [float(st["coast_rp"][RPS.index(REFERENCE_RP)])] * len(trials)
+            else:
+                z = [rp_levels(None, corrected, t10, tc_input_levels({**st, "tc_shift_m": v}))[f"rp{REFERENCE_RP}_m"]
+                     for v in trials]
+            out.append((st["station"], z))
+        except Exception as err:  # one bad station must not stop the pool; it is reported and skipped
+            print(f"  skipped station {st['station']}: {type(err).__name__}: {err}", flush=True)
+    return out
+
+
+def trial_levels(todo: list[dict], stores, bases: dict, workers: int, trials=TC_TRIAL_SHIFTS_M,
+                 start: np.datetime64 = HOURLY_START) -> pd.DataFrame:
+    """REFERENCE_RP level (m) per station input (rows, by "station") and trial COAST-RP_TC shift (columns).
+
+    Each trial replaces the input's own "tc_shift_m"; GTSM-QA stations keep COAST-RP's level.
+    """
+    tasks = [(todo[i:i + TASK_SIZE], _stores(stores), bases, start, tuple(trials))
+             for i in range(0, len(todo), TASK_SIZE)]
+    rows = {}
+    with ProcessPoolExecutor(workers) as pool:
+        for res in pool.map(_trial_task, tasks):
+            rows.update(dict(res))
+    return pd.DataFrame.from_dict(rows, orient="index", columns=list(trials)).sort_index()
 
 
 def tc_input_levels(st: dict) -> np.ndarray | None:
