@@ -87,6 +87,12 @@ dependencies:
       # ~/.cdsapirc credentials file (https://cds.climate.copernicus.eu/how-to-api),
       # not installable by conda-forge-only solve constraints used elsewhere here.
       - cdsapi==0.7.7
+      # Boundary-forcing test (boundary_test/): FES tide prediction, extremes, gauge tide
+      # analysis, PDF tables. Newer releases need numpy>=2 / xarray datatree.
+      - pyTMD==2.1.9
+      - pyextremes==2.6.1
+      - utide==0.3.1
+      - pdfplumber==0.11.9
 
 # Optional dev tools (type-check, not needed to run the pipeline):
 #   mamba install -n gfm mypy
