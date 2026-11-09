@@ -144,32 +144,51 @@ steps:
         bash "$(jobs_dir $C/${s}_materialized.yml)/submit_preprocess_and_dispatch.sh"
       done
 
-  - id: local_validation
+  # Five validation batches, 4 cores each, in parallel once the local runs are merged.
+  - id: validate_england_local
     after: [local_runs]
-    job: {partition: 4vcpu, cpus_per_task: 4, mem: 30G, time: "2-00:00:00"}
+    job: &validation_job {partition: 4vcpu, cpus_per_task: 4, mem: 30G, time: "2-00:00:00"}
     run: |
-      EL=$(hpc_config $C/england_local_input_materialized.yml); EG=$(hpc_config $C/england_global_input_materialized.yml)
-      WL=$(hpc_config $C/wales_local_input_materialized.yml); WG=$(hpc_config $C/wales_global_input_materialized.yml)
-      SB=$(hpc_config $C/sf_bay_local_input_materialized.yml); GL=$(hpc_config $C/config.yml)
+      EL=$(hpc_config $C/england_local_input_materialized.yml)
       "$PY" validation/rescore_floodzone3_local.py --config "$EL"
       "$PY" validation/rescore_1km_fp_buffer_local.py --config "$EL"
+
+  - id: validate_england_global
+    after: [local_runs]
+    job: *validation_job
+    run: |
+      EG=$(hpc_config $C/england_global_input_materialized.yml)
       "$PY" validation/rescore_england_fz3.py --config "$EG"
       "$PY" validation/rescore_1km_fp_buffer.py --config "$EG"
-      "$PY" validation/plot_local_vs_global_agreement.py --local-config "$EL" --global-config "$EG" --return-period RP100 \
-          --bbox -0.1717 52.5678 0.2529 53.0819 --out "$R/england_local_input/all_england/agreement_wash_RP100.png"
+
+  - id: validate_england_map
+    after: [local_runs]
+    job: *validation_job
+    run: |
+      EL=$(hpc_config $C/england_local_input_materialized.yml); EG=$(hpc_config $C/england_global_input_materialized.yml)
+      "$PY" validation/plot_local_vs_global_agreement.py --local-config "$EL" --global-config "$EG" --return-period RP100           --bbox -0.1717 52.5678 0.2529 53.0819 --out "$R/england_local_input/all_england/agreement_wash_RP100.png"
+
+  - id: validate_wales
+    after: [local_runs]
+    job: *validation_job
+    run: |
+      WL=$(hpc_config $C/wales_local_input_materialized.yml); WG=$(hpc_config $C/wales_global_input_materialized.yml)
       for script in rescore_floodzone3_local.py rescore_1km_fp_buffer_local.py; do
         "$PY" validation/$script --config "$WL" --benchmark-key wales_nrw_floodzone_seas --region severn_estuary
       done
       for rp in RP100 RP250; do
         "$PY" validation/validate_country.py --config "$WG" --country GBR --rp $rp --slr SLR_0
-        "$PY" validation/plot_local_vs_global_agreement.py --local-config "$WL" --global-config "$WG" \
-            --benchmark-key wales_nrw_floodzone_seas --region severn_estuary --return-period $rp
+        "$PY" validation/plot_local_vs_global_agreement.py --local-config "$WL" --global-config "$WG"             --benchmark-key wales_nrw_floodzone_seas --region severn_estuary --return-period $rp
       done
       "$PY" validation/rescore_1km_fp_buffer.py --config "$WG"
+
+  - id: validate_sf_bay
+    after: [local_runs]
+    job: *validation_job
+    run: |
+      SB=$(hpc_config $C/sf_bay_local_input_materialized.yml)
       SF_BENCH="zip://$R/inputs/validation/California/alameda_flooding_slr000.zip!flooding/v2.1/county_alameda_flddepth_slr000_w100.tif"
-      "$PY" validation/validate_sf_bay.py --config "$SB" --bbox -122.355 37.45 -121.99 37.91 --benchmark-path "$SF_BENCH" \
-          --benchmark-scale-m 0.01 --native-merged-path "$R/sf_bay_local_input/merged_results/local_native/waterdepth_RP100_SLR_0.tif" \
-          --out-dir "$R/sf_bay_local_input/validation/USA_alameda_sample"
+      "$PY" validation/validate_sf_bay.py --config "$SB" --bbox -122.355 37.45 -121.99 37.91 --benchmark-path "$SF_BENCH"           --benchmark-scale-m 0.01 --native-merged-path "$R/sf_bay_local_input/merged_results/local_native/waterdepth_RP100_SLR_0.tif"           --out-dir "$R/sf_bay_local_input/validation/USA_alameda_sample"
 
   # ── local comparisons with every flood-model variant at its calibrated run ──
   - id: local_variants
