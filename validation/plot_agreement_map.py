@@ -388,8 +388,11 @@ def plot_country(cfg: dict, country_iso: str, metric: str = "agreement") -> None
     variable = "extent"
 
     gfm_catalog = None
+    _catalog_paths = cfg["paths"]["hydromt_data_catalog"]
+    if isinstance(_catalog_paths, str):
+        _catalog_paths = [_catalog_paths]
     try:
-        gfm_catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
+        gfm_catalog = get_data_catalog([_REPO_ROOT / p for p in _catalog_paths], root=cfg["paths"]["root"])
     except Exception as e:
         print(f"  WARNING: could not build the GFM data catalog for the land/water background ({e}) - plotting without it.")
 

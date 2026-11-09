@@ -1,6 +1,8 @@
 # England hop-propagation test: a small, self-contained real cluster near The Wash estuary
-# (Lincolnshire), hop_distance 0-5, recomputed fresh for just this subset (not reused from the
-# all-England build - confirmed identical either way, so no external dependency was cut off).
+# (Lincolnshire), hop_distance 0-5. Its grid and manifest are the 51 tiles of
+# england_fine_tiles_all_england.gpkg lying wholly inside lon -0.1717..0.2529,
+# lat 52.5678..53.0819 (EPSG:4326), renumbered 0-50 in all-England tile_id order; hop_distance
+# recomputed for the subset equals the all-England value for every tile.
 # Purpose: validate collect_neighbor_wave_seeds end-to-end for england_lidar_dem tiles - never
 # exercised before (the Isles of Scilly test was all hop=0). Local-input only (no global
 # counterpart needed - this test is about the hop mechanism, not a local-vs-global comparison).
@@ -32,6 +34,7 @@ simulation:
   model_outputs: "{root}/england_hop_test/model_outputs"
   preprocessing_inputs_dir: null  # own per-tile inputs under model_outputs
 postprocessing:
+  merge_only: true  # validation run: the HPC postprocess chain merges only, no exposure / flood totals
   merged_outputs: "{root}/england_hop_test/merged_results"
 visualization:
   output_dir: "{root}/england_hop_test/figures"

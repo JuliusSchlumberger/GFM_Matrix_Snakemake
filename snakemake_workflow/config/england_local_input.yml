@@ -1,18 +1,20 @@
 # England local-input validation: real EA LIDAR DEM + EA design sea levels, both kept in
 # their native ODN datum (native_datum=native, data_catalog_local_input.yml - TODO.md: no
 # GOCO06s bridge, confirmed unnecessary since both legs already share a datum), over a fine,
-# overlapping tile grid built from EA's own 5km tiles (preparation/build_england_fine_tiles.py)
+# overlapping tile grid built from EA's own 5km tiles over all of England
+# (preparation/build_england_fine_tiles.py without --production-tile-id: 1836 tiles, hop 0-13)
 # - production's own tile_grid is sized for 30m data and is infeasible at England's native 1m
 # resolution (TODO.md). Diffed against england_global_input.yml, which uses the exact same
-# tile_grid.path (TODO.md D5). Scenario override layer on config.yml + config_local.yml
-# (config_utils.materialize_config).
+# tile_grid.path (TODO.md D5). Outputs sit under all_england/: the Isles of Scilly test grid's
+# outputs directly under {root}/england_local_input/ reuse tile_ids 0-14 for other tiles.
+# Scenario override layer on config.yml + config_local.yml (config_utils.materialize_config).
 
 # Two-component SLR propagation adds the static level MDT + 2020 offset (boundaries.static_station_levels)
 # in the GOCO06s frame to this ODN scenario's sea; it is kept, so a systematic overestimation here
 # may come from that offset between the two datums (TODO.md).
 
 tile_grid:
-  path: "{processed_inputs_dir}/mask/validation/england_fine_tiles.gpkg"
+  path: "{processed_inputs_dir}/mask/validation/england_fine_tiles_all_england.gpkg"
 
 paths:
   hydromt_data_catalog:
@@ -41,18 +43,19 @@ adaptation:
   slr_intensities: []
 
 simulation:
-  dem_source_manifest: "{processed_inputs_dir}/mask/validation/england_fine_dem_source_manifest.csv"
-  model_outputs: "{root}/england_local_input/model_outputs"
+  dem_source_manifest: "{processed_inputs_dir}/mask/validation/england_fine_dem_source_manifest_all_england.csv"
+  model_outputs: "{root}/england_local_input/all_england/model_outputs"
   preprocessing_inputs_dir: null  # own per-tile inputs under model_outputs
 postprocessing:
-  merged_outputs: "{root}/england_local_input/merged_results"
+  merge_only: true  # validation run: the HPC postprocess chain merges only, no exposure / flood totals
+  merged_outputs: "{root}/england_local_input/all_england/merged_results"
 visualization:
-  output_dir: "{root}/england_local_input/figures"
+  output_dir: "{root}/england_local_input/all_england/figures"
 validation:
   # Isolated from the shared default ({root}/validation) for the same reason as
   # boundary_conditions.stations_cache_dir above - england_global_input's own metrics CSVs
   # would otherwise collide with these at the exact same filename (standalone_metrics_path
   # does not key by scenario, only by benchmark/RP/SLR).
-  output_dir: "{root}/england_local_input/validation"
+  output_dir: "{root}/england_local_input/all_england/validation"
 hpc:
-  jobs_dir: "{root}/england_local_input/model_outputs/hpc_jobs"
+  jobs_dir: "{root}/england_local_input/all_england/model_outputs/hpc_jobs"

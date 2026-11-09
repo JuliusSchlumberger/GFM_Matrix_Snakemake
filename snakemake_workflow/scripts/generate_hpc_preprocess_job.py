@@ -3,7 +3,8 @@
 Tile targets are split into independent `snakemake --nolock` batches, followed by
 one afterany job that generates and submits the simulation waves.
 submit_preprocess_and_dispatch.sh first builds every shared, tile-independent
-output (geoid-offset raster, cached station GeoPackages) synchronously on the
+output (geoid-offset raster, GOCO06s absolute geoid when a local DEM bridges
+through it, cached station GeoPackages) synchronously on the
 machine that wrote resolved_config.yml: --nolock is only safe once those exist.
 Target paths mirror preprocessing.smk's templates.
 
@@ -26,8 +27,14 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from config_utils import atomic_write, load_config, load_hpc_config, merged_waterlevel_names, retry_transient_io  # noqa: E402
+from config_utils import (  # noqa: E402
+    atomic_write, dem_source_by_tile, dem_source_meta, get_data_catalog, load_config, load_hpc_config,
+    merged_waterlevel_names, retry_transient_io,
+)
 from hpc_common import _retry_wrapper_lines, _stage_configfile_lines, read_targets_lines, sbatch_header  # noqa: E402
+from vertical_datum import HYBRID_GRID_BRIDGES  # noqa: E402
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _target_paths(tile_dir: str, return_periods: list[str], waterlevel_names: list[str]) -> list[str]:
@@ -36,6 +43,20 @@ def _target_paths(tile_dir: str, return_periods: list[str], waterlevel_names: li
         for slr in waterlevel_names:
             paths.append(f"{tile_dir}/inputs/boundaries_{rp}_{slr}.gpkg")
     return paths
+
+
+def _needs_goco06s_absolute_raster(config: dict) -> bool:
+    """Return whether any tile's dem_source bridges through GOCO06s's absolute geoid (as extract_dem)."""
+    sources = set(dem_source_by_tile(config).values())
+    if not sources:
+        return False
+    catalog_paths = config["paths"]["hydromt_data_catalog"]
+    catalog_paths = [catalog_paths] if isinstance(catalog_paths, str) else catalog_paths
+    catalog = get_data_catalog([_REPO_ROOT / p for p in catalog_paths], root=config["paths"]["root"])
+    return any(
+        dem_source_meta(catalog, source, "native_datum", "egm2008", config["paths"]["root"]) in HYBRID_GRID_BRIDGES
+        for source in sources
+    )
 
 
 def _simulate_target_paths(tile_dir: str, return_periods: list[str], waterlevel_names: list[str]) -> list[str]:
@@ -137,6 +158,8 @@ def main() -> None:
 
     # Shared, non-tile outputs: must be built before any --nolock batch starts.
     linux_shared_targets = [linux_config["vertical_datum_correction"]["offset_raster_path"]]
+    if _needs_goco06s_absolute_raster(local_config):
+        linux_shared_targets.append(linux_config["vertical_datum_correction"]["goco06s_absolute_raster_path"])
     linux_bc = linux_config["boundary_conditions"]
     # As preprocessing.smk: the scenario's own stations_cache_dir, nothing to build when prebuilt.
     linux_stations_cache_dir = (linux_bc.get("stations_cache_dir")

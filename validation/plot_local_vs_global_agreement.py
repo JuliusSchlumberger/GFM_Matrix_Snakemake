@@ -51,6 +51,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _BLOCK_SIZE = 8192
 _CAT_DRY, _CAT_AGREE, _CAT_UNDER, _CAT_OVER = 0, 1, 2, 3
 _CAT_NODATA = 255
+_MAX_CATEGORY_PIXELS = 4_000_000_000  # one uint8 category array; all of England at 1 m is ~1e11
 
 
 def _crop_to_valid(category: np.ndarray, transform) -> tuple[np.ndarray, "rasterio.Affine"]:
@@ -78,7 +79,7 @@ def _fill_category(category, model_wet, benchmark_wet, domain_mask, row_slice, c
 
 
 def _category_and_metrics_local(
-    cfg, gfm_catalog, bench_catalog, rp, benchmark_key, country_iso, region_name,
+    cfg, gfm_catalog, bench_catalog, rp, benchmark_key, country_iso, region_name, bbox=None,
 ) -> tuple[np.ndarray, rasterio.Affine, rasterio.crs.CRS, dict]:
     val_cfg = cfg["validation"]
     slr = val_cfg["waterlevel_name"]
@@ -94,7 +95,7 @@ def _category_and_metrics_local(
     full_gdf = v.load_benchmark_4326(bench_catalog, spec)
     full_sindex = full_gdf.sindex
     region = region_name if region_name is not None else next(iter(spec.regions))
-    region_bbox = spec.regions[region]
+    region_bbox = spec.regions[region] if bbox is None else bbox
 
     native_dir = Path(cfg["postprocessing"]["merged_outputs"]) / "local_native"
     raster_path = native_dir / f"waterdepth_{rp}_{slr}.tif"
@@ -108,6 +109,11 @@ def _category_and_metrics_local(
         window = window.intersection(rasterio.windows.Window(0, 0, src.width, src.height))
         window = window.round_offsets().round_lengths()
         out_transform = src.window_transform(window)
+        if window.height * window.width > _MAX_CATEGORY_PIXELS:
+            raise ValueError(
+                f"local window is {window.height} x {window.width} px at native resolution, too large to "
+                f"classify in memory: pass a smaller --bbox"
+            )
         category = np.full((window.height, window.width), _CAT_NODATA, dtype="uint8")
 
         for row_off in range(0, window.height, _BLOCK_SIZE):
@@ -154,7 +160,7 @@ def _category_and_metrics_local(
 
 
 def _category_and_metrics_global(
-    cfg, gfm_catalog, bench_catalog, rp, benchmark_key, country_iso, region_name,
+    cfg, gfm_catalog, bench_catalog, rp, benchmark_key, country_iso, region_name, bbox=None,
 ) -> tuple[np.ndarray, rasterio.Affine, rasterio.crs.CRS, dict]:
     val_cfg = cfg["validation"]
     slr = val_cfg["waterlevel_name"]
@@ -172,7 +178,7 @@ def _category_and_metrics_global(
     full_gdf = v.load_benchmark_4326(bench_catalog, spec)
     full_sindex = full_gdf.sindex
     region = region_name if region_name is not None else next(iter(spec.regions))
-    region_bbox = spec.regions[region]
+    region_bbox = spec.regions[region] if bbox is None else bbox
     chunk_paths = _chunks_overlapping_bbox(region_bbox, pp_chunk_deg, merged_chunks_dir, rp, slr)
 
     pieces = []  # (category_block, transform) - mosaicked below
@@ -276,6 +282,9 @@ def main() -> None:
     parser.add_argument("--region", default=None,
                         help="named region bounding the scoring window - required if the "
                              "benchmark has more than one (e.g. wales_nrw_floodzone_seas)")
+    parser.add_argument("--bbox", nargs=4, type=float, default=None, metavar=("LON_MIN", "LAT_MIN", "LON_MAX", "LAT_MAX"),
+                        help="score and plot this EPSG:4326 window instead of the whole region (needed for a "
+                             "country-scale 1 m local merge, whose full-resolution map does not fit in memory)")
     parser.add_argument("--return-period", default="RP100")
     parser.add_argument("--out", default=None)
     args = parser.parse_args()
@@ -288,19 +297,22 @@ def main() -> None:
     if isinstance(local_catalog_paths, str):
         local_catalog_paths = [local_catalog_paths]
     local_gfm_catalog = get_data_catalog([_REPO_ROOT / p for p in local_catalog_paths], root=local_cfg["paths"]["root"])
-    global_gfm_catalog = get_data_catalog(_REPO_ROOT / global_cfg["paths"]["hydromt_data_catalog"], root=global_cfg["paths"]["root"])
+    global_catalog_paths = global_cfg["paths"]["hydromt_data_catalog"]
+    if isinstance(global_catalog_paths, str):
+        global_catalog_paths = [global_catalog_paths]
+    global_gfm_catalog = get_data_catalog([_REPO_ROOT / p for p in global_catalog_paths], root=global_cfg["paths"]["root"])
     bench_catalog = get_data_catalog(_REPO_ROOT / val_cfg["benchmark_catalog"], root=val_cfg["benchmark_root"])
     v.fix_catalog_meta_encoding(bench_catalog, _REPO_ROOT / val_cfg["benchmark_catalog"])
 
     rp = args.return_period
     print(f"Scoring+classifying local ({rp})...", flush=True)
     local_cat, local_t, local_crs, local_metrics = _category_and_metrics_local(
-        local_cfg, local_gfm_catalog, bench_catalog, rp, args.benchmark_key, args.country_iso, args.region,
+        local_cfg, local_gfm_catalog, bench_catalog, rp, args.benchmark_key, args.country_iso, args.region, args.bbox,
     )
     print(f"  local: {local_metrics}")
     print(f"Scoring+classifying global ({rp})...", flush=True)
     global_cat, global_t, global_crs, global_metrics = _category_and_metrics_global(
-        global_cfg, global_gfm_catalog, bench_catalog, rp, args.benchmark_key, args.country_iso, args.region,
+        global_cfg, global_gfm_catalog, bench_catalog, rp, args.benchmark_key, args.country_iso, args.region, args.bbox,
     )
     print(f"  global: {global_metrics}")
 

@@ -10,6 +10,11 @@ gated on the whole previous one via --dependency=afterany. Outputs are identical
 Chunk IDs come from tiles.build_chunk_grid, as in the Snakefile. The tile grid is
 read via the local config; embedded paths use the Linux view (config_hpc.yml).
 
+`postprocessing.merge_only` (validation scenarios) writes the merges only, no exposure or
+flood totals: merge_chunk, or, with a simulation.dem_source_manifest (tiles in the local
+DEM's projected CRS, which merge_chunk rejects), one merge_england_local_tiles.py job per
+(RP, SLR) into merged_outputs/local_native/.
+
 Usage:
     python generate_hpc_postprocess_job.py [--config path/to/config.yml]
     bash <printed submit_postprocess_and_exposure.sh path>
@@ -73,6 +78,42 @@ def _split_by_chunk(
     return batches
 
 
+def _raise_open_files_limit_lines() -> list[str]:
+    # A merge holds every overlapping tile raster open at once; a fine-tile chunk or a
+    # local-native merge (~1,800 England tiles) exceeds the common soft limit of 1024.
+    return ['ulimit -n "$(ulimit -Hn)" 2>/dev/null || true']
+
+
+def _write_native_merge_jobs(
+    local_jobs_dir: Path, linux_jobs_dir: str, linux_code_root: str, sbatch_cfg: dict,
+    name_prefix: str, return_periods: list[str], waterlevel_names: list[str], configfile_path: str,
+) -> list[str]:
+    """Write one merge_england_local_tiles.py sbatch per (RP, SLR); return their Linux paths."""
+    script_paths = []
+    for rp in return_periods:
+        for slr in waterlevel_names:
+            name = f"{name_prefix}local_native_merge_{rp}_{slr}"
+            lines = [
+                *sbatch_header(name, sbatch_cfg, f"{linux_jobs_dir}/logs", cpus_per_task=1),
+                *_stage_configfile_lines(),
+                "",
+                f'cd "{linux_code_root}"',
+                *_raise_open_files_limit_lines(),
+                f'stage_configfile_locally "{configfile_path}" LOCAL_CONFIGFILE || exit 1',
+                (
+                    'python preparation/merge_england_local_tiles.py --config "$LOCAL_CONFIGFILE" '
+                    f'--return-periods {rp} --waterlevel-name {slr}'
+                ),
+                "",
+            ]
+            script_path = local_jobs_dir / f"{name}.sbatch"
+            with open(script_path, "w", encoding="utf-8", newline="\n") as f:
+                f.write("\n".join(lines))
+            script_paths.append(f"{linux_jobs_dir}/{name}.sbatch")
+            print(f"  wrote {script_path}")
+    return script_paths
+
+
 def _write_batches(
     local_jobs_dir: Path, linux_jobs_dir: str, linux_code_root: str, sbatch_cfg: dict,
     phase_name: str, batches: list[list[str]], configfile_path: str, tile_grid_path: str,
@@ -98,6 +139,7 @@ def _write_batches(
             "",
             f'cd "{linux_code_root}"',
             f'echo "=== Postprocessing {phase_name} batch {i:03d}: {len(batch_targets)} target(s) ==="',
+            *_raise_open_files_limit_lines(),
             f'stage_configfile_locally "{configfile_path}" LOCAL_CONFIGFILE || exit 1',
             f'stage_tile_grid_locally "{tile_grid_path}" LOCAL_TILE_GRID || exit 1',
             "python -c 'import sys, yaml; cfg_path, new_path = sys.argv[1], sys.argv[2]; "
@@ -188,6 +230,13 @@ def main() -> None:
     return_periods = [f"RP{rp}" for rp in local_config["boundary_conditions"]["return_periods"]]
     waterlevel_names = merged_waterlevel_names(local_config["boundary_conditions"], local_config["adaptation"])
     baseline_slr = local_config["protection"]["baseline_waterlevel_name"]
+    merge_only = local_config["postprocessing"].get("merge_only", False)
+    native_merge = bool(local_config["simulation"].get("dem_source_manifest"))
+    if native_merge and not merge_only:
+        raise ValueError(
+            "simulation.dem_source_manifest is set but postprocessing.merge_only is not: the exposure "
+            "chain needs the EPSG:4326 chunks, which merge_chunk cannot build from projected local tiles"
+        )
 
     chunk_size_deg = local_config["postprocessing"]["chunk_size_deg"]
     chunk_grid = build_chunk_grid(tile_gdf, chunk_size_deg)
@@ -246,7 +295,20 @@ def main() -> None:
         name_prefix = "postprocess_"
         submit_name = "submit_postprocess_and_exposure.sh"
 
-    if per_chunk:
+    if native_merge:
+        print(f"Local-native merge: {len(return_periods) * len(waterlevel_names)} job(s), one per (RP, SLR)")
+        phases = [("local-native merge", _write_native_merge_jobs(
+            local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg, name_prefix,
+            return_periods, waterlevel_names, linux_resolved_config,
+        ))]
+    elif merge_only:
+        phase1_targets = [lx for _, lx, _ in phase1_sel]
+        print(f"Merge only (merge_chunk): {len(phase1_targets)} target(s)")
+        phases = [("merge_chunk", _write_batches(
+            local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
+            f"{name_prefix}merge", _split_evenly(phase1_targets, n_nodes), linux_resolved_config, linux_config["tile_grid"]["path"],
+        ) if phase1_targets else [])]
+    elif per_chunk:
         # Per chunk: the needed flood-fraction targets (pulling in merges and the
         # exposure grid), plus in resume mode any merge/grid output missing alone.
         targets_by_chunk: dict[str, list[str]] = {cid: [] for cid in chunk_ids}
@@ -314,7 +376,9 @@ def main() -> None:
 
     # Resume mode needs a FRESH exposure dispatch if no batch_*_chunks.txt exists.
     print()
-    if args.resume and any((local_jobs_dir / "exposure").glob("batch_*_chunks.txt")):
+    if merge_only:
+        print("merge_only: no exposure analysis, flood totals or plots")
+    elif args.resume and any((local_jobs_dir / "exposure").glob("batch_*_chunks.txt")):
         submit_lines = generate_exposure_resume_dispatch(
             local_config, linux_config, submit_lines, prev_ids_expr="$PREV_IDS",
         )
@@ -324,7 +388,7 @@ def main() -> None:
         )
 
     # Final phase, gated on exposure's last job ($JID = reduce_write).
-    if not args.no_flood_totals_and_plots:
+    if not args.no_flood_totals_and_plots and not merge_only:
         _, linux_ftp_script = write_flood_totals_and_plots_job(
             local_config, linux_config,
             partition=args.flood_totals_partition, cpus=args.flood_totals_cpus_per_task, mem=args.flood_totals_mem,
@@ -340,12 +404,17 @@ def main() -> None:
         f.write("\n".join(submit_lines) + "\n")
 
     n_total_scripts = sum(len(s) for _, s in phases)
-    tail = "" if args.no_flood_totals_and_plots else " -> flood totals -> plots"
-    print(f"\nDone. {len(phases)} postprocessing phase(s) + exposure analysis{tail}, "
+    if merge_only:
+        tail = ""
+    elif args.no_flood_totals_and_plots:
+        tail = " -> exposure analysis"
+    else:
+        tail = " -> exposure analysis -> flood totals -> plots"
+    print(f"\nDone. {len(phases)} postprocessing phase(s){tail}, "
           f"{n_total_scripts}+ sbatch script(s) written to {local_jobs_dir}")
     print(f"Submit on the cluster with: bash {linux_jobs_dir}/{submit_name}")
-    print(f"(This one call submits the ENTIRE remaining pipeline - postprocessing -> exposure "
-          f"analysis{tail} - all at once; SLURM's own --dependency=afterany chain handles the timing.)")
+    print(f"(This one call submits the ENTIRE remaining pipeline - postprocessing{tail} - all at once; "
+          f"SLURM's own --dependency=afterany chain handles the timing.)")
 
 
 if __name__ == "__main__":

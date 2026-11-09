@@ -1,9 +1,11 @@
-"""Merge england_local_input's fine tiles into one native-CRS waterdepth raster per scenario.
+"""Merge a local-input scenario's tiles into one native-CRS waterdepth raster per scenario.
 
-The tiles' native grid is England's own LIDAR source CRS (EPSG:27700), not the
-global EPSG:4326 chunk grid merge_chunk assumes - merge_tile_rasters_native keeps
-them at full native resolution rather than reprojecting (TODO.md). Not
-Snakemake-tracked: rerun manually after re-running the eikonal solve.
+The tiles' native grid is the local DEM's own projected CRS (e.g. EPSG:27700 for
+England and Wales), not the global EPSG:4326 chunk grid merge_chunk assumes -
+merge_tile_rasters_native keeps them at full native resolution rather than
+reprojecting (TODO.md). Not Snakemake-tracked; generate_hpc_postprocess_job.py runs
+it for a `postprocessing.merge_only` scenario with a dem_source_manifest. Every
+tile must have its output: a failed triple raises here, rerun it first.
 
 Usage:
     python merge_england_local_tiles.py --config <england_local_input_materialized.yml> \
