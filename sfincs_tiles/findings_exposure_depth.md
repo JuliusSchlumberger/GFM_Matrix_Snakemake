@@ -121,8 +121,8 @@ Reading for depth-damage curves:
 
 Gate 1: Q1 answered on the subset. Population- and area-weighted metrics agree within noise up to
 1000 people/km2; the > 1000/km2 class is the weakest (CSI 0.60, FAR 0.24) and every tile of that
-class is already in the subset, so the full 1000-tile pass (1b) would not add to it and stays
-queued for the paper figure only. 84 % of tiles are within a factor 2 (handoff target 90 %).
+class is already in the subset. 84 % of tiles are within a factor 2 (handoff target 90 %); the
+full pass (1b, below) gives 88 %.
 Dropped: the 100 m population check (1.4), stage 2 damage curves (user, 2026-11-09).
 
 ### Which cells count: the denominator of "within tau"
@@ -146,6 +146,35 @@ Figure X1c (`exposure_depth.py cdf`): cumulative curves, area solid, population 
 points (area) and 4-7 points (population); the conclusion holds: about half of SFINCS's flooded
 area within 20 cm, three quarters within 50 cm. Against CoSMoS in SF Bay, with DEM and forcing
 differences included, under half of CoSMoS's flooded area is within 50 cm.
+
+### Stage 1b: the full 1000-tile pass
+
+`exposure_depth_pass.py stage1 --all-tiles`, `exposure_depth.py report|cdf --all-tiles`; outputs in
+`.cleanup_baseline/exposure_depth/stage1/full/`. 997 of 1000 tiles; three fail in the pass (1359:
+window outside the subgrid; 2059, 3164: subgrid stored south-up, which the nesting check rejects).
+
+| cell density | CSI area | CSI population | HR population | FAR population | exposure bias population |
+|---|---|---|---|---|---|
+| < 10 /km2 | 0.76 | 0.73 | 0.88 | 0.19 | 1.09 |
+| 10-100 | 0.72 | 0.72 | 0.85 | 0.17 | 1.02 |
+| 100-1000 | 0.72 | 0.73 | 0.81 | 0.12 | 0.92 |
+| > 1000 | 0.72 | 0.67 | 0.80 | 0.20 | 1.00 |
+| all | 0.75 | 0.68 | 0.80 | 0.18 | 0.98 |
+
+- The subset's picture holds, slightly better: population CSI 0.68 (subset 0.64), the densest
+  class 0.67 (0.60), again with compensating misses and false alarms (HR 0.80, FAR 0.20, bias
+  1.00). The subset over-represents dense tiles with poor agreement; the full set is the
+  population-representative figure.
+- Exposed population per tile within a factor 2 of SFINCS: 88 % of the 798 tiles with exposure.
+- Fringe share: 25 % of the eikonal-only area (28 % of its population) is shallower than 0.3 m,
+  45 % of the SFINCS-only area (43 %).
+
+Depth, exact, both-wet (area / population): within 10 cm 0.31 / 0.27, 20 cm 0.51 / 0.47, 30 cm
+0.65 / 0.61, 50 cm 0.81 / 0.80; bias +0.34 / +0.28 m at 0.1-0.3 m SFINCS depth, -0.05 to -0.12 m
+(area) and -0.16 to -0.19 m (population) from 1 m up. Of all SFINCS-wet cells (X1c): 10 cm
+0.27-0.31 / 0.22-0.27, 20 cm 0.48-0.50 / 0.42-0.46, 30 cm 0.62-0.64 / 0.58-0.61, 50 cm
+0.80-0.81 / 0.78-0.79. Same reading as the subset: about 0.5 m depth classes are supported,
+10-20 cm are not.
 
 ## Stage 3: national flood maps (exposure) and SF Bay (depth)
 
@@ -189,17 +218,18 @@ of CoSMoS-wet cells); 5-7 % within 10 cm.
 
 ## Answers
 
-Q1, exposure: against SFINCS on the same DEM and forcing, the eikonal reproduces exposed
-population per tile within a factor 2 for 84 % of tiles and pooled within 7 % (exposure bias
-0.93), population-weighted CSI 0.64; up to 1000 people/km2 population and area weights agree, above
-it CSI drops to 0.60 with compensating errors. Against national flood maps the eikonal places
+Q1, exposure: against SFINCS on the same DEM and forcing (997 tiles), the eikonal reproduces
+exposed population per tile within a factor 2 for 88 % of tiles and pooled within 2 % (exposure
+bias 0.98), population-weighted CSI 0.68 (area 0.75); above 1000 people/km2 it drops to 0.67 with
+compensating misses and false alarms. Against national flood maps the eikonal places
 too little of the population in the flood zone (30-55 % of the benchmark's exposed population,
 population CSI 0.24-0.56): usable for exposure where SFINCS-like hydrodynamics are the reference,
 with an underestimate of exposed population against the national design maps.
 
-Q2, depth: against SFINCS, of all SFINCS-flooded cells 27-30 % agree within 10 cm, 47-49 % within
-20 cm, 61-63 % within 30 cm, 79-80 % within 50 cm (population-weighted 19-24 / 38-42 / 53-56 /
-74-77 %), with a systematic compression (+0.3 m in shallow, -0.2 to -0.3 m in deep water).
+Q2, depth: against SFINCS (997 tiles), of all SFINCS-flooded cells 27-31 % agree within 10 cm,
+48-50 % within 20 cm, 62-64 % within 30 cm, 80-81 % within 50 cm (population-weighted 22-27 /
+42-46 / 58-61 / 78-79 %), with a systematic compression (+0.3 m in shallow water, -0.1 to -0.2 m
+from 1 m depth up).
 Depth-damage curves with classes of about 0.5 m are supported, 10-20 cm resolution is not.
 Against CoSMoS in SF Bay (DEM and forcing differences included) even 50 cm holds for under half
 the flooded area.
