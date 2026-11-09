@@ -64,8 +64,8 @@ Dropped for the next stage: nothing. Not answerable from the result files: the 1
 
 `exposure_depth_pass.py select | stage1`, `exposure_depth.py report`; outputs in
 `.cleanup_baseline/exposure_depth/stage1/`. Subset: 92 tiles with SFINCS flooding, 25 per tile
-density class (people per km2 of tile land) and all 14 tiles above 1000/km2, none of SF Bay,
-Severn or Fundy among the calibration tiles. Population per subgrid pixel = WorldPop count x pixel
+density class (people per km2 of tile land), all 14 tiles above 1000/km2, plus two SF Bay
+tiles (728, 817) and one Bay of Fundy tile (891); no calibration tile covers the Severn. Population per subgrid pixel = WorldPop count x pixel
 area / cell area (a full cell sums to its count within 1 %, test). Density classes below are those
 of the WorldPop cell each pixel lies in. Depth differences are exact (1 cm bins).
 
