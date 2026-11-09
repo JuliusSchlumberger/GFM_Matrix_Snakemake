@@ -86,6 +86,27 @@ Decided and implemented:
   Open).
 
 Open:
+- **Hydrax reruns: eikonal studies (500 tiles), SFINCS calibration (1,500 tiles), local
+  comparisons (2026-11-09).** Blockers and fixes found by reading the launch paths:
+  - Order: storm-tide product final (rebuild with the 2026-11-08 decisions: coastline nodes,
+    300 km pooled shape, no cap, basin shift; the levels file on `<data_root>` is from 11-07) ->
+    station boundary lines -> shared station cache -> per-tile inputs (production
+    `model_outputs` for the SFINCS candidates, `calibration_500_tiles` for the studies, each
+    scenario) -> runs. SFINCS copies each tile's production `inputs/boundaries_RP100_SLR_0.gpkg`,
+    so those must be rebuilt before stage 2.
+  - SFINCS: new base dir (old one has old layout, stale inputs/lines, no `group`, old
+    resolved_config); stage 2 from the bridge adds no post job, so `variant_selection.json` is not
+    written after the sweep; `calibration_run.done` blocks later phases unless rerun_calibration.sh.
+  - Studies: `obstacle_coupling` needs `--max-rounds 40` (defaults to the config's 100); scripts
+    leave out duration correction B and two-component SLR although their docstrings say
+    "production"; preprocess batches use `--rerun-triggers=mtime` only, so delete
+    `inputs/boundaries_*.gpkg` to force new levels.
+  - Local: postprocess bridge fails on projected local tiles (merge by hand,
+    `merge_england_local_tiles.py`); GOCO06s absolute raster not a shared preprocess target
+    (race); local station caches are prebuilt and must be rebuilt by hand; scotland paused;
+    england configs point at the Scilly test grid; hop-test grid has no build script;
+    `run_eikonal_cli` skips existing waterdepth rasters, so delete `results/` for a rerun.
+  - One core-budgeted HPC harness (max 120 cores): wave-0 tier alone asks 6 x 24 = 144.
 - **England national-map score does not reproduce (exposure/depth assessment, 2026-11-09):**
   `validate_country.py --country GBR` on the same `merged_results` chunks gives England FZ3 hits
   +130 % and misses +270 % against the saved `validation/GBR/metrics_GBR_RP100_SLR_0.csv`;
