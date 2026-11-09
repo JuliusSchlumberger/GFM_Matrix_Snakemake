@@ -1,0 +1,196 @@
+# Hydrax rerun under one 120-core budget: storm-tide product -> production inputs -> eikonal solver
+# studies (500 tiles, land cover and uniform), SFINCS calibration (1,500 tiles, both groups, two
+# phases), local comparisons (England all, Wales Severn, SF Bay, hop test; base and variants),
+# global production run and its national-map validation (Scotland, Wales, England, New Brunswick).
+# Step order is also release priority. Steps marked destructive delete old outputs on <data_root>;
+# they run only with --allow-destructive.
+#   python hpc/harness.py run --plan hpc/plans/hydrax_rerun.yml --allow-destructive
+name: hydrax_rerun
+max_cores: 120
+partition_cores: {}
+state_dir: /p/11212688-004-global-floodmaps/modelling/hpc_harness/hydrax_rerun
+cwd: /u/schlumbe/gfm_code
+env:
+  HDF5_USE_FILE_LOCKING: "FALSE"
+preamble: |
+  source sfincs_tiles/site_env.sh
+  PY="$GFM_PYTHON"
+  C=snakemake_workflow/config
+  R="$GFM_DATA_ROOT"
+  CFG=/p/11212688-004-global-floodmaps/modelling/hpc_harness/hydrax_rerun/configs
+  mkdir -p "$CFG"
+  # A config as the compute nodes see it (config_hpc.yml layered on), for scripts called directly.
+  hpc_config() {
+    "$PY" -c "import sys, yaml; sys.path.insert(0, 'src'); from config_utils import load_hpc_config; \
+  yaml.safe_dump(load_hpc_config(sys.argv[1]), open(sys.argv[2], 'w'))" "$1" "$CFG/$(basename "$1")"
+    echo "$CFG/$(basename "$1")"
+  }
+  jobs_dir() {
+    "$PY" -c "import sys; sys.path.insert(0, 'src'); from config_utils import load_hpc_config; \
+  print(load_hpc_config(sys.argv[1])['hpc']['jobs_dir'])" "$1"
+  }
+  LOCAL_SCENARIOS="england_local_input england_global_input wales_local_input wales_global_input sf_bay_local_input england_hop_test"
+
+steps:
+  # ── storm-tide product (2026-11-08 decisions, basin shifts fitted in the build) ──
+  - id: product
+    job: {partition: 24vcpu, cpus_per_task: 24, mem: 168G, time: "2-00:00:00"}
+    run: |
+      "$PY" preparation/run_preparation.py storm_tide_product boundary_conditions --config "$(hpc_config $C/config.yml)"
+
+  - id: materialize
+    after: [product]
+    run: |
+      "$PY" snakemake_workflow/scripts/materialize_configs.py
+
+  # ── production tile inputs (SFINCS reads them; the global run simulates them) ──
+  - id: production_preprocess
+    after: [materialize]
+    run: |
+      "$PY" snakemake_workflow/scripts/generate_hpc_preprocess_job.py --config $C/config.yml --preprocess-only
+      bash "$(jobs_dir $C/config.yml)/submit_preprocess_batches.sh"
+
+  # ── eikonal solver studies, 500 tiles, per friction source ──
+  - id: reset_studies
+    destructive: true
+    run: |
+      cd "$R/calibration_500_tiles"
+      rm -rf sweep_budget obstacle_coupling sweep_budget_landcover sweep_budget_uniform \
+             obstacle_coupling_landcover obstacle_coupling_uniform figures
+      rm -f hpc_jobs/calib_*.sbatch hpc_jobs/submit_calib_*.sh hpc_jobs/logs/calib_*
+
+  - id: studies_preprocess
+    after: [materialize]
+    run: |
+      "$PY" snakemake_workflow/scripts/generate_hpc_preprocess_job.py --config $C/calibration_500_tiles_materialized.yml --preprocess-only
+      bash "$(jobs_dir $C/calibration_500_tiles_materialized.yml)/submit_preprocess_batches.sh"
+
+  - id: sweep_landcover
+    after: [studies_preprocess, reset_studies]
+    run: |
+      "$PY" calibration_studies/generate_calibration_batch_jobs.py sweep_budget --config $C/calibration_500_tiles_materialized.yml --friction-source landcover
+      bash "$R/calibration_500_tiles/hpc_jobs/submit_calib_sweep_budget_landcover_batches.sh"
+
+  - id: sweep_uniform
+    after: [studies_preprocess, reset_studies]
+    run: |
+      "$PY" calibration_studies/generate_calibration_batch_jobs.py sweep_budget --config $C/calibration_500_tiles_materialized.yml --friction-source uniform
+      bash "$R/calibration_500_tiles/hpc_jobs/submit_calib_sweep_budget_uniform_batches.sh"
+
+  # The sweep's jobs end with the step, so the wet-tile lists are written here, after them.
+  - id: wet_tiles
+    after: [sweep_landcover, sweep_uniform]
+    run: |
+      for src in landcover uniform; do
+        "$PY" calibration_studies/aggregate_wet_tiles.py "$R/calibration_500_tiles/sweep_budget_$src" --n-tiles-wanted 500
+      done
+
+  - id: obstacle_coupling
+    after: [wet_tiles]
+    run: |
+      for src in landcover uniform; do
+        "$PY" calibration_studies/generate_calibration_batch_jobs.py obstacle_coupling --config $C/calibration_500_tiles_materialized.yml --friction-source $src
+        bash "$R/calibration_500_tiles/hpc_jobs/submit_calib_obstacle_coupling_${src}_batches.sh"
+      done
+
+  # ── SFINCS calibration, 1,500 tiles: stage 1 -> selection -> sweep (+ post job) -> duration ──
+  - id: reset_sfincs
+    destructive: true
+    run: |
+      rm -rf "$R/calibration_roughness_SFINCS" "$R/calibration_roughness_SFINCS_dedup"
+
+  - id: sfincs_sweep
+    after: [production_preprocess, reset_sfincs]
+    run: |
+      "$PY" sfincs_tiles/generate_calibration_jobs.py stage1 --config $C/config.yml --n-tiles 1500
+      bash "$R/calibration_roughness_SFINCS/hpc_jobs_stage1/submit_chain.sh"
+
+  - id: sfincs_duration
+    after: [sfincs_sweep]
+    run: |
+      "$PY" sfincs_tiles/calibration_split.py --config "$R/calibration_roughness_SFINCS/resolved_config.yml" || true
+      PHASE=duration bash sfincs_tiles/rerun_calibration.sh --part models
+
+  # ── local comparisons: base scenarios (preprocess -> hop waves -> merge, one chain each) ──
+  - id: reset_local
+    destructive: true
+    run: |
+      for s in wales_local_input wales_global_input sf_bay_local_input england_hop_test; do
+        rm -rf "$R/$s/model_outputs"/*/results "$R/$s/model_outputs"/{oom_tiles,skipped_tiles,run_timings} \
+               "$R/$s/merged_results" "$R/$s/validation" "$R/$s/model_outputs/hpc_jobs"
+      done
+
+  - id: local_station_caches
+    after: [materialize]
+    job: {partition: 4vcpu, cpus_per_task: 4, mem: 30G, time: "1-00:00:00"}
+    run: |
+      for s in england_local_input england_hop_test; do
+        "$PY" preparation/cache_local_waterlevel_stations.py --config "$(hpc_config $C/${s}_materialized.yml)"
+      done
+      "$PY" preparation/cache_local_waterlevel_stations.py --config "$(hpc_config $C/wales_local_input_materialized.yml)" \
+          --local-dem-key wales_lidar_dem
+
+  - id: local_runs
+    # After production_preprocess: the global twins read the shared global station cache it builds.
+    after: [local_station_caches, reset_local, production_preprocess]
+    run: |
+      for s in $LOCAL_SCENARIOS; do
+        "$PY" snakemake_workflow/scripts/generate_hpc_preprocess_job.py --config $C/${s}_materialized.yml --calibration
+        bash "$(jobs_dir $C/${s}_materialized.yml)/submit_preprocess_and_dispatch.sh"
+      done
+
+  - id: local_validation
+    after: [local_runs]
+    job: {partition: 4vcpu, cpus_per_task: 4, mem: 30G, time: "2-00:00:00"}
+    run: |
+      EL=$(hpc_config $C/england_local_input_materialized.yml); EG=$(hpc_config $C/england_global_input_materialized.yml)
+      WL=$(hpc_config $C/wales_local_input_materialized.yml); WG=$(hpc_config $C/wales_global_input_materialized.yml)
+      SB=$(hpc_config $C/sf_bay_local_input_materialized.yml); GL=$(hpc_config $C/config.yml)
+      "$PY" validation/rescore_floodzone3_local.py --config "$EL"
+      "$PY" validation/rescore_1km_fp_buffer_local.py --config "$EL"
+      "$PY" validation/rescore_england_fz3.py --config "$EG"
+      "$PY" validation/rescore_1km_fp_buffer.py --config "$EG"
+      "$PY" validation/plot_local_vs_global_agreement.py --local-config "$EL" --global-config "$EG" --return-period RP100 \
+          --bbox -0.1717 52.5678 0.2529 53.0819 --out "$R/england_local_input/all_england/agreement_wash_RP100.png"
+      for script in rescore_floodzone3_local.py rescore_1km_fp_buffer_local.py; do
+        "$PY" validation/$script --config "$WL" --benchmark-key wales_nrw_floodzone_seas --region severn_estuary
+      done
+      for rp in RP100 RP250; do
+        "$PY" validation/validate_country.py --config "$WG" --country GBR --rp $rp --slr SLR_0
+        "$PY" validation/plot_local_vs_global_agreement.py --local-config "$WL" --global-config "$WG" \
+            --benchmark-key wales_nrw_floodzone_seas --region severn_estuary --return-period $rp
+      done
+      "$PY" validation/rescore_1km_fp_buffer.py --config "$WG"
+      SF_BENCH="zip://$R/inputs/validation/California/alameda_flooding_slr000.zip!flooding/v2.1/county_alameda_flddepth_slr000_w100.tif"
+      "$PY" validation/validate_sf_bay.py --config "$SB" --bbox -122.355 37.45 -121.99 37.91 --benchmark-path "$SF_BENCH" \
+          --benchmark-scale-m 0.01 --native-merged-path "$R/sf_bay_local_input/merged_results/local_native/waterdepth_RP100_SLR_0.tif" \
+          --out-dir "$R/sf_bay_local_input/validation/USA_alameda_sample"
+
+  # ── local comparisons with every flood-model variant at its calibrated run ──
+  - id: local_variants
+    after: [sfincs_duration, local_runs]
+    run: |
+      SEL="$R/calibration_roughness_SFINCS/variant_selection.json"
+      "$PY" snakemake_workflow/scripts/materialize_configs.py england_local_input england_global_input wales_local_input \
+          wales_global_input sf_bay_local_input --variants all --selection "$SEL"
+      for f in $C/*__*_materialized.yml; do
+        "$PY" snakemake_workflow/scripts/generate_hpc_preprocess_job.py --config "$f" --calibration
+        bash "$(jobs_dir "$f")/submit_preprocess_and_dispatch.sh"
+      done
+
+  # ── global production run (lowest priority) and its national-map validation ──
+  - id: production_simulate
+    after: [production_preprocess]
+    run: |
+      "$PY" snakemake_workflow/scripts/generate_hpc_simulation_jobs.py --config $C/config.yml
+      bash "$(jobs_dir $C/config.yml)/submit_waves.sh"
+
+  - id: production_validation
+    after: [production_simulate]
+    job: {partition: 4vcpu, cpus_per_task: 4, mem: 30G, time: "2-00:00:00"}
+    run: |
+      GL=$(hpc_config $C/config.yml)
+      "$PY" validation/run_validation.py --config "$GL" --countries GBR CAN
+      SF_BENCH="zip://$R/inputs/validation/California/alameda_flooding_slr000.zip!flooding/v2.1/county_alameda_flddepth_slr000_w100.tif"
+      "$PY" validation/validate_sf_bay.py --config "$GL" --bbox -122.355 37.45 -121.99 37.91 --benchmark-path "$SF_BENCH" \
+          --benchmark-scale-m 0.01 --out-dir "$R/sf_bay_local_input/validation/USA_alameda_sample_global_baseline"

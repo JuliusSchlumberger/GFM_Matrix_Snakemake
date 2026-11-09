@@ -87,28 +87,20 @@ Decided and implemented:
 
 Open:
 - **Hydrax reruns: eikonal studies (500 tiles), SFINCS calibration (1,500 tiles), local
-  comparisons (2026-11-09).** Blockers and fixes found by reading the launch paths:
-  - Order: storm-tide product final (rebuild with the 2026-11-08 decisions, all in the code:
-    coastline nodes, 1950-2024 masked fit, 300 km pooled shape, no cap, basin shift, flags; the
-    levels file on `<data_root>` is from 11-07) ->
-    station boundary lines -> shared station cache -> per-tile inputs (production
-    `model_outputs` for the SFINCS candidates, `calibration_500_tiles` for the studies, each
-    scenario) -> runs. SFINCS copies each tile's production `inputs/boundaries_RP100_SLR_0.gpkg`,
-    so those must be rebuilt before stage 2.
-  - SFINCS: new base dir (old one has old layout, stale inputs/lines, no `group`, old
-    resolved_config); stage 2 from the bridge adds no post job, so `variant_selection.json` is not
-    written after the sweep; `calibration_run.done` blocks later phases unless rerun_calibration.sh.
-  - Studies: `obstacle_coupling` needs `--max-rounds 40` (defaults to the config's 100); scripts
-    leave out duration correction B and two-component SLR although their docstrings say
-    "production"; preprocess batches use `--rerun-triggers=mtime` only, so delete
-    `inputs/boundaries_*.gpkg` to force new levels.
-  - Local: the England/Wales station caches are prebuilt and must be rebuilt by hand
-    (`cache_local_waterlevel_stations.py`); scotland paused; `run_eikonal_cli` skips existing
-    waterdepth rasters and preprocessing reruns on mtime only, so the wales_*, sf_bay_local_input
-    and england_hop_test output dirs on `<data_root>` (earlier runs) need `results/` cleared for a
-    rerun. The England scenarios write to fresh `all_england/` dirs. The all-England 1 m
-    agreement map needs `plot_local_vs_global_agreement.py --bbox` (a full-region map does not
-    fit in memory).
+  comparisons, global run (2026-11-09).** Everything runs from `hpc/plans/hydrax_rerun.yml` under
+  `hpc/harness.py` (120 cores): product -> materialize -> production inputs -> studies, SFINCS
+  (stage 1 -> sweep + post job -> duration), local base runs + validation, local variants, global
+  run + national-map validation. Open:
+  - The harness has not met SLURM yet: run `hpc/plans/smoke.yml` on Hydrax first.
+  - The plan's helper functions and `hpc_config` assume no `config_local.yml` on Hydrax (root from
+    `config_hpc.yml` via `load_hpc_config`); check before the first run.
+  - Variant runs take `calibration_roughness_SFINCS/variant_selection.json` (raw pooling); the
+    overlap-corrected `_dedup` selection is the alternative (user to decide).
+  - `postprocessing.merge_only` (local scenarios) is read with a default of false; add the default
+    to config.yml if it should be listed there (config default: ask).
+  - Scotland local input stays paused; Scotland and New Brunswick are scored from the global run.
+  - All-England local/global: 1,836 tiles, 14 hop waves, ~3,700 solves per scenario and variant;
+    the variant step multiplies that by the variant count.
   - One core-budgeted HPC harness (max 120 cores): wave-0 tier asks 6 x 24 = 144, so one
     wave-0 job waits for cores. The submit scripts capture `sbatch --parsable` ids and chain
     every wave and the merge with `--dependency=afterany:<ids>`; two of them run inside jobs
