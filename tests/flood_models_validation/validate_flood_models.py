@@ -113,3 +113,30 @@ def test_variant_config_moves_outputs_and_keeps_inputs() -> None:
     assert v["simulation"]["flooding"]["model"] == "straight_line"
     assert v["simulation"]["flooding"]["uniform_attenuation_m_per_km"] == 0.15
     assert config["simulation"]["model_outputs"] == "{root}/x/model_outputs"
+
+
+def test_solve_trace_sees_every_sweep_and_outer_iteration_without_changing_the_result() -> None:
+    from flood_model import SolveTrace
+
+    class Recorder(SolveTrace):
+        def __init__(self):
+            self.starts, self.sweeps, self.outers = [], 0, []
+
+        def solve_started(self, solve_pass, outer, depth_of):
+            self.starts.append((solve_pass, outer))
+
+        def sweep(self, t, change):
+            self.sweeps += 1
+
+        def outer_done(self, outer, waterlevel, blocked, pct_newly_blocked, inner):
+            self.outers.append((outer, inner["n_rounds_used"]))
+
+    dem, mask, rows, cols = _strip_tile()
+    kw = dict(seed_rows=rows, seed_cols=cols, seed_values=np.full(len(rows), 2.0), resolution=30.0,
+              obstacle_coupling=True, max_outer_iterations=3, max_rounds=40)
+    plain, _ = flood_depth_dense(dem, mask, np.full_like(dem, 0.01), TRANSFORM, **kw)
+    rec = Recorder()
+    traced, _ = flood_depth_dense(dem, mask, np.full_like(dem, 0.01), TRANSFORM, trace=rec, **kw)
+    assert np.array_equal(plain, traced)
+    assert rec.starts == [("first", n) for n in range(1, len(rec.outers) + 1)]
+    assert rec.sweeps == 4 * sum(r for _, r in rec.outers)

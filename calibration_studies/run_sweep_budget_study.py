@@ -1,16 +1,17 @@
 """Trace the non-coupling eikonal solve sweep by sweep on calibration tiles.
 
-Tiles come from select_study_candidate_tiles.py's candidate_tiles.txt. Seeds and
-friction (decode -> scale -> floor) match production; sweeps follow
-_ORTHANT_ORDER[i % 4] as solve_eikonal_dense's sweep_budget (one continuous pass,
-avoiding O(N^2) re-solves). A round is 4 sweeps; the tile stops once a complete
-round's max raw change <= --epsilon (0.03 m) or after MAX_ROUNDS_CEILING rounds.
-A tile dry at sweep 1 is logged DRY and stopped (the candidate pool is
-over-provisioned). Writes one CSV per tile with per-sweep depth-change metrics.
+Tiles come from select_study_candidate_tiles.py's candidate_tiles.txt. Each tile is solved by
+production's own path (eikonal_runner.solve_wave0_tile: inputs, seeds, two-component static level,
+duration correction B, block sweeps) with obstacle coupling off and up to MAX_ROUNDS_CEILING
+rounds; the solver stops once a round's max change <= --epsilon. With correction B production
+solves twice (solve_pass "first", then "duration" with the corrected friction); both are traced.
+A tile dry at the first sweep is logged DRY and stopped (the candidate pool is over-provisioned).
+Writes one CSV per tile with per-sweep depth-change metrics.
 
 Usage:
     python run_sweep_budget_study.py --out-dir <output_dir> [--config <config.yml>] [--tile-ids id [id ...]]
 """
+
 import argparse
 import csv
 import sys
@@ -18,130 +19,37 @@ import time
 import traceback
 from pathlib import Path
 
-import geopandas as gpd
 import numpy as np
-import rasterio
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import load_config  # noqa: E402
-from eikonal import _ORTHANT_ORDER, _dense_sweep  # noqa: E402
-from flood_model import effective_dem  # noqa: E402
-from flood_model import _idw_seed_values, coastline_mask, prune_to_coast_connected  # noqa: E402
-from rasters import decode_dem_cm, decode_friction_int16, decode_waterlevel_cm  # noqa: E402
+from eikonal_runner import solve_wave0_tile  # noqa: E402
+from flood_model import SolveTrace  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 RETURN_PERIOD = "RP100"
 WATERLEVEL_NAME = "SLR_0"
 
-# tile_generation.ocean_code / river_code in config.yml.
-OCEAN_CODE = 1
-RIVER_CODE = 3
-
-def friction_settings(flooding: dict, friction_source: str | None, uniform_m_per_km: float | None) -> dict:
-    """Return load_tile's friction keywords for a friction source (None: the config's).
-
-    Per grid step, as production on DeltaDTM tiles: land cover friction_scale_factor x
-    flooding.resolution on friction.tif; uniform rate x resolution per cell.
-    """
-    cell_m = float(flooding["resolution"])
-    source = friction_source or flooding["friction_source"]
-    if source == "uniform":
-        rate = uniform_m_per_km if uniform_m_per_km is not None else float(flooding["uniform_attenuation_m_per_km"])
-        return {"friction_scale_factor": 1.0, "uniform_friction": rate / 1000.0 * cell_m}
-    return {"friction_scale_factor": float(flooding["friction_scale_factor"]) * cell_m, "uniform_friction": None}
-
-
 # Smoke-test fallback when no --tile-ids are given.
 TILES = [2083, 2514, 1421, 2569, 2858, 2314, 753]
 
-SWEEPS_PER_ROUND = 4  # one full cycle of _ORTHANT_ORDER
+SWEEPS_PER_ROUND = 4  # one full cycle of eikonal._ORTHANT_ORDER
 MAX_ROUNDS_CEILING = 100
-MAX_SWEEPS = MAX_ROUNDS_CEILING * SWEEPS_PER_ROUND
 N_TILES_WANTED_DEFAULT = 500  # only reachable in a single sequential run, not per HPC node
 
 
-def load_tile(tile_id: int, model_outputs: Path, knn: int, idw_power: float, friction_scale_factor: float,
-              on_no_stations: str = "dry", uniform_friction: float | None = None):
-    """Load a tile's decoded solver inputs and IDW-seeded coastline values.
-
-    Shared by the calibration studies (run_obstacle_coupling_study.py,
-    diagnose_large_residual.py), so all of them seed exactly as production does.
-
-    Parameters
-    ----------
-    on_no_stations : {"dry", "raise"}
-        A tile with zero boundary stations: "dry" seeds nothing (sweep 1 then
-        reports DRY; production's NO_STATIONS_REASON), "raise" raises ValueError
-        (studies whose tile list should already exclude such tiles; BallTree would
-        crash on them).
-    uniform_friction : float, optional
-        Friction per grid step everywhere instead of friction.tif x friction_scale_factor.
-
-    Returns
-    -------
-    tuple
-        (dem, mask, friction, coastline, coastline_rows, coastline_cols, initial,
-        max_waterlevel); max_waterlevel is the highest station level in m, None
-        for a "dry" tile without stations.
-    """
-    if on_no_stations not in ("dry", "raise"):
-        raise ValueError(f"on_no_stations must be 'dry' or 'raise', not {on_no_stations!r}")
-    tile_dir = model_outputs / str(tile_id)
-    scenario = f"{RETURN_PERIOD}_{WATERLEVEL_NAME}"
-    inputs = tile_dir / "inputs"
-
-    with rasterio.open(inputs / "dem.tif") as src:
-        dem = decode_dem_cm(src.read(1))
-        transform = src.transform
-    with rasterio.open(inputs / "mask.tif") as src:
-        # int8: int64 would OOM on the largest tiles.
-        mask = src.read(1).astype(np.int8)
-    with rasterio.open(inputs / "friction.tif") as src:
-        friction = decode_friction_int16(src.read(1))
-    boundaries = gpd.read_file(inputs / f"boundaries_{scenario}.gpkg")
-
-    dem = effective_dem(dem, mask)
-    # decode -> scale -> floor, as in eikonal_runner: a zero-friction cell floors
-    # to 0.001 regardless of friction_scale_factor.
-    friction = friction * friction_scale_factor
-    if uniform_friction is not None:
-        friction = np.full_like(friction, uniform_friction)
-    friction = np.where(friction > 0, friction, friction.dtype.type(0.001))
-    coastline = coastline_mask(mask, ocean_code=OCEAN_CODE, river_code=RIVER_CODE)
-    coastline_rows, coastline_cols = np.nonzero(coastline)
-
-    # Int16 cm-encoded levels. Zero stations are expected for small/isolated tiles.
-    station_values = decode_waterlevel_cm(boundaries[WATERLEVEL_NAME].to_numpy())
-    if len(station_values) == 0:
-        if on_no_stations == "raise":
-            raise ValueError(
-                f"tile {tile_id} has zero boundary stations - should have been excluded "
-                "from wet_tiles_selected.txt by run_sweep_budget_study.py"
-            )
-        coastline_rows = np.array([], dtype=coastline_rows.dtype)
-        coastline_cols = np.array([], dtype=coastline_cols.dtype)
-        initial = np.array([], dtype=np.float64)
-        return dem, mask, friction, coastline, coastline_rows, coastline_cols, initial, None
-
-    stations_lonlat = np.column_stack(
-        [boundaries.geometry.x.to_numpy(), boundaries.geometry.y.to_numpy()]
-    )
-    initial = _idw_seed_values(
-        coastline_rows, coastline_cols, transform, stations_lonlat, station_values,
-        min(knn, len(station_values)), mask, OCEAN_CODE, idw_power,
-    )
-    max_waterlevel = float(station_values.max())
-    return dem, mask, friction, coastline, coastline_rows, coastline_cols, initial, max_waterlevel
+def study_overrides(friction_source: str | None, uniform_m_per_km: float | None) -> dict:
+    """Return solve_wave0_tile overrides for a friction source (None: the config's)."""
+    out = {}
+    if friction_source is not None:
+        out["friction_source"] = friction_source
+    if uniform_m_per_km is not None:
+        out["uniform_attenuation_m_per_km"] = uniform_m_per_km
+    return out
 
 
-def _full_depth_array(t, dem, mask, coastline) -> np.ndarray:
-    """Return tile-shaped depth (0 where dry), same math as flood_depth_dense without coupling."""
-    waterlevel = -t[1:, 1:]
-    flood = (waterlevel > dem) & (mask != OCEAN_CODE)
-    flood = prune_to_coast_connected(flood, coastline)
-    depth = np.zeros_like(dem)
-    depth[flood] = waterlevel[flood] - dem[flood]
-    return depth
+class DryTile(Exception):
+    pass
 
 
 def _depth_change_metrics(depth_prev: np.ndarray, depth_curr: np.ndarray, n_cells: int) -> dict:
@@ -153,87 +61,63 @@ def _depth_change_metrics(depth_prev: np.ndarray, depth_curr: np.ndarray, n_cell
     changed = abs_diff > 0
     n_changed = int(changed.sum())
     changed_vals = abs_diff[changed]
-    n_newly_flooded = int(((depth_prev == 0) & (depth_curr > 0)).sum())
     return {
         "max_depth_change_abs": round(float(abs_diff.max()), 4) if abs_diff.size else 0.0,
         "median_depth_change_abs": round(float(np.median(changed_vals)), 4) if changed_vals.size else 0.0,
         "mean_depth_change_abs": round(float(changed_vals.mean()), 4) if changed_vals.size else 0.0,
-        "n_newly_flooded": n_newly_flooded,
+        "n_newly_flooded": int(((depth_prev == 0) & (depth_curr > 0)).sum()),
         "n_cells_changed": n_changed,
         "pct_cells_changed": round(100.0 * n_changed / n_cells, 6),
     }
 
 
-def run_tile_sweep_trace(
-    tile_id: int, max_sweeps: int, model_outputs: Path, knn: int, idw_power: float, friction_kw: dict,
-    epsilon: float,
-) -> tuple[list[dict], bool, bool]:
-    """Trace one tile sweep by sweep; return (rows, is_wet, round_converged).
+class SweepTrace(SolveTrace):
+    """Record one row per sweep of every solve pass."""
 
-    is_wet is False iff sweep 1 has zero flooding. round_converged is True iff a
-    complete round's max raw change reached <= epsilon before max_sweeps.
-    """
-    dem, mask, friction, coastline, seed_rows, seed_cols, initial, _ = load_tile(
-        tile_id, model_outputs, knn, idw_power, **friction_kw,
-    )
-    seed_values = -initial
-    dtype = friction.dtype
-    n_cells = dem.size
+    def __init__(self, tile_id: int):
+        self.tile_id = tile_id
+        self.rows: list[dict] = []
 
-    m, n = friction.shape
-    # Unseeded t=+99 (waterlevel -99 m) = never flooded, as in solve_eikonal_dense.
-    t = np.full((m + 1, n + 1), 99.0, dtype=dtype)
-    t[seed_rows, seed_cols] = seed_values
-    neg_two = dtype.type(-2.0)
-    eight = dtype.type(8.0)
-    four = dtype.type(4.0)
+    def solve_started(self, solve_pass, outer, depth_of) -> None:
+        self.solve_pass, self.depth_of = solve_pass, depth_of
+        self.sweep_count, self.prev_depth, self.t0 = 0, None, time.perf_counter()
 
-    rows = []
-    prev_depth = np.zeros_like(dem)  # implicit all-dry "sweep 0"
-    t0 = time.perf_counter()
-
-    for sweep in range(1, max_sweeps + 1):
-        # Raw whole-array t update (not depth-pruned): what solve_eikonal_dense maxes
-        # over 4 sweeps and compares to epsilon, so round convergence can be rebuilt.
-        sweep_max_change_raw = _dense_sweep(t, friction, _ORTHANT_ORDER[(sweep - 1) % 4], neg_two, eight, four)
-        depth = _full_depth_array(t, dem, mask, coastline)
+    def sweep(self, t, change) -> None:
+        self.sweep_count += 1
+        depth = self.depth_of(-t[1:, 1:])
+        if self.prev_depth is None:
+            self.prev_depth = np.zeros_like(depth)  # implicit all-dry "sweep 0"
         n_inundated = int((depth > 0).sum())
-        change = _depth_change_metrics(prev_depth, depth, n_cells)
+        if self.solve_pass == "first" and self.sweep_count == 1 and n_inundated == 0:
+            raise DryTile
+        row = {"tile": self.tile_id, "solve_pass": self.solve_pass, "n_cells": depth.size,
+               "sweep_count": self.sweep_count, "cum_time_s": round(time.perf_counter() - self.t0, 3),
+               "sweep_max_change_raw": round(float(change), 8), "n_inundated": n_inundated,
+               "depth_mean": round(float(depth[depth > 0].mean()), 4) if n_inundated else 0.0,
+               "depth_sum": round(float(depth.sum()), 2), "depth_max": round(float(depth.max()), 4),
+               "status": "ok", **_depth_change_metrics(self.prev_depth, depth, depth.size)}
+        self.rows.append(row)
+        self.prev_depth = depth
 
-        row = {
-            "tile": tile_id,
-            "n_cells": n_cells,
-            "sweep_count": sweep,
-            "cum_time_s": round(time.perf_counter() - t0, 3),
-            "sweep_max_change_raw": round(float(sweep_max_change_raw), 8),
-            "n_inundated": n_inundated,
-            "depth_mean": round(float(depth[depth > 0].mean()), 4) if n_inundated else 0.0,
-            "depth_sum": round(float(depth.sum()), 2),
-            "depth_max": round(float(depth.max()), 4),
-            "status": "ok",
-        }
-        row.update(change)
-        rows.append(row)
 
-        if sweep == 1 and n_inundated == 0:
-            return rows, False, False  # dry: skip remaining sweeps
-
-        prev_depth = depth
-
-        # Round-level early exit only at round boundaries, as in solve_eikonal_dense.
-        if sweep % SWEEPS_PER_ROUND == 0:
-            round_max_change = max(r["sweep_max_change_raw"] for r in rows[-SWEEPS_PER_ROUND:])
-            if round_max_change <= epsilon:
-                return rows, True, True
-
-    return rows, True, False
+def run_tile_sweep_trace(config: dict, tile_id: int, overrides: dict, epsilon: float) -> tuple[list[dict], bool, bool]:
+    """Trace one tile's production solve; return (rows, is_wet, round_converged of the last pass)."""
+    trace = SweepTrace(tile_id)
+    try:
+        solve_wave0_tile(config, tile_id, RETURN_PERIOD, WATERLEVEL_NAME, _REPO_ROOT, trace=trace,
+                         obstacle_coupling=False, max_rounds=MAX_ROUNDS_CEILING, waterlevel_epsilon_m=epsilon,
+                         **overrides)
+    except DryTile:
+        return trace.rows, False, False
+    last = [r for r in trace.rows if r["solve_pass"] == trace.rows[-1]["solve_pass"]]
+    converged = max(r["sweep_max_change_raw"] for r in last[-SWEEPS_PER_ROUND:]) <= epsilon
+    return trace.rows, True, converged
 
 
 FIELDNAMES = [
-    "tile", "n_cells", "sweep_count", "cum_time_s", "sweep_max_change_raw", "n_inundated", "depth_mean",
-    "depth_sum", "depth_max", "max_depth_change_abs", "median_depth_change_abs",
-    "mean_depth_change_abs", "n_newly_flooded", "n_cells_changed", "pct_cells_changed",
-    "status",
+    "tile", "solve_pass", "n_cells", "sweep_count", "cum_time_s", "sweep_max_change_raw", "n_inundated",
+    "depth_mean", "depth_sum", "depth_max", "max_depth_change_abs", "median_depth_change_abs",
+    "mean_depth_change_abs", "n_newly_flooded", "n_cells_changed", "pct_cells_changed", "status",
 ]
 
 
@@ -266,16 +150,11 @@ def main() -> None:
     n_tiles_wanted = args.n_tiles_wanted
 
     cfg = load_config(args.config)
-    # Not root/model_outputs: calibration studies keep their own model_outputs tree.
-    model_outputs = Path(cfg["simulation"]["model_outputs"])
-    knn = int(cfg["simulation"]["flooding"]["knn"])
-    idw_power = float(cfg["simulation"]["flooding"]["idw_power"])
-    friction = friction_settings(cfg["simulation"]["flooding"], args.friction_source, args.uniform_attenuation_m_per_km)
+    overrides = study_overrides(args.friction_source, args.uniform_attenuation_m_per_km)
     if args.epsilon is None:
         args.epsilon = float(cfg["simulation"]["flooding"]["waterlevel_epsilon_m"])
-    print(f"model_outputs={model_outputs}  knn={knn}  friction={friction}  "
-          f"max_sweeps={MAX_SWEEPS} ({MAX_ROUNDS_CEILING} rounds)  epsilon={args.epsilon}  "
-          f"n_tiles_wanted={n_tiles_wanted}", flush=True)
+    print(f"model_outputs={cfg['simulation']['model_outputs']}  overrides={overrides}  "
+          f"max_rounds={MAX_ROUNDS_CEILING}  epsilon={args.epsilon}  n_tiles_wanted={n_tiles_wanted}", flush=True)
 
     wet_tiles: list[int] = []
     errored_tiles: list[int] = []
@@ -287,25 +166,22 @@ def main() -> None:
             writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
             writer.writeheader()
             try:
-                tile_rows, is_wet, round_converged = run_tile_sweep_trace(
-                    tile_id, MAX_SWEEPS, model_outputs, knn, idw_power, friction, args.epsilon,
-                )
+                tile_rows, is_wet, round_converged = run_tile_sweep_trace(cfg, tile_id, overrides, args.epsilon)
                 for row in tile_rows:
-                    print(f"  sweeps={row['sweep_count']:3d}  cum_time={row['cum_time_s']}s  "
+                    print(f"  {row['solve_pass']:>8} sweeps={row['sweep_count']:3d}  cum_time={row['cum_time_s']}s  "
                           f"n_inundated={row['n_inundated']:,}  depth_sum={row['depth_sum']}  "
                           f"max_change={row['max_depth_change_abs']}  "
-                          f"median_change={row['median_depth_change_abs']}  "
-                          f"mean_change={row['mean_depth_change_abs']}  "
                           f"n_newly_flooded={row['n_newly_flooded']:,}  "
                           f"n_changed={row['n_cells_changed']:,} ({row['pct_cells_changed']}%)", flush=True)
                     writer.writerow(row)
                     f.flush()
                 if is_wet:
                     wet_tiles.append(tile_id)
-                    n_rounds = len(tile_rows) // SWEEPS_PER_ROUND
+                    n_rounds = sum(r["solve_pass"] == tile_rows[-1]["solve_pass"] for r in tile_rows) // SWEEPS_PER_ROUND
                     conv_label = f"round-converged at round {n_rounds}" if round_converged else \
                         f"did NOT converge within {MAX_ROUNDS_CEILING} rounds"
-                    print(f"  SUMMARY: wet, {conv_label} ({len(wet_tiles)}/{n_tiles_wanted} selected so far)", flush=True)
+                    print(f"  SUMMARY: wet, last pass {conv_label} ({len(wet_tiles)}/{n_tiles_wanted} selected so far)",
+                          flush=True)
                 else:
                     print("  SUMMARY: DRY at sweep 1 - excluded", flush=True)
             except Exception as exc:

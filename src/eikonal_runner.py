@@ -18,10 +18,15 @@ import rasterio.crs
 import rasterio.transform
 import rasterio.warp
 
-from boundaries import collect_neighbor_wave_seeds, static_station_levels
-from config_utils import path_ready, retry_transient_io
+from boundaries import (
+    collect_neighbor_wave_seeds,
+    static_level_inputs,
+    static_station_levels,
+    storm_tide_hydrograph_path,
+)
+from config_utils import path_ready, retry_transient_io, tile_pixel_size_m
 from event_volume import DurationCorrection, load_coast_hg
-from flood_model import FLOOD_MODELS, WATERLEVEL_EPSILON_M, flood_depth_dense, static_level_grid
+from flood_model import FLOOD_MODELS, WATERLEVEL_EPSILON_M, SolveTrace, flood_depth_dense, static_level_grid
 from rasters import (
     decode_dem_cm,
     decode_friction_int16,
@@ -32,11 +37,66 @@ from rasters import (
 from tiles import load_tile_grid
 
 
-def run_eikonal_python(
+def run_eikonal_python(dem_path: str | Path, mask_path: str | Path, friction_path: str | Path,
+                       output_path: str | Path, *args, **kwargs) -> dict:
+    """Run `solve_tile`, write its depth to `output_path`, return the diagnostics."""
+    waterdepth, diagnostics = solve_tile(dem_path, mask_path, friction_path, *args, **kwargs)
+    save_waterdepth_raster(dem_path, waterdepth, output_path)
+    return diagnostics
+
+
+def flooding_solve_settings(flooding_config: dict[str, Any]) -> dict[str, Any]:
+    """Return `solve_tile`'s solver settings from `simulation.flooding`."""
+    # Indexed, not .get(): every config layers on config.yml, which sets all of these, so a
+    # missing key is a broken config, not a reason to default.
+    oc = flooding_config["obstacle_coupling"]
+    return {
+        "resolution": flooding_config["resolution"], "k": flooding_config["knn"],
+        "idw_power": flooding_config["idw_power"],
+        "obstacle_coupling": oc["enabled"], "max_outer_iterations": oc["max_outer_iterations"],
+        "max_rounds": flooding_config["max_rounds"], "outer_convergence_pct": oc["outer_convergence_pct"],
+        "waterlevel_epsilon_m": flooding_config["waterlevel_epsilon_m"],
+        "friction_scale_factor": flooding_config["friction_scale_factor"],
+        "duration_config": flooding_config["duration_correction"],
+        "model": flooding_config["model"], "friction_source": flooding_config["friction_source"],
+        "uniform_attenuation_m_per_km": flooding_config["uniform_attenuation_m_per_km"],
+    }
+
+
+def solve_wave0_tile(config: dict[str, Any], tile_id: int | str, return_period: str, waterlevel_name: str,
+                     code_root: Path, trace: SolveTrace | None = None,
+                     **overrides) -> tuple[np.ndarray, dict]:
+    """Solve a hop-0 tile from its station boundaries as run_tile_scenario does, without writing.
+
+    Same inputs and settings (two-component static level, correction B, the tile's pixel size);
+    `overrides` replace `solve_tile` settings (the calibration studies' max_rounds, coupling,
+    friction source). Returns (depth m, diagnostics).
+    """
+    sim = config["simulation"]
+    inputs = Path(sim.get("preprocessing_inputs_dir") or sim["model_outputs"]) / str(tile_id) / "inputs"
+    flooding = sim["flooding"]
+    if flooding["slr_propagation"] not in SLR_PROPAGATION_MODES:
+        raise ValueError(f"simulation.flooding.slr_propagation: {flooding['slr_propagation']!r} "
+                         f"not in {SLR_PROPAGATION_MODES}")
+    static_stations = None
+    if flooding["slr_propagation"] == "two_component":
+        static_stations = static_station_levels(**static_level_inputs(config), return_period=return_period,
+                                                waterlevel_name=waterlevel_name)
+    settings = {
+        **flooding_solve_settings(flooding), "variable": waterlevel_name,
+        "boundaries_path": inputs / f"boundaries_{return_period}_{waterlevel_name}.gpkg",
+        "ocean_code": config["tile_generation"]["ocean_code"], "river_code": config["tile_generation"]["river_code"],
+        "pixel_size_m": tile_pixel_size_m(config, str(tile_id), code_root), "static_stations": static_stations,
+        "return_period": int(return_period.removeprefix("RP")),
+        "hydrograph_path": str(storm_tide_hydrograph_path(config)), **overrides,
+    }
+    return solve_tile(inputs / "dem.tif", inputs / "mask.tif", inputs / "friction.tif", trace=trace, **settings)
+
+
+def solve_tile(
     dem_path: str | Path,
     mask_path: str | Path,
     friction_path: str | Path,
-    output_path: str | Path,
     resolution: float,
     k: int,
     variable: str,
@@ -62,8 +122,9 @@ def run_eikonal_python(
     model: str = "eikonal",
     friction_source: str = "landcover",
     uniform_attenuation_m_per_km: float | None = None,
-) -> dict:
-    """Run `flood_model.flood_depth_dense` in-process, write depth, return diagnostics.
+    trace: SolveTrace | None = None,
+) -> tuple[np.ndarray, dict]:
+    """Run `flood_model.flood_depth_dense` in-process; return (depth m, diagnostics).
 
     Inputs are int16-encoded on disk (DEM and water levels in cm) and decoded
     to float32 m. `friction_scale_factor` (production 0.25, config.yml) is a
@@ -131,9 +192,9 @@ def run_eikonal_python(
         duration_correction=duration_correction,
         model=model,
         attenuation_m_per_m=uniform_m_per_m,
+        trace=trace,
     )
-    save_waterdepth_raster(dem_path, waterdepth, output_path)
-    return diagnostics
+    return waterdepth, diagnostics
 
 
 def build_duration_correction(
@@ -338,9 +399,6 @@ def run_tile_scenario(
             write_zero_waterdepth(dem_path, output_path)
             return {"outcome": "skip_no_inundation", "skip_reason": skip_reason}
 
-        # Indexed, not .get(): every config layers on config.yml, which sets all
-        # of these, so a missing key is a broken config, not a reason to default.
-        oc_config = flooding_config["obstacle_coupling"]
         static_stations = None
         if slr_propagation == "two_component":
             static_stations = static_station_levels(**static_level_inputs, return_period=return_period,
@@ -349,26 +407,15 @@ def run_tile_scenario(
         try:
             diagnostics = run_eikonal_python(
                 dem_path, mask_path, friction_path, output_path,
-                resolution=flooding_config["resolution"], k=flooding_config["knn"],
-                idw_power=flooding_config["idw_power"],
+                **flooding_solve_settings(flooding_config),
                 variable=waterlevel_name,
                 boundaries_path=None if hop_distance >= 1 else read_boundaries_path,
                 seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
                 ocean_code=ocean_code, river_code=river_code,
-                obstacle_coupling=oc_config["enabled"],
-                max_outer_iterations=oc_config["max_outer_iterations"],
-                max_rounds=flooding_config["max_rounds"],
-                outer_convergence_pct=oc_config["outer_convergence_pct"],
-                waterlevel_epsilon_m=flooding_config["waterlevel_epsilon_m"],
-                friction_scale_factor=flooding_config["friction_scale_factor"],
                 pixel_size_m=pixel_size_m,
                 static_stations=static_stations,
-                duration_config=flooding_config["duration_correction"],
                 return_period=int(return_period.removeprefix("RP")),
                 hydrograph_path=hydrograph_path,
-                model=flooding_config["model"],
-                friction_source=flooding_config["friction_source"],
-                uniform_attenuation_m_per_km=flooding_config["uniform_attenuation_m_per_km"],
             )
         except MemoryError:
             mark_tile_oom(oom_dir, tile_id, reason="MemoryError in flood_depth_dense - tile too large")

@@ -76,16 +76,12 @@ def test_run_tables_pool_per_group_and_select_the_best_run() -> None:
     assert select_runs(pooled, "bias")["variants"]["eikonal_landcover"]["run_key"] == "eikonal_landcover_fsf0.3"
 
 
-def test_study_friction_settings() -> None:
+def test_study_overrides() -> None:
     sys.path.insert(0, str(REPO_ROOT / "calibration_studies"))
-    from run_sweep_budget_study import friction_settings
+    from run_sweep_budget_study import study_overrides
 
-    flooding = {"friction_source": "landcover", "friction_scale_factor": 0.25, "uniform_attenuation_m_per_km": 0.2,
-                "resolution": 30}
-    assert friction_settings(flooding, None, None) == {"friction_scale_factor": 7.5, "uniform_friction": None}
-    uniform = friction_settings(flooding, "uniform", None)
-    assert uniform["friction_scale_factor"] == 1.0 and np.isclose(uniform["uniform_friction"], 0.006)
-    assert np.isclose(friction_settings(flooding, "uniform", 0.1)["uniform_friction"], 0.003)
+    assert study_overrides(None, None) == {}
+    assert study_overrides("uniform", 0.2) == {"friction_source": "uniform", "uniform_attenuation_m_per_km": 0.2}
 
 
 def test_depth_accuracy_pools_exact_differences(tmp_path) -> None:

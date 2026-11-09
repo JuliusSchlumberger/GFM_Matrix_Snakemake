@@ -19,6 +19,8 @@ but seeds write at vertex (r, c): Aqueduct's own asymmetry (`core.jl`
 
 from __future__ import annotations
 
+from typing import Callable
+
 import numpy as np
 from numba import njit
 
@@ -203,6 +205,7 @@ def solve_eikonal_dense(
     sweep_budget: int | None = None,
     verbose: bool = False,
     return_diagnostics: bool = False,
+    on_sweep: Callable[[np.ndarray, float], None] | None = None,
 ) -> np.ndarray | tuple[np.ndarray, dict]:
     """Solve the eikonal equation on the full dense grid via Fast Sweeping.
 
@@ -214,6 +217,8 @@ def solve_eikonal_dense(
     epsilon/max_rounds; 3 reproduces Aqueduct's Eikonal.jl runtime behaviour.
     return_diagnostics: also return n_rounds_used, max_change, converged (None
     under sweep_budget) and frac_blocks_swept.
+    on_sweep: called after every sweep with the live `t` (do not modify) and that sweep's
+    max change; the calibration studies trace convergence with it.
     """
     m, n = friction.shape
     dtype = friction.dtype
@@ -243,6 +248,8 @@ def solve_eikonal_dense(
             SWEEP_BLOCK_SIZE, changed_at, swept_at, sweep_count,
         )
         blocks_swept += n_swept
+        if on_sweep is not None:
+            on_sweep(t, change)
         return change
 
     def frac_blocks_swept() -> float:

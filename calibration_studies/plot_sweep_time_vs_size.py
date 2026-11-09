@@ -22,7 +22,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import load_config  # noqa: E402
-from plot_sweep_budget_convergence import N_COMPLETE_ROUNDS, collect  # noqa: E402
+from plot_sweep_budget_convergence import N_COMPLETE_ROUNDS, collect, read_trace_csv  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -89,7 +89,7 @@ def main() -> None:
     if (~df["converged"]).any():
         def _censored_elapsed(row) -> float:
             csv_path = sweep_budget_dir / f"{int(row['tile'])}.csv"
-            raw = pd.read_csv(csv_path)
+            raw = read_trace_csv(csv_path)
             last_idx = row["n_rounds_available"] * 4 - 1
             return float(raw["cum_time_s"].iloc[last_idx])
 

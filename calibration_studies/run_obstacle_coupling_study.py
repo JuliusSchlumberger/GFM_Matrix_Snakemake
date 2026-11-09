@@ -1,16 +1,12 @@
 """Trace obstacle-coupling outer iterations on the wet calibration tiles.
 
-Tiles come from run_sweep_budget_study.py's wet_tiles_selected.txt. Writes one
-CSV per tile: an n_outer=0 unblocked baseline, one row per outer iteration
-(static dem > max_waterlevel pre-filter, stop when pct_newly_blocked <
---outer-convergence-pct), and a status="summary" row splitting flooding removed
-by the static filter alone vs the full outer loop.
-
-Each inner solve runs up to --max-rounds rounds (4 sweeps, Julia's
-Gray-code order) with epsilon early exit; blocking uses
-flood_model.OBSTACLE_BLOCK_FRICTION. Unlike production, dynamic blocking is
-restricted to cells with t < 99 (reached): unreached cells read as
-waterlevel -99 m and a block is never undone. pct_unreached is logged.
+Tiles come from run_sweep_budget_study.py's wet_tiles_selected.txt. Each tile is solved by
+production's own path (eikonal_runner.solve_wave0_tile: inputs, seeds, two-component static
+level, duration correction B, block sweeps, flood_model's outer loop), once without coupling
+(the n_outer=0 baseline) and once coupled with up to --max-outer-iterations outer iterations.
+With correction B production solves twice per run (solve_pass "first", then "duration"); every
+outer iteration of both passes gets a row, and a status="summary" row splits the last pass's
+flooding removed by the static pre-filter alone vs the full outer loop.
 
 Usage:
     python run_obstacle_coupling_study.py --out-dir <output_dir> [--config <config.yml>]
@@ -21,7 +17,6 @@ flooding.max_rounds).
 """
 import argparse
 import csv
-import gc
 import sys
 import time
 import traceback
@@ -31,205 +26,123 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import load_config  # noqa: E402
-from eikonal import _ORTHANT_ORDER, _dense_sweep  # noqa: E402
-from flood_model import OBSTACLE_BLOCK_FRICTION as BLOCK_FRICTION  # noqa: E402
-from flood_model import prune_to_coast_connected  # noqa: E402
+from eikonal import UNREACHED_T  # noqa: E402
+from eikonal_runner import solve_wave0_tile  # noqa: E402
+from flood_model import SolveTrace  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from run_sweep_budget_study import OCEAN_CODE, TILES, friction_settings, load_tile  # noqa: E402
+from run_sweep_budget_study import RETURN_PERIOD, TILES, WATERLEVEL_NAME, study_overrides  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MAX_OUTER = 15  # beyond production's default, to find where tiles stop needing more
-# Not config-driven on purpose; pass --max-outer-iterations/--max-rounds to match config.yml.
-
-# t only decreases from the unseeded 99.0 (eikonal.solve_eikonal_dense) once seeds reach a cell.
-UNREACHED_SENTINEL = 99.0
+# Production's config.yml max_rounds; the calibration config's 100 is the sweep study's ceiling.
+DEFAULT_INNER_ROUNDS = 40
 
 
-def solve_inner(friction, seed_rows, seed_cols, seed_values, dtype, epsilon, max_rounds):
-    """Run up to max_rounds 4-sweep rounds with epsilon early exit.
-
-    Mirrors solve_eikonal_dense(max_rounds=...); also returns per-cell change
-    stats of the last round.
-    """
-    m, n = friction.shape
-    # Unseeded t=+99 (waterlevel -99 m) = never flooded, as in solve_eikonal_dense.
-    t = np.full((m + 1, n + 1), 99.0, dtype=dtype)
-    t[seed_rows, seed_cols] = seed_values
-    neg_two = dtype.type(-2.0)
-    eight = dtype.type(8.0)
-    four = dtype.type(4.0)
-    round_max_change = 0.0
-    n_rounds_used = 0
-    prev_domain = t[1:, 1:].copy()
-    for r in range(max_rounds):
-        prev_domain = t[1:, 1:].copy()
-        round_max_change = 0.0
-        for orthant in _ORTHANT_ORDER:
-            round_max_change = max(round_max_change, _dense_sweep(t, friction, orthant, neg_two, eight, four))
-        n_rounds_used = r + 1
-        if round_max_change <= epsilon:
-            break
-
-    # In-place native-dtype diff: float64 temporaries OOM on the largest tile.
-    diff = t[1:, 1:] - prev_domain
-    np.abs(diff, out=diff)
-    n_cells = diff.size
-    change_stats = {
-        "n_rounds_used": n_rounds_used,
-        "pct_cells_still_changing": round(100.0 * float(np.count_nonzero(diff > epsilon)) / n_cells, 6),
-        "mean_cell_change": round(float(diff.mean(dtype=np.float64)), 8),
-        "min_cell_change": round(float(diff.min()), 8),
-        "max_cell_change": round(float(diff.max()), 8),
-    }
-    return t, round_max_change, change_stats
-
-
-def _full_depth_array(waterlevel, dem, mask, coastline) -> np.ndarray:
-    """Return tile-shaped depth (0 where dry), same math as flood_depth_dense without coupling."""
-    flood = (waterlevel > dem) & (mask != OCEAN_CODE)
-    flood = prune_to_coast_connected(flood, coastline)
-    depth = np.zeros_like(dem)
-    depth[flood] = waterlevel[flood] - dem[flood]
-    return depth
-
-
-def _snapshot_from_depth(depth, n_outer, stopped_early, last_max_change, epsilon,
-                          cum_elapsed, iter_elapsed, change_stats, pct_unreached) -> dict:
+def _depth_row(depth: np.ndarray, waterlevel: np.ndarray | None) -> dict:
     flood = depth > 0
     n_inundated = int(flood.sum())
-    row = {
-        "n_outer": n_outer,
-        "cum_time_s": round(cum_elapsed, 3),
-        "iter_time_s": round(iter_elapsed, 3),
-        "outer_stopped_early": stopped_early,
-        "last_max_change": round(float(last_max_change), 8),
-        "epsilon": epsilon,
-        "inner_converged": bool(last_max_change <= epsilon),
-        "pct_unreached": round(pct_unreached, 6),
-        "n_inundated": n_inundated,
-    }
-    row.update(change_stats)
+    row = {"n_inundated": n_inundated,
+           "pct_unreached": "" if waterlevel is None else
+           round(100.0 * float(np.count_nonzero(waterlevel <= -UNREACHED_T)) / depth.size, 6)}
     if n_inundated:
-        depth_vals = depth[flood]
-        row["depth_mean"] = round(float(depth_vals.mean()), 4)
-        row["depth_min"] = round(float(depth_vals.min()), 4)
-        row["depth_max"] = round(float(depth_vals.max()), 4)
-        row["depth_q20"] = round(float(np.percentile(depth_vals, 20)), 4)
-        row["depth_q80"] = round(float(np.percentile(depth_vals, 80)), 4)
+        v = depth[flood]
+        row.update(depth_mean=round(float(v.mean()), 4), depth_min=round(float(v.min()), 4),
+                   depth_max=round(float(v.max()), 4), depth_q20=round(float(np.percentile(v, 20)), 4),
+                   depth_q80=round(float(np.percentile(v, 80)), 4))
     else:
-        row["depth_mean"] = row["depth_min"] = row["depth_max"] = row["depth_q20"] = row["depth_q80"] = 0.0
+        row.update(depth_mean=0.0, depth_min=0.0, depth_max=0.0, depth_q20=0.0, depth_q80=0.0)
     return row
 
 
 def _depth_change_metrics(depth_prev: np.ndarray, depth_curr: np.ndarray) -> dict:
     """Count both directions: re-blocking a cell can un-flood it."""
     abs_diff = np.abs(depth_curr - depth_prev)
-    n_newly_flooded = int(((depth_prev == 0) & (depth_curr > 0)).sum())
-    n_no_longer_flooded = int(((depth_prev > 0) & (depth_curr == 0)).sum())
     return {
         "max_depth_change_abs": round(float(abs_diff.max()), 4) if abs_diff.size else 0.0,
-        "n_newly_flooded": n_newly_flooded,
-        "n_no_longer_flooded": n_no_longer_flooded,
+        "n_newly_flooded": int(((depth_prev == 0) & (depth_curr > 0)).sum()),
+        "n_no_longer_flooded": int(((depth_prev > 0) & (depth_curr == 0)).sum()),
     }
 
 
-def run_tile_trace(
-    tile_id: int, model_outputs: Path, knn: int, idw_power: float, friction_kw: dict,
-    max_outer: int, inner_max_rounds: int, epsilon: float, outer_convergence_pct: float,
-) -> list[dict]:
-    """Trace the unblocked baseline and each outer iteration; one row per solve."""
-    dem, mask, friction, coastline, seed_rows, seed_cols, initial, max_waterlevel = load_tile(
-        tile_id, model_outputs, knn, idw_power, **friction_kw, on_no_stations="raise",
-    )
-    seed_values = -initial
-    dtype = friction.dtype
-    n_cells = dem.size
+class OuterTrace(SolveTrace):
+    """Record one row per outer iteration of every solve pass, and the last uncoupled solve."""
 
+    def __init__(self, tile_id: int, epsilon: float, outer_convergence_pct: float):
+        self.tile_id, self.epsilon, self.outer_convergence_pct = tile_id, epsilon, outer_convergence_pct
+        self.rows: list[dict] = []
+        self.t0 = time.perf_counter()
+        self.prev_depth = None
+
+    def solve_started(self, solve_pass, outer, depth_of) -> None:
+        self.solve_pass, self.depth_of, self.iter_t0 = solve_pass, depth_of, time.perf_counter()
+        self.n_sweeps, self.round_change, self.last_round_change = 0, 0.0, 0.0
+        if outer <= 1:
+            self.prev_depth = None
+
+    def sweep(self, t, change) -> None:
+        self.n_sweeps += 1
+        self.round_change = max(self.round_change, change)
+        if self.n_sweeps % 4 == 0:
+            self.last_round_change, self.round_change = self.round_change, 0.0
+
+    def outer_done(self, outer, waterlevel, blocked, pct_newly_blocked, inner) -> None:
+        depth = self.depth_of(waterlevel)
+        prev = self.prev_depth if self.prev_depth is not None else np.zeros_like(depth)
+        row = {"tile": self.tile_id, "solve_pass": self.solve_pass, "n_outer": outer, "n_cells": depth.size,
+               "cum_time_s": round(time.perf_counter() - self.t0, 3),
+               "iter_time_s": round(time.perf_counter() - self.iter_t0, 3),
+               "n_rounds_used": inner.get("n_rounds_used"),
+               "outer_stopped_early": outer > 1 and pct_newly_blocked < self.outer_convergence_pct,
+               "pct_blocked_cumulative": round(100.0 * int(blocked.sum()) / depth.size, 6),
+               "pct_newly_blocked": round(pct_newly_blocked, 6),
+               "last_max_change": round(float(self.last_round_change), 8), "epsilon": self.epsilon,
+               "inner_converged": bool(inner.get("converged")), "status": "ok",
+               **_depth_row(depth, waterlevel), **_depth_change_metrics(prev, depth)}
+        self.rows.append(row)
+        self.prev_depth = depth
+
+
+class BaselineTrace(SolveTrace):
+    """Keep the round count and last round change of the last uncoupled solve pass."""
+
+    def solve_started(self, solve_pass, outer, depth_of) -> None:
+        self.n_sweeps, self.round_change, self.last_round_change = 0, 0.0, 0.0
+
+    def sweep(self, t, change) -> None:
+        self.n_sweeps += 1
+        self.round_change = max(self.round_change, change)
+        if self.n_sweeps % 4 == 0:
+            self.last_round_change, self.round_change = self.round_change, 0.0
+
+
+def run_tile_trace(config: dict, tile_id: int, overrides: dict, max_outer: int, inner_max_rounds: int,
+                   epsilon: float, outer_convergence_pct: float) -> list[dict]:
+    """Trace the uncoupled baseline and each outer iteration; one row per solve."""
+    settings = {"max_rounds": inner_max_rounds, "waterlevel_epsilon_m": epsilon, **overrides}
+    base = BaselineTrace()
     t0 = time.perf_counter()
-
-    # n_outer=0 baseline: unblocked solve, no static pre-filter.
-    iter_t0 = time.perf_counter()
-    t0_b, max_change0, change_stats0 = solve_inner(
-        friction, seed_rows, seed_cols, seed_values, dtype, epsilon, inner_max_rounds,
-    )
-    wl0 = -t0_b[1:, 1:]
-    pct_unreached0 = 100.0 * float(np.count_nonzero(t0_b[1:, 1:] >= UNREACHED_SENTINEL)) / n_cells
-    # Free t0_b (~830MB float32 on the largest tile) before the outer loop (OOM otherwise).
-    del t0_b
-    gc.collect()
-    prev_depth = _full_depth_array(wl0, dem, mask, coastline)
-    del wl0
-    baseline_snap = _snapshot_from_depth(prev_depth, 0, False, max_change0, epsilon,
-                                          time.perf_counter() - t0, time.perf_counter() - iter_t0,
-                                          change_stats0, pct_unreached0)
-    baseline_snap["tile"] = tile_id
-    baseline_snap["n_cells"] = n_cells
-    baseline_snap["pct_newly_blocked"] = 0.0
-    baseline_snap["pct_blocked_cumulative"] = 0.0
-    baseline_snap["max_depth_change_abs"] = 0.0
-    baseline_snap["n_newly_flooded"] = 0
-    baseline_snap["n_no_longer_flooded"] = 0
-    baseline_snap["status"] = "ok"
-    rows = [baseline_snap]
-
-    static_blocked = dem > max_waterlevel
-    friction_b = np.where(static_blocked, dtype.type(BLOCK_FRICTION), friction)
-    prev_blocked = None
-
-    for outer in range(max_outer):
-        n_outer = outer + 1
-        iter_t0 = time.perf_counter()
-        t_b, max_change, change_stats = solve_inner(
-            friction_b, seed_rows, seed_cols, seed_values, dtype, epsilon, inner_max_rounds,
-        )
-        iter_elapsed = time.perf_counter() - iter_t0
-        wl_b = -t_b[1:, 1:]
-        # Unreached cells (t=99 sentinel, waterlevel -99 m) must not be blocked:
-        # blocks persist through every later outer iteration.
-        reached = t_b[1:, 1:] < UNREACHED_SENTINEL
-        pct_unreached = 100.0 * float(np.count_nonzero(~reached)) / n_cells
-        del t_b  # free the dominant allocation before the next solve (OOM otherwise)
-        gc.collect()
-
-        blocked = ((wl_b <= dem) & reached) | static_blocked
-        if prev_blocked is not None:
-            # Monotonic union (as in flood_model): otherwise blocked cells can reopen,
-            # giving an undamped period-2 oscillation.
-            blocked = blocked | prev_blocked
-        blocked[seed_rows, seed_cols] = False
-        depth = _full_depth_array(wl_b, dem, mask, coastline)
-        del wl_b
-
-        n_newly = int(blocked.sum()) if prev_blocked is None else int((blocked & ~prev_blocked).sum())
-        pct_newly = 100.0 * n_newly / n_cells
-        stopped_early = prev_blocked is not None and pct_newly < outer_convergence_pct
-
-        change = _depth_change_metrics(prev_depth, depth)
-        snap = _snapshot_from_depth(depth, n_outer, stopped_early, max_change, epsilon,
-                                     time.perf_counter() - t0, iter_elapsed, change_stats, pct_unreached)
-        snap.update(change)
-        snap["tile"] = tile_id
-        snap["n_cells"] = n_cells
-        snap["pct_newly_blocked"] = round(pct_newly, 6)
-        snap["pct_blocked_cumulative"] = round(100.0 * int(blocked.sum()) / n_cells, 6)
-        snap["status"] = "ok"
-        rows.append(snap)
-
-        prev_depth = depth
-        if stopped_early:
-            break
-        friction_b = np.where(blocked, dtype.type(BLOCK_FRICTION), friction)
-        prev_blocked = blocked
-
-    return rows
+    depth0, _ = solve_wave0_tile(config, tile_id, RETURN_PERIOD, WATERLEVEL_NAME, _REPO_ROOT, trace=base,
+                                 obstacle_coupling=False, **settings)
+    baseline = {"tile": tile_id, "solve_pass": "baseline", "n_outer": 0, "n_cells": depth0.size,
+                "cum_time_s": round(time.perf_counter() - t0, 3), "iter_time_s": round(time.perf_counter() - t0, 3),
+                "n_rounds_used": -(-base.n_sweeps // 4), "outer_stopped_early": False,
+                "pct_blocked_cumulative": 0.0, "pct_newly_blocked": 0.0,
+                "last_max_change": round(float(base.last_round_change), 8), "epsilon": epsilon,
+                "inner_converged": bool(base.last_round_change <= epsilon), "status": "ok",
+                **_depth_row(depth0, None),
+                "max_depth_change_abs": 0.0, "n_newly_flooded": 0, "n_no_longer_flooded": 0}
+    trace = OuterTrace(tile_id, epsilon, outer_convergence_pct)
+    solve_wave0_tile(config, tile_id, RETURN_PERIOD, WATERLEVEL_NAME, _REPO_ROOT, trace=trace,
+                     obstacle_coupling=True, max_outer_iterations=max_outer,
+                     outer_convergence_pct=outer_convergence_pct, **settings)
+    return [baseline, *trace.rows]
 
 
 FIELDNAMES = [
-    "tile", "n_outer", "n_cells", "cum_time_s", "iter_time_s", "n_rounds_used",
+    "tile", "solve_pass", "n_outer", "n_cells", "cum_time_s", "iter_time_s", "n_rounds_used",
     "outer_stopped_early", "pct_blocked_cumulative", "pct_newly_blocked",
-    "last_max_change", "epsilon", "inner_converged", "pct_unreached", "pct_cells_still_changing",
-    "mean_cell_change", "min_cell_change", "max_cell_change", "max_depth_change_abs",
+    "last_max_change", "epsilon", "inner_converged", "pct_unreached", "max_depth_change_abs",
     "n_newly_flooded", "n_no_longer_flooded", "n_inundated", "depth_mean",
     "depth_min", "depth_max", "depth_q20", "depth_q80", "status",
     "pct_removed_by_static_filter_alone", "pct_additional_removed_by_full_outer_loop",
@@ -238,10 +151,11 @@ FIELDNAMES = [
 
 
 def build_summary_row(rows: list[dict], tile_id: int) -> dict:
-    """Summarize % of baseline flooding removed by static pre-filter vs full outer loop."""
+    """Summarize % of baseline flooding removed by static pre-filter vs full outer loop (last pass)."""
     baseline = rows[0]  # n_outer=0: no blocking at all
-    static_only = rows[1]  # n_outer=1: static pre-filter + one inner solve, zero re-blocking
-    final = rows[-1]  # converged (or MAX_OUTER-capped) row
+    last = [r for r in rows[1:] if r["solve_pass"] == rows[-1]["solve_pass"]]
+    static_only = last[0]  # n_outer=1: static pre-filter + one inner solve, zero re-blocking
+    final = last[-1]  # converged (or capped) row
 
     n0 = baseline["n_inundated"]
     row = {k: "" for k in FIELDNAMES}
@@ -271,8 +185,10 @@ def main() -> None:
                         help="default: config simulation.flooding.friction_source")
     parser.add_argument("--uniform-attenuation-m-per-km", type=float, default=None,
                         help="uniform rate (default: config simulation.flooding.uniform_attenuation_m_per_km)")
-    parser.add_argument("--max-outer-iterations", type=int, default=None, help=f"default: {DEFAULT_MAX_OUTER} (production uses config simulation.flooding.obstacle_coupling.max_outer_iterations)")
-    parser.add_argument("--max-rounds", type=int, default=None, help="default: config simulation.flooding.max_rounds")
+    parser.add_argument("--max-outer-iterations", type=int, default=DEFAULT_MAX_OUTER,
+                        help="default: %(default)s (production: config obstacle_coupling.max_outer_iterations)")
+    parser.add_argument("--max-rounds", type=int, default=DEFAULT_INNER_ROUNDS,
+                        help="inner solve cap (default: %(default)s, production's)")
     parser.add_argument("--epsilon", type=float, default=None, help="default: config simulation.flooding.waterlevel_epsilon_m")
     parser.add_argument("--outer-convergence-pct", type=float, default=None, help="default: config simulation.flooding.obstacle_coupling.outer_convergence_pct")
     args = parser.parse_args()
@@ -282,17 +198,13 @@ def main() -> None:
     tiles = args.tile_ids if args.tile_ids else TILES
 
     cfg = load_config(args.config)
-    model_outputs = Path(cfg["simulation"]["model_outputs"])
     flooding_cfg = cfg["simulation"]["flooding"]
-    knn = int(flooding_cfg["knn"])
-    idw_power = float(flooding_cfg["idw_power"])
-    friction = friction_settings(flooding_cfg, args.friction_source, args.uniform_attenuation_m_per_km)
-    max_outer = args.max_outer_iterations if args.max_outer_iterations is not None else DEFAULT_MAX_OUTER
-    inner_max_rounds = args.max_rounds if args.max_rounds is not None else int(flooding_cfg["max_rounds"])
+    overrides = study_overrides(args.friction_source, args.uniform_attenuation_m_per_km)
     epsilon = args.epsilon if args.epsilon is not None else float(flooding_cfg["waterlevel_epsilon_m"])
-    outer_convergence_pct = args.outer_convergence_pct if args.outer_convergence_pct is not None else float(flooding_cfg["obstacle_coupling"]["outer_convergence_pct"])
-    print(f"model_outputs={model_outputs}  knn={knn}  friction={friction}  "
-          f"max_outer={max_outer}  inner_max_rounds={inner_max_rounds}  epsilon={epsilon}  "
+    outer_convergence_pct = (args.outer_convergence_pct if args.outer_convergence_pct is not None
+                             else float(flooding_cfg["obstacle_coupling"]["outer_convergence_pct"]))
+    print(f"model_outputs={cfg['simulation']['model_outputs']}  overrides={overrides}  "
+          f"max_outer={args.max_outer_iterations}  inner_max_rounds={args.max_rounds}  epsilon={epsilon}  "
           f"outer_convergence_pct={outer_convergence_pct}", flush=True)
 
     for tile_id in tiles:
@@ -302,27 +214,15 @@ def main() -> None:
             writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
             writer.writeheader()
             try:
-                tile_rows = run_tile_trace(
-                    tile_id, model_outputs, knn, idw_power, friction,
-                    max_outer, inner_max_rounds, epsilon, outer_convergence_pct,
-                )
+                tile_rows = run_tile_trace(cfg, tile_id, overrides, args.max_outer_iterations, args.max_rounds,
+                                           epsilon, outer_convergence_pct)
                 for row in tile_rows:
-                    label = "baseline (no blocking)" if row["n_outer"] == 0 else f"outer {row['n_outer']}"
-                    print(f"  {label}: cum_time={row['cum_time_s']}s  "
-                          f"iter_time={row['iter_time_s']}s  n_rounds_used={row['n_rounds_used']}"
+                    print(f"  {row['solve_pass']:>8} outer {row['n_outer']}: iter_time={row['iter_time_s']}s  "
+                          f"n_rounds_used={row['n_rounds_used']}"
                           f"{'  (stopped early)' if row['outer_stopped_early'] else ''}  "
                           f"pct_blocked_cumulative={row['pct_blocked_cumulative']}%  "
                           f"pct_newly_blocked={row['pct_newly_blocked']}%  "
-                          f"last_max_change={row['last_max_change']:.8f}  "
-                          f"inner_converged={row['inner_converged']}  "
-                          f"pct_unreached={row['pct_unreached']}%", flush=True)
-                    print(f"    pct_cells_still_changing={row['pct_cells_still_changing']}%  "
-                          f"mean_change={row['mean_cell_change']}  min_change={row['min_cell_change']}  "
-                          f"max_change={row['max_cell_change']}", flush=True)
-                    print(f"    n_inundated={row['n_inundated']:,}  "
-                          f"depth mean={row['depth_mean']}  min={row['depth_min']}  max={row['depth_max']}  "
-                          f"q20={row['depth_q20']}  q80={row['depth_q80']}", flush=True)
-                    print(f"    max_depth_change_abs={row['max_depth_change_abs']}  "
+                          f"inner_converged={row['inner_converged']}  n_inundated={row['n_inundated']:,}  "
                           f"n_newly_flooded={row['n_newly_flooded']:,}  "
                           f"n_no_longer_flooded={row['n_no_longer_flooded']:,}", flush=True)
                     writer.writerow(row)

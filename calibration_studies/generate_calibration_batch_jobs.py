@@ -120,7 +120,7 @@ def main() -> None:
     parser.add_argument(
         "--extra-args", default="",
         help="extra CLI args forwarded verbatim to each node's script call, e.g. '--epsilon 0.03' "
-             "or '--max-outer-iterations 4 --max-rounds 40' to reproduce production's config.yml values",
+             "or '--max-outer-iterations 4' to reproduce production's config.yml value",
     )
     args = parser.parse_args()
 
@@ -160,7 +160,10 @@ def main() -> None:
     px_by_tile_id = load_pixel_counts(all_tile_ids, domain_tiles_path)
     batches = lpt_bin_pack(all_tile_ids, px_by_tile_id, n_nodes)
     sizes = [len(b) for b in batches]
-    hours_per_batch = [estimate_worst_case_hours(b, px_by_tile_id, spec["worst_case_sweeps_per_tile"]) for b in batches]
+    # Correction B solves every tile twice (production flood_depth_dense), and so do the studies.
+    passes = 2 if local_config["simulation"]["flooding"]["duration_correction"]["enabled"] else 1
+    hours_per_batch = [passes * estimate_worst_case_hours(b, px_by_tile_id, spec["worst_case_sweeps_per_tile"])
+                       for b in batches]
     max_hours = max(hours_per_batch) if hours_per_batch else 0.0
     print(f"{n_nodes} node(s), {min(sizes)}-{max(sizes)} tile(s) each (LPT bin-packed by estimated pixel count)")
     print(f"worst-case estimated time per node: {min(hours_per_batch):.2f}-{max_hours:.2f}h "

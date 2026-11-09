@@ -41,6 +41,25 @@ WATERLEVEL_EPSILON_M = 0.03
 # Prohibitive even in float32 for any path crossing a blocked cell.
 OBSTACLE_BLOCK_FRICTION = 9999.0
 
+
+class SolveTrace:
+    """Observe flood_depth_dense's eikonal solves; every hook is a no-op here.
+
+    `solve_pass` is "first", or "duration" for the solve with correction B's friction; `outer`
+    is 0 without obstacle coupling, else the outer iteration (1-based). `depth_of` maps a
+    water level grid to the solve's flood depth (coast-connected, 0 where dry).
+    """
+
+    def solve_started(self, solve_pass: str, outer: int, depth_of) -> None:
+        pass
+
+    def sweep(self, t: np.ndarray, change: float) -> None:
+        pass
+
+    def outer_done(self, outer: int, waterlevel: np.ndarray, blocked: np.ndarray, pct_newly_blocked: float,
+                   inner: dict) -> None:
+        pass
+
 # Grid step (cells) of the coarse grid the static level is interpolated on before bilinear
 # upsampling; the level (MDT + SLR fingerprint) varies over tens of km.
 STATIC_LEVEL_COARSEN = 32
@@ -302,6 +321,7 @@ def flood_depth_dense(
     duration_correction: DurationCorrection | None = None,
     model: str = "eikonal",
     attenuation_m_per_m: float | None = None,
+    trace: SolveTrace | None = None,
 ) -> tuple[np.ndarray, dict]:
     """Solve flood depth (m) on the full dense tile; 0.0 where not flooded.
 
@@ -339,6 +359,8 @@ def flood_depth_dense(
     `straight_line_level` at `attenuation_m_per_m` with `resolution` as the cell size, connected.
     `friction`, obstacle coupling and the sweep settings are unused there; duration correction
     needs a solve and is refused.
+
+    `trace` (SolveTrace) observes every eikonal solve: its sweeps and outer iterations.
     """
     if model not in FLOOD_MODELS:
         raise ValueError(f"flood_depth_dense: model {model!r} not in {FLOOD_MODELS}")
@@ -414,11 +436,15 @@ def flood_depth_dense(
             diagnostics["n_static_wet_cells"] = int(static_wet.sum())
         return depth, diagnostics
 
-    def solve(friction: np.ndarray) -> tuple[np.ndarray, dict]:
+    on_sweep = trace.sweep if trace is not None else None
+
+    def solve(friction: np.ndarray, solve_pass: str) -> tuple[np.ndarray, dict]:
         if not obstacle_coupling:
+            if trace is not None:
+                trace.solve_started(solve_pass, 0, depth_from)
             t = solve_eikonal_dense(
                 friction, coastline_rows, coastline_cols, -initial, waterlevel_epsilon_m,
-                max_rounds=max_rounds, sweep_budget=sweep_budget,
+                max_rounds=max_rounds, sweep_budget=sweep_budget, on_sweep=on_sweep,
             )
             return -t[1:, 1:], {"obstacle_coupling": False}
         dtype = friction.dtype
@@ -434,9 +460,11 @@ def flood_depth_dense(
         outer_converged = False
         for outer in range(max_outer_iterations):
             n_outer = outer + 1
+            if trace is not None:
+                trace.solve_started(solve_pass, n_outer, depth_from)
             t, inner_diag = solve_eikonal_dense(
                 friction_b, coastline_rows, coastline_cols, -initial, waterlevel_epsilon_m,
-                max_rounds=max_rounds, return_diagnostics=True,
+                max_rounds=max_rounds, return_diagnostics=True, on_sweep=on_sweep,
             )
             waterlevel_b = -t[1:, 1:]
             blocked = (waterlevel_b <= dem) | static_blocked
@@ -448,6 +476,8 @@ def flood_depth_dense(
 
             n_newly = int(blocked.sum()) if prev_blocked is None else int((blocked & ~prev_blocked).sum())
             pct_newly = 100.0 * n_newly / n_cells
+            if trace is not None:
+                trace.outer_done(n_outer, waterlevel_b, blocked, pct_newly, inner_diag)
             if prev_blocked is not None and pct_newly < outer_convergence_pct:
                 outer_converged = True
                 break
@@ -468,13 +498,13 @@ def flood_depth_dense(
         depth[flood] = waterlevel[flood] - dem[flood]
         return depth
 
-    waterlevel, diagnostics = solve(friction)
+    waterlevel, diagnostics = solve(friction, "first")
     if duration_correction is not None:
         sources = mask == ocean_code
         sources[coastline_rows, coastline_cols] = True
         multiplier = duration_correction.multiplier(depth_from(waterlevel), dem, sources, transform)
         corrected = multiplier != 1.0
-        waterlevel, diagnostics = solve(friction * multiplier)
+        waterlevel, diagnostics = solve(friction * multiplier, "duration")
         diagnostics["n_duration_corrected_cells"] = int(corrected.sum())
         diagnostics["mean_duration_multiplier"] = float(multiplier[corrected].mean()) if corrected.any() else 1.0
 

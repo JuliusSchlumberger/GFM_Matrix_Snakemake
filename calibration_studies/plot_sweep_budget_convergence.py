@@ -19,7 +19,9 @@ N_COMPLETE_ROUNDS = 100  # = run_sweep_budget_study.MAX_ROUNDS_CEILING
 def read_trace_csv(csv_path: Path, required_col: str | None = None) -> pd.DataFrame | None:
     """Read one tile's study trace CSV; None while it is still being written (empty).
 
-    Also None when it has no rows or lacks `required_col` (e.g. an error-only CSV).
+    Also None when it has no rows or lacks `required_col` (e.g. an error-only CSV). Keeps the
+    rows of the last solve pass (the one production writes; correction B solves twice), the
+    uncoupled baseline and the summary/error rows.
     """
     try:
         df = pd.read_csv(csv_path)
@@ -27,7 +29,12 @@ def read_trace_csv(csv_path: Path, required_col: str | None = None) -> pd.DataFr
         return None  # still being written
     if df.empty or (required_col is not None and required_col not in df.columns):
         return None
-    return df
+    if "solve_pass" in df:
+        passes = df["solve_pass"].dropna()
+        passes = passes[passes != "baseline"]
+        if len(passes):
+            df = df[df["solve_pass"].isna() | df["solve_pass"].isin(["baseline", passes.iloc[-1]])]
+    return df.reset_index(drop=True)
 
 
 def band_stats(long_df: pd.DataFrame, value_col: str, by: str) -> pd.DataFrame:
