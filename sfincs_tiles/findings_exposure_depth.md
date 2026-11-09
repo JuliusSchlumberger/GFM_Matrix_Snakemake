@@ -59,3 +59,68 @@ Gate 0: pooled within 50 cm is 0.83 (> 0.6), so the depth question stays open an
 Dropped for the next stage: nothing. Not answerable from the result files: the 10 cm share
 (the bins are as wide as the tolerance) and where the disagreement sits (fringe vs deep, handoff
 0.4: the files hold depths only for both-wet cells). Both come from the stage-1 raster pass.
+
+## Stage 1: population-weighted agreement, one raster pass (friction factor 12)
+
+`exposure_depth_pass.py select | stage1`, `exposure_depth.py report`; outputs in
+`.cleanup_baseline/exposure_depth/stage1/`. Subset: 92 tiles with SFINCS flooding, 25 per tile
+density class (people per km2 of tile land) and all 14 tiles above 1000/km2, none of SF Bay,
+Severn or Fundy among the calibration tiles. Population per subgrid pixel = WorldPop count x pixel
+area / cell area (a full cell sums to its count within 1 %, test). Density classes below are those
+of the WorldPop cell each pixel lies in. Depth differences are exact (1 cm bins).
+
+Extent, pooled over the subset (HR = hit rate, FAR = false-alarm ratio, exposure bias = eikonal /
+SFINCS flooded area or population):
+
+| cell density | CSI area | CSI population | HR population | FAR population | exposure bias population |
+|---|---|---|---|---|---|
+| < 10 /km2 | 0.80 | 0.77 | 0.88 | 0.13 | 1.01 |
+| 10-100 | 0.74 | 0.74 | 0.85 | 0.14 | 0.98 |
+| 100-1000 | 0.73 | 0.73 | 0.78 | 0.09 | 0.85 |
+| > 1000 | 0.71 | 0.60 | 0.74 | 0.24 | 0.97 |
+| all | 0.77 | 0.64 | 0.75 | 0.19 | 0.93 |
+
+- Population weights agree with area weights up to 1000 people/km2. In the densest class the
+  population-weighted CSI drops to 0.60 (area 0.71): the eikonal floods densely populated cells
+  SFINCS keeps dry (FAR 0.24) and misses others (HR 0.74); the two errors nearly cancel in the
+  total (exposure bias 0.97), so totals hide them.
+- Exposed population per tile is within a factor 2 of SFINCS for 84 % of the 83 tiles with any
+  exposure (X5); the misses are mostly overestimates on tiles with little exposure, the largest
+  tiles lie close to 1:1.
+- Disagreement is not fringe-dominated: a third of the eikonal-only area (33 %; 25 % of its
+  population) has eikonal depth < 0.3 m, and 36 % of the SFINCS-only area (34 %) SFINCS depth
+  < 0.3 m. The 100 m population check (handoff 1.4) is dropped.
+
+Depth on both-wet cells, exact (area-weighted / population-weighted):
+
+| SFINCS depth | bias | MAE | within 10 cm | within 20 cm | within 50 cm | P90 abs |
+|---|---|---|---|---|---|---|
+| 0.1-0.3 m | +0.29 / +0.32 m | 0.31 / 0.35 m | 0.37 / 0.44 | 0.55 / 0.62 | 0.76 / 0.80 | 0.88 / 1.08 m |
+| 0.3-0.5 m | +0.13 / +0.15 | 0.25 / 0.29 | 0.36 / 0.37 | 0.61 / 0.63 | 0.85 / 0.88 | 0.72 / 0.77 |
+| 0.5-1 m | -0.03 / -0.08 | 0.24 / 0.30 | 0.33 / 0.27 | 0.54 / 0.45 | 0.88 / 0.85 | 0.54 / 0.60 |
+| 1-1.5 m | -0.16 / -0.28 | 0.29 / 0.37 | 0.30 / 0.20 | 0.49 / 0.34 | 0.81 / 0.69 | 0.70 / 0.78 |
+| 1.5-2 m | -0.21 / -0.28 | 0.29 / 0.35 | 0.31 / 0.23 | 0.49 / 0.39 | 0.81 / 0.74 | 0.69 / 0.76 |
+| 2-3 m | -0.22 / -0.25 | 0.29 / 0.30 | 0.31 / 0.24 | 0.52 / 0.47 | 0.82 / 0.80 | 0.69 / 0.67 |
+| > 3 m | -0.34 / -0.23 | 0.41 / 0.26 | 0.23 / 0.20 | 0.38 / 0.45 | 0.68 / 0.91 | 0.96 / 0.49 |
+| all | -0.10 / -0.15 | 0.28 / 0.33 | 0.32 / 0.26 | 0.52 / 0.44 | 0.82 / 0.79 | 0.69 / 0.72 |
+
+80 % of both-wet cells agree within 0.47 m (population: 0.53 m), 90 % within 0.69 m (0.72 m).
+
+Reading for depth-damage curves:
+- 10 cm: not supported; a quarter to a third of cells agree that closely, in every class.
+- 20 cm: about half the cells (44 % of the population), and only a third of the population at
+  1-2 m SFINCS depth.
+- 50 cm: about 80 % of cells and population in every class from 0.3 m up; the 0.1-0.3 m class and
+  the 1-2 m class of populated cells are lower (0.69-0.80).
+- The errors are systematic, not just noise: the eikonal is too deep in shallow water (+0.3 m at
+  0.1-0.3 m) and too shallow in deep water (-0.2 to -0.3 m from 1 m up), worse where people live.
+  Depth classes with steps of about 0.5 m (e.g. < 0.5, 0.5-1, 1-1.5, 1.5-2, > 2 m) are what the
+  model supports; curves resolved at 10-20 cm are not.
+- This is accuracy relative to SFINCS on the same DEM and forcing; DEM error against reality adds
+  to it. The SFINCS set is RP100 only.
+
+Gate 1: Q1 answered on the subset. Population- and area-weighted metrics agree within noise up to
+1000 people/km2; the > 1000/km2 class is the weakest (CSI 0.60, FAR 0.24) and every tile of that
+class is already in the subset, so the full 1000-tile pass (1b) would not add to it and stays
+queued for the paper figure only. 84 % of tiles are within a factor 2 (handoff target 90 %).
+Dropped: the 100 m population check (1.4), stage 2 damage curves (user, 2026-11-09).
