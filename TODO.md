@@ -109,7 +109,7 @@ Open:
   - `generate_hpc_preprocess_job.py` hard-codes the global station cache, ignoring
     `stations_cache_dir`; `coastline_nodes.parquet` is not cleared by `force` and ignores the mask
     codes; `compute_goco06s_absolute_raster` is unreachable (extract_dem takes it as a param).
-  - Docs behind the code: methods_02 §4.1 (knn 5 / power 3, edge-connected ocean, IDW per ocean
+  - After the reruns (user, 2026-11-09), docs behind the code: methods_02 §4.1 (knn 5 / power 3, edge-connected ocean, IDW per ocean
     component), §2.4 and config.yml:263 (per-RP product hydrographs), §4.4 and
     flood_model.py:37 (no 0.10 m wet threshold; validation at 0.01 m), §4.5 (lakes and rivers
     are not excluded); methods_01 §4 (hop seeds from the whole overlap; coastline nodes; the
