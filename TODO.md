@@ -326,12 +326,20 @@ Open:
   station's basin (`station_basins`), flags `flag_tail_uncertain` / `flag_tc_coast` /
   `flag_fallback_r` in `levels.parquet` and the levels file. Open:
   - The basin shifts are test 2's values (`open_guesses.py tc_scale`: 1979-2024, cap 0.35, no
-    pooling), hard-coded in `TC_SHIFT_M`; not refitted for the 1950-2024 pooled fit. Rerun
-    `tc_scale` on the new product if they should be.
-  - Flag definitions taken as: tail-uncertain = the pooled shape used > 0.2 (no cap, so "cap
-    binding" never fires); TC-coast = a COAST-RP TC part (the stations the mask and shift act
-    on; `tc_dominant_rp*` is also in `levels.parquet`); fallback-r = fewer than 3 gauges within
-    500 km. Nodes: own shape and TC part, fallback-r if any blended station has it. Confirm.
+    pooling), hard-coded in `TC_SHIFT_M`. Wanted (user, 2026-11-09): refit them inside the
+    production build on the new fit. Blocked: `tc_scale` scores against test 9's gauge
+    reference (`gauge_gauge_rp100_m` of `boundary_test/surge_correction.py`, the gauge's own
+    skew surges on its own harmonic tide; local `.cleanup_baseline/level_sources`), which the
+    build does not compute. It has the GESLA records, gauge constants and station classes, so the
+    reference could be ported into `prepare_storm_tide_product` (gauge set and years may differ
+    slightly from test 9). The fit itself does not depend on a prior shift: it rebuilds the
+    gauges' stations (r left out, mask on) with trial shifts 0-0.4 m on the raw COAST-RP_TC and
+    interpolates where the median RP100 bias of the other basins' TC-dominated gauges is zero;
+    five rebuilds of ~620 stations are needed because the TC and ETC rates combine nonlinearly.
+    Decide: port the reference into the build, or keep the hard-coded shifts.
+  - Flags (decided, user 2026-11-09): tail-uncertain = the pooled shape used > 0.2; TC-coast = a
+    COAST-RP TC part (`tc_dominant_rp*` is also in `levels.parquet`); fallback-r = fewer than 3
+    gauges within 500 km. Nodes: own shape and TC part, fallback-r if any blended station has it.
   - Not built: step 1's per-station 5-95% band above RP100.
   - Gauge ratios r stay on 1979-2024 (the gauge GTSM store and hourly basis); only the station
     fits use 1950-2024.
