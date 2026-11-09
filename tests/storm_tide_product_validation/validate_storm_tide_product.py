@@ -8,16 +8,18 @@ import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
+from scipy.stats import genpareto
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "preparation"))
 from boundaries import storm_tide_hydrograph_path, storm_tide_levels_path  # noqa: E402
 from flood_model import _idw_nearest_k  # noqa: E402
-from skew_surge import HW_PROMINENCE, high_waters  # noqa: E402
+from skew_surge import HW_PROMINENCE, high_waters, profile_loglik  # noqa: E402
 from prepare_boundary_conditions import nearest_slr_m  # noqa: E402
 from storm_tide_product import (  # noqa: E402
-    BLEND_QUANTILES, NODE_LEVEL_SOURCE, RPS, blended_model, export_levels, model_vector, ratio_covariate, station_ratio,
-    station_ratios)
+    BLEND_QUANTILES, FLAG_COLUMNS, NODE_LEVEL_SOURCE, RPS, SHAPE_GRID, TC_SHIFT_ALL_M, TC_SHIFT_M, blended_model,
+    export_levels, model_vector, pooled_shapes, ratio_covariate, station_basins, station_flags, station_ratio,
+    station_ratios, station_records, station_surge_model, tc_hours, tc_input_levels, tc_shift_m)
 from tide_prediction import consistent_version_flag  # noqa: E402
 
 HOURS = np.arange(24 * 30, dtype=float)
@@ -105,15 +107,17 @@ def test_export_levels_appends_the_coastline_nodes(tmp_path: Path) -> None:
     coast.to_netcdf(tmp_path / "coast_rp.nc")
     lev = pd.DataFrame({"station_id": ["a", "b"], "level_source": ["product", None], "r": [1.1, np.nan],
                         "atlas": ["fes2022", "fes2022"], "gpd_shape": [0.1, np.nan],
-                        **{f"rp{rp}_m": [3.0, np.nan] for rp in RPS}})
+                        **{f"rp{rp}_m": [3.0, np.nan] for rp in RPS}, **{c: [True, False] for c in FLAG_COLUMNS}})
     nodes = pd.DataFrame({"lon": [0.5], "lat": [50.1], "atlas": ["fes2014"], "gpd_shape": [0.05],
-                          **{f"rp{rp}_m": [4.0] for rp in RPS}}, index=pd.Index([7], name="node"))
+                          **{f"rp{rp}_m": [4.0] for rp in RPS}, **{c: [True] for c in FLAG_COLUMNS}},
+                         index=pd.Index([7], name="node"))
     export_levels(lev, tmp_path / "coast_rp.nc", tmp_path / "levels.nc", nodes)
     with xr.open_dataset(tmp_path / "levels.nc") as ds:
         assert ds.station_id.values.tolist() == ["a", "b", "node_7"]
         assert ds.storm_tide_rp_0100.values.tolist() == [3.0, 2.0, 4.0]
         assert ds.level_source.values.tolist() == ["product", "coast_rp", NODE_LEVEL_SOURCE]
         assert ds.station_x_coordinate.values[2] == 0.5
+        assert ds.flag_fallback_r.values.tolist() == [1, 0, 1]
 
 
 def test_slr_lookup_takes_the_nearest_value_inside_the_open_one_degree_box() -> None:
@@ -123,3 +127,114 @@ def test_slr_lookup_takes_the_nearest_value_inside_the_open_one_degree_box() -> 
     # [1.0, 0.0] lies on the box edge, [0.2, 0.0] has no value
     assert nearest_slr_m(slr_lonlat, slr_mm, station)[0] == pytest.approx(0.3)
     assert np.isnan(nearest_slr_m(slr_lonlat, slr_mm, station)[1])
+
+
+def test_profile_likelihood_peaks_at_the_sample_shape() -> None:
+    x = genpareto.rvs(0.2, scale=0.3, size=20000, random_state=np.random.default_rng(1))
+    prof = profile_loglik(x, SHAPE_GRID)
+    assert SHAPE_GRID[np.argmax(prof)] == pytest.approx(0.2, abs=0.03)
+    assert np.isfinite(prof).all()
+
+
+def test_pooled_shapes_sum_the_profiles_within_the_radius() -> None:
+    def profile(c, weight=1.0):
+        return -weight * (SHAPE_GRID - c) ** 2
+    # two stations 50 km apart (the second with ten times the information), one 2,000 km away
+    lonlat = np.array([[0.0, 0.0], [0.45, 0.0], [18.0, 0.0]])
+    profiles = np.vstack([profile(0.4), profile(0.1, 10.0), profile(-0.1)])
+    query = np.vstack([lonlat, [[90.0, 0.0]]])
+    shapes = pooled_shapes(lonlat, profiles, query, radius_km=300.0)
+    assert shapes[0] == shapes[1] == pytest.approx(round((0.4 + 1.0) / 11.0, 2))
+    assert shapes[2] == pytest.approx(-0.1)
+    assert np.isnan(shapes[3])
+
+
+def _synthetic_station(n_years: int = 20, seed: int = 0):
+    hours = np.arange(n_years * 8766)
+    th = np.cos(2 * np.pi * hours / 12.42)
+    rng = np.random.default_rng(seed)
+    g = rng.normal(0.0, 0.02, len(hours))
+    # a heavy-tailed surge at every high water, small enough to pass the despike
+    hw = high_waters(th)[0]
+    g[hw] += genpareto.rvs(0.5, scale=0.005, size=len(hw), random_state=rng)
+    years = 1950 + hours // 8766
+    return {"station": 0, "atlas": "fes2022", "mhws_m": 1.0, "r": 1.0}, g, th, years
+
+
+def test_station_fit_has_no_shape_cap_and_takes_the_pooled_shape() -> None:
+    st, g, th, years = _synthetic_station()
+    row, _, _, _ = station_surge_model(st, g, th, years)
+    assert row["gpd_shape"] == row["gpd_shape_mle"] > 0.35
+    row, model, _, _ = station_surge_model({**st, "pooled_shape": 0.12}, g, th, years)
+    assert model["shape"] == pytest.approx(0.12) and row["gpd_shape_mle"] > 0.35
+    row, _, _, _ = station_surge_model({**st, "pooled_shape": np.nan}, g, th, years)
+    assert row["gpd_shape"] == row["gpd_shape_mle"]
+
+
+def test_cyclone_mask_drops_the_masked_cycles_from_the_fit() -> None:
+    st, g, th, years = _synthetic_station()
+    storm = np.arange(5000, 5049)
+    g[storm] += 3.0  # a step, not a spike: despike keeps it
+    open_row, open_model, _, _ = station_surge_model(st, g, th, years)
+    row, model, _, _ = station_surge_model({**st, "tc_hours": storm}, g, th, years)
+    assert open_row["tc_masked_share"] == 0.0 and 0.0 < row["tc_masked_share"] < 0.001
+    assert len(model["sorted"]) < len(open_model["sorted"])
+    assert open_model["sorted"].max() > 2.5 > model["sorted"].max()
+
+
+def test_tc_shift_follows_the_basin_and_reaches_the_tc_levels() -> None:
+    assert tc_shift_m("WP") == TC_SHIFT_M["WP"] and tc_shift_m("EP") == tc_shift_m("none") == TC_SHIFT_ALL_M
+    assert all(0.18 <= v <= 0.26 for v in [*TC_SHIFT_M.values(), TC_SHIFT_ALL_M])
+    st = {"tc": np.array([1.0, 2.0]), "tc_shift_m": tc_shift_m("NA")}
+    assert tc_input_levels(st) == pytest.approx([1.0 + TC_SHIFT_M["NA"], 2.0 + TC_SHIFT_M["NA"]])
+    assert tc_input_levels({"tc": None}) is None
+
+
+def _ibtracs(path: Path, rows: list[tuple]) -> Path:
+    header = "SID,ISO_TIME,BASIN,LAT,LON,WMO_WIND,USA_WIND\n ,Year-Month-Day,,degrees_north,degrees_east,kts,kts\n"
+    path.write_text(header + "".join(",".join(map(str, r)) + "\n" for r in rows))
+    return path
+
+
+def test_station_basins_keep_the_north_atlantic_code(tmp_path: Path) -> None:
+    path = _ibtracs(tmp_path / "ibtracs.csv", [("a", "1990-09-01 00:00:00", "NA", 25.0, -80.0, 50, " "),
+                                               ("a", "1990-09-01 06:00:00", "NA", 25.5, -80.5, 60, " "),
+                                               ("b", "1990-09-02 00:00:00", "EP", 24.0, -82.0, 40, " ")])
+    assert station_basins(np.array([[-80.2, 25.2], [0.0, 0.0]]), path).tolist() == ["NA", "none"]
+
+
+def test_tc_hours_take_storms_with_wind_or_without_any_wind_on_record(tmp_path: Path) -> None:
+    path = _ibtracs(tmp_path / "ibtracs.csv", [("weak", "1950-01-02 00:00:00", "SI", -20.0, 50.0, 20, " "),
+                                               ("strong", "1950-01-03 00:00:00", "SI", -20.0, 50.0, 40, " "),
+                                               ("old", "1950-01-05 00:00:00", "SI", -20.0, 50.0, " ", " ")])
+    stations = pd.DataFrame({"lat": [-20.5, 40.0], "lon": [50.0, 0.0]}, index=[3, 4])
+    hours = tc_hours(stations, 24 * 30, path, np.datetime64("1950-01-01T00:00"), half_hr=1)
+    assert list(hours) == [3]
+    assert hours[3].tolist() == [47, 48, 49, 95, 96, 97]
+
+
+def test_station_flags() -> None:
+    flags = station_flags([0.25, 0.1, np.nan], [True, False, False], [False, True, False])
+    assert list(flags.columns) == list(FLAG_COLUMNS)
+    assert flags.to_numpy().tolist() == [[True, True, False], [False, False, True], [False, False, False]]
+
+
+def test_station_records_join_the_early_and_main_surge_stores(tmp_path: Path) -> None:
+    start = np.datetime64("1950-01-01T00:00")
+    n_hours = 48
+    for name, first, values in (("early", start, [1.0] * 12 + [2.0] * 12),
+                                ("main", start + np.timedelta64(24, "h"), [3.0] * 24)):
+        store = tmp_path / name
+        store.mkdir()
+        pd.DataFrame({"gtsm_index": [7]}).to_parquet(store / "stations.parquet")
+        np.save(store / "time.npy", (first + np.arange(24).astype("timedelta64[h]")).astype("datetime64[ns]"))
+        np.save(store / "series.npy", (np.array(values) * 1000).astype(np.int16)[None, :])
+    bases = []
+    for k, n in enumerate((n_hours, n_hours, 6, 6)):
+        bases.append(tmp_path / f"b{k}.npy")
+        np.save(bases[-1], np.full((n, 1), 1.0 if k in (0, 2) else 0.0))
+    st = {"station": 0, "atlas": "fes2022", "gtsm_index": 7, "hc": np.array([1.0 + 0j])}
+    (_, g, th, t10, years), = station_records([st], [tmp_path / "early", tmp_path / "main"], {"fes2022": bases}, start)
+    assert g.tolist() == [1.0] * 12 + [2.0] * 12 + [3.0] * 24
+    assert th.tolist() == [1.0] * n_hours and t10.tolist() == [1.0] * 6
+    assert years[0] == 1950 and len(years) == n_hours

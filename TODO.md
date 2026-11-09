@@ -88,8 +88,9 @@ Decided and implemented:
 Open:
 - **Hydrax reruns: eikonal studies (500 tiles), SFINCS calibration (1,500 tiles), local
   comparisons (2026-11-09).** Blockers and fixes found by reading the launch paths:
-  - Order: storm-tide product final (rebuild with the 2026-11-08 decisions: coastline nodes,
-    300 km pooled shape, no cap, basin shift; the levels file on `<data_root>` is from 11-07) ->
+  - Order: storm-tide product final (rebuild with the 2026-11-08 decisions, all in the code:
+    coastline nodes, 1950-2024 masked fit, 300 km pooled shape, no cap, basin shift, flags; the
+    levels file on `<data_root>` is from 11-07) ->
     station boundary lines -> shared station cache -> per-tile inputs (production
     `model_outputs` for the SFINCS candidates, `calibration_500_tiles` for the studies, each
     scenario) -> runs. SFINCS copies each tile's production `inputs/boundaries_RP100_SLR_0.gpkg`,
@@ -317,11 +318,32 @@ Open:
      Masked without a shift, TC-dominated gauges: RP100 median -0.16 m, MAE 0.389 m (production
      -0.03 / 0.361 m). Decided (user, 2026-11-08): pool at 300 km, drop the cap, and shift the
      COAST-RP_TC levels per cyclone basin (test 2's basin fit, 0.18-0.25 m) with the mask on.
+  Built into production (`storm_tide_product`, `prepare_storm_tide_product`; not yet run): fit on
+  1950-2024 (the 1950-1978 store `gtsm_surge_stations_1950_1978` and a 1950-2024 FES basis in the
+  cache), IBTrACS mask at stations with a COAST-RP TC part (`tc_hours`), shape pooled at 300 km
+  over all stations except the GTSM-QA ones (`shape_profiles.parquet`, `pooled_shapes`; TC and
+  non-TC pooled together, as `pooled_shape` tested it), no cap, COAST-RP_TC + `TC_SHIFT_M` of the
+  station's basin (`station_basins`), flags `flag_tail_uncertain` / `flag_tc_coast` /
+  `flag_fallback_r` in `levels.parquet` and the levels file. Open:
+  - The basin shifts are test 2's values (`open_guesses.py tc_scale`: 1979-2024, cap 0.35, no
+    pooling), hard-coded in `TC_SHIFT_M`; not refitted for the 1950-2024 pooled fit. Rerun
+    `tc_scale` on the new product if they should be.
+  - Flag definitions taken as: tail-uncertain = the pooled shape used > 0.2 (no cap, so "cap
+    binding" never fires); TC-coast = a COAST-RP TC part (the stations the mask and shift act
+    on; `tc_dominant_rp*` is also in `levels.parquet`); fallback-r = fewer than 3 gauges within
+    500 km. Nodes: own shape and TC part, fallback-r if any blended station has it. Confirm.
+  - Not built: step 1's per-station 5-95% band above RP100.
+  - Gauge ratios r stay on 1979-2024 (the gauge GTSM store and hourly basis); only the station
+    fits use 1950-2024.
+  - `level_product_gauges.GaugeCheck` (the baseline of every `open_guesses.py` stage) still builds
+    1979-2024 without mask, pooling or shift, and now without the cap.
+  - After the rebuild: refresh the §8.4 numbers in `boundary_test/INPUT_ANALYSIS.md` (Against
+    COAST-RP, at the gauges), which describe the 11-07 build; check the run time of the second
+    station pass (shape profiles).
 - **Storm-tide product: decisions taken as estimates (open questions; tested in
   `boundary_test/INPUT_ANALYSIS.md` §8.6, fig19-fig23).**
-  - No TC mask (decided): ERA5 cyclones stay in the ETC fit and count again in COAST-RP's TC part,
-    which matches the gauges best because both sources are too low (§8.6). Retest the mask
-    (`boundary_test/open_guesses.py tc_mask`) when test 10 replaces the TC part.
+  - TC mask with COAST-RP_TC shifted per basin (decided, review steps 2 and 6 above). Retest it
+    (`boundary_test/open_guesses.py tc_mask`, `tc_scale`) when test 10 replaces the TC part.
   - Interpolation: `knn` 5, `idw_power` 3 (config default now; leave-one-out RP100 MAE 5.7 cm
     against 7.0 cm for k 15 / power 2, fewest stations off by > 0.5 m). The test predicts a station
     from neighbours farther away than a coastline cell's, so it overstates the error; the ranking
@@ -340,12 +362,9 @@ Open:
   - Gauge ratios without GTSM's own tide: production fits r on gauge vs GTSM-on-FES skew surges
     and takes the common years of those two series; test 9 also required GTSM's harmonic tide
     (`gtsm_harm`) and its years. The port's gauge set may differ by a few sites.
-  - GPD shape cap 0.35 (`SHAPE_CAP`, Fathom RFA's cap): kept, and without the TC mask it sets the
-    RP250-RP1000 tail at 832 stations, mostly hurricane/typhoon coasts (Hangzhou Bay RP1000
-    12.6 m against COAST-RP's 4.8 m). The gauges cannot tell caps apart (RP100 MAE
-    0.215-0.217 m from none to 0.2); at RP1000 no cap adds up to 12.9 m, 0.2 removes up to
-    3.9 m. Above RP100 nothing checks it; test 10 (STORM-forced GTSM) is the check for the
-    cyclone tail.
+  - GPD shape: no cap, pooled at 300 km (decided, review step 6 above). The gauges cannot tell
+    caps apart (RP100 MAE 0.215-0.217 m from none to 0.2). Above RP100 nothing checks the tail;
+    test 10 (STORM-forced GTSM) is the check for the cyclone tail.
   - GTSM despike (|residual - 5-h median| > 2 m; >= 5 jumps > 2 m -> COAST-RP levels, 15
     Arafura stations): kept; 3-5 jumps give the same 15, and 1 m would catch real North Sea
     surges.

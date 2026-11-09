@@ -4,21 +4,23 @@
 Entry point: run(config), via `python run_preparation.py storm_tide_product`; read when
 boundary_conditions.storm_tide_source is gfm_product. Method: src/storm_tide_product.py and
 boundary_test/INPUT_ANALYSIS.md §8.4-8.5. Raw inputs: GESLA-4.1, GTSM-ERA5 surge residual,
-FES2022 and FES2014, COAST-RP (+ _ETC, _TC) (config `storm_tide_product`).
+FES2022 and FES2014, COAST-RP (+ _ETC, _TC), IBTrACS (config `storm_tide_product`).
 
-Writes into storm_tide_product.cache_dir (~30 GB; may live off the data root) copies of raw
+Writes into storm_tide_product.cache_dir (~45 GB; may live off the data root) copies of raw
 inputs and what depends on them alone: FES2022 decompressed, tide bases, GTSM series at the
-stations and gauges, GESLA records, FES constants and MHWS at the stations, the coastline nodes
-and their FES constants; deterministic, kept across runs. Into
+stations (1950-1978 and 1979-2024 stores) and gauges, GESLA records, FES constants and MHWS at
+the stations, the coastline nodes and their FES constants; deterministic, kept across runs. Into
 boundary_conditions.storm_tide_product_dir (~3 GB):
   gauges/       gauge table (ratio, class, tidal MHWS), TC donor shapes and the tide-correction
                 gauges (tide_gauges.parquet: short harmonic fits of every coastal GESLA site)
-  stations.csv, levels.parquet, hydrographs.npy, hydrograph_info.parquet, surge_models.npy
+  stations.csv, shape_profiles.parquet (GPD profile likelihood per station, for the pooled
+  shape), levels.parquet, hydrographs.npy, hydrograph_info.parquet, surge_models.npy
   (stp.model_vector per station), node_levels.parquet, and the two product files
   (boundaries.PRODUCT_*_FILENAME; the levels file holds the stations, then the coastline nodes).
 force=True (default) recomputes everything outside the cache, and the cached coastline nodes
-(they follow the masks, which fix_ocean_mask edits in place); ~6 h on 4 workers, most of it the GTSM
-extraction (552 monthly files read in full) and the per-station build.
+(they follow the masks, which fix_ocean_mask edits in place). Most of the run time is the GTSM
+extraction (900 monthly files read in full) and the two passes over the stations (shape
+profiles, then levels and hydrographs).
 """
 
 from __future__ import annotations
@@ -57,7 +59,11 @@ class _Paths:
             "fes2014": (self.cache / "fes2014_hourly_re.npy", self.cache / "fes2014_hourly_im.npy",
                         self.cache / "fes2014_nodal_re.npy", self.cache / "fes2014_nodal_im.npy"),
         }
+        # the stations' hourly tide spans their whole record (stp.record_times); the gauges' 1979-2024
+        self.station_bases = {a: (self.cache / f"{a}_record_re.npy", self.cache / f"{a}_record_im.npy", *b[2:])
+                              for a, b in self.bases.items()}
         self.gtsm_stations = self.cache / "gtsm_surge_stations"
+        self.gtsm_stations_early = self.cache / "gtsm_surge_stations_{}_{}".format(*stp.EARLY_YEARS)
         self.gtsm_gauges = self.cache / "gtsm_surge_gauges"
         self.records = self.cache / "gesla"
         self.gauges = root / "gauges"
@@ -72,12 +78,14 @@ class _Paths:
         self.node_constants = self.cache / "node_fes_constants.npz"
         self.surge_models = root / "surge_models.npy"
         self.node_levels = root / "node_levels.parquet"
+        self.shape_profiles = root / "shape_profiles.parquet"
 
 
 def _bases(models: dict, paths: _Paths, atlases) -> None:
     for atlas in atlases:
         h_re, h_im, n_re, n_im = paths.bases[atlas]
         tp.cached_basis(models[atlas], tp.hourly_times(), h_re, h_im)
+        tp.cached_basis(models[atlas], stp.record_times(), *paths.station_bases[atlas][:2])
         # FES2014's 10-min basis only feeds MHWS and the high-water peaks: float32 is ample
         tp.cached_basis(models[atlas], tp.nodal_times(), n_re, n_im, np.float64 if atlas == "fes2022" else np.float32)
 
@@ -176,6 +184,8 @@ def node_levels(config: dict, paths: _Paths, models: dict, todo: list[dict], lev
     simulation.flooding knn nearest product stations, weights distance^-idw_power, as the seeds
     weight the stations. Its TC levels are the same weighting over those of the neighbours with a
     TC part, if the nearest has one. Its tide is corrected by the gauges around the node itself.
+    Flags: tail_uncertain and tc_coast from the node's own shape and TC part, fallback_r where any
+    of its stations takes the covariate r.
     """
     if not paths.coastline_nodes.exists():
         catalog = get_data_catalog(_REPO_ROOT / config["paths"]["hydromt_data_catalog"], root=config["paths"]["root"])
@@ -204,7 +214,7 @@ def node_levels(config: dict, paths: _Paths, models: dict, todo: list[dict], lev
     tc_used = np.full((len(todo), len(stp.RPS)), np.nan)
     for k, st in enumerate(todo):
         if st["tc"] is not None:
-            tc_used[k] = st["tc"] * st.get("tc_scale", 1.0) + st.get("tc_shift_m", 0.0)
+            tc_used[k] = stp.tc_input_levels(st)
     hc = np.empty((len(nodes), c["fes2022"].shape[1]), dtype=complex)
     factor, count = np.ones(len(nodes)), np.zeros(len(nodes), dtype=int)
     glonlat = tide_gauges[["lon", "lat"]].to_numpy(dtype=float)
@@ -224,9 +234,12 @@ def node_levels(config: dict, paths: _Paths, models: dict, todo: list[dict], lev
         todo_nodes.append({"node": j, "atlas": atlas[j], "hc": hc[j], "neighbours": neighbours[j], "weights": w[j],
                            "tc": tc_node})
     logger.info("Levels at %d coastline nodes (%d tide-corrected)", len(nodes), int((count > 0).sum()))
-    out = nodes.join(stp.build_nodes(todo_nodes, paths.surge_models, paths.bases, workers))
+    out = nodes.join(stp.build_nodes(todo_nodes, paths.surge_models, paths.station_bases, workers))
     out["atlas"], out["tide_factor"], out["tide_gauges"] = atlas, factor, count
     out["nearest_station_km"] = d[:, 0] * stp.EARTH_RADIUS_KM
+    fallback = lev.flag_fallback_r.to_numpy()[neighbours].any(axis=1)
+    flags = stp.station_flags(out.gpd_shape.to_numpy(), [n["tc"] is not None for n in todo_nodes], fallback)
+    out[list(stp.FLAG_COLUMNS)] = flags.to_numpy()
     return out
 
 
@@ -241,8 +254,8 @@ def run(config: dict, force: bool = True) -> None:
     if force:
         for p in [paths.gauges / n for n in ("gauges.parquet", "gauge_constants.npz", "tc_donors.parquet",
                                              "tc_donor_shapes.npy", "tide_gauges.parquet")] + [
-                paths.stations, paths.levels, paths.hydrographs, paths.info, paths.surge_models, paths.node_levels,
-                paths.coastline_nodes,
+                paths.stations, paths.shape_profiles, paths.levels, paths.hydrographs, paths.info,
+                paths.surge_models, paths.node_levels, paths.coastline_nodes,
                 paths.root / PRODUCT_LEVELS_FILENAME, paths.root / PRODUCT_HYDROGRAPHS_FILENAME]:
             if p.exists():
                 p.unlink()
@@ -262,6 +275,11 @@ def run(config: dict, force: bool = True) -> None:
     if not (paths.gtsm_stations / "series.npy").exists():
         logger.info("GTSM surge at %d stations", stations.gtsm_index.nunique())
         extract_series(Path(cfg["gtsm_dir"]), stations.gtsm_index.to_numpy(), paths.gtsm_stations, workers)
+    if not (paths.gtsm_stations_early / "series.npy").exists():
+        logger.info("GTSM surge %d-%d at %d stations", *stp.EARLY_YEARS, stations.gtsm_index.nunique())
+        extract_series(Path(cfg["gtsm_dir"]), stations.gtsm_index.to_numpy(), paths.gtsm_stations_early, workers,
+                       years=stp.EARLY_YEARS)
+    stores = (paths.gtsm_stations_early, paths.gtsm_stations)
 
     tide_gauges = tide_gauge_table(cfg, paths, models, workers)
     atlas = station_atlas(paths, stations, models, gauges, tide_gauges, workers)
@@ -272,15 +290,37 @@ def run(config: dict, force: bool = True) -> None:
     donors = pd.read_parquet(paths.gauges / "tc_donors.parquet")
     tc_shapes = stp.station_tc_shapes(stations, donors, np.load(paths.gauges / "tc_donor_shapes.npy"))
     coast = stp.coast_rp_levels(coast_rp).to_numpy()
+    has_tc = stations.station_id.isin(tc_levels.index).to_numpy()
+    logger.info("Cyclone mask and basins of the %d stations with a COAST-RP TC part", int(has_tc.sum()))
+    mask_hours = stp.tc_hours(stations[has_tc], len(stp.record_times()), Path(cfg["ibtracs_path"]), stp.RECORD_START)
+    basin = np.full(len(stations), "", dtype=object)
+    basin[has_tc] = stp.station_basins(stations.loc[has_tc, ["lon", "lat"]].to_numpy(dtype=float), Path(cfg["ibtracs_path"]))
     todo = []
     for k, (st, s) in enumerate(stations.iterrows()):
         a = "fes2014" if atlas["use14"][k] else "fes2022"
         f = atlas["tide_factor"][k]
-        todo.append({"station": st, "gtsm_index": int(s.gtsm_index), "atlas": a, "coast_rp": coast[k],
-                     "hc": atlas["hc"][a][k] * f, "mhws_m": float(atlas["mhws"][a][k] * f),
-                     "r_idw": float(ratios.r_idw.iloc[k]), "r_covariate": covariate,
-                     "tc": tc_levels.loc[s.station_id].to_numpy() if s.station_id in tc_levels.index else None,
-                     "tc_shape": tc_shapes.get(st)})
+        item = {"station": st, "gtsm_index": int(s.gtsm_index), "atlas": a, "coast_rp": coast[k],
+                "hc": atlas["hc"][a][k] * f, "mhws_m": float(atlas["mhws"][a][k] * f),
+                "r_idw": float(ratios.r_idw.iloc[k]), "r_covariate": covariate, "tc": None, "tc_shape": tc_shapes.get(st)}
+        if has_tc[k]:
+            item.update({"tc": tc_levels.loc[s.station_id].to_numpy(), "tc_hours": mask_hours.get(st),
+                         "tc_shift_m": stp.tc_shift_m(basin[k])})
+        todo.append(item)
+
+    if not paths.shape_profiles.exists():
+        logger.info("GPD shape profiles at %d stations", len(todo))
+        prof = stp.build_profiles(todo, stores, paths.station_bases, workers, stp.RECORD_START)
+        pd.DataFrame(np.vstack(prof.profile.to_numpy()), index=prof.index,
+                     columns=[f"{x:.2f}" for x in stp.SHAPE_GRID]).assign(gtsm_jumps=prof.gtsm_jumps) \
+            .to_parquet(paths.shape_profiles)
+    prof = pd.read_parquet(paths.shape_profiles)
+    # GTSM-QA stations take COAST-RP's levels; their broken series stay out of the pool
+    pool = prof.index[prof.gtsm_jumps < stp.GTSM_QA_JUMPS]
+    lonlat = stations[["lon", "lat"]].to_numpy(dtype=float)
+    pooled = stp.pooled_shapes(lonlat[stations.index.get_indexer(pool)],
+                               prof.loc[pool].drop(columns="gtsm_jumps").to_numpy(), lonlat)
+    for item, shape in zip(todo, pooled):
+        item["pooled_shape"] = shape
 
     logger.info("Levels and hydrographs at %d stations", len(todo))
     hyd = np.lib.format.open_memmap(paths.hydrographs, mode="w+", dtype=np.float32,
@@ -289,7 +329,7 @@ def run(config: dict, force: bool = True) -> None:
     vectors = np.lib.format.open_memmap(paths.surge_models, mode="w+", dtype=np.float32,
                                         shape=(len(stations), len(stp.BLEND_QUANTILES) + len(stp.MODEL_FIELDS)))
     vectors[:] = np.nan
-    rows, info = stp.build_stations(todo, paths.gtsm_stations, paths.bases, hyd, workers, vectors)
+    rows, info = stp.build_stations(todo, stores, paths.station_bases, hyd, workers, vectors, stp.RECORD_START)
     hyd.flush()
     vectors.flush()
     del vectors
@@ -299,6 +339,10 @@ def run(config: dict, force: bool = True) -> None:
     lev = stations.join(ratios).join(pd.DataFrame(rows).set_index("station"))
     lev["mhws_fes2022_m"], lev["mhws_fes2014_m"] = atlas["mhws"]["fes2022"], atlas["mhws"]["fes2014"]
     lev["tide_factor"], lev["tide_gauges"] = atlas["tide_factor"], atlas["tide_gauges"]
+    lev["tc_basin"] = basin.astype(str)
+    lev["tc_shift_m"] = [item.get("tc_shift_m", np.nan) for item in todo]
+    lev[list(stp.FLAG_COLUMNS)] = stp.station_flags(lev.gpd_shape.to_numpy(), has_tc,
+                                                    ~np.isfinite(lev.r_idw.to_numpy())).to_numpy()
     for j, rp in enumerate(stp.RPS):
         lev[f"coast_rp_rp{rp}_m"] = coast[:, j]
         lev[f"coast_rp_etc_rp{rp}_m"] = etc[rp].to_numpy()

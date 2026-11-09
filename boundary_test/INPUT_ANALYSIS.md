@@ -923,25 +923,32 @@ FES2022, FES2014, COAST-RP), into `boundary_conditions.storm_tide_product_dir`:
 
 **Construction.**
 - *Stations.* Each COAST-RP station takes the nearest GTSM-ERA5 surge series (all within 0.8 km;
-  1979-2024, hourly) and the FES2022 constants at its position.
+  1950-2024, hourly) and the FES2022 constants at its position.
   - FES2014 replaces FES2022 at 66 stations: the 56 that the version rule of §8.2 flags, plus 10
     neighbours on the same artefact (§8.5).
   - A station on an FES land cell (IBIS_GL_TS_MO_62198, Le Havre) takes the constants of the
     nearest station with values.
 - *ETC levels.* GTSM skew surges on the hourly FES tide are fitted with a GPD, scaled by r (test
-  9) and convolved with the 10-min FES high waters over a nodal cycle.
+  9) and convolved with the 10-min FES high waters over a nodal cycle. At stations with a COAST-RP
+  TC part, cycles within 300 km and 24 h of an IBTrACS tropical storm (>= 34 kt, or a track with no
+  wind on record) leave the fit. The GPD shape is pooled: the shape that maximises the summed
+  profile likelihood of the stations within 300 km, scale per station, no cap
+  (`input_analysis/boundary_forcing/boundary_forcing_input_analysis.md` §9).
 - *Surge ratio r.* r = `ratio_fes`, i.e. gauge / GTSM skew-surge RP10 with the FES tide under
   both. At the gauges it is equivalent to test 9's `ratio`: median 1.18 vs 1.19, correlation
   0.97. Each station takes the inverse-distance mean of r at calibration gauges within 500 km
-  (at least 3), otherwise the gauge median, and r is capped at 2.0.
+  (at least 3), otherwise the gauges' power law in the station's GTSM RP10 skew surge, and r is
+  capped at 2.0.
   - The leave-one-out MAE is the same for any cap between 1.5 and 2.5; 2.0 is about the gauge
     p90.
-  - Station r: median 1.18. 203 stations are capped; 13,583 take the median (no 3 gauges within
+  - Station r: median 1.18. 203 stations are capped; 13,583 take the power law (no 3 gauges within
     500 km).
-- *TC part.* COAST-RP_TC enters as an annual exceedance rate added to the ETC rate, which is
-  COAST-RP's own combination. TC is a gap-filler until test 10. The cyclones of the ERA5 record
-  stay in the ETC fit, so they count in both parts; removing them scored worse at the gauges
-  (§8.6).
+- *TC part.* COAST-RP_TC, raised by the shift of its IBTrACS basin (0.18 m West Pacific to
+  0.25 m North Atlantic, fitted at the TC-dominated gauges of the other basins), enters as an
+  annual exceedance rate added to the ETC rate, which is COAST-RP's own combination. TC is a
+  gap-filler until test 10.
+- *Flags* (levels file): tail-uncertain (GPD shape > 0.2), TC-coast (a COAST-RP TC part) and
+  fallback-r (r from the power law).
 - *Hydrographs.* The accepted generator of §8.3. Where the TC rate exceeds the ETC rate at the
   RP level (and, below RP10, also at RP10), the station uses the TC shape: a neighbouring gauge's
   surge-dominated shape within 50 km, else the Gaussian.
@@ -953,7 +960,7 @@ caused them (fig17):
 |---|---|---|---|
 | A second low-water bump of the shallow-water tide counts as a high water; the next real high water then reads as a skew surge of several metres | Ungava Bay, Hudson Strait, Amazon mouth | a maximum in the lowest quarter of the 25-h tidal range with a prominence < 10% of that range is not a high water (`skew_surge.HW_PROMINENCE`); weak lesser high waters of mixed tides stay | largest skew surge at Ungava 4.5 → 0.8 m |
 | GTSM residual spikes of up to 12 m within an hour (a model artefact) | Arafura coast, New Guinea (137-139°E, 5-8°S) | hours more than 2 m from their 5-h median are dropped; a station with ≥ 5 hourly jumps > 2 m takes COAST-RP's levels and a Gaussian shape (`level_source = coast_rp`) | 15 |
-| A heavy GPD tail fitted to a few large events | hurricane and typhoon coasts, scattered elsewhere | GPD shape capped at 0.35 and the scale refitted (Fathom RFA's cap; about the gauges' p95) | 832 |
+| A heavy GPD tail fitted to a few large events | hurricane and typhoon coasts, scattered elsewhere | cyclone mask at stations with a TC part and the shape pooled over 300 km | all stations |
 
 Two further QA steps:
 - *Peak overshoot.* Where a neighbouring high water in the window already exceeded the RP level,
@@ -1106,9 +1113,9 @@ convolution of the gauge's own skew surges with its own tide.
 
 | rule | variants | at the gauges (RP100 station - gauge, median / MAE) | outcome |
 |---|---|---|---|
-| GPD shape cap 0.35 (fig20) | none, 0.5, 0.35, 0.25, 0.2 | all gauges: MAE 0.215-0.217 m for every cap | keep; it only bounds RP1000 |
+| GPD shape cap 0.35 (fig20) | none, 0.5, 0.35, 0.25, 0.2 | all gauges: MAE 0.215-0.217 m for every cap | no cap; the shape is pooled over 300 km instead |
 | despike 2 m, >= 5 jumps (fig19) | 1-3 m, 1-20 jumps | not testable at gauges | keep |
-| no TC mask (fig21) | none; 300 / 150 / 500 km; +-12 / 24 / 48 h; 34 / 64 kt | TC-dominated: none -0.03 / 0.36 m, 300 km -0.17 / 0.39 m | no mask |
+| no TC mask (fig21) | none; 300 / 150 / 500 km; +-12 / 24 / 48 h; 34 / 64 kt | TC-dominated: none -0.03 / 0.36 m, 300 km -0.17 / 0.39 m | 300 km mask, COAST-RP_TC shifted per basin |
 | FES version rule and its growth (fig22) | at gauges and stations near gauges | FES2014 matches the gauge where the rule fires | keep; one wrong flag |
 | hydrograph maximum off time 0 (fig23) | diagnosis | not a level question | keep; cosmetic |
 
@@ -1118,7 +1125,8 @@ convolution of the gauge's own skew surges with its own tide.
   It matters at RP1000. Without it, the heavy-tailed stations rise by up to 12.9 m, and by up to
   8.0 m with 0.5; a cap of 0.2 lowers them by up to 3.9 m (RP100 by up to 0.9 m). The gauges' own shapes
   (median 0.01, standard deviation 0.25) are no narrower than GTSM's (-0.03, 0.19), so they do
-  not fix the value. 0.35 stays as a bound on the extremes.
+  not fix the value. The product pools the shape over 300 km instead
+  (`input_analysis/boundary_forcing/boundary_forcing_input_analysis.md` §9).
 - *Despike.* The median station's largest hourly change in the GTSM residual is 0.17 m.
   - 22 stations have a jump above 2 m. 15 of them have 3 or more, and the same 15 are picked
     for any count from 3 to 5. They are the Arafura cluster, with jumps up to 13 m.
@@ -1126,7 +1134,8 @@ convolution of the gauge's own skew surges with its own tide.
     20 or more jumps above 1 m are in the southern North Sea and the German Bight.
 - *TC mask.* An IBTrACS mask (cycles within ±24 h of a storm of ≥ 34 kt passing within 300 km
   leave the ETC fit, at stations with a TC part; 9,247 stations, median 0.3% of cycles) makes
-  the TC coasts worse at the gauges, so production has none.
+  the TC coasts worse at the gauges on its own; the product masks and raises COAST-RP_TC by
+  its basin's shift, which makes up for it.
   - TC-dominated gauges at RP100: median -0.03 m and MAE 0.36 m without the mask, against
     -0.17 m and 0.39 m with it. Stations with a TC part: -0.02 m and 0.25 m against
     -0.07 m and 0.27 m. Non-TC gauges are unchanged. The spread widens without the mask: the

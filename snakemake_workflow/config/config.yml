@@ -169,7 +169,7 @@ storm_tide_product:
   gesla_dir: "{root}/inputs/GESLA4.1_ALL"           # GESLA-4.1 data files + GESLA4-1_ALL.csv
   gtsm_dir: "{root}/inputs/GTSM_storm_tide_hourly"  # GTSM-ERA5 storm_surge_residual/*.nc, hourly
   fes2022_dir: "{root}/inputs/fes2022b/ocean_tide_extrapolated"  # *.nc.xz, decompressed once
-  # NOAA IBTrACS v04r01; read only by the cyclone-mask test (boundary_test/open_guesses.py)
+  # NOAA IBTrACS v04r01: cyclone mask of the ETC fit and the cyclone basin of the COAST-RP_TC shift
   ibtracs_path: "{root}/inputs/IBTrACS/ibtracs.ALL.list.v04r01.csv"
   # ~30 GB derived from the raw inputs: GTSM series regrouped per station (18 GB), FES2022
   # decompressed (5 GB), GESLA records (4 GB), tide bases; shared with the HPC.

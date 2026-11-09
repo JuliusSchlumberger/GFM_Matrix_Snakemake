@@ -28,36 +28,8 @@ import storm_tide_product as stp  # noqa: E402
 import tide_prediction as tp  # noqa: E402
 
 GAUGE_MAX_KM = 25.0
-TC_MASK_KM = 300.0  # cyclone-mask test: cycles with a tropical storm this close leave the ETC fit
-TC_MASK_HR = 24
-TC_MIN_WIND_KT = 34.0
 GAUGE_RPS = (2, 10, 50, 100)
 GROUPS = ("all", "non-TC-dominated gauges", "TC-dominated gauges", "stations with a TC part")
-
-
-def tc_hours(stations: pd.DataFrame, n_hours: int, ibtracs_path: Path, start: np.datetime64,
-             radius_km: float = TC_MASK_KM, half_hr: int = TC_MASK_HR, min_wind_kt: float = TC_MIN_WIND_KT) -> dict:
-    """Station -> hourly indices within half_hr of a tropical storm passing within radius_km.
-
-    A storm counts where its wind is >= min_wind_kt, and along its whole track where no wind is on
-    record: most pre-1979 South Indian, South Pacific and North Indian tracks carry none, while
-    84-95% of the storms there reach 34 kt since 1979.
-    """
-    tracks = pd.read_csv(ibtracs_path, usecols=["SID", "ISO_TIME", "LAT", "LON", "WMO_WIND", "USA_WIND"],
-                         skiprows=[1], na_values=[" "], low_memory=False)
-    wind = tracks[["WMO_WIND", "USA_WIND"]].apply(pd.to_numeric, errors="coerce").max(axis=1)
-    no_wind = ~wind.notna().groupby(tracks.SID).transform("any")
-    tracks = tracks[(wind >= min_wind_kt) | no_wind]
-    hour = ((pd.to_datetime(tracks.ISO_TIME).to_numpy() - np.datetime64(start)) // np.timedelta64(1, "h")).astype(int)
-    tree = BallTree(np.radians(tracks[["LAT", "LON"]].to_numpy(dtype=float)), metric="haversine")
-    near = tree.query_radius(np.radians(stations[["lat", "lon"]].to_numpy()), r=radius_km / stp.EARTH_RADIUS_KM)
-    spread = np.arange(-half_hr, half_hr + 1)
-    out = {}
-    for st, idx in zip(stations.index, near):
-        if len(idx):
-            h = np.unique((hour[idx][:, None] + spread).ravel())
-            out[st] = h[(h >= 0) & (h < n_hours)]
-    return out
 
 
 class GaugeCheck:
@@ -109,7 +81,7 @@ class GaugeCheck:
 
     def tc_hours(self, **mask) -> dict:
         with_tc = self.picked[self.picked.station_id.isin(self.tc_levels.index)]
-        return tc_hours(with_tc, len(tp.hourly_times()), Path(self.cfg["storm_tide_product"]["ibtracs_path"]),
+        return stp.tc_hours(with_tc, len(tp.hourly_times()), Path(self.cfg["storm_tide_product"]["ibtracs_path"]),
                         tp.HOURLY_START, **mask)
 
     def levels(self, workers: int, mask_hours: dict | None = None, **station_keys) -> pd.DataFrame:
