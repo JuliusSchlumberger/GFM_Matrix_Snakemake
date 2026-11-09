@@ -5,8 +5,11 @@ per SFINCS depth class, same-bin hit rates, outlier tiles. Reads both the curren
 earlier (`eikonal` / `fsf_*`, effective friction factors) result layouts. Writes tables and
 figures to --out-dir; reads the calibration directories only.
 
+Stage-1 report: pools the exposure_depth_pass.py tiles in --out-dir/tiles.
+
 Usage:
     python exposure_depth.py stage0 --config <config.yml> --out-dir <dir> [--fsf 12]
+    python exposure_depth.py report --config <config.yml> --out-dir <stage-1 dir>
 """
 
 from __future__ import annotations
@@ -254,16 +257,167 @@ def stage0(args) -> None:
     print(json.dumps(summary))
 
 
+STAGE1_TAUS_M = (0.1, 0.2, 0.3, 0.5)
+FRINGE_M = 0.3  # an own-only cell shallower than this counts as fringe disagreement
+
+
+def _diff_stats(hist: np.ndarray, edges: np.ndarray) -> dict:
+    """Within-tau shares, MAE, RMSE, P50/P90 of |delta d| and tau80/tau90 from a 1 cm histogram."""
+    h = np.asarray(hist, dtype=np.float64)[1:-1]  # drop the beyond-3-m catch-alls (counted in n_beyond)
+    total = float(np.asarray(hist).sum())
+    if total <= 0:
+        return {"n": 0.0}
+    centres = (edges[:-1] + edges[1:]) / 2
+    a = np.abs(centres)
+    out = {"n": total, "share_beyond_3m": 1 - h.sum() / total,
+           "bias_m": float((h * centres).sum() / h.sum()), "mae_m": float((h * a).sum() / h.sum()),
+           "rmse_m": float(np.sqrt((h * centres ** 2).sum() / h.sum()))}
+    inside = np.maximum(np.abs(edges[:-1]), np.abs(edges[1:]))  # a bin is within tau if both edges are
+    for tau in STAGE1_TAUS_M:
+        out[f"within_{tau:g}m"] = float(h[inside <= tau + 1e-9].sum() / total)
+    order = np.argsort(a)
+    cum = np.cumsum(h[order]) / total
+    for q, name in ((0.5, "p50"), (0.8, "tau80"), (0.9, "p90")):
+        k = np.searchsorted(cum, q)
+        out[f"{name}_abs_m"] = float(a[order][k]) if k < len(a) else np.nan
+    return out
+
+
+def _metrics(m: float, mo: float, so: float) -> dict:
+    return {"HR": m / (m + so) if m + so else np.nan, "FAR": mo / (m + mo) if m + mo else np.nan,
+            "CSI": m / (m + mo + so) if m + mo + so else np.nan,
+            "exposure_bias": (m + mo) / (m + so) if m + so else np.nan}
+
+
+def report(args) -> None:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from exposure_depth_pass import DENSITY_LABELS, DIFF_EDGES, SFINCS_CLASS_EDGES
+
+    out = Path(args.out_dir)
+    tiles_dir = out / "tiles"
+    meta, arrays = [], {}
+    for j in sorted(tiles_dir.glob("*.json")):
+        info = json.loads(j.read_text())
+        meta.append(info)
+        arrays[info["tile_id"]] = dict(np.load(j.with_suffix(".npz")))
+    meta = pd.DataFrame(meta)
+    subset = pd.read_csv(out / "subset_tiles.csv")
+    meta = meta.merge(subset[["tile_id", "density", "density_class"]].astype({"tile_id": str}), on="tile_id")
+
+    rows = []
+    for w in ("area", "pop"):
+        counts = sum(a[f"counts_{w}"] for a in arrays.values())
+        for c, label in enumerate(DENSITY_LABELS):
+            rows.append({"weight": w, "density_class": label, "matched": counts[c, 0], "model_only": counts[c, 1],
+                         "sfincs_only": counts[c, 2], **_metrics(*counts[c])})
+        tot = counts.sum(axis=0)
+        rows.append({"weight": w, "density_class": "all", "matched": tot[0], "model_only": tot[1],
+                     "sfincs_only": tot[2], **_metrics(*tot)})
+    by_density = pd.DataFrame(rows)
+
+    per_tile = []
+    for tid, a in arrays.items():
+        m, mo, so = a["counts_pop"].sum(axis=0)
+        per_tile.append({"tile_id": tid, "pop_sfincs": m + so, "pop_model": m + mo, **{
+            f"{k}_pop": v for k, v in _metrics(m, mo, so).items()}})
+    per_tile = meta.merge(pd.DataFrame(per_tile), on="tile_id")
+    exposed = per_tile[(per_tile.pop_sfincs > 0) | (per_tile.pop_model > 0)]
+    ratio = exposed.pop_model / exposed.pop_sfincs
+    within2 = float(((ratio >= 0.5) & (ratio <= 2)).mean())
+
+    depth_rows = []
+    labels = [f"{lo:g}-{hi:g}" for lo, hi in zip((0.1, *SFINCS_CLASS_EDGES[:-1]), SFINCS_CLASS_EDGES)] + [">3"]
+    for w in ("area", "pop"):
+        diff = sum(a[f"diff_{w}"] for a in arrays.values())
+        for c, label in enumerate(labels):
+            depth_rows.append({"weight": w, "sfincs_class_m": label, **_diff_stats(diff[c], DIFF_EDGES)})
+        depth_rows.append({"weight": w, "sfincs_class_m": "all", **_diff_stats(diff.sum(axis=0), DIFF_EDGES)})
+    depth = pd.DataFrame(depth_rows)
+
+    fringe = {}
+    k = int(round(FRINGE_M / 0.1)) + 1  # bins below FRINGE_M after the < 0 catch-all
+    for w in ("area", "pop"):
+        for side in ("model_only", "sfincs_only"):
+            h = sum(a[f"{side}_depth_{w}"] for a in arrays.values())
+            fringe[f"{side}_{w}_share_below_{FRINGE_M:g}m"] = float(h[:k].sum() / h.sum()) if h.sum() else np.nan
+
+    by_density.to_csv(out / "T3_extent_by_density_class.csv", index=False)
+    per_tile.to_csv(out / "tiles_exposed_population.csv", index=False)
+    depth.to_csv(out / "T4_depth_reliability_exact.csv", index=False)
+    summary = {"tiles": len(arrays), "tiles_with_exposure": len(exposed),
+               "share_tiles_population_within_factor_2": within2, **fringe}
+    (out / "stage1_summary.json").write_text(json.dumps(summary, indent=1))
+    plot_stage1(by_density, exposed, depth, out)
+    with pd.option_context("display.float_format", "{:.3f}".format, "display.width", 220):
+        print(by_density.to_string(index=False))
+        print(depth.to_string(index=False))
+    print(json.dumps(summary, indent=1))
+
+
+def plot_stage1(by_density: pd.DataFrame, exposed: pd.DataFrame, depth: pd.DataFrame, out: Path) -> None:
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4.2))
+    d = by_density[by_density.density_class != "all"]
+    for ax, metric, letter in zip(axes, ("CSI", "HR", "exposure_bias"), "abc"):
+        x = np.arange(d.density_class.nunique())
+        for off, w, color, label in ((-0.18, "area", "#9ecae1", "area-weighted"),
+                                     (0.18, "pop", "#08519c", "population-weighted")):
+            sub = d[d.weight == w]
+            ax.bar(x + off, sub[metric], width=0.34, color=color, label=label)
+        ax.set_xticks(x, [f"{c}" for c in d[d.weight == "pop"].density_class], fontsize=8)
+        ax.set(xlabel="population density of the cell (people/km2)", ylabel=metric)
+        if metric == "exposure_bias":
+            ax.axhline(1, color="#525252", lw=0.8)
+        else:
+            ax.set_ylim(0, 1)
+        draw_panel_letter(ax, letter)
+    axes[0].legend(frameon=False, fontsize=8)
+    fig.tight_layout()
+    fig.savefig(out / "X4_metrics_by_density_class.png", dpi=200)
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(5.5, 5))
+    e = exposed[(exposed.pop_sfincs > 0) & (exposed.pop_model > 0)]
+    ax.scatter(e.pop_sfincs, e.pop_model, s=12, color="#3182bd", alpha=0.7, edgecolors="none")
+    lo, hi = max(1.0, min(e.pop_sfincs.min(), e.pop_model.min())), max(e.pop_sfincs.max(), e.pop_model.max())
+    xs = np.array([lo, hi])
+    ax.plot(xs, xs, color="#252525", lw=1)
+    ax.fill_between(xs, xs / 2, xs * 2, color="#bdbdbd", alpha=0.35, label="factor 2")
+    ax.set(xscale="log", yscale="log", xlabel="exposed population, SFINCS", ylabel="exposed population, eikonal",
+           title=f"RP100 exposed population per tile ({len(e)} tiles)")
+    ax.legend(frameon=False, fontsize=8)
+    fig.tight_layout()
+    fig.savefig(out / "X5_exposed_population_per_tile.png", dpi=200)
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    dd = depth[(depth.sfincs_class_m != "all")]
+    classes = dd[dd.weight == "area"].sfincs_class_m.tolist()
+    x = np.arange(len(classes))
+    for off, tau, color in ((-0.27, 0.1, "#c6dbef"), (-0.09, 0.2, "#6baed6"), (0.09, 0.3, "#2171b5"),
+                            (0.27, 0.5, "#08306b")):
+        ax.bar(x + off, dd[dd.weight == "area"][f"within_{tau:g}m"], width=0.17, color=color,
+               label=f"within {tau * 100:.0f} cm")
+        ax.scatter(x + off, dd[dd.weight == "pop"][f"within_{tau:g}m"], marker="_", s=120, color="#a50f15",
+                   zorder=3, label="population-weighted" if tau == 0.1 else None)
+    ax.set_xticks(x, [f"{c} m" for c in classes], fontsize=8)
+    ax.set(xlabel="SFINCS depth class", ylabel="share of both-wet cells within tolerance", ylim=(0, 1),
+           title="Exact depth reliability by SFINCS depth class (bars: area, red: population)")
+    ax.legend(frameon=False, fontsize=7, ncol=3)
+    fig.tight_layout()
+    fig.savefig(out / "X2b_exact_tolerance_by_depth_class.png", dpi=200)
+    plt.close(fig)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("stage", choices=["stage0"])
+    parser.add_argument("stage", choices=["stage0", "report"])
     parser.add_argument("--config", required=True)
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
     parser.add_argument("--dedup-dir-name", default="calibration_roughness_SFINCS_dedup")
     parser.add_argument("--fsf", type=float, default=12.0, help="friction factor of the result files (old layout: effective)")
     parser.add_argument("--out-dir", required=True)
     args = parser.parse_args()
-    {"stage0": stage0}[args.stage](args)
+    {"stage0": stage0, "report": report}[args.stage](args)
 
 
 if __name__ == "__main__":

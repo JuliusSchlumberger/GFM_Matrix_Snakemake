@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import geopandas as gpd
 import numpy as np
 import rasterio
+from pyproj import Transformer
+from scipy.spatial import cKDTree
 
 
 def parse_sfincs_inp(inp_path: Path) -> dict:
@@ -70,3 +73,32 @@ def active_on_subgrid(sfincs_dir: Path, sg_shape: tuple, sg_transform) -> np.nda
             and (msk.shape[0] * f, msk.shape[1] * f) == tuple(sg_shape)):
         raise ValueError(f"sfincs grid {msk.shape} @ {tr} does not nest into subgrid {sg_shape} @ {sg_transform}")
     return np.kron(msk > 0, np.ones((f, f), dtype=bool))
+
+
+_PARTITION_CRS = "EPSG:6933"  # equal-area - fair distance comparison regardless of latitude
+
+
+def build_tile_tree(tile_selection_gpkg: Path) -> tuple[cKDTree, np.ndarray]:
+    """Return a KDTree over selected tiles' centroids (EPSG:6933) and the parallel tile ids.
+
+    Uses ALL selected tiles, so a tile without a usable result still claims its
+    own Voronoi territory instead of ceding it to its neighbours.
+    """
+    gdf = gpd.read_file(tile_selection_gpkg)
+    sel = gdf[gdf["category"] == "selected"].to_crs(_PARTITION_CRS)
+    centers = np.column_stack([sel.geometry.centroid.x.to_numpy(), sel.geometry.centroid.y.to_numpy()])
+    tile_ids = sel["tile_id"].astype(str).to_numpy()
+    return cKDTree(centers), tile_ids
+
+
+def core_mask(shape: tuple, transform, crs, this_tile_id: str, tree: cKDTree, tile_ids: np.ndarray) -> np.ndarray:
+    """Mark the cells of `shape` closer to tile `this_tile_id`'s centre than to any other (Voronoi core)."""
+    h, w = shape
+    rows, cols = np.indices((h, w))
+    xs = transform.c + (cols + 0.5) * transform.a + (rows + 0.5) * transform.b
+    ys = transform.f + (cols + 0.5) * transform.d + (rows + 0.5) * transform.e
+    transformer = Transformer.from_crs(crs, _PARTITION_CRS, always_xy=True)
+    px, py = transformer.transform(xs.ravel(), ys.ravel())
+    _, idx = tree.query(np.column_stack([px, py]), k=1)
+    nearest_tile_id = tile_ids[idx].reshape(h, w)
+    return nearest_tile_id == this_tile_id

@@ -20,45 +20,16 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
-import geopandas as gpd
 import numpy as np
 import rasterio
 import yaml
-from pyproj import Transformer
 from scipy.spatial import cKDTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from compute_calibration_result import compute_result  # noqa: E402
+from sfincs_grid import build_tile_tree, core_mask  # noqa: E402
 from gfm_config import read_root  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
-
-_PARTITION_CRS = "EPSG:6933"  # equal-area - fair distance comparison regardless of latitude
-
-
-def build_tile_tree(tile_selection_gpkg: Path) -> tuple[cKDTree, np.ndarray]:
-    """Return a KDTree over selected tiles' centroids (EPSG:6933) and the parallel tile ids.
-
-    Uses ALL selected tiles, so a tile without a usable result still claims its
-    own Voronoi territory instead of ceding it to its neighbours.
-    """
-    gdf = gpd.read_file(tile_selection_gpkg)
-    sel = gdf[gdf["category"] == "selected"].to_crs(_PARTITION_CRS)
-    centers = np.column_stack([sel.geometry.centroid.x.to_numpy(), sel.geometry.centroid.y.to_numpy()])
-    tile_ids = sel["tile_id"].astype(str).to_numpy()
-    return cKDTree(centers), tile_ids
-
-
-def _core_mask(shape: tuple, transform, crs, this_tile_id: str, tree: cKDTree, tile_ids: np.ndarray) -> np.ndarray:
-    h, w = shape
-    rows, cols = np.indices((h, w))
-    xs = transform.c + (cols + 0.5) * transform.a + (rows + 0.5) * transform.b
-    ys = transform.f + (cols + 0.5) * transform.d + (rows + 0.5) * transform.e
-    transformer = Transformer.from_crs(crs, _PARTITION_CRS, always_xy=True)
-    px, py = transformer.transform(xs.ravel(), ys.ravel())
-    _, idx = tree.query(np.column_stack([px, py]), k=1)
-    nearest_tile_id = tile_ids[idx].reshape(h, w)
-    return nearest_tile_id == this_tile_id
-
 
 def compute_result_dedup(tile_dir: Path, flooding: dict, tree: cKDTree, tile_ids: np.ndarray) -> dict:
     """Build one tile's calibration_result dict, restricted to its Voronoi core.
@@ -68,7 +39,7 @@ def compute_result_dedup(tile_dir: Path, flooding: dict, tree: cKDTree, tile_ids
     """
     with retry_transient_io(rasterio.open, tile_dir / "sfincs_model" / "hmax_subgrid.tif") as src:
         transform, crs, shape = src.transform, src.crs, src.shape
-    core = _core_mask(shape, transform, crs, tile_dir.name, tree, tile_ids)
+    core = core_mask(shape, transform, crs, tile_dir.name, tree, tile_ids)
     return compute_result(tile_dir, flooding, core_mask=core)
 
 
