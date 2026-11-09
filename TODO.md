@@ -86,6 +86,12 @@ Decided and implemented:
   Open).
 
 Open:
+- **England national-map score does not reproduce (exposure/depth assessment, 2026-11-09):**
+  `validate_country.py --country GBR` on the same `merged_results` chunks and benchmark files
+  (dated 2026-10-16, as the saved `validation/GBR/metrics_GBR_RP100_SLR_0.csv`) gives England FZ3
+  hits +130 % and misses +270 % against the saved run; Scotland, Wales and New Brunswick match
+  exactly. Find what changed (merged chunks over England rewritten since? region bbox or filter?)
+  before quoting England scores. Rerun output: `.cleanup_baseline/exposure_depth/stage3/`.
 - **SLR fingerprint ratio:** does the ratio of station SLR to global-mean SLR
   (`prepare_boundary_conditions` fingerprints, 2100 median) change much with the time horizon or
   the SSP? The fingerprints assume it does not.
