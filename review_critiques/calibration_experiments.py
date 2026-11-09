@@ -40,7 +40,11 @@ from flood_agreement import WET_THRESHOLD_M, confusion_counts  # noqa: E402
 from flood_model import effective_dem, flood_depth_dense, prune_to_coast_connected  # noqa: E402
 from sfincs_grid import active_on_subgrid  # noqa: E402
 
-DATA_ROOT = Path("P:/11212688-004-global-floodmaps/modelling")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sfincs_tiles"))
+from gfm_config import read_root  # noqa: E402
+
+DATA_ROOT = read_root(Path(__file__).resolve().parents[1] / "snakemake_workflow" / "config" / "config.yml")
+
 BASE = DATA_ROOT / "calibration_roughness_SFINCS"
 LU_FSF = [6.0, 9.0, 12.0, 15.0, 18.0]
 UNIFORM_M_PER_KM = [0.1, 0.15, 0.2, 0.3, 0.45, 0.6]

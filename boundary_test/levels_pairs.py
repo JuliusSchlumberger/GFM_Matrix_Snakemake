@@ -11,6 +11,7 @@ Usage:
 """
 
 import argparse
+import sys
 from pathlib import Path
 
 import netCDF4
@@ -18,7 +19,12 @@ import numpy as np
 import pandas as pd
 from sklearn.neighbors import BallTree
 
-INPUTS = Path("P:/11212688-004-global-floodmaps/modelling/inputs")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sfincs_tiles"))
+from gfm_config import read_root  # noqa: E402
+
+DATA_ROOT = read_root(Path(__file__).resolve().parents[1] / "snakemake_workflow" / "config" / "config.yml")
+
+INPUTS = DATA_ROOT / "inputs"
 GTSM_TIDE_FILE = INPUTS / "GTSM_storm_tide_hourly" / "tidal_elevation" / "historical_tide_2000_01_v1.nc"
 COAST_RP = INPUTS / "COAST-RP_dataset" / "COAST-RP.nc"
 COAST_HG = INPUTS / "COAST_HG" / "COAST-HG_RP100.nc"

@@ -18,7 +18,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from gesla import DEDUP_KM, deduplicate, read_metadata  # noqa: E402
 
-GESLA_META = Path("P:/11212688-004-global-floodmaps/modelling/inputs/GESLA4.1_ALL/GESLA4-1_ALL.csv")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sfincs_tiles"))
+from gfm_config import read_root  # noqa: E402
+
+DATA_ROOT = read_root(Path(__file__).resolve().parents[1] / "snakemake_workflow" / "config" / "config.yml")
+
+GESLA_META = DATA_ROOT / "inputs" / "GESLA4.1_ALL" / "GESLA4-1_ALL.csv"
 MIN_YEARS = 20
 
 

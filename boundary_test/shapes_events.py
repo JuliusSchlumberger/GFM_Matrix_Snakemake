@@ -37,7 +37,12 @@ sys.path.insert(0, str(REPO / "boundary_test"))
 from extract_gtsm_series import load_series, station_series  # noqa: E402
 from tide_prediction import HOURLY_END, HOURLY_START, on_hourly_grid  # noqa: E402
 
-COAST_HG = Path("P:/11212688-004-global-floodmaps/modelling/inputs/COAST_HG/COAST-HG_RP100.nc")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sfincs_tiles"))
+from gfm_config import read_root  # noqa: E402
+
+DATA_ROOT = read_root(Path(__file__).resolve().parents[1] / "snakemake_workflow" / "config" / "config.yml")
+
+COAST_HG = DATA_ROOT / "inputs" / "COAST_HG" / "COAST-HG_RP100.nc"
 WINDOW_HR = 72  # +-72 h, the length of a COAST-HG hydrograph (149 h)
 WINDOW_COVERAGE = 0.9
 YEAR_COVERAGE = 0.8

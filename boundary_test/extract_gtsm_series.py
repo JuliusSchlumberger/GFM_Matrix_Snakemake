@@ -29,8 +29,13 @@ sys.path.insert(0, str(REPO / "src"))
 from gtsm_series import FOLDERS, extract_series, gtsm_stations, station_series  # noqa: E402, F401 (re-exported)
 from gtsm_series import load_series as _load_series  # noqa: E402
 
-GTSM_DIR = Path("P:/11212688-004-global-floodmaps/modelling/inputs/GTSM_storm_tide_hourly")
-BASE = Path("P:/11212688-004-global-floodmaps/modelling/calibration_roughness_SFINCS")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sfincs_tiles"))
+from gfm_config import read_root  # noqa: E402
+
+DATA_ROOT = read_root(Path(__file__).resolve().parents[1] / "snakemake_workflow" / "config" / "config.yml")
+
+GTSM_DIR = DATA_ROOT / "inputs" / "GTSM_storm_tide_hourly"
+BASE = DATA_ROOT / "calibration_roughness_SFINCS"
 MATCH_KM = 0.1
 EARTH_RADIUS_KM = 6371.0
 

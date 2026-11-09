@@ -38,7 +38,12 @@ from tide_statistics import high_water_statistics, spring_high_waters  # noqa: E
 from tide_prediction import extract_constants, nodal_times, tide_basis  # noqa: E402
 from tide_prediction import ensure_local_fes as _ensure_local_fes  # noqa: E402
 
-FES_SOURCE = Path("P:/11212688-004-global-floodmaps/modelling/inputs/fes2022b/ocean_tide_extrapolated")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sfincs_tiles"))
+from gfm_config import read_root  # noqa: E402
+
+DATA_ROOT = read_root(Path(__file__).resolve().parents[1] / "snakemake_workflow" / "config" / "config.yml")
+
+FES_SOURCE = DATA_ROOT / "inputs" / "fes2022b" / "ocean_tide_extrapolated"
 FES_MODEL = "FES2022_extrapolated"
 NODE_DEG = 1.0 / 30.0
 STEP_MIN = 60 // STEPS_PER_HR  # 10 min, the step of the synthetic hydrographs

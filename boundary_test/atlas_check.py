@@ -30,7 +30,12 @@ from fes_tide_stats import STEP_MIN, prediction_basis  # noqa: E402
 from tide_prediction import fes2014_model, grouped_constants  # noqa: E402
 from tide_prediction import levels  # noqa: E402
 
-INPUTS = Path("P:/11212688-004-global-floodmaps/modelling/inputs")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sfincs_tiles"))
+from gfm_config import read_root  # noqa: E402
+
+DATA_ROOT = read_root(Path(__file__).resolve().parents[1] / "snakemake_workflow" / "config" / "config.yml")
+
+INPUTS = DATA_ROOT / "inputs"
 REFERENCE_ATLASES = {"fes2014": ("FES2014", INPUTS / "fes2014" / "fes2014b_elevations_extrapolated"
                                  / "ocean_tide_extrapolated", "FES2014_extrapolated", "spline")}
 FES_NODES = REPO / ".cleanup_baseline" / "boundary_test" / "fes_nodes.parquet"

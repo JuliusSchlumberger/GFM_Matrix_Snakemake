@@ -40,7 +40,12 @@ import duration_experiment as de  # noqa: E402
 from event_volume import time_within_peak  # noqa: E402
 from flood_model import flood_depth_dense  # noqa: E402
 
-COAST_HG = Path("P:/11212688-004-global-floodmaps/modelling/inputs/COAST_HG/COAST-HG_RP100.nc")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sfincs_tiles"))
+from gfm_config import read_root  # noqa: E402
+
+DATA_ROOT = read_root(Path(__file__).resolve().parents[1] / "snakemake_workflow" / "config" / "config.yml")
+
+COAST_HG = DATA_ROOT / "inputs" / "COAST_HG" / "COAST-HG_RP100.nc"
 SOLVER = dict(ocean_code=1, river_code=3, obstacle_coupling=True, max_outer_iterations=4,
               outer_convergence_pct=0.01, max_rounds=40, waterlevel_epsilon_m=0.03)
 FSF_NO_B, FSF_B = 12.0, 7.5

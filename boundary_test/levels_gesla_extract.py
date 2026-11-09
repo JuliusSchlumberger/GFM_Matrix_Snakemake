@@ -22,7 +22,12 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from gesla import extract_record  # noqa: E402
 
-GESLA_DIR = Path("P:/11212688-004-global-floodmaps/modelling/inputs/GESLA4.1_ALL")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sfincs_tiles"))
+from gfm_config import read_root  # noqa: E402
+
+DATA_ROOT = read_root(Path(__file__).resolve().parents[1] / "snakemake_workflow" / "config" / "config.yml")
+
+GESLA_DIR = DATA_ROOT / "inputs" / "GESLA4.1_ALL"
 FIRST_YEAR = 1979  # start of the GTSM ERA5 surge series
 
 

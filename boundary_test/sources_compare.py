@@ -22,6 +22,7 @@ Usage:
 """
 
 import argparse
+import sys
 from pathlib import Path
 
 import netCDF4
@@ -29,7 +30,12 @@ import numpy as np
 import pandas as pd
 from sklearn.neighbors import BallTree
 
-COAST_RP_DIR = Path("P:/11212688-004-global-floodmaps/modelling/inputs/COAST-RP_dataset")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sfincs_tiles"))
+from gfm_config import read_root  # noqa: E402
+
+DATA_ROOT = read_root(Path(__file__).resolve().parents[1] / "snakemake_workflow" / "config" / "config.yml")
+
+COAST_RP_DIR = DATA_ROOT / "inputs" / "COAST-RP_dataset"
 EARTH_RADIUS_KM = 6371.0
 SAME_STATION_KM = 0.1
 PEAK_RPS = (2, 10, 50, 100)

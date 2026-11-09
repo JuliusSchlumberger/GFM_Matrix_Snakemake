@@ -35,7 +35,12 @@ sys.path.insert(0, str(REPO / "boundary_test"))
 from extract_gtsm_series import load_series, station_series  # noqa: E402
 from tide_prediction import HOURLY_START, on_hourly_grid, remove_annual_means  # noqa: E402
 
-INPUTS = Path("P:/11212688-004-global-floodmaps/modelling/inputs/COAST-RP_dataset")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sfincs_tiles"))
+from gfm_config import read_root  # noqa: E402
+
+DATA_ROOT = read_root(Path(__file__).resolve().parents[1] / "snakemake_workflow" / "config" / "config.yml")
+
+INPUTS = DATA_ROOT / "inputs" / "COAST-RP_dataset"
 RPS = (2, 10, 50, 100)
 COAST_RP_RPS = (1, 2, 5, 10, 25, 50, 100, 250, 500, 1000)
 YEAR_COVERAGE = 0.8

@@ -24,7 +24,12 @@ sys.path.insert(0, str(REPO / "boundary_test"))
 from storm_tide_product import RPS  # noqa: E402
 from generator_validation import hourly_profile, profile_measures  # noqa: E402
 
-COAST_HG = Path("P:/11212688-004-global-floodmaps/modelling/inputs/COAST_HG/COAST-HG_RP100.nc")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sfincs_tiles"))
+from gfm_config import read_root  # noqa: E402
+
+DATA_ROOT = read_root(Path(__file__).resolve().parents[1] / "snakemake_workflow" / "config" / "config.yml")
+
+COAST_HG = DATA_ROOT / "inputs" / "COAST_HG" / "COAST-HG_RP100.nc"
 MEASURES = ("t025_hr", "t05_hr")
 CHUNK = 2000
 

@@ -8,6 +8,7 @@ Usage:
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -16,7 +17,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-BASE = Path("P:/11212688-004-global-floodmaps/modelling/calibration_roughness_SFINCS")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sfincs_tiles"))
+from gfm_config import read_root  # noqa: E402
+
+DATA_ROOT = read_root(Path(__file__).resolve().parents[1] / "snakemake_workflow" / "config" / "config.yml")
+
+BASE = DATA_ROOT / "calibration_roughness_SFINCS"
 VARIANT_STYLE = {
     "landcover": ("land-cover-indexed rate", "k", "-o"),
     "A_volume_cap": ("A: basin volume cap", "tab:blue", "-s"),
