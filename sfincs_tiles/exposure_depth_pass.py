@@ -33,7 +33,9 @@ from gfm_config import read_root, resolve_catalog_path  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
 from sfincs_grid import active_on_subgrid, build_tile_tree, core_mask  # noqa: E402
 
-EARTH_RADIUS_KM = 6371.0088
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from exposure_grid import population_per_pixel  # noqa: E402
+
 LAND_CODE = 0
 DENSITY_EDGES = (10.0, 100.0, 1000.0)  # people per km2: classes < 10, 10-100, 100-1000, > 1000
 DENSITY_LABELS = ("<10", "10-100", "100-1000", ">1000")
@@ -48,38 +50,6 @@ NAMED_SITES = {"SF Bay": (-122.3, 37.8), "Severn": (-3.0, 51.4), "Fundy": (-64.5
 def legacy_raster(out_dir: Path, fsf: float) -> Path:
     """Return the eikonal raster of the earlier calibration layout (effective friction factor)."""
     return out_dir / f"eikonal_on_subgrid_waterdepth_RP100_SLR_0_fsf{fsf:g}.tif"
-
-
-def cell_area_km2(lat_top: float, lat_bottom: float, dlon_deg: float) -> float:
-    """Area (km2) of a lon/lat cell on the sphere."""
-    return (EARTH_RADIUS_KM ** 2 * np.radians(dlon_deg)
-            * abs(np.sin(np.radians(lat_top)) - np.sin(np.radians(lat_bottom))))
-
-
-def population_on_grid(pop_path: Path, shape: tuple, transform, crs) -> tuple[np.ndarray, np.ndarray]:
-    """Return (people per subgrid pixel, people per km2 of the pixel's WorldPop cell) on a grid.
-
-    Each pixel takes count x pixel area / cell area of the WorldPop cell its centre lies in, so a
-    fully covered cell sums to its count. NaN-free; zero outside settled cells.
-    """
-    bounds = transform_bounds(crs, "EPSG:4326", transform.c, transform.f + transform.e * shape[0],
-                              transform.c + transform.a * shape[1], transform.f, densify_pts=21)
-    with retry_transient_io(rasterio.open, pop_path) as src:
-        pad = 2 * abs(src.transform.a)
-        win = from_bounds(bounds[0] - pad, bounds[1] - pad, bounds[2] + pad, bounds[3] + pad, src.transform)
-        win = win.round_offsets().round_lengths()
-        count = src.read(1, window=win, boundless=True, fill_value=0).astype(np.float64)
-        nodata = src.nodata
-        wtr = src.window_transform(win)
-    count[(count == nodata) | ~np.isfinite(count) | (count < 0)] = 0.0
-    lat_top = wtr.f + wtr.e * np.arange(count.shape[0])
-    area = np.array([cell_area_km2(t, t + wtr.e, abs(wtr.a)) for t in lat_top])[:, None] * np.ones(count.shape[1])
-    density = np.divide(count, area, out=np.zeros_like(count), where=area > 0)
-    out_density = np.zeros(shape, dtype=np.float64)
-    reproject(density, out_density, src_transform=wtr, src_crs="EPSG:4326", dst_transform=transform, dst_crs=crs,
-              resampling=Resampling.nearest)
-    pixel_km2 = abs(transform.a * transform.e - transform.b * transform.d) / 1e6
-    return out_density * pixel_km2, out_density
 
 
 def _weighted_hist(values: np.ndarray, weights: np.ndarray, edges: np.ndarray) -> np.ndarray:
@@ -105,7 +75,7 @@ def tile_pass(tile_dir: Path, fsf: float, pop_path: Path, tree, tile_ids, run_ke
                   dst_transform=transform, dst_crs=crs, resampling=Resampling.nearest)
     score = ((mog == LAND_CODE) & active_on_subgrid(sfincs_dir, shape, transform)
              & core_mask(shape, transform, crs, tile_dir.name, tree, tile_ids))
-    people, density = population_on_grid(pop_path, shape, transform, crs)
+    people, density = population_per_pixel(pop_path, shape, transform, crs)
     pixel_km2 = abs(transform.a * transform.e - transform.b * transform.d) / 1e6
     dclass = np.digitize(density, DENSITY_EDGES)
 

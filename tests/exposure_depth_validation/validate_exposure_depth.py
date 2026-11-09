@@ -9,8 +9,9 @@ from pyproj import Transformer
 from rasterio.transform import from_origin
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "sfincs_tiles"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from exposure_depth import within_tolerance_share  # noqa: E402
-from exposure_depth_pass import population_on_grid  # noqa: E402
+from exposure_grid import population_per_pixel  # noqa: E402
 
 RES = 30 / 3600
 
@@ -24,7 +25,7 @@ def test_population_weights_sum_to_the_cell_count(tmp_path) -> None:
         dst.write(arr, 1)
     x0, y0 = Transformer.from_crs("EPSG:4326", "EPSG:32631", always_xy=True).transform(
         4.9 + 12 * RES - 0.01, 50.1 - 12 * RES + 0.01)
-    people, density = population_on_grid(path, (120, 120), from_origin(x0, y0, 30, 30), "EPSG:32631")
+    people, density = population_per_pixel(path, (120, 120), from_origin(x0, y0, 30, 30), "EPSG:32631")
     assert abs(people.sum() - 1000) < 20  # pixel-centre discretisation of one 0.55 km2 cell
     assert density.max() > 1000
 

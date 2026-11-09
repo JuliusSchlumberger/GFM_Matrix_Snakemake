@@ -124,3 +124,25 @@ Gate 1: Q1 answered on the subset. Population- and area-weighted metrics agree w
 class is already in the subset, so the full 1000-tile pass (1b) would not add to it and stays
 queued for the paper figure only. 84 % of tiles are within a factor 2 (handoff target 90 %).
 Dropped: the 100 m population check (1.4), stage 2 damage curves (user, 2026-11-09).
+
+### Which cells count: the denominator of "within tau"
+
+The shares above count only cells both models flood. Against the question "of all cells where
+the reference gives a depth, what share does the eikonal match within tau", a cell the reference
+floods and the eikonal leaves dry counts as eikonal depth 0 (reference-wet), and a cell only the
+eikonal floods can be counted against reference depth 0 (either-wet). One-sided cells are known
+from the stage-1 pass in 0.1 m depth bins against the other side's sub-threshold depth (0-0.10 m),
+so their shares are bounds; SF Bay comes from the full difference raster and is exact.
+Figure X1c (`exposure_depth.py cdf`): cumulative curves, area solid, population dashed.
+
+| within | SFINCS, both-wet | SFINCS, SFINCS-wet | SFINCS, either-wet | CoSMoS, both-wet | CoSMoS, CoSMoS-wet | CoSMoS, either-wet |
+|---|---|---|---|---|---|---|
+| 10 cm | 0.32 / 0.26 | 0.27-0.30 / 0.19-0.24 | 0.24-0.29 / 0.16-0.22 | 0.07 / 0.15 | 0.05 / 0.07 | 0.03 / 0.03 |
+| 20 cm | 0.52 / 0.44 | 0.47-0.49 / 0.38-0.42 | 0.44-0.48 / 0.34-0.39 | 0.14 / 0.27 | 0.11 / 0.15 | 0.08 / 0.12 |
+| 30 cm | 0.66 / 0.59 | 0.61-0.63 / 0.53-0.56 | 0.59-0.62 / 0.48-0.53 | 0.23 / 0.38 | 0.18 / 0.24 | 0.14 / 0.21 |
+| 50 cm | 0.82 / 0.79 | 0.79-0.80 / 0.74-0.77 | 0.77-0.79 / 0.70-0.73 | 0.46 / 0.56 | 0.41 / 0.42 | 0.29 / 0.43 |
+
+(area / population.) Against SFINCS, counting the eikonal's misses lowers the shares by 3-6
+points (area) and 4-7 points (population); the conclusion holds: about half of SFINCS's flooded
+area within 20 cm, three quarters within 50 cm. Against CoSMoS in SF Bay, with DEM and forcing
+differences included, under half of CoSMoS's flooded area is within 50 cm.

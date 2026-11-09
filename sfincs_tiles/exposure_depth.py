@@ -10,6 +10,7 @@ Stage-1 report: pools the exposure_depth_pass.py tiles in --out-dir/tiles.
 Usage:
     python exposure_depth.py stage0 --config <config.yml> --out-dir <dir> [--fsf 12]
     python exposure_depth.py report --config <config.yml> --out-dir <stage-1 dir>
+    python exposure_depth.py cdf --config <config.yml> --out-dir <stage-1 dir> [--sf-bay-cdf <csv>]
 """
 
 from __future__ import annotations
@@ -408,16 +409,92 @@ def plot_stage1(by_density: pd.DataFrame, exposed: pd.DataFrame, depth: pd.DataF
     plt.close(fig)
 
 
+CDF_TAUS_M = np.round(np.arange(0.0, 1.501, 0.01), 2)
+DENOMINATORS = {"both_wet": ("both flood", "#9ecae1"), "reference_wet": ("reference floods", "#08519c"),
+                "either_wet": ("either floods", "#a50f15")}
+
+
+def sfincs_cdfs(tiles_dir: Path) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Cumulative share within tau per denominator and weight: (lower, upper) bound arrays.
+
+    Both-wet cells from the 1 cm difference histograms (bin fully within tau). A one-sided cell
+    is known only by its own depth (0.1 m bins) against the other side's sub-threshold depth
+    (0-0.10 m): within tau at least if its depth bin lies below tau, at most if below tau + 0.10.
+    """
+    from exposure_depth_pass import DEPTH_EDGES, DIFF_EDGES
+
+    acc = {}
+    for npz in tiles_dir.glob("*.npz"):
+        for k, v in np.load(npz).items():
+            acc[k] = acc.get(k, 0) + v
+    inside = np.maximum(np.abs(DIFF_EDGES[:-1]), np.abs(DIFF_EDGES[1:]))
+    upper = np.concatenate((DEPTH_EDGES, [np.inf]))
+    out = {}
+    for w in ("area", "pop"):
+        diff = acc[f"diff_{w}"].sum(axis=0)
+        both = np.array([diff[1:-1][inside <= t + 1e-9].sum() for t in CDF_TAUS_M])
+        s_only, m_only = acc[f"sfincs_only_depth_{w}"], acc[f"model_only_depth_{w}"]
+
+        def one_sided(h, extra):
+            return np.array([h[upper <= t + extra + 1e-9].sum() for t in CDF_TAUS_M])
+        n_both = diff.sum()
+        out[f"both_wet_{w}"] = (both / n_both, both / n_both)
+        n_ref = n_both + s_only.sum()
+        out[f"reference_wet_{w}"] = ((both + one_sided(s_only, 0.0)) / n_ref, (both + one_sided(s_only, 0.1)) / n_ref)
+        n_eit = n_ref + m_only.sum()
+        out[f"either_wet_{w}"] = ((both + one_sided(s_only, 0.0) + one_sided(m_only, 0.0)) / n_eit,
+                                  (both + one_sided(s_only, 0.1) + one_sided(m_only, 0.1)) / n_eit)
+    return out
+
+
+def cdf(args) -> None:
+    """Plot the cumulative depth agreement against SFINCS and, if given, SF Bay CoSMoS."""
+    out = Path(args.out_dir)
+    sf = sfincs_cdfs(out / "tiles")
+    bay = pd.read_csv(args.sf_bay_cdf) if args.sf_bay_cdf else None
+    rows = {"tau_m": CDF_TAUS_M}
+    for k, (lo, hi) in sf.items():
+        rows[f"{k}_low"], rows[f"{k}_high"] = lo, hi
+    pd.DataFrame(rows).to_csv(out / "sfincs_depth_cdf.csv", index=False)
+
+    panels = [("a", "eikonal vs SFINCS (92 tiles, same DEM and forcing)", sf)]
+    if bay is not None:
+        panels.append(("b", "eikonal vs CoSMoS, SF Bay (includes DEM and forcing differences)",
+                       {c: (bay[c].to_numpy(), bay[c].to_numpy()) for c in bay.columns if c != "tau_m"}))
+    fig, axes = plt.subplots(1, len(panels), figsize=(6.2 * len(panels), 4.8), squeeze=False)
+    for ax, (letter, title, curves) in zip(axes[0], panels):
+        taus = CDF_TAUS_M if curves is sf else bay.tau_m.to_numpy()
+        for den, (label, color) in DENOMINATORS.items():
+            for w, ls in (("area", "-"), ("pop", "--")):
+                lo, hi = curves[f"{den}_{w}"]
+                ax.plot(taus, (lo + hi) / 2, color=color, ls=ls, lw=1.6,
+                        label=f"{label}, {'area' if w == 'area' else 'population'}")
+                if not np.allclose(lo, hi):
+                    ax.fill_between(taus, lo, hi, color=color, alpha=0.15, lw=0)
+        for t in (0.1, 0.2, 0.3, 0.5):
+            ax.axvline(t, color="#d9d9d9", lw=0.8, zorder=0)
+        ax.set(xlim=(0, 1.5), ylim=(0, 1), xlabel="|eikonal depth - reference depth| (m)",
+               ylabel="share of cells within", title=title)
+        ax.title.set_fontsize(9)
+        draw_panel_letter(ax, letter)
+    axes[0][0].legend(frameon=False, fontsize=7, loc="lower right")
+    fig.tight_layout()
+    fig.savefig(out / "X1c_depth_cdf_by_denominator.png", dpi=200)
+    plt.close(fig)
+    print(f"wrote {out / 'X1c_depth_cdf_by_denominator.png'}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("stage", choices=["stage0", "report"])
+    parser.add_argument("stage", choices=["stage0", "report", "cdf"])
     parser.add_argument("--config", required=True)
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
     parser.add_argument("--dedup-dir-name", default="calibration_roughness_SFINCS_dedup")
     parser.add_argument("--fsf", type=float, default=12.0, help="friction factor of the result files (old layout: effective)")
     parser.add_argument("--out-dir", required=True)
+    parser.add_argument("--sf-bay-cdf", default=None, help="cdf: sf_bay_depth_cdf.csv of sf_bay_depth_reliability.py")
     args = parser.parse_args()
-    {"stage0": stage0, "report": report}[args.stage](args)
+    {"stage0": stage0, "report": report, "cdf": cdf}[args.stage](args)
 
 
 if __name__ == "__main__":

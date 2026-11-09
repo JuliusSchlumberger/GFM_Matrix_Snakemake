@@ -28,6 +28,7 @@ from shapely.geometry import box
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io  # noqa: E402
+from exposure_grid import population_per_pixel  # noqa: E402
 from pipeline_plots import pixel_area_km2_grid  # noqa: E402
 from tiles import load_tile_grid  # noqa: E402
 import validation as v  # noqa: E402
@@ -104,7 +105,22 @@ def _new_acc() -> dict[str, float]:
         "tp_cells": 0, "fp_cells": 0, "fn_cells": 0, "tn_cells": 0,
         "tp_tol_km2": 0.0, "fp_tol_km2": 0.0, "fn_tol_km2": 0.0, "tn_tol_km2": 0.0,
         "fp_forgiven_km2": 0.0, "fn_forgiven_km2": 0.0,
+        **{f"{c}_{w}": 0.0 for w in EXPOSURE_WEIGHTS for c in ("tp", "fp", "fn", "tn")},
     }
+
+
+# Extra soft counts: area at exposure.exceedance_threshold_m (exp_km2), population at the primary
+# threshold (pop) and at the exposure threshold (exp_pop); population = WorldPop people per pixel.
+EXPOSURE_WEIGHTS = ("exp_km2", "pop", "exp_pop")
+
+
+def _exposure_columns(a: dict) -> dict:
+    out = {}
+    for w in EXPOSURE_WEIGHTS:
+        out.update({f"{c}_{w}": a[f"{c}_{w}"] for c in ("tp", "fp", "fn", "tn")})
+        m = v.metrics_from_counts(a[f"tp_{w}"], a[f"fp_{w}"], a[f"fn_{w}"], a[f"tn_{w}"])
+        out.update({f"{k}_{w}": m[k] for k in ("HR", "FAR", "CSI", "bias")})
+    return out
 
 
 def _find_benchmark_keys(catalog, country_iso: str) -> list[str]:
@@ -182,6 +198,8 @@ def _blend_regions(rows: list[dict], regions_spec: dict[str, list[float]] | None
         "fp_forgiven_km2": fp_forgiven, "fn_forgiven_km2": fn_forgiven,
         "HR_tol": tol_metrics["HR"], "FAR_tol": tol_metrics["FAR"], "CSI_tol": tol_metrics["CSI"],
         "pct_disagreement_forgiven": pct_forgiven,
+        **_exposure_columns({k: sum(r.get(k, 0.0) for r in rows)
+                             for w in EXPOSURE_WEIGHTS for k in (f"tp_{w}", f"fp_{w}", f"fn_{w}", f"tn_{w}")}),
     })
 
 
@@ -204,6 +222,8 @@ def validate_country_national_coverage(
     rp = val_cfg["return_period"]
     slr = val_cfg["waterlevel_name"]
     primary_threshold_m = float(val_cfg["primary_threshold_m"])
+    exposure_threshold_m = float(cfg["exposure"]["exceedance_threshold_m"])
+    population_path = gfm_catalog.get_source("population").path
     supersample = int(val_cfg["benchmark_supersample"])
     wet_fraction = float(val_cfg["benchmark_wet_fraction"])
     # coastline_tolerance_m is stored as metres (config.yml), not cells - converted here at
@@ -332,6 +352,14 @@ def validate_country_national_coverage(
                 a["fn_cells"] += fn_c
                 a["tn_cells"] += tn_c
 
+                exposure_wet = model_domain & (depth > exposure_threshold_m) & not_water
+                people = population_per_pixel(population_path, depth.shape, out_transform, "EPSG:4326")[0]
+                for w, wet, weight in (("exp_km2", exposure_wet, area_km2), ("pop", model_wet, people),
+                                       ("exp_pop", exposure_wet, people)):
+                    for c, val in zip(("tp", "fp", "fn", "tn"),
+                                      v.confusion_counts_soft(wet, fraction, domain_mask, weight)):
+                        a[f"{c}_{w}"] += val
+
                 tol = v.confusion_counts_tolerant(model_wet, fraction, domain_mask, area_km2, tolerance_cells)
                 a["tp_tol_km2"] += tol["tp"]
                 a["fp_tol_km2"] += tol["fp"]
@@ -381,6 +409,7 @@ def validate_country_national_coverage(
                 "fp_forgiven_km2": a["fp_forgiven_km2"], "fn_forgiven_km2": a["fn_forgiven_km2"],
                 "HR_tol": tol_metrics["HR"], "FAR_tol": tol_metrics["FAR"], "CSI_tol": tol_metrics["CSI"],
                 "pct_disagreement_forgiven": pct_forgiven,
+                **_exposure_columns(a),
             }))
 
         blended = _blend_regions(region_rows, spec.regions)
