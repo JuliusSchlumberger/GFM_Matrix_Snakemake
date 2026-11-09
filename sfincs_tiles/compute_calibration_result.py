@@ -21,11 +21,14 @@ import numpy as np
 import rasterio
 import yaml
 from hydromt_sfincs import SfincsModel
-from rasterio.warp import Resampling, reproject
+from rasterio.warp import Resampling, reproject, transform_bounds
+from rasterio.windows import Window
 from scipy import ndimage
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from calibration_paths import DEPTH_ACCURACY_NAME, RUNS_NAME, decode_waterdepth_cm, run_path  # noqa: E402
+from calibration_paths import (  # noqa: E402
+    DEPTH_ACCURACY_NAME, RUNS_NAME, WATERDEPTH_NODATA_INT16, WATERDEPTH_SCALE, decode_waterdepth_cm, run_path,
+)
 from calibration_split import split_group  # noqa: E402
 from flood_agreement import (  # noqa: E402
     DEPTH_CATEGORY_EDGES, DEPTH_CORR_FINE_EDGES, WET_THRESHOLD_M, confusion_counts, depth_corr_sufficient_stats,
@@ -81,8 +84,46 @@ def _compare(depth: np.ndarray, wet: np.ndarray, ref: dict) -> dict:
     return out
 
 
+def _read_on_grid(path: Path, transform, crs, shape: tuple, int16_cm: bool) -> np.ndarray | None:
+    """Read the part of a depth raster over the destination grid, reprojected onto it (NaN: no data)."""
+    h, w = shape
+    with retry_transient_io(rasterio.open, path) as src:
+        left, bottom, right, top = transform_bounds(crs, src.crs, *rasterio.transform.array_bounds(h, w, transform),
+                                                    densify_pts=21)
+        # Affine arithmetic, not windows.from_bounds: its GDAL transformer crashes hydromt-sfincs-dev on Windows.
+        inv = ~src.transform
+        cols, rows = zip(*(inv * xy for xy in ((left, top), (right, top), (left, bottom), (right, bottom))))
+        c0, c1 = max(0, int(np.floor(min(cols)))), min(src.width, int(np.ceil(max(cols))))
+        r0, r1 = max(0, int(np.floor(min(rows)))), min(src.height, int(np.ceil(max(rows))))
+        if c1 <= c0 or r1 <= r0:
+            return None
+        win = Window(c0, r0, c1 - c0, r1 - r0)
+        raw, src_tr, src_crs, nodata = src.read(1, window=win), src.window_transform(win), src.crs, src.nodata
+    if int16_cm:
+        arr = raw.astype(np.float32) / WATERDEPTH_SCALE
+        arr[raw == (nodata if nodata is not None else WATERDEPTH_NODATA_INT16)] = np.nan
+    else:
+        arr = raw.astype(np.float32)
+        if nodata is not None and not np.isnan(nodata):
+            arr[raw == nodata] = np.nan
+    out = np.full(shape, np.nan, dtype=np.float32)
+    reproject(arr, out, src_transform=src_tr, src_crs=src_crs, dst_transform=transform, dst_crs=crs,
+              resampling=Resampling.nearest, src_nodata=np.nan, dst_nodata=np.nan)
+    return out
+
+
+def _max_merged(depth: np.ndarray, paths: list[Path], transform, crs, int16_cm: bool) -> np.ndarray:
+    for p in paths:
+        if p.exists():
+            other = _read_on_grid(p, transform, crs, depth.shape, int16_cm)
+            if other is not None:
+                depth = np.fmax(depth, other)
+    return depth
+
+
 def compute_result(tile_dir: Path, flooding: dict, core_mask: np.ndarray | None = None,
-                   pop_path: Path | None = None) -> tuple[dict, dict[str, np.ndarray]]:
+                   pop_path: Path | None = None,
+                   neighbor_dirs: list[Path] | None = None) -> tuple[dict, dict[str, np.ndarray]]:
     """Build one tile's calibration_result dict vs SFINCS's hmax_subgrid.tif, and its depth histograms.
 
     Scoring area: real land (mask.tif == LAND_CODE) active in SFINCS
@@ -98,6 +139,10 @@ def compute_result(tile_dir: Path, flooding: dict, core_mask: np.ndarray | None 
         restricted to it (the tile's Voronoi core, so overlapping tiles do not
         count shared land twice) and the result gains ``"dedup": True`` and
         ``domain["core_fraction_of_active_land"]``.
+    neighbor_dirs : list of Path, optional
+        Tile dirs of the other calibration tiles overlapping this one. SFINCS and every run
+        then take, per cell, the maximum over this tile and those (production's tile merge,
+        merge.merge_tile_rasters_chunk); with `core_mask`, each place is scored once.
     pop_path : Path, optional
         WorldPop counts. When given, each run also gets population-weighted extent counts
         (``matched_pop`` ...) and its histograms a population weight (people per subgrid pixel,
@@ -113,6 +158,9 @@ def compute_result(tile_dir: Path, flooding: dict, core_mask: np.ndarray | None 
         nodata, transform, crs, shape = src.nodata, src.transform, src.crs, src.shape
     if nodata is not None and not np.isnan(nodata):
         sfincs_depth[sfincs_depth == nodata] = np.nan
+    neighbors = neighbor_dirs or []
+    sfincs_depth = _max_merged(sfincs_depth, [n / "sfincs_model" / "hmax_subgrid.tif" for n in neighbors],
+                               transform, crs, int16_cm=False)
 
     mog = np.empty(shape, dtype=np.float32)
     with retry_transient_io(rasterio.open, tile_dir / "inputs" / "mask.tif") as src:
@@ -148,6 +196,7 @@ def compute_result(tile_dir: Path, flooding: dict, core_mask: np.ndarray | None 
     result = {
         "tile_id": tile_dir.name, "group": split_group(tile_dir.name), "built": time.strftime("%Y-%m-%d %H:%M:%S"),
         **({"dedup": True} if core_mask is not None else {}),
+        **({"max_merged_neighbors": [n.name for n in neighbors]} if neighbor_dirs is not None else {}),
         "settings": {"wet_threshold_m": WET_THRESHOLD_M, "subgrid_res_m": float(abs(transform.a)),
                      "flooding": flooding},
         "domain": domain,
@@ -168,6 +217,7 @@ def compute_result(tile_dir: Path, flooding: dict, core_mask: np.ndarray | None 
         depth, _, _, rshape = decode_waterdepth_cm(p)
         if rshape != shape:
             continue
+        depth = _max_merged(depth, [run_path(n / "outputs", key) for n in neighbors], transform, crs, int16_cm=True)
         wet = score & np.isfinite(depth) & (depth > WET_THRESHOLD_M)
         result["runs"][key] = {"variant": meta["variant"], "parameter": meta["parameter"], "alpha": meta["alpha"],
                                "flooded_km2": float(wet.sum() * cell_km2), "depth": _depth_stats(depth, wet),

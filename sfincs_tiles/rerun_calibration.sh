@@ -48,8 +48,8 @@ if [ "$PART" = "models" ]; then
   [ -f "$BASE/tile_ids.txt" ] || { echo "no $BASE/tile_ids.txt" >&2; exit 1; }
   grep -q "def phase_runs" "$CODE/run_calibration_models.py" \
     || { echo "$CODE/run_calibration_models.py has no phase_runs - sync the code first" >&2; exit 1; }
-  if [ "$PHASE" != "sweep" ] && [ ! -f "$BASE/variant_selection.json" ]; then
-    echo "PHASE=$PHASE needs $BASE/variant_selection.json - run the sweep phase and its post job first" >&2
+  if [ "$PHASE" != "sweep" ] && [ ! -f "$GFM_DATA_ROOT/$DEDUP_DIR_NAME/variant_selection.json" ]; then
+    echo "PHASE=$PHASE needs $GFM_DATA_ROOT/$DEDUP_DIR_NAME/variant_selection.json - run the sweep phase and its post job first" >&2
     exit 1
   fi
 

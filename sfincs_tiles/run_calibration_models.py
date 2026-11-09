@@ -219,6 +219,8 @@ def main() -> None:
     parser.add_argument("--config", required=True, help="config.yml or the base dir's resolved_config.yml")
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
     parser.add_argument("--phase", choices=PHASES, default="sweep")
+    parser.add_argument("--selection-dir-name", default=None,
+                        help="base dir holding variant_selection.json (default: <base-dir-name>_dedup)")
     parser.add_argument("--run", action="append", default=None, metavar="VARIANT[:PARAMETER[:ALPHA]]",
                         help="run these instead of the phase (repeatable)")
     parser.add_argument("--overwrite", action="store_true", help="redo outputs that already exist")
@@ -239,7 +241,8 @@ def main() -> None:
     if args.run:
         runs = [parse_run(spec) for spec in args.run]
     else:
-        selection_path = base_dir / SELECTION_NAME
+        # The overlap-merged scoring (compute_calibration_result_dedup.py) picks the runs, as production merges.
+        selection_path = root / (args.selection_dir_name or f"{args.base_dir_name}_dedup") / SELECTION_NAME
         selection = json.loads(selection_path.read_text()) if selection_path.exists() else None
         if args.phase != "sweep" and selection is None:
             raise SystemExit(f"phase {args.phase} needs {selection_path} (compute_variant_metrics.py)")

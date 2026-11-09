@@ -4,7 +4,7 @@
 # Idempotent: each step is skipped when its output exists. A failure appends to
 # outputs/calibration_run.failed (cleared on success) and exits 0 so the job's tile loop continues.
 # calibration_run.done skips the tile; calibration_run.step holds the running step.
-# CAL_PHASE (sweep | duration | selected, default sweep) picks run_calibration_models.py's phase.
+# CAL_PHASE (sweep | duration, default sweep) picks run_calibration_models.py's phase.
 # Usage: BASE_DIR_NAME=calibration_roughness_SFINCS SFINCS_THREADS=4 CAL_PHASE=sweep bash run_final_tile.sh <tile_id>
 set -uo pipefail
 unset PROJ_LIB PROJ_DATA GDAL_DATA

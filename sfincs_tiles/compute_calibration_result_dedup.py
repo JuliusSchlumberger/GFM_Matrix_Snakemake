@@ -1,8 +1,10 @@
-"""Write calibration_result.json per tile, each counting only its Voronoi core.
+"""Write calibration_result.json per tile as production merges tiles: overlap max, each place once.
 
-Sweep tiles overlap (boundary-condition buffer), so pooling raw counts counts
-overlap zones once per tile (summed footprints overcount the union by 1.237x).
-Output mirrors the original layout in a separate base dir. Needs hydromt-sfincs-dev.
+Sweep tiles overlap (boundary-condition buffer). Production merges overlapping tiles by per-cell
+maximum (merge.merge_tile_rasters_chunk); here SFINCS and every run take, per cell, the maximum
+over all calibration tiles whose model grid covers it, and each tile scores only its Voronoi core,
+so every place counts once. Output mirrors the original layout in a separate base dir; the
+variant selection is taken from it. Needs hydromt-sfincs-dev.
 
 Usage:
     python compute_calibration_result_dedup.py --config <config.yml> \\
@@ -22,6 +24,7 @@ from pathlib import Path
 import numpy as np
 import rasterio
 import yaml
+from rasterio.warp import transform_bounds
 from scipy.spatial import cKDTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -30,24 +33,38 @@ from sfincs_grid import build_tile_tree, core_mask  # noqa: E402
 from gfm_config import read_root  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
 
-def compute_result_dedup(tile_dir: Path, flooding: dict, tree: cKDTree, tile_ids: np.ndarray,
-                         pop_path: Path | None = None) -> tuple[dict, dict[str, np.ndarray]]:
-    """Build one tile's calibration_result dict, restricted to its Voronoi core.
+def grid_bounds(base_dir: Path, tile_list: list[str]) -> dict[str, tuple]:
+    """Return each tile's SFINCS subgrid bounds (EPSG:4326 lon/lat)."""
+    out = {}
+    for tid in tile_list:
+        path = base_dir / tid / "sfincs_model" / "hmax_subgrid.tif"
+        if path.exists():
+            with retry_transient_io(rasterio.open, path) as src:
+                out[tid] = transform_bounds(src.crs, "EPSG:4326", *src.bounds, densify_pts=21)
+    return out
 
-    `compute_calibration_result.compute_result` with the core mask (on the
-    hmax_subgrid.tif grid) as its ``core_mask``.
-    """
+
+def overlapping(tid: str, bounds: dict[str, tuple]) -> list[str]:
+    """Return the other tiles whose subgrid bounds intersect tile `tid`'s."""
+    x0, y0, x1, y1 = bounds[tid]
+    return [t for t, (a0, b0, a1, b1) in bounds.items() if t != tid and a0 < x1 and a1 > x0 and b0 < y1 and b1 > y0]
+
+
+def compute_result_dedup(tile_dir: Path, flooding: dict, tree: cKDTree, tile_ids: np.ndarray,
+                         pop_path: Path | None = None,
+                         neighbor_dirs: list[Path] | None = None) -> tuple[dict, dict[str, np.ndarray]]:
+    """Build one tile's calibration_result dict on its Voronoi core, overlaps merged by maximum."""
     with retry_transient_io(rasterio.open, tile_dir / "sfincs_model" / "hmax_subgrid.tif") as src:
         transform, crs, shape = src.transform, src.crs, src.shape
     core = core_mask(shape, transform, crs, tile_dir.name, tree, tile_ids)
-    return compute_result(tile_dir, flooding, core_mask=core, pop_path=pop_path)
+    return compute_result(tile_dir, flooding, core_mask=core, pop_path=pop_path, neighbor_dirs=neighbor_dirs or [])
 
 
 def _process_one(args_tuple) -> tuple[str, str | None]:
-    tile_dir, out_tile_dir, flooding, tree, tile_ids, pop_path = args_tuple
+    tile_dir, out_tile_dir, flooding, tree, tile_ids, pop_path, neighbor_dirs = args_tuple
     tile_id = tile_dir.name
     try:
-        result, hists = compute_result_dedup(tile_dir, flooding, tree, tile_ids, pop_path)
+        result, hists = compute_result_dedup(tile_dir, flooding, tree, tile_ids, pop_path, neighbor_dirs)
     except Exception as exc:
         return tile_id, f"{type(exc).__name__}: {exc}"
     write_result(out_tile_dir / "outputs", result, hists)
@@ -83,11 +100,13 @@ def main() -> None:
 
     flooding = config["simulation"]["flooding"]
     pop_path = population_path(Path(args.config), Path(args.catalog))
+    # Neighbours come from every tile of the calibration, not only --tile-id.
+    bounds = grid_bounds(base_dir, (base_dir / "tile_ids.txt").read_text().split())
 
     jobs = [
-        (base_dir / tid, out_base_dir / tid, flooding, tree, tile_ids, pop_path)
-        for tid in tile_list
-        if (base_dir / tid / "sfincs_model" / "hmax_subgrid.tif").exists()
+        (base_dir / tid, out_base_dir / tid, flooding, tree, tile_ids, pop_path,
+         [base_dir / n for n in overlapping(tid, bounds)])
+        for tid in tile_list if tid in bounds
     ]
     print(f"{len(jobs)} tile(s) have the required source files.", flush=True)
 

@@ -11,12 +11,12 @@ state_dir: /p/11212688-004-global-floodmaps/modelling/hpc_harness/hydrax_rerun
 cwd: /u/schlumbe/gfm_code
 env:
   HDF5_USE_FILE_LOCKING: "FALSE"
-  # SFINCS post job (site_env.sh CAL_*): the dedup rescoring of every run on 1,500 tiles needs
-  # ~1 day on 4 workers, so 16 workers with a 1-day limit.
+  # SFINCS post job (site_env.sh CAL_*): the overlap-merged rescoring of every run on 1,500 tiles
+  # reads each tile's neighbours too: 16 workers, 2-day limit.
   CAL_PARTITION: 16vcpu
   CAL_CPUS: "16"
   CAL_MEM: 120G
-  CAL_TIME: "1-00:00:00"
+  CAL_TIME: "2-00:00:00"
 preamble: |
   source sfincs_tiles/site_env.sh
   PY="$GFM_PYTHON"
@@ -175,7 +175,7 @@ steps:
   - id: local_variants
     after: [sfincs_duration, local_runs]
     run: |
-      SEL="$R/calibration_roughness_SFINCS/variant_selection.json"
+      SEL="$R/calibration_roughness_SFINCS_dedup/variant_selection.json"  # overlap-merged, as production
       "$PY" snakemake_workflow/scripts/materialize_configs.py england_local_input england_global_input wales_local_input \
           wales_global_input sf_bay_local_input --variants all --selection "$SEL"
       for f in $C/*__*_materialized.yml; do
