@@ -22,6 +22,9 @@ paths:
 
 boundary_conditions:
   # Present-day only (TODO.md D4): EA's design sea levels have no SLR scenario.
+  # Only what the benchmarks score: RP100 and RP250 bracket the ~RP200 flood zones
+  # (data_catalog_validation.yml comparison_return_periods), present day.
+  return_periods: [100, 250]
   waterlevel_names: ["SLR_0"]
   # Isolated from the shared global COAST-RP cache - see england_local_input.yml's matching
   # override and its own comment for why sharing the default directory is unsafe.

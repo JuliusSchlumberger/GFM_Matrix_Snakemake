@@ -23,6 +23,7 @@ boundary_conditions:
   # levels under the same file names.
   stations_cache_dir: "{root}/deltas_floodmaps/ssp245/WL_scenarios_cache"
   return_periods: [100]
+  waterlevel_names: ["SLR_0", "SLR_500", "SLR_1000", "SLR_1500", "SLR_2000"]
 
 adaptation:
   slr_intensities: []

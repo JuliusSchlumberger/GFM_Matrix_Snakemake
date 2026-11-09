@@ -19,6 +19,7 @@ paths:
     - "snakemake_workflow/config/data_catalog_local_input.yml"
 
 boundary_conditions:
+  return_periods: [100]  # tests the hop seeding, one event is enough
   waterlevel_names: ["SLR_0"]
   stations_cache_dir: "{root}/england_hop_test/processed_inputs/WL_scenarios_cache"
   stations_cache_prebuilt: true  # preparation/cache_local_waterlevel_stations.py

@@ -18,3 +18,12 @@ validation:
   output_dir: "{root}/wales_global_input/validation"
 hpc:
   jobs_dir: "{root}/wales_global_input/model_outputs/hpc_jobs"
+
+boundary_conditions:
+  # Only what the benchmarks score: RP100 and RP250 bracket the ~RP200 flood zones
+  # (data_catalog_validation.yml comparison_return_periods), present day.
+  return_periods: [100, 250]
+  waterlevel_names: ["SLR_0"]
+# merged_waterlevel_names() unions this with waterlevel_names.
+adaptation:
+  slr_intensities: []
