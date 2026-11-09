@@ -4,16 +4,21 @@ Reads validate_country.py's metrics CSVs with the exposure columns (area at the 
 threshold, population at both thresholds), checks the area counts against a reference run's
 CSVs, and draws X8 (area vs population scores per region) and X9 (one region's agreement map,
 shaded by population; agreement at the primary threshold as validate_country writes it).
+--local-vs-global instead tabulates local- against global-input runs (T4: area CSI, population
+CSI and population bias at both thresholds), from any scorer's metrics CSVs with those columns.
 
 Usage:
     python validation/exposure_validation_report.py --config <config.yml> --metrics-dir <dir> \\
         --reference-dir <saved validation dir> --out-dir <dir> [--map-region GBR:firth_of_forth:RP100]
+    python validation/exposure_validation_report.py --out-dir <dir> \\
+        --local-vs-global england <local validation dir> <global validation dir> [--local-vs-global ...]
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+from fnmatch import fnmatchcase as fnmatch
 from pathlib import Path
 
 import matplotlib
@@ -48,6 +53,54 @@ def replication(metrics: pd.DataFrame, reference_dir: Path) -> pd.DataFrame:
     for c in ("tp_km2", "fp_km2", "fn_km2"):
         out[f"{c}_rel_diff"] = (m[c] - m[f"{c}_ref"]) / m[f"{c}_ref"].where(m[f"{c}_ref"] != 0)
     return out
+
+
+# (threshold, area CSI, population CSI, population bias) columns of a metrics CSV.
+LOCAL_VS_GLOBAL = (("primary", "CSI", "CSI_pop", "bias_pop"),
+                   ("exposure", "CSI_exp_km2", "CSI_exp_pop", "bias_exp_pop"))
+_KEYS = ["benchmark_key", "region", "return_period"]
+
+
+def _read_scored_rows(path: Path) -> pd.DataFrame:
+    df = pd.read_csv(path)
+    if "HT" in df.columns:  # validate_sf_bay.py: one row per grid, indexed by grid name
+        df = df.rename(columns={df.columns[0]: "grid"})
+        df = df[df.grid == "A_coarsen_to_model_grid"].assign(
+            benchmark_key="usgs_cosmos_depth", region="model_grid", return_period="RP100")
+    return df
+
+
+def load_scenario_metrics(validation_dir: Path) -> pd.DataFrame:
+    """Every scored row under a validation dir; a standalone scorer's row wins over validate_country's."""
+    paths = [*validation_dir.glob("metrics_*.csv"), *validation_dir.glob("*/metrics_*.csv")]
+    paths.sort(key=lambda p: (not fnmatch(p.name, "metrics_???_RP*"), p.as_posix()))
+    frames = [_read_scored_rows(p) for p in paths]
+    if not frames:
+        return pd.DataFrame(columns=_KEYS)
+    df = pd.concat(frames, ignore_index=True)
+    return df.drop_duplicates(_KEYS, keep="last")
+
+
+def local_vs_global(pairs: list[tuple[str, Path, Path | None]]) -> pd.DataFrame:
+    """Area CSI, population CSI and population bias of local vs global input, per threshold.
+
+    One row per scenario, local-input (benchmark, region, RP) and threshold; the global
+    twin's columns are NaN where it has no matching row or no twin exists.
+    """
+    rows = []
+    for scenario, local_dir, global_dir in pairs:
+        local = load_scenario_metrics(local_dir).set_index(_KEYS).add_suffix("_local")
+        glob_ = load_scenario_metrics(global_dir) if global_dir is not None else pd.DataFrame(columns=_KEYS)
+        m = local.join(glob_.set_index(_KEYS).add_suffix("_global"), how="left").reset_index()
+        for threshold, csi_area, csi_pop, bias_pop in LOCAL_VS_GLOBAL:
+            out = m[_KEYS].assign(scenario=scenario, threshold=threshold)
+            for name, col in (("CSI_area", csi_area), ("CSI_pop", csi_pop), ("bias_pop", bias_pop)):
+                for side in ("local", "global"):
+                    out[f"{name}_{side}"] = m.get(f"{col}_{side}", np.nan)
+            rows.append(out)
+    cols = ["scenario", *_KEYS, "threshold"]
+    df = pd.concat(rows, ignore_index=True)
+    return df[cols + [c for c in df.columns if c not in cols]].sort_values(cols, ignore_index=True)
 
 
 def plot_scores(metrics: pd.DataFrame, out: Path) -> None:
@@ -100,18 +153,32 @@ def plot_map(metrics_dir: Path, iso: str, region: str, rp: str, pop_path: str, o
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--config", required=True)
-    parser.add_argument("--metrics-dir", required=True, help="validation.output_dir of the exposure run")
-    parser.add_argument("--reference-dir", required=True, help="validation.output_dir of the saved run")
+    parser.add_argument("--config")
+    parser.add_argument("--metrics-dir", help="validation.output_dir of the exposure run")
+    parser.add_argument("--reference-dir", help="validation.output_dir of the saved run")
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--map-region", default="GBR:firth_of_forth:RP100", help="ISO:region:RP for X9")
+    parser.add_argument("--local-vs-global", nargs="+", action="append", metavar="ARG",
+                        help="SCENARIO LOCAL_DIR [GLOBAL_DIR]: validation dirs of a local-input run and its "
+                             "global-input twin; repeatable. Writes T4 only.")
     args = parser.parse_args()
+    out = Path(args.out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    if args.local_vs_global:
+        if any(len(p) not in (2, 3) for p in args.local_vs_global):
+            parser.error("--local-vs-global takes SCENARIO LOCAL_DIR [GLOBAL_DIR]")
+        pairs = [(p[0], Path(p[1]), Path(p[2]) if len(p) == 3 else None) for p in args.local_vs_global]
+        table = local_vs_global(pairs)
+        table.to_csv(out / "T4_local_vs_global_exposure.csv", index=False)
+        with pd.option_context("display.float_format", "{:.3f}".format, "display.width", 240):
+            print(table.to_string(index=False))
+        return
+    if not (args.config and args.metrics_dir and args.reference_dir):
+        parser.error("--config, --metrics-dir and --reference-dir are required without --local-vs-global")
     cfg = load_config(args.config)
     paths = cfg["paths"]["hydromt_data_catalog"]
     catalog = get_data_catalog([_REPO_ROOT / p for p in ([paths] if isinstance(paths, str) else paths)],
                                root=cfg["paths"]["root"])
-    out = Path(args.out_dir)
-    out.mkdir(parents=True, exist_ok=True)
     metrics = load_metrics(Path(args.metrics_dir))
     rep = replication(metrics, Path(args.reference_dir))
     rep.to_csv(out / "replication_vs_saved_run.csv", index=False)

@@ -3,7 +3,8 @@
 A narrower, memory-safe path than run_multi_rp_summary.py. Chunks are scored in
 8192-px blocks because `benchmark_fraction_from_vector` rasterizes at
 out_shape*supersample per side: a full 5deg chunk (~18,500 px) at supersample=5
-needs a ~8.6 GB uint8 array.
+needs a ~8.6 GB uint8 array. Rows carry validate_country.py's exposure columns
+(v.exposure_columns).
 
 Usage:
     python validation/rescore_england_fz3.py --config snakemake_workflow/config/config.yml
@@ -11,6 +12,8 @@ Usage:
 
 import argparse
 import sys
+from collections import defaultdict
+from functools import partial
 from pathlib import Path
 
 import pandas as pd
@@ -21,6 +24,7 @@ from shapely.geometry import box
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io  # noqa: E402
 from pipeline_plots import pixel_area_km2_grid  # noqa: E402
+from population_grid import population_per_pixel  # noqa: E402
 import validation as v  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -35,6 +39,8 @@ _RPS = ["RP100", "RP250"]
 def _score_one_rp(rp, slr, cfg, gfm_catalog, bench_catalog, spec, full_gdf, full_sindex) -> dict | None:
     val_cfg = cfg["validation"]
     primary_threshold_m = float(val_cfg["primary_threshold_m"])
+    exposure_threshold_m = float(cfg["exposure"]["exceedance_threshold_m"])
+    population_path = gfm_catalog.get_source("population").path
     supersample = int(val_cfg["benchmark_supersample"])
     pp_chunk_deg = float(cfg["postprocessing"]["chunk_size_deg"])
     # Not postprocessing.block_size (2048, tuned for raster writes): per-block catalog
@@ -51,6 +57,7 @@ def _score_one_rp(rp, slr, cfg, gfm_catalog, bench_catalog, spec, full_gdf, full
 
     tp = fp = fn = tn = 0.0
     model_wet_km2 = benchmark_wet_km2 = 0.0
+    exposure_acc: dict[str, float] = defaultdict(float)
     n_processed = 0
 
     for chunk_path in chunk_paths:
@@ -102,6 +109,13 @@ def _score_one_rp(rp, slr, cfg, gfm_catalog, bench_catalog, spec, full_gdf, full
                     fn += c_fn
                     tn += c_tn
 
+                    exposure_wet = model_domain & (depth > exposure_threshold_m) & not_water
+                    people = population_per_pixel(population_path, depth.shape, out_transform, "EPSG:4326",
+                                                  open_raster=partial(retry_transient_io, rasterio.open))[0]
+                    for k, val in v.exposure_counts(model_wet, exposure_wet, fraction, domain_mask,
+                                                    area_km2, people).items():
+                        exposure_acc[k] += val
+
         if chunk_has_data:
             n_processed += 1
         print(f"    chunk {chunk_path.name}: done", flush=True)
@@ -119,6 +133,7 @@ def _score_one_rp(rp, slr, cfg, gfm_catalog, bench_catalog, spec, full_gdf, full
         "waterlevel_name": slr, "region": region,
         "HR": metrics["HR"], "FAR": metrics["FAR"], "CSI": metrics["CSI"], "bias": metrics["bias"],
         "model_wet_km2": model_wet_km2, "benchmark_wet_km2": benchmark_wet_km2,
+        **v.exposure_columns(exposure_acc),
     }
 
 
