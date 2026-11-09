@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import numpy as np
-from scipy import ndimage
 
-_STRUCTURE_8 = np.ones((3, 3), dtype=bool)
-
-WET_THRESHOLD_M = 0.10  # reporting "flooded" cutoff; independent of flood_model.MIN_FLOOD_DEPTH_M
+WET_THRESHOLD_M = 0.10  # reporting "flooded" cutoff; the model itself floods any depth > 0
 
 # Depth bin edges (m); depth_joint_hist adds <first/>last catch-all bins.
 DEPTH_CORR_FINE_EDGES = np.arange(0.0, 3.01, 0.1)
@@ -76,30 +73,6 @@ def depth_error_metrics_from_pooled(pooled: dict, within_band_m: float = 0.2) ->
 
     return {"r": float(r), "bias_m": float(bias_m), "rmse_m": rmse_m,
             "median_error_m": median_error_m, band_key: pct_within}
-
-
-def prune_to_ocean_connected(
-    flooded: np.ndarray, mask: np.ndarray,
-    ocean_code: int = 1, land_code: int = 0, river_code: int | None = None,
-) -> np.ndarray:
-    """Discard flooded cells with no hydraulic path to the sea.
-
-    Keeps 8-connected components touching a coastline cell (ocean within 1 px of
-    land or river). As flood_model.prune_to_coast_connected but without its
-    edge-connectivity requirement: SFINCS's rectangular UTM subgrid has no real wet edge.
-    """
-    landlike = mask == land_code
-    if river_code is not None:
-        landlike = landlike | (mask == river_code)
-    coastline = ndimage.binary_dilation(landlike, structure=_STRUCTURE_8) & (mask == ocean_code)
-    if not coastline.any() or not flooded.any():
-        return np.zeros_like(flooded)
-    dilated_coast = ndimage.binary_dilation(coastline, structure=_STRUCTURE_8)
-    labels, _ = ndimage.label(flooded, structure=_STRUCTURE_8)
-    touching = set(np.unique(labels[dilated_coast])) - {0}
-    if not touching:
-        return np.zeros_like(flooded)
-    return np.isin(labels, list(touching))
 
 
 # Twin of src/validation.py's confusion_counts / metrics_from_counts: hydromt-sfincs-dev can't import src/

@@ -27,10 +27,11 @@ from rasterio.windows import Window
 
 EIKONAL_NODATA = np.finfo(np.float32).max
 
-# int16-cm per-tile rasters (rasters.encode_waterdepth_cm) are decoded to
-# float32 m + EIKONAL_NODATA on read, before any merge arithmetic.
+# int16-cm per-tile rasters (rasters.encode_waterdepth_cm) are decoded to float32 m +
+# EIKONAL_NODATA on read, before any merge arithmetic. int16 max is the "not computed"
+# sentinel. Single definition: rasters imports these.
 WATERDEPTH_NODATA_INT16 = np.iinfo(np.int16).max
-WATERDEPTH_SCALE = 100  # cm per metre - must match rasters.WATERDEPTH_SCALE
+WATERDEPTH_SCALE = 100  # cm per metre
 
 
 def decode_waterdepth_array(raw: np.ndarray) -> np.ndarray:

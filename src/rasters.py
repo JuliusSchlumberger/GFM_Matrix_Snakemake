@@ -20,7 +20,7 @@ from scipy import ndimage
 
 from config_utils import atomic_write, retry_transient_io
 
-from merge import EIKONAL_NODATA
+from merge import WATERDEPTH_NODATA_INT16, WATERDEPTH_SCALE, decode_waterdepth_array
 
 # DeltaDTM is valid up to 30 m, so int16 cm (+-327.67 m) has ample headroom; the
 # 99 m gap-fill sentinel sits above any real value and inside int16's range.
@@ -30,10 +30,6 @@ DEM_NODATA_M = 99.0
 # Friction (the land-cover-indexed attenuation rate, m/m = lookup-table n / 100) spans
 # ~0.0001-0.0012; x1e6 keeps 2 significant digits with ~27x headroom below int16's max.
 FRICTION_SCALE = 1_000_000
-
-# int16 max doubles as the "not computed" sentinel (int16 twin of merge.EIKONAL_NODATA).
-WATERDEPTH_SCALE = 100  # cm per metre
-WATERDEPTH_NODATA_INT16 = np.iinfo(np.int16).max  # 32767
 
 
 def _encode_int16(values: np.ndarray, scale: float, label: str, valid_hint: str) -> np.ndarray:
@@ -102,11 +98,7 @@ def encode_waterdepth_cm(waterdepth_m: np.ndarray) -> np.ndarray:
     return encoded
 
 
-def decode_waterdepth_cm(waterdepth_int16: np.ndarray) -> np.ndarray:
-    """Decode int16-cm water depth to float32 metres; sentinel -> `merge.EIKONAL_NODATA`."""
-    decoded = waterdepth_int16.astype(np.float32) / WATERDEPTH_SCALE
-    decoded[waterdepth_int16 == WATERDEPTH_NODATA_INT16] = EIKONAL_NODATA
-    return decoded
+decode_waterdepth_cm = decode_waterdepth_array  # int16 cm -> float32 m, sentinel -> EIKONAL_NODATA
 
 
 # Boundary water levels (COAST-RP + SLR) in boundaries.gpkg use the same int16-cm
