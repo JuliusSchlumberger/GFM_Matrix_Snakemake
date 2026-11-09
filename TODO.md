@@ -98,6 +98,9 @@ Open:
   - Variant runs take `calibration_roughness_SFINCS/variant_selection.json` (raw pooling); the
     overlap-corrected `_dedup` selection is the alternative (user to decide).
   - Scotland local input stays paused; Scotland and New Brunswick are scored from the global run.
+  - With the later global run: the SF Bay global baseline (`validate_sf_bay.py --config config.yml ...
+    --out-dir .../USA_alameda_sample_global_baseline`) and its row in the local-vs-global exposure
+    table (`exposure_validation_report.py --local-vs-global sf_bay ...`).
   - All-England local/global: 1,836 tiles, 14 hop waves, ~3,700 solves per scenario and variant;
     the variant step multiplies that by the variant count.
   - One core-budgeted HPC harness (max 120 cores): wave-0 tier asks 6 x 24 = 144, so one

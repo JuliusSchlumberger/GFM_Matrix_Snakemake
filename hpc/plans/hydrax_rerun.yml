@@ -190,6 +190,13 @@ steps:
       SF_BENCH="zip://$R/inputs/validation/California/alameda_flooding_slr000.zip!flooding/v2.1/county_alameda_flddepth_slr000_w100.tif"
       "$PY" validation/validate_sf_bay.py --config "$SB" --bbox -122.355 37.45 -121.99 37.91 --benchmark-path "$SF_BENCH"           --benchmark-scale-m 0.01 --native-merged-path "$R/sf_bay_local_input/merged_results/local_native/waterdepth_RP100_SLR_0.tif"           --out-dir "$R/sf_bay_local_input/validation/USA_alameda_sample"
 
+  # Local vs global input, area- and population-weighted (T4). SF Bay has no global-input scenario:
+  # its global side comes from the production run, so it joins the table after the global rerun.
+  - id: exposure_table
+    after: [validate_england_local, validate_england_global, validate_wales]
+    run: |
+      "$PY" validation/exposure_validation_report.py --out-dir "$R/local_vs_global_exposure"         --local-vs-global england "$R/england_local_input/all_england/validation" "$R/england_global_input/all_england/validation"         --local-vs-global wales "$R/wales_local_input/validation" "$R/wales_global_input/validation"
+
   # ── local comparisons with every flood-model variant at its calibrated run ──
   - id: local_variants
     after: [sfincs_duration, local_runs]
