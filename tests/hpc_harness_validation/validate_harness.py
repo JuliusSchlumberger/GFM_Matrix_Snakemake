@@ -81,3 +81,33 @@ def test_step_is_done_once_its_command_and_jobs_end(tmp_path, monkeypatch) -> No
     tasks[0].state = "COMPLETED"
     ctl.update_steps(tasks)
     assert ctl.states["s"]["status"] == "done" and tid
+
+
+def test_controller_starts_a_waiting_step_before_it_stops(tmp_path, monkeypatch) -> None:
+    plan = {"name": "t", "max_cores": 2, "state_dir": tmp_path / "state",
+            "steps": [{"id": "a", "run": "true"}, {"id": "b", "after": ["a"], "run": "true"}]}
+    ctl = Controller(plan, None, False, 0)
+    started, seen = [], set()
+    monkeypatch.setattr(ctl, "start_step", lambda s: started.append(s["id"]) or ctl.states.update(
+        {s["id"]: {"status": "running"}}))
+
+    def update_steps(tasks):  # a step ends one poll after it started, in a poll that starts nothing
+        for sid, st in ctl.states.items():
+            if st["status"] == "running":
+                if sid in seen:
+                    st["status"] = "done"
+                seen.add(sid)
+
+    monkeypatch.setattr(ctl, "update_steps", update_steps)
+    monkeypatch.setattr(harness.time, "sleep", lambda s: None)
+    monkeypatch.setattr(harness, "print_status", lambda plan: None)
+    ctl.run()
+    assert started == ["a", "b"]
+
+
+def test_plan_paths_must_be_absolute(tmp_path) -> None:
+    import pytest
+    plan = tmp_path / "p.yml"
+    plan.write_text("name: t\nmax_cores: 1\nstate_dir: ${SURELY_UNSET_VAR_XYZ}/x\nsteps: []\n")
+    with pytest.raises(SystemExit):
+        harness.load_plan(plan)

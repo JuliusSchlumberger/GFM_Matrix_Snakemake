@@ -231,7 +231,15 @@ def submit(task: Task, dependency: str | None) -> str:
 
 def load_plan(path: Path) -> dict:
     plan = yaml.safe_load(Path(path).read_text())
-    plan["state_dir"] = Path(os.path.expandvars(plan["state_dir"]))
+    for key in ("state_dir", "cwd"):
+        if key not in plan:
+            continue
+        value = os.path.expandvars(str(plan[key]))
+        # Every step, job and the sbatch stand-in run in other directories: a relative or
+        # half-expanded path would put the queue somewhere the controller does not look.
+        if "$" in value or not value.startswith("/") and not Path(value).is_absolute():
+            raise SystemExit(f"{path}: {key} {value!r} must be an absolute path (unset variable?)")
+        plan[key] = Path(value) if key == "state_dir" else value
     ids = [s["id"] for s in plan["steps"]]
     if len(set(ids)) != len(ids):
         raise SystemExit(f"{path}: duplicate step ids")
@@ -403,12 +411,12 @@ class Controller:
 
     def run(self) -> None:
         while True:
-            started = self.start_ready_steps()
+            self.start_ready_steps()
             tasks = self.poll_tasks()
             self.release(tasks)
             self.update_steps(load_tasks(self.queue_dir))
             save_step_states(self.plan, self.states)
-            if not started and not any(st["status"] == "running" for st in self.states.values()):
+            if not any(st["status"] == "running" for st in self.states.values()) and not self.start_ready_steps():
                 self.log("nothing left to run (steps still pending wait on a failed, interrupted or "
                          "destructive step)")
                 print_status(self.plan)

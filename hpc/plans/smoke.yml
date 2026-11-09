@@ -4,8 +4,8 @@
 # Expected: steps fan_out and child done, never_runs DEP_NEVER, at most 2 jobs at once.
 name: smoke
 max_cores: 2
-state_dir: ${GFM_DATA_ROOT}/hpc_harness/smoke
-cwd: ${GFM_DATA_ROOT}/hpc_harness/smoke
+state_dir: /p/11212688-004-global-floodmaps/modelling/hpc_harness/smoke
+cwd: /p/11212688-004-global-floodmaps/modelling/hpc_harness/smoke
 env:
   JOB_HEAD: "#!/bin/bash\n#SBATCH --partition=1vcpu\n#SBATCH --cpus-per-task=1\n#SBATCH --mem=1G\n#SBATCH --time=0-00:05:00"
 steps:
