@@ -100,8 +100,9 @@ All write to `hpc.jobs_dir` and print the submit command; submit from a login no
 | `python snakemake_workflow/scripts/generate_hpc_exposure_jobs.py` | exposure analysis only | `submit_exposure_analysis.sh` |
 | `python snakemake_workflow/scripts/generate_hpc_flood_totals_and_plots_job.py` | one flood-totals + plots job | printed `sbatch` command |
 
-The chain is self-continuing: `submit_preprocess_and_dispatch.sh` activates the env, builds the shared inputs (geoid offset raster, one station cache per return period and SLR level) on the submitting node, runs the preprocessing batches in parallel, then a job generates and submits the simulation waves.
+The chain is self-continuing: `submit_preprocess_and_dispatch.sh` activates the env, builds the shared inputs (geoid offset raster, the GOCO06s absolute geoid when a local DEM source bridges through it, one station cache per return period and SLR level unless `boundary_conditions.stations_cache_prebuilt`) on the submitting node, runs the preprocessing batches in parallel, then a job generates and submits the simulation waves.
 After the last wave, `submit_waves.sh` runs one more job that generates and submits the postprocessing and exposure chain.
+A scenario with `postprocessing.merge_only` (the local-input validation scenarios) gets the merges only, no exposure or flood totals: `merge_chunk`, or, with a `simulation.dem_source_manifest` (tiles in the local DEM's projected CRS), one `preparation/merge_england_local_tiles.py` job per return period and SLR level into `<merged_outputs>/local_native/`.
 So, after `preparation/run_preparation.py`, a full run is:
 
 ```

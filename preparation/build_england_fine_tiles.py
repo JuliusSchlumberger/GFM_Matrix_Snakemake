@@ -155,11 +155,9 @@ def run(config: dict, production_tile_id: int | None) -> None:
     final_hop = [h for i, h in enumerate(hop) if i not in unreachable_set]
     final_gdf = assign_tile_id(final_domains, final_hop)
 
-    # Single-tile mode keeps the original, already-referenced filenames (england_local_input.yml/
-    # england_global_input.yml's tile_grid.path) unchanged - backward compatible with the Scilly
-    # test already run this session. All-England mode writes new, distinctly-named outputs
-    # instead of silently overwriting/superseding that already-validated artifact; repointing
-    # the configs at it is a separate, deliberate step once the full tile set is reviewed.
+    # Distinct names per mode: the single-tile test grid's outputs on <data_root> use the same
+    # tile_ids for other tiles, so one grid must never overwrite the other. The England
+    # scenario configs read the all-England files.
     name_suffix = "" if production_tile_id is not None else "_all_england"
     out_dir = Path(config["paths"]["processed_inputs_dir"]) / "mask" / "validation"
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)

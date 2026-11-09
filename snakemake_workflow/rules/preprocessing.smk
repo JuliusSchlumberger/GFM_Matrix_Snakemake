@@ -78,7 +78,7 @@ rule extract_dem:
         # Only the ODN/NAVD88 bridges need GOCO06s's absolute geoid (vertical_datum.py).
         goco06s_absolute_raster=lambda wc: (
             [rules.compute_goco06s_absolute_raster.output.absolute_raster]
-            if _dem_source_meta_for_tile(wc.tile_id, "native_datum", "egm2008") in ("odn_osgm15", "navd88_geoid18")
+            if _dem_source_meta_for_tile(wc.tile_id, "native_datum", "egm2008") in HYBRID_GRID_BRIDGES
             else []
         ),
     output:

@@ -202,6 +202,8 @@ def sample_geoid_offset(
 # shift, ~0.5-1m in California - see compute_navd88_itrf2014_shift_raster.py),
 # not a downloaded national grid - same role as OSGM15, different derivation.
 DATUM_BRIDGES = frozenset({"egm2008", "odn_osgm15", "navd88_geoid18", "native"})
+# The bridges that also need GOCO06s's absolute geoid (rule compute_goco06s_absolute_raster).
+HYBRID_GRID_BRIDGES = frozenset({"odn_osgm15", "navd88_geoid18"})
 
 
 def _hybrid_minus_goco_grid(
@@ -284,7 +286,7 @@ def compute_vertical_datum_offset(
         return np.zeros((dst_height, dst_width), dtype=np.float32)
     if native_datum == "egm2008":
         return sample_geoid_offset(geoid_offset_raster, dst_transform, dst_crs, dst_height, dst_width)
-    if native_datum in ("odn_osgm15", "navd88_geoid18"):
+    if native_datum in HYBRID_GRID_BRIDGES:
         return _hybrid_minus_goco_grid(
             native_datum, hybrid_grid_raster, goco06s_absolute_raster, dst_transform, dst_crs, dst_height, dst_width,
         )
@@ -340,7 +342,7 @@ def compute_vertical_datum_offset_at_points(
         return np.zeros(np.asarray(lons).shape, dtype=np.float32)
     if native_datum == "egm2008":
         return sample_geoid_offset_at_points(geoid_offset_raster, lons, lats)
-    if native_datum in ("odn_osgm15", "navd88_geoid18"):
+    if native_datum in HYBRID_GRID_BRIDGES:
         return _hybrid_minus_goco_points(native_datum, hybrid_grid_raster, goco06s_absolute_raster, lons, lats)
     raise NotImplementedError(
         f"No vertical-datum bridge implemented for native_datum={native_datum!r} "

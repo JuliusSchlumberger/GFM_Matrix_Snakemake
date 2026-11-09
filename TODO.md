@@ -102,12 +102,19 @@ Open:
     leave out duration correction B and two-component SLR although their docstrings say
     "production"; preprocess batches use `--rerun-triggers=mtime` only, so delete
     `inputs/boundaries_*.gpkg` to force new levels.
-  - Local: postprocess bridge fails on projected local tiles (merge by hand,
-    `merge_england_local_tiles.py`); GOCO06s absolute raster not a shared preprocess target
-    (race); local station caches are prebuilt and must be rebuilt by hand; scotland paused;
-    england configs point at the Scilly test grid; hop-test grid has no build script;
-    `run_eikonal_cli` skips existing waterdepth rasters, so delete `results/` for a rerun.
-  - One core-budgeted HPC harness (max 120 cores): wave-0 tier alone asks 6 x 24 = 144.
+  - Local: the England/Wales station caches are prebuilt and must be rebuilt by hand
+    (`cache_local_waterlevel_stations.py`); scotland paused; `run_eikonal_cli` skips existing
+    waterdepth rasters and preprocessing reruns on mtime only, so the wales_*, sf_bay_local_input
+    and england_hop_test output dirs on `<data_root>` (earlier runs) need `results/` cleared for a
+    rerun. The England scenarios write to fresh `all_england/` dirs. The all-England 1 m
+    agreement map needs `plot_local_vs_global_agreement.py --bbox` (a full-region map does not
+    fit in memory).
+  - One core-budgeted HPC harness (max 120 cores): wave-0 tier asks 6 x 24 = 144, so one
+    wave-0 job waits for cores. The submit scripts capture `sbatch --parsable` ids and chain
+    every wave and the merge with `--dependency=afterany:<ids>`; two of them run inside jobs
+    (`generate_jobs_and_dispatch`, `gfm_generate_postprocess_and_dispatch`). The harness's
+    sbatch must therefore return an id at once, honour `afterany` on ids it holds back, and be
+    on PATH inside jobs. No script in the chain calls squeue/scontrol or uses `singleton`.
 - **England national-map score does not reproduce (exposure/depth assessment, 2026-11-09):**
   `validate_country.py --country GBR` on the same `merged_results` chunks gives England FZ3 hits
   +130 % and misses +270 % against the saved `validation/GBR/metrics_GBR_RP100_SLR_0.csv`;
@@ -903,12 +910,9 @@ more (bias 1.35-1.39 vs 1.17-1.19) - consistent with a model that captures more 
 extent (higher HR) at the cost of some extra false-positive area, not a sign it's worse.
 
 **Section 5 - still open:**
-- Fix item above (list-valued `hydromt_data_catalog`) resolved `validate_country.py`/
-  `rescore_england_fz3.py` only; `validate_england_fz2_band.py`, `rescore_1km_fp_buffer.py`,
-  `validate_sf_bay.py`, `plot_agreement_map.py`, `plot_sf_bay.py` (and ~14 preparation/analysis
-  scripts) have the same pattern, not yet hit/fixed - none has been called with a list-valued
-  catalog yet (`rescore_1km_fp_buffer.py` ran fine above because it was only run against
-  `england_global_input`, whose catalog is a plain string).
+- List-valued `hydromt_data_catalog`: every validation script except
+  `run_multi_rp_summary.py` accepts it; ~14 preparation/analysis scripts (production-only
+  inputs: storm-tide product, DeltaDTM sync, exposure/analysis figures) still take a single path.
 - Only RP100/RP250 scored so far (D5's own "RP100 first" step, kept narrow deliberately) - the
   full RP x SLR_0 grid (9 RPs) would need the same merge+score run repeated, plus (if ever
   wanted) a true FZ2 band score (needs RP1000, not yet solved).
@@ -944,12 +948,11 @@ per production tile would solve most of England 2-3x over.
 it runs every real EA core across all of England in ONE pass**, not per-production-tile.
 This sidesteps the deduplication problem entirely (each core gets exactly one fine tile by
 construction) and lets hop_distance come out whatever it really is, rather than assuming
-every tile is hop=0 as the single-tile Scilly test did. Single-tile mode keeps writing the
-original filenames (`england_fine_tiles.gpkg` etc., still what `england_local_input.yml`/
-`england_global_input.yml` point at - unaffected); all-England mode writes distinctly-named
-outputs (`england_fine_tiles_all_england.gpkg`) instead of silently superseding the
-already-validated Scilly artifact - repointing the configs at it is a deliberate, separate
-step once the full tile set is reviewed.
+every tile is hop=0 as the single-tile Scilly test did. Single-tile mode writes
+`england_fine_tiles.gpkg` etc. (the Scilly test grid, outputs directly under
+`{root}/england_{local,global}_input/`); all-England mode writes
+`england_fine_tiles_all_england.gpkg` + manifest, which `england_local_input.yml`/
+`england_global_input.yml` read, with outputs under `{root}/england_{local,global}_input/all_england/`.
 
 **First all-England build - real findings, not just confirmation:** 3660 real EA cores (every
 real tile, matching the earlier VRT-regeneration count exactly - confirms no duplication),
@@ -1058,9 +1061,9 @@ across nodes instead of 4 at a time) - but the user may be fine accepting the ~2
 runtime instead while away on holiday soon.
 
 **Section 5 - still open:**
-- Full all-England scale (1836 tiles after the waterlevel filter, up to hop=13 waves): local vs.
-  HPC execution path not yet decided (see runtime estimate above) - no HPC job generation
-  attempted yet for this scenario, and no local run of the full grid started either.
+- Full all-England scale (1836 tiles after the waterlevel filter, up to hop=13 waves): runs on
+  the HPC wave dispatch (`generate_hpc_preprocess_job.py --calibration`, 14 waves, 435 wave
+  jobs), not yet run.
 - The Wash hop-test tiles/config/outputs (`england_hop_test*`) are a one-off validation
   artifact, not wired into any scoring - fine to leave as-is or clean up later, not blocking.
 
