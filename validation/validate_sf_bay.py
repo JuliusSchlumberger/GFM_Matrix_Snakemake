@@ -3,7 +3,8 @@
 A) "coarsen": CoSMoS 2m EPSG:26910 depth averaged onto the model grid (~30m, EPSG:4326).
 B) "refine": model depth bilinear-resampled onto the CoSMoS 2m grid.
 Each gives HT/FAR/CSI/bias at primary_threshold_m and RMSE/MAE (m) over the whole
-domain and over benchmark-wet pixels only.
+domain and over benchmark-wet pixels only. Grid A also gets validate_country.py's
+exposure columns (v.exposure_columns; both depth maps thresholded at each threshold).
 
 Domain: union of the 9 counties' rectangular raster extents
 (sf_bay_county_bbox_union.gpkg). CoSMoS only has values inside the flood extent,
@@ -43,11 +44,14 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections import defaultdict
+from functools import partial
 from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
 import rasterio
+import rasterio.crs
 import rasterio.transform
 import rasterio.windows
 from rasterio.features import rasterize
@@ -57,6 +61,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
+from pipeline_plots import pixel_area_km2_grid  # noqa: E402
+from population_grid import population_per_pixel  # noqa: E402
 import validation as v  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -114,6 +120,7 @@ class _Accumulator:
         self.n_all = 0
         self.sq_fl = self.abs_fl = 0.0
         self.n_fl = 0
+        self.exposure: dict[str, float] = defaultdict(float)
 
     def add(self, model_depth: np.ndarray, bench_depth: np.ndarray, model_wet: np.ndarray,
             bench_wet: np.ndarray, domain: np.ndarray) -> None:
@@ -136,6 +143,13 @@ class _Accumulator:
         self.abs_fl += float(np.sum(np.abs(err_fl)))
         self.n_fl += int(err_fl.size)
 
+    def add_exposure(self, model_depth: np.ndarray, bench_depth: np.ndarray, model_wet: np.ndarray,
+                     bench_wet: np.ndarray, domain: np.ndarray, area_km2, people: np.ndarray,
+                     exposure_threshold_m: float) -> None:
+        for k, val in _exposure_counts(model_depth, bench_depth, model_wet, bench_wet, domain, area_km2,
+                                       people, exposure_threshold_m).items():
+            self.exposure[k] += val
+
     def metrics(self) -> dict:
         m = v.metrics_from_counts(self.tp, self.fp, self.fn, self.tn)
         rmse_all = float(np.sqrt(self.sq_all / self.n_all)) if self.n_all else np.nan
@@ -148,7 +162,28 @@ class _Accumulator:
             "HT": m["HR"], "FAR": m["FAR"], "CSI": m["CSI"], "bias": m["bias"],
             "RMSE_all_m": rmse_all, "MAE_all_m": mae_all, "n_all_px": self.n_all,
             "RMSE_flooded_m": rmse_fl, "MAE_flooded_m": mae_fl, "n_flooded_px": self.n_fl,
+            **(v.exposure_columns(self.exposure) if self.exposure else {}),
         }
+
+
+def _exposure_counts(model_depth, bench_depth, model_wet, bench_wet, domain, area_km2, people,
+                     exposure_threshold_m: float) -> dict[str, float]:
+    # CoSMoS is a depth benchmark, so at the exposure threshold both maps are thresholded.
+    return v.exposure_counts(
+        model_wet, model_depth > exposure_threshold_m, bench_wet.astype("float64"), domain, area_km2, people,
+        exposure_fraction=(bench_depth > exposure_threshold_m).astype("float64"),
+    )
+
+
+def _model_grid_weights(population_path, shape, transform, crs):
+    """(km2 per pixel, people per pixel) on a model grid in any CRS."""
+    if rasterio.crs.CRS.from_user_input(crs).is_geographic:
+        area_km2 = pixel_area_km2_grid(transform, shape[1], shape[0])
+    else:
+        area_km2 = abs(transform.a * transform.e) / 1e6
+    people = population_per_pixel(population_path, shape, transform, crs,
+                                  open_raster=partial(retry_transient_io, rasterio.open))[0]
+    return area_km2, people
 
 
 def _write_model_grid_outputs(out_dir: Path, model_depth, bench_depth, model_wet, bench_wet, domain, transform, crs) -> None:
@@ -209,6 +244,7 @@ def _score_coarsen_windowed(
     bench_depth_2m: np.ndarray, bench_transform_2m, bench_crs_2m,
     gfm_catalog, permanent_water_source, permanent_water_codes,
     surveyed_domain_path: Path, threshold_m: float, out_dir: Path | None,
+    population_path: str, exposure_threshold_m: float,
 ):
     """Grid A ("coarsen"), windowed over the model's own native-resolution grid."""
     acc = _Accumulator()
@@ -256,6 +292,9 @@ def _score_coarsen_windowed(
                 model_wet_win = depth > threshold_m
                 bench_wet_win = bench_on_win > threshold_m
                 acc.add(depth, bench_on_win, model_wet_win, bench_wet_win, domain_win)
+                area_km2, people = _model_grid_weights(population_path, shape, win_transform, model_crs)
+                acc.add_exposure(depth, bench_on_win, model_wet_win, bench_wet_win, domain_win, area_km2, people,
+                                 exposure_threshold_m)
 
                 if agree_dst is not None:
                     out_win = rasterio.windows.Window(
@@ -412,6 +451,8 @@ def validate_sf_bay(
     gfm_catalog = get_data_catalog(_catalog_paths, root=cfg["paths"]["root"])
     permanent_water_source = val_cfg["permanent_water_source"]
     permanent_water_codes = val_cfg["permanent_water_codes"]
+    population_path = gfm_catalog.get_source("population").path
+    exposure_threshold_m = float(cfg["exposure"]["exceedance_threshold_m"])
 
     benchmark_root = Path(val_cfg["benchmark_root"])
     surveyed_domain_path = benchmark_root / "California" / "flooding" / "sf_bay_county_bbox_union.gpkg"
@@ -429,6 +470,7 @@ def validate_sf_bay(
             bench_depth_2m, bench_transform_2m, bench_crs_2m,
             gfm_catalog, permanent_water_source, permanent_water_codes,
             surveyed_domain_path, threshold_m, Path(out_dir) if out_dir is not None else None,
+            population_path, exposure_threshold_m,
         )
         acc_b = _score_refine_windowed(
             native_merged_path, model_crs, model_nodata,
@@ -484,6 +526,11 @@ def validate_sf_bay(
         "resolution": f"{abs(model_transform_native.a):.7f} deg (~model native, {model_shape_native})",
         **_confusion_metrics(model_wet_a, bench_wet_a, domain_a),
         **_depth_error_metrics(model_depth_native, bench_on_model, domain_a, bench_wet_a),
+        **v.exposure_columns(_exposure_counts(
+            model_depth_native, bench_on_model, model_wet_a, bench_wet_a, domain_a,
+            *_model_grid_weights(population_path, model_shape_native, model_transform_native, model_crs),
+            exposure_threshold_m,
+        )),
     }
     if out_dir is not None:
         _write_model_grid_outputs(Path(out_dir), model_depth_native, bench_on_model, model_wet_a, bench_wet_a,

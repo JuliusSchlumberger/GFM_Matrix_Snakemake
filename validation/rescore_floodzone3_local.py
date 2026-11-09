@@ -5,7 +5,9 @@ waterdepth raster stays in its own native projected CRS (merge_england_local_til
 - never reprojected onto the global EPSG:4326 chunk grid, TODO.md). The benchmark
 is a vector, so it is reprojected into that native CRS instead (cheap) rather than
 reprojecting the raster (expensive) - validation.benchmark_fraction_from_vector and
-.window_scoring_domain both take an explicit dst_crs for exactly this.
+.window_scoring_domain both take an explicit dst_crs for exactly this. Rows carry
+validate_country.py's exposure columns (v.exposure_columns), population weights on the
+native grid.
 
 Defaults reproduce England's original behaviour exactly (bare --config call, no other
 flags). --region picks which of the benchmark's named regions bounds the scoring window -
@@ -20,6 +22,8 @@ Usage:
 
 import argparse
 import sys
+from collections import defaultdict
+from functools import partial
 from pathlib import Path
 
 import pandas as pd
@@ -30,6 +34,7 @@ from shapely.geometry import box
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io  # noqa: E402
+from population_grid import population_per_pixel  # noqa: E402
 import validation as v  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -42,6 +47,8 @@ def _score_one_rp(
 ) -> dict | None:
     val_cfg = cfg["validation"]
     primary_threshold_m = float(val_cfg["primary_threshold_m"])
+    exposure_threshold_m = float(cfg["exposure"]["exceedance_threshold_m"])
+    population_path = gfm_catalog.get_source("population").path
     supersample = int(val_cfg["benchmark_supersample"])
     permanent_water_source = val_cfg["permanent_water_source"]
     permanent_water_codes = val_cfg["permanent_water_codes"]
@@ -55,6 +62,7 @@ def _score_one_rp(
     raster_path = native_dir / f"waterdepth_{rp}_{slr}.tif"
     tp = fp = fn = tn = 0.0
     model_wet_native_units = benchmark_wet_native_units = 0.0
+    exposure_acc: dict[str, float] = defaultdict(float)
     n_processed = 0
 
     with retry_transient_io(rasterio.open, raster_path) as src:
@@ -108,6 +116,13 @@ def _score_one_rp(
                 fp += c_fp
                 fn += c_fn
                 tn += c_tn
+
+                exposure_wet = model_domain & (depth > exposure_threshold_m) & not_water
+                people = population_per_pixel(population_path, depth.shape, out_transform, native_crs,
+                                              open_raster=partial(retry_transient_io, rasterio.open))[0]
+                for k, val in v.exposure_counts(model_wet, exposure_wet, fraction, domain_mask,
+                                                pixel_area_km2, people).items():
+                    exposure_acc[k] += val
         print(f"  {rp}: {n_processed} block(s) with real model data.", flush=True)
 
     if n_processed == 0:
@@ -122,6 +137,7 @@ def _score_one_rp(
         "waterlevel_name": slr, "region": region,
         "HR": metrics["HR"], "FAR": metrics["FAR"], "CSI": metrics["CSI"], "bias": metrics["bias"],
         "model_wet_km2": model_wet_native_units, "benchmark_wet_km2": benchmark_wet_native_units,
+        **v.exposure_columns(exposure_acc),
     }
 
 

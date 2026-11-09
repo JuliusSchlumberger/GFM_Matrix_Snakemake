@@ -409,3 +409,39 @@ def metrics_from_counts(tp: float, fp: float, fn: float, tn: float = 0.0) -> dic
         "EB_ratio": _safe_div(fp, fn),
         "bias": _safe_div(tp + fp, tp + fn),
     }
+
+
+# Exposure weights next to the primary area score: area at exposure.exceedance_threshold_m
+# (exp_km2), population at the primary threshold (pop) and at the exposure threshold (exp_pop).
+EXPOSURE_WEIGHTS = ("exp_km2", "pop", "exp_pop")
+
+
+def exposure_counts(
+    model_wet: np.ndarray, exposure_wet: np.ndarray, fraction: np.ndarray, domain_mask: np.ndarray,
+    area_km2: np.ndarray | float, people: np.ndarray, exposure_fraction: np.ndarray | None = None,
+) -> dict[str, float]:
+    """Soft tp/fp/fn/tn for each of EXPOSURE_WEIGHTS, keyed "{tp,fp,fn,tn}_{weight}".
+
+    `model_wet`/`exposure_wet`: model wet above the primary/exposure threshold. `people`:
+    people per pixel (population_grid.population_per_pixel). `exposure_fraction`: benchmark
+    wet fraction at the exposure threshold, for depth benchmarks; an extent benchmark has
+    no depth, so it keeps `fraction` at both thresholds.
+    """
+    exp_fraction = fraction if exposure_fraction is None else exposure_fraction
+    out = {}
+    for w, wet, frac, weight in (("exp_km2", exposure_wet, exp_fraction, area_km2),
+                                 ("pop", model_wet, fraction, people),
+                                 ("exp_pop", exposure_wet, exp_fraction, people)):
+        for c, val in zip(("tp", "fp", "fn", "tn"), confusion_counts_soft(wet, frac, domain_mask, weight)):
+            out[f"{c}_{w}"] = val
+    return out
+
+
+def exposure_columns(counts: dict[str, float]) -> dict[str, float]:
+    """Per-weight counts plus HR, FAR, CSI and bias, all suffixed "_{weight}"."""
+    out = {}
+    for w in EXPOSURE_WEIGHTS:
+        out.update({f"{c}_{w}": counts[f"{c}_{w}"] for c in ("tp", "fp", "fn", "tn")})
+        m = metrics_from_counts(counts[f"tp_{w}"], counts[f"fp_{w}"], counts[f"fn_{w}"], counts[f"tn_{w}"])
+        out.update({f"{k}_{w}": m[k] for k in ("HR", "FAR", "CSI", "bias")})
+    return out
