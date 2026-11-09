@@ -89,3 +89,32 @@ def test_study_friction_settings() -> None:
     uniform = friction_settings(flooding, "uniform", None)
     assert uniform["friction_scale_factor"] == 1.0 and np.isclose(uniform["uniform_friction"], 0.006)
     assert np.isclose(friction_settings(flooding, "uniform", 0.1)["uniform_friction"], 0.003)
+
+
+def test_depth_accuracy_pools_exact_differences(tmp_path) -> None:
+    from calibration_paths import DEPTH_ACCURACY_NAME
+    from calibration_results import depth_accuracy_table
+    from flood_agreement import WET_THRESHOLD_M, depth_diff_hists
+
+    rng = np.random.default_rng(1)
+    results, truth = {}, []
+    for tid in (1, 2):
+        sfincs = np.where(rng.random(4000) < 0.7, rng.uniform(0, 3.5, 4000), np.nan)
+        model = np.clip(np.nan_to_num(sfincs) + rng.normal(0, 0.3, 4000), 0, None)
+        s_wet, m_wet = np.nan_to_num(sfincs) > WET_THRESHOLD_M, model > WET_THRESHOLD_M
+        h = depth_diff_hists(model, sfincs, m_wet, s_wet, np.ones(4000))
+        out = tmp_path / str(tid) / "outputs"
+        out.mkdir(parents=True)
+        np.savez_compressed(out / DEPTH_ACCURACY_NAME, **{"r__area": h})
+        results[tid] = {"group": "calibration",
+                        "runs": {"r": {"variant": "eikonal_landcover", "parameter": 0.25, "alpha": None}}}
+        truth.append(np.abs(model - np.nan_to_num(sfincs))[s_wet])
+    table = depth_accuracy_table(tmp_path, results)
+    row = table[(table.group == "all") & (table.cells == "reference_wet") & (table.sfincs_class_m == "all")].iloc[0]
+    err = np.concatenate(truth)
+    assert row.n == len(err) and row.n_tiles == 2
+    for tau in (0.1, 0.2, 0.5):
+        # 1 cm bins: a cell within tau of a bin edge may land either side
+        assert abs(row[f"within_{tau:g}m"] - (err <= tau).mean()) < 0.01
+    either = table[(table.group == "all") & (table.cells == "either_wet")].iloc[0]
+    assert either.n >= row.n

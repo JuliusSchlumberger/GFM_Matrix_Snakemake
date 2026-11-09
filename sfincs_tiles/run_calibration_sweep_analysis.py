@@ -1,6 +1,7 @@
 """Run the SFINCS calibration analysis on whatever tiles have a calibration_result.json.
 
-Steps (subprocesses): 1 compute_variant_metrics.py (run tables, variant_selection.json);
+Steps (subprocesses): 1 compute_variant_metrics.py (run tables, variant_selection.json) and
+plot_depth_accuracy.py (depth accuracy per run);
 2 the best variant's run by pooled CSI (or --select-by bias); 3 plot_worst_tiles_panel.py; 4
 plot_validation_results.py; 5 plot_sfincs_tile_diagnostics.py forcing figures for
 the worst tiles (or all, --forcing-checks-all) into figures/forcing_checks/.
@@ -82,6 +83,8 @@ def main() -> None:
         return
 
     _run([python, str(_THIS_DIR / "compute_variant_metrics.py"), *common, *subset, "--select-by", args.select_by])
+    if (root / args.base_dir_name / "variant_runs_depth_accuracy.csv").exists():
+        _run([python, str(_THIS_DIR / "plot_depth_accuracy.py"), *common])
     best = _best_run(root, args)
     _run([python, str(_THIS_DIR / "plot_worst_tiles_panel.py"), *common, *raster,
           "--run-key", best, "--n-panel-tiles", str(args.n_panel_tiles),

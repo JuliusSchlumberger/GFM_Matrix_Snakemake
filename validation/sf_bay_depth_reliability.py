@@ -23,11 +23,10 @@ from rasterio.warp import Resampling, reproject
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 from config_utils import get_data_catalog, load_config  # noqa: E402
-from exposure_grid import cell_area_km2, population_per_pixel  # noqa: E402
+from population_grid import cell_area_km2, population_per_pixel  # noqa: E402
 
 sys.path.insert(0, str(_REPO_ROOT / "sfincs_tiles"))
-from exposure_depth import _diff_stats  # noqa: E402
-from exposure_depth_pass import DIFF_EDGES, SFINCS_CLASS_EDGES  # noqa: E402
+from flood_agreement import DIFF_EDGES, SFINCS_CLASS_EDGES, SFINCS_CLASS_LABELS, diff_stats  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _chunks import _chunks_overlapping_bbox, _mosaic_read  # noqa: E402
@@ -68,18 +67,17 @@ def main() -> None:
     weights = {"area": np.broadcast_to(area[:, None], shape),
                "pop": population_per_pixel(catalog.get_source("population").path, shape, transform, "EPSG:4326")[0]}
     full = np.concatenate(([-np.inf], DIFF_EDGES, [np.inf]))
-    labels = [f"{lo:g}-{hi:g}" for lo, hi in zip((0.1, *SFINCS_CLASS_EDGES[:-1]), SFINCS_CLASS_EDGES)] + [">3"]
     cls = np.digitize(bench[both], SFINCS_CLASS_EDGES)
     d = diff[both]
     rows = []
     for name, w in weights.items():
         wb = w[both]
-        for c, label in enumerate(labels):
+        for c, label in enumerate(SFINCS_CLASS_LABELS):
             sel = cls == c
             rows.append({"weight": name, "cosmos_class_m": label,
-                         **_diff_stats(np.histogram(d[sel], bins=full, weights=wb[sel])[0], DIFF_EDGES)})
+                         **diff_stats(np.histogram(d[sel], bins=full, weights=wb[sel])[0])})
         rows.append({"weight": name, "cosmos_class_m": "all",
-                     **_diff_stats(np.histogram(d, bins=full, weights=wb)[0], DIFF_EDGES)})
+                     **diff_stats(np.histogram(d, bins=full, weights=wb)[0])})
     table = pd.DataFrame(rows)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     table.to_csv(args.out, index=False)

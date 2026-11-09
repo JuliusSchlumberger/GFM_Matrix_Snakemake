@@ -28,19 +28,17 @@ from rasterio.windows import from_bounds
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from calibration_paths import decode_waterdepth_cm, run_path  # noqa: E402
-from flood_agreement import WET_THRESHOLD_M  # noqa: E402
+from flood_agreement import DIFF_EDGES, SFINCS_CLASS_EDGES, WET_THRESHOLD_M  # noqa: E402
 from gfm_config import read_root, resolve_catalog_path  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
 from sfincs_grid import active_on_subgrid, build_tile_tree, core_mask  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from exposure_grid import population_per_pixel  # noqa: E402
+from population_grid import population_per_pixel  # noqa: E402
 
 LAND_CODE = 0
 DENSITY_EDGES = (10.0, 100.0, 1000.0)  # people per km2: classes < 10, 10-100, 100-1000, > 1000
 DENSITY_LABELS = ("<10", "10-100", "100-1000", ">1000")
-SFINCS_CLASS_EDGES = (0.3, 0.5, 1.0, 1.5, 2.0, 3.0)  # m, from WET_THRESHOLD_M; the last class > 3 m
-DIFF_EDGES = np.round(np.arange(-3.0, 3.001, 0.01), 2)  # m, model - SFINCS, 1 cm bins (+ catch-alls)
 DEPTH_EDGES = np.round(np.arange(0.0, 3.001, 0.1), 1)  # m, own-only cell depths (+ > 3 m)
 N_PER_DENSITY_CLASS = 25
 # Tiles kept in the subset if they exist: SF Bay, Severn estuary, Bay of Fundy (lon, lat).

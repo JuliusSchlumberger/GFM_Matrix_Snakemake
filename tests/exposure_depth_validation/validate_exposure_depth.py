@@ -11,7 +11,7 @@ from rasterio.transform import from_origin
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "sfincs_tiles"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from exposure_depth import within_tolerance_share  # noqa: E402
-from exposure_grid import population_per_pixel  # noqa: E402
+from population_grid import population_per_pixel  # noqa: E402
 
 RES = 30 / 3600
 

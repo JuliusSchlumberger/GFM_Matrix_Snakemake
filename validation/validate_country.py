@@ -17,6 +17,7 @@ import argparse
 import math
 import sys
 from collections import defaultdict
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -28,7 +29,7 @@ from shapely.geometry import box
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io  # noqa: E402
-from exposure_grid import population_per_pixel  # noqa: E402
+from population_grid import population_per_pixel  # noqa: E402
 from pipeline_plots import pixel_area_km2_grid  # noqa: E402
 from tiles import load_tile_grid  # noqa: E402
 import validation as v  # noqa: E402
@@ -353,7 +354,8 @@ def validate_country_national_coverage(
                 a["tn_cells"] += tn_c
 
                 exposure_wet = model_domain & (depth > exposure_threshold_m) & not_water
-                people = population_per_pixel(population_path, depth.shape, out_transform, "EPSG:4326")[0]
+                people = population_per_pixel(population_path, depth.shape, out_transform, "EPSG:4326",
+                                              open_raster=partial(retry_transient_io, rasterio.open))[0]
                 for w, wet, weight in (("exp_km2", exposure_wet, area_km2), ("pop", model_wet, people),
                                        ("exp_pop", exposure_wet, people)):
                     for c, val in zip(("tp", "fp", "fn", "tn"),

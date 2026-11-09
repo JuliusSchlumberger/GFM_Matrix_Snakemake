@@ -12,7 +12,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from flood_agreement import depth_error_metrics_from_pooled, metrics_from_counts
+from calibration_paths import DEPTH_ACCURACY_NAME
+from flood_agreement import SFINCS_CLASS_LABELS, depth_error_metrics_from_pooled, diff_stats, metrics_from_counts
 from retry_io import retry_transient_io
 
 RESULT_NAME = "calibration_result.json"
@@ -26,6 +27,7 @@ DISPLAY_LABEL = {
     "eikonal_landcover_duration": "Eikonal, land-cover rate + duration",
 }
 COUNTS = ("matched_km2", "model_only_km2", "sfincs_only_km2")
+COUNTS_POP = ("matched_pop", "model_only_pop", "sfincs_only_pop")  # people; absent in results without population
 GROUPS = ("calibration", "validation")
 
 
@@ -81,6 +83,7 @@ def run_tables(results: dict[int, dict]) -> tuple[pd.DataFrame, pd.DataFrame]:
             v = e["vs_sfincs"]
             rows.append({"tile_id": tid, "group": r["group"], "run_key": key, "variant": e["variant"],
                          "parameter": e["parameter"], "alpha": e["alpha"], **{c: v[c] for c in COUNTS},
+                         **{c: v.get(c, np.nan) for c in COUNTS_POP},
                          "HT": v["HT"], "FAR": v["FAR"], "CSI": v["CSI"], "bias": v["bias"]})
     per_tile = pd.DataFrame(rows)
     if per_tile.empty:
@@ -90,11 +93,52 @@ def run_tables(results: dict[int, dict]) -> tuple[pd.DataFrame, pd.DataFrame]:
     for group, sub in [*per_tile.groupby("group"), ("all", per_tile)]:
         for key, g in sub.groupby("run_key"):
             s = g[list(COUNTS)].sum()
+            p = g[list(COUNTS_POP)].sum(min_count=1)
             first = g.iloc[0]
             pooled.append({"group": group, "run_key": key, "variant": first.variant, "parameter": first.parameter,
                            "alpha": first.alpha, "n_tiles_scored": len(g), **s.to_dict(),
-                           **metrics_from_counts(s["matched_km2"], s["model_only_km2"], s["sfincs_only_km2"])})
+                           **metrics_from_counts(s["matched_km2"], s["model_only_km2"], s["sfincs_only_km2"]),
+                           "n_tiles_pop": int(g[COUNTS_POP[0]].notna().sum()), **p.to_dict(),
+                           **{f"{m}_pop": val for m, val in metrics_from_counts(*p.to_numpy()).items()}})
     return per_tile, pd.DataFrame(pooled)
+
+
+def depth_accuracy_table(base_dir: Path, results: dict[int, dict]) -> pd.DataFrame:
+    """Pool every run's depth-difference histograms per group; one row per denominator and class.
+
+    Denominators: both_wet (cells both flood), reference_wet (every SFINCS-wet cell, a model-dry
+    cell at its own sub-threshold depth), either_wet (every cell either floods; class "all"
+    only). Weights: area (km2) and pop (people). Tiles without the histogram file are skipped.
+    """
+    acc, n_tiles, meta = {}, {}, {}
+    for tid, r in results.items():
+        path = base_dir / str(tid) / "outputs" / DEPTH_ACCURACY_NAME
+        if not path.exists():
+            continue
+        with np.load(path) as hists:
+            for name in hists.files:
+                key, weight = name.rsplit("__", 1)
+                e = r["runs"].get(key)
+                if e is None:
+                    continue
+                meta[key] = (e["variant"], e["parameter"], e["alpha"])
+                h = hists[name]
+                for group in (r["group"], "all"):
+                    acc[group, key, weight] = acc.get((group, key, weight), 0) + h
+                    if weight == "area":
+                        n_tiles[group, key] = n_tiles.get((group, key), 0) + 1
+    rows = []
+    for (group, key, weight), h in sorted(acc.items()):
+        both, sfincs_only, model_only = h
+        variant, parameter, alpha = meta[key]
+        head = {"group": group, "run_key": key, "variant": variant, "parameter": parameter, "alpha": alpha,
+                "n_tiles": n_tiles.get((group, key), 0), "weight": weight}
+        for cells, by_class in (("both_wet", both), ("reference_wet", both + sfincs_only)):
+            for label, hc in zip(SFINCS_CLASS_LABELS, by_class):
+                rows.append({**head, "cells": cells, "sfincs_class_m": label, **diff_stats(hc)})
+            rows.append({**head, "cells": cells, "sfincs_class_m": "all", **diff_stats(by_class.sum(axis=0))})
+        rows.append({**head, "cells": "either_wet", "sfincs_class_m": "all", **diff_stats(h.sum(axis=(0, 1)))})
+    return pd.DataFrame(rows)
 
 
 def select_runs(pooled: pd.DataFrame, select_by: str = "CSI") -> dict:

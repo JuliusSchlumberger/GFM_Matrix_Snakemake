@@ -3,7 +3,9 @@
 Writes {base}/variant_runs_{per_tile,pooled}.csv and {base}/variant_selection.json: per
 variant the calibration-group run with the best pooled CSI (or |bias - 1|), its validation
 score, and the best variant. run_calibration_models.py reads the selection for its
-duration and selected phases.
+duration and selected phases. {base}/variant_runs_depth_accuracy.csv reports each run's depth
+agreement (within 10-50 cm, bias, MAE per SFINCS depth class, area and population); it does not
+enter the selection.
 
 Usage:
     python compute_variant_metrics.py --base-dir-name calibration_roughness_SFINCS [--select-by CSI]
@@ -18,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from calibration_paths import SELECTION_NAME  # noqa: E402
-from calibration_results import load_results, run_tables, select_runs  # noqa: E402
+from calibration_results import depth_accuracy_table, load_results, run_tables, select_runs  # noqa: E402
 from gfm_config import read_root  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
 
@@ -44,7 +46,21 @@ def main() -> None:
     retry_transient_io(pooled.to_csv, base_dir / "variant_runs_pooled.csv", index=False)
     cal = pooled[pooled.group == "calibration"].sort_values(["variant", "parameter", "alpha"])
     for r in cal.itertuples():
-        print(f"{r.run_key}: n={r.n_tiles_scored}, CSI={r.CSI:.4f}, bias={r.bias:.4f}, HT={r.HT:.4f}, FAR={r.FAR:.4f}")
+        print(f"{r.run_key}: n={r.n_tiles_scored}, CSI={r.CSI:.4f}, bias={r.bias:.4f}, HT={r.HT:.4f}, FAR={r.FAR:.4f}, "
+              f"CSI_pop={r.CSI_pop:.4f}, bias_pop={r.bias_pop:.4f}")
+
+    depth = depth_accuracy_table(base_dir, results)
+    if len(depth):
+        retry_transient_io(depth.to_csv, base_dir / "variant_runs_depth_accuracy.csv", index=False)
+        ref = depth[(depth.group == "calibration") & (depth.cells == "reference_wet") & (depth.sfincs_class_m == "all")]
+        ref = ref.sort_values(["variant", "parameter", "alpha"])
+        if len(ref):
+            print("\nDepth vs SFINCS on every SFINCS-wet cell, calibration group (area / population; report only):")
+        for key, g in ref.groupby("run_key", sort=False):
+            g = g.set_index("weight")
+            shares = "  ".join(f"{t:g} m " + "/".join(f"{g.at[w, f'within_{t:g}m']:.2f}" for w in g.index)
+                               for t in (0.1, 0.2, 0.5))
+            print(f"  {key}: within {shares}, bias {g.at['area', 'bias_m']:+.2f} m")
 
     selection = select_runs(pooled, args.select_by)
     retry_transient_io((base_dir / SELECTION_NAME).write_text, json.dumps(selection, indent=1), encoding="utf-8")

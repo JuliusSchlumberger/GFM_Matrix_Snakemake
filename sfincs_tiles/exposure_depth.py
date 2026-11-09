@@ -29,7 +29,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from calibration_results import load_results  # noqa: E402
-from flood_agreement import DEPTH_CORR_FINE_EDGES  # noqa: E402
+from flood_agreement import DEPTH_CORR_FINE_EDGES, DIFF_EDGES, SFINCS_CLASS_LABELS, diff_stats  # noqa: E402
 from gfm_config import read_root  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -258,30 +258,7 @@ def stage0(args) -> None:
     print(json.dumps(summary))
 
 
-STAGE1_TAUS_M = (0.1, 0.2, 0.3, 0.5)
 FRINGE_M = 0.3  # an own-only cell shallower than this counts as fringe disagreement
-
-
-def _diff_stats(hist: np.ndarray, edges: np.ndarray) -> dict:
-    """Within-tau shares, MAE, RMSE, P50/P90 of |delta d| and tau80/tau90 from a 1 cm histogram."""
-    h = np.asarray(hist, dtype=np.float64)[1:-1]  # drop the beyond-3-m catch-alls (counted in n_beyond)
-    total = float(np.asarray(hist).sum())
-    if total <= 0:
-        return {"n": 0.0}
-    centres = (edges[:-1] + edges[1:]) / 2
-    a = np.abs(centres)
-    out = {"n": total, "share_beyond_3m": 1 - h.sum() / total,
-           "bias_m": float((h * centres).sum() / h.sum()), "mae_m": float((h * a).sum() / h.sum()),
-           "rmse_m": float(np.sqrt((h * centres ** 2).sum() / h.sum()))}
-    inside = np.maximum(np.abs(edges[:-1]), np.abs(edges[1:]))  # a bin is within tau if both edges are
-    for tau in STAGE1_TAUS_M:
-        out[f"within_{tau:g}m"] = float(h[inside <= tau + 1e-9].sum() / total)
-    order = np.argsort(a)
-    cum = np.cumsum(h[order]) / total
-    for q, name in ((0.5, "p50"), (0.8, "tau80"), (0.9, "p90")):
-        k = np.searchsorted(cum, q)
-        out[f"{name}_abs_m"] = float(a[order][k]) if k < len(a) else np.nan
-    return out
 
 
 def _metrics(m: float, mo: float, so: float) -> dict:
@@ -292,7 +269,7 @@ def _metrics(m: float, mo: float, so: float) -> dict:
 
 def report(args) -> None:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from exposure_depth_pass import DENSITY_LABELS, DIFF_EDGES, SFINCS_CLASS_EDGES
+    from exposure_depth_pass import DENSITY_LABELS
 
     tiles_dir = Path(args.out_dir) / "tiles"
     ids = pass_tile_ids(Path(args.out_dir), args.all_tiles)
@@ -328,12 +305,11 @@ def report(args) -> None:
     within2 = float(((ratio >= 0.5) & (ratio <= 2)).mean())
 
     depth_rows = []
-    labels = [f"{lo:g}-{hi:g}" for lo, hi in zip((0.1, *SFINCS_CLASS_EDGES[:-1]), SFINCS_CLASS_EDGES)] + [">3"]
     for w in ("area", "pop"):
         diff = sum(a[f"diff_{w}"] for a in arrays.values())
-        for c, label in enumerate(labels):
-            depth_rows.append({"weight": w, "sfincs_class_m": label, **_diff_stats(diff[c], DIFF_EDGES)})
-        depth_rows.append({"weight": w, "sfincs_class_m": "all", **_diff_stats(diff.sum(axis=0), DIFF_EDGES)})
+        for c, label in enumerate(SFINCS_CLASS_LABELS):
+            depth_rows.append({"weight": w, "sfincs_class_m": label, **diff_stats(diff[c])})
+        depth_rows.append({"weight": w, "sfincs_class_m": "all", **diff_stats(diff.sum(axis=0))})
     depth = pd.DataFrame(depth_rows)
 
     fringe = {}
@@ -437,7 +413,7 @@ def sfincs_cdfs(tiles_dir: Path, ids: list[str]) -> dict[str, tuple[np.ndarray, 
     is known only by its own depth (0.1 m bins) against the other side's sub-threshold depth
     (0-0.10 m): within tau at least if its depth bin lies below tau, at most if below tau + 0.10.
     """
-    from exposure_depth_pass import DEPTH_EDGES, DIFF_EDGES
+    from exposure_depth_pass import DEPTH_EDGES
 
     acc = {}
     for tid in ids:

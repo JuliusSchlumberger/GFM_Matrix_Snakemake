@@ -27,7 +27,7 @@ import rasterio
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 from config_utils import get_data_catalog, load_config  # noqa: E402
-from exposure_grid import population_per_pixel  # noqa: E402
+from population_grid import population_per_pixel  # noqa: E402
 from map_style import AGREE_COLOR, A_ONLY_COLOR, B_ONLY_COLOR, LAND_COLOR, draw_panel_letter  # noqa: E402
 
 SCORES = (("primary, area", "CSI", "bias"), ("exposure, area", "CSI_exp_km2", "bias_exp_km2"),

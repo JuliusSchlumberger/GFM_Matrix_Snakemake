@@ -16,6 +16,8 @@ UNIFORM_RATES_M_PER_KM = (0.05, 0.075, 0.1, 0.125, 0.15, 0.2, 0.3, 0.45)
 DURATION_ALPHAS = (0.25, 0.5, 0.75, 1.0, 1.5)
 RUNS_NAME = "model_runs.json"  # per tile: run key -> variant, parameter, alpha, solver diagnostics
 SELECTION_NAME = "variant_selection.json"  # per base dir: the calibrated run of each variant
+# per tile, beside calibration_result.json: "<run key>__<area|pop>" -> flood_agreement.depth_diff_hists
+DEPTH_ACCURACY_NAME = "calibration_depth_accuracy.npz"
 _RUN_SUFFIX = f"_waterdepth_{RETURN_PERIOD}_{WATERLEVEL_NAME}.tif"
 
 
