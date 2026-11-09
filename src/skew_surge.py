@@ -87,6 +87,28 @@ def surge_model(s: np.ndarray, n_years: float, max_shape: float | None = None,
             "n_years": n_years}
 
 
+def profile_loglik(x: np.ndarray, shapes: np.ndarray) -> np.ndarray:
+    """GPD log-likelihood of excesses x at each of `shapes`, maximised over the scale (-inf if infeasible)."""
+    xi = shapes[:, None]
+    lo = np.log(np.maximum(np.where(shapes < 0, -shapes * x.max() * (1 + 1e-9), 0.0), 1e-4 * x.mean()))
+    hi = np.full(len(shapes), np.log(20.0 * x.max()))
+
+    def loglik(log_scale):
+        s = np.exp(log_scale)[:, None]
+        z = 1.0 + xi * x[None, :] / s
+        with np.errstate(divide="ignore", invalid="ignore"):
+            core = np.where(xi == 0, x[None, :] / s, (1.0 + 1.0 / xi) * np.log(z))
+            v = -len(x) * np.log(s[:, 0]) - core.sum(axis=1)
+        return np.where((z > 0).all(axis=1) & np.isfinite(v), v, -np.inf)
+
+    golden = (np.sqrt(5.0) - 1.0) / 2.0  # the profile is unimodal in log scale
+    for _ in range(60):
+        c, d = hi - golden * (hi - lo), lo + golden * (hi - lo)
+        left = loglik(c) >= loglik(d)
+        hi, lo = np.where(left, d, hi), np.where(left, lo, c)
+    return loglik((lo + hi) / 2.0)
+
+
 def scaled(model: dict, r: float) -> dict:
     """The model of r x S for S > 0 (the negative skew surges stay as they are)."""
     srt = model["sorted"]

@@ -1,16 +1,22 @@
 """Storm-tide RP levels and per-RP hydrographs at the COAST-RP stations from GTSM-ERA5, FES and gauges.
 
-ETC levels: skew surges of the GTSM-ERA5 surge residual (1979-2024) on the hourly FES tide, a
-GPD on their declustered tail (shape capped at SHAPE_CAP), positive skew surges scaled by the
-gauge ratio r, convolved with the FES high waters of one nodal cycle (`skew_surge`). r is the
-inverse-distance mean, within IDW_RADIUS_KM, of the GESLA gauges' ratio of gauge to GTSM-on-FES
-skew surge at RATIO_RP (non-TC-dominated gauges, at least MIN_NEIGHBOURS); with fewer, the
-gauges' power law of r in the station's own GTSM-on-FES skew surge at RATIO_RP (`ratio_covariate`:
-r falls as the surge grows, the large ratios sit where GTSM's surge is a decimetre). Capped at R_CAP. Atlas: FES2022, FES2014 where `tide_prediction.consistent_version_flag` fires.
-TC: COAST-RP_TC's annual exceedance rate is added to the ETC rate, as COAST-RP combines its
-own two parts. The ETC fit keeps the cyclones of the ERA5 record: both TC sources are too low at
-the gauges and counting them in both matches the gauges best (INPUT_ANALYSIS.md §8.6). RP
-levels solve rate(z) = -ln(1 - 1/RP), m above local MSL.
+ETC levels: skew surges of the GTSM-ERA5 surge residual (RECORD_START-2024) on the hourly FES
+tide, a GPD on their declustered tail, positive skew surges scaled by the gauge ratio r,
+convolved with the FES high waters of one nodal cycle (`skew_surge`). The GPD shape is pooled:
+each station takes the shape that maximises the summed profile likelihood of the stations within
+POOL_KM (`pooled_shapes`), the scale is its own. At stations with a COAST-RP_TC part, cycles
+within TC_MASK_KM / TC_MASK_HR of an IBTrACS tropical storm leave the ETC fit (`tc_hours`).
+r is the inverse-distance mean, within IDW_RADIUS_KM, of the GESLA gauges' ratio of gauge to
+GTSM-on-FES skew surge at RATIO_RP (1979-2024; non-TC-dominated gauges, at least
+MIN_NEIGHBOURS); with fewer, the gauges' power law of r in the station's own GTSM-on-FES skew
+surge at RATIO_RP (`ratio_covariate`: r falls as the surge grows, the large ratios sit where
+GTSM's surge is a decimetre). Capped at R_CAP. Atlas: FES2022, FES2014 where
+`tide_prediction.consistent_version_flag` fires.
+TC: COAST-RP_TC's levels, raised by its cyclone basin's TC_SHIFT_M (COAST-RP_TC is low at the
+gauges), become an annual exceedance rate added to the ETC rate, as COAST-RP combines its own
+two parts. RP levels solve rate(z) = -ln(1 - 1/RP), m above local MSL.
+Flags (`station_flags`): tail_uncertain (GPD shape > TAIL_UNCERTAIN_SHAPE), tc_coast (a COAST-RP_TC
+part), fallback_r (r from the covariate fallback).
 Hydrographs: the FES tide around the high water nearest the median tide-at-peak of the
 station's annual maxima of the RP window, plus their median 13-h smoothed surge, scaled so the
 peak is the RP level (`storm_tide_hydrograph.rp_hydrograph`); a gauge's surge-dominated shape
@@ -37,13 +43,14 @@ from sklearn.neighbors import BallTree
 from gesla import extract_record
 from gtsm_series import load_series, station_series
 from skew_surge import (
-    HW_PROMINENCE, SPIKE_M, annual_rate, despike, exceedance, high_waters, scaled, shifted, skew_level, skew_surges,
-    surge_model, tide_peaks)
+    HW_PROMINENCE, SPIKE_M, annual_rate, cluster_excesses, despike, exceedance, high_waters, profile_loglik, scaled,
+    shifted, skew_level, skew_surges, surge_model, tide_peaks)
 from storm_tide_hydrograph import (
     STEPS_PER_HR, annual_maximum_events, gaussian_shape, high_water_indices, high_water_window, median_surge_shape,
     rp_event_selection, rp_hydrograph)
 from tide_prediction import (
-    FES2022_OK_M, STEP_MIN, fit_constants, hour_years, levels, on_hourly_grid, predict, remove_annual_means)
+    FES2022_OK_M, HOURLY_END, HOURLY_START, STEP_MIN, fit_constants, hour_years, levels, on_hourly_grid, predict,
+    remove_annual_means)
 
 RPS = (2, 5, 10, 25, 50, 100, 250, 500, 1000)
 EARTH_RADIUS_KM = 6371.0
@@ -58,8 +65,25 @@ RATIO_RP = 10
 IDW_RADIUS_KM = 500.0
 MIN_NEIGHBOURS = 3
 R_CAP = 2.0  # ratios above it rest on skew surges of a few decimetres
-SHAPE_CAP = 0.35  # GPD shape bound: Fathom RFA's cap (Collings et al., 2024), ~p95 of GTSM at the gauges
 GTSM_QA_JUMPS = 5  # hourly residual jumps > SPIKE_M that mark a station's GTSM series unusable
+# Station record: GTSM-ERA5 1950-2024; the main store starts in 1979 (gtsm_series.FOLDERS)
+RECORD_START = np.datetime64("1950-01-01T00:00")
+EARLY_YEARS = (1950, 1978)
+# GPD shape pooling (boundary_test/open_guesses.py pooled_shape): 300 km halves the change of a
+# station's shape between 1979-2024 and 1950-2024 against the station alone
+SHAPE_GRID = np.round(np.arange(-0.5, 0.805, 0.01), 2)
+POOL_KM = 300.0
+TAIL_UNCERTAIN_SHAPE = 0.2
+FLAG_COLUMNS = ("flag_tail_uncertain", "flag_tc_coast", "flag_fallback_r")
+# Cyclone mask: a storm counts where its wind is >= TC_MIN_WIND_KT, and along its whole track where
+# no wind is on record (most pre-1979 South Indian, South Pacific and North Indian tracks)
+TC_MASK_KM, TC_MASK_HR, TC_MIN_WIND_KT = 300.0, 24, 34.0
+BASIN_KM = 300.0  # a station's basin: the most frequent IBTrACS basin of the track points this close
+# COAST-RP_TC shift (m) per IBTrACS basin (open_guesses.py tc_scale, tc_scale.parquet
+# tc_shift_m_loo_basin): it zeroes the median RP100 bias of the masked fit at the TC-dominated
+# gauges of the other basins; basins without such gauges (EP, SA, none) take the fit over all.
+TC_SHIFT_M = {"NA": 0.253, "WP": 0.183, "SP": 0.234, "SI": 0.242, "NI": 0.240}
+TC_SHIFT_ALL_M = 0.237
 # Hydrographs (accepted generator, INPUT_ANALYSIS.md §8.3)
 BASE_HR, EXTENDED_HR = 72, 120
 CENSORED_SHARE = 0.25  # share of annual maxima above MSL over a whole +-BASE_HR half: use EXTENDED_HR
@@ -328,6 +352,119 @@ def station_tc_shapes(stations: pd.DataFrame, donors: pd.DataFrame, shapes: np.n
             if dist <= TC_GAUGE_KM}
 
 
+def tc_hours(stations: pd.DataFrame, n_hours: int, ibtracs_path: Path, start: np.datetime64,
+             radius_km: float = TC_MASK_KM, half_hr: int = TC_MASK_HR, min_wind_kt: float = TC_MIN_WIND_KT) -> dict:
+    """Station -> hourly indices (from `start`) within half_hr of a tropical storm passing within radius_km."""
+    tracks = pd.read_csv(ibtracs_path, usecols=["SID", "ISO_TIME", "LAT", "LON", "WMO_WIND", "USA_WIND"],
+                         skiprows=[1], na_values=[" "], low_memory=False)
+    wind = tracks[["WMO_WIND", "USA_WIND"]].apply(pd.to_numeric, errors="coerce").max(axis=1)
+    no_wind = ~wind.notna().groupby(tracks.SID).transform("any")
+    tracks = tracks[(wind >= min_wind_kt) | no_wind]
+    hour = ((pd.to_datetime(tracks.ISO_TIME).to_numpy() - np.datetime64(start)) // np.timedelta64(1, "h")).astype(int)
+    tree = BallTree(np.radians(tracks[["LAT", "LON"]].to_numpy(dtype=float)), metric="haversine")
+    near = tree.query_radius(np.radians(stations[["lat", "lon"]].to_numpy()), r=radius_km / EARTH_RADIUS_KM)
+    spread = np.arange(-half_hr, half_hr + 1)
+    out = {}
+    for st, idx in zip(stations.index, near):
+        if len(idx):
+            h = np.unique((hour[idx][:, None] + spread).ravel())
+            out[st] = h[(h >= 0) & (h < n_hours)]
+    return out
+
+
+def station_basins(lonlat: np.ndarray, ibtracs_path: Path) -> np.ndarray:
+    """Most frequent IBTrACS basin of the track points within BASIN_KM of each point; "none" if none."""
+    # keep_default_na=False: the North Atlantic's code "NA" is not a missing value
+    tracks = pd.read_csv(ibtracs_path, usecols=["BASIN", "LAT", "LON"], skiprows=[1], keep_default_na=False,
+                         low_memory=False)
+    tree = BallTree(np.radians(tracks[["LAT", "LON"]].to_numpy(dtype=float)), metric="haversine")
+    near = tree.query_radius(np.radians(np.asarray(lonlat, dtype=float)[:, ::-1]), r=BASIN_KM / EARTH_RADIUS_KM)
+    basin = tracks.BASIN.to_numpy()
+    out = []
+    for i in near:
+        if not len(i):
+            out.append("none")
+            continue
+        values, counts = np.unique(basin[i], return_counts=True)
+        out.append(str(values[np.argmax(counts)]))
+    return np.array(out, dtype=object)
+
+
+def tc_shift_m(basin: str) -> float:
+    """COAST-RP_TC shift (m) of an IBTrACS basin."""
+    return TC_SHIFT_M.get(basin, TC_SHIFT_ALL_M)
+
+
+def tc_input_levels(st: dict) -> np.ndarray | None:
+    """COAST-RP_TC levels at RPS (m above MSL) of a station input, with its "tc_scale" / "tc_shift_m"."""
+    if st["tc"] is None:
+        return None
+    return st["tc"] * st.get("tc_scale", 1.0) + st.get("tc_shift_m", 0.0)
+
+
+def pooled_shapes(lonlat: np.ndarray, profiles: np.ndarray, query: np.ndarray, radius_km: float = POOL_KM) -> np.ndarray:
+    """GPD shape (SHAPE_GRID) maximising the summed `profiles` of the points within radius_km of each query.
+
+    `profiles`: (point, SHAPE_GRID) profile log-likelihoods (`shape_profile`). NaN where no point is near.
+    """
+    near = BallTree(np.radians(lonlat[:, ::-1]), metric="haversine").query_radius(
+        np.radians(query[:, ::-1]), r=radius_km / EARTH_RADIUS_KM)
+    return np.array([SHAPE_GRID[np.argmax(profiles[j].sum(axis=0))] if len(j) else np.nan for j in near])
+
+
+def station_flags(gpd_shape, has_tc, fallback_r) -> pd.DataFrame:
+    """FLAG_COLUMNS (bool) from the GPD shape, a COAST-RP_TC part and r from the covariate fallback."""
+    return pd.DataFrame(dict(zip(FLAG_COLUMNS, (np.asarray(gpd_shape, dtype=float) > TAIL_UNCERTAIN_SHAPE,
+                                                np.asarray(has_tc, dtype=bool), np.asarray(fallback_r, dtype=bool)))))
+
+
+def record_times() -> np.ndarray:
+    """Hourly axis of the station record, RECORD_START to the end of the tide basis."""
+    return np.arange(RECORD_START, HOURLY_END, np.timedelta64(1, "h"))
+
+
+def _axis_years(start: np.datetime64, n_hours: int) -> np.ndarray:
+    return (np.datetime64(start, "h") + np.arange(n_hours).astype("timedelta64[h]")).astype("datetime64[Y]").astype(int) \
+        + 1970
+
+
+def _load_stores(stores, start: np.datetime64) -> list:
+    loaded = []
+    for store in stores:
+        st_tab, time, series = load_series(Path(store))
+        t = time.to_numpy().astype("datetime64[s]")
+        idx = (t - np.datetime64(start, "s")) // np.timedelta64(3600, "s")
+        idx = np.where(t.astype(np.int64) % 3600 == 0, idx, -1)
+        loaded.append((dict(zip(st_tab.gtsm_index, range(len(st_tab)))), idx.astype(int), series))
+    return loaded
+
+
+def station_records(chunk: list[dict], stores, bases: dict, start: np.datetime64 = HOURLY_START, nodal: bool = True):
+    """Yield (station input, surge, hourly tide, 10-min tide, years) per station of `chunk`.
+
+    `stores`: GTSM surge stores (`gtsm_series`) joined on the hourly axis from `start`, whose length
+    is the hourly basis's in `bases` (atlas -> hourly re, hourly im, 10-min re, 10-min im). The
+    10-min tide is None with nodal=False.
+    """
+    loaded = _load_stores(stores, start)
+    for atlas in bases:
+        sts = [s for s in chunk if s["atlas"] == atlas]
+        if not sts:
+            continue
+        hc = np.vstack([s["hc"] for s in sts])
+        b = [np.load(p, mmap_mode="r") for p in bases[atlas]]
+        th_all = predict(b[0], b[1], hc)
+        t10_all = predict(b[2], b[3], hc) if nodal else None
+        n_hours = th_all.shape[0]
+        years = _axis_years(start, n_hours)
+        for j, st in enumerate(sts):
+            g = np.full(n_hours, np.nan)
+            for pos, idx, series in loaded:
+                keep = (idx >= 0) & (idx < n_hours)
+                g[idx[keep]] = station_series(series, pos[st["gtsm_index"]])[keep]
+            yield st, g, th_all[:, j], None if t10_all is None else t10_all[:, j], years
+
+
 def running_mean(windows: np.ndarray, width_hr: int) -> np.ndarray:
     kernel = np.ones(width_hr) / width_hr
     return np.vstack([np.convolve(np.nan_to_num(w), kernel, mode="same") for w in windows])
@@ -376,34 +513,52 @@ def blended_model(vectors: np.ndarray, w: np.ndarray) -> dict:
     return {"sorted": v[:q], **{k: float(x) for k, x in zip(MODEL_FIELDS, v[q:])}}
 
 
-def station_surge_model(st: dict, g: np.ndarray, th: np.ndarray, years: np.ndarray) -> tuple[dict, dict, dict, np.ndarray]:
-    """Row fields, raw and gauge-corrected skew-surge models and the despiked surge of one station.
+def etc_sample(st: dict, g: np.ndarray, th: np.ndarray, years: np.ndarray) -> tuple[np.ndarray, int, dict, np.ndarray]:
+    """Skew surges of the ETC fit, their number of years, QA fields and the despiked surge of one station.
 
-    `g`: hourly GTSM surge residual (m, NaN missing); `th`: the station's hourly FES tide on the same
-    axis. `st` may set "shape_cap" (None: no cap) in place of SHAPE_CAP, "pooled_shape" as a fixed
-    GPD shape, "r" as a fixed ratio in place of `station_ratio` ("r_idw", "r_covariate"), and
-    "surge_offset_m" adds a gauge offset to the positive skew surges in place of the ratio.
+    Cycles in years observed below YEAR_COVERAGE and, where `st` sets "tc_hours", cycles whose high
+    water falls in those hours (the cyclone mask) are left out.
     """
-    row = {"station": st["station"], "atlas": st["atlas"], "mhws_m": st["mhws_m"]}
-    row["gtsm_jumps"] = int(np.sum(np.abs(np.diff(g)) > SPIKE_M))
+    jumps = int(np.sum(np.abs(np.diff(g)) > SPIKE_M))
     g = despike(g)
     hw, h = high_waters(th, HW_PROMINENCE)
     skew = skew_surges(g + th, hw, h)
     cover = pd.Series(np.isfinite(skew)).groupby(years[hw]).mean()
     keep_years = cover.index[cover >= YEAR_COVERAGE]
     ok = np.isin(years[hw], keep_years) & np.isfinite(skew)
-    # tc_hours (cycles left out of the ETC fit) is set only by the cyclone-mask test, boundary_test/open_guesses.py
     tc_cycles = np.isin(hw, st["tc_hours"]) if st.get("tc_hours") is not None else np.zeros(len(hw), bool)
-    row["tc_masked_share"] = float(tc_cycles[ok].mean())
-    model = surge_model(skew[ok & ~tc_cycles], len(keep_years), max_shape=st.get("shape_cap", SHAPE_CAP),
-                        shape=st.get("pooled_shape"))
+    qa = {"gtsm_jumps": jumps, "tc_masked_share": float(tc_cycles[ok].mean())}
+    return skew[ok & ~tc_cycles], len(keep_years), qa, g
+
+
+def shape_profile(st: dict, g: np.ndarray, th: np.ndarray, years: np.ndarray) -> tuple[int, np.ndarray]:
+    """GTSM jump count and SHAPE_GRID profile log-likelihood of a station's declustered ETC excesses."""
+    sample, _, qa, _ = etc_sample(st, g, th, years)
+    return qa["gtsm_jumps"], profile_loglik(cluster_excesses(sample)[1], SHAPE_GRID)
+
+
+def station_surge_model(st: dict, g: np.ndarray, th: np.ndarray, years: np.ndarray) -> tuple[dict, dict, dict, np.ndarray]:
+    """Row fields, raw and gauge-corrected skew-surge models and the despiked surge of one station.
+
+    `g`: hourly GTSM surge residual (m, NaN missing); `th`: the station's hourly FES tide on the same
+    axis. `st` may set "tc_hours" (`etc_sample`), "pooled_shape" as a fixed GPD shape,
+    "shape_cap" as an upper bound on the shape, "r" as a fixed ratio in place of `station_ratio`
+    ("r_idw", "r_covariate"), and "surge_offset_m" adds a gauge offset to the positive skew surges
+    in place of the ratio.
+    """
+    row = {"station": st["station"], "atlas": st["atlas"], "mhws_m": st["mhws_m"]}
+    sample, n_years, qa, g = etc_sample(st, g, th, years)
+    row.update(qa)
+    pooled = st.get("pooled_shape")
+    model = surge_model(sample, n_years, max_shape=st.get("shape_cap"),
+                        shape=pooled if pooled is not None and np.isfinite(pooled) else None)
     if "surge_offset_m" in st:
         corrected = shifted(model, st["surge_offset_m"])
     else:
         row["r_uncapped"] = st["r"] if "r" in st else station_ratio(st, model)
         row["r"] = min(row["r_uncapped"], R_CAP)
         corrected = scaled(model, row["r"])
-    row.update({"n_years": len(keep_years), "gpd_shape": model["shape"], "gpd_shape_mle": model["shape_mle"],
+    row.update({"n_years": n_years, "gpd_shape": model["shape"], "gpd_shape_mle": model["shape_mle"],
                 "gpd_scale": model["scale"], "theta": model["theta"]})
     return row, model, corrected, g
 
@@ -442,8 +597,7 @@ def station_product(st: dict, g: np.ndarray, th: np.ndarray, t10: np.ndarray,
     hyd = np.full((len(RPS), N_STEPS), np.nan, dtype=np.float32)
     info = []
     jumps = row["gtsm_jumps"]
-    tc_levels = st["tc"] * st.get("tc_scale", 1.0) + st.get("tc_shift_m", 0.0) if st["tc"] is not None else None
-    row.update(rp_levels(model, corrected, t10, tc_levels))
+    row.update(rp_levels(model, corrected, t10, tc_input_levels(st)))
     # GTSM's residual is numerically broken here (jumps of metres within an hour): COAST-RP's level
     row["level_source"] = "coast_rp" if jumps >= GTSM_QA_JUMPS else "product"
     if jumps >= GTSM_QA_JUMPS:
@@ -493,37 +647,52 @@ def station_product(st: dict, g: np.ndarray, th: np.ndarray, t10: np.ndarray,
 
 
 def _station_task(args):
-    chunk, store, bases = args
-    surge_st, surge_time, surge = load_series(Path(store))
-    pos = dict(zip(surge_st.gtsm_index, range(len(surge_st))))
-    surge_idx, _ = on_hourly_grid(surge_time.to_numpy(), np.zeros(len(surge_time)))
     results = []
-    for atlas in bases:
-        sts = [s for s in chunk if s["atlas"] == atlas]
-        if not sts:
-            continue
-        hc = np.vstack([s["hc"] for s in sts])
-        b = [np.load(p, mmap_mode="r") for p in bases[atlas]]
-        th_all, t10_all = predict(b[0], b[1], hc), predict(b[2], b[3], hc)
-        n_hours = th_all.shape[0]
-        years = hour_years(np.arange(n_hours))
-        for j, st in enumerate(sts):
-            g = np.full(n_hours, np.nan)
-            g[surge_idx] = station_series(surge, pos[st["gtsm_index"]])
-            try:
-                results.append(station_product(st, g, th_all[:, j], t10_all[:, j], years))
-            except Exception as err:  # one bad station must not stop the pool; it is reported and skipped
-                print(f"  skipped station {st['station']}: {type(err).__name__}: {err}", flush=True)
+    for st, g, th, t10, years in station_records(*args):
+        try:
+            results.append(station_product(st, g, th, t10, years))
+        except Exception as err:  # one bad station must not stop the pool; it is reported and skipped
+            print(f"  skipped station {st['station']}: {type(err).__name__}: {err}", flush=True)
     return results
 
 
-def build_stations(todo: list[dict], store: Path, bases: dict, hyd: np.ndarray, workers: int,
-                   models: np.ndarray | None = None) -> tuple[list, list]:
+def _stores(stores) -> list[str]:
+    return [str(stores)] if isinstance(stores, (str, Path)) else [str(s) for s in stores]
+
+
+def _profile_task(args):
+    out = []
+    for st, g, th, _, years in station_records(*args, nodal=False):
+        try:
+            out.append((st["station"], *shape_profile(st, g, th, years)))
+        except Exception as err:  # one bad station must not stop the pool; it is reported and skipped
+            print(f"  skipped station {st['station']}: {type(err).__name__}: {err}", flush=True)
+    return out
+
+
+def build_profiles(todo: list[dict], stores, bases: dict, workers: int,
+                   start: np.datetime64 = HOURLY_START) -> pd.DataFrame:
+    """GTSM jump count and SHAPE_GRID profile log-likelihood ("profile", array) per station input, by station.
+
+    `stores`, `bases` and `start` as in `station_records`.
+    """
+    tasks = [(todo[i:i + TASK_SIZE], _stores(stores), bases, start) for i in range(0, len(todo), TASK_SIZE)]
+    rows = []
+    with ProcessPoolExecutor(workers) as pool:
+        for k, res in enumerate(pool.map(_profile_task, tasks)):
+            rows += [{"station": s, "gtsm_jumps": j, "profile": p} for s, j, p in res]
+            if k % 20 == 0:
+                print(f"  {min((k + 1) * TASK_SIZE, len(todo))}/{len(todo)} station profiles", flush=True)
+    return pd.DataFrame(rows).set_index("station").sort_index()
+
+
+def build_stations(todo: list[dict], stores, bases: dict, hyd: np.ndarray, workers: int,
+                   models: np.ndarray | None = None, start: np.datetime64 = HOURLY_START) -> tuple[list, list]:
     """Run `station_product` for every station input in `todo`, writing hyd[row] (and models[row]) in place.
 
-    `bases`: atlas -> (hourly re, hourly im, 10-min re, 10-min im) .npy paths.
+    `stores` (one store or several), `bases` and `start` as in `station_records`.
     """
-    tasks = [(todo[i:i + TASK_SIZE], str(store), bases) for i in range(0, len(todo), TASK_SIZE)]
+    tasks = [(todo[i:i + TASK_SIZE], _stores(stores), bases, start) for i in range(0, len(todo), TASK_SIZE)]
     rows, info = [], []
     with ProcessPoolExecutor(workers) as pool:
         for k, res in enumerate(pool.map(_station_task, tasks)):
@@ -581,8 +750,8 @@ def export_levels(lev: pd.DataFrame, coast_rp_path: Path, dest: Path, nodes: pd.
     """Write the levels in COAST-RP's layout (stations, order, coordinates, storm_tide_rp_XXXX).
 
     Stations without a product level keep COAST-RP's (`level_source`). The coastline `nodes`
-    (lon, lat, atlas, gpd_shape, rp*_m) follow the COAST-RP stations, station_id "node_<n>".
-    RP1 is not produced.
+    (lon, lat, atlas, gpd_shape, rp*_m, FLAG_COLUMNS) follow the COAST-RP stations, station_id
+    "node_<n>". The FLAG_COLUMNS are written as int8 0/1. RP1 is not produced.
     """
     coast = xr.open_dataset(coast_rp_path)
     assert len(lev) == coast.sizes["stations"] and (lev.station_id.to_numpy() == coast.station_id.values.astype(str)).all()
@@ -599,6 +768,8 @@ def export_levels(lev: pd.DataFrame, coast_rp_path: Path, dest: Path, nodes: pd.
     data["level_source"] = ("stations", source.astype(str))
     for col in ("r", "atlas", "gpd_shape"):
         data[col] = ("stations", lev[col].to_numpy())
+    for col in FLAG_COLUMNS:
+        data[col] = ("stations", lev[col].to_numpy(dtype=np.int8))
     ds = xr.Dataset(data, coords={"station_id": ("stations", coast.station_id.values),
                                   "station_x_coordinate": ("stations", coast.station_x_coordinate.values),
                                   "station_y_coordinate": ("stations", coast.station_y_coordinate.values)},
@@ -611,7 +782,8 @@ def export_levels(lev: pd.DataFrame, coast_rp_path: Path, dest: Path, nodes: pd.
                      for rp in RPS for name in [f"storm_tide_rp_{rp:04d}"]}
         node_data.update({"level_source": ("stations", np.full(n_nodes, NODE_LEVEL_SOURCE)),
                           "r": ("stations", np.full(n_nodes, np.nan)), "atlas": ("stations", nodes.atlas.to_numpy()),
-                          "gpd_shape": ("stations", nodes.gpd_shape.to_numpy())})
+                          "gpd_shape": ("stations", nodes.gpd_shape.to_numpy()),
+                          **{col: ("stations", nodes[col].to_numpy(dtype=np.int8)) for col in FLAG_COLUMNS}})
         node_ds = xr.Dataset(node_data, coords={
             "station_id": ("stations", np.array([f"node_{n}" for n in nodes.index])),
             "station_x_coordinate": ("stations", nodes.lon.to_numpy()),

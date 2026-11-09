@@ -289,8 +289,8 @@ model between it (default) and COAST-RP / COAST-HG.
 - **QA** (fig17): three failure modes of a first build: low-water bumps of shallow-water tides
   taken as high waters, GTSM residual spikes and heavy GPD tails. They were removed by dropping
   weak maxima in the low-water band, despiking (15 Arafura stations fall back to COAST-RP) and a
-  GPD shape cap of 0.35. Tropical cyclones of the ERA5 record stay in the ETC fit, although
-  COAST-RP's TC part counts them again (fig21).
+  cyclone mask on the ETC fit with a GPD shape pooled over 300 km, on 1950-2024 (§9); COAST-RP's
+  TC part is raised by its basin's shift (0.18-0.25 m).
 - **Against COAST-RP** (fig12, fig13): median +0.05 m at RP100 (10-90%: -0.22 to +0.29 m). The FES
   tide lowers the levels by 0.05-0.08 m and r raises them by 0.06-0.09 m. Large departures are
   regional: lower in the southern North Sea, higher in the western Baltic, the macrotidal
@@ -309,11 +309,12 @@ model between it (default) and COAST-RP / COAST-HG.
 - Neighbours on one FES artefact are made consistent: the version rule is grown by 25 km, which
   adds 10 stations.
 - **The estimated rules, tested** (fig19-fig23, INPUT_ANALYSIS.md §8.6):
-  - the shape cap, the despike thresholds and the FES version rule hold, with one wrong FES flag
+  - the despike thresholds and the FES version rule hold, with one wrong FES flag
     at the Saguenay mouth;
   - off-centre hydrograph maxima are cosmetic;
-  - a cyclone mask would lower TC coasts by 0.14 m at RP100 and move them away from the gauges,
-    because both cyclone sources are too low; production has none until test 10.
+  - a cyclone mask alone lowers TC coasts by 0.14 m at RP100 and moves them away from the
+    gauges, because both cyclone sources are too low; the product pairs it with the basin shift
+    of COAST-RP_TC (§9).
 
 ## 9. Review of the estimated rules and test 4
 
