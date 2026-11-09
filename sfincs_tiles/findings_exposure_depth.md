@@ -146,3 +146,60 @@ Figure X1c (`exposure_depth.py cdf`): cumulative curves, area solid, population 
 points (area) and 4-7 points (population); the conclusion holds: about half of SFINCS's flooded
 area within 20 cm, three quarters within 50 cm. Against CoSMoS in SF Bay, with DEM and forcing
 differences included, under half of CoSMoS's flooded area is within 50 cm.
+
+## Stage 3: national flood maps (exposure) and SF Bay (depth)
+
+`validate_country.py` gained soft counts at the exposure threshold (0.10 m) and population-weighted
+(WorldPop people per model pixel, `exposure_grid.population_per_pixel`); it was rerun on the
+production merged chunks the saved scores used (`merged_results`), output local
+(`.cleanup_baseline/exposure_depth/stage3/`). `exposure_validation_report.py`: table T3, X8, X9.
+Replication of the saved area counts: exact for New Brunswick, Scotland and Wales (Severn hits
++1.7 %); England does NOT reproduce (FZ3 hits +130 %, misses +270 %, same benchmark file date as
+the saved run): its numbers below are not used for conclusions until the difference is found.
+
+CSI (area at 0.01 m / population at 0.10 m) and population bias (model / benchmark exposed):
+
+| benchmark, region | RP100 CSI area / pop | RP250 CSI area / pop | pop bias RP100 / RP250 |
+|---|---|---|---|
+| Wales NRW flood zones, all | 0.64 / 0.42 | 0.66 / 0.45 | 0.43 / 0.47 |
+| Wales, Severn estuary | 0.81 / 0.51 | 0.83 / 0.56 | 0.52 / 0.57 |
+| Wales, Menai Strait | 0.77 / 0.52 | 0.78 / 0.53 | 0.52 / 0.54 |
+| Scotland SEPA coastal (M), all | 0.43 / 0.24 | 0.45 / 0.26 | 0.38 / 0.42 |
+| Scotland, Firth of Forth | 0.48 / 0.25 | 0.52 / 0.30 | 0.28 / 0.35 |
+| England EA FZ3 (not reproduced) | 0.50 / 0.31 | 0.50 / 0.32 | 0.53 / 0.57 |
+| New Brunswick 1-in-100 | 0.01 / 0.00 | - | 0.00 |
+
+- Against every national map the population-weighted CSI is well below the area one (Wales
+  0.64 -> 0.42, Scotland 0.43 -> 0.24): the model's misses sit where people live. The bias says
+  how: the eikonal floods only 30-55 % of the population the maps put in the flood zone, while its
+  area bias is 0.5-0.8. X9 (Firth of Forth) shows it: the flood zone in the dense Leith/Portobello
+  area east of Edinburgh is benchmark-only.
+- The exposure threshold (0.10 vs 0.01 m) changes the scores by 0.01-0.03: the depth threshold is
+  not what separates the two.
+- The flood zones are ~RP200 design extents with defences ignored or represented differently;
+  the comparison brackets them with RP100 and RP250 and both give the same picture.
+- New Brunswick scores near zero at both weights, as in the saved run: the benchmark and the model
+  barely overlap there (known from the main validation, not an exposure effect).
+- England FZ2 is a band (RP200-1000), not a cumulative extent; its cumulative scores here are not
+  meaningful and the band score stays in `validate_england_fz2_band.py`.
+
+SF Bay (CoSMoS, depth): see "Which cells count" above. Against CoSMoS, with DEM and forcing
+differences included, under half the flooded area agrees within 50 cm (0.41 area, 0.42 population
+of CoSMoS-wet cells); 5-7 % within 10 cm.
+
+## Answers
+
+Q1, exposure: against SFINCS on the same DEM and forcing, the eikonal reproduces exposed
+population per tile within a factor 2 for 84 % of tiles and pooled within 7 % (exposure bias
+0.93), population-weighted CSI 0.64; up to 1000 people/km2 population and area weights agree, above
+it CSI drops to 0.60 with compensating errors. Against national flood maps the eikonal places
+too little of the population in the flood zone (30-55 % of the benchmark's exposed population,
+population CSI 0.24-0.56): usable for exposure where SFINCS-like hydrodynamics are the reference,
+with an underestimate of exposed population against the national design maps.
+
+Q2, depth: against SFINCS, of all SFINCS-flooded cells 27-30 % agree within 10 cm, 47-49 % within
+20 cm, 61-63 % within 30 cm, 79-80 % within 50 cm (population-weighted 19-24 / 38-42 / 53-56 /
+74-77 %), with a systematic compression (+0.3 m in shallow, -0.2 to -0.3 m in deep water).
+Depth-damage curves with classes of about 0.5 m are supported, 10-20 cm resolution is not.
+Against CoSMoS in SF Bay (DEM and forcing differences included) even 50 cm holds for under half
+the flooded area.

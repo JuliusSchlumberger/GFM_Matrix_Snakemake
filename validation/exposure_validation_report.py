@@ -35,7 +35,7 @@ SCORES = (("primary, area", "CSI", "bias"), ("exposure, area", "CSI_exp_km2", "b
 
 
 def load_metrics(metrics_dir: Path) -> pd.DataFrame:
-    frames = [pd.read_csv(p) for p in sorted(metrics_dir.glob("*/metrics_*_RP*_SLR_0.csv"))]
+    frames = [pd.read_csv(p) for p in sorted(metrics_dir.glob("*/metrics_???_RP*_SLR_0.csv"))]
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
