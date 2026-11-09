@@ -109,7 +109,7 @@ boundary_conditions:
 
   # IPCC AR6 regional SLR projection (SSP-RCP code) and confidence level used to
   # build the SLR fingerprints. Not an SLR level: those are waterlevel_names below.
-  slr_projection: "ssp245" # options: ssp126/ssp245/ssp585
+  slr_projection: "ssp245" # options: ssp126/ssp245/ssp370/ssp585
   confidence_level: "medium" # options: low/medium
   # AR6 global-mean SLR at 2020 over its 1995-2014 baseline (median, all SSPs), regionalised with
   # the fingerprint and added to every level: SLR_0 is the 2020 sea level, as the analysis SLR axis
@@ -140,7 +140,6 @@ boundary_conditions:
 
   waterlevel_names: # SLR levels "SLR_<mm>" = the waterlevel_name wildcard values
     - "SLR_0"
-    - "SLR_370"
     - "SLR_500"
     - "SLR_1000"
     - "SLR_1500"
@@ -373,7 +372,7 @@ population_growth: # Used by: analysis/compute_exposure_analysis.py
   ssps:
     - SSP1
     - SSP2
-    # - SSP3
+    - SSP3
     - SSP5
   # Output years (5-year grid of the IIASA projections; intermediate years linearly interpolated).
   output_years:
@@ -522,12 +521,13 @@ visualization:
   ssp_rcp_codes:
     SSP1: 126
     SSP2: 245
+    SSP3: 370
     SSP5: 585
 
   ssp_colors:
     SSP1: "#1f77b4"
     SSP2: "#2ca02c"
-    # SSP3: "#ff7f0e"
+    SSP3: "#ff7f0e"
     SSP5: "#d62728"
 
   measure_colors:

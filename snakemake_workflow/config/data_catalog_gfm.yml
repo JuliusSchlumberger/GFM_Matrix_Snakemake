@@ -130,7 +130,7 @@ ipcc_ar6_slr_wg1_csv:
     source_access: open download
     source_notes: >
       No script in the repo writes these files; obtain them from the project maintainers
-      (`<issue_tracker>`). Each `SLR_<code>_wg1.csv` (codes 126, 245, 585 from
+      (`<issue_tracker>`). Each `SLR_<code>_wg1.csv` (codes 126, 245, 370, 585 from
       visualization.ssp_rcp_codes) has a `years` index column and columns 0.17, 0.5, 0.83
       (global-mean SLR in m). Read by the analysis only.
     source_version: "20210809"

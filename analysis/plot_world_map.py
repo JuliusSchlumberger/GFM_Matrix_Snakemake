@@ -34,10 +34,12 @@ def main() -> None:
     parser.add_argument("--expdir", required=True)
     parser.add_argument("--out-dir", default=None)
     parser.add_argument("--years", nargs="+", type=int, default=[2050, 2100])
-    parser.add_argument("--ssps", nargs="+", default=["SSP1", "SSP2", "SSP5"])
+    parser.add_argument("--ssps", nargs="+", default=None, help="default: population_growth.ssps")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
+    if args.ssps is None:
+        args.ssps = cfg["population_growth"]["ssps"]
 
     viz = cfg["visualization"]
 
