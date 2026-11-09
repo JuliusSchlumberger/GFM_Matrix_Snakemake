@@ -97,7 +97,7 @@ def test_mutual_exclusivity_validation() -> None:
     waterdepth, diagnostics = fm.flood_depth_dense(
         dem, mask, friction, transform,
         seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
-        obstacle_coupling=True,
+        obstacle_coupling=True, max_outer_iterations=3,
     )
     assert diagnostics["obstacle_coupling"] is True
     print("PASS: seeds + obstacle_coupling=True runs without error")
@@ -125,7 +125,7 @@ def test_seed_path_obstacle_coupling() -> None:
     wd_on, diag_on = fm.flood_depth_dense(
         dem, mask, friction, transform,
         seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
-        resolution=30.0, obstacle_coupling=True,
+        resolution=30.0, obstacle_coupling=True, max_outer_iterations=3,
     )
     assert diag_on["obstacle_coupling"] is True
     assert diag_on["outer_converged"] is True, diag_on

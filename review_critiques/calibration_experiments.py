@@ -63,7 +63,7 @@ def load_tile(tile_id: str) -> dict:
         sfincs_dir, tile_dir / "inputs" / "mask.tif", friction_scale_factor=1.0, default_friction=0.002,
     )
     boundaries = gpd.read_file(tile_dir / "inputs" / "boundaries_RP100_SLR_0.gpkg")
-    seeds = rcm.production_seeds(mask, transform, crs, boundaries, knn=15, river_code=3)
+    seeds = rcm.production_seeds(mask, transform, crs, boundaries, knn=15, river_code=3, idw_power=2.0)
     solver_dem, solver_mask = rcm.solver_inputs(dem, mask)
     with rasterio.open(sfincs_dir / "hmax_subgrid.tif") as src:
         sfincs = src.read(1).astype(np.float32)

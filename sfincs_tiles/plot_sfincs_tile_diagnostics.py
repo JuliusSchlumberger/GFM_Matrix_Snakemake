@@ -276,7 +276,7 @@ def _order_along_coast(lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np
     return np.array(order), np.concatenate([[0.0], np.cumsum(steps)])
 
 
-def _coastrp_context(tile_dir: Path, knn: int, river_code: int, idw_power: float = 2.0) -> dict:
+def _coastrp_context(tile_dir: Path, knn: int, river_code: int, idw_power: float) -> dict:
     from flood_model import _idw_seed_values, coastline_mask  # src/, heavy imports only needed here
 
     with rasterio.open(tile_dir / "inputs" / "mask.tif") as src:
@@ -409,7 +409,7 @@ def _legend_corner_map(ctx: dict, extra_lon=(), extra_lat=(), box_w: float = 0.5
 
 
 def plot_coastrp_forcing(tile_dir: Path, sfincs_dir: Path, mask2d: np.ndarray, transform: rasterio.Affine,
-                         crs: str, out_path: Path, knn: int, river_code: int, idw_power: float = 2.0) -> None:
+                         crs: str, out_path: Path, knn: int, river_code: int, idw_power: float) -> None:
     """Plot COAST-RP RP100 levels vs. the eikonal IDW seed and SFINCS forcing/zsmax.
 
     `knn` is the eikonal seed's number of nearest stations.
@@ -419,7 +419,7 @@ def plot_coastrp_forcing(tile_dir: Path, sfincs_dir: Path, mask2d: np.ndarray, t
 
 
 def _plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs, out_path, knn, river_code,
-                          idw_power: float = 2.0) -> None:
+                          idw_power: float) -> None:
     ctx = _coastrp_context(tile_dir, knn, river_code, idw_power)
     level_m = ctx["level_m"]
     vmax = float(np.ceil(level_m.max() * 2) / 2)

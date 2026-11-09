@@ -56,8 +56,8 @@ def static_level_grid(
     transform: Affine,
     stations_lonlat: np.ndarray,
     station_values: np.ndarray,
-    k: int = 5,
-    idw_power: float = 2.0,
+    k: int,
+    idw_power: float,
 ) -> np.ndarray:
     """Interpolate the static sea level (m, DEM datum) onto the tile grid.
 
@@ -88,8 +88,8 @@ def seed_level_idw(
     rows: np.ndarray,
     cols: np.ndarray,
     values: np.ndarray,
-    k: int = 5,
-    idw_power: float = 2.0,
+    k: int,
+    idw_power: float,
 ) -> np.ndarray:
     """Interpolate seed water levels (m) over the tile: inverse-distance k-NN in grid cells.
 
@@ -203,7 +203,7 @@ def _idw_seed_values(
     k: int,
     mask: np.ndarray,
     ocean_code: int,
-    idw_power: float = 2.0,
+    idw_power: float,
 ) -> np.ndarray:
     xs, ys = rasterio.transform.xy(transform, rows, cols)
     return idw_seed_values_at(np.column_stack([xs, ys]), rows, cols, stations_lonlat, station_values,
@@ -219,7 +219,7 @@ def idw_seed_values_at(
     k: int,
     mask: np.ndarray,
     ocean_code: int,
-    idw_power: float = 2.0,
+    idw_power: float,
 ) -> np.ndarray:
     """Inverse-distance k-NN (haversine, weights distance^-idw_power) seed values at (lon, lat) cells.
 
@@ -263,7 +263,7 @@ def _idw_nearest_k(
     station_latlon_rad: np.ndarray,
     station_values: np.ndarray,
     k: int,
-    idw_power: float = 2.0,
+    idw_power: float,
 ) -> np.ndarray:
     tree = BallTree(station_latlon_rad, metric="haversine")
     dist, idx = tree.query(cell_latlon_rad, k=k)
@@ -288,13 +288,13 @@ def flood_depth_dense(
     seed_values: np.ndarray | None = None,
     resolution: float = 30.0,
     k: int = 5,
-    idw_power: float = 2.0,
+    idw_power: float | None = None,
     variable: str = "waterlevel",
     ocean_code: int = 1,
     river_code: int | None = None,
     sweep_budget: int | None = None,
     obstacle_coupling: bool = False,
-    max_outer_iterations: int = 3,
+    max_outer_iterations: int | None = None,
     max_rounds: int = 40,
     outer_convergence_pct: float = 0.01,
     waterlevel_epsilon_m: float = WATERLEVEL_EPSILON_M,
@@ -353,6 +353,11 @@ def flood_depth_dense(
         raise ValueError("flood_depth_dense: pass either boundaries or seed_rows/seed_cols/seed_values")
     if using_seeds and (seed_rows is None or seed_cols is None or seed_values is None):
         raise ValueError("flood_depth_dense: seed_rows/seed_cols/seed_values must all be given together")
+    # No defaults for the config's idw_power / max_outer_iterations: required where used.
+    if idw_power is None and (boundaries is not None or model in ("bathtub", "bathtub_connected")):
+        raise ValueError("flood_depth_dense: station IDW and the bathtub models need idw_power")
+    if max_outer_iterations is None and obstacle_coupling and model == "eikonal":
+        raise ValueError("flood_depth_dense: obstacle_coupling needs max_outer_iterations")
 
     mask = mask.astype(np.int8)
     dem = effective_dem(dem, mask)

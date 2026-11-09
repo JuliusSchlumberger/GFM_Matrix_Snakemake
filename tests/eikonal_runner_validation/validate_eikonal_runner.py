@@ -60,8 +60,8 @@ def test_run_eikonal_python_end_to_end_on_synthetic_tile() -> None:
 
         diagnostics = run_eikonal_python(
             dem_path, mask_path, friction_path, output_path,
-            resolution=30.0, k=5, variable="SLR_0",
-            boundaries_path=boundaries_path,
+            resolution=30.0, k=5, variable="SLR_0", idw_power=2.0, max_outer_iterations=3,
+            friction_scale_factor=1.0, boundaries_path=boundaries_path,
             ocean_code=1, river_code=None,
         )
 
@@ -117,7 +117,7 @@ def test_run_eikonal_python_friction_scale_factor_is_applied() -> None:
             out_path = tmpdir / f"waterdepth_scale_{scale_factor}.tif"
             run_eikonal_python(
                 dem_path, mask_path, friction_path, out_path,
-                resolution=30.0, k=5, variable="SLR_0",
+                resolution=30.0, k=5, variable="SLR_0", idw_power=2.0, max_outer_iterations=3,
                 boundaries_path=boundaries_path, ocean_code=1,
                 friction_scale_factor=scale_factor,
             )

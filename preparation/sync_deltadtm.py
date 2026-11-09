@@ -145,7 +145,7 @@ def run(config: dict) -> None:
     mask_out_dir = Path(catalog.get_source("deltadtm_mask").path).parent
 
     zip_download_dir = Path(sync_cfg["zip_download_dir"])
-    delete_zips = bool(sync_cfg.get("delete_zips_after_extract", False))
+    delete_zips = bool(sync_cfg["delete_zips_after_extract"])
 
     retry_transient_io(dem_out_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io(mask_out_dir.mkdir, parents=True, exist_ok=True)

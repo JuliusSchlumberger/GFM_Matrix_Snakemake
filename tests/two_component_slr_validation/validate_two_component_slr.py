@@ -135,6 +135,6 @@ def test_storm_tide_stays_local_across_the_new_sea() -> None:
 def test_static_level_grid_reproduces_station_field() -> None:
     lonlat = np.array([[100.0, 10.0], [100.2, 10.0], [100.0, 9.9], [100.2, 9.9]])
     values = np.array([1.0, 1.0, 1.0, 1.0])
-    grid = static_level_grid((N_ROWS, N_COLS), TRANSFORM, lonlat, values)
+    grid = static_level_grid((N_ROWS, N_COLS), TRANSFORM, lonlat, values, k=5, idw_power=2.0)
     assert grid.shape == (N_ROWS, N_COLS)
     assert np.allclose(grid, 1.0)

@@ -46,7 +46,7 @@ def test_seed_level_idw_is_the_seed_value_on_a_flat_coast() -> None:
 
 def test_bathtub_floods_the_closed_pit_and_the_connected_one_does_not() -> None:
     dem, mask, rows, cols = _strip_tile()
-    common = dict(seed_rows=rows, seed_cols=cols, seed_values=np.full(len(rows), 1.0), ocean_code=1)
+    common = dict(seed_rows=rows, seed_cols=cols, seed_values=np.full(len(rows), 1.0), ocean_code=1, idw_power=2.0)
     bath, _ = flood_depth_dense(dem, mask, np.ones_like(dem), TRANSFORM, model="bathtub", **common)
     conn, _ = flood_depth_dense(dem, mask, np.ones_like(dem), TRANSFORM, model="bathtub_connected", **common)
     assert bath[10, 20] == pytest.approx(2.0)

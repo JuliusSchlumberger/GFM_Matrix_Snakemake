@@ -138,7 +138,7 @@ def solver_inputs(dem: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, np.nda
 
 
 def production_seeds(mask, transform, crs, boundaries: gpd.GeoDataFrame, knn: int, river_code: int,
-                     idw_power: float = 2.0):
+                     idw_power: float):
     """Return (rows, cols, level_m) eikonal seeds on the subgrid coastline, or None if none.
 
     Each cell gets the inverse-distance average (weights distance^-idw_power) of its `knn` nearest
