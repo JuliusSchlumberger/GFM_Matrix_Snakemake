@@ -130,6 +130,46 @@ $T^{-\alpha}$ form fits flood extent best, with $T_\mathrm{ref}$ absorbed into
 one shape per station (RP100), used for every return period and SLR level.
 Implementation: `event_volume.DurationCorrection`.
 
+### 2.5 Illustrative comparison of the four variants
+
+Figure 1 runs every entry of `FLOOD_MODELS` on one synthetic scenario
+(`docs/figure_scripts/generate_flood_variant_examples.py`), built so each variant's
+added mechanism changes one visible thing and nothing else - `straight_line` and
+`eikonal` share the same attenuation rate, so only the distance metric differs
+between them. Depth is shown in 0.10 m colour bands (not a continuous scale) so
+small differences between variants read as a visible band change, not a shade
+difference; two fixed points ("near"/"far" circles) are annotated with their
+depth under every variant for the same reason.
+
+Box A is the scenario's two static inputs. Box B compares the four variants on
+them, with no duration correction:
+
+- A pit below the boundary water level, embanked out to the domain's own top
+  edge - it has no coastline anywhere in the domain, not merely none nearby.
+  `bathtub` checks only level against elevation and floods it anyway (3.50 m);
+  every other variant's coast-connectivity filter (§4.5) excludes it (0.00 m).
+- A ridge blocking every direct route to the far side of the domain except
+  around a gap at one end, so the real connected path to a point there is longer
+  than the straight-line distance to it. `bathtub`/`bathtub_connected` apply no
+  attenuation at all and show the same depth there as next to the coast (2.00 m
+  at both points); `straight_line` attenuates by the (too-short) straight-line
+  distance (1.20 m near, 0.55 m far); `eikonal` attenuates by the true, longer,
+  connectivity-respecting path around the ridge, giving shallower results at both
+  (0.80 m, 0.37 m) - and a growing gap with distance from the ridge's gap, since
+  the straight-line/real-path discrepancy itself grows with distance from it.
+
+Box C adds the duration correction (§2.4) that boxes A/B omit, on the same
+scenario and a synthetic single-station, single-peak storm tide. `eikonal`'s
+corrected depth (0.85 m, 0.17 m near/far) goes through the production
+`duration_correction` path unchanged; `straight_line` has no spatial friction
+field for that path to correct, so its own corrected depth (1.03 m, 0.25 m)
+instead rescales its one `attenuation_m_per_m` by the domain-mean multiplier
+over the first solve's wet cells - the same scalar `flood_depth_dense` itself
+reports as `diagnostics["mean_duration_multiplier"]` - which is this figure's
+approximation, not a second physical mechanism.
+
+![Four FLOOD_MODELS variants on one scenario, with and without duration correction](flood_variant_comparison.png)
+
 ## 3. Data inputs
 
 | Symbol | Description | Source |
@@ -263,7 +303,7 @@ itself. Production therefore caps the solve at `max_rounds = 40`. See
 `methods_03_calibration_sensitivity.md` §2 for the full calibration
 methodology.
 
-**Illustrative example.** Figure 1 is generated directly from the
+**Illustrative example.** Figure 2 is generated directly from the
 production solver code (`docs/figure_scripts/generate_eikonal_solver_examples.py`).
 Panel (a) shows the four sweeps that make up one round, run individually
 from a single seed at the centre of a small (deliberately coarse, for
@@ -347,7 +387,7 @@ described above (`tests/eikonal_kernel_validation`).
    own direction, so every vertex's upwind neighbours are still updated
    before the vertex itself. Because most of a domain settles within the
    first few rounds, and later rounds only move a narrow front through
-   winding channels, most block visits are skipped (Figure 2).
+   winding channels, most block visits are skipped (Figure 3).
 
 On ten real calibration tiles (2–72 million cells), the first change alone
 made the complete obstacle-coupled flood solve (§4.4a) 2–7 times faster, and
@@ -358,11 +398,11 @@ rounds: one tile needing 100 rounds in its first outer iteration went from
 not what it computes, so neither affects the convergence criterion, the round
 cap or any calibration result.
 
-Figure 2 is generated from the production `_block_sweep` code
+Figure 3 is generated from the production `_block_sweep` code
 (`docs/figure_scripts/generate_eikonal_solver_examples.py`) on a synthetic domain (not a real
 tile): uniform open land seeded along its top edge (the "coastline"), with
 one spiral maze of impassable walls in the lower right, the same construction
-as Figure 1b, built at a larger size. A block size of 16 is used for legibility
+as Figure 2b, built at a larger size. A block size of 16 is used for legibility
 (production uses 64 on grids roughly 30 times larger in each dimension).
 The figure shows only the block grid, not the solution itself: each square
 is one block, coloured if it is re-swept in at least one of that round's four
@@ -447,7 +487,7 @@ See
 `methods_03_calibration_sensitivity.md` §3 for the full calibration
 methodology and exact per-tile breakdown.
 
-**Illustrative example.** Figure 3 shows this on a small synthetic case (not
+**Illustrative example.** Figure 4 shows this on a small synthetic case (not
 a real tile): a ridge that is too tall to ever legitimately flood, but
 whose low friction makes it numerically the cheapest inland route for the
 rows directly behind it - cheaper than the honest detour around it via the
