@@ -6,7 +6,6 @@ carry-forward.
 
 Usage:
     python plot_obstacle_coupling_calibration_bands.py <obstacle_coupling_dir> --fig-dir <figures_dir> [--max-outer-iterations 3]
-        [--solve-pass first|duration]
 """
 
 from __future__ import annotations
@@ -26,15 +25,15 @@ from matplotlib.ticker import FuncFormatter, LogLocator, MaxNLocator
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import load_config  # noqa: E402
-from plot_sweep_budget_convergence import SOLVE_PASSES, band_stats, figure_name, plot_band, read_trace_csv  # noqa: E402
+from plot_sweep_budget_convergence import band_stats, plot_band, read_trace_csv  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 FLOOR_PCT = 1e-4  # log-scale display floor for panel (b)'s pct_newly_blocked
 
 
-def _load_tile_trace(csv_path: Path, solve_pass: str | None) -> pd.DataFrame | None:
+def _load_tile_trace(csv_path: Path) -> pd.DataFrame | None:
     # Tiles whose n_outer=0 baseline is dry are excluded.
-    df = read_trace_csv(csv_path, solve_pass=solve_pass)
+    df = read_trace_csv(csv_path)
     if df is None:
         return None
     baseline_rows = df[df["n_outer"] == 0]
@@ -114,9 +113,6 @@ def main() -> None:
     parser.add_argument("--x-max", type=int, default=6,
                          help="x-axis upper limit (outer iteration) - independent of the max outer "
                               "iteration actually observed in the data, for consistent axis framing")
-    parser.add_argument("--solve-pass", choices=SOLVE_PASSES, default=None,
-                        help="first: the variant without correction B; duration: with it "
-                             "(default: the last pass traced; the figure name gets the pass when given)")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -132,7 +128,7 @@ def main() -> None:
 
     records = []
     for p in sorted(obstacle_dir.glob("*.csv")):
-        iters = _load_tile_trace(p, args.solve_pass)
+        iters = _load_tile_trace(p)
         if iters is not None:
             records.append(iters)
     long_df = pd.concat(records, ignore_index=True)
@@ -140,7 +136,7 @@ def main() -> None:
     print(f"{n_tiles} tile(s) with a usable outer-iteration trace, {len(long_df)} tile-iteration row(s)")
 
     make_figure(long_df, max_outer_iterations, outer_convergence_pct, args.x_max,
-                figures_dir / figure_name("obstacle_coupling_calibration_bands", args.solve_pass))
+                figures_dir / "obstacle_coupling_calibration_bands.png")
 
 
 if __name__ == "__main__":

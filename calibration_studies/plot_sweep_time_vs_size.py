@@ -4,7 +4,7 @@ Not restricted to wet tiles. Non-converged tiles are triangles at
 (n_rounds_available, elapsed time so far), not extrapolated.
 
 Usage:
-    python plot_sweep_time_vs_size.py <sweep_budget_dir> --fig-dir <figures_dir> [--epsilon 0.03] [--solve-pass first|duration]
+    python plot_sweep_time_vs_size.py <sweep_budget_dir> --fig-dir <figures_dir> [--epsilon 0.03]
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import load_config  # noqa: E402
-from plot_sweep_budget_convergence import N_COMPLETE_ROUNDS, SOLVE_PASSES, collect, figure_name, read_trace_csv  # noqa: E402
+from plot_sweep_budget_convergence import N_COMPLETE_ROUNDS, collect, read_trace_csv  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -71,9 +71,6 @@ def main() -> None:
     parser.add_argument("--fig-dir", required=True)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--epsilon", type=float, default=None, help="default: config simulation.flooding.waterlevel_epsilon_m")
-    parser.add_argument("--solve-pass", choices=SOLVE_PASSES, default=None,
-                        help="first: the variant without correction B; duration: with it "
-                             "(default: the last pass traced; the figure name gets the pass when given)")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -83,7 +80,7 @@ def main() -> None:
     figures_dir = Path(args.fig_dir)
     figures_dir.mkdir(parents=True, exist_ok=True)
 
-    df = collect(sweep_budget_dir, epsilon, args.solve_pass)
+    df = collect(sweep_budget_dir, epsilon)
     df = df.dropna(subset=["n_cells"])
     print(f"{len(df)} tile(s) with a usable sweep trace "
           f"({int(df['converged'].sum())} converged within {N_COMPLETE_ROUNDS} rounds)")
@@ -92,14 +89,14 @@ def main() -> None:
     if (~df["converged"]).any():
         def _censored_elapsed(row) -> float:
             csv_path = sweep_budget_dir / f"{int(row['tile'])}.csv"
-            raw = read_trace_csv(csv_path, solve_pass=args.solve_pass)
+            raw = read_trace_csv(csv_path)
             last_idx = row["n_rounds_available"] * 4 - 1
             return float(raw["cum_time_s"].iloc[last_idx])
 
         censored_mask = ~df["converged"]
         df.loc[censored_mask, "time_to_converge_s"] = df.loc[censored_mask].apply(_censored_elapsed, axis=1)
 
-    make_figure(df, epsilon, figures_dir / figure_name("sweep_time_vs_size", args.solve_pass))
+    make_figure(df, epsilon, figures_dir / "sweep_time_vs_size.png")
 
 
 if __name__ == "__main__":

@@ -10,10 +10,14 @@ production's own solver code paths directly (seeding, friction scaling,
 sweep order, convergence check), not a reimplementation.
 
 The caps apply only to the eikonal models, so each study runs once per
-friction source (land cover, uniform rate). With duration correction B a
-tile is solved twice, and both solves are traced: the first is the variant
-without the correction, the second the variant with it. The figure scripts
-take `--solve-pass first|duration` to draw either.
+friction source (land cover, uniform rate), without duration correction B.
+A source's caps also serve its duration variant, which re-solves the same
+tile with a scaled friction field.
+
+The studies solve to ceilings well above any production cap (100 sweep
+rounds; 15 outer iterations at 40 inner rounds). The figures mark
+`config.yml`'s current `max_rounds` and `max_outer_iterations` as reference
+lines; the caps are chosen from where the tiles converge.
 
 ## 2. Sweep-round calibration (`max_rounds`)
 

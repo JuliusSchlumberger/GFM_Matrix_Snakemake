@@ -102,18 +102,16 @@ steps:
         bash "$R/calibration_500_tiles/hpc_jobs/submit_calib_obstacle_coupling_${src}_batches.sh"
       done
 
-  # Per friction source and solve pass: "first" is the variant without correction B, "duration" with it.
+  # Per friction source; a source's caps also serve its duration variant.
   - id: study_figures
     after: [obstacle_coupling]
     job: {partition: 4vcpu, cpus_per_task: 4, mem: 30G, time: "0-04:00:00"}
     run: |
       S="$R/calibration_500_tiles"
       for src in landcover uniform; do
-        for pass in first duration; do
-          "$PY" calibration_studies/plot_sweep_calibration_bands.py "$S/sweep_budget_$src" --fig-dir "$S/figures/$src" --solve-pass $pass
-          "$PY" calibration_studies/plot_sweep_time_vs_size.py "$S/sweep_budget_$src" --fig-dir "$S/figures/$src" --solve-pass $pass
-          "$PY" calibration_studies/plot_obstacle_coupling_calibration_bands.py "$S/obstacle_coupling_$src" --fig-dir "$S/figures/$src" --solve-pass $pass
-        done
+        "$PY" calibration_studies/plot_sweep_calibration_bands.py "$S/sweep_budget_$src" --fig-dir "$S/figures/$src"
+        "$PY" calibration_studies/plot_sweep_time_vs_size.py "$S/sweep_budget_$src" --fig-dir "$S/figures/$src"
+        "$PY" calibration_studies/plot_obstacle_coupling_calibration_bands.py "$S/obstacle_coupling_$src" --fig-dir "$S/figures/$src"
       done
 
   # ── SFINCS calibration, 1,500 tiles: stage 1 -> selection -> sweep (+ post job) -> duration ──

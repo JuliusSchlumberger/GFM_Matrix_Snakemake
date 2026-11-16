@@ -15,6 +15,10 @@ simulation:
     max_rounds: 100
     obstacle_coupling:
       max_outer_iterations: 15
+    # The caps found for each friction source also serve its duration variant (correction B
+    # re-solves with a scaled friction field), so the studies solve once, without it.
+    duration_correction:
+      enabled: false
 
 # One scenario per tile. slr_intensities must be set: merged_waterlevel_names() unions it with
 # waterlevel_names, so leaving it unset would add config.yml's adaptation SLR levels.
