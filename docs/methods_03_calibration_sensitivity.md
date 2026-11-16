@@ -9,6 +9,12 @@ studies sample the same population of real coastal tiles and use
 production's own solver code paths directly (seeding, friction scaling,
 sweep order, convergence check), not a reimplementation.
 
+The caps apply only to the eikonal models, so each study runs once per
+friction source (land cover, uniform rate). With duration correction B a
+tile is solved twice, and both solves are traced: the first is the variant
+without the correction, the second the variant with it. The figure scripts
+take `--solve-pass first|duration` to draw either.
+
 ## 2. Sweep-round calibration (`max_rounds`)
 
 **Population**: 537 wet tiles out of 571 candidates stratified by size and

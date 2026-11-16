@@ -204,5 +204,7 @@ python hpc/harness.py status --plan hpc/plans/<plan>.yml           # from anothe
 python hpc/harness.py retry|mark-done --plan ... <step>             # after a failed or interrupted step
 ```
 
+`hpc/plans/hydrax_rerun.yml` lists in its header the `--only` selection for running only the eikonal solver studies.
+
 State (step states, queued jobs, logs) lives in the plan's `state_dir`, so a stopped controller resumes where it was; a launcher step that was running when the controller stopped comes back as `interrupted` (retry or mark-done it).
 A job asking for more cores than the budget is refused (`TOO_BIG`), and one with an `afterok` on a failed job is never submitted (`DEP_NEVER`).

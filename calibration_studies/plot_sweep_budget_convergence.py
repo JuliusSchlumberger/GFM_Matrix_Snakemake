@@ -14,14 +14,21 @@ import pandas as pd
 
 SWEEPS_PER_ROUND = 4  # one full cycle of eikonal._ORTHANT_ORDER
 N_COMPLETE_ROUNDS = 100  # = run_sweep_budget_study.MAX_ROUNDS_CEILING
+SOLVE_PASSES = ("first", "duration")
 
 
-def read_trace_csv(csv_path: Path, required_col: str | None = None) -> pd.DataFrame | None:
+def figure_name(stem: str, solve_pass: str | None) -> str:
+    return f"{stem}.png" if solve_pass is None else f"{stem}_{solve_pass}.png"
+
+
+def read_trace_csv(csv_path: Path, required_col: str | None = None,
+                   solve_pass: str | None = None) -> pd.DataFrame | None:
     """Read one tile's study trace CSV; None while it is still being written (empty).
 
     Also None when it has no rows or lacks `required_col` (e.g. an error-only CSV). Keeps the
-    rows of the last solve pass (the one production writes; correction B solves twice), the
-    uncoupled baseline and the summary/error rows.
+    rows of one solve pass, the uncoupled baseline and the summary/error rows. `solve_pass`
+    "first" is the solve without correction B, "duration" the one with it; None keeps the last
+    pass (the one production writes; correction B solves twice).
     """
     try:
         df = pd.read_csv(csv_path)
@@ -33,7 +40,8 @@ def read_trace_csv(csv_path: Path, required_col: str | None = None) -> pd.DataFr
         passes = df["solve_pass"].dropna()
         passes = passes[passes != "baseline"]
         if len(passes):
-            df = df[df["solve_pass"].isna() | df["solve_pass"].isin(["baseline", passes.iloc[-1]])]
+            keep = solve_pass or passes.iloc[-1]
+            df = df[df["solve_pass"].isna() | df["solve_pass"].isin(["baseline", keep])]
     return df.reset_index(drop=True)
 
 
@@ -64,8 +72,8 @@ def plot_band(ax, s: pd.DataFrame, color: str, label: str, floor: float | None =
         ax.plot(s.index, p02, color=color, linewidth=1.3, linestyle="-.", label=f"{label} - 2nd percentile")
 
 
-def _tile_convergence(csv_path: Path, epsilon: float) -> dict | None:
-    df = read_trace_csv(csv_path, "sweep_max_change_raw")
+def _tile_convergence(csv_path: Path, epsilon: float, solve_pass: str | None) -> dict | None:
+    df = read_trace_csv(csv_path, "sweep_max_change_raw", solve_pass)
     if df is None or len(df) < SWEEPS_PER_ROUND:
         return None  # unreadable, or a dry tile (1 row)
 
@@ -95,12 +103,12 @@ def _tile_convergence(csv_path: Path, epsilon: float) -> dict | None:
     }
 
 
-def collect(sweep_budget_dir: Path, epsilon: float) -> pd.DataFrame:
+def collect(sweep_budget_dir: Path, epsilon: float, solve_pass: str | None = None) -> pd.DataFrame:
     """Return one convergence record per readable wet tile CSV."""
     records = []
     csvs = sorted(sweep_budget_dir.glob("*.csv"))
     for p in csvs:
-        rec = _tile_convergence(p, epsilon)
+        rec = _tile_convergence(p, epsilon, solve_pass)
         if rec is not None:
             records.append(rec)
     return pd.DataFrame.from_records(records)

@@ -4,6 +4,9 @@
 # Step order is also release priority. Steps marked destructive delete old outputs on <data_root>;
 # they run only with --allow-destructive.
 #   python hpc/harness.py run --plan hpc/plans/hydrax_rerun.yml --allow-destructive
+# The eikonal solver studies alone (with the product rebuild they read):
+#   python hpc/harness.py run --plan hpc/plans/hydrax_rerun.yml --allow-destructive \
+#     --only product,materialize,reset_studies,studies_preprocess,sweep_landcover,sweep_uniform,wet_tiles,obstacle_coupling,study_figures
 name: hydrax_rerun
 max_cores: 120
 partition_cores: {}
@@ -49,8 +52,9 @@ steps:
       "$PY" snakemake_workflow/scripts/materialize_configs.py
 
   # ── production tile inputs (SFINCS reads them; the global run simulates them) ──
+  # After studies_preprocess: both build the shared stations_RP100_SLR_0 cache.
   - id: production_preprocess
-    after: [materialize]
+    after: [materialize, studies_preprocess]
     run: |
       "$PY" snakemake_workflow/scripts/generate_hpc_preprocess_job.py --config $C/config.yml --preprocess-only
       bash "$(jobs_dir $C/config.yml)/submit_preprocess_batches.sh"
@@ -96,6 +100,20 @@ steps:
       for src in landcover uniform; do
         "$PY" calibration_studies/generate_calibration_batch_jobs.py obstacle_coupling --config $C/calibration_500_tiles_materialized.yml --friction-source $src
         bash "$R/calibration_500_tiles/hpc_jobs/submit_calib_obstacle_coupling_${src}_batches.sh"
+      done
+
+  # Per friction source and solve pass: "first" is the variant without correction B, "duration" with it.
+  - id: study_figures
+    after: [obstacle_coupling]
+    job: {partition: 4vcpu, cpus_per_task: 4, mem: 30G, time: "0-04:00:00"}
+    run: |
+      S="$R/calibration_500_tiles"
+      for src in landcover uniform; do
+        for pass in first duration; do
+          "$PY" calibration_studies/plot_sweep_calibration_bands.py "$S/sweep_budget_$src" --fig-dir "$S/figures/$src" --solve-pass $pass
+          "$PY" calibration_studies/plot_sweep_time_vs_size.py "$S/sweep_budget_$src" --fig-dir "$S/figures/$src" --solve-pass $pass
+          "$PY" calibration_studies/plot_obstacle_coupling_calibration_bands.py "$S/obstacle_coupling_$src" --fig-dir "$S/figures/$src" --solve-pass $pass
+        done
       done
 
   # ── SFINCS calibration, 1,500 tiles: stage 1 -> selection -> sweep (+ post job) -> duration ──

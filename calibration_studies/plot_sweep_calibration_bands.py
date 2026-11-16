@@ -7,6 +7,7 @@ Rebuilds wet_tiles_selected.txt first (overwrites it).
 
 Usage:
     python plot_sweep_calibration_bands.py <sweep_budget_dir> --fig-dir <figures_dir> [--max-rounds 40] [--n-tiles-wanted 500]
+        [--solve-pass first|duration]
 """
 
 from __future__ import annotations
@@ -28,7 +29,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from aggregate_wet_tiles import aggregate_wet_tiles  # noqa: E402
 from config_utils import load_config  # noqa: E402
 from plot_sweep_budget_convergence import (  # noqa: E402
-    N_COMPLETE_ROUNDS, SWEEPS_PER_ROUND, band_stats, collect as collect_convergence, plot_band, read_trace_csv,
+    N_COMPLETE_ROUNDS, SOLVE_PASSES, SWEEPS_PER_ROUND, band_stats, collect as collect_convergence, figure_name,
+    plot_band, read_trace_csv,
 )
 
 N_TILES_WANTED_DEFAULT = 500  # matches aggregate_wet_tiles.py's own default
@@ -38,9 +40,9 @@ FLOOR = 1e-4  # log-scale display floor for panels (b)/(c)
 FLOOR_COUNT = 0.2  # log-scale display floor for panel (d)'s raw cell counts
 
 
-def _aggregate_to_rounds(csv_path: Path) -> pd.DataFrame | None:
+def _aggregate_to_rounds(csv_path: Path, solve_pass: str | None) -> pd.DataFrame | None:
     # Per 4-sweep round: max of change columns, sum of newly flooded, last n_inundated.
-    df = read_trace_csv(csv_path, "sweep_max_change_raw")
+    df = read_trace_csv(csv_path, "sweep_max_change_raw", solve_pass)
     if df is None or len(df) < SWEEPS_PER_ROUND:
         return None  # unreadable, or a dry tile
 
@@ -145,6 +147,9 @@ def main() -> None:
         help=f"forwarded to aggregate_wet_tiles.py's own selection, run as this script's first "
              f"step (default: {N_TILES_WANTED_DEFAULT})",
     )
+    parser.add_argument("--solve-pass", choices=SOLVE_PASSES, default=None,
+                        help="first: the variant without correction B; duration: with it "
+                             "(default: the last pass traced; the figure name gets the pass when given)")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -163,7 +168,7 @@ def main() -> None:
         csv_path = sweep_budget_dir / f"{tid}.csv"
         if not csv_path.exists():
             continue
-        rounds_df = _aggregate_to_rounds(csv_path)
+        rounds_df = _aggregate_to_rounds(csv_path, args.solve_pass)
         if rounds_df is not None:
             records.append(rounds_df)
     long_df = pd.concat(records, ignore_index=True)
@@ -171,12 +176,12 @@ def main() -> None:
     print(f"{n_tiles} tile(s) with a usable sweep trace, {len(long_df)} tile-round row(s)")
 
     # Full N_COMPLETE_ROUNDS ceiling, not just max_rounds.
-    cdf_df = collect_convergence(sweep_budget_dir, epsilon)
+    cdf_df = collect_convergence(sweep_budget_dir, epsilon, args.solve_pass)
     cdf_df = cdf_df[cdf_df["tile"].isin(tile_ids)]
     print(f"{len(cdf_df)} tile(s) in the CDF panel ({int(cdf_df['converged'].sum())} converged "
           f"within {N_COMPLETE_ROUNDS} rounds)")
 
-    make_figure(long_df, cdf_df, epsilon, max_rounds, figures_dir / "sweep_calibration_bands.png")
+    make_figure(long_df, cdf_df, epsilon, max_rounds, figures_dir / figure_name("sweep_calibration_bands", args.solve_pass))
 
 
 if __name__ == "__main__":
