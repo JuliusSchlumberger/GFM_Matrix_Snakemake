@@ -250,6 +250,14 @@ def load_plan(path: Path) -> dict:
     return plan
 
 
+def check_requires(plan: dict) -> None:
+    # Checked before anything is queued: a job missing a file fails only after its queue wait.
+    cwd = Path(plan.get("cwd", "."))
+    missing = [r for r in plan.get("requires", []) if not (cwd / r).exists()]
+    if missing:
+        raise SystemExit(f"plan {plan['name']}: missing under {cwd}: {', '.join(missing)}")
+
+
 def _state_path(plan: dict) -> Path:
     return plan["state_dir"] / "steps.json"
 
@@ -457,6 +465,7 @@ def main() -> None:
     args = parser.parse_args()
     plan = load_plan(Path(args.plan))
     if args.command == "run":
+        check_requires(plan)
         Controller(plan, set(args.only.split(",")) if args.only else None, args.allow_destructive, args.poll_s).run()
     elif args.command == "status":
         print_status(plan)

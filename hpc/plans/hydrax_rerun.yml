@@ -12,6 +12,8 @@ max_cores: 120
 partition_cores: {}
 state_dir: /p/11212688-004-global-floodmaps/modelling/hpc_harness/hydrax_rerun
 cwd: /u/schlumbe/gfm_code
+# Gitignored site files (docs/hpc.md, "Config layering on a cluster").
+requires: [sfincs_tiles/site_env.sh, snakemake_workflow/config/config_hpc.yml, snakemake_workflow/config/config_local.yml]
 env:
   HDF5_USE_FILE_LOCKING: "FALSE"
   # SFINCS post job (site_env.sh CAL_*): the overlap-merged rescoring of every run on 1,500 tiles

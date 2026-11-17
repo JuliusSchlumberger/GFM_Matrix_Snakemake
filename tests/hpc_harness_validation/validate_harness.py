@@ -105,6 +105,16 @@ def test_controller_starts_a_waiting_step_before_it_stops(tmp_path, monkeypatch)
     assert started == ["a", "b"]
 
 
+def test_missing_required_file_stops_the_run(tmp_path) -> None:
+    import pytest
+    (tmp_path / "here.sh").write_text("")
+    plan = {"name": "t", "cwd": str(tmp_path), "requires": ["here.sh"]}
+    harness.check_requires(plan)
+    plan["requires"].append("site_env.sh")
+    with pytest.raises(SystemExit, match="site_env.sh"):
+        harness.check_requires(plan)
+
+
 def test_plan_paths_must_be_absolute(tmp_path) -> None:
     import pytest
     plan = tmp_path / "p.yml"
