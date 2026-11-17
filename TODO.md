@@ -411,6 +411,8 @@ Open:
      selection relative to the record). Build A = the `product` step of `hpc/plans/hydrax_rerun.yml`
      on Hydrax (overwrites the 11-07 product and WL_scenarios; the 11-07 build is kept in
      `.cleanup_baseline/storm_tide_product`). Never build locally while it runs: shared cache.
+     Phase 0 is on Hydrax (1b3fc5a); it is in build A only if the product job started after the
+     pull: `hydrograph_info.parquet` n_events at RP1000 is 2 everywhere with it, 3+ without.
   1. Rescore build A: align `level_product_gauges.GaugeCheck` with production (1950-2024, mask,
      pooled shape, basin shift, tide correction, r left out); 618-gauge levels and 698-gauge
      hydrographs (`generator_validation.py`), by region and tidal class.
@@ -512,6 +514,26 @@ Open:
   should move to this direct measure is still an open question - changing it would affect the
   calibrated `duration_refit.py`/`friction_scale_factor` values (§2.2/§2.4), so needs a deliberate
   decision, not a silent code change.
+
+- **Review `compute_calibration_result_dedup.py` and `calibration_roughness_SFINCS_dedup`,
+  potentially remove them altogether.** `sfincs_tiles/select_calibration_tiles.py select` now
+  drops a candidate tile if it overlaps an already-selected tile (its buffered
+  `domain_tiles_global.gpkg` polygon intersects one already picked), so a *future* selection run
+  needs no post-hoc dedup - this was the whole point of the dedup step (correcting the ~1.237x
+  double-counting from the hop=0 coastal buffer / forced-split overlap pad). The *existing*
+  `calibration_roughness_SFINCS` selection (1000 tiles, already run, real overlapping results)
+  still needs it - it was drawn before this change. Once a fresh non-overlapping selection has
+  been drawn and run for real (see below - only 784 of 2088 eligible tiles are mutually
+  non-overlapping, well short of the old 1000 target), decide whether to keep
+  `compute_calibration_result_dedup.py`/`sfincs_grid.build_tile_tree`/`core_mask`/the
+  `_dedup` base-dir convention around for old data, or delete them (git keeps the history).
+
+- **Re-running `select_calibration_tiles.py select` with the new overlap criterion only yields
+  784 non-overlapping tiles from the current 2088 eligible (down from the 1000-tile target)** -
+  a real coverage drop from avoiding overlap at selection time, not a bug. Needs a decision: run
+  with fewer tiles, loosen some upstream filter to grow the eligible pool first, or accept a
+  partial dedup-free set alongside the existing overlapping one. Not resolved; no fresh selection
+  has been run for real yet.
 
 ## Figures needing a pass under the new "Figures (deliverables)" rules
 
