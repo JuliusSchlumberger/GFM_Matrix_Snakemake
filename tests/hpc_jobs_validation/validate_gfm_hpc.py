@@ -227,8 +227,9 @@ def test_validate_submit_writes_a_validation_job(tmp_path, submitted) -> None:
     assert (job["partition"], job["time"]) == ("4vcpu", "2-00:00:00")
     script = fx.local_path(job["script"], tmp_path)
     fx.assert_common_job_shape(script)
-    assert f"hpc/gfm_hpc.py validate --only scores --config {fx.LINUX_CODE}/snakemake_workflow/config/config.yml" \
-        in script.read_text()
+    view = tmp_path / "state" / "configs" / "config.yml"  # the node reads the HPC view, complete in itself
+    assert view.exists()
+    assert f"hpc/gfm_hpc.py validate --only scores --config {view}" in script.read_text()
 
 
 def test_hydrax_plan_keeps_its_step_ids() -> None:

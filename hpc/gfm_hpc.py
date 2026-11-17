@@ -115,7 +115,7 @@ def _inline_job(config_path: Path, name: str, profile: str, argv: list[str], pro
     local_dir = Path(local["hpc"]["jobs_dir"])
     (local_dir / "logs").mkdir(parents=True, exist_ok=True)
     code_root = linux["paths"]["code_root"]
-    node_config = f"{code_root}/snakemake_workflow/config/{Path(config_path).name}"
+    node_config = str(hpc_view(config_path))  # complete in itself, wherever config_path lives
     chain = JobChain(hpc, local_dir, hpc["jobs_dir"])
     chain.add(name, profile, [f'cd "{code_root}"',
                               " ".join(['"$GFM_PY" hpc/gfm_hpc.py', *argv, "--config", node_config])])
