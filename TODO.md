@@ -7,15 +7,13 @@ the code is done; what remains needs you, the HPC cluster or `<data_root>`.
 
 1. **Merge the latest `cleanup` commits into `main`** (the earlier merge is done; `git log origin/main..cleanup`).
 2. **On the cluster:** back up the `*_materialized.yml` files in `<code_root>/snakemake_workflow/config/`,
-   `git pull` on `main`, create the gitignored site files
-   (`cp sfincs_tiles/site_env.example.sh sfincs_tiles/site_env.sh` and
-   `cp snakemake_workflow/config/config_hpc.example.yml snakemake_workflow/config/config_hpc.yml`;
-   the examples hold the example site's values), then `python snakemake_workflow/scripts/materialize_configs.py` (the cluster
+   `git pull` on `main`, create the gitignored site file
+   (`cp snakemake_workflow/config/config_hpc.example.yml snakemake_workflow/config/config_hpc.yml`;
+   the example holds the example site's values), then `python snakemake_workflow/scripts/materialize_configs.py` (the cluster
    checkout is not under `<data_root>`, so it cannot be done from the local machine). Configs with the old keys
    `slr_scenario` / `slr_scenarios` fail with KeyError.
-3. **On the cluster:** `DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part models` once, to check the
-   shell drivers (only tested locally with stubbed sbatch/python). Paths live in
-   `sfincs_tiles/site_env.sh`; keep its roots in sync with `config_hpc.yml`.
+3. **On the cluster:** `python hpc/gfm_hpc.py sfincs rerun --part models --dry-run` once, to check the
+   rerun port (only tested locally with stubbed sbatch).
 4. **Cluster `gfm` env:** `mamba install -n gfm pytest=8.4.2 ruff=0.12.0`.
 5. **`<data_root>` cleanup:** `sfincs_smoke_test/` is no longer used; delete it if you like. When
    calibration stage 1 runs again, pass `--overwrite` so screen / pre-flight error records cached by
@@ -93,7 +91,7 @@ Open:
   user). The global production run and its national-map validation (Scotland, New Brunswick)
   come later, separately (user). Open:
   - The harness has not met SLURM yet: run `hpc/plans/smoke.yml` on Hydrax first.
-  - The plan needs `site_env.sh`, `config_hpc.yml` and `config_local.yml` (Linux paths) in the
+  - The plan needs `config_hpc.yml` and `config_local.yml` (Linux paths) in the
     Hydrax checkout; `harness.py run` checks them (`requires:`).
   - Scotland local input stays paused; Scotland and New Brunswick are scored from the global run.
   - With the later global run: the SF Bay global baseline (`validate_sf_bay.py --config config.yml ...
@@ -104,24 +102,19 @@ Open:
   - One core-budgeted HPC harness (max 120 cores): wave-0 tier asks 6 x 24 = 144, so one
     wave-0 job waits for cores. The submit scripts capture `sbatch --parsable` ids and chain
     every wave and the merge with `--dependency=afterany:<ids>`; two of them run inside jobs
-    (`generate_jobs_and_dispatch`, `gfm_generate_postprocess_and_dispatch`). The harness's
+    (`gfm_generate_jobs_and_dispatch`, `gfm_generate_postprocess_and_dispatch`). The harness's
     sbatch must therefore return an id at once, honour `afterany` on ids it holds back, and be
     on PATH inside jobs. No script in the chain calls squeue/scontrol or uses `singleton`.
-- **One way onto the HPC (proposal, 2026-11-17, user to decide).** Three families of job
-  generators with their own site config (`config_hpc.yml` vs `site_env.sh`), env activation
-  (`env_activate_cmd` vs `GFM_PYTHON`), sbatch writers, bin packers, argument names and submit
-  scripts; plan steps glue them with inline `python -c` and hand-built paths. Proposal: one site
-  file, one job writer with named resource profiles, one front-door CLI (`hpc/gfm_hpc.py`) that
-  every plan step calls, golden-file tests of the generated scripts. Open decisions: activation
-  style; replacing the `sfincs_tiles` shell drivers (not while a batch runs); dropping the
-  Snakemake dispatch rule (`rules/hpc_dispatch.smk`); scenarios by name. Defects found on the way:
-  `collect_hpc_failures.py` skips `resume_wave*` failure logs; postprocess and flood-totals keep a
-  stale `resolved_config.yml`; exposure jobs read the config from the share unstaged and without
-  the retry wrapper; the postprocess tile-grid override lacks `|| exit 1`; SFINCS jobs omit
-  `--account` and get `HDF5_USE_FILE_LOCKING` only when inherited; `rerun_calibration.sh --part
-  sfincs` leaves stale `final_*.sbatch`; the solver studies rewrite finished tiles' CSVs on a
-  resubmit; the plan's `calibration_split.py ... || true` hides failures; `docs/hpc.md` gives the
-  wrong default `jobs_dir`.
+- **One way onto the HPC: what remains.** One site file, one job writer with resource profiles,
+  the `hpc/gfm_hpc.py` front door and the plan on top of it are in place (docs/hpc.md). Open:
+  - The solver studies rewrite finished tiles' CSVs on a resubmit: give them a resume (skip tiles
+    whose output is complete), as the eikonal waves have with `--resume`.
+  - Harness: `retry_on_timeout` for steps whose jobs hit their wall-clock limit (resubmit once with
+    the step's resume command).
+  - Harness `status`: show each step's progress from the matching `gfm_hpc.py progress` monitor.
+  - First Hydrax run of the front door: smoke plan, then a small real chain (docs/hpc.md,
+    "A small scenario on the cluster"); the jobs start Python by absolute path without
+    `conda activate`, so check that PROJ/GDAL find their data in the first logs.
 - **England national-map score does not reproduce (exposure/depth assessment, 2026-11-09):**
   `validate_country.py --country GBR` on the same `merged_results` chunks gives England FZ3 hits
   +130 % and misses +270 % against the saved `validation/GBR/metrics_GBR_RP100_SLR_0.csv`;
@@ -159,14 +152,13 @@ Open:
   1. Hydrax: product rebuild with coastline nodes, SFINCS forcing and runs, then
      `calibration_split.py` (30 % calibration / 70 % validation by tile-id hash; check
      `calibration_split_balance.csv`).
-  2. Solver studies per friction source (`generate_calibration_batch_jobs.py sweep_budget |
-     obstacle_coupling --friction-source landcover` at friction_scale_factor 0.25, and
-     `--friction-source uniform --uniform-attenuation-m-per-km 0.2`); set `max_rounds` and
+  2. Solver studies per friction source (`gfm_hpc.py studies sweep | obstacle --source landcover`
+     at friction_scale_factor 0.25, and `--source uniform --uniform-attenuation-m-per-km 0.2`); set `max_rounds` and
      `obstacle_coupling.max_outer_iterations` per friction source in the variant configs.
-  3. `RESET_RUNS=1 PHASE=sweep bash sfincs_tiles/rerun_calibration.sh --part models`: friction
+  3. `gfm_hpc.py sfincs rerun --part models --phase sweep --reset-runs --submit`: friction
      factor and uniform rate on the calibration tiles; post job writes variant_selection.json.
-  4. `PHASE=duration ...`: alpha of both duration variants at their base variant's value.
-  5. `PHASE=selected ...`: every variant at its selected run on all tiles; validation-group
+  4. `--phase duration`: alpha of both duration variants at their base variant's value.
+  5. A `selected` phase (not in `generate_calibration_jobs.py` yet): every variant at its selected run on all tiles; validation-group
      scores in variant_selection.json and `plot_validation_results.py --group validation`.
   6. Best variant (pooled CSI on the calibration group) -> config.yml `simulation.flooding`
      (model, friction_source, parameter, alpha); production run on Hydrax.

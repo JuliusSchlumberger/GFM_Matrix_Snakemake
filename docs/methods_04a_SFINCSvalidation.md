@@ -132,7 +132,7 @@ The analysis is run twice, once per base directory, and each run writes its CSVs
 
 ## HPC pipeline
 
-Two stages, chained on Slurm (`generate_calibration_jobs.py`), all jobs on the partition set by `hpc.calibration_sbatch.partition`:
+Two stages, chained on Slurm (`gfm_hpc.py sfincs`, [hpc.md](hpc.md#sfincs-calibration-and-solver-studies)), with the resources of the `sfincs_*` profiles in `config_hpc.yml`:
 
 - **Stage 1** - 10 jobs, each one interleaved shard of the candidate pool: screen → boundary lines (4 worker processes) → SFINCS mask pre-flight.
 - **Bridge** - one job that starts when every stage-1 job has ended: collects the line results, runs the tile selection (+ maps) and submits stage 2.
@@ -140,7 +140,7 @@ Two stages, chained on Slurm (`generate_calibration_jobs.py`), all jobs on the p
 
 Every step is skipped when its output exists, so a resubmitted tile resumes where it stopped. A tile records its current step in `outputs/calibration_run.step`, its success in `calibration_run.done` and failures in `calibration_run.failed`; `check_calibration_progress.py` reports both stages per job.
 
-`rerun_calibration.sh` redoes part of the run in place after a code change, relying on this skip logic: per selected tile it deletes the done/failed/step markers (which re-queues the tile) plus the artefacts to be redone, then write and submit the stage-2 jobs via `generate_calibration_jobs.py stage2`. `--part models` (model-side changes) runs one phase (`PHASE`); existing runs are kept unless `RESET_RUNS=1` deletes every `*_waterdepth_RP100_SLR_0*.tif`, `model_runs.json` and `calibration_result.json` first; a post job (after all stage-2 jobs) then runs `compute_calibration_result_dedup.py` and the analysis on both base directories, which writes the selection the next phase needs. `--part sfincs` (forcing/mask changes) deletes `sfincs.inp`, so line forcing → SFINCS model build → SFINCS run → postprocessing → `calibration_result.json` are redone, followed by the sweep phase and its post job. Two conda environments are called by full interpreter path: `gfm` (flood models, lines, selection) and `hydromt-sfincs-dev` (SFINCS build/postprocessing, pre-flight, comparison); their specs are `environment.yml` and `environment_sfincs.yml`.
+`gfm_hpc.py sfincs rerun` redoes part of the run in place after a code change, relying on this skip logic: per selected tile it deletes the done/failed/step markers (which re-queues the tile) plus the artefacts to be redone, then write and submit the stage-2 jobs via `generate_calibration_jobs.py stage2`. `--part models` (model-side changes) runs one phase (`--phase`); existing runs are kept unless `--reset-runs` deletes every `*_waterdepth_RP100_SLR_0*.tif`, `model_runs.json` and `calibration_result.json` first; a post job (after all stage-2 jobs) then runs `compute_calibration_result_dedup.py` and the analysis on both base directories, which writes the selection the next phase needs. `--part sfincs` (forcing/mask changes) deletes `sfincs.inp`, so line forcing → SFINCS model build → SFINCS run → postprocessing → `calibration_result.json` are redone, followed by the sweep phase and its post job. Two conda environments are called by full interpreter path: `gfm` (flood models, lines, selection) and `hydromt-sfincs-dev` (SFINCS build/postprocessing, pre-flight, comparison); their specs are `environment.yml` and `environment_sfincs.yml`.
 
 ## Structural limitations (not bugs)
 

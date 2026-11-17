@@ -33,7 +33,7 @@ After editing an environment file: `conda env update -f environment.yml --prune`
 ## SFINCS
 
 The eikonal pipeline does not need SFINCS.
-The calibration runs it on the cluster from a container image (`SFINCS_IMAGE`, default `docker://deltares/sfincs-cpu:sfincs-v2.4.0-Galibier-Release`) with Apptainer (`CONTAINER_CMD`); both are set in `sfincs_tiles/site_env.sh` ([hpc.md](hpc.md#one-time-site-setup)).
+The calibration runs it on the cluster from a container image (`hpc.container.sfincs_image`, Hydrax: `docker://deltares/sfincs-cpu:sfincs-v2.4.0-Galibier-Release`) with Apptainer (`hpc.container.cmd`); both are set in `config_hpc.yml` ([hpc.md](hpc.md#site-setup)).
 Locally, only the optional smoke test `tests/sfincs_synthetic_end_to_end/test_sfincs_smoke.py` uses a SFINCS executable, set as `paths.sfincs_exe` in `config_local.yml`; it skips when that is unset.
 
 ## Shell

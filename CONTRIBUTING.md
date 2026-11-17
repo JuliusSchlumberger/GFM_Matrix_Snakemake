@@ -19,7 +19,7 @@ ruff check .
 - Changes are behaviour-preserving unless a result change has been agreed beforehand.
 - `src/` is a flat library: scripts reach it with `sys.path.insert(0, ...)`, following the sibling file's pattern; no packaging or relative imports.
 - Tests never write to the shared data root (`<data_root>`); write to `tmp_path`.
-- Machine values go in the gitignored `config_local.yml`, cluster values in the gitignored site files `config_hpc.yml` and `sfincs_tiles/site_env.sh` ([docs/hpc.md](docs/hpc.md)); never in `config.yml`.
+- Machine values go in the gitignored `config_local.yml`, cluster values in the gitignored site file `config_hpc.yml` ([docs/hpc.md](docs/hpc.md)); never in `config.yml`.
 
 ## Documentation
 

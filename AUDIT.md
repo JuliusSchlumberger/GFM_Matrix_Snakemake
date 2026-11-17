@@ -21,12 +21,13 @@ Size: ~31,600 lines of Python/Snakemake/shell in 189 tracked files.
 | Directory | Role | Entry points |
 |---|---|---|
 | `src/` (23) | Shared library, flat layout, imported via `sys.path.insert` | - |
-| `Snakefile`, `snakemake_workflow/` (33) | DAG: preprocess, simulate, postprocess; HPC job generators | `snakemake <target>`, `run_eikonal_dag.py`, `generate_hpc_*.py`, `generate_eikonal_jobs.py` |
+| `Snakefile`, `snakemake_workflow/` (33) | DAG: preprocess, simulate, postprocess; HPC job generators | `snakemake <target>`, `run_eikonal_dag.py`, `generate_hpc_*.py` (via `hpc/gfm_hpc.py`) |
 | `preparation/` (10) | One-off global inputs: tile grid, boundary conditions, DeltaDTM VRTs | `run_preparation.py` |
 | `analysis/` (28) | Exposure, adaptation pathways, figures, delta case | `run_analysis.py`, `run_delta_floodmaps.py` (top level) |
 | `validation/` (13) | Eikonal vs national maps (GBR, CAN) and SF Bay | `run_validation.py`, standalone `validate_sf_bay.py` + `plot_sf_bay.py`, `rescore_england_fz3.py`, `validate_england_fz2_band.py` |
-| `sfincs_tiles/` (36) | SFINCS calibration, HPC cluster only | `generate_calibration_jobs.py stage1/stage2`, `rerun_calibration.sh --part`, `run_final_tile.sh` |
+| `sfincs_tiles/` (36) | SFINCS calibration, HPC cluster only | `generate_calibration_jobs.py` (via `hpc/gfm_hpc.py sfincs`), `run_final_tile.sh` |
 | `calibration_studies/` (10) | Solver sensitivity (sweep budget, obstacle coupling) | `generate_calibration_batch_jobs.py` |
+| `hpc/` (2) | Cluster front door, core-budget harness, plans | `gfm_hpc.py`, `harness.py` |
 | `tests/` (26) | pytest suites (`validate_*.py`, `test_*.py`) | `pytest` |
 | `docs/` | `methods_01..04b` method write-ups, `figure_scripts/` | - |
 
@@ -45,8 +46,7 @@ All on branch `cleanup` (~50 commits ahead of `main`, not merged).
 - Phases 0-7 of the original plan: tooling (ruff, pytest), stale/duplicate files
   deleted, out-of-scope validation removed, doc drift fixed, near-duplicate helpers
   unified (`src/step_runner.py`, `analysis/_common.py`, `validation/_chunks.py`,
-  `tiles.chunk_id_from_corner`), hard-coded paths moved to config /
-  `sfincs_tiles/site_env.sh`, aqueduct -> eikonal and module renames, large
+  `tiles.chunk_id_from_corner`), hard-coded paths moved to config, aqueduct -> eikonal and module renames, large
   modules split (`run_analysis.py` STEPS table, `build_station_boundary_lines.py`
   -> `boundary_lines_geometry.py` + `boundary_lines_plot.py`).
 - Documentation trim over all 188 files (CLAUDE.md "Documentation standard"):
@@ -115,7 +115,7 @@ Methods that worked for proving a refactor changes nothing:
 ## 5. Known open items (details in TODO.md)
 
 Decisions for the user, not sweep work: merge `cleanup`; cluster checks after pulling
-(`DRY_RUN=1 bash sfincs_tiles/rerun_calibration.sh --part eikonal`); re-run the
+(`python hpc/gfm_hpc.py sfincs rerun --part models --dry-run`); re-run the
 delta / bangkok_chao_phraya / calibration_500_tiles outputs that used
 `friction_scale_factor` 9.0 or 30.0; history rewrite for ~1 GB of `.npy` blobs.
 
@@ -124,8 +124,7 @@ Small code issues already logged (fix only with the user's go-ahead):
   behaviour (clamps / warns instead of default / raise).
 - `retry_io.retry_transient_io`: `retries` counts attempts.
 - `calibration_paths.decode_waterdepth_cm`: 0 cm stays 0.0, only nodata -> NaN.
-- Unused parameters: `generate_eikonal_jobs.generate_wave_dispatch` (3, tied to rule
-  params), `build_sfincs_tile._compute_zsini_array(grid_coords)`; wasted DEM read in
+- Unused parameters: `build_sfincs_tile._compute_zsini_array(grid_coords)`; wasted DEM read in
   `connectivity_tiling._domain_touches_ocean`.
 - Misnomer `boundary_lines_geometry.land_eroded` (holds land grown outward).
 - String literals with history or stale claims (argparse help, assert messages,

@@ -74,6 +74,7 @@ The full global grid runs on a SLURM cluster: [docs/hpc.md](docs/hpc.md).
 | `validation/` | comparison with national flood maps and the SF Bay benchmark |
 | `sfincs_tiles/` | SFINCS calibration of the eikonal friction (cluster) |
 | `calibration_studies/` | solver sensitivity studies (sweep budget, obstacle coupling) |
+| `hpc/` | cluster front door `gfm_hpc.py`, core-budget harness and its plans ([docs/hpc.md](docs/hpc.md)) |
 | `tests/` | pytest suites |
 | `docs/` | methods, data, install, running and HPC guides |
 | `profiles/` | Snakemake profile loaded by default |
@@ -89,9 +90,9 @@ Settings are layered; later files override earlier ones:
 3. `<scenario>.yml` (tile set, outputs, scenario scope; the model follows `config.yml`),
    merged into `<scenario>_materialized.yml` by
    `snakemake_workflow/scripts/materialize_configs.py` and selected with `GFM_CONFIG_PATH`.
-4. On a cluster: `config_hpc.yml` (gitignored; copy `config_hpc.example.yml`) holds the cluster
-   paths, partitions and environment activation; the SFINCS calibration also needs
-   `sfincs_tiles/site_env.sh` (copy `site_env.example.sh`). See [docs/hpc.md](docs/hpc.md).
+4. On a cluster: `config_hpc.yml` (gitignored; copy `config_hpc.example.yml`) holds every site
+   value: cluster paths, interpreters, container, account and job resource profiles. Jobs are
+   written and submitted through `hpc/gfm_hpc.py`. See [docs/hpc.md](docs/hpc.md).
 
 `profiles/default/config.yaml` makes Snakemake re-run a job only when its inputs, parameters or
 software environment change, not when a script is edited.
