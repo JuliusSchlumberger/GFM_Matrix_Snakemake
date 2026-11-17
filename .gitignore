@@ -1,9 +1,8 @@
 # Machine-local config override
 snakemake_workflow/config/config_local.yml
 
-# HPC site files (copy the *.example.* siblings)
+# HPC site file (copy config_hpc.example.yml)
 snakemake_workflow/config/config_hpc.yml
-sfincs_tiles/site_env.sh
 
 # Machine-local Claude Code notes
 CLAUDE.local.md

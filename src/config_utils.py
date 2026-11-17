@@ -155,12 +155,12 @@ HPC_SITE_CONFIG_MISSING = (
 
 
 def has_hpc_site_values(config: dict) -> bool:
-    """Return whether `config` carries the HPC site values (hpc.sbatch.env_activate_cmd set).
+    """Return whether `config` carries the HPC site values (hpc.python.gfm set).
 
     config.yml leaves them empty; config_hpc.yml sets them, and so does every
     resolved_config.yml a generator writes from the layered config.
     """
-    return bool(((config.get("hpc") or {}).get("sbatch") or {}).get("env_activate_cmd"))
+    return bool(((config.get("hpc") or {}).get("python") or {}).get("gfm"))
 
 
 def load_hpc_config(config_path: str | Path) -> dict:
@@ -178,22 +178,6 @@ def load_hpc_config(config_path: str | Path) -> dict:
     if not has_hpc_site_values(config):
         raise FileNotFoundError(f"{HPC_SITE_CONFIG_MISSING} ({config_path} has no hpc site values either)")
     return config
-
-
-def with_hpc_site_values(hpc_cfg: dict, config_dir: str | Path) -> dict:
-    """Layer the `hpc` block of `config_dir`/config_hpc.yml over `hpc_cfg`.
-
-    For the Snakefile's `config["hpc"]`, which has no site layer. Without the
-    file, `hpc_cfg` must already carry the site values (GFM_CONFIG_PATH set to
-    a resolved_config.yml); otherwise raises FileNotFoundError.
-    """
-    site_path = Path(config_dir) / "config_hpc.yml"
-    if site_path.exists():
-        with open(site_path, encoding="utf-8") as f:
-            hpc_cfg = _deep_merge(hpc_cfg, (yaml.safe_load(f) or {}).get("hpc") or {})
-    if not has_hpc_site_values({"hpc": hpc_cfg}):
-        raise FileNotFoundError(HPC_SITE_CONFIG_MISSING)
-    return hpc_cfg
 
 
 def materialize_config(

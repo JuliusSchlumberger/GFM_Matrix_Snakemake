@@ -1,14 +1,12 @@
-"""Generate HPC sbatch scripts for postprocessing across hpc.n_nodes parallel nodes.
+"""Write the HPC postprocessing chain across hpc.n_nodes parallel nodes; entry point `generate()`.
 
-Rules: merge_chunk -> prepare_exposure_grid_chunk -> compute_flood_fraction_chunk,
-then the exposure-analysis dispatch and flood-totals/plots job appended to the
-same submit script (one synchronous submission from the login node).
+Rules: merge_chunk -> prepare_exposure_grid_chunk -> compute_flood_fraction_chunk, then the
+exposure analysis and the flood-totals/plots job, all in one submit script.
 
-With at least as many chunks as nodes, whole chunks are assigned per batch (LPT by
-tile count) and Snakemake chains each chunk itself; otherwise three phases, each
-gated on the whole previous one via --dependency=afterany. Outputs are identical.
-Chunk IDs come from tiles.build_chunk_grid, as in the Snakefile. The tile grid is
-read via the local config; embedded paths use the Linux view (config_hpc.yml).
+With at least as many chunks as nodes, whole chunks are packed per batch (LPT by tile count) and
+Snakemake chains each chunk itself; otherwise three phases, each gated on the whole previous one
+(afterany). Outputs are identical. Chunk IDs come from tiles.build_chunk_grid, as in the
+Snakefile. The tile grid is read via the local config; embedded paths use config_hpc.yml.
 
 `postprocessing.merge_only` (validation scenarios) writes the merges only, no exposure or
 flood totals: merge_chunk, or, with a simulation.dem_source_manifest (tiles in the local
@@ -16,8 +14,8 @@ DEM's projected CRS, which merge_chunk rejects), one merge_england_local_tiles.p
 (RP, SLR) into merged_outputs/local_native/.
 
 Usage:
-    python generate_hpc_postprocess_job.py [--config path/to/config.yml]
-    bash <printed submit_postprocess_and_exposure.sh path>
+    python generate_hpc_postprocess_job.py [--config path] [--resume] [--no-flood-totals-and-plots] [--profile-set P.F=V]
+    bash <printed submit script>
 """
 
 import argparse
@@ -33,14 +31,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import atomic_write, load_config, load_hpc_config, merged_waterlevel_names, retry_transient_io  # noqa: E402
 from hpc_common import (  # noqa: E402
-    _retry_wrapper_lines,
-    _stage_configfile_lines,
-    _stage_tile_grid_lines,
+    SNAKEMAKE,
+    JobChain,
+    add_profile_set_argument,
+    apply_profile_sets,
+    even_split,
+    lpt_pack,
     read_targets_lines,
-    sbatch_header,
+    resolve_profile,
+    tile_grid_override_lines,
 )
-from generate_hpc_exposure_jobs import generate_exposure_dispatch, generate_exposure_resume_dispatch  # noqa: E402
-from generate_hpc_flood_totals_and_plots_job import write_flood_totals_and_plots_job  # noqa: E402
+from generate_hpc_exposure_jobs import add_exposure_jobs, add_exposure_resume_jobs  # noqa: E402
+from generate_hpc_flood_totals_and_plots_job import add_flood_totals_job  # noqa: E402
 from tiles import build_chunk_grid  # noqa: E402
 
 
@@ -55,27 +57,13 @@ def _stage_file_locally(src_path: str) -> str:
     return dst
 
 
-
-def _split_evenly(targets: list[str], n_nodes: int) -> list[list[str]]:
-    """Split `targets` into up to n_nodes contiguous, near-equal batches."""
-    n_batches = min(n_nodes, len(targets))
-    k, m = divmod(len(targets), n_batches)
-    return [targets[i * k + min(i, m): (i + 1) * k + min(i + 1, m)] for i in range(n_batches)]
-
-
 def _split_by_chunk(
     targets_by_chunk: dict[str, list[str]], chunk_weight: dict[str, float], n_nodes: int,
 ) -> list[list[str]]:
-    # Whole chunks per batch, LPT; no two batches build the same exposure grid.
+    # Whole chunks per batch; no two batches build the same exposure grid.
     chunks = [c for c in targets_by_chunk if targets_by_chunk[c]]
-    n_batches = min(n_nodes, len(chunks))
-    loads = [0.0] * n_batches
-    batches: list[list[str]] = [[] for _ in range(n_batches)]
-    for cid in sorted(chunks, key=lambda c: -chunk_weight.get(c, 1.0)):
-        j = loads.index(min(loads))
-        batches[j] += targets_by_chunk[cid]
-        loads[j] += chunk_weight.get(cid, 1.0)
-    return batches
+    buckets = lpt_pack({c: chunk_weight.get(c, 1.0) for c in chunks}, min(n_nodes, len(chunks)))
+    return [[t for c in bucket for t in targets_by_chunk[c]] for bucket in buckets]
 
 
 def _raise_open_files_limit_lines() -> list[str]:
@@ -84,138 +72,75 @@ def _raise_open_files_limit_lines() -> list[str]:
     return ['ulimit -n "$(ulimit -Hn)" 2>/dev/null || true']
 
 
-def _write_native_merge_jobs(
-    local_jobs_dir: Path, linux_jobs_dir: str, linux_code_root: str, sbatch_cfg: dict,
-    name_prefix: str, return_periods: list[str], waterlevel_names: list[str], configfile_path: str,
-) -> list[str]:
-    """Write one merge_england_local_tiles.py sbatch per (RP, SLR); return their Linux paths."""
-    script_paths = []
+def _add_native_merge_jobs(chain: JobChain, linux_code_root: str, name_prefix: str, return_periods: list[str],
+                           waterlevel_names: list[str], configfile_path: str) -> list[str]:
+    """Add one merge_england_local_tiles.py job per (RP, SLR); return their names."""
+    names = []
     for rp in return_periods:
         for slr in waterlevel_names:
             name = f"{name_prefix}local_native_merge_{rp}_{slr}"
-            lines = [
-                *sbatch_header(name, sbatch_cfg, f"{linux_jobs_dir}/logs", cpus_per_task=1),
-                *_stage_configfile_lines(),
-                "",
+            chain.add(name, "postprocess", [
                 f'cd "{linux_code_root}"',
                 *_raise_open_files_limit_lines(),
                 f'stage_configfile_locally "{configfile_path}" LOCAL_CONFIGFILE || exit 1',
-                (
-                    'python preparation/merge_england_local_tiles.py --config "$LOCAL_CONFIGFILE" '
-                    f'--return-periods {rp} --waterlevel-name {slr}'
-                ),
-                "",
-            ]
-            script_path = local_jobs_dir / f"{name}.sbatch"
-            with open(script_path, "w", encoding="utf-8", newline="\n") as f:
-                f.write("\n".join(lines))
-            script_paths.append(f"{linux_jobs_dir}/{name}.sbatch")
-            print(f"  wrote {script_path}")
-    return script_paths
+                f'"$GFM_PY" preparation/merge_england_local_tiles.py --config "$LOCAL_CONFIGFILE" '
+                f'--return-periods {rp} --waterlevel-name {slr}',
+            ], resources={"cpus_per_task": 1}, helpers=("stage_config",))
+            names.append(name)
+    return names
 
 
-def _write_batches(
-    local_jobs_dir: Path, linux_jobs_dir: str, linux_code_root: str, sbatch_cfg: dict,
-    phase_name: str, batches: list[list[str]], configfile_path: str, tile_grid_path: str,
-) -> list[str]:
-    """Write one `GFM_CONFIG_PATH=<configfile_path> snakemake` sbatch per batch.
+def _add_batches(chain: JobChain, linux_code_root: str, phase_name: str, batches: list[list[str]],
+                 configfile_path: str, tile_grid_path: str, after: list[str]) -> list[str]:
+    """Add one `GFM_CONFIG_PATH=<staged config> snakemake` job per batch; return their names.
 
-    Returns their Linux paths. configfile_path (resolved_config.yml) makes the
-    compute node's Snakefile parse see this dispatch's config.
+    The staged resolved_config.yml makes the compute node's Snakefile parse see this dispatch's config.
     """
-    script_paths = []
+    cores = resolve_profile(chain.hpc_cfg, "postprocess")["cpus_per_task"]
+    names = []
     for i, batch_targets in enumerate(batches):
         name = f"postprocess_{phase_name}_batch_{i:03d}"
-
-        targets_path = local_jobs_dir / f"{name}_targets.txt"
-        with open(targets_path, "w", encoding="utf-8", newline="\n") as f:
+        with open(chain.local_dir / f"{name}_targets.txt", "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(batch_targets) + "\n")
-
-        lines = [
-            *sbatch_header(name, sbatch_cfg, f"{linux_jobs_dir}/logs"),
-            *_retry_wrapper_lines(),
-            *_stage_configfile_lines(),
-            *_stage_tile_grid_lines(),
-            "",
+        chain.add(name, "postprocess", [
             f'cd "{linux_code_root}"',
             f'echo "=== Postprocessing {phase_name} batch {i:03d}: {len(batch_targets)} target(s) ==="',
             *_raise_open_files_limit_lines(),
             f'stage_configfile_locally "{configfile_path}" LOCAL_CONFIGFILE || exit 1',
             f'stage_tile_grid_locally "{tile_grid_path}" LOCAL_TILE_GRID || exit 1',
-            "python -c 'import sys, yaml; cfg_path, new_path = sys.argv[1], sys.argv[2]; "
-            "cfg = yaml.safe_load(open(cfg_path, encoding=\"utf-8\")); cfg[\"tile_grid\"][\"path\"] = new_path; "
-            "yaml.safe_dump(cfg, open(cfg_path, \"w\", encoding=\"utf-8\"))' "
-            '"$LOCAL_CONFIGFILE" "$LOCAL_TILE_GRID"',
+            *tile_grid_override_lines(),
             "",
-            *read_targets_lines("TARGETS", f"{linux_jobs_dir}/{name}_targets.txt"),
-            (
-                f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
-                f'snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
-                # --rerun-incomplete: redo outputs a killed earlier job left flagged
-                # incomplete instead of aborting the batch.
-                f'--rerun-triggers=mtime --rerun-incomplete '
-                '"${TARGETS[@]}"'
-            ),
-            "",
-        ]
-        script_path = local_jobs_dir / f"{name}.sbatch"
-        with open(script_path, "w", encoding="utf-8", newline="\n") as f:
-            f.write("\n".join(lines))
-        script_paths.append(f"{linux_jobs_dir}/{name}.sbatch")
-        print(f"  wrote {script_path} ({len(batch_targets)} target(s))")
-    return script_paths
+            *read_targets_lines("TARGETS", f"{chain.linux_dir}/{name}_targets.txt"),
+            # --rerun-incomplete: redo outputs a killed earlier job left flagged incomplete
+            # instead of aborting the batch.
+            f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry {SNAKEMAKE} --cores {cores} --nolock '
+            '--rerun-triggers=mtime --rerun-incomplete "${TARGETS[@]}"',
+        ], after=after, helpers=("retry", "stage_config", "stage_tile_grid"))
+        names.append(name)
+        print(f"  {name}: {len(batch_targets)} target(s)")
+    return names
 
 
-def main() -> None:
-    """Write the postprocessing + exposure (+ flood totals/plots) dispatch scripts."""
-    # allow_abbrev=False: a removed flag that is a prefix of its replacement must be an error.
-    parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter, allow_abbrev=False,
-    )
-    default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
-    parser.add_argument("--config", default=str(default_config))
-    parser.add_argument(
-        "--resume", action="store_true",
-        help="rebalance only the still-missing targets across the full node budget per phase "
-             "(skipping any phase that's already 100%% done), instead of a fresh dispatch. "
-             "Cancel the original dispatch's still-running jobs FIRST - see "
-             "generate_hpc_simulation_jobs.py's own --resume docstring for why (same reasoning: "
-             "a stale batch racing a new one over the same still-incomplete targets would redo "
-             "work concurrently for as long as both stay alive).",
-    )
-    parser.add_argument(
-        "--no-flood-totals-and-plots", action="store_true",
-        help="don't append the flood_totals_and_plots phase (compute_flood_totals.py + "
-             "run_analysis.py --only-plots) onto the end of this chain - by default it IS "
-             "appended, gated --dependency=afterany on exposure analysis's own "
-             "final reduce_write job, so the full postprocessing -> exposure -> flood-totals -> "
-             "plots pipeline is one single submission from the login node.",
-    )
-    parser.add_argument("--flood-totals-partition", default=None, help="default: hpc.flood_totals_sbatch.partition")
-    parser.add_argument("--flood-totals-cpus-per-task", type=int, default=None,
-                        help="default: hpc.flood_totals_sbatch.cpus_per_task")
-    parser.add_argument("--flood-totals-mem", default=None, help="default: hpc.flood_totals_sbatch.mem")
-    args = parser.parse_args()
-
-    config_path = Path(args.config)
+def generate(config_path: str | Path, *, resume: bool = False, flood_totals: bool = True,
+             profile_sets: list[str] | None = None) -> str:
+    """Write the postprocessing + exposure (+ flood totals/plots) chain; return its submit script's Linux path."""
+    config_path = Path(config_path)
     local_config = load_config(config_path)
     linux_config = load_hpc_config(config_path)
+    hpc_cfg = apply_profile_sets(linux_config["hpc"], profile_sets)
 
     local_jobs_dir = Path(local_config["hpc"]["jobs_dir"])
-    linux_jobs_dir = linux_config["hpc"]["jobs_dir"]
+    linux_jobs_dir = hpc_cfg["jobs_dir"]
     linux_code_root = linux_config["paths"]["code_root"]
-    hpc_cfg = linux_config["hpc"]
     n_nodes = hpc_cfg["n_nodes"]
-    sbatch_cfg = hpc_cfg["sbatch"]
 
-    retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
-
-    # Only written if missing (standalone use); atomic_write because another
+    # Rewritten every time: a different config may have left its own. atomic_write because another
     # node reading over the shared mount right after a non-atomic write can see a partial file.
-    resolved_config_path = local_jobs_dir / "resolved_config.yml"
-    atomic_write(resolved_config_path, lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
+    atomic_write(local_jobs_dir / "resolved_config.yml", lambda f: yaml.safe_dump(linux_config, f),
+                 encoding="utf-8", newline="")
     linux_resolved_config = f"{linux_jobs_dir}/resolved_config.yml"
+    linux_tile_grid = linux_config["tile_grid"]["path"]
 
     # Local view for the tile-grid read; Linux view for embedded target paths.
     _local_tile_grid_path = _stage_file_locally(local_config["tile_grid"]["path"])
@@ -241,7 +166,7 @@ def main() -> None:
     chunk_grid = build_chunk_grid(tile_gdf, chunk_size_deg)
     chunk_ids = chunk_grid["chunk_id"].tolist()
     print(f"{len(chunk_ids)} populated chunk(s) (chunk_size_deg={chunk_size_deg}), "
-          f"{len(return_periods)} RPs, {len(waterlevel_names)} SLRs, n_nodes={n_nodes}\n")
+          f"{len(return_periods)} RPs, {len(waterlevel_names)} SLRs, n_nodes={n_nodes}")
 
     linux_merged = linux_config["postprocessing"]["merged_outputs"]
     local_merged = local_config["postprocessing"]["merged_outputs"]
@@ -272,7 +197,7 @@ def main() -> None:
         for row in chunk_grid.itertuples()
     }
 
-    if args.resume:
+    if resume:
         # One glob per flat output directory: per-target exists() over the shared mount is a
         # network round-trip each (77,000+ targets).
         chunks_dir_local = Path(local_merged) / "chunks"
@@ -286,7 +211,7 @@ def main() -> None:
         phase3_sel = [p for p in phase3_pairs if Path(p[2]).name not in existing_ff]
         print(f"Resume: phase 1 {len(phase1_sel)}/{len(phase1_pairs)} remaining, "
               f"phase 2 {len(phase2_sel)}/{len(phase2_pairs)} remaining, "
-              f"phase 3 {len(phase3_sel)}/{len(phase3_pairs)} remaining\n")
+              f"phase 3 {len(phase3_sel)}/{len(phase3_pairs)} remaining")
         name_prefix = "resume_postprocess_"
         submit_name = "submit_resume_postprocess_and_exposure.sh"
     else:
@@ -294,126 +219,76 @@ def main() -> None:
         name_prefix = "postprocess_"
         submit_name = "submit_postprocess_and_exposure.sh"
 
+    chain = JobChain(hpc_cfg, local_jobs_dir, linux_jobs_dir)
+    last: list[str] = []  # the most recent non-empty phase: the next one waits for all of it
     if native_merge:
         print(f"Local-native merge: {len(return_periods) * len(waterlevel_names)} job(s), one per (RP, SLR)")
-        phases = [("local-native merge", _write_native_merge_jobs(
-            local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg, name_prefix,
-            return_periods, waterlevel_names, linux_resolved_config,
-        ))]
+        last = _add_native_merge_jobs(chain, linux_code_root, name_prefix, return_periods, waterlevel_names,
+                                      linux_resolved_config)
     elif merge_only:
         phase1_targets = [lx for _, lx, _ in phase1_sel]
         print(f"Merge only (merge_chunk): {len(phase1_targets)} target(s)")
-        phases = [("merge_chunk", _write_batches(
-            local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
-            f"{name_prefix}merge", _split_evenly(phase1_targets, n_nodes), linux_resolved_config, linux_config["tile_grid"]["path"],
-        ) if phase1_targets else [])]
+        last = _add_batches(chain, linux_code_root, f"{name_prefix}merge", even_split(phase1_targets, n_nodes),
+                            linux_resolved_config, linux_tile_grid, after=[])
     elif per_chunk:
         # Per chunk: the needed flood-fraction targets (pulling in merges and the
         # exposure grid), plus in resume mode any merge/grid output missing alone.
         targets_by_chunk: dict[str, list[str]] = {cid: [] for cid in chunk_ids}
-        for sel in ([phase3_sel] if not args.resume else [phase1_sel, phase2_sel, phase3_sel]):
+        for sel in ([phase3_sel] if not resume else [phase1_sel, phase2_sel, phase3_sel]):
             for cid, lx, _ in sel:
                 targets_by_chunk[cid].append(lx)
         n_targets = sum(len(v) for v in targets_by_chunk.values())
-        print(f"Per-chunk dispatch ({len(chunk_ids)} chunk(s) >= n_nodes={n_nodes}): "
-              f"{n_targets} target(s), merge -> exposure grid -> flood fraction per chunk, no phase barriers")
-        chunk_scripts = _write_batches(
-            local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
-            f"{name_prefix}chunks", _split_by_chunk(targets_by_chunk, chunk_weight, n_nodes), linux_resolved_config, linux_config["tile_grid"]["path"],
-        ) if n_targets else []
-        phases = [("postprocessing (per chunk: merge -> exposure grid -> flood fraction)", chunk_scripts)]
+        print(f"Per-chunk dispatch ({len(chunk_ids)} chunk(s) >= n_nodes={n_nodes}): {n_targets} target(s), "
+              "merge -> exposure grid -> flood fraction per chunk, no phase barriers")
+        if n_targets:
+            last = _add_batches(chain, linux_code_root, f"{name_prefix}chunks",
+                                _split_by_chunk(targets_by_chunk, chunk_weight, n_nodes),
+                                linux_resolved_config, linux_tile_grid, after=[])
     else:
         print(f"Three-phase dispatch ({len(chunk_ids)} chunk(s) < n_nodes={n_nodes} - spreads merges over more nodes)")
-        phase1_targets = [lx for _, lx, _ in phase1_sel]
-        phase2_targets = [lx for _, lx, _ in phase2_sel]
-        phase3_targets = [lx for _, lx, _ in phase3_sel]
+        # Requesting waterdepth also produces provenance in the same job. Phase 2 needs each
+        # chunk's (return_periods[0], baseline_slr) merge for its grid metadata.
+        print(f"Phase 2 reference scenario: {return_periods[0]}_{baseline_slr}")
+        for phase, sel in (("merge", phase1_sel), ("exposure_grid", phase2_sel), ("flood_fraction", phase3_sel)):
+            targets = [lx for _, lx, _ in sel]
+            if targets:
+                last = _add_batches(chain, linux_code_root, f"{name_prefix}{phase}", even_split(targets, n_nodes),
+                                    linux_resolved_config, linux_tile_grid, after=last)
 
-        # Requesting waterdepth also produces provenance in the same job.
-        print(f"Phase 1 (merge_chunk): {len(phase1_targets)} target(s)")
-        phase1_scripts = _write_batches(
-            local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
-            f"{name_prefix}merge", _split_evenly(phase1_targets, n_nodes), linux_resolved_config, linux_config["tile_grid"]["path"],
-        ) if phase1_targets else []
-
-        # Needs each chunk's (return_periods[0], baseline_slr) merge for grid metadata.
-        print(f"\nPhase 2 (prepare_exposure_grid_chunk): {len(phase2_targets)} target(s) "
-              f"(reference scenario: {return_periods[0]}_{baseline_slr})")
-        phase2_scripts = _write_batches(
-            local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
-            f"{name_prefix}exposure_grid", _split_evenly(phase2_targets, n_nodes), linux_resolved_config, linux_config["tile_grid"]["path"],
-        ) if phase2_targets else []
-
-        print(f"\nPhase 3 (compute_flood_fraction_chunk): {len(phase3_targets)} target(s)")
-        phase3_scripts = _write_batches(
-            local_jobs_dir, linux_jobs_dir, linux_code_root, sbatch_cfg,
-            f"{name_prefix}flood_fraction", _split_evenly(phase3_targets, n_nodes), linux_resolved_config, linux_config["tile_grid"]["path"],
-        ) if phase3_targets else []
-        phases = [
-            ("phase 1 (merge_chunk)", phase1_scripts),
-            ("phase 2 (prepare_exposure_grid_chunk)", phase2_scripts),
-            ("phase 3 (compute_flood_fraction_chunk)", phase3_scripts),
-        ]
-
-    # Phases with zero batches (resume, done) are skipped; PREV_IDS carries over.
-    submit_lines = ["#!/bin/bash", "set -euo pipefail", "", 'PREV_IDS=""']
-    for phase_label, scripts in phases:
-        if not scripts:
-            continue
-        submit_lines.append(f'\n# {phase_label} ({len(scripts)} batch(es))')
-        submit_lines.append('IDS=""')
-        for script in scripts:
-            submit_lines += [
-                'if [ -z "$PREV_IDS" ]; then',
-                f'  JID=$(sbatch --parsable "{script}")',
-                "else",
-                f'  JID=$(sbatch --parsable --dependency=afterany:$PREV_IDS "{script}")',
-                "fi",
-                f'echo "{phase_label}: submitted {script} -> job $JID"',
-                'IDS="${IDS:+$IDS:}$JID"',
-            ]
-        submit_lines.append('PREV_IDS="$IDS"')
-
-    # Resume mode needs a FRESH exposure dispatch if no batch_*_chunks.txt exists.
-    print()
     if merge_only:
         print("merge_only: no exposure analysis, flood totals or plots")
-    elif args.resume and any((local_jobs_dir / "exposure").glob("batch_*_chunks.txt")):
-        submit_lines = generate_exposure_resume_dispatch(
-            local_config, linux_config, submit_lines, prev_ids_expr="$PREV_IDS",
-        )
     else:
-        submit_lines = generate_exposure_dispatch(
-            local_config, linux_config, chunk_ids, submit_lines, prev_ids_expr="$PREV_IDS",
-        )
+        # Resume needs a fresh exposure dispatch if no batch_*_chunks.txt exists.
+        if resume and any((local_jobs_dir / "exposure").glob("batch_*_chunks.txt")):
+            exposure_last = add_exposure_resume_jobs(chain, local_config, linux_config, after=last)
+        else:
+            exposure_last = add_exposure_jobs(chain, local_config, linux_config, chunk_ids, after=last)
+        if flood_totals:
+            add_flood_totals_job(chain, linux_config, after=[exposure_last])
 
-    # Final phase, gated on exposure's last job ($JID = reduce_write).
-    if not args.no_flood_totals_and_plots and not merge_only:
-        _, linux_ftp_script = write_flood_totals_and_plots_job(
-            local_config, linux_config,
-            partition=args.flood_totals_partition, cpus=args.flood_totals_cpus_per_task, mem=args.flood_totals_mem,
-        )
-        submit_lines.append("\n# flood totals + plots (final phase)")
-        submit_lines += [
-            f'JID=$(sbatch --parsable --dependency=afterany:$JID "{linux_ftp_script}")',
-            f'echo "submitted {linux_ftp_script} -> job $JID (depends on exposure analysis\'s reduce_write)"',
-        ]
+    submit = chain.write_submit(submit_name)
+    print(f"Done: {len(chain.jobs)} job(s) -> {local_jobs_dir}")
+    return submit
 
-    submit_script_path = local_jobs_dir / submit_name
-    with open(submit_script_path, "w", encoding="utf-8", newline="\n") as f:
-        f.write("\n".join(submit_lines) + "\n")
 
-    n_total_scripts = sum(len(s) for _, s in phases)
-    if merge_only:
-        tail = ""
-    elif args.no_flood_totals_and_plots:
-        tail = " -> exposure analysis"
-    else:
-        tail = " -> exposure analysis -> flood totals -> plots"
-    print(f"\nDone. {len(phases)} postprocessing phase(s){tail}, "
-          f"{n_total_scripts}+ sbatch script(s) written to {local_jobs_dir}")
-    print(f"Submit on the cluster with: bash {linux_jobs_dir}/{submit_name}")
-    print(f"(This one call submits the ENTIRE remaining pipeline - postprocessing{tail} - all at once; "
-          f"SLURM's own --dependency=afterany chain handles the timing.)")
+def main() -> None:
+    # allow_abbrev=False: a removed flag that is a prefix of its replacement must be an error.
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter, allow_abbrev=False,
+    )
+    parser.add_argument("--config", default=str(Path(__file__).resolve().parents[1] / "config" / "config.yml"))
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="only the still-missing targets per phase, rebalanced over the node budget; cancel the "
+             "original dispatch's still-running jobs first",
+    )
+    parser.add_argument("--no-flood-totals-and-plots", action="store_true",
+                        help="end the chain after the exposure analysis")
+    add_profile_set_argument(parser)
+    args = parser.parse_args()
+    submit = generate(args.config, resume=args.resume, flood_totals=not args.no_flood_totals_and_plots,
+                      profile_sets=args.profile_set)
+    print(f"Submit on the cluster with: bash {submit}")
 
 
 if __name__ == "__main__":

@@ -1,21 +1,19 @@
-"""Generate HPC sbatch scripts for preprocessing across hpc.n_nodes parallel nodes.
+"""Write the HPC preprocessing jobs: node batches, then the simulation dispatch; entry point `generate()`.
 
-Tile targets are split into independent `snakemake --nolock` batches, followed by
-one afterany job that generates and submits the simulation waves.
-submit_preprocess_and_dispatch.sh first builds every shared, tile-independent
-output (geoid-offset raster, GOCO06s absolute geoid when a local DEM bridges
-through it, cached station GeoPackages) synchronously on the
-machine that wrote resolved_config.yml: --nolock is only safe once those exist.
+Tile targets are split into independent `snakemake --nolock` batches, followed by one afterany
+job that checks every batch target exists, then generates and submits the simulation waves.
+The submit script first builds every shared, tile-independent output (geoid-offset raster,
+GOCO06s absolute geoid when a local DEM bridges through it, cached station GeoPackages)
+synchronously on the machine that runs it: --nolock is only safe once those exist.
 Target paths mirror preprocessing.smk's templates.
 
---calibration --fuse: when EVERY tile is hop_distance==0, each batch preprocesses
-then simulates its own tiles (no cross-node dependency); writes
-submit_fused_batches.sh instead.
+fuse: when EVERY tile is hop_distance==0, each batch preprocesses then simulates its own tiles
+(no cross-node dependency); writes submit_fused_batches.sh instead.
+preprocess_only: no dispatch job; writes submit_preprocess_batches.sh.
 
 Usage:
-    python generate_hpc_preprocess_job.py [--config path/to/config.yml]
-    python generate_hpc_preprocess_job.py --config ... --calibration --fuse
-    bash <printed submit_preprocess_and_dispatch.sh / submit_fused_batches.sh path>
+    python generate_hpc_preprocess_job.py [--config path] [--fuse | --preprocess-only] [--profile-set P.F=V]
+    bash <printed submit script>
 """
 
 import argparse
@@ -31,10 +29,15 @@ from config_utils import (  # noqa: E402
     atomic_write, dem_source_by_tile, dem_source_meta, get_data_catalog, load_config, load_hpc_config,
     merged_waterlevel_names, retry_transient_io,
 )
-from hpc_common import _retry_wrapper_lines, _stage_configfile_lines, read_targets_lines, sbatch_header  # noqa: E402
+from hpc_common import (  # noqa: E402
+    SNAKEMAKE, JobChain, add_profile_set_argument, apply_profile_sets, env_lines, even_split, read_targets_lines,
+    resolve_profile, retry_wrapper_lines, stage_configfile_lines,
+)
 from vertical_datum import HYBRID_GRID_BRIDGES  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+SUBMIT_NAMES = {"fuse": "submit_fused_batches.sh", "preprocess_only": "submit_preprocess_batches.sh",
+                "dispatch": "submit_preprocess_and_dispatch.sh"}
 
 
 def _target_paths(tile_dir: str, return_periods: list[str], waterlevel_names: list[str]) -> list[str]:
@@ -63,97 +66,50 @@ def _simulate_target_paths(tile_dir: str, return_periods: list[str], waterlevel_
     return [f"{tile_dir}/results/waterdepth_{rp}_{slr}.tif" for rp in return_periods for slr in waterlevel_names]
 
 
-def main() -> None:
-    """Generate (and print how to submit) the HPC preprocessing dispatch."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    default_config = Path(__file__).resolve().parents[1] / "config" / "config.yml"
-    parser.add_argument("--config", default=str(default_config))
-    parser.add_argument(
-        "--calibration", action="store_true",
-        help="use generate_hpc_simulation_jobs.py directly for the post-preprocessing "
-             "wave-dispatch phase instead of `snakemake generate_eikonal_jobs` - skips "
-             "Snakemake's own full-DAG preprocessing-output verification (safe here: this "
-             "phase only runs after submit_preprocess_and_dispatch.sh's own afterany chain "
-             "already guarantees every preprocessing batch above finished), and - unlike "
-             "`rule generate_eikonal_jobs`, whose own base_config_path is a hardcoded "
-             "literal path to production config.yml regardless of --configfile (see "
-             "hpc_dispatch.smk) - correctly honors a scenario --config end to end. "
-             "Appropriate at calibration-subset scale, where the full-DAG build's "
-             "multi-hour cost at production scale buys nothing anyway.",
-    )
-    parser.add_argument(
-        "--fuse", action="store_true",
-        help="requires --calibration. Collapses preprocessing and simulate into ONE "
-             "sbatch script per batch (preprocess this batch's tiles, then immediately "
-             "simulate the same tiles, sequentially on the same node) instead of the "
-             "normal two-phase design (every preprocessing batch across every node, "
-             "THEN one dispatch job that generates and submits simulate waves). Valid "
-             "ONLY when every tile in the run is hop_distance==0 (asserted below) - "
-             "the two-phase design exists purely to let hop>=1 simulate wait for its "
-             "lower-hop neighbours' own simulate output, which can land on a DIFFERENT "
-             "node's batch; a hop=0-only tile's simulate step has no such cross-tile "
-             "dependency at all (only its own preprocessing), so there is nothing for "
-             "the dispatch phase's cross-node synchronization to protect here - it was "
-             "pure added wait, inherited from the general multi-wave machinery rather "
-             "than being a real requirement for a single-wave study like this one.",
-    )
-    parser.add_argument(
-        "--preprocess-only", action="store_true",
-        help="skip phase 2 (generate+dispatch simulate waves) entirely - no "
-             "`generate_eikonal_jobs`/`generate_hpc_simulation_jobs.py` call, no dispatch "
-             "sbatch, no afterany chain. For call sites that only need preprocessing "
-             "outputs (dem/mask/friction/boundaries) and never intend to run the eikonal "
-             "flood solve at all - e.g. building shared model_outputs/ inputs for a "
-             "downstream pipeline (SFINCS) that reads them directly and has its own, "
-             "separate run/dispatch mechanism. Mutually exclusive with --fuse (nothing to "
-             "fuse simulate into). Writes submit_preprocess_batches.sh instead of "
-             "submit_preprocess_and_dispatch.sh.",
-    )
-    args = parser.parse_args()
-    if args.fuse and not args.calibration:
-        parser.error("--fuse requires --calibration")
-    if args.fuse and args.preprocess_only:
-        parser.error("--fuse and --preprocess-only are mutually exclusive")
+def _write_lines(path: Path, lines: list[str]) -> None:
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
 
-    config_path = Path(args.config)
+
+def generate(config_path: str | Path, *, fuse: bool = False, preprocess_only: bool = False,
+             profile_sets: list[str] | None = None) -> str:
+    """Write the preprocessing batches (+ dispatch job) and the submit script; return its Linux path."""
+    if fuse and preprocess_only:
+        raise ValueError("fuse and preprocess_only are mutually exclusive")
+    config_path = Path(config_path)
     local_config = load_config(config_path)
     linux_config = load_hpc_config(config_path)
+    hpc_cfg = apply_profile_sets(linux_config["hpc"], profile_sets)
 
     local_jobs_dir = Path(local_config["hpc"]["jobs_dir"])
-    linux_jobs_dir = linux_config["hpc"]["jobs_dir"]
+    linux_jobs_dir = hpc_cfg["jobs_dir"]
     linux_code_root = linux_config["paths"]["code_root"]
     linux_model_outputs = linux_config["simulation"]["model_outputs"]
     # Preprocessing targets (inputs/ only); see preprocessing.smk.
     linux_preprocessing_inputs_dir = linux_config["simulation"].get("preprocessing_inputs_dir") or linux_model_outputs
-    hpc_cfg = linux_config["hpc"]
-    n_nodes = hpc_cfg["n_nodes"]
 
-    retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
 
-    # Referenced via GFM_CONFIG_PATH so compute nodes see this --config, not the
-    # default config.yml. atomic_write: another node reading over the shared mount right after
+    # Referenced via GFM_CONFIG_PATH so compute nodes see this config, not the default
+    # config.yml. atomic_write: another node reading over the shared mount right after
     # a non-atomic write can see a partial file (UnicodeDecodeError).
-    resolved_config_path = local_jobs_dir / "resolved_config.yml"
-    atomic_write(resolved_config_path, lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
+    atomic_write(local_jobs_dir / "resolved_config.yml", lambda f: yaml.safe_dump(linux_config, f),
+                 encoding="utf-8", newline="")
     linux_resolved_config = f"{linux_jobs_dir}/resolved_config.yml"
 
-    # Local view: linux_config's absolute Linux path only works embedded in sbatch
-    # scripts, not opened from Windows.
+    # Local view: linux_config's absolute Linux path only works embedded in job scripts.
     tile_gdf = retry_transient_io(gpd.read_file, local_config["tile_grid"]["path"])
     return_periods = [f"RP{rp}" for rp in linux_config["boundary_conditions"]["return_periods"]]
     waterlevel_names = merged_waterlevel_names(linux_config["boundary_conditions"], linux_config["adaptation"])
 
-    if args.fuse:
+    if fuse:
         non_wave0 = tile_gdf.loc[tile_gdf["hop_distance"] != 0, "tile_id"].tolist()
         if non_wave0:
             raise ValueError(
-                f"--fuse requires every tile to be hop_distance==0 (a fused batch runs "
-                f"simulate right after preprocessing, with no cross-batch ordering, so a "
-                f"hop>=1 tile could run before its neighbour) - found {len(non_wave0)} "
-                f"tile(s) with hop_distance!=0: {non_wave0[:20]}"
-                f"{'...' if len(non_wave0) > 20 else ''}. Drop --fuse and use the normal "
-                f"two-phase --calibration dispatch instead."
+                f"fuse requires every tile to be hop_distance==0 (a fused batch simulates right after "
+                f"preprocessing, with no cross-batch ordering, so a hop>=1 tile could run before its "
+                f"neighbour) - found {len(non_wave0)} tile(s) with hop_distance!=0: {non_wave0[:20]}"
+                f"{'...' if len(non_wave0) > 20 else ''}. Use the two-phase dispatch instead."
             )
 
     # Shared, non-tile outputs: must be built before any --nolock batch starts.
@@ -168,63 +124,31 @@ def main() -> None:
         for rp in return_periods:
             for slr in waterlevel_names:
                 linux_shared_targets.append(f"{linux_stations_cache_dir}/stations_{rp}_{slr}.gpkg")
-
-    shared_targets_path = local_jobs_dir / "shared_targets.txt"
-    with open(shared_targets_path, "w", encoding="utf-8", newline="\n") as f:
-        f.write("\n".join(linux_shared_targets) + "\n")
+    _write_lines(local_jobs_dir / "shared_targets.txt", linux_shared_targets)
     linux_shared_targets_file = f"{linux_jobs_dir}/shared_targets.txt"
 
     all_tiles = sorted(tile_gdf["tile_id"].astype(int).astype(str).tolist(), key=int)
-
     # hpc.single_preprocess_job: one job for all tiles; at calibration scale
     # SLURM queue wait (hours) dominates minutes of compute.
-    if hpc_cfg.get("single_preprocess_job", False):
-        n_batches = 1
-        batches = [("000", all_tiles)]
-    else:
-        n_batches = min(n_nodes, len(all_tiles))
-        k, m = divmod(len(all_tiles), n_batches)
-        batches = [  # [(batch_id, [tile_id, ...]), ...]
-            (f"{i:03d}", all_tiles[i * k + min(i, m): (i + 1) * k + min(i + 1, m)])
-            for i in range(n_batches)
-        ]
+    n_batches = 1 if hpc_cfg.get("single_preprocess_job", False) else hpc_cfg["n_nodes"]
+    batches = [(f"{i:03d}", tiles) for i, tiles in enumerate(even_split(all_tiles, n_batches))]
 
-    if args.fuse:
-        submit_script_name = "submit_fused_batches.sh"
-    elif args.preprocess_only:
-        submit_script_name = "submit_preprocess_batches.sh"
-    else:
-        submit_script_name = "submit_preprocess_and_dispatch.sh"
+    kind = "fuse" if fuse else "preprocess_only" if preprocess_only else "dispatch"
+    submit_script_name = SUBMIT_NAMES[kind]
+    cores = resolve_profile(hpc_cfg, "preprocess")["cpus_per_task"]
+    snakemake_batch = (f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry {SNAKEMAKE} --cores {cores} '
+                       '--nolock --rerun-triggers=mtime --rerun-incomplete')
 
-    batch_script_paths = []
+    chain = JobChain(hpc_cfg, local_jobs_dir, linux_jobs_dir)
     for batch_id, batch_tiles in batches:
-        sbatch_cfg = hpc_cfg["sbatch"]
         name = f"preprocess_batch_{batch_id}"
         targets = [
             p for tile_id in batch_tiles
             for p in _target_paths(f"{linux_preprocessing_inputs_dir}/{tile_id}", return_periods, waterlevel_names)
         ]
-
         # Targets in a file read via mapfile (read_targets_lines), keeping the script short.
-        targets_path = local_jobs_dir / f"{name}_targets.txt"
-        with open(targets_path, "w", encoding="utf-8", newline="\n") as f:
-            f.write("\n".join(targets) + "\n")
-
-        # --fuse: this batch's simulate targets (all tiles hop_distance==0).
-        if args.fuse:
-            simulate_targets = [
-                p for tile_id in batch_tiles
-                for p in _simulate_target_paths(f"{linux_model_outputs}/{tile_id}", return_periods, waterlevel_names)
-            ]
-            simulate_targets_path = local_jobs_dir / f"{name}_simulate_targets.txt"
-            with open(simulate_targets_path, "w", encoding="utf-8", newline="\n") as f:
-                f.write("\n".join(simulate_targets) + "\n")
-
-        lines = [
-            *sbatch_header(name, sbatch_cfg, f"{linux_jobs_dir}/logs"),
-            *_retry_wrapper_lines(),
-            *_stage_configfile_lines(),
-            "",
+        _write_lines(local_jobs_dir / f"{name}_targets.txt", targets)
+        body = [
             f'cd "{linux_code_root}"',
             f'echo "=== Preprocessing batch {batch_id}: {len(batch_tiles)} tiles ==="',
             f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
@@ -244,149 +168,85 @@ def main() -> None:
             f'done < "{linux_shared_targets_file}"',
             "",
             *read_targets_lines("TARGETS", f"{linux_jobs_dir}/{name}_targets.txt"),
-            (
-                f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
-                f'snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
-                '--rerun-triggers=mtime --rerun-incomplete '
-                '"${TARGETS[@]}"'
-            ),
-            "",
+            f'{snakemake_batch} "${{TARGETS[@]}}"',
         ]
-        if args.fuse:
-            lines += [
+        if fuse:
+            simulate_targets = [
+                p for tile_id in batch_tiles
+                for p in _simulate_target_paths(f"{linux_model_outputs}/{tile_id}", return_periods, waterlevel_names)
+            ]
+            _write_lines(local_jobs_dir / f"{name}_simulate_targets.txt", simulate_targets)
+            body += [
+                "",
                 f'echo "=== Simulating batch {batch_id}: {len(batch_tiles)} tiles ==="',
                 *read_targets_lines("SIMULATE_TARGETS", f"{linux_jobs_dir}/{name}_simulate_targets.txt"),
-                (
-                    f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
-                    f'snakemake --cores {sbatch_cfg["cpus_per_task"]} --nolock '
-                    '--rerun-triggers=mtime --rerun-incomplete '
-                    '"${SIMULATE_TARGETS[@]}"'
-                ),
-                "",
+                f'{snakemake_batch} "${{SIMULATE_TARGETS[@]}}"',
             ]
-        script_path = local_jobs_dir / f"{name}.sbatch"
-        with open(script_path, "w", encoding="utf-8", newline="\n") as f:
-            f.write("\n".join(lines))
-        batch_script_paths.append(f"{linux_jobs_dir}/{name}.sbatch")
-        print(f"  wrote {script_path} ({len(batch_tiles)} tiles, {len(targets)} target files)")
+        chain.add(name, "preprocess", body, helpers=("retry", "stage_config"))
+        print(f"  wrote {name} ({len(batch_tiles)} tiles, {len(targets)} target files)")
 
-    # Phase 2 (not under --fuse): generate and submit the wave scripts.
-    # --calibration uses generate_hpc_simulation_jobs.py because
-    # `snakemake generate_eikonal_jobs` builds resolved_config.yml from a
-    # hardcoded production config.yml path, ignoring GFM_CONFIG_PATH.
-    dispatch_script_path = None
-    if not args.fuse and not args.preprocess_only:
-        if args.calibration:
-            generate_call = (
-                'python snakemake_workflow/scripts/generate_hpc_simulation_jobs.py '
-                '--config "$LOCAL_CONFIGFILE"'
-            )
-        else:
-            generate_call = (
-                'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
-                'snakemake generate_eikonal_jobs --cores 1 --nolock '
-                '--rerun-triggers=mtime'
-            )
-
-        dispatch_cfg = hpc_cfg["sbatch"]
-        dispatch_lines = [
-            *sbatch_header(
-                "gfm_generate_jobs_and_dispatch", dispatch_cfg, f"{linux_jobs_dir}/logs",
-                cpus_per_task=1, log_name="generate_jobs_and_dispatch",
-            ),
-            *_retry_wrapper_lines(),  # only used by the non-calibration snakemake branch below; harmless if unused
-            *_stage_configfile_lines(),
-            "",
+    stale_dispatch = local_jobs_dir / "generate_jobs_and_dispatch.sbatch"
+    if kind == "dispatch":
+        # The preprocess batches end afterany: a failed batch must stop the chain here, not
+        # surface as missing-input failures in every simulate job.
+        target_files = " ".join(f'"{linux_jobs_dir}/{name}_targets.txt"' for name in chain.names())
+        chain.add("gfm_generate_jobs_and_dispatch", "dispatch", [
             f'cd "{linux_code_root}"',
-            'echo "=== Generating wave sbatch scripts ==="',
             f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
-            generate_call,
-            "",
+            'echo "=== Checking preprocessing outputs ==="',
+            f'"$GFM_PY" hpc/gfm_hpc.py check-targets {target_files} || exit 1',
+            'echo "=== Generating wave sbatch scripts ==="',
+            '"$GFM_PY" hpc/gfm_hpc.py run simulate --config "$LOCAL_CONFIGFILE"',
             'echo "=== Submitting simulation waves ==="',
             f'bash "{linux_jobs_dir}/submit_waves.sh"',
-            "",
-        ]
-        dispatch_script_path = local_jobs_dir / "generate_jobs_and_dispatch.sbatch"
-        with open(dispatch_script_path, "w", encoding="utf-8", newline="\n") as f:
-            f.write("\n".join(dispatch_lines))
-        print(f"  wrote {dispatch_script_path}")
+        ], after=chain.names(), filename=stale_dispatch.name, helpers=("stage_config",))
+    elif stale_dispatch.exists():
+        # No dispatch job; remove a stale one so it cannot be submitted by mistake.
+        stale_dispatch.unlink()
+        print(f"  removed stale {stale_dispatch}")
 
-    # Build shared inputs synchronously here (same machine that wrote
-    # resolved_config.yml), then submit batches, then the afterany dispatch job.
-    shared_cfg = hpc_cfg["sbatch"]
-    submit_lines = [
-        "#!/bin/bash",
-        "set -euo pipefail",
+    # Shared inputs are built synchronously by the submit script, before any batch is queued.
+    prelude = [
+        *env_lines(hpc_cfg),
         "",
-        shared_cfg["env_activate_cmd"],
-        "",
-        *_retry_wrapper_lines(),
-        *_stage_configfile_lines(),
+        *retry_wrapper_lines(),
+        *stage_configfile_lines(),
         "",
         f'cd "{linux_code_root}"',
         'echo "=== Building shared preprocessing inputs (synchronous, on this login node) ==="',
         f'stage_configfile_locally "{linux_resolved_config}" LOCAL_CONFIGFILE || exit 1',
         *read_targets_lines("SHARED_TARGETS", linux_shared_targets_file),
         (
-            f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry '
-            'snakemake --cores 1 --nolock --rerun-triggers=mtime '
-            f'"${{SHARED_TARGETS[@]}}" 2>&1 | tee "{linux_jobs_dir}/logs/build_shared_inputs.log"'
+            f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry {SNAKEMAKE} --cores 1 --nolock '
+            f'--rerun-triggers=mtime "${{SHARED_TARGETS[@]}}" 2>&1 | tee "{linux_jobs_dir}/logs/build_shared_inputs.log"'
         ),
         "",
-        'IDS=""',
     ]
-    for script in batch_script_paths:
-        submit_lines += [
-            f'JID=$(sbatch --parsable "{script}")',
-            f'echo "submitted {script} -> job $JID"',
-            'IDS="${IDS:+$IDS:}$JID"',
-        ]
-    if args.fuse or args.preprocess_only:
-        # No dispatch job; remove a stale one so it cannot be submitted by mistake.
-        stale_dispatch = local_jobs_dir / "generate_jobs_and_dispatch.sbatch"
-        if stale_dispatch.exists():
-            stale_dispatch.unlink()
-            print(f"  removed stale {stale_dispatch} (leftover from a prior two-phase generation)")
-    else:
-        submit_lines += [
-            "",
-            f'JID=$(sbatch --parsable --dependency=afterany:$IDS "{linux_jobs_dir}/generate_jobs_and_dispatch.sbatch")',
-            (
-                f'echo "submitted {linux_jobs_dir}/generate_jobs_and_dispatch.sbatch -> job $JID '
-                f'(depends on all {len(batch_script_paths)} preprocessing batches)"'
-            ),
-        ]
-    submit_script_path = local_jobs_dir / submit_script_name
-    with open(submit_script_path, "w", encoding="utf-8", newline="\n") as f:
-        f.write("\n".join(submit_lines) + "\n")
+    submit = chain.write_submit(submit_script_name, prelude)
     # Only one kind of submit script should exist per jobs_dir.
-    all_submit_names = {"submit_fused_batches.sh", "submit_preprocess_batches.sh", "submit_preprocess_and_dispatch.sh"}
-    for other_name in all_submit_names - {submit_script_name}:
+    for other_name in set(SUBMIT_NAMES.values()) - {submit_script_name}:
         stale_submit = local_jobs_dir / other_name
         if stale_submit.exists():
             stale_submit.unlink()
-            print(f"  removed stale {stale_submit} (leftover from a prior generation of a different kind)")
+            print(f"  removed stale {stale_submit}")
 
-    if hpc_cfg.get("single_preprocess_job", False):
-        node_summary = "single hpc.sbatch job, no batching - hpc.single_preprocess_job"
-    else:
-        node_summary = f"{n_batches} nodes, {n_nodes} total budget"
-    if args.fuse:
-        print(
-            f"\nDone. 1 synchronous shared-inputs build + {len(batch_script_paths)} fused "
-            f"preprocess+simulate batch(es) ({node_summary}) written to {local_jobs_dir}"
-        )
-    elif args.preprocess_only:
-        print(
-            f"\nDone. 1 synchronous shared-inputs build + {len(batch_script_paths)} preprocessing-only "
-            f"batch(es) ({node_summary}) written to {local_jobs_dir} - no simulate dispatch generated."
-        )
-    else:
-        print(
-            f"\nDone. 1 synchronous shared-inputs build + {len(batch_script_paths)} preprocessing batch(es) "
-            f"({node_summary}) + 1 dispatch job written to {local_jobs_dir}"
-        )
-    print(f"Submit on the cluster with: bash {linux_jobs_dir}/{submit_script_name}")
+    print(f"Done: shared-inputs build + {len(batches)} {kind} batch(es)"
+          f"{' + dispatch job' if kind == 'dispatch' else ''} -> {local_jobs_dir}")
+    return submit
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--config", default=str(Path(__file__).resolve().parents[1] / "config" / "config.yml"))
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--fuse", action="store_true",
+                      help="every tile hop_distance==0: each batch preprocesses then simulates its own tiles")
+    mode.add_argument("--preprocess-only", action="store_true",
+                      help="no simulation dispatch (e.g. inputs for the SFINCS calibration)")
+    add_profile_set_argument(parser)
+    args = parser.parse_args()
+    submit = generate(args.config, fuse=args.fuse, preprocess_only=args.preprocess_only, profile_sets=args.profile_set)
+    print(f"Submit on the cluster with: bash {submit}")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 """Run the flood model for one tile/return_period/waterlevel_name from a plain CLI call.
 
-HPC entry point for the sbatch scripts from generate_eikonal_jobs.py; logs a
+HPC entry point of the wave jobs (generate_hpc_simulation_jobs.py, via run_simulation_batch.py); logs a
 run-timing record for every outcome.
 
 Usage:

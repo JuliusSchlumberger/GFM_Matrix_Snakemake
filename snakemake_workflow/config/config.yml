@@ -284,48 +284,58 @@ simulation: # Used by: preprocessing rules
     bytes_per_pixel: 80
 
 # ── HPC DISPATCH ────────────────────────────────────────────────────────────────
-# Used by: rule generate_eikonal_jobs (rules/hpc_dispatch.smk) / scripts/generate_eikonal_jobs.py.
-# A hop_distance>=1 tile is seeded from a lower-hop neighbour's output, so tiles are grouped by
-# wave, then split into node batches; submit_waves.sh submits each wave with a SLURM
-# `--dependency=afterany` barrier on all prior waves. See docs/hpc.md.
-# `sbatch` is shared by simulation and preprocessing batching; for preprocessing its
-# cpus_per_task is also the `snakemake --cores` value (1 = fully serial).
+# Used by: hpc/gfm_hpc.py and the job generators it calls. A hop_distance>=1 tile is seeded from a
+# lower-hop neighbour's output, so tiles are grouped by wave, then split into node batches;
+# submit_waves.sh submits each wave with a SLURM `--dependency=afterany` barrier on the prior
+# wave. See docs/hpc.md.
 hpc:
   n_nodes: 40                                        # shared budget across
   # every batch per wave, split evenly by tile count
   jobs_dir: "{root}/model_outputs_v2/hpc_jobs"           # generated sbatch scripts, resolved_config.yml, submit_waves.sh, logs/
   single_preprocess_job: false # true: generate_hpc_preprocess_job.py writes one job for all tiles instead of node batches
-  # Site SLURM values (partition, mem, env_activate_cmd, wave_tiers, *_sbatch) are left empty here:
-  # they come from config_hpc.yml (copy config_hpc.example.yml), which the HPC generators require.
-  sbatch:
-    partition: ""                                     # "" omits #SBATCH --partition (cluster default)
-    account: ""                                       # optional; "" omits #SBATCH --account
-    # days-hours:minutes:seconds. Mandatory: the cluster may default an unset time to 1 minute and kill the job.
-    time: "1-00:00:00"
-    mem: ""
-    # Simulation: tiles solved concurrently per node (single-threaded numba solves).
-    # Preprocessing: `snakemake --cores` for the batch.
-    cpus_per_task: 1
-    env_activate_cmd: ""                              # shell line activating the gfm env in every job
+  # Site values (account, python, container, state_root, job_env, profile resources, wave_tiers)
+  # are left empty here: they come from config_hpc.yml (copy config_hpc.example.yml), which the
+  # HPC generators require.
+  account: ""                                         # optional; "" omits #SBATCH --account
+  python:
+    gfm: ""                                           # absolute python of the gfm env
+    sfincs: ""                                        # absolute python of the hydromt-sfincs-dev env
+  container:
+    cmd: ""                                           # runs SFINCS: `<cmd> exec -B <dir>:/mnt/data <image> sfincs`
+    sfincs_image: ""
+  sfincs_timeout_s: 14400                             # wall-clock limit of one SFINCS run (run_final_tile.sh)
+  state_root: ""                                      # harness plan state and gfm_hpc's HPC-view configs
+  job_env: []                                         # shell lines every job runs after the interpreter exports
+  # Job resources by job kind. A profile's empty or null values fall back to `default`.
+  # Preprocessing: cpus_per_task is the `snakemake --cores` value (1 = fully serial).
+  # Simulation: tiles solved concurrently per node (single-threaded numba solves).
+  profiles:
+    default:
+      partition: ""                                   # "" omits #SBATCH --partition (cluster default)
+      # days-hours:minutes:seconds. Mandatory: the cluster may default an unset time to 1 minute and kill the job.
+      time: "1-00:00:00"
+      mem: ""
+      cpus_per_task: 1
+    preprocess: {}
+    simulate: {}
+    postprocess: {}
+    exposure: {}
+    dispatch: {cpus_per_task: 1}                      # jobs that only generate and submit further jobs
+    flood_totals: {}                                  # cpus_per_task is also compute_flood_totals.py --workers
+    solver_study: {}                                  # --time is computed per study
+    study_figures: {}
+    sfincs_stage1: {}                                 # --time from --stage1-hours
+    sfincs_bridge: {}
+    sfincs_tile: {}                                   # --time computed per job; cpus_per_task = SFINCS threads
+    sfincs_post: {}                                   # cpus_per_task is also the dedup's --workers
+    validation: {}
+    product: {}
 
-  # Per-hop_distance-wave node/partition tiers; override n_nodes/sbatch above, read only by
-  # generate_hpc_simulation_jobs.py (not hpc_dispatch.smk). First tier whose `hops` contains the
-  # wave's hop_distance wins; `n_nodes: null` = one node per tile; `hops: null` is the catch-all
-  # and MUST be last. Each tier sets n_nodes, partition, cpus_per_task, mem and time.
-  # Empty: every wave uses n_nodes/sbatch.
+  # Per-hop_distance-wave node/partition tiers of the simulate jobs; override n_nodes and
+  # profiles.simulate. First tier whose `hops` contains the wave's hop_distance wins;
+  # `n_nodes: null` = one node per tile; `hops: null` is the catch-all and MUST be last. Each tier
+  # sets n_nodes, partition, cpus_per_task, mem and time. Empty: every wave uses n_nodes/simulate.
   wave_tiers: []
-
-  # Resources of the SFINCS calibration jobs (sfincs_tiles/generate_calibration_jobs.py; --time is
-  # computed per job) and of the flood-totals + plots job (generate_hpc_flood_totals_and_plots_job.py,
-  # cpus_per_task is also its --workers). Empty/null values fall back to hpc.sbatch.
-  calibration_sbatch:
-    partition: ""
-    cpus_per_task: null
-    mem: ""
-  flood_totals_sbatch:
-    partition: ""
-    cpus_per_task: null
-    mem: ""
 
 # ── POSTPROCESSING ────────────────────────────────────────────────────────────
 # Used by: merge_chunk.py, compute_flood_fraction_chunk.py, build_mosaic_vrt.py,

@@ -1,10 +1,10 @@
-"""Generate per-node sbatch scripts for a sweep-budget/obstacle-coupling study.
+"""Write per-node jobs for a sweep-budget/obstacle-coupling study; entry point `generate()`.
 
 One process per node runs its tile slice sequentially (amortizes env setup and
 Numba JIT). Tiles are LPT bin-packed on pixel count (bbox area_deg2 * 3600**2,
 EPSG:4326 ~1-arcsecond DeltaDTM); --time is a no-early-exit worst case.
 Build wet_tiles_selected.txt afterwards with aggregate_wet_tiles.py.
-Partition, mem, cpus and account default to hpc.sbatch (config_hpc.yml). --friction-source
+Resources: the solver_study profile of config_hpc.yml (--profile-set to override). --friction-source
 picks the study's friction (land cover at the config's friction_scale_factor, or a uniform
 rate); each source writes to its own <out_subdir>_<source> folder.
 
@@ -13,12 +13,13 @@ Usage:
     python generate_calibration_batch_jobs.py obstacle_coupling --tile-ids-file <wet_tiles_selected.txt>
     python generate_calibration_batch_jobs.py sweep_budget --friction-source uniform --uniform-attenuation-m-per-km 0.2
     python generate_calibration_batch_jobs.py sweep_budget --study-dir-name calibration_500_tiles
-    bash <printed submit script path>
+    bash <printed submit script>
 """
 
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from pathlib import Path
 
@@ -27,9 +28,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from config_utils import atomic_write, load_config, load_hpc_config, retry_transient_io  # noqa: E402
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sfincs_tiles"))
-from gfm_config import check_site_roots, site_paths  # noqa: E402  (site python path: sfincs_tiles/site_env.sh)
+from hpc_common import JobChain, add_profile_set_argument, apply_profile_sets, lpt_pack  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -69,18 +68,6 @@ def load_pixel_counts(tile_ids: list[str], domain_tiles_path: Path) -> dict[str,
     return {t: px_by_tile_id[t] for t in tile_ids}
 
 
-def lpt_bin_pack(tile_ids: list[str], px_by_tile_id: dict[str, float], n_nodes: int) -> list[list[str]]:
-    """Split tiles into n_nodes buckets by LPT greedy bin packing on pixel count."""
-    ordered = sorted(tile_ids, key=lambda t: px_by_tile_id[t], reverse=True)
-    buckets: list[list[str]] = [[] for _ in range(n_nodes)]
-    bucket_cost = [0.0] * n_nodes
-    for tile_id in ordered:
-        idx = min(range(n_nodes), key=lambda i: bucket_cost[i])
-        buckets[idx].append(tile_id)
-        bucket_cost[idx] += px_by_tile_id[tile_id]
-    return buckets
-
-
 def estimate_worst_case_hours(batch_tiles: list[str], px_by_tile_id: dict[str, float], worst_case_sweeps_per_tile: int) -> float:
     """Estimate a batch's wall-clock hours assuming no early exit."""
     total_px = sum(px_by_tile_id[t] for t in batch_tiles)
@@ -90,75 +77,44 @@ def estimate_worst_case_hours(batch_tiles: list[str], px_by_tile_id: dict[str, f
 
 def hours_to_slurm_time(hours: float) -> str:
     """Format hours as SLURM D-HH:MM:SS, rounded up to a whole hour (2.3 -> 0-03:00:00)."""
-    import math
     total_hours = max(1, math.ceil(hours))
     days, rem_hours = divmod(total_hours, 24)
     return f"{days}-{rem_hours:02d}:00:00"
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("study", choices=list(SCRIPTS))
-    parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
-    parser.add_argument(
-        "--study-dir-name", default="calibration_500_tiles",
-        help="name of the study's own output directory under paths.root - default is the "
-             "current global-representativeness study; pass a different name for an "
-             "independent, separately-sized study",
-    )
-    parser.add_argument("--tile-ids-file", default=None, help="default: <study-dir-name>/<study's own default file>, see SCRIPTS above")
-    parser.add_argument("--n-nodes", type=int, default=N_NODES_DEFAULT)
-    parser.add_argument("--partition", default=None, help="default: hpc.sbatch.partition")
-    parser.add_argument("--time", default=None, help="default: derived from the worst-loaded node's own estimated worst-case time, see estimate_worst_case_hours()")
-    parser.add_argument("--time-margin", type=float, default=1.5, help="safety multiplier applied to the worst-loaded node's estimated worst-case hours before rounding up to --time (default: 1.5x)")
-    parser.add_argument("--mem", default=None, help="default: hpc.sbatch.mem")
-    parser.add_argument("--cpus-per-task", type=int, default=None, help="default: hpc.sbatch.cpus_per_task")
-    parser.add_argument("--account", default=None, help="default: hpc.sbatch.account")
-    parser.add_argument("--friction-source", choices=["landcover", "uniform"], default="landcover")
-    parser.add_argument("--uniform-attenuation-m-per-km", type=float, default=None,
-                        help="with --friction-source uniform (default: the config's uniform_attenuation_m_per_km)")
-    parser.add_argument(
-        "--extra-args", default="",
-        help="extra CLI args forwarded verbatim to each node's script call, e.g. '--epsilon 0.03' "
-             "or '--max-outer-iterations 4' to reproduce production's config.yml value",
-    )
-    args = parser.parse_args()
-
-    spec = SCRIPTS[args.study]
-
-    config_path = Path(args.config)
+def generate(study: str, config_path: str | Path, *, friction_source: str = "landcover",
+             study_dir_name: str = "calibration_500_tiles", tile_ids_file: str | None = None,
+             n_nodes: int = N_NODES_DEFAULT, time: str | None = None, time_margin: float = 1.5,
+             uniform_attenuation_m_per_km: float | None = None, extra_args: str = "",
+             profile_sets: list[str] | None = None) -> str:
+    """Write the study's batch jobs, resolved_config.yml and submit script; return its Linux path."""
+    spec = SCRIPTS[study]
+    config_path = Path(config_path)
     local_config = load_config(config_path)
     linux_config = load_hpc_config(config_path)
-    site = site_paths()
-    check_site_roots(site, linux_config["paths"])
-    gfm_py_linux = site["GFM_PYTHON"]
-    sbatch_cfg = linux_config["hpc"]["sbatch"]
-    for key in ("partition", "mem", "cpus_per_task", "account"):
-        if getattr(args, key) is None:
-            setattr(args, key, sbatch_cfg.get(key, ""))
+    apply_profile_sets(linux_config["hpc"], profile_sets)
 
     local_root = Path(local_config["paths"]["root"])
     linux_root = linux_config["paths"]["root"]
     linux_code_root = linux_config["paths"]["code_root"]
+    study_root_local = local_root / study_dir_name
+    study_root_linux = f"{linux_root}/{study_dir_name}"
 
-    study_root_local = local_root / args.study_dir_name
-    study_root_linux = f"{linux_root}/{args.study_dir_name}"
-
-    out_subdir = f"{spec['out_subdir']}_{args.friction_source}"
-    friction_args = f"--friction-source {args.friction_source}" + (
-        f" --uniform-attenuation-m-per-km {args.uniform_attenuation_m_per_km:g}"
-        if args.uniform_attenuation_m_per_km is not None else "")
-    tile_ids_file = (Path(args.tile_ids_file) if args.tile_ids_file
-                     else study_root_local / spec["default_tile_ids_file"].format(source=args.friction_source))
-    all_tile_ids = [line.strip() for line in tile_ids_file.read_text().splitlines() if line.strip()]
+    out_subdir = f"{spec['out_subdir']}_{friction_source}"
+    friction_args = f"--friction-source {friction_source}" + (
+        f" --uniform-attenuation-m-per-km {uniform_attenuation_m_per_km:g}"
+        if uniform_attenuation_m_per_km is not None else "")
+    ids_path = (Path(tile_ids_file) if tile_ids_file
+                else study_root_local / spec["default_tile_ids_file"].format(source=friction_source))
+    all_tile_ids = [line.strip() for line in ids_path.read_text().splitlines() if line.strip()]
     if not all_tile_ids:
-        raise ValueError(f"no tile IDs in {tile_ids_file}")
-    print(f"{len(all_tile_ids)} tile(s) from {tile_ids_file}")
+        raise ValueError(f"no tile IDs in {ids_path}")
+    print(f"{len(all_tile_ids)} tile(s) from {ids_path}")
 
-    n_nodes = min(args.n_nodes, len(all_tile_ids))
+    n_nodes = min(n_nodes, len(all_tile_ids))
     domain_tiles_path = local_root / "processed_inputs" / "mask" / "domain_tiles_global.gpkg"
     px_by_tile_id = load_pixel_counts(all_tile_ids, domain_tiles_path)
-    batches = lpt_bin_pack(all_tile_ids, px_by_tile_id, n_nodes)
+    batches = lpt_pack(px_by_tile_id, n_nodes)
     sizes = [len(b) for b in batches]
     # Correction B solves every tile twice (production flood_depth_dense), and so do the studies.
     passes = 2 if local_config["simulation"]["flooding"]["duration_correction"]["enabled"] else 1
@@ -168,74 +124,72 @@ def main() -> None:
     print(f"{n_nodes} node(s), {min(sizes)}-{max(sizes)} tile(s) each (LPT bin-packed by estimated pixel count)")
     print(f"worst-case estimated time per node: {min(hours_per_batch):.2f}-{max_hours:.2f}h "
           f"(zero early-exit-ever bound, {spec['worst_case_sweeps_per_tile']} sweeps/tile)")
-
-    time_limit = args.time or hours_to_slurm_time(max_hours * args.time_margin)
-    print(f"--time={time_limit} ({'explicit' if args.time else f'derived: {max_hours:.2f}h worst case x {args.time_margin} margin'})")
+    time_limit = time or hours_to_slurm_time(max_hours * time_margin)
+    print(f"--time={time_limit} ({'explicit' if time else f'derived: {max_hours:.2f}h worst case x {time_margin} margin'})")
 
     local_jobs_dir = study_root_local / "hpc_jobs"
     linux_jobs_dir = f"{study_root_linux}/hpc_jobs"
-    retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
     retry_transient_io((study_root_local / out_subdir).mkdir, parents=True, exist_ok=True)
 
     # Nodes get the pre-merged Linux-path config so they need no override files.
-    resolved_config_path = study_root_local / "resolved_config.yml"
-    atomic_write(str(resolved_config_path), lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
-    print(f"Wrote {resolved_config_path} (Linux path view, for --config on every node)")
+    atomic_write(str(study_root_local / "resolved_config.yml"), lambda f: yaml.safe_dump(linux_config, f),
+                 encoding="utf-8", newline="")
     linux_config_path = f"{study_root_linux}/resolved_config.yml"
 
     out_dir_linux = f"{study_root_linux}/{out_subdir}"
-    batch_name_prefix = f"calib_{args.study}_{args.friction_source}_batch"
-
-    script_paths = []
+    batch_name_prefix = f"calib_{study}_{friction_source}_batch"
+    chain = JobChain(linux_config["hpc"], local_jobs_dir, linux_jobs_dir)
     for i, batch_tiles in enumerate(batches):
         if not batch_tiles:
             continue
-        batch_id = f"{i:03d}"
-        name = f"{batch_name_prefix}_{batch_id}"
-        lines = [
-            "#!/bin/bash",
-            f"#SBATCH --job-name={name}",
-        ]
-        if args.partition:
-            lines.append(f"#SBATCH --partition={args.partition}")
-        if args.account:
-            lines.append(f"#SBATCH --account={args.account}")
-        lines += [
-            f"#SBATCH --time={time_limit}",
-            f"#SBATCH --mem={args.mem}",
-            f"#SBATCH --cpus-per-task={args.cpus_per_task}",
-            f"#SBATCH --output={linux_jobs_dir}/logs/{name}_%j.out",
-            f"#SBATCH --error={linux_jobs_dir}/logs/{name}_%j.err",
-            "",
-            # -e would change nothing: the node runs one command, and the study script itself
-            # carries on past a failing tile.
-            "set -uo pipefail",
-            "unset PROJ_LIB PROJ_DATA GDAL_DATA",  # as the sfincs_tiles jobs: no stale PROJ/GDAL data dirs
-            f'"{gfm_py_linux}" "{linux_code_root}/calibration_studies/{spec["script_name"]}" --out-dir "{out_dir_linux}" '
-            f'--config "{linux_config_path}" {friction_args} --tile-ids {" ".join(batch_tiles)} {args.extra_args}',
-            "",
-        ]
-        script_path = local_jobs_dir / f"{name}.sbatch"
-        with open(script_path, "w", encoding="utf-8", newline="\n") as f:
-            f.write("\n".join(lines))
-        script_paths.append(f"{linux_jobs_dir}/{name}.sbatch")
-        print(f"  wrote {script_path} ({len(batch_tiles)} tile(s))")
+        # -e would change nothing: the node runs one command, and the study script itself
+        # carries on past a failing tile.
+        chain.add(f"{batch_name_prefix}_{i:03d}", "solver_study", [
+            f'"$GFM_PY" "{linux_code_root}/calibration_studies/{spec["script_name"]}" --out-dir "{out_dir_linux}" '
+            f'--config "{linux_config_path}" {friction_args} --tile-ids {" ".join(batch_tiles)} {extra_args}',
+        ], resources={"time": time_limit}, errexit=False)
+        print(f"  {batch_name_prefix}_{i:03d}: {len(batch_tiles)} tile(s)")
+    return chain.write_submit(f"submit_{batch_name_prefix}es.sh")
 
-    submit_lines = ["#!/bin/bash", "set -euo pipefail", ""]
-    for script in script_paths:
-        submit_lines += [
-            f'JID=$(sbatch --parsable "{script}")',
-            f'echo "submitted {script} -> job $JID"',
-        ]
-    submit_filename = f"submit_{batch_name_prefix}es.sh"
-    submit_path = local_jobs_dir / submit_filename
-    with open(submit_path, "w", encoding="utf-8", newline="\n") as f:
-        f.write("\n".join(submit_lines) + "\n")
 
-    print(f"\nDone. {len(script_paths)} batch(es), {len(all_tile_ids)} tile(s) total.")
-    print(f"Wrote {submit_path}")
-    print(f"\nSubmit on the cluster with: bash {linux_jobs_dir}/{submit_filename}")
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("study", choices=list(SCRIPTS))
+    parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
+    add_study_arguments(parser)
+    args = parser.parse_args()
+    submit = generate(args.study, args.config, **study_kwargs(args))
+    print(f"Submit on the cluster with: bash {submit}")
+
+
+def add_study_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add the study options shared by this CLI and hpc/gfm_hpc.py studies."""
+    parser.add_argument(
+        "--study-dir-name", default="calibration_500_tiles",
+        help="the study's output directory under paths.root; another name gives an independent study",
+    )
+    parser.add_argument("--tile-ids-file", default=None, help="default: <study-dir-name>/<the study's default file>")
+    parser.add_argument("--n-nodes", type=int, default=N_NODES_DEFAULT)
+    parser.add_argument("--time", default=None, help="default: the worst-loaded node's worst-case estimate x --time-margin")
+    parser.add_argument("--time-margin", type=float, default=1.5)
+    parser.add_argument("--friction-source", choices=["landcover", "uniform"], default="landcover")
+    parser.add_argument("--uniform-attenuation-m-per-km", type=float, default=None,
+                        help="with --friction-source uniform (default: the config's uniform_attenuation_m_per_km)")
+    parser.add_argument(
+        "--extra-args", default="",
+        help="extra CLI args forwarded verbatim to each node's script call, e.g. '--epsilon 0.03' "
+             "or '--max-outer-iterations 4' to reproduce production's config.yml value",
+    )
+    add_profile_set_argument(parser)
+
+
+def study_kwargs(args: argparse.Namespace) -> dict:
+    """Return generate()'s keyword arguments from parsed add_study_arguments options."""
+    return {"friction_source": args.friction_source, "study_dir_name": args.study_dir_name,
+            "tile_ids_file": args.tile_ids_file, "n_nodes": args.n_nodes, "time": args.time,
+            "time_margin": args.time_margin, "uniform_attenuation_m_per_km": args.uniform_attenuation_m_per_km,
+            "extra_args": args.extra_args, "profile_sets": args.profile_set}
 
 
 if __name__ == "__main__":

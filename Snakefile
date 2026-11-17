@@ -169,9 +169,6 @@ _SIMULATION_OUTPUTS = expand(
     tile_id=TILE_IDS, return_period=RETURN_PERIODS, waterlevel_name=WATERLEVEL_NAMES,
 )
 
-# Must follow _PREPROCESS_OUTPUTS, which generate_eikonal_jobs uses.
-include: "snakemake_workflow/rules/hpc_dispatch.smk"
-
 _plot_cfg = config["postprocessing"]["plots"]
 _plotting_enabled = _plot_cfg["enabled"]
 

@@ -1,33 +1,60 @@
 # HPC site values, worked example for Hydrax (Deltares). Copy to config_hpc.yml (gitignored)
-# and fill in your site values. Required by the HPC job generators, which layer it over
-# config.yml (+ config_local.yml) via config_utils.load_hpc_config(): it gives the paths as the
-# compute nodes see them and the cluster's SLURM values. Only keys to override.
+# and fill in your site values. The one site file of every HPC job: hpc/gfm_hpc.py and the job
+# generators layer it over config.yml (+ config_local.yml, a scenario) via
+# config_utils.load_hpc_config(). Only keys to override; semantics in config.yml's hpc block.
 
 paths:
-  # Linux mount of the shared data root; equal to GFM_DATA_ROOT in sfincs_tiles/site_env.sh.
+  # Linux mount of the shared data root.
   root: "/p/11212688-004-global-floodmaps/modelling"
-  # Linux repo checkout the jobs `cd` into; equal to GFM_CODE_ROOT in sfincs_tiles/site_env.sh.
-  # Absolute, no `~`: it is embedded as `cd "{code_root}"`, where bash does not expand `~`.
+  # Linux repo checkout the jobs `cd` into. Absolute, no `~`: it is embedded as `cd "{code_root}"`,
+  # where bash does not expand `~`.
   code_root: "/u/schlumbe/gfm_code"
 
 hpc:
-  sbatch:
-    # Hydrax partitions: 1vcpu/4vcpu/16vcpu/24vcpu/60vcpu (8 GB/vCPU), 44vcpu, gpu, test (30 min cap).
-    # Responsible use: ~240 cores at once, so n_nodes x cpus_per_task per wave should stay under that.
-    partition: 1vcpu
-    # 1vcpu nodes have 7950 MB usable, not 8192; requesting 8G fails.
-    mem: "7G"
-    # HDF5_USE_FILE_LOCKING=FALSE: HDF5 reads (e.g. geogunit .nc) hang on Hydrax NFS otherwise.
-    env_activate_cmd: 'module load miniconda && eval "$(conda shell.bash hook)" && conda activate gfm && export HDF5_USE_FILE_LOCKING=FALSE'
+  account: ""
+  # Every job calls these by absolute path, with the first one's bin directory first on PATH.
+  python:
+    gfm: "/u/schlumbe/.conda/envs/gfm/bin/python"
+    sfincs: "/u/schlumbe/.conda/envs/hydromt-sfincs-dev/bin/python"
+  container:
+    cmd: apptainer
+    sfincs_image: "docker://deltares/sfincs-cpu:sfincs-v2.4.0-Galibier-Release"
+  # Harness plan state and gfm_hpc's HPC-view configs.
+  state_root: "/p/11212688-004-global-floodmaps/modelling/hpc_harness"
+  job_env:
+    # No stale PROJ/GDAL data dirs from the submitting shell.
+    - unset PROJ_LIB PROJ_DATA GDAL_DATA
+    # HDF5 reads (e.g. geogunit .nc) hang on Hydrax NFS with file locking.
+    - export HDF5_USE_FILE_LOCKING=FALSE
+
+  # Hydrax partitions: 1vcpu/4vcpu/16vcpu/24vcpu/60vcpu (8 GB/vCPU), 44vcpu, gpu, test (30 min cap).
+  # Responsible use: ~240 cores at once, so n_nodes x cpus_per_task per wave should stay under that.
+  # default.time stays in config.yml (scenario configs override it).
+  profiles:
+    default:
+      partition: 1vcpu
+      # 1vcpu nodes have 7950 MB usable, not 8192; requesting 8G fails.
+      mem: "7G"
+    # 4 threads per SFINCS run (sfincs_min_per_mcell is calibrated at 4).
+    sfincs_stage1: {partition: "4vcpu", cpus_per_task: 4, mem: "30G"}
+    sfincs_bridge: {partition: "4vcpu", cpus_per_task: 4, mem: "30G"}
+    sfincs_tile: {partition: "4vcpu", cpus_per_task: 4, mem: "30G"}
+    sfincs_post: {partition: "4vcpu", cpus_per_task: 4, mem: "30G", time: "0-12:00:00"}
+    # One node, I/O-bound thread pool of cpus_per_task workers. The mem is a guess at the
+    # partition's safe ceiling; confirm with `sinfo -N -o "%N %P %m %c"`.
+    flood_totals: {partition: "24vcpu", cpus_per_task: 24, mem: "32G"}
+    study_figures: {partition: "4vcpu", cpus_per_task: 4, mem: "30G", time: "0-04:00:00"}
+    validation: {partition: "4vcpu", cpus_per_task: 4, mem: "30G", time: "2-00:00:00"}
+    product: {partition: "16vcpu", cpus_per_task: 16, mem: "120G", time: "2-00:00:00"}
 
   # Sized for ~0.6 min/solve and the 4504-tile grid (hop 0: 3761 tiles, hop 1/2: 462+139);
-  # re-estimate before reusing for another grid or solver change. Semantics: config.yml.
+  # re-estimate before reusing for another grid or solver change.
   wave_tiers:
     - hops: [0]
       n_nodes: 6
       partition: "24vcpu"
       cpus_per_task: 24
-      mem: "168G"           # 7G/vcpu, same headroom ratio as sbatch: above
+      mem: "168G"           # 7G/vcpu, same headroom ratio as profiles.default
       time: "0-16:00:00"    # ~12h worst case (627 tiles/batch x 45 scenarios / 24-way / ~0.6min) + margin
     - hops: [1, 2]
       n_nodes: 2
@@ -41,15 +68,3 @@ hpc:
       cpus_per_task: 1
       mem: "7G"
       time: "0-01:00:00"    # ~27min worst case (45 scenarios serial, ~0.6min each) + margin
-
-  # SFINCS calibration jobs: 4 threads per SFINCS run (sfincs_min_per_mcell is calibrated at 4).
-  calibration_sbatch:
-    partition: "4vcpu"
-    cpus_per_task: 4
-    mem: "30G"
-  # Flood totals + plots: one node, I/O-bound thread pool of cpus_per_task workers.
-  flood_totals_sbatch:
-    partition: "24vcpu"
-    cpus_per_task: 24
-    # A guess at the partition's safe ceiling; confirm with `sinfo -N -o "%N %P %m %c"`.
-    mem: "32G"

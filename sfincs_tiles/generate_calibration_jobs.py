@@ -1,81 +1,72 @@
-"""Write the SFINCS calibration's HPC chain (calibration_roughness_SFINCS).
+"""Write the SFINCS calibration's HPC chain (calibration_roughness_SFINCS); entry point `run()`.
 
-stage1 (local): candidate shards + per-shard screen/boundary-line/pre-flight jobs
-and a bridge job (afterany) that selects tiles and runs `stage2 --submit`.
-stage2: spreads unfinished tiles over jobs, longest-processing-time-first, plus a post job
+stage1: candidate shards + per-shard screen/boundary-line/pre-flight jobs and a bridge job
+(afterany) that selects tiles and runs `stage2 --submit`.
+stage2: spreads unfinished tiles over jobs, longest processing time first, plus a post job
 (afterany) that writes variant_selection.json, the dedup and both analyses.
+post: the post job of a phase alone.
+rerun: resets a finished calibration's tiles in place (`--part models`: one phase of the flood-model
+runs; `--part sfincs`: forcing, SFINCS model build and run, then the sweep) and writes stage 2.
 
-Usage:
-    python generate_calibration_jobs.py stage1            # then on the cluster: bash .../hpc_jobs_stage1/submit_chain.sh
+Usage (normally through hpc/gfm_hpc.py sfincs ...):
+    python generate_calibration_jobs.py stage1 [--submit]
     python generate_calibration_jobs.py stage2 --submit   # what the bridge job runs
+    python generate_calibration_jobs.py rerun --part models --phase duration [--reset-runs] [--dry-run] [--submit]
 
-Job resources: hpc.calibration_sbatch (config_hpc.yml); roots and pythons: site_env.sh.
+Job resources: the sfincs_* profiles of config_hpc.yml (--profile-set to override).
 """
 
 from __future__ import annotations
 
 import argparse
-import heapq
 import json
 import math
 import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from gfm_config import check_site_roots, read_root, site_paths  # noqa: E402
+_HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE))
+sys.path.insert(0, str(_HERE.parent / "src"))
+from gfm_config import read_root  # noqa: E402
 
-# Site paths: single definition in site_env.sh (env-overridable), shared with the shell drivers.
-_HX = site_paths()
-LINUX_DATA_ROOT = _HX["GFM_DATA_ROOT"]
-LINUX_CODE_ROOT = _HX["GFM_CODE_ROOT"]
 # Eikonal solves per tile, in units of the 10-solve sweep of eikonal_min_per_mcell, by phase
 # (run_calibration_models.phase_runs; a duration run solves twice, bathtubs ~free).
 RUN_LOAD = {"sweep": 1.8, "duration": 2.0}
-GFM_PY = _HX["GFM_PYTHON"]
-HYDROMT_PY = _HX["GFM_SFINCS_PYTHON"]
 DONE_MARKER = "calibration_run.done"
+TILE_MARKERS = ("calibration_run.done", "calibration_run.failed", "calibration_run.step")
 FALLBACK_MCELLS = 2.0  # tile without a pre-flight record
+DEFAULT_CONFIG = _HERE.parent / "snakemake_workflow" / "config" / "config.yml"
 
 
-def _hpc_view(args) -> tuple[dict, dict]:
-    """Return the HPC view of --config and its hpc.calibration_sbatch with the CLI overrides.
+def _hpc_view(config: str | Path, profile_sets: list[str] | None) -> dict:
+    from config_utils import load_hpc_config
+    from hpc_common import apply_profile_sets
 
-    Also checks that site_env.sh and the config agree on the roots.
-    """
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-    from config_utils import load_hpc_config  # noqa: E402
-    from hpc_common import job_sbatch_cfg  # noqa: E402
-
-    linux_config = load_hpc_config(args.config)
-    check_site_roots(_HX, linux_config["paths"])
-    sbatch = job_sbatch_cfg(linux_config["hpc"], "calibration_sbatch")
-    if args.partition:
-        sbatch["partition"] = args.partition
-    if args.mem:
-        sbatch["mem"] = args.mem
-    return linux_config, sbatch
+    linux_config = load_hpc_config(config)
+    apply_profile_sets(linux_config["hpc"], profile_sets)
+    return linux_config
 
 
-# No stale PROJ/GDAL data dirs from the submitting shell; HDF5 reads hang on Hydrax NFS with locking.
-JOB_ENV = ["unset PROJ_LIB PROJ_DATA GDAL_DATA", "export HDF5_USE_FILE_LOCKING=FALSE"]
+def _slurm_hours(hours: int) -> str:
+    return f"{hours // 24}-{hours % 24:02d}:00:00"
 
 
-def _sbatch_header(name: str, sbatch: dict, hours: int, log_dir: str) -> list[str]:
-    # No -e: a job's later steps still run after an earlier one partly failed (stage 1: the
-    # pre-flight after tiles errored in the line build; stage 2: the rest of the tile loop).
-    # Steps the rest cannot do without end in `|| exit 1`.
-    partition = [f"#SBATCH --partition={sbatch['partition']}"] if sbatch.get("partition") else []
-    account = [f"#SBATCH --account={sbatch['account']}"] if sbatch.get("account") else []
-    return ["#!/bin/bash", f"#SBATCH --job-name={name}", *partition, *account,
-            f"#SBATCH --cpus-per-task={sbatch['cpus_per_task']}", f"#SBATCH --mem={sbatch['mem']}",
-            f"#SBATCH --time={hours // 24}-{hours % 24:02d}:00:00",
-            f"#SBATCH --output={log_dir}/{name}_%j.out", f"#SBATCH --error={log_dir}/{name}_%j.err", "",
-            "set -uo pipefail", *JOB_ENV, f'cd "{LINUX_CODE_ROOT}/sfincs_tiles" || exit 1', ""]
+def _chain(linux_config: dict, local_dir: Path, linux_dir: str):
+    from hpc_common import JobChain
+
+    (local_dir / "logs").mkdir(parents=True, exist_ok=True)
+    return JobChain(linux_config["hpc"], local_dir, linux_dir)
 
 
-def cmd_stage1(args) -> None:
-    """Write the stage-1 sbatch jobs, the bridge job and submit_chain.sh.
+def _submit(submit: str) -> None:
+    from hpc_common import submit_script
+
+    submit_script(submit)
+
+
+def cmd_stage1(args) -> str:
+    """Write the stage-1 jobs, the bridge job and submit_chain.sh; return the submit script's Linux path.
 
     Side effects: writes {base}/resolved_config.yml (Linux path view) and runs
     ``select_calibration_tiles.py pool``.
@@ -83,180 +74,285 @@ def cmd_stage1(args) -> None:
     import yaml
 
     config_path = Path(args.config)
-    linux_config, sbatch = _hpc_view(args)
-    cpus = sbatch["cpus_per_task"]
-    root = read_root(config_path)
-    base = root / args.base_dir_name
+    linux_config = _hpc_view(config_path, args.profile_set)
+    base = read_root(config_path) / args.base_dir_name
     base.mkdir(parents=True, exist_ok=True)
     (base / "resolved_config.yml").write_text(yaml.safe_dump(linux_config), encoding="utf-8", newline="\n")
 
-    subprocess.run([sys.executable, str(Path(__file__).parent / "select_calibration_tiles.py"), "pool",
+    subprocess.run([sys.executable, str(_HERE / "select_calibration_tiles.py"), "pool",
                     "--config", str(config_path), "--base-dir-name", args.base_dir_name,
                     "--n-shards", str(args.n_jobs)], check=True)
 
-    lb = f"{LINUX_DATA_ROOT}/{args.base_dir_name}"
-    cfg = f"{lb}/resolved_config.yml"
-    jobs_dir = base / "hpc_jobs_stage1"
-    (jobs_dir / "logs").mkdir(parents=True, exist_ok=True)
-    ljobs = f"{lb}/hpc_jobs_stage1"
-    common = f"--config {cfg} --base-dir-name {args.base_dir_name}"
-    names = []
+    code = f"{linux_config['paths']['code_root']}/sfincs_tiles"
+    lb = f"{linux_config['paths']['root']}/{args.base_dir_name}"
+    common = f"--config {lb}/resolved_config.yml --base-dir-name {args.base_dir_name}"
+    chain = _chain(linux_config, base / "hpc_jobs_stage1", f"{lb}/hpc_jobs_stage1")
+    cpus = chain_cpus(linux_config, "sfincs_stage1")
+    # No -e: a job's later steps still run after an earlier one partly failed (the pre-flight
+    # after tiles errored in the line build). Steps the rest cannot do without end in `|| exit 1`.
     for k in range(args.n_jobs):
-        name = f"stage1_{k:03d}"
-        names.append(name)
         shard, screened = f"{lb}/candidates/shard_{k:03d}.txt", f"{lb}/candidates/screened_{k:03d}.txt"
         n = len((base / "candidates" / f"shard_{k:03d}.txt").read_text().split())
-        lines = _sbatch_header(f"cal_{name}", sbatch, args.stage1_hours, f"{ljobs}/logs") + [
+        chain.add(f"cal_stage1_{k:03d}", "sfincs_stage1", [
+            f'cd "{code}" || exit 1',
             f"# {n} candidate tile(s): screen -> boundary lines -> SFINCS mask pre-flight",
-            f"{GFM_PY} select_calibration_tiles.py screen {common} --tile-ids-file {shard} --out-ids {screened} || exit 1",
-            f"{GFM_PY} build_station_boundary_lines.py {common} --tiles-dir-name model_outputs "
+            f'"$GFM_PY" select_calibration_tiles.py screen {common} --tile-ids-file {shard} --out-ids {screened} || exit 1',
+            f'"$GFM_PY" build_station_boundary_lines.py {common} --tiles-dir-name model_outputs '
             f"--tile-ids-file {screened} --workers {cpus} --skip-existing --plot all",
-            f"{HYDROMT_PY} preflight_sfincs_mask.py {common} --tiles-dir-name model_outputs "
+            f'"$SFINCS_PY" preflight_sfincs_mask.py {common} --tiles-dir-name model_outputs '
             f"--tile-ids-file {screened} --skip-existing",
-            ""]
-        (jobs_dir / f"{name}.sbatch").write_text("\n".join(lines), newline="\n")
-
-    bridge = _sbatch_header("cal_bridge", sbatch, 2, f"{ljobs}/logs") + [
+        ], filename=f"stage1_{k:03d}.sbatch", resources={"time": _slurm_hours(args.stage1_hours)}, errexit=False)
+    chain.add("cal_bridge", "sfincs_bridge", [
+        f'cd "{code}" || exit 1',
         "# after every stage-1 job: line summary -> tile selection + maps -> stage-2 jobs (submitted)",
-        f"{GFM_PY} build_station_boundary_lines.py {common} --summarize",
-        f"{GFM_PY} select_calibration_tiles.py select {common} --n-tiles {args.n_tiles} || exit 1",
-        f"{GFM_PY} generate_calibration_jobs.py stage2 {common} --n-jobs {args.stage2_jobs} --submit",
-        ""]
-    (jobs_dir / "bridge.sbatch").write_text("\n".join(bridge), newline="\n")
-    submit = ["#!/bin/bash", "set -euo pipefail", "ids=()"]
-    submit += [f"ids+=($(sbatch --parsable {ljobs}/{n}.sbatch))" for n in names]
-    submit += ['dep=$(IFS=:; echo "${ids[*]}")',
-               f'bridge=$(sbatch --parsable --dependency=afterany:$dep {ljobs}/bridge.sbatch)',
-               'echo "stage 1: ${ids[*]}"', 'echo "bridge (selection + stage-2 submission): $bridge"', ""]
-    (jobs_dir / "submit_chain.sh").write_text("\n".join(submit), newline="\n")
-    print(f"wrote {jobs_dir}: {len(names)} stage-1 job(s) + bridge\n"
-          f"Submit on the cluster with: bash {ljobs}/submit_chain.sh")
+        f'"$GFM_PY" build_station_boundary_lines.py {common} --summarize',
+        f'"$GFM_PY" select_calibration_tiles.py select {common} --n-tiles {args.n_tiles} || exit 1',
+        f'"$GFM_PY" generate_calibration_jobs.py stage2 {common} --n-jobs {args.stage2_jobs} --submit',
+    ], after=chain.names(), filename="bridge.sbatch", resources={"time": _slurm_hours(2)}, errexit=False)
+    submit = chain.write_submit("submit_chain.sh")
+    print(f"stage 1: {args.n_jobs} job(s) + bridge -> {base / 'hpc_jobs_stage1'}")
+    if args.submit:
+        _submit(submit)
+    return submit
 
 
-def cmd_stage2(args) -> None:
-    """Write the stage-2 sbatch jobs for unfinished tiles; submit them with --submit.
+def chain_cpus(linux_config: dict, profile: str) -> int:
+    from hpc_common import resolve_profile
+
+    return resolve_profile(linux_config["hpc"], profile)["cpus_per_task"]
+
+
+def _add_post_job(chain, linux_config: dict, base_dir_name: str, dedup_dir_name: str, phase: str,
+                  after: list[str]) -> str:
+    """Add the post job of a phase: analysis (variant_selection.json), dedup, dedup analysis.
+
+    The progress report and the raw analysis must not stop the rest; they run before the dedup,
+    which ends the job when it fails.
+    """
+    cfg = f"{linux_config['paths']['root']}/{base_dir_name}/resolved_config.yml"
+    workers = chain_cpus(linux_config, "sfincs_post")
+    name = f"cal_post_{phase}"
+    chain.add(name, "sfincs_post", [
+        f'cd "{linux_config["paths"]["code_root"]}/sfincs_tiles" || exit 1',
+        f'"$GFM_PY" check_calibration_progress.py --config {cfg} --base-dir-name {base_dir_name}',
+        f'"$GFM_PY" run_calibration_sweep_analysis.py --config {cfg} --base-dir-name {base_dir_name}',
+        f'"$SFINCS_PY" compute_calibration_result_dedup.py --config {cfg} --base-dir-name {base_dir_name} '
+        f"--out-dir-name {dedup_dir_name} --workers {workers} || exit 1",
+        f'"$GFM_PY" run_calibration_sweep_analysis.py --config {cfg} --base-dir-name {dedup_dir_name} '
+        f"--raster-base-dir-name {base_dir_name}",
+    ], after=after, filename=f"post_models_{phase}.sbatch", errexit=False)
+    return name
+
+
+def cmd_stage2(args) -> str | None:
+    """Write the stage-2 jobs for unfinished tiles (+ post job); return the submit script's Linux path.
 
     Per-tile minutes = overhead_min + active Mcells (pre-flight) x
-    (sfincs_min_per_mcell + eikonal_min_per_mcell x RUN_LOAD[phase, group]).
+    (sfincs_min_per_mcell + eikonal_min_per_mcell x RUN_LOAD[phase]). None when every tile is done.
     """
-    _, sbatch = _hpc_view(args)
-    root = read_root(Path(args.config))
-    base = root / args.base_dir_name
+    from hpc_common import lpt_pack
+
+    linux_config = _hpc_view(args.config, args.profile_set)
+    base = read_root(Path(args.config)) / args.base_dir_name
     ids = [t.strip() for t in (base / "tile_ids.txt").read_text().split() if t.strip()]
-    tiles, n_done = [], 0
+    est, n_done = {}, 0
     for tid in ids:
         if (base / tid / "outputs" / DONE_MARKER).exists():
             n_done += 1
             continue
         pf = base / "boundary_lines" / "preflight" / f"{tid}.json"
         mcells = json.loads(pf.read_text()).get("n_active", 0) / 1e6 if pf.exists() else FALLBACK_MCELLS
-        load = RUN_LOAD[args.phase]
-        est = args.overhead_min + mcells * (args.sfincs_min_per_mcell + args.eikonal_min_per_mcell * load)
-        tiles.append((tid, est))
-    if not tiles:
+        est[tid] = args.overhead_min + mcells * (args.sfincs_min_per_mcell
+                                                 + args.eikonal_min_per_mcell * RUN_LOAD[args.phase])
+    if not est:
         print(f"Nothing to do: {n_done} tile(s) already done.")
-        return
+        return None
 
-    heap = [(0.0, j) for j in range(min(args.n_jobs, len(tiles)))]
-    jobs = {j: [] for _, j in heap}
-    load = {j: 0.0 for _, j in heap}
-    for tid, est in sorted(tiles, key=lambda x: -x[1]):
-        total, j = heapq.heappop(heap)
-        jobs[j].append(tid)
-        load[j] = total + est
-        heapq.heappush(heap, (load[j], j))
-
-    out_dir = base / "hpc_jobs_stage2"
-    (out_dir / "logs").mkdir(parents=True, exist_ok=True)
-    lout = f"{LINUX_DATA_ROOT}/{args.base_dir_name}/hpc_jobs_stage2"
-    names = []
-    for j, tids in sorted(jobs.items()):
-        name = f"final_{j:03d}"
-        names.append(name)
-        (out_dir / f"tiles_{j:03d}.txt").write_text("\n".join(tids) + "\n", newline="\n")
-        hours = max(1, math.ceil(load[j] * args.time_margin / 60.0))
-        lines = _sbatch_header(f"cal_{name}", sbatch, hours, f"{lout}/logs") + [
-            f"# {len(tids)} tile(s), estimated {load[j] / 60:.1f} h (generate_calibration_jobs.py stage2)",
+    lb = f"{linux_config['paths']['root']}/{args.base_dir_name}"
+    lout = f"{lb}/hpc_jobs_stage2"
+    chain = _chain(linux_config, base / "hpc_jobs_stage2", lout)
+    hpc = linux_config["hpc"]
+    if not (hpc["container"]["cmd"] and hpc["container"]["sfincs_image"]):
+        raise ValueError("hpc.container.cmd and hpc.container.sfincs_image must be set (config_hpc.yml)")
+    exports = {"GFM_DATA_ROOT": linux_config["paths"]["root"], "GFM_CODE_ROOT": linux_config["paths"]["code_root"],
+               "CONTAINER_CMD": hpc["container"]["cmd"], "SFINCS_IMAGE": hpc["container"]["sfincs_image"],
+               "SFINCS_TIMEOUT_S": hpc["sfincs_timeout_s"]}
+    threads = chain_cpus(linux_config, "sfincs_tile")
+    loads = []
+    for j, tids in enumerate(lpt_pack(est, min(args.n_jobs, len(est)))):
+        load = sum(est[t] for t in tids)
+        loads.append(load)
+        (chain.local_dir / f"tiles_{j:03d}.txt").write_text("\n".join(tids) + "\n", newline="\n")
+        hours = max(1, math.ceil(load * args.time_margin / 60.0))
+        # No -e: a failing tile must not end the loop (run_final_tile.sh records it and exits 0).
+        chain.add(f"cal_final_{j:03d}", "sfincs_tile", [
+            f'cd "{linux_config["paths"]["code_root"]}/sfincs_tiles" || exit 1',
+            f"# {len(tids)} tile(s), estimated {load / 60:.1f} h (generate_calibration_jobs.py stage2)",
             "while read -r TILE; do",
             '  [ -n "$TILE" ] || continue',
-            f'  BASE_DIR_NAME={args.base_dir_name} SFINCS_THREADS={sbatch["cpus_per_task"]} CAL_PHASE={args.phase} '
-            f'bash {LINUX_CODE_ROOT}/sfincs_tiles/run_final_tile.sh "$TILE" </dev/null',
-            f"done < {lout}/tiles_{j:03d}.txt", ""]
-        (out_dir / f"{name}.sbatch").write_text("\n".join(lines), newline="\n")
-    (out_dir / "submit_all.sh").write_text(
-        "#!/bin/bash\nset -euo pipefail\n" + "".join(f"sbatch {lout}/{n}.sbatch\n" for n in names), newline="\n")
-    loads = sorted(load.values())
-    print(f"{len(tiles)} tile(s) to run ({n_done} already done) over {len(jobs)} job(s) on {sbatch['partition']}")
-    print(f"estimated hours per job: {loads[0] / 60:.1f}-{loads[-1] / 60:.1f} (x{args.time_margin:g} margin for --time; "
-          f"total {sum(loads) / 60:.0f} h)")
-    post = write_post_job(out_dir, args.base_dir_name, args.dedup_dir_name, args.phase,
-                          sbatch.get("account", "")) if args.post else None
+            f"  BASE_DIR_NAME={args.base_dir_name} SFINCS_THREADS={threads} CAL_PHASE={args.phase} "
+            f'bash {linux_config["paths"]["code_root"]}/sfincs_tiles/run_final_tile.sh "$TILE" </dev/null',
+            f"done < {lout}/tiles_{j:03d}.txt",
+        ], filename=f"final_{j:03d}.sbatch", resources={"time": _slurm_hours(hours)}, errexit=False,
+            env="sfincs", exports=exports)
+    if args.post:
+        _add_post_job(chain, linux_config, args.base_dir_name, args.dedup_dir_name, args.phase, chain.names())
+    submit = chain.write_submit("submit_all.sh")
+    loads.sort()
+    print(f"{len(est)} tile(s) to run ({n_done} already done) over {len(loads)} job(s), phase {args.phase}")
+    print(f"estimated hours per job: {loads[0] / 60:.1f}-{loads[-1] / 60:.1f} (x{args.time_margin:g} margin for "
+          f"--time; total {sum(loads) / 60:.0f} h)")
     if args.submit:
-        ids = [subprocess.run(["sbatch", "--parsable", f"{lout}/{n}.sbatch"], check=True, capture_output=True,
-                              text=True).stdout.strip().split(";")[0] for n in names]
-        print(f"submitted {len(ids)} stage-2 job(s), phase {args.phase}: {' '.join(ids)}")
-        if post:
-            res = subprocess.run(["sbatch", "--parsable", f"--dependency=afterany:{':'.join(ids)}",
-                                  f"{lout}/{post.name}"], check=True, capture_output=True, text=True)
-            print(f"post job (selection, dedup, analyses; after all of the above): {res.stdout.strip()}")
-    else:
-        print(f"submit with: bash {lout}/submit_all.sh" + (f", then {lout}/{post.name} after them" if post else ""))
+        _submit(submit)
+    return submit
 
 
-def write_post_job(out_dir: Path, base_dir_name: str, dedup_dir_name: str, phase: str, account: str = "") -> Path:
-    """Write the post job of a phase: analysis (variant_selection.json), dedup, dedup analysis.
+def cmd_post(args) -> str:
+    """Write the post job of `--phase` alone and its submit script."""
+    linux_config = _hpc_view(args.config, args.profile_set)
+    base = read_root(Path(args.config)) / args.base_dir_name
+    lout = f"{linux_config['paths']['root']}/{args.base_dir_name}/hpc_jobs_stage2"
+    chain = _chain(linux_config, base / "hpc_jobs_stage2", lout)
+    _add_post_job(chain, linux_config, args.base_dir_name, args.dedup_dir_name, args.phase, [])
+    submit = chain.write_submit(f"submit_post_{args.phase}.sh")
+    if args.submit:
+        _submit(submit)
+    return submit
 
-    Resources from site_env.sh (CAL_*). The progress report and the raw analysis must not stop
-    the rest; they run before the dedup, which ends the job when it fails.
+
+def reset_tiles(base: Path, part: str, reset_runs: bool, dry_run: bool) -> dict[str, int]:
+    """Delete the per-tile markers that make run_final_tile.sh skip a tile; return counts.
+
+    `part` models: the tile markers, and with `reset_runs` every flood-model raster and result.
+    `part` sfincs: the tile markers and sfincs_model/sfincs.inp (forcing and model are rebuilt).
+    Listed tiles without a directory are counted, not created.
     """
-    lb = f"{LINUX_DATA_ROOT}/{base_dir_name}"
-    cfg, logs = f"{lb}/resolved_config.yml", f"{lb}/hpc_jobs_stage2/logs"
-    lines = [
-        "#!/bin/bash", f"#SBATCH --job-name=cal_post_{phase}", f"#SBATCH --partition={_HX['CAL_PARTITION']}",
-        *([f"#SBATCH --account={account}"] if account else []),
-        f"#SBATCH --cpus-per-task={_HX['CAL_CPUS']}", f"#SBATCH --mem={_HX['CAL_MEM']}",
-        f"#SBATCH --time={_HX['CAL_TIME']}", f"#SBATCH --output={logs}/cal_post_{phase}_%j.out",
-        f"#SBATCH --error={logs}/cal_post_{phase}_%j.err", "",
-        "set -uo pipefail", *JOB_ENV, f'cd "{LINUX_CODE_ROOT}/sfincs_tiles" || exit 1',
-        f"{GFM_PY} check_calibration_progress.py --config {cfg} --base-dir-name {base_dir_name}",
-        f"{GFM_PY} run_calibration_sweep_analysis.py --config {cfg} --base-dir-name {base_dir_name}",
-        f"{HYDROMT_PY} compute_calibration_result_dedup.py --config {cfg} --base-dir-name {base_dir_name} "
-        f"--out-dir-name {dedup_dir_name} --workers {_HX['CAL_CPUS']} || exit 1",
-        f"{GFM_PY} run_calibration_sweep_analysis.py --config {cfg} --base-dir-name {dedup_dir_name} "
-        f"--raster-base-dir-name {base_dir_name}", ""]
-    path = out_dir / f"post_models_{phase}.sbatch"
-    path.write_text("\n".join(lines), newline="\n")
-    return path
+    counts = {"tiles": 0, "missing": 0, "rasters": 0}
+    for t in (base / "tile_ids.txt").read_text().split():
+        if not (base / t).is_dir():
+            counts["missing"] += 1
+            continue
+        out = base / t / "outputs"
+        counts["tiles"] += 1
+        doomed = []
+        if part == "sfincs":
+            doomed = [out / m for m in TILE_MARKERS] + [base / t / "sfincs_model" / "sfincs.inp"]
+        elif out.is_dir():
+            doomed = [out / m for m in TILE_MARKERS]
+            if reset_runs:
+                rasters = sorted(out.glob("*_waterdepth_RP100_SLR_0*.tif"))
+                counts["rasters"] += len(rasters)
+                doomed += rasters + [out / f for f in ("model_runs.json", "eikonal_solver_diagnostics.json",
+                                                       "calibration_result.json")]
+        if not dry_run:
+            for p in doomed:
+                p.unlink(missing_ok=True)
+    return counts
 
 
-def main() -> None:
-    repo_root = Path(__file__).resolve().parent.parent
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["stage1", "stage2"])
-    parser.add_argument("--config", default=str(repo_root / "snakemake_workflow" / "config" / "config.yml"))
+def cmd_rerun(args) -> str | None:
+    """Rerun part of a finished calibration in place: reset tiles, then write (and submit) stage 2.
+
+    Guards: tile_ids.txt exists; the checkout has the code the part needs; a non-sweep phase needs
+    the sweep's variant_selection.json. `--dry-run` only reports what would be reset.
+    """
+    root = read_root(Path(args.config))
+    base = root / args.base_dir_name
+    if not (base / "tile_ids.txt").exists():
+        raise SystemExit(f"no {base / 'tile_ids.txt'}")
+    if args.part == "models":
+        if "def phase_runs" not in (_HERE / "run_calibration_models.py").read_text(encoding="utf-8"):
+            raise SystemExit(f"{_HERE / 'run_calibration_models.py'} has no phase_runs - sync the code first")
+        selection = root / args.dedup_dir_name / "variant_selection.json"
+        if args.phase != "sweep" and not selection.exists():
+            raise SystemExit(f"--phase {args.phase} needs {selection} - run the sweep phase and its post job first")
+    else:
+        if not (_HERE / "connected_forcing.py").exists():
+            raise SystemExit(f"{_HERE / 'connected_forcing.py'} missing - sync the code first")
+        if args.phase != "sweep":
+            raise SystemExit("--part sfincs reruns the sweep phase; run --part models for other phases")
+
+    counts = reset_tiles(base, args.part, args.reset_runs and args.part == "models", args.dry_run)
+    what = f"{counts['tiles']} tile(s) for phase {args.phase}"
+    if args.part == "models":
+        what += f", {counts['rasters']} model raster(s)"
+    if args.dry_run:
+        print(f"dry run: would reset {what} ({counts['missing']} listed without a tile directory)")
+        return None
+    print(f"reset {what} ({counts['missing']} listed without a tile directory)")
+
+    # Job files of an earlier, larger run would otherwise stay next to the new ones.
+    jobs = base / "hpc_jobs_stage2"
+    for pattern in ("final_*.sbatch", "tiles_*.txt"):
+        for p in jobs.glob(pattern):
+            p.unlink()
+    stage2 = argparse.Namespace(**vars(args))
+    stage2.config = str(base / "resolved_config.yml")
+    if args.part == "models":
+        # SFINCS outputs exist, so run_final_tile.sh skips SFINCS: estimate only the model runs.
+        stage2.sfincs_min_per_mcell, stage2.overhead_min = 0.0, 5.0
+    else:
+        # Eikonal rasters exist, so the sweep is skipped: its time estimate is ~0.
+        stage2.eikonal_min_per_mcell = 1.0
+    submit = cmd_stage2(stage2)
+    print(f"progress: python sfincs_tiles/check_calibration_progress.py --config {stage2.config} "
+          f"--base-dir-name {args.base_dir_name}")
+    return submit
+
+
+COMMANDS = {"stage1": cmd_stage1, "stage2": cmd_stage2, "post": cmd_post, "rerun": cmd_rerun}
+
+
+def add_arguments(parser: argparse.ArgumentParser, command: str) -> None:
+    """Add the options of `command` (stage1, stage2, post, rerun) to `parser`."""
+    from hpc_common import add_profile_set_argument
+
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
-    parser.add_argument("--n-jobs", type=int, default=None, help="default: 10 for stage1, 20 for stage2")
-    parser.add_argument("--stage2-jobs", type=int, default=20, help="stage1: forwarded to the bridge's stage2 call")
-    parser.add_argument("--n-tiles", type=int, default=1500)
-    parser.add_argument("--partition", default=None, help="default: hpc.calibration_sbatch.partition")
-    parser.add_argument("--mem", default=None, help="default: hpc.calibration_sbatch.mem")
-    parser.add_argument("--stage1-hours", type=int, default=24)
+    parser.add_argument("--submit", action="store_true", help="run the written submit script")
+    add_profile_set_argument(parser)
+    if command == "stage1":
+        parser.add_argument("--n-jobs", type=int, default=10)
+        parser.add_argument("--stage2-jobs", type=int, default=20, help="forwarded to the bridge's stage2 call")
+        parser.add_argument("--n-tiles", type=int, default=1500)
+        parser.add_argument("--stage1-hours", type=int, default=24)
+        return
+    parser.add_argument("--phase", choices=["sweep", "duration"], default="sweep",
+                        help="run_calibration_models.py phase (CAL_PHASE of run_final_tile.sh)")
+    parser.add_argument("--dedup-dir-name", default=None, help="post job: default <base-dir-name>_dedup")
+    if command == "post":
+        return
+    parser.add_argument("--n-jobs", type=int, default=20)
     parser.add_argument("--overhead-min", type=float, default=35.0)  # inputs, model build + subgrid, postprocessing
     parser.add_argument("--sfincs-min-per-mcell", type=float, default=12.5)  # p90 over 550 SFINCS runs, 4 threads
     parser.add_argument("--eikonal-min-per-mcell", type=float, default=10.0,
                         help="10 eikonal solves, per million active SFINCS cells (rough); scaled by RUN_LOAD")
-    parser.add_argument("--phase", choices=["sweep", "duration"], default="sweep",
-                        help="stage2: run_calibration_models.py phase (CAL_PHASE of run_final_tile.sh)")
     parser.add_argument("--time-margin", type=float, default=1.5)
-    parser.add_argument("--submit", action="store_true", help="stage2: sbatch the jobs right away")
     parser.add_argument("--no-post", dest="post", action="store_false",
-                        help="stage2: no post job (variant selection, dedup, analyses) after the jobs")
-    parser.add_argument("--dedup-dir-name", default=None, help="stage2 post job: default <base-dir-name>_dedup")
-    args = parser.parse_args()
-    if args.n_jobs is None:
-        args.n_jobs = 10 if args.command == "stage1" else 20
-    args.dedup_dir_name = args.dedup_dir_name or f"{args.base_dir_name}_dedup"
-    {"stage1": cmd_stage1, "stage2": cmd_stage2}[args.command](args)
+                        help="no post job (variant selection, dedup, analyses) after the jobs")
+    if command == "rerun":
+        parser.add_argument("--part", choices=["models", "sfincs"], required=True)
+        parser.add_argument("--reset-runs", action="store_true",
+                            help="--part models: also delete every model raster and result")
+        parser.add_argument("--dry-run", action="store_true", help="only report what would be reset")
+
+
+def run(command: str, args: argparse.Namespace) -> str | None:
+    """Run `command` with parsed `args`; return the written submit script's Linux path, if any."""
+    args.dedup_dir_name = getattr(args, "dedup_dir_name", None) or f"{args.base_dir_name}_dedup"
+    return COMMANDS[command](args)
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="command", required=True)
+    for command in COMMANDS:
+        p = sub.add_parser(command)
+        p.add_argument("--config", default=str(DEFAULT_CONFIG))
+        add_arguments(p, command)
+    args = parser.parse_args(argv)
+    submit = run(args.command, args)
+    if submit and not args.submit:
+        print(f"Submit on the cluster with: bash {submit}")
 
 
 if __name__ == "__main__":

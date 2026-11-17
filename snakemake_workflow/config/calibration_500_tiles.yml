@@ -37,8 +37,9 @@ hpc:
   n_nodes: 30
   # jobs_dir defaults to production's model_outputs/hpc_jobs; isolate it.
   jobs_dir: "{root}/calibration_500_tiles/model_outputs/hpc_jobs"
-  sbatch:
-    time: "0-09:00:00"
+  profiles:
+    default:
+      time: "0-09:00:00"
 
 # Deliverable scope (figures and the population years reported).
 analysis: {plot_timeseries: true}

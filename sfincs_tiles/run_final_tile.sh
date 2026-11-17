@@ -5,6 +5,7 @@
 # outputs/calibration_run.failed (cleared on success) and exits 0 so the job's tile loop continues.
 # calibration_run.done skips the tile; calibration_run.step holds the running step.
 # CAL_PHASE (sweep | duration, default sweep) picks run_calibration_models.py's phase.
+# Site values come from the exports of the stage-2 job header (generate_calibration_jobs.py).
 # Usage: BASE_DIR_NAME=calibration_roughness_SFINCS SFINCS_THREADS=4 CAL_PHASE=sweep bash run_final_tile.sh <tile_id>
 set -uo pipefail
 unset PROJ_LIB PROJ_DATA GDAL_DATA
@@ -14,15 +15,13 @@ BASE_DIR_NAME="${BASE_DIR_NAME:-calibration_roughness_SFINCS}"
 SFINCS_THREADS="${SFINCS_THREADS:-4}"
 CAL_PHASE="${CAL_PHASE:-sweep}"
 
-SITE_ENV="$(dirname "${BASH_SOURCE[0]}")/site_env.sh"
-[ -f "$SITE_ENV" ] || { echo "sfincs_tiles/site_env.sh not found: copy sfincs_tiles/site_env.example.sh to sfincs_tiles/site_env.sh and fill in your site values" >&2; exit 1; }
-source "$SITE_ENV"
+for var in GFM_PY SFINCS_PY GFM_DATA_ROOT GFM_CODE_ROOT CONTAINER_CMD SFINCS_IMAGE SFINCS_TIMEOUT_S; do
+  [ -n "${!var:-}" ] || { echo "run_final_tile.sh: $var is not set (exported by the stage-2 job header)" >&2; exit 1; }
+done
 CODE_ROOT="$GFM_CODE_ROOT"
 DATA_ROOT="$GFM_DATA_ROOT"
 CONFIG="$DATA_ROOT/$BASE_DIR_NAME/resolved_config.yml"
-SFINCS_TIMEOUT_S=14400
-HYDROMT_SFINCS_DEV_PY="$GFM_SFINCS_PYTHON"
-GFM_PY="$GFM_PYTHON"
+HYDROMT_SFINCS_DEV_PY="$SFINCS_PY"
 
 SRC="$DATA_ROOT/model_outputs/$TILE_ID/inputs"
 TILE_DIR="$DATA_ROOT/$BASE_DIR_NAME/$TILE_ID"
