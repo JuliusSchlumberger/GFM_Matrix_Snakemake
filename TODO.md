@@ -463,6 +463,48 @@ Open:
   RP10 / RP1000 on ~100 tiles (transferability, critique 1b, now with B on; RP100 COAST-HG shape
   shifted to each RP peak).
 
+## Open methods questions
+
+- **Duration correction's multiplier is derived from a first eikonal pass's own depth
+  (`event_volume.DurationCorrection.multiplier`: head = depth above the cell's spill level,
+  `duration = time_within_peak(hydrograph, head)`), not from directly comparing the boundary
+  forcing's time series to each cell's own elevation.** Raised while building
+  `docs/figure_scripts/generate_flood_variant_examples.py` (methods_02_flood_depth.md §2.5): the
+  two-pass, head-based design is real production behaviour (confirmed by reading
+  `src/event_volume.py` and methods_02 §2.4), not something specific to that figure. That figure's
+  box C now shows the direct, single-pass alternative instead
+  (`elevation_duration_multiplier`: `duration` = how long the boundary forcing alone exceeds a
+  cell's own elevation, no first solve needed) for comparison - illustrative only, not a claim
+  that it is the better algorithm. Whether production's actual `event_volume.DurationCorrection`
+  should move to this direct measure is still an open question - changing it would affect the
+  calibrated `duration_refit.py`/`friction_scale_factor` values (§2.2/§2.4), so needs a deliberate
+  decision, not a silent code change.
+
+## Figures needing a pass under the new "Figures (deliverables)" rules
+
+- **`docs/flood_variant_comparison.png` reconciled with the global `CLAUDE.md`'s "Figures
+  (deliverables)" section**: elevation uses Greens, depth uses Blues, friction uses
+  Oranges - single-hue sequential ramps, one fixed per variable in `_figure_style.py`
+  (the section 9 "Colour" rule was loosened to explicitly allow these, not just
+  viridis/cividis/Crameri/cmocean, after the first pass picked viridis/cividis and that
+  read as actively worse here - DEM in particular needs green/brown-like low/high, not
+  dark-purple-to-yellow). Saved as PNG (300 dpi) + PDF (fonts embedded) at a fixed
+  180 mm width via the new `_figure_style.apply_style`/`save_figure` helpers. One
+  deliberate, documented override remains: `SHOW_COLORBARS = False` in the script skips
+  the rule's "one shared colour bar per group of panels" in favour of the discrete
+  0.20 m bands plus point-annotated values already in place - flip it to `True` to
+  render the default shared colour bars instead (plumbing is in place but not visually
+  tuned, since it's off by default).
+
+- **`src/map_style.py` moved to `analysis/_figure_style.py`**, and its panel-lettering
+  function renamed `draw_panel_letter` -> `panel_letters` (every call site updated, ~60
+  of them in `input_analysis/make_boundary_forcing_figures.py` alone; the alias in
+  `validation/plot_agreement_map.py` renamed `_draw_panel_letter` -> `_panel_letters` to
+  match) - both now match this project's CLAUDE.md "Style module" line. `ruff check .` and
+  `pytest -m "not needs_data"` both pass. `add_land` (same CLAUDE.md line, "maps always show
+  land in light grey") still doesn't exist - no map figure currently calls it;
+  `LAND_COLOR`/`draw_caption_box` cover the same convention by hand today.
+
 ## Known behaviour
 
 - `friction_scale_factor` (config.yml) is a bare per-metre rate, rescaled by a tile's own

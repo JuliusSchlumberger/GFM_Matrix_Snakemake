@@ -25,6 +25,8 @@ from config_utils import get_data_catalog, load_config, retry_transient_io  # no
 from pathways import slr_pathway  # noqa: E402
 from population_extension import extend_growth_factors  # noqa: E402
 from analysis_figures import (  # noqa: E402
+    _DEFAULT_SSP_LINESTYLES,
+    _DEFAULT_SSP_MARKERS,
     load_growth_matrix_csv,
     build_growth_matrix_from_grid,
     draw_ember_panel,
@@ -79,10 +81,10 @@ def _draw_ssp_pathways(ax, growth_df, iso: str, slr_paths: dict[str, np.ndarray]
         g = np.array([interpolate_growth_factor(growth_df, ssp, iso, int(y), 1.0) for y in PATHWAY_YEARS]) - 1.0
         x, y = slr / 1000.0, g * 100.0
         c = colors.get(ssp, "k")
-        ax.plot(x, y, "-", color=c, lw=2.2, zorder=5, path_effects=halo)
+        ax.plot(x, y, linestyle=_DEFAULT_SSP_LINESTYLES.get(ssp, "-"), color=c, lw=2.2, zorder=5, path_effects=halo)
         for yr in (2050, 2100):
             i = int(yr - PATHWAY_YEARS[0])
-            ax.plot(x[i], y[i], "o", ms=6, mfc="w", mec=c, mew=1.8, zorder=6)
+            ax.plot(x[i], y[i], marker=_DEFAULT_SSP_MARKERS.get(ssp, "o"), ms=6, mfc="w", mec=c, mew=1.8, zorder=6)
 
 
 def plot_top_countries_ember(
@@ -181,15 +183,19 @@ def plot_country_set_ember(
         y_lo, y_hi = min(growth_fracs) * 100.0, max(growth_fracs) * 100.0
         for ssp, x in slr_paths.items():
             c = colors.get(ssp, "k")
+            ssp_marker = _DEFAULT_SSP_MARKERS.get(ssp, "o")
             for v in variants:
                 y = (np.array([interpolate_growth_factor(ext[v], ssp, iso, int(t), 1.0) for t in years]) - 1.0) * 100.0
                 y_lo, y_hi = min(y_lo, y.min()), max(y_hi, y.max())
                 ax.plot(x[i2100:], y[i2100:], linestyle=styles[v], color=c, lw=2.1, zorder=5, path_effects=halo)
-                ax.plot(x[-1], y[-1], "s", ms=5, color=c, mec="w", mew=0.8, zorder=6)
-            ax.plot(x[:i2100 + 1], y[:i2100 + 1], "-", color=c, lw=2.6, zorder=5, path_effects=halo)
+                ax.plot(x[-1], y[-1], marker=ssp_marker, ms=5, color=c, mec="w", mew=0.8, zorder=6)
+            # colour is never the only SSP cue (section 9) - this segment (pre-2100) also
+            # gets the SSP's own line style, not just its colour.
+            ax.plot(x[:i2100 + 1], y[:i2100 + 1], linestyle=_DEFAULT_SSP_LINESTYLES.get(ssp, "-"), color=c,
+                    lw=2.6, zorder=5, path_effects=halo)
             for yr in (2050, 2100):
                 i = int(yr - years[0])
-                ax.plot(x[i], y[i], "o", ms=6, mfc="w", mec=c, mew=1.8, zorder=7)
+                ax.plot(x[i], y[i], marker=ssp_marker, ms=6, mfc="w", mec=c, mew=1.8, zorder=7)
         ax.set_ylim(y_lo - 5, y_hi + 8)
         ax.set_xlim(0, max(max(slr_mm) / 1000.0, max(p.max() for p in slr_paths.values())))
         ax.set_title(iso_to_name.get(iso, iso), fontsize=fs + 2)

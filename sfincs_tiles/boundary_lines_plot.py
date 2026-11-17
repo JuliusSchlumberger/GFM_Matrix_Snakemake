@@ -14,7 +14,8 @@ from matplotlib.colors import ListedColormap
 from rasterio.warp import transform as warp_transform
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from map_style import WATER_COLOR  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analysis"))
+from _figure_style import WATER_COLOR  # noqa: E402
 
 from boundary_lines_geometry import (  # noqa: E402
     OCEAN_CODE,

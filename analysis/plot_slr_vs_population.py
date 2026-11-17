@@ -32,10 +32,20 @@ from analysis_figures import (  # noqa: E402
     CONTINENTS, build_growth_matrix_from_grid, iso_to_continent, load_growth_matrix_csv, load_slr_trajectories,
     ssp_rcp_label,
 )
+from _figure_style import (  # noqa: E402
+    CONTINENT_COLORS, DOUBLE_COLUMN_MM, MM_PER_INCH, SLR_POP_DECOMPOSITION_COLORS,
+    apply_style, panel_letters, save_figure, write_caption,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-C_SLR, C_POP, C_INT = "#1f77b4", "#ff7f0e", "#9467bd"
-CONTINENT_COLORS = dict(zip(CONTINENTS, plt.cm.Set2.colors))
+C_SLR = SLR_POP_DECOMPOSITION_COLORS["slr"]
+C_POP = SLR_POP_DECOMPOSITION_COLORS["pop"]
+C_INT = SLR_POP_DECOMPOSITION_COLORS["interaction"]
+FIG_WIDTH_IN = DOUBLE_COLUMN_MM / MM_PER_INCH
+# Cosmetic cap on text-annotated countries in the dense scatter/envelope figures (section 9's
+# 180 mm design width leaves no room for every qualifying country's name); all qualifying
+# countries still get a marker/hull - this only trims which ones are name-labelled.
+MAX_SCATTER_LABELS = 7
 
 
 def _decompose(mats, slr_mm, gfr, traj, ext, ssp, iso, year, variant) -> dict:
@@ -56,9 +66,9 @@ def _decompose(mats, slr_mm, gfr, traj, ext, ssp, iso, year, variant) -> dict:
             "slr_alone": e1 - e0, "pop_alone": (p1 - 1) * e0, "interaction": (e1 - e0) * (p1 - 1)}
 
 
-def _waterfall(ref, central, band, top, names, ssp, rcp, year, to_year, variants, v0, xmax, out_path, dpi):
+def _waterfall(ref, central, band, top, names, ssp, rcp, year, to_year, variants, v0, xmax, out_path):
     rows_df = ref.loc[top] if year == 2100 else central.loc[top]
-    fig, ax = plt.subplots(figsize=(11, 0.42 * len(top) + 2.4))
+    fig, ax = plt.subplots(figsize=(FIG_WIDTH_IN, 0.3 * len(top) + 1.6))
     y = -np.arange(len(top), dtype=float)
     for yi, iso in zip(y, top):
         r = rows_df.loc[iso]
@@ -79,11 +89,12 @@ def _waterfall(ref, central, band, top, names, ssp, rcp, year, to_year, variants
             ax.plot(r.EAI_end / 1e6, yi, "D", ms=6, color="k", mec="k", zorder=5)
         ax.plot(r.EAI_2020 / 1e6, yi, "|", ms=10, color="k", mew=1.5, zorder=5)
     ax.set_yticks(y)
-    ax.set_yticklabels([names.get(i, i) for i in top], fontsize=11)
+    ax.set_yticklabels([names.get(i, i) for i in top], fontsize=7)
     ax.set_ylim(y[-1] - 0.7, 0.7)
     ax.set_xlim(0, xmax)
     ax.grid(axis="x", alpha=0.3)
-    ax.set_xlabel("Expected annual impact, no adaptation (million people)", fontsize=12)
+    ax.set_xlabel("Expected annual impact, no adaptation (million people)", fontsize=8)
+    ax.tick_params(axis="x", labelsize=7)
     for sp in ("top", "right"):
         ax.spines[sp].set_visible(False)
     handles = [Line2D([], [], ls="none", marker="|", ms=10, mew=1.5, color="k", label="EAI 2020"),
@@ -94,18 +105,28 @@ def _waterfall(ref, central, band, top, names, ssp, rcp, year, to_year, variants
     if year == 2100:
         handles += [Line2D([], [], ls="none", marker="D", ms=6, color="w", mec="k", label="EAI 2100"),
                     Line2D([], [], color="k", lw=1.0, label="EAI 2100, SLR p17-p83")]
-        title = f"{ssp_rcp_label(ssp, rcp)}: change in EAI 2020-2100"
+        message = f"{ssp_rcp_label(ssp, rcp)}: change in EAI 2020-2100"
     else:
         handles += [Line2D([], [], ls="none", marker="D", ms=6, color="k",
                            label=f"EAI {to_year}, population {variants[v0].get('label', v0)} after 2100"),
                     Patch(facecolor="0.15", alpha=0.25, edgecolor="0.15",
                           label=f"EAI {to_year}, range across population variants")]
-        title = f"{ssp_rcp_label(ssp, rcp)} continued: change in EAI 2020-{to_year} (median SLR)"
-    ax.set_title(title, fontsize=13, loc="left")
-    ax.legend(handles=handles, loc="lower right", fontsize=9.5, frameon=True, framealpha=0.95)
+        message = f"{ssp_rcp_label(ssp, rcp)} continued: change in EAI 2020-{to_year} (median SLR)"
+    ax.legend(handles=handles, loc="lower right", fontsize=7, frameon=False)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=dpi)
+    save_figure(fig, out_path)
     plt.close(fig)
+    write_caption(out_path, [
+        message,
+        "Horizontal bars: EAI 2020 (tick mark) extended by the SLR-alone, population-alone and "
+        "interaction terms of the decomposition (colours below), to EAI at the end year (diamond).",
+        f"Colours: SLR alone {C_SLR}, population alone {C_POP}, interaction {C_INT}; hatched "
+        "bars mark a negative (population-decline) contribution.",
+        "EAI 2100, SLR p17-p83: black line through the 2100 diamond, the AR6 median-trajectory "
+        "17th-83rd percentile range." if year == 2100 else
+        "Grey band: range of EAI across the configured post-2100 population variants, at median SLR.",
+        f"Countries: the {len(top)} with the highest EAI in 2100, no adaptation.",
+    ])
     print(f"  Written: {out_path.name}")
 
 

@@ -27,8 +27,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config_utils import load_config  # noqa: E402
-from map_style import LAND_COLOR  # noqa: E402
+from _figure_style import LAND_COLOR  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 COAST_COLOR = "#b8b8b3"

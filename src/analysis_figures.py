@@ -7,6 +7,7 @@ Inputs: exposure_{label}_base.csv (cols SLR_{mm}), exposure_{label}_growth_matri
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -18,21 +19,14 @@ from scipy.interpolate import pchip_interpolate
 
 from config_utils import retry_transient_io
 
-
-_DEFAULT_SLR_COLORS = {
-    "SSP1": "#1f77b4",
-    "SSP2": "#2ca02c",
-    "SSP3": "#ff7f0e",
-    "SSP5": "#d62728",
-}
-
-_DEFAULT_MEASURE_COLORS = {
-    "baseline": "#7f7f7f",
-    "protect": "#1f77b4",
-    "retreat": "#9467bd",
-    "avoid": "#2ca02c",
-    "protect_avoid": "#17becf",
-}
+# SSP colour/line-style/marker defaults live in the style module (analysis/_figure_style.py,
+# CLAUDE.md "Style module"), not here - re-exported under their old names since several
+# scripts already import them from this module.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analysis"))
+from _figure_style import SSP_COLORS as _DEFAULT_SLR_COLORS  # noqa: E402
+from _figure_style import SSP_LINESTYLES as _DEFAULT_SSP_LINESTYLES  # noqa: E402
+from _figure_style import SSP_MARKERS as _DEFAULT_SSP_MARKERS  # noqa: E402
+from _figure_style import MEASURE_COLORS as _DEFAULT_MEASURE_COLORS  # noqa: E402
 
 
 CONTINENTS = ["Africa", "Asia", "Europe", "North America", "South America", "Oceania"]
@@ -220,7 +214,7 @@ def draw_slr_uncertainty_band(
             p83 = float(unc.loc[yr, "p83"]) / 1000.0
             ax.errorbar(
                 p50, yi + offset, xerr=[[p50 - p17], [p83 - p50]],
-                fmt="o", color=color, markersize=5, capsize=3, linewidth=1.5,
+                fmt=_DEFAULT_SSP_MARKERS.get(ssp, "o"), color=color, markersize=5, capsize=3, linewidth=1.5,
             )
     ax.set_yticks(range(n_years))
     ax.set_yticklabels([str(yr) for yr in highlight_years], fontsize=max(6, fontsize - 3))
@@ -346,12 +340,13 @@ def plot_burning_ember(
                 continue
             xs = slr_traj[years_common].to_numpy() / 1000.0
             ys = (gr_traj[years_common].to_numpy() - 1.0) * 100.0
-            ax.plot(xs, ys, "-", color=color, linewidth=2, label=ssp, zorder=5)
+            ax.plot(xs, ys, linestyle=_DEFAULT_SSP_LINESTYLES.get(ssp, "-"), color=color, linewidth=2,
+                    label=ssp, zorder=5)
             for yr in highlight_years:
                 if yr in years_common:
                     xi = float(slr_traj[yr]) / 1000.0
                     yi = (float(gr_traj[yr]) - 1.0) * 100.0
-                    ax.plot(xi, yi, "o", color=color, markersize=7, zorder=6)
+                    ax.plot(xi, yi, marker=_DEFAULT_SSP_MARKERS.get(ssp, "o"), color=color, markersize=7, zorder=6)
                     ax.annotate(str(yr), (xi, yi), textcoords="offset points",
                                 xytext=(4, 4), fontsize=max(6, fontsize - 3), color=color)
         ax.legend(loc="upper left", fontsize=max(6, fontsize - 2), title="SSP")

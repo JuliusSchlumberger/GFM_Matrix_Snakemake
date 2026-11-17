@@ -1,0 +1,17 @@
+Block skipping only re-sweeps a block when it or an upwind neighbour actually
+changed last round, cutting block visits to 19% overall here while
+staying bit-identical to sweeping every block every round.
+
+Scenario: open land seeded along the coast (top edge, blue bar) with one spiral
+maze of impassable walls (friction 9999) inland - the same slow, direction-
+reversing case as the rounds figure, at production block size scaled down (16
+cells here vs. SWEEP_BLOCK_SIZE=64 in production). No CRS or uncertainty: a
+synthetic unprojected grid, deterministic solve.
+
+Colours: each cell is one sweep block (not one grid cell). Orange = re-swept that
+round; light grey = skipped. Not a magnitude scale - a 2-category, directly
+labelled split (see legend).
+
+Panels: (a)-(e) which blocks were processed after round {1, 3, 8, 16, 22}
+of 26 to full convergence (100, 30, 20, 9, 8% of block visits respectively) -
+fewer blocks re-swept as the solution settles.

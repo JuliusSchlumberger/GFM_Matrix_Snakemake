@@ -38,7 +38,8 @@ from pathways import eai_along_pathway, matrix_interpolator, slr_pathway  # noqa
 from population_extension import extend_growth_factors  # noqa: E402
 from population_growth import _build_name_to_iso, interpolate_growth_factor, load_ssp_growth_factors  # noqa: E402
 from analysis_figures import (  # noqa: E402
-    _DEFAULT_SLR_COLORS, build_growth_matrix_from_grid, load_growth_matrix_csv, load_slr_trajectories,
+    _DEFAULT_SLR_COLORS, _DEFAULT_SSP_LINESTYLES, build_growth_matrix_from_grid, load_growth_matrix_csv,
+    load_slr_trajectories,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -140,14 +141,15 @@ def main() -> None:
 
         for ssp in ssps:
             c = s_colors.get(ssp, "grey")
+            ls = _DEFAULT_SSP_LINESTYLES.get(ssp, "-")  # colour is never the only SSP cue (section 9)
             x = slr_paths[(ssp, "p50")] / 1000.0
             y = growth_paths[(ssp, v0)] * 100.0
-            ax_l.plot(x[:i2100 + 1], y[:i2100 + 1], "-", color=c, lw=2.5, zorder=5)
+            ax_l.plot(x[:i2100 + 1], y[:i2100 + 1], linestyle=ls, color=c, lw=2.5, zorder=5)
             if to_year > LAST_SSP_YEAR:
                 yv = np.vstack([growth_paths[(ssp, v)][i2100:] for v in variants]) * 100.0
                 ax_l.fill_between(x[i2100:], yv.min(axis=0), yv.max(axis=0), color=c, alpha=0.25, lw=0, zorder=4)
-                ax_l.plot(x[i2100:], yv.min(axis=0), "-", color=c, lw=0.8, zorder=4)
-                ax_l.plot(x[i2100:], yv.max(axis=0), "-", color=c, lw=0.8, zorder=4)
+                ax_l.plot(x[i2100:], yv.min(axis=0), linestyle=ls, color=c, lw=0.8, zorder=4)
+                ax_l.plot(x[i2100:], yv.max(axis=0), linestyle=ls, color=c, lw=0.8, zorder=4)
         ax_l.axhline(0, color="k", lw=0.8, ls="--", alpha=0.5)
         ax_l.set_xlim(0, 1.5)
         ax_l.set_ylim(g_lo * 100.0, g_hi * 100.0)
@@ -169,13 +171,14 @@ def main() -> None:
                 if not yrs:
                     continue
                 c = s_colors.get(ssp, "grey")
+                ls = _DEFAULT_SSP_LINESTYLES.get(ssp, "-")  # colour is never the only SSP cue (section 9)
                 yk = k + off
                 # Bar spans SLR p17-p83 x all population variants.
                 all_y = [t for t in yrs.values() if t is not None]
                 if all_y:
                     open_end = any(t is None for t in yrs.values())
-                    ax_r.plot([min(all_y), x_end if open_end else max(all_y)], [yk, yk], "-", color=c, lw=2.5,
-                              solid_capstyle="butt")
+                    ax_r.plot([min(all_y), x_end if open_end else max(all_y)], [yk, yk], linestyle=ls, color=c,
+                              lw=2.5, solid_capstyle="butt")
                     if open_end:
                         ax_r.plot(x_end, yk, ">", color=c, ms=9)
                 if yrs[(v0, "p50")] is not None:

@@ -31,9 +31,10 @@ import rasterio
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
+sys.path.insert(0, str(_REPO_ROOT / "analysis"))
 from config_utils import get_data_catalog, load_config  # noqa: E402
 from population_grid import population_per_pixel  # noqa: E402
-from map_style import AGREE_COLOR, A_ONLY_COLOR, B_ONLY_COLOR, LAND_COLOR, draw_panel_letter  # noqa: E402
+from _figure_style import AGREE_COLOR, A_ONLY_COLOR, B_ONLY_COLOR, LAND_COLOR, panel_letters  # noqa: E402
 
 SCORES = (("primary, area", "CSI", "bias"), ("exposure, area", "CSI_exp_km2", "bias_exp_km2"),
           ("primary, population", "CSI_pop", "bias_pop"), ("exposure, population", "CSI_exp_pop", "bias_exp_pop"))
@@ -119,7 +120,7 @@ def plot_scores(metrics: pd.DataFrame, out: Path) -> None:
     axes[1].set(xlabel="bias (model / benchmark wet)", xscale="log")
     axes[0].legend(frameon=False, fontsize=7, loc="lower right")
     for ax, letter in zip(axes, "ab"):
-        draw_panel_letter(ax, letter)
+        panel_letters(ax, letter)
     fig.suptitle("Eikonal vs national flood maps: area and population, at the primary (0.01 m) and exposure "
                  "(0.10 m) thresholds", fontsize=10)
     fig.tight_layout()

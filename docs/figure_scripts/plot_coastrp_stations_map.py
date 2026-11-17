@@ -24,8 +24,9 @@ from matplotlib.patches import Patch
 from rasterio.windows import from_bounds
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "analysis"))
 from config_utils import load_config  # noqa: E402
-from map_style import LAND_COLOR, LAND_LABEL, WATER_COLOR, WATER_LABEL, draw_caption_box  # noqa: E402
+from _figure_style import LAND_COLOR, LAND_LABEL, WATER_COLOR, WATER_LABEL, draw_caption_box  # noqa: E402
 from rasters import decode_waterlevel_cm  # noqa: E402
 from tiles import load_tile_grid  # noqa: E402
 

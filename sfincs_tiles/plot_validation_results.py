@@ -34,7 +34,8 @@ from flood_agreement import (  # noqa: E402
 from gfm_config import read_root  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from map_style import LAND_COLOR  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analysis"))
+from _figure_style import LAND_COLOR  # noqa: E402
 
 COAST_COLOR = "#b8b8b3"
 HC_BATHTUB_COLOR = "#8a8a86"

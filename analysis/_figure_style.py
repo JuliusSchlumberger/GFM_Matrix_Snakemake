@@ -1,8 +1,11 @@
-"""Shared colours, labels and panel lettering for flood-extent agreement maps.
+"""Shared colours, fonts, sizes, panel lettering and captions for figures
+(CLAUDE.md "Figures" / the general CLAUDE.md's section 9).
 
 AGREE = both sides wet. A_ONLY/B_ONLY are direction-free; keep one A/B convention
 per comparison type (e.g. A = the physics reference) so colours mean the same.
 """
+
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 
@@ -18,6 +21,101 @@ B_ONLY_COLOR = "#e41a1c"
 
 LAND_LABEL = "Land"
 WATER_LABEL = "Permanent water"
+
+# Colour-blind-safe sequential maps (section 9 "Colour") - matplotlib built-ins, so
+# picking them needs no new dependency (cmocean/Crameri are not installed in this
+# project's envs). Single-hue ColorBrewer ramps for the common geophysical quantities
+# that recur across this project's figures, so each has one fixed identity throughout;
+# SEQUENTIAL_CMAP is the fallback for anything else.
+SEQUENTIAL_CMAP = "viridis"
+SEQUENTIAL_CMAP_ELEVATION = "Greens"
+SEQUENTIAL_CMAP_DEPTH = "Blues"
+SEQUENTIAL_CMAP_FRICTION = "Oranges"
+
+SINGLE_COLUMN_MM = 90
+DOUBLE_COLUMN_MM = 180
+MM_PER_INCH = 25.4
+
+# SSP identity across the burning-ember / pathways / tipping-points figures. Not
+# red/green (section 9: never that pair as the only distinction) and chosen to read
+# against the burning-ember YlOrRd background too, since warm hues (red/orange/yellow)
+# blend into it. Line style and marker vary per SSP as well, so colour is never the
+# only cue (section 9 "Categories are double-encoded") wherever shape/style isn't
+# already claimed by something else (e.g. strategy, in the tipping-points figure).
+SSP_COLORS = {
+    "SSP1": "#0072B2",  # blue
+    "SSP2": "#CC79A7",  # reddish purple
+    "SSP3": "#56B4E9",  # sky blue
+    "SSP5": "#3B3B3B",  # charcoal grey
+}
+SSP_LINESTYLES = {"SSP1": "-.", "SSP2": "-", "SSP3": ":", "SSP5": "--"}
+SSP_MARKERS = {"SSP1": "s", "SSP2": "o", "SSP3": "^", "SSP5": "D"}
+
+# Adaptation-measure identity. Single colour per measure (plot_timeseries.py,
+# plot_extended_pathways.py) - not yet reconciled with MEASURE_PAIR_COLORS below
+# (plot_custom_pathways.py), which gives the same measure names different hues
+# (e.g. "avoid" is green here, blue there) to free up small/large as a second colour
+# dimension; section 9 wants one colour per variable across every figure, so this is
+# a known, open inconsistency (TODO.md), not a decision made here.
+MEASURE_COLORS = {
+    "baseline": "#7f7f7f",
+    "protect": "#1f77b4",
+    "retreat": "#9467bd",
+    "avoid": "#2ca02c",
+    "protect_avoid": "#17becf",
+}
+
+# ColorBrewer "Paired": small/large intensity shares a hue, so colour still identifies
+# the measure on its own; baseline is a neutral grey, reserved for context (section 9).
+BASELINE_TRACK_COLOR = "0.55"
+MEASURE_PAIR_COLORS = {
+    "avoid": {"small": "#A6CEE3", "large": "#1F78B4"},
+    "protect": {"small": "#FDBF6F", "large": "#FF7F00"},
+    "protect_avoid": {"small": "#CAB2D6", "large": "#6A3D9A"},
+    "retreat": {"small": "#B2DF8A", "large": "#33A02C"},
+}
+
+# EAI-change decomposition (plot_slr_vs_population.py waterfalls/scatter): SLR alone,
+# population alone, and their interaction term.
+SLR_POP_DECOMPOSITION_COLORS = {"slr": "#1f77b4", "pop": "#ff7f0e", "interaction": "#9467bd"}
+
+# Continent identity (plot_slr_vs_population.py scatter/envelope) - ColorBrewer Set2; the
+# only continent-colour mapping in the project. Keys must match src/analysis_figures.py's
+# CONTINENTS list; a continent missing from this dict (e.g. "Other") falls back to context
+# grey at the call site, per section 9.
+CONTINENT_COLORS = {
+    "Africa": "#66c2a5",
+    "Asia": "#fc8d62",
+    "Europe": "#8da0cb",
+    "North America": "#e78ac3",
+    "South America": "#a6d854",
+    "Oceania": "#ffd92f",
+}
+
+
+def apply_style() -> None:
+    """Set this project's figure rcParams once (section 9 "Output and checks").
+
+    Called explicitly by each figure script rather than on import, so importing this
+    module stays side-effect-free (CLAUDE.md section 6).
+    """
+    plt.rcParams.update({
+        "font.family": "sans-serif",
+        "font.size": 8,
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+        "axes.linewidth": 0.6,
+        "lines.linewidth": 1.0,
+        "pdf.fonttype": 42,
+        "savefig.dpi": 300,
+    })
+
+
+def save_figure(fig: plt.Figure, path: Path) -> None:
+    """Save `fig` as PNG (300 dpi) and PDF (fonts embedded) under `path`'s stem."""
+    path = Path(path)
+    fig.savefig(path.with_suffix(".png"), dpi=300, bbox_inches="tight")
+    fig.savefig(path.with_suffix(".pdf"), bbox_inches="tight")
 
 
 def orient_north_up(arr, transform):
@@ -37,15 +135,26 @@ def orient_north_up(arr, transform):
     return arr
 
 
-def draw_panel_letter(ax: plt.Axes, letter: str | None) -> None:
-    """Draw '(letter)' just above the axes' top-left corner; no-op if falsy.
+def panel_letters(ax: plt.Axes, letter: str | None, fontsize: float = 11, label: str | None = None) -> None:
+    """Draw '(letter)', or '(letter) label' if `label` is given, just above the axes'
+    top-left corner; no-op if `letter` is falsy.
 
-    Maps never use titles; captions go in `draw_caption_box`.
+    Maps never use titles; captions go in `draw_caption_box`. For a small-multiple
+    panel's short header (section 9's exception to "no titles"), pass it as `label`
+    rather than a separate `ax.set_title` - one left-aligned string, not a centered
+    title floating independently of the letter it has to line up with. `label` must be
+    single-line: a second line would sit under the letter, not after it, breaking that
+    same alignment. `fontsize` defaults to the original, larger-figure value; pass a
+    smaller one (still >= 7, section 9's floor) for a figure with many small panels,
+    where 11 pt reads oversized relative to the panels.
     """
     if not letter:
         return
+    if label:
+        assert "\n" not in label, "panel_letters label must be single-line - no separate title"
+    text = f"({letter}) {label}" if label else f"({letter})"
     ax.text(
-        0.0, 1.02, f"({letter})", transform=ax.transAxes, fontsize=11, fontweight="bold",
+        0.0, 1.02, text, transform=ax.transAxes, fontsize=fontsize, fontweight="bold",
         ha="left", va="bottom",
     )
 
@@ -70,5 +179,10 @@ def draw_caption_box(ax: plt.Axes, lines: list[str] | str, loc: str = "upper lef
         x, y, "\n".join(lines), transform=ax.transAxes, fontsize=fontsize, va=va, ha=ha,
         bbox=dict(facecolor="white", alpha=0.85, edgecolor="black", linewidth=0.5, pad=4.0),
     )
+
+
+def write_caption(figure_path: Path, lines: list[str]) -> None:
+    """Write `lines` to a `.txt` file next to `figure_path` (CLAUDE.md "Figures")."""
+    Path(figure_path).with_suffix(".txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

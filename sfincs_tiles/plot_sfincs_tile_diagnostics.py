@@ -44,7 +44,8 @@ from plot_worst_tiles_panel import (  # noqa: E402
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from map_style import WATER_COLOR, WATER_LABEL, draw_caption_box, draw_panel_letter  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analysis"))
+from _figure_style import WATER_COLOR, WATER_LABEL, draw_caption_box, panel_letters  # noqa: E402
 from rasters import decode_waterlevel_cm  # noqa: E402
 
 OCEAN_CODE = 1
@@ -162,7 +163,7 @@ def plot_boundary_forcing(mask2d: np.ndarray, transform: rasterio.Affine, crs: s
                         textcoords="offset points", fontsize=8, weight="bold", zorder=7)
     ax.set_xlabel("longitude")
     ax.set_ylabel("latitude")
-    draw_panel_letter(ax, "a")
+    panel_letters(ax, "a")
     draw_caption_box(ax, "Boundary stations + boundary cell line(s)", loc="lower left")
     ax.legend(fontsize=8, loc="best")
 
@@ -181,7 +182,7 @@ def plot_boundary_forcing(mask2d: np.ndarray, transform: rasterio.Affine, crs: s
         ax.axvline(bzs[-1, 0] / 3600.0, color="grey", linestyle=":", linewidth=1.2, label="end of bzs / SFINCS run")
     ax.set_xlabel("elapsed time (h)")
     ax.set_ylabel("water level (m)")
-    draw_panel_letter(ax, "b")
+    panel_letters(ax, "b")
     draw_caption_box(ax, "Forcing hydrographs (MDT-corrected)", loc="lower right")
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
@@ -350,7 +351,7 @@ def _profile_panel(ax, ctx: dict, zsmax_lonlat, bzs, letter: str, title: str | N
     if len(idx) == 0:
         ax.text(0.5, 0.5, "no COAST-RP station inside the tile", ha="center", va="center", transform=ax.transAxes)
         ax.set_axis_off()
-        draw_panel_letter(ax, letter)
+        panel_letters(ax, letter)
         return
     kx = 111.32 * np.cos(np.radians(np.mean(st_lat[idx])))
 
@@ -384,7 +385,7 @@ def _profile_panel(ax, ctx: dict, zsmax_lonlat, bzs, letter: str, title: str | N
     ax.legend(fontsize=12, loc="best", framealpha=0.9)
     if title:
         ax.set_title(title, fontsize=10)
-    draw_panel_letter(ax, letter)
+    panel_letters(ax, letter)
 
 
 def _legend_corner_map(ctx: dict, extra_lon=(), extra_lat=(), box_w: float = 0.55, box_h: float = 0.45) -> str:
@@ -462,7 +463,7 @@ def _plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs, out_path
         plt.Line2D([0], [0], marker="*", color="none", markeredgecolor="#1f4e8c", markersize=14,
                    label="SFINCS forcing points (sfincs.bnd)"),
     ], **legend_kw)
-    draw_panel_letter(ax, "a")
+    panel_letters(ax, "a")
 
     _profile_panel(axes[1], ctx, _zsmax_lonlat(sfincs_dir, crs), bzs, "b")
     fig.tight_layout()

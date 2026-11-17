@@ -28,7 +28,8 @@ from calibration_results import DISPLAY_LABEL, GROUPS  # noqa: E402
 from gfm_config import read_root  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from map_style import draw_panel_letter  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analysis"))
+from _figure_style import panel_letters  # noqa: E402
 
 TAU_COLORS = {0.1: "#9ecae1", 0.2: "#4292c6", 0.5: "#08306b"}
 BIAS_CLASSES = {"0.1-0.3": "#fdae6b", "0.5-1": "#e6550d", "2-3": "#7f2704"}
@@ -80,7 +81,7 @@ def plot(depth: pd.DataFrame, pooled: pd.DataFrame, selection: dict, group: str,
     for ax in axes[:, -1]:
         ax.legend(frameon=False, fontsize=7, loc="center left", bbox_to_anchor=(1.02, 0.5))
     for k, ax in enumerate(axes.T.ravel()):
-        draw_panel_letter(ax, "abcdefghijklmnopqrstuvwxyz"[k] if k < 26 else None)
+        panel_letters(ax, "abcdefghijklmnopqrstuvwxyz"[k] if k < 26 else None)
     fig.suptitle(f"Depth and extent agreement vs SFINCS per run, {group} group\n"
                  "grey line: selected run (by CSI; depth is reported only)", fontsize=9)
     fig.savefig(out, dpi=200, bbox_inches="tight")

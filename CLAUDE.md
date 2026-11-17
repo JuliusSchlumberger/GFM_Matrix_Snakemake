@@ -77,6 +77,27 @@ Never write to, move, or delete anything under `<data_root>` or the model output
 - Open questions, deferred decisions and work still to tackle go to `TODO.md` by default,
   not only into chat.
 
+## Figures
+
+General rules: §9 of the general CLAUDE.md. Project specifics:
+
+- Style module: `analysis/_figure_style` (style, sizes, fonts, project colour
+  assignments, save helper).
+- No titles or subtitles; annotations kept to a minimum (axis labels, colour
+  bars).
+- Every panel is numbered (a), (b), ... just outside its top-left corner
+  (`panel_letters`). No separate per-panel titles: a small-multiple's short
+  row/column header (e.g. "SSP2-4.5", "2100") is appended to the letter as
+  one left-aligned string - "(a) SSP2-4.5" via
+  `panel_letters(ax, letter, label=...)` - not a centered `ax.set_title`
+  floating independently of the letter it has to line up with. No line
+  breaks in `label`: a second line sits under the letter, not after it.
+- Every figure gets a description `<figure>.txt` next to it: the main message
+  in one sentence, then what is shown and what each colour, line style and
+  marker means, plus CRS and uncertainty definition where relevant (`write_caption`).
+- Maps always show land in light grey for orientation (`add_land`).
+- Figure widths: 180 mm.
+
 ## Documentation standard
 
 Documentation is for future readers of the code, not a record of this session.

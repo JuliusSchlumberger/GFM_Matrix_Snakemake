@@ -1,0 +1,24 @@
+The Fast Sweeping solver needs several rounds of four directional sweeps to
+converge, and stops once the largest change between rounds drops below epsilon.
+
+Scenario: a synthetic spiral maze (nested high-friction rings with alternating
+gaps) seeded along the top edge - a known slow case, since the only path reverses
+direction repeatedly and each round only relays information once per sweep
+direction.
+
+Colours: (a)-(d) - yellow = reached by that single sweep direction, light grey =
+not yet reached, dark grey = wall. (e)-(h) - Blues, light = low cumulative
+attenuation from the seed (m), dark = high; dark grey = wall; light grey = not
+yet reached at that round. No CRS or uncertainty: a synthetic unprojected grid,
+deterministic solve.
+
+Markers: orange star = the seed cell (a-h). In (a)-(d), the orange arrow points at
+one example cell 't' (bold outline) that direction's sweep updates, from the two
+neighbour cells (dashed outline) it reads to do so.
+
+Panels:
+(a)-(d) one sweep direction each, in round order - the region each one alone
+     reaches from the seed before the next direction starts
+(e)-(h) the solution after 1, 2, 5 and 12 rounds (4/8/20/48 sweeps)
+(i) the largest change between consecutive rounds, vs. epsilon (dashed line) -
+     the convergence check the solver itself uses

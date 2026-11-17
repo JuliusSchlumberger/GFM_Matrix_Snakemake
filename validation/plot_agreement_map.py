@@ -29,13 +29,14 @@ from matplotlib.patches import Patch
 from matplotlib.ticker import MaxNLocator
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analysis"))
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
-from map_style import (  # noqa: E402
+from _figure_style import (  # noqa: E402
     LAND_COLOR as _LAND_COLOR,
     LAND_LABEL as _LAND_LABEL,
     WATER_COLOR as _WATER_COLOR,
     WATER_LABEL as _WATER_LABEL,
-    draw_panel_letter as _draw_panel_letter,
+    panel_letters as _panel_letters,
 )
 import validation as v  # noqa: E402
 from validate_country import _find_benchmark_keys  # noqa: E402
@@ -215,7 +216,7 @@ def plot_agreement_map(
             ax.set_ylabel("Latitude")
         else:
             ax.tick_params(labelleft=False)
-        _draw_panel_letter(ax, letters[i])
+        _panel_letters(ax, letters[i])
         _draw_annotation_box(ax, _format_metrics_lines(rp_metrics.get(rp_label)))
 
     fig.subplots_adjust(wspace=0.04, bottom=0.17, top=0.92)  # room for rotated x-ticks
@@ -285,7 +286,7 @@ def plot_subregions_grid(
             else:
                 ax.tick_params(labelleft=False)
             letter = letters[panel_i] if use_letters and panel_i < len(letters) else None
-            _draw_panel_letter(ax, letter)
+            _panel_letters(ax, letter)
             metrics = rp_region_metrics.get(rp_label, {}).get(region)
             _draw_annotation_box(ax, _format_metrics_lines(metrics))
             panel_i += 1

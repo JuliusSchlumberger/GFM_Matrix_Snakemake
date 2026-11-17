@@ -17,8 +17,9 @@ from matplotlib.colors import BoundaryNorm, ListedColormap
 from matplotlib.patches import Patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "analysis"))
 from config_utils import get_data_catalog, load_config  # noqa: E402
-from map_style import WATER_COLOR, draw_caption_box  # noqa: E402
+from _figure_style import WATER_COLOR, draw_caption_box  # noqa: E402
 from tiles import load_tile_grid  # noqa: E402
 
 # Forest subtypes 111-126 share one Manning's n in lu_to_roughness_lookup.csv,

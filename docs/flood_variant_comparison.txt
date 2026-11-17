@@ -1,0 +1,42 @@
+The four FLOOD_MODELS variants (src/flood_model.py) disagree sharply once a scenario has
+a disconnected basin and a detour around an obstacle, which is the sanity check and the
+explanation this figure exists to give, panel by panel.
+
+Scenario: ocean at the left edge, with a surge boundary condition (red line, every panel)
+rising over 24h; a floodplain sloping from 0 m at the coast to 2.3 m at the domain's far
+inland edge; a pond below sea level (-1 m), walled off on three sides at 3 m and open at
+the domain's own upper edge; a 3 m sill blocking a direct route inland except around a
+gap at one end.
+
+Grey boxes: the left box (a-c) is the scenario's static inputs; the right box (d-h) is
+every flood-depth result on that scenario.
+
+Colours: single-hue, colour-blind-safe sequential ramps, one per variable - elevation
+(a) uses Greens, flood depth (d-h) uses Blues, friction (b, c) uses Oranges (light = low
+in all three). Depth is binned into discrete 0.20 m steps. Grey = dry land; light
+blue-grey = permanent water (including below-sea-level elevation in (a), shown as one
+flat colour, not part of the scale).
+
+No colour bars: deliberately overridden here (SHOW_COLORBARS=False in the script) in
+favour of the discrete depth bands plus the annotated sample-point values below, which
+already give exact numbers; set SHOW_COLORBARS=True to restore one shared colour bar per
+panel group instead.
+
+Markers: white circles with a purple edge = three fixed sample points (pond interior,
+near the sill's gap, far past it); the black-on-white number beside each is that point's
+flood depth (m) under the panel's model.
+
+This is a deterministic synthetic test scenario, not a result with uncertainty to report.
+No CRS: the domain is an unprojected synthetic grid, not a geographic map.
+
+Panels:
+(a) elevation (m)
+(b) friction - spatially uniform attenuation rate
+(c) friction x a direct duration multiplier (time the boundary forcing exceeds each
+    cell's own elevation) - NOT production's actual event_volume.DurationCorrection;
+    see TODO.md "Open methods questions" and elevation_duration_multiplier's docstring
+(d) bathtub - IDW-interpolated level, no coast-connectivity check
+(e) bathtub_connected - (d) + coast-connectivity filter
+(f) straight_line - uniform rate, attenuated by straight-line distance
+(g) eikonal - uniform rate, attenuated by the real, connectivity-respecting path
+(h) eikonal, run with the duration-corrected friction field from (c)

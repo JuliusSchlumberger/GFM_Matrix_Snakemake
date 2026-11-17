@@ -31,7 +31,8 @@ from sklearn.neighbors import BallTree  # noqa: E402
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "boundary_test"))
-from map_style import LAND_COLOR, draw_caption_box, draw_panel_letter  # noqa: E402
+sys.path.insert(0, str(REPO / "analysis"))
+from _figure_style import LAND_COLOR, draw_caption_box, panel_letters  # noqa: E402
 from tide_prediction import VERSION_DIFF_M, VERSION_RATIO, version_flag  # noqa: E402
 from regions import ar6_regions  # noqa: E402
 from site_sets import GRID, INK, MUTED, _save, _style  # noqa: E402
@@ -83,7 +84,7 @@ def fig01_tide_scatter(out: Path, dest: Path) -> None:
         draw_caption_box(ax, [f"median ratio {ratio:.2f}", f"MAE {mae:.3f} m", f"n = {len(ok)}"], loc="lower right")
         ax.set(xlim=(0, hi), ylim=(0, hi), xlabel="GESLA MHWS (m)", ylabel=f"{label} MHWS (m)", aspect="equal")
         _style(ax)
-        draw_panel_letter(ax, letter)
+        panel_letters(ax, letter)
     fig.tight_layout()
     _save(fig, dest / "fig01_tide_mhws_scatter.png")
     missing14 = ", ".join(q.site_name[q.fes2014__mhws_m.isna()])
@@ -131,7 +132,7 @@ def fig02_tide_ratio_maps(out: Path, dest: Path) -> None:
         sc = ax.scatter(q.loc[r.index, "lon"], q.loc[r.index, "lat"], c=r, s=12, cmap="RdBu_r", norm=norm,
                         linewidths=0.2, edgecolors="white", transform=PC, zorder=2)
         ax.spines["geo"].set_edgecolor(MUTED)
-        draw_panel_letter(ax, letter)
+        panel_letters(ax, letter)
     cax = fig.add_axes([0.25, 0.055, 0.5, 0.018])
     cb = fig.colorbar(sc, cax=cax, orientation="horizontal", extend="both")
     cb.ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
@@ -222,7 +223,7 @@ def fig08_profiles_by_rp(out: Path, dest: Path) -> None:
             if j == 0:
                 ax.set_ylabel("water level / peak")
             _style(ax)
-            draw_panel_letter(ax, "abcd"[2 * i + j])
+            panel_letters(ax, "abcd"[2 * i + j])
     handles, labels = axes[0, 0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=6, frameon=False, fontsize=8.5)
     fig.tight_layout(rect=(0, 0.05, 1, 1))
@@ -333,7 +334,7 @@ def fig09_surge_by_rp(out: Path, dest: Path) -> None:
         if j == 0:
             ax.set_ylabel("surge / surge maximum")
         _style(ax)
-        draw_panel_letter(ax, "ab"[j])
+        panel_letters(ax, "ab"[j])
     ax = fig.add_subplot(gs[0, 2])
     pos, data, colors = [], [], []
     for k, rp in enumerate(cats):
@@ -352,7 +353,7 @@ def fig09_surge_by_rp(out: Path, dest: Path) -> None:
     ax.set_xticks(range(len(cats)), [f"{iv.left:g}-{iv.right:g}" for iv in cats])
     ax.set(xlabel="empirical RP (y)", ylabel="surge duration above half its maximum (h)")
     _style(ax)
-    draw_panel_letter(ax, "c")
+    panel_letters(ax, "c")
     handles, labels = fig.axes[0].get_legend_handles_labels()
     handles += [plt.Line2D([], [], color=INK), plt.Line2D([], [], color=BLUE)]
     labels += ["GESLA (c)", "GTSM (c)"]
@@ -468,13 +469,13 @@ def fig07_coast_rp_regions(out: Path, dest: Path) -> None:
     ax.set(xlim=(lo - pad, hi + pad), ylim=(ypos - 0.4, -0.6), xlabel="COAST-RP - gauge GEV (m)")
     ax.legend(frameon=False, loc="lower right", fontsize=8)
     _style(ax)
-    draw_panel_letter(ax, "a")
+    panel_letters(ax, "a")
     ax2 = fig.add_subplot(gs[0, 1], sharey=ax)
     ax2.barh(y, st.n, color=MUTED, height=0.6)
     ax2.set(xlabel="sites", xscale="log", xlim=(1, st.n.max() * 1.3))
     plt.setp(ax2.get_yticklabels(), visible=False)
     _style(ax2)
-    draw_panel_letter(ax2, "b")
+    panel_letters(ax2, "b")
     fig.subplots_adjust(left=0.2, right=0.98, bottom=0.65 / (0.25 * ypos + 1.4), top=1 - 0.45 / (0.25 * ypos + 1.4))
     _save(fig, dest / "fig07_coast_rp_vs_gauges.png")
     st.drop(columns="continent").round(3).to_csv(dest / "fig07_coast_rp_vs_gauges_data.csv")
@@ -525,7 +526,7 @@ def fig04_fes_versions(out: Path, dest: Path) -> None:
     sc = ax.scatter(n.node_lon[order], n.node_lat[order], c=r[order], s=3, cmap="RdBu_r", norm=LogNorm(1 / 3, 3),
                     linewidths=0, transform=PC, zorder=2)
     ax.spines["geo"].set_edgecolor(MUTED)
-    draw_panel_letter(ax, "a")
+    panel_letters(ax, "a")
     cax = fig.add_axes([0.13, 0.12, 0.36, 0.025])
     cb = fig.colorbar(sc, cax=cax, orientation="horizontal", extend="both")
     cb.ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
@@ -544,7 +545,7 @@ def fig04_fes_versions(out: Path, dest: Path) -> None:
     ax.set(xlim=(0, hi), ylim=(0, hi), xlabel="FES2014 MHWS (m)", ylabel="FES2022 MHWS (m)", aspect="equal")
     ax.legend(frameon=False, loc="upper left", markerscale=1.5)
     _style(ax)
-    draw_panel_letter(ax, "b")
+    panel_letters(ax, "b")
     _save(fig, dest / "fig04_fes2022_vs_fes2014.png")
     describe(dest / "fig04_fes2022_vs_fes2014.png", f"""
         FES2022 against FES2014 at the {len(n):,} FES boundary nodes of the test tiles (the atlas
@@ -692,7 +693,7 @@ def fig05_basin_heads(out: Path, dest: Path) -> None:
                 ax.set_aspect(d["stretch"], adjustable="datalim")
                 for spine in ax.spines.values():
                     spine.set_edgecolor(MUTED)
-                draw_panel_letter(ax, f"{letter}{i + 1}")
+                panel_letters(ax, f"{letter}{i + 1}")
             summary.append(f"({letter}1, {letter}2) {d['name']}: {len(b)} nodes, {int(b.replaced.sum())} replaced in "
                            f"{len(clusters)} cluster(s); FES2022 MHWS max {b.fes2022_mhws_m.max():.1f} m, FES2014 max "
                            f"{b.fes2014_mhws_m.max():.1f} m"
@@ -777,7 +778,7 @@ def fig06_rule_sensitivity(out: Path, dest: Path) -> None:
     _heat(axes[2], grid, "nodes_replaced", lambda r: f"{int(r.nodes_replaced)}", plt.get_cmap("Oranges"),
           LogNorm(max(grid.nodes_replaced.min(), 1), grid.nodes_replaced.max()))
     for ax, letter in zip(axes, "abc"):
-        draw_panel_letter(ax, letter)
+        panel_letters(ax, letter)
     fig.tight_layout()
     _save(fig, dest / "fig06_version_rule_sensitivity.png")
     adopted = grid[(grid.ratio == VERSION_RATIO) & (grid.diff_m == VERSION_DIFF_M)].iloc[0]
@@ -875,7 +876,7 @@ def fig10_generator_acceptance(out: Path, dest: Path) -> None:
             if j == 0:
                 ax.set_ylabel(ylab)
             _style(ax)
-            draw_panel_letter(ax, "abcdefgh"[i * len(GEN_RANGES) + j])
+            panel_letters(ax, "abcdefgh"[i * len(GEN_RANGES) + j])
     handles, labels = axes[0, 0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=6, frameon=False, fontsize=9)
     fig.tight_layout(rect=(0, 0.05, 1, 1))
@@ -940,7 +941,7 @@ def fig11_generator_profiles(out: Path, dest: Path) -> None:
         ax.axhline(0, color=MUTED, linewidth=0.8)
         ax.set(xlim=(-WINDOW_PLOT_HR, WINDOW_PLOT_HR), ylim=(-1.0, 1.05))
         _style(ax)
-        draw_panel_letter(ax, letter)
+        panel_letters(ax, letter)
     for ax in axes[1]:
         ax.set_xlabel("hours from peak")
     for ax in axes[:, 0]:
@@ -999,7 +1000,7 @@ def fig12_level_product_maps(product: Path, dest: Path) -> None:
         sc = ax.scatter(lev.loc[values.index, "lon"], lev.loc[values.index, "lat"], c=values, s=3, cmap=cmap,
                         norm=norm, linewidths=0, transform=PC, zorder=2)
         ax.spines["geo"].set_edgecolor(MUTED)
-        draw_panel_letter(ax, "ab"[k])
+        panel_letters(ax, "ab"[k])
         cax = fig.add_axes([0.25, 0.54 - k * 0.48, 0.5, 0.014])
         cb = fig.colorbar(sc, cax=cax, orientation="horizontal", extend="both")
         cb.ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
@@ -1050,7 +1051,7 @@ def fig13_level_product_by_rp(product: Path, dest: Path) -> None:
         ax.text(0.03, 0.97, f"{label} ({int(sel.sum()):,} stations)", transform=ax.transAxes, va="top",
                 fontsize=9, color=INK)
         _style(ax)
-        draw_panel_letter(ax, letter)
+        panel_letters(ax, letter)
     axes[0].set_ylabel("difference, median over stations (m)")
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=2, frameon=False, fontsize=9)
@@ -1093,7 +1094,7 @@ def fig14_level_product_gauges(product: Path, dest: Path) -> None:
             ax.set(xlim=(0, hi), ylim=(0, hi), aspect="equal", xlabel=f"gauge RP{rp} (m)",
                    ylabel=f"{label} RP{rp} (m)")
             _style(ax)
-            draw_panel_letter(ax, letter)
+            panel_letters(ax, letter)
     handles, labels = axes[0, 0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=2, frameon=False, fontsize=9)
     fig.tight_layout(rect=(0, 0.04, 1, 1))
@@ -1130,7 +1131,7 @@ def fig15_level_product_hydrographs(product: Path, dest: Path) -> None:
                 transform=ax.transAxes, va="top", fontsize=8.5, color=INK)
         ax.legend(frameon=False, fontsize=8, loc="upper right")
         _style(ax)
-        draw_panel_letter(ax, letter)
+        panel_letters(ax, letter)
     for ax in axes[1]:
         ax.set_xlabel("hours from peak")
     for ax in axes[:, 0]:
@@ -1174,7 +1175,7 @@ def fig16_station_interpolation(product: Path, dest: Path) -> None:
            xlabel="neighbours k", ylabel="RP100 leave-one-out MAE (cm)")
     ax.legend(frameon=False, fontsize=8)
     _style(ax)
-    draw_panel_letter(ax, "a")
+    panel_letters(ax, "a")
     ax = axes[1]
     x = np.arange(len(spacing))
     edges = [s.strip("(]").split(", ") for s in spacing.index]
@@ -1187,7 +1188,7 @@ def fig16_station_interpolation(product: Path, dest: Path) -> None:
            ylabel="RP100 leave-one-out MAE (cm)")
     ax.legend(frameon=False, fontsize=8)
     _style(ax)
-    draw_panel_letter(ax, "b")
+    panel_letters(ax, "b")
     fig.tight_layout()
     _save(fig, dest / "fig16_station_interpolation.png")
     describe(dest / "fig16_station_interpolation.png", f"""
@@ -1226,7 +1227,7 @@ def fig17_level_product_qa(product: Path, dest: Path) -> None:
         ax.text(0.01, 0.97, label, transform=ax.transAxes, va="top", fontsize=9, color=INK)
         ax.set(xlim=(hours[0], hours[-1]), ylabel="m above MSL")
         _style(ax)
-        draw_panel_letter(ax, "ace"[row])
+        panel_letters(ax, "ace"[row])
         ax = axes[row, 1]
         for name, color, text in (("old", MUTED, "before"), ("new", GREEN, "after")):
             v = qa[f"{k}_ranked_{name}"]
@@ -1234,7 +1235,7 @@ def fig17_level_product_qa(product: Path, dest: Path) -> None:
                     label=f"{text} QA")
         ax.set(xscale="log", ylabel="skew surge (m)")
         _style(ax)
-        draw_panel_letter(ax, "bdf"[row])
+        panel_letters(ax, "bdf"[row])
     axes[2, 0].set_xlabel("hours from the largest skew surge (before QA)")
     axes[2, 1].set_xlabel("rank")
     axes[0, 1].legend(frameon=False, fontsize=8)
@@ -1286,7 +1287,7 @@ def fig18_product_durations(product: Path, dest: Path) -> None:
         if j == 0:
             ax.legend(frameon=False, fontsize=8)
         _style(ax)
-        draw_panel_letter(ax, "ab"[j])
+        panel_letters(ax, "ab"[j])
     ratio = (d.rp100_t025_hr / d.coast_hg_t025_hr).replace([np.inf, 0], np.nan).dropna()
     ratio = ratio.iloc[np.argsort(np.abs(np.log(ratio.to_numpy())))]
     ax = fig.add_subplot(grid[1, :], projection=MAP_PROJ)
@@ -1295,7 +1296,7 @@ def fig18_product_durations(product: Path, dest: Path) -> None:
     sc = ax.scatter(d.loc[ratio.index, "lon"], d.loc[ratio.index, "lat"], c=ratio, s=3, cmap="PuOr_r",
                     norm=LogNorm(1 / 4, 4), linewidths=0, transform=PC, zorder=2)
     ax.spines["geo"].set_edgecolor(MUTED)
-    draw_panel_letter(ax, "c")
+    panel_letters(ax, "c")
     cb = fig.colorbar(sc, ax=ax, orientation="horizontal", extend="both", fraction=0.04, pad=0.03, shrink=0.5)
     cb.ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
     cb.set_ticks([0.25, 0.5, 1, 2, 4], labels=["1/4", "1/2", "1", "2", "4"])
@@ -1340,7 +1341,7 @@ def fig19_despike(product: Path, dest: Path) -> None:
     ax.set(xscale="log", yscale="log", xlabel="largest hourly change of the GTSM surge residual (m)",
            ylabel="stations")
     _style(ax)
-    draw_panel_letter(ax, "a")
+    panel_letters(ax, "a")
     ax = fig.add_subplot(grid[0, 1])
     counts = (1, 2, 3, 5, 10, 20)
     table = np.array([[int((d[f"jumps_gt_{m:g}m"] >= n).sum()) for n in counts] for m in (1.0, 2.0, 3.0)])
@@ -1352,7 +1353,7 @@ def fig19_despike(product: Path, dest: Path) -> None:
            yticklabels=["> 1 m", "> 2 m", "> 3 m"], xlabel="hourly jumps per station (46 years)",
            ylabel="jump threshold")
     ax.set_title("stations sent to COAST-RP levels (bold: production)", fontsize=9, color=INK)
-    draw_panel_letter(ax, "b")
+    panel_letters(ax, "b")
     ax = fig.add_subplot(grid[1, :], projection=MAP_PROJ)
     ax.set_global()
     _land(ax)
@@ -1364,7 +1365,7 @@ def fig19_despike(product: Path, dest: Path) -> None:
     ax.spines["geo"].set_edgecolor(MUTED)
     cb = fig.colorbar(sc, ax=ax, orientation="horizontal", fraction=0.04, pad=0.03, shrink=0.5)
     cb.set_label("hourly jumps > 1 m (orange rings: stations on COAST-RP levels)")
-    draw_panel_letter(ax, "c")
+    panel_letters(ax, "c")
     fig.tight_layout()
     _save(fig, dest / "fig19_despike.png")
     n1 = int((d.jumps_gt_1m > 0).sum())
@@ -1405,7 +1406,7 @@ def fig20_gpd_cap(product: Path, dest: Path) -> None:
     ax.set(xlabel="GPD shape (maximum likelihood)", ylabel="density")
     ax.legend(frameon=False, fontsize=8)
     _style(ax)
-    draw_panel_letter(ax, "a")
+    panel_letters(ax, "a")
     ax = axes[1]
     caps = list(dict.fromkeys(sc.level))
     x = np.arange(len(caps))
@@ -1418,7 +1419,7 @@ def fig20_gpd_cap(product: Path, dest: Path) -> None:
            ylabel="RP100 station - gauge (cm)")
     ax.legend(frameon=False, fontsize=7, loc="center")
     _style(ax)
-    draw_panel_letter(ax, "b")
+    panel_letters(ax, "b")
     ax = axes[2]
     prod = st[st.cap == "0.35 (production)"].set_index("station")
     for c, color in (("none", INK), ("0.5", MUTED), ("0.25", GREEN), ("0.2", BLUE)):
@@ -1430,7 +1431,7 @@ def fig20_gpd_cap(product: Path, dest: Path) -> None:
            ylim=(-3.5, 10.0))
     ax.legend(frameon=False, fontsize=8, markerscale=2)
     _style(ax)
-    draw_panel_letter(ax, "c")
+    panel_letters(ax, "c")
     fig.tight_layout()
     _save(fig, dest / "fig20_gpd_cap.png")
     m = sc[(sc.rp == 100) & (sc.gauges == "all")].set_index("level")
@@ -1473,7 +1474,7 @@ def fig21_tc_mask(product: Path, dest: Path) -> None:
         ax.invert_yaxis()
         ax.legend(frameon=False, fontsize=8)
         _style(ax)
-        draw_panel_letter(ax, letter)
+        panel_letters(ax, letter)
     fig.tight_layout()
     _save(fig, dest / "fig21_tc_mask.png")
     s = sc[(sc.gauges == "TC-dominated gauges") & (sc.rp == 100)].set_index("level")
@@ -1524,7 +1525,7 @@ def fig22_fes_rule(product: Path, dest: Path) -> None:
     ax.set(xlim=lim, ylim=(-1.5, 1.5), xlabel="FES2022 - gauge MHWS (m)", ylabel="FES2014 - gauge MHWS (m)")
     ax.legend(frameon=False, fontsize=8)
     _style(ax)
-    draw_panel_letter(ax, "a")
+    panel_letters(ax, "a")
     ax = axes[1]
     for flagged, marker, label in ((True, "o", "rule"), (False, "^", "grown to neighbours")):
         s = near[near.rule_flag == flagged]
@@ -1540,7 +1541,7 @@ def fig22_fes_rule(product: Path, dest: Path) -> None:
                     fontsize=7, color=INK, xytext=(3, 3), textcoords="offset points")
     ax.legend(frameon=False, fontsize=7)
     _style(ax)
-    draw_panel_letter(ax, "b")
+    panel_letters(ax, "b")
     ax = axes[2]
     far = f[f.gauge_km > GUESS_NEAR_GAUGE_KM]
     ax.scatter(far.mhws_fes2014_m, far.mhws_fes2022_m, s=25, color=INK)
@@ -1550,7 +1551,7 @@ def fig22_fes_rule(product: Path, dest: Path) -> None:
     ax.title.set_fontsize(9)
     ax.legend(frameon=False, fontsize=8)
     _style(ax)
-    draw_panel_letter(ax, "c")
+    panel_letters(ax, "c")
     fig.tight_layout()
     _save(fig, dest / "fig22_fes_rule.png")
     n_rule, n_grown = int(f.rule_flag.sum()), int((~f.rule_flag).sum())
@@ -1594,17 +1595,17 @@ def fig23_peak_offsets(product: Path, dest: Path) -> None:
            ylabel="hydrographs with the maximum off time 0 (%)")
     ax.legend(frameon=False, fontsize=8, title="tide (form factor)", title_fontsize=8)
     _style(ax)
-    draw_panel_letter(ax, "a")
+    panel_letters(ax, "a")
     ax = axes[1]
     ax.hist(off.offset_hr.clip(-60, 60), bins=np.arange(-60.5, 61, 1), color=BLUE)
     ax.set(xlabel="hours from time 0 to the maximum", ylabel="hydrographs")
     _style(ax)
-    draw_panel_letter(ax, "b")
+    panel_letters(ax, "b")
     ax = axes[2]
     ax.hist(off.excess_m.clip(0, 1.0), bins=50, color=BLUE)
     ax.set(xlabel="maximum minus the level at time 0 (m)", ylabel="hydrographs", yscale="log")
     _style(ax)
-    draw_panel_letter(ax, "c")
+    panel_letters(ax, "c")
     fig.tight_layout()
     _save(fig, dest / "fig23_peak_offsets.png")
     rp100 = p[p.rp == 100]
@@ -1653,7 +1654,7 @@ def fig24_datum_terms(processed: Path, dest: Path) -> None:
         sc = ax.scatter(t.loc[v.index, "lon"], t.loc[v.index, "lat"], c=v, s=3, cmap="RdBu_r", norm=norm,
                         linewidths=0, transform=PC, zorder=2)
         ax.spines["geo"].set_edgecolor(MUTED)
-        draw_panel_letter(ax, "abc"[k])
+        panel_letters(ax, "abc"[k])
         cax = fig.add_axes([0.25, 0.765 - k * 0.235, 0.5, 0.007])
         cb = fig.colorbar(sc, cax=cax, orientation="horizontal", extend="both")
         cb.ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
@@ -1668,7 +1669,7 @@ def fig24_datum_terms(processed: Path, dest: Path) -> None:
     ax.set(xlim=(-0.8, 0.8), xlabel="RP100 at SLR 0 (m)", ylabel="share of stations")
     ax.legend(frameon=False, fontsize=9, loc="upper left")
     _style(ax)
-    draw_panel_letter(ax, "d")
+    panel_letters(ax, "d")
     _save(fig, dest / "fig24_datum_terms.png")
     q = t[["mdt", "offset", "level_change", "change"]].quantile([0.05, 0.5, 0.95])
     describe(dest / "fig24_datum_terms.png", f"""
@@ -1714,7 +1715,7 @@ def fig25_long_record(product: Path, dest: Path) -> None:
     ax.set(xlim=lim, ylim=lim, xlabel="GPD shape (MLE), 1979-2024", ylabel="GPD shape (MLE), 1950-2024")
     ax.legend(frameon=False, fontsize=8, markerscale=4)
     _style(ax)
-    draw_panel_letter(ax, "a")
+    panel_letters(ax, "a")
     ax = fig.add_subplot(grid[1])
     bins = np.linspace(-1.0, 1.0, 81)
     for sel, color, label in ((~tc, MUTED, "no TC part"), (tc, ORANGE, "TC part")):
@@ -1722,7 +1723,7 @@ def fig25_long_record(product: Path, dest: Path) -> None:
     ax.set(xlabel="RP1000 level, 1950-2024 minus 1979-2024 (m; clipped at +-1)", ylabel="stations")
     ax.legend(frameon=False, fontsize=8)
     _style(ax)
-    draw_panel_letter(ax, "b")
+    panel_letters(ax, "b")
     ax = fig.add_subplot(grid[2], projection=MAP_PROJ)
     ratio = d.early_skew_rp10_m / d.late_skew_rp10_m
     cell = pd.DataFrame({"lon": (d.lon // 5) * 5 + 2.5, "lat": (d.lat // 5) * 5 + 2.5, "r": ratio}).dropna()
@@ -1731,7 +1732,7 @@ def fig25_long_record(product: Path, dest: Path) -> None:
     sc = ax.scatter(cell.lon, cell.lat, c=cell.r, s=9, cmap="RdBu_r", norm=Normalize(0.8, 1.2), transform=PC)
     ax.set_global()
     fig.colorbar(sc, ax=ax, shrink=0.8, label="skew-surge RP10, 1950-1978 / 1979-2024")
-    draw_panel_letter(ax, "c")
+    panel_letters(ax, "c")
     fig.tight_layout()
     _save(fig, dest / "fig25_long_record.png")
     a, b = d.gpd_shape_mle > 0.35, d.long_gpd_shape_mle > 0.35
@@ -1766,7 +1767,7 @@ def fig26_pooled_shape(product: Path, dest: Path) -> None:
     ax.set_xticks(x, [str(r) for r in radii])
     ax.legend(frameon=False, fontsize=8)
     _style(ax)
-    draw_panel_letter(ax, "a")
+    panel_letters(ax, "a")
     ax = axes[1]
     for sel, color, label in ((~st.tc_part, MUTED, "no TC part"), (st.tc_part, ORANGE, "TC part")):
         s = st[sel]
@@ -1776,7 +1777,7 @@ def fig26_pooled_shape(product: Path, dest: Path) -> None:
     ax.set_xticks(x, [str(r) for r in radii])
     ax.legend(frameon=False, fontsize=8)
     _style(ax)
-    draw_panel_letter(ax, "b")
+    panel_letters(ax, "b")
     ax = axes[2]
     levels = sc.level.unique().tolist()
     y = np.arange(len(levels))
@@ -1788,7 +1789,7 @@ def fig26_pooled_shape(product: Path, dest: Path) -> None:
     ax.set(xlabel="RP100 MAE against the gauges (m)", xlim=(0, 0.5))
     ax.legend(frameon=False, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.14), ncol=2)
     _style(ax)
-    draw_panel_letter(ax, "c")
+    panel_letters(ax, "c")
     fig.tight_layout()
     _save(fig, dest / "fig26_pooled_shape.png")
     describe(dest / "fig26_pooled_shape.png", f"""
@@ -1822,7 +1823,7 @@ def fig27_tide_correction(product: Path, dest: Path) -> None:
                ylabel=f"{label} (m)")
         ax.legend(frameon=False, fontsize=8, markerscale=2, loc="upper left")
         _style(ax)
-        draw_panel_letter(ax, letter)
+        panel_letters(ax, letter)
     ax = axes[2]
     km = [10, 25, 50, 100, 200]
     for grp, color in (("all", INK), ("gauge tide > 2 m", ORANGE), ("> 10 km from a station", BLUE)):
@@ -1835,7 +1836,7 @@ def fig27_tide_correction(product: Path, dest: Path) -> None:
     ax.legend(frameon=False, fontsize=8, title="solid: corrected; dashed: current forcing;\ndotted: FES uncorrected",
               title_fontsize=7)
     _style(ax)
-    draw_panel_letter(ax, "c")
+    panel_letters(ax, "c")
     fig.tight_layout()
     _save(fig, dest / "fig27_tide_correction.png")
     a = sc[sc.gauges == "all"].set_index("tide").mae_m
@@ -1870,7 +1871,7 @@ def fig28_tile_interpolation(product: Path, dest: Path) -> None:
         ax.set_xticks(x, [f"{g}\n(n = {int(s.sum())})" for g, s in groups.items()], fontsize=8)
         ax.set(ylabel=f"RP{rp} MAE against the gauges (m)")
         _style(ax)
-        draw_panel_letter(ax, letter)
+        panel_letters(ax, letter)
     axes[0].legend(frameon=False, fontsize=8)
     fig.tight_layout()
     _save(fig, dest / "fig28_tile_interpolation.png")
@@ -1968,7 +1969,7 @@ def fig30_surge_accuracy(product: Path, dest: Path) -> None:
                     linewidths=0.2, edgecolors=INK)
     ax.set_global()
     fig.colorbar(sc, ax=ax, shrink=0.7, label="r = gauge / GTSM-on-FES skew surge, RP10")
-    draw_panel_letter(ax, "a")
+    panel_letters(ax, "a")
     ax = fig.add_subplot(2, 2, 2)
     classes = ["no_tc", "etc_with_tc", "tc_dominated"]
     for k, (col, color, label) in enumerate((("coast_rp", MUTED, "COAST-RP"), ("raw", ORANGE, "GTSM, r = 1, no TC"),
@@ -1984,7 +1985,7 @@ def fig30_surge_accuracy(product: Path, dest: Path) -> None:
     ax.set(ylabel="RP100 level - gauge (m): median, p10-p90")
     ax.legend(frameon=False, fontsize=8)
     _style(ax)
-    draw_panel_letter(ax, "b")
+    panel_letters(ax, "b")
     ax = fig.add_subplot(2, 2, 3)
     bins = np.linspace(-0.8, 0.8, 41)
     for sel, color, label in ((g.neighbours >= 3, BLUE, "3 or more gauges near"),
@@ -1994,7 +1995,7 @@ def fig30_surge_accuracy(product: Path, dest: Path) -> None:
     ax.set(xlabel="r predicted without the gauge / gauge's r - 1", ylabel="gauges")
     ax.legend(frameon=False, fontsize=8)
     _style(ax)
-    draw_panel_letter(ax, "c")
+    panel_letters(ax, "c")
     ax = fig.add_subplot(2, 2, 4)
     size = g.groupby("region").size()
     keep = size[size >= 10].index
@@ -2010,7 +2011,7 @@ def fig30_surge_accuracy(product: Path, dest: Path) -> None:
     ax.set(xlabel="RP100 level - gauge (m): median, p10-p90")
     ax.legend(frameon=False, fontsize=8)
     _style(ax)
-    draw_panel_letter(ax, "d")
+    panel_letters(ax, "d")
     fig.tight_layout()
     _save(fig, dest / "fig30_surge_accuracy.png")
     r = g.ratio_fes
@@ -2047,7 +2048,7 @@ def fig31_duration_uncertainty(product: Path, dest: Path) -> None:
         if n == 0:
             ax.legend(frameon=False, fontsize=7)
         _style(ax)
-        draw_panel_letter(ax, "ab"[n])
+        panel_letters(ax, "ab"[n])
     for n, f in enumerate(("t025", "t05")):
         ax = fig.add_subplot(2, 2, n + 3, projection=MAP_PROJ)
         _land(ax)
@@ -2056,7 +2057,7 @@ def fig31_duration_uncertainty(product: Path, dest: Path) -> None:
                         linewidths=0)
         ax.set_global()
         fig.colorbar(sc, ax=ax, shrink=0.7, label=f"product RP100 / COAST-HG, {label[f]}")
-        draw_panel_letter(ax, "cd"[n])
+        panel_letters(ax, "cd"[n])
     fig.tight_layout()
     _save(fig, dest / "fig31_duration_uncertainty.png")
     r2, r100 = d[d.rp == 2], d[d.rp == 100]

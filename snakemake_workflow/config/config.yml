@@ -527,11 +527,15 @@ visualization:
     SSP3: 370
     SSP5: 585
 
+  # Not red/green (never that pair as the only distinction - CLAUDE.md section 9) and
+  # chosen to read against the burning-ember YlOrRd background, which warm hues
+  # (red/orange/yellow) blend into; line style/marker also vary per SSP in the figure
+  # scripts (analysis_figures._DEFAULT_SSP_LINESTYLES/_DEFAULT_SSP_MARKERS).
   ssp_colors:
-    SSP1: "#1f77b4"
-    SSP2: "#2ca02c"
-    SSP3: "#ff7f0e"
-    SSP5: "#d62728"
+    SSP1: "#0072B2" # blue
+    SSP2: "#CC79A7" # reddish purple
+    SSP3: "#56B4E9" # sky blue
+    SSP5: "#3B3B3B" # charcoal grey
 
   measure_colors:
     baseline: "#7f7f7f"

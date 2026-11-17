@@ -1,0 +1,24 @@
+The outer obstacle-coupling loop matters: a friction-cheap crossing of a
+physically-impassable ridge inflates basin depth behind it unless the loop
+detects and blocks that crossing.
+
+Scenario: ocean at the left edge; a tall ridge (dark grey block), well above the
+3.0 m boundary level, with open flanks above and below it; a basin inland of the
+ridge. The ridge is the cheapest raw route inland, so an uncoupled solve lets
+water cross it anyway; the open flanks keep the basin connected regardless, so
+coupling changes its depth, not whether it floods. No CRS or uncertainty: a
+synthetic unprojected grid, deterministic solve.
+
+Colours: dark grey = the ridge (impassable). Blues (a, b) and Reds (c) - discrete
+0.10 m bands, light = low, dark = high; a continuous scale hid how small (but
+real) a difference obstacle coupling makes here, in both the depth itself (a vs
+b) and the over-estimation (c). No colour bars: (a)/(b)'s band-contour kink and
+(c)'s bands already make the comparison; (c) is a different quantity from (a)/(b)
+anyway, so a shared one would not help.
+
+Panels:
+(a) basin depth without obstacle coupling - inflated by the cheap ridge crossing
+(b) basin depth with obstacle coupling - the crossing is detected and blocked
+(c) (a) minus (b): how much (a) over-estimates depth by not blocking the cheap
+    crossing, concentrated in the interior rows behind the ridge; the open
+    flanks above/below it are ~zero

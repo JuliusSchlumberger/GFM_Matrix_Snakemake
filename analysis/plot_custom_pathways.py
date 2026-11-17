@@ -21,19 +21,16 @@ import pandas as pd  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from population_growth import _build_name_to_iso  # noqa: E402
+from _figure_style import (  # noqa: E402
+    BASELINE_TRACK_COLOR, MEASURE_PAIR_COLORS, apply_style, panel_letters, save_figure, write_caption,
+)
 
 SSP_DISPLAY = {"SSP2": "SSP2-4.5", "SSP5": "SSP5-8.5"}
 
-MEASURE_COLORS = {"baseline": "0.55"}
+MEASURE_COLORS = {"baseline": BASELINE_TRACK_COLOR}
 MEASURE_LABEL = {"avoid": "Avoid", "protect": "Protect", "retreat": "Retreat", "protect_avoid": "Protect + Avoid"}
-# ColorBrewer "Paired": small/large share a hue.
-MEASURE_PAIR_COLORS = {
-    "avoid": {"small": "#A6CEE3", "large": "#1F78B4"},
-    "protect": {"small": "#FDBF6F", "large": "#FF7F00"},
-    "protect_avoid": {"small": "#CAB2D6", "large": "#6A3D9A"},
-    "retreat": {"small": "#B2DF8A", "large": "#33A02C"},
-}
 # Top to bottom; intensity is the CSV's "small"/"large" label, not the SLR_* config value.
 TRACKS = [("baseline", None), ("avoid", "small"), ("avoid", "large"), ("protect", "small"),
          ("protect", "large"), ("protect_avoid", "small"), ("protect_avoid", "large"),
@@ -83,7 +80,8 @@ ANNOT_FONTSIZE = 15
 TITLE_FONTSIZE = 19
 
 
-def _style_axes(ax: plt.Axes, to_year: int, title: str | None, show_yticklabels: bool = True) -> None:
+def _style_axes(ax: plt.Axes, to_year: int, title: str | None, show_yticklabels: bool = True,
+                letter: str | None = None) -> None:
     ax.set_xlim(2020, to_year + 1)
     ax.set_yticks([TRACK_Y[t] for t in TRACKS])
     ax.tick_params(axis="y", length=0)
@@ -98,12 +96,13 @@ def _style_axes(ax: plt.Axes, to_year: int, title: str | None, show_yticklabels:
     for side in ("top", "right", "left"):
         ax.spines[side].set_visible(False)
     ax.plot(1, 0, ">", color="black", ms=9, transform=ax.transAxes, clip_on=False, zorder=10)
-    if title:
-        ax.set_title(title, fontsize=TITLE_FONTSIZE, fontweight="bold")
+    # panel letter + the entity name as its label (section 9: no separate title
+    # floating independently of the letter it has to line up with)
+    panel_letters(ax, letter, fontsize=TITLE_FONTSIZE, label=title)
 
 
 def plot_entity_panel(ax: plt.Axes, title: str | None, g: pd.DataFrame, to_year: int,
-                      show_yticklabels: bool = True) -> None:
+                      show_yticklabels: bool = True, letter: str | None = None) -> None:
     """Draw one entity's sequences; a never-tipping baseline gets a bare trunk panel."""
     base_track = TRACK_Y[("baseline", None)]
 
@@ -113,7 +112,7 @@ def plot_entity_panel(ax: plt.Axes, title: str | None, g: pd.DataFrame, to_year:
         ax.plot(to_year, base_track, ">", ms=ARROW_MS, color=MEASURE_COLORS["baseline"], zorder=5)
         ax.text(0.5, 0.5, f"No adaptation needed by {to_year}", transform=ax.transAxes,
                 ha="center", va="center", fontsize=ANNOT_FONTSIZE + 2, color="0.4", style="italic")
-        _style_axes(ax, to_year, title, show_yticklabels)
+        _style_axes(ax, to_year, title, show_yticklabels, letter)
         return
 
     baseline_tip = float(g["baseline_tip_year"].iloc[0])
@@ -150,7 +149,7 @@ def plot_entity_panel(ax: plt.Axes, title: str | None, g: pd.DataFrame, to_year:
             prev_track = track
 
     ax.axvline(baseline_tip, color=MEASURE_COLORS["baseline"], lw=0.8, ls=":", zorder=1)
-    _style_axes(ax, to_year, title, show_yticklabels)
+    _style_axes(ax, to_year, title, show_yticklabels, letter)
 
 
 def _add_legend(fig: plt.Figure, to_year: int, bbox_y: float = 0.02) -> None:
@@ -161,8 +160,9 @@ def _add_legend(fig: plt.Figure, to_year: int, bbox_y: float = 0.02) -> None:
               bbox_to_anchor=(0.5, bbox_y))
 
 
-def make_figure(sub: pd.DataFrame, entities: list[str], titles: dict[str, str], to_year: int, out_path: Path, dpi: int) -> None:
+def make_figure(sub: pd.DataFrame, entities: list[str], titles: dict[str, str], to_year: int, out_path: Path) -> None:
     """Plot one panel per entity in a grid of up to 3 columns."""
+    apply_style()
     ncols = min(3, len(entities))
     nrows = int(np.ceil(len(entities) / ncols))
     fig, axes = plt.subplots(nrows, ncols, figsize=(6.8 * ncols, 5.6 * nrows), squeeze=False,
@@ -175,7 +175,7 @@ def make_figure(sub: pd.DataFrame, entities: list[str], titles: dict[str, str], 
     for idx, (ax, entity) in enumerate(zip(axes.flat, entities)):
         row, col = divmod(idx, ncols)
         plot_entity_panel(ax, titles.get(entity, entity), sub[sub["entity"] == entity], to_year,
-                          show_yticklabels=(col == 0))
+                          show_yticklabels=(col == 0), letter=chr(ord("a") + idx))
         if row == col_last_row[col]:
             ax.set_xlabel("Year", fontsize=AXIS_FONTSIZE)
     for ax in axes.flat[len(entities):]:
@@ -183,24 +183,45 @@ def make_figure(sub: pd.DataFrame, entities: list[str], titles: dict[str, str], 
 
     _add_legend(fig, to_year)
     fig.tight_layout(rect=(0, 0.07, 1, 1))
-    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+    save_figure(fig, out_path)
     plt.close(fig)
+    write_caption(out_path, [
+        "Each panel is one continent's adaptation pathway: when a strategy's EAI tipping",
+        "point forces a switch to the next one, under this SSP.",
+        "",
+        "Colours: grey = baseline (no adaptation); every other colour is one measure at",
+        "one intensity - Avoid/Protect/Protect+Avoid/Retreat, each small/large as a",
+        "light/dark pair (ColorBrewer Paired) - read off the y-axis tick labels, coloured",
+        "to match (the legend below covers only the generic markers, not the measure",
+        "colours).",
+        "",
+        "Markers: dot = a new strategy starts here; black tick = that strategy's own",
+        "tipping point (bars overshoot it slightly, purely so the tick is visible past",
+        "the line it caps); arrow = holds to the end of the plotted period without",
+        "tipping again. Dotted vertical line = the baseline's own tipping year.",
+        "",
+        "Panels: (a)-" + f"({chr(ord('a') + len(entities) - 1)})" + " one continent each, in the order shown.",
+    ])
 
 
 def make_countries_combined_figure(
     sub_by_ssp: dict[str, pd.DataFrame], countries: list[str], titles: dict[str, str],
-    to_year: int, out_path: Path, dpi: int,
+    to_year: int, out_path: Path,
 ) -> None:
     """Plot countries as columns and SSPs as rows in one figure."""
+    apply_style()
     ssps = list(sub_by_ssp)
     fig, axes = plt.subplots(len(ssps), len(countries), figsize=(6.8 * len(countries), 5.6 * len(ssps)), squeeze=False,
                              sharex=True, sharey=True)
+    idx = 0
     for r, ssp in enumerate(ssps):
         sub = sub_by_ssp[ssp]
         for c, iso in enumerate(countries):
             ax = axes[r, c]
             title = titles.get(iso, iso) if r == 0 else None
-            plot_entity_panel(ax, title, sub[sub["entity"] == iso], to_year, show_yticklabels=(c == 0))
+            plot_entity_panel(ax, title, sub[sub["entity"] == iso], to_year, show_yticklabels=(c == 0),
+                              letter=chr(ord("a") + idx))
+            idx += 1
             if r == len(ssps) - 1:
                 ax.set_xlabel("Year", fontsize=AXIS_FONTSIZE)
         # -150 pt clears the first column's wide y-tick labels
@@ -210,8 +231,28 @@ def make_countries_combined_figure(
 
     _add_legend(fig, to_year)
     fig.tight_layout(rect=(0.07, 0.07, 1, 1))
-    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+    save_figure(fig, out_path)
     plt.close(fig)
+    write_caption(out_path, [
+        "Each panel is one country's adaptation pathway under one SSP: when a strategy's",
+        "EAI tipping point forces a switch to the next one.",
+        "",
+        "Rows: SSP2-RCP4.5 then SSP5-RCP8.5 (row label, left). Columns: one country each",
+        "(label above the top row only - same country below it).",
+        "",
+        "Colours: grey = baseline (no adaptation); every other colour is one measure at",
+        "one intensity - Avoid/Protect/Protect+Avoid/Retreat, each small/large as a",
+        "light/dark pair (ColorBrewer Paired) - read off the y-axis tick labels, coloured",
+        "to match (the legend below covers only the generic markers, not the measure",
+        "colours).",
+        "",
+        "Markers: dot = a new strategy starts here; black tick = that strategy's own",
+        "tipping point (bars overshoot it slightly, purely so the tick is visible past",
+        "the line it caps); arrow = holds to the end of the plotted period without",
+        "tipping again. Dotted vertical line = the baseline's own tipping year.",
+        "",
+        "Panels: lettered left to right, top to bottom, the usual reading order.",
+    ])
 
 
 def main() -> None:
@@ -221,7 +262,6 @@ def main() -> None:
     parser.add_argument("--csv-ssp5", required=True)
     parser.add_argument("--to-year", type=int, default=2150)
     parser.add_argument("--out-dir", required=True)
-    parser.add_argument("--dpi", type=int, default=200)
     args = parser.parse_args()
 
     dfs = {"SSP2": pd.read_csv(args.csv_ssp2), "SSP5": pd.read_csv(args.csv_ssp5)}
@@ -238,7 +278,7 @@ def main() -> None:
     if countries:
         titles = {iso: iso_to_name.get(iso, iso) for iso in countries}
         out_path = out_dir / "custom_pathways_map_countries_combined.png"
-        make_countries_combined_figure(sub_by_ssp, countries, titles, args.to_year, out_path, args.dpi)
+        make_countries_combined_figure(sub_by_ssp, countries, titles, args.to_year, out_path)
         print(f"Written: {out_path}")
 
     for ssp, sub in sub_by_ssp.items():
@@ -246,7 +286,7 @@ def main() -> None:
         if continents:
             titles = {c: c for c in continents}
             out_path = out_dir / f"custom_pathways_map_continents_{ssp}.png"
-            make_figure(sub, continents, titles, args.to_year, out_path, args.dpi)
+            make_figure(sub, continents, titles, args.to_year, out_path)
             print(f"Written: {out_path}")
 
 

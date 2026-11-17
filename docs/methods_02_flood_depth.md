@@ -133,40 +133,95 @@ Implementation: `event_volume.DurationCorrection`.
 ### 2.5 Illustrative comparison of the four variants
 
 Figure 1 runs every entry of `FLOOD_MODELS` on one synthetic scenario
-(`docs/figure_scripts/generate_flood_variant_examples.py`), built so each variant's
-added mechanism changes one visible thing and nothing else - `straight_line` and
-`eikonal` share the same attenuation rate, so only the distance metric differs
-between them. Depth is shown in 0.10 m colour bands (not a continuous scale) so
-small differences between variants read as a visible band change, not a shade
-difference; two fixed points ("near"/"far" circles) are annotated with their
-depth under every variant for the same reason.
+(`docs/figure_scripts/generate_flood_variant_examples.py`), arranged as a 3x3 grid of
+panels (one cell unused), styled per the general CLAUDE.md's section 9 via
+`analysis/_figure_style.py`: no titles, each panel numbered (a)-(h) just outside its
+top-left corner (`panel_letters`), a 180 mm final width set once and never rescaled,
+and the full description - what each panel, colour and marker means - lives in the
+companion `flood_variant_comparison.txt` (`write_caption`), not on the image itself.
+Saved as both PNG (300 dpi) and PDF (fonts embedded) via `_figure_style.save_figure`.
+Elevation (a) uses Greens, flood depth (d)-(h) uses Blues, friction (b)/(c) uses
+Oranges - single-hue, colour-blind-safe sequential ramps, one fixed per variable in
+`_figure_style.py` (section 9 allows these alongside viridis/cividis/Crameri/cmocean
+for a single magnitude variable per panel). Land/water context colours
+(not part of either scale) reuse `_figure_style.LAND_COLOR`/`WATER_COLOR`, the same
+convention as the flood-extent agreement maps. `SHOW_COLORBARS` is an explicit,
+documented override (`False` here) of section 9's default of one shared colour bar per
+panel group: depth is read off discrete 0.20 m colour bands plus three annotated sample
+points instead, which already give exact numbers without crowding eight small panels;
+setting it `True` restores the default. Point labels are black text on a white box,
+close to their marker; "near"/"far" sit far enough apart, and their labels offset in
+opposite directions (above/below), that they never collide despite sharing a row.
 
-Box A is the scenario's two static inputs. Box B compares the four variants on
-them, with no duration correction:
+A filled light-grey panel (no label, no edge) separates the two groups: panels
+(a)-(c), the scenario's static inputs, on the left; panels (d)-(h), every
+flood-depth result on that scenario, on the right - with deliberately more
+horizontal gap between the two groups than between panels within a group. Within
+that, panels (a)-(c) are lettered top to bottom and (d)-(h) left to right, top to
+bottom - the usual reading order. A red line in every panel marks the offshore
+boundary-forcing column, at elevation 0.
 
-- A pit below the boundary water level, embanked out to the domain's own top
-  edge - it has no coastline anywhere in the domain, not merely none nearby.
-  `bathtub` checks only level against elevation and floods it anyway (3.50 m);
-  every other variant's coast-connectivity filter (§4.5) excludes it (0.00 m).
-- A ridge blocking every direct route to the far side of the domain except
-  around a gap at one end, so the real connected path to a point there is longer
-  than the straight-line distance to it. `bathtub`/`bathtub_connected` apply no
-  attenuation at all and show the same depth there as next to the coast (2.00 m
-  at both points); `straight_line` attenuates by the (too-short) straight-line
-  distance (1.20 m near, 0.55 m far); `eikonal` attenuates by the true, longer,
-  connectivity-respecting path around the ridge, giving shallower results at both
-  (0.80 m, 0.37 m) - and a growing gap with distance from the ridge's gap, since
-  the straight-line/real-path discrepancy itself grows with distance from it.
+Panels (a) elevation and (b) friction are the scenario's two static inputs: a
+floodplain sloping from 0 m at the coast to 2.3 m at the domain's far inland edge, a
+pond below sea level (-1 m) walled off on three sides by a closed ring at 3 m (above
+the surge peak everywhere around it) and open on the fourth, where the domain's own
+upper edge already closes it - it has no coastline anywhere in the domain, not merely
+none nearby - and a sill, at the same 3 m, blocking every direct route to the far side
+of the domain except around a gap at one end, so the real connected path to a point
+there is longer than the straight-line distance to it; friction is spatially uniform.
+(A sill closer to the surge peak itself, e.g. ~1.2-1.7 m above the sloping background
+rather than safely above it, was tried first and dropped - see
+`build_variant_scenario`'s docstring for why it didn't reliably force the detour this
+figure needs.)
 
-Box C adds the duration correction (§2.4) that boxes A/B omit, on the same
-scenario and a synthetic single-station, single-peak storm tide. `eikonal`'s
-corrected depth (0.85 m, 0.17 m near/far) goes through the production
-`duration_correction` path unchanged; `straight_line` has no spatial friction
-field for that path to correct, so its own corrected depth (1.03 m, 0.25 m)
-instead rescales its one `attenuation_m_per_m` by the domain-mean multiplier
-over the first solve's wet cells - the same scalar `flood_depth_dense` itself
-reports as `diagnostics["mean_duration_multiplier"]` - which is this figure's
-approximation, not a second physical mechanism.
+Panels (d)/(e)/(f)/(g) compare the four variants on that scenario, with no duration
+correction. `straight_line` and `eikonal` share the exact same uniform attenuation
+rate - only the distance metric they attenuate by differs:
+
+- `bathtub` (d) checks only (IDW-interpolated) level against elevation, with no
+  connectivity check, and floods the walled-off pond anyway (3.50 m);
+  `bathtub_connected` (e)'s coast-connectivity filter (§4.5) excludes it (0.00 m).
+- `straight_line` (f) attenuates the boundary level by the straight-line distance
+  through the sill's gap (0.59 m near the gap, 0.00 m far from it); `eikonal` (g)
+  attenuates by the true, longer, connectivity-respecting path around the sill, and
+  comes out noticeably drier near the gap (0.14 m) - the real path costs more
+  attenuation than the straight-line shortcut gives it credit for.
+
+Panels (c)/(h) are deliberately **not** production's actual duration correction
+(`event_volume.DurationCorrection`, §2.4): that mechanism needs a first eikonal
+pass's own depth to define a head above each cell's spill level, which this panel's
+whole point is to not assume. Instead (`elevation_duration_multiplier`), (c) compares
+the boundary forcing's time series directly against each cell's own elevation - how
+long the forcing alone exceeds it - with no first solve at all. Raised while building
+this figure and logged as an open methods question in `TODO.md`, not asserted as the
+better algorithm: changing production to work this way would affect the calibrated
+`friction_scale_factor`/`duration_refit.py` values (§2.2/§2.4), so it needs a
+deliberate decision, not a silent code change. `straight_line` has no spatial friction
+field to correct, so a duration correction for it would only ever be a scalar
+rescaling of its one `attenuation_m_per_m` - not a meaningful panel, so it is left out
+here (that scalar rescaling is still what `flood_depth_dense` itself falls back to
+when reporting duration correction's effect in aggregate,
+`diagnostics["mean_duration_multiplier"]`, just not reproduced in this figure).
+
+The reference duration (`DURATION_T_REF_S`) is the longest duration any cell in the
+domain can see - the full storm - not some shorter, arbitrary value. That pins the
+multiplier to exactly 1.0 at the longest-duration (always-wet, coastal) cells and
+above 1.0 everywhere else, so the corrected friction is never below the uncorrected
+baseline anywhere, and corrected depth can therefore only shrink or stay the same
+relative to (g), never exceed it (an earlier version used a fixed 12 h reference,
+which gave coastal cells *less* friction than baseline and let corrected depths
+exceed the uncorrected ones - backwards, and fixed here). The pond's wall and the
+sill (3 m) sit above the 2.5 m surge peak everywhere, so they are never exceeded at
+all - they are hard obstacles for (f)/(g)'s connectivity/detour test, not
+"briefly-overtopped sills"; the short-but-nonzero-exceedance story this correction is
+meant to show instead comes from the open background slope itself (0 m to 2.3 m, all
+within reach of the 2.5 m peak), which gives every background cell a real, finite
+exceedance duration - long near the coast, short near the inland edge - with no
+barrier needed. Because the multiplier is a direct function of elevation alone, (c)'s
+pattern is literally the elevation panel's own contours, rescaled - the pond's wall
+and the sill read as the same raised (never-exceeded, highest-multiplier) shapes in
+both. `eikonal`'s corrected depth (h) (0.00 m near the gap, down from 0.14 m
+uncorrected) runs this modified friction field through a single ordinary solve.
 
 ![Four FLOOD_MODELS variants on one scenario, with and without duration correction](flood_variant_comparison.png)
 

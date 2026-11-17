@@ -33,7 +33,8 @@ from gfm_config import read_root  # noqa: E402
 from sfincs_grid import active_on_subgrid  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from map_style import (  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analysis"))
+from _figure_style import (  # noqa: E402
     AGREE_COLOR, A_ONLY_COLOR, B_ONLY_COLOR, LAND_COLOR, LAND_LABEL, WATER_COLOR, WATER_LABEL,
     draw_caption_box, orient_north_up,
 )

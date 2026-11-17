@@ -33,7 +33,8 @@ from flood_agreement import DEPTH_CORR_FINE_EDGES, DIFF_EDGES, SFINCS_CLASS_LABE
 from gfm_config import read_root  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from map_style import draw_panel_letter  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analysis"))
+from _figure_style import panel_letters  # noqa: E402
 
 BIN_M = 0.1  # hist_fine bin width: DEPTH_CORR_FINE_EDGES step
 TOLERANCES_M = (0.1, 0.2, 0.3, 0.5)
@@ -217,7 +218,7 @@ def plot_stage0(results: dict, fsf: float, classes: pd.DataFrame, tiles: pd.Data
         if col == "sfincs_km2":
             ax.set_xscale("log")
         ax.set(xlabel=label, ylabel="CSI (tile)", ylim=(0, 1))
-        draw_panel_letter(ax, letter)
+        panel_letters(ax, letter)
     fig.suptitle(f"Tile CSI against tile properties, friction factor {fsf:g}; red: the 8 lowest")
     fig.tight_layout()
     fig.savefig(out / "X3_outlier_tiles.png", dpi=200)
@@ -347,7 +348,7 @@ def plot_stage1(by_density: pd.DataFrame, exposed: pd.DataFrame, depth: pd.DataF
             ax.axhline(1, color="#525252", lw=0.8)
         else:
             ax.set_ylim(0, 1)
-        draw_panel_letter(ax, letter)
+        panel_letters(ax, letter)
     axes[0].legend(frameon=False, fontsize=8)
     fig.tight_layout()
     fig.savefig(out / "X4_metrics_by_density_class.png", dpi=200)
@@ -469,7 +470,7 @@ def cdf(args) -> None:
         ax.set(xlim=(0, 1.5), ylim=(0, 1), xlabel="|eikonal depth - reference depth| (m)",
                ylabel="share of cells within", title=title)
         ax.title.set_fontsize(9)
-        draw_panel_letter(ax, letter)
+        panel_letters(ax, letter)
     axes[0][0].legend(frameon=False, fontsize=7, loc="lower right")
     fig.tight_layout()
     fig.savefig(out / "X1c_depth_cdf_by_denominator.png", dpi=200)
