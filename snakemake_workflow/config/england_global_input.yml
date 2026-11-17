@@ -19,6 +19,12 @@ visualization:
 validation:
   # Isolated from the shared default - see england_local_input.yml's matching override.
   output_dir: "{root}/england_global_input/all_england/validation"
+  # hpc/gfm_hpc.py validate: per group, scripts run in order with {config} = this scenario's
+  # HPC-view config and {config:NAME} = scenario NAME's.
+  runs:
+    scores:
+      - ["validation/rescore_england_fz3.py", "--config", "{config}"]
+      - ["validation/rescore_1km_fp_buffer.py", "--config", "{config}"]
 hpc:
   jobs_dir: "{root}/england_global_input/all_england/model_outputs/hpc_jobs"
 

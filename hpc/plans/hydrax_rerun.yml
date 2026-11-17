@@ -2,7 +2,7 @@
 # studies (500 tiles, land cover and uniform), SFINCS calibration (1,500 tiles, both groups, two
 # phases), local comparisons (England all, Wales Severn, SF Bay, hop test; base and variants).
 # Step order is also release priority. Steps marked destructive delete old outputs on <data_root>;
-# they run only with --allow-destructive.
+# they run only with --allow-destructive. Run the harness with the gfm env's python.
 #   python hpc/harness.py run --plan hpc/plans/hydrax_rerun.yml --allow-destructive
 # The eikonal solver studies alone (with the product rebuild they read):
 #   python hpc/harness.py run --plan hpc/plans/hydrax_rerun.yml --allow-destructive \
@@ -12,41 +12,25 @@ max_cores: 120
 partition_cores: {}
 state_dir: /p/11212688-004-global-floodmaps/modelling/hpc_harness/hydrax_rerun
 cwd: /u/schlumbe/gfm_code
-# Gitignored site files (docs/hpc.md, "Config layering on a cluster").
-requires: [sfincs_tiles/site_env.sh, snakemake_workflow/config/config_hpc.yml, snakemake_workflow/config/config_local.yml]
+# Gitignored site files (docs/hpc.md, "Site setup").
+requires: [snakemake_workflow/config/config_hpc.yml, snakemake_workflow/config/config_local.yml]
 env:
   HDF5_USE_FILE_LOCKING: "FALSE"
-  # SFINCS post job (site_env.sh CAL_*): the overlap-merged rescoring of every run on 1,500 tiles
-  # reads each tile's neighbours too: 16 workers, 2-day limit.
-  CAL_PARTITION: 16vcpu
-  CAL_CPUS: "16"
-  CAL_MEM: 120G
-  CAL_TIME: "2-00:00:00"
 preamble: |
-  source sfincs_tiles/site_env.sh
-  PY="$GFM_PYTHON"
-  C=snakemake_workflow/config
-  R="$GFM_DATA_ROOT"
-  CFG=/p/11212688-004-global-floodmaps/modelling/hpc_harness/hydrax_rerun/configs
-  mkdir -p "$CFG"
-  # A config as the compute nodes see it (config_hpc.yml layered on), for scripts called directly.
-  hpc_config() {
-    "$PY" -c "import sys, yaml; sys.path.insert(0, 'src'); from config_utils import load_hpc_config; \
-  yaml.safe_dump(load_hpc_config(sys.argv[1]), open(sys.argv[2], 'w'))" "$1" "$CFG/$(basename "$1")"
-    echo "$CFG/$(basename "$1")"
-  }
-  jobs_dir() {
-    "$PY" -c "import sys; sys.path.insert(0, 'src'); from config_utils import load_hpc_config; \
-  print(load_hpc_config(sys.argv[1])['hpc']['jobs_dir'])" "$1"
-  }
+  PY="$GFM_HARNESS_PYTHON"
+  gfm_hpc() { "$PY" hpc/gfm_hpc.py "$@"; }
+  R=$(gfm_hpc config production --hpc --key paths.root)
   LOCAL_SCENARIOS="england_local_input england_global_input wales_local_input wales_global_input sf_bay_local_input england_hop_test"
+  VARIANT_SCENARIOS="england_local_input england_global_input wales_local_input wales_global_input sf_bay_local_input"
+  # SFINCS post job: the overlap-merged rescoring of every run on 1,500 tiles reads each tile's
+  # neighbours too: 16 workers, 2-day limit.
+  SFINCS_POST="--profile-set sfincs_post.partition=16vcpu --profile-set sfincs_post.cpus_per_task=16
+    --profile-set sfincs_post.mem=120G --profile-set sfincs_post.time=2-00:00:00"
 
 steps:
   # ── storm-tide product (2026-11-08 decisions, basin shifts fitted in the build) ──
   - id: product
-    job: {partition: 16vcpu, cpus_per_task: 16, mem: 120G, time: "2-00:00:00"}
-    run: |
-      "$PY" preparation/run_preparation.py storm_tide_product boundary_conditions --config "$(hpc_config $C/config.yml)"
+    run: gfm_hpc product --submit
 
   - id: materialize
     after: [product]
@@ -57,9 +41,7 @@ steps:
   # After studies_preprocess: both build the shared stations_RP100_SLR_0 cache.
   - id: production_preprocess
     after: [materialize, studies_preprocess]
-    run: |
-      "$PY" snakemake_workflow/scripts/generate_hpc_preprocess_job.py --config $C/config.yml --preprocess-only
-      bash "$(jobs_dir $C/config.yml)/submit_preprocess_batches.sh"
+    run: gfm_hpc run preprocess --scenario production --preprocess-only --submit
 
   # ── eikonal solver studies, 500 tiles, per friction source ──
   - id: reset_studies
@@ -72,49 +54,29 @@ steps:
 
   - id: studies_preprocess
     after: [materialize]
-    run: |
-      "$PY" snakemake_workflow/scripts/generate_hpc_preprocess_job.py --config $C/calibration_500_tiles_materialized.yml --preprocess-only
-      bash "$(jobs_dir $C/calibration_500_tiles_materialized.yml)/submit_preprocess_batches.sh"
+    run: gfm_hpc run preprocess --scenario calibration_500_tiles --preprocess-only --submit
 
   - id: sweep_landcover
     after: [studies_preprocess, reset_studies]
-    run: |
-      "$PY" calibration_studies/generate_calibration_batch_jobs.py sweep_budget --config $C/calibration_500_tiles_materialized.yml --friction-source landcover
-      bash "$R/calibration_500_tiles/hpc_jobs/submit_calib_sweep_budget_landcover_batches.sh"
+    run: gfm_hpc studies sweep --source landcover --submit
 
   - id: sweep_uniform
     after: [studies_preprocess, reset_studies]
-    run: |
-      "$PY" calibration_studies/generate_calibration_batch_jobs.py sweep_budget --config $C/calibration_500_tiles_materialized.yml --friction-source uniform
-      bash "$R/calibration_500_tiles/hpc_jobs/submit_calib_sweep_budget_uniform_batches.sh"
+    run: gfm_hpc studies sweep --source uniform --submit
 
   # The sweep's jobs end with the step, so the wet-tile lists are written here, after them.
   - id: wet_tiles
     after: [sweep_landcover, sweep_uniform]
-    run: |
-      for src in landcover uniform; do
-        "$PY" calibration_studies/aggregate_wet_tiles.py "$R/calibration_500_tiles/sweep_budget_$src" --n-tiles-wanted 500
-      done
+    run: gfm_hpc studies wet-tiles --source landcover uniform
 
   - id: obstacle_coupling
     after: [wet_tiles]
-    run: |
-      for src in landcover uniform; do
-        "$PY" calibration_studies/generate_calibration_batch_jobs.py obstacle_coupling --config $C/calibration_500_tiles_materialized.yml --friction-source $src
-        bash "$R/calibration_500_tiles/hpc_jobs/submit_calib_obstacle_coupling_${src}_batches.sh"
-      done
+    run: gfm_hpc studies obstacle --source landcover uniform --submit
 
   # Per friction source; a source's caps also serve its duration variant.
   - id: study_figures
     after: [obstacle_coupling]
-    job: {partition: 4vcpu, cpus_per_task: 4, mem: 30G, time: "0-04:00:00"}
-    run: |
-      S="$R/calibration_500_tiles"
-      for src in landcover uniform; do
-        "$PY" calibration_studies/plot_sweep_calibration_bands.py "$S/sweep_budget_$src" --fig-dir "$S/figures/$src"
-        "$PY" calibration_studies/plot_sweep_time_vs_size.py "$S/sweep_budget_$src" --fig-dir "$S/figures/$src"
-        "$PY" calibration_studies/plot_obstacle_coupling_calibration_bands.py "$S/obstacle_coupling_$src" --fig-dir "$S/figures/$src"
-      done
+    run: gfm_hpc studies figures --source landcover uniform --submit
 
   # ── SFINCS calibration, 1,500 tiles: stage 1 -> selection -> sweep (+ post job) -> duration ──
   - id: reset_sfincs
@@ -124,16 +86,14 @@ steps:
 
   - id: sfincs_sweep
     after: [production_preprocess, reset_sfincs]
-    run: |
-      "$PY" sfincs_tiles/generate_calibration_jobs.py stage1 --config $C/config.yml --n-tiles 1500
-      bash "$R/calibration_roughness_SFINCS/hpc_jobs_stage1/submit_chain.sh"
+    run: gfm_hpc sfincs stage1 --n-tiles 1500 $SFINCS_POST --submit
 
   - id: sfincs_duration
     after: [sfincs_sweep]
     run: |
       "$PY" sfincs_tiles/calibration_split.py --config "$R/calibration_roughness_SFINCS/resolved_config.yml" \
         || echo "WARNING: calibration_split.py failed (balance report only; the duration phase does not read it)"
-      PHASE=duration bash sfincs_tiles/rerun_calibration.sh --part models
+      gfm_hpc sfincs rerun --part models --phase duration $SFINCS_POST --submit
 
   # ── local comparisons: base scenarios (preprocess -> hop waves -> merge, one chain each) ──
   - id: reset_local
@@ -149,9 +109,9 @@ steps:
     job: {partition: 4vcpu, cpus_per_task: 4, mem: 30G, time: "1-00:00:00"}
     run: |
       for s in england_local_input england_hop_test; do
-        "$PY" preparation/cache_local_waterlevel_stations.py --config "$(hpc_config $C/${s}_materialized.yml)"
+        "$PY" preparation/cache_local_waterlevel_stations.py --config "$(gfm_hpc config $s --hpc)"
       done
-      "$PY" preparation/cache_local_waterlevel_stations.py --config "$(hpc_config $C/wales_local_input_materialized.yml)" \
+      "$PY" preparation/cache_local_waterlevel_stations.py --config "$(gfm_hpc config wales_local_input --hpc)" \
           --local-dem-key wales_lidar_dem
 
   - id: local_runs
@@ -159,71 +119,42 @@ steps:
     after: [local_station_caches, reset_local, production_preprocess]
     run: |
       for s in $LOCAL_SCENARIOS; do
-        "$PY" snakemake_workflow/scripts/generate_hpc_preprocess_job.py --config $C/${s}_materialized.yml --calibration
-        bash "$(jobs_dir $C/${s}_materialized.yml)/submit_preprocess_and_dispatch.sh"
+        gfm_hpc run preprocess --scenario $s --submit
       done
 
-  # Five validation batches, 4 cores each, in parallel once the local runs are merged.
+  # Validation batches (each scenario's validation.runs), in parallel once the local runs are merged.
   - id: validate_england_local
     after: [local_runs]
-    job: &validation_job {partition: 4vcpu, cpus_per_task: 4, mem: 30G, time: "2-00:00:00"}
-    run: |
-      EL=$(hpc_config $C/england_local_input_materialized.yml)
-      "$PY" validation/rescore_floodzone3_local.py --config "$EL"
-      "$PY" validation/rescore_1km_fp_buffer_local.py --config "$EL"
+    run: gfm_hpc validate --scenario england_local_input --only scores --submit
 
   - id: validate_england_global
     after: [local_runs]
-    job: *validation_job
-    run: |
-      EG=$(hpc_config $C/england_global_input_materialized.yml)
-      "$PY" validation/rescore_england_fz3.py --config "$EG"
-      "$PY" validation/rescore_1km_fp_buffer.py --config "$EG"
+    run: gfm_hpc validate --scenario england_global_input --submit
 
   - id: validate_england_map
     after: [local_runs]
-    job: *validation_job
-    run: |
-      EL=$(hpc_config $C/england_local_input_materialized.yml); EG=$(hpc_config $C/england_global_input_materialized.yml)
-      "$PY" validation/plot_local_vs_global_agreement.py --local-config "$EL" --global-config "$EG" --return-period RP100           --bbox -0.1717 52.5678 0.2529 53.0819 --out "$R/england_local_input/all_england/agreement_wash_RP100.png"
+    run: gfm_hpc validate --scenario england_local_input --only agreement_map --submit
 
   - id: validate_wales
     after: [local_runs]
-    job: *validation_job
-    run: |
-      WL=$(hpc_config $C/wales_local_input_materialized.yml); WG=$(hpc_config $C/wales_global_input_materialized.yml)
-      for script in rescore_floodzone3_local.py rescore_1km_fp_buffer_local.py; do
-        "$PY" validation/$script --config "$WL" --benchmark-key wales_nrw_floodzone_seas --region severn_estuary
-      done
-      for rp in RP100 RP250; do
-        "$PY" validation/validate_country.py --config "$WG" --country GBR --rp $rp --slr SLR_0
-        "$PY" validation/plot_local_vs_global_agreement.py --local-config "$WL" --global-config "$WG"             --benchmark-key wales_nrw_floodzone_seas --region severn_estuary --return-period $rp
-      done
-      "$PY" validation/rescore_1km_fp_buffer.py --config "$WG"
+    run: gfm_hpc validate --scenario wales_local_input --submit
 
   - id: validate_sf_bay
     after: [local_runs]
-    job: *validation_job
-    run: |
-      SB=$(hpc_config $C/sf_bay_local_input_materialized.yml)
-      SF_BENCH="zip://$R/inputs/validation/California/alameda_flooding_slr000.zip!flooding/v2.1/county_alameda_flddepth_slr000_w100.tif"
-      "$PY" validation/validate_sf_bay.py --config "$SB" --bbox -122.355 37.45 -121.99 37.91 --benchmark-path "$SF_BENCH"           --benchmark-scale-m 0.01 --native-merged-path "$R/sf_bay_local_input/merged_results/local_native/waterdepth_RP100_SLR_0.tif"           --out-dir "$R/sf_bay_local_input/validation/USA_alameda_sample"
+    run: gfm_hpc validate --scenario sf_bay_local_input --submit
 
   # Local vs global input, area- and population-weighted (T4). SF Bay has no global-input scenario:
   # its global side comes from the production run, so it joins the table after the global rerun.
   - id: exposure_table
     after: [validate_england_local, validate_england_global, validate_wales]
-    run: |
-      "$PY" validation/exposure_validation_report.py --out-dir "$R/local_vs_global_exposure"         --local-vs-global england "$R/england_local_input/all_england/validation" "$R/england_global_input/all_england/validation"         --local-vs-global wales "$R/wales_local_input/validation" "$R/wales_global_input/validation"
+    run: gfm_hpc validate --scenario england_local_input --only exposure_table
 
   # ── local comparisons with every flood-model variant at its calibrated run ──
   - id: local_variants
     after: [sfincs_duration, local_runs]
     run: |
       SEL="$R/calibration_roughness_SFINCS_dedup/variant_selection.json"  # overlap-merged, as production
-      "$PY" snakemake_workflow/scripts/materialize_configs.py england_local_input england_global_input wales_local_input \
-          wales_global_input sf_bay_local_input --variants all --selection "$SEL"
-      for f in $C/*__*_materialized.yml; do
-        "$PY" snakemake_workflow/scripts/generate_hpc_preprocess_job.py --config "$f" --calibration
-        bash "$(jobs_dir "$f")/submit_preprocess_and_dispatch.sh"
+      "$PY" snakemake_workflow/scripts/materialize_configs.py $VARIANT_SCENARIOS --variants all --selection "$SEL"
+      for f in snakemake_workflow/config/*__*_materialized.yml; do
+        gfm_hpc run preprocess --config "$f" --submit
       done

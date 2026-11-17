@@ -48,5 +48,15 @@ visualization:
   output_dir: "{root}/sf_bay_local_input/figures"
 validation:
   output_dir: "{root}/sf_bay_local_input/validation"
+  # hpc/gfm_hpc.py validate: per group, scripts run in order with {config} = this scenario's
+  # HPC-view config and {config:NAME} = scenario NAME's.
+  runs:
+    scores:
+      - ["validation/validate_sf_bay.py", "--config", "{config}", "--bbox", "-122.355", "37.45", "-121.99", "37.91",
+         "--benchmark-path",
+         "zip://{root}/inputs/validation/California/alameda_flooding_slr000.zip!flooding/v2.1/county_alameda_flddepth_slr000_w100.tif",
+         "--benchmark-scale-m", "0.01",
+         "--native-merged-path", "{root}/sf_bay_local_input/merged_results/local_native/waterdepth_RP100_SLR_0.tif",
+         "--out-dir", "{root}/sf_bay_local_input/validation/USA_alameda_sample"]
 hpc:
   jobs_dir: "{root}/sf_bay_local_input/model_outputs/hpc_jobs"

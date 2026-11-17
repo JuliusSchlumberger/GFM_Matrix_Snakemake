@@ -48,5 +48,25 @@ visualization:
 validation:
   # Isolated from the shared default - see england_local_input.yml's matching override.
   output_dir: "{root}/wales_local_input/validation"
+  # hpc/gfm_hpc.py validate: per group, scripts run in order with {config} = this scenario's
+  # HPC-view config and {config:NAME} = scenario NAME's.
+  # Wales global input is scored here too, next to the local-vs-global agreement maps.
+  runs:
+    scores:
+      - ["validation/rescore_floodzone3_local.py", "--config", "{config}",
+         "--benchmark-key", "wales_nrw_floodzone_seas", "--region", "severn_estuary"]
+      - ["validation/rescore_1km_fp_buffer_local.py", "--config", "{config}",
+         "--benchmark-key", "wales_nrw_floodzone_seas", "--region", "severn_estuary"]
+      - ["validation/validate_country.py", "--config", "{config:wales_global_input}", "--country", "GBR",
+         "--rp", "RP100", "--slr", "SLR_0"]
+      - ["validation/plot_local_vs_global_agreement.py", "--local-config", "{config}",
+         "--global-config", "{config:wales_global_input}", "--benchmark-key", "wales_nrw_floodzone_seas",
+         "--region", "severn_estuary", "--return-period", "RP100"]
+      - ["validation/validate_country.py", "--config", "{config:wales_global_input}", "--country", "GBR",
+         "--rp", "RP250", "--slr", "SLR_0"]
+      - ["validation/plot_local_vs_global_agreement.py", "--local-config", "{config}",
+         "--global-config", "{config:wales_global_input}", "--benchmark-key", "wales_nrw_floodzone_seas",
+         "--region", "severn_estuary", "--return-period", "RP250"]
+      - ["validation/rescore_1km_fp_buffer.py", "--config", "{config:wales_global_input}"]
 hpc:
   jobs_dir: "{root}/wales_local_input/model_outputs/hpc_jobs"
