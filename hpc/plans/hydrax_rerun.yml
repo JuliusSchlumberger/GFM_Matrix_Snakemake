@@ -5,8 +5,7 @@
 # they run only with --allow-destructive. Run the harness with the gfm env's python.
 #   python hpc/harness.py run --plan hpc/plans/hydrax_rerun.yml --allow-destructive
 # The eikonal solver studies alone (with the product rebuild they read):
-#   python hpc/harness.py run --plan hpc/plans/hydrax_rerun.yml --allow-destructive \
-#     --only product,materialize,reset_studies,studies_preprocess,sweep_landcover,sweep_uniform,wet_tiles,obstacle_coupling,study_figures
+#   python hpc/harness.py run --plan hpc/plans/hydrax_rerun.yml --allow-destructive --only product,materialize,reset_studies,studies_preprocess,sweep_landcover,sweep_uniform,wet_tiles,obstacle_coupling,study_figures
 name: hydrax_rerun
 max_cores: 120
 partition_cores: {}
