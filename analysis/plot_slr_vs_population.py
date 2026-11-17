@@ -45,7 +45,7 @@ FIG_WIDTH_IN = DOUBLE_COLUMN_MM / MM_PER_INCH
 # Cosmetic cap on text-annotated countries in the dense scatter/envelope figures (section 9's
 # 180 mm design width leaves no room for every qualifying country's name); all qualifying
 # countries still get a marker/hull - this only trims which ones are name-labelled.
-MAX_SCATTER_LABELS = 7
+MAX_SCATTER_LABELS = 5
 
 
 def _decompose(mats, slr_mm, gfr, traj, ext, ssp, iso, year, variant) -> dict:
@@ -130,10 +130,6 @@ def _waterfall(ref, central, band, top, names, ssp, rcp, year, to_year, variants
     print(f"  Written: {out_path.name}")
 
 
-# Scales both the scatter figsizes and their fontsizes, so text keeps its size relative to the box.
-FONT_SCALE = 1.5
-
-
 def _ratio_lines(ax, lo, hi, linthresh=1e4):
     xx = np.geomspace(lo, hi, 50)
     for k, ls in ((1.0, "-"), (0.1, "--")):
@@ -141,7 +137,7 @@ def _ratio_lines(ax, lo, hi, linthresh=1e4):
         for sign in (1, -1):
             ax.plot(xs, sign * k * xs, color="0.6", lw=0.9, ls=ls, zorder=1)
         ax.annotate(f"r = {k:g}", (xs[len(xs) // 3], k * xs[len(xs) // 3]),
-                    xytext=(0, 4), textcoords="offset points", fontsize=9 * FONT_SCALE, color="0.45",
+                    xytext=(0, 4), textcoords="offset points", fontsize=7, color="0.45",
                     ha="center", va="bottom")
 
 
@@ -155,25 +151,34 @@ def _filter_scatter(ref, continent, min_change):
     return d
 
 
-def _scatter_panel(ax, d, names, top_labels, size_max, panel_label, show_ylabel, min_change, M, linthresh):
+def _scatter_panel(ax, d, names, label_isos, size_max, letter, ssp_label, min_change, M, linthresh):
     if d.empty:
         ax.set_axis_off()
         ax.text(0.5, 0.5, f"No country with an EAI change >= {min_change:,.0f}",
-                ha="center", va="center", fontsize=11 * FONT_SCALE, color="0.4")
+                ha="center", va="center", fontsize=7, color="0.4")
         return
-    size = 30 + 420 * np.sqrt(d.EAI_end / size_max)
+    size = 6 + 90 * np.sqrt(d.EAI_end / size_max)
     _ratio_lines(ax, linthresh / 5, M, linthresh)
     ax.axhline(0, color="k", lw=0.8, zorder=1)
     for c in [c for c in CONTINENTS if c in set(d.continent)] + (["Other"] if "Other" in set(d.continent) else []):
         q = d[d.continent == c]
         ax.scatter(q.slr_part, q.pop_part, s=size[q.index], color=CONTINENT_COLORS.get(c, "0.6"),
-                   edgecolor="k", lw=0.5, alpha=0.85, zorder=3)
-    for iso in top_labels:
-        if iso not in d.index:
-            continue
-        r = d.loc[iso]
-        ax.annotate(names.get(iso, iso), (r.slr_part, r.pop_part), xytext=(6, 5 if r.pop_part >= 0 else -11),
-                    textcoords="offset points", fontsize=9.5 * FONT_SCALE, zorder=4)
+                   edgecolor="k", lw=0.4, alpha=0.85, zorder=3)
+    # Labelled points, sorted so a fixed vertical stagger (below) separates ones that cluster
+    # close together rather than relying on an automatic label-placement dependency.
+    below = sorted((i for i in label_isos if i in d.index and d.loc[i, "pop_part"] < 0),
+                   key=lambda i: d.loc[i, "pop_part"])
+    above = sorted((i for i in label_isos if i in d.index and d.loc[i, "pop_part"] >= 0),
+                   key=lambda i: -d.loc[i, "pop_part"])
+    for group, sign in ((below, -1), (above, 1)):
+        for k, iso in enumerate(group):
+            r = d.loc[iso]
+            near_right_edge = r.slr_part > 0.5 * M
+            dy = sign * (4 + 13 * k)
+            ax.annotate(names.get(iso, iso), (r.slr_part, r.pop_part),
+                        xytext=(-5 if near_right_edge else 5, dy),
+                        ha="right" if near_right_edge else "left",
+                        textcoords="offset points", fontsize=7, zorder=4)
     # slr_part is always > 0, so x spans 0..M and y -M..M; square box rather than equal units.
     ax.set_xscale("symlog", linthresh=linthresh)
     ax.set_yscale("symlog", linthresh=linthresh)
@@ -182,16 +187,13 @@ def _scatter_panel(ax, d, names, top_labels, size_max, panel_label, show_ylabel,
     ax.set_box_aspect(1)
     ax.xaxis.set_major_formatter(plt.FuncFormatter(_people))
     ax.yaxis.set_major_formatter(plt.FuncFormatter(_people))
-    ax.tick_params(axis="both", labelsize=10 * FONT_SCALE)
-    ax.text(-0.09, 1.03, panel_label, transform=ax.transAxes, ha="left", va="bottom",
-            fontsize=16 * FONT_SCALE, fontweight="bold", clip_on=False)
-    ax.set_xlabel("Change in EAI due to sea-level rise, 2020-2100 (people)", fontsize=12 * FONT_SCALE)
-    if show_ylabel:
-        ax.set_ylabel("Change in EAI due to population change, 2020-2100 (people)", fontsize=12 * FONT_SCALE)
+    ax.tick_params(axis="both", labelsize=7)
+    panel_letters(ax, letter, fontsize=8, label=ssp_label)
+    ax.set_xlabel("Change in EAI due to sea-level rise, 2020-2100 (people)", fontsize=7)
     ax.grid(alpha=0.25, which="major")
 
 
-def _scatter_figure(refs, names, continent, ssps, min_change, n_labels, out_path, dpi):
+def _scatter_figure(refs, names, continent, ssps, rcp, min_change, n_labels, out_path):
     # One shared country set: those qualifying under ANY scenario.
     qualifying = {ssp: _filter_scatter(refs[ssp], continent, min_change) for ssp in ssps}
     non_empty = [d for d in qualifying.values() if not d.empty]
@@ -209,30 +211,45 @@ def _scatter_figure(refs, names, continent, ssps, min_change, n_labels, out_path
     size_max = max(d.EAI_end.max() for d in panels.values())
     top_labels = sorted(set().union(
         *(set(d.EAI_end.sort_values(ascending=False).index[:n_labels]) for d in panels.values())))
+    # Name only the MAX_SCATTER_LABELS highest-EAI countries - every qualifying country still
+    # gets a marker; this only trims text labels to fit the 180 mm panel width.
+    label_isos = sorted(top_labels, key=lambda i: -max(panels[s].EAI_end.get(i, 0.0) for s in ssps))
+    label_isos = label_isos[:MAX_SCATTER_LABELS]
     linthresh = 1e4
     M = max(max(d.slr_part.max(), d.pop_part.abs().max()) for d in panels.values()) * 1.3
 
-    panel_labels = ["(a)", "(b)", "(c)", "(d)"]
-    fig, axes = plt.subplots(1, len(ssps), figsize=(9 * len(ssps) * FONT_SCALE, 9.5 * FONT_SCALE),
+    fig, axes = plt.subplots(1, len(ssps), figsize=(FIG_WIDTH_IN, FIG_WIDTH_IN / len(ssps) + 1.05),
                              sharex=True, sharey=True)
     axes = np.atleast_1d(axes)
     conts_all = set()
-    for i, (ax, ssp, lbl) in enumerate(zip(axes, ssps, panel_labels)):
+    for i, (ax, ssp) in enumerate(zip(axes, ssps)):
         d = panels[ssp]
-        _scatter_panel(ax, d, names, top_labels, size_max, lbl, i == 0, min_change, M, linthresh)
+        _scatter_panel(ax, d, names, label_isos, size_max, chr(ord("a") + i), ssp_rcp_label(ssp, rcp),
+                       min_change, M, linthresh)
         conts_all |= set(d.continent)
 
     conts = [c for c in CONTINENTS if c in conts_all]
-    h_cont = [Line2D([], [], ls="none", marker="o", color=CONTINENT_COLORS[c], mec="k", ms=9, label=c) for c in conts]
+    h_cont = [Line2D([], [], ls="none", marker="o", color=CONTINENT_COLORS[c], mec="k", ms=5, label=c) for c in conts]
     ref_sizes = [v for v in (1e5, 1e6, 5e6) if v <= size_max]
     h_size = [Line2D([], [], ls="none", marker="o", color="0.75", mec="k",
-                     ms=np.sqrt(30 + 420 * np.sqrt(v / size_max)), label=f"EAI 2100 = {_people(v)}")
+                     ms=np.sqrt(6 + 90 * np.sqrt(v / size_max)), label=f"EAI 2100 = {_people(v)}")
               for v in ref_sizes]
-    axes[-1].legend(handles=h_cont + h_size, loc="center left", bbox_to_anchor=(1.02, 0.5),
-                    fontsize=10 * FONT_SCALE, frameon=False, labelspacing=1.1)
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+    fig.subplots_adjust(left=0.1, right=0.78, bottom=0.17, top=0.84, wspace=0.32)
+    fig.supylabel("Change in EAI due to population change, 2020-2100 (people)", fontsize=7, x=0.01)
+    axes[-1].legend(handles=h_cont + h_size, loc="center left", bbox_to_anchor=(1.04, 0.5),
+                    fontsize=7, frameon=False, labelspacing=1.0)
+    save_figure(fig, out_path)
     plt.close(fig)
+    write_caption(out_path, [
+        f"{' & '.join(ssp_rcp_label(s, rcp) for s in ssps)}: countries where the no-adaptation EAI "
+        f"changes by at least {min_change:,.0f} people/yr between 2020 and 2100, split into the "
+        "part driven by sea-level rise alone and the part driven by population change alone "
+        "(interaction term shared equally between the two).",
+        "Dashed/solid grey lines: constant ratio (0.1x, 1x) between the two parts.",
+        "Marker colour: continent; marker size: EAI in 2100. Only the "
+        f"{MAX_SCATTER_LABELS} highest-EAI countries are name-labelled; every qualifying country "
+        "is plotted.",
+    ])
     print(f"  Written: {out_path.name}")
 
 
@@ -256,7 +273,7 @@ def _envelope_points(mats, slr_mm, gfr, traj, ext, iso, year, variant, ssps) -> 
 
 
 def _scatter_envelope(ref_by_ssp, mats, slr_mm, gfr, traj, ext, variant, names, continent,
-                      ref_ssp, env_ssps, rcp, n_labels, out_path, dpi):
+                      ref_ssp, env_ssps, rcp, n_labels, out_path):
     # Top n_labels by ref_ssp EAI 2100. Hull over every (env_ssps x SLR p17/p50/p83) point, each
     # SSP with its own SLR band; dumbbell = lowest- and highest-EAI(2100) points, sized by EAI.
     ref = ref_by_ssp[ref_ssp].copy()
@@ -265,6 +282,9 @@ def _scatter_envelope(ref_by_ssp, mats, slr_mm, gfr, traj, ext, variant, names, 
     top = ref.EAI_end.sort_values(ascending=False).index[:n_labels]
     d = ref.loc[top].copy()
     d["continent"] = [continent.get(i, "Other") for i in d.index]
+    # Every top-n_labels country keeps its hull/dumbbell; only text labels are trimmed further
+    # to fit the 180 mm panel (section 9).
+    label_isos = set(d.EAI_end.sort_values(ascending=False).index[:MAX_SCATTER_LABELS])
 
     x_floor = 10.0  # people - keeps a handful of near-zero/negative envelope points log-plottable
     linthresh = 1e4
@@ -282,9 +302,9 @@ def _scatter_envelope(ref_by_ssp, mats, slr_mm, gfr, traj, ext, variant, names, 
     eai_max = max(upper_pt[i][2] for i in d.index)
 
     def _msize(eai):
-        return 30 + 420 * np.sqrt(max(eai, 0.0) / eai_max)
+        return 6 + 90 * np.sqrt(max(eai, 0.0) / eai_max)
 
-    fig, ax = plt.subplots(figsize=(12 * FONT_SCALE, 12.5 * FONT_SCALE))
+    fig, ax = plt.subplots(figsize=(FIG_WIDTH_IN, FIG_WIDTH_IN * 0.95))
     M = max(max(xy[:, 0].max(), np.abs(xy[:, 1]).max()) for xy in envelopes.values()) * 1.3
     _ratio_lines(ax, linthresh / 5, M, linthresh)
     ax.axhline(0, color="k", lw=0.8, zorder=1)
@@ -304,10 +324,16 @@ def _scatter_envelope(ref_by_ssp, mats, slr_mm, gfr, traj, ext, variant, names, 
             ax.plot([lx, ux], [ly, uy], color=color, lw=1.1, alpha=0.7, zorder=4)
             ax.scatter([lx], [ly], s=_msize(le), color=color, edgecolor="k", lw=0.5, alpha=0.85, zorder=5)
             ax.scatter([ux], [uy], s=_msize(ue), color=color, edgecolor="k", lw=0.5, alpha=0.95, zorder=5)
-    for iso in d.index:
-        ux, uy, _ = upper_pt[iso]
-        ax.annotate(names.get(iso, iso), (ux, uy), xytext=(6, 5 if uy >= 0 else -11),
-                    textcoords="offset points", fontsize=9.5 * FONT_SCALE, zorder=6)
+    below = sorted((i for i in label_isos if upper_pt[i][1] < 0), key=lambda i: upper_pt[i][1])
+    above = sorted((i for i in label_isos if upper_pt[i][1] >= 0), key=lambda i: -upper_pt[i][1])
+    for group, sign in ((below, -1), (above, 1)):
+        for k, iso in enumerate(group):
+            ux, uy, _ = upper_pt[iso]
+            near_right_edge = ux > 0.5 * M
+            dy = sign * (4 + 16 * k)
+            ax.annotate(names.get(iso, iso), (ux, uy), xytext=(-5 if near_right_edge else 5, dy),
+                        ha="right" if near_right_edge else "left",
+                        textcoords="offset points", fontsize=7, zorder=6)
 
     ax.set_xscale("symlog", linthresh=linthresh)
     ax.set_yscale("symlog", linthresh=linthresh)
@@ -316,27 +342,38 @@ def _scatter_envelope(ref_by_ssp, mats, slr_mm, gfr, traj, ext, variant, names, 
     ax.set_box_aspect(1)
     ax.xaxis.set_major_formatter(plt.FuncFormatter(_people))
     ax.yaxis.set_major_formatter(plt.FuncFormatter(_people))
-    ax.tick_params(axis="both", labelsize=10 * FONT_SCALE)
-    ax.set_xlabel("Change in EAI due to sea-level rise, 2020-2100 (people)", fontsize=12 * FONT_SCALE)
-    ax.set_ylabel("Change in EAI due to population change, 2020-2100 (people)", fontsize=12 * FONT_SCALE)
+    ax.tick_params(axis="both", labelsize=7)
+    ax.set_xlabel("Change in EAI due to sea-level rise, 2020-2100 (people)", fontsize=7)
+    ax.set_ylabel("Change in EAI due to population change, 2020-2100 (people)", fontsize=7)
     ax.grid(alpha=0.25, which="major")
 
     conts = [c for c in CONTINENTS if c in set(d.continent)]
-    h_cont = [Line2D([], [], ls="none", marker="o", color=CONTINENT_COLORS[c], mec="k", ms=9, label=c) for c in conts]
+    h_cont = [Line2D([], [], ls="none", marker="o", color=CONTINENT_COLORS[c], mec="k", ms=5, label=c) for c in conts]
     ref_sizes = [v for v in (1e5, 1e6, 5e6) if v <= eai_max]
     h_size = [Line2D([], [], ls="none", marker="o", color="0.75", mec="k",
                      ms=np.sqrt(_msize(v)), label=f"EAI 2100 = {_people(v)}")
               for v in ref_sizes]
-    h_dumbbell = [Line2D([], [], color="0.4", lw=1.1, marker="o", mfc="0.75", mec="k", ms=7,
-                        label="lower-bound to upper-bound EAI 2100\n(across env., dot size = that point's own EAI)")]
+    h_dumbbell = [Line2D([], [], color="0.4", lw=1.1, marker="o", mfc="0.75", mec="k", ms=5,
+                        label="lower- to upper-bound EAI 2100\n(across env., size = that point's EAI)")]
     scen_label = " & ".join(ssp_rcp_label(s, rcp) for s in env_ssps)
     h_shape = [Patch(facecolor="0.6", alpha=0.3, edgecolor="0.6",
                      label=f"envelope: {scen_label}\n(each with its own SLR p17-p83 range)")]
-    ax.legend(handles=h_cont + h_size + h_dumbbell + h_shape, loc="upper left", bbox_to_anchor=(1.01, 1.0),
-              fontsize=10 * FONT_SCALE, frameon=False, alignment="left", labelspacing=1.1)
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+    fig.subplots_adjust(left=0.1, right=0.7, bottom=0.2, top=0.97)
+    ax.legend(handles=h_cont + h_size + h_dumbbell + h_shape, loc="upper left", bbox_to_anchor=(1.03, 1.0),
+              fontsize=7, frameon=False, alignment="left", labelspacing=0.9)
+    save_figure(fig, out_path)
     plt.close(fig)
+    write_caption(out_path, [
+        f"The {len(d)} highest-EAI-2100 countries under {ssp_rcp_label(ref_ssp, rcp)}, decomposed "
+        "as in the scatter figure, with an envelope over every combination of "
+        f"{' & '.join(ssp_rcp_label(s, rcp) for s in env_ssps)} and the AR6 SLR p17-p83 range.",
+        "Shaded hull: the full envelope per country; dumbbell: the lowest- and highest-EAI(2100) "
+        "point in that envelope, dot size proportional to that point's own EAI.",
+        "Marker/hull colour: continent; dashed/solid grey lines: constant ratio (0.1x, 1x) "
+        "between the two decomposition terms.",
+        f"Only the {MAX_SCATTER_LABELS} highest-EAI countries are name-labelled; all "
+        f"{len(d)} are plotted.",
+    ])
     print(f"  Written: {out_path.name}")
 
 
@@ -360,9 +397,9 @@ def main() -> None:
     variants: dict[str, dict] = ep.get("variants") or {"stabilise": {"mode": "constant"}}
     v0 = next(iter(variants))
     rcp = viz["ssp_rcp_codes"]
-    dpi = int(viz["dpi"])
     out_dir = Path(args.out_dir or viz["output_dir"])
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
+    apply_style()
 
     catalog = get_data_catalog(_REPO_ROOT / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
     growth_df = load_ssp_growth_factors(Path(catalog.get_source("ssp_population_growth_factors").path))
@@ -394,17 +431,17 @@ def main() -> None:
                     + both.interaction.clip(lower=0)).max()) / 1e6 * 1.03
         for yr in (2100, to_year):
             _waterfall(ref, central, band, top, names, ssp, rcp, yr, to_year, variants, v0, xmax,
-                       out_dir / f"slr_vs_population_waterfall_{ssp}_{yr}.png", dpi)
+                       out_dir / f"slr_vs_population_waterfall_{ssp}_{yr}.png")
 
     # +1: keeps a country that narrowly missed one scenario's top list in the shared label set.
-    _scatter_figure(refs_by_ssp, names, continent, ssps, min_change, n_labels + 1,
-                    out_dir / f"slr_vs_population_scatter_{'_'.join(ssps)}_2100.png", dpi)
+    _scatter_figure(refs_by_ssp, names, continent, ssps, rcp, min_change, n_labels + 1,
+                    out_dir / f"slr_vs_population_scatter_{'_'.join(ssps)}_2100.png")
 
     env_ssps = ssps
     ref_ssp = "SSP2" if "SSP2" in refs_by_ssp else ssps[0]
     _scatter_envelope(refs_by_ssp, mats, slr_mm, gfr, traj, ext, v0, names, continent,
                       ref_ssp, env_ssps, rcp, n_labels,
-                      out_dir / "slr_vs_population_scatter_envelope_2100.png", dpi)
+                      out_dir / "slr_vs_population_scatter_envelope_2100.png")
 
 
 if __name__ == "__main__":

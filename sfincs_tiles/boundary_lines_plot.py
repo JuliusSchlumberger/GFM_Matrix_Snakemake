@@ -15,7 +15,7 @@ from rasterio.warp import transform as warp_transform
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analysis"))
-from _figure_style import WATER_COLOR  # noqa: E402
+from _figure_style import BOUNDARY_CELL_COLOR, SFINCS_COLOR, WATER_COLOR, apply_style, save_figure  # noqa: E402
 
 from boundary_lines_geometry import (  # noqa: E402
     OCEAN_CODE,
@@ -25,6 +25,7 @@ from boundary_lines_geometry import (  # noqa: E402
 
 
 def _plot(tile_id, tile_dir, gpkg, mask, bounds, tile, out_path: Path, row: dict) -> None:
+    apply_style()
     fig, (ax, ax2) = plt.subplots(1, 2, figsize=(18, 9.5))
     extent = [bounds[0], bounds[2], bounds[1], bounds[3]]
     land_sea = np.where(mask == OCEAN_CODE, 0, 1)
@@ -42,7 +43,7 @@ def _plot(tile_id, tile_dir, gpkg, mask, bounds, tile, out_path: Path, row: dict
         m2d, tr, crs = read_sfincs_mask(tile_dir / "sfincs_model")
         r, c = np.nonzero(m2d == 2)  # waterlevel boundary
         lon, lat = warp_transform(crs, "EPSG:4326", *(tr * (c + 0.5, r + 0.5)))
-        ax.scatter(lon, lat, s=1.5, color="#1f4e8c", alpha=0.6, label="SFINCS boundary cells", zorder=3)
+        ax.scatter(lon, lat, s=1.5, color=SFINCS_COLOR, alpha=0.6, label="SFINCS boundary cells", zorder=3)
     if segs is not None:
         for kind, color in SEGMENT_KINDS.items():
             sel = segs[segs["kind"] == kind]
@@ -73,7 +74,7 @@ def _plot(tile_id, tile_dir, gpkg, mask, bounds, tile, out_path: Path, row: dict
     handles = []
     for name, style, label in [
         ("inactive", dict(facecolor="#4d4d4d", alpha=0.55, edgecolor="none"), "inactive cells (ocean side)"),
-        ("land_inactive", dict(facecolor="#d62728", alpha=0.85, edgecolor="none"), "CONFLICT: land inactive"),
+        ("land_inactive", dict(facecolor=BOUNDARY_CELL_COLOR, alpha=0.85, edgecolor="none"), "CONFLICT: land inactive"),
         ("ocean_active", dict(facecolor="none", hatch="////", edgecolor="#ff7f0e", linewidth=0.0),
          "open sea left active (reaches tile edge)"),
     ]:
@@ -98,5 +99,5 @@ def _plot(tile_id, tile_dir, gpkg, mask, bounds, tile, out_path: Path, row: dict
         a_.set_ylabel("latitude (°N)")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=120)
+    save_figure(fig, out_path)
     plt.close(fig)

@@ -10,6 +10,10 @@ paths:
 
   processed_inputs_dir: "{root}/processed_inputs" # intermediate files of prepare_boundary_conditions.py
   deltas_shapefile: "{root}/inputs/DeltasGlobal/all_deltas.shp" # global delta polygons (deltas deliverable)
+  # Single figures root: every pipeline writes its figures under one of this directory's own
+  # subdirectories (main_production, validation, sfincs_runs/<base_dir_name>, 500_tiles,
+  # input_forcing_qa), rather than scattering them across each run's own output directory.
+  figures_root: "{root}/figures"
 # ── SYNC DELTADTM ──────────────────────────────────────────────────────────────
 sync_deltadtm:  # Used by: preparation/sync_deltadtm.py.
   zip_download_dir: "{root}/inputs/DeltaDTM/_zips" # temp directory for the downloaded .zip archives
@@ -414,7 +418,7 @@ analysis: # Used by: analysis/run_analysis.py
 
 # ── VISUALISATION ─────────────────────────────────────────────────────────────
 visualization:
-  output_dir: "{root}/figures_v2"
+  output_dir: "{figures_root}/main_production"
 
   # ── Burning-ember ────────────────────────────────────────
   # The growth matrices span a wider space than the ember figures show, so pathways can be
@@ -553,7 +557,7 @@ visualization:
 validation:
   benchmark_catalog: "snakemake_workflow/config/data_catalog_validation.yml"
   benchmark_root: "{root}/inputs/validation" # NOT the GFM catalog's own {root}
-  output_dir: "{root}/validation_v2"
+  output_dir: "{figures_root}/validation"
   return_period: "RP100" # scalar RP: "RP100" wildcard form (see boundary_conditions.return_periods)
   waterlevel_name: "SLR_0"
   primary_threshold_m: 0.01 # model wet-cell depth threshold for scoring. Deliberately not

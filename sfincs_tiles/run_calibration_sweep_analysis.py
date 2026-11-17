@@ -35,7 +35,7 @@ _REPO_ROOT = _THIS_DIR.parent
 
 sys.path.insert(0, str(_THIS_DIR))
 from calibration_paths import SELECTION_NAME  # noqa: E402
-from gfm_config import read_root  # noqa: E402
+from gfm_config import read_figures_root, read_root  # noqa: E402
 
 
 def _run(cmd: list[str]) -> None:
@@ -113,13 +113,14 @@ def _model_prediction(row) -> str:
 def _forcing_checks(python: str, args, root: Path, key: str) -> None:
     # A failing tile is reported at the end (exit 1) instead of aborting the rest.
     base = root / args.base_dir_name
-    out_dir = base / "figures" / "forcing_checks"
+    fig_dir = read_figures_root(Path(args.config)) / "sfincs_runs" / args.base_dir_name
+    out_dir = fig_dir / "forcing_checks"
     per_tile = pd.read_csv(base / "variant_runs_per_tile.csv")
     rows = per_tile[per_tile["run_key"] == key].sort_values("tile_id")
     if args.tile_ids_file:
         rows = rows[rows["tile_id"].astype(str).isin(Path(args.tile_ids_file).read_text().split())]
     if not args.forcing_checks_all:
-        sel_path = base / "figures" / f"worst_tiles_selection_{key}.csv"
+        sel_path = fig_dir / f"worst_tiles_selection_{key}.csv"
         if not sel_path.exists():
             raise SystemExit(f"{sel_path} missing - run the full analysis (step 3) first, or use --forcing-checks-all")
         rows = rows[rows["tile_id"].isin(pd.read_csv(sel_path)["tile_id"])]

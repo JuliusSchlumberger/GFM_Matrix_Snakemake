@@ -99,6 +99,7 @@ TASK_SIZE = 25
 BLEND_QUANTILES = np.linspace(0.0, 1.0, 2001)
 MODEL_FIELDS = ("u", "p_u", "shape", "scale", "theta")
 NODE_LEVEL_SOURCE = "coastline_node"
+FAILED_LEVEL_SOURCE = "failed"  # the station's build raised; the levels file carries COAST-RP's levels
 
 
 def coast_rp_levels(path: Path) -> pd.DataFrame:
@@ -522,8 +523,19 @@ def station_records(chunk: list[dict], stores, bases: dict, start: np.datetime64
 
 
 def running_mean(windows: np.ndarray, width_hr: int) -> np.ndarray:
-    kernel = np.ones(width_hr) / width_hr
-    return np.vstack([np.convolve(np.nan_to_num(w), kernel, mode="same") for w in windows])
+    """Centred running mean over the finite hours of each row; NaN where the kernel holds none.
+
+    Missing hours and the hours beyond the row ends leave the mean instead of counting as zero.
+    """
+    kernel = np.ones(width_hr)
+    out = []
+    for w in windows:
+        finite = np.isfinite(w)
+        total = np.convolve(np.where(finite, w, 0.0), kernel, mode="same")
+        count = np.convolve(finite.astype(float), kernel, mode="same")
+        with np.errstate(invalid="ignore", divide="ignore"):
+            out.append(np.where(count > 0, total / count, np.nan))
+    return np.vstack(out)
 
 
 def fit_length(shape: np.ndarray, n: int) -> np.ndarray:
@@ -703,13 +715,14 @@ def station_product(st: dict, g: np.ndarray, th: np.ndarray, t10: np.ndarray,
 
 
 def _station_task(args):
-    results = []
+    results, failed = [], []
     for st, g, th, t10, years in station_records(*args):
         try:
             results.append(station_product(st, g, th, t10, years))
-        except Exception as err:  # one bad station must not stop the pool; it is reported and skipped
-            print(f"  skipped station {st['station']}: {type(err).__name__}: {err}", flush=True)
-    return results
+        except Exception as err:  # one bad station must not stop the pool; it is reported and marked failed
+            print(f"  failed station {st['station']}: {type(err).__name__}: {err}", flush=True)
+            failed.append(st["station"])
+    return results, failed
 
 
 def _stores(stores) -> list[str]:
@@ -746,12 +759,14 @@ def build_stations(todo: list[dict], stores, bases: dict, hyd: np.ndarray, worke
                    models: np.ndarray | None = None, start: np.datetime64 = HOURLY_START) -> tuple[list, list]:
     """Run `station_product` for every station input in `todo`, writing hyd[row] (and models[row]) in place.
 
-    `stores` (one store or several), `bases` and `start` as in `station_records`.
+    `stores` (one store or several), `bases` and `start` as in `station_records`. A station whose
+    build raises gets a row with only level_source FAILED_LEVEL_SOURCE and keeps NaN hydrographs.
     """
     tasks = [(todo[i:i + TASK_SIZE], _stores(stores), bases, start) for i in range(0, len(todo), TASK_SIZE)]
     rows, info = [], []
     with ProcessPoolExecutor(workers) as pool:
-        for k, res in enumerate(pool.map(_station_task, tasks)):
+        for k, (res, failed) in enumerate(pool.map(_station_task, tasks)):
+            rows += [{"station": s, "level_source": FAILED_LEVEL_SOURCE} for s in failed]
             for row, h, i, vector in res:
                 rows.append(row)
                 info += i
@@ -805,7 +820,8 @@ def fes2022_ok_gauges(pairs: pd.DataFrame, mhws_gauge: np.ndarray, mhws_fes: np.
 def export_levels(lev: pd.DataFrame, coast_rp_path: Path, dest: Path, nodes: pd.DataFrame | None = None) -> None:
     """Write the levels in COAST-RP's layout (stations, order, coordinates, storm_tide_rp_XXXX).
 
-    Stations without a product level keep COAST-RP's (`level_source`). The coastline `nodes`
+    Stations without a product level keep COAST-RP's (`level_source` coast_rp, or
+    FAILED_LEVEL_SOURCE where the station's build raised). The coastline `nodes`
     (lon, lat, atlas, gpd_shape, rp*_m, FLAG_COLUMNS) follow the COAST-RP stations, station_id
     "node_<n>". The FLAG_COLUMNS are written as int8 0/1. RP1 is not produced.
     """
@@ -817,7 +833,7 @@ def export_levels(lev: pd.DataFrame, coast_rp_path: Path, dest: Path, nodes: pd.
         z = lev[f"rp{rp}_m"].to_numpy(dtype=np.float64)
         fallback = coast[f"storm_tide_rp_{rp:04d}"].values.astype(np.float64)
         missing = ~np.isfinite(z)
-        source[missing] = "coast_rp"
+        source[missing & (source != FAILED_LEVEL_SOURCE)] = "coast_rp"
         data[f"storm_tide_rp_{rp:04d}"] = ("stations", np.where(missing, fallback, z),
                                            {"units": "m", "long_name": f"storm tide, return period {rp} y",
                                             "vertical_reference": "local mean sea level"})

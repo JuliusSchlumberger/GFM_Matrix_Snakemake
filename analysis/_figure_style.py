@@ -5,6 +5,7 @@ AGREE = both sides wet. A_ONLY/B_ONLY are direction-free; keep one A/B conventio
 per comparison type (e.g. A = the physics reference) so colours mean the same.
 """
 
+import time
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -12,6 +13,12 @@ import matplotlib.pyplot as plt
 # Background colours distinct from the category palette.
 LAND_COLOR = "#cfcfcf"
 WATER_COLOR = "#aec6d8"
+
+# SFINCS boundary/forcing diagnostics (sfincs_tiles/boundary_lines_plot.py,
+# plot_sfincs_tile_diagnostics.py): a waterlevel-boundary cell/conflict marker (red) and
+# a SFINCS-sourced series/point marker (blue), each one colour shared across both scripts.
+BOUNDARY_CELL_COLOR = "#d62728"
+SFINCS_COLOR = "#1f4e8c"
 
 # ColorBrewer Set1 (colour-vision-deficiency safe); mirrored by config.yml
 # validation.plots.agreement_colors.
@@ -21,6 +28,13 @@ B_ONLY_COLOR = "#e41a1c"
 
 LAND_LABEL = "Land"
 WATER_LABEL = "Permanent water"
+
+# Muted ink/grid theme (input_analysis/make_boundary_forcing_figures.py): near-black text,
+# grey de-emphasised series, light grid - an alternative to apply_style()'s defaults for
+# figures with many overlaid series where full-black ink would be too heavy.
+INK = "#0b0b0b"
+MUTED = "#898781"
+GRID = "#e1e0d9"
 
 # Colour-blind-safe sequential maps (section 9 "Colour") - matplotlib built-ins, so
 # picking them needs no new dependency (cmocean/Crameri are not installed in this
@@ -111,11 +125,32 @@ def apply_style() -> None:
     })
 
 
+def _savefig_retry(fig: plt.Figure, path: Path, **kwargs) -> None:
+    # Windows intermittently refuses to truncate a file another process (viewer, indexer) holds.
+    for attempt in range(5):
+        try:
+            fig.savefig(path, **kwargs)
+            return
+        except OSError:
+            if attempt == 4:
+                raise
+            time.sleep(2)
+
+
 def save_figure(fig: plt.Figure, path: Path) -> None:
     """Save `fig` as PNG (300 dpi) and PDF (fonts embedded) under `path`'s stem."""
     path = Path(path)
-    fig.savefig(path.with_suffix(".png"), dpi=300, bbox_inches="tight")
-    fig.savefig(path.with_suffix(".pdf"), bbox_inches="tight")
+    _savefig_retry(fig, path.with_suffix(".png"), dpi=300, bbox_inches="tight")
+    _savefig_retry(fig, path.with_suffix(".pdf"), bbox_inches="tight")
+
+
+def style_axes_muted(ax: plt.Axes) -> None:
+    """Apply the muted ink/grid theme (INK/MUTED/GRID) to one axes."""
+    ax.grid(color=GRID, linewidth=0.6)
+    ax.set_axisbelow(True)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    ax.tick_params(colors=MUTED, labelcolor=INK)
 
 
 def orient_north_up(arr, transform):

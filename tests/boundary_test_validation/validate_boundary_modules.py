@@ -117,6 +117,14 @@ def test_rp_selection_window_and_largest_events_beyond_the_record() -> None:
     assert set(rp_event_selection(rp, 100.0)) == {5, 6}
 
 
+def test_rp_selection_follows_the_record_length() -> None:
+    long_record = 76.0 / np.arange(1, 76)  # 75 annual maxima: largest empirical RP 76 y
+    assert set(rp_event_selection(long_record, 50.0)) == {0, 1, 2}
+    assert set(rp_event_selection(long_record, 100.0)) == {0, 1}
+    short_record = 31.0 / np.arange(1, 31)
+    assert set(rp_event_selection(short_record, 50.0)) == {0, 1}
+
+
 def test_median_surge_shape_recentres_on_the_surge_maximum() -> None:
     t = np.arange(-72, 73)
     windows = np.vstack([np.exp(-np.log(2) * ((t - lag) / 9.0) ** 2) * amp for lag, amp in ((-3, 0.5), (4, 1.2))])

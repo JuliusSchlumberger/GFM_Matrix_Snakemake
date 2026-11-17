@@ -17,8 +17,8 @@ from flood_model import _idw_nearest_k  # noqa: E402
 from skew_surge import HW_PROMINENCE, high_waters, profile_loglik, skew_level, total_level  # noqa: E402
 from prepare_boundary_conditions import nearest_slr_m  # noqa: E402
 from storm_tide_product import (  # noqa: E402
-    BLEND_QUANTILES, FLAG_COLUMNS, NODE_LEVEL_SOURCE, RPS, SHAPE_GRID, blended_model, export_levels, loo_basin_fit,
-    model_vector, pooled_shapes, ratio_covariate, station_basins, station_flags, station_ratio, station_ratios,
+    BLEND_QUANTILES, FAILED_LEVEL_SOURCE, FLAG_COLUMNS, NODE_LEVEL_SOURCE, RPS, SHAPE_GRID, blended_model, export_levels, loo_basin_fit,
+    model_vector, pooled_shapes, ratio_covariate, running_mean, station_basins, station_flags, station_ratio, station_ratios,
     station_records, station_surge_model, tc_hours, tc_input_levels, trial_root)
 from tide_prediction import consistent_version_flag  # noqa: E402
 
@@ -118,6 +118,27 @@ def test_export_levels_appends_the_coastline_nodes(tmp_path: Path) -> None:
         assert ds.level_source.values.tolist() == ["product", "coast_rp", NODE_LEVEL_SOURCE]
         assert ds.station_x_coordinate.values[2] == 0.5
         assert ds.flag_fallback_r.values.tolist() == [1, 0, 1]
+
+
+def test_export_levels_keeps_failed_stations_marked_with_coast_rp_levels(tmp_path: Path) -> None:
+    coast = xr.Dataset({f"storm_tide_rp_{rp:04d}": ("stations", [1.0, 2.0]) for rp in RPS},
+                       coords={"station_id": ("stations", ["a", "b"]), "station_x_coordinate": ("stations", [0.0, 1.0]),
+                               "station_y_coordinate": ("stations", [50.0, 50.0])})
+    coast.to_netcdf(tmp_path / "coast_rp.nc")
+    lev = pd.DataFrame({"station_id": ["a", "b"], "level_source": ["product", FAILED_LEVEL_SOURCE], "r": [1.1, np.nan],
+                        "atlas": ["fes2022", "fes2022"], "gpd_shape": [0.1, np.nan],
+                        **{f"rp{rp}_m": [3.0, np.nan] for rp in RPS}, **{c: [True, False] for c in FLAG_COLUMNS}})
+    export_levels(lev, tmp_path / "coast_rp.nc", tmp_path / "levels.nc")
+    with xr.open_dataset(tmp_path / "levels.nc") as ds:
+        assert ds.storm_tide_rp_0100.values.tolist() == [3.0, 2.0]
+        assert ds.level_source.values.tolist() == ["product", FAILED_LEVEL_SOURCE]
+
+
+def test_running_mean_ignores_missing_hours_and_the_row_ends() -> None:
+    w = np.full((1, 40), 0.5)
+    w[0, 20:23] = np.nan
+    out = running_mean(w, 13)[0]
+    assert np.allclose(out, 0.5)
 
 
 def test_slr_lookup_takes_the_nearest_value_inside_the_open_one_degree_box() -> None:

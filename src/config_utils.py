@@ -119,8 +119,8 @@ def load_config(config_path: str | Path, extra_override: str | Path | None = Non
     """Load config.yml the same way the root Snakefile does, for standalone scripts.
 
     Layers: config.yml < sibling config_local.yml < `extra_override` (skipped
-    if missing; HPC callers use `load_hpc_config`). Then expands {root}, {code_root} and
-    {processed_inputs_dir} everywhere.
+    if missing; HPC callers use `load_hpc_config`). Then expands {root}, {code_root},
+    {processed_inputs_dir} and {figures_root} everywhere.
     """
     config_path = Path(config_path)
     with open(config_path, encoding="utf-8") as f:
@@ -142,9 +142,11 @@ def load_config(config_path: str | Path, extra_override: str | Path | None = Non
         raise ValueError(f"{config_path}: paths.root is not set - create snakemake_workflow/config/config_local.yml (copy config_local.yml.example) or pass a config that sets it (config_hpc.yml / a materialized scenario config)")
     code_root = config["paths"].get("code_root", root)
     subs = {"root": root, "code_root": code_root}
-    # Two-pass, as the Snakefile's _PATH_SUBS: processed_inputs_dir contains {root}.
+    # Two-pass, as the Snakefile's _PATH_SUBS: processed_inputs_dir/figures_root contain {root}.
     if "processed_inputs_dir" in config["paths"]:
         subs["processed_inputs_dir"] = _expand_paths(config["paths"]["processed_inputs_dir"], subs)
+    if "figures_root" in config["paths"]:
+        subs["figures_root"] = _expand_paths(config["paths"]["figures_root"], subs)
     return _expand_paths(config, subs)
 
 

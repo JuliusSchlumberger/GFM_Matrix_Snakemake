@@ -36,7 +36,7 @@ from scipy.spatial import cKDTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from calibration_paths import SELECTION_NAME  # noqa: E402
-from gfm_config import read_root  # noqa: E402
+from gfm_config import read_figures_root, read_root  # noqa: E402
 from sfincs_grid import read_sfincs_mask  # noqa: E402
 from plot_worst_tiles_panel import (  # noqa: E402
     CATEGORY_COLORS, CATEGORY_LABELS, DRY, EIKONAL_ONLY, SFINCS_ONLY,
@@ -45,13 +45,16 @@ from plot_worst_tiles_panel import (  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analysis"))
-from _figure_style import WATER_COLOR, WATER_LABEL, draw_caption_box, panel_letters  # noqa: E402
+from _figure_style import (  # noqa: E402
+    BOUNDARY_CELL_COLOR, SFINCS_COLOR, WATER_COLOR, WATER_LABEL, apply_style, draw_caption_box, panel_letters,
+    save_figure,
+)
 from rasters import decode_waterlevel_cm  # noqa: E402
 
 OCEAN_CODE = 1
 
 INACTIVE, ACTIVE, BOUNDARY = 0, 1, 2
-MASK_COLORS = ["#f5f5f2", "#a8c8e8", "#d62728"]  # inactive, active, boundary
+MASK_COLORS = ["#f5f5f2", "#a8c8e8", BOUNDARY_CELL_COLOR]  # inactive, active, boundary
 MASK_LABELS = ["inactive", "active", "waterlevel boundary"]
 
 FIGURES = ["mask", "boundary_forcing", "biggest_disagreement", "coastrp_forcing"]
@@ -125,7 +128,7 @@ def plot_mask(mask2d: np.ndarray, transform: rasterio.Affine, crs: str, out_path
     ax.set_xlabel("longitude")
     ax.set_ylabel("latitude")
     fig.tight_layout()
-    fig.savefig(out_path, dpi=170)
+    save_figure(fig, out_path)
     plt.close(fig)
     print(f"Wrote {out_path}")
 
@@ -146,12 +149,13 @@ def plot_boundary_forcing(mask2d: np.ndarray, transform: rasterio.Affine, crs: s
 
     b_rows, b_cols = np.nonzero(mask2d == BOUNDARY)
     blons, blats = _cell_centres_lonlat(transform, crs, b_rows, b_cols)
-    ax.scatter(blons, blats, s=8, color="#d62728", marker="s", label=f"boundary cells (n={len(blons)})", zorder=4)
+    ax.scatter(blons, blats, s=8, color=BOUNDARY_CELL_COLOR, marker="s", label=f"boundary cells (n={len(blons)})",
+               zorder=4)
 
     points_path = sfincs_dir / "matched_boundary_points.gpkg"
     if points_path.exists():
         points = gpd.read_file(points_path).to_crs("EPSG:4326")
-        ax.scatter(points.geometry.x, points.geometry.y, s=80, facecolors="none", edgecolors="#1f4e8c",
+        ax.scatter(points.geometry.x, points.geometry.y, s=80, facecolors="none", edgecolors=SFINCS_COLOR,
                    linewidths=1.5, marker="o", label=f"matched COAST-RP stations (n={len(points)})", zorder=5)
     bnd, bzs = _read_sfincs_bnd_bzs(sfincs_dir)
     if bnd is not None:
@@ -172,8 +176,8 @@ def plot_boundary_forcing(mask2d: np.ndarray, transform: rasterio.Affine, crs: s
     hydro = pd.read_csv(hydro_path)
     station_cols = [c for c in hydro.columns if c != "elapsed_hr"]
     for col in station_cols:
-        ax.plot(hydro["elapsed_hr"], hydro[col], color="#1f4e8c", alpha=0.35, linewidth=0.9)
-    ax.plot(hydro["elapsed_hr"], hydro[station_cols].median(axis=1), color="#1f4e8c", linewidth=2,
+        ax.plot(hydro["elapsed_hr"], hydro[col], color=SFINCS_COLOR, alpha=0.35, linewidth=0.9)
+    ax.plot(hydro["elapsed_hr"], hydro[station_cols].median(axis=1), color=SFINCS_COLOR, linewidth=2,
              label=f"median across {len(station_cols)} matched station(s)")
     if bzs is not None:
         for k in range(bzs.shape[1] - 1):
@@ -188,7 +192,7 @@ def plot_boundary_forcing(mask2d: np.ndarray, transform: rasterio.Affine, crs: s
     ax.grid(True, alpha=0.3)
 
     fig.tight_layout()
-    fig.savefig(out_path, dpi=170)
+    save_figure(fig, out_path)
     plt.close(fig)
     print(f"Wrote {out_path}")
 
@@ -258,7 +262,7 @@ def plot_biggest_disagreement(tile_dir: Path, out_path: Path, run_key: str) -> N
         f"of {n_components} disagreement patch(es) total",
     ])
     fig.tight_layout()
-    fig.savefig(out_path, dpi=170, bbox_inches="tight")
+    save_figure(fig, out_path)
     plt.close(fig)
     print(f"Wrote {out_path}")
 
@@ -371,11 +375,11 @@ def _profile_panel(ax, ctx: dict, zsmax_lonlat, bzs, letter: str, title: str | N
     if zs is not None:
         d_z, j_z = cKDTree(km(zlon, zlat)).query(point_xy)
         zs_at = np.where(has_point & (d_z <= SAME_POINT_MAX_KM), zs[j_z], np.nan)
-        ax.plot(dist_km, zs_at, "^-", color="#1f4e8c", linewidth=2,
+        ax.plot(dist_km, zs_at, "^-", color=SFINCS_COLOR, linewidth=2,
                 label="SFINCS peak water level zsmax at the same point")
     if bzs is not None:
         for k in range(bzs.shape[1] - 1):
-            ax.axhline(bzs[:, k + 1].max(), color="#1f4e8c", linestyle=":", linewidth=1,
+            ax.axhline(bzs[:, k + 1].max(), color=SFINCS_COLOR, linestyle=":", linewidth=1,
                        label="SFINCS bnd forcing peaks" if k == 0 else None)
     ax.set_xticks(dist_km)
     ax.set_xticklabels([f"{st_lon[k]:.2f}E\n{st_lat[k]:.2f}N" for k in idx], rotation=90, fontsize=11)
@@ -437,11 +441,11 @@ def _plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs, out_path
     ax.scatter(ctx["st_lon"][off], ctx["st_lat"][off], s=90, marker="x", color="black", linewidths=1.8, zorder=6)
     b_rows, b_cols = np.nonzero(mask2d == BOUNDARY)
     blons, blats = _cell_centres_lonlat(transform, crs, b_rows, b_cols)
-    ax.scatter(blons, blats, s=4, color="#1f4e8c", marker="s", zorder=4)
+    ax.scatter(blons, blats, s=4, color=SFINCS_COLOR, marker="s", zorder=4)
     bnd, bzs = _read_sfincs_bnd_bzs(sfincs_dir)
     if bnd is not None:
         bnd_lons, bnd_lats = warp_transform(crs, "EPSG:4326", bnd[:, 0], bnd[:, 1])
-        ax.scatter(bnd_lons, bnd_lats, s=260, facecolors="none", edgecolors="#1f4e8c", linewidths=2.0,
+        ax.scatter(bnd_lons, bnd_lats, s=260, facecolors="none", edgecolors=SFINCS_COLOR, linewidths=2.0,
                    marker="*", zorder=6)
     cb = fig.colorbar(sc, ax=ax, fraction=0.04, pad=0.02, label="COAST-RP RP100 water level (m)")
     b = ctx["bounds"]
@@ -458,9 +462,9 @@ def _plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs, out_path
         plt.Line2D([0], [0], marker="x", color="none", markeredgecolor="black", markersize=9, markeredgewidth=1.8,
                    label=f"no ocean within {STATION_OCEAN_TOL_M / 1000:g} km - left out of (b) (n={len(off)})"),
         plt.Line2D([0], [0], color=cmap(0.5), linewidth=3, label=f"eikonal coastline seed (IDW, k={knn})"),
-        plt.Line2D([0], [0], marker="s", color="none", markerfacecolor="#1f4e8c", markersize=5,
+        plt.Line2D([0], [0], marker="s", color="none", markerfacecolor=SFINCS_COLOR, markersize=5,
                    label="SFINCS waterlevel-boundary cells"),
-        plt.Line2D([0], [0], marker="*", color="none", markeredgecolor="#1f4e8c", markersize=14,
+        plt.Line2D([0], [0], marker="*", color="none", markeredgecolor=SFINCS_COLOR, markersize=14,
                    label="SFINCS forcing points (sfincs.bnd)"),
     ], **legend_kw)
     panel_letters(ax, "a")
@@ -473,7 +477,7 @@ def _plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs, out_path
     axes[1].set_position([pb.x0, pa.y0, pb.width, pa.height])
     pc = cb.ax.get_position()
     cb.ax.set_position([pc.x0, pa.y0, pc.width, pa.height])
-    fig.savefig(out_path, dpi=170, bbox_inches="tight", pad_inches=0.2)
+    save_figure(fig, out_path)
     plt.close(fig)
     print(f"Wrote {out_path}")
 
@@ -504,12 +508,14 @@ def main() -> None:
     if args.out_name and args.out_prefix:
         parser.error("--out-name and --out-prefix are mutually exclusive")
 
+    apply_style()
     root = read_root(Path(args.config))
     with open(args.config, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     tile_dir = root / args.base_dir_name / args.tile_id
     sfincs_dir = tile_dir / "sfincs_model"
-    fig_dir = Path(args.fig_dir) if args.fig_dir else tile_dir / "figures"
+    fig_dir = (Path(args.fig_dir) if args.fig_dir
+               else read_figures_root(Path(args.config)) / "sfincs_runs" / args.base_dir_name / args.tile_id)
     fig_dir.mkdir(parents=True, exist_ok=True)
 
     def out_path(figure: str) -> Path:

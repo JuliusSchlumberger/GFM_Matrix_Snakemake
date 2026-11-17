@@ -160,7 +160,7 @@ Durations (hours; local MSL = 0; B's T = time within f x (peak - MSL) of the pea
   high waters at +-24 h 0.81 -> 0.58 of the peak (< 1 m), 0.86 -> 0.75 (1-2 m), unchanged > 2 m.
   Rarer events are more surge-dominated, so the tidal neighbours are relatively lower, while the
   surge holds the level above MSL longer. Figures: `analysis/shapes_profiles.png`,
-  `input_analysis/boundary_forcing/figures/fig08_profiles_by_rp.png`, `analysis/shapes_durations.png`.
+  `{paths.figures_root}/input_forcing_qa/fig08_profiles_by_rp.png`, `analysis/shapes_durations.png`.
 
 ### 0.4 What duration does to inland levels (2c), synthetic SFINCS floodplains
 

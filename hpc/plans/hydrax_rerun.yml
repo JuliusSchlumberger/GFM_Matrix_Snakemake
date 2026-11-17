@@ -67,7 +67,8 @@ steps:
     run: |
       cd "$R/calibration_500_tiles"
       rm -rf sweep_budget obstacle_coupling sweep_budget_landcover sweep_budget_uniform \
-             obstacle_coupling_landcover obstacle_coupling_uniform figures
+             obstacle_coupling_landcover obstacle_coupling_uniform
+      rm -rf "$R/figures/500_tiles"
       rm -f hpc_jobs/calib_*.sbatch hpc_jobs/submit_calib_*.sh hpc_jobs/logs/calib_*
 
   - id: studies_preprocess
@@ -110,10 +111,11 @@ steps:
     job: {partition: 4vcpu, cpus_per_task: 4, mem: 30G, time: "0-04:00:00"}
     run: |
       S="$R/calibration_500_tiles"
+      FIGROOT="$R/figures/500_tiles"
       for src in landcover uniform; do
-        "$PY" calibration_studies/plot_sweep_calibration_bands.py "$S/sweep_budget_$src" --fig-dir "$S/figures/$src"
-        "$PY" calibration_studies/plot_sweep_time_vs_size.py "$S/sweep_budget_$src" --fig-dir "$S/figures/$src"
-        "$PY" calibration_studies/plot_obstacle_coupling_calibration_bands.py "$S/obstacle_coupling_$src" --fig-dir "$S/figures/$src"
+        "$PY" calibration_studies/plot_sweep_calibration_bands.py "$S/sweep_budget_$src" --fig-dir "$FIGROOT/$src"
+        "$PY" calibration_studies/plot_sweep_time_vs_size.py "$S/sweep_budget_$src" --fig-dir "$FIGROOT/$src"
+        "$PY" calibration_studies/plot_obstacle_coupling_calibration_bands.py "$S/obstacle_coupling_$src" --fig-dir "$FIGROOT/$src"
       done
 
   # ── SFINCS calibration, 1,500 tiles: stage 1 -> selection -> sweep (+ post job) -> duration ──
@@ -121,6 +123,7 @@ steps:
     destructive: true
     run: |
       rm -rf "$R/calibration_roughness_SFINCS" "$R/calibration_roughness_SFINCS_dedup"
+      rm -rf "$R/figures/sfincs_runs/calibration_roughness_SFINCS" "$R/figures/sfincs_runs/calibration_roughness_SFINCS_dedup"
 
   - id: sfincs_sweep
     after: [production_preprocess, reset_sfincs]

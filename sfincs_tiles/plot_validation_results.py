@@ -31,11 +31,16 @@ from calibration_results import GROUPS, load_results, metrics_overview, pooled_d
 from flood_agreement import (  # noqa: E402
     DEPTH_CATEGORY_EDGES, DEPTH_CORR_FINE_EDGES, depth_error_metrics_from_pooled, metrics_from_counts,
 )
-from gfm_config import read_root  # noqa: E402
+from gfm_config import read_figures_root, read_root  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analysis"))
-from _figure_style import LAND_COLOR  # noqa: E402
+from _figure_style import (  # noqa: E402
+    DOUBLE_COLUMN_MM, LAND_COLOR, MM_PER_INCH, SEQUENTIAL_CMAP, apply_style, panel_letters, save_figure,
+    write_caption,
+)
+
+FIG_WIDTH_IN = DOUBLE_COLUMN_MM / MM_PER_INCH
 
 COAST_COLOR = "#b8b8b3"
 HC_BATHTUB_COLOR = "#8a8a86"
@@ -53,32 +58,47 @@ def _category_bin_labels(edges: np.ndarray) -> list[str]:
 def plot_depth_correlation(pooled: dict, out_path: Path) -> None:
     """Plot pooled cell-level depth density heatmaps (0.1 m bins) for each model vs SFINCS."""
     lo, hi = float(DEPTH_CORR_FINE_EDGES[0]), float(DEPTH_CORR_FINE_EDGES[-1])
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5.5))
-    for ax, model, label in [(axes[0], "ref", LABEL["ref"]), (axes[1], "model", LABEL["model"])]:
+    fig, axes = plt.subplots(1, 2, figsize=(FIG_WIDTH_IN, FIG_WIDTH_IN / 2 + 0.3), layout="constrained")
+    cores = {}
+    for model in ("ref", "model"):
         joint = pooled[model]
-        if joint["hist_fine"] is None or joint["n"] == 0:
-            ax.set_title(f"{label}: no data")
+        if joint["hist_fine"] is not None and joint["n"] > 0:
+            cores[model] = np.log1p(joint["hist_fine"][1:-1, 1:-1])  # drop <0m/>3m catch-all rows/cols
+    vmax = max((c.max() for c in cores.values()), default=1.0)
+    im = None
+    metric_lines = []
+    for letter, ax, model, label in [("a", axes[0], "ref", LABEL["ref"]), ("b", axes[1], "model", LABEL["model"])]:
+        joint = pooled[model]
+        if model not in cores:
+            ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=ax.transAxes, fontsize=7)
             ax.axis("off")
+            panel_letters(ax, letter, fontsize=8, label=f"{label}: no data")
             continue
         m = depth_error_metrics_from_pooled(joint)
-        core = joint["hist_fine"][1:-1, 1:-1]  # drop the <0m/>3m catch-all rows/cols
-        im = ax.imshow(np.log1p(core.T), origin="lower", extent=[lo, hi, lo, hi],
-                        aspect="auto", cmap="viridis")
+        im = ax.imshow(cores[model].T, origin="lower", extent=[lo, hi, lo, hi],
+                        cmap=SEQUENTIAL_CMAP, vmin=0, vmax=vmax)
+        ax.set_box_aspect(1)
         ax.plot([lo, hi], [lo, hi], color="white", linestyle=":", linewidth=1)
-        ax.set_xlabel("SFINCS depth (m)")
-        ax.set_ylabel(f"{label} depth (m)")
-        ax.set_title(f"{label} vs SFINCS (n={int(joint['n']):,})\n"
-                      f"r={m['r']:.3f}  bias={m['bias_m']:+.2f}m  RMSE={m['rmse_m']:.2f}m", fontsize=10)
-        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03, label="log(1 + cell count)")
+        ax.set_xlabel("SFINCS depth (m)", fontsize=7)
+        ax.set_ylabel(f"{label} depth (m)", fontsize=7)
+        ax.tick_params(labelsize=7)
+        panel_letters(ax, letter, fontsize=8, label=f"{label}, n={int(joint['n']):,}, r={m['r']:.3f}")
+        metric_lines.append(f"({letter}) {label}: bias={m['bias_m']:+.2f} m, RMSE={m['rmse_m']:.2f} m.")
         band_key = [k for k in m if k.startswith("pct_within_")][0]
         print(f"  {label} depth agreement: n={int(joint['n']):,} r={m['r']:.3f} bias={m['bias_m']:+.3f}m "
               f"RMSE={m['rmse_m']:.3f}m median_error={m['median_error_m']:+.3f}m {band_key}={m[band_key]:.1f}%")
 
-    fig.suptitle("Cell-level depth agreement against SFINCS, pooled across all tiles\n"
-                  "(every mutually-flooded cell, dotted = 1:1)", fontsize=12)
-    fig.tight_layout(rect=[0, 0, 1, 0.90])
-    fig.savefig(out_path, dpi=170)
+    if im is not None:
+        fig.colorbar(im, ax=axes, fraction=0.046, pad=0.03, label="log(1 + cell count)")
+    save_figure(fig, out_path)
     plt.close(fig)
+    write_caption(out_path, [
+        "Cell-level depth agreement against SFINCS, pooled across all tiles - every "
+        "mutually-flooded cell, 0.1 m bins; dotted line is 1:1.",
+        "(a) reference run (connected bathtub) vs SFINCS. (b) model run vs SFINCS. Colour: log(1 + "
+        "cell count), one shared scale across both panels.",
+        *metric_lines,
+    ])
     print(f"Wrote {out_path}")
 
 
@@ -97,8 +117,9 @@ def plot_depth_category_alignment(pooled: dict, out_path: Path) -> None:
     if hist is None or joint["n"] == 0:
         ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=ax.transAxes)
         ax.axis("off")
-        fig.savefig(out_path, dpi=170)
+        save_figure(fig, out_path)
         plt.close(fig)
+        write_caption(out_path, ["No data for this run."])
         print(f"Wrote {out_path}")
         return
     hist = hist[1:, 1:]
@@ -119,8 +140,15 @@ def plot_depth_category_alignment(pooled: dict, out_path: Path) -> None:
 
     cax = fig.add_axes((0.83, 0.22, 0.03, 0.73))
     fig.colorbar(im, cax=cax, label="% of SFINCS-bin cells")
-    fig.savefig(out_path, dpi=170)
+    save_figure(fig, out_path)
     plt.close(fig)
+    write_caption(out_path, [
+        f"Depth-bin confusion matrix, {LABEL[model]} vs SFINCS, pooled across all tiles (both-wet "
+        "cells, 0.2 m bins above the 0.10 m wet threshold).",
+        "Each row (SFINCS depth bin) is normalised to 100%; colour and the printed number are the "
+        f"% of that SFINCS bin's cells landing in each {LABEL[model]} depth bin. A well-calibrated "
+        "run concentrates mass on the diagonal.",
+    ])
     print(f"Wrote {out_path}")
 
 
@@ -132,40 +160,37 @@ def _csi(matched, model_only, sfincs_only):
 
 def plot_extent_scatter(df: pd.DataFrame, out_path: Path) -> None:
     """Plot per-tile flooded extent of each model vs SFINCS (log-log)."""
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5.5))
+    sfincs = df["sfincs_km2"].to_numpy(dtype=float)
+    ref = df["ref_km2"].to_numpy(dtype=float)
+    model = df["model_km2"].to_numpy(dtype=float)
+    valid_ref = np.isfinite(sfincs) & np.isfinite(ref) & (sfincs > 0) & (ref > 0)
+    valid_model = np.isfinite(sfincs) & np.isfinite(model) & (sfincs > 0) & (model > 0)
+    all_vals = np.concatenate([sfincs[valid_ref | valid_model], ref[valid_ref], model[valid_model]])
+    lim = [all_vals.min(), all_vals.max()] if len(all_vals) else [0.1, 1.0]
 
-    ax = axes[0]
-    x = df["sfincs_km2"].to_numpy(dtype=float)
-    y = df["ref_km2"].to_numpy(dtype=float)
-    valid = np.isfinite(x) & np.isfinite(y) & (x > 0) & (y > 0)
-    ax.scatter(x[valid], y[valid], s=14, alpha=0.5, color=HC_BATHTUB_COLOR, edgecolors="none")
-    if valid.any():
-        lim = [min(x[valid].min(), y[valid].min()), max(x[valid].max(), y[valid].max())]
+    fig, axes = plt.subplots(1, 2, figsize=(FIG_WIDTH_IN, FIG_WIDTH_IN / 2 + 0.3), layout="constrained")
+    panels = [("a", axes[0], ref, valid_ref, HC_BATHTUB_COLOR, LABEL["ref"]),
+              ("b", axes[1], model, valid_model, EA_BATHTUB_COLOR, LABEL["model"])]
+    for letter, ax, y, valid, color, label in panels:
+        ax.scatter(sfincs[valid], y[valid], s=10, alpha=0.5, color=color, edgecolors="none")
         ax.plot(lim, lim, color="black", linestyle=":", linewidth=1)
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    ax.set_xlabel("SFINCS flooded area (km2)")
-    ax.set_ylabel(f"{LABEL['ref']} flooded area (km2)")
-    ax.set_title(f"{LABEL['ref']} vs SFINCS (n={int(valid.sum())})")
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xlim(lim)
+        ax.set_ylim(lim)
+        ax.set_box_aspect(1)
+        ax.set_xlabel("SFINCS flooded area (km2)", fontsize=7)
+        ax.set_ylabel(f"{label} flooded area (km2)", fontsize=7)
+        ax.tick_params(labelsize=7)
+        panel_letters(ax, letter, fontsize=8, label=f"{label} vs SFINCS, n={int(valid.sum())}")
 
-    ax = axes[1]
-    x = df["sfincs_km2"].to_numpy(dtype=float)
-    y = df["model_km2"].to_numpy(dtype=float)
-    valid = np.isfinite(x) & np.isfinite(y) & (x > 0) & (y > 0)
-    ax.scatter(x[valid], y[valid], s=14, alpha=0.5, color=EA_BATHTUB_COLOR, edgecolors="none")
-    if valid.any():
-        lim = [min(x[valid].min(), y[valid].min()), max(x[valid].max(), y[valid].max())]
-        ax.plot(lim, lim, color="black", linestyle=":", linewidth=1)
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    ax.set_xlabel("SFINCS flooded area (km2)")
-    ax.set_ylabel(f"{LABEL['model']} flooded area (km2)")
-    ax.set_title(f"{LABEL['model']} vs SFINCS (n={int(valid.sum())})")
-
-    fig.suptitle("Flooded extent agreement against SFINCS (log-log, dotted = 1:1)", fontsize=13)
-    fig.tight_layout(rect=[0, 0, 1, 0.94])
-    fig.savefig(out_path, dpi=170)
+    save_figure(fig, out_path)
     plt.close(fig)
+    write_caption(out_path, [
+        "Flooded extent agreement against SFINCS, per tile (log-log); dotted line is 1:1; both "
+        "panels share the same axis limits.",
+        f"(a) {LABEL['ref']} (reference run) vs SFINCS. (b) {LABEL['model']} (model run) vs SFINCS.",
+    ])
     print(f"Wrote {out_path}")
 
 
@@ -177,7 +202,7 @@ def plot_agreement_hist(df: pd.DataFrame, out_path: Path) -> None:
     bt_mask = np.isfinite(ref_csi)
     ek_mask = np.isfinite(model_csi)
 
-    fig, ax = plt.subplots(figsize=(9, 5.5))
+    fig, ax = plt.subplots(figsize=(FIG_WIDTH_IN, 3.2), layout="constrained")
     bins = np.linspace(0, 1, 26)
     bt_valid = ref_csi[bt_mask]
     ek_valid = model_csi[ek_mask]
@@ -185,13 +210,16 @@ def plot_agreement_hist(df: pd.DataFrame, out_path: Path) -> None:
             label=f"{LABEL['ref']} (median={np.median(bt_valid):.2f}, n={len(bt_valid)})")
     ax.hist(ek_valid, bins=bins, alpha=0.6, color=EA_BATHTUB_COLOR,
             label=f"{LABEL['model']} (median={np.median(ek_valid):.2f}, n={len(ek_valid)})")
-    ax.set_xlabel("extent agreement with SFINCS (CSI: matched / (matched + model-only + SFINCS-only))")
-    ax.set_ylabel("number of tiles")
-    ax.legend(fontsize=9)
-    ax.set_title("Extent agreement with SFINCS per tile")
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=170)
+    ax.set_xlabel("extent agreement with SFINCS (CSI)", fontsize=7)
+    ax.set_ylabel("number of tiles", fontsize=7)
+    ax.tick_params(labelsize=7)
+    ax.legend(fontsize=7, frameon=False)
+    save_figure(fig, out_path)
     plt.close(fig)
+    write_caption(out_path, [
+        "Per-tile extent agreement with SFINCS (CSI = matched / (matched + model-only + "
+        "SFINCS-only)), reference run vs model run.",
+    ])
     print(f"Wrote {out_path}")
 
     for prefix, label, mask, valid in (
@@ -209,27 +237,35 @@ def plot_agreement_hist(df: pd.DataFrame, out_path: Path) -> None:
 
 def plot_depth_scatter(df: pd.DataFrame, out_path: Path) -> None:
     """Plot per-tile median flood depth of each model vs SFINCS."""
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5.5))
+    sfincs = df["sfincs_depth_median_m"].to_numpy(dtype=float)
+    ref = df["ref_depth_median_m"].to_numpy(dtype=float)
+    model = df["model_depth_median_m"].to_numpy(dtype=float)
+    valid_ref = np.isfinite(sfincs) & np.isfinite(ref)
+    valid_model = np.isfinite(sfincs) & np.isfinite(model)
+    all_vals = np.concatenate([sfincs[valid_ref | valid_model], ref[valid_ref], model[valid_model]])
+    lim = [0, all_vals.max()] if len(all_vals) else [0, 1.0]
 
-    for ax, col, color, label in [
-        (axes[0], "ref_depth_median_m", HC_BATHTUB_COLOR, LABEL["ref"]),
-        (axes[1], "model_depth_median_m", EA_BATHTUB_COLOR, LABEL["model"]),
-    ]:
-        x = df["sfincs_depth_median_m"].to_numpy(dtype=float)
-        y = df[col].to_numpy(dtype=float)
-        valid = np.isfinite(x) & np.isfinite(y)
-        ax.scatter(x[valid], y[valid], s=14, alpha=0.5, color=color, edgecolors="none")
-        if valid.any():
-            lim = [0, max(x[valid].max(), y[valid].max())]
-            ax.plot(lim, lim, color="black", linestyle=":", linewidth=1)
-        ax.set_xlabel("SFINCS median flood depth (m)")
-        ax.set_ylabel(f"{label} median flood depth (m)")
-        ax.set_title(f"{label} vs SFINCS (n={int(valid.sum())})")
+    fig, axes = plt.subplots(1, 2, figsize=(FIG_WIDTH_IN, FIG_WIDTH_IN / 2 + 0.3), layout="constrained")
+    panels = [("a", axes[0], ref, valid_ref, HC_BATHTUB_COLOR, LABEL["ref"]),
+              ("b", axes[1], model, valid_model, EA_BATHTUB_COLOR, LABEL["model"])]
+    for letter, ax, y, valid, color, label in panels:
+        ax.scatter(sfincs[valid], y[valid], s=10, alpha=0.5, color=color, edgecolors="none")
+        ax.plot(lim, lim, color="black", linestyle=":", linewidth=1)
+        ax.set_xlim(lim)
+        ax.set_ylim(lim)
+        ax.set_box_aspect(1)
+        ax.set_xlabel("SFINCS median flood depth (m)", fontsize=7)
+        ax.set_ylabel(f"{label} median flood depth (m)", fontsize=7)
+        ax.tick_params(labelsize=7)
+        panel_letters(ax, letter, fontsize=8, label=f"{label} vs SFINCS, n={int(valid.sum())}")
 
-    fig.suptitle("Median flood depth agreement against SFINCS (dotted = 1:1)", fontsize=13)
-    fig.tight_layout(rect=[0, 0, 1, 0.94])
-    fig.savefig(out_path, dpi=170)
+    save_figure(fig, out_path)
     plt.close(fig)
+    write_caption(out_path, [
+        "Median flood depth agreement against SFINCS, per tile; dotted line is 1:1; both panels "
+        "share the same axis limits.",
+        f"(a) {LABEL['ref']} (reference run) vs SFINCS. (b) {LABEL['model']} (model run) vs SFINCS.",
+    ])
     print(f"Wrote {out_path}")
 
 
@@ -249,21 +285,29 @@ def plot_tile_agreement_map(df: pd.DataFrame, out_path: Path) -> None:
     plot_df = plot_df[plot_df["lon"].notna() & np.isfinite(plot_df["csi"])]
 
     proj = ccrs.EqualEarth()
-    fig = plt.figure(figsize=(14, 7.5), facecolor="white")
+    fig = plt.figure(figsize=(FIG_WIDTH_IN, FIG_WIDTH_IN * 0.56), facecolor="white")
     ax = plt.axes(projection=proj)
     ax.set_global()
     ax.add_feature(cfeature.LAND, facecolor=LAND_COLOR, edgecolor=COAST_COLOR, linewidth=0.4, zorder=1)
+    # CSI is a magnitude (0-1), not a diverging quantity - single-hue sequential, never red/green.
     sc = ax.scatter(
         plot_df["lon"], plot_df["lat"], transform=ccrs.PlateCarree(),
-        c=plot_df["csi"], cmap="RdYlGn", vmin=0, vmax=1, s=22, alpha=0.9,
-        linewidths=0.3, edgecolors="white", zorder=3,
+        c=plot_df["csi"], cmap=SEQUENTIAL_CMAP, vmin=0, vmax=1, s=10, alpha=0.9,
+        linewidths=0.2, edgecolors="white", zorder=3,
     )
     ax.spines["geo"].set_edgecolor(COAST_COLOR)
     ax.spines["geo"].set_linewidth(0.6)
     cbar = fig.colorbar(sc, ax=ax, fraction=0.025, pad=0.02)
-    cbar.set_label(f"{LABEL['model']}-SFINCS extent agreement (CSI)")
-    fig.savefig(out_path, dpi=220, bbox_inches="tight", facecolor="white")
+    cbar.set_label(f"{LABEL['model']}-SFINCS extent agreement (CSI)", fontsize=7)
+    cbar.ax.tick_params(labelsize=7)
+    save_figure(fig, out_path)
     plt.close(fig)
+    write_caption(out_path, [
+        f"Per-tile extent agreement (CSI) between {LABEL['model']} and SFINCS, every scored tile "
+        "globally. Equal Earth projection; land shown in light grey for orientation.",
+        f"Colour: CSI = matched / (matched + {LABEL['model']}-only + SFINCS-only), 0 (no overlap) "
+        "to 1 (perfect match).",
+    ])
     print(f"Wrote {out_path}")
 
 
@@ -274,24 +318,28 @@ def plot_agreement_vs_tile_size(df: pd.DataFrame, out_path: Path) -> None:
     """
     plot_df = _agreement_df(df)
 
-    fig, ax = plt.subplots(figsize=(9, 6.5))
+    fig, ax = plt.subplots(figsize=(FIG_WIDTH_IN, FIG_WIDTH_IN * 0.72), layout="constrained")
     size = plot_df["land_km2"].to_numpy(dtype=float)
     mis = plot_df["misalignment"].to_numpy(dtype=float)
     valid = np.isfinite(size) & (size > 0) & np.isfinite(mis)
-    ax.scatter(size[valid], mis[valid], s=18, alpha=0.5, color=EA_BATHTUB_COLOR, edgecolors="none")
+    ax.scatter(size[valid], mis[valid], s=12, alpha=0.5, color=EA_BATHTUB_COLOR, edgecolors="none")
     ax.set_xscale("log")
-    ax.set_xlabel("tile land area (km2, log)")
-    ax.set_ylabel("misalignment (1 - CSI)")
+    ax.set_xlabel("tile land area (km2, log)", fontsize=7)
+    ax.set_ylabel("misalignment (1 - CSI)", fontsize=7)
+    ax.tick_params(labelsize=7)
     ax.grid(True, alpha=0.3)
-    title = f"Misalignment vs. tile size (n={int(valid.sum())})"
+    stats_line = f"n={int(valid.sum())}"
     if valid.sum() >= 3:
         r_log = np.corrcoef(np.log10(size[valid]), mis[valid])[0, 1]
         rho, _ = spearmanr(size[valid], mis[valid])
-        title += f"\npearson r={r_log:.3f} (log-area), spearman rho={rho:.3f}"
-    ax.set_title(title, fontsize=12)
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=170)
+        stats_line += f", pearson r={r_log:.3f} (log-area), spearman rho={rho:.3f}"
+    save_figure(fig, out_path)
     plt.close(fig)
+    write_caption(out_path, [
+        f"Per-tile misalignment (1 - CSI) between {LABEL['model']} and SFINCS against tile land "
+        "area (log scale) - does agreement degrade for small or large tiles?",
+        stats_line,
+    ])
     print(f"Wrote {out_path}")
 
 
@@ -307,9 +355,10 @@ def main() -> None:
     parser.add_argument("--group", choices=GROUPS, default=None, help="only these tiles (default: all)")
     parser.add_argument("--tile-ids-file", default=None, help="restrict to these tiles (default: every tile with a result)")
     args = parser.parse_args()
+    apply_style()
 
     base_dir = read_root(Path(args.config)) / args.base_dir_name
-    fig_dir = base_dir / "figures"
+    fig_dir = read_figures_root(Path(args.config)) / "sfincs_runs" / args.base_dir_name
     fig_dir.mkdir(parents=True, exist_ok=True)
     selection = json.loads((base_dir / SELECTION_NAME).read_text())
     key = args.run_key

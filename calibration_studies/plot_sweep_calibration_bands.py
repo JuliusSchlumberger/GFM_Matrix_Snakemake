@@ -6,7 +6,7 @@ tiles of (b) raw solver residual [m], (c) connectivity-pruned max depth change
 Rebuilds wet_tiles_selected.txt first (overwrites it).
 
 Usage:
-    python plot_sweep_calibration_bands.py <sweep_budget_dir> --fig-dir <figures_dir> [--max-rounds 40] [--n-tiles-wanted 500]
+    python plot_sweep_calibration_bands.py <sweep_budget_dir> [--fig-dir <figures_dir>] [--max-rounds 40] [--n-tiles-wanted 500]
 """
 
 from __future__ import annotations
@@ -25,8 +25,10 @@ from matplotlib.ticker import MaxNLocator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "analysis"))
 from aggregate_wet_tiles import aggregate_wet_tiles  # noqa: E402
 from config_utils import load_config  # noqa: E402
+from _figure_style import apply_style, save_figure  # noqa: E402
 from plot_sweep_budget_convergence import (  # noqa: E402
     N_COMPLETE_ROUNDS, SWEEPS_PER_ROUND, band_stats, collect as collect_convergence, plot_band, read_trace_csv,
 )
@@ -128,7 +130,7 @@ def make_figure(long_df: pd.DataFrame, cdf_df: pd.DataFrame, epsilon: float, max
     ax.grid(True, alpha=0.3)
 
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    save_figure(fig, out_path)
     plt.close(fig)
     print(f"Wrote {out_path}")
 
@@ -136,7 +138,7 @@ def make_figure(long_df: pd.DataFrame, cdf_df: pd.DataFrame, epsilon: float, max
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("sweep_budget_dir")
-    parser.add_argument("--fig-dir", required=True)
+    parser.add_argument("--fig-dir", default=None, help="default: {paths.figures_root}/500_tiles")
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--epsilon", type=float, default=None, help="default: config simulation.flooding.waterlevel_epsilon_m")
     parser.add_argument("--max-rounds", type=int, default=None, help="default: config simulation.flooding.max_rounds")
@@ -146,13 +148,14 @@ def main() -> None:
              f"step (default: {N_TILES_WANTED_DEFAULT})",
     )
     args = parser.parse_args()
+    apply_style()
 
     cfg = load_config(args.config)
     epsilon = args.epsilon if args.epsilon is not None else float(cfg["simulation"]["flooding"]["waterlevel_epsilon_m"])
     max_rounds = args.max_rounds if args.max_rounds is not None else int(cfg["simulation"]["flooding"]["max_rounds"])
 
     sweep_budget_dir = Path(args.sweep_budget_dir)
-    figures_dir = Path(args.fig_dir)
+    figures_dir = Path(args.fig_dir) if args.fig_dir else Path(cfg["paths"]["figures_root"]) / "500_tiles"
     figures_dir.mkdir(parents=True, exist_ok=True)
 
     tile_ids = aggregate_wet_tiles(sweep_budget_dir, args.n_tiles_wanted)

@@ -4,7 +4,7 @@ Not restricted to wet tiles. Non-converged tiles are triangles at
 (n_rounds_available, elapsed time so far), not extrapolated.
 
 Usage:
-    python plot_sweep_time_vs_size.py <sweep_budget_dir> --fig-dir <figures_dir> [--epsilon 0.03]
+    python plot_sweep_time_vs_size.py <sweep_budget_dir> [--fig-dir <figures_dir>] [--epsilon 0.03]
 """
 
 from __future__ import annotations
@@ -21,8 +21,10 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "analysis"))
 from config_utils import load_config  # noqa: E402
 from plot_sweep_budget_convergence import N_COMPLETE_ROUNDS, collect, read_trace_csv  # noqa: E402
+from _figure_style import apply_style, save_figure  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -60,7 +62,7 @@ def make_figure(df: pd.DataFrame, epsilon: float, out_path: Path) -> None:
     ax.grid(True, alpha=0.3, which="both")
 
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
+    save_figure(fig, out_path)
     plt.close(fig)
     print(f"Wrote {out_path}")
 
@@ -68,16 +70,17 @@ def make_figure(df: pd.DataFrame, epsilon: float, out_path: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("sweep_budget_dir")
-    parser.add_argument("--fig-dir", required=True)
+    parser.add_argument("--fig-dir", default=None, help="default: {paths.figures_root}/500_tiles")
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--epsilon", type=float, default=None, help="default: config simulation.flooding.waterlevel_epsilon_m")
     args = parser.parse_args()
+    apply_style()
 
     cfg = load_config(args.config)
     epsilon = args.epsilon if args.epsilon is not None else float(cfg["simulation"]["flooding"]["waterlevel_epsilon_m"])
 
     sweep_budget_dir = Path(args.sweep_budget_dir)
-    figures_dir = Path(args.fig_dir)
+    figures_dir = Path(args.fig_dir) if args.fig_dir else Path(cfg["paths"]["figures_root"]) / "500_tiles"
     figures_dir.mkdir(parents=True, exist_ok=True)
 
     df = collect(sweep_budget_dir, epsilon)

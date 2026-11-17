@@ -68,8 +68,10 @@ _PATH_SUBS = {
     "root": config["paths"]["root"],
     "code_root": config["paths"].get("code_root", config["paths"].get("root", "")),
 }
-# processed_inputs_dir is itself "{root}/...", so it is expanded first.
+# processed_inputs_dir/figures_root are themselves "{root}/...", so expanded first.
 _PATH_SUBS["processed_inputs_dir"] = _expand_paths(config["paths"]["processed_inputs_dir"], _PATH_SUBS)
+if "figures_root" in config["paths"]:
+    _PATH_SUBS["figures_root"] = _expand_paths(config["paths"]["figures_root"], _PATH_SUBS)
 config = _expand_paths(config, _PATH_SUBS)
 
 

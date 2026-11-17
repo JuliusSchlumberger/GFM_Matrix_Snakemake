@@ -36,6 +36,9 @@ from analysis_figures import (  # noqa: E402
     CONTINENTS, build_growth_matrix_from_grid, draw_ember_panel, iso_to_continent, load_growth_matrix_csv,
     load_slr_trajectories, ssp_rcp_label,
 )
+from _figure_style import (  # noqa: E402
+    DOUBLE_COLUMN_MM, MM_PER_INCH, apply_style, panel_letters, save_figure, write_caption,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 LAST_SSP_YEAR = 2100
@@ -74,6 +77,7 @@ def main() -> None:
               if (Path(args.expdir) / f"exposure_{l}_growth_matrix.csv").exists()]
     out_dir = Path(args.out_dir or viz["output_dir"])
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
+    apply_style()
     s_colors = viz["ssp_colors"]
     m_colors = viz["measure_colors"]
     rcp = viz["ssp_rcp_codes"]
@@ -170,43 +174,55 @@ def main() -> None:
     end_val = {g: max(sum(eai[(sort_label, i, s, v)][i_end] for i in members) for s in ssps for v in variants)
                for g, members in groups.items()}
     order = sorted(end_val, key=end_val.get, reverse=True)
-    fig, axes = plt.subplots(len(order), len(ssps), figsize=(5.6 * len(ssps) + 0.8, 2.2 * len(order) + 0.6),
+    fig_width_in = DOUBLE_COLUMN_MM / MM_PER_INCH
+    fig, axes = plt.subplots(len(order), len(ssps), figsize=(fig_width_in, 1.3 * len(order) + 0.6),
                              sharex=True, sharey="row", squeeze=False)
-    for row, g in zip(axes, order):
+    for row_idx, (row, g) in enumerate(zip(axes, order)):
         top = 0.0
-        for ax, ssp in zip(row, ssps):
+        for col_idx, (ax, ssp) in enumerate(zip(row, ssps)):
             for label in labels:
                 c = m_colors.get(label.partition("_SLR_")[0], "#444444")
                 series = {v: sum(eai[(label, i, ssp, v)] for i in groups[g]) for v in variants}
                 stacked = np.vstack(list(series.values()))
-                ax.plot(years[:i_end + 1], stacked[0, :i_end + 1], "-", color=c, lw=2.0)
+                ax.plot(years[:i_end + 1], stacked[0, :i_end + 1], "-", color=c, lw=1.6)
                 ax.fill_between(years[i_end:], stacked[:, i_end:].min(axis=0), stacked[:, i_end:].max(axis=0),
                                 color=c, alpha=0.15, lw=0)
                 for s in series.values():
-                    ax.plot(years[i_end:], s[i_end:], linestyle=PROJECTION_LINESTYLE, color=c, lw=1.8)
+                    ax.plot(years[i_end:], s[i_end:], linestyle=PROJECTION_LINESTYLE, color=c, lw=1.3)
                 top = max(top, stacked.max())
             ax.grid(alpha=0.3)
             ax.yaxis.set_major_formatter(plt.FuncFormatter(_people))
             ax.yaxis.set_major_locator(plt.MaxNLocator(4))
-            ax.tick_params(labelsize=12)
+            ax.tick_params(labelsize=7)
+            letter = chr(ord("a") + row_idx * len(ssps) + col_idx)
+            label_text = ssp_rcp_label(ssp, rcp) if row_idx == 0 else None
+            panel_letters(ax, letter, fontsize=8, label=label_text)
         # Headroom for the legend in the first row.
-        row[0].set_ylim(0, (1.55 if g == order[0] else 1.05) * top or 1.0)
-        row[0].set_ylabel("EAI (people)", fontsize=12)
-        row[0].annotate(g, xy=(0, 0.5), xycoords="axes fraction", xytext=(-78, 0), textcoords="offset points",
-                        rotation=90, ha="center", va="center", fontsize=15, fontweight="bold")
-    for ax, ssp in zip(axes[0], ssps):
-        ax.set_title(ssp_rcp_label(ssp, rcp), fontsize=15)
+        row[0].set_ylim(0, (1.7 if g == order[0] else 1.05) * top or 1.0)
+        row[0].set_ylabel("EAI (people)", fontsize=7)
+        row[0].annotate(g, xy=(0, 0.5), xycoords="axes fraction", xytext=(-46, 0), textcoords="offset points",
+                        rotation=90, ha="center", va="center", fontsize=8, fontweight="bold")
     for ax in axes[-1]:
-        ax.set_xlabel("Year", fontsize=13)
+        ax.set_xlabel("Year", fontsize=7)
         ax.set_xticks(list(range(2025, to_year + 1, 25)))
-    fig.tight_layout(rect=(0.03, 0, 1, 1))
     handles = [Patch(color=m_colors.get(l.partition("_SLR_")[0], "#444444"), label=_strategy_name(l)) for l in labels]
-    handles += [Line2D([], [], color="0.3", lw=2.0, label=f"to {LAST_SSP_YEAR}: SSP population")]
-    handles += [Line2D([], [], color="0.3", lw=1.8, ls=PROJECTION_LINESTYLE, label=f"after {LAST_SSP_YEAR}: projection")]
-    axes[0, 0].legend(handles=handles, loc="upper left", ncol=2, fontsize=10.5, frameon=True, framealpha=0.9,
-                      handlelength=2.2, columnspacing=1.0, borderaxespad=0.3, labelspacing=0.3)
-    fig.savefig(out_dir / "timeseries_extended_continents.png", dpi=dpi, bbox_inches="tight")
+    handles += [Line2D([], [], color="0.3", lw=1.6, label=f"to {LAST_SSP_YEAR}: SSP population")]
+    handles += [Line2D([], [], color="0.3", lw=1.3, ls=PROJECTION_LINESTYLE, label=f"after {LAST_SSP_YEAR}: projection")]
+    axes[0, 0].legend(handles=handles, loc="upper left", ncol=1, fontsize=7, frameon=False,
+                      handlelength=2.0, labelspacing=0.3)
+    fig.subplots_adjust(left=0.12, right=0.99, top=0.98, bottom=0.07, hspace=0.3, wspace=0.25)
+    out_path = out_dir / "timeseries_extended_continents.png"
+    save_figure(fig, out_path)
     plt.close(fig)
+    write_caption(out_path, [
+        f"No-adaptation and adaptation-strategy EAI by continent, {' & '.join(ssp_rcp_label(s, rcp) for s in ssps)}, "
+        f"to {LAST_SSP_YEAR} from the SSP population projection and continuing to {to_year} under the "
+        "configured post-2100 population variants.",
+        "Rows: continents, ordered by baseline EAI in 2100 (highest first). Columns: SSP/RCP scenario.",
+        "Colour: adaptation strategy (see legend). Solid line: SSP population path to "
+        f"{LAST_SSP_YEAR}; dashed lines and shaded band after {LAST_SSP_YEAR}: the configured "
+        "population-continuation variants and their range.",
+    ])
     print(f"Written: timeseries_extended_continents.png and extended_pathways.csv -> {out_dir}")
 
 

@@ -381,6 +381,10 @@ def run(config: dict, force: bool = True) -> None:
     vectors.flush()
     del vectors
     pd.DataFrame(info).to_parquet(paths.info)
+    failed = [r["station"] for r in rows if r.get("level_source") == stp.FAILED_LEVEL_SOURCE]
+    if failed:
+        logger.warning("%d stations failed and take COAST-RP's levels (level_source %s): %s", len(failed),
+                       stp.FAILED_LEVEL_SOURCE, failed[:20])
     # station_id is not unique in COAST-RP (offshore "currents_*" points), so its rows join by position
     etc = stp.coast_rp_levels(coast_rp.parent / "COAST-RP_ETC.nc")
     lev = stations.join(ratios).join(pd.DataFrame(rows).set_index("station"))
