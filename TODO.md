@@ -93,10 +93,8 @@ Open:
   user). The global production run and its national-map validation (Scotland, New Brunswick)
   come later, separately (user). Open:
   - The harness has not met SLURM yet: run `hpc/plans/smoke.yml` on Hydrax first.
-  - The plan's helper functions and `hpc_config` assume no `config_local.yml` on Hydrax (root from
-    `config_hpc.yml` via `load_hpc_config`); check before the first run.
-  - Variant runs take `calibration_roughness_SFINCS/variant_selection.json` (raw pooling); the
-    overlap-corrected `_dedup` selection is the alternative (user to decide).
+  - The plan needs `site_env.sh`, `config_hpc.yml` and `config_local.yml` (Linux paths) in the
+    Hydrax checkout; `harness.py run` checks them (`requires:`).
   - Scotland local input stays paused; Scotland and New Brunswick are scored from the global run.
   - With the later global run: the SF Bay global baseline (`validate_sf_bay.py --config config.yml ...
     --out-dir .../USA_alameda_sample_global_baseline`) and its row in the local-vs-global exposure
@@ -109,6 +107,21 @@ Open:
     (`generate_jobs_and_dispatch`, `gfm_generate_postprocess_and_dispatch`). The harness's
     sbatch must therefore return an id at once, honour `afterany` on ids it holds back, and be
     on PATH inside jobs. No script in the chain calls squeue/scontrol or uses `singleton`.
+- **One way onto the HPC (proposal, 2026-11-17, user to decide).** Three families of job
+  generators with their own site config (`config_hpc.yml` vs `site_env.sh`), env activation
+  (`env_activate_cmd` vs `GFM_PYTHON`), sbatch writers, bin packers, argument names and submit
+  scripts; plan steps glue them with inline `python -c` and hand-built paths. Proposal: one site
+  file, one job writer with named resource profiles, one front-door CLI (`hpc/gfm_hpc.py`) that
+  every plan step calls, golden-file tests of the generated scripts. Open decisions: activation
+  style; replacing the `sfincs_tiles` shell drivers (not while a batch runs); dropping the
+  Snakemake dispatch rule (`rules/hpc_dispatch.smk`); scenarios by name. Defects found on the way:
+  `collect_hpc_failures.py` skips `resume_wave*` failure logs; postprocess and flood-totals keep a
+  stale `resolved_config.yml`; exposure jobs read the config from the share unstaged and without
+  the retry wrapper; the postprocess tile-grid override lacks `|| exit 1`; SFINCS jobs omit
+  `--account` and get `HDF5_USE_FILE_LOCKING` only when inherited; `rerun_calibration.sh --part
+  sfincs` leaves stale `final_*.sbatch`; the solver studies rewrite finished tiles' CSVs on a
+  resubmit; the plan's `calibration_split.py ... || true` hides failures; `docs/hpc.md` gives the
+  wrong default `jobs_dir`.
 - **England national-map score does not reproduce (exposure/depth assessment, 2026-11-09):**
   `validate_country.py --country GBR` on the same `merged_results` chunks gives England FZ3 hits
   +130 % and misses +270 % against the saved `validation/GBR/metrics_GBR_RP100_SLR_0.csv`;
