@@ -462,7 +462,7 @@ def main() -> None:
     parser.add_argument("--only", default=None, help="run: comma-separated step ids (their own order and waits)")
     parser.add_argument("--allow-destructive", action="store_true", help="run: also run steps marked destructive")
     parser.add_argument("--poll-s", type=float, default=60.0)
-    args = parser.parse_args()
+    args = parser.parse_intermixed_args()  # `retry --plan p.yml step` as well as `retry step --plan p.yml`
     plan = load_plan(Path(args.plan))
     if args.command == "run":
         check_requires(plan)
