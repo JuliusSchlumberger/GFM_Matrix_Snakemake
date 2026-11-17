@@ -57,16 +57,21 @@ def _hpc_view(args) -> tuple[dict, dict]:
     return linux_config, sbatch
 
 
+# No stale PROJ/GDAL data dirs from the submitting shell; HDF5 reads hang on Hydrax NFS with locking.
+JOB_ENV = ["unset PROJ_LIB PROJ_DATA GDAL_DATA", "export HDF5_USE_FILE_LOCKING=FALSE"]
+
+
 def _sbatch_header(name: str, sbatch: dict, hours: int, log_dir: str) -> list[str]:
     # No -e: a job's later steps still run after an earlier one partly failed (stage 1: the
     # pre-flight after tiles errored in the line build; stage 2: the rest of the tile loop).
     # Steps the rest cannot do without end in `|| exit 1`.
     partition = [f"#SBATCH --partition={sbatch['partition']}"] if sbatch.get("partition") else []
-    return ["#!/bin/bash", f"#SBATCH --job-name={name}", *partition,
+    account = [f"#SBATCH --account={sbatch['account']}"] if sbatch.get("account") else []
+    return ["#!/bin/bash", f"#SBATCH --job-name={name}", *partition, *account,
             f"#SBATCH --cpus-per-task={sbatch['cpus_per_task']}", f"#SBATCH --mem={sbatch['mem']}",
             f"#SBATCH --time={hours // 24}-{hours % 24:02d}:00:00",
             f"#SBATCH --output={log_dir}/{name}_%j.out", f"#SBATCH --error={log_dir}/{name}_%j.err", "",
-            "set -uo pipefail", "unset PROJ_LIB PROJ_DATA GDAL_DATA", f'cd "{LINUX_CODE_ROOT}/sfincs_tiles" || exit 1', ""]
+            "set -uo pipefail", *JOB_ENV, f'cd "{LINUX_CODE_ROOT}/sfincs_tiles" || exit 1', ""]
 
 
 def cmd_stage1(args) -> None:
@@ -184,7 +189,8 @@ def cmd_stage2(args) -> None:
     print(f"{len(tiles)} tile(s) to run ({n_done} already done) over {len(jobs)} job(s) on {sbatch['partition']}")
     print(f"estimated hours per job: {loads[0] / 60:.1f}-{loads[-1] / 60:.1f} (x{args.time_margin:g} margin for --time; "
           f"total {sum(loads) / 60:.0f} h)")
-    post = write_post_job(out_dir, args.base_dir_name, args.dedup_dir_name, args.phase) if args.post else None
+    post = write_post_job(out_dir, args.base_dir_name, args.dedup_dir_name, args.phase,
+                          sbatch.get("account", "")) if args.post else None
     if args.submit:
         ids = [subprocess.run(["sbatch", "--parsable", f"{lout}/{n}.sbatch"], check=True, capture_output=True,
                               text=True).stdout.strip().split(";")[0] for n in names]
@@ -197,7 +203,7 @@ def cmd_stage2(args) -> None:
         print(f"submit with: bash {lout}/submit_all.sh" + (f", then {lout}/{post.name} after them" if post else ""))
 
 
-def write_post_job(out_dir: Path, base_dir_name: str, dedup_dir_name: str, phase: str) -> Path:
+def write_post_job(out_dir: Path, base_dir_name: str, dedup_dir_name: str, phase: str, account: str = "") -> Path:
     """Write the post job of a phase: analysis (variant_selection.json), dedup, dedup analysis.
 
     Resources from site_env.sh (CAL_*). The progress report and the raw analysis must not stop
@@ -207,10 +213,11 @@ def write_post_job(out_dir: Path, base_dir_name: str, dedup_dir_name: str, phase
     cfg, logs = f"{lb}/resolved_config.yml", f"{lb}/hpc_jobs_stage2/logs"
     lines = [
         "#!/bin/bash", f"#SBATCH --job-name=cal_post_{phase}", f"#SBATCH --partition={_HX['CAL_PARTITION']}",
+        *([f"#SBATCH --account={account}"] if account else []),
         f"#SBATCH --cpus-per-task={_HX['CAL_CPUS']}", f"#SBATCH --mem={_HX['CAL_MEM']}",
         f"#SBATCH --time={_HX['CAL_TIME']}", f"#SBATCH --output={logs}/cal_post_{phase}_%j.out",
         f"#SBATCH --error={logs}/cal_post_{phase}_%j.err", "",
-        "set -uo pipefail", "unset PROJ_LIB PROJ_DATA GDAL_DATA", f'cd "{LINUX_CODE_ROOT}/sfincs_tiles" || exit 1',
+        "set -uo pipefail", *JOB_ENV, f'cd "{LINUX_CODE_ROOT}/sfincs_tiles" || exit 1',
         f"{GFM_PY} check_calibration_progress.py --config {cfg} --base-dir-name {base_dir_name}",
         f"{GFM_PY} run_calibration_sweep_analysis.py --config {cfg} --base-dir-name {base_dir_name}",
         f"{HYDROMT_PY} compute_calibration_result_dedup.py --config {cfg} --base-dir-name {base_dir_name} "

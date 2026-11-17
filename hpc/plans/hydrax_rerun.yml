@@ -131,7 +131,8 @@ steps:
   - id: sfincs_duration
     after: [sfincs_sweep]
     run: |
-      "$PY" sfincs_tiles/calibration_split.py --config "$R/calibration_roughness_SFINCS/resolved_config.yml" || true
+      "$PY" sfincs_tiles/calibration_split.py --config "$R/calibration_roughness_SFINCS/resolved_config.yml" \
+        || echo "WARNING: calibration_split.py failed (balance report only; the duration phase does not read it)"
       PHASE=duration bash sfincs_tiles/rerun_calibration.sh --part models
 
   # ── local comparisons: base scenarios (preprocess -> hop waves -> merge, one chain each) ──

@@ -43,10 +43,8 @@ def write_flood_totals_and_plots_job(
     retry_transient_io(local_jobs_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((local_jobs_dir / "logs").mkdir, parents=True, exist_ok=True)
 
-    # Reuse generate_hpc_postprocess_job.py's resolved_config.yml if present.
     resolved_config_path = local_jobs_dir / "resolved_config.yml"
-    if not resolved_config_path.exists():
-        atomic_write(resolved_config_path, lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
+    atomic_write(resolved_config_path, lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
     linux_resolved_config = f"{linux_jobs_dir}/resolved_config.yml"
 
     name = "flood_totals_and_plots"

@@ -214,8 +214,7 @@ def main() -> None:
     # Only written if missing (standalone use); atomic_write because another
     # node reading over the shared mount right after a non-atomic write can see a partial file.
     resolved_config_path = local_jobs_dir / "resolved_config.yml"
-    if not resolved_config_path.exists():
-        atomic_write(resolved_config_path, lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
+    atomic_write(resolved_config_path, lambda f: yaml.safe_dump(linux_config, f), encoding="utf-8", newline="")
     linux_resolved_config = f"{linux_jobs_dir}/resolved_config.yml"
 
     # Local view for the tile-grid read; Linux view for embedded target paths.

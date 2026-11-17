@@ -29,7 +29,7 @@ The examples hold the values of Hydrax (Deltares) as a worked example.
 | `hpc.sbatch.partition` / `account` / `mem` / `time` / `cpus_per_task` | default job resources; `""` omits the `partition` / `account` line; `mem` (per job, `--mem`) and `time` are required |
 | `hpc.sbatch.env_activate_cmd` | shell line activating the `gfm` env in every job |
 | `hpc.n_nodes` | most batches per wave; a wave's tiles are split evenly over them |
-| `hpc.jobs_dir` | where the generators write scripts, `resolved_config.yml`, submit scripts and `logs/` (default `<data_root>/model_outputs/hpc_jobs`) |
+| `hpc.jobs_dir` | where the generators write scripts, `resolved_config.yml`, submit scripts and `logs/` (default `<data_root>/model_outputs_v2/hpc_jobs`) |
 | `hpc.wave_tiers` | optional per-hop resources, read only by `generate_hpc_simulation_jobs.py`: a list of tiers, each with `hops`, `n_nodes`, `partition`, `cpus_per_task`, `mem`, `time`; the first tier whose `hops` contains the wave's `hop_distance` wins, `n_nodes: null` means one job per tile, and the last tier must be the catch-all `hops: null` |
 | `hpc.calibration_sbatch`, `hpc.flood_totals_sbatch` | resources of the SFINCS calibration and flood-totals jobs; empty falls back to `hpc.sbatch` |
 
@@ -107,7 +107,7 @@ So, after `preparation/run_preparation.py`, a full run is:
 
 ```
 python snakemake_workflow/scripts/generate_hpc_preprocess_job.py
-bash <data_root>/model_outputs/hpc_jobs/submit_preprocess_and_dispatch.sh
+bash <data_root>/model_outputs_v2/hpc_jobs/submit_preprocess_and_dispatch.sh
 ```
 
 The wave-generation job of that chain runs `snakemake generate_eikonal_jobs`, which verifies every preprocessing output first and always reads `config.yml`, not a scenario config.
@@ -157,7 +157,7 @@ python <code_root>/snakemake_workflow/scripts/run_eikonal_cli.py \
 ```
 ```
 python /home/me/gfm/snakemake_workflow/scripts/run_eikonal_cli.py \
-    --config /data/gfm/model_outputs/hpc_jobs/resolved_config.yml \
+    --config /data/gfm/model_outputs_v2/hpc_jobs/resolved_config.yml \
     --tile-id 3930 --return-period RP100 --waterlevel-name SLR_500
 ```
 

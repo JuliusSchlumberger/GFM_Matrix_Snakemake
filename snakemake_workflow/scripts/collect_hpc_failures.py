@@ -1,6 +1,6 @@
 """Report every tile/scenario that did not produce a simulated waterdepth on HPC.
 
-job_error rows (from {jobs_dir}/logs/wave*_batch_*_failures.txt) need re-running;
+job_error rows (from {jobs_dir}/logs/[resume_]wave*_batch_*_failures.txt) need re-running;
 skipped_tiles/*.txt rows (no stations, no upstream flooding, OOM) are deliberate
 results, listed for visibility only.
 
@@ -36,7 +36,7 @@ def collect_job_errors(jobs_dir: Path) -> list[dict]:
     """Collect non-zero-exit (tile, RP, SLR) lines written by the sbatch run_job()."""
     rows = []
     logs_dir = jobs_dir / "logs"
-    for fail_file in sorted(logs_dir.glob("wave*_batch_*_failures.txt")):
+    for fail_file in sorted(logs_dir.glob("*wave*_batch_*_failures.txt")):
         for line in fail_file.read_text(encoding="utf-8-sig").splitlines():
             line = line.strip()
             if not line:
