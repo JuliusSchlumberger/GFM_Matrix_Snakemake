@@ -3,6 +3,17 @@
 Plan: `<data_root>/inputs/coast_forcing_test_plan.md`. One section per stage; a stage starts only
 after the previous section exists.
 
+## Decision (2026-11-18): keep the station line (L0); C1 not pursued
+
+The storm-tide product has hydrographs only at the COAST-RP stations; the coastline seed cells get
+levels, not hydrographs (stage 0b). A coastline boundary would need per-cell series built from the
+station series anyway, which is what the station line already forces: its points sit at the
+COAST-RP stations, and SFINCS blends the two nearest points by distance (stage 0, point 1), so the
+forcing varies continuously along the line. Stages 1-2 are not run; the SFINCS calibration keeps
+`build_station_boundary_lines.py` / `build_line_forcing.py`. The stage-0b check
+(`build_coast_forcing.py`, removed; in git at e182e65) showed what per-cell nearest-station series
+would do: metre-scale level steps between neighbouring cells in macrotidal water.
+
 ## Amendments to the plan (2026-11-18)
 
 - **L0 is a fresh run.** The 1,000-tile run that was to be the control is deleted. L0 and C1 are built
@@ -67,26 +78,37 @@ cell. Next: stage 0b once the storm-tide product rebuild has written
 
 ## Stage 0b, preliminary run with COAST-HG (2026-11-18)
 
-Not the gate: the forcing source is the storm-tide product, which is being rebuilt. This run used
-COAST-HG RP100 (`inputs/COAST_HG/COAST-HG_RP100.nc`) to test the check and get a first idea.
-`build_coast_forcing.py smoothness`, native mask coarsened 4x (~120 m), coastline and seeds as the
-eikonal, nearest hydrograph station in the same ocean body. Outputs: `.cleanup_baseline/coast_boundary/stage0b_coast_hg/`.
+Not the gate: the forcing source is the storm-tide product, which is being rebuilt. The product has
+hydrographs only at the 23,226 COAST-RP stations (the same positions as COAST-HG); its coastline
+nodes carry levels, not hydrographs (`src/storm_tide_product.py`). So a boundary cell's series has
+to be built from station series either way, and this run with COAST-HG RP100 has the right station
+geometry; only the shapes will change.
 
-| tile | boundary cells | hydrograph stations | station switches | shape jump max / p90 over station pairs (m) | median fall from peak (m) |
+Measure (instability concern): per pair of adjacent boundary cells, the largest difference of their
+**forced levels, unshifted**, over the 40-110 h window, `max_t |z_i(t) - z_j(t)|`, at ~120 m spacing
+(native mask coarsened 4x). Two forcings, both peaking at the cell's seed:
+- **nearest**: the nearest hydrograph station's series (plan step 5; the eikonal's duration
+  correction does the same);
+- **blend**: the inverse-distance blend of the knn = 5 nearest stations' series, weights
+  distance^-3, as the seeds.
+Stations are matched within the cell's ocean body on the tile grid, a station joining the body of
+its nearest cell, as the seeds. (Matching on the global 30 m mask instead split Cobequid Bay at a
+causeway the coarse grid does not resolve, giving 5 m jumps and 197 unconnected cells.)
+Outputs: `.cleanup_baseline/coast_boundary/stage0b_coast_hg/`.
+
+| tile | boundary cells | adjacent pairs with a station switch | seeds alone: max | nearest: max / pairs > 25 cm | blend: max / pairs > 25 cm |
 |---|---|---|---|---|---|
-| 3758 Rarotonga | 390 | 4 | 7 | 0.03 / 0.03 | 0.85 |
-| 891 Minas Basin | 26,863 | 22 | 165 | 4.86 / 0.37 | 1.99 |
-| 1677 Dutch Wadden | 16,740 | 42 | 186 | 1.75 / 1.38 | 4.77 |
+| 3758 Rarotonga | 390 | 7 | 0.001 m | 0.03 m / 0 | 0.002 m / 0 |
+| 891 Minas Basin | 26,863 | 159 | 0.22 m | **6.61 m** / 17 | 0.31 m / 6 |
+| 1677 Dutch Wadden | 16,740 | 233 | 0.16 m | **2.05 m** / 95 | 0.32 m / 74 |
 
-- COAST-HG peaks are all at 74.5 h, so the peak timing never differs between neighbours; the jumps
-  are tide-phase and amplitude differences away from the peak. Most boundary cells sit next to a
-  cell with the same station (zero jump); the jumps are concentrated at the switches, which are
-  frequent where stations are dense (the Wadden islands, 891's south coast).
-- 891: 197 cells have no hydrograph station in their ocean body and fall back to the nearest one
-  overall; the p95 station distance is 0.88 deg.
+- Nearest-station forcing puts metre-scale level steps between neighbouring cells wherever the
+  station switches in macrotidal water: neighbours share the peak (seed) but not the low water.
+- Blending removes them. What remains: 891's 6 pairs sit where the seeds themselves step by 0.22 m;
+  all of 1677's pairs above 10 cm are in the IJsselmeer and Markermeer.
 - **1677: the IJsselmeer and Markermeer are ocean-coded and connected to the North Sea in the native
   mask**, so they get boundary cells at storm-tide seeds (as the eikonal coastline does). C1 vs L0
-  on this tile will be dominated by that, not by the boundary placement. Logged in TODO.md.
+  on this tile will be dominated by that. Logged in TODO.md.
 
-To decide when the product run is in: the threshold for an acceptable jump between neighbours,
-and whether the jump is measured over the whole 40-110 h window or only around the peak.
+Leaning: blend (the per-cell series is then as smooth as the seeds). To decide on the product run:
+the acceptable jump between neighbours.

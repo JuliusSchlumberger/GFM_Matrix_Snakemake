@@ -88,14 +88,7 @@ steps:
 
   # ── SFINCS calibration, 1,500 tiles: stage 1 -> selection -> sweep (+ post job) -> duration ──
   # Also removes both variant_selection.json files, so nothing downstream can read an old selection.
-  - id: coast_boundary_decision
-    gate: >-
-      decide the SFINCS boundary (station line L0, coastline C1 or C2) from the coast-boundary test
-      (sfincs_tiles/findings_coast_boundary.md); the selection funnel and the stage-1/2 jobs follow
-      from it; commit, push and git pull here.
-
   - id: reset_sfincs
-    after: [coast_boundary_decision]
     destructive: true
     run: |
       rm -rf "$R/calibration_roughness_SFINCS" "$R/calibration_roughness_SFINCS_dedup"

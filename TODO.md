@@ -500,6 +500,14 @@ Open:
   other dammed lakes are affected (Haringvliet, Zeeland, Thames barrier) before the production run.
   Found by `sfincs_tiles/build_coast_forcing.py smoothness` (findings_coast_boundary.md, stage 0b).
 
+- **The duration correction takes each cell's nearest hydrograph station** (`event_volume.station_index`),
+  so its hydrograph, and the duration multiplier from it, steps where the nearest station switches.
+  In macrotidal water neighbouring stations differ by metres away from the peak (stage 0b of
+  findings_coast_boundary.md: up to 6.6 m low-water difference between adjacent coastline cells in
+  tile 891). An inverse-distance blend of the knn stations' series, as the seeds, removed the steps
+  there. Decide whether the duration correction should blend; it changes production results and
+  the calibrated `friction_scale_factor`.
+
 - **Duration correction's multiplier is derived from a first eikonal pass's own depth
   (`event_volume.DurationCorrection.multiplier`: head = depth above the cell's spill level,
   `duration = time_within_peak(hydrograph, head)`), not from directly comparing the boundary
