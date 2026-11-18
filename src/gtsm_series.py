@@ -6,12 +6,13 @@ mm, station-major, so one station reads contiguously (23,000 stations x 46 y hou
 Main entry: `extract_series`; `load_series` / `station_series` read it.
 """
 
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import netCDF4
 import numpy as np
 import pandas as pd
+
+from process_pool import process_pool
 
 # Surge from 1979, the ERA5 period of COAST-RP and HGRAPHER-RP; tide: every downloaded year.
 FOLDERS = {"surge": ("storm_surge_residual", "reanalysis_surge_hourly_*_v3.nc", "surge", 1979),
@@ -89,7 +90,7 @@ def extract_series(gtsm_dir: Path, gtsm_indices: np.ndarray, store: Path, worker
     series = np.lib.format.open_memmap(store / "series.npy.part", mode="w+", dtype=np.int16,
                                        shape=(len(unique_idx), sum(lengths)))
     times, pos = [], 0
-    with ProcessPoolExecutor(workers) as pool:
+    with process_pool(workers) as pool:
         for k, (time, block) in enumerate(pool.map(_read_month, [(str(f), var, unique_idx) for f in files])):
             keep = time > times[-1][-1] if times else np.ones(len(time), dtype=bool)  # monthly files may overlap
             series[:, pos: pos + keep.sum()] = block[:, keep]

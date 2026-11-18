@@ -7,7 +7,6 @@ semidiurnal and diurnal regimes are both measured; the factor scales every FES c
 tide_correction`.
 """
 
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +14,7 @@ import pandas as pd
 from sklearn.neighbors import BallTree
 
 import tide_prediction as tp
+from process_pool import process_pool
 
 from gesla import EARTH_RADIUS_KM, GOOD_QC, deduplicate, read_metadata
 
@@ -73,7 +73,7 @@ def gauge_tides(gesla_dir: Path, sites: pd.DataFrame, workers: int) -> pd.DataFr
     """One row per site with a fit: file_name, lon, lat, amp_<constituent>_m and the record checks."""
     names = sites.file_name.tolist()
     tasks = [(str(gesla_dir), names[i:i + CHUNK]) for i in range(0, len(names), CHUNK)]
-    with ProcessPoolExecutor(workers) as pool:
+    with process_pool(workers) as pool:
         fits = [f for chunk in pool.map(_fit_task, tasks) for f in chunk]
     rows = [{"file_name": n, "lon": float(s.lon), "lat": float(s.lat), **f}
             for n, (_, s), f in zip(names, sites.iterrows(), fits) if f is not None]

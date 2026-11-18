@@ -178,7 +178,7 @@ storm_tide_product:
   # ~30 GB derived from the raw inputs: GTSM series regrouped per station (18 GB), FES2022
   # decompressed (5 GB), GESLA records (4 GB), tide bases; shared with the HPC.
   cache_dir: "{processed_inputs_dir}/storm_tide_product/cache"
-  workers: 4
+  workers: null  # worker processes; null: every core this process may use (the HPC job's allocation)
 
 # ── RASTER FORMAT ──────────────────────────────────────────────────────────────
 raster_format:

@@ -31,7 +31,6 @@ input_analysis/boundary_forcing/boundary_forcing_input_analysis.md §9. Stages a
 preparation/prepare_storm_tide_product.py.
 """
 
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import netCDF4
@@ -42,6 +41,7 @@ from sklearn.neighbors import BallTree
 
 from gesla import extract_record
 from gtsm_series import load_series, station_series
+from process_pool import process_pool
 from skew_surge import (
     HW_PROMINENCE, SPIKE_M, annual_rate, cluster_excesses, despike, exceedance, high_waters, profile_loglik, scaled,
     shifted, skew_level, skew_surges, surge_model, tide_peaks, total_level)
@@ -149,7 +149,7 @@ def extract_gauge_records(gesla_dir: Path, pairs: pd.DataFrame, dest: Path, work
     """Write every gauge's record to dest/<file_name>.npz; return good_years per gauge."""
     dest.mkdir(parents=True, exist_ok=True)
     tasks = [(str(gesla_dir), f, tz, str(dest / f"{f}.npz")) for f, tz in zip(pairs.file_name, pairs.time_zone_hr)]
-    with ProcessPoolExecutor(workers) as pool:
+    with process_pool(workers) as pool:
         return pd.DataFrame(list(pool.map(_record_task, tasks))).set_index("file_name")
 
 
@@ -174,7 +174,7 @@ def _mhws_task(args) -> list:
 def nodal_mhws(paths: tuple[Path, Path], hc: np.ndarray, workers: int) -> np.ndarray:
     """MHWS (m) of constants (point, constituent) over the 10-min nodal-cycle basis `paths`."""
     tasks = [(paths, hc[i:i + TASK_SIZE]) for i in range(0, len(hc), TASK_SIZE)]
-    with ProcessPoolExecutor(workers) as pool:
+    with process_pool(workers) as pool:
         return np.array([m for chunk in pool.map(_mhws_task, tasks) for m in chunk])
 
 
@@ -182,7 +182,7 @@ def fit_gauge_tides(pairs: pd.DataFrame, records: Path, hourly: tuple[Path, Path
     """Harmonic constants (gauge, constituent) fitted to each record on the hourly FES2022 basis."""
     names = pairs.file_name.tolist()
     chunks = [(str(records), names[i:i + TASK_SIZE], hourly) for i in range(0, len(names), TASK_SIZE)]
-    with ProcessPoolExecutor(workers) as pool:
+    with process_pool(workers) as pool:
         return np.vstack([h for chunk in pool.map(_gauge_fit_task, chunks) for h in chunk])
 
 
@@ -257,7 +257,7 @@ def gauge_ratios(sites: list[dict], records: Path, store: Path, hourly: tuple[Pa
     chunks = [(sites[i:i + TASK_SIZE // 2], str(records), str(store), hourly)
               for i in range(0, len(sites), TASK_SIZE // 2)]
     rows = []
-    with ProcessPoolExecutor(workers) as pool:
+    with process_pool(workers) as pool:
         for k, r in enumerate(pool.map(_ratio_task, chunks)):
             rows += r
             print(f"  {min((k + 1) * (TASK_SIZE // 2), len(sites))}/{len(sites)} gauges", flush=True)
@@ -301,7 +301,7 @@ def tc_donors(pairs: pd.DataFrame, hc_full: np.ndarray, records: Path, hourly: t
     names = pairs.file_name.tolist()
     chunks = [(names[i:i + TASK_SIZE], hc_full[i:i + TASK_SIZE], str(records), hourly)
               for i in range(0, len(names), TASK_SIZE)]
-    with ProcessPoolExecutor(workers) as pool:
+    with process_pool(workers) as pool:
         events = [e for chunk in pool.map(_donor_task, chunks) for e in chunk]
     rows, shapes = [], []
     for k, ev in enumerate(events):
@@ -446,7 +446,7 @@ def trial_levels(todo: list[dict], stores, bases: dict, workers: int, trials=TC_
     tasks = [(todo[i:i + TASK_SIZE], _stores(stores), bases, start, tuple(trials))
              for i in range(0, len(todo), TASK_SIZE)]
     rows = {}
-    with ProcessPoolExecutor(workers) as pool:
+    with process_pool(workers) as pool:
         for res in pool.map(_trial_task, tasks):
             rows.update(dict(res))
     return pd.DataFrame.from_dict(rows, orient="index", columns=list(trials)).sort_index()
@@ -747,7 +747,7 @@ def build_profiles(todo: list[dict], stores, bases: dict, workers: int,
     """
     tasks = [(todo[i:i + TASK_SIZE], _stores(stores), bases, start) for i in range(0, len(todo), TASK_SIZE)]
     rows = []
-    with ProcessPoolExecutor(workers) as pool:
+    with process_pool(workers) as pool:
         for k, res in enumerate(pool.map(_profile_task, tasks)):
             rows += [{"station": s, "gtsm_jumps": j, "profile": p} for s, j, p in res]
             if k % 20 == 0:
@@ -764,7 +764,7 @@ def build_stations(todo: list[dict], stores, bases: dict, hyd: np.ndarray, worke
     """
     tasks = [(todo[i:i + TASK_SIZE], _stores(stores), bases, start) for i in range(0, len(todo), TASK_SIZE)]
     rows, info = [], []
-    with ProcessPoolExecutor(workers) as pool:
+    with process_pool(workers) as pool:
         for k, (res, failed) in enumerate(pool.map(_station_task, tasks)):
             rows += [{"station": s, "level_source": FAILED_LEVEL_SOURCE} for s in failed]
             for row, h, i, vector in res:
@@ -803,7 +803,7 @@ def build_nodes(todo: list[dict], models_path: Path, bases: dict, workers: int) 
     """
     tasks = [(todo[i:i + TASK_SIZE], str(models_path), bases) for i in range(0, len(todo), TASK_SIZE)]
     rows = []
-    with ProcessPoolExecutor(workers) as pool:
+    with process_pool(workers) as pool:
         for k, res in enumerate(pool.map(_node_task, tasks)):
             rows += res
             if k % 200 == 0:
