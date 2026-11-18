@@ -105,6 +105,35 @@ def test_controller_starts_a_waiting_step_before_it_stops(tmp_path, monkeypatch)
     assert started == ["a", "b"]
 
 
+def test_gate_stops_its_dependants_and_the_run_exits_nonzero(tmp_path, monkeypatch) -> None:
+    import pytest
+    plan = {"name": "t", "max_cores": 2, "state_dir": tmp_path / "state",
+            "steps": [{"id": "g", "gate": "choose the caps"}, {"id": "b", "after": ["g"], "run": "true"}]}
+    ctl = Controller(plan, None, False, 0)
+    monkeypatch.setattr(harness, "print_status", lambda plan: None)
+    with pytest.raises(SystemExit, match="g awaiting_decision"):
+        ctl.run()
+    assert ctl.states["b"]["status"] == "pending"
+
+
+def test_failed_step_makes_the_run_exit_nonzero(tmp_path, monkeypatch) -> None:
+    import pytest
+    plan = {"name": "t", "max_cores": 2, "state_dir": tmp_path / "state", "steps": [{"id": "a", "run": "true"}]}
+    ctl = Controller(plan, None, False, 0)
+    ctl.states["a"] = {"status": "failed"}
+    monkeypatch.setattr(harness, "print_status", lambda plan: None)
+    with pytest.raises(SystemExit, match="a failed"):
+        ctl.run()
+
+
+def test_step_needs_run_or_gate(tmp_path) -> None:
+    import pytest
+    plan = tmp_path / "p.yml"
+    plan.write_text(f"name: t\nmax_cores: 1\nstate_dir: {tmp_path.as_posix()}\nsteps: [{{id: a, gate: x, run: 'true'}}]\n")
+    with pytest.raises(SystemExit, match="either"):
+        harness.load_plan(plan)
+
+
 def test_missing_required_file_stops_the_run(tmp_path) -> None:
     import pytest
     (tmp_path / "here.sh").write_text("")

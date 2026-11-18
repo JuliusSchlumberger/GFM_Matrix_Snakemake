@@ -6,7 +6,9 @@ with a placeholder job id, so existing generators, submit scripts and self-submi
 unchanged. The controller submits a queued job once its dependencies have ended and its cores
 fit the budget (partition `<N>vcpu` counts N, else cpus-per-task x ntasks), translating
 placeholder ids. A step is done when its command and every job it queued have ended. The plan's
-`preamble` (shell) runs before every step's command.
+`preamble` (shell) runs before every step's command. A `gate:` step runs nothing: it stops its
+dependants with its message until `mark-done`. `run` exits non-zero while a step is failed,
+interrupted or awaiting a decision.
 
 Usage (on the cluster login node, in tmux; GFM_REAL_SBATCH if sbatch is not /usr/bin/sbatch):
     python hpc/harness.py run --plan hpc/plans/hydrax_rerun.yml [--allow-destructive] [--only a,b]
@@ -247,6 +249,8 @@ def load_plan(path: Path) -> dict:
         missing = [a for a in s.get("after", []) if a not in ids]
         if missing:
             raise SystemExit(f"{path}: step {s['id']} waits for unknown step(s) {missing}")
+        if ("gate" in s) == ("run" in s) or "gate" in s and "job" in s:
+            raise SystemExit(f"{path}: step {s['id']} needs either `run` (optionally with `job`) or `gate`")
     return plan
 
 
@@ -315,6 +319,11 @@ class Controller:
 
     def start_step(self, step: dict) -> None:
         sid = step["id"]
+        if "gate" in step:
+            self.states[sid] = {"status": "awaiting_decision", "started": time.time()}
+            self.log(f"DECISION NEEDED at step {sid}: {step['gate'].strip()}\n"
+                     f"    then: python hpc/harness.py mark-done --plan <plan> {sid}")
+            return
         env = step_env(self.plan, sid)
         cwd = os.path.expandvars(self.plan.get("cwd", "."))
         if step.get("job"):
@@ -399,6 +408,10 @@ class Controller:
             st.update(status="failed" if st["command_rc"] else ("done_with_failed_jobs" if failed else "done"),
                       ended=time.time(), n_jobs=len(mine), n_failed_jobs=len(failed))
             self.log(f"step {sid} {st['status']} ({len(mine)} job(s), {len(failed)} not COMPLETED)")
+            log = self.plan["state_dir"] / "logs" / f"{sid}.log"
+            if st["status"] == "failed" and log.exists():
+                tail = log.read_text(errors="replace").splitlines()[-10:]
+                self.log(f"FAILED step {sid}, end of {log}:\n" + "\n".join(f"    {line}" for line in tail))
 
     def start_ready_steps(self) -> int:
         """Start every pending step whose waits are met; return how many started.
@@ -427,9 +440,14 @@ class Controller:
             self.update_steps(load_tasks(self.queue_dir))
             save_step_states(self.plan, self.states)
             if not any(st["status"] == "running" for st in self.states.values()) and not self.start_ready_steps():
-                self.log("nothing left to run (steps still pending wait on a failed, interrupted or "
-                         "destructive step)")
                 print_status(self.plan)
+                blocked = {sid: st["status"] for sid, st in self.states.items()
+                           if st["status"] in ("failed", "interrupted", "awaiting_decision")
+                           and (not self.only or sid in self.only)}
+                if blocked:
+                    raise SystemExit("STOPPED: " + ", ".join(f"{sid} {status}" for sid, status in blocked.items())
+                                     + " (retry or mark-done, then run again)")
+                self.log("nothing left to run (steps still pending wait on a destructive step)")
                 return
             time.sleep(self.poll_s)
 
@@ -448,6 +466,8 @@ def print_status(plan: dict) -> None:
             counts[t.state] = counts.get(t.state, 0) + 1
         flag = " [destructive]" if s.get("destructive") else ""
         print(f"  {s['id']:<28} {st['status']:<22} {', '.join(f'{k} {v}' for k, v in sorted(counts.items()))}{flag}")
+        if st["status"] == "awaiting_decision":
+            print(f"      DECISION NEEDED: {s['gate'].strip()}")
 
 
 def main() -> None:

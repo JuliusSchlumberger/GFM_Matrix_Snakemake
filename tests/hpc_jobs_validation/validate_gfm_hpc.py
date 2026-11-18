@@ -238,9 +238,10 @@ def test_hydrax_plan_keeps_its_step_ids() -> None:
     assert [s["id"] for s in plan["steps"]] == [
         "product", "materialize", "production_preprocess", "reset_studies", "studies_preprocess", "sweep_landcover",
         "sweep_uniform", "wet_tiles", "obstacle_coupling", "study_figures", "reset_sfincs", "sfincs_sweep",
-        "sfincs_duration", "reset_local", "local_station_caches", "local_runs", "validate_england_local",
-        "validate_england_global", "validate_england_map", "validate_wales", "validate_sf_bay", "exposure_table",
-        "local_variants"]
+        "sfincs_duration", "choose_parameters", "rematerialize", "reset_local", "local_station_caches", "local_runs",
+        "validate_england_local", "validate_england_global", "validate_england_map", "validate_wales",
+        "validate_sf_bay", "exposure_table", "local_variants", "approve_production", "reset_production",
+        "production_run"]
     harness.load_plan(fx.REPO / "hpc" / "plans" / "smoke.yml")
 
 

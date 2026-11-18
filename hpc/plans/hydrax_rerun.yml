@@ -1,13 +1,17 @@
-# Hydrax rerun under one 120-core budget: storm-tide product -> production inputs -> eikonal solver
-# studies (500 tiles, land cover and uniform), SFINCS calibration (1,500 tiles, both groups, two
-# phases), local comparisons (England all, Wales Severn, SF Bay, hop test; base and variants).
+# Hydrax rerun under one 144-core budget: storm-tide product -> production inputs -> eikonal solver
+# studies (500 tiles, land cover and uniform) and SFINCS calibration (1,500 tiles, both groups, two
+# phases) -> decision: solver caps and flood model -> local comparisons (England all, Wales Severn,
+# SF Bay, hop test; base and variants) and their validation -> decision: production -> production
+# run with postprocessing, exposure and flood totals.
 # Step order is also release priority. Steps marked destructive delete old outputs on <data_root>;
-# they run only with --allow-destructive. Run the harness with the gfm env's python.
+# they run only with --allow-destructive. A gate step stops the run until
+# `python hpc/harness.py mark-done --plan hpc/plans/hydrax_rerun.yml <gate>`. Run the harness with
+# the gfm env's python.
 #   python hpc/harness.py run --plan hpc/plans/hydrax_rerun.yml --allow-destructive
 # The eikonal solver studies alone (with the product rebuild they read):
 #   python hpc/harness.py run --plan hpc/plans/hydrax_rerun.yml --allow-destructive --only product,materialize,reset_studies,studies_preprocess,sweep_landcover,sweep_uniform,wet_tiles,obstacle_coupling,study_figures
 name: hydrax_rerun
-max_cores: 120
+max_cores: 144
 partition_cores: {}
 state_dir: /p/11212688-004-global-floodmaps/modelling/hpc_harness/hydrax_rerun
 cwd: /u/schlumbe/gfm_code
@@ -96,6 +100,20 @@ steps:
         || echo "WARNING: calibration_split.py failed (balance report only; the duration phase does not read it)"
       gfm_hpc sfincs rerun --part models --phase duration $SFINCS_POST --submit
 
+  # ── decision: solver caps and flood model, from the studies and the SFINCS calibration ──
+  - id: choose_parameters
+    after: [study_figures, sfincs_duration]
+    gate: >-
+      set simulation.flooding in config.yml: max_rounds and obstacle_coupling.max_outer_iterations
+      per friction source (figures_root/500_tiles/<source>) and the best flood-model variant
+      (calibration_roughness_SFINCS_dedup/variant_selection.json); commit, push and git pull here
+      (TODO.md, flood-model comparison steps 2 and 6).
+
+  - id: rematerialize
+    after: [choose_parameters]
+    run: |
+      "$PY" snakemake_workflow/scripts/materialize_configs.py
+
   # ── local comparisons: base scenarios (preprocess -> hop waves -> merge, one chain each) ──
   - id: reset_local
     destructive: true
@@ -117,7 +135,7 @@ steps:
 
   - id: local_runs
     # After production_preprocess: the global twins read the shared global station cache it builds.
-    after: [local_station_caches, reset_local, production_preprocess]
+    after: [rematerialize, local_station_caches, reset_local, production_preprocess]
     run: |
       for s in $LOCAL_SCENARIOS; do
         gfm_hpc run preprocess --scenario $s --submit
@@ -151,11 +169,35 @@ steps:
     run: gfm_hpc validate --scenario england_local_input --only exposure_table
 
   # ── local comparisons with every flood-model variant at its calibrated run ──
+  # Every variant at the run the SFINCS calibration selected for it (variant_selection.json).
   - id: local_variants
-    after: [sfincs_duration, local_runs]
+    after: [rematerialize, local_runs]
     run: |
       SEL="$R/calibration_roughness_SFINCS_dedup/variant_selection.json"  # overlap-merged, as production
       "$PY" snakemake_workflow/scripts/materialize_configs.py $VARIANT_SCENARIOS --variants all --selection "$SEL"
       for f in snakemake_workflow/config/*__*_materialized.yml; do
         gfm_hpc run preprocess --config "$f" --submit
       done
+
+  # ── production: full grid, every RP x SLR, then postprocessing, exposure and flood totals ──
+  - id: approve_production
+    after: [exposure_table, validate_england_map, validate_sf_bay, local_variants]
+    gate: >-
+      review the validation scores (local vs global input, every variant); production reruns with
+      config.yml as it stands now.
+
+  # Existing results would be kept as done (run_eikonal_cli skips an existing output); the per-tile
+  # inputs stay, production_preprocess rebuilt them.
+  - id: reset_production
+    after: [approve_production]
+    destructive: true
+    run: |
+      MO=$(gfm_hpc config production --hpc --key simulation.model_outputs)
+      MERGED=$(gfm_hpc config production --hpc --key postprocessing.merged_outputs)
+      cd "$MO"
+      rm -rf ./*/results oom_tiles skipped_tiles run_timings hpc_jobs
+      rm -rf "$MERGED"
+
+  - id: production_run
+    after: [reset_production]
+    run: gfm_hpc run preprocess --scenario production --submit
