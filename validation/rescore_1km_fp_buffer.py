@@ -288,9 +288,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--merged-outputs", default=None,
-                        help="override postprocessing.merged_outputs (config.yml currently points at "
-                             "merged_results_v2, which does not exist on disk yet - the completed run "
-                             "lives under merged_results)")
+                        help="override postprocessing.merged_outputs")
     args = parser.parse_args()
 
     cfg = load_config(args.config)

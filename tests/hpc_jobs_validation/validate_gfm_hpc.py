@@ -238,10 +238,10 @@ def test_hydrax_plan_keeps_its_step_ids() -> None:
     assert [s["id"] for s in plan["steps"]] == [
         "product", "materialize", "production_preprocess", "reset_studies", "studies_preprocess", "sweep_landcover",
         "sweep_uniform", "wet_tiles", "obstacle_coupling", "study_figures", "reset_sfincs", "sfincs_sweep",
-        "sfincs_duration", "choose_parameters", "rematerialize", "reset_local", "local_station_caches", "local_runs",
-        "validate_england_local", "validate_england_global", "validate_england_map", "validate_wales",
-        "validate_sf_bay", "exposure_table", "local_variants", "approve_production", "reset_production",
-        "production_run"]
+        "sfincs_duration", "choose_parameters", "rematerialize", "reset_production", "reset_local",
+        "local_station_caches", "global_tiles", "local_runs", "global_runs", "validate_england_local",
+        "validate_england_global", "validate_england_map", "validate_wales", "validate_sf_bay",
+        "validate_sf_bay_global", "exposure_table", "local_variants", "approve_production", "production_run"]
     harness.load_plan(fx.REPO / "hpc" / "plans" / "smoke.yml")
 
 
@@ -249,7 +249,7 @@ def test_plan_validation_groups_exist() -> None:
     plan = (fx.REPO / "hpc" / "plans" / "hydrax_rerun.yml").read_text()
     for name, groups in (("england_local_input", {"scores", "agreement_map", "exposure_table"}),
                          ("england_global_input", {"scores"}), ("wales_local_input", {"scores"}),
-                         ("sf_bay_local_input", {"scores"})):
+                         ("sf_bay_local_input", {"scores"}), ("sf_bay_global_input", {"scores"})):
         assert f"--scenario {name}" in plan
         cfg = yaml.safe_load((fx.REPO / "snakemake_workflow" / "config" / f"{name}.yml").read_text())
         assert set(cfg["validation"]["runs"]) == groups

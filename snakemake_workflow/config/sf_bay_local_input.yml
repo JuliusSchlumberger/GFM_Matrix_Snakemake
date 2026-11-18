@@ -5,14 +5,8 @@
 # GLOBAL COAST-RP (California/new_inputs/boundary_forcing/datasource.txt = "CoastRP") -
 # unlike Wales/England, no boundary_conditions override and no
 # cache_local_waterlevel_stations.py run.
-#
-# No sf_bay_global_input.yml / no separate global-input run (user, 2026-11-06, same lesson
-# as Scotland): since the DEM and boundary don't change tile geometry or boundary source
-# for the GLOBAL side, production's own already-computed merged chunks (global DeltaDTM +
-# COAST-RP) are the global baseline as-is - read live via
-# `validate_sf_bay.py --config snakemake_workflow/config/config.yml --bbox ... --benchmark-path ...`,
-# never rerun. Scenario override layer on config.yml + config_local.yml
-# (config_utils.materialize_config).
+# The global side is sf_bay_global_input.yml. Scenario override layer on config.yml +
+# config_local.yml (config_utils.materialize_config).
 
 tile_grid:
   path: "{processed_inputs_dir}/mask/validation/sf_bay_fine_tiles_alameda.gpkg"

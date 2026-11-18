@@ -82,7 +82,7 @@ def make_fixture(base: Path, *, n_nodes: int = 2, all_hop0: bool = False, tiers:
 def add_sim_results(base: Path) -> None:
     """Tiles 1 and 4 done, tile 2 half done."""
     for tid, names in ((1, ["SLR_0", "SLR_500"]), (4, ["SLR_0", "SLR_500"]), (2, ["SLR_0"])):
-        d = base / "root" / "model_outputs_v2" / str(tid) / "results"
+        d = base / "root" / "model_outputs" / str(tid) / "results"
         d.mkdir(parents=True, exist_ok=True)
         for n in names:
             (d / f"waterdepth_RP100_{n}.tif").write_bytes(b"x")

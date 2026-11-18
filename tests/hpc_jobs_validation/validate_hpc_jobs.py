@@ -20,7 +20,7 @@ import generate_hpc_preprocess_job as pre  # noqa: E402
 import generate_hpc_simulation_jobs as sim  # noqa: E402
 from hpc_common import THREAD_ENV  # noqa: E402
 
-JOBS_DIR = "model_outputs_v2/hpc_jobs"
+JOBS_DIR = "model_outputs/hpc_jobs"
 
 
 def _chain(tmp_path: Path, submit: str) -> dict[str, dict]:
@@ -123,7 +123,7 @@ def test_postprocess_three_phases_chain(tmp_path) -> None:
 
 def test_exposure_standalone(tmp_path) -> None:
     cfg = fx.make_fixture(tmp_path)
-    ff = tmp_path / "root" / "merged_results_v2" / "chunks" / "flood_fraction"
+    ff = tmp_path / "root" / "merged_results" / "chunks" / "flood_fraction"
     ff.mkdir(parents=True)
     for cid in ("N00E000", "N05E000"):
         (ff / f"flood_fraction_{cid}_RP100_SLR_0.tif").write_bytes(b"x")

@@ -1,0 +1,35 @@
+# SF Bay global-input baseline: production (global DeltaDTM DEM, global COAST-RP boundaries) on
+# the production tiles under sf_bay_local_input.yml's fine tiles, closed over hop seeding
+# (select_country_tiles.py --footprint). Tile inputs and results are production's, so the
+# production run keeps these; merges, figures and scores stay here. Scenario override layer on
+# config.yml + config_local.yml (config_utils.materialize_config).
+
+tile_grid:
+  path: "{processed_inputs_dir}/mask/validation/sf_bay_global_input_tiles.gpkg"
+
+postprocessing:
+  merge_only: true  # validation run: the HPC postprocess chain merges only, no exposure / flood totals
+  merged_outputs: "{root}/sf_bay_global_input/merged_results"
+visualization:
+  output_dir: "{root}/sf_bay_global_input/figures"
+validation:
+  output_dir: "{root}/sf_bay_global_input/validation"
+  # hpc/gfm_hpc.py validate: per group, scripts run in order with {config} = this scenario's
+  # HPC-view config and {config:NAME} = scenario NAME's.
+  runs:
+    scores:
+      - ["validation/validate_sf_bay.py", "--config", "{config}", "--bbox", "-122.355", "37.45", "-121.99", "37.91",
+         "--benchmark-path",
+         "zip://{root}/inputs/validation/California/alameda_flooding_slr000.zip!flooding/v2.1/county_alameda_flddepth_slr000_w100.tif",
+         "--benchmark-scale-m", "0.01",
+         "--out-dir", "{root}/sf_bay_global_input/validation/USA_alameda_sample"]
+hpc:
+  jobs_dir: "{root}/sf_bay_global_input/hpc_jobs"
+
+boundary_conditions:
+  # validate_sf_bay.py scores RP100, SLR000 only (CoSMoS Alameda).
+  return_periods: [100]
+  waterlevel_names: ["SLR_0"]
+# merged_waterlevel_names() unions this with waterlevel_names.
+adaptation:
+  slr_intensities: []

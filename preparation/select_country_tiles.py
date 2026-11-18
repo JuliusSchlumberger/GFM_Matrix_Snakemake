@@ -11,6 +11,8 @@ Usage:
     python select_country_tiles.py --config <config.yml> [--out-dir <dir>]
     python select_country_tiles.py --config <config.yml> \\
         --benchmark-key scotland_sepa_coastal_m --region firth_of_forth
+    python select_country_tiles.py --config <config.yml> --footprint <fine_tiles.gpkg> \\
+        --name england_global_input --out-dir <dir>
 """
 
 import argparse
@@ -72,6 +74,13 @@ def _core_tile_ids_single_region(tile_grid: gpd.GeoDataFrame, catalog, benchmark
     region_geom = shapely_box(*regions[region_name])
     hits = tile_grid[tile_grid.geometry.intersects(region_geom)]
     print(f"  region processed: {benchmark_key}:{region_name} ({len(hits)} tiles)")
+    return set(hits["tile_id"].astype(int))
+
+
+def core_tile_ids_under_footprint(tile_grid: gpd.GeoDataFrame, footprint: gpd.GeoDataFrame) -> set[int]:
+    """Return the tile_ids whose area overlaps the footprint's (edge contact alone does not count)."""
+    area = footprint.to_crs(tile_grid.crs).geometry.unary_union
+    hits = tile_grid[tile_grid.geometry.intersects(area) & ~tile_grid.geometry.touches(area)]
     return set(hits["tile_id"].astype(int))
 
 
@@ -147,9 +156,17 @@ def main() -> None:
         "--region", default=None,
         help="named region of --benchmark-key to use as the core (required with --benchmark-key)",
     )
+    parser.add_argument(
+        "--footprint", default=None,
+        help="tile GeoPackage (e.g. a local-input scenario's fine tiles) whose area is the core; "
+             "requires --name, ignores --groups and --benchmark-key",
+    )
+    parser.add_argument("--name", default=None, help="output <name>_tiles.gpkg (with --footprint)")
     args = parser.parse_args()
     if args.benchmark_key is not None and args.region is None:
         parser.error("--benchmark-key requires --region")
+    if (args.footprint is None) != (args.name is None):
+        parser.error("--footprint and --name go together")
     groups = {k: GROUPS[k] for k in args.groups} if args.groups else GROUPS
 
     cfg = load_config(args.config)
@@ -159,12 +176,18 @@ def main() -> None:
     tile_grid["tile_id"] = tile_grid["tile_id"].astype(int)
     print(f"Production tile grid: {len(tile_grid)} tiles\n")
 
+    out_dir = Path(args.out_dir) if args.out_dir else Path(cfg["paths"]["processed_inputs_dir"]) / "mask" / "calibration"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.footprint is not None:
+        print(f"=== {args.name} (footprint {args.footprint}) ===")
+        core_ids = core_tile_ids_under_footprint(tile_grid, gpd.read_file(args.footprint))
+        _build_and_write(args.name, core_ids, tile_grid, out_dir)
+        return
+
     bench_catalog = get_data_catalog(
         _REPO_ROOT / val_cfg["benchmark_catalog"], root=val_cfg["benchmark_root"],
     )
-
-    out_dir = Path(args.out_dir) if args.out_dir else Path(cfg["paths"]["processed_inputs_dir"]) / "mask" / "calibration"
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     if args.benchmark_key is not None:
         group_name = f"{args.benchmark_key}_{args.region}"

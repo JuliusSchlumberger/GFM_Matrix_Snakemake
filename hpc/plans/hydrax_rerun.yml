@@ -1,8 +1,9 @@
 # Hydrax rerun under one 144-core budget: storm-tide product -> production inputs -> eikonal solver
 # studies (500 tiles, land cover and uniform) and SFINCS calibration (1,500 tiles, both groups, two
-# phases) -> decision: solver caps and flood model -> local comparisons (England all, Wales Severn,
-# SF Bay, hop test; base and variants) and their validation -> decision: production -> production
-# run with postprocessing, exposure and flood totals.
+# phases) -> decision: solver caps and flood model -> validation runs (England all, Wales Severn,
+# SF Bay; local input on fine tiles, global input on production tiles; base and variants; hop test)
+# and their scores -> decision: production -> production run with postprocessing, exposure and
+# flood totals, which keeps the global-input runs' tile results.
 # Step order is also release priority. Steps marked destructive delete old outputs on <data_root>;
 # they run only with --allow-destructive. A gate step stops the run until
 # `python hpc/harness.py mark-done --plan hpc/plans/hydrax_rerun.yml <gate>`. Run the harness with
@@ -23,8 +24,11 @@ preamble: |
   PY="$GFM_HARNESS_PYTHON"
   gfm_hpc() { "$PY" hpc/gfm_hpc.py "$@"; }
   R=$(gfm_hpc config production --hpc --key paths.root)
-  LOCAL_SCENARIOS="england_local_input england_global_input wales_local_input wales_global_input sf_bay_local_input england_hop_test"
-  VARIANT_SCENARIOS="england_local_input england_global_input wales_local_input wales_global_input sf_bay_local_input"
+  # Local input on fine tiles, own folders; global input on production tiles, results in production's.
+  LOCAL_SCENARIOS="england_local_input wales_local_input sf_bay_local_input england_hop_test"
+  GLOBAL_SCENARIOS="england_global_input wales_global_input sf_bay_global_input"
+  VARIANT_SCENARIOS="england_local_input england_global_input wales_local_input wales_global_input
+    sf_bay_local_input sf_bay_global_input"
   # SFINCS post job: the overlap-merged rescoring of every run on 1,500 tiles reads each tile's
   # neighbours too: 16 workers, 2-day limit.
   SFINCS_POST="--profile-set sfincs_post.partition=16vcpu --profile-set sfincs_post.cpus_per_task=16
@@ -83,6 +87,7 @@ steps:
     run: gfm_hpc studies figures --source landcover uniform --submit
 
   # ── SFINCS calibration, 1,500 tiles: stage 1 -> selection -> sweep (+ post job) -> duration ──
+  # Also removes both variant_selection.json files, so nothing downstream can read an old selection.
   - id: reset_sfincs
     destructive: true
     run: |
@@ -114,13 +119,25 @@ steps:
     run: |
       "$PY" snakemake_workflow/scripts/materialize_configs.py
 
-  # ── local comparisons: base scenarios (preprocess -> hop waves -> merge, one chain each) ──
+  # ── production outputs: cleared once, then filled by the global-input runs and the production run ──
+  # run_eikonal_cli skips an existing output, so old results would otherwise count as done. The per-tile
+  # inputs stay (production_preprocess rebuilt them).
+  - id: reset_production
+    after: [choose_parameters]
+    destructive: true
+    run: |
+      MO=$(gfm_hpc config production --hpc --key simulation.model_outputs)
+      MERGED=$(gfm_hpc config production --hpc --key postprocessing.merged_outputs)
+      cd "${MO:?}"
+      rm -rf ./*/results oom_tiles skipped_tiles run_timings hpc_jobs
+      rm -rf "${MERGED:?}"
+
+  # ── validation runs: local input (fine tiles) and global input (production tiles) ──
   - id: reset_local
     destructive: true
     run: |
-      for s in wales_local_input wales_global_input sf_bay_local_input england_hop_test; do
-        rm -rf "$R/$s/model_outputs"/*/results "$R/$s/model_outputs"/{oom_tiles,skipped_tiles,run_timings} \
-               "$R/$s/merged_results" "$R/$s/validation" "$R/$s/model_outputs/hpc_jobs"
+      for s in wales_local_input wales_global_input sf_bay_local_input sf_bay_global_input england_hop_test; do
+        rm -rf "$R/$s/model_outputs"/*/results "$R/$s/model_outputs"/{oom_tiles,skipped_tiles,run_timings}                "$R/$s/merged_results" "$R/$s/validation" "$R/$s/model_outputs/hpc_jobs" "$R/$s/hpc_jobs"
       done
 
   - id: local_station_caches
@@ -130,48 +147,67 @@ steps:
       for s in england_local_input england_hop_test; do
         "$PY" preparation/cache_local_waterlevel_stations.py --config "$(gfm_hpc config $s --hpc)"
       done
-      "$PY" preparation/cache_local_waterlevel_stations.py --config "$(gfm_hpc config wales_local_input --hpc)" \
-          --local-dem-key wales_lidar_dem
+      "$PY" preparation/cache_local_waterlevel_stations.py --config "$(gfm_hpc config wales_local_input --hpc)"           --local-dem-key wales_lidar_dem
+
+  # The production tiles under each local scenario's fine tiles, closed over hop seeding.
+  - id: global_tiles
+    after: [materialize]
+    run: |
+      for c in england wales sf_bay; do
+        FINE=$(gfm_hpc config ${c}_local_input --hpc --key tile_grid.path)
+        "$PY" preparation/select_country_tiles.py --config "$(gfm_hpc config production --hpc)"           --footprint "$FINE" --name ${c}_global_input --out-dir "$(dirname "$FINE")"
+      done
 
   - id: local_runs
-    # After production_preprocess: the global twins read the shared global station cache it builds.
+    # After production_preprocess: SF Bay's global forcing reads the station cache it builds.
     after: [rematerialize, local_station_caches, reset_local, production_preprocess]
     run: |
       for s in $LOCAL_SCENARIOS; do
         gfm_hpc run preprocess --scenario $s --submit
       done
 
-  # Validation batches (each scenario's validation.runs), in parallel once the local runs are merged.
+  # Their tile results stay in production's model_outputs; the production run skips them.
+  - id: global_runs
+    after: [rematerialize, reset_production, reset_local, global_tiles, production_preprocess]
+    run: |
+      for s in $GLOBAL_SCENARIOS; do
+        gfm_hpc run preprocess --scenario $s --submit
+      done
+
+  # Validation batches (each scenario's validation.runs), in parallel once their runs are merged.
   - id: validate_england_local
     after: [local_runs]
     run: gfm_hpc validate --scenario england_local_input --only scores --submit
 
   - id: validate_england_global
-    after: [local_runs]
+    after: [global_runs]
     run: gfm_hpc validate --scenario england_global_input --submit
 
   - id: validate_england_map
-    after: [local_runs]
+    after: [local_runs, global_runs]
     run: gfm_hpc validate --scenario england_local_input --only agreement_map --submit
 
   - id: validate_wales
-    after: [local_runs]
+    after: [local_runs, global_runs]
     run: gfm_hpc validate --scenario wales_local_input --submit
 
   - id: validate_sf_bay
     after: [local_runs]
     run: gfm_hpc validate --scenario sf_bay_local_input --submit
 
-  # Local vs global input, area- and population-weighted (T4). SF Bay has no global-input scenario:
-  # its global side comes from the production run, so it joins the table after the global rerun.
+  - id: validate_sf_bay_global
+    after: [global_runs]
+    run: gfm_hpc validate --scenario sf_bay_global_input --submit
+
+  # Local vs global input, area- and population-weighted (T4).
   - id: exposure_table
     after: [validate_england_local, validate_england_global, validate_wales]
     run: gfm_hpc validate --scenario england_local_input --only exposure_table
 
-  # ── local comparisons with every flood-model variant at its calibrated run ──
+  # ── validation runs with every flood-model variant at its calibrated run ──
   # Every variant at the run the SFINCS calibration selected for it (variant_selection.json).
   - id: local_variants
-    after: [rematerialize, local_runs]
+    after: [rematerialize, local_runs, global_runs]
     run: |
       SEL="$R/calibration_roughness_SFINCS_dedup/variant_selection.json"  # overlap-merged, as production
       "$PY" snakemake_workflow/scripts/materialize_configs.py $VARIANT_SCENARIOS --variants all --selection "$SEL"
@@ -181,23 +217,11 @@ steps:
 
   # ── production: full grid, every RP x SLR, then postprocessing, exposure and flood totals ──
   - id: approve_production
-    after: [exposure_table, validate_england_map, validate_sf_bay, local_variants]
+    after: [exposure_table, validate_england_map, validate_sf_bay, validate_sf_bay_global, local_variants]
     gate: >-
-      review the validation scores (local vs global input, every variant); production reruns with
-      config.yml as it stands now.
-
-  # Existing results would be kept as done (run_eikonal_cli skips an existing output); the per-tile
-  # inputs stay, production_preprocess rebuilt them.
-  - id: reset_production
-    after: [approve_production]
-    destructive: true
-    run: |
-      MO=$(gfm_hpc config production --hpc --key simulation.model_outputs)
-      MERGED=$(gfm_hpc config production --hpc --key postprocessing.merged_outputs)
-      cd "$MO"
-      rm -rf ./*/results oom_tiles skipped_tiles run_timings hpc_jobs
-      rm -rf "$MERGED"
+      review the validation scores (local vs global input, every variant); production runs with
+      config.yml as it stands now, so leave simulation.flooding as the global-input runs had it.
 
   - id: production_run
-    after: [reset_production]
+    after: [approve_production]
     run: gfm_hpc run preprocess --scenario production --submit

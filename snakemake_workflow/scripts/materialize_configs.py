@@ -37,6 +37,7 @@ SCENARIOS = [
     "wales_global_input",
     "scotland_local_input",
     "sf_bay_local_input",
+    "sf_bay_global_input",
 ]
 
 
