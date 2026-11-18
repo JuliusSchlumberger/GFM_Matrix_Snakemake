@@ -492,6 +492,14 @@ Open:
 
 ## Open methods questions
 
+- **IJsselmeer and Markermeer are ocean-coded and connected to the North Sea in the native mask**
+  (tile 1677 `inputs/mask.tif`: code 1, same 8-connected ocean body as the North Sea and the
+  Wadden Sea). The eikonal coastline (`flood_model.coastline_mask`) therefore seeds the lake
+  shores at storm-tide levels (~3.6 m RP100), as if the Afsluitdijk and Houtribdijk were open.
+  Find where the bodies connect (a diagonal leak across the dam or a sluice gap) and whether
+  other dammed lakes are affected (Haringvliet, Zeeland, Thames barrier) before the production run.
+  Found by `sfincs_tiles/build_coast_forcing.py smoothness` (findings_coast_boundary.md, stage 0b).
+
 - **Duration correction's multiplier is derived from a first eikonal pass's own depth
   (`event_volume.DurationCorrection.multiplier`: head = depth above the cell's spill level,
   `duration = time_within_peak(hydrograph, head)`), not from directly comparing the boundary
@@ -506,26 +514,6 @@ Open:
   should move to this direct measure is still an open question - changing it would affect the
   calibrated `duration_refit.py`/`friction_scale_factor` values (§2.2/§2.4), so needs a deliberate
   decision, not a silent code change.
-
-- **Review `compute_calibration_result_dedup.py` and `calibration_roughness_SFINCS_dedup`,
-  potentially remove them altogether.** `sfincs_tiles/select_calibration_tiles.py select` now
-  drops a candidate tile if it overlaps an already-selected tile (its buffered
-  `domain_tiles_global.gpkg` polygon intersects one already picked), so a *future* selection run
-  needs no post-hoc dedup - this was the whole point of the dedup step (correcting the ~1.237x
-  double-counting from the hop=0 coastal buffer / forced-split overlap pad). The *existing*
-  `calibration_roughness_SFINCS` selection (1000 tiles, already run, real overlapping results)
-  still needs it - it was drawn before this change. Once a fresh non-overlapping selection has
-  been drawn and run for real (see below - only 784 of 2088 eligible tiles are mutually
-  non-overlapping, well short of the old 1000 target), decide whether to keep
-  `compute_calibration_result_dedup.py`/`sfincs_grid.build_tile_tree`/`core_mask`/the
-  `_dedup` base-dir convention around for old data, or delete them (git keeps the history).
-
-- **Re-running `select_calibration_tiles.py select` with the new overlap criterion only yields
-  784 non-overlapping tiles from the current 2088 eligible (down from the 1000-tile target)** -
-  a real coverage drop from avoiding overlap at selection time, not a bug. Needs a decision: run
-  with fewer tiles, loosen some upstream filter to grow the eligible pool first, or accept a
-  partial dedup-free set alongside the existing overlapping one. Not resolved; no fresh selection
-  has been run for real yet.
 
 ## Figures needing a pass under the new "Figures (deliverables)" rules
 

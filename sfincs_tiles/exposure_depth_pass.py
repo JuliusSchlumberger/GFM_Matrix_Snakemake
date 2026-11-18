@@ -1,6 +1,6 @@
 """Stage-1 raster pass of the exposure/depth assessment: population-weighted agreement per tile.
 
-For each tile, on SFINCS's 30 m subgrid over SFINCS-active land in the tile's Voronoi core (as the
+For each tile, on SFINCS's 30 m subgrid over SFINCS-active land the tile owns (as the
 dedup scoring): area- and population-weighted matched / model-only / SFINCS-only counts per
 population-density class, exact depth-difference histograms per SFINCS depth class on both-wet
 cells, and the depths in each model's own-only cells. Population: WorldPop counts, each subgrid
@@ -31,7 +31,7 @@ from calibration_paths import decode_waterdepth_cm, run_path  # noqa: E402
 from flood_agreement import DIFF_EDGES, SFINCS_CLASS_EDGES, WET_THRESHOLD_M  # noqa: E402
 from gfm_config import read_root, resolve_catalog_path  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
-from sfincs_grid import active_on_subgrid, build_tile_tree, core_mask  # noqa: E402
+from sfincs_grid import active_on_subgrid, core_mask, load_footprints  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from population_grid import population_per_pixel  # noqa: E402
@@ -56,7 +56,7 @@ def _weighted_hist(values: np.ndarray, weights: np.ndarray, edges: np.ndarray) -
     return np.histogram(values, bins=full, weights=weights)[0]
 
 
-def tile_pass(tile_dir: Path, fsf: float, pop_path: Path, tree, tile_ids, run_key: str | None = None) -> dict:
+def tile_pass(tile_dir: Path, fsf: float, pop_path: Path, footprints, run_key: str | None = None) -> dict:
     """Compute one tile's stage-1 accumulators (dict of arrays and scalars)."""
     sfincs_dir = tile_dir / "sfincs_model"
     with retry_transient_io(rasterio.open, sfincs_dir / "hmax_subgrid.tif") as src:
@@ -73,7 +73,7 @@ def tile_pass(tile_dir: Path, fsf: float, pop_path: Path, tree, tile_ids, run_ke
         reproject(source=rasterio.band(src, 1), destination=mog, src_transform=src.transform, src_crs=src.crs,
                   dst_transform=transform, dst_crs=crs, resampling=Resampling.nearest)
     score = ((mog == LAND_CODE) & active_on_subgrid(sfincs_dir, shape, transform)
-             & core_mask(shape, transform, crs, tile_dir.name, tree, tile_ids))
+             & core_mask(shape, transform, crs, tile_dir.name, footprints))
     people, density = population_per_pixel(pop_path, shape, transform, crs)
     pixel_km2 = abs(transform.a * transform.e - transform.b * transform.d) / 1e6
     dclass = np.digitize(density, DENSITY_EDGES)
@@ -97,9 +97,9 @@ def tile_pass(tile_dir: Path, fsf: float, pop_path: Path, tree, tile_ids, run_ke
 
 
 def _pass_task(args) -> tuple[str, str | None]:
-    tile_dir, out_dir, fsf, pop_path, tree, tile_ids = args
+    tile_dir, out_dir, fsf, pop_path, footprints = args
     try:
-        res = tile_pass(tile_dir, fsf, pop_path, tree, tile_ids)
+        res = tile_pass(tile_dir, fsf, pop_path, footprints)
     except Exception as exc:  # one broken tile must not stop the pass; it is reported
         return tile_dir.name, f"{type(exc).__name__}: {exc}"
     arrays = {k: v for k, v in res.items() if isinstance(v, np.ndarray)}
@@ -155,9 +155,9 @@ def stage1(args) -> None:
     ids = (pd.read_csv(out / "subset_tiles.csv").tile_id.astype(str).tolist() if not args.all_tiles
            else (base / "tile_ids.txt").read_text().split())
     todo = [t for t in ids if not (tiles_out / f"{t}.npz").exists()]
-    tree, tile_ids = build_tile_tree(base / "tile_selection.gpkg")
+    footprints = load_footprints(base / "tile_selection.gpkg")
     print(f"{len(todo)} of {len(ids)} tile(s) to pass", flush=True)
-    jobs = [(base / t, tiles_out, args.fsf, pop_path, tree, tile_ids) for t in todo]
+    jobs = [(base / t, tiles_out, args.fsf, pop_path, footprints) for t in todo]
     failed = []
     with ProcessPoolExecutor(args.workers) as pool:
         for k, fut in enumerate(as_completed([pool.submit(_pass_task, j) for j in jobs]), 1):

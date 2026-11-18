@@ -241,7 +241,7 @@ def main() -> None:
     if args.run:
         runs = [parse_run(spec) for spec in args.run]
     else:
-        # The overlap-merged scoring (compute_calibration_result_dedup.py) picks the runs, as production merges.
+        # The owned-area scoring (compute_calibration_result_dedup.py) picks the runs: each place counts once.
         selection_path = root / (args.selection_dir_name or f"{args.base_dir_name}_dedup") / SELECTION_NAME
         selection = json.loads(selection_path.read_text()) if selection_path.exists() else None
         if args.phase != "sweep" and selection is None:

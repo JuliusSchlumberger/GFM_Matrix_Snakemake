@@ -29,8 +29,8 @@ preamble: |
   GLOBAL_SCENARIOS="england_global_input wales_global_input sf_bay_global_input"
   VARIANT_SCENARIOS="england_local_input england_global_input wales_local_input wales_global_input
     sf_bay_local_input sf_bay_global_input"
-  # SFINCS post job: the overlap-merged rescoring of every run on 1,500 tiles reads each tile's
-  # neighbours too: 16 workers, 2-day limit.
+  # SFINCS post job: the analysis and the owned-area rescoring of every run on 1,500 tiles:
+  # 16 workers, 2-day limit.
   SFINCS_POST="--profile-set sfincs_post.partition=16vcpu --profile-set sfincs_post.cpus_per_task=16
     --profile-set sfincs_post.mem=120G --profile-set sfincs_post.time=2-00:00:00"
 
@@ -88,7 +88,14 @@ steps:
 
   # ── SFINCS calibration, 1,500 tiles: stage 1 -> selection -> sweep (+ post job) -> duration ──
   # Also removes both variant_selection.json files, so nothing downstream can read an old selection.
+  - id: coast_boundary_decision
+    gate: >-
+      decide the SFINCS boundary (station line L0, coastline C1 or C2) from the coast-boundary test
+      (sfincs_tiles/findings_coast_boundary.md); the selection funnel and the stage-1/2 jobs follow
+      from it; commit, push and git pull here.
+
   - id: reset_sfincs
+    after: [coast_boundary_decision]
     destructive: true
     run: |
       rm -rf "$R/calibration_roughness_SFINCS" "$R/calibration_roughness_SFINCS_dedup"
@@ -209,7 +216,7 @@ steps:
   - id: local_variants
     after: [rematerialize, local_runs, global_runs]
     run: |
-      SEL="$R/calibration_roughness_SFINCS_dedup/variant_selection.json"  # overlap-merged, as production
+      SEL="$R/calibration_roughness_SFINCS_dedup/variant_selection.json"  # each place scored once
       "$PY" snakemake_workflow/scripts/materialize_configs.py $VARIANT_SCENARIOS --variants all --selection "$SEL"
       for f in snakemake_workflow/config/*__*_materialized.yml; do
         gfm_hpc run preprocess --config "$f" --submit

@@ -10,7 +10,7 @@ Usage:
     python select_calibration_tiles.py pool   --config <cfg> --base-dir-name calibration_roughness_SFINCS --n-shards 10
     python select_calibration_tiles.py screen --config <cfg> --base-dir-name calibration_roughness_SFINCS \\
         --tile-ids-file candidates/shard_000.txt --out-ids candidates/screened_000.txt
-    python select_calibration_tiles.py select --config <cfg> --base-dir-name calibration_roughness_SFINCS --n-tiles 1000
+    python select_calibration_tiles.py select --config <cfg> --base-dir-name calibration_roughness_SFINCS --n-tiles 1500
 """
 
 from __future__ import annotations
@@ -58,14 +58,10 @@ CATEGORY_STYLE = {  # funnel stage -> (colour, label)
 # tile_selection_map.png - a pipeline-incompleteness state, not a tile-selection outcome.
 
 
-def stratified_sample_exact(df: pd.DataFrame, n_target: int, grid_deg: float, seed: int) -> tuple[pd.DataFrame, int]:
+def stratified_sample_exact(df: pd.DataFrame, n_target: int, grid_deg: float, seed: int) -> pd.DataFrame:
     """Sample n_target tiles round-robin over shuffled lon/lat bins, so sparse bins are not starved.
 
-    `df` must carry a `geometry` column (each tile's already-buffered domain_tiles_global.gpkg
-    polygon - the buffer is what makes neighbouring tiles overlap). A candidate that intersects
-    an already-picked tile is dropped, not re-queued, so the round-robin naturally keeps drawing
-    from the rest of its bin; `n_target` may not be reached if too few non-overlapping candidates
-    remain. Returns (selected, n_dropped_for_overlap). `n_target` must be <= len(df).
+    Selected tiles may overlap; compute_calibration_result_dedup.py scores each place once.
     """
     rng = np.random.default_rng(seed)
     df = df.copy()
@@ -77,23 +73,13 @@ def stratified_sample_exact(df: pd.DataFrame, n_target: int, grid_deg: float, se
     bins = list(pools)
     rng.shuffle(bins)
     picked: list[int] = []
-    picked_geoms = []
-    n_dropped_overlap = 0
     while len(picked) < n_target and any(pools.values()):
         for b in bins:
             if len(picked) >= n_target:
                 break
-            if not pools[b]:
-                continue
-            idx = pools[b].pop()
-            geom = df.loc[idx, "geometry"]
-            if any(geom.intersects(g) for g in picked_geoms):
-                n_dropped_overlap += 1
-                continue
-            picked.append(idx)
-            picked_geoms.append(geom)
-    selected = df.loc[picked].drop(columns=["_bin", "geometry"]).sort_values("tile_id").reset_index(drop=True)
-    return selected, n_dropped_overlap
+            if pools[b]:
+                picked.append(pools[b].pop())
+    return df.loc[picked].drop(columns=["_bin"]).sort_values("tile_id").reset_index(drop=True)
 
 
 def _ids(path: Path) -> list[str]:
@@ -267,30 +253,24 @@ def cmd_select(args, root: Path, base: Path) -> None:
     funnel.loc[eligible_mask, "category"] = "eligible"
     eligible = funnel[eligible_mask]
 
-    all_tiles = gpd.read_file(root / TILE_GRID)
-    all_tiles["tile_id"] = all_tiles["tile_id"].astype(int)
-    # domain_tiles_global.gpkg's geometry already carries the hop=0 coastal buffer and the
-    # forced-split overlap pad (src/connectivity_tiling.py) - the actual overlap a non-deduped
-    # pooled metric would double-count, so it's what "overlapping with an already-selected tile"
-    # must check against.
-    eligible = eligible.merge(all_tiles[["tile_id", "geometry"]], on="tile_id", how="left")
-    selected, n_dropped_overlap = stratified_sample_exact(eligible, min(args.n_tiles, len(eligible)), GRID_DEG, args.seed)
+    selected = stratified_sample_exact(eligible, min(args.n_tiles, len(eligible)), GRID_DEG, args.seed)
     funnel.loc[funnel["tile_id"].isin(selected["tile_id"]), "category"] = "selected"
 
     n_unscreened = int((~screened).sum())
     print(f"{len(funnel)} candidates: {int(funnel['screen_ok'].sum())} screened ok, "
           f"{int((funnel['screen_ok'] & funnel['line_suitable']).sum())} with a suitable line, "
-          f"{len(eligible)} pass the SFINCS mask pre-flight -> {len(selected)} selected "
-          f"({n_dropped_overlap} dropped for overlapping an already-selected tile)"
+          f"{len(eligible)} pass the SFINCS mask pre-flight -> {len(selected)} selected"
           f"{f' ({n_unscreened} never screened)' if n_unscreened else ''}")
     if len(selected) < args.n_tiles:
-        print(f"WARNING: only {len(selected)} non-overlapping eligible tile(s), fewer than --n-tiles {args.n_tiles}")
+        print(f"WARNING: only {len(selected)} eligible tile(s), fewer than --n-tiles {args.n_tiles}")
 
     (base / "candidates").mkdir(parents=True, exist_ok=True)
     funnel.to_csv(base / "candidates" / "candidate_funnel.csv", index=False)
     selected.to_csv(base / "tile_selection_metadata.csv", index=False)
     (base / "tile_ids.txt").write_text("".join(f"{t}\n" for t in selected["tile_id"]), newline="\n")
 
+    all_tiles = gpd.read_file(root / TILE_GRID)
+    all_tiles["tile_id"] = all_tiles["tile_id"].astype(int)
     gdf = all_tiles[["tile_id", "geometry"]].merge(funnel[["tile_id", "category"]], on="tile_id")
     gdf.to_file(base / "tile_selection.gpkg", layer="tiles", driver="GPKG")
     fig_dir = read_figures_root(Path(args.config)) / "sfincs_runs" / args.base_dir_name
@@ -313,7 +293,7 @@ def main() -> None:
     parser.add_argument("--tile-ids-file", help="screen: this shard's candidate ids")
     parser.add_argument("--out-ids", help="screen: where to write the ids that passed")
     parser.add_argument("--overwrite", action="store_true", help="screen: redo tiles already screened")
-    parser.add_argument("--n-tiles", type=int, default=1000)
+    parser.add_argument("--n-tiles", type=int, default=1500)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
     apply_style()

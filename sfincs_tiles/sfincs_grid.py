@@ -7,8 +7,7 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import rasterio
-from pyproj import Transformer
-from scipy.spatial import cKDTree
+from rasterio.features import geometry_mask
 
 
 def parse_sfincs_inp(inp_path: Path) -> dict:
@@ -75,30 +74,39 @@ def active_on_subgrid(sfincs_dir: Path, sg_shape: tuple, sg_transform) -> np.nda
     return np.kron(msk > 0, np.ones((f, f), dtype=bool))
 
 
-_PARTITION_CRS = "EPSG:6933"  # equal-area - fair distance comparison regardless of latitude
+_AREA_CRS = "EPSG:6933"  # equal-area, so tile sizes compare fairly at any latitude
+_SEGMENT_DEG = 0.01  # densify lon/lat edges before projecting, so they stay true on the model grid
 
 
-def build_tile_tree(tile_selection_gpkg: Path) -> tuple[cKDTree, np.ndarray]:
-    """Return a KDTree over selected tiles' centroids (EPSG:6933) and the parallel tile ids.
+def load_footprints(tile_selection_gpkg: Path) -> gpd.GeoDataFrame:
+    """Return the selected tiles' polygons (EPSG:4326) by tile id, with their size rank (0 = largest).
 
-    Uses ALL selected tiles, so a tile without a usable result still claims its
-    own Voronoi territory instead of ceding it to its neighbours.
+    Ties in area go to the lower tile id. Uses ALL selected tiles, so a tile without a usable
+    result still claims its overlaps instead of ceding them to a smaller neighbour.
     """
     gdf = gpd.read_file(tile_selection_gpkg)
-    sel = gdf[gdf["category"] == "selected"].to_crs(_PARTITION_CRS)
-    centers = np.column_stack([sel.geometry.centroid.x.to_numpy(), sel.geometry.centroid.y.to_numpy()])
-    tile_ids = sel["tile_id"].astype(str).to_numpy()
-    return cKDTree(centers), tile_ids
+    sel = gdf[gdf["category"] == "selected"].to_crs("EPSG:4326")
+    sel = sel.assign(tile_id=sel["tile_id"].astype(int), area=sel.to_crs(_AREA_CRS).area)
+    sel = sel.sort_values(["area", "tile_id"], ascending=[False, True])
+    sel["rank"] = np.arange(len(sel))
+    sel["tile_id"] = sel["tile_id"].astype(str)
+    return sel.set_index("tile_id")[["rank", "geometry"]]
 
 
-def core_mask(shape: tuple, transform, crs, this_tile_id: str, tree: cKDTree, tile_ids: np.ndarray) -> np.ndarray:
-    """Mark the cells of `shape` closer to tile `this_tile_id`'s centre than to any other (Voronoi core)."""
-    h, w = shape
-    rows, cols = np.indices((h, w))
-    xs = transform.c + (cols + 0.5) * transform.a + (rows + 0.5) * transform.b
-    ys = transform.f + (cols + 0.5) * transform.d + (rows + 0.5) * transform.e
-    transformer = Transformer.from_crs(crs, _PARTITION_CRS, always_xy=True)
-    px, py = transformer.transform(xs.ravel(), ys.ravel())
-    _, idx = tree.query(np.column_stack([px, py]), k=1)
-    nearest_tile_id = tile_ids[idx].reshape(h, w)
-    return nearest_tile_id == this_tile_id
+def core_mask(shape: tuple, transform, crs, this_tile_id: str, footprints: gpd.GeoDataFrame) -> np.ndarray:
+    """Mark the cells of `shape` inside tile `this_tile_id` and inside no larger selected tile.
+
+    A place covered by several selected tiles belongs to the largest of them, so pooled sums
+    count it once and no covered place is dropped. Cell centres decide (rasterio geometry_mask).
+    """
+    own = footprints.loc[this_tile_id]
+    others = footprints[(footprints["rank"] < own["rank"]) & footprints.intersects(own.geometry)]
+
+    def _inside(geoms: gpd.GeoSeries) -> np.ndarray:
+        projected = geoms.segmentize(_SEGMENT_DEG).to_crs(crs)
+        return geometry_mask(list(projected), out_shape=shape, transform=transform, invert=True)
+
+    core = _inside(gpd.GeoSeries([own.geometry], crs=footprints.crs))
+    if len(others):
+        core &= ~_inside(others.geometry)
+    return core
