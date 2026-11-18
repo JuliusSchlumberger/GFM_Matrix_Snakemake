@@ -57,7 +57,7 @@ hpc:
       partition: "24vcpu"
       cpus_per_task: 24
       mem: "168G"           # 7G/vcpu, same headroom ratio as profiles.default
-      time: "1-08:00:00"    # 2 x (~12h worst case at 627 tiles/batch x 45 scenarios / 24-way / ~0.6min + margin)
+      time: "2-00:00:00"    # 4 x ~12h worst case (627 tiles/batch x 45 scenarios / 24-way / ~0.6min)
     - hops: [1, 2]
       n_nodes: 2
       partition: "24vcpu"

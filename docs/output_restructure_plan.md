@@ -43,11 +43,11 @@ Status values:
 
 | on disk (`R/…`) | written by | read by | config key / literal | status |
 |---|---|---|---|---|
-| `model_outputs/<tid>/inputs/` (~4504 tiles × 50 files) | preprocessing rules (`preprocessing.smk:46-189`), HPC preprocess jobs | `run_eikonal`, `eikonal_runner.py:76-93,374`, `check_preprocess_progress.py:72`, **SFINCS hard-coded** (`run_final_tile.sh:27`, `generate_calibration_jobs.py:112,114`, `select_calibration_tiles.py:152`, `build_station_boundary_lines.py:355`, `preflight_sfincs_mask.py:65`), `calibration_studies/select_study_candidate_tiles.py:33,85` | `PPI` = `{root}/model_outputs` (`config.yml:196`) | ok; shared by v2, the SFINCS comparison and parameter adjustment |
-| `model_outputs/<tid>/results/` (45 rasters per tile) | `run_eikonal` (`simulation.smk:47-51`), `run_eikonal_cli.py` | `merge_chunk`, `validation/_chunks.py:72`, `validate_country.py:231`, `merge_england_local_tiles.py` | `MO` = `{root}/model_outputs_v2` (`config.yml:195`) | **mismatch**: v1 results are under `model_outputs`, config targets the not-yet-run `model_outputs_v2` |
+| `model_outputs/<tid>/inputs/` (~4504 tiles × 50 files) | preprocessing rules (`preprocessing.smk:46-189`), HPC preprocess jobs | `run_eikonal`, `eikonal_runner.py:76-93,374`, `check_preprocess_progress.py:72`, **SFINCS hard-coded** (`run_final_tile.sh:27`, `generate_calibration_jobs.py:112,114`, `select_calibration_tiles.py:152`, `build_station_boundary_lines.py:355`, `preflight_sfincs_mask.py:65`), `calibration_studies/select_study_candidate_tiles.py:33,85` | `PPI` = `{root}/model_outputs` (`config.yml:196`) | ok; shared by production, the global-input case studies, the SFINCS comparison and parameter adjustment |
+| `model_outputs/<tid>/results/` (45 rasters per tile) | `run_eikonal` (`simulation.smk:47-51`), `run_eikonal_cli.py` | `merge_chunk`, `validation/_chunks.py:72`, `validate_country.py:231`, `merge_england_local_tiles.py` | `MO` = `{root}/model_outputs` (`config.yml:195`) | ok (v1). The rerun replaces it in place: `hydrax_rerun.yml` `reset_production` deletes the v1 results, then the global-input case studies and the production run write here |
 | `model_outputs/{run_timings (202 680), skipped_tiles (34 734)}` | `eikonal_runner.py:339-340,480`, `run_eikonal.py:46,56`, `run_eikonal_cli.py:73` | `summarize_run_timings.py`, `collect_hpc_failures.py:92`, `plot_domain_maps.py:132`, `tile_output_complete` (:439-450) | literal under `MO` | ok (v1) |
-| `model_outputs/hpc_jobs/` (1040 files, `logs/` 1711, `exposure/`) | `generate_hpc_*`, `hpc_common.py:74-75` | `collect_hpc_failures.py`, `check_postprocess_progress.py:48`, resume logic | `JD` = `{root}/model_outputs_v2/hpc_jobs` (`config.yml:300`) | **mismatch** (v1 under `model_outputs`); also holds `resolved_config_2026-10-15.yml` |
-| `merged_results/{chunks (87 309, flat), exposure/{*.csv, flood_totals/}}` | `postprocessing.smk:9-121`, `generate_hpc_exposure_jobs.py:95`, `compute_flood_totals.py:96` | `run_analysis.py:84-87`, validation scripts, `compute_exposure_analysis.py:501` | `MR` = `{root}/merged_results_v2` (`config.yml:340`); `validation.flood_totals_dir` = literal `{root}/merged_results_v2/exposure/flood_totals` (:584) | **mismatch**; `flood_totals_dir` does not derive from `MR`, and no overlay overrides it |
+| `model_outputs/hpc_jobs/` (1040 files, `logs/` 1711, `exposure/`) | `generate_hpc_*`, `hpc_common.py:74-75` | `collect_hpc_failures.py`, `check_postprocess_progress.py:48`, resume logic | `JD` = `{root}/model_outputs/hpc_jobs` (`config.yml:298`) | ok (v1); also holds `resolved_config_2026-10-15.yml`. `reset_production` deletes it |
+| `merged_results/{chunks (87 309, flat), exposure/{*.csv, flood_totals/}}` | `postprocessing.smk:9-121`, `generate_hpc_exposure_jobs.py:95`, `compute_flood_totals.py:96` | `run_analysis.py:84-87`, validation scripts, `compute_exposure_analysis.py:501` | `MR` = `{root}/merged_results` (`config.yml:350`); `validation.flood_totals_dir` = literal `{root}/merged_results/exposure/flood_totals` (:594) | ok (v1; `reset_production` deletes it, the rerun rewrites it); `flood_totals_dir` does not derive from `MR`, and no overlay overrides it |
 | `processed_inputs/*.nc`, `*.csv` | `prepare_boundary_conditions.py:375-431`, `extract_*` | `boundaries.py:157-211` | `PI` (`config.yml:11`) | ok. SLR ssp126 files are from 2026-10-05 and ssp245 from 2026-11-07; the ssp126 ones may be stale |
 | `processed_inputs/WL_scenarios/`, `WL_scenarios_cache/` | `prepare_boundary_conditions`, `cache_waterlevel_stations` (`preprocessing.smk:143-172`) | `extract_boundaries` | `waterlevel_nc_dir` (:97), `stations_cache_dir` (default literal at `preprocessing.smk:144`) | ok |
 | `processed_inputs/storm_tide_product/{…, cache/, gauges/}` | `prepare_storm_tide_product.py:56-84` | `run_eikonal` (hydrographs) | `storm_tide_product_dir` (:112), `cache_dir` (:180) | ok |
@@ -65,10 +65,10 @@ Status values:
 | `deltas_floodmaps/{delta_flood_extent.csv, figures/}` | analysis scripts hard-coding `root/"deltas_floodmaps"`: `compute_delta_flood_extent.py:194`, `add_slr_year_column.py:59,66`, `plot_delta_affected_fraction_timeseries.py:103-113`, `plot_delta_flood_map.py:87-94` | same | **literal** | ok |
 | `deltas_floodmaps/previous_without_protection/` | none | none | none | **dup/orphan** (2026-10-15 copy) |
 | `england_local_input/{model_outputs(16), merged_results/{chunks,local_native}, processed_inputs/WL_scenarios_cache, validation/GBR, figures, agreement_*.png}` | ELI overlay, `merge_england_local_tiles.py:30`, `plot_local_vs_global_agreement.py:351` (writes to `validation.output_dir.parent`) | validation scripts | overlay | **mismatch**: the overlay now points to `england_local_input/all_england/…`. The data on disk is the earlier domain (`england_fine_tiles.gpkg`, per the stale materialized config) |
-| `england_global_input/{model_outputs(15), merged_results/chunks, validation/GBR}` | EGI overlay | validation | overlay | **mismatch** (same `all_england` shift) |
+| `england_global_input/{model_outputs(15), merged_results/chunks, validation/GBR}` | EGI overlay | validation | overlay | **orphan**: the overlay now runs production tiles (`england_global_input_tiles.gpkg`) with tile results in production's `MO`; merges, validation and `hpc_jobs` under `england_global_input/all_england/` (same for Wales and SF Bay) |
 | `england_hop_test/{model_outputs(53), processed_inputs/WL_scenarios_cache}` | EHT overlay | – | overlay | ok (test) |
 | `wales_{local,global}_input/…`, `scotland_local_input/processed_inputs/WL_scenarios_cache`, `sf_bay_local_input/{model_outputs(56), merged_results/local_native, validation/USA_*}` | overlays, `validate_sf_bay.py` | validation | overlays | ok. Scotland has a station cache only, no run yet. `sf_bay_local_input/validation/` holds 4 variant folders (`_global_baseline`, `_masked_fix`, `_usgs10m`, `_sample`) |
-| `sf_bay_global_input/model_outputs` (4 tiles; tile 1 has inputs only) | aborted run (TODO.md:1437-1444) | none | no overlay | **orphan** |
+| `sf_bay_global_input/model_outputs` (4 tiles; tile 1 has inputs only) | aborted run (TODO.md:1437-1444) | none | the new `sf_bay_global_input.yml` writes only `merged_results`, `validation`, `figures`, `hpc_jobs` there | **orphan** (`model_outputs` only) |
 | `fundy_extreme_forcing_experiment/{571,891,csi_comparison.csv}` | no code in the repo | none | none | **orphan** (one-off; New Brunswick) |
 | `figures/main_production/` | analysis scripts (`visualization.output_dir`) | – | `config.yml:421` | ok (v1 figures) |
 | `figures/validation/{CAN,GBR,USA,*.csv}` | `run_validation.py`, `validate_country.py`, `rescore_*`, `run_multi_rp_summary.py` | `build_overview_table.py:132`, `compare_against_published.py:58` | `validation.output_dir` (:560) | ok, but this is tables/metrics, not figures |
@@ -78,7 +78,7 @@ Status values:
 | `hpc_harness/{hydrax_rerun, smoke}/` | `hpc/harness.py:287-323` | harness | `state_dir` in `hpc/plans/*.yml` (hard-coded `/p/…`) | ok; `smoke` is test state |
 | `input_analysis/boundary_forcing/{*.md, figures/}` | manual | – | none | ok (notes) |
 | `inputs/` (27 entries) | downloads and sync scripts; **also generated**: `ICGM/geoid_*.tif` (rule outputs, `preprocessing.smk:12-36`), `deltadtm.vrt`, `DeltaDTM/_zips`; `DeltaDTM_masks` is rewritten in place by `fix_ocean_mask_with_osm_land.py:77,89` | everything | catalog, `config.yml:12-30,173-177,282,559` | ok. Two odd entries: `fes2014.zip` (10.5 GB) sits next to the extracted `fes2014/`, and `Storm-tide` is a 10 KB file with no extension |
-| not on disk: `model_outputs_v2`, `merged_results_v2`, `local_vs_global_exposure` | – | – | config defaults; `hydrax_rerun.yml:220` | expected (v2 not run yet) |
+| not on disk: `local_vs_global_exposure` | – | – | `england_local_input.yml` `validation.runs.exposure_table` | expected (not run yet) |
 | repo, not `R`: `adaptation_validation_output/`, `validation/overview_*.csv`, `run_timings.csv`, `batch_logs*/`, `sfincs.log` | `validate_adaptation_measures.py:208`, `build_overview_table.py:154`, manual redirects | – | literals | out of scope; listed so they aren't forgotten |
 
 ### 1.3 Duplicated path definitions in code
@@ -137,8 +137,7 @@ R/
 │           ├── build/                      00_…04_*.gpkg, checkpoint, histograms, domain maps
 │           ├── subsets/<subset>.gpkg       bangkok_chao_phraya, deltas_global, calibration_500_tiles, calibration/<group>
 │           └── tile_inputs/<tid>/inputs/   per-tile dem/mask/friction/boundaries (= PPI)
-├── main_production/
-│   └── <release>/                          v1 (existing), v2 (planned rerun)      ← run root
+├── main_production/                        ← run root (one release; a rerun replaces it, Q2)
 ├── parameter_adjustment/                   ← run root (500-tile eikonal sensitivity)
 │   └── <study>_<friction>/                 sweep_budget_*, obstacle_coupling_* (study outputs)
 ├── sfincs_comparison/
@@ -150,7 +149,7 @@ R/
 │            san_francisco_bay/alameda/local_input, scotland/firth_of_forth/local_input,
 │            england/wash/local_input__hop_test, new_brunswick/… (see Q4)
 ├── figures/
-│   └── <same relative path as the run root>/   main_production/v2, parameter_adjustment,
+│   └── <same relative path as the run root>/   main_production, parameter_adjustment,
 │                                               sfincs_comparison/roughness_calibration, case_studies/…,
 │                                               input_forcing_qa, input_analysis
 └── hpc_harness/<plan>/         [ADD] harness state (cross-run operations)
@@ -173,8 +172,7 @@ the rules write today, so **no `.smk` output pattern changes**:
 ### 2.2 Naming convention
 
 - **Folder names.** All folders are lowercase `snake_case`, with no dates and no `_v2`/`_new`/`_old`
-  suffixes. The only version labels are `main_production/<release>` (`v1`, `v2`) and
-  `tilings/<tiling_id>`.
+  suffixes. The only version label is `tilings/<tiling_id>`.
 - **Level order.**
   - Case studies: `<product>/<case>/<domain>/<input_variant>`.
   - Domains: reuse the names already in the tile-grid files (`all_england`, `severn_estuary`,
@@ -189,7 +187,7 @@ the rules write today, so **no `.smk` output pattern changes**:
 
   ```yaml
   paths:
-    run: "main_production/v2"
+    run: "main_production"
     run_root: "{root}/{run}"
   simulation:
     model_outputs: "{run_root}/model_outputs"
@@ -223,7 +221,7 @@ the rules write today, so **no `.smk` output pattern changes**:
 - **Resolved configs.** `<run_root>/hpc_jobs/resolved_config.yml` (as now). Dated copies such as
   `resolved_config_2026-10-15.yml` go next to it.
 - **Test variants.** These are siblings with the `__<variant>` suffix, e.g.
-  `case_studies/england/wash/local_input__hop_test` or `main_production/v2__no_correction_b`.
+  `case_studies/england/wash/local_input__hop_test` or `main_production__no_correction_b`.
   Throw-away tests (`hpc_harness/smoke`) are deleted when done.
 - **Intermediates.**
   - Shared caches stay in `processed_inputs/storm_tide_product/cache/`.
@@ -259,8 +257,12 @@ Recommendation: yes, as `processed_inputs/tilings/<tiling_id>/`, at two levels.
     `wales_fine_severn_estuary`, …), because their tile ids differ from the global grid.
   - Subsets of the global grid share its ids, so they go into `subsets/`.
 - **(b) Per-tile prepared inputs: central only where they are actually shared.** That is the global
-  DeltaDTM + COAST-RP set, which v2 production, parameter adjustment and the SFINCS comparison all
-  read. The SFINCS comparison already reads them through a hard-coded `model_outputs`.
+  DeltaDTM + COAST-RP set, which production, parameter adjustment, the SFINCS comparison and the
+  global-input case studies all read. The SFINCS comparison already reads them through a
+  hard-coded `model_outputs`.
+  - The global-input case studies run production tiles and also write their tile results into
+    production's `MO`, so the production run skips them; only their merges, validation, figures
+    and `hpc_jobs` sit in their own run root.
   - Case studies with local DEMs or local water levels keep their inputs inside their run root
     (`PPI: null`), because those inputs belong to that run only.
   - So do Bangkok and the deltas runs, which computed their own.
@@ -281,17 +283,16 @@ Trade-offs:
   re-running `build_tile_manifest`.
   - Rule: a tiling is write-once. Changes produce a new `<tiling_id>`.
   - `tile_split` needs a fix before it is used on a central grid (TODO).
-- **Production inputs move twice.** Splitting v1 `model_outputs/<tid>/{inputs,results}` takes one
+- **Production inputs move twice.** Splitting `model_outputs/<tid>/{inputs,results}` takes one
   rename per tile: about 9000 `mv` calls, minutes on the HPC.
-  - The alternative is to move `model_outputs` whole to `main_production/v1/model_outputs` and
-    point v2's `PPI` there.
-  - That is one rename, but v2, parameter adjustment and the SFINCS comparison then depend on a v1
-    folder, so v1 results can never be dropped independently.
+  - The alternative is to move `model_outputs` whole to `main_production/model_outputs` and point
+    `PPI` there.
+  - That is one rename, but parameter adjustment and the SFINCS comparison then depend on the
+    production folder.
 
-**Q2. One run root per v2 production release, or overwrite in place?**
-- Recommendation: `main_production/v1` (existing) and `main_production/v2` (new).
-- Trade-off: v1 stays readable for comparisons at the cost of disk space. v1's ~87 k chunks and
-  ~200 k rasters can be deleted later in one step.
+**Q2. One run root per production release, or overwrite in place?** Decided: overwrite in place
+(disk space). The rerun deletes the v1 results and merges (`hydrax_rerun.yml` `reset_production`)
+and writes to the same `model_outputs` and `merged_results`; there is no v2 folder.
 
 **Q3. Validation metrics in the run root or under `figures/`?**
 - Recommendation: run root (`<run_root>/validation/`). Scripts already read and write CSVs there
@@ -314,18 +315,18 @@ Trade-offs:
 
 **Q5. New Brunswick has no run of its own.**
 - Today CAN is scored from the production run (`validation.output_dir/CAN`).
-- Recommendation: the production-scored metrics stay in `main_production/<release>/validation/CAN`.
+- Recommendation: the production-scored metrics stay in `main_production/validation/CAN`.
   `case_studies/new_brunswick/` holds only the Fundy experiment until a local-input run exists.
 - Trade-off: one validation case lives in two places.
 - The same split applies to GBR: production-scored metrics for England, Wales and Scotland sit in
   `main_production/…/validation/GBR`, while the local/global comparison runs sit in `case_studies`.
 
 **Q6. `validation.flood_totals_dir`.**
-- Today it is the literal `{root}/merged_results_v2/exposure/flood_totals`, so every case-study run
+- Today it is the literal `{root}/merged_results/exposure/flood_totals`, so every case-study run
   reads production totals.
 - Recommendation: derive it from `run_root`. For production the value is unchanged; for case
   studies the scored totals change, which is a **result change**.
-- The parity alternative is to pin it to `{root}/main_production/v2/merged_results/exposure/flood_totals`
+- The parity alternative is to pin it to `{root}/main_production/merged_results/exposure/flood_totals`
   and log the bug in TODO.
 
 **Q7. SFINCS comparison internal layout.**
@@ -357,12 +358,12 @@ Recommendation: delete only after the restructure has been verified, and list ea
 
 | old (`R/…`) | new (`R/…`) |
 |---|---|
-| `model_outputs/<tid>/inputs/` | `processed_inputs/tilings/connectivity_v1/tile_inputs/<tid>/inputs/` (Q1 (b); else stays with v1) |
-| `model_outputs/<tid>/results/`, `model_outputs/{run_timings,skipped_tiles,oom_tiles}/` | `main_production/v1/model_outputs/…` |
-| `model_outputs/hpc_jobs/` | `main_production/v1/hpc_jobs/` |
-| `merged_results/` | `main_production/v1/merged_results/` |
-| `figures/main_production/` | `figures/main_production/v1/` |
-| `figures/validation/` | `main_production/v1/validation/` |
+| `model_outputs/<tid>/inputs/` | `processed_inputs/tilings/connectivity_v1/tile_inputs/<tid>/inputs/` (Q1 (b); else stays with production) |
+| `model_outputs/<tid>/results/`, `model_outputs/{run_timings,skipped_tiles,oom_tiles}/` | `main_production/model_outputs/…` |
+| `model_outputs/hpc_jobs/` | `main_production/hpc_jobs/` |
+| `merged_results/` | `main_production/merged_results/` |
+| `figures/main_production/` | `figures/main_production/` (unchanged) |
+| `figures/validation/` | `main_production/validation/` |
 | `processed_inputs/mask/domain_tiles_global.gpkg` | `processed_inputs/tilings/connectivity_v1/tile_grid.gpkg` |
 | `processed_inputs/mask/{00_…04_*.gpkg, *checkpoint*.jsonl, *histogram*.png, domains_final*.png}` | `processed_inputs/tilings/connectivity_v1/build/` |
 | `processed_inputs/mask/{bangkok_chao_phraya,deltas_global,gbr_wales_scotland_friction9}_tiles.gpkg` | `processed_inputs/tilings/connectivity_v1/subsets/<name>.gpkg` |
@@ -557,8 +558,8 @@ All of these move to config-derived values: one constant or config key, no liter
    5. the deltas
    6. the Wales, Scotland, SF Bay and England case studies
    7. the tilings (`PI/mask` → `PI/tilings`, in the same commit as all `tile_grid.path` values)
-   8. production v1 last: per-tile split of `model_outputs` into `tile_inputs` and
-      `main_production/v1`, then `merged_results`, `hpc_jobs` and `figures/main_production`
+   8. production last: per-tile split of `model_outputs` into `tile_inputs` and
+      `main_production`, then `merged_results` and `hpc_jobs`
 5. **Docs, harness plans, TODO** updated in one commit.
 6. **Orphans** deleted on approval (Q8), listing sizes first.
 
@@ -568,10 +569,9 @@ All of these move to config-derived values: one constant or config key, no liter
 
 - [ ] **D1 Top level.** Add `processed_inputs/` and `hpc_harness/` as top-level folders (2.4)?
 - [ ] **D2 Central tiles (Q1).** Definitions central: yes or no. Production per-tile inputs:
-  (a) split into `processed_inputs/tilings/connectivity_v1/tile_inputs` (~9000 renames, v1 results
-  independent), or (b) leave them inside `main_production/v1/model_outputs` (one rename, v2 depends
-  on the v1 folder)?
-- [ ] **D3 Releases (Q2).** `main_production/v1` + `v2` side by side?
+  (a) split into `processed_inputs/tilings/connectivity_v1/tile_inputs` (~9000 renames, production
+  results independent), or (b) leave them inside `main_production/model_outputs` (one rename)?
+- [x] **D3 Releases (Q2).** Overwrite in place; no v2 folder.
 - [ ] **D4 Validation location (Q3).** Run root (recommended) or `figures/`?
 - [ ] **D5 Non-validation runs (Q4).** Bangkok, the deltas, local-vs-global and Fundy under
   `case_studies/`, or a new `applications/`?
@@ -585,5 +585,6 @@ All of these move to config-derived values: one constant or config key, no liter
 - [ ] **D10 Orphans (Q8).** Approve the deletion list after verification.
 - [ ] **D11 Protected changes.** Go-ahead to edit the `config.yml` defaults and the overlays, plus
   `site_env.example.sh` (new `GFM_TILE_INPUTS`).
-- [ ] **D12 Timing.** Restructure before the v2 rerun starts (recommended: v2 then writes straight
-  into `main_production/v2`), and is any HPC batch running now?
+- [ ] **D12 Timing.** The rerun writes in place into `model_outputs` and `merged_results`.
+  Restructure before it starts (it then writes straight into `main_production`), or after it
+  (one more move)? Is any HPC batch running now?
