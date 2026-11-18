@@ -23,6 +23,7 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
+import cartopy.crs as ccrs  # noqa: E402
 import geopandas as gpd  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
@@ -30,8 +31,14 @@ import pandas as pd  # noqa: E402
 import rasterio  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from gfm_config import read_root  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analysis"))
+from gfm_config import read_figures_root, read_root  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
+from _figure_style import (  # noqa: E402
+    DOUBLE_COLUMN_MM, LAND_COLOR, MM_PER_INCH, apply_style, panel_letters, save_figure, write_caption,
+)
+
+FIG_WIDTH_IN = DOUBLE_COLUMN_MM / MM_PER_INCH
 
 TILE_GRID = "processed_inputs/mask/domain_tiles_global.gpkg"
 OCEAN_CODE, RIVER_CODE = 1, 3  # config tile_generation.ocean_code / river_code
@@ -39,18 +46,26 @@ GRID_DEG = 15.0  # lon/lat bin size for the stratified sample
 ANTIMERIDIAN_WIDTH_DEG = 60.0  # wider than any real tile's bbox
 CATEGORY_STYLE = {  # funnel stage -> (colour, label)
     "selected": ("#2a78d6", "selected"),
-    "eligible": ("#7fb3e8", "eligible, not sampled"),
-    "preflight_failed": ("#e8a33d", "line ok, SFINCS mask pre-flight failed"),
-    "line_unsuitable": ("#d6452a", "boundary line unsuitable"),
-    "screened_out": ("#b3b3ad", "no production inputs / no COAST-RP station"),
-    "not_screened": ("#dcdcd8", "not screened (stage-1 job missing?)"),
+    "eligible": ("#7fb3e8", "eligible"),
+    # preflight_failed and line_unsuitable keep distinct funnel categories (candidate_funnel.csv,
+    # the print summary) but share one colour/label on the map - both mean "no usable SFINCS
+    # boundary for this tile," just caught at different checks.
+    "preflight_failed": ("#d6452a", "unsuited"),
+    "line_unsuitable": ("#d6452a", "unsuited"),
+    "screened_out": ("#b3b3ad", "not a coastal tile"),
 }
+# "not_screened" (stage-1 job missing) is a funnel category but not drawn/legended on
+# tile_selection_map.png - a pipeline-incompleteness state, not a tile-selection outcome.
 
 
-def stratified_sample_exact(df: pd.DataFrame, n_target: int, grid_deg: float, seed: int) -> pd.DataFrame:
+def stratified_sample_exact(df: pd.DataFrame, n_target: int, grid_deg: float, seed: int) -> tuple[pd.DataFrame, int]:
     """Sample n_target tiles round-robin over shuffled lon/lat bins, so sparse bins are not starved.
 
-    `n_target` must be <= len(df).
+    `df` must carry a `geometry` column (each tile's already-buffered domain_tiles_global.gpkg
+    polygon - the buffer is what makes neighbouring tiles overlap). A candidate that intersects
+    an already-picked tile is dropped, not re-queued, so the round-robin naturally keeps drawing
+    from the rest of its bin; `n_target` may not be reached if too few non-overlapping candidates
+    remain. Returns (selected, n_dropped_for_overlap). `n_target` must be <= len(df).
     """
     rng = np.random.default_rng(seed)
     df = df.copy()
@@ -61,14 +76,24 @@ def stratified_sample_exact(df: pd.DataFrame, n_target: int, grid_deg: float, se
         rng.shuffle(pools[b])
     bins = list(pools)
     rng.shuffle(bins)
-    picked = []
+    picked: list[int] = []
+    picked_geoms = []
+    n_dropped_overlap = 0
     while len(picked) < n_target and any(pools.values()):
         for b in bins:
             if len(picked) >= n_target:
                 break
-            if pools[b]:
-                picked.append(pools[b].pop())
-    return df.loc[picked].drop(columns="_bin").sort_values("tile_id").reset_index(drop=True)
+            if not pools[b]:
+                continue
+            idx = pools[b].pop()
+            geom = df.loc[idx, "geometry"]
+            if any(geom.intersects(g) for g in picked_geoms):
+                n_dropped_overlap += 1
+                continue
+            picked.append(idx)
+            picked_geoms.append(geom)
+    selected = df.loc[picked].drop(columns=["_bin", "geometry"]).sort_values("tile_id").reset_index(drop=True)
+    return selected, n_dropped_overlap
 
 
 def _ids(path: Path) -> list[str]:
@@ -148,36 +173,52 @@ def _read_jsons(d: Path) -> pd.DataFrame:
 
 
 def _plot_map(gdf: gpd.GeoDataFrame, all_tiles: gpd.GeoDataFrame, out: Path) -> None:
-    fig, ax = plt.subplots(figsize=(16, 8.5))
-    all_tiles.plot(ax=ax, color="#ececea", edgecolor="none")
+    proj = ccrs.EqualEarth()
+    fig = plt.figure(figsize=(FIG_WIDTH_IN, FIG_WIDTH_IN * 0.5), facecolor="white")
+    ax = plt.axes(projection=proj)
+    ax.set_global()
+    ax.set_anchor("N")  # pull the map up against the legend row, no gap below
+    # Candidate-tile footprint (not literal land) as orientation context, light grey per convention.
+    all_tiles.plot(ax=ax, color=LAND_COLOR, edgecolor="none", transform=ccrs.PlateCarree(), zorder=0)
     for cat in reversed(list(CATEGORY_STYLE)):
         sub = gdf[gdf["category"] == cat]
-        colour, label = CATEGORY_STYLE[cat]
+        colour, _ = CATEGORY_STYLE[cat]
         if len(sub):
-            sub.plot(ax=ax, color=colour, edgecolor="none", label=f"{label} ({len(sub)})")
-    handles = [plt.Rectangle((0, 0), 1, 1, color=CATEGORY_STYLE[c][0]) for c in CATEGORY_STYLE]
-    labels = [f"{CATEGORY_STYLE[c][1]} ({int((gdf['category'] == c).sum())})" for c in CATEGORY_STYLE]
-    ax.legend(handles, labels, loc="lower left", fontsize=10, frameon=True)
-    ax.set_xlim(-180, 180)
-    ax.set_ylim(-60, 85)
-    ax.set_aspect("equal")
-    ax.set_xlabel("longitude")
-    ax.set_ylabel("latitude")
-    ax.set_title(f"Final SFINCS calibration - tile selection ({int((gdf['category'] == 'selected').sum())} selected "
-                 f"of {len(gdf)} candidates)")
-    fig.tight_layout()
-    fig.savefig(out, dpi=150)
+            sub.plot(ax=ax, color=colour, edgecolor="none", transform=ccrs.PlateCarree(), zorder=1)
+    # Categories sharing a label (preflight_failed/line_unsuitable) collapse to one legend entry,
+    # its count summed across them.
+    by_label: dict[str, list] = {}
+    for cat, (colour, label) in CATEGORY_STYLE.items():
+        by_label.setdefault(label, [colour, 0])
+        by_label[label][1] += int((gdf["category"] == cat).sum())
+    handles = [plt.Rectangle((0, 0), 1, 1, color=colour) for colour, _ in by_label.values()]
+    labels = [f"{label} ({count})" for label, (_, count) in by_label.items()]
+    fig.legend(handles, labels, loc="lower center", ncol=len(by_label), fontsize=6.5, frameon=False,
+               bbox_to_anchor=(0.5, 0.0))
+    n_selected = int((gdf["category"] == "selected").sum())
+    save_figure(fig, out)
     plt.close(fig)
+    write_caption(out, [
+        f"Final SFINCS calibration tile selection: {n_selected} selected of {len(gdf)} candidates, "
+        "by funnel stage. Equal Earth projection; land shown for orientation (not source data).",
+        "Colour: funnel stage (legend) - selected, eligible but not sampled, boundary line "
+        "unsuitable for SFINCS, or not a coastal tile. Tiles never screened (stage-1 job "
+        "missing) are omitted.",
+    ])
 
 
 def _plot_histograms(funnel: pd.DataFrame, out: Path) -> None:
-    groups = [("screened", funnel[funnel["screen_ok"]], "#b3b3ad"),
-              ("eligible", funnel[funnel["category"].isin(["eligible", "selected"])], "#7fb3e8"),
-              ("selected", funnel[funnel["category"] == "selected"], "#2a78d6")]
+    # Nested funnel: selected <= eligible <= screened, so reusing CATEGORY_STYLE's
+    # screened_out/eligible/selected colours (grey -> light blue -> dark blue) reads as one
+    # progression, not three unrelated categories.
+    groups = [("screened", funnel[funnel["screen_ok"]], CATEGORY_STYLE["screened_out"][0]),
+              ("eligible", funnel[funnel["category"].isin(["eligible", "selected"])], CATEGORY_STYLE["eligible"][0]),
+              ("selected", funnel[funnel["category"] == "selected"], CATEGORY_STYLE["selected"][0])]
     cols = [("lat", "tile centroid latitude (deg)", None), ("ocean_frac", "ocean fraction", None),
             ("n_cells", "native cells (M)", 1e-6), ("n_forcing_stations", "forcing stations on the line", None)]
-    fig, axes = plt.subplots(1, len(cols), figsize=(4.2 * len(cols), 3.6))
-    for ax, (col, label, scale) in zip(axes, cols):
+    fig, axes = plt.subplots(1, len(cols), figsize=(FIG_WIDTH_IN, FIG_WIDTH_IN / len(cols) + 0.7),
+                             layout="constrained")
+    for i, (ax, (col, label, scale)) in enumerate(zip(axes, cols)):
         data = [g[col].dropna().to_numpy(dtype=float) * (scale or 1) for _, g, _ in groups if col in g]
         if not data or not any(len(d) for d in data):
             ax.set_visible(False)
@@ -185,12 +226,19 @@ def _plot_histograms(funnel: pd.DataFrame, out: Path) -> None:
         edges = np.histogram_bin_edges(np.concatenate(data), bins=30)
         for (name, g, colour), d in zip(groups, data):
             ax.hist(d, bins=edges, color=colour, alpha=0.75, label=f"{name} ({len(d)})")
-        ax.set_xlabel(label)
-    axes[0].set_ylabel("tiles")
-    axes[0].legend(fontsize=8)
-    fig.tight_layout()
-    fig.savefig(out, dpi=150)
+        ax.set_xlabel(label, fontsize=7)
+        ax.tick_params(labelsize=7)
+        panel_letters(ax, "abcd"[i], fontsize=8)
+    axes[0].set_ylabel("tiles", fontsize=7)
+    axes[0].legend(fontsize=6.5, frameon=False)
+    save_figure(fig, out)
     plt.close(fig)
+    write_caption(out, [
+        "Tile-selection funnel: distribution of candidate tiles at each funnel stage (nested: "
+        "selected <= eligible <= screened).",
+        "(a) tile centroid latitude. (b) ocean fraction. (c) native cell count (millions). "
+        "(d) forcing stations on the boundary line.",
+    ])
 
 
 def cmd_select(args, root: Path, base: Path) -> None:
@@ -218,27 +266,34 @@ def cmd_select(args, root: Path, base: Path) -> None:
     eligible_mask = funnel["screen_ok"] & funnel["line_suitable"] & funnel["preflight_ok"]
     funnel.loc[eligible_mask, "category"] = "eligible"
     eligible = funnel[eligible_mask]
-    selected = stratified_sample_exact(eligible, min(args.n_tiles, len(eligible)), GRID_DEG, args.seed)
+
+    all_tiles = gpd.read_file(root / TILE_GRID)
+    all_tiles["tile_id"] = all_tiles["tile_id"].astype(int)
+    # domain_tiles_global.gpkg's geometry already carries the hop=0 coastal buffer and the
+    # forced-split overlap pad (src/connectivity_tiling.py) - the actual overlap a non-deduped
+    # pooled metric would double-count, so it's what "overlapping with an already-selected tile"
+    # must check against.
+    eligible = eligible.merge(all_tiles[["tile_id", "geometry"]], on="tile_id", how="left")
+    selected, n_dropped_overlap = stratified_sample_exact(eligible, min(args.n_tiles, len(eligible)), GRID_DEG, args.seed)
     funnel.loc[funnel["tile_id"].isin(selected["tile_id"]), "category"] = "selected"
 
     n_unscreened = int((~screened).sum())
     print(f"{len(funnel)} candidates: {int(funnel['screen_ok'].sum())} screened ok, "
           f"{int((funnel['screen_ok'] & funnel['line_suitable']).sum())} with a suitable line, "
-          f"{len(eligible)} pass the SFINCS mask pre-flight -> {len(selected)} selected"
+          f"{len(eligible)} pass the SFINCS mask pre-flight -> {len(selected)} selected "
+          f"({n_dropped_overlap} dropped for overlapping an already-selected tile)"
           f"{f' ({n_unscreened} never screened)' if n_unscreened else ''}")
     if len(selected) < args.n_tiles:
-        print(f"WARNING: only {len(selected)} eligible tile(s), fewer than --n-tiles {args.n_tiles}")
+        print(f"WARNING: only {len(selected)} non-overlapping eligible tile(s), fewer than --n-tiles {args.n_tiles}")
 
     (base / "candidates").mkdir(parents=True, exist_ok=True)
     funnel.to_csv(base / "candidates" / "candidate_funnel.csv", index=False)
     selected.to_csv(base / "tile_selection_metadata.csv", index=False)
     (base / "tile_ids.txt").write_text("".join(f"{t}\n" for t in selected["tile_id"]), newline="\n")
 
-    all_tiles = gpd.read_file(root / TILE_GRID)
-    all_tiles["tile_id"] = all_tiles["tile_id"].astype(int)
     gdf = all_tiles[["tile_id", "geometry"]].merge(funnel[["tile_id", "category"]], on="tile_id")
     gdf.to_file(base / "tile_selection.gpkg", layer="tiles", driver="GPKG")
-    fig_dir = base / "figures"
+    fig_dir = read_figures_root(Path(args.config)) / "sfincs_runs" / args.base_dir_name
     fig_dir.mkdir(parents=True, exist_ok=True)
     _plot_map(gdf, all_tiles, fig_dir / "tile_selection_map.png")
     _plot_histograms(funnel, fig_dir / "tile_selection_histograms.png")
@@ -261,6 +316,7 @@ def main() -> None:
     parser.add_argument("--n-tiles", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
+    apply_style()
     root = read_root(Path(args.config))
     base = root / args.base_dir_name
     {"pool": cmd_pool, "screen": cmd_screen, "select": cmd_select}[args.command](args, root, base)

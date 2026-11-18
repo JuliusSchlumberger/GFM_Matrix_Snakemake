@@ -66,7 +66,9 @@ dependencies:
   - affine=2.4.0
   - openpyxl=3.1.2                # pandas ExcelWriter engine (its only user, a calibration xlsx report script, was removed - see TODO.md)
   - tomli=2.0.1                   # TOML fallback for Python <3.11 (no stdlib tomllib) - calibration scripts
-  - pytest=8.4.2                  # test runner (config in pyproject.toml; tests/conftest.py skips needs_data and hydromt-sfincs tests)
+  - cartopy=0.22.0                # map projections (plot_domain_maps.py, imported by run_preparation.py)
+  - pyarrow=14.0.1                # pandas parquet engine (storm-tide product tables)
+  - pytest=8.4.2                 # test runner (config in pyproject.toml; tests/conftest.py skips needs_data and hydromt-sfincs tests)
   - ruff=0.12.0                   # linter (config in pyproject.toml)
   - pip
   - pip:
@@ -87,12 +89,10 @@ dependencies:
       # ~/.cdsapirc credentials file (https://cds.climate.copernicus.eu/how-to-api),
       # not installable by conda-forge-only solve constraints used elsewhere here.
       - cdsapi==0.7.7
-      # Boundary-forcing test (boundary_test/): FES tide prediction, extremes, gauge tide
-      # analysis, PDF tables. Newer releases need numpy>=2 / xarray datatree.
+      # FES tide prediction (src/tide_prediction.py, storm-tide product). Newer pyTMD
+      # releases need numpy>=2 / xarray datatree.
       - pyTMD==2.1.9
-      - pyextremes==2.6.1
-      - utide==0.3.1
-      - pdfplumber==0.11.9
+      - timescale==0.1.3
 
 # Optional dev tools (type-check, not needed to run the pipeline):
 #   mamba install -n gfm mypy

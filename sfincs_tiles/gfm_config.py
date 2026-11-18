@@ -33,6 +33,15 @@ def read_root(config_path: Path) -> Path:
     return Path(root)
 
 
+def read_figures_root(config_path: Path) -> Path:
+    """Return ``paths.figures_root``, falling back to ``{root}/figures`` if unset."""
+    with open(config_path, encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    root = read_root(config_path)
+    figures_root = (cfg.get("paths") or {}).get("figures_root", "{root}/figures")
+    return Path(figures_root.replace("{root}", str(root)))
+
+
 def _load_config(config_path: Path) -> dict:
     with open(config_path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)

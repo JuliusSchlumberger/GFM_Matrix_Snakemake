@@ -12,6 +12,7 @@ from rasterio.enums import Resampling
 from rasterio.windows import from_bounds
 
 from config_utils import retry_transient_io
+from process_pool import available_cpus
 
 _KM_PER_DEG = 111.32
 _DELTADTM_LAND_CODE = 0  # inputs/DeltaDTM_masks/deltadtm_mask.vrt convention: 0=land, 1=ocean, 2=lake, 3=river
@@ -105,7 +106,6 @@ def compute_flood_area_km2(raster_path: str | Path, threshold_m: float) -> float
     Raster must be EPSG:4326. Blocks are reduced in parallel threads but summed in
     window order, so the result is bit-identical to a serial reduction.
     """
-    import os
     import threading
     from concurrent.futures import ThreadPoolExecutor
 
@@ -137,7 +137,7 @@ def compute_flood_area_km2(raster_path: str | Path, threshold_m: float) -> float
         return float((valid * pixel_area_km2).sum())
 
     try:
-        with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 1)) as pool:
+        with ThreadPoolExecutor(max_workers=min(8, available_cpus())) as pool:
             partials = list(pool.map(window_sum, windows))
     finally:
         for ds in handles:

@@ -40,6 +40,7 @@ from coastline_nodes import coastline_nodes  # noqa: E402
 from config_utils import get_data_catalog  # noqa: E402
 from gesla import coastal_sites  # noqa: E402
 from gtsm_series import extract_series, gtsm_stations  # noqa: E402
+from process_pool import available_cpus  # noqa: E402
 import storm_tide_product as stp  # noqa: E402
 import tide_correction as tc  # noqa: E402
 import tide_prediction as tp  # noqa: E402
@@ -291,7 +292,7 @@ def tc_shift_fit(paths: _Paths, stations: pd.DataFrame, todo: list[dict], gauges
 def run(config: dict, force: bool = True) -> None:
     """Write the storm-tide product files (and intermediates) into storm_tide_product_dir."""
     cfg = config["storm_tide_product"]
-    workers = int(cfg["workers"])
+    workers = int(cfg["workers"] or available_cpus())
     paths = _Paths(Path(config["boundary_conditions"]["storm_tide_product_dir"]), Path(cfg["cache_dir"]))
     paths.cache.mkdir(parents=True, exist_ok=True)
     catalog = get_data_catalog(_REPO_ROOT / config["paths"]["hydromt_data_catalog"], root=config["paths"]["root"])
@@ -381,6 +382,10 @@ def run(config: dict, force: bool = True) -> None:
     vectors.flush()
     del vectors
     pd.DataFrame(info).to_parquet(paths.info)
+    failed = [r["station"] for r in rows if r.get("level_source") == stp.FAILED_LEVEL_SOURCE]
+    if failed:
+        logger.warning("%d stations failed and take COAST-RP's levels (level_source %s): %s", len(failed),
+                       stp.FAILED_LEVEL_SOURCE, failed[:20])
     # station_id is not unique in COAST-RP (offshore "currents_*" points), so its rows join by position
     etc = stp.coast_rp_levels(coast_rp.parent / "COAST-RP_ETC.nc")
     lev = stations.join(ratios).join(pd.DataFrame(rows).set_index("station"))

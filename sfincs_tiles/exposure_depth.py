@@ -34,7 +34,7 @@ from gfm_config import read_root  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analysis"))
-from _figure_style import panel_letters  # noqa: E402
+from _figure_style import apply_style, panel_letters, save_figure  # noqa: E402
 
 BIN_M = 0.1  # hist_fine bin width: DEPTH_CORR_FINE_EDGES step
 TOLERANCES_M = (0.1, 0.2, 0.3, 0.5)
@@ -189,7 +189,7 @@ def plot_stage0(results: dict, fsf: float, classes: pd.DataFrame, tiles: pd.Data
            xlim=(0, 1), ylim=(0, 1), title=f"Depth agreement, RP100, friction factor {fsf:g} ({len(per_tile)} tiles)")
     ax.legend(frameon=False, fontsize=8, loc="lower right")
     fig.tight_layout()
-    fig.savefig(out / "X1_depth_tolerance_curve.png", dpi=200)
+    save_figure(fig, out / "X1_depth_tolerance_curve.png")
     plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(7, 4.5))
@@ -204,7 +204,7 @@ def plot_stage0(results: dict, fsf: float, classes: pd.DataFrame, tiles: pd.Data
            xlabel="SFINCS depth class (cells, millions)", title="Depth reliability by SFINCS depth class")
     ax.legend(frameon=False, fontsize=8)
     fig.tight_layout()
-    fig.savefig(out / "X2_tolerance_by_depth_class.png", dpi=200)
+    save_figure(fig, out / "X2_tolerance_by_depth_class.png")
     plt.close(fig)
 
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
@@ -221,7 +221,7 @@ def plot_stage0(results: dict, fsf: float, classes: pd.DataFrame, tiles: pd.Data
         panel_letters(ax, letter)
     fig.suptitle(f"Tile CSI against tile properties, friction factor {fsf:g}; red: the 8 lowest")
     fig.tight_layout()
-    fig.savefig(out / "X3_outlier_tiles.png", dpi=200)
+    save_figure(fig, out / "X3_outlier_tiles.png")
     plt.close(fig)
 
 
@@ -351,7 +351,7 @@ def plot_stage1(by_density: pd.DataFrame, exposed: pd.DataFrame, depth: pd.DataF
         panel_letters(ax, letter)
     axes[0].legend(frameon=False, fontsize=8)
     fig.tight_layout()
-    fig.savefig(out / "X4_metrics_by_density_class.png", dpi=200)
+    save_figure(fig, out / "X4_metrics_by_density_class.png")
     plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(5.5, 5))
@@ -365,7 +365,7 @@ def plot_stage1(by_density: pd.DataFrame, exposed: pd.DataFrame, depth: pd.DataF
            title=f"RP100 exposed population per tile ({len(e)} tiles)")
     ax.legend(frameon=False, fontsize=8)
     fig.tight_layout()
-    fig.savefig(out / "X5_exposed_population_per_tile.png", dpi=200)
+    save_figure(fig, out / "X5_exposed_population_per_tile.png")
     plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(8, 4.5))
@@ -383,7 +383,7 @@ def plot_stage1(by_density: pd.DataFrame, exposed: pd.DataFrame, depth: pd.DataF
            title="Exact depth reliability by SFINCS depth class (bars: area, red: population)")
     ax.legend(frameon=False, fontsize=7, ncol=3)
     fig.tight_layout()
-    fig.savefig(out / "X2b_exact_tolerance_by_depth_class.png", dpi=200)
+    save_figure(fig, out / "X2b_exact_tolerance_by_depth_class.png")
     plt.close(fig)
 
 
@@ -473,7 +473,7 @@ def cdf(args) -> None:
         panel_letters(ax, letter)
     axes[0][0].legend(frameon=False, fontsize=7, loc="lower right")
     fig.tight_layout()
-    fig.savefig(out / "X1c_depth_cdf_by_denominator.png", dpi=200)
+    save_figure(fig, out / "X1c_depth_cdf_by_denominator.png")
     plt.close(fig)
     print(f"wrote {out / 'X1c_depth_cdf_by_denominator.png'}")
 
@@ -490,6 +490,7 @@ def main() -> None:
                         help="report/cdf: every passed tile (into <out-dir>/full) instead of the subset")
     parser.add_argument("--sf-bay-cdf", default=None, help="cdf: sf_bay_depth_cdf.csv of sf_bay_depth_reliability.py")
     args = parser.parse_args()
+    apply_style()
     {"stage0": stage0, "report": report, "cdf": cdf}[args.stage](args)
 
 

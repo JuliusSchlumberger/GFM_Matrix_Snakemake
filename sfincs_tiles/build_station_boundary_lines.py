@@ -64,7 +64,7 @@ from shapely.geometry import MultiLineString, Point, box
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from gfm_config import read_root, storm_tide_hydrograph_path, storm_tide_product_levels_path  # noqa: E402
+from gfm_config import read_figures_root, read_root, storm_tide_hydrograph_path, storm_tide_product_levels_path  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -96,7 +96,7 @@ from boundary_lines_geometry import (  # noqa: E402,F401
 from boundary_lines_plot import _plot  # noqa: E402
 
 
-def build_tile(root: Path, tile_dir: Path, out_dir: Path, buffer_deg: float, overwrite: bool,
+def build_tile(root: Path, tile_dir: Path, out_dir: Path, fig_dir: Path, buffer_deg: float, overwrite: bool,
                plot: str = "suitable", min_size_deg: float = 0.0, hydrograph_nc: Path | None = None,
                levels_nc: Path | None = None) -> dict:
     """Build one tile's boundary line, write {tile_id}.gpkg and return its summary row.
@@ -224,8 +224,8 @@ def build_tile(root: Path, tile_dir: Path, out_dir: Path, buffer_deg: float, ove
         row["status"] = "written"
 
     suitable = bool(row.get("suitable"))
-    fig_path = out_dir / ("figures" if suitable else "figures_unsuitable") / f"{tile_id}.png"
-    stale = out_dir / ("figures_unsuitable" if suitable else "figures") / f"{tile_id}.png"
+    fig_path = fig_dir / ("figures" if suitable else "figures_unsuitable") / f"{tile_id}.png"
+    stale = fig_dir / ("figures_unsuitable" if suitable else "figures") / f"{tile_id}.png"
     if plot == "all" or (plot == "suitable" and suitable):
         _plot(tile_id, tile_dir, gpkg, mask, bounds, tile, fig_path, row)
     for path in ([stale] if plot != "none" else []) + ([fig_path] if plot == "suitable" and not suitable else []):
@@ -255,12 +255,12 @@ def _running_marker(out_dir: Path, tile_id) -> Path:
 
 
 def _safe_build(args):
-    root, tile_dir, out_dir, buffer_deg, overwrite, plot, min_size_deg, hydrograph_nc, levels_nc = args
+    root, tile_dir, out_dir, fig_dir, buffer_deg, overwrite, plot, min_size_deg, hydrograph_nc, levels_nc = args
     marker = _running_marker(out_dir, tile_dir.name)
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(str(os.getpid()))  # tells the parent which tiles were in flight if this worker dies
     try:
-        row = build_tile(root, tile_dir, out_dir, buffer_deg, overwrite, plot, min_size_deg, hydrograph_nc,
+        row = build_tile(root, tile_dir, out_dir, fig_dir, buffer_deg, overwrite, plot, min_size_deg, hydrograph_nc,
                          levels_nc)
     except Exception as exc:  # one broken tile must not stop the batch
         row = {"tile_id": int(tile_dir.name), "status": f"error: {exc!r}",
@@ -368,6 +368,7 @@ def main() -> None:
     root = read_root(Path(args.config))
     base = root / args.base_dir_name
     out_dir = base / "boundary_lines"
+    fig_dir = read_figures_root(Path(args.config)) / "sfincs_runs" / args.base_dir_name / "boundary_lines"
     tiles_root = root / args.tiles_dir_name
     with open(args.config, encoding="utf-8") as f:
         bc = (yaml.safe_load(f) or {}).get("boundary_conditions", {})
@@ -397,7 +398,7 @@ def main() -> None:
 
     hydrograph_nc = storm_tide_hydrograph_path(Path(args.config))
     levels_nc = storm_tide_product_levels_path(Path(args.config))
-    jobs = [(root, d, out_dir, buffer_deg, args.overwrite, args.plot, min_size_deg, hydrograph_nc, levels_nc)
+    jobs = [(root, d, out_dir, fig_dir, buffer_deg, args.overwrite, args.plot, min_size_deg, hydrograph_nc, levels_nc)
             for d in tile_dirs]
     rows = _run_jobs(jobs, args.workers, out_dir)
     if rows:

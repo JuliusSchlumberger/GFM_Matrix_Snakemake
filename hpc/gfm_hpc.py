@@ -163,7 +163,8 @@ def cmd_studies(args) -> None:
     from config_utils import load_config
 
     config = _config_from(args)
-    study_root = Path(load_config(config)["paths"]["root"]) / args.study_dir_name
+    cfg = load_config(config)
+    study_root = Path(cfg["paths"]["root"]) / args.study_dir_name
     if args.action in STUDIES:
         import generate_calibration_batch_jobs as gen
         for source in args.source:
@@ -179,7 +180,7 @@ def cmd_studies(args) -> None:
                             args.profile_set), args)
     else:
         for source in args.source:
-            figs = study_root / "figures" / source
+            figs = Path(cfg["paths"]["figures_root"]) / "500_tiles" / source
             _python("calibration_studies/plot_sweep_calibration_bands.py", study_root / f"sweep_budget_{source}",
                     "--fig-dir", figs)
             _python("calibration_studies/plot_sweep_time_vs_size.py", study_root / f"sweep_budget_{source}",

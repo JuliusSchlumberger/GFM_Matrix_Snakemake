@@ -4,7 +4,6 @@ Entry point: `coastline_nodes`. The coastline is `flood_model.coastline_mask` on
 DeltaDTM mask tile, the definition the eikonal seeds use.
 """
 
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +12,7 @@ import rasterio
 
 from config_utils import retry_transient_io
 from flood_model import coastline_mask
+from process_pool import process_pool
 from tiles import _scan_mask_dir
 
 # The FES2022 grid step: the tide at a node is FES's, which does not resolve finer coastline detail.
@@ -43,7 +43,7 @@ def coastline_nodes(mask_dir: Path, ocean_code: int, river_code: int, workers: i
     Bins align with the 1-degree tile edges, so no node is split between tiles.
     """
     paths = sorted(_scan_mask_dir(mask_dir).values())
-    with ProcessPoolExecutor(workers) as pool:
+    with process_pool(workers) as pool:
         parts = list(pool.map(_tile_nodes, [(p, ocean_code, river_code) for p in paths], chunksize=8))
     lonlat = np.vstack(parts)
     return pd.DataFrame({"lon": lonlat[:, 0], "lat": lonlat[:, 1]})

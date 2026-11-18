@@ -48,7 +48,8 @@ steps:
     run: |
       cd "$R/calibration_500_tiles"
       rm -rf sweep_budget obstacle_coupling sweep_budget_landcover sweep_budget_uniform \
-             obstacle_coupling_landcover obstacle_coupling_uniform figures
+             obstacle_coupling_landcover obstacle_coupling_uniform
+      rm -rf "$R/figures/500_tiles"
       rm -f hpc_jobs/calib_*.sbatch hpc_jobs/submit_calib_*.sh hpc_jobs/logs/calib_*
 
   - id: studies_preprocess
@@ -82,6 +83,7 @@ steps:
     destructive: true
     run: |
       rm -rf "$R/calibration_roughness_SFINCS" "$R/calibration_roughness_SFINCS_dedup"
+      rm -rf "$R/figures/sfincs_runs/calibration_roughness_SFINCS" "$R/figures/sfincs_runs/calibration_roughness_SFINCS_dedup"
 
   - id: sfincs_sweep
     after: [production_preprocess, reset_sfincs]

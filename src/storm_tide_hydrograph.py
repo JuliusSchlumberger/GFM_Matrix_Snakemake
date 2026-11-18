@@ -25,8 +25,9 @@ MSL_WINDOW_HR = 8766  # 1 year
 SHAPE_MODES = ("per_rp", "pooled", "gaussian")
 HIGH_WATER_SEPARATION_HR = 6
 RP_WINDOW_FACTOR = 2.0
-RECORD_RP_YR = 50.0  # beyond the ~46-y GTSM record no event of that RP class exists
-LARGEST_EVENT_RP_YR = 20.0
+# Targets beyond the record's largest empirical RP take its LARGEST_EVENTS largest events; on a
+# 46-y record this is the validated selection (RP >= 50: the events of empirical RP >= 20)
+LARGEST_EVENTS = 2
 
 
 def fill_short_gaps(series: pd.Series, max_gap_hr: int = 3) -> pd.Series | None:
@@ -199,11 +200,13 @@ def annual_maximum_events(level: np.ndarray, years: np.ndarray, half_window_hr: 
 def rp_event_selection(rp_yr: np.ndarray, target_rp_yr: float) -> np.ndarray:
     """Indices of events whose empirical RP is within RP_WINDOW_FACTOR of the target RP.
 
-    Targets at or beyond RECORD_RP_YR take the events with RP >= LARGEST_EVENT_RP_YR: the
+    `rp_yr` holds every annual maximum of the record, so its largest value, n + 1, is the
+    record's largest empirical RP. Targets above it take the LARGEST_EVENTS largest events: the
     record holds nothing rarer, so the largest observed events give the shape.
     """
-    if target_rp_yr >= RECORD_RP_YR:
-        return np.flatnonzero(rp_yr >= LARGEST_EVENT_RP_YR)
+    rp_yr = np.asarray(rp_yr, dtype=float)
+    if target_rp_yr > rp_yr.max():
+        return np.argsort(rp_yr)[-LARGEST_EVENTS:]
     return np.flatnonzero((rp_yr > target_rp_yr / RP_WINDOW_FACTOR) & (rp_yr <= target_rp_yr * RP_WINDOW_FACTOR))
 
 

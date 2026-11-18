@@ -2,13 +2,13 @@
 
 Reads the tables written by the `boundary_test/` scripts (INPUT_ANALYSIS.md §10) from
 <out-dir>/ and <out-dir>/analysis/ (fig12-17: the level product in --product-dir),
-and writes figNN_*.png + figNN_*.txt into --dest. Figures carry no titles;
-everything a reader needs to decode them is in the description file.
+and writes figNN_*.png + figNN_*.txt into --dest (default: {paths.figures_root}/input_forcing_qa).
+Figures carry no titles; everything a reader needs to decode them is in the description file.
 
 Usage:
     python input_analysis/make_boundary_forcing_figures.py [--only fig01 fig07]
         [--out-dir .cleanup_baseline/level_sources] [--product-dir .cleanup_baseline/level_product]
-        [--dest input_analysis/boundary_forcing/figures]
+        [--dest <dir>]
 """
 
 import argparse
@@ -32,10 +32,12 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "boundary_test"))
 sys.path.insert(0, str(REPO / "analysis"))
-from _figure_style import LAND_COLOR, draw_caption_box, panel_letters  # noqa: E402
+from _figure_style import (  # noqa: E402
+    GRID, INK, LAND_COLOR, MUTED, apply_style, draw_caption_box, panel_letters, save_figure, style_axes_muted,
+)
+from config_utils import load_config  # noqa: E402
 from tide_prediction import VERSION_DIFF_M, VERSION_RATIO, version_flag  # noqa: E402
 from regions import ar6_regions  # noqa: E402
-from site_sets import GRID, INK, MUTED, _save, _style  # noqa: E402
 
 BLUE, ORANGE, GREEN = "#2a78d6", "#eb6834", "#1baf7a"
 RP_BINS = (0, 2, 5, 10, 20, 50)
@@ -83,10 +85,11 @@ def fig01_tide_scatter(out: Path, dest: Path) -> None:
         stats[label] = (ratio, mae, len(ok), int((q[col].isna()).sum()))
         draw_caption_box(ax, [f"median ratio {ratio:.2f}", f"MAE {mae:.3f} m", f"n = {len(ok)}"], loc="lower right")
         ax.set(xlim=(0, hi), ylim=(0, hi), xlabel="GESLA MHWS (m)", ylabel=f"{label} MHWS (m)", aspect="equal")
-        _style(ax)
+        style_axes_muted(ax)
         panel_letters(ax, letter)
     fig.tight_layout()
-    _save(fig, dest / "fig01_tide_mhws_scatter.png")
+    save_figure(fig, dest / "fig01_tide_mhws_scatter.png")
+    plt.close(fig)
     missing14 = ", ".join(q.site_name[q.fes2014__mhws_m.isna()])
     missing22 = ", ".join(q.site_name[q.fes_gauge__mhws_m.isna()]) or "none"
     describe(dest / "fig01_tide_mhws_scatter.png", f"""
@@ -138,7 +141,8 @@ def fig02_tide_ratio_maps(out: Path, dest: Path) -> None:
     cb.ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
     cb.set_ticks([1 / 1.5, 0.8, 1.0, 1.25, 1.5], labels=["0.67", "0.8", "1", "1.25", "1.5"])
     cb.set_label("MHWS ratio, source / GESLA")
-    _save(fig, dest / "fig02_tide_mhws_ratio_maps.png")
+    save_figure(fig, dest / "fig02_tide_mhws_ratio_maps.png")
+    plt.close(fig)
     describe(dest / "fig02_tide_mhws_ratio_maps.png", """
         The MHWS ratios of fig01 as maps (Equal Earth projection; land in grey). Each dot is one
         quality tide gauge; its colour is the ratio of the source's MHWS to the gauge's MHWS on a
@@ -169,9 +173,10 @@ def fig03_constituents(out: Path, dest: Path) -> None:
     ax.set_xticks(x, [k.upper() for k in order])
     ax.set(ylabel="amplitude ratio, source / GESLA")
     ax.legend(frameon=False, loc="upper left")
-    _style(ax)
+    style_axes_muted(ax)
     fig.tight_layout()
-    _save(fig, dest / "fig03_tide_constituent_ratios.png")
+    save_figure(fig, dest / "fig03_tide_constituent_ratios.png")
+    plt.close(fig)
     n = c[c.comparison == "gtsm_harm vs gesla_harm"].set_index("constituent").n
     describe(dest / "fig03_tide_constituent_ratios.png", f"""
         Amplitude of the main tidal constituents relative to the gauge, at the quality tide
@@ -222,12 +227,13 @@ def fig08_profiles_by_rp(out: Path, dest: Path) -> None:
                 ax.set_xlabel("hours from peak")
             if j == 0:
                 ax.set_ylabel("water level / peak")
-            _style(ax)
+            style_axes_muted(ax)
             panel_letters(ax, "abcd"[2 * i + j])
     handles, labels = axes[0, 0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=6, frameon=False, fontsize=8.5)
     fig.tight_layout(rect=(0, 0.05, 1, 1))
-    _save(fig, dest / "fig08_profiles_by_rp.png")
+    save_figure(fig, dest / "fig08_profiles_by_rp.png")
+    plt.close(fig)
     n_gesla = "; ".join(f"{_rp_label(rp)}: {counts[('gesla', 0, rp.right)]} / {counts[('gesla', 2, rp.right)]}"
                         for rp in ev.rp_class.cat.categories)
     describe(dest / "fig08_profiles_by_rp.png", f"""
@@ -333,7 +339,7 @@ def fig09_surge_by_rp(out: Path, dest: Path) -> None:
         ax.set(xlim=(-WINDOW_PLOT_HR, WINDOW_PLOT_HR), ylim=(-0.4, 1.05), xlabel="hours from surge maximum")
         if j == 0:
             ax.set_ylabel("surge / surge maximum")
-        _style(ax)
+        style_axes_muted(ax)
         panel_letters(ax, "ab"[j])
     ax = fig.add_subplot(gs[0, 2])
     pos, data, colors = [], [], []
@@ -352,14 +358,15 @@ def fig09_surge_by_rp(out: Path, dest: Path) -> None:
         ax.axhline(hg[1], color=GREEN, linestyle="--", linewidth=1.4)
     ax.set_xticks(range(len(cats)), [f"{iv.left:g}-{iv.right:g}" for iv in cats])
     ax.set(xlabel="empirical RP (y)", ylabel="surge duration above half its maximum (h)")
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "c")
     handles, labels = fig.axes[0].get_legend_handles_labels()
     handles += [plt.Line2D([], [], color=INK), plt.Line2D([], [], color=BLUE)]
     labels += ["GESLA (c)", "GTSM (c)"]
     fig.legend(handles, labels, loc="lower center", ncol=8, frameon=False, fontsize=8.5)
     fig.tight_layout(rect=(0, 0.08, 1, 1))
-    _save(fig, dest / "fig09_surge_by_rp.png")
+    save_figure(fig, dest / "fig09_surge_by_rp.png")
+    plt.close(fig)
     med = t.groupby(["source", "rp_class"], observed=True).dur50.median().unstack()
     n = t.groupby(["source", "rp_class"], observed=True).size().unstack()
     hg_text = (f"Dashed green: the surge part of COAST-HG's spring-tide RP100 hydrograph at {hg[2]} "
@@ -468,16 +475,17 @@ def fig07_coast_rp_regions(out: Path, dest: Path) -> None:
             tick.set_fontweight("bold")
     ax.set(xlim=(lo - pad, hi + pad), ylim=(ypos - 0.4, -0.6), xlabel="COAST-RP - gauge GEV (m)")
     ax.legend(frameon=False, loc="lower right", fontsize=8)
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "a")
     ax2 = fig.add_subplot(gs[0, 1], sharey=ax)
     ax2.barh(y, st.n, color=MUTED, height=0.6)
     ax2.set(xlabel="sites", xscale="log", xlim=(1, st.n.max() * 1.3))
     plt.setp(ax2.get_yticklabels(), visible=False)
-    _style(ax2)
+    style_axes_muted(ax2)
     panel_letters(ax2, "b")
     fig.subplots_adjust(left=0.2, right=0.98, bottom=0.65 / (0.25 * ypos + 1.4), top=1 - 0.45 / (0.25 * ypos + 1.4))
-    _save(fig, dest / "fig07_coast_rp_vs_gauges.png")
+    save_figure(fig, dest / "fig07_coast_rp_vs_gauges.png")
+    plt.close(fig)
     st.drop(columns="continent").round(3).to_csv(dest / "fig07_coast_rp_vs_gauges_data.csv")
     describe(dest / "fig07_coast_rp_vs_gauges.png", f"""
         COAST-RP storm-tide return levels against the tide gauges, by IPCC AR6 reference region
@@ -544,9 +552,10 @@ def fig04_fes_versions(out: Path, dest: Path) -> None:
     ax.plot(x, np.maximum(VERSION_RATIO * x, x + VERSION_DIFF_M), color=INK, linewidth=1, linestyle="--")
     ax.set(xlim=(0, hi), ylim=(0, hi), xlabel="FES2014 MHWS (m)", ylabel="FES2022 MHWS (m)", aspect="equal")
     ax.legend(frameon=False, loc="upper left", markerscale=1.5)
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "b")
-    _save(fig, dest / "fig04_fes2022_vs_fes2014.png")
+    save_figure(fig, dest / "fig04_fes2022_vs_fes2014.png")
+    plt.close(fig)
     describe(dest / "fig04_fes2022_vs_fes2014.png", f"""
         FES2022 against FES2014 at the {len(n):,} FES boundary nodes of the test tiles (the atlas
         grid nodes that seed the tiles' boundary cells). At every node both atlases are predicted
@@ -704,7 +713,8 @@ def fig05_basin_heads(out: Path, dest: Path) -> None:
     cax = fig.add_axes([0.3, 0.45 / fig_h, 0.4, 0.16 / fig_h])
     cb = fig.colorbar(sc, cax=cax, orientation="horizontal")
     cb.set_label("MHWS (m)")
-    _save(fig, dest / "fig05_fes_basin_heads.png")
+    save_figure(fig, dest / "fig05_fes_basin_heads.png")
+    plt.close(fig)
     names = "; ".join(s.split(":")[0] for s in summary)
     describe(dest / "fig05_fes_basin_heads.png", f"""
         MHWS (mean high water springs above local mean sea level) at the FES boundary nodes in the
@@ -780,7 +790,8 @@ def fig06_rule_sensitivity(out: Path, dest: Path) -> None:
     for ax, letter in zip(axes, "abc"):
         panel_letters(ax, letter)
     fig.tight_layout()
-    _save(fig, dest / "fig06_version_rule_sensitivity.png")
+    save_figure(fig, dest / "fig06_version_rule_sensitivity.png")
+    plt.close(fig)
     adopted = grid[(grid.ratio == VERSION_RATIO) & (grid.diff_m == VERSION_DIFF_M)].iloc[0]
     nodes_r1 = int(grid[(grid.ratio == 1.0) & (grid.diff_m == VERSION_DIFF_M)].nodes_replaced.iloc[0])
     band_lines = "; ".join(f"{idx} m: n={int(b.n)}, FES2014 closer at {b.fes2014_closer:.0%}, median gain "
@@ -875,12 +886,13 @@ def fig10_generator_acceptance(out: Path, dest: Path) -> None:
                 ax.set_xlabel("return period (y)")
             if j == 0:
                 ax.set_ylabel(ylab)
-            _style(ax)
+            style_axes_muted(ax)
             panel_letters(ax, "abcdefgh"[i * len(GEN_RANGES) + j])
     handles, labels = axes[0, 0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=6, frameon=False, fontsize=9)
     fig.tight_layout(rect=(0, 0.05, 1, 1))
-    _save(fig, dest / "fig10_generator_acceptance.png")
+    save_figure(fig, dest / "fig10_generator_acceptance.png")
+    plt.close(fig)
     passes = t.groupby("variant").pass_shape.sum().astype(int)
     cells = t.groupby("variant").size()
     n = t[t.variant == "generator_smooth"].groupby("range_class").n_sites.max()
@@ -940,7 +952,7 @@ def fig11_generator_profiles(out: Path, dest: Path) -> None:
                         label=label)
         ax.axhline(0, color=MUTED, linewidth=0.8)
         ax.set(xlim=(-WINDOW_PLOT_HR, WINDOW_PLOT_HR), ylim=(-1.0, 1.05))
-        _style(ax)
+        style_axes_muted(ax)
         panel_letters(ax, letter)
     for ax in axes[1]:
         ax.set_xlabel("hours from peak")
@@ -949,7 +961,8 @@ def fig11_generator_profiles(out: Path, dest: Path) -> None:
     handles, labels = axes[0, 1].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=4, frameon=False, fontsize=9)
     fig.tight_layout(rect=(0, 0.05, 1, 1))
-    _save(fig, dest / "fig11_generator_profiles.png")
+    save_figure(fig, dest / "fig11_generator_profiles.png")
+    plt.close(fig)
     describe(dest / "fig11_generator_profiles.png", """
         Median storm-tide hydrographs over the quality sites, normalised by their peak and
         centred on it (local mean sea level = 0): (a) spring range 0-1 m at RP 10, (b) 0-1 m at
@@ -1006,7 +1019,8 @@ def fig12_level_product_maps(product: Path, dest: Path) -> None:
         cb.ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
         cb.set_ticks(ticks, labels=ticklabels)
         cb.set_label(label)
-    _save(fig, dest / "fig12_level_product_maps.png")
+    save_figure(fig, dest / "fig12_level_product_maps.png")
+    plt.close(fig)
     describe(dest / "fig12_level_product_maps.png", f"""
         The level product (ii) at the {d.size:,} COAST-RP stations north of 60 S, the ones production
         uses (Equal Earth projection; land in grey). (a) RP100 level of the new product minus COAST-RP's total RP100
@@ -1050,13 +1064,14 @@ def fig13_level_product_by_rp(product: Path, dest: Path) -> None:
                xlim=(x[0] - 0.3, x[-1] + 0.3))
         ax.text(0.03, 0.97, f"{label} ({int(sel.sum()):,} stations)", transform=ax.transAxes, va="top",
                 fontsize=9, color=INK)
-        _style(ax)
+        style_axes_muted(ax)
         panel_letters(ax, letter)
     axes[0].set_ylabel("difference, median over stations (m)")
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=2, frameon=False, fontsize=9)
     fig.tight_layout(rect=(0, 0.1, 1, 1))
-    _save(fig, dest / "fig13_level_product_by_rp.png")
+    save_figure(fig, dest / "fig13_level_product_by_rp.png")
+    plt.close(fig)
     describe(dest / "fig13_level_product_by_rp.png", """
         The new level product against COAST-RP per return period, (a) at stations without a TC
         component in COAST-RP, (b) at stations with one. Lines are medians over stations of three
@@ -1093,12 +1108,13 @@ def fig14_level_product_gauges(product: Path, dest: Path) -> None:
             draw_caption_box(ax, lines, loc="lower right")
             ax.set(xlim=(0, hi), ylim=(0, hi), aspect="equal", xlabel=f"gauge RP{rp} (m)",
                    ylabel=f"{label} RP{rp} (m)")
-            _style(ax)
+            style_axes_muted(ax)
             panel_letters(ax, letter)
     handles, labels = axes[0, 0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=2, frameon=False, fontsize=9)
     fig.tight_layout(rect=(0, 0.04, 1, 1))
-    _save(fig, dest / "fig14_level_product_gauges.png")
+    save_figure(fig, dest / "fig14_level_product_gauges.png")
+    plt.close(fig)
     describe(dest / "fig14_level_product_gauges.png", f"""
         RP levels at the test 9 gauges that have a COAST-RP station within 25 km ({len(g)} gauges)
         against the gauge's own skew-surge convolution (gauge surge on the gauge tide, the reference
@@ -1130,14 +1146,15 @@ def fig15_level_product_hydrographs(product: Path, dest: Path) -> None:
         ax.text(0.02, 0.97, f"{name}\n{lev.loc[st, 'station_id']}, r = {lev.loc[st, 'r']:.2f}",
                 transform=ax.transAxes, va="top", fontsize=8.5, color=INK)
         ax.legend(frameon=False, fontsize=8, loc="upper right")
-        _style(ax)
+        style_axes_muted(ax)
         panel_letters(ax, letter)
     for ax in axes[1]:
         ax.set_xlabel("hours from peak")
     for ax in axes[:, 0]:
         ax.set_ylabel("water level above MSL (m)")
     fig.tight_layout()
-    _save(fig, dest / "fig15_level_product_hydrographs.png")
+    save_figure(fig, dest / "fig15_level_product_hydrographs.png")
+    plt.close(fig)
     describe(dest / "fig15_level_product_hydrographs.png", """
         Storm-tide hydrographs of the level product at four example stations (the COAST-RP station
         nearest each named place) for RP10, RP100 and RP1000, 10-min steps, ±72 h around the peak.
@@ -1174,7 +1191,7 @@ def fig16_station_interpolation(product: Path, dest: Path) -> None:
     ax.set(xscale="log", xticks=[2, 3, 5, 8, 15, 30], xticklabels=["2", "3", "5", "8", "15", "30"],
            xlabel="neighbours k", ylabel="RP100 leave-one-out MAE (cm)")
     ax.legend(frameon=False, fontsize=8)
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "a")
     ax = axes[1]
     x = np.arange(len(spacing))
@@ -1187,10 +1204,11 @@ def fig16_station_interpolation(product: Path, dest: Path) -> None:
     ax.set(xticks=x, xticklabels=labels, xlabel="distance to the nearest other station (km)",
            ylabel="RP100 leave-one-out MAE (cm)")
     ax.legend(frameon=False, fontsize=8)
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "b")
     fig.tight_layout()
-    _save(fig, dest / "fig16_station_interpolation.png")
+    save_figure(fig, dest / "fig16_station_interpolation.png")
+    plt.close(fig)
     describe(dest / "fig16_station_interpolation.png", f"""
         How well the level at a coastline cell can be interpolated from the stations around it,
         tested by leaving each station out and predicting its RP100 level (new product) from the
@@ -1226,7 +1244,7 @@ def fig17_level_product_qa(product: Path, dest: Path) -> None:
                    edgecolor=GREEN, s=50, zorder=3, label="high waters, prominent only")
         ax.text(0.01, 0.97, label, transform=ax.transAxes, va="top", fontsize=9, color=INK)
         ax.set(xlim=(hours[0], hours[-1]), ylabel="m above MSL")
-        _style(ax)
+        style_axes_muted(ax)
         panel_letters(ax, "ace"[row])
         ax = axes[row, 1]
         for name, color, text in (("old", MUTED, "before"), ("new", GREEN, "after")):
@@ -1234,7 +1252,7 @@ def fig17_level_product_qa(product: Path, dest: Path) -> None:
             ax.plot(np.arange(1, len(v) + 1), v, color=color, marker=".", linestyle="none", markersize=4,
                     label=f"{text} QA")
         ax.set(xscale="log", ylabel="skew surge (m)")
-        _style(ax)
+        style_axes_muted(ax)
         panel_letters(ax, "bdf"[row])
     axes[2, 0].set_xlabel("hours from the largest skew surge (before QA)")
     axes[2, 1].set_xlabel("rank")
@@ -1242,7 +1260,8 @@ def fig17_level_product_qa(product: Path, dest: Path) -> None:
     handles, labels = axes[0, 0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=5, frameon=False, fontsize=8)
     fig.tight_layout(rect=(0, 0.04, 1, 1))
-    _save(fig, dest / "fig17_level_product_qa.png")
+    save_figure(fig, dest / "fig17_level_product_qa.png")
+    plt.close(fig)
     describe(dest / "fig17_level_product_qa.png", """
         Two failure modes the level product's QA removes, and one it keeps, one station each. Left: the hourly
         FES tide (blue), GTSM-ERA5 surge residual (orange) and their sum (dotted) around the
@@ -1286,7 +1305,7 @@ def fig18_product_durations(product: Path, dest: Path) -> None:
                xlabel="spring tidal range (2 x MHWS, FES)", ylabel=f"median {label}")
         if j == 0:
             ax.legend(frameon=False, fontsize=8)
-        _style(ax)
+        style_axes_muted(ax)
         panel_letters(ax, "ab"[j])
     ratio = (d.rp100_t025_hr / d.coast_hg_t025_hr).replace([np.inf, 0], np.nan).dropna()
     ratio = ratio.iloc[np.argsort(np.abs(np.log(ratio.to_numpy())))]
@@ -1302,7 +1321,8 @@ def fig18_product_durations(product: Path, dest: Path) -> None:
     cb.set_ticks([0.25, 0.5, 1, 2, 4], labels=["1/4", "1/2", "1", "2", "4"])
     cb.set_label("T(0.25) at RP100, product / COAST-HG")
     fig.tight_layout()
-    _save(fig, dest / "fig18_product_durations.png")
+    save_figure(fig, dest / "fig18_product_durations.png")
+    plt.close(fig)
     med = {f"{k}_{m}": d[f"{k}_{m}"].median() for k, *_ in DURATION_SERIES for m in ("t025_hr", "t05_hr")}
     describe(dest / "fig18_product_durations.png", f"""
         Peak durations of the two hydrograph products at the {len(d):,} COAST-RP stations north of
@@ -1340,7 +1360,7 @@ def fig19_despike(product: Path, dest: Path) -> None:
         ax.axvline(m, color=MUTED, linestyle=":" if m != 2 else "--", linewidth=1)
     ax.set(xscale="log", yscale="log", xlabel="largest hourly change of the GTSM surge residual (m)",
            ylabel="stations")
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "a")
     ax = fig.add_subplot(grid[0, 1])
     counts = (1, 2, 3, 5, 10, 20)
@@ -1367,7 +1387,8 @@ def fig19_despike(product: Path, dest: Path) -> None:
     cb.set_label("hourly jumps > 1 m (orange rings: stations on COAST-RP levels)")
     panel_letters(ax, "c")
     fig.tight_layout()
-    _save(fig, dest / "fig19_despike.png")
+    save_figure(fig, dest / "fig19_despike.png")
+    plt.close(fig)
     n1 = int((d.jumps_gt_1m > 0).sum())
     describe(dest / "fig19_despike.png", f"""
         Jumps in the GTSM-ERA5 surge residual at the {len(d):,} stations north of 60 S (1979-2024,
@@ -1405,7 +1426,7 @@ def fig20_gpd_cap(product: Path, dest: Path) -> None:
         ax.axvline(c, color=ORANGE if c == 0.35 else MUTED, linestyle="--", linewidth=1)
     ax.set(xlabel="GPD shape (maximum likelihood)", ylabel="density")
     ax.legend(frameon=False, fontsize=8)
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "a")
     ax = axes[1]
     caps = list(dict.fromkeys(sc.level))
@@ -1418,7 +1439,7 @@ def fig20_gpd_cap(product: Path, dest: Path) -> None:
     ax.set(xticks=x, xticklabels=[c.replace(" (production)", "\n(production)") for c in caps], xlabel="shape cap",
            ylabel="RP100 station - gauge (cm)")
     ax.legend(frameon=False, fontsize=7, loc="center")
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "b")
     ax = axes[2]
     prod = st[st.cap == "0.35 (production)"].set_index("station")
@@ -1430,10 +1451,11 @@ def fig20_gpd_cap(product: Path, dest: Path) -> None:
     ax.set(xlabel="station GPD shape (maximum likelihood)", ylabel="RP1000 minus production (m)",
            ylim=(-3.5, 10.0))
     ax.legend(frameon=False, fontsize=8, markerscale=2)
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "c")
     fig.tight_layout()
-    _save(fig, dest / "fig20_gpd_cap.png")
+    save_figure(fig, dest / "fig20_gpd_cap.png")
+    plt.close(fig)
     m = sc[(sc.rp == 100) & (sc.gauges == "all")].set_index("level")
     n35 = int((lev.gpd_shape_mle > 0.35).sum())
     describe(dest / "fig20_gpd_cap.png", f"""
@@ -1473,10 +1495,11 @@ def fig21_tc_mask(product: Path, dest: Path) -> None:
         ax.title.set_fontsize(9)
         ax.invert_yaxis()
         ax.legend(frameon=False, fontsize=8)
-        _style(ax)
+        style_axes_muted(ax)
         panel_letters(ax, letter)
     fig.tight_layout()
-    _save(fig, dest / "fig21_tc_mask.png")
+    save_figure(fig, dest / "fig21_tc_mask.png")
+    plt.close(fig)
     s = sc[(sc.gauges == "TC-dominated gauges") & (sc.rp == 100)].set_index("level")
     describe(dest / "fig21_tc_mask.png", f"""
         A tropical-cyclone mask, tested and not used in production: at stations with a COAST-RP TC
@@ -1524,7 +1547,7 @@ def fig22_fes_rule(product: Path, dest: Path) -> None:
     ax.plot(lim, lim, color=MUTED, linewidth=0.8)
     ax.set(xlim=lim, ylim=(-1.5, 1.5), xlabel="FES2022 - gauge MHWS (m)", ylabel="FES2014 - gauge MHWS (m)")
     ax.legend(frameon=False, fontsize=8)
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "a")
     ax = axes[1]
     for flagged, marker, label in ((True, "o", "rule"), (False, "^", "grown to neighbours")):
@@ -1540,7 +1563,7 @@ def fig22_fes_rule(product: Path, dest: Path) -> None:
         ax.annotate(gauge.split("-")[0].replace("_", " "), (grp.gauge_mhws_m.iloc[0], grp.mhws_fes2022_m.max()),
                     fontsize=7, color=INK, xytext=(3, 3), textcoords="offset points")
     ax.legend(frameon=False, fontsize=7)
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "b")
     ax = axes[2]
     far = f[f.gauge_km > GUESS_NEAR_GAUGE_KM]
@@ -1550,10 +1573,11 @@ def fig22_fes_rule(product: Path, dest: Path) -> None:
     ax.set(xlabel="FES2014 MHWS (m)", ylabel="FES2022 MHWS (m)", title=f"{len(far)} stations without a gauge")
     ax.title.set_fontsize(9)
     ax.legend(frameon=False, fontsize=8)
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "c")
     fig.tight_layout()
-    _save(fig, dest / "fig22_fes_rule.png")
+    save_figure(fig, dest / "fig22_fes_rule.png")
+    plt.close(fig)
     n_rule, n_grown = int(f.rule_flag.sum()), int((~f.rule_flag).sum())
     describe(dest / "fig22_fes_rule.png", f"""
         The FES version rule (FES2014 where FES2022's MHWS exceeds it by a factor
@@ -1594,20 +1618,21 @@ def fig23_peak_offsets(product: Path, dest: Path) -> None:
     ax.set(xticks=np.arange(len(share)), xticklabels=share.index, xlabel="return period (y)",
            ylabel="hydrographs with the maximum off time 0 (%)")
     ax.legend(frameon=False, fontsize=8, title="tide (form factor)", title_fontsize=8)
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "a")
     ax = axes[1]
     ax.hist(off.offset_hr.clip(-60, 60), bins=np.arange(-60.5, 61, 1), color=BLUE)
     ax.set(xlabel="hours from time 0 to the maximum", ylabel="hydrographs")
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "b")
     ax = axes[2]
     ax.hist(off.excess_m.clip(0, 1.0), bins=50, color=BLUE)
     ax.set(xlabel="maximum minus the level at time 0 (m)", ylabel="hydrographs", yscale="log")
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "c")
     fig.tight_layout()
-    _save(fig, dest / "fig23_peak_offsets.png")
+    save_figure(fig, dest / "fig23_peak_offsets.png")
+    plt.close(fig)
     rp100 = p[p.rp == 100]
     describe(dest / "fig23_peak_offsets.png", f"""
         Hydrographs whose maximum is not at time 0, the high water the generator's surge is
@@ -1668,9 +1693,10 @@ def fig24_datum_terms(processed: Path, dest: Path) -> None:
     ax.axvline(0, color=MUTED, linewidth=0.8)
     ax.set(xlim=(-0.8, 0.8), xlabel="RP100 at SLR 0 (m)", ylabel="share of stations")
     ax.legend(frameon=False, fontsize=9, loc="upper left")
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "d")
-    _save(fig, dest / "fig24_datum_terms.png")
+    save_figure(fig, dest / "fig24_datum_terms.png")
+    plt.close(fig)
     q = t[["mdt", "offset", "level_change", "change"]].quantile([0.05, 0.5, 0.95])
     describe(dest / "fig24_datum_terms.png", f"""
         The terms that turn a storm-tide level (above local MSL) into the total level of the
@@ -1714,7 +1740,7 @@ def fig25_long_record(product: Path, dest: Path) -> None:
         ax.axhline(v, color=GRID, linewidth=0.8)
     ax.set(xlim=lim, ylim=lim, xlabel="GPD shape (MLE), 1979-2024", ylabel="GPD shape (MLE), 1950-2024")
     ax.legend(frameon=False, fontsize=8, markerscale=4)
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "a")
     ax = fig.add_subplot(grid[1])
     bins = np.linspace(-1.0, 1.0, 81)
@@ -1722,7 +1748,7 @@ def fig25_long_record(product: Path, dest: Path) -> None:
         ax.hist((d.long_rp1000_m - d.rp1000_m)[sel].clip(-1, 1), bins=bins, color=color, alpha=0.6, label=label)
     ax.set(xlabel="RP1000 level, 1950-2024 minus 1979-2024 (m; clipped at +-1)", ylabel="stations")
     ax.legend(frameon=False, fontsize=8)
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "b")
     ax = fig.add_subplot(grid[2], projection=MAP_PROJ)
     ratio = d.early_skew_rp10_m / d.late_skew_rp10_m
@@ -1734,7 +1760,8 @@ def fig25_long_record(product: Path, dest: Path) -> None:
     fig.colorbar(sc, ax=ax, shrink=0.8, label="skew-surge RP10, 1950-1978 / 1979-2024")
     panel_letters(ax, "c")
     fig.tight_layout()
-    _save(fig, dest / "fig25_long_record.png")
+    save_figure(fig, dest / "fig25_long_record.png")
+    plt.close(fig)
     a, b = d.gpd_shape_mle > 0.35, d.long_gpd_shape_mle > 0.35
     describe(dest / "fig25_long_record.png", f"""
         Every product station rebuilt on GTSM-ERA5 1950-2024 with the production method of the
@@ -1766,7 +1793,7 @@ def fig26_pooled_shape(product: Path, dest: Path) -> None:
     ax.set(xlabel="pooling radius (km; 0 = station alone)", ylabel="|shape 1950-2024 - shape 1979-2024|")
     ax.set_xticks(x, [str(r) for r in radii])
     ax.legend(frameon=False, fontsize=8)
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "a")
     ax = axes[1]
     for sel, color, label in ((~st.tc_part, MUTED, "no TC part"), (st.tc_part, ORANGE, "TC part")):
@@ -1776,7 +1803,7 @@ def fig26_pooled_shape(product: Path, dest: Path) -> None:
     ax.set(xlabel="pooling radius (km; 0 = station alone)", ylabel="stations with shape > 0.35 (1950-2024)")
     ax.set_xticks(x, [str(r) for r in radii])
     ax.legend(frameon=False, fontsize=8)
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "b")
     ax = axes[2]
     levels = sc.level.unique().tolist()
@@ -1788,10 +1815,11 @@ def fig26_pooled_shape(product: Path, dest: Path) -> None:
     ax.invert_yaxis()
     ax.set(xlabel="RP100 MAE against the gauges (m)", xlim=(0, 0.5))
     ax.legend(frameon=False, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.14), ncol=2)
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "c")
     fig.tight_layout()
-    _save(fig, dest / "fig26_pooled_shape.png")
+    save_figure(fig, dest / "fig26_pooled_shape.png")
+    plt.close(fig)
     describe(dest / "fig26_pooled_shape.png", f"""
         GPD shape pooled over neighbouring stations, on 1950-2024 with the IBTrACS mask (cycles within
         300 km and 24 h of a tropical storm >= 34 kt, or anywhere on a track with no wind on record,
@@ -1822,7 +1850,7 @@ def fig27_tide_correction(product: Path, dest: Path) -> None:
         ax.set(xscale="log", yscale="log", xlim=lim, ylim=lim, xlabel="gauge tide amplitude (m)",
                ylabel=f"{label} (m)")
         ax.legend(frameon=False, fontsize=8, markerscale=2, loc="upper left")
-        _style(ax)
+        style_axes_muted(ax)
         panel_letters(ax, letter)
     ax = axes[2]
     km = [10, 25, 50, 100, 200]
@@ -1835,10 +1863,11 @@ def fig27_tide_correction(product: Path, dest: Path) -> None:
     ax.set_xticks(km, [str(k) for k in km])
     ax.legend(frameon=False, fontsize=8, title="solid: corrected; dashed: current forcing;\ndotted: FES uncorrected",
               title_fontsize=7)
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "c")
     fig.tight_layout()
-    _save(fig, dest / "fig27_tide_correction.png")
+    save_figure(fig, dest / "fig27_tide_correction.png")
+    plt.close(fig)
     a = sc[sc.gauges == "all"].set_index("tide").mae_m
     describe(dest / "fig27_tide_correction.png", f"""
         FES tide against {len(gt)} usable coastal GESLA sites (first two years of each record,
@@ -1870,11 +1899,12 @@ def fig28_tile_interpolation(product: Path, dest: Path) -> None:
             ax.bar(x + (k - 1.5) * 0.2, mae, width=0.19, color=colors[k], label=label)
         ax.set_xticks(x, [f"{g}\n(n = {int(s.sum())})" for g, s in groups.items()], fontsize=8)
         ax.set(ylabel=f"RP{rp} MAE against the gauges (m)")
-        _style(ax)
+        style_axes_muted(ax)
         panel_letters(ax, letter)
     axes[0].legend(frameon=False, fontsize=8)
     fig.tight_layout()
-    _save(fig, dest / "fig28_tile_interpolation.png")
+    save_figure(fig, dest / "fig28_tile_interpolation.png")
+    plt.close(fig)
     describe(dest / "fig28_tile_interpolation.png", f"""
         Test 4, how the coastline level between stations is formed, at the {len(t)} ratio gauges.
         Current: inverse-distance weighting (k = 5, power 3) of the nearest stations' RP levels.
@@ -1933,7 +1963,8 @@ def fig29_level_uncertainty(product: Path, dest: Path) -> None:
     ax.set_global()
     ax.set_title("(f) largest component per 5-degree cell (most stations)", fontsize=9)
     ax.legend(frameon=False, fontsize=7, loc="upper left", bbox_to_anchor=(0.0, -0.02), ncol=2)
-    _save(fig, dest / "fig29_level_uncertainty.png")
+    save_figure(fig, dest / "fig29_level_uncertainty.png")
+    plt.close(fig)
     q = st[[f"{c}_m" for c in ("sampling_station", *UNCERTAINTY_COMPONENTS, "combined")]].quantile([0.5, 0.9]).round(3)
     share = st.dominant.value_counts(normalize=True).round(2)
     describe(dest / "fig29_level_uncertainty.png", f"""
@@ -1984,7 +2015,7 @@ def fig30_surge_accuracy(product: Path, dest: Path) -> None:
     ax.set_xticks(range(3), [f"{c}\n(n = {(g.station_class == c).sum()})" for c in classes])
     ax.set(ylabel="RP100 level - gauge (m): median, p10-p90")
     ax.legend(frameon=False, fontsize=8)
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "b")
     ax = fig.add_subplot(2, 2, 3)
     bins = np.linspace(-0.8, 0.8, 41)
@@ -1994,7 +2025,7 @@ def fig30_surge_accuracy(product: Path, dest: Path) -> None:
                 label=f"{label}: n {int(sel.sum())}, MAE {g.r_loo_err[sel].abs().mean():.2f}")
     ax.set(xlabel="r predicted without the gauge / gauge's r - 1", ylabel="gauges")
     ax.legend(frameon=False, fontsize=8)
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "c")
     ax = fig.add_subplot(2, 2, 4)
     size = g.groupby("region").size()
@@ -2010,10 +2041,11 @@ def fig30_surge_accuracy(product: Path, dest: Path) -> None:
     ax.set_yticks(y, [f"{r} ({size[r]})" for r in order], fontsize=7)
     ax.set(xlabel="RP100 level - gauge (m): median, p10-p90")
     ax.legend(frameon=False, fontsize=8)
-    _style(ax)
+    style_axes_muted(ax)
     panel_letters(ax, "d")
     fig.tight_layout()
-    _save(fig, dest / "fig30_surge_accuracy.png")
+    save_figure(fig, dest / "fig30_surge_accuracy.png")
+    plt.close(fig)
     r = g.ratio_fes
     describe(dest / "fig30_surge_accuracy.png", f"""
         Accuracy of the GTSM-ERA5 surge signal at the {len(g)} ratio gauges (>= 20 complete years since
@@ -2047,7 +2079,7 @@ def fig31_duration_uncertainty(product: Path, dest: Path) -> None:
         ax.set(ylabel=f"{label[f]}: relative (median, p10-p90)", ylim=(-1, 1.5))
         if n == 0:
             ax.legend(frameon=False, fontsize=7)
-        _style(ax)
+        style_axes_muted(ax)
         panel_letters(ax, "ab"[n])
     for n, f in enumerate(("t025", "t05")):
         ax = fig.add_subplot(2, 2, n + 3, projection=MAP_PROJ)
@@ -2059,7 +2091,8 @@ def fig31_duration_uncertainty(product: Path, dest: Path) -> None:
         fig.colorbar(sc, ax=ax, shrink=0.7, label=f"product RP100 / COAST-HG, {label[f]}")
         panel_letters(ax, "cd"[n])
     fig.tight_layout()
-    _save(fig, dest / "fig31_duration_uncertainty.png")
+    save_figure(fig, dest / "fig31_duration_uncertainty.png")
+    plt.close(fig)
     r2, r100 = d[d.rp == 2], d[d.rp == 100]
     describe(dest / "fig31_duration_uncertainty.png", f"""
         Uncertainty of the hydrograph durations T(0.25) and T(0.5): hours the level stays within 25% /
@@ -2089,17 +2122,20 @@ PRODUCT_FIGURES = {"fig12": fig12_level_product_maps, "fig13": fig13_level_produ
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--config", default=str(REPO / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--out-dir", default=str(REPO / ".cleanup_baseline" / "level_sources"))
-    parser.add_argument("--dest", default=str(REPO / "input_analysis" / "boundary_forcing" / "figures"))
+    parser.add_argument("--dest", default=None, help="default: {paths.figures_root}/input_forcing_qa")
     parser.add_argument("--product-dir", default=str(REPO / ".cleanup_baseline" / "level_product"))
     parser.add_argument("--processed-dir", default=None,
                         help="processed_inputs with the boundary_conditions files (fig24); default: product-dir's parent")
     parser.add_argument("--only", nargs="*", choices=sorted({**FIGURES, **PRODUCT_FIGURES, **PROCESSED_FIGURES}),
                         default=None)
     args = parser.parse_args()
-    out, dest = Path(args.out_dir), Path(args.dest)
+    out = Path(args.out_dir)
+    dest = Path(args.dest) if args.dest else Path(load_config(args.config)["paths"]["figures_root"]) / "input_forcing_qa"
     processed = Path(args.processed_dir) if args.processed_dir else Path(args.product_dir).parent
     dest.mkdir(parents=True, exist_ok=True)
+    apply_style()
     for name in args.only or {**FIGURES, **PRODUCT_FIGURES, **PROCESSED_FIGURES}:
         if name in FIGURES:
             FIGURES[name](out, dest)

@@ -10,7 +10,6 @@ Usage:
 """
 
 import argparse
-import os
 import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -26,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import _chunk_is_populated, _read_band, _read_band_and_transform, discover_chunk_ids  # noqa: E402
 from config_utils import get_data_catalog, load_config, merged_waterlevel_names, retry_transient_io  # noqa: E402
 from population_growth import load_ssp_growth_factors, interpolate_growth_factor  # noqa: E402
+from process_pool import available_cpus  # noqa: E402
 from validation import load_iso_lookup  # noqa: E402
 from analysis_figures import load_slr_trajectories  # noqa: E402
 from exposure_analysis import (                                 # noqa: E402
@@ -941,7 +941,7 @@ def main() -> None:
         for g_pct in growth_pct_labels
     ]
     n_tasks = len(ssp_tasks) + len(growth_tasks)
-    n_workers = max(1, min(os.cpu_count() or 1, max(n_tasks, 1)))
+    n_workers = max(1, min(available_cpus(), max(n_tasks, 1)))
     print(
         f"\nComputing AVOID / PROTECT + AVOID exposure: {len(avoid_units)} (variant, slr_intensity) units x "
         f"{len(ssps)} SSPs x {len(output_years)} years = {len(ssp_tasks)} SSP tasks, plus "

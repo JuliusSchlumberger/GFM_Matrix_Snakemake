@@ -29,15 +29,17 @@ from rasterio.warp import Resampling, reproject
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from calibration_paths import decode_waterdepth_cm, run_path  # noqa: E402
 from flood_agreement import WET_THRESHOLD_M  # noqa: E402
-from gfm_config import read_root  # noqa: E402
+from gfm_config import read_figures_root, read_root  # noqa: E402
 from sfincs_grid import active_on_subgrid  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analysis"))
 from _figure_style import (  # noqa: E402
-    AGREE_COLOR, A_ONLY_COLOR, B_ONLY_COLOR, LAND_COLOR, LAND_LABEL, WATER_COLOR, WATER_LABEL,
-    draw_caption_box, orient_north_up,
+    AGREE_COLOR, A_ONLY_COLOR, B_ONLY_COLOR, DOUBLE_COLUMN_MM, LAND_COLOR, LAND_LABEL, MM_PER_INCH, WATER_COLOR,
+    WATER_LABEL, apply_style, draw_caption_box, orient_north_up, panel_letters, save_figure, write_caption,
 )
+
+FIG_WIDTH_IN = DOUBLE_COLUMN_MM / MM_PER_INCH
 
 LAND_CODE = 0
 
@@ -121,23 +123,24 @@ def _caption_corner(cls: np.ma.MaskedArray, box_w: float = 0.5, box_h: float = 0
     return min(windows, key=lambda k: score(windows[k]))
 
 
-def _make_panel(worst, base_dir: Path, out_path: Path, run_key: str) -> None:
+def _make_panel(worst, base_dir: Path, out_path: Path, run_key: str, panel_title: str) -> None:
     if worst.empty:
         print(f"SKIP {out_path.name}: no eligible tile")
         return
     ncols = 3
     nrows = int(np.ceil(len(worst) / ncols))
-    fig, axes = plt.subplots(nrows, ncols, figsize=(4.5 * ncols, 4.5 * nrows))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(FIG_WIDTH_IN, FIG_WIDTH_IN / ncols * nrows + 0.4),
+                             layout="constrained")
     axes = np.atleast_2d(axes).reshape(nrows, ncols)
     cmap = ListedColormap(CATEGORY_COLORS)
 
-    for ax, row in zip(axes.flat, worst.itertuples()):
+    for letter_idx, (ax, row) in enumerate(zip(axes.flat, worst.itertuples())):
         tile_dir = base_dir / str(row.tile_id)
         cls = build_classification(tile_dir, run_key)
         ax.set_facecolor(OFF_DOMAIN_COLOR)
         corner = "upper left"
         if cls is None:
-            ax.text(0.5, 0.5, "no subgrid data", ha="center", va="center", transform=ax.transAxes)
+            ax.text(0.5, 0.5, "no subgrid data", ha="center", va="center", transform=ax.transAxes, fontsize=6.5)
         else:
             with rasterio.open(tile_dir / "sfincs_model" / "hmax_subgrid.tif") as src:
                 cls = orient_north_up(cls, src.transform)
@@ -146,8 +149,10 @@ def _make_panel(worst, base_dir: Path, out_path: Path, run_key: str) -> None:
             corner = _caption_corner(cls)
         ax.set_xticks([])
         ax.set_yticks([])
-        draw_caption_box(ax, [f"tile {row.tile_id}", f"CSI = {row.csi:.3f}", f"agree = {row.matched_km2:.1f} km²"],
-                         loc=corner, fontsize=13)
+        ax.set_box_aspect(1)
+        panel_letters(ax, "abcdefghijklmnopqrstuvwxyz"[letter_idx], fontsize=7)
+        draw_caption_box(ax, [f"tile {row.tile_id}", f"CSI = {row.csi:.3f}", f"agree = {row.matched_km2:.1f} km2"],
+                         loc=corner, fontsize=6.5)
 
     for ax in axes.flat[len(worst):]:
         ax.axis("off")
@@ -155,15 +160,22 @@ def _make_panel(worst, base_dir: Path, out_path: Path, run_key: str) -> None:
     legend_handles = [Patch(facecolor=c, edgecolor="grey", linewidth=0.5, label=l)
                        for c, l in zip(CATEGORY_COLORS, CATEGORY_LABELS)]
     legend_handles.append(Patch(facecolor=OFF_DOMAIN_COLOR, edgecolor="grey", linewidth=0.5, label=WATER_LABEL))
-    fig.legend(handles=legend_handles, loc="lower center", ncol=5, fontsize=12, bbox_to_anchor=(0.5, -0.02))
-    fig.tight_layout(rect=[0, 0.03, 1, 1])
+    fig.legend(handles=legend_handles, loc="lower center", ncol=5, fontsize=7, frameon=False,
+               bbox_to_anchor=(0.5, -0.04))
 
-    fig.savefig(out_path, dpi=170, bbox_inches="tight")
+    save_figure(fig, out_path)
     plt.close(fig)
+    write_caption(out_path, [
+        f"{panel_title}, run {run_key}: the {len(worst)} worst-CSI tiles (lowest extent agreement "
+        "with SFINCS), cropped to the disagreement area, SFINCS native subgrid.",
+        "Colour: land/water agreement category (legend). Each panel's box gives the tile id, CSI "
+        "and matched (agreement) area.",
+    ])
     print(f"Wrote {out_path}")
 
 
 def main() -> None:
+    apply_style()
     repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(repo_root / "snakemake_workflow" / "config" / "config.yml"))
@@ -183,7 +195,7 @@ def main() -> None:
 
     base_dir = read_root(Path(args.config)) / args.base_dir_name
     raster_dir = read_root(Path(args.config)) / (args.raster_base_dir_name or args.base_dir_name)
-    fig_dir = base_dir / "figures"
+    fig_dir = read_figures_root(Path(args.config)) / "sfincs_runs" / args.base_dir_name
     fig_dir.mkdir(parents=True, exist_ok=True)
     key = args.run_key
 
@@ -215,8 +227,10 @@ def main() -> None:
     selection[["panel", "rank", *cols]].to_csv(selection_path, index=False)
     print(f"Wrote {selection_path}")
 
-    _make_panel(sfincs_over, raster_dir, fig_dir / f"worst_tiles_panel_sfincs_overpredicts{sfx}.png", key)
-    _make_panel(eikonal_over, raster_dir, fig_dir / f"worst_tiles_panel_eikonal_overpredicts{sfx}.png", key)
+    _make_panel(sfincs_over, raster_dir, fig_dir / f"worst_tiles_panel_sfincs_overpredicts{sfx}.png", key,
+                "SFINCS over-predicting")
+    _make_panel(eikonal_over, raster_dir, fig_dir / f"worst_tiles_panel_eikonal_overpredicts{sfx}.png", key,
+                "Model over-predicting")
 
 
 if __name__ == "__main__":

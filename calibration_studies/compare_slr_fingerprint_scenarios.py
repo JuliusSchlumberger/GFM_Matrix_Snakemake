@@ -6,7 +6,7 @@ base / global_mean * T, so Pearson r does not depend on the target T.
 
 Reads, and on a cache miss writes, the same COAST-RP / SLR caches as
 preparation/prepare_boundary_conditions.py in `paths.processed_inputs_dir`.
-The figure goes to --out (default: the current directory).
+The figure goes to --out (default: {paths.figures_root}/500_tiles/).
 
 Usage:
     python calibration_studies/compare_slr_fingerprint_scenarios.py
@@ -30,8 +30,10 @@ import xarray as xr
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 sys.path.insert(0, str(_REPO_ROOT / "preparation"))
+sys.path.insert(0, str(_REPO_ROOT / "analysis"))
 from config_utils import get_data_catalog, load_config  # noqa: E402
 from prepare_boundary_conditions import compute_slr_fingerprints, preprocess_coastrp  # noqa: E402
+from _figure_style import apply_style, save_figure  # noqa: E402
 
 TARGET_SLR_M = 1.0  # plot units only; r is invariant to it
 
@@ -55,10 +57,13 @@ def main() -> None:
     parser.add_argument("--scenario-a", default="ssp126", help="options: ssp119/ssp126/ssp245/ssp370/ssp585")
     parser.add_argument("--scenario-b", default="ssp245")
     parser.add_argument("--confidence", default=None, help="default: boundary_conditions.confidence_level from config")
-    parser.add_argument("--out", default="slr_fingerprint_scenario_comparison.png")
+    parser.add_argument("--out", default=None, help="default: {paths.figures_root}/500_tiles/slr_fingerprint_scenario_comparison.png")
     args = parser.parse_args()
+    apply_style()
 
     cfg = load_config(Path(args.config))
+    out_path = Path(args.out) if args.out else Path(cfg["paths"]["figures_root"]) / "500_tiles" / "slr_fingerprint_scenario_comparison.png"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     wl_cfg = cfg["boundary_conditions"]
     confidence = args.confidence or wl_cfg.get("confidence_level", "medium")
 
@@ -105,9 +110,9 @@ def main() -> None:
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
-    fig.savefig(args.out, dpi=170)
+    save_figure(fig, out_path)
     plt.close(fig)
-    print(f"\nWrote {args.out}")
+    print(f"\nWrote {out_path}")
 
 
 if __name__ == "__main__":

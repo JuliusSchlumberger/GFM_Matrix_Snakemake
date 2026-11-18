@@ -397,6 +397,26 @@ Open:
     higher than the centre one; median excess 1.6 cm, 99% < 21 cm. Kept: the maximum is the RP
     level, which is what SFINCS and B use; recentring the window on the maximum would only be
     cosmetic.
+- **Storm-tide product: external review (`<data_root>/inputs/Storm-tide product review.md`).**
+  Plan; each phase is one session, decisions wait on phase 1.
+  0. Code and brief done (failed stations marked and counted, NaN-aware `running_mean`, event
+     selection relative to the record). Build A = the `product` step of `hpc/plans/hydrax_rerun.yml`
+     on Hydrax (overwrites the 11-07 product and WL_scenarios; the 11-07 build is kept in
+     `.cleanup_baseline/storm_tide_product`). Never build locally while it runs: shared cache.
+     Phase 0 is on Hydrax (1b3fc5a); it is in build A only if the product job started after the
+     pull: `hydrograph_info.parquet` n_events at RP1000 is 2 everywhere with it, 3+ without.
+  1. Rescore build A: align `level_product_gauges.GaugeCheck` with production (1950-2024, mask,
+     pooled shape, basin shift, tide correction, r left out); 618-gauge levels and 698-gauge
+     hydrographs (`generator_validation.py`), by region and tidal class.
+  2. Cached-data diagnostics (new `open_guesses.py` stages): r vs S10 and vs independent
+     covariates (GTSM point depth, shelf width, tidal range) + LOO of the fallback options; r at
+     RP2/10/50 at long gauges; steric seasonal gap at ~50 gauges (gauge monthly climatology vs
+     FES Sa+Ssa vs GTSM); mask loss (annual maxima masked, ET track points) and despike loss near
+     tracks; TC shift bootstrap per basin from `tc_shift_gauges.parquet`; GPD by HW-height tertile.
+  3. Decisions from 2, then build B and rescore against A by region.
+  4. Node hydrographs / T tables for correction B (head in m, not x·peak) and node levels at the
+     SFINCS boundary; test one Fundy tile against GeoNB.
+  5. National design levels (WBI, CFB, Daigle 2020) in the level validation, if data available.
 - **Per-RP hydrograph generator** (`src/storm_tide_hydrograph.rp_hydrograph`, generator_smooth;
   INPUT_ANALYSIS.md §8.3): its flood volume behind the test 11 sills is within 10% of real events
   at RP 2 and 10, although it falls short on overflow above 0.9 x peak (-20 to -40% on 2-4 m and
@@ -404,6 +424,8 @@ Open:
   volume); the low microtidal troughs belong to GTSM's surge deficit (test 9). Against COAST-HG
   (fig18) its peaks are 2-4x wider (median T(0.25) 12 vs 6 h at RP100), which lowers B's
   multiplier.
+  - Validated on 1979-2024; production takes annual maxima from 1950-2024: rescore in the review
+    plan's phase 1.
 - **FES version rule** (decided, INPUT_ANALYSIS.md test 6, §8.2): FES2014 replaces FES2022 where
   the two atlases' MHWS differ by the ratio and minimum difference of
   `tide_prediction.version_flag`; it reaches production through the product's levels. How far a
@@ -485,6 +507,26 @@ Open:
   calibrated `duration_refit.py`/`friction_scale_factor` values (§2.2/§2.4), so needs a deliberate
   decision, not a silent code change.
 
+- **Review `compute_calibration_result_dedup.py` and `calibration_roughness_SFINCS_dedup`,
+  potentially remove them altogether.** `sfincs_tiles/select_calibration_tiles.py select` now
+  drops a candidate tile if it overlaps an already-selected tile (its buffered
+  `domain_tiles_global.gpkg` polygon intersects one already picked), so a *future* selection run
+  needs no post-hoc dedup - this was the whole point of the dedup step (correcting the ~1.237x
+  double-counting from the hop=0 coastal buffer / forced-split overlap pad). The *existing*
+  `calibration_roughness_SFINCS` selection (1000 tiles, already run, real overlapping results)
+  still needs it - it was drawn before this change. Once a fresh non-overlapping selection has
+  been drawn and run for real (see below - only 784 of 2088 eligible tiles are mutually
+  non-overlapping, well short of the old 1000 target), decide whether to keep
+  `compute_calibration_result_dedup.py`/`sfincs_grid.build_tile_tree`/`core_mask`/the
+  `_dedup` base-dir convention around for old data, or delete them (git keeps the history).
+
+- **Re-running `select_calibration_tiles.py select` with the new overlap criterion only yields
+  784 non-overlapping tiles from the current 2088 eligible (down from the 1000-tile target)** -
+  a real coverage drop from avoiding overlap at selection time, not a bug. Needs a decision: run
+  with fewer tiles, loosen some upstream filter to grow the eligible pool first, or accept a
+  partial dedup-free set alongside the existing overlapping one. Not resolved; no fresh selection
+  has been run for real yet.
+
 ## Figures needing a pass under the new "Figures (deliverables)" rules
 
 - **`docs/flood_variant_comparison.png` reconciled with the global `CLAUDE.md`'s "Figures
@@ -509,6 +551,36 @@ Open:
   `pytest -m "not needs_data"` both pass. `add_land` (same CLAUDE.md line, "maps always show
   land in light grey") still doesn't exist - no map figure currently calls it;
   `LAND_COLOR`/`draw_caption_box` cover the same convention by hand today.
+
+- **`MEASURE_COLORS` (`plot_timeseries.py`, `plot_extended_pathways.py`) vs
+  `MEASURE_PAIR_COLORS` (`plot_custom_pathways.py`) give the same measure name a different
+  hue** ("avoid" is green in one, blue in the other) - `MEASURE_PAIR_COLORS` deliberately
+  frees up small/large intensity as a second colour dimension, so reconciling the two needs
+  a decision (merge the hues, or accept two measure-colour identities for two different
+  figure families), not a mechanical fix. Documented as an open comment in
+  `_figure_style.py`; not resolved.
+
+- **`boundary_test/site_sets.py` still defines its own `GRID`/`INK`/`MUTED`/`_style`/`_save`**,
+  now duplicating `_figure_style.py`'s `GRID`/`INK`/`MUTED`/`style_axes_muted`/`save_figure`
+  (the latter gained `_save`'s Windows-retry-on-OSError loop).
+  `input_analysis/make_boundary_forcing_figures.py` was switched over to the `_figure_style`
+  versions; `boundary_test/msl_sensitivity.py` still imports the local ones. `boundary_test/`
+  is a separate sub-tool, out of scope for this pass - left as-is, not reconciled.
+
+- **`sfincs_tiles/plot_validation_results.py` (7 figures), `plot_worst_tiles_panel.py` (2),
+  `plot_depth_accuracy.py` (1) were brought up to the figure rules (180 mm, `panel_letters`,
+  `write_caption`, frameless legends, shared colour scales/axis limits, `RdYlGn` -> viridis
+  for CSI) and verified with synthetic data matching their real input schema, but the real
+  production PNGs under `<data_root>/figures/sfincs_runs/calibration_roughness_SFINCS{,_dedup}/`
+  are still the stale October renders** - `compute_variant_metrics.py` (needed to rebuild the
+  missing `variant_runs_{per_tile,pooled}.csv`/`variant_selection.json`/
+  `variant_runs_depth_accuracy.csv`) fails: the per-tile `calibration_result.json` files on
+  this data root store results directly under `eikonal`/`bathtub` keys, not the `runs: {run_key:
+  {...}}` structure `run_tables`/`pooled_depth_joint` now expect - an old schema, from before
+  some since-unidentified refactor. Regenerating the real figures needs either a schema
+  migration or an actual model rerun on these ~1000 tiles; out of scope for a figure-styling
+  pass. `select_calibration_tiles.py`'s 2 figures, by contrast, *were* regenerated for real
+  (their inputs - `tile_selection.gpkg`, `candidates/candidate_funnel.csv` - are current).
 
 ## Known behaviour
 
