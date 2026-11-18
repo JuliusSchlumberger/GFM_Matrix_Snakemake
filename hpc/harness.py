@@ -288,7 +288,9 @@ def job_script(plan: dict, step: dict) -> Path:
     lines = ["#!/bin/bash", f"#SBATCH --job-name=h_{step['id']}", f"#SBATCH --output={logs}/{step['id']}_%j.out",
              f"#SBATCH --error={logs}/{step['id']}_%j.err"]
     lines += [f"#SBATCH --{k.replace('_', '-')}={v}" for k, v in job.items()]
-    lines += ["set -eo pipefail", plan.get("preamble", ""), step["run"]]
+    # As src/hpc_common.THREAD_ENV: one BLAS/OpenMP thread per process.
+    lines += ["set -eo pipefail", "export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMBA_NUM_THREADS=1",
+              plan.get("preamble", ""), step["run"]]
     path = plan["state_dir"] / "steps" / f"{step['id']}.sbatch"
     path.write_text("\n".join(lines) + "\n")
     return path

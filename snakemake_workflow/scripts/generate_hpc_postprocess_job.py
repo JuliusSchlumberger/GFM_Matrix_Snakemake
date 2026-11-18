@@ -38,7 +38,6 @@ from hpc_common import (  # noqa: E402
     even_split,
     lpt_pack,
     read_targets_lines,
-    resolve_profile,
     tile_grid_override_lines,
 )
 from generate_hpc_exposure_jobs import add_exposure_jobs, add_exposure_resume_jobs  # noqa: E402
@@ -96,7 +95,6 @@ def _add_batches(chain: JobChain, linux_code_root: str, phase_name: str, batches
 
     The staged resolved_config.yml makes the compute node's Snakefile parse see this dispatch's config.
     """
-    cores = resolve_profile(chain.hpc_cfg, "postprocess")["cpus_per_task"]
     names = []
     for i, batch_targets in enumerate(batches):
         name = f"postprocess_{phase_name}_batch_{i:03d}"
@@ -113,7 +111,7 @@ def _add_batches(chain: JobChain, linux_code_root: str, phase_name: str, batches
             *read_targets_lines("TARGETS", f"{chain.linux_dir}/{name}_targets.txt"),
             # --rerun-incomplete: redo outputs a killed earlier job left flagged incomplete
             # instead of aborting the batch.
-            f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry {SNAKEMAKE} --cores {cores} --nolock '
+            f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry {SNAKEMAKE} --cores "$SLURM_CPUS_PER_TASK" --nolock '
             '--rerun-triggers=mtime --rerun-incomplete "${TARGETS[@]}"',
         ], after=after, helpers=("retry", "stage_config", "stage_tile_grid"))
         names.append(name)

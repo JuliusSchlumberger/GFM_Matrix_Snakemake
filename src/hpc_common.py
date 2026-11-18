@@ -7,6 +7,9 @@ import posixpath
 from pathlib import Path
 
 PROFILE_FIELDS = ("partition", "account", "time", "mem", "cpus_per_task")
+# A job's parallelism is its processes (process_pool.available_cpus); one BLAS/OpenMP thread each
+# keeps N processes on N cores. SFINCS sets its own OMP_NUM_THREADS (run_final_tile.sh).
+THREAD_ENV = "export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMBA_NUM_THREADS=1"
 SNAKEMAKE = '"$GFM_PY" -m snakemake'
 
 
@@ -63,7 +66,7 @@ def env_lines(hpc_cfg: dict, env: str = "gfm") -> list[str]:
     if python.get("sfincs"):
         lines.append(f'export SFINCS_PY="{python["sfincs"]}"')
     lines.append(f'export PATH="{posixpath.dirname(python[env])}:$PATH"')
-    return lines + list(hpc_cfg.get("job_env") or [])
+    return lines + [THREAD_ENV, *(hpc_cfg.get("job_env") or [])]
 
 
 def job_lines(

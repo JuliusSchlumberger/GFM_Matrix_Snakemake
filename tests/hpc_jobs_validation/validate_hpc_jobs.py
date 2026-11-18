@@ -18,6 +18,7 @@ import generate_hpc_exposure_jobs as exposure  # noqa: E402
 import generate_hpc_postprocess_job as post  # noqa: E402
 import generate_hpc_preprocess_job as pre  # noqa: E402
 import generate_hpc_simulation_jobs as sim  # noqa: E402
+from hpc_common import THREAD_ENV  # noqa: E402
 
 JOBS_DIR = "model_outputs_v2/hpc_jobs"
 
@@ -47,6 +48,8 @@ def test_preprocess_batches_then_checked_dispatch(tmp_path) -> None:
     assert dispatch.index("check-targets") < dispatch.index("run simulate")
     assert submit.endswith("/submit_preprocess_and_dispatch.sh")
     assert '"$GFM_PY" -m snakemake' in (d / "submit_preprocess_and_dispatch.sh").read_text()
+    batch = (d / "preprocess_batch_000.sbatch").read_text()
+    assert '--cores "$SLURM_CPUS_PER_TASK"' in batch and THREAD_ENV in batch
 
 
 def test_preprocess_only_and_fuse(tmp_path) -> None:
@@ -74,6 +77,8 @@ def test_simulation_waves_keep_whole_tiles_in_order(tmp_path) -> None:
     assert jobs["wave0_batch_000"]["after"] == []
     assert jobs["wave1_batch_000"]["after"] == ["wave0_batch_000", "wave0_batch_001"]
     assert jobs["gfm_generate_postprocess_and_dispatch"]["after"] == [n for n in jobs if n.startswith("wave")]
+    wave = (d / "wave0_batch_000.sbatch").read_text()
+    assert "--workers" not in wave and THREAD_ENV in wave  # run_simulation_batch.py reads the job's cores
 
 
 def test_simulation_resume_and_tiers(tmp_path) -> None:
@@ -140,6 +145,7 @@ def test_sfincs_stage2_lpt_and_post(tmp_path) -> None:
     assert jobs["cal_post_sweep"]["after"] == ["cal_final_000", "cal_final_001"]
     assert jobs["cal_post_sweep"]["mem"] == "120G"
     final = (out / "final_000.sbatch").read_text()
+    assert "SFINCS_THREADS" not in final and THREAD_ENV in final  # run_final_tile.sh: the job's cores
     for var in ("GFM_DATA_ROOT", "GFM_CODE_ROOT", "CONTAINER_CMD", "SFINCS_IMAGE", "SFINCS_TIMEOUT_S"):
         assert f"export {var}=" in final
 

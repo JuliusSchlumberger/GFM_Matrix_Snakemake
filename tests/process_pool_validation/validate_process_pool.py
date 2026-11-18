@@ -18,6 +18,11 @@ def test_available_cpus_is_positive() -> None:
     assert available_cpus() >= 1
 
 
+def test_available_cpus_is_the_slurm_allocation(monkeypatch) -> None:
+    monkeypatch.setenv("SLURM_CPUS_PER_TASK", "3")
+    assert available_cpus() == 3
+
+
 def test_pool_workers_run_one_blas_thread() -> None:
     with process_pool(2) as pool:
         per_task = list(pool.map(_blas_threads, range(4)))

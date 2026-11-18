@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config_utils import atomic_write, load_config, load_hpc_config, merged_waterlevel_names, retry_transient_io  # noqa: E402
 from hpc_common import (  # noqa: E402
-    JobChain, add_profile_set_argument, apply_profile_sets, even_split, resolve_profile, tile_grid_override_lines,
+    JobChain, add_profile_set_argument, apply_profile_sets, even_split, tile_grid_override_lines,
 )
 
 
@@ -137,7 +137,6 @@ def generate(config_path: str | Path, *, resume: bool = False, profile_sets: lis
         if hpc_cfg.get("wave_tiers"):
             tier = _resolve_wave_tier(wave, hpc_cfg["wave_tiers"])
             resources = {k: tier[k] for k in ("partition", "cpus_per_task", "mem", "time")}
-        workers = resolve_profile(hpc_cfg, "simulate", resources)["cpus_per_task"]
         body = [
             f'FAIL_LOG="{linux_jobs_dir}/logs/{name}_failures.txt"',
             ': > "$FAIL_LOG"',
@@ -148,7 +147,6 @@ def generate(config_path: str | Path, *, resume: bool = False, profile_sets: lis
             f'"$GFM_PY" "{code_root}/snakemake_workflow/scripts/run_simulation_batch.py" \\',
             f'  --triples-file "{linux_jobs_dir}/{name}_triples.csv" \\',
             '  --config "$LOCAL_CONFIGFILE" \\',
-            f"  --workers {workers} \\",
             '  --fail-log "$FAIL_LOG"',
         ]
         # Not -e: one failed (tile, rp, slr) must not abort the rest of this node's batch, so
@@ -156,7 +154,7 @@ def generate(config_path: str | Path, *, resume: bool = False, profile_sets: lis
         chain.add(name, "simulate", body, after=prev_wave, resources=resources, errexit=False,
                   helpers=("stage_config", "stage_tile_grid"))
         this_wave.append(name)
-        print(f"  {name}: {len(items)} item(s), {workers}-way concurrent")
+        print(f"  {name}: {len(items)} item(s), {chain.jobs[-1]['cpus_per_task']}-way concurrent")
 
     # The postprocessing chain is generated once every wave has ended; its generator must get this
     # dispatch's config, or a scenario run would postprocess production's outputs.

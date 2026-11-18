@@ -87,7 +87,6 @@ def cmd_stage1(args) -> str:
     lb = f"{linux_config['paths']['root']}/{args.base_dir_name}"
     common = f"--config {lb}/resolved_config.yml --base-dir-name {args.base_dir_name}"
     chain = _chain(linux_config, base / "hpc_jobs_stage1", f"{lb}/hpc_jobs_stage1")
-    cpus = chain_cpus(linux_config, "sfincs_stage1")
     # No -e: a job's later steps still run after an earlier one partly failed (the pre-flight
     # after tiles errored in the line build). Steps the rest cannot do without end in `|| exit 1`.
     for k in range(args.n_jobs):
@@ -98,7 +97,7 @@ def cmd_stage1(args) -> str:
             f"# {n} candidate tile(s): screen -> boundary lines -> SFINCS mask pre-flight",
             f'"$GFM_PY" select_calibration_tiles.py screen {common} --tile-ids-file {shard} --out-ids {screened} || exit 1',
             f'"$GFM_PY" build_station_boundary_lines.py {common} --tiles-dir-name model_outputs '
-            f"--tile-ids-file {screened} --workers {cpus} --skip-existing --plot all",
+            f"--tile-ids-file {screened} --skip-existing --plot all",
             f'"$SFINCS_PY" preflight_sfincs_mask.py {common} --tiles-dir-name model_outputs '
             f"--tile-ids-file {screened} --skip-existing",
         ], filename=f"stage1_{k:03d}.sbatch", resources={"time": _slurm_hours(args.stage1_hours)}, errexit=False)
@@ -116,12 +115,6 @@ def cmd_stage1(args) -> str:
     return submit
 
 
-def chain_cpus(linux_config: dict, profile: str) -> int:
-    from hpc_common import resolve_profile
-
-    return resolve_profile(linux_config["hpc"], profile)["cpus_per_task"]
-
-
 def _add_post_job(chain, linux_config: dict, base_dir_name: str, dedup_dir_name: str, phase: str,
                   after: list[str]) -> str:
     """Add the post job of a phase: analysis (variant_selection.json), dedup, dedup analysis.
@@ -130,14 +123,13 @@ def _add_post_job(chain, linux_config: dict, base_dir_name: str, dedup_dir_name:
     which ends the job when it fails.
     """
     cfg = f"{linux_config['paths']['root']}/{base_dir_name}/resolved_config.yml"
-    workers = chain_cpus(linux_config, "sfincs_post")
     name = f"cal_post_{phase}"
     chain.add(name, "sfincs_post", [
         f'cd "{linux_config["paths"]["code_root"]}/sfincs_tiles" || exit 1',
         f'"$GFM_PY" check_calibration_progress.py --config {cfg} --base-dir-name {base_dir_name}',
         f'"$GFM_PY" run_calibration_sweep_analysis.py --config {cfg} --base-dir-name {base_dir_name}',
         f'"$SFINCS_PY" compute_calibration_result_dedup.py --config {cfg} --base-dir-name {base_dir_name} '
-        f"--out-dir-name {dedup_dir_name} --workers {workers} || exit 1",
+        f"--out-dir-name {dedup_dir_name} || exit 1",
         f'"$GFM_PY" run_calibration_sweep_analysis.py --config {cfg} --base-dir-name {dedup_dir_name} '
         f"--raster-base-dir-name {base_dir_name}",
     ], after=after, filename=f"post_models_{phase}.sbatch", errexit=False)
@@ -177,7 +169,6 @@ def cmd_stage2(args) -> str | None:
     exports = {"GFM_DATA_ROOT": linux_config["paths"]["root"], "GFM_CODE_ROOT": linux_config["paths"]["code_root"],
                "CONTAINER_CMD": hpc["container"]["cmd"], "SFINCS_IMAGE": hpc["container"]["sfincs_image"],
                "SFINCS_TIMEOUT_S": hpc["sfincs_timeout_s"]}
-    threads = chain_cpus(linux_config, "sfincs_tile")
     loads = []
     for j, tids in enumerate(lpt_pack(est, min(args.n_jobs, len(est)))):
         load = sum(est[t] for t in tids)
@@ -190,7 +181,7 @@ def cmd_stage2(args) -> str | None:
             f"# {len(tids)} tile(s), estimated {load / 60:.1f} h (generate_calibration_jobs.py stage2)",
             "while read -r TILE; do",
             '  [ -n "$TILE" ] || continue',
-            f"  BASE_DIR_NAME={args.base_dir_name} SFINCS_THREADS={threads} CAL_PHASE={args.phase} "
+            f"  BASE_DIR_NAME={args.base_dir_name} CAL_PHASE={args.phase} "
             f'bash {linux_config["paths"]["code_root"]}/sfincs_tiles/run_final_tile.sh "$TILE" </dev/null',
             f"done < {lout}/tiles_{j:03d}.txt",
         ], filename=f"final_{j:03d}.sbatch", resources={"time": _slurm_hours(hours)}, errexit=False,

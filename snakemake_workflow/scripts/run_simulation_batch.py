@@ -25,6 +25,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+from process_pool import available_cpus  # noqa: E402
+
 RUNNER = Path(__file__).resolve().parent / "run_eikonal_cli.py"
 
 
@@ -51,7 +54,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--triples-file", required=True, help="CSV, no header: tile_id,return_period,waterlevel_name per line")
     parser.add_argument("--config", required=True, help="path to a fully-resolved config.yml (e.g. resolved_config.yml)")
-    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--workers", type=int, default=None, help="default: every core this process may use (the job's allocation)")
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--fail-log", default=None, help="path to append 'tile_id rp slr' lines for any failed triple")
     parser.add_argument(
@@ -61,6 +64,7 @@ def main() -> None:
              "slowest real solve this batch's tiles need, not just the median case.",
     )
     args = parser.parse_args()
+    args.workers = args.workers or available_cpus()
 
     triples: list[tuple[str, str, str]] = []
     with open(args.triples_file, newline="", encoding="utf-8") as f:

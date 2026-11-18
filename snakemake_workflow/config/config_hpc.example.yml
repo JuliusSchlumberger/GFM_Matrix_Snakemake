@@ -45,6 +45,8 @@ hpc:
     flood_totals: {partition: "24vcpu", cpus_per_task: 24, mem: "32G"}
     study_figures: {partition: "4vcpu", cpus_per_task: 4, mem: "30G", time: "0-04:00:00"}
     validation: {partition: "4vcpu", cpus_per_task: 4, mem: "30G", time: "2-00:00:00"}
+    # Measured at 4 workers: ~5 GB main process + ~3 GB per worker; the rest of SLURM's 70 GB was
+    # file cache. 16 workers: ~55 GB resident.
     product: {partition: "16vcpu", cpus_per_task: 16, mem: "120G", time: "2-00:00:00"}
 
   # Sized for ~0.6 min/solve and the 4504-tile grid (hop 0: 3761 tiles, hop 1/2: 462+139);

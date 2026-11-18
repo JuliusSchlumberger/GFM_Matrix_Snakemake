@@ -67,6 +67,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gfm_config import read_figures_root, read_root, storm_tide_hydrograph_path, storm_tide_product_levels_path  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from process_pool import available_cpus  # noqa: E402
 
 
 # Re-exported for connected_forcing.py.
@@ -362,8 +363,9 @@ def main() -> None:
                              "unsuitable ones to figures_unsuitable/ (default: all)")
     parser.add_argument("--summarize", action="store_true",
                         help="only collect boundary_lines/status/*.json into summary.csv + suitable/unsuitable/errored lists")
-    parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--workers", type=int, default=None, help="default: every core this process may use (the job's allocation)")
     args = parser.parse_args()
+    args.workers = args.workers or available_cpus()
 
     root = read_root(Path(args.config))
     base = root / args.base_dir_name

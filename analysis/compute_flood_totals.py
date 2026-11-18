@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import _read_band, _read_band_and_transform, _round_val, discover_chunk_ids  # noqa: E402
 from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io, return_period_label  # noqa: E402
 from pipeline_plots import pixel_area_km2_grid  # noqa: E402
+from process_pool import available_cpus  # noqa: E402
 from exposure_analysis import _build_iso_index, _safe, country_sums  # noqa: E402
 from validation import load_iso_lookup  # noqa: E402
 
@@ -75,7 +76,7 @@ def main() -> None:
     parser.add_argument("--config", default=_default_cfg)
     parser.add_argument("--out-dir", required=True)
     parser.add_argument(
-        "--workers", type=int, default=1,
+        "--workers", type=int, default=None,
         help="chunks processed concurrently via a thread pool (default 1 = serial). Each chunk's "
              "own work is ~45 small, independent rasterio reads over the network share - I/O-wait "
              "bound, not CPU-bound (same reasoning run_simulation_batch.py already uses for its own "
@@ -83,6 +84,7 @@ def main() -> None:
              "cpu/network-connection budget available.",
     )
     args = parser.parse_args()
+    args.workers = args.workers or available_cpus()
 
     cfg = load_config(args.config)
     bc = cfg["boundary_conditions"]

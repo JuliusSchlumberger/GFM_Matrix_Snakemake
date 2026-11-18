@@ -9,7 +9,12 @@ _blas_limits = None
 
 
 def available_cpus() -> int:
-    """Return the number of cores this process may run on (under SLURM: the job's cores)."""
+    """Return the number of cores this process may run on (under SLURM: the job's cores).
+
+    SLURM_CPUS_PER_TASK comes first: without CPU binding the affinity mask is the whole node.
+    """
+    if os.environ.get("SLURM_CPUS_PER_TASK"):
+        return int(os.environ["SLURM_CPUS_PER_TASK"])
     try:
         return len(os.sched_getaffinity(0))
     except AttributeError:  # no affinity API outside Linux

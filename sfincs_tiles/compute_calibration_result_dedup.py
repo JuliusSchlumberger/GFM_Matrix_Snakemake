@@ -33,6 +33,9 @@ from sfincs_grid import build_tile_tree, core_mask  # noqa: E402
 from gfm_config import read_root  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from process_pool import available_cpus  # noqa: E402
+
 def grid_bounds(base_dir: Path, tile_list: list[str]) -> dict[str, tuple]:
     """Return each tile's SFINCS subgrid bounds (EPSG:4326 lon/lat)."""
     out = {}
@@ -77,9 +80,10 @@ def main() -> None:
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
     parser.add_argument("--out-dir-name", default="calibration_roughness_SFINCS_dedup")
     parser.add_argument("--tile-id", default=None, help="single tile only (default: every tile in tile_ids.txt)")
-    parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--workers", type=int, default=None, help="default: every core this process may use (the job's allocation)")
     parser.add_argument("--catalog", default=str(DEFAULT_CATALOG), help="data catalog holding the population raster")
     args = parser.parse_args()
+    args.workers = args.workers or available_cpus()
 
     with open(args.config, encoding="utf-8") as f:
         config = yaml.safe_load(f)

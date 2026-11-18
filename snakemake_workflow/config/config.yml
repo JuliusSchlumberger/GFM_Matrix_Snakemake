@@ -311,8 +311,8 @@ hpc:
   state_root: ""                                      # harness plan state and gfm_hpc's HPC-view configs
   job_env: []                                         # shell lines every job runs after the interpreter exports
   # Job resources by job kind. A profile's empty or null values fall back to `default`.
-  # Preprocessing: cpus_per_task is the `snakemake --cores` value (1 = fully serial).
-  # Simulation: tiles solved concurrently per node (single-threaded numba solves).
+  # A job runs cpus_per_task processes (snakemake --cores, worker pools; SFINCS: its threads),
+  # each with one BLAS/OpenMP thread. Size mem for that many processes.
   profiles:
     default:
       partition: ""                                   # "" omits #SBATCH --partition (cluster default)
@@ -325,13 +325,13 @@ hpc:
     postprocess: {}
     exposure: {}
     dispatch: {cpus_per_task: 1}                      # jobs that only generate and submit further jobs
-    flood_totals: {}                                  # cpus_per_task is also compute_flood_totals.py --workers
+    flood_totals: {}
     solver_study: {}                                  # --time is computed per study
     study_figures: {}
     sfincs_stage1: {}                                 # --time from --stage1-hours
     sfincs_bridge: {}
-    sfincs_tile: {}                                   # --time computed per job; cpus_per_task = SFINCS threads
-    sfincs_post: {}                                   # cpus_per_task is also the dedup's --workers
+    sfincs_tile: {}                                   # --time computed per job
+    sfincs_post: {}
     validation: {}
     product: {}
 

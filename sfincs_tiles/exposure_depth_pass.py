@@ -35,6 +35,7 @@ from sfincs_grid import active_on_subgrid, build_tile_tree, core_mask  # noqa: E
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from population_grid import population_per_pixel  # noqa: E402
+from process_pool import available_cpus  # noqa: E402
 
 LAND_CODE = 0
 DENSITY_EDGES = (10.0, 100.0, 1000.0)  # people per km2: classes < 10, 10-100, 100-1000, > 1000
@@ -178,8 +179,9 @@ def main() -> None:
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--fsf", type=float, default=12.0, help="effective friction factor of the earlier layout")
     parser.add_argument("--all-tiles", action="store_true", help="stage1: every tile instead of the subset")
-    parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--workers", type=int, default=None, help="default: every core this process may use (the job's allocation)")
     args = parser.parse_args()
+    args.workers = args.workers or available_cpus()
     {"select": select, "stage1": stage1}[args.stage](args)
 
 

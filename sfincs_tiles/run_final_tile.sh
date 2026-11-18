@@ -6,13 +6,13 @@
 # calibration_run.done skips the tile; calibration_run.step holds the running step.
 # CAL_PHASE (sweep | duration, default sweep) picks run_calibration_models.py's phase.
 # Site values come from the exports of the stage-2 job header (generate_calibration_jobs.py).
-# Usage: BASE_DIR_NAME=calibration_roughness_SFINCS SFINCS_THREADS=4 CAL_PHASE=sweep bash run_final_tile.sh <tile_id>
+# Usage: BASE_DIR_NAME=calibration_roughness_SFINCS [SFINCS_THREADS=4] CAL_PHASE=sweep bash run_final_tile.sh <tile_id>
 set -uo pipefail
 unset PROJ_LIB PROJ_DATA GDAL_DATA
 
 TILE_ID="${1:?usage: run_final_tile.sh <tile_id>}"
 BASE_DIR_NAME="${BASE_DIR_NAME:-calibration_roughness_SFINCS}"
-SFINCS_THREADS="${SFINCS_THREADS:-4}"
+SFINCS_THREADS="${SFINCS_THREADS:-${SLURM_CPUS_PER_TASK:-4}}"
 CAL_PHASE="${CAL_PHASE:-sweep}"
 
 for var in GFM_PY SFINCS_PY GFM_DATA_ROOT GFM_CODE_ROOT CONTAINER_CMD SFINCS_IMAGE SFINCS_TIMEOUT_S; do

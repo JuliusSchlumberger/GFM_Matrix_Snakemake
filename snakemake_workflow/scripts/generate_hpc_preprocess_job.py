@@ -31,7 +31,7 @@ from config_utils import (  # noqa: E402
 )
 from hpc_common import (  # noqa: E402
     SNAKEMAKE, JobChain, add_profile_set_argument, apply_profile_sets, env_lines, even_split, read_targets_lines,
-    resolve_profile, retry_wrapper_lines, stage_configfile_lines,
+    retry_wrapper_lines, stage_configfile_lines,
 )
 from vertical_datum import HYBRID_GRID_BRIDGES  # noqa: E402
 
@@ -135,8 +135,7 @@ def generate(config_path: str | Path, *, fuse: bool = False, preprocess_only: bo
 
     kind = "fuse" if fuse else "preprocess_only" if preprocess_only else "dispatch"
     submit_script_name = SUBMIT_NAMES[kind]
-    cores = resolve_profile(hpc_cfg, "preprocess")["cpus_per_task"]
-    snakemake_batch = (f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry {SNAKEMAKE} --cores {cores} '
+    snakemake_batch = (f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry {SNAKEMAKE} --cores "$SLURM_CPUS_PER_TASK" '
                        '--nolock --rerun-triggers=mtime --rerun-incomplete')
 
     chain = JobChain(hpc_cfg, local_jobs_dir, linux_jobs_dir)

@@ -95,15 +95,18 @@ Each Snakemake call inside a job is retried as a whole against transient read er
 ## Resource profiles
 
 Every job gets its resources from one profile in `hpc.profiles`: `default`, overlaid with the profile's set values.
+A job uses exactly its `cpus_per_task` cores: Snakemake runs with `--cores "$SLURM_CPUS_PER_TASK"`, every worker pool sizes itself with `process_pool.available_cpus()` (`SLURM_CPUS_PER_TASK` first), and SFINCS runs that many OpenMP threads.
+Every job exports `OMP_NUM_THREADS=1` (and the OpenBLAS, MKL and numba equivalents), so N processes stay on N cores; SFINCS sets its own.
+Size `mem` for the processes' resident memory with a margin; SLURM's figure also counts file cache, which the kernel frees under pressure.
 
 | Profile | Jobs |
 |---|---|
-| `preprocess` | preprocessing batches (`cpus_per_task` = `snakemake --cores`) |
+| `preprocess` | preprocessing batches |
 | `simulate` | simulation waves (`cpus_per_task` = tiles solved at once), overridden per wave by `hpc.wave_tiers` |
-| `postprocess`, `exposure`, `flood_totals` | postprocessing chain (`flood_totals.cpus_per_task` = its `--workers`) |
+| `postprocess`, `exposure`, `flood_totals` | postprocessing chain |
 | `dispatch` | jobs that only write and submit the next chain |
 | `solver_study`, `study_figures` | eikonal solver studies (`--time` computed from a worst-case estimate) and their figures |
-| `sfincs_stage1`, `sfincs_bridge`, `sfincs_tile`, `sfincs_post` | SFINCS calibration (`sfincs_tile.cpus_per_task` = SFINCS threads, `--time` computed per job; `sfincs_post.cpus_per_task` = the dedup's workers) |
+| `sfincs_stage1`, `sfincs_bridge`, `sfincs_tile`, `sfincs_post` | SFINCS calibration (`--time` computed per `sfincs_tile` job) |
 | `validation`, `product` | `validate --submit`, `product --submit` |
 
 `--profile-set PROFILE.FIELD=VALUE` (repeatable) overrides one value for a run; it is written into the chain's `resolved_config.yml`, so jobs submitted later by the chain keep it.
