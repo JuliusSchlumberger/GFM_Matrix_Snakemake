@@ -141,7 +141,9 @@ def main() -> None:
     parser.add_argument("--fig-dir", default=None, help="default: {paths.figures_root}/500_tiles")
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--epsilon", type=float, default=None, help="default: config simulation.flooding.waterlevel_epsilon_m")
-    parser.add_argument("--max-rounds", type=int, default=None, help="default: config simulation.flooding.max_rounds")
+    parser.add_argument("--max-rounds", type=int, default=None,
+                        help="default: config simulation.flooding.max_rounds of --friction-source")
+    parser.add_argument("--friction-source", choices=["landcover", "uniform"], default="landcover")
     parser.add_argument(
         "--n-tiles-wanted", type=int, default=N_TILES_WANTED_DEFAULT,
         help=f"forwarded to aggregate_wet_tiles.py's own selection, run as this script's first "
@@ -152,7 +154,8 @@ def main() -> None:
 
     cfg = load_config(args.config)
     epsilon = args.epsilon if args.epsilon is not None else float(cfg["simulation"]["flooding"]["waterlevel_epsilon_m"])
-    max_rounds = args.max_rounds if args.max_rounds is not None else int(cfg["simulation"]["flooding"]["max_rounds"])
+    max_rounds = (args.max_rounds if args.max_rounds is not None
+                  else int(cfg["simulation"]["flooding"]["max_rounds"][args.friction_source]))
 
     sweep_budget_dir = Path(args.sweep_budget_dir)
     figures_dir = Path(args.fig_dir) if args.fig_dir else Path(cfg["paths"]["figures_root"]) / "500_tiles"

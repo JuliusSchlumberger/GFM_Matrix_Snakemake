@@ -182,7 +182,7 @@ def cmd_studies(args) -> None:
         for source in args.source:
             figs = Path(cfg["paths"]["figures_root"]) / "500_tiles" / source
             _python("calibration_studies/plot_sweep_calibration_bands.py", study_root / f"sweep_budget_{source}",
-                    "--fig-dir", figs)
+                    "--fig-dir", figs, "--friction-source", source)
             _python("calibration_studies/plot_sweep_time_vs_size.py", study_root / f"sweep_budget_{source}",
                     "--fig-dir", figs)
             _python("calibration_studies/plot_obstacle_coupling_calibration_bands.py",

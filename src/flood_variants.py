@@ -30,6 +30,11 @@ def parameter_key(name: str) -> str | None:
     return None if source is None else PARAMETER_KEY[source]
 
 
+def max_rounds(flooding: dict) -> int:
+    """Return the solver's round cap for the friction source `flooding` is set to."""
+    return int(flooding["max_rounds"][flooding["friction_source"]])
+
+
 def variant_flooding(flooding: dict, name: str, parameter: float | None = None,
                      alpha: float | None = None) -> dict:
     """Return a copy of `simulation.flooding` set to variant `name`.

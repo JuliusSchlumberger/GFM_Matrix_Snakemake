@@ -354,7 +354,8 @@ change drops to/below $\varepsilon$) within 40 rounds, and of the remaining
 domains that have not strictly converged by round 40, 97.8% already have a
 stable flood extent by then - the residual change is confined to depth
 still settling in already-flooded cells, not the flooded/dry boundary
-itself. Production therefore caps the solve at `max_rounds = 40`. See
+itself. Production therefore caps the solve at `max_rounds = 40` with land-cover friction
+(10 with uniform attenuation, from the same study per friction source). See
 `methods_03_calibration_sensitivity.md` §2 for the full calibration
 methodology.
 

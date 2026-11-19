@@ -36,7 +36,7 @@ from scipy import ndimage
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from event_volume import DurationCorrection  # noqa: E402
 from flood_model import flood_depth_dense, idw_seed_values_at  # noqa: E402
-from flood_variants import VARIANTS, run_key, variant_flooding  # noqa: E402
+from flood_variants import VARIANTS, max_rounds, run_key, variant_flooding  # noqa: E402
 from rasters import WATERDEPTH_NODATA_INT16, decode_waterlevel_cm, encode_waterdepth_cm  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -289,7 +289,7 @@ def main() -> None:
             obstacle_coupling=bool(oc["enabled"]),
             max_outer_iterations=int(oc["max_outer_iterations"]),
             outer_convergence_pct=float(oc["outer_convergence_pct"]),
-            max_rounds=int(flooding["max_rounds"]),
+            max_rounds=max_rounds(v_flooding),
             waterlevel_epsilon_m=float(flooding["waterlevel_epsilon_m"]),
             duration_correction=duration, model=spec["model"], attenuation_m_per_m=rate_m_per_m,
         )

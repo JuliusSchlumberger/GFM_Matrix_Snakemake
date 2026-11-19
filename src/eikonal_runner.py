@@ -27,6 +27,7 @@ from boundaries import (
 from config_utils import path_ready, retry_transient_io, tile_pixel_size_m
 from event_volume import DurationCorrection, load_coast_hg
 from flood_model import FLOOD_MODELS, WATERLEVEL_EPSILON_M, SolveTrace, flood_depth_dense, static_level_grid
+from flood_variants import max_rounds
 from rasters import (
     decode_dem_cm,
     decode_friction_int16,
@@ -54,7 +55,7 @@ def flooding_solve_settings(flooding_config: dict[str, Any]) -> dict[str, Any]:
         "resolution": flooding_config["resolution"], "k": flooding_config["knn"],
         "idw_power": flooding_config["idw_power"],
         "obstacle_coupling": oc["enabled"], "max_outer_iterations": oc["max_outer_iterations"],
-        "max_rounds": flooding_config["max_rounds"], "outer_convergence_pct": oc["outer_convergence_pct"],
+        "max_rounds": max_rounds(flooding_config), "outer_convergence_pct": oc["outer_convergence_pct"],
         "waterlevel_epsilon_m": flooding_config["waterlevel_epsilon_m"],
         "friction_scale_factor": flooding_config["friction_scale_factor"],
         "duration_config": flooding_config["duration_correction"],

@@ -35,7 +35,7 @@ and the tile stops early once a round's max change falls at or below it.
 change ≤ ε) within 40 rounds. Of the remaining 41.5%, 97.8% already have a
 frozen flood extent by round 40 - the residual change is confined to depth
 still settling in already-wet cells, not the wet/dry boundary. Production
-caps `max_rounds` at 40 on this basis.
+caps `max_rounds` at 40 on this basis; the uniform-attenuation study sets 10.
 
 **Supporting scripts**: `calibration_studies/run_sweep_budget_study.py` (per-tile
 sweep traces, one CSV per tile) - `calibration_studies/aggregate_wet_tiles.py`

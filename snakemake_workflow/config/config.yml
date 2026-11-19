@@ -240,10 +240,12 @@ simulation: # Used by: preprocessing rules
     uniform_attenuation_m_per_km: 0.2
 
     # Max rounds (4 directional sweeps each, early exit on convergence) per solve, also per inner
-    # solve under obstacle_coupling. 40: sweep-budget study (docs/methods_03_calibration_sensitivity.md
-    # §2): 58.5% of tiles converge by round 40, and 97.8% of the rest have a frozen flood extent.
+    # solve under obstacle_coupling, by friction_source: sweep-budget study per source
+    # (docs/methods_03_calibration_sensitivity.md §2, figures_root/500_tiles/<source>).
     # The fixed 3-sweep mode stays available via flood_depth_dense's `sweep_budget`.
-    max_rounds: 40
+    max_rounds:
+      landcover: 40
+      uniform: 10
 
     # Early-exit threshold (m) on a round's max per-cell waterlevel change; well below the 0.1 m
     # flood/no-flood threshold (see flood_model.WATERLEVEL_EPSILON_M).
