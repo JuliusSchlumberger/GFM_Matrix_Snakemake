@@ -1015,22 +1015,24 @@ def main() -> None:
     parser.add_argument("stages", nargs="+", choices=("cap", "despike", "tc_mask", "fes_rule", "peaks", "shape_noise",
                                                        "tc_scale", "tc_jumps", "r_variants", "long_record",
                                                        "pooled_shape", "tide_correction",
-                                                       "tile_interpolation", "coastline_nodes"))
+                                                       "tile_interpolation", "coastline_nodes", "ingredients"))
     parser.add_argument("--product-dir", required=True)
+    parser.add_argument("--dest-dir", default=None, help="output directory (default: <product-dir>/open_guesses)")
     parser.add_argument("--sources-dir", default=".cleanup_baseline/level_sources")
     parser.add_argument("--config", default=str(REPO / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--override", default=None)
     parser.add_argument("--workers", type=int, default=4)
     args = parser.parse_args()
     out = Path(args.product_dir)
-    dest = out / "open_guesses"
-    dest.mkdir(exist_ok=True)
+    dest = Path(args.dest_dir) if args.dest_dir else out / "open_guesses"
+    dest.mkdir(parents=True, exist_ok=True)
     check = GaugeCheck(out, Path(args.sources_dir), load_config(args.config, args.override))
     for stage in args.stages:
         print(f"== {stage}", flush=True)
         if stage in ("cap", "tc_mask", "fes_rule", "shape_noise", "tc_scale", "tc_jumps", "r_variants",
-                     "long_record", "pooled_shape", "tide_correction", "tile_interpolation", "coastline_nodes"):
-            {"cap": cap, "tc_mask": tc_mask, "fes_rule": fes_rule, "shape_noise": shape_noise,
+                     "long_record", "pooled_shape", "tide_correction", "tile_interpolation", "coastline_nodes",
+                     "ingredients"):
+            {"cap": cap, "tc_mask": tc_mask, "fes_rule": fes_rule, "shape_noise": shape_noise, "ingredients": ingredients,
              "tc_scale": tc_scale, "tc_jumps": tc_jumps, "r_variants": r_variants, "long_record": long_record,
              "pooled_shape": pooled_shape, "tide_correction": tide_correction,
              "tile_interpolation": tile_interpolation, "coastline_nodes": coastline_nodes}[stage](check, dest, args.workers)

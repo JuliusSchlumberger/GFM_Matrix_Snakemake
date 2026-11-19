@@ -51,11 +51,15 @@ Acceptance per tidal class x RP: pass_overflow when the median ex090 and ex075 l
 OVERFLOW_TOL of the gauge medians (test 11: about +-7-10% in flood volume); pass_shape (T(0.25),
 T(0.5), nb24 within +-15%) and pass_rmse are kept for comparison.
 
+The GTSM record is 1979-2024 (<out-dir>/gtsm_surge on the site basis); with --record-cache it
+is production's 1950-2024 (<out-dir>/gtsm_surge_1950_1978 joined on, the FES2022 record basis of
+the product cache, the same constituents as the site basis).
+
 Writes <out-dir>/analysis/{generator_scores.parquet, generator_acceptance.csv} and
 generator_profiles.npz (hourly normalised profiles per site, RP and variant).
 
 Usage:
-    python boundary_test/generator_validation.py --out-dir .cleanup_baseline/level_sources [--workers 3]
+    python boundary_test/generator_validation.py --out-dir .cleanup_baseline/level_sources [--workers 3]         [--record-cache <storm_tide_product cache_dir>] [--tag _1950]
 """
 
 import argparse
@@ -70,9 +74,10 @@ from sklearn.neighbors import BallTree
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "boundary_test"))
-from extract_gtsm_series import load_series, station_series  # noqa: E402
+from extract_gtsm_series import station_series  # noqa: E402
+from gtsm_series import load_series  # noqa: E402
 from levels_tides import FES_CACHE  # noqa: E402
-from tide_prediction import HOURLY_START, on_hourly_grid  # noqa: E402
+from tide_prediction import HOURLY_START  # noqa: E402
 from storm_tide_hydrograph import (  # noqa: E402
     STEPS_PER_HR,
     annual_maximum_events,
@@ -88,7 +93,7 @@ from storm_tide_hydrograph import (  # noqa: E402
     storm_events,
     to_10min,
 )
-from storm_tide_product import fit_length, running_mean  # noqa: E402
+from storm_tide_product import EARLY_YEARS, RECORD_START, fit_length, running_mean  # noqa: E402
 from tide_statistics import spring_high_waters  # noqa: E402
 
 TARGET_RPS = (2, 10, 25, 50, 100)
@@ -148,21 +153,24 @@ def _site_task(args) -> tuple[list[dict], dict]:
 
 
 def _score_site(args) -> tuple[list[dict], dict]:
-    out, site, fes_hc, gtsm_hc, mhws, coast, tc_shapes, hg_profile, gauge_ev, gtsm_ev = args
-    out = Path(out)
-    b_re = np.load(out / "hourly_basis_re.npy", mmap_mode="r")
-    b_im = np.load(out / "hourly_basis_im.npy", mmap_mode="r")
+    record, site, fes_hc, gtsm_hc, mhws, coast, tc_shapes, hg_profile, gauge_ev, gtsm_ev = args
+    b_re = np.load(record["basis"][0], mmap_mode="r")
+    b_im = np.load(record["basis"][1], mmap_mode="r")
     f_re = np.load(FES_CACHE / "basis_re.npy", mmap_mode="r")
     f_im = np.load(FES_CACHE / "basis_im.npy", mmap_mode="r")
-    surge_st, surge_time, surge = load_series(out, "surge")
-    pos = dict(zip(surge_st.gtsm_index, range(len(surge_st))))
-    surge_idx, _ = on_hourly_grid(surge_time.to_numpy(), np.zeros(len(surge_time)))
+    start = record["start"]
     n_hours = b_re.shape[0]
     gtsm_surge = np.full(n_hours, np.nan)
-    gtsm_surge[surge_idx] = station_series(surge, pos[site["gtsm_index"]])
+    for store in record["stores"]:
+        surge_st, surge_time, surge = load_series(Path(store))
+        pos = dict(zip(surge_st.gtsm_index, range(len(surge_st))))
+        t = surge_time.to_numpy().astype("datetime64[s]")
+        idx = (t - np.datetime64(start, "s")) // np.timedelta64(3600, "s")
+        keep = (t.astype(np.int64) % 3600 == 0) & (idx >= 0) & (idx < n_hours)
+        gtsm_surge[idx[keep]] = station_series(surge, pos[site["gtsm_index"]])[keep]
     gtsm_tide = np.asarray(b_re) @ gtsm_hc.real + np.asarray(b_im) @ gtsm_hc.imag
     level = gtsm_surge + gtsm_tide
-    years = (HOURLY_START + np.arange(n_hours).astype("timedelta64[h]")).astype("datetime64[Y]").astype(int) + 1970
+    years = (np.datetime64(start, "h") + np.arange(n_hours).astype("timedelta64[h]")).astype("datetime64[Y]")         .astype(int) + 1970
     ev = annual_maximum_events(level, years, EXTENDED_HR)
     if len(ev) < 10:
         return [], {}
@@ -178,7 +186,7 @@ def _score_site(args) -> tuple[list[dict], dict]:
     fes = np.asarray(f_re) @ fes_hc.real + np.asarray(f_im) @ fes_hc.imag
     hw = high_water_indices(fes)
     spring = spring_high_waters(fes, 600.0)
-    surge10 = to_10min(pd.Series(np.nan_to_num(gtsm_surge), index=pd.date_range(HOURLY_START, periods=n_hours, freq="h")))
+    surge10 = to_10min(pd.Series(np.nan_to_num(gtsm_surge), index=pd.date_range(start, periods=n_hours, freq="h")))
     rows, profiles = [], {}
     hg_events = None
     for rp in TARGET_RPS:
@@ -337,8 +345,18 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None, help="score only the first N sites (trial run)")
     parser.add_argument("--sample", type=int, default=None, help="score N random sites (seed 0)")
     parser.add_argument("--tag", default="", help="suffix for the output files")
+    parser.add_argument("--record-cache", default=None,
+                        help="storm-tide product cache_dir: score on production's 1950-2024 GTSM record")
     args = parser.parse_args()
     out = Path(args.out_dir)
+    if args.record_cache:
+        cache = Path(args.record_cache)
+        record = {"stores": [str(out / "gtsm_surge_{}_{}".format(*EARLY_YEARS)), str(out / "gtsm_surge")],
+                  "basis": (str(cache / "fes2022_record_re.npy"), str(cache / "fes2022_record_im.npy")),
+                  "start": RECORD_START}
+    else:
+        record = {"stores": [str(out / "gtsm_surge")],
+                  "basis": (str(out / "hourly_basis_re.npy"), str(out / "hourly_basis_im.npy")), "start": HOURLY_START}
     dest = out / "analysis"
     sites = pd.read_csv(dest / "levels_sites.csv", index_col=0)
     sites = sites[sites.quality]
@@ -373,7 +391,7 @@ def main() -> None:
         t = ev.index[(ev.file_name == f) & (ev.source == "gtsm")]
         gauge_ev = {"rp": ev.rp_empirical_yr[g].to_numpy(), "prof": prof[g], "peak": ev.peak_m[g].to_numpy()}
         gtsm_ev = {"rp": ev.rp_empirical_yr[t].to_numpy(), "prof": prof[t]}
-        tasks.append((str(out), {"file_name": f, "gtsm_index": int(pairs.loc[f, "gtsm_index"])}, fes_hc, gtsm_hc, mh,
+        tasks.append((record, {"file_name": f, "gtsm_index": int(pairs.loc[f, "gtsm_index"])}, fes_hc, gtsm_hc, mh,
                       coast, tc_shapes.get(f), prof[hg[0]].astype(float) if len(hg) else None, gauge_ev, gtsm_ev))
     if args.sample:
         tasks = [tasks[i] for i in np.random.default_rng(0).choice(len(tasks), min(args.sample, len(tasks)),
