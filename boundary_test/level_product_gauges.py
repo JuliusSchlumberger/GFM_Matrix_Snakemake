@@ -36,6 +36,8 @@ GAUGE_RPS = (2, 10, 50, 100)
 GROUPS = ("all", "non-TC-dominated gauges", "TC-dominated gauges", "stations with a TC part")
 RANGE_BINS = (0, 1, 2, 4, 20)  # gauge spring tidal range (m), the classes of generator_validation
 MIN_REGION_GAUGES = 15  # smaller AR6 regions are scored together as "other"
+ATLASES = ("fes2022", "fes2014")
+PRODUCTION_RECORD = "1950-2024"
 
 
 class GaugeCheck:
@@ -44,9 +46,16 @@ class GaugeCheck:
     def __init__(self, out: Path, sources: Path, cfg: dict):
         self.out, self.cfg = out, cfg
         self.cache = cache = Path(cfg["storm_tide_product"]["cache_dir"])
-        self.stores = (cache / "gtsm_surge_stations_{}_{}".format(*stp.EARLY_YEARS), cache / "gtsm_surge_stations")
-        self.bases = {a: (cache / f"{a}_record_re.npy", cache / f"{a}_record_im.npy",
-                          cache / f"{a}_nodal_re.npy", cache / f"{a}_nodal_im.npy") for a in ("fes2022", "fes2014")}
+        # record -> (surge stores, FES bases, start, hours); 1979-2024 is the GTSM-ERA5 store alone
+        self.records = {
+            PRODUCTION_RECORD: ((cache / "gtsm_surge_stations_{}_{}".format(*stp.EARLY_YEARS), cache / "gtsm_surge_stations"),
+                                {a: (cache / f"{a}_record_re.npy", cache / f"{a}_record_im.npy",
+                                     cache / f"{a}_nodal_re.npy", cache / f"{a}_nodal_im.npy") for a in ATLASES},
+                                stp.RECORD_START, len(stp.record_times())),
+            "1979-2024": (cache / "gtsm_surge_stations",
+                          {a: (cache / f"{a}_hourly_re.npy", cache / f"{a}_hourly_im.npy",
+                               cache / f"{a}_nodal_re.npy", cache / f"{a}_nodal_im.npy") for a in ATLASES},
+                          tp.HOURLY_START, len(tp.hourly_times()))}
         catalog = get_data_catalog(REPO / cfg["paths"]["hydromt_data_catalog"], root=cfg["paths"]["root"])
         coast_rp = Path(catalog.get_source("coast_rp").path)
         self.stations = stations = pd.read_csv(out / "stations.csv", index_col="station")
@@ -58,7 +67,7 @@ class GaugeCheck:
         c = np.load(cache / "fes_constants.npz")
         models = {"fes2022": tp.fes2022_model(cache / "fes2022"),
                   "fes2014": tp.fes2014_model(Path(catalog.get_source("fes2014_ocean_tide").path))}
-        self.hc = hc = {a: tp.fill_masked(c[a], lonlat) for a in ("fes2022", "fes2014")}
+        self.hc = hc = {a: tp.fill_masked(c[a], lonlat) for a in ATLASES}
         for a in hc:
             hc[a][:, tp.seasonal_columns(models[a])] = 0.0
         self.mh = mh = np.load(cache / "fes_mhws.npz")
@@ -89,7 +98,7 @@ class GaugeCheck:
             log_ratio[site] = np.nan
             f = float(tdc.correction_factors(lonlat[[k]], tg_lonlat, log_ratio)[0][0])
             item = {"station": len(self.todo), "gtsm_index": int(stations.gtsm_index.loc[st]), "atlas": a,
-                    "coast_rp": coast[k], "station_index": st, "hc": hc[a][k] * f, "mhws_m": float(mh[a][k] * f),
+                    "coast_rp": coast[k], "station_index": st, "hc": hc[a][k], "mhws_m": float(mh[a][k]),
                     "r_idw": r, "r_covariate": stp.ratio_covariate(others),
                     "tc": self.tc_levels.loc[sid].to_numpy() if sid in self.tc_levels.index else None,
                     "tc_shape": tc_shapes.get(st), "pooled_shape": float(self.lev.gpd_shape.loc[st])}
@@ -101,20 +110,30 @@ class GaugeCheck:
         print(f"{len(self.todo)} of {len(ratio_gauges)} ratio gauges within {stp.GAUGE_STATION_KM:.0f} km "
               "of a station", flush=True)
 
-    def tc_hours(self, **mask) -> dict:
+    def tc_hours(self, record: str = PRODUCTION_RECORD, **mask) -> dict:
         with_tc = self.picked[self.picked.station_id.isin(self.tc_levels.index)]
-        return stp.tc_hours(with_tc, len(stp.record_times()), Path(self.cfg["storm_tide_product"]["ibtracs_path"]),
-                            stp.RECORD_START, **mask)
+        _, _, start, n_hours = self.records[record]
+        return stp.tc_hours(with_tc, n_hours, Path(self.cfg["storm_tide_product"]["ibtracs_path"]), start, **mask)
 
-    def levels(self, workers: int, mask_hours: dict | None = None, **station_keys) -> pd.DataFrame:
+    def inputs(self, tide_corrected: bool = True, **station_keys) -> list[dict]:
+        """Station inputs with the gauge-left-out tide factor (or none) and `station_keys` applied."""
+        out = []
+        for s, f in zip(self.todo, self.meta.tide_factor_loo):
+            f = f if tide_corrected else 1.0
+            out.append({**s, "hc": s["hc"] * f, "mhws_m": float(s["mhws_m"] * f), **station_keys})
+        return out
+
+    def levels(self, workers: int, mask_hours: dict | None = None, record: str = PRODUCTION_RECORD,
+               tide_corrected: bool = True, **station_keys) -> pd.DataFrame:
         """Rebuilt levels (gauge, rp{RP}_m / etc_raw_rp{RP}_m); `station_keys` go into every input.
 
-        `mask_hours` None applies production's IBTrACS mask; {} builds without a mask.
+        `mask_hours` None applies production's IBTrACS mask on `record`; {} builds without a mask.
         """
-        hours = self.tc_hours() if mask_hours is None else mask_hours
-        todo = [{**s, "tc_hours": hours.get(s["station_index"]), **station_keys} for s in self.todo]
+        hours = self.tc_hours(record) if mask_hours is None else mask_hours
+        stores, bases, start, _ = self.records[record]
+        todo = [{**s, "tc_hours": hours.get(s["station_index"])} for s in self.inputs(tide_corrected, **station_keys)]
         hyd = np.full((len(todo), len(stp.RPS), stp.N_STEPS), np.nan, dtype=np.float32)
-        rows, _ = stp.build_stations(todo, self.stores, self.bases, hyd, workers, start=stp.RECORD_START)
+        rows, _ = stp.build_stations(todo, stores, bases, hyd, workers, start=start)
         loo = pd.DataFrame(rows).set_index("station").sort_index()
         loo.index = self.meta.file_name.to_numpy()[loo.index]
         return loo

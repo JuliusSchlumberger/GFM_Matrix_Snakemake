@@ -408,6 +408,16 @@ Open:
   1. Rescore build A: align `level_product_gauges.GaugeCheck` with production (1950-2024, mask,
      pooled shape, basin shift, tide correction, r left out); 618-gauge levels and 698-gauge
      hydrographs (`generator_validation.py`), by region and tidal class.
+     GaugeCheck now builds from production's inputs (in-sample parity with levels.parquet: 0.00 m);
+     the `open_guesses.py` stages cap, tc_mask, tc_scale and pooled_shape were written against the
+     old base (no mask, own shape, 1979 axis): their "production" labels and the pooled_shape
+     variants (`check.todo` now carries pooled_shape) no longer hold if rerun.
+     Levels done (`.cleanup_baseline/phase1_build_a`, r and tide factor left out): RP100 MAE 0.219 m
+     (11-07: 0.217, COAST-RP 0.298), RP2 0.099 (0.088); TC-dominated RP100 bias -0.044 (COAST-RP
+     -0.247). Better in ENA, NPO, EPO, WNA, SPO; worse in NWN (RP100 0.339 vs 0.252), EAS (0.209 vs
+     0.172), NEU (0.181 vs 0.155), WCE, SEA (bias +0.145). Not yet attributed to record / mask /
+     pooled shape / tide factor: one GaugeCheck variant per ingredient (~4 min each) before phase 3.
+     Hydrographs (`generator_validation.py`) still on 1979-2024 GTSM at the sites: not rescored.
   2. Cached-data diagnostics (new `open_guesses.py` stages): r vs S10 and vs independent
      covariates (GTSM point depth, shelf width, tidal range) + LOO of the fallback options; r at
      RP2/10/50 at long gauges; steric seasonal gap at ~50 gauges (gauge monthly climatology vs

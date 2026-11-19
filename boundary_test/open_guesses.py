@@ -35,11 +35,14 @@ Stages (each writes <product-dir>/open_guesses/<stage>*.parquet for the figure s
             tide-correction gauges and the levels at the ratio gauges (gauge left out of every factor)
   shape_noise  the stations' MLE GPD shapes against the shapes a light tail (shape 0, or the
             median shape) gives from each station's number of storms: is the heavy tail noise?
-Gauge reference: test 9's convolution of the gauge's own skew surges on its own tide.
+  ingredients  production at the ratio gauges with one ingredient taken out at a time (INGREDIENTS),
+            scored by TC group, region and tidal range: which ingredient moves which region
+Stages cap, tc_mask, tc_scale, r_variants and pooled_shape vary the 11-07 product (OLD_BASE), the
+others production. Gauge reference: test 9's convolution of the gauge's own skew surges on its own tide.
 
 Usage:
     python boundary_test/open_guesses.py <stage> [...] --product-dir <storm_tide_product_dir> \
-        [--sources-dir .cleanup_baseline/level_sources] [--override local.yml] [--workers 4]
+        [--dest-dir <dir>] [--sources-dir .cleanup_baseline/level_sources] [--override local.yml] [--workers 4]
 """
 
 import argparse
@@ -56,7 +59,7 @@ sys.path.insert(0, str(REPO / "boundary_test"))
 from config_utils import get_data_catalog, load_config  # noqa: E402
 from gesla import DEDUP_KM  # noqa: E402
 from gtsm_series import MISSING, extract_series, load_series, station_series  # noqa: E402
-from level_product_gauges import GAUGE_RPS, GaugeCheck, scores  # noqa: E402
+from level_product_gauges import GAUGE_RPS, GaugeCheck, breakdown_groups, scores  # noqa: E402
 import skew_surge as ss  # noqa: E402
 import storm_tide_product as stp  # noqa: E402
 import tide_correction as tdc  # noqa: E402
@@ -83,6 +86,15 @@ NEIGHBOUR_KM = 25.0
 LONG_START = stp.RECORD_START
 EARLY_YEARS = stp.EARLY_YEARS
 SHAPE_CAP = 0.35  # Fathom RFA's GPD shape cap (Collings et al., 2024), the reference of the cap tests
+# the 11-07 product the stages cap, tc_mask, tc_scale, r_variants and pooled_shape test against:
+# 1979-2024, no IBTrACS mask (levels' mask_hours {}), no tide factor, own GPD shape capped, no TC shift
+OLD_RECORD = "1979-2024"
+OLD_BASE = {"record": OLD_RECORD, "tide_corrected": False, "pooled_shape": np.nan, "tc_shift_m": 0.0,
+            "shape_cap": SHAPE_CAP}
+# production with one ingredient taken out (levels keywords; mask_hours {} is "no mask")
+INGREDIENTS = {"production": {}, "no IBTrACS mask": {"mask_hours": {}}, "own GPD shape": {"pooled_shape": np.nan},
+               "no TC shift": {"tc_shift_m": 0.0}, "no tide factor": {"tide_corrected": False},
+               "1979-2024 record": {"record": OLD_RECORD}}
 R_MIN_SKEW_M = 0.2  # below it the ratio rests on a GTSM skew surge of a few decimetres
 POOL_KM = (100.0, 300.0, 1000.0)
 TIDE_KM = (10.0, 25.0, 50.0, 100.0, 200.0)
@@ -100,6 +112,7 @@ def _station_inputs(check: GaugeCheck, ks: np.ndarray) -> list[dict]:
         a = check.lev.atlas.iloc[k]
         todo.append({"station": j, "gtsm_index": int(s.gtsm_index), "atlas": a, "coast_rp": check.coast[k],
                      "hc": check.hc[a][k], "mhws_m": float(check.mh[a][k]), "r": float(check.lev.r.iloc[k]),
+                     "shape_cap": SHAPE_CAP,
                      "tc": check.tc_levels.loc[s.station_id].to_numpy() if s.station_id in check.tc_levels.index
                      else None, "tc_shape": shapes.get(idx)})
     return todo
@@ -120,7 +133,7 @@ def cap(check: GaugeCheck, dest: Path, workers: int) -> None:
     print(f"cap: {len(ks)} stations with MLE shape > {CAP_SAMPLE_MIN_SHAPE}", flush=True)
     todo = _station_inputs(check, ks)
     for name, value in CAPS.items():
-        res = check.table(check.levels(workers, shape_cap=value))
+        res = check.table(check.levels(workers, {}, **{**OLD_BASE, "shape_cap": value}))
         gauge_rows.append(scores(res, {name: "new_loo"}))
         res[[f"new_loo_rp{rp}_m" for rp in (10, 100)] + ["gauge_rp100_m", "station_class"]].assign(cap=name) \
             .to_parquet(dest / f"cap_gauges_{name.split()[0]}.parquet")
@@ -160,8 +173,8 @@ def despike(check: GaugeCheck, dest: Path) -> None:
 def tc_mask(check: GaugeCheck, dest: Path, workers: int) -> None:
     rows = []
     for name, mask in TC_MASKS.items():
-        hours = {} if mask is None else check.tc_hours(**mask)
-        res = check.table(check.levels(workers, hours))
+        hours = {} if mask is None else check.tc_hours(OLD_RECORD, **mask)
+        res = check.table(check.levels(workers, hours, **OLD_BASE))
         rows.append(scores(res, {name: "new_loo"}))
         print(f"  {name}", flush=True)
     s = pd.concat(rows)
@@ -231,8 +244,8 @@ def _loo_basin(levels: dict, gauge_rp100: pd.Series, basin: pd.Series, fit: np.n
 
 
 def tc_scale(check: GaugeCheck, dest: Path, workers: int) -> None:
-    hours = check.tc_hours()
-    base = check.table(check.levels(workers))
+    hours = check.tc_hours(OLD_RECORD)
+    base = check.table(check.levels(workers, {}, **OLD_BASE))
     gauges = pd.read_parquet(check.out / "gauges" / "gauges.parquet")
     basin = _gauge_basins(check, gauges.loc[base.index])
     tc_dom = (base.station_class == "tc_dominated").to_numpy()
@@ -243,7 +256,7 @@ def tc_scale(check: GaugeCheck, dest: Path, workers: int) -> None:
     for key, values in TC_RAISES.items():
         levels = {}
         for v in values:
-            levels[v] = check.table(check.levels(workers, hours, **{key: v}))
+            levels[v] = check.table(check.levels(workers, hours, **{**OLD_BASE, key: v}))
             out[f"masked_{key}_{v:g}_rp100_m"] = levels[v].new_loo_rp100_m
             print(f"  masked, {key} {v:g}", flush=True)
         values = np.array(sorted(levels))
@@ -331,12 +344,12 @@ def r_variants(check: GaugeCheck, dest: Path, workers: int) -> None:
         d, nd = _idw(at, cal, "offset_m")
         keys["additive"].append({"surge_offset_m": d if nd >= stp.MIN_NEIGHBOURS else float(cal.offset_m.median())})
     base_todo = check.todo
-    out = check.table(check.levels(workers))
+    out = check.table(check.levels(workers, {}, **OLD_BASE))
     out["neighbours"] = neighbours
     out = out.rename(columns={f"new_loo_rp{rp}_m": f"production_rp{rp}_m" for rp in GAUGE_RPS})
     for variant, extra in keys.items():
         check.todo = [{**s, **e} for s, e in zip(base_todo, extra)]
-        loo = check.table(check.levels(workers))
+        loo = check.table(check.levels(workers, {}, **OLD_BASE))
         for rp in GAUGE_RPS:
             out[f"{variant}_rp{rp}_m"] = loo[f"new_loo_rp{rp}_m"]
         out[f"{variant}_value"] = [next(iter(e.values())) for e in extra]
@@ -521,12 +534,13 @@ def pooled_shape(check: GaugeCheck, dest: Path, workers: int) -> None:
     for km in POOL_KM:
         shapes = stp.pooled_shapes(lonlat, prof["full"], gauge_st[["lon", "lat"]].to_numpy(dtype=float), km)
         variants[f"75 yr, masked, pooled {km:g} km, no cap"] = {"mask": True, "shape_cap": None, "pooled_shape": shapes}
-    table = check.table(check.levels(workers))
+    table = check.table(check.levels(workers, {}, **OLD_BASE))
     table = table.rename(columns={f"new_loo_rp{rp}_m": f"production_rp{rp}_m" for rp in GAUGE_RPS})
     cols = {"46 yr, double count, cap 0.35 (production)": "production"}
+    base_inputs = check.inputs(False, pooled_shape=np.nan, tc_shift_m=0.0)
     for k, (name, v) in enumerate(variants.items()):
         todo = []
-        for j, s in enumerate(check.todo):
+        for j, s in enumerate(base_inputs):
             extra = {key: (val[j] if key == "pooled_shape" else val) for key, val in v.items() if key != "mask"}
             todo.append({**s, **extra, "tc_hours": hours.get(s["station_index"]) if v.get("mask") else None})
         rows = pd.DataFrame(_run_long(_long_task, todo, stores, bases, workers)).set_index("station")
@@ -921,6 +935,26 @@ def _null_shapes(args) -> np.ndarray:
     rng = np.random.default_rng(seed)
     return np.array([genpareto.fit(genpareto.rvs(shape0, size=n, random_state=rng), floc=0)[0]
                      for _ in range(NOISE_REPS)])
+
+
+def ingredients(check: GaugeCheck, dest: Path, workers: int) -> None:
+    root = dest / "ingredients"
+    root.mkdir(exist_ok=True)
+    table, cols = None, {}
+    for k, (name, kw) in enumerate(INGREDIENTS.items()):
+        res = check.table(check.levels(workers, **kw))
+        if table is None:
+            table = res.drop(columns=[c for c in res if c.startswith("new_loo")])
+        for rp in GAUGE_RPS:
+            table[f"v{k}_rp{rp}_m"] = res[f"new_loo_rp{rp}_m"]
+        cols[name] = f"v{k}"
+        print(f"  {name}", flush=True)
+    table.to_parquet(root / "gauges.parquet")
+    s = pd.concat([scores(table, cols).assign(split="TC group"), scores(table, cols, breakdown_groups(table))])
+    s.to_csv(root / "scores.csv", index=False)
+    with pd.option_context("display.width", 250, "display.max_rows", 500):
+        print(s[s.rp.isin([2, 100])].pivot_table(index=["split", "gauges", "rp"], columns="level", values="mae",
+                                                 dropna=False, sort=False)[list(cols)].round(3).to_string(), flush=True)
 
 
 def _cycles_per_year(check: GaugeCheck) -> np.ndarray:
