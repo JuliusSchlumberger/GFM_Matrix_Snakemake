@@ -67,6 +67,7 @@ class GaugeCheck:
         c = np.load(cache / "fes_constants.npz")
         models = {"fes2022": tp.fes2022_model(cache / "fes2022"),
                   "fes2014": tp.fes2014_model(Path(catalog.get_source("fes2014_ocean_tide").path))}
+        self.constituents = {a: list(models[a].constituents) for a in ATLASES}
         self.hc = hc = {a: tp.fill_masked(c[a], lonlat) for a in ATLASES}
         for a in hc:
             hc[a][:, tp.seasonal_columns(models[a])] = 0.0

@@ -408,22 +408,56 @@ Open:
   1. Rescore build A: align `level_product_gauges.GaugeCheck` with production (1950-2024, mask,
      pooled shape, basin shift, tide correction, r left out); 618-gauge levels and 698-gauge
      hydrographs (`generator_validation.py`), by region and tidal class.
-     GaugeCheck now builds from production's inputs (in-sample parity with levels.parquet: 0.00 m);
-     the `open_guesses.py` stages cap, tc_mask, tc_scale and pooled_shape were written against the
-     old base (no mask, own shape, 1979 axis): their "production" labels and the pooled_shape
-     variants (`check.todo` now carries pooled_shape) no longer hold if rerun.
+     GaugeCheck builds from production's inputs (in-sample parity with levels.parquet: 0.00 m); the
+     11-07-base stages of `open_guesses.py` pass OLD_BASE explicitly.
      Levels done (`.cleanup_baseline/phase1_build_a`, r and tide factor left out): RP100 MAE 0.219 m
      (11-07: 0.217, COAST-RP 0.298), RP2 0.099 (0.088); TC-dominated RP100 bias -0.044 (COAST-RP
      -0.247). Better in ENA, NPO, EPO, WNA, SPO; worse in NWN (RP100 0.339 vs 0.252), EAS (0.209 vs
-     0.172), NEU (0.181 vs 0.155), WCE, SEA (bias +0.145). Not yet attributed to record / mask /
-     pooled shape / tide factor: one GaugeCheck variant per ingredient (~4 min each) before phase 3.
-     Hydrographs (`generator_validation.py`) still on 1979-2024 GTSM at the sites: not rescored.
+     0.172), NEU (0.181 vs 0.155), WCE, SEA (bias +0.145). Attribution (`open_guesses.py
+     ingredients`, `.cleanup_baseline/phase1_build_a/open_guesses/ingredients`), one ingredient out:
+     TC shift raises RP2 at stations with a TC part (MAE 0.102 -> 0.080 without; SEA, SPO, EPO) but
+     is needed at RP100 (TC-dominated bias -0.044, -0.134 without); tide factor costs NWN (RP100
+     0.339 -> 0.279 without) and WCE (0.149 -> 0.115), helps WNA (0.172 vs 0.244), ENA, NZ, SAU;
+     IBTrACS mask costs EAS (0.209 -> 0.173 without); 1950 record costs NEU 1 cm (0.171 on 1979);
+     pooled shape < 1 cm everywhere. NEU's remaining gap to 11-07 (0.155) is none of the four.
+     Hydrographs done (`generator_validation.py --record-cache`, tags _1979 / _1950): the 1950-2024
+     record changes the generator_smooth overflow ratios by <= 0.09 and no tidal class's pass_overflow
+     except (0,1] m RP10 (ex075 0.90 -> 0.89, at the tolerance); 1-20 m coasts stay 15-25% short.
+     Phase 0's selection now scores all 698 sites at RP25-100 (296 site x RP rows had < 2 events).
   2. Cached-data diagnostics (new `open_guesses.py` stages): r vs S10 and vs independent
      covariates (GTSM point depth, shelf width, tidal range) + LOO of the fallback options; r at
      RP2/10/50 at long gauges; steric seasonal gap at ~50 gauges (gauge monthly climatology vs
      FES Sa+Ssa vs GTSM); mask loss (annual maxima masked, ET track points) and despike loss near
      tracks; TC shift bootstrap per basin from `tc_shift_gauges.parquet`; GPD by HW-height tertile.
-  3. Decisions from 2, then build B and rescore against A by region.
+     Done (`boundary_test/review_diagnostics.py`, `.cleanup_baseline/phase2`, gauge-left-out scores):
+     - Basin shift: own-basin fits differ (WP 0.26, NA 0.09, SP 0.26, SI 0.13, NI 0.03 m); left out,
+       each basin gets the others' (WP 0.14, NA 0.25). Bootstrap 90%: WP own 0.20-0.29, NA own 0-0.31.
+     - TC raise forms (fit at RP100, TC-dominated gauges): shift raises RP2 everywhere (TC-part MAE
+       0.080 -> 0.104/0.112); a scale of COAST-RP_TC above its RP2 floor leaves RP2-10 unchanged; own
+       basin it zeroes RP100 bias (+0.011) but widens RP50-100 MAE (0.370 vs shift 0.336); basin left
+       out it inflates NA (ENA RP100 +0.22). EAS RP100 bias: -0.082 left out, +0.009 own-basin shift.
+     - Mask: ET points are 0.1% of masked annual maxima in EAS (12% ENA); a mask without them changes
+       no score. The mask drops 23% of EAS annual maxima; EAS's gap is the left-out shift, not ET.
+     - Tide neighbours: along water (GEBCO 15") fixes NWN (RP100 0.339 -> 0.236) and WCE (0.149 ->
+       0.124) but fails where GEBCO disconnects inlets (Bamfield +0.83 m, WNA 0.172 -> 0.212); over
+       2,373 tide gauges amplitude error 16.2% vs 15.5% production; FES-amplitude similarity x1.2 15.1%.
+     - r: r_rp50/r_rp10 median 1.01-1.04, r_rp2/r_rp10 0.97-0.99 (p10-p90 at >= 40 y 0.92-1.11).
+       Independent covariates are weak (|Spearman| <= 0.15 for depth, shelf, range; S10 -0.58);
+       fallback LOO at the 98 isolated gauges: power law on S10 0.26 ln r MAE, + covariates 0.24,
+       median r 0.45, r = 1 0.56.
+     - Surge-tide independence: q99.9 skew surge top/bottom HW tertile 0.92-0.96 at gauges (GTSM on
+       FES 0.80-0.94); level bias by tidal-range class stays within +-4 cm (phase 1).
+     - Seasonal gap (gauge minus GTSM monthly cycle at the annual-maximum months): median +2.8 cm,
+       p90 +8 cm; EAS +7, WNA +7, SEA +5 cm. FES Sa+Ssa at those months is ~0 (no gap filled by them).
+     - Despike: 0 hours dropped within the IBTrACS mask hours at 9,232 TC-part stations (1 hour away).
+  3. Decide, then build B and rescore against A by region:
+     - TC raise: production applies the basin-left-out values, which swap WP and NA. Own-basin fit
+       (left-out kept as the validation score) and form (shift vs scale above COAST-RP_TC's RP2
+       floor). The own-basin scores above are in sample: score them gauge-left-out within the basin
+       first; NI (3 gauges) and SI (8) own fits span 0-0.4 m in the bootstrap.
+     - Seasonal gap: whether to add a monthly steric climatology to the GTSM residual (source to pick).
+     - No change indicated: ET in the mask, tide-factor neighbours, r rule and fallback, despike,
+       surge-tide independence.
   4. Node hydrographs / T tables for correction B (head in m, not x·peak) and node levels at the
      SFINCS boundary; test one Fundy tile against GeoNB.
   5. National design levels (WBI, CFB, Daigle 2020) in the level validation, if data available.
@@ -434,8 +468,8 @@ Open:
   volume); the low microtidal troughs belong to GTSM's surge deficit (test 9). Against COAST-HG
   (fig18) its peaks are 2-4x wider (median T(0.25) 12 vs 6 h at RP100), which lowers B's
   multiplier.
-  - Validated on 1979-2024; production takes annual maxima from 1950-2024: rescore in the review
-    plan's phase 1.
+  - Rescored on production's 1950-2024 annual maxima: overflow ratios within 0.09 of 1979-2024
+    (review plan, phase 1).
 - **FES version rule** (decided, INPUT_ANALYSIS.md test 6, §8.2): FES2014 replaces FES2022 where
   the two atlases' MHWS differ by the ratio and minimum difference of
   `tide_prediction.version_flag`; it reaches production through the product's levels. How far a
