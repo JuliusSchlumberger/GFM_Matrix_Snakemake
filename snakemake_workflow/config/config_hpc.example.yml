@@ -35,6 +35,9 @@ hpc:
       partition: 1vcpu
       # 1vcpu nodes have 7950 MB usable, not 8192; requesting 8G fails.
       mem: "7G"
+    # 40 batches x ~5,400 rules (48 RP/SLR boundary files per tile) at ~45 s per rule: ~67 h on
+    # one core, ~17 h on four.
+    preprocess: {partition: "4vcpu", cpus_per_task: 4, mem: "30G", time: "2-00:00:00"}
     # 4 threads per SFINCS run (sfincs_min_per_mcell is calibrated at 4).
     sfincs_stage1: {partition: "4vcpu", cpus_per_task: 4, mem: "30G"}
     sfincs_bridge: {partition: "4vcpu", cpus_per_task: 4, mem: "30G"}
