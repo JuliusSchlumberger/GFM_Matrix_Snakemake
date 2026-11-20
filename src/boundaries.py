@@ -41,18 +41,15 @@ def load_waterlevel_stations(nc_path: str | Path, variable: str, x_var: str, y_v
     return stations[stations[column_name].notna()].reset_index(drop=True)
 
 
-def select_stations_for_tile(
-    stations: gpd.GeoDataFrame,
-    tile: gpd.GeoDataFrame,
-    buffer_deg: float = 0.0,
-    min_search_size_deg: float = 0.0,
-) -> gpd.GeoDataFrame:
-    """Select stations within the tile bbox plus `buffer_deg` (or a minimum search box).
+def station_search_bounds(
+    tile: gpd.GeoDataFrame, buffer_deg: float = 0.0, min_search_size_deg: float = 0.0,
+) -> tuple[float, float, float, float]:
+    """Return the (minx, miny, maxx, maxy) lon/lat box a tile's stations are searched in.
 
-    The search area is the envelope of "bbox + buffer_deg" (plain lon/lat, not
-    latitude-corrected) and a `min_search_size_deg` square centred on the tile. The
-    floor exists because domain bboxes are not uniformly padded, so small chunks
-    could otherwise starve the solver's k-nearest-neighbour IDW candidate pool.
+    The envelope of "bbox + buffer_deg" (plain lon/lat, not latitude-corrected) and a
+    `min_search_size_deg` square centred on the tile. The floor exists because domain
+    bboxes are not uniformly padded, so small chunks could otherwise starve the solver's
+    k-nearest-neighbour IDW candidate pool.
     """
     minx, miny, maxx, maxy = tile.total_bounds
     buf_minx, buf_miny, buf_maxx, buf_maxy = minx - buffer_deg, miny - buffer_deg, maxx + buffer_deg, maxy + buffer_deg
@@ -61,10 +58,17 @@ def select_stations_for_tile(
     half = min_search_size_deg / 2.0
     min_minx, min_miny, min_maxx, min_maxy = cx - half, cy - half, cx + half, cy + half
 
-    search_area = box(
-        min(buf_minx, min_minx), min(buf_miny, min_miny),
-        max(buf_maxx, min_maxx), max(buf_maxy, min_maxy),
-    )
+    return (min(buf_minx, min_minx), min(buf_miny, min_miny), max(buf_maxx, min_maxx), max(buf_maxy, min_maxy))
+
+
+def select_stations_for_tile(
+    stations: gpd.GeoDataFrame,
+    tile: gpd.GeoDataFrame,
+    buffer_deg: float = 0.0,
+    min_search_size_deg: float = 0.0,
+) -> gpd.GeoDataFrame:
+    """Select stations within the tile's `station_search_bounds`."""
+    search_area = box(*station_search_bounds(tile, buffer_deg, min_search_size_deg))
     return stations[stations.intersects(search_area)].reset_index(drop=True)
 
 
