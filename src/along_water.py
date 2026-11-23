@@ -1,15 +1,18 @@
 """Shortest-path distance through connected water, and IDW over the k nearest stations by it.
 
 Used to carry station values up estuaries along the water instead of across land, on the
-coarse ocean-connectivity raster (`tiles.mosaic_water_fraction_downsampled`). Main entry:
-`along_water_idw`.
+coarse ocean-connectivity raster (`tiles.mosaic_water_fraction_downsampled`), or on water
+outside land polygons (`land_water_window`). Main entries: `along_water_idw`, `along_water_distances`.
 """
 
 import numpy as np
+from rasterio.features import rasterize
+from rasterio.transform import from_origin
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
 
+KM_PER_DEG = 111.2
 _OFFSETS = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 
 
@@ -76,3 +79,37 @@ def along_water_idw(distances: np.ndarray, values: np.ndarray, k: int,
     with np.errstate(invalid="ignore", divide="ignore"):
         out = (w * vk).sum(axis=0) / w.sum(axis=0)
     return out, used_fallback
+
+
+def land_water_window(land, lon: float, lat: float, half_km: float, cell_m: float, supersample: int):
+    """Water outside the `land` polygons (lon/lat) in a square window around a point.
+
+    Land is rasterised on cells of cell_m / supersample; a cell_m cell is water where any of its
+    sub-cells is, so channels down to the sub-cell width stay open. Columns beyond +-180 are land:
+    no connection across the antimeridian. Returns the water mask and a (lon, lat) -> (row, col)
+    function.
+    """
+    cell_deg = cell_m / 1000.0 / KM_PER_DEG
+    n = int(np.ceil(2 * half_km / KM_PER_DEG / cell_deg))
+    col_deg = cell_deg / max(np.cos(np.radians(lat)), 0.05)
+    west, north = lon - n * col_deg / 2, lat + n * cell_deg / 2
+    k = supersample
+    shape = (n * k, n * k)
+    land = list(land)
+    sub = rasterize(((g, 1) for g in land), out_shape=shape, transform=from_origin(west, north, col_deg / k, cell_deg / k),
+                    fill=0, dtype="uint8") if land else np.zeros(shape, "uint8")
+    water = (sub == 0).reshape(n, k, n, k).any(axis=(1, 3))
+    col_lon = west + (np.arange(n) + 0.5) * col_deg
+    water[:, (col_lon < -180) | (col_lon > 180)] = False
+
+    def rc(lonlat: np.ndarray) -> np.ndarray:
+        return np.column_stack([np.clip(((north - lonlat[:, 1]) / cell_deg).astype(int), 0, n - 1),
+                                np.clip(((lonlat[:, 0] - west) / col_deg).astype(int), 0, n - 1)])
+    return water, rc
+
+
+def window_bounds(lon: float, lat: float, half_km: float) -> tuple[float, float, float, float]:
+    """(west, south, east, north) of the `land_water_window` around a point."""
+    dlat = half_km / KM_PER_DEG
+    dlon = dlat / max(np.cos(np.radians(lat)), 0.05)
+    return lon - dlon, lat - dlat, lon + dlon, lat + dlat

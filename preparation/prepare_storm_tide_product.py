@@ -4,18 +4,20 @@
 Entry point: run(config), via `python run_preparation.py storm_tide_product`; read when
 boundary_conditions.storm_tide_source is gfm_product. Method: src/storm_tide_product.py and
 boundary_test/INPUT_ANALYSIS.md §8.4-8.5. Raw inputs: GESLA-4.1, GTSM-ERA5 surge residual,
-FES2022 and FES2014, COAST-RP (+ _ETC, _TC), IBTrACS (config `storm_tide_product`).
+FES2022 and FES2014, COAST-RP (+ _ETC, _TC), IBTrACS (config `storm_tide_product`), OSM land
+polygons (data catalog land_polygons).
 
 Writes into storm_tide_product.cache_dir (~45 GB; may live off the data root) copies of raw
 inputs and what depends on them alone: FES2022 decompressed, tide bases, GTSM series at the
 stations (1950-1978 and 1979-2024 stores) and gauges, GESLA records, FES constants and MHWS at
 the stations, the coastline nodes and their FES constants; deterministic, kept across runs. Into
 boundary_conditions.storm_tide_product_dir (~3 GB):
-  gauges/       gauge table (ratio, class, tidal MHWS), TC donor shapes and the tide-correction
-                gauges (tide_gauges.parquet: short harmonic fits of every coastal GESLA site)
+  gauges/       gauge table (ratio, class, tidal MHWS), TC donor shapes, the tide-correction
+                gauges (tide_gauges.parquet: short harmonic fits of every coastal GESLA site) and
+                which of them reach each station and node through water (tide_links_*.npz)
   stations.csv, shape_profiles.parquet (GPD profile likelihood per station, for the pooled
-  shape), tc_shifts.csv and tc_shift_gauges.parquet (the per-basin COAST-RP_TC shift fit and its
-  gauges, `tc_shift_fit`), levels.parquet, hydrographs.npy, hydrograph_info.parquet, surge_models.npy
+  shape), tc_shifts.csv and tc_shift_gauges.parquet (the COAST-RP_TC shift fit, its per-basin
+  validation and its gauges, `tc_shift_fit`), levels.parquet, hydrographs.npy, hydrograph_info.parquet, surge_models.npy
   (stp.model_vector per station), node_levels.parquet, and the two product files
   (boundaries.PRODUCT_*_FILENAME; the levels file holds the stations, then the coastline nodes).
 force=True (default) recomputes everything outside the cache, and the cached coastline nodes
@@ -32,6 +34,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.sparse import load_npz, save_npz
 from sklearn.neighbors import BallTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -70,6 +73,8 @@ class _Paths:
         self.records = self.cache / "gesla"
         self.gauges = root / "gauges"
         self.tide_gauges = self.gauges / "tide_gauges.parquet"
+        self.tide_links_stations = self.gauges / "tide_links_stations.npz"
+        self.tide_links_nodes = self.gauges / "tide_links_nodes.npz"
         self.stations = root / "stations.csv"
         self.constants = self.cache / "fes_constants.npz"
         self.mhws = self.cache / "fes_mhws.npz"
@@ -149,8 +154,17 @@ def tide_gauge_table(cfg: dict, paths: _Paths, models: dict, workers: int) -> pd
     return gt
 
 
+def tide_links(path: Path, points_lonlat: np.ndarray, tide_gauges: pd.DataFrame, land_path: Path, workers: int):
+    """`tc.water_links` of the points to the tide gauges, cached at `path`."""
+    if not path.exists():
+        logger.info("Tide gauges reaching %d points through water", len(points_lonlat))
+        save_npz(path, tc.water_links(points_lonlat, tide_gauges[["lon", "lat"]].to_numpy(dtype=float), land_path,
+                                      workers))
+    return load_npz(path).tocsr()
+
+
 def station_atlas(paths: _Paths, stations: pd.DataFrame, models: dict, gauges: pd.DataFrame,
-                  tide_gauges: pd.DataFrame, workers: int) -> dict:
+                  tide_gauges: pd.DataFrame, land_path: Path, workers: int) -> dict:
     """FES constants (Sa/Ssa zeroed), MHWS of both atlases, the atlas choice and the tide factor per station.
 
     The factor (tide_correction) scales the chosen atlas's constants; MHWS scales with it.
@@ -172,16 +186,18 @@ def station_atlas(paths: _Paths, stations: pd.DataFrame, models: dict, gauges: p
     use14 = tp.consistent_version_flag(mh["fes2022"], mh["fes2014"], lonlat, ok)
     logger.info("FES2014 at %d stations", int(use14.sum()))
     glonlat = tide_gauges[["lon", "lat"]].to_numpy(dtype=float)
+    links = tide_links(paths.tide_links_stations, lonlat, tide_gauges, land_path, workers)
     factor, count = np.ones(len(stations)), np.zeros(len(stations), dtype=int)
     for a, sel in (("fes2014", use14), ("fes2022", ~use14)):
-        factor[sel], count[sel] = tc.correction_factors(lonlat[sel], glonlat, tide_gauges[f"log_ratio_{a}"].to_numpy())
+        factor[sel], count[sel] = tc.correction_factors(lonlat[sel], glonlat, tide_gauges[f"log_ratio_{a}"].to_numpy(),
+                                                        links=links[np.flatnonzero(sel)])
     logger.info("Tide corrected at %d stations (factor p10/p50/p90 %s)", int((count > 0).sum()),
                 np.round(np.quantile(factor[count > 0], [0.1, 0.5, 0.9]), 2) if (count > 0).any() else "-")
     return {"hc": hc, "mhws": {a: mh[a] for a in hc}, "use14": use14, "tide_factor": factor, "tide_gauges": count}
 
 
 def node_levels(config: dict, paths: _Paths, models: dict, todo: list[dict], lev: pd.DataFrame,
-                tide_gauges: pd.DataFrame, workers: int) -> pd.DataFrame:
+                tide_gauges: pd.DataFrame, land_path: Path, workers: int) -> pd.DataFrame:
     """RP levels at the coastline nodes from the stations' surge models (`stp.build_nodes`).
 
     A node takes the atlas of its nearest station and the surge models of the
@@ -222,13 +238,15 @@ def node_levels(config: dict, paths: _Paths, models: dict, todo: list[dict], lev
     hc = np.empty((len(nodes), c["fes2022"].shape[1]), dtype=complex)
     factor, count = np.ones(len(nodes)), np.zeros(len(nodes), dtype=int)
     glonlat = tide_gauges[["lon", "lat"]].to_numpy(dtype=float)
+    links = tide_links(paths.tide_links_nodes, lonlat, tide_gauges, land_path, workers)
     for a in ("fes2022", "fes2014"):
         sel = atlas == a
         if not sel.any():
             continue
         h = tp.fill_masked(c[a], lonlat)
         h[:, tp.seasonal_columns(models[a])] = 0.0
-        factor[sel], count[sel] = tc.correction_factors(lonlat[sel], glonlat, tide_gauges[f"log_ratio_{a}"].to_numpy())
+        factor[sel], count[sel] = tc.correction_factors(lonlat[sel], glonlat, tide_gauges[f"log_ratio_{a}"].to_numpy(),
+                                                        links=links[np.flatnonzero(sel)])
         hc[sel] = h[sel] * factor[sel, None]
     todo_nodes = []
     for j in range(len(nodes)):
@@ -248,12 +266,15 @@ def node_levels(config: dict, paths: _Paths, models: dict, todo: list[dict], lev
 
 
 def tc_shift_fit(paths: _Paths, stations: pd.DataFrame, todo: list[dict], gauges: pd.DataFrame,
-                 ibtracs_path: Path, stores, workers: int) -> tuple[dict, float]:
-    """COAST-RP_TC shift (m) per IBTrACS basin and over all basins (`stp.loo_basin_fit`).
+                 ibtracs_path: Path, stores, workers: int) -> float:
+    """COAST-RP_TC shift (m) over all TC-dominated gauges, and per IBTrACS basin as validation.
 
     Each TC-dominated gauge with a reference level takes the nearest station within
     stp.GAUGE_STATION_KM, rebuilt as in `todo` (mask, pooled shape) with r computed without the
-    gauge, at every stp.TC_TRIAL_SHIFTS_M. Writes tc_shifts.csv and tc_shift_gauges.parquet.
+    gauge, at every stp.TC_TRIAL_SHIFTS_M. The product applies the all-basin shift: per-basin fits
+    score no better with the gauges within 300 km of the scored gauge left out of the fit
+    (`review_diagnostics.py basin_fit_cv`). The basin-left-out values (`stp.loo_basin_fit`) go to
+    tc_shifts.csv as the out-of-basin check. Writes tc_shifts.csv and tc_shift_gauges.parquet.
     """
     ref_col = f"gauge_rp{stp.REFERENCE_RP}_m"
     if ref_col not in gauges:
@@ -280,13 +301,13 @@ def tc_shift_fit(paths: _Paths, stations: pd.DataFrame, todo: list[dict], gauges
         out[f"rp{stp.REFERENCE_RP}_shift_{t:g}_m"] = lev[col].to_numpy()
     out.to_parquet(paths.tc_shift_gauges)
     counts = tcd.basin.value_counts()
-    table = pd.DataFrame([{"basin": b, "shift_m": v, "gauges": int(counts[b]), "fit_gauges": int(len(tcd) - counts[b])}
-                          for b, v in shifts.items()]
-                         + [{"basin": "all", "shift_m": all_shift, "gauges": len(tcd), "fit_gauges": len(tcd)}])
+    table = pd.DataFrame([{"basin": "all", "shift_m": all_shift, "gauges": len(tcd), "fit_gauges": len(tcd)}]
+                         + [{"basin": b, "shift_m": v, "gauges": int(counts[b]), "fit_gauges": int(len(tcd) - counts[b])}
+                            for b, v in shifts.items()])
     table.to_csv(paths.tc_shifts, index=False)  # read it with keep_default_na=False: "NA" is the North Atlantic
-    logger.info("COAST-RP_TC shifts (m; other basins use 'all'), gauge years %d-%d:\n%s",
+    logger.info("COAST-RP_TC shift (m; 'all' applied, basin rows fitted on the other basins), gauge years %d-%d:\n%s",
                 int(tcd.first_year.min()), int(tcd.last_year.max()), table.round(3).to_string(index=False))
-    return shifts, all_shift
+    return all_shift
 
 
 def run(config: dict, force: bool = True) -> None:
@@ -297,9 +318,11 @@ def run(config: dict, force: bool = True) -> None:
     paths.cache.mkdir(parents=True, exist_ok=True)
     catalog = get_data_catalog(_REPO_ROOT / config["paths"]["hydromt_data_catalog"], root=config["paths"]["root"])
     coast_rp = Path(catalog.get_source("coast_rp").path)
+    land_path = Path(catalog.get_source("land_polygons").path)
     if force:
         for p in [paths.gauges / n for n in ("gauges.parquet", "gauge_constants.npz", "tc_donors.parquet",
-                                             "tc_donor_shapes.npy", "tide_gauges.parquet")] + [
+                                             "tc_donor_shapes.npy", "tide_gauges.parquet", "tide_links_stations.npz",
+                                             "tide_links_nodes.npz")] + [
                 paths.stations, paths.shape_profiles, paths.tc_shifts, paths.tc_shift_gauges, paths.levels, paths.hydrographs, paths.info,
                 paths.surge_models, paths.node_levels, paths.coastline_nodes,
                 paths.root / PRODUCT_LEVELS_FILENAME, paths.root / PRODUCT_HYDROGRAPHS_FILENAME]:
@@ -328,7 +351,7 @@ def run(config: dict, force: bool = True) -> None:
     stores = (paths.gtsm_stations_early, paths.gtsm_stations)
 
     tide_gauges = tide_gauge_table(cfg, paths, models, workers)
-    atlas = station_atlas(paths, stations, models, gauges, tide_gauges, workers)
+    atlas = station_atlas(paths, stations, models, gauges, tide_gauges, land_path, workers)
     ratios = stp.station_ratios(stations, gauges)
     covariate = stp.ratio_covariate(gauges)
     tc_levels = stp.coast_rp_levels(coast_rp.parent / "COAST-RP_TC.nc")
@@ -366,9 +389,9 @@ def run(config: dict, force: bool = True) -> None:
                                prof.loc[pool].drop(columns="gtsm_jumps").to_numpy(), lonlat)
     for item, shape in zip(todo, pooled):
         item["pooled_shape"] = shape
-    shifts, all_shift = tc_shift_fit(paths, stations, todo, gauges, Path(cfg["ibtracs_path"]), stores, workers)
+    tc_shift = tc_shift_fit(paths, stations, todo, gauges, Path(cfg["ibtracs_path"]), stores, workers)
     for k in np.flatnonzero(has_tc):
-        todo[k]["tc_shift_m"] = shifts.get(basin[k], all_shift)
+        todo[k]["tc_shift_m"] = tc_shift
 
     logger.info("Levels and hydrographs at %d stations", len(todo))
     hyd = np.lib.format.open_memmap(paths.hydrographs, mode="w+", dtype=np.float32,
@@ -400,7 +423,7 @@ def run(config: dict, force: bool = True) -> None:
         lev[f"coast_rp_etc_rp{rp}_m"] = etc[rp].to_numpy()
         lev[f"coast_rp_tc_rp{rp}_m"] = tc_levels[rp].reindex(lev.station_id).to_numpy()
     lev.to_parquet(paths.levels)
-    nodes = node_levels(config, paths, models, todo, lev, tide_gauges, workers)
+    nodes = node_levels(config, paths, models, todo, lev, tide_gauges, land_path, workers)
     nodes.to_parquet(paths.node_levels)
     stp.export_levels(lev, coast_rp, paths.root / PRODUCT_LEVELS_FILENAME, nodes)
     stp.export_hydrographs(lev, np.load(paths.hydrographs, mmap_mode="r"), paths.root / PRODUCT_HYDROGRAPHS_FILENAME)

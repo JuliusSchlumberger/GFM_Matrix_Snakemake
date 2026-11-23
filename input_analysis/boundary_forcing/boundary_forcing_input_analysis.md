@@ -261,7 +261,7 @@ Confirmation on 5-10 real 2-D tiles follows once the generator exists (test 8).
 **Decided:**
 - Tide: FES2022, FES2014 where the version rule fires (MHWS ratio > 1.5 and difference > 1.25 m),
   gauges overriding both: scaled by the median gauge/FES amplitude ratio of the GESLA gauges within
-  25 km (§9). EOT20 not used.
+  25 km that reach the point through water outside the OSM land polygons (§9). EOT20 not used.
 - Hydrograph: per-RP generator (§5, built and tested: 14 of 20 cases pass) from GTSM surge shapes on the FES tide at each station's tide
   level during extremes, scaled to the RP peak; largest-event shapes for RP >= 50; window
   extended where events outlast ±72 h; gauge shapes, else a Gaussian, at TC stations. COAST-HG is
@@ -290,7 +290,7 @@ model between it (default) and COAST-RP / COAST-HG.
   taken as high waters, GTSM residual spikes and heavy GPD tails. They were removed by dropping
   weak maxima in the low-water band, despiking (15 Arafura stations fall back to COAST-RP) and a
   cyclone mask on the ETC fit with a GPD shape pooled over 300 km, on 1950-2024 (§9); COAST-RP's
-  TC part is raised by its basin's shift (0.18-0.25 m).
+  TC part is raised by one shift fitted over the TC-dominated gauges of all basins.
 - **Against COAST-RP** (fig12, fig13): median +0.05 m at RP100 (10-90%: -0.22 to +0.29 m). The FES
   tide lowers the levels by 0.05-0.08 m and r raises them by 0.06-0.09 m. Large departures are
   regional: lower in the southern North Sea, higher in the western Baltic, the macrotidal
@@ -313,8 +313,8 @@ model between it (default) and COAST-RP / COAST-HG.
     at the Saguenay mouth;
   - off-centre hydrograph maxima are cosmetic;
   - a cyclone mask alone lowers TC coasts by 0.14 m at RP100 and moves them away from the
-    gauges, because both cyclone sources are too low; the product pairs it with the basin shift
-    of COAST-RP_TC (§9).
+    gauges, because both cyclone sources are too low; the product pairs it with the shift of
+    COAST-RP_TC (§9).
 
 ## 9. Review of the estimated rules and test 4
 

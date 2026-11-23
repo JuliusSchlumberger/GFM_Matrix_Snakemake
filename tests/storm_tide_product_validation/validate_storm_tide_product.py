@@ -288,7 +288,7 @@ def test_station_records_join_the_early_and_main_surge_stores(tmp_path: Path) ->
     assert years[0] == 1950 and len(years) == n_hours
 
 
-def test_tc_shift_fit_scores_the_tc_dominated_gauges_at_their_nearest_station(tmp_path: Path) -> None:
+def test_tc_shift_fit_applies_the_all_basin_shift_and_reports_the_basin_left_out_fits(tmp_path: Path) -> None:
     import prepare_storm_tide_product as prep
     stations = pd.DataFrame({"lon": [-80.0, 120.0, 0.0], "lat": [25.0, 20.0, 50.0]})
     gauges = pd.DataFrame({"lon": [-80.05, 120.05, 0.0, 60.0], "lat": [25.0, 20.0, 50.0, 0.0],
@@ -303,9 +303,10 @@ def test_tc_shift_fit_scores_the_tc_dominated_gauges_at_their_nearest_station(tm
     levels = pd.DataFrame([2.0 + trials, 3.0 + trials], columns=list(trials))
     with patch("storm_tide_product.trial_levels", return_value=levels) as tl, \
             patch("storm_tide_product.station_basins", return_value=np.array(["NA", "WP"], dtype=object)):
-        shifts, all_shift = prep.tc_shift_fit(prep._Paths(tmp_path, tmp_path), stations, todo, gauges, tmp_path,
+        shift = prep.tc_shift_fit(prep._Paths(tmp_path, tmp_path), stations, todo, gauges, tmp_path,
                                               [], 1)
     assert [i["station"] for i in tl.call_args[0][0]] == [0, 1]  # "far" has no station within 25 km
-    assert shifts == {"NA": pytest.approx(0.1), "WP": pytest.approx(0.3)} and all_shift == pytest.approx(0.2)
+    assert shift == pytest.approx(0.2)
     table = pd.read_csv(tmp_path / "tc_shifts.csv", keep_default_na=False)
-    assert table.basin.tolist() == ["NA", "WP", "all"] and table.gauges.tolist() == [1, 1, 2]
+    assert table.basin.tolist() == ["all", "NA", "WP"] and table.gauges.tolist() == [2, 1, 1]
+    assert table.shift_m.tolist() == pytest.approx([0.2, 0.1, 0.3])

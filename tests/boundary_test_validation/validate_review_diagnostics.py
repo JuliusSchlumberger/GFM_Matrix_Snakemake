@@ -34,3 +34,19 @@ def test_basin_fits_zero_their_gauges_median_error() -> None:
     assert np.isclose(own["A"], 0.1) and np.isclose(own["B"], 0.3)
     assert np.isclose(loo["A"], 0.3) and np.isclose(loo["B"], 0.1)
     assert 0.1 <= all_value <= 0.3
+
+
+def test_osm_water_keeps_a_channel_narrower_than_a_cell_open(tmp_path: Path) -> None:
+    import geopandas as gpd
+    from shapely.geometry import box
+
+    from review_diagnostics import OsmWater
+
+    # land everywhere except a 50 m wide north-south channel through lon 0 (50 m < the 100 m cell)
+    half_deg = 25e-3 / 111.2 / 2
+    land = gpd.GeoDataFrame(geometry=[box(-1, -1, -half_deg, 1), box(half_deg, -1, 1, 1)], crs="EPSG:4326")
+    land.to_file(tmp_path / "land.gpkg")
+    water, cell_m, rc = OsmWater(tmp_path / "land.gpkg", np.array([[0.0, 0.0]]), 5.0)(0.0, 0.0, 5.0)
+    row, col = rc(np.array([[0.0, 0.0]]))[0]
+    assert cell_m == 100.0
+    assert water[:, col].all() and water.sum() == water.shape[0]

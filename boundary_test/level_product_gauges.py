@@ -22,6 +22,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.sparse import load_npz
 from sklearn.neighbors import BallTree
 
 REPO = Path(__file__).resolve().parents[1]
@@ -62,6 +63,9 @@ class GaugeCheck:
         self.lev = pd.read_parquet(out / "levels.parquet")
         self.gauges = gauges = pd.read_parquet(out / "gauges" / "gauges.parquet")
         tide_gauges = pd.read_parquet(out / "gauges" / "tide_gauges.parquet")
+        # a product built with the through-water tide rule carries its station links
+        links_path = out / "gauges" / "tide_links_stations.npz"
+        links = load_npz(links_path).tocsr() if links_path.exists() else None
         self.reference = pd.read_parquet(sources / "surge_correction" / "sites.parquet")
         lonlat = stations[["lon", "lat"]].to_numpy(dtype=float)
         c = np.load(cache / "fes_constants.npz")
@@ -97,7 +101,8 @@ class GaugeCheck:
                                         r=DEDUP_KM / stp.EARTH_RADIUS_KM)[0]
             log_ratio = tide_gauges[f"log_ratio_{a}"].to_numpy(dtype=float).copy()
             log_ratio[site] = np.nan
-            f = float(tdc.correction_factors(lonlat[[k]], tg_lonlat, log_ratio)[0][0])
+            f = float(tdc.correction_factors(lonlat[[k]], tg_lonlat, log_ratio,
+                                             links=None if links is None else links[[k]])[0][0])
             item = {"station": len(self.todo), "gtsm_index": int(stations.gtsm_index.loc[st]), "atlas": a,
                     "coast_rp": coast[k], "station_index": st, "hc": hc[a][k], "mhws_m": float(mh[a][k]),
                     "r_idw": r, "r_covariate": stp.ratio_covariate(others),

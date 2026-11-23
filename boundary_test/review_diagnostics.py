@@ -5,11 +5,15 @@ Stages (each writes <dest-dir>/<stage>/ parquet and csv tables):
                on the TC-dominated gauges (basin left out, or the basin's own gauges), scored at RP
                2-100: shift (production), scale of the whole level, and scale of the level above
                COAST-RP_TC's own RP2 level (its tide floor), which leaves the tide untouched
+  basin_fit_cv the shift and the surge scale fitted per basin, scored with the scored gauge and every
+               TC-dominated gauge within CV_EXCLUDE_KM of it left out of the fit (own basin, or one
+               value over all basins), beside the basin-left-out and in-sample fits
   tc_mask_et   the IBTrACS mask with and without extratropical track points (NATURE "ET"): share of
                the stations' annual maxima each masks, and the levels at the gauges
   shift_bootstrap  the production basin shift resampled over its gauges (tc_shift_gauges.parquet)
   tide_neighbours  the tide factor's neighbour gauges within tide_correction.CORRECTION_KM: all
-               (production), connected through GEBCO water (elevation < 0), FES amplitude within a
+               (production), connected through GEBCO water (elevation < 0) or through water outside
+               the OSM land polygons (tide_correction.WATER_CELL_M cells), FES amplitude within a
                factor TIDE_SIMILAR_RULE of the point's (TIDE_SIMILAR as sensitivity), and both; the
                tide amplitude at the usable tide gauges and the levels at the ratio gauges, gauge
                site left out
@@ -39,15 +43,17 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import geopandas as gpd
 import rasterio
 from rasterio.windows import Window, from_bounds
 from rasterio.windows import transform as window_transform
+from shapely import STRtree, box, unary_union
 from sklearn.neighbors import BallTree
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "boundary_test"))
-from along_water import along_water_distances  # noqa: E402
+from along_water import along_water_distances, land_water_window, window_bounds  # noqa: E402
 from config_utils import get_data_catalog, load_config  # noqa: E402
 from gesla import DEDUP_KM  # noqa: E402
 from gtsm_series import gtsm_stations, load_series, station_series  # noqa: E402
@@ -67,6 +73,9 @@ import tide_prediction as tp  # noqa: E402
 RAISE_FORMS = {"shift": ("tc_shift_m", (0.0, 0.1, 0.2, 0.3, 0.4)),
                "level scale": ("tc_scale", (1.0, 1.1, 1.2, 1.3, 1.4)),
                "surge scale": ("tc_surge_scale", (1.0, 1.25, 1.5, 1.75, 2.0))}
+CV_FORMS = ("shift", "surge scale")
+CV_FITS = ("basin left out", "own basin, in sample", "own basin, gauges left out", "all basins, gauges left out")
+CV_EXCLUDE_KM = stp.TC_MASK_KM  # gauges this close see the same storms: not independent of the scored gauge
 BOOTSTRAP_REPS = 2000
 SEED = 0
 TC_GROUPS = ("TC-dominated gauges", "stations with a TC part")
@@ -170,6 +179,86 @@ def tc_raise(check: GaugeCheck, dest: Path, workers: int) -> None:
             print(v)
             print(s.pivot_table(index=["split", "gauges", "rp"], columns="level", values=v, sort=False)[list(cols)]
                   .round(3).to_string(), flush=True)
+
+
+def _cv_value(trials: np.ndarray, err: np.ndarray, use: np.ndarray, fallback: np.ndarray) -> float:
+    return stp.trial_root(trials, np.median(err[:, use if use.any() else fallback], axis=1))
+
+
+def basin_fit_cv(check: GaugeCheck, dest: Path, workers: int) -> None:
+    root = dest / "basin_fit_cv"
+    root.mkdir(parents=True, exist_ok=True)
+    sub = _tc_part(check)
+    basin = sub.lev.tc_basin.loc[sub.meta.station].to_numpy().astype(str)
+    cache = root / "trial_levels.parquet"
+    if cache.exists():
+        trial_levels = pd.read_parquet(cache)
+    else:
+        hours = sub.tc_hours()
+        parts = []
+        for form in CV_FORMS:
+            key, trials = RAISE_FORMS[form]
+            for v in trials:
+                lv = _levels_with(sub, _raised(sub.todo, key, v), workers, mask_hours=hours)
+                parts.append(lv.reset_index().assign(form=form, trial=v, gauge=np.arange(len(lv))))
+                print(f"  {form} {v:g}", flush=True)
+        trial_levels = pd.concat(parts, ignore_index=True)
+        trial_levels.to_parquet(cache)
+    base = trial_levels[(trial_levels.form == CV_FORMS[0]) & (trial_levels.trial == 0.0)].set_index("gauge")
+    out = base.drop(columns=[c for c in base if c.startswith("new_loo")] + ["form", "trial"])
+    out["basin"] = basin
+    for rp in GAUGE_RPS:
+        out[f"none_rp{rp}_m"] = base[f"new_loo_rp{rp}_m"]
+    tcd = (out.station_class == "tc_dominated").to_numpy()
+    lonlat = np.radians(sub.gauges.loc[sub.meta.file_name, ["lat", "lon"]].to_numpy(dtype=float))
+    near = BallTree(lonlat[tcd], metric="haversine").query_radius(
+        lonlat, r=CV_EXCLUDE_KM / stp.EARTH_RADIUS_KM)
+    fits = []
+    for form in CV_FORMS:
+        trials = np.array(RAISE_FORMS[form][1])
+        lv = trial_levels[trial_levels.form == form].sort_values(["trial", "gauge"])
+        err = np.stack([g.new_loo_rp100_m.to_numpy() - g.gauge_rp100_m.to_numpy()
+                        for _, g in lv.groupby("trial")])[:, tcd]
+        loo, own, all_value = _basin_values(trials, err, basin[tcd])
+        per_gauge = {"basin left out": np.array([loo.get(b, all_value) for b in basin]),
+                     "own basin, in sample": np.array([own.get(b, all_value) for b in basin])}
+        cv_own, cv_all, n_fit = [], [], []
+        for j in range(len(out)):
+            away = np.ones(tcd.sum(), bool)
+            away[near[j]] = False
+            same = away & (basin[tcd] == basin[j])
+            cv_own.append(_cv_value(trials, err, same, away))
+            cv_all.append(_cv_value(trials, err, away, away))
+            n_fit.append(int(same.sum()))
+        per_gauge["own basin, gauges left out"] = np.array(cv_own)
+        per_gauge["all basins, gauges left out"] = np.array(cv_all)
+        for fit, values in per_gauge.items():
+            col = "_".join(f"{form} {fit}".replace(",", "").split())
+            for rp in GAUGE_RPS:
+                lev = np.stack([g[f"new_loo_rp{rp}_m"].to_numpy() for _, g in lv.groupby("trial")])
+                out[f"{col}_rp{rp}_m"] = [np.interp(x, trials, lev[:, j]) for j, x in enumerate(values)]
+            fits += [{"form": form, "fit": fit, "basin": b, "gauges": int((basin[tcd] == b).sum()),
+                      "median": float(np.nanmedian(values[basin == b])),
+                      "min": float(np.nanmin(values[basin == b])), "max": float(np.nanmax(values[basin == b])),
+                      "fit_gauges_median": float(np.median(np.array(n_fit)[basin == b]))
+                      if fit == "own basin, gauges left out" else np.nan}
+                     for b in np.unique(basin)]
+    out.to_parquet(root / "gauges.parquet")
+    fits = pd.DataFrame(fits)
+    fits.to_csv(root / "fits.csv", index=False)
+    cols = {"no raise": "none"} | {f"{f}, {fit}": "_".join(f"{f} {fit}".replace(",", "").split())
+                                   for f in CV_FORMS for fit in CV_FITS}
+    groups = {g: group_mask(out, g) for g in TC_GROUPS} | breakdown_groups(out) \
+        | {("basin", b): (out.basin == b).to_numpy() for b in np.unique(basin)}
+    s = scores(out, cols, groups)
+    s["split"] = s.split.fillna("TC group")
+    s.to_csv(root / "scores.csv", index=False)
+    with pd.option_context("display.width", 300, "display.max_rows", 500, "display.max_columns", 50):
+        print(fits.round(3).to_string())
+        for v in ("median", "mae"):
+            print(v)
+            print(s[s.rp.isin([2, 10, 100])].pivot_table(index=["split", "gauges", "rp"], columns="level", values=v,
+                                                         sort=False)[list(cols)].round(3).to_string(), flush=True)
 
 
 def _tc_hours_nature(stations: pd.DataFrame, n_hours: int, ibtracs_path: Path, start: np.datetime64,
@@ -283,6 +372,24 @@ def shift_bootstrap(check: GaugeCheck, dest: Path, workers: int) -> None:
     print(table.round(3).to_string(), flush=True)
 
 
+class OsmWater:
+    """`along_water.land_water_window` on the OSM land polygons, read once over the windows of `points`."""
+
+    def __init__(self, path: Path, points: np.ndarray, half_km: float):
+        boxes = [box(*window_bounds(x, y, half_km)) for x, y in points]
+        self.land = gpd.read_file(path, mask=unary_union(boxes)).geometry.to_numpy()
+        self.tree = STRtree(self.land)
+
+    def __call__(self, lon: float, lat: float, half_km: float):
+        hits = self.tree.query(box(*window_bounds(lon, lat, half_km)))
+        water, rc = land_water_window(self.land[hits], lon, lat, half_km, tdc.WATER_CELL_M, tdc.WATER_SUPERSAMPLE)
+        return water, tdc.WATER_CELL_M, rc
+
+
+def _gebco_water(src):
+    return lambda lon, lat, half_km: _water_window(src, lon, lat, half_km)
+
+
 def _water_window(src, lon: float, lat: float, half_km: float):
     """GEBCO water (elevation < 0) around a point on ~square cells, its cell size (m) and a lon/lat -> (row, col)."""
     dlat = half_km / KM_PER_DEG
@@ -304,17 +411,20 @@ def _water_window(src, lon: float, lat: float, half_km: float):
     return square, abs(t.e) * KM_PER_DEG * 1000.0, rc
 
 
-def _along_km(src, point: np.ndarray, others: np.ndarray, radius_km: float) -> np.ndarray:
+def _along_km(water_window, point: np.ndarray, others: np.ndarray, radius_km: float) -> np.ndarray:
     """Water-path distance (km) from `point` (lon, lat) to each of `others`; inf where not connected."""
     if not len(others):
         return np.zeros(0)
-    water, cell_m, rc = _water_window(src, float(point[0]), float(point[1]), radius_km + WINDOW_MARGIN_KM)
+    water, cell_m, rc = water_window(float(point[0]), float(point[1]), radius_km + WINDOW_MARGIN_KM)
     return along_water_distances(water, cell_m, rc(point[None, :]), rc(others), limit_m=radius_km * 1000.0)[0] / 1000.0
 
 
 def _neighbour_factors(points: np.ndarray, fes_amp_points: np.ndarray, g_lonlat: np.ndarray, g_fes_amp: np.ndarray,
-                       log_ratio: np.ndarray, exclude: list[np.ndarray], src) -> pd.DataFrame:
-    """Tide factor per point under each neighbour rule; `exclude`: gauge rows left out per point."""
+                       log_ratio: np.ndarray, exclude: list[np.ndarray], waters: dict) -> pd.DataFrame:
+    """Tide factor per point under each neighbour rule; `exclude`: gauge rows left out per point.
+
+    `waters`: water-window source per name (GEBCO, OSM), each giving an along-water rule.
+    """
     tree = BallTree(np.radians(g_lonlat[:, ::-1]), metric="haversine")
     near, dist = tree.query_radius(np.radians(points[:, ::-1]), r=tdc.CORRECTION_KM / stp.EARTH_RADIUS_KM,
                                    return_distance=True)
@@ -322,11 +432,14 @@ def _neighbour_factors(points: np.ndarray, fes_amp_points: np.ndarray, g_lonlat:
     for j, (i, d) in enumerate(zip(near, dist)):
         keep = ~np.isin(i, exclude[j]) & np.isfinite(log_ratio[i])
         i = i[keep]
-        along = _along_km(src, points[j], g_lonlat[i], tdc.CORRECTION_KM)
         similar = np.abs(np.log(g_fes_amp[i] / fes_amp_points[j]))
-        rules = {"25 km (production)": np.ones(len(i), bool), "along water": np.isfinite(along)}
+        rules = {"25 km (production)": np.ones(len(i), bool)}
+        for name, water_window in waters.items():
+            rules[f"along water ({name})"] = np.isfinite(_along_km(water_window, points[j], g_lonlat[i],
+                                                                   tdc.CORRECTION_KM))
         rules |= {f"FES amplitude within x{x:g}": similar <= np.log(x) for x in TIDE_SIMILAR}
-        rules[f"along water + FES within x{TIDE_SIMILAR_RULE:g}"] = rules["along water"] & (similar <= np.log(TIDE_SIMILAR_RULE))
+        rules[f"along water (GEBCO) + FES within x{TIDE_SIMILAR_RULE:g}"] = \
+            rules["along water (GEBCO)"] & (similar <= np.log(TIDE_SIMILAR_RULE))
         row = {}
         for name, sel in rules.items():
             row[name] = float(np.exp(np.median(log_ratio[i[sel]]))) if sel.any() else 1.0
@@ -344,8 +457,13 @@ def tide_neighbours(check: GaugeCheck, dest: Path, workers: int) -> None:
     g_lonlat = gt[["lon", "lat"]].to_numpy(dtype=float)
     st_lonlat = check.stations[["lon", "lat"]].to_numpy(dtype=float)
     site_tree = BallTree(np.radians(g_lonlat[:, ::-1]), metric="haversine")
-    src = rasterio.open(get_data_catalog(REPO / check.cfg["paths"]["hydromt_data_catalog"],
-                                         root=check.cfg["paths"]["root"]).get_source("gebco").path)
+    catalog = get_data_catalog(REPO / check.cfg["paths"]["hydromt_data_catalog"], root=check.cfg["paths"]["root"])
+    src = rasterio.open(catalog.get_source("gebco").path)
+    gauge_stations = check.stations.index.get_indexer(check.meta.station)
+    osm_points = np.vstack([g_lonlat[gt.usable.to_numpy()], st_lonlat[gauge_stations]])
+    waters = {"GEBCO": _gebco_water(src),
+              "OSM": OsmWater(Path(catalog.get_source("land_polygons").path), osm_points,
+                              tdc.CORRECTION_KM + WINDOW_MARGIN_KM)}
 
     # amplitude at the usable tide gauges, each with its own site left out; atlas of the nearest station
     use = gt[gt.usable].reset_index(drop=True)
@@ -359,7 +477,7 @@ def tide_neighbours(check: GaugeCheck, dest: Path, workers: int) -> None:
     for a in ("fes2022", "fes2014"):
         sel = np.flatnonzero(atlas == a)
         f = _neighbour_factors(u_lonlat[sel], fes_amp[sel], g_lonlat, gt[f"amp_{a}_m"].to_numpy(dtype=float),
-                               gt[f"log_ratio_{a}"].to_numpy(dtype=float), [same[j] for j in sel], src)
+                               gt[f"log_ratio_{a}"].to_numpy(dtype=float), [same[j] for j in sel], waters)
         factors.append(f.set_index(sel))
     factors = pd.concat(factors).sort_index()
     amp = use[["file_name", "lon", "lat"]].assign(atlas=atlas, amp_gauge_m=tdc.tide_amplitude(use), amp_fes_m=fes_amp,
@@ -369,7 +487,8 @@ def tide_neighbours(check: GaugeCheck, dest: Path, workers: int) -> None:
     rules = [c for c in factors if not c.startswith("n ")]
     rows = []
     groups = {"all": np.ones(len(amp), bool), "gauge amplitude > 2 m": amp.amp_gauge_m.to_numpy() > 2.0,
-              "rule changes the neighbours": (factors[rules[1]] != factors[rules[0]]).to_numpy()} | {
+              "GEBCO along water changes the factor": (factors["along water (GEBCO)"] != factors[rules[0]]).to_numpy(),
+              "OSM along water changes the factor": (factors["along water (OSM)"] != factors[rules[0]]).to_numpy()} | {
         f"country {c}": (amp.country == c).to_numpy() for c in ("CAN", "USA", "GBR", "FRA", "NOR", "AUS", "JPN")}
     for label, sel in groups.items():
         for name in ["FES, uncorrected"] + rules:
@@ -391,14 +510,14 @@ def tide_neighbours(check: GaugeCheck, dest: Path, workers: int) -> None:
     for a in ("fes2022", "fes2014"):
         sel = np.flatnonzero(s_atlas == a)
         f = _neighbour_factors(st_lonlat[pos[sel]], s_amp[sel], g_lonlat, gt[f"amp_{a}_m"].to_numpy(dtype=float),
-                               gt[f"log_ratio_{a}"].to_numpy(dtype=float), [sites[j] for j in sel], src)
+                               gt[f"log_ratio_{a}"].to_numpy(dtype=float), [sites[j] for j in sel], waters)
         st_factors.append(f.set_index(sel))
     st_factors = pd.concat(st_factors).sort_index()
     st_factors.index = check.meta.file_name.to_numpy()
     st_factors.to_parquet(root / "station_factors.parquet")
     table, cols = None, {}
-    level_rules = ["25 km (production)", "along water", f"FES amplitude within x{TIDE_SIMILAR_RULE:g}",
-                   f"along water + FES within x{TIDE_SIMILAR_RULE:g}"]
+    level_rules = ["25 km (production)", "along water (GEBCO)", "along water (OSM)",
+                   f"FES amplitude within x{TIDE_SIMILAR_RULE:g}"]
     for n, name in enumerate(level_rules):
         sub = copy.copy(check)
         sub.meta = check.meta.assign(tide_factor_loo=st_factors[name].to_numpy())
@@ -684,7 +803,7 @@ def despike_tracks(check: GaugeCheck, dest: Path, workers: int) -> None:
     print(out.groupby("tc_basin")[["dropped_near_track", "dropped_away", "hours_near_track"]].sum().to_string())
 
 
-STAGES = {"tc_raise": tc_raise, "tc_mask_et": tc_mask_et, "shift_bootstrap": shift_bootstrap,
+STAGES = {"tc_raise": tc_raise, "basin_fit_cv": basin_fit_cv, "tc_mask_et": tc_mask_et, "shift_bootstrap": shift_bootstrap,
           "tide_neighbours": tide_neighbours, "gauge_series": gauge_series, "gauge_analysis": gauge_analysis,
           "despike_tracks": despike_tracks}
 

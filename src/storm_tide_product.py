@@ -12,8 +12,8 @@ MIN_NEIGHBOURS); with fewer, the gauges' power law of r in the station's own GTS
 surge at RATIO_RP (`ratio_covariate`: r falls as the surge grows, the large ratios sit where
 GTSM's surge is a decimetre). Capped at R_CAP. Atlas: FES2022, FES2014 where
 `tide_prediction.consistent_version_flag` fires.
-TC: COAST-RP_TC's levels, raised by its cyclone basin's shift (COAST-RP_TC is low at the
-gauges; `loo_basin_fit`), become an annual exceedance rate added to the ETC rate, as COAST-RP
+TC: COAST-RP_TC's levels, raised by one shift fitted over the TC-dominated gauges of all basins
+(COAST-RP_TC is low at the gauges; `loo_basin_fit` gives the out-of-basin check), become an annual exceedance rate added to the ETC rate, as COAST-RP
 combines its own two parts. RP levels solve rate(z) = -ln(1 - 1/RP), m above local MSL.
 Flags (`station_flags`): tail_uncertain (GPD shape > TAIL_UNCERTAIN_SHAPE), tc_coast (a COAST-RP_TC
 part), fallback_r (r from the covariate fallback).

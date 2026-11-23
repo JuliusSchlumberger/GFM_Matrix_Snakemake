@@ -943,9 +943,8 @@ FES2022, FES2014, COAST-RP), into `boundary_conditions.storm_tide_product_dir`:
     p90.
   - Station r: median 1.18. 203 stations are capped; 13,583 take the power law (no 3 gauges within
     500 km).
-- *TC part.* COAST-RP_TC, raised by the shift of its IBTrACS basin (fitted in the build at the
-  TC-dominated gauges of the other basins against the gauge's own skew-surge convolution, trial
-  shifts 0-0.4 m; 0.18-0.25 m on the 1979-2024 capped fit), enters as an
+- *TC part.* COAST-RP_TC, raised by one shift (fitted in the build at the TC-dominated gauges of
+  all basins against the gauge's own skew-surge convolution, trial shifts 0-0.4 m), enters as an
   annual exceedance rate added to the ETC rate, which is COAST-RP's own combination. TC is a
   gap-filler until test 10.
 - *Flags* (levels file): tail-uncertain (GPD shape > 0.2), TC-coast (a COAST-RP TC part) and
@@ -1136,7 +1135,7 @@ convolution of the gauge's own skew surges with its own tide.
 - *TC mask.* An IBTrACS mask (cycles within ±24 h of a storm of ≥ 34 kt passing within 300 km
   leave the ETC fit, at stations with a TC part; 9,247 stations, median 0.3% of cycles) makes
   the TC coasts worse at the gauges on its own; the product masks and raises COAST-RP_TC by
-  its basin's shift, which makes up for it.
+  the shift, which makes up for it.
   - TC-dominated gauges at RP100: median -0.03 m and MAE 0.36 m without the mask, against
     -0.17 m and 0.39 m with it. Stations with a TC part: -0.02 m and 0.25 m against
     -0.07 m and 0.27 m. Non-TC gauges are unchanged. The spread widens without the mask: the

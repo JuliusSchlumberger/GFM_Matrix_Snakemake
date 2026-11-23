@@ -305,9 +305,6 @@ Open:
       range can be smaller (estuary heads), so the time near the peak is too long there.
     - A node blends stations by distance only, across an isthmus too (Chignecto: Fundy and
       Northumberland Strait stations); the tide is the node's own.
-    - The SFINCS boundary lines leave the nodes out (`boundary_lines_geometry._tile_stations`,
-      matched by position against the product's level file), so SFINCS makes the estuary tide
-      itself. Rebuild the lines after the product rebuild.
   5. Global rerun with flags (tail-uncertain, TC-coast, fallback-r); test 10 afterwards revises
      the flagged stations. The 1950-1978 surge months are on `<data_root>`
      (`inputs/GTSM_storm_tide_hourly/storm_surge_residual`, all 900 months).
@@ -451,13 +448,25 @@ Open:
        p90 +8 cm; EAS +7, WNA +7, SEA +5 cm. FES Sa+Ssa at those months is ~0 (no gap filled by them).
      - Despike: 0 hours dropped within the IBTrACS mask hours at 9,232 TC-part stations (1 hour away).
   3. Decide, then build B and rescore against A by region:
-     - TC raise: production applies the basin-left-out values, which swap WP and NA. Own-basin fit
-       (left-out kept as the validation score) and form (shift vs scale above COAST-RP_TC's RP2
-       floor). The own-basin scores above are in sample: score them gauge-left-out within the basin
-       first; NI (3 gauges) and SI (8) own fits span 0-0.4 m in the bootstrap.
-     - Seasonal gap: whether to add a monthly steric climatology to the GTSM residual (source to pick).
-     - No change indicated: ET in the mask, tide-factor neighbours, r rule and fallback, despike,
-       surge-tide independence.
+     - TC raise, scored with every TC-dominated gauge within 300 km of the scored gauge left out of
+       the fit (review_diagnostics basin_fit_cv; TC-dominated RP100 bias / MAE): no raise -0.131 /
+       0.362; shift basin left out (production) -0.032 / 0.353; own basin 0.017 / 0.354 (in sample
+       0.336: the gain is overfit); one value over all basins (0.22 m) -0.005 / 0.353; surge scale
+       0.016 / 0.393 own basin, -0.008 / 0.436 all basins. Proposed for B: one shift over all basins
+       (WP 0.14 -> 0.22, NA 0.25 -> 0.22, others ~unchanged; EAS RP100 bias -0.068 -> -0.035).
+     - Tide neighbours along water outside the OSM land polygons (100 m cells, 25 m sub-cells): tide
+       amplitude error over 2,373 gauges 15.5% (= production; GEBCO 16.2%); RP100 MAE all gauges
+       0.219 -> 0.216, NWN 0.339 -> 0.277, WNA 0.172 -> 0.158 (GEBCO 0.212), WCE 0.149 -> 0.139; no
+       region worse by more than 0.004. GEBCO gains more in NWN (0.236) and at spring range > 4 m
+       only by cutting inlets. Proposed for B: OSM along water.
+     - Build B (implemented, to run on Hydrax): one all-basin shift (`tc_shift_fit`), tide factor from
+       the gauges reaching the point through OSM water (`tide_correction.water_links`, cached in
+       gauges/tide_links_*.npz). Then rescore B against A (level_product_gauges; open_guesses
+       ingredients) and write the gauge-validation section of INPUT_ANALYSIS.md for the appendix
+       (leave-out design, metrics, A vs B, tested alternatives, commands, figures).
+     - Seasonal gap: not in B (a few cm against RP100 MAE 0.22 m; r absorbs part of it at gauges);
+       revisit if B leaves negative RP100 bias in EAS/WNA/SEA.
+     - No change indicated: ET in the mask, r rule and fallback, despike, surge-tide independence.
   4. Node hydrographs / T tables for correction B (head in m, not x·peak) and node levels at the
      SFINCS boundary; test one Fundy tile against GeoNB.
   5. National design levels (WBI, CFB, Daigle 2020) in the level validation, if data available.
@@ -1855,3 +1864,14 @@ History holds ~1.2 GB of old files that are no longer tracked (209 MB packed): `
    `*_materialized.yml`, `.cleanup_baseline/`), or `git fetch && git reset --hard origin/<branch>`.
 5. Old hashes in docs and messages change; `.git/filter-repo/commit-map` in the mirror maps old to
    new (e.g. for AUDIT.md's `git show 89e130e:AUDIT.md`).
+
+## SFINCS post job warnings (cal_post_sweep_298174.err)
+- [ ] `ERROR 1: PROJ: proj_create_from_database: Open of .../envs/gfm/share/proj failed` in the post job after `unset PROJ_LIB PROJ_DATA GDAL_DATA`; outputs were still written. Find which plot script triggers it and whether any reprojection silently fell back.
+- [ ] `constrained_layout not applied because axes sizes collapsed to zero` from `analysis/_figure_style.py:132` during `run_calibration_sweep_analysis.py`; identify the figure (stderr is not interleaved with stdout) and fix its layout.
+- [ ] Tile 1359: `run_sfincs_tile.py postprocessing failed` (job 297351); SFINCS output exists, rescore it.
+
+## SFINCS calibration vs production, remaining differences
+- [ ] Duration variants take SFINCS's line hydrographs (`sfincs_tiles/run_calibration_models.py:202`), production the product hydrographs per cell (`src/eikonal_runner.py` `build_duration_correction`).
+- [ ] Calibration runs have no static two-component level (`sfincs_tiles/run_calibration_models.py:9-12`); at SLR_0 it is MDT + 0.049 m.
+- [ ] `sfincs_tiles/run_final_tile.sh:55` copies `boundaries_RP100_SLR_0.gpkg` only when missing: after a product rebuild the calibration dir must be reset (plan step `reset_sfincs`) or the copies go stale.
+- [ ] `build_line_forcing.py` drops forcing points > 55 km from any hydrograph station (tile 1082: 19 of 264); SFINCS fills those cells from the neighbouring points. Check how many tiles lose points after the rerun.
