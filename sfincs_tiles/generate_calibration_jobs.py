@@ -214,8 +214,8 @@ def cmd_post(args) -> str:
 def reset_tiles(base: Path, part: str, reset_runs: bool, dry_run: bool) -> dict[str, int]:
     """Delete the per-tile markers that make run_final_tile.sh skip a tile; return counts.
 
-    `part` models: the tile markers, and with `reset_runs` every flood-model raster and result.
-    `part` sfincs: the tile markers and sfincs_model/sfincs.inp (forcing and model are rebuilt).
+    `part` models: the tile markers. `part` sfincs: the tile markers and sfincs_model/sfincs.inp
+    (forcing and model are rebuilt). With `reset_runs` also every flood-model raster and result.
     Listed tiles without a directory are counted, not created.
     """
     counts = {"tiles": 0, "missing": 0, "rasters": 0}
@@ -226,15 +226,14 @@ def reset_tiles(base: Path, part: str, reset_runs: bool, dry_run: bool) -> dict[
         out = base / t / "outputs"
         counts["tiles"] += 1
         doomed = []
+        doomed = [out / m for m in TILE_MARKERS]
         if part == "sfincs":
-            doomed = [out / m for m in TILE_MARKERS] + [base / t / "sfincs_model" / "sfincs.inp"]
-        elif out.is_dir():
-            doomed = [out / m for m in TILE_MARKERS]
-            if reset_runs:
-                rasters = sorted(out.glob("*_waterdepth_RP100_SLR_0*.tif"))
-                counts["rasters"] += len(rasters)
-                doomed += rasters + [out / f for f in ("model_runs.json", "eikonal_solver_diagnostics.json",
-                                                       "calibration_result.json")]
+            doomed.append(base / t / "sfincs_model" / "sfincs.inp")
+        if reset_runs and out.is_dir():
+            rasters = sorted(out.glob("*_waterdepth_RP100_SLR_0*.tif"))
+            counts["rasters"] += len(rasters)
+            doomed += rasters + [out / f for f in ("model_runs.json", "eikonal_solver_diagnostics.json",
+                                                   "calibration_result.json")]
         if not dry_run:
             for p in doomed:
                 p.unlink(missing_ok=True)
@@ -260,12 +259,14 @@ def cmd_rerun(args) -> str | None:
     else:
         if not (_HERE / "connected_forcing.py").exists():
             raise SystemExit(f"{_HERE / 'connected_forcing.py'} missing - sync the code first")
+        if "--coast-offset-cells" not in (_HERE / "run_final_tile.sh").read_text(encoding="utf-8"):
+            raise SystemExit(f"{_HERE / 'run_final_tile.sh'} has no coast boundary - sync the code first")
         if args.phase != "sweep":
             raise SystemExit("--part sfincs reruns the sweep phase; run --part models for other phases")
 
-    counts = reset_tiles(base, args.part, args.reset_runs and args.part == "models", args.dry_run)
+    counts = reset_tiles(base, args.part, args.reset_runs, args.dry_run)
     what = f"{counts['tiles']} tile(s) for phase {args.phase}"
-    if args.part == "models":
+    if args.reset_runs:
         what += f", {counts['rasters']} model raster(s)"
     if args.dry_run:
         print(f"dry run: would reset {what} ({counts['missing']} listed without a tile directory)")
@@ -282,7 +283,7 @@ def cmd_rerun(args) -> str | None:
     if args.part == "models":
         # SFINCS outputs exist, so run_final_tile.sh skips SFINCS: estimate only the model runs.
         stage2.sfincs_min_per_mcell, stage2.overhead_min = 0.0, 5.0
-    else:
+    elif not args.reset_runs:
         # Eikonal rasters exist, so the sweep is skipped: its time estimate is ~0.
         stage2.eikonal_min_per_mcell = 1.0
     submit = cmd_stage2(stage2)
@@ -323,7 +324,7 @@ def add_arguments(parser: argparse.ArgumentParser, command: str) -> None:
     if command == "rerun":
         parser.add_argument("--part", choices=["models", "sfincs"], required=True)
         parser.add_argument("--reset-runs", action="store_true",
-                            help="--part models: also delete every model raster and result")
+                            help="also delete every flood-model raster and result")
         parser.add_argument("--dry-run", action="store_true", help="only report what would be reset")
 
 

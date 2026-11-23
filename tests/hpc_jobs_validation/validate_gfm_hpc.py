@@ -168,6 +168,13 @@ def test_rerun_sfincs_part(tmp_path, submitted) -> None:
     assert not (base / "hpc_jobs_stage2" / "final_007.sbatch").exists()
 
 
+def test_rerun_sfincs_part_with_reset_runs_redoes_the_model_runs_too(tmp_path, submitted) -> None:
+    cfg, base = _rerun_site(tmp_path)
+    sfincs.run("rerun", _rerun_args(cfg, base, part="sfincs", reset_runs=True, no_post=True))
+    assert not (base / "3" / "sfincs_model" / "sfincs.inp").exists()
+    assert sorted(p.name for p in (base / "2" / "outputs").iterdir()) == []
+
+
 def test_rerun_dry_run_and_guards(tmp_path, submitted, capsys) -> None:
     cfg, base = _rerun_site(tmp_path)
     assert sfincs.run("rerun", _rerun_args(cfg, base, part="models", reset_runs=True, dry_run=True)) is None

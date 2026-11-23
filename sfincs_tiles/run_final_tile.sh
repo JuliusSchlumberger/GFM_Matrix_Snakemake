@@ -5,6 +5,9 @@
 # outputs/calibration_run.failed (cleared on success) and exits 0 so the job's tile loop continues.
 # calibration_run.done skips the tile; calibration_run.step holds the running step.
 # CAL_PHASE (sweep | duration, default sweep) picks run_calibration_models.py's phase.
+# SFINCS_BOUNDARY_MODE coast (default): forced SFINCS_COAST_OFFSET_CELLS (default 3) cells seaward of
+# the eikonal's coastline with its seed levels (findings_coast_boundary.md); line: along the station
+# boundary line.
 # Site values come from the exports of the stage-2 job header (generate_calibration_jobs.py).
 # Usage: BASE_DIR_NAME=calibration_roughness_SFINCS [SFINCS_THREADS=4] CAL_PHASE=sweep bash run_final_tile.sh <tile_id>
 set -uo pipefail
@@ -14,6 +17,9 @@ TILE_ID="${1:?usage: run_final_tile.sh <tile_id>}"
 BASE_DIR_NAME="${BASE_DIR_NAME:-calibration_roughness_SFINCS}"
 SFINCS_THREADS="${SFINCS_THREADS:-${SLURM_CPUS_PER_TASK:-4}}"
 CAL_PHASE="${CAL_PHASE:-sweep}"
+BOUNDARY_MODE="${SFINCS_BOUNDARY_MODE:-coast}"
+COAST_OFFSET_CELLS="${SFINCS_COAST_OFFSET_CELLS:-3}"
+case "$BOUNDARY_MODE" in coast|line) ;; *) echo "run_final_tile.sh: SFINCS_BOUNDARY_MODE must be coast or line" >&2; exit 1;; esac
 
 for var in GFM_PY SFINCS_PY GFM_DATA_ROOT GFM_CODE_ROOT CONTAINER_CMD SFINCS_IMAGE SFINCS_TIMEOUT_S; do
   [ -n "${!var:-}" ] || { echo "run_final_tile.sh: $var is not set (exported by the stage-2 job header)" >&2; exit 1; }
@@ -48,7 +54,7 @@ if [ -f "$DONE" ]; then
   echo "tile $TILE_ID: already done ($(cat "$DONE")) - skipping"
   exit 0
 fi
-[ -f "$LINES_SRC" ] || fail "no boundary line ($LINES_SRC)"
+[ "$BOUNDARY_MODE" = coast ] || [ -f "$LINES_SRC" ] || fail "no boundary line ($LINES_SRC)"
 mkdir -p "$IN" "$SM" "$OUT" || fail "cannot create $TILE_DIR"
 
 step "copy_inputs"
@@ -58,7 +64,9 @@ for f in tile_geometry.gpkg model_bbox.json dem.tif mask.tif friction.tif bounda
     /bin/cp -f --remove-destination "$SRC/$f" "$IN/$f" </dev/null || fail "copying $f failed"
   fi
 done
-/bin/cp -f "$LINES_SRC" "$LINES" </dev/null || fail "copying the boundary line failed"
+if [ "$BOUNDARY_MODE" = line ]; then
+  /bin/cp -f "$LINES_SRC" "$LINES" </dev/null || fail "copying the boundary line failed"
+fi
 
 cd "$CODE_ROOT/sfincs_tiles" || fail "cannot cd to $CODE_ROOT/sfincs_tiles"
 
@@ -79,13 +87,20 @@ if [ ! -f "$SM/manning_n.tif" ]; then
 fi
 
 if [ ! -f "$SM/sfincs.inp" ] || [ ! -f "$SM/subgrid/dep_subgrid.tif" ]; then
-  step "build_line_forcing"
-  "$HYDROMT_SFINCS_DEV_PY" build_line_forcing.py --tile-id "$TILE_ID" --base-dir-name "$BASE_DIR_NAME" \
-    --lines-gpkg "$LINES" --config "$CONFIG" || fail "build_line_forcing.py failed"
-  step "build_sfincs_tile"
   rm -f "$SM/sfincs_map.nc" "$SM/hmax_subgrid.tif"
-  "$HYDROMT_SFINCS_DEV_PY" build_sfincs_tile.py --tile-id "$TILE_ID" --base-dir-name "$BASE_DIR_NAME" \
-    --boundary-lines-gpkg "$LINES" --config "$CONFIG" || fail "build_sfincs_tile.py failed"
+  if [ "$BOUNDARY_MODE" = line ]; then
+    step "build_line_forcing"
+    "$HYDROMT_SFINCS_DEV_PY" build_line_forcing.py --tile-id "$TILE_ID" --base-dir-name "$BASE_DIR_NAME" \
+      --lines-gpkg "$LINES" --config "$CONFIG" || fail "build_line_forcing.py failed"
+    step "build_sfincs_tile"
+    "$HYDROMT_SFINCS_DEV_PY" build_sfincs_tile.py --tile-id "$TILE_ID" --base-dir-name "$BASE_DIR_NAME" \
+      --boundary-lines-gpkg "$LINES" --config "$CONFIG" || fail "build_sfincs_tile.py failed"
+  else
+    step "build_sfincs_tile"
+    "$HYDROMT_SFINCS_DEV_PY" build_sfincs_tile.py --tile-id "$TILE_ID" --base-dir-name "$BASE_DIR_NAME" \
+      --boundary-mode coast --coast-offset-cells "$COAST_OFFSET_CELLS" --config "$CONFIG" \
+      || fail "build_sfincs_tile.py failed"
+  fi
 fi
 
 # Each run is skipped when its raster exists.
