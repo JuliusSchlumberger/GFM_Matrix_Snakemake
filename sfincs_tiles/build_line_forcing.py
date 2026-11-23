@@ -136,36 +136,51 @@ def line_samples(lines_gpkg: Path, tile_geometry_gpkg: Path) -> gpd.GeoDataFrame
     return out[~key.duplicated().to_numpy()].to_crs("EPSG:4326").reset_index(drop=True)
 
 
-def attach_hydrographs(points: gpd.GeoDataFrame, hydrograph_nc: Path) -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
+def attach_hydrographs(points: gpd.GeoDataFrame, hydrograph_nc: Path, knn: int = 1,
+                       idw_power: float = 3.0) -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
     """Give each point (EPSG:4326, `rp100_level_m`) a hydrograph peaking at its level.
 
-    Shape: the point's `hydrograph_station` where set, else the nearest hydrograph station within
-    MAX_MATCH_KM (longitude scaled by cos(latitude); points without one are dropped). Shifted,
-    not scaled: offset = rp100_level_m - hydrograph_max, so the peak equals the level.
+    Shape: the point's `hydrograph_station` where set; else the IDW blend (weights
+    distance^-idw_power, longitude scaled by cos(latitude)) of its `knn` nearest hydrograph
+    stations within MAX_MATCH_KM, points without one dropped. Blending shapes taken relative to
+    their own peak keeps the blend's peak at 0, as every hydrograph peaks at the same time
+    (COAST_HG_PEAK_HR), and makes the shape vary smoothly between neighbouring points instead of
+    jumping where the nearest station changes. The shape is then shifted, not scaled, to the level.
     """
     hg_lon, hg_lat, hg, times = read_hydrographs(hydrograph_nc)
+    shapes = hg.astype(np.float64) - np.nanmax(hg, axis=1, keepdims=True)
     points = points.reset_index(drop=True).copy()
     if "hydrograph_station" not in points.columns:
         points["hydrograph_station"] = np.nan
-    unmatched = points["hydrograph_station"].isna().to_numpy()
-    far = np.zeros(len(points), dtype=bool)
-    if unmatched.any():
-        xy = np.column_stack([points.geometry.x, points.geometry.y])[unmatched]
+    blended = np.empty((len(points), shapes.shape[1]), dtype=np.float64)
+    fixed = points["hydrograph_station"].notna().to_numpy()
+    blended[fixed] = shapes[points.loc[fixed, "hydrograph_station"].to_numpy(dtype=int)]
+    keep = np.ones(len(points), dtype=bool)
+    if (~fixed).any():
+        xy = np.column_stack([points.geometry.x, points.geometry.y])[~fixed]
         scale = np.array([np.cos(np.radians(xy[:, 1].mean())), 1.0])
-        d, j = cKDTree(np.column_stack([hg_lon, hg_lat]) * scale).query(xy * scale)
-        points.loc[unmatched, "hydrograph_station"] = j
-        points.loc[unmatched, "hydrograph_dist_km"] = np.round(d * KM_PER_DEG, 1)
-        far[unmatched] = d * KM_PER_DEG > MAX_MATCH_KM
-    if far.any():
-        print(f"  {int(far.sum())} point(s) without a hydrograph station within {MAX_MATCH_KM:.0f} km - dropped")
-        points = points[~far].reset_index(drop=True)
+        k = min(knn, len(hg_lon))
+        d, j = cKDTree(np.column_stack([hg_lon, hg_lat]) * scale).query(xy * scale, k=k)
+        d, j = d.reshape(len(xy), k) * KM_PER_DEG, j.reshape(len(xy), k)
+        near = d <= MAX_MATCH_KM
+        w = np.where(near, np.maximum(d, 1e-6) ** -idw_power, 0.0)
+        has = near.any(axis=1)
+        w[has] /= w[has].sum(axis=1, keepdims=True)
+        blended[~fixed] = np.einsum("pk,pkt->pt", w, shapes[j])
+        points.loc[~fixed, "hydrograph_station"] = j[:, 0]
+        points.loc[~fixed, "hydrograph_dist_km"] = np.round(d[:, 0], 1)
+        points.loc[~fixed, "n_hydrographs"] = near.sum(axis=1)
+        keep[~fixed] = has
+    if not keep.all():
+        print(f"  {int((~keep).sum())} point(s) without a hydrograph station within {MAX_MATCH_KM:.0f} km - dropped")
+    points, blended = points[keep].reset_index(drop=True), blended[keep]
     if points.empty:
         raise ValueError("no forcing point has a hydrograph station nearby")
     points["hydrograph_station"] = points["hydrograph_station"].astype(int)
-    series = hg[points["hydrograph_station"].to_numpy()].astype(np.float64)
-    offset = points["rp100_level_m"].to_numpy(dtype=np.float64) - np.nanmax(series, axis=1)
-    points["mdt_offset_m"] = np.round(offset, 4)
-    hydro = pd.DataFrame(series.T + offset, index=times)
+    level = points["rp100_level_m"].to_numpy(dtype=np.float64)
+    nearest = hg[points["hydrograph_station"].to_numpy()].astype(np.float64)
+    points["mdt_offset_m"] = np.round(level - np.nanmax(nearest, axis=1), 4)  # vs the nearest station's own peak
+    hydro = pd.DataFrame(blended.T + level, index=times)
     hydro.insert(0, "elapsed_hr", (times - times[0]).total_seconds() / 3600.0)
     return points, hydro
 
@@ -189,7 +204,8 @@ def build_line_forcing(lines_gpkg: Path, hydrograph_nc: Path, tile_dir: Path, ro
     seed_lonlat, seed_levels = production_seed_levels(tile_dir, seed_rule)
     points["rp100_level_m"] = level_at_nearest_seed(
         np.column_stack([points.geometry.x, points.geometry.y]), seed_lonlat, seed_levels)
-    return attach_hydrographs(points, hydrograph_nc)
+    return attach_hydrographs(points, hydrograph_nc, knn=int(seed_rule["knn"]),
+                              idw_power=float(seed_rule["idw_power"]))
 
 
 def main() -> None:

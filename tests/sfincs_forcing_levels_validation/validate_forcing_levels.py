@@ -6,13 +6,17 @@ from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import rasterio
+import xarray as xr
 from shapely.geometry import LineString, box
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "sfincs_tiles"))
 
-from build_line_forcing import FORCING_SPACING_M, line_samples, level_at_nearest_seed, production_seed_levels  # noqa: E402
+from build_line_forcing import (  # noqa: E402
+    FORCING_SPACING_M, attach_hydrographs, level_at_nearest_seed, line_samples, production_seed_levels,
+)
 from calibration_paths import RETURN_PERIOD, WATERLEVEL_NAME  # noqa: E402
 
 RULE = {"knn": 2, "idw_power": 3.0, "river_code": 3}
@@ -42,6 +46,26 @@ def test_forcing_point_takes_the_seed_level_of_the_coast_behind_it() -> None:
         north, middle, south = level_at_nearest_seed(offshore, cells, levels)
         assert north > 2.8 and south < 1.2
         assert south < middle < north
+
+
+def test_blended_hydrograph_peaks_at_the_level_and_lies_between_its_stations() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        nc = Path(tmp) / "hg.nc"
+        t = np.arange(9)
+        narrow = np.array([0.0, 0.0, 0.1, 0.5, 1.0, 0.5, 0.1, 0.0, 0.0])
+        broad = np.array([0.2, 0.4, 0.6, 0.8, 1.0, 0.8, 0.6, 0.4, 0.2])  # peaks at the same step
+        xr.Dataset({"hydrograph_average_tide_signal": (("station", "time"), np.vstack([narrow, broad]))},
+                   coords={"station_x_coordinate": ("station", [10.0, 10.2]),
+                           "station_y_coordinate": ("station", [50.0, 50.0]),
+                           "time": pd.date_range("2026-01-01", periods=len(t), freq="h")}).to_netcdf(nc)
+        points = gpd.GeoDataFrame({"rp100_level_m": [3.0, 3.0, 3.0]},
+                                  geometry=gpd.points_from_xy([10.0, 10.1, 10.2], [50.0, 50.0, 50.0]), crs="EPSG:4326")
+        pts, hydro = attach_hydrographs(points, nc, knn=2, idw_power=3.0)
+        curves = hydro.drop(columns="elapsed_hr").to_numpy().T
+        assert np.allclose(curves.max(axis=1), 3.0)
+        assert np.allclose(curves[0], narrow + 2.0, atol=1e-6) and np.allclose(curves[2], broad + 2.0, atol=1e-6)
+        assert np.allclose(curves[1], 0.5 * (narrow + broad) + 2.0, atol=1e-3)
+        assert pts["n_hydrographs"].tolist() == [2, 2, 2]
 
 
 def test_line_samples_are_at_most_the_spacing_apart_and_shared_nodes_count_once() -> None:

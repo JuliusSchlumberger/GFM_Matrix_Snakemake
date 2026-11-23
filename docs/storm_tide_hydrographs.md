@@ -186,10 +186,11 @@ over stations and nodes in the same ocean component. Leave-one-out at 22,670 sta
   (ground, or the sill behind a ridge) gives T = time the nearest station's hydrograph at that RP
   stays within that head of its peak. Friction is multiplied by (12 h / T)^1, capped at 10, and the
   tile is solved again. Only time near the peak matters, so datum and SLR do not.
-- **SFINCS**: forcing points every ≤ 2 km along the boundary line, each with the RP100 hydrograph
-  of the nearest station (≤ 55 km), cut to COAST-HG's 894-step axis (peak at 74.5 h) and shifted
-  so its maximum equals the eikonal seed level at the nearest coastline cell (stations + coastline
-  nodes, RP100 SLR_0 incl. MDT and 2020 offset). SFINCS interpolates between the points.
+- **SFINCS**: forcing points every ≤ 2 km along the boundary line, each with the IDW blend (k = 5,
+  power 3, ≤ 55 km) of its nearest stations' RP100 hydrograph shapes, cut to COAST-HG's 894-step
+  axis (peak at 74.5 h) and shifted so its maximum equals the eikonal seed level at the nearest
+  coastline cell (stations + coastline nodes, RP100 SLR_0 incl. MDT and 2020 offset). SFINCS
+  interpolates between the points.
 
 ### 3.8 Fallback source
 
