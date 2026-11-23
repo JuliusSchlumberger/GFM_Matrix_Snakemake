@@ -5,12 +5,15 @@
   screen  production inputs present and >= 1 COAST-RP station
   select  screened + suitable boundary line + SFINCS mask pre-flight ok; stratified
           sample of --n-tiles over 15 deg lon/lat bins
+  replace swap selected tiles whose SFINCS run failed (--tile-ids) for the next tile the
+          sample draws from the same bin; the rest of the selection stays
 
 Usage:
     python select_calibration_tiles.py pool   --config <cfg> --base-dir-name calibration_roughness_SFINCS --n-shards 10
     python select_calibration_tiles.py screen --config <cfg> --base-dir-name calibration_roughness_SFINCS \\
         --tile-ids-file candidates/shard_000.txt --out-ids candidates/screened_000.txt
     python select_calibration_tiles.py select --config <cfg> --base-dir-name calibration_roughness_SFINCS --n-tiles 1500
+    python select_calibration_tiles.py replace --config <cfg> --base-dir-name calibration_roughness_SFINCS --tile-ids 1359
 """
 
 from __future__ import annotations
@@ -44,6 +47,7 @@ TILE_GRID = "processed_inputs/mask/domain_tiles_global.gpkg"
 OCEAN_CODE, RIVER_CODE = 1, 3  # config tile_generation.ocean_code / river_code
 GRID_DEG = 15.0  # lon/lat bin size for the stratified sample
 ANTIMERIDIAN_WIDTH_DEG = 60.0  # wider than any real tile's bbox
+ANTIMERIDIAN_TOL_DEG = 1e-3
 CATEGORY_STYLE = {  # funnel stage -> (colour, label)
     "selected": ("#2a78d6", "selected"),
     "eligible": ("#7fb3e8", "eligible"),
@@ -51,6 +55,7 @@ CATEGORY_STYLE = {  # funnel stage -> (colour, label)
     # the print summary) but share one colour/label on the map - both mean "no usable SFINCS
     # boundary for this tile," just caught at different checks.
     "preflight_failed": ("#d6452a", "unsuited"),
+    "run_failed": ("#d6452a", "unsuited"),
     "line_unsuitable": ("#d6452a", "unsuited"),
     "screened_out": ("#b3b3ad", "not a coastal tile"),
 }
@@ -58,20 +63,25 @@ CATEGORY_STYLE = {  # funnel stage -> (colour, label)
 # tile_selection_map.png - a pipeline-incompleteness state, not a tile-selection outcome.
 
 
+def _bin_pools(df: pd.DataFrame, grid_deg: float, seed: int) -> tuple[pd.Series, dict[str, list], list[str]]:
+    # (bin per row, shuffled row labels per bin, shuffled bin order); the sampler pops from the end.
+    rng = np.random.default_rng(seed)
+    bin_of = (np.floor(df["lon"] / grid_deg).astype(int).astype(str) + "_"
+              + np.floor(df["lat"] / grid_deg).astype(int).astype(str))
+    pools = {b: list(g.index) for b, g in df.groupby(bin_of)}
+    for b in pools:
+        rng.shuffle(pools[b])
+    bins = list(pools)
+    rng.shuffle(bins)
+    return bin_of, pools, bins
+
+
 def stratified_sample_exact(df: pd.DataFrame, n_target: int, grid_deg: float, seed: int) -> pd.DataFrame:
     """Sample n_target tiles round-robin over shuffled lon/lat bins, so sparse bins are not starved.
 
     Selected tiles may overlap; compute_calibration_result_dedup.py scores each place once.
     """
-    rng = np.random.default_rng(seed)
-    df = df.copy()
-    df["_bin"] = (np.floor(df["lon"] / grid_deg).astype(int).astype(str) + "_"
-                  + np.floor(df["lat"] / grid_deg).astype(int).astype(str))
-    pools = {b: list(g.index) for b, g in df.groupby("_bin")}
-    for b in pools:
-        rng.shuffle(pools[b])
-    bins = list(pools)
-    rng.shuffle(bins)
+    _, pools, bins = _bin_pools(df, grid_deg, seed)
     picked: list[int] = []
     while len(picked) < n_target and any(pools.values()):
         for b in bins:
@@ -79,7 +89,17 @@ def stratified_sample_exact(df: pd.DataFrame, n_target: int, grid_deg: float, se
                 break
             if pools[b]:
                 picked.append(pools[b].pop())
-    return df.loc[picked].drop(columns=["_bin"]).sort_values("tile_id").reset_index(drop=True)
+    return df.loc[picked].sort_values("tile_id").reset_index(drop=True)
+
+
+def touches_antimeridian(bounds: pd.DataFrame) -> pd.Series:
+    """Flag tiles whose lon/lat bounds reach +-180 deg or wrap across it.
+
+    A tile stored past 180 (maxx > 180) is not caught by the width test, and its SFINCS domain
+    reprojected to EPSG:4326 spans the globe.
+    """
+    return (((bounds["maxx"] - bounds["minx"]) > ANTIMERIDIAN_WIDTH_DEG)
+            | (bounds["maxx"] >= 180.0 - ANTIMERIDIAN_TOL_DEG) | (bounds["minx"] <= -180.0 + ANTIMERIDIAN_TOL_DEG))
 
 
 def _ids(path: Path) -> list[str]:
@@ -91,8 +111,7 @@ def cmd_pool(args, root: Path, base: Path) -> None:
     tiles = gpd.read_file(root / TILE_GRID)
     n_all = len(tiles)
     tiles = tiles[tiles["hop_distance"] == 0]
-    b = tiles.geometry.bounds
-    tiles = tiles[(b["maxx"] - b["minx"]) <= ANTIMERIDIAN_WIDTH_DEG]
+    tiles = tiles[~touches_antimeridian(tiles.geometry.bounds)]
     ids = sorted(int(t) for t in tiles["tile_id"])
     out = base / "candidates"
     out.mkdir(parents=True, exist_ok=True)
@@ -198,7 +217,8 @@ def _plot_histograms(funnel: pd.DataFrame, out: Path) -> None:
     # screened_out/eligible/selected colours (grey -> light blue -> dark blue) reads as one
     # progression, not three unrelated categories.
     groups = [("screened", funnel[funnel["screen_ok"]], CATEGORY_STYLE["screened_out"][0]),
-              ("eligible", funnel[funnel["category"].isin(["eligible", "selected"])], CATEGORY_STYLE["eligible"][0]),
+              ("eligible", funnel[funnel["category"].isin(["eligible", "selected", "run_failed"])],
+               CATEGORY_STYLE["eligible"][0]),
               ("selected", funnel[funnel["category"] == "selected"], CATEGORY_STYLE["selected"][0])]
     cols = [("lat", "tile centroid latitude (deg)", None), ("ocean_frac", "ocean fraction", None),
             ("n_cells", "native cells (M)", 1e-6), ("n_forcing_stations", "forcing stations on the line", None)]
@@ -282,15 +302,69 @@ def cmd_select(args, root: Path, base: Path) -> None:
     print(funnel["category"].value_counts().to_string())
 
 
+def cmd_replace(args, root: Path, base: Path) -> None:
+    """Swap failed selected tiles for the next tile the same seeded sample draws from their bins.
+
+    Rebuilds the sample from candidates/candidate_funnel.csv (it must reproduce the selection,
+    else nothing is written). A replacement is not selected, not failed and not at the
+    antimeridian. Rewrites tile_ids.txt, tile_selection_metadata.csv, the funnel and
+    tile_selection.gpkg; the failed tile's directory is left alone.
+    """
+    funnel = pd.read_csv(base / "candidates" / "candidate_funnel.csv")
+    ids = [int(t) for t in _ids(base / "tile_ids.txt")]
+    failed = [int(t) for t in args.tile_ids]
+    if missing := sorted(set(failed) - set(ids)):
+        raise SystemExit(f"not in tile_ids.txt: {missing}")
+    eligible = funnel[funnel["category"].isin(["eligible", "selected", "run_failed"])]
+    drawn = set(stratified_sample_exact(eligible, len(ids), GRID_DEG, args.seed)["tile_id"])
+    ever_failed = set(funnel.loc[funnel["category"] == "run_failed", "tile_id"])
+    if len(drawn) != len(ids) or not drawn - ever_failed <= set(ids):
+        raise SystemExit("candidate_funnel.csv with --seed does not reproduce tile_ids.txt; nothing written")
+
+    tiles = gpd.read_file(root / TILE_GRID)
+    bounds = tiles.geometry.bounds.set_index(tiles["tile_id"].astype(int))
+    at_antimeridian = set(bounds.index[touches_antimeridian(bounds)])
+    bin_of, pools, _ = _bin_pools(eligible, GRID_DEG, args.seed)
+    taken = set(ids) | drawn | ever_failed | set(failed)
+    swaps = {}
+    for t in failed:
+        b = bin_of[eligible.index[eligible["tile_id"] == t][0]]
+        nxt = [eligible.at[i, "tile_id"] for i in reversed(pools[b])]
+        free = [c for c in nxt if c not in taken and c not in at_antimeridian]
+        if not free:
+            raise SystemExit(f"tile {t}: no eligible tile left in bin {b}; nothing written")
+        swaps[t] = int(free[0])
+        taken.add(swaps[t])
+
+    new_ids = sorted((set(ids) - set(swaps)) | set(swaps.values()))
+    funnel.loc[funnel["tile_id"].isin(swaps), "category"] = "run_failed"
+    funnel.loc[funnel["tile_id"].isin(swaps.values()), "category"] = "selected"
+    meta = pd.read_csv(base / "tile_selection_metadata.csv")
+    added = funnel[funnel["tile_id"].isin(swaps.values())].assign(category="eligible")
+    meta = pd.concat([meta[~meta["tile_id"].isin(swaps)], added[meta.columns]]).sort_values("tile_id")
+    sel = gpd.read_file(base / "tile_selection.gpkg", layer="tiles")
+    sel["category"] = sel["tile_id"].map(funnel.set_index("tile_id")["category"]).fillna(sel["category"])
+
+    funnel.to_csv(base / "candidates" / "candidate_funnel.csv", index=False)
+    meta.to_csv(base / "tile_selection_metadata.csv", index=False)
+    (base / "tile_ids.txt").write_text("".join(f"{t}\n" for t in new_ids), newline="\n")
+    sel.to_file(base / "tile_selection.gpkg", layer="tiles", driver="GPKG")
+    for t, r in swaps.items():
+        print(f"tile {t} -> {r} (bin {bin_of[eligible.index[eligible['tile_id'] == t][0]]})")
+    print(f"wrote {base / 'tile_ids.txt'} ({len(new_ids)} tiles), tile_selection_metadata.csv, "
+          "candidates/candidate_funnel.csv, tile_selection.gpkg")
+
+
 def main() -> None:
-    """Run the requested pool/screen/select subcommand."""
+    """Run the requested pool/screen/select/replace subcommand."""
     repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["pool", "screen", "select"])
+    parser.add_argument("command", choices=["pool", "screen", "select", "replace"])
     parser.add_argument("--config", default=str(repo_root / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
     parser.add_argument("--n-shards", type=int, default=10, help="pool: number of stage-1 jobs")
     parser.add_argument("--tile-ids-file", help="screen: this shard's candidate ids")
+    parser.add_argument("--tile-ids", nargs="+", default=[], help="replace: the selected tiles whose run failed")
     parser.add_argument("--out-ids", help="screen: where to write the ids that passed")
     parser.add_argument("--overwrite", action="store_true", help="screen: redo tiles already screened")
     parser.add_argument("--n-tiles", type=int, default=1500)
@@ -299,7 +373,8 @@ def main() -> None:
     apply_style()
     root = read_root(Path(args.config))
     base = root / args.base_dir_name
-    {"pool": cmd_pool, "screen": cmd_screen, "select": cmd_select}[args.command](args, root, base)
+    {"pool": cmd_pool, "screen": cmd_screen, "select": cmd_select, "replace": cmd_replace}[args.command](
+        args, root, base)
 
 
 if __name__ == "__main__":
