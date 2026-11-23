@@ -1,0 +1,553 @@
+gauges,rp,level,n,median,mae,p10,p90,split
+all,2,production,618,0.021,0.099,-0.093,0.191,TC group
+all,2,no IBTrACS mask,618,0.027,0.1,-0.084,0.193,TC group
+all,2,own GPD shape,618,0.022,0.099,-0.091,0.192,TC group
+all,2,no TC shift,618,0.012,0.088,-0.101,0.157,TC group
+all,2,no tide factor,618,0.022,0.101,-0.081,0.192,TC group
+all,2,1979-2024 record,618,0.018,0.098,-0.092,0.187,TC group
+all,10,production,618,0.008,0.115,-0.161,0.179,TC group
+all,10,no IBTrACS mask,618,0.019,0.113,-0.123,0.185,TC group
+all,10,own GPD shape,618,0.008,0.116,-0.161,0.179,TC group
+all,10,no TC shift,618,-0.003,0.11,-0.167,0.15,TC group
+all,10,no tide factor,618,0.007,0.116,-0.147,0.179,TC group
+all,10,1979-2024 record,618,0.005,0.113,-0.16,0.175,TC group
+all,50,production,618,-0.007,0.166,-0.262,0.218,TC group
+all,50,no IBTrACS mask,618,0.005,0.162,-0.237,0.225,TC group
+all,50,own GPD shape,618,-0.007,0.166,-0.264,0.227,TC group
+all,50,no TC shift,618,-0.017,0.166,-0.292,0.182,TC group
+all,50,no tide factor,618,-0.008,0.168,-0.267,0.217,TC group
+all,50,1979-2024 record,618,-0.009,0.164,-0.267,0.218,TC group
+all,100,production,618,-0.007,0.219,-0.349,0.246,TC group
+all,100,no IBTrACS mask,618,0.002,0.215,-0.335,0.253,TC group
+all,100,own GPD shape,618,-0.014,0.219,-0.345,0.254,TC group
+all,100,no TC shift,618,-0.025,0.217,-0.393,0.199,TC group
+all,100,no tide factor,618,-0.011,0.221,-0.349,0.253,TC group
+all,100,1979-2024 record,618,-0.005,0.217,-0.352,0.247,TC group
+non-TC-dominated gauges,2,production,451,0.023,0.106,-0.09,0.202,TC group
+non-TC-dominated gauges,2,no IBTrACS mask,451,0.025,0.107,-0.09,0.202,TC group
+non-TC-dominated gauges,2,own GPD shape,451,0.023,0.106,-0.09,0.202,TC group
+non-TC-dominated gauges,2,no TC shift,451,0.015,0.094,-0.092,0.179,TC group
+non-TC-dominated gauges,2,no tide factor,451,0.023,0.107,-0.076,0.208,TC group
+non-TC-dominated gauges,2,1979-2024 record,451,0.023,0.104,-0.088,0.193,TC group
+non-TC-dominated gauges,10,production,451,0.013,0.114,-0.137,0.199,TC group
+non-TC-dominated gauges,10,no IBTrACS mask,451,0.015,0.115,-0.137,0.199,TC group
+non-TC-dominated gauges,10,own GPD shape,451,0.012,0.114,-0.141,0.199,TC group
+non-TC-dominated gauges,10,no TC shift,451,0.009,0.108,-0.14,0.184,TC group
+non-TC-dominated gauges,10,no tide factor,451,0.012,0.115,-0.117,0.19,TC group
+non-TC-dominated gauges,10,1979-2024 record,451,0.012,0.111,-0.123,0.193,TC group
+non-TC-dominated gauges,50,production,451,-0,0.139,-0.205,0.214,TC group
+non-TC-dominated gauges,50,no IBTrACS mask,451,0.001,0.14,-0.203,0.217,TC group
+non-TC-dominated gauges,50,own GPD shape,451,-0.003,0.138,-0.209,0.204,TC group
+non-TC-dominated gauges,50,no TC shift,451,-0.006,0.134,-0.205,0.198,TC group
+non-TC-dominated gauges,50,no tide factor,451,-0.003,0.14,-0.194,0.191,TC group
+non-TC-dominated gauges,50,1979-2024 record,451,0.001,0.134,-0.199,0.204,TC group
+non-TC-dominated gauges,100,production,451,-0.001,0.166,-0.247,0.213,TC group
+non-TC-dominated gauges,100,no IBTrACS mask,451,-0.001,0.167,-0.247,0.223,TC group
+non-TC-dominated gauges,100,own GPD shape,451,-0.008,0.165,-0.242,0.208,TC group
+non-TC-dominated gauges,100,no TC shift,451,-0.008,0.161,-0.247,0.204,TC group
+non-TC-dominated gauges,100,no tide factor,451,-0.007,0.168,-0.232,0.208,TC group
+non-TC-dominated gauges,100,1979-2024 record,451,-0.002,0.162,-0.247,0.213,TC group
+TC-dominated gauges,2,production,167,0.01,0.08,-0.095,0.124,TC group
+TC-dominated gauges,2,no IBTrACS mask,167,0.031,0.082,-0.073,0.137,TC group
+TC-dominated gauges,2,own GPD shape,167,0.011,0.08,-0.092,0.123,TC group
+TC-dominated gauges,2,no TC shift,167,-0.001,0.071,-0.105,0.096,TC group
+TC-dominated gauges,2,no tide factor,167,0.01,0.083,-0.086,0.131,TC group
+TC-dominated gauges,2,1979-2024 record,167,0.008,0.079,-0.093,0.124,TC group
+TC-dominated gauges,10,production,167,-0.029,0.119,-0.212,0.135,TC group
+TC-dominated gauges,10,no IBTrACS mask,167,0.034,0.107,-0.109,0.175,TC group
+TC-dominated gauges,10,own GPD shape,167,-0.029,0.121,-0.208,0.133,TC group
+TC-dominated gauges,10,no TC shift,167,-0.056,0.116,-0.236,0.071,TC group
+TC-dominated gauges,10,no tide factor,167,-0.023,0.12,-0.204,0.153,TC group
+TC-dominated gauges,10,1979-2024 record,167,-0.031,0.119,-0.214,0.136,TC group
+TC-dominated gauges,50,production,167,-0.035,0.24,-0.439,0.269,TC group
+TC-dominated gauges,50,no IBTrACS mask,167,0.037,0.223,-0.377,0.286,TC group
+TC-dominated gauges,50,own GPD shape,167,-0.039,0.243,-0.442,0.278,TC group
+TC-dominated gauges,50,no TC shift,167,-0.12,0.251,-0.563,0.125,TC group
+TC-dominated gauges,50,no tide factor,167,-0.035,0.243,-0.439,0.291,TC group
+TC-dominated gauges,50,1979-2024 record,167,-0.047,0.244,-0.442,0.269,TC group
+TC-dominated gauges,100,production,167,-0.044,0.362,-0.682,0.334,TC group
+TC-dominated gauges,100,no IBTrACS mask,167,0.057,0.345,-0.609,0.352,TC group
+TC-dominated gauges,100,own GPD shape,167,-0.04,0.362,-0.674,0.369,TC group
+TC-dominated gauges,100,no TC shift,167,-0.134,0.369,-0.806,0.186,TC group
+TC-dominated gauges,100,no tide factor,167,-0.043,0.365,-0.674,0.339,TC group
+TC-dominated gauges,100,1979-2024 record,167,-0.056,0.365,-0.681,0.336,TC group
+stations with a TC part,2,production,323,0.04,0.102,-0.081,0.213,TC group
+stations with a TC part,2,no IBTrACS mask,323,0.047,0.103,-0.064,0.218,TC group
+stations with a TC part,2,own GPD shape,323,0.041,0.102,-0.079,0.213,TC group
+stations with a TC part,2,no TC shift,323,0.015,0.08,-0.098,0.138,TC group
+stations with a TC part,2,no tide factor,323,0.035,0.105,-0.079,0.221,TC group
+stations with a TC part,2,1979-2024 record,323,0.036,0.099,-0.078,0.205,TC group
+stations with a TC part,10,production,323,0.019,0.117,-0.165,0.172,TC group
+stations with a TC part,10,no IBTrACS mask,323,0.04,0.112,-0.102,0.183,TC group
+stations with a TC part,10,own GPD shape,323,0.018,0.119,-0.164,0.175,TC group
+stations with a TC part,10,no TC shift,323,-0.003,0.108,-0.183,0.127,TC group
+stations with a TC part,10,no tide factor,323,0.013,0.119,-0.162,0.176,TC group
+stations with a TC part,10,1979-2024 record,323,0.011,0.116,-0.166,0.169,TC group
+stations with a TC part,50,production,323,0.01,0.182,-0.299,0.218,TC group
+stations with a TC part,50,no IBTrACS mask,323,0.038,0.175,-0.229,0.231,TC group
+stations with a TC part,50,own GPD shape,323,0.011,0.185,-0.321,0.245,TC group
+stations with a TC part,50,no TC shift,323,-0.02,0.181,-0.333,0.168,TC group
+stations with a TC part,50,no tide factor,323,0.008,0.185,-0.31,0.224,TC group
+stations with a TC part,50,1979-2024 record,323,-0.002,0.182,-0.306,0.218,TC group
+stations with a TC part,100,production,323,0.003,0.253,-0.423,0.268,TC group
+stations with a TC part,100,no IBTrACS mask,323,0.037,0.245,-0.362,0.277,TC group
+stations with a TC part,100,own GPD shape,323,0.003,0.254,-0.426,0.293,TC group
+stations with a TC part,100,no TC shift,323,-0.032,0.25,-0.6,0.186,TC group
+stations with a TC part,100,no tide factor,323,0.007,0.256,-0.439,0.269,TC group
+stations with a TC part,100,1979-2024 record,323,-0.001,0.252,-0.423,0.268,TC group
+E.Asia (EAS),2,production,92,0.011,0.06,-0.06,0.095,region
+E.Asia (EAS),2,no IBTrACS mask,92,0.026,0.063,-0.047,0.117,region
+E.Asia (EAS),2,own GPD shape,92,0.011,0.06,-0.06,0.097,region
+E.Asia (EAS),2,no TC shift,92,0.001,0.051,-0.066,0.067,region
+E.Asia (EAS),2,no tide factor,92,0.014,0.061,-0.066,0.095,region
+E.Asia (EAS),2,1979-2024 record,92,0.01,0.059,-0.061,0.097,region
+E.Asia (EAS),10,production,92,-0.03,0.094,-0.171,0.066,region
+E.Asia (EAS),10,no IBTrACS mask,92,0.025,0.076,-0.097,0.098,region
+E.Asia (EAS),10,own GPD shape,92,-0.029,0.094,-0.17,0.066,region
+E.Asia (EAS),10,no TC shift,92,-0.05,0.095,-0.185,0.051,region
+E.Asia (EAS),10,no tide factor,92,-0.033,0.096,-0.196,0.072,region
+E.Asia (EAS),10,1979-2024 record,92,-0.03,0.094,-0.173,0.067,region
+E.Asia (EAS),50,production,92,-0.064,0.171,-0.426,0.097,region
+E.Asia (EAS),50,no IBTrACS mask,92,-0.002,0.133,-0.285,0.129,region
+E.Asia (EAS),50,own GPD shape,92,-0.063,0.168,-0.427,0.095,region
+E.Asia (EAS),50,no TC shift,92,-0.109,0.182,-0.473,0.051,region
+E.Asia (EAS),50,no tide factor,92,-0.07,0.174,-0.431,0.096,region
+E.Asia (EAS),50,1979-2024 record,92,-0.063,0.171,-0.427,0.082,region
+E.Asia (EAS),100,production,92,-0.082,0.209,-0.571,0.084,region
+E.Asia (EAS),100,no IBTrACS mask,92,-0.022,0.173,-0.443,0.144,region
+E.Asia (EAS),100,own GPD shape,92,-0.083,0.207,-0.554,0.078,region
+E.Asia (EAS),100,no TC shift,92,-0.136,0.234,-0.62,0.036,region
+E.Asia (EAS),100,no tide factor,92,-0.086,0.212,-0.571,0.082,region
+E.Asia (EAS),100,1979-2024 record,92,-0.082,0.21,-0.58,0.077,region
+E.Australia (EAU),2,production,23,0.049,0.113,-0.058,0.209,region
+E.Australia (EAU),2,no IBTrACS mask,23,0.049,0.114,-0.058,0.212,region
+E.Australia (EAU),2,own GPD shape,23,0.048,0.113,-0.058,0.208,region
+E.Australia (EAU),2,no TC shift,23,0.049,0.111,-0.058,0.206,region
+E.Australia (EAU),2,no tide factor,23,0.079,0.108,0.017,0.163,region
+E.Australia (EAU),2,1979-2024 record,23,0.042,0.104,-0.064,0.167,region
+E.Australia (EAU),10,production,23,0.039,0.119,-0.088,0.173,region
+E.Australia (EAU),10,no IBTrACS mask,23,0.039,0.121,-0.088,0.175,region
+E.Australia (EAU),10,own GPD shape,23,0.039,0.12,-0.088,0.173,region
+E.Australia (EAU),10,no TC shift,23,0.039,0.118,-0.088,0.171,region
+E.Australia (EAU),10,no tide factor,23,0.058,0.112,0,0.18,region
+E.Australia (EAU),10,1979-2024 record,23,0.036,0.11,-0.1,0.161,region
+E.Australia (EAU),50,production,23,0.042,0.124,-0.209,0.131,region
+E.Australia (EAU),50,no IBTrACS mask,23,0.042,0.131,-0.209,0.164,region
+E.Australia (EAU),50,own GPD shape,23,0.041,0.126,-0.207,0.127,region
+E.Australia (EAU),50,no TC shift,23,0.032,0.12,-0.209,0.119,region
+E.Australia (EAU),50,no tide factor,23,0.041,0.112,-0.03,0.179,region
+E.Australia (EAU),50,1979-2024 record,23,0.023,0.115,-0.231,0.115,region
+E.Australia (EAU),100,production,23,0.026,0.172,-0.43,0.144,region
+E.Australia (EAU),100,no IBTrACS mask,23,0.026,0.174,-0.43,0.193,region
+E.Australia (EAU),100,own GPD shape,23,0.025,0.168,-0.445,0.173,region
+E.Australia (EAU),100,no TC shift,23,0.026,0.169,-0.43,0.129,region
+E.Australia (EAU),100,no tide factor,23,0.01,0.155,-0.296,0.202,region
+E.Australia (EAU),100,1979-2024 record,23,0.024,0.169,-0.439,0.127,region
+E.North-America (ENA),2,production,67,-0.008,0.085,-0.135,0.101,region
+E.North-America (ENA),2,no IBTrACS mask,67,0.018,0.084,-0.12,0.127,region
+E.North-America (ENA),2,own GPD shape,67,-0.007,0.085,-0.134,0.101,region
+E.North-America (ENA),2,no TC shift,67,-0.019,0.087,-0.137,0.096,region
+E.North-America (ENA),2,no tide factor,67,-0.014,0.105,-0.114,0.198,region
+E.North-America (ENA),2,1979-2024 record,67,-0.008,0.083,-0.128,0.091,region
+E.North-America (ENA),10,production,67,-0.017,0.12,-0.219,0.135,region
+E.North-America (ENA),10,no IBTrACS mask,67,0.022,0.114,-0.116,0.207,region
+E.North-America (ENA),10,own GPD shape,67,-0.02,0.125,-0.216,0.149,region
+E.North-America (ENA),10,no TC shift,67,-0.027,0.127,-0.257,0.124,region
+E.North-America (ENA),10,no tide factor,67,-0.018,0.134,-0.179,0.188,region
+E.North-America (ENA),10,1979-2024 record,67,-0.028,0.119,-0.225,0.155,region
+E.North-America (ENA),50,production,67,0.001,0.226,-0.358,0.437,region
+E.North-America (ENA),50,no IBTrACS mask,67,0.056,0.235,-0.303,0.503,region
+E.North-America (ENA),50,own GPD shape,67,0.018,0.238,-0.395,0.442,region
+E.North-America (ENA),50,no TC shift,67,-0.033,0.227,-0.508,0.262,region
+E.North-America (ENA),50,no tide factor,67,0.009,0.245,-0.438,0.43,region
+E.North-America (ENA),50,1979-2024 record,67,-0.01,0.235,-0.372,0.46,region
+E.North-America (ENA),100,production,67,0.031,0.352,-0.466,0.718,region
+E.North-America (ENA),100,no IBTrACS mask,67,0.071,0.355,-0.415,0.747,region
+E.North-America (ENA),100,own GPD shape,67,0.043,0.358,-0.479,0.735,region
+E.North-America (ENA),100,no TC shift,67,-0.02,0.327,-0.683,0.592,region
+E.North-America (ENA),100,no tide factor,67,0.042,0.371,-0.593,0.717,region
+E.North-America (ENA),100,1979-2024 record,67,0.024,0.357,-0.47,0.725,region
+Equatorial.Pacific-Ocean (EPO),2,production,19,0.055,0.08,0.031,0.131,region
+Equatorial.Pacific-Ocean (EPO),2,no IBTrACS mask,19,0.055,0.079,0.031,0.131,region
+Equatorial.Pacific-Ocean (EPO),2,own GPD shape,19,0.055,0.08,0.031,0.131,region
+Equatorial.Pacific-Ocean (EPO),2,no TC shift,19,0.05,0.063,0.01,0.1,region
+Equatorial.Pacific-Ocean (EPO),2,no tide factor,19,0.051,0.069,0.03,0.131,region
+Equatorial.Pacific-Ocean (EPO),2,1979-2024 record,19,0.055,0.078,0.03,0.13,region
+Equatorial.Pacific-Ocean (EPO),10,production,19,0.034,0.059,-0.036,0.131,region
+Equatorial.Pacific-Ocean (EPO),10,no IBTrACS mask,19,0.034,0.059,-0.036,0.131,region
+Equatorial.Pacific-Ocean (EPO),10,own GPD shape,19,0.034,0.059,-0.035,0.132,region
+Equatorial.Pacific-Ocean (EPO),10,no TC shift,19,0.02,0.054,-0.041,0.126,region
+Equatorial.Pacific-Ocean (EPO),10,no tide factor,19,0.018,0.051,-0.046,0.096,region
+Equatorial.Pacific-Ocean (EPO),10,1979-2024 record,19,0.033,0.058,-0.037,0.13,region
+Equatorial.Pacific-Ocean (EPO),50,production,19,-0.007,0.068,-0.099,0.139,region
+Equatorial.Pacific-Ocean (EPO),50,no IBTrACS mask,19,-0.007,0.068,-0.099,0.139,region
+Equatorial.Pacific-Ocean (EPO),50,own GPD shape,19,-0.007,0.067,-0.099,0.139,region
+Equatorial.Pacific-Ocean (EPO),50,no TC shift,19,-0.011,0.067,-0.102,0.139,region
+Equatorial.Pacific-Ocean (EPO),50,no tide factor,19,-0.014,0.064,-0.099,0.101,region
+Equatorial.Pacific-Ocean (EPO),50,1979-2024 record,19,-0.012,0.069,-0.101,0.132,region
+Equatorial.Pacific-Ocean (EPO),100,production,19,-0.024,0.084,-0.168,0.127,region
+Equatorial.Pacific-Ocean (EPO),100,no IBTrACS mask,19,-0.024,0.084,-0.168,0.127,region
+Equatorial.Pacific-Ocean (EPO),100,own GPD shape,19,-0.024,0.082,-0.168,0.127,region
+Equatorial.Pacific-Ocean (EPO),100,no TC shift,19,-0.024,0.084,-0.176,0.127,region
+Equatorial.Pacific-Ocean (EPO),100,no tide factor,19,-0.027,0.081,-0.168,0.107,region
+Equatorial.Pacific-Ocean (EPO),100,1979-2024 record,19,-0.024,0.086,-0.17,0.12,region
+Mediterranean (MED),2,production,38,0.015,0.055,-0.044,0.095,region
+Mediterranean (MED),2,no IBTrACS mask,38,0.015,0.055,-0.044,0.095,region
+Mediterranean (MED),2,own GPD shape,38,0.014,0.055,-0.044,0.094,region
+Mediterranean (MED),2,no TC shift,38,0.015,0.055,-0.044,0.095,region
+Mediterranean (MED),2,no tide factor,38,0.01,0.051,-0.042,0.103,region
+Mediterranean (MED),2,1979-2024 record,38,0.002,0.052,-0.056,0.086,region
+Mediterranean (MED),10,production,38,0.014,0.055,-0.055,0.108,region
+Mediterranean (MED),10,no IBTrACS mask,38,0.014,0.055,-0.055,0.108,region
+Mediterranean (MED),10,own GPD shape,38,0.014,0.055,-0.055,0.109,region
+Mediterranean (MED),10,no TC shift,38,0.014,0.055,-0.055,0.108,region
+Mediterranean (MED),10,no tide factor,38,0.006,0.048,-0.038,0.087,region
+Mediterranean (MED),10,1979-2024 record,38,0.002,0.054,-0.067,0.101,region
+Mediterranean (MED),50,production,38,0.017,0.062,-0.077,0.096,region
+Mediterranean (MED),50,no IBTrACS mask,38,0.017,0.062,-0.077,0.096,region
+Mediterranean (MED),50,own GPD shape,38,0.012,0.062,-0.086,0.096,region
+Mediterranean (MED),50,no TC shift,38,0.017,0.062,-0.077,0.096,region
+Mediterranean (MED),50,no tide factor,38,0.002,0.052,-0.066,0.086,region
+Mediterranean (MED),50,1979-2024 record,38,0.011,0.062,-0.079,0.093,region
+Mediterranean (MED),100,production,38,0.009,0.066,-0.11,0.096,region
+Mediterranean (MED),100,no IBTrACS mask,38,0.009,0.066,-0.11,0.096,region
+Mediterranean (MED),100,own GPD shape,38,0.003,0.067,-0.121,0.097,region
+Mediterranean (MED),100,no TC shift,38,0.009,0.066,-0.11,0.096,region
+Mediterranean (MED),100,no tide factor,38,-0,0.056,-0.085,0.08,region
+Mediterranean (MED),100,1979-2024 record,38,0.006,0.065,-0.109,0.091,region
+N.Europe (NEU),2,production,97,-0.013,0.062,-0.083,0.098,region
+N.Europe (NEU),2,no IBTrACS mask,97,-0.013,0.062,-0.083,0.098,region
+N.Europe (NEU),2,own GPD shape,97,-0.01,0.062,-0.082,0.098,region
+N.Europe (NEU),2,no TC shift,97,-0.013,0.062,-0.083,0.098,region
+N.Europe (NEU),2,no tide factor,97,-0.013,0.061,-0.084,0.098,region
+N.Europe (NEU),2,1979-2024 record,97,0.013,0.063,-0.071,0.107,region
+N.Europe (NEU),10,production,97,-0.025,0.082,-0.118,0.094,region
+N.Europe (NEU),10,no IBTrACS mask,97,-0.025,0.082,-0.118,0.094,region
+N.Europe (NEU),10,own GPD shape,97,-0.022,0.082,-0.123,0.1,region
+N.Europe (NEU),10,no TC shift,97,-0.025,0.082,-0.118,0.094,region
+N.Europe (NEU),10,no tide factor,97,-0.021,0.082,-0.123,0.096,region
+N.Europe (NEU),10,1979-2024 record,97,-0.003,0.077,-0.095,0.115,region
+N.Europe (NEU),50,production,97,-0.033,0.132,-0.246,0.097,region
+N.Europe (NEU),50,no IBTrACS mask,97,-0.033,0.132,-0.246,0.097,region
+N.Europe (NEU),50,own GPD shape,97,-0.026,0.128,-0.241,0.094,region
+N.Europe (NEU),50,no TC shift,97,-0.033,0.132,-0.246,0.097,region
+N.Europe (NEU),50,no tide factor,97,-0.033,0.132,-0.245,0.097,region
+N.Europe (NEU),50,1979-2024 record,97,-0.011,0.124,-0.208,0.118,region
+N.Europe (NEU),100,production,97,-0.043,0.181,-0.304,0.106,region
+N.Europe (NEU),100,no IBTrACS mask,97,-0.043,0.181,-0.304,0.106,region
+N.Europe (NEU),100,own GPD shape,97,-0.034,0.176,-0.312,0.105,region
+N.Europe (NEU),100,no TC shift,97,-0.043,0.181,-0.304,0.106,region
+N.Europe (NEU),100,no tide factor,97,-0.043,0.182,-0.317,0.106,region
+N.Europe (NEU),100,1979-2024 record,97,-0.019,0.171,-0.291,0.128,region
+N.Pacific-Ocean (NPO),2,production,23,0.012,0.071,-0.06,0.05,region
+N.Pacific-Ocean (NPO),2,no IBTrACS mask,23,0.021,0.074,-0.06,0.05,region
+N.Pacific-Ocean (NPO),2,own GPD shape,23,0.012,0.071,-0.06,0.05,region
+N.Pacific-Ocean (NPO),2,no TC shift,23,0.011,0.07,-0.06,0.049,region
+N.Pacific-Ocean (NPO),2,no tide factor,23,0.022,0.073,-0.06,0.041,region
+N.Pacific-Ocean (NPO),2,1979-2024 record,23,0.01,0.07,-0.066,0.048,region
+N.Pacific-Ocean (NPO),10,production,23,-0.002,0.109,-0.141,0.068,region
+N.Pacific-Ocean (NPO),10,no IBTrACS mask,23,0.026,0.119,-0.141,0.085,region
+N.Pacific-Ocean (NPO),10,own GPD shape,23,-0.002,0.11,-0.141,0.07,region
+N.Pacific-Ocean (NPO),10,no TC shift,23,-0.004,0.109,-0.141,0.06,region
+N.Pacific-Ocean (NPO),10,no tide factor,23,0.009,0.106,-0.14,0.069,region
+N.Pacific-Ocean (NPO),10,1979-2024 record,23,-0.002,0.11,-0.146,0.066,region
+N.Pacific-Ocean (NPO),50,production,23,-0.021,0.185,-0.417,0.078,region
+N.Pacific-Ocean (NPO),50,no IBTrACS mask,23,-0.001,0.191,-0.417,0.084,region
+N.Pacific-Ocean (NPO),50,own GPD shape,23,-0.022,0.186,-0.417,0.078,region
+N.Pacific-Ocean (NPO),50,no TC shift,23,-0.026,0.189,-0.417,0.066,region
+N.Pacific-Ocean (NPO),50,no tide factor,23,-0.021,0.179,-0.417,0.078,region
+N.Pacific-Ocean (NPO),50,1979-2024 record,23,-0.021,0.187,-0.422,0.076,region
+N.Pacific-Ocean (NPO),100,production,23,-0.015,0.259,-0.572,0.087,region
+N.Pacific-Ocean (NPO),100,no IBTrACS mask,23,-0.016,0.265,-0.572,0.09,region
+N.Pacific-Ocean (NPO),100,own GPD shape,23,-0.015,0.261,-0.58,0.088,region
+N.Pacific-Ocean (NPO),100,no TC shift,23,-0.103,0.266,-0.572,0.08,region
+N.Pacific-Ocean (NPO),100,no tide factor,23,-0.032,0.259,-0.572,0.087,region
+N.Pacific-Ocean (NPO),100,1979-2024 record,23,-0.013,0.262,-0.571,0.083,region
+N.W.North-America (NWN),2,production,20,-0.045,0.254,-0.291,0.468,region
+N.W.North-America (NWN),2,no IBTrACS mask,20,-0.045,0.254,-0.291,0.468,region
+N.W.North-America (NWN),2,own GPD shape,20,-0.045,0.254,-0.29,0.469,region
+N.W.North-America (NWN),2,no TC shift,20,-0.045,0.254,-0.291,0.468,region
+N.W.North-America (NWN),2,no tide factor,20,-0.036,0.195,-0.256,0.358,region
+N.W.North-America (NWN),2,1979-2024 record,20,-0.055,0.259,-0.306,0.469,region
+N.W.North-America (NWN),10,production,20,-0.054,0.289,-0.339,0.511,region
+N.W.North-America (NWN),10,no IBTrACS mask,20,-0.054,0.289,-0.339,0.511,region
+N.W.North-America (NWN),10,own GPD shape,20,-0.054,0.289,-0.339,0.511,region
+N.W.North-America (NWN),10,no TC shift,20,-0.054,0.289,-0.339,0.511,region
+N.W.North-America (NWN),10,no tide factor,20,-0.057,0.228,-0.28,0.38,region
+N.W.North-America (NWN),10,1979-2024 record,20,-0.071,0.296,-0.349,0.517,region
+N.W.North-America (NWN),50,production,20,-0.066,0.323,-0.412,0.556,region
+N.W.North-America (NWN),50,no IBTrACS mask,20,-0.066,0.323,-0.412,0.556,region
+N.W.North-America (NWN),50,own GPD shape,20,-0.066,0.323,-0.414,0.556,region
+N.W.North-America (NWN),50,no TC shift,20,-0.066,0.323,-0.412,0.556,region
+N.W.North-America (NWN),50,no tide factor,20,-0.071,0.262,-0.314,0.391,region
+N.W.North-America (NWN),50,1979-2024 record,20,-0.086,0.331,-0.416,0.568,region
+N.W.North-America (NWN),100,production,20,-0.072,0.339,-0.434,0.578,region
+N.W.North-America (NWN),100,no IBTrACS mask,20,-0.072,0.339,-0.434,0.578,region
+N.W.North-America (NWN),100,own GPD shape,20,-0.072,0.34,-0.435,0.577,region
+N.W.North-America (NWN),100,no TC shift,20,-0.072,0.339,-0.434,0.578,region
+N.W.North-America (NWN),100,no tide factor,20,-0.077,0.279,-0.332,0.395,region
+N.W.North-America (NWN),100,1979-2024 record,20,-0.094,0.348,-0.443,0.573,region
+New-Zealand (NZ),2,production,15,-0.011,0.045,-0.052,0.065,region
+New-Zealand (NZ),2,no IBTrACS mask,15,-0.012,0.045,-0.052,0.065,region
+New-Zealand (NZ),2,own GPD shape,15,-0.011,0.045,-0.052,0.064,region
+New-Zealand (NZ),2,no TC shift,15,-0.012,0.042,-0.052,0.065,region
+New-Zealand (NZ),2,no tide factor,15,0.01,0.064,-0.057,0.134,region
+New-Zealand (NZ),2,1979-2024 record,15,-0.018,0.04,-0.06,0.013,region
+New-Zealand (NZ),10,production,15,-0.004,0.058,-0.083,0.082,region
+New-Zealand (NZ),10,no IBTrACS mask,15,-0.004,0.058,-0.083,0.082,region
+New-Zealand (NZ),10,own GPD shape,15,-0.004,0.058,-0.083,0.083,region
+New-Zealand (NZ),10,no TC shift,15,-0.004,0.058,-0.083,0.081,region
+New-Zealand (NZ),10,no tide factor,15,0.008,0.08,-0.092,0.116,region
+New-Zealand (NZ),10,1979-2024 record,15,-0.046,0.05,-0.09,0.012,region
+New-Zealand (NZ),50,production,15,0.012,0.073,-0.129,0.083,region
+New-Zealand (NZ),50,no IBTrACS mask,15,0.014,0.072,-0.126,0.083,region
+New-Zealand (NZ),50,own GPD shape,15,0.01,0.074,-0.129,0.083,region
+New-Zealand (NZ),50,no TC shift,15,0.011,0.073,-0.129,0.083,region
+New-Zealand (NZ),50,no tide factor,15,0.012,0.096,-0.146,0.13,region
+New-Zealand (NZ),50,1979-2024 record,15,-0.058,0.062,-0.129,0.01,region
+New-Zealand (NZ),100,production,15,-0.014,0.079,-0.148,0.077,region
+New-Zealand (NZ),100,no IBTrACS mask,15,-0.01,0.077,-0.142,0.077,region
+New-Zealand (NZ),100,own GPD shape,15,-0.013,0.081,-0.147,0.088,region
+New-Zealand (NZ),100,no TC shift,15,-0.025,0.08,-0.148,0.077,region
+New-Zealand (NZ),100,no tide factor,15,-0.014,0.101,-0.164,0.139,region
+New-Zealand (NZ),100,1979-2024 record,15,-0.062,0.07,-0.142,-0.014,region
+S.Australia (SAU),2,production,29,0.065,0.133,-0.126,0.2,region
+S.Australia (SAU),2,no IBTrACS mask,29,0.065,0.134,-0.126,0.2,region
+S.Australia (SAU),2,own GPD shape,29,0.065,0.133,-0.127,0.199,region
+S.Australia (SAU),2,no TC shift,29,0.065,0.133,-0.128,0.2,region
+S.Australia (SAU),2,no tide factor,29,0.065,0.148,-0.067,0.257,region
+S.Australia (SAU),2,1979-2024 record,29,0.045,0.119,-0.15,0.194,region
+S.Australia (SAU),10,production,29,0.049,0.151,-0.16,0.244,region
+S.Australia (SAU),10,no IBTrACS mask,29,0.053,0.151,-0.16,0.244,region
+S.Australia (SAU),10,own GPD shape,29,0.051,0.151,-0.16,0.244,region
+S.Australia (SAU),10,no TC shift,29,0.047,0.151,-0.163,0.244,region
+S.Australia (SAU),10,no tide factor,29,0.057,0.161,-0.101,0.286,region
+S.Australia (SAU),10,1979-2024 record,29,0.04,0.137,-0.171,0.224,region
+S.Australia (SAU),50,production,29,0.055,0.166,-0.17,0.287,region
+S.Australia (SAU),50,no IBTrACS mask,29,0.055,0.167,-0.17,0.287,region
+S.Australia (SAU),50,own GPD shape,29,0.062,0.166,-0.167,0.292,region
+S.Australia (SAU),50,no TC shift,29,0.055,0.166,-0.171,0.287,region
+S.Australia (SAU),50,no tide factor,29,0.08,0.178,-0.106,0.318,region
+S.Australia (SAU),50,1979-2024 record,29,0.047,0.15,-0.167,0.266,region
+S.Australia (SAU),100,production,29,0.06,0.173,-0.167,0.305,region
+S.Australia (SAU),100,no IBTrACS mask,29,0.06,0.174,-0.167,0.305,region
+S.Australia (SAU),100,own GPD shape,29,0.073,0.172,-0.166,0.313,region
+S.Australia (SAU),100,no TC shift,29,0.06,0.172,-0.168,0.305,region
+S.Australia (SAU),100,no tide factor,29,0.077,0.186,-0.105,0.332,region
+S.Australia (SAU),100,1979-2024 record,29,0.057,0.157,-0.173,0.284,region
+S.E.Asia (SEA),2,production,22,0.125,0.17,0.03,0.317,region
+S.E.Asia (SEA),2,no IBTrACS mask,22,0.125,0.17,0.03,0.317,region
+S.E.Asia (SEA),2,own GPD shape,22,0.126,0.17,0.03,0.317,region
+S.E.Asia (SEA),2,no TC shift,22,0.1,0.137,0.028,0.274,region
+S.E.Asia (SEA),2,no tide factor,22,0.114,0.165,0.03,0.317,region
+S.E.Asia (SEA),2,1979-2024 record,22,0.126,0.17,0.03,0.317,region
+S.E.Asia (SEA),10,production,22,0.112,0.147,0.013,0.271,region
+S.E.Asia (SEA),10,no IBTrACS mask,22,0.112,0.15,0.029,0.271,region
+S.E.Asia (SEA),10,own GPD shape,22,0.111,0.147,0.013,0.271,region
+S.E.Asia (SEA),10,no TC shift,22,0.085,0.119,0.012,0.239,region
+S.E.Asia (SEA),10,no tide factor,22,0.109,0.141,0.013,0.269,region
+S.E.Asia (SEA),10,1979-2024 record,22,0.114,0.148,0.008,0.267,region
+S.E.Asia (SEA),50,production,22,0.135,0.157,-0.07,0.262,region
+S.E.Asia (SEA),50,no IBTrACS mask,22,0.142,0.158,-0.07,0.262,region
+S.E.Asia (SEA),50,own GPD shape,22,0.13,0.153,-0.07,0.262,region
+S.E.Asia (SEA),50,no TC shift,22,0.053,0.136,-0.125,0.218,region
+S.E.Asia (SEA),50,no tide factor,22,0.109,0.151,-0.07,0.262,region
+S.E.Asia (SEA),50,1979-2024 record,22,0.139,0.159,-0.082,0.258,region
+S.E.Asia (SEA),100,production,22,0.145,0.215,-0.251,0.269,region
+S.E.Asia (SEA),100,no IBTrACS mask,22,0.145,0.215,-0.251,0.272,region
+S.E.Asia (SEA),100,own GPD shape,22,0.136,0.212,-0.25,0.269,region
+S.E.Asia (SEA),100,no TC shift,22,0.062,0.191,-0.328,0.212,region
+S.E.Asia (SEA),100,no tide factor,22,0.11,0.209,-0.251,0.269,region
+S.E.Asia (SEA),100,1979-2024 record,22,0.147,0.218,-0.253,0.268,region
+S.Pacific-Ocean (SPO),2,production,18,0.063,0.072,-0.029,0.11,region
+S.Pacific-Ocean (SPO),2,no IBTrACS mask,18,0.06,0.071,-0.029,0.11,region
+S.Pacific-Ocean (SPO),2,own GPD shape,18,0.063,0.072,-0.029,0.11,region
+S.Pacific-Ocean (SPO),2,no TC shift,18,0.036,0.052,-0.029,0.088,region
+S.Pacific-Ocean (SPO),2,no tide factor,18,0.062,0.07,-0.03,0.11,region
+S.Pacific-Ocean (SPO),2,1979-2024 record,18,0.059,0.07,-0.032,0.108,region
+S.Pacific-Ocean (SPO),10,production,18,0.06,0.082,-0.094,0.109,region
+S.Pacific-Ocean (SPO),10,no IBTrACS mask,18,0.073,0.092,-0.094,0.122,region
+S.Pacific-Ocean (SPO),10,own GPD shape,18,0.059,0.082,-0.094,0.109,region
+S.Pacific-Ocean (SPO),10,no TC shift,18,0.022,0.065,-0.094,0.087,region
+S.Pacific-Ocean (SPO),10,no tide factor,18,0.069,0.078,-0.095,0.092,region
+S.Pacific-Ocean (SPO),10,1979-2024 record,18,0.057,0.08,-0.095,0.106,region
+S.Pacific-Ocean (SPO),50,production,18,-0.016,0.203,-0.421,0.127,region
+S.Pacific-Ocean (SPO),50,no IBTrACS mask,18,0.015,0.206,-0.421,0.152,region
+S.Pacific-Ocean (SPO),50,own GPD shape,18,-0.021,0.203,-0.421,0.125,region
+S.Pacific-Ocean (SPO),50,no TC shift,18,-0.079,0.204,-0.452,0.081,region
+S.Pacific-Ocean (SPO),50,no tide factor,18,-0.035,0.204,-0.425,0.12,region
+S.Pacific-Ocean (SPO),50,1979-2024 record,18,-0.019,0.202,-0.418,0.127,region
+S.Pacific-Ocean (SPO),100,production,18,-0.042,0.364,-0.752,0.16,region
+S.Pacific-Ocean (SPO),100,no IBTrACS mask,18,-0.012,0.363,-0.752,0.188,region
+S.Pacific-Ocean (SPO),100,own GPD shape,18,-0.049,0.366,-0.752,0.16,region
+S.Pacific-Ocean (SPO),100,no TC shift,18,-0.133,0.369,-0.904,0.075,region
+S.Pacific-Ocean (SPO),100,no tide factor,18,-0.053,0.364,-0.752,0.161,region
+S.Pacific-Ocean (SPO),100,1979-2024 record,18,-0.044,0.363,-0.752,0.163,region
+W.North-America (WNA),2,production,32,-0.022,0.138,-0.143,0.237,region
+W.North-America (WNA),2,no IBTrACS mask,32,-0.022,0.138,-0.143,0.237,region
+W.North-America (WNA),2,own GPD shape,32,-0.022,0.138,-0.143,0.237,region
+W.North-America (WNA),2,no TC shift,32,-0.022,0.138,-0.143,0.237,region
+W.North-America (WNA),2,no tide factor,32,0.013,0.187,-0.106,0.62,region
+W.North-America (WNA),2,1979-2024 record,32,-0.024,0.138,-0.149,0.237,region
+W.North-America (WNA),10,production,32,-0.028,0.151,-0.177,0.247,region
+W.North-America (WNA),10,no IBTrACS mask,32,-0.028,0.151,-0.177,0.247,region
+W.North-America (WNA),10,own GPD shape,32,-0.028,0.151,-0.177,0.247,region
+W.North-America (WNA),10,no TC shift,32,-0.028,0.151,-0.177,0.247,region
+W.North-America (WNA),10,no tide factor,32,0.001,0.207,-0.14,0.677,region
+W.North-America (WNA),10,1979-2024 record,32,-0.032,0.149,-0.183,0.247,region
+W.North-America (WNA),50,production,32,-0.016,0.164,-0.245,0.263,region
+W.North-America (WNA),50,no IBTrACS mask,32,-0.016,0.164,-0.245,0.263,region
+W.North-America (WNA),50,own GPD shape,32,-0.014,0.165,-0.244,0.261,region
+W.North-America (WNA),50,no TC shift,32,-0.016,0.164,-0.245,0.263,region
+W.North-America (WNA),50,no tide factor,32,-0.019,0.231,-0.147,0.72,region
+W.North-America (WNA),50,1979-2024 record,32,-0.015,0.16,-0.251,0.259,region
+W.North-America (WNA),100,production,32,-0.023,0.172,-0.301,0.273,region
+W.North-America (WNA),100,no IBTrACS mask,32,-0.023,0.172,-0.301,0.273,region
+W.North-America (WNA),100,own GPD shape,32,-0.022,0.174,-0.297,0.268,region
+W.North-America (WNA),100,no TC shift,32,-0.024,0.172,-0.301,0.273,region
+W.North-America (WNA),100,no tide factor,32,-0.026,0.244,-0.177,0.74,region
+W.North-America (WNA),100,1979-2024 record,32,-0.02,0.167,-0.291,0.268,region
+West&Central-Europe (WCE),2,production,24,0.02,0.12,-0.175,0.2,region
+West&Central-Europe (WCE),2,no IBTrACS mask,24,0.02,0.12,-0.175,0.2,region
+West&Central-Europe (WCE),2,own GPD shape,24,0.02,0.12,-0.176,0.2,region
+West&Central-Europe (WCE),2,no TC shift,24,0.02,0.12,-0.175,0.2,region
+West&Central-Europe (WCE),2,no tide factor,24,-0.012,0.087,-0.109,0.189,region
+West&Central-Europe (WCE),2,1979-2024 record,24,0.015,0.119,-0.174,0.192,region
+West&Central-Europe (WCE),10,production,24,0.018,0.117,-0.165,0.219,region
+West&Central-Europe (WCE),10,no IBTrACS mask,24,0.018,0.117,-0.165,0.219,region
+West&Central-Europe (WCE),10,own GPD shape,24,0.019,0.118,-0.167,0.219,region
+West&Central-Europe (WCE),10,no TC shift,24,0.018,0.117,-0.165,0.219,region
+West&Central-Europe (WCE),10,no tide factor,24,-0.008,0.085,-0.085,0.192,region
+West&Central-Europe (WCE),10,1979-2024 record,24,0.015,0.119,-0.16,0.216,region
+West&Central-Europe (WCE),50,production,24,0.026,0.134,-0.152,0.227,region
+West&Central-Europe (WCE),50,no IBTrACS mask,24,0.026,0.134,-0.152,0.227,region
+West&Central-Europe (WCE),50,own GPD shape,24,0.033,0.135,-0.163,0.23,region
+West&Central-Europe (WCE),50,no TC shift,24,0.026,0.134,-0.152,0.227,region
+West&Central-Europe (WCE),50,no tide factor,24,-0.009,0.101,-0.12,0.204,region
+West&Central-Europe (WCE),50,1979-2024 record,24,0.032,0.139,-0.15,0.237,region
+West&Central-Europe (WCE),100,production,24,0.029,0.149,-0.209,0.235,region
+West&Central-Europe (WCE),100,no IBTrACS mask,24,0.029,0.149,-0.209,0.235,region
+West&Central-Europe (WCE),100,own GPD shape,24,0.037,0.151,-0.209,0.24,region
+West&Central-Europe (WCE),100,no TC shift,24,0.029,0.149,-0.209,0.235,region
+West&Central-Europe (WCE),100,no tide factor,24,-0.001,0.115,-0.167,0.222,region
+West&Central-Europe (WCE),100,1979-2024 record,24,0.041,0.155,-0.211,0.25,region
+other,2,production,99,0.063,0.145,-0.108,0.245,region
+other,2,no IBTrACS mask,99,0.065,0.146,-0.099,0.245,region
+other,2,own GPD shape,99,0.062,0.144,-0.108,0.245,region
+other,2,no TC shift,99,0.016,0.097,-0.115,0.153,region
+other,2,no tide factor,99,0.054,0.143,-0.108,0.25,region
+other,2,1979-2024 record,99,0.059,0.143,-0.11,0.245,region
+other,10,production,99,0.025,0.149,-0.166,0.187,region
+other,10,no IBTrACS mask,99,0.028,0.148,-0.106,0.194,region
+other,10,own GPD shape,99,0.025,0.149,-0.162,0.187,region
+other,10,no TC shift,99,-0.003,0.121,-0.217,0.144,region
+other,10,no tide factor,99,0.028,0.146,-0.151,0.194,region
+other,10,1979-2024 record,99,0.022,0.147,-0.15,0.188,region
+other,50,production,99,0.013,0.204,-0.267,0.296,region
+other,50,no IBTrACS mask,99,0.018,0.205,-0.261,0.305,region
+other,50,own GPD shape,99,0.014,0.204,-0.252,0.295,region
+other,50,no TC shift,99,-0.017,0.195,-0.325,0.191,region
+other,50,no tide factor,99,0.012,0.202,-0.267,0.296,region
+other,50,1979-2024 record,99,0.002,0.199,-0.262,0.294,region
+other,100,production,99,0.016,0.28,-0.364,0.328,region
+other,100,no IBTrACS mask,99,0.02,0.283,-0.364,0.345,region
+other,100,own GPD shape,99,0.015,0.278,-0.349,0.326,region
+other,100,no TC shift,99,-0.025,0.267,-0.443,0.243,region
+other,100,no tide factor,99,0.015,0.277,-0.364,0.328,region
+other,100,1979-2024 record,99,0.003,0.274,-0.369,0.324,region
+"(0, 1]",2,production,231,0.015,0.067,-0.079,0.117,spring tidal range (m)
+"(0, 1]",2,no IBTrACS mask,231,0.021,0.068,-0.073,0.118,spring tidal range (m)
+"(0, 1]",2,own GPD shape,231,0.014,0.067,-0.079,0.116,spring tidal range (m)
+"(0, 1]",2,no TC shift,231,0.01,0.062,-0.079,0.096,spring tidal range (m)
+"(0, 1]",2,no tide factor,231,0.022,0.07,-0.07,0.118,spring tidal range (m)
+"(0, 1]",2,1979-2024 record,231,0.017,0.066,-0.069,0.112,spring tidal range (m)
+"(0, 1]",10,production,231,-0,0.091,-0.155,0.124,spring tidal range (m)
+"(0, 1]",10,no IBTrACS mask,231,0.011,0.091,-0.135,0.13,spring tidal range (m)
+"(0, 1]",10,own GPD shape,231,-0.002,0.092,-0.159,0.126,spring tidal range (m)
+"(0, 1]",10,no TC shift,231,-0.008,0.089,-0.162,0.08,spring tidal range (m)
+"(0, 1]",10,no tide factor,231,0.001,0.092,-0.148,0.104,spring tidal range (m)
+"(0, 1]",10,1979-2024 record,231,0.005,0.089,-0.147,0.124,spring tidal range (m)
+"(0, 1]",50,production,231,-0.014,0.165,-0.3,0.164,spring tidal range (m)
+"(0, 1]",50,no IBTrACS mask,231,-0.006,0.166,-0.28,0.173,spring tidal range (m)
+"(0, 1]",50,own GPD shape,231,-0.016,0.164,-0.321,0.154,spring tidal range (m)
+"(0, 1]",50,no TC shift,231,-0.033,0.168,-0.347,0.105,spring tidal range (m)
+"(0, 1]",50,no tide factor,231,-0.014,0.166,-0.304,0.153,spring tidal range (m)
+"(0, 1]",50,1979-2024 record,231,-0.01,0.162,-0.301,0.16,spring tidal range (m)
+"(0, 1]",100,production,231,-0.022,0.236,-0.485,0.209,spring tidal range (m)
+"(0, 1]",100,no IBTrACS mask,231,-0.013,0.237,-0.477,0.213,spring tidal range (m)
+"(0, 1]",100,own GPD shape,231,-0.028,0.231,-0.485,0.203,spring tidal range (m)
+"(0, 1]",100,no TC shift,231,-0.05,0.237,-0.582,0.125,spring tidal range (m)
+"(0, 1]",100,no tide factor,231,-0.019,0.237,-0.485,0.209,spring tidal range (m)
+"(0, 1]",100,1979-2024 record,231,-0.014,0.231,-0.485,0.203,spring tidal range (m)
+"(1, 2]",2,production,205,0.032,0.091,-0.085,0.191,spring tidal range (m)
+"(1, 2]",2,no IBTrACS mask,205,0.037,0.092,-0.081,0.192,spring tidal range (m)
+"(1, 2]",2,own GPD shape,205,0.032,0.091,-0.085,0.192,spring tidal range (m)
+"(1, 2]",2,no TC shift,205,0.014,0.079,-0.1,0.128,spring tidal range (m)
+"(1, 2]",2,no tide factor,205,0.022,0.088,-0.076,0.175,spring tidal range (m)
+"(1, 2]",2,1979-2024 record,205,0.025,0.089,-0.086,0.192,spring tidal range (m)
+"(1, 2]",10,production,205,0.008,0.105,-0.164,0.168,spring tidal range (m)
+"(1, 2]",10,no IBTrACS mask,205,0.028,0.096,-0.104,0.17,spring tidal range (m)
+"(1, 2]",10,own GPD shape,205,0.006,0.105,-0.161,0.169,spring tidal range (m)
+"(1, 2]",10,no TC shift,205,-0.004,0.104,-0.172,0.127,spring tidal range (m)
+"(1, 2]",10,no tide factor,205,0.004,0.102,-0.145,0.141,spring tidal range (m)
+"(1, 2]",10,1979-2024 record,205,0.003,0.103,-0.166,0.161,spring tidal range (m)
+"(1, 2]",50,production,205,-0.011,0.154,-0.26,0.172,spring tidal range (m)
+"(1, 2]",50,no IBTrACS mask,205,0.009,0.141,-0.187,0.199,spring tidal range (m)
+"(1, 2]",50,own GPD shape,205,-0.012,0.157,-0.262,0.199,spring tidal range (m)
+"(1, 2]",50,no TC shift,205,-0.018,0.158,-0.295,0.138,spring tidal range (m)
+"(1, 2]",50,no tide factor,205,-0.013,0.153,-0.255,0.152,spring tidal range (m)
+"(1, 2]",50,1979-2024 record,205,-0.013,0.153,-0.269,0.177,spring tidal range (m)
+"(1, 2]",100,production,205,-0.021,0.204,-0.35,0.206,spring tidal range (m)
+"(1, 2]",100,no IBTrACS mask,205,-0.001,0.192,-0.291,0.219,spring tidal range (m)
+"(1, 2]",100,own GPD shape,205,-0.021,0.207,-0.344,0.218,spring tidal range (m)
+"(1, 2]",100,no TC shift,205,-0.036,0.21,-0.379,0.144,spring tidal range (m)
+"(1, 2]",100,no tide factor,205,-0.021,0.205,-0.343,0.198,spring tidal range (m)
+"(1, 2]",100,1979-2024 record,205,-0.023,0.203,-0.37,0.211,spring tidal range (m)
+"(2, 4]",2,production,123,0.023,0.136,-0.081,0.276,spring tidal range (m)
+"(2, 4]",2,no IBTrACS mask,123,0.023,0.137,-0.081,0.276,spring tidal range (m)
+"(2, 4]",2,own GPD shape,123,0.023,0.136,-0.081,0.278,spring tidal range (m)
+"(2, 4]",2,no TC shift,123,0.015,0.114,-0.081,0.198,spring tidal range (m)
+"(2, 4]",2,no tide factor,123,0.043,0.144,-0.072,0.316,spring tidal range (m)
+"(2, 4]",2,1979-2024 record,123,0.013,0.134,-0.077,0.276,spring tidal range (m)
+"(2, 4]",10,production,123,0.021,0.143,-0.137,0.254,spring tidal range (m)
+"(2, 4]",10,no IBTrACS mask,123,0.025,0.146,-0.116,0.254,spring tidal range (m)
+"(2, 4]",10,own GPD shape,123,0.021,0.144,-0.141,0.253,spring tidal range (m)
+"(2, 4]",10,no TC shift,123,0.01,0.13,-0.147,0.234,spring tidal range (m)
+"(2, 4]",10,no tide factor,123,0.02,0.152,-0.114,0.317,spring tidal range (m)
+"(2, 4]",10,1979-2024 record,123,0.012,0.14,-0.128,0.241,spring tidal range (m)
+"(2, 4]",50,production,123,0.011,0.164,-0.208,0.305,spring tidal range (m)
+"(2, 4]",50,no IBTrACS mask,123,0.02,0.165,-0.178,0.305,spring tidal range (m)
+"(2, 4]",50,own GPD shape,123,0.012,0.165,-0.213,0.316,spring tidal range (m)
+"(2, 4]",50,no TC shift,123,-0.009,0.157,-0.213,0.269,spring tidal range (m)
+"(2, 4]",50,no tide factor,123,0.012,0.174,-0.143,0.357,spring tidal range (m)
+"(2, 4]",50,1979-2024 record,123,-0,0.164,-0.218,0.299,spring tidal range (m)
+"(2, 4]",100,production,123,0.003,0.194,-0.261,0.357,spring tidal range (m)
+"(2, 4]",100,no IBTrACS mask,123,0.012,0.191,-0.239,0.357,spring tidal range (m)
+"(2, 4]",100,own GPD shape,123,0.008,0.194,-0.257,0.354,spring tidal range (m)
+"(2, 4]",100,no TC shift,123,-0.005,0.183,-0.261,0.311,spring tidal range (m)
+"(2, 4]",100,no tide factor,123,0.02,0.204,-0.178,0.452,spring tidal range (m)
+"(2, 4]",100,1979-2024 record,123,-0.001,0.194,-0.259,0.327,spring tidal range (m)
+"(4, 20]",2,production,59,0.012,0.175,-0.183,0.331,spring tidal range (m)
+"(4, 20]",2,no IBTrACS mask,59,0.012,0.175,-0.183,0.331,spring tidal range (m)
+"(4, 20]",2,own GPD shape,59,0.012,0.175,-0.183,0.332,spring tidal range (m)
+"(4, 20]",2,no TC shift,59,0.011,0.162,-0.183,0.321,spring tidal range (m)
+"(4, 20]",2,no tide factor,59,-0.033,0.177,-0.189,0.283,spring tidal range (m)
+"(4, 20]",2,1979-2024 record,59,0.012,0.174,-0.186,0.323,spring tidal range (m)
+"(4, 20]",10,production,59,0.022,0.186,-0.172,0.385,spring tidal range (m)
+"(4, 20]",10,no IBTrACS mask,59,0.022,0.186,-0.172,0.384,spring tidal range (m)
+"(4, 20]",10,own GPD shape,59,0.021,0.186,-0.175,0.386,spring tidal range (m)
+"(4, 20]",10,no TC shift,59,0.022,0.173,-0.172,0.325,spring tidal range (m)
+"(4, 20]",10,no tide factor,59,-0.013,0.187,-0.218,0.288,spring tidal range (m)
+"(4, 20]",10,1979-2024 record,59,0.014,0.185,-0.171,0.38,spring tidal range (m)
+"(4, 20]",50,production,59,0.029,0.214,-0.207,0.419,spring tidal range (m)
+"(4, 20]",50,no IBTrACS mask,59,0.029,0.214,-0.207,0.419,spring tidal range (m)
+"(4, 20]",50,own GPD shape,59,0.033,0.215,-0.21,0.426,spring tidal range (m)
+"(4, 20]",50,no TC shift,59,0.023,0.199,-0.207,0.312,spring tidal range (m)
+"(4, 20]",50,no tide factor,59,-0.004,0.213,-0.267,0.327,spring tidal range (m)
+"(4, 20]",50,1979-2024 record,59,0.023,0.211,-0.217,0.421,spring tidal range (m)
+"(4, 20]",100,production,59,0.039,0.256,-0.249,0.435,spring tidal range (m)
+"(4, 20]",100,no IBTrACS mask,59,0.039,0.257,-0.249,0.435,spring tidal range (m)
+"(4, 20]",100,own GPD shape,59,0.035,0.258,-0.253,0.448,spring tidal range (m)
+"(4, 20]",100,no TC shift,59,0.036,0.241,-0.249,0.324,spring tidal range (m)
+"(4, 20]",100,no tide factor,59,0.001,0.256,-0.308,0.317,spring tidal range (m)
+"(4, 20]",100,1979-2024 record,59,0.024,0.254,-0.251,0.44,spring tidal range (m)

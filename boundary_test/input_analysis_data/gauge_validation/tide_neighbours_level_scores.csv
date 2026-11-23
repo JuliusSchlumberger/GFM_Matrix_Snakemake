@@ -1,0 +1,369 @@
+gauges,rp,level,n,median,mae,p10,p90,split
+all,2,25 km (production),618,0.021,0.099,-0.093,0.191,TC group
+all,2,along water (GEBCO),618,0.023,0.096,-0.084,0.192,TC group
+all,2,along water (OSM),618,0.022,0.097,-0.088,0.191,TC group
+all,2,FES amplitude within x1.2,618,0.023,0.098,-0.085,0.194,TC group
+all,10,25 km (production),618,0.008,0.115,-0.161,0.179,TC group
+all,10,along water (GEBCO),618,0.01,0.113,-0.15,0.178,TC group
+all,10,along water (OSM),618,0.007,0.113,-0.16,0.179,TC group
+all,10,FES amplitude within x1.2,618,0.01,0.115,-0.156,0.181,TC group
+all,50,25 km (production),618,-0.007,0.166,-0.262,0.218,TC group
+all,50,along water (GEBCO),618,-0.006,0.163,-0.259,0.215,TC group
+all,50,along water (OSM),618,-0.007,0.163,-0.259,0.222,TC group
+all,50,FES amplitude within x1.2,618,-0.007,0.165,-0.253,0.219,TC group
+all,100,25 km (production),618,-0.007,0.219,-0.349,0.246,TC group
+all,100,along water (GEBCO),618,-0.005,0.216,-0.347,0.25,TC group
+all,100,along water (OSM),618,-0.006,0.216,-0.347,0.246,TC group
+all,100,FES amplitude within x1.2,618,-0.006,0.218,-0.347,0.25,TC group
+non-TC-dominated gauges,2,25 km (production),451,0.023,0.106,-0.09,0.202,TC group
+non-TC-dominated gauges,2,along water (GEBCO),451,0.027,0.102,-0.08,0.208,TC group
+non-TC-dominated gauges,2,along water (OSM),451,0.024,0.102,-0.084,0.202,TC group
+non-TC-dominated gauges,2,FES amplitude within x1.2,451,0.024,0.105,-0.084,0.214,TC group
+non-TC-dominated gauges,10,25 km (production),451,0.013,0.114,-0.137,0.199,TC group
+non-TC-dominated gauges,10,along water (GEBCO),451,0.014,0.11,-0.118,0.191,TC group
+non-TC-dominated gauges,10,along water (OSM),451,0.012,0.11,-0.135,0.2,TC group
+non-TC-dominated gauges,10,FES amplitude within x1.2,451,0.014,0.113,-0.135,0.201,TC group
+non-TC-dominated gauges,50,25 km (production),451,-0,0.139,-0.205,0.214,TC group
+non-TC-dominated gauges,50,along water (GEBCO),451,0.002,0.135,-0.185,0.202,TC group
+non-TC-dominated gauges,50,along water (OSM),451,-0,0.134,-0.199,0.212,TC group
+non-TC-dominated gauges,50,FES amplitude within x1.2,451,0.002,0.137,-0.194,0.214,TC group
+non-TC-dominated gauges,100,25 km (production),451,-0.001,0.166,-0.247,0.213,TC group
+non-TC-dominated gauges,100,along water (GEBCO),451,-0.001,0.162,-0.234,0.211,TC group
+non-TC-dominated gauges,100,along water (OSM),451,-0.001,0.162,-0.234,0.212,TC group
+non-TC-dominated gauges,100,FES amplitude within x1.2,451,-0,0.165,-0.232,0.213,TC group
+TC-dominated gauges,2,25 km (production),167,0.01,0.08,-0.095,0.124,TC group
+TC-dominated gauges,2,along water (GEBCO),167,0.015,0.08,-0.087,0.129,TC group
+TC-dominated gauges,2,along water (OSM),167,0.015,0.081,-0.095,0.132,TC group
+TC-dominated gauges,2,FES amplitude within x1.2,167,0.015,0.081,-0.092,0.14,TC group
+TC-dominated gauges,10,25 km (production),167,-0.029,0.119,-0.212,0.135,TC group
+TC-dominated gauges,10,along water (GEBCO),167,-0.029,0.119,-0.209,0.14,TC group
+TC-dominated gauges,10,along water (OSM),167,-0.029,0.12,-0.21,0.14,TC group
+TC-dominated gauges,10,FES amplitude within x1.2,167,-0.025,0.12,-0.21,0.14,TC group
+TC-dominated gauges,50,25 km (production),167,-0.035,0.24,-0.439,0.269,TC group
+TC-dominated gauges,50,along water (GEBCO),167,-0.033,0.24,-0.439,0.269,TC group
+TC-dominated gauges,50,along water (OSM),167,-0.041,0.24,-0.439,0.269,TC group
+TC-dominated gauges,50,FES amplitude within x1.2,167,-0.036,0.241,-0.435,0.295,TC group
+TC-dominated gauges,100,25 km (production),167,-0.044,0.362,-0.682,0.334,TC group
+TC-dominated gauges,100,along water (GEBCO),167,-0.044,0.363,-0.682,0.334,TC group
+TC-dominated gauges,100,along water (OSM),167,-0.044,0.363,-0.682,0.334,TC group
+TC-dominated gauges,100,FES amplitude within x1.2,167,-0.046,0.363,-0.682,0.339,TC group
+stations with a TC part,2,25 km (production),323,0.04,0.102,-0.081,0.213,TC group
+stations with a TC part,2,along water (GEBCO),323,0.041,0.102,-0.078,0.213,TC group
+stations with a TC part,2,along water (OSM),323,0.041,0.103,-0.083,0.208,TC group
+stations with a TC part,2,FES amplitude within x1.2,323,0.039,0.102,-0.073,0.218,TC group
+stations with a TC part,10,25 km (production),323,0.019,0.117,-0.165,0.172,TC group
+stations with a TC part,10,along water (GEBCO),323,0.02,0.118,-0.168,0.173,TC group
+stations with a TC part,10,along water (OSM),323,0.02,0.119,-0.168,0.172,TC group
+stations with a TC part,10,FES amplitude within x1.2,323,0.02,0.118,-0.162,0.173,TC group
+stations with a TC part,50,25 km (production),323,0.01,0.182,-0.299,0.218,TC group
+stations with a TC part,50,along water (GEBCO),323,0.011,0.182,-0.299,0.222,TC group
+stations with a TC part,50,along water (OSM),323,0.01,0.183,-0.303,0.222,TC group
+stations with a TC part,50,FES amplitude within x1.2,323,0.011,0.182,-0.297,0.218,TC group
+stations with a TC part,100,25 km (production),323,0.003,0.253,-0.423,0.268,TC group
+stations with a TC part,100,along water (GEBCO),323,0.007,0.253,-0.422,0.269,TC group
+stations with a TC part,100,along water (OSM),323,0.005,0.254,-0.422,0.269,TC group
+stations with a TC part,100,FES amplitude within x1.2,323,0.004,0.253,-0.423,0.268,TC group
+E.Asia (EAS),2,25 km (production),92,0.011,0.06,-0.06,0.095,region
+E.Asia (EAS),2,along water (GEBCO),92,0.013,0.061,-0.062,0.096,region
+E.Asia (EAS),2,along water (OSM),92,0.013,0.062,-0.062,0.096,region
+E.Asia (EAS),2,FES amplitude within x1.2,92,0.012,0.061,-0.06,0.095,region
+E.Asia (EAS),10,25 km (production),92,-0.03,0.094,-0.171,0.066,region
+E.Asia (EAS),10,along water (GEBCO),92,-0.033,0.094,-0.171,0.066,region
+E.Asia (EAS),10,along water (OSM),92,-0.03,0.094,-0.171,0.066,region
+E.Asia (EAS),10,FES amplitude within x1.2,92,-0.027,0.093,-0.171,0.066,region
+E.Asia (EAS),50,25 km (production),92,-0.064,0.171,-0.426,0.097,region
+E.Asia (EAS),50,along water (GEBCO),92,-0.069,0.171,-0.423,0.097,region
+E.Asia (EAS),50,along water (OSM),92,-0.064,0.171,-0.423,0.097,region
+E.Asia (EAS),50,FES amplitude within x1.2,92,-0.064,0.17,-0.423,0.097,region
+E.Asia (EAS),100,25 km (production),92,-0.082,0.209,-0.571,0.084,region
+E.Asia (EAS),100,along water (GEBCO),92,-0.079,0.21,-0.571,0.084,region
+E.Asia (EAS),100,along water (OSM),92,-0.079,0.21,-0.571,0.084,region
+E.Asia (EAS),100,FES amplitude within x1.2,92,-0.082,0.209,-0.571,0.084,region
+E.Australia (EAU),2,25 km (production),23,0.049,0.113,-0.058,0.209,region
+E.Australia (EAU),2,along water (GEBCO),23,0.049,0.113,-0.052,0.208,region
+E.Australia (EAU),2,along water (OSM),23,0.049,0.114,-0.052,0.209,region
+E.Australia (EAU),2,FES amplitude within x1.2,23,0.049,0.113,-0.058,0.209,region
+E.Australia (EAU),10,25 km (production),23,0.039,0.119,-0.088,0.173,region
+E.Australia (EAU),10,along water (GEBCO),23,0.039,0.117,-0.083,0.172,region
+E.Australia (EAU),10,along water (OSM),23,0.039,0.119,-0.083,0.173,region
+E.Australia (EAU),10,FES amplitude within x1.2,23,0.039,0.119,-0.088,0.173,region
+E.Australia (EAU),50,25 km (production),23,0.042,0.124,-0.209,0.131,region
+E.Australia (EAU),50,along water (GEBCO),23,0.042,0.121,-0.206,0.125,region
+E.Australia (EAU),50,along water (OSM),23,0.042,0.123,-0.206,0.131,region
+E.Australia (EAU),50,FES amplitude within x1.2,23,0.042,0.124,-0.209,0.131,region
+E.Australia (EAU),100,25 km (production),23,0.026,0.172,-0.43,0.144,region
+E.Australia (EAU),100,along water (GEBCO),23,0.026,0.169,-0.43,0.144,region
+E.Australia (EAU),100,along water (OSM),23,0.026,0.17,-0.43,0.144,region
+E.Australia (EAU),100,FES amplitude within x1.2,23,0.026,0.172,-0.43,0.144,region
+E.North-America (ENA),2,25 km (production),67,-0.008,0.085,-0.135,0.101,region
+E.North-America (ENA),2,along water (GEBCO),67,-0.002,0.084,-0.126,0.118,region
+E.North-America (ENA),2,along water (OSM),67,-0.008,0.088,-0.136,0.127,region
+E.North-America (ENA),2,FES amplitude within x1.2,67,0.002,0.084,-0.116,0.14,region
+E.North-America (ENA),10,25 km (production),67,-0.017,0.12,-0.219,0.135,region
+E.North-America (ENA),10,along water (GEBCO),67,-0.013,0.122,-0.219,0.153,region
+E.North-America (ENA),10,along water (OSM),67,-0.019,0.125,-0.221,0.146,region
+E.North-America (ENA),10,FES amplitude within x1.2,67,-0.014,0.122,-0.177,0.163,region
+E.North-America (ENA),50,25 km (production),67,0.001,0.226,-0.358,0.437,region
+E.North-America (ENA),50,along water (GEBCO),67,0.001,0.23,-0.358,0.436,region
+E.North-America (ENA),50,along water (OSM),67,-0,0.23,-0.358,0.437,region
+E.North-America (ENA),50,FES amplitude within x1.2,67,0.01,0.227,-0.35,0.46,region
+E.North-America (ENA),100,25 km (production),67,0.031,0.352,-0.466,0.718,region
+E.North-America (ENA),100,along water (GEBCO),67,0.036,0.356,-0.466,0.719,region
+E.North-America (ENA),100,along water (OSM),67,0.032,0.356,-0.466,0.718,region
+E.North-America (ENA),100,FES amplitude within x1.2,67,0.032,0.352,-0.466,0.719,region
+Equatorial.Pacific-Ocean (EPO),2,25 km (production),19,0.055,0.08,0.031,0.131,region
+Equatorial.Pacific-Ocean (EPO),2,along water (GEBCO),19,0.055,0.08,0.031,0.131,region
+Equatorial.Pacific-Ocean (EPO),2,along water (OSM),19,0.055,0.08,0.031,0.131,region
+Equatorial.Pacific-Ocean (EPO),2,FES amplitude within x1.2,19,0.055,0.08,0.031,0.131,region
+Equatorial.Pacific-Ocean (EPO),10,25 km (production),19,0.034,0.059,-0.036,0.131,region
+Equatorial.Pacific-Ocean (EPO),10,along water (GEBCO),19,0.034,0.059,-0.036,0.131,region
+Equatorial.Pacific-Ocean (EPO),10,along water (OSM),19,0.034,0.059,-0.036,0.131,region
+Equatorial.Pacific-Ocean (EPO),10,FES amplitude within x1.2,19,0.034,0.059,-0.036,0.131,region
+Equatorial.Pacific-Ocean (EPO),50,25 km (production),19,-0.007,0.068,-0.099,0.139,region
+Equatorial.Pacific-Ocean (EPO),50,along water (GEBCO),19,-0.007,0.068,-0.099,0.139,region
+Equatorial.Pacific-Ocean (EPO),50,along water (OSM),19,-0.007,0.068,-0.099,0.139,region
+Equatorial.Pacific-Ocean (EPO),50,FES amplitude within x1.2,19,-0.007,0.068,-0.099,0.139,region
+Equatorial.Pacific-Ocean (EPO),100,25 km (production),19,-0.024,0.084,-0.168,0.127,region
+Equatorial.Pacific-Ocean (EPO),100,along water (GEBCO),19,-0.024,0.084,-0.168,0.127,region
+Equatorial.Pacific-Ocean (EPO),100,along water (OSM),19,-0.024,0.084,-0.168,0.127,region
+Equatorial.Pacific-Ocean (EPO),100,FES amplitude within x1.2,19,-0.024,0.084,-0.168,0.127,region
+Mediterranean (MED),2,25 km (production),38,0.015,0.055,-0.044,0.095,region
+Mediterranean (MED),2,along water (GEBCO),38,0.006,0.05,-0.056,0.08,region
+Mediterranean (MED),2,along water (OSM),38,0.006,0.055,-0.056,0.095,region
+Mediterranean (MED),2,FES amplitude within x1.2,38,0.015,0.054,-0.044,0.08,region
+Mediterranean (MED),10,25 km (production),38,0.014,0.055,-0.055,0.108,region
+Mediterranean (MED),10,along water (GEBCO),38,0.004,0.049,-0.055,0.084,region
+Mediterranean (MED),10,along water (OSM),38,0.004,0.055,-0.055,0.108,region
+Mediterranean (MED),10,FES amplitude within x1.2,38,0.014,0.054,-0.055,0.092,region
+Mediterranean (MED),50,25 km (production),38,0.017,0.062,-0.077,0.096,region
+Mediterranean (MED),50,along water (GEBCO),38,0.004,0.055,-0.072,0.076,region
+Mediterranean (MED),50,along water (OSM),38,0.004,0.06,-0.077,0.09,region
+Mediterranean (MED),50,FES amplitude within x1.2,38,0.017,0.06,-0.077,0.09,region
+Mediterranean (MED),100,25 km (production),38,0.009,0.066,-0.11,0.096,region
+Mediterranean (MED),100,along water (GEBCO),38,0.002,0.058,-0.104,0.064,region
+Mediterranean (MED),100,along water (OSM),38,0.002,0.064,-0.11,0.079,region
+Mediterranean (MED),100,FES amplitude within x1.2,38,0.009,0.065,-0.11,0.083,region
+N.Europe (NEU),2,25 km (production),97,-0.013,0.062,-0.083,0.098,region
+N.Europe (NEU),2,along water (GEBCO),97,-0.013,0.062,-0.083,0.098,region
+N.Europe (NEU),2,along water (OSM),97,-0.013,0.062,-0.083,0.098,region
+N.Europe (NEU),2,FES amplitude within x1.2,97,-0.013,0.062,-0.083,0.098,region
+N.Europe (NEU),10,25 km (production),97,-0.025,0.082,-0.118,0.094,region
+N.Europe (NEU),10,along water (GEBCO),97,-0.025,0.083,-0.123,0.094,region
+N.Europe (NEU),10,along water (OSM),97,-0.025,0.083,-0.123,0.094,region
+N.Europe (NEU),10,FES amplitude within x1.2,97,-0.025,0.083,-0.122,0.094,region
+N.Europe (NEU),50,25 km (production),97,-0.033,0.132,-0.246,0.097,region
+N.Europe (NEU),50,along water (GEBCO),97,-0.033,0.132,-0.246,0.097,region
+N.Europe (NEU),50,along water (OSM),97,-0.033,0.132,-0.241,0.097,region
+N.Europe (NEU),50,FES amplitude within x1.2,97,-0.033,0.132,-0.246,0.097,region
+N.Europe (NEU),100,25 km (production),97,-0.043,0.181,-0.304,0.106,region
+N.Europe (NEU),100,along water (GEBCO),97,-0.043,0.181,-0.305,0.106,region
+N.Europe (NEU),100,along water (OSM),97,-0.043,0.181,-0.299,0.106,region
+N.Europe (NEU),100,FES amplitude within x1.2,97,-0.043,0.181,-0.304,0.106,region
+N.Pacific-Ocean (NPO),2,25 km (production),23,0.012,0.071,-0.06,0.05,region
+N.Pacific-Ocean (NPO),2,along water (GEBCO),23,0.012,0.072,-0.06,0.05,region
+N.Pacific-Ocean (NPO),2,along water (OSM),23,0.012,0.072,-0.06,0.05,region
+N.Pacific-Ocean (NPO),2,FES amplitude within x1.2,23,0.012,0.072,-0.06,0.05,region
+N.Pacific-Ocean (NPO),10,25 km (production),23,-0.002,0.109,-0.141,0.068,region
+N.Pacific-Ocean (NPO),10,along water (GEBCO),23,-0.002,0.109,-0.141,0.068,region
+N.Pacific-Ocean (NPO),10,along water (OSM),23,-0.002,0.109,-0.141,0.068,region
+N.Pacific-Ocean (NPO),10,FES amplitude within x1.2,23,-0.002,0.109,-0.141,0.068,region
+N.Pacific-Ocean (NPO),50,25 km (production),23,-0.021,0.185,-0.417,0.078,region
+N.Pacific-Ocean (NPO),50,along water (GEBCO),23,-0.021,0.185,-0.417,0.078,region
+N.Pacific-Ocean (NPO),50,along water (OSM),23,-0.021,0.185,-0.417,0.078,region
+N.Pacific-Ocean (NPO),50,FES amplitude within x1.2,23,-0.021,0.185,-0.417,0.078,region
+N.Pacific-Ocean (NPO),100,25 km (production),23,-0.015,0.259,-0.572,0.087,region
+N.Pacific-Ocean (NPO),100,along water (GEBCO),23,-0.015,0.259,-0.572,0.087,region
+N.Pacific-Ocean (NPO),100,along water (OSM),23,-0.015,0.259,-0.572,0.087,region
+N.Pacific-Ocean (NPO),100,FES amplitude within x1.2,23,-0.015,0.259,-0.572,0.087,region
+N.W.North-America (NWN),2,25 km (production),20,-0.045,0.254,-0.291,0.468,region
+N.W.North-America (NWN),2,along water (GEBCO),20,-0.03,0.155,-0.183,0.333,region
+N.W.North-America (NWN),2,along water (OSM),20,-0.034,0.196,-0.211,0.478,region
+N.W.North-America (NWN),2,FES amplitude within x1.2,20,-0.034,0.216,-0.211,0.627,region
+N.W.North-America (NWN),10,25 km (production),20,-0.054,0.289,-0.339,0.511,region
+N.W.North-America (NWN),10,along water (GEBCO),20,-0.04,0.188,-0.213,0.355,region
+N.W.North-America (NWN),10,along water (OSM),20,-0.042,0.229,-0.245,0.521,region
+N.W.North-America (NWN),10,FES amplitude within x1.2,20,-0.042,0.25,-0.245,0.624,region
+N.W.North-America (NWN),50,25 km (production),20,-0.066,0.323,-0.412,0.556,region
+N.W.North-America (NWN),50,along water (GEBCO),20,-0.051,0.22,-0.201,0.372,region
+N.W.North-America (NWN),50,along water (OSM),20,-0.051,0.262,-0.246,0.568,region
+N.W.North-America (NWN),50,FES amplitude within x1.2,20,-0.051,0.284,-0.246,0.611,region
+N.W.North-America (NWN),100,25 km (production),20,-0.072,0.339,-0.434,0.578,region
+N.W.North-America (NWN),100,along water (GEBCO),20,-0.059,0.236,-0.211,0.38,region
+N.W.North-America (NWN),100,along water (OSM),20,-0.059,0.277,-0.259,0.588,region
+N.W.North-America (NWN),100,FES amplitude within x1.2,20,-0.059,0.3,-0.259,0.603,region
+New-Zealand (NZ),2,25 km (production),15,-0.011,0.045,-0.052,0.065,region
+New-Zealand (NZ),2,along water (GEBCO),15,-0.011,0.045,-0.052,0.065,region
+New-Zealand (NZ),2,along water (OSM),15,-0.011,0.045,-0.052,0.065,region
+New-Zealand (NZ),2,FES amplitude within x1.2,15,-0.011,0.045,-0.052,0.065,region
+New-Zealand (NZ),10,25 km (production),15,-0.004,0.058,-0.083,0.082,region
+New-Zealand (NZ),10,along water (GEBCO),15,-0.004,0.058,-0.083,0.082,region
+New-Zealand (NZ),10,along water (OSM),15,-0.004,0.058,-0.083,0.082,region
+New-Zealand (NZ),10,FES amplitude within x1.2,15,-0.004,0.058,-0.083,0.082,region
+New-Zealand (NZ),50,25 km (production),15,0.012,0.073,-0.129,0.083,region
+New-Zealand (NZ),50,along water (GEBCO),15,0.012,0.073,-0.129,0.083,region
+New-Zealand (NZ),50,along water (OSM),15,0.012,0.073,-0.129,0.083,region
+New-Zealand (NZ),50,FES amplitude within x1.2,15,0.012,0.073,-0.129,0.083,region
+New-Zealand (NZ),100,25 km (production),15,-0.014,0.079,-0.148,0.077,region
+New-Zealand (NZ),100,along water (GEBCO),15,-0.014,0.079,-0.148,0.077,region
+New-Zealand (NZ),100,along water (OSM),15,-0.014,0.079,-0.148,0.077,region
+New-Zealand (NZ),100,FES amplitude within x1.2,15,-0.014,0.079,-0.148,0.077,region
+S.Australia (SAU),2,25 km (production),29,0.065,0.133,-0.126,0.2,region
+S.Australia (SAU),2,along water (GEBCO),29,0.065,0.129,-0.122,0.203,region
+S.Australia (SAU),2,along water (OSM),29,0.065,0.133,-0.126,0.197,region
+S.Australia (SAU),2,FES amplitude within x1.2,29,0.065,0.148,-0.128,0.246,region
+S.Australia (SAU),10,25 km (production),29,0.049,0.151,-0.16,0.244,region
+S.Australia (SAU),10,along water (GEBCO),29,0.049,0.146,-0.15,0.242,region
+S.Australia (SAU),10,along water (OSM),29,0.049,0.151,-0.16,0.242,region
+S.Australia (SAU),10,FES amplitude within x1.2,29,0.049,0.166,-0.161,0.286,region
+S.Australia (SAU),50,25 km (production),29,0.055,0.166,-0.17,0.287,region
+S.Australia (SAU),50,along water (GEBCO),29,0.055,0.162,-0.158,0.285,region
+S.Australia (SAU),50,along water (OSM),29,0.055,0.166,-0.17,0.285,region
+S.Australia (SAU),50,FES amplitude within x1.2,29,0.055,0.181,-0.17,0.318,region
+S.Australia (SAU),100,25 km (production),29,0.06,0.173,-0.167,0.305,region
+S.Australia (SAU),100,along water (GEBCO),29,0.06,0.169,-0.151,0.303,region
+S.Australia (SAU),100,along water (OSM),29,0.06,0.173,-0.167,0.303,region
+S.Australia (SAU),100,FES amplitude within x1.2,29,0.06,0.188,-0.167,0.332,region
+S.E.Asia (SEA),2,25 km (production),22,0.125,0.17,0.03,0.317,region
+S.E.Asia (SEA),2,along water (GEBCO),22,0.125,0.166,0.03,0.317,region
+S.E.Asia (SEA),2,along water (OSM),22,0.125,0.166,0.03,0.317,region
+S.E.Asia (SEA),2,FES amplitude within x1.2,22,0.125,0.17,0.03,0.317,region
+S.E.Asia (SEA),10,25 km (production),22,0.112,0.147,0.013,0.271,region
+S.E.Asia (SEA),10,along water (GEBCO),22,0.112,0.142,0.013,0.269,region
+S.E.Asia (SEA),10,along water (OSM),22,0.112,0.142,0.013,0.269,region
+S.E.Asia (SEA),10,FES amplitude within x1.2,22,0.112,0.147,0.013,0.271,region
+S.E.Asia (SEA),50,25 km (production),22,0.135,0.157,-0.07,0.262,region
+S.E.Asia (SEA),50,along water (GEBCO),22,0.122,0.152,-0.07,0.262,region
+S.E.Asia (SEA),50,along water (OSM),22,0.122,0.152,-0.07,0.262,region
+S.E.Asia (SEA),50,FES amplitude within x1.2,22,0.135,0.157,-0.07,0.262,region
+S.E.Asia (SEA),100,25 km (production),22,0.145,0.215,-0.251,0.269,region
+S.E.Asia (SEA),100,along water (GEBCO),22,0.123,0.21,-0.251,0.269,region
+S.E.Asia (SEA),100,along water (OSM),22,0.123,0.21,-0.251,0.269,region
+S.E.Asia (SEA),100,FES amplitude within x1.2,22,0.145,0.215,-0.251,0.269,region
+S.Pacific-Ocean (SPO),2,25 km (production),18,0.063,0.072,-0.029,0.11,region
+S.Pacific-Ocean (SPO),2,along water (GEBCO),18,0.063,0.072,-0.029,0.111,region
+S.Pacific-Ocean (SPO),2,along water (OSM),18,0.063,0.072,-0.029,0.11,region
+S.Pacific-Ocean (SPO),2,FES amplitude within x1.2,18,0.063,0.072,-0.029,0.11,region
+S.Pacific-Ocean (SPO),10,25 km (production),18,0.06,0.082,-0.094,0.109,region
+S.Pacific-Ocean (SPO),10,along water (GEBCO),18,0.06,0.082,-0.094,0.107,region
+S.Pacific-Ocean (SPO),10,along water (OSM),18,0.06,0.082,-0.094,0.109,region
+S.Pacific-Ocean (SPO),10,FES amplitude within x1.2,18,0.06,0.082,-0.094,0.109,region
+S.Pacific-Ocean (SPO),50,25 km (production),18,-0.016,0.203,-0.421,0.127,region
+S.Pacific-Ocean (SPO),50,along water (GEBCO),18,-0.016,0.202,-0.421,0.124,region
+S.Pacific-Ocean (SPO),50,along water (OSM),18,-0.016,0.203,-0.421,0.127,region
+S.Pacific-Ocean (SPO),50,FES amplitude within x1.2,18,-0.016,0.203,-0.421,0.127,region
+S.Pacific-Ocean (SPO),100,25 km (production),18,-0.042,0.364,-0.752,0.16,region
+S.Pacific-Ocean (SPO),100,along water (GEBCO),18,-0.042,0.363,-0.752,0.16,region
+S.Pacific-Ocean (SPO),100,along water (OSM),18,-0.042,0.364,-0.752,0.16,region
+S.Pacific-Ocean (SPO),100,FES amplitude within x1.2,18,-0.042,0.364,-0.752,0.16,region
+W.North-America (WNA),2,25 km (production),32,-0.022,0.138,-0.143,0.237,region
+W.North-America (WNA),2,along water (GEBCO),32,0.014,0.165,-0.137,0.269,region
+W.North-America (WNA),2,along water (OSM),32,0.013,0.117,-0.116,0.212,region
+W.North-America (WNA),2,FES amplitude within x1.2,32,0.001,0.137,-0.135,0.284,region
+W.North-America (WNA),10,25 km (production),32,-0.028,0.151,-0.177,0.247,region
+W.North-America (WNA),10,along water (GEBCO),32,0.003,0.183,-0.175,0.294,region
+W.North-America (WNA),10,along water (OSM),32,-0,0.132,-0.143,0.221,region
+W.North-America (WNA),10,FES amplitude within x1.2,32,-0.014,0.15,-0.143,0.311,region
+W.North-America (WNA),50,25 km (production),32,-0.016,0.164,-0.245,0.263,region
+W.North-America (WNA),50,along water (GEBCO),32,-0.005,0.203,-0.259,0.319,region
+W.North-America (WNA),50,along water (OSM),32,-0.008,0.149,-0.195,0.235,region
+W.North-America (WNA),50,FES amplitude within x1.2,32,-0.015,0.164,-0.197,0.338,region
+W.North-America (WNA),100,25 km (production),32,-0.023,0.172,-0.301,0.273,region
+W.North-America (WNA),100,along water (GEBCO),32,-0.011,0.212,-0.283,0.329,region
+W.North-America (WNA),100,along water (OSM),32,-0.011,0.158,-0.217,0.251,region
+W.North-America (WNA),100,FES amplitude within x1.2,32,-0.023,0.172,-0.216,0.347,region
+West&Central-Europe (WCE),2,25 km (production),24,0.02,0.12,-0.175,0.2,region
+West&Central-Europe (WCE),2,along water (GEBCO),24,0.036,0.098,-0.079,0.189,region
+West&Central-Europe (WCE),2,along water (OSM),24,0.02,0.109,-0.159,0.2,region
+West&Central-Europe (WCE),2,FES amplitude within x1.2,24,0.02,0.114,-0.175,0.2,region
+West&Central-Europe (WCE),10,25 km (production),24,0.018,0.117,-0.165,0.219,region
+West&Central-Europe (WCE),10,along water (GEBCO),24,0.037,0.097,-0.059,0.204,region
+West&Central-Europe (WCE),10,along water (OSM),24,0.018,0.107,-0.145,0.219,region
+West&Central-Europe (WCE),10,FES amplitude within x1.2,24,0.018,0.112,-0.165,0.219,region
+West&Central-Europe (WCE),50,25 km (production),24,0.026,0.134,-0.152,0.227,region
+West&Central-Europe (WCE),50,along water (GEBCO),24,0.056,0.111,-0.105,0.221,region
+West&Central-Europe (WCE),50,along water (OSM),24,0.026,0.123,-0.152,0.228,region
+West&Central-Europe (WCE),50,FES amplitude within x1.2,24,0.026,0.128,-0.152,0.227,region
+West&Central-Europe (WCE),100,25 km (production),24,0.029,0.149,-0.209,0.235,region
+West&Central-Europe (WCE),100,along water (GEBCO),24,0.053,0.124,-0.118,0.228,region
+West&Central-Europe (WCE),100,along water (OSM),24,0.029,0.139,-0.209,0.237,region
+West&Central-Europe (WCE),100,FES amplitude within x1.2,24,0.029,0.144,-0.209,0.235,region
+other,2,25 km (production),99,0.063,0.145,-0.108,0.245,region
+other,2,along water (GEBCO),99,0.063,0.146,-0.108,0.245,region
+other,2,along water (OSM),99,0.063,0.146,-0.108,0.245,region
+other,2,FES amplitude within x1.2,99,0.063,0.144,-0.108,0.245,region
+other,10,25 km (production),99,0.025,0.149,-0.166,0.187,region
+other,10,along water (GEBCO),99,0.028,0.15,-0.166,0.194,region
+other,10,along water (OSM),99,0.028,0.15,-0.166,0.194,region
+other,10,FES amplitude within x1.2,99,0.025,0.148,-0.166,0.187,region
+other,50,25 km (production),99,0.013,0.204,-0.267,0.296,region
+other,50,along water (GEBCO),99,0.013,0.204,-0.267,0.296,region
+other,50,along water (OSM),99,0.013,0.205,-0.267,0.296,region
+other,50,FES amplitude within x1.2,99,0.013,0.204,-0.267,0.296,region
+other,100,25 km (production),99,0.016,0.28,-0.364,0.328,region
+other,100,along water (GEBCO),99,0.02,0.28,-0.364,0.328,region
+other,100,along water (OSM),99,0.02,0.28,-0.364,0.328,region
+other,100,FES amplitude within x1.2,99,0.016,0.28,-0.364,0.328,region
+"(0, 1]",2,25 km (production),231,0.015,0.067,-0.079,0.117,spring tidal range (m)
+"(0, 1]",2,along water (GEBCO),231,0.015,0.067,-0.076,0.117,spring tidal range (m)
+"(0, 1]",2,along water (OSM),231,0.015,0.067,-0.079,0.117,spring tidal range (m)
+"(0, 1]",2,FES amplitude within x1.2,231,0.014,0.067,-0.074,0.118,spring tidal range (m)
+"(0, 1]",10,25 km (production),231,-0,0.091,-0.155,0.124,spring tidal range (m)
+"(0, 1]",10,along water (GEBCO),231,-0,0.091,-0.148,0.125,spring tidal range (m)
+"(0, 1]",10,along water (OSM),231,-0.001,0.091,-0.155,0.123,spring tidal range (m)
+"(0, 1]",10,FES amplitude within x1.2,231,0,0.092,-0.148,0.125,spring tidal range (m)
+"(0, 1]",50,25 km (production),231,-0.014,0.165,-0.3,0.164,spring tidal range (m)
+"(0, 1]",50,along water (GEBCO),231,-0.014,0.164,-0.3,0.153,spring tidal range (m)
+"(0, 1]",50,along water (OSM),231,-0.014,0.164,-0.304,0.153,spring tidal range (m)
+"(0, 1]",50,FES amplitude within x1.2,231,-0.014,0.165,-0.298,0.164,spring tidal range (m)
+"(0, 1]",100,25 km (production),231,-0.022,0.236,-0.485,0.209,spring tidal range (m)
+"(0, 1]",100,along water (GEBCO),231,-0.022,0.235,-0.485,0.209,spring tidal range (m)
+"(0, 1]",100,along water (OSM),231,-0.022,0.235,-0.485,0.203,spring tidal range (m)
+"(0, 1]",100,FES amplitude within x1.2,231,-0.022,0.236,-0.485,0.209,spring tidal range (m)
+"(1, 2]",2,25 km (production),205,0.032,0.091,-0.085,0.191,spring tidal range (m)
+"(1, 2]",2,along water (GEBCO),205,0.034,0.09,-0.081,0.187,spring tidal range (m)
+"(1, 2]",2,along water (OSM),205,0.034,0.089,-0.077,0.187,spring tidal range (m)
+"(1, 2]",2,FES amplitude within x1.2,205,0.032,0.092,-0.084,0.192,spring tidal range (m)
+"(1, 2]",10,25 km (production),205,0.008,0.105,-0.164,0.168,spring tidal range (m)
+"(1, 2]",10,along water (GEBCO),205,0.01,0.104,-0.159,0.158,spring tidal range (m)
+"(1, 2]",10,along water (OSM),205,0.008,0.103,-0.159,0.16,spring tidal range (m)
+"(1, 2]",10,FES amplitude within x1.2,205,0.01,0.106,-0.161,0.16,spring tidal range (m)
+"(1, 2]",50,25 km (production),205,-0.011,0.154,-0.26,0.172,spring tidal range (m)
+"(1, 2]",50,along water (GEBCO),205,-0.011,0.154,-0.26,0.166,spring tidal range (m)
+"(1, 2]",50,along water (OSM),205,-0.011,0.151,-0.249,0.172,spring tidal range (m)
+"(1, 2]",50,FES amplitude within x1.2,205,-0.011,0.155,-0.26,0.172,spring tidal range (m)
+"(1, 2]",100,25 km (production),205,-0.021,0.204,-0.35,0.206,spring tidal range (m)
+"(1, 2]",100,along water (GEBCO),205,-0.021,0.204,-0.35,0.198,spring tidal range (m)
+"(1, 2]",100,along water (OSM),205,-0.021,0.201,-0.343,0.206,spring tidal range (m)
+"(1, 2]",100,FES amplitude within x1.2,205,-0.021,0.206,-0.35,0.206,spring tidal range (m)
+"(2, 4]",2,25 km (production),123,0.023,0.136,-0.081,0.276,spring tidal range (m)
+"(2, 4]",2,along water (GEBCO),123,0.032,0.132,-0.081,0.276,spring tidal range (m)
+"(2, 4]",2,along water (OSM),123,0.023,0.126,-0.081,0.265,spring tidal range (m)
+"(2, 4]",2,FES amplitude within x1.2,123,0.023,0.129,-0.073,0.286,spring tidal range (m)
+"(2, 4]",10,25 km (production),123,0.021,0.143,-0.137,0.254,spring tidal range (m)
+"(2, 4]",10,along water (GEBCO),123,0.017,0.139,-0.13,0.265,spring tidal range (m)
+"(2, 4]",10,along water (OSM),123,0.014,0.133,-0.136,0.245,spring tidal range (m)
+"(2, 4]",10,FES amplitude within x1.2,123,0.024,0.137,-0.13,0.264,spring tidal range (m)
+"(2, 4]",50,25 km (production),123,0.011,0.164,-0.208,0.305,spring tidal range (m)
+"(2, 4]",50,along water (GEBCO),123,0.005,0.162,-0.178,0.318,spring tidal range (m)
+"(2, 4]",50,along water (OSM),123,0.003,0.156,-0.203,0.304,spring tidal range (m)
+"(2, 4]",50,FES amplitude within x1.2,123,0.012,0.158,-0.178,0.318,spring tidal range (m)
+"(2, 4]",100,25 km (production),123,0.003,0.194,-0.261,0.357,spring tidal range (m)
+"(2, 4]",100,along water (GEBCO),123,0.006,0.192,-0.237,0.357,spring tidal range (m)
+"(2, 4]",100,along water (OSM),123,0.004,0.185,-0.241,0.349,spring tidal range (m)
+"(2, 4]",100,FES amplitude within x1.2,123,0.007,0.188,-0.203,0.357,spring tidal range (m)
+"(4, 20]",2,25 km (production),59,0.012,0.175,-0.183,0.331,spring tidal range (m)
+"(4, 20]",2,along water (GEBCO),59,0.027,0.158,-0.13,0.283,spring tidal range (m)
+"(4, 20]",2,along water (OSM),59,0.012,0.177,-0.205,0.331,spring tidal range (m)
+"(4, 20]",2,FES amplitude within x1.2,59,0.012,0.175,-0.183,0.331,spring tidal range (m)
+"(4, 20]",10,25 km (production),59,0.022,0.186,-0.172,0.385,spring tidal range (m)
+"(4, 20]",10,along water (GEBCO),59,0.028,0.17,-0.15,0.29,spring tidal range (m)
+"(4, 20]",10,along water (OSM),59,0.012,0.188,-0.192,0.385,spring tidal range (m)
+"(4, 20]",10,FES amplitude within x1.2,59,0.022,0.186,-0.172,0.385,spring tidal range (m)
+"(4, 20]",50,25 km (production),59,0.029,0.214,-0.207,0.419,spring tidal range (m)
+"(4, 20]",50,along water (GEBCO),59,0.046,0.196,-0.157,0.332,spring tidal range (m)
+"(4, 20]",50,along water (OSM),59,0.023,0.215,-0.207,0.419,spring tidal range (m)
+"(4, 20]",50,FES amplitude within x1.2,59,0.029,0.214,-0.207,0.419,spring tidal range (m)
+"(4, 20]",100,25 km (production),59,0.039,0.256,-0.249,0.435,spring tidal range (m)
+"(4, 20]",100,along water (GEBCO),59,0.048,0.238,-0.195,0.324,spring tidal range (m)
+"(4, 20]",100,along water (OSM),59,0.018,0.258,-0.249,0.435,spring tidal range (m)
+"(4, 20]",100,FES amplitude within x1.2,59,0.039,0.257,-0.249,0.435,spring tidal range (m)

@@ -182,19 +182,21 @@ def coastline_mask(mask: np.ndarray, ocean_code: int = 1, river_code: int | None
     "ocean" speckle (ponds, aquaculture, thermokarst) is never seeded.
     `river_code=None` restricts adjacency to land only.
     """
-    ocean = mask == ocean_code
-    components, _n = ndimage.label(ocean, structure=_STRUCTURE_8)
-    edge_labels = np.unique(np.concatenate(
-        [components[0, :], components[-1, :], components[:, 0], components[:, -1]]
-    ))
-    edge_labels = edge_labels[edge_labels != 0]
-    edge_connected_ocean = np.isin(components, edge_labels)
-
     landlike = mask == 0
     if river_code is not None:
         landlike = landlike | (mask == river_code)
     dilated_landlike = ndimage.binary_dilation(landlike, structure=_STRUCTURE_8)
-    return dilated_landlike & edge_connected_ocean
+    return dilated_landlike & open_sea_mask(mask, ocean_code)
+
+
+def open_sea_mask(mask: np.ndarray, ocean_code: int = 1, seeds: np.ndarray | None = None) -> np.ndarray:
+    """Mark ocean cells in 8-connected ocean components touching the array edge or a `seeds` cell."""
+    components, _n = ndimage.label(mask == ocean_code, structure=_STRUCTURE_8)
+    open_labels = [components[0, :], components[-1, :], components[:, 0], components[:, -1]]
+    if seeds is not None:
+        open_labels.append(components[seeds])
+    open_labels = np.unique(np.concatenate(open_labels))
+    return np.isin(components, open_labels[open_labels != 0])
 
 
 def prune_to_coast_connected(region: np.ndarray, coastline: np.ndarray) -> np.ndarray:
@@ -437,8 +439,22 @@ def flood_depth_dense(
         return depth, diagnostics
 
     on_sweep = trace.sweep if trace is not None else None
+    # Seeded components too: a frame of no-data turned land (calibration subgrid) cuts the sea off the edge.
+    open_sea = open_sea_mask(mask, ocean_code, seeds=coastline)
+    open_sea_coast = open_sea & coastline
+
+    def keep_seeds_local(friction: np.ndarray) -> np.ndarray:
+        # At the water class's low friction a basin's highest seed would cross the open sea, or
+        # run along the chain of coastline cells, and raise the lower seeds (they are not frozen)
+        # and the land behind them. So the open sea beyond the coastline is blocked, and a
+        # coastline cell costs as its roughest land/river neighbour.
+        land_max = ndimage.maximum_filter(np.where(open_sea, friction.dtype.type(0), friction), size=3)
+        out = np.where(open_sea, friction.dtype.type(OBSTACLE_BLOCK_FRICTION), friction)
+        out[open_sea_coast] = np.maximum(friction, land_max)[open_sea_coast]
+        return out
 
     def solve(friction: np.ndarray, solve_pass: str) -> tuple[np.ndarray, dict]:
+        friction = keep_seeds_local(friction)
         if not obstacle_coupling:
             if trace is not None:
                 trace.solve_started(solve_pass, 0, depth_from)

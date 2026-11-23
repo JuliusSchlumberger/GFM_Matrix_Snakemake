@@ -1,0 +1,57 @@
+form,fit,basin,gauges,median,min,max,fit_gauges_median
+shift,basin left out,EP,0,0.221183,0.221183,0.221183,
+shift,basin left out,NA,60,0.246773,0.246773,0.246773,
+shift,basin left out,NI,3,0.225428,0.225428,0.225428,
+shift,basin left out,SI,8,0.226036,0.226036,0.226036,
+shift,basin left out,SP,14,0.20725,0.20725,0.20725,
+shift,basin left out,WP,79,0.143033,0.143033,0.143033,
+shift,basin left out,none,0,0.221183,0.221183,0.221183,
+shift,"own basin, in sample",EP,0,0.221183,0.221183,0.221183,
+shift,"own basin, in sample",NA,60,0.0879732,0.0879732,0.0879732,
+shift,"own basin, in sample",NI,3,0.0268511,0.0268511,0.0268511,
+shift,"own basin, in sample",SI,8,0.132047,0.132047,0.132047,
+shift,"own basin, in sample",SP,14,0.25878,0.25878,0.25878,
+shift,"own basin, in sample",WP,79,0.259433,0.259433,0.259433,
+shift,"own basin, in sample",none,0,0.221183,0.221183,0.221183,
+shift,"own basin, gauges left out",EP,0,0.221183,0.221183,0.221183,0.0
+shift,"own basin, gauges left out",NA,60,0.0879732,0.0307711,0.242693,55.0
+shift,"own basin, gauges left out",NI,3,0.126139,0.0268511,0.225428,1.5
+shift,"own basin, gauges left out",SI,8,0.132047,0.105634,0.304948,8.0
+shift,"own basin, gauges left out",SP,14,0.25878,0.233263,0.381108,14.0
+shift,"own basin, gauges left out",WP,79,0.259433,0.222608,0.277076,68.0
+shift,"own basin, gauges left out",none,0,0.221183,0.221183,0.221183,0.0
+shift,"all basins, gauges left out",EP,0,0.221183,0.221183,0.221183,
+shift,"all basins, gauges left out",NA,60,0.225428,0.19707,0.242798,
+shift,"all basins, gauges left out",NI,3,0.223305,0.221183,0.225428,
+shift,"all basins, gauges left out",SI,8,0.221183,0.21684,0.226671,
+shift,"all basins, gauges left out",SP,14,0.221183,0.216334,0.226671,
+shift,"all basins, gauges left out",WP,79,0.221183,0.170998,0.24093,
+shift,"all basins, gauges left out",none,0,0.221183,0.221183,0.221183,
+surge scale,basin left out,EP,0,1.39463,1.39463,1.39463,
+surge scale,basin left out,NA,60,1.58446,1.58446,1.58446,
+surge scale,basin left out,NI,3,1.39928,1.39928,1.39928,
+surge scale,basin left out,SI,8,1.39463,1.39463,1.39463,
+surge scale,basin left out,SP,14,1.38379,1.38379,1.38379,
+surge scale,basin left out,WP,79,1.12447,1.12447,1.12447,
+surge scale,basin left out,none,0,1.39463,1.39463,1.39463,
+surge scale,"own basin, in sample",EP,0,1.39463,1.39463,1.39463,
+surge scale,"own basin, in sample",NA,60,1.05937,1.05937,1.05937,
+surge scale,"own basin, in sample",NI,3,1.01786,1.01786,1.01786,
+surge scale,"own basin, in sample",SI,8,1.39422,1.39422,1.39422,
+surge scale,"own basin, in sample",SP,14,1.99294,1.99294,1.99294,
+surge scale,"own basin, in sample",WP,79,1.59177,1.59177,1.59177,
+surge scale,"own basin, in sample",none,0,1.39463,1.39463,1.39463,
+surge scale,"own basin, gauges left out",EP,0,1.39463,1.39463,1.39463,0.0
+surge scale,"own basin, gauges left out",NA,60,1.05937,1.02185,1.15971,55.0
+surge scale,"own basin, gauges left out",NI,3,1.20857,1.01786,1.39928,1.5
+surge scale,"own basin, gauges left out",SI,8,1.39422,1.31123,1.69246,8.0
+surge scale,"own basin, gauges left out",SP,14,1.99294,1.81734,2,14.0
+surge scale,"own basin, gauges left out",WP,79,1.59177,1.42996,1.7282,68.0
+surge scale,"own basin, gauges left out",none,0,1.39463,1.39463,1.39463,0.0
+surge scale,"all basins, gauges left out",EP,0,1.39463,1.39463,1.39463,
+surge scale,"all basins, gauges left out",NA,60,1.4088,1.37043,1.48316,
+surge scale,"all basins, gauges left out",NI,3,1.39695,1.39463,1.39928,
+surge scale,"all basins, gauges left out",SI,8,1.39463,1.39018,1.39928,
+surge scale,"all basins, gauges left out",SP,14,1.39463,1.38506,1.41897,
+surge scale,"all basins, gauges left out",WP,79,1.39463,1.29515,1.4232,
+surge scale,"all basins, gauges left out",none,0,1.39463,1.39463,1.39463,

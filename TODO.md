@@ -459,11 +459,13 @@ Open:
        0.219 -> 0.216, NWN 0.339 -> 0.277, WNA 0.172 -> 0.158 (GEBCO 0.212), WCE 0.149 -> 0.139; no
        region worse by more than 0.004. GEBCO gains more in NWN (0.236) and at spring range > 4 m
        only by cutting inlets. Proposed for B: OSM along water.
-     - Build B (implemented, to run on Hydrax): one all-basin shift (`tc_shift_fit`), tide factor from
-       the gauges reaching the point through OSM water (`tide_correction.water_links`, cached in
-       gauges/tide_links_*.npz). Then rescore B against A (level_product_gauges; open_guesses
-       ingredients) and write the gauge-validation section of INPUT_ANALYSIS.md for the appendix
-       (leave-out design, metrics, A vs B, tested alternatives, commands, figures).
+     - Build B is production (one all-basin shift 0.223 m; OSM through-water tide neighbours).
+       Rescored (`.cleanup_baseline/phase3_build_b`): RP100 MAE 0.219 -> 0.215 m, TC-dominated bias
+       -0.044 -> -0.001, EAS RP100 bias -0.082 -> -0.020, NWN 0.339 -> 0.278; RP2 at TC-part
+       stations +0.040 -> +0.048 (EAS RP2 MAE 0.060 -> 0.075, SEA 0.170 -> 0.199). Written up in
+       INPUT_ANALYSIS.md §8.7. Still open for the appendix: figures for §8.7 (gauge scores by
+       region A/COAST-RP, the TC raise CV, the tide-neighbour map) and a durable home for the
+       §8.7 tables (now only in the gitignored .cleanup_baseline).
      - Seasonal gap: not in B (a few cm against RP100 MAE 0.22 m; r absorbs part of it at gauges);
        revisit if B leaves negative RP100 bias in EAS/WNA/SEA.
      - No change indicated: ET in the mask, r rule and fallback, despike, surge-tide independence.
@@ -1875,3 +1877,7 @@ History holds ~1.2 GB of old files that are no longer tracked (209 MB packed): `
 - [ ] Calibration runs have no static two-component level (`sfincs_tiles/run_calibration_models.py:9-12`); at SLR_0 it is MDT + 0.049 m.
 - [ ] `sfincs_tiles/run_final_tile.sh:55` copies `boundaries_RP100_SLR_0.gpkg` only when missing: after a product rebuild the calibration dir must be reset (plan step `reset_sfincs`) or the copies go stale.
 - [ ] `build_line_forcing.py` drops forcing points > 55 km from any hydrograph station (tile 1082: 19 of 264); SFINCS fills those cells from the neighbouring points. Check how many tiles lose points after the rerun.
+- [ ] Tile 891 (Cobequid Bay head, -63.8 to -63.6 E, 45.3-45.4 N): production eikonal seeds up to 19.15 m RP100 (product A; 467 C1 forcing points > 10 m). Check the station/coastline-node levels there after product B (`sfincs_tiles/findings_coast_boundary.md`, stage 1).
+- [ ] Seeds stay local (`flood_model.flood_depth_dense` blocks the open sea): production and calibration eikonal outputs predate it and are not re-run by Snakemake (code edits are not a rerun trigger). Re-run production and the calibration sweep, then re-check friction_scale_factor (calibrated with levels crossing the sea). Tile 891 fsf0.35 vs R3 SFINCS: eikonal-only 150 -> 58 km2, CSI 0.734 -> 0.838; tiles 31/646 small gains, 978 unchanged.
+- [ ] Tile 891 after local seeds: the eikonal-only patch at -64.46 E, 45.12 N still sits 2-3 m above its nearest seed (river or land path from a higher seed?). Not traced.
+- [ ] `straight_line_level` (model straight_line) still takes max(seed - rate x distance) across water, so its seeds are not local.

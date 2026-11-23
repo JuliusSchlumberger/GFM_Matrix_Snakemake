@@ -1,0 +1,89 @@
+gauges,tide,n,median_rel,mae_rel,off_25pct
+all,"FES, uncorrected",2373,0.005,0.239,395
+all,25 km (production),2373,-0,0.155,259
+all,along water (GEBCO),2373,-0,0.162,261
+all,along water (OSM),2373,-0,0.155,264
+all,FES amplitude within x1.1,2373,0,0.154,243
+all,FES amplitude within x1.2,2373,0,0.151,235
+all,FES amplitude within x1.5,2373,0,0.152,244
+all,along water (GEBCO) + FES within x1.2,2373,0,0.162,242
+gauge amplitude > 2 m,"FES, uncorrected",632,0.002,0.124,88
+gauge amplitude > 2 m,25 km (production),632,-0.003,0.08,39
+gauge amplitude > 2 m,along water (GEBCO),632,-0.004,0.081,45
+gauge amplitude > 2 m,along water (OSM),632,-0.004,0.079,44
+gauge amplitude > 2 m,FES amplitude within x1.1,632,-0.003,0.076,35
+gauge amplitude > 2 m,FES amplitude within x1.2,632,-0.003,0.071,29
+gauge amplitude > 2 m,FES amplitude within x1.5,632,-0.004,0.074,33
+gauge amplitude > 2 m,along water (GEBCO) + FES within x1.2,632,-0.002,0.078,40
+GEBCO along water changes the factor,"FES, uncorrected",797,0.015,0.301,172
+GEBCO along water changes the factor,25 km (production),797,0,0.135,94
+GEBCO along water changes the factor,along water (GEBCO),797,0.001,0.154,96
+GEBCO along water changes the factor,along water (OSM),797,-0,0.131,94
+GEBCO along water changes the factor,FES amplitude within x1.1,797,0.003,0.136,92
+GEBCO along water changes the factor,FES amplitude within x1.2,797,0.002,0.126,84
+GEBCO along water changes the factor,FES amplitude within x1.5,797,0.001,0.131,85
+GEBCO along water changes the factor,along water (GEBCO) + FES within x1.2,797,0.002,0.16,92
+OSM along water changes the factor,"FES, uncorrected",675,0.02,0.215,149
+OSM along water changes the factor,25 km (production),675,0.001,0.13,80
+OSM along water changes the factor,along water (GEBCO),675,-0,0.123,75
+OSM along water changes the factor,along water (OSM),675,-0,0.129,85
+OSM along water changes the factor,FES amplitude within x1.1,675,0.003,0.12,76
+OSM along water changes the factor,FES amplitude within x1.2,675,0.002,0.119,69
+OSM along water changes the factor,FES amplitude within x1.5,675,0.002,0.124,70
+OSM along water changes the factor,along water (GEBCO) + FES within x1.2,675,0,0.128,69
+country CAN,"FES, uncorrected",520,0.013,0.206,98
+country CAN,25 km (production),520,-0.002,0.139,50
+country CAN,along water (GEBCO),520,-0,0.139,54
+country CAN,along water (OSM),520,-0.001,0.136,56
+country CAN,FES amplitude within x1.1,520,0,0.132,50
+country CAN,FES amplitude within x1.2,520,0,0.129,44
+country CAN,FES amplitude within x1.5,520,-0.001,0.132,45
+country CAN,along water (GEBCO) + FES within x1.2,520,0.001,0.135,51
+country USA,"FES, uncorrected",863,0.026,0.412,212
+country USA,25 km (production),863,0.002,0.226,134
+country USA,along water (GEBCO),863,0.004,0.248,136
+country USA,along water (OSM),863,0.003,0.229,134
+country USA,FES amplitude within x1.1,863,0.005,0.231,117
+country USA,FES amplitude within x1.2,863,0.005,0.224,118
+country USA,FES amplitude within x1.5,863,0.002,0.223,125
+country USA,along water (GEBCO) + FES within x1.2,863,0.007,0.251,119
+country GBR,"FES, uncorrected",64,-0.014,0.046,1
+country GBR,25 km (production),64,-0.007,0.044,1
+country GBR,along water (GEBCO),64,-0.008,0.045,1
+country GBR,along water (OSM),64,-0.007,0.042,1
+country GBR,FES amplitude within x1.1,64,-0.007,0.043,1
+country GBR,FES amplitude within x1.2,64,-0.007,0.042,1
+country GBR,FES amplitude within x1.5,64,-0.007,0.045,1
+country GBR,along water (GEBCO) + FES within x1.2,64,-0.008,0.045,1
+country FRA,"FES, uncorrected",60,-0.003,0.058,3
+country FRA,25 km (production),60,0,0.057,3
+country FRA,along water (GEBCO),60,0,0.053,3
+country FRA,along water (OSM),60,0.003,0.056,3
+country FRA,FES amplitude within x1.1,60,0,0.056,3
+country FRA,FES amplitude within x1.2,60,-0.002,0.057,3
+country FRA,FES amplitude within x1.5,60,-0.002,0.057,3
+country FRA,along water (GEBCO) + FES within x1.2,60,0,0.053,3
+country NOR,"FES, uncorrected",29,-0.018,0.037,0
+country NOR,25 km (production),29,-0.006,0.032,0
+country NOR,along water (GEBCO),29,-0.006,0.032,0
+country NOR,along water (OSM),29,-0.006,0.032,0
+country NOR,FES amplitude within x1.1,29,-0.006,0.032,0
+country NOR,FES amplitude within x1.2,29,-0.006,0.032,0
+country NOR,FES amplitude within x1.5,29,-0.006,0.032,0
+country NOR,along water (GEBCO) + FES within x1.2,29,-0.006,0.032,0
+country AUS,"FES, uncorrected",123,0.001,0.112,13
+country AUS,25 km (production),123,-0.003,0.1,10
+country AUS,along water (GEBCO),123,-0.006,0.097,9
+country AUS,along water (OSM),123,-0.006,0.098,10
+country AUS,FES amplitude within x1.1,123,-0.003,0.109,12
+country AUS,FES amplitude within x1.2,123,-0.006,0.104,11
+country AUS,FES amplitude within x1.5,123,-0.003,0.103,11
+country AUS,along water (GEBCO) + FES within x1.2,123,-0.003,0.101,10
+country JPN,"FES, uncorrected",141,-0.006,0.053,5
+country JPN,25 km (production),141,0.001,0.053,5
+country JPN,along water (GEBCO),141,-0,0.05,4
+country JPN,along water (OSM),141,-0,0.051,4
+country JPN,FES amplitude within x1.1,141,0.001,0.051,5
+country JPN,FES amplitude within x1.2,141,0.001,0.05,4
+country JPN,FES amplitude within x1.5,141,0.001,0.049,3
+country JPN,along water (GEBCO) + FES within x1.2,141,-0,0.05,4

@@ -1,0 +1,305 @@
+split,gauges,rp,level,n,median,mae,p10,p90
+region,E.Asia (EAS),2,COAST-RP,92,-0.07,0.11,-0.158,0.128
+region,E.Asia (EAS),2,"new, r left out",92,0.036,0.075,-0.036,0.148
+region,E.Asia (EAS),2,"new, r = 1, no TC",92,-0.099,0.105,-0.17,0.007
+region,E.Asia (EAS),2,"new, r in sample",92,0.036,0.073,-0.031,0.147
+region,E.Asia (EAS),10,COAST-RP,92,-0.14,0.172,-0.312,0.074
+region,E.Asia (EAS),10,"new, r left out",92,-0.003,0.096,-0.14,0.136
+region,E.Asia (EAS),10,"new, r = 1, no TC",92,-0.185,0.207,-0.347,-0.042
+region,E.Asia (EAS),10,"new, r in sample",92,0.002,0.093,-0.145,0.141
+region,E.Asia (EAS),50,COAST-RP,92,-0.199,0.257,-0.569,0.019
+region,E.Asia (EAS),50,"new, r left out",92,-0.014,0.162,-0.362,0.147
+region,E.Asia (EAS),50,"new, r = 1, no TC",92,-0.316,0.37,-0.679,-0.098
+region,E.Asia (EAS),50,"new, r in sample",92,-0.013,0.158,-0.353,0.168
+region,E.Asia (EAS),100,COAST-RP,92,-0.211,0.3,-0.717,0.009
+region,E.Asia (EAS),100,"new, r left out",92,-0.02,0.195,-0.501,0.158
+region,E.Asia (EAS),100,"new, r = 1, no TC",92,-0.366,0.467,-0.933,-0.103
+region,E.Asia (EAS),100,"new, r in sample",92,-0.022,0.191,-0.495,0.17
+region,E.Australia (EAU),2,COAST-RP,23,-0.015,0.082,-0.083,0.11
+region,E.Australia (EAU),2,"new, r left out",23,0.049,0.114,-0.052,0.21
+region,E.Australia (EAU),2,"new, r = 1, no TC",23,0.01,0.081,-0.104,0.052
+region,E.Australia (EAU),2,"new, r in sample",23,0.064,0.096,0.02,0.139
+region,E.Australia (EAU),10,COAST-RP,23,-0.052,0.105,-0.128,0.054
+region,E.Australia (EAU),10,"new, r left out",23,0.039,0.119,-0.083,0.174
+region,E.Australia (EAU),10,"new, r = 1, no TC",23,-0.016,0.092,-0.157,0.021
+region,E.Australia (EAU),10,"new, r in sample",23,0.051,0.094,0.007,0.122
+region,E.Australia (EAU),50,COAST-RP,23,-0.088,0.143,-0.195,-0.007
+region,E.Australia (EAU),50,"new, r left out",23,0.042,0.123,-0.206,0.132
+region,E.Australia (EAU),50,"new, r = 1, no TC",23,-0.069,0.138,-0.312,-0.003
+region,E.Australia (EAU),50,"new, r in sample",23,0.044,0.094,-0.122,0.097
+region,E.Australia (EAU),100,COAST-RP,23,-0.121,0.208,-0.505,-0.001
+region,E.Australia (EAU),100,"new, r left out",23,0.026,0.17,-0.43,0.147
+region,E.Australia (EAU),100,"new, r = 1, no TC",23,-0.095,0.208,-0.501,-0.01
+region,E.Australia (EAU),100,"new, r in sample",23,0.027,0.135,-0.253,0.117
+region,E.North-America (ENA),2,COAST-RP,67,-0.298,0.335,-0.538,0.047
+region,E.North-America (ENA),2,"new, r left out",67,-0.008,0.088,-0.136,0.126
+region,E.North-America (ENA),2,"new, r = 1, no TC",67,-0.117,0.139,-0.245,0.06
+region,E.North-America (ENA),2,"new, r in sample",67,0.003,0.074,-0.107,0.092
+region,E.North-America (ENA),10,COAST-RP,67,-0.368,0.402,-0.644,-0.039
+region,E.North-America (ENA),10,"new, r left out",67,-0.02,0.125,-0.226,0.141
+region,E.North-America (ENA),10,"new, r = 1, no TC",67,-0.207,0.221,-0.42,-0.011
+region,E.North-America (ENA),10,"new, r in sample",67,-0.024,0.115,-0.183,0.121
+region,E.North-America (ENA),50,COAST-RP,67,-0.373,0.474,-0.89,0.217
+region,E.North-America (ENA),50,"new, r left out",67,-0.003,0.229,-0.366,0.419
+region,E.North-America (ENA),50,"new, r = 1, no TC",67,-0.284,0.398,-0.854,-0.083
+region,E.North-America (ENA),50,"new, r in sample",67,0.004,0.228,-0.368,0.419
+region,E.North-America (ENA),100,COAST-RP,67,-0.296,0.538,-0.985,0.461
+region,E.North-America (ENA),100,"new, r left out",67,0.028,0.353,-0.487,0.698
+region,E.North-America (ENA),100,"new, r = 1, no TC",67,-0.345,0.525,-1.304,-0.098
+region,E.North-America (ENA),100,"new, r in sample",67,0.023,0.355,-0.487,0.805
+region,Equatorial.Pacific-Ocean (EPO),2,COAST-RP,19,0.034,0.061,-0.083,0.065
+region,Equatorial.Pacific-Ocean (EPO),2,"new, r left out",19,0.085,0.093,0.04,0.168
+region,Equatorial.Pacific-Ocean (EPO),2,"new, r = 1, no TC",19,0.011,0.033,-0.048,0.032
+region,Equatorial.Pacific-Ocean (EPO),2,"new, r in sample",19,0.081,0.092,0.009,0.168
+region,Equatorial.Pacific-Ocean (EPO),10,COAST-RP,19,-0.032,0.072,-0.132,0.035
+region,Equatorial.Pacific-Ocean (EPO),10,"new, r left out",19,0.034,0.061,-0.018,0.134
+region,Equatorial.Pacific-Ocean (EPO),10,"new, r = 1, no TC",19,-0.041,0.058,-0.121,0.017
+region,Equatorial.Pacific-Ocean (EPO),10,"new, r in sample",19,0.043,0.064,-0.044,0.126
+region,Equatorial.Pacific-Ocean (EPO),50,COAST-RP,19,-0.092,0.118,-0.184,0.012
+region,Equatorial.Pacific-Ocean (EPO),50,"new, r left out",19,-0.006,0.066,-0.098,0.139
+region,Equatorial.Pacific-Ocean (EPO),50,"new, r = 1, no TC",19,-0.089,0.105,-0.202,0.016
+region,Equatorial.Pacific-Ocean (EPO),50,"new, r in sample",19,0.012,0.072,-0.101,0.135
+region,Equatorial.Pacific-Ocean (EPO),100,COAST-RP,19,-0.135,0.144,-0.261,0.002
+region,Equatorial.Pacific-Ocean (EPO),100,"new, r left out",19,-0.016,0.081,-0.16,0.127
+region,Equatorial.Pacific-Ocean (EPO),100,"new, r = 1, no TC",19,-0.107,0.131,-0.281,0.016
+region,Equatorial.Pacific-Ocean (EPO),100,"new, r in sample",19,-0.01,0.084,-0.161,0.138
+region,Mediterranean (MED),2,COAST-RP,38,-0.012,0.09,-0.087,0.131
+region,Mediterranean (MED),2,"new, r left out",38,0.007,0.055,-0.056,0.095
+region,Mediterranean (MED),2,"new, r = 1, no TC",38,-0.045,0.072,-0.115,-0.008
+region,Mediterranean (MED),2,"new, r in sample",38,0.006,0.043,-0.032,0.045
+region,Mediterranean (MED),10,COAST-RP,38,-0.036,0.093,-0.124,0.101
+region,Mediterranean (MED),10,"new, r left out",38,0.004,0.055,-0.055,0.108
+region,Mediterranean (MED),10,"new, r = 1, no TC",38,-0.048,0.087,-0.161,-0.006
+region,Mediterranean (MED),10,"new, r in sample",38,0.001,0.037,-0.021,0.035
+region,Mediterranean (MED),50,COAST-RP,38,-0.04,0.104,-0.173,0.071
+region,Mediterranean (MED),50,"new, r left out",38,0.004,0.06,-0.077,0.09
+region,Mediterranean (MED),50,"new, r = 1, no TC",38,-0.062,0.101,-0.204,-0.007
+region,Mediterranean (MED),50,"new, r in sample",38,-0.009,0.041,-0.051,0.035
+region,Mediterranean (MED),100,COAST-RP,38,-0.037,0.113,-0.204,0.063
+region,Mediterranean (MED),100,"new, r left out",38,0.002,0.064,-0.11,0.079
+region,Mediterranean (MED),100,"new, r = 1, no TC",38,-0.075,0.112,-0.213,-0.003
+region,Mediterranean (MED),100,"new, r in sample",38,-0.008,0.045,-0.078,0.034
+region,N.Europe (NEU),2,COAST-RP,97,0.122,0.172,-0.133,0.404
+region,N.Europe (NEU),2,"new, r left out",97,-0.013,0.062,-0.083,0.098
+region,N.Europe (NEU),2,"new, r = 1, no TC",97,-0.083,0.092,-0.198,0.003
+region,N.Europe (NEU),2,"new, r in sample",97,-0.006,0.044,-0.069,0.077
+region,N.Europe (NEU),10,COAST-RP,97,0.059,0.17,-0.223,0.347
+region,N.Europe (NEU),10,"new, r left out",97,-0.025,0.083,-0.123,0.094
+region,N.Europe (NEU),10,"new, r = 1, no TC",97,-0.106,0.138,-0.328,0.017
+region,N.Europe (NEU),10,"new, r in sample",97,-0.024,0.049,-0.087,0.046
+region,N.Europe (NEU),50,COAST-RP,97,0.013,0.218,-0.338,0.333
+region,N.Europe (NEU),50,"new, r left out",97,-0.033,0.132,-0.241,0.097
+region,N.Europe (NEU),50,"new, r = 1, no TC",97,-0.127,0.206,-0.435,0.005
+region,N.Europe (NEU),50,"new, r in sample",97,-0.034,0.098,-0.177,0.045
+region,N.Europe (NEU),100,COAST-RP,97,-0.012,0.263,-0.433,0.283
+region,N.Europe (NEU),100,"new, r left out",97,-0.043,0.181,-0.299,0.106
+region,N.Europe (NEU),100,"new, r = 1, no TC",97,-0.135,0.259,-0.532,0.011
+region,N.Europe (NEU),100,"new, r in sample",97,-0.049,0.145,-0.251,0.049
+region,N.Pacific-Ocean (NPO),2,COAST-RP,23,-0.096,0.146,-0.211,-0.044
+region,N.Pacific-Ocean (NPO),2,"new, r left out",23,0.036,0.082,-0.06,0.066
+region,N.Pacific-Ocean (NPO),2,"new, r = 1, no TC",23,-0.03,0.096,-0.126,0.01
+region,N.Pacific-Ocean (NPO),2,"new, r in sample",23,0.014,0.087,-0.06,0.081
+region,N.Pacific-Ocean (NPO),10,COAST-RP,23,-0.118,0.2,-0.317,-0.068
+region,N.Pacific-Ocean (NPO),10,"new, r left out",23,0.008,0.115,-0.141,0.097
+region,N.Pacific-Ocean (NPO),10,"new, r = 1, no TC",23,-0.059,0.156,-0.233,0.006
+region,N.Pacific-Ocean (NPO),10,"new, r in sample",23,0.006,0.12,-0.14,0.135
+region,N.Pacific-Ocean (NPO),50,COAST-RP,23,-0.155,0.293,-0.622,-0.011
+region,N.Pacific-Ocean (NPO),50,"new, r left out",23,0.022,0.198,-0.417,0.09
+region,N.Pacific-Ocean (NPO),50,"new, r = 1, no TC",23,-0.108,0.272,-0.589,-0.022
+region,N.Pacific-Ocean (NPO),50,"new, r in sample",23,0.011,0.202,-0.422,0.163
+region,N.Pacific-Ocean (NPO),100,COAST-RP,23,-0.222,0.39,-0.805,-0.018
+region,N.Pacific-Ocean (NPO),100,"new, r left out",23,-0.015,0.27,-0.572,0.108
+region,N.Pacific-Ocean (NPO),100,"new, r = 1, no TC",23,-0.154,0.375,-0.837,-0.027
+region,N.Pacific-Ocean (NPO),100,"new, r in sample",23,-0.012,0.273,-0.588,0.177
+region,N.W.North-America (NWN),2,COAST-RP,20,0.025,0.288,-0.265,0.442
+region,N.W.North-America (NWN),2,"new, r left out",20,-0.034,0.197,-0.211,0.478
+region,N.W.North-America (NWN),2,"new, r = 1, no TC",20,-0.079,0.2,-0.265,0.324
+region,N.W.North-America (NWN),2,"new, r in sample",20,0.015,0.146,-0.182,0.272
+region,N.W.North-America (NWN),10,COAST-RP,20,-0.015,0.311,-0.396,0.403
+region,N.W.North-America (NWN),10,"new, r left out",20,-0.042,0.23,-0.245,0.521
+region,N.W.North-America (NWN),10,"new, r = 1, no TC",20,-0.104,0.234,-0.356,0.326
+region,N.W.North-America (NWN),10,"new, r in sample",20,0.013,0.163,-0.212,0.26
+region,N.W.North-America (NWN),50,COAST-RP,20,-0.037,0.35,-0.39,0.372
+region,N.W.North-America (NWN),50,"new, r left out",20,-0.051,0.262,-0.246,0.568
+region,N.W.North-America (NWN),50,"new, r = 1, no TC",20,-0.118,0.27,-0.388,0.34
+region,N.W.North-America (NWN),50,"new, r in sample",20,0.002,0.18,-0.2,0.245
+region,N.W.North-America (NWN),100,COAST-RP,20,-0.043,0.375,-0.434,0.36
+region,N.W.North-America (NWN),100,"new, r left out",20,-0.059,0.278,-0.259,0.588
+region,N.W.North-America (NWN),100,"new, r = 1, no TC",20,-0.122,0.287,-0.394,0.35
+region,N.W.North-America (NWN),100,"new, r in sample",20,0.002,0.191,-0.183,0.239
+region,New-Zealand (NZ),2,COAST-RP,15,0.011,0.119,-0.162,0.152
+region,New-Zealand (NZ),2,"new, r left out",15,-0,0.045,-0.052,0.065
+region,New-Zealand (NZ),2,"new, r = 1, no TC",15,-0.045,0.061,-0.102,0.075
+region,New-Zealand (NZ),2,"new, r in sample",15,0.039,0.056,0.019,0.083
+region,New-Zealand (NZ),10,COAST-RP,15,-0.021,0.138,-0.25,0.133
+region,New-Zealand (NZ),10,"new, r left out",15,-0.004,0.058,-0.083,0.082
+region,New-Zealand (NZ),10,"new, r = 1, no TC",15,-0.027,0.084,-0.178,0.081
+region,New-Zealand (NZ),10,"new, r in sample",15,0.041,0.049,0.012,0.072
+region,New-Zealand (NZ),50,COAST-RP,15,-0.044,0.158,-0.333,0.135
+region,New-Zealand (NZ),50,"new, r left out",15,0.012,0.073,-0.129,0.083
+region,New-Zealand (NZ),50,"new, r = 1, no TC",15,-0.017,0.101,-0.256,0.096
+region,New-Zealand (NZ),50,"new, r in sample",15,0.028,0.045,-0.015,0.072
+region,New-Zealand (NZ),100,COAST-RP,15,-0.05,0.167,-0.366,0.138
+region,New-Zealand (NZ),100,"new, r left out",15,-0.012,0.078,-0.148,0.077
+region,New-Zealand (NZ),100,"new, r = 1, no TC",15,-0.057,0.114,-0.287,0.097
+region,New-Zealand (NZ),100,"new, r in sample",15,0.032,0.05,-0.049,0.074
+region,S.Australia (SAU),2,COAST-RP,29,0.031,0.197,-0.094,0.455
+region,S.Australia (SAU),2,"new, r left out",29,0.065,0.133,-0.126,0.197
+region,S.Australia (SAU),2,"new, r = 1, no TC",29,-0.039,0.101,-0.213,0.126
+region,S.Australia (SAU),2,"new, r in sample",29,0.04,0.068,-0.051,0.113
+region,S.Australia (SAU),10,COAST-RP,29,0.01,0.207,-0.163,0.442
+region,S.Australia (SAU),10,"new, r left out",29,0.049,0.151,-0.16,0.242
+region,S.Australia (SAU),10,"new, r = 1, no TC",29,-0.059,0.125,-0.27,0.139
+region,S.Australia (SAU),10,"new, r in sample",29,0.037,0.073,-0.071,0.113
+region,S.Australia (SAU),50,COAST-RP,29,-0.004,0.224,-0.21,0.438
+region,S.Australia (SAU),50,"new, r left out",29,0.055,0.167,-0.17,0.285
+region,S.Australia (SAU),50,"new, r = 1, no TC",29,-0.057,0.138,-0.298,0.141
+region,S.Australia (SAU),50,"new, r in sample",29,0.029,0.081,-0.065,0.139
+region,S.Australia (SAU),100,COAST-RP,29,-0.023,0.236,-0.222,0.439
+region,S.Australia (SAU),100,"new, r left out",29,0.061,0.173,-0.167,0.303
+region,S.Australia (SAU),100,"new, r = 1, no TC",29,-0.057,0.143,-0.305,0.142
+region,S.Australia (SAU),100,"new, r in sample",29,0.036,0.086,-0.055,0.16
+region,S.E.Asia (SEA),2,COAST-RP,22,0.042,0.165,-0.155,0.348
+region,S.E.Asia (SEA),2,"new, r left out",22,0.159,0.199,0.05,0.412
+region,S.E.Asia (SEA),2,"new, r = 1, no TC",22,-0.007,0.049,-0.066,0.113
+region,S.E.Asia (SEA),2,"new, r in sample",22,0.141,0.208,0.097,0.412
+region,S.E.Asia (SEA),10,COAST-RP,22,-0.029,0.167,-0.197,0.297
+region,S.E.Asia (SEA),10,"new, r left out",22,0.132,0.176,0.042,0.313
+region,S.E.Asia (SEA),10,"new, r = 1, no TC",22,-0.054,0.073,-0.115,0.073
+region,S.E.Asia (SEA),10,"new, r in sample",22,0.136,0.184,0.091,0.313
+region,S.E.Asia (SEA),50,COAST-RP,22,-0.065,0.185,-0.266,0.255
+region,S.E.Asia (SEA),50,"new, r left out",22,0.122,0.171,-0.039,0.278
+region,S.E.Asia (SEA),50,"new, r = 1, no TC",22,-0.093,0.139,-0.318,0.036
+region,S.E.Asia (SEA),50,"new, r in sample",22,0.125,0.173,0.006,0.277
+region,S.E.Asia (SEA),100,COAST-RP,22,-0.099,0.253,-0.391,0.236
+region,S.E.Asia (SEA),100,"new, r left out",22,0.123,0.226,-0.165,0.357
+region,S.E.Asia (SEA),100,"new, r = 1, no TC",22,-0.111,0.214,-0.483,0.022
+region,S.E.Asia (SEA),100,"new, r in sample",22,0.121,0.23,-0.163,0.357
+region,S.Pacific-Ocean (SPO),2,COAST-RP,18,-0.023,0.049,-0.091,0.026
+region,S.Pacific-Ocean (SPO),2,"new, r left out",18,0.069,0.078,-0.029,0.119
+region,S.Pacific-Ocean (SPO),2,"new, r = 1, no TC",18,-0.031,0.044,-0.088,0.009
+region,S.Pacific-Ocean (SPO),2,"new, r in sample",18,0.063,0.076,-0.028,0.125
+region,S.Pacific-Ocean (SPO),10,COAST-RP,18,-0.097,0.094,-0.179,-0.009
+region,S.Pacific-Ocean (SPO),10,"new, r left out",18,0.066,0.087,-0.094,0.114
+region,S.Pacific-Ocean (SPO),10,"new, r = 1, no TC",18,-0.062,0.096,-0.195,-0.017
+region,S.Pacific-Ocean (SPO),10,"new, r in sample",18,0.068,0.083,-0.093,0.092
+region,S.Pacific-Ocean (SPO),50,COAST-RP,18,-0.225,0.266,-0.547,-0.038
+region,S.Pacific-Ocean (SPO),50,"new, r left out",18,-0.008,0.204,-0.421,0.135
+region,S.Pacific-Ocean (SPO),50,"new, r = 1, no TC",18,-0.216,0.282,-0.585,-0.047
+region,S.Pacific-Ocean (SPO),50,"new, r in sample",18,-0.01,0.199,-0.412,0.127
+region,S.Pacific-Ocean (SPO),100,COAST-RP,18,-0.267,0.425,-0.964,-0.02
+region,S.Pacific-Ocean (SPO),100,"new, r left out",18,-0.033,0.364,-0.741,0.172
+region,S.Pacific-Ocean (SPO),100,"new, r = 1, no TC",18,-0.289,0.467,-1.061,-0.07
+region,S.Pacific-Ocean (SPO),100,"new, r in sample",18,-0.034,0.362,-0.741,0.172
+region,W.North-America (WNA),2,COAST-RP,32,-0.083,0.143,-0.164,0.143
+region,W.North-America (WNA),2,"new, r left out",32,0.013,0.119,-0.116,0.212
+region,W.North-America (WNA),2,"new, r = 1, no TC",32,-0.067,0.137,-0.209,0.173
+region,W.North-America (WNA),2,"new, r in sample",32,0.018,0.093,-0.075,0.216
+region,W.North-America (WNA),10,COAST-RP,32,-0.119,0.181,-0.276,0.095
+region,W.North-America (WNA),10,"new, r left out",32,-0,0.134,-0.143,0.221
+region,W.North-America (WNA),10,"new, r = 1, no TC",32,-0.136,0.177,-0.267,0.161
+region,W.North-America (WNA),10,"new, r in sample",32,0.006,0.097,-0.091,0.218
+region,W.North-America (WNA),50,COAST-RP,32,-0.153,0.215,-0.371,0.078
+region,W.North-America (WNA),50,"new, r left out",32,-0.008,0.152,-0.195,0.235
+region,W.North-America (WNA),50,"new, r = 1, no TC",32,-0.179,0.221,-0.347,0.158
+region,W.North-America (WNA),50,"new, r in sample",32,0.004,0.099,-0.096,0.225
+region,W.North-America (WNA),100,COAST-RP,32,-0.168,0.231,-0.415,0.078
+region,W.North-America (WNA),100,"new, r left out",32,-0.011,0.161,-0.217,0.251
+region,W.North-America (WNA),100,"new, r = 1, no TC",32,-0.19,0.242,-0.388,0.161
+region,W.North-America (WNA),100,"new, r in sample",32,0.001,0.101,-0.099,0.232
+region,West&Central-Europe (WCE),2,COAST-RP,24,0.153,0.225,0.029,0.471
+region,West&Central-Europe (WCE),2,"new, r left out",24,0.02,0.109,-0.159,0.2
+region,West&Central-Europe (WCE),2,"new, r = 1, no TC",24,-0.025,0.11,-0.167,0.172
+region,West&Central-Europe (WCE),2,"new, r in sample",24,-0.003,0.084,-0.071,0.189
+region,West&Central-Europe (WCE),10,COAST-RP,24,0.113,0.209,-0.006,0.457
+region,West&Central-Europe (WCE),10,"new, r left out",24,0.018,0.107,-0.145,0.219
+region,West&Central-Europe (WCE),10,"new, r = 1, no TC",24,-0.042,0.114,-0.159,0.172
+region,West&Central-Europe (WCE),10,"new, r in sample",24,0.01,0.08,-0.055,0.201
+region,West&Central-Europe (WCE),50,COAST-RP,24,0.104,0.214,-0.082,0.508
+region,West&Central-Europe (WCE),50,"new, r left out",24,0.026,0.123,-0.153,0.228
+region,West&Central-Europe (WCE),50,"new, r = 1, no TC",24,-0.044,0.124,-0.237,0.167
+region,West&Central-Europe (WCE),50,"new, r in sample",24,0.018,0.079,-0.065,0.207
+region,West&Central-Europe (WCE),100,COAST-RP,24,0.121,0.225,-0.128,0.534
+region,West&Central-Europe (WCE),100,"new, r left out",24,0.029,0.139,-0.209,0.237
+region,West&Central-Europe (WCE),100,"new, r = 1, no TC",24,-0.035,0.135,-0.326,0.165
+region,West&Central-Europe (WCE),100,"new, r in sample",24,0.012,0.093,-0.115,0.213
+region,other,2,COAST-RP,99,0.03,0.168,-0.249,0.174
+region,other,2,"new, r left out",99,0.056,0.144,-0.108,0.237
+region,other,2,"new, r = 1, no TC",99,-0.043,0.096,-0.212,0.045
+region,other,2,"new, r in sample",99,0.054,0.133,-0.089,0.237
+region,other,10,COAST-RP,99,-0.032,0.195,-0.349,0.16
+region,other,10,"new, r left out",99,0.028,0.148,-0.17,0.187
+region,other,10,"new, r = 1, no TC",99,-0.092,0.147,-0.371,0.023
+region,other,10,"new, r in sample",99,0.034,0.133,-0.151,0.163
+region,other,50,COAST-RP,99,-0.071,0.252,-0.438,0.163
+region,other,50,"new, r left out",99,0.018,0.204,-0.267,0.277
+region,other,50,"new, r = 1, no TC",99,-0.143,0.267,-0.575,-0.008
+region,other,50,"new, r in sample",99,0.018,0.191,-0.225,0.247
+region,other,100,COAST-RP,99,-0.094,0.314,-0.559,0.217
+region,other,100,"new, r left out",99,0.02,0.279,-0.368,0.33
+region,other,100,"new, r = 1, no TC",99,-0.17,0.367,-0.878,-0.012
+region,other,100,"new, r in sample",99,0.043,0.266,-0.388,0.307
+spring tidal range (m),"(0, 1]",2,COAST-RP,231,-0.052,0.13,-0.23,0.171
+spring tidal range (m),"(0, 1]",2,"new, r left out",231,0.018,0.068,-0.079,0.118
+spring tidal range (m),"(0, 1]",2,"new, r = 1, no TC",231,-0.069,0.097,-0.212,0.009
+spring tidal range (m),"(0, 1]",2,"new, r in sample",231,0.01,0.058,-0.061,0.099
+spring tidal range (m),"(0, 1]",10,COAST-RP,231,-0.099,0.174,-0.351,0.129
+spring tidal range (m),"(0, 1]",10,"new, r left out",231,0.001,0.092,-0.156,0.126
+spring tidal range (m),"(0, 1]",10,"new, r = 1, no TC",231,-0.121,0.163,-0.338,-0.013
+spring tidal range (m),"(0, 1]",10,"new, r in sample",231,-0.006,0.076,-0.128,0.081
+spring tidal range (m),"(0, 1]",50,COAST-RP,231,-0.116,0.251,-0.542,0.113
+spring tidal range (m),"(0, 1]",50,"new, r left out",231,-0.01,0.167,-0.31,0.15
+spring tidal range (m),"(0, 1]",50,"new, r = 1, no TC",231,-0.174,0.284,-0.575,-0.018
+spring tidal range (m),"(0, 1]",50,"new, r in sample",231,-0.016,0.149,-0.307,0.122
+spring tidal range (m),"(0, 1]",100,COAST-RP,231,-0.131,0.315,-0.716,0.113
+spring tidal range (m),"(0, 1]",100,"new, r left out",231,-0.015,0.238,-0.506,0.192
+spring tidal range (m),"(0, 1]",100,"new, r = 1, no TC",231,-0.215,0.371,-0.873,-0.019
+spring tidal range (m),"(0, 1]",100,"new, r in sample",231,-0.021,0.22,-0.507,0.158
+spring tidal range (m),"(1, 2]",2,COAST-RP,205,-0.044,0.14,-0.284,0.151
+spring tidal range (m),"(1, 2]",2,"new, r left out",205,0.041,0.095,-0.07,0.189
+spring tidal range (m),"(1, 2]",2,"new, r = 1, no TC",205,-0.051,0.093,-0.179,0.034
+spring tidal range (m),"(1, 2]",2,"new, r in sample",205,0.04,0.085,-0.061,0.159
+spring tidal range (m),"(1, 2]",10,COAST-RP,205,-0.097,0.173,-0.359,0.114
+spring tidal range (m),"(1, 2]",10,"new, r left out",205,0.019,0.103,-0.14,0.16
+spring tidal range (m),"(1, 2]",10,"new, r = 1, no TC",205,-0.098,0.15,-0.338,0.01
+spring tidal range (m),"(1, 2]",10,"new, r in sample",205,0.022,0.09,-0.134,0.141
+spring tidal range (m),"(1, 2]",50,COAST-RP,205,-0.143,0.23,-0.446,0.109
+spring tidal range (m),"(1, 2]",50,"new, r left out",205,-0.006,0.144,-0.203,0.192
+spring tidal range (m),"(1, 2]",50,"new, r = 1, no TC",205,-0.169,0.256,-0.62,-0.015
+spring tidal range (m),"(1, 2]",50,"new, r in sample",205,0,0.13,-0.199,0.156
+spring tidal range (m),"(1, 2]",100,COAST-RP,205,-0.161,0.278,-0.531,0.107
+spring tidal range (m),"(1, 2]",100,"new, r left out",205,-0.007,0.191,-0.315,0.211
+spring tidal range (m),"(1, 2]",100,"new, r = 1, no TC",205,-0.208,0.332,-0.807,-0.023
+spring tidal range (m),"(1, 2]",100,"new, r in sample",205,-0.011,0.176,-0.28,0.181
+spring tidal range (m),"(2, 4]",2,COAST-RP,123,0.077,0.202,-0.341,0.348
+spring tidal range (m),"(2, 4]",2,"new, r left out",123,0.036,0.133,-0.081,0.262
+spring tidal range (m),"(2, 4]",2,"new, r = 1, no TC",123,-0.047,0.098,-0.156,0.11
+spring tidal range (m),"(2, 4]",2,"new, r in sample",123,0.037,0.112,-0.044,0.239
+spring tidal range (m),"(2, 4]",10,COAST-RP,123,0.023,0.202,-0.387,0.297
+spring tidal range (m),"(2, 4]",10,"new, r left out",123,0.02,0.139,-0.129,0.272
+spring tidal range (m),"(2, 4]",10,"new, r = 1, no TC",123,-0.075,0.128,-0.232,0.101
+spring tidal range (m),"(2, 4]",10,"new, r in sample",123,0.035,0.112,-0.074,0.233
+spring tidal range (m),"(2, 4]",50,COAST-RP,123,-0.021,0.226,-0.555,0.259
+spring tidal range (m),"(2, 4]",50,"new, r left out",123,0.009,0.159,-0.178,0.305
+spring tidal range (m),"(2, 4]",50,"new, r = 1, no TC",123,-0.103,0.186,-0.407,0.103
+spring tidal range (m),"(2, 4]",50,"new, r in sample",123,0.026,0.129,-0.114,0.26
+spring tidal range (m),"(2, 4]",100,COAST-RP,123,-0.028,0.247,-0.538,0.315
+spring tidal range (m),"(2, 4]",100,"new, r left out",123,0.006,0.188,-0.241,0.357
+spring tidal range (m),"(2, 4]",100,"new, r = 1, no TC",123,-0.116,0.231,-0.551,0.093
+spring tidal range (m),"(2, 4]",100,"new, r in sample",123,0.022,0.155,-0.159,0.304
+spring tidal range (m),"(4, 20]",2,COAST-RP,59,0.139,0.339,-0.201,0.51
+spring tidal range (m),"(4, 20]",2,"new, r left out",59,0.012,0.178,-0.205,0.331
+spring tidal range (m),"(4, 20]",2,"new, r = 1, no TC",59,-0.032,0.137,-0.251,0.185
+spring tidal range (m),"(4, 20]",2,"new, r in sample",59,0.013,0.147,-0.088,0.347
+spring tidal range (m),"(4, 20]",10,COAST-RP,59,0.105,0.345,-0.444,0.491
+spring tidal range (m),"(4, 20]",10,"new, r left out",59,0.013,0.189,-0.192,0.385
+spring tidal range (m),"(4, 20]",10,"new, r = 1, no TC",59,-0.042,0.151,-0.269,0.182
+spring tidal range (m),"(4, 20]",10,"new, r in sample",59,0.011,0.15,-0.098,0.37
+spring tidal range (m),"(4, 20]",50,COAST-RP,59,0.09,0.365,-0.497,0.55
+spring tidal range (m),"(4, 20]",50,"new, r left out",59,0.023,0.217,-0.207,0.43
+spring tidal range (m),"(4, 20]",50,"new, r = 1, no TC",59,-0.058,0.179,-0.32,0.181
+spring tidal range (m),"(4, 20]",50,"new, r in sample",59,0.014,0.169,-0.096,0.388
+spring tidal range (m),"(4, 20]",100,COAST-RP,59,0.09,0.402,-0.521,0.569
+spring tidal range (m),"(4, 20]",100,"new, r left out",59,0.018,0.259,-0.249,0.434
+spring tidal range (m),"(4, 20]",100,"new, r = 1, no TC",59,-0.064,0.227,-0.404,0.178
+spring tidal range (m),"(4, 20]",100,"new, r in sample",59,0.011,0.21,-0.11,0.348

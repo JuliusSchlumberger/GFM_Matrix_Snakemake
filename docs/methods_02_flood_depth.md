@@ -496,10 +496,14 @@ that cannot legitimately be on a real flood path, then re-solves:
    level anywhere in the tile can never legitimately flood, under any
    friction field or path — friction only ever attenuates the propagated
    water level, it never amplifies it above its source value. Such cells are
-   assigned a prohibitively high friction value from the start. Ocean cells
-   are exempt (their effective elevation is defined as 0 — see §4.1 — always
-   below any real positive water level), since they are how the flood signal
-   legitimately reaches other coastal points, not something to exclude.
+   assigned a prohibitively high friction value from the start. The open sea
+   (ocean components reaching the tile edge or holding a seed) is blocked in
+   every solve regardless, so seeds stay local: at the water class's low
+   friction a basin's highest seed would otherwise cross the sea and raise the
+   lower seeds (they are not frozen) and the land behind them (Bay of Fundy:
+   19 m seeds reached the 4.5 m shore 60-80 km away at 12 m). Coastline cells
+   stay passable at the friction of their roughest land/river neighbour, so a
+   seed enters land, and travels along the coast, at land cost.
 2. **Iterative dynamic filter**: solve (§4.4, to the same convergence
    criterion), then additionally block any cell whose resulting
    (locally-attenuated) water level does not exceed its own elevation — such

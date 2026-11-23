@@ -1,0 +1,89 @@
+gauges,rp,level,n,median,mae,p10,p90,split
+TC-dominated gauges,2,"mask, all track points (production)",164,0.012,0.081,-0.095,0.126,TC group
+TC-dominated gauges,2,"mask, no ET points",164,0.012,0.081,-0.095,0.127,TC group
+TC-dominated gauges,10,"mask, all track points (production)",164,-0.029,0.119,-0.213,0.138,TC group
+TC-dominated gauges,10,"mask, no ET points",164,-0.027,0.118,-0.213,0.14,TC group
+TC-dominated gauges,50,"mask, all track points (production)",164,-0.034,0.236,-0.436,0.281,TC group
+TC-dominated gauges,50,"mask, no ET points",164,-0.032,0.236,-0.437,0.281,TC group
+TC-dominated gauges,100,"mask, all track points (production)",164,-0.041,0.355,-0.677,0.345,TC group
+TC-dominated gauges,100,"mask, no ET points",164,-0.044,0.355,-0.677,0.342,TC group
+stations with a TC part,2,"mask, all track points (production)",323,0.04,0.102,-0.081,0.213,TC group
+stations with a TC part,2,"mask, no ET points",323,0.041,0.102,-0.077,0.214,TC group
+stations with a TC part,10,"mask, all track points (production)",323,0.019,0.117,-0.165,0.172,TC group
+stations with a TC part,10,"mask, no ET points",323,0.019,0.117,-0.165,0.172,TC group
+stations with a TC part,50,"mask, all track points (production)",323,0.01,0.182,-0.299,0.218,TC group
+stations with a TC part,50,"mask, no ET points",323,0.01,0.182,-0.299,0.218,TC group
+stations with a TC part,100,"mask, all track points (production)",323,0.003,0.253,-0.423,0.268,TC group
+stations with a TC part,100,"mask, no ET points",323,0.004,0.253,-0.423,0.268,TC group
+E.Asia (EAS),2,"mask, all track points (production)",92,0.011,0.06,-0.06,0.095,region
+E.Asia (EAS),2,"mask, no ET points",92,0.011,0.06,-0.06,0.095,region
+E.Asia (EAS),10,"mask, all track points (production)",92,-0.03,0.094,-0.171,0.066,region
+E.Asia (EAS),10,"mask, no ET points",92,-0.03,0.094,-0.171,0.066,region
+E.Asia (EAS),50,"mask, all track points (production)",92,-0.064,0.171,-0.426,0.097,region
+E.Asia (EAS),50,"mask, no ET points",92,-0.064,0.171,-0.426,0.097,region
+E.Asia (EAS),100,"mask, all track points (production)",92,-0.082,0.209,-0.571,0.084,region
+E.Asia (EAS),100,"mask, no ET points",92,-0.082,0.21,-0.571,0.087,region
+E.North-America (ENA),2,"mask, all track points (production)",65,-0.008,0.088,-0.137,0.102,region
+E.North-America (ENA),2,"mask, no ET points",65,0.001,0.087,-0.134,0.102,region
+E.North-America (ENA),10,"mask, all track points (production)",65,-0.017,0.122,-0.219,0.136,region
+E.North-America (ENA),10,"mask, no ET points",65,-0.011,0.121,-0.219,0.145,region
+E.North-America (ENA),50,"mask, all track points (production)",65,0.001,0.218,-0.308,0.439,region
+E.North-America (ENA),50,"mask, no ET points",65,0.01,0.218,-0.303,0.455,region
+E.North-America (ENA),100,"mask, all track points (production)",65,0.035,0.336,-0.386,0.74,region
+E.North-America (ENA),100,"mask, no ET points",65,0.038,0.335,-0.386,0.747,region
+N.Pacific-Ocean (NPO),2,"mask, all track points (production)",17,0.015,0.026,-0.008,0.059,region
+N.Pacific-Ocean (NPO),2,"mask, no ET points",17,0.015,0.026,-0.008,0.059,region
+N.Pacific-Ocean (NPO),10,"mask, all track points (production)",17,0.01,0.039,-0.043,0.069,region
+N.Pacific-Ocean (NPO),10,"mask, no ET points",17,0.01,0.039,-0.043,0.069,region
+N.Pacific-Ocean (NPO),50,"mask, all track points (production)",17,-0.001,0.106,-0.048,0.11,region
+N.Pacific-Ocean (NPO),50,"mask, no ET points",17,-0.001,0.106,-0.048,0.11,region
+N.Pacific-Ocean (NPO),100,"mask, all track points (production)",17,-0.004,0.196,-0.128,0.12,region
+N.Pacific-Ocean (NPO),100,"mask, no ET points",17,-0.004,0.196,-0.128,0.12,region
+S.E.Asia (SEA),2,"mask, all track points (production)",21,0.157,0.176,0.028,0.319,region
+S.E.Asia (SEA),2,"mask, no ET points",21,0.157,0.176,0.028,0.319,region
+S.E.Asia (SEA),10,"mask, all track points (production)",21,0.112,0.154,0.04,0.274,region
+S.E.Asia (SEA),10,"mask, no ET points",21,0.112,0.154,0.04,0.274,region
+S.E.Asia (SEA),50,"mask, all track points (production)",21,0.135,0.164,-0.071,0.267,region
+S.E.Asia (SEA),50,"mask, no ET points",21,0.135,0.164,-0.071,0.267,region
+S.E.Asia (SEA),100,"mask, all track points (production)",21,0.145,0.224,-0.27,0.27,region
+S.E.Asia (SEA),100,"mask, no ET points",21,0.145,0.224,-0.27,0.27,region
+other,2,"mask, all track points (production)",128,0.082,0.137,-0.078,0.23,region
+other,2,"mask, no ET points",128,0.082,0.137,-0.078,0.23,region
+other,10,"mask, all track points (production)",128,0.057,0.137,-0.145,0.174,region
+other,10,"mask, no ET points",128,0.057,0.137,-0.145,0.174,region
+other,50,"mask, all track points (production)",128,0.029,0.185,-0.223,0.22,region
+other,50,"mask, no ET points",128,0.029,0.185,-0.223,0.22,region
+other,100,"mask, all track points (production)",128,0.02,0.254,-0.383,0.271,region
+other,100,"mask, no ET points",128,0.02,0.254,-0.383,0.271,region
+"(0, 1]",2,"mask, all track points (production)",123,0.019,0.064,-0.079,0.118,spring tidal range (m)
+"(0, 1]",2,"mask, no ET points",123,0.02,0.063,-0.071,0.118,spring tidal range (m)
+"(0, 1]",10,"mask, all track points (production)",123,0.007,0.085,-0.146,0.124,spring tidal range (m)
+"(0, 1]",10,"mask, no ET points",123,0.008,0.085,-0.146,0.128,spring tidal range (m)
+"(0, 1]",50,"mask, all track points (production)",123,-0,0.167,-0.299,0.197,spring tidal range (m)
+"(0, 1]",50,"mask, no ET points",123,0.005,0.167,-0.299,0.197,spring tidal range (m)
+"(0, 1]",100,"mask, all track points (production)",123,-0.001,0.258,-0.418,0.254,spring tidal range (m)
+"(0, 1]",100,"mask, no ET points",123,-0.001,0.258,-0.418,0.254,spring tidal range (m)
+"(1, 2]",2,"mask, all track points (production)",137,0.037,0.092,-0.072,0.192,spring tidal range (m)
+"(1, 2]",2,"mask, no ET points",137,0.038,0.092,-0.072,0.193,spring tidal range (m)
+"(1, 2]",10,"mask, all track points (production)",137,0.005,0.108,-0.17,0.166,spring tidal range (m)
+"(1, 2]",10,"mask, no ET points",137,0.005,0.109,-0.169,0.166,spring tidal range (m)
+"(1, 2]",50,"mask, all track points (production)",137,-0.011,0.175,-0.311,0.178,spring tidal range (m)
+"(1, 2]",50,"mask, no ET points",137,-0.009,0.175,-0.311,0.178,spring tidal range (m)
+"(1, 2]",100,"mask, all track points (production)",137,-0.021,0.243,-0.507,0.212,spring tidal range (m)
+"(1, 2]",100,"mask, no ET points",137,-0.021,0.243,-0.507,0.214,spring tidal range (m)
+"(2, 4]",2,"mask, all track points (production)",50,0.106,0.171,-0.062,0.305,spring tidal range (m)
+"(2, 4]",2,"mask, no ET points",50,0.106,0.171,-0.062,0.305,spring tidal range (m)
+"(2, 4]",10,"mask, all track points (production)",50,0.083,0.168,-0.175,0.252,spring tidal range (m)
+"(2, 4]",10,"mask, no ET points",50,0.081,0.168,-0.175,0.252,spring tidal range (m)
+"(2, 4]",50,"mask, all track points (production)",50,0.052,0.188,-0.3,0.306,spring tidal range (m)
+"(2, 4]",50,"mask, no ET points",50,0.052,0.187,-0.3,0.306,spring tidal range (m)
+"(2, 4]",100,"mask, all track points (production)",50,0.046,0.232,-0.34,0.367,spring tidal range (m)
+"(2, 4]",100,"mask, no ET points",50,0.046,0.232,-0.34,0.367,spring tidal range (m)
+"(4, 20]",2,"mask, all track points (production)",13,0.096,0.306,-0.113,0.578,spring tidal range (m)
+"(4, 20]",2,"mask, no ET points",13,0.096,0.306,-0.112,0.578,spring tidal range (m)
+"(4, 20]",10,"mask, all track points (production)",13,0.121,0.32,-0.089,0.619,spring tidal range (m)
+"(4, 20]",10,"mask, no ET points",13,0.121,0.32,-0.089,0.619,spring tidal range (m)
+"(4, 20]",50,"mask, all track points (production)",13,0.166,0.371,-0.063,0.838,spring tidal range (m)
+"(4, 20]",50,"mask, no ET points",13,0.166,0.371,-0.063,0.838,spring tidal range (m)
+"(4, 20]",100,"mask, all track points (production)",13,0.182,0.392,-0.055,0.979,spring tidal range (m)
+"(4, 20]",100,"mask, no ET points",13,0.182,0.392,-0.055,0.979,spring tidal range (m)

@@ -56,6 +56,21 @@ def test_bathtub_floods_the_closed_pit_and_the_connected_one_does_not() -> None:
     assert conn[0, 10] == 0.0
 
 
+def test_eikonal_high_seed_does_not_cross_the_sea_to_the_opposite_shore() -> None:
+    # Two shores of a strait across the whole tile: north seeded at 5 m, south at 1 m.
+    mask = np.zeros((40, 30), dtype=np.int8)
+    mask[15:25, :] = 1
+    dem = np.where(mask == 1, 0.0, 2.0).astype(np.float32)
+    friction = np.where(mask == 1, 0.006, 0.036).astype(np.float32)  # water vs land class, per 30 m step
+    cols = np.arange(30)
+    rows = np.concatenate([np.full(30, 15), np.full(30, 24)])
+    values = np.concatenate([np.full(30, 5.0), np.full(30, 1.0)])
+    depth, _ = flood_depth_dense(dem, mask, friction, TRANSFORM, seed_rows=rows, seed_cols=np.tile(cols, 2),
+                                 seed_values=values, ocean_code=1, idw_power=2.0)
+    assert (depth[:15] > 0).any()          # the north shore floods from its own seeds
+    assert (depth[25:] == 0).all()         # 1 m seeds, 2 m ground: the 5 m seeds must not reach it
+
+
 def test_straight_line_attenuates_with_distance() -> None:
     dem, mask, rows, cols = _strip_tile()
     depth, diag = flood_depth_dense(dem, mask, np.ones_like(dem), TRANSFORM, seed_rows=rows, seed_cols=cols,

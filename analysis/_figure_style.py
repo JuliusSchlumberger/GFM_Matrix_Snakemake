@@ -106,6 +106,24 @@ CONTINENT_COLORS = {
     "Oceania": "#ffd92f",
 }
 
+# Storm-tide level sources and rule variants (docs/figure_scripts/plot_gauge_validation.py),
+# Okabe-Ito, each with its own marker. The production variant is blue in every panel.
+STORM_TIDE_SOURCE_STYLES = {
+    "GFM product": ("#0072B2", "o"),
+    "COAST-RP": ("#E69F00", "s"),
+}
+TC_RAISE_STYLES = {
+    "none": ("#000000", "X"),
+    "shift": ("#0072B2", "o"),
+    "factor": ("#009E73", "D"),
+}
+TIDE_NEIGHBOUR_STYLES = {
+    "within 25 km": ("#E69F00", "s"),
+    "through GEBCO water": ("#D55E00", "^"),
+    "through OSM water": ("#0072B2", "o"),
+    "similar FES amplitude": ("#CC79A7", "D"),
+}
+
 
 def apply_style() -> None:
     """Set this project's figure rcParams once (section 9 "Output and checks").

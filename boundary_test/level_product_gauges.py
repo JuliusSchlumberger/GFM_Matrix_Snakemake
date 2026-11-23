@@ -2,8 +2,10 @@
 
 Each gauge with a ratio takes its nearest product station within stp.GAUGE_STATION_KM; that
 station is rebuilt from production's inputs (1950-2024 record, IBTrACS mask, pooled GPD shape,
-basin COAST-RP_TC shift, atlas) with r and the tide factor computed without the gauge, so no
-gauge calibrates itself. The basin shift is already fitted leaving the gauge's basin out. The
+COAST-RP_TC shift, atlas) with r and the tide factor computed without the gauge, so no gauge
+calibrates itself; the tide factor keeps production's through-water rule where the product has
+its station links. The all-basin shift is fitted at all TC-dominated gauges, the scored one
+among them (1 of ~170). The
 reference is the gauge's own skew-surge convolution of test 9 (`surge_correction.py`: gauge surge
 on the gauge tide). Reads the product directory of `run_preparation.py storm_tide_product` and its
 cache. `open_guesses.py` reuses `GaugeCheck` for variants of the product's rules.

@@ -1,0 +1,13 @@
+gauges,r from,n,mae_ln_r,median_ln_r,share_off_20pct
+all calibration gauges,r = 1,451,0.283,-0.167,0.399
+all calibration gauges,median r,451,0.216,0.0,0.31
+all calibration gauges,power law on S10 (production),451,0.177,0.007,0.377
+all calibration gauges,depth + shelf + range,451,0.233,0.085,0.479
+all calibration gauges,S10 + depth + shelf + range,451,0.176,0.021,0.348
+all calibration gauges,"IDW (production, >= 3 gauges)",353,0.106,0.019,0.136
+< 3 other gauges within 500 km,r = 1,98,0.562,-0.476,0.724
+< 3 other gauges within 500 km,median r,98,0.445,-0.31,0.653
+< 3 other gauges within 500 km,power law on S10 (production),98,0.259,-0.066,0.561
+< 3 other gauges within 500 km,depth + shelf + range,98,0.387,-0.193,0.633
+< 3 other gauges within 500 km,S10 + depth + shelf + range,98,0.243,-0.068,0.48
+< 3 other gauges within 500 km,"IDW (production, >= 3 gauges)",0,,,

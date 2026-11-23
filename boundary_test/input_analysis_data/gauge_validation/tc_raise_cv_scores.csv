@@ -1,0 +1,649 @@
+gauges,rp,level,n,median,mae,p10,p90,split
+TC-dominated gauges,2,no raise,164,-0.001,0.071,-0.106,0.096,TC group
+TC-dominated gauges,2,"shift, basin left out",164,0.02,0.082,-0.091,0.131,TC group
+TC-dominated gauges,2,"shift, own basin, in sample",164,0.036,0.096,-0.094,0.174,TC group
+TC-dominated gauges,2,"shift, own basin, gauges left out",164,0.034,0.101,-0.099,0.19,TC group
+TC-dominated gauges,2,"shift, all basins, gauges left out",164,0.025,0.088,-0.088,0.144,TC group
+TC-dominated gauges,2,"surge scale, basin left out",164,-0,0.071,-0.102,0.099,TC group
+TC-dominated gauges,2,"surge scale, own basin, in sample",164,0.002,0.071,-0.105,0.096,TC group
+TC-dominated gauges,2,"surge scale, own basin, gauges left out",164,0.003,0.071,-0.105,0.096,TC group
+TC-dominated gauges,2,"surge scale, all basins, gauges left out",164,0.001,0.071,-0.103,0.098,TC group
+TC-dominated gauges,10,no raise,164,-0.056,0.116,-0.236,0.07,TC group
+TC-dominated gauges,10,"shift, basin left out",164,-0.022,0.119,-0.207,0.139,TC group
+TC-dominated gauges,10,"shift, own basin, in sample",164,0.014,0.123,-0.206,0.171,TC group
+TC-dominated gauges,10,"shift, own basin, gauges left out",164,0.009,0.13,-0.203,0.183,TC group
+TC-dominated gauges,10,"shift, all basins, gauges left out",164,-0.001,0.122,-0.197,0.145,TC group
+TC-dominated gauges,10,"surge scale, basin left out",164,-0.045,0.114,-0.221,0.104,TC group
+TC-dominated gauges,10,"surge scale, own basin, in sample",164,-0.031,0.115,-0.224,0.095,TC group
+TC-dominated gauges,10,"surge scale, own basin, gauges left out",164,-0.031,0.116,-0.225,0.095,TC group
+TC-dominated gauges,10,"surge scale, all basins, gauges left out",164,-0.039,0.114,-0.219,0.095,TC group
+TC-dominated gauges,50,no raise,164,-0.118,0.247,-0.554,0.125,TC group
+TC-dominated gauges,50,"shift, basin left out",164,-0.031,0.234,-0.427,0.287,TC group
+TC-dominated gauges,50,"shift, own basin, in sample",164,-0.018,0.234,-0.49,0.315,TC group
+TC-dominated gauges,50,"shift, own basin, gauges left out",164,-0.012,0.244,-0.477,0.325,TC group
+TC-dominated gauges,50,"shift, all basins, gauges left out",164,-0.013,0.237,-0.411,0.328,TC group
+TC-dominated gauges,50,"surge scale, basin left out",164,-0.055,0.288,-0.452,0.457,TC group
+TC-dominated gauges,50,"surge scale, own basin, in sample",164,-0.034,0.255,-0.517,0.346,TC group
+TC-dominated gauges,50,"surge scale, own basin, gauges left out",164,-0.02,0.259,-0.476,0.368,TC group
+TC-dominated gauges,50,"surge scale, all basins, gauges left out",164,-0.025,0.27,-0.421,0.459,TC group
+TC-dominated gauges,100,no raise,164,-0.131,0.362,-0.793,0.186,TC group
+TC-dominated gauges,100,"shift, basin left out",164,-0.032,0.353,-0.667,0.349,TC group
+TC-dominated gauges,100,"shift, own basin, in sample",164,0,0.336,-0.652,0.371,TC group
+TC-dominated gauges,100,"shift, own basin, gauges left out",164,0.017,0.354,-0.654,0.384,TC group
+TC-dominated gauges,100,"shift, all basins, gauges left out",164,-0.005,0.353,-0.667,0.386,TC group
+TC-dominated gauges,100,"surge scale, basin left out",164,-0.031,0.475,-0.632,1.019,TC group
+TC-dominated gauges,100,"surge scale, own basin, in sample",164,0.011,0.37,-0.682,0.583,TC group
+TC-dominated gauges,100,"surge scale, own basin, gauges left out",164,0.016,0.393,-0.686,0.603,TC group
+TC-dominated gauges,100,"surge scale, all basins, gauges left out",164,-0.008,0.436,-0.578,0.815,TC group
+stations with a TC part,2,no raise,323,0.015,0.08,-0.098,0.138,TC group
+stations with a TC part,2,"shift, basin left out",323,0.044,0.104,-0.078,0.216,TC group
+stations with a TC part,2,"shift, own basin, in sample",323,0.058,0.112,-0.071,0.197,TC group
+stations with a TC part,2,"shift, own basin, gauges left out",323,0.055,0.114,-0.071,0.204,TC group
+stations with a TC part,2,"shift, all basins, gauges left out",323,0.05,0.109,-0.069,0.211,TC group
+stations with a TC part,2,"surge scale, basin left out",323,0.015,0.08,-0.095,0.139,TC group
+stations with a TC part,2,"surge scale, own basin, in sample",323,0.016,0.08,-0.095,0.139,TC group
+stations with a TC part,2,"surge scale, own basin, gauges left out",323,0.016,0.08,-0.094,0.139,TC group
+stations with a TC part,2,"surge scale, all basins, gauges left out",323,0.015,0.08,-0.096,0.139,TC group
+stations with a TC part,10,no raise,323,-0.003,0.108,-0.183,0.127,TC group
+stations with a TC part,10,"shift, basin left out",323,0.02,0.118,-0.161,0.177,TC group
+stations with a TC part,10,"shift, own basin, in sample",323,0.031,0.12,-0.148,0.182,TC group
+stations with a TC part,10,"shift, own basin, gauges left out",323,0.031,0.124,-0.154,0.198,TC group
+stations with a TC part,10,"shift, all basins, gauges left out",323,0.033,0.121,-0.154,0.168,TC group
+stations with a TC part,10,"surge scale, basin left out",323,0.004,0.107,-0.169,0.138,TC group
+stations with a TC part,10,"surge scale, own basin, in sample",323,0.006,0.108,-0.173,0.133,TC group
+stations with a TC part,10,"surge scale, own basin, gauges left out",323,0.006,0.109,-0.176,0.133,TC group
+stations with a TC part,10,"surge scale, all basins, gauges left out",323,0.004,0.107,-0.173,0.136,TC group
+stations with a TC part,50,no raise,323,-0.02,0.181,-0.333,0.168,TC group
+stations with a TC part,50,"shift, basin left out",323,0.013,0.181,-0.296,0.218,TC group
+stations with a TC part,50,"shift, own basin, in sample",323,0.02,0.181,-0.272,0.251,TC group
+stations with a TC part,50,"shift, own basin, gauges left out",323,0.02,0.186,-0.3,0.281,TC group
+stations with a TC part,50,"shift, all basins, gauges left out",323,0.02,0.183,-0.312,0.248,TC group
+stations with a TC part,50,"surge scale, basin left out",323,0.007,0.203,-0.29,0.281,TC group
+stations with a TC part,50,"surge scale, own basin, in sample",323,-0.003,0.189,-0.307,0.235,TC group
+stations with a TC part,50,"surge scale, own basin, gauges left out",323,0.003,0.19,-0.289,0.252,TC group
+stations with a TC part,50,"surge scale, all basins, gauges left out",323,0.012,0.194,-0.29,0.267,TC group
+stations with a TC part,100,no raise,323,-0.032,0.25,-0.6,0.186,TC group
+stations with a TC part,100,"shift, basin left out",323,0.01,0.252,-0.412,0.28,TC group
+stations with a TC part,100,"shift, own basin, in sample",323,0.017,0.243,-0.45,0.27,TC group
+stations with a TC part,100,"shift, own basin, gauges left out",323,0.02,0.252,-0.46,0.322,TC group
+stations with a TC part,100,"shift, all basins, gauges left out",323,0.022,0.253,-0.425,0.307,TC group
+stations with a TC part,100,"surge scale, basin left out",323,0.007,0.311,-0.358,0.513,TC group
+stations with a TC part,100,"surge scale, own basin, in sample",323,0.013,0.259,-0.395,0.369,TC group
+stations with a TC part,100,"surge scale, own basin, gauges left out",323,0.015,0.27,-0.406,0.401,TC group
+stations with a TC part,100,"surge scale, all basins, gauges left out",323,0.016,0.29,-0.351,0.445,TC group
+E.Asia (EAS),2,no raise,92,0.001,0.051,-0.066,0.067,region
+E.Asia (EAS),2,"shift, basin left out",92,0.014,0.062,-0.054,0.108,region
+E.Asia (EAS),2,"shift, own basin, in sample",92,0.055,0.088,-0.016,0.183,region
+E.Asia (EAS),2,"shift, own basin, gauges left out",92,0.053,0.086,-0.025,0.186,region
+E.Asia (EAS),2,"shift, all basins, gauges left out",92,0.029,0.072,-0.047,0.138,region
+E.Asia (EAS),2,"surge scale, basin left out",92,0.002,0.051,-0.065,0.067,region
+E.Asia (EAS),2,"surge scale, own basin, in sample",92,0.007,0.051,-0.063,0.071,region
+E.Asia (EAS),2,"surge scale, own basin, gauges left out",92,0.006,0.051,-0.064,0.072,region
+E.Asia (EAS),2,"surge scale, all basins, gauges left out",92,0.004,0.051,-0.065,0.069,region
+E.Asia (EAS),10,no raise,92,-0.05,0.095,-0.185,0.051,region
+E.Asia (EAS),10,"shift, basin left out",92,-0.024,0.093,-0.162,0.079,region
+E.Asia (EAS),10,"shift, own basin, in sample",92,0.019,0.097,-0.122,0.171,region
+E.Asia (EAS),10,"shift, own basin, gauges left out",92,0.019,0.1,-0.13,0.159,region
+E.Asia (EAS),10,"shift, all basins, gauges left out",92,-0.003,0.097,-0.15,0.105,region
+E.Asia (EAS),10,"surge scale, basin left out",92,-0.047,0.094,-0.182,0.058,region
+E.Asia (EAS),10,"surge scale, own basin, in sample",92,-0.026,0.094,-0.174,0.075,region
+E.Asia (EAS),10,"surge scale, own basin, gauges left out",92,-0.025,0.095,-0.177,0.075,region
+E.Asia (EAS),10,"surge scale, all basins, gauges left out",92,-0.036,0.093,-0.179,0.063,region
+E.Asia (EAS),50,no raise,92,-0.109,0.182,-0.473,0.051,region
+E.Asia (EAS),50,"shift, basin left out",92,-0.056,0.168,-0.414,0.111,region
+E.Asia (EAS),50,"shift, own basin, in sample",92,0.002,0.161,-0.328,0.182,region
+E.Asia (EAS),50,"shift, own basin, gauges left out",92,-0.004,0.167,-0.327,0.181,region
+E.Asia (EAS),50,"shift, all basins, gauges left out",92,-0.015,0.168,-0.374,0.145,region
+E.Asia (EAS),50,"surge scale, basin left out",92,-0.092,0.179,-0.452,0.062,region
+E.Asia (EAS),50,"surge scale, own basin, in sample",92,-0.018,0.189,-0.339,0.207,region
+E.Asia (EAS),50,"surge scale, own basin, gauges left out",92,-0.023,0.194,-0.346,0.221,region
+E.Asia (EAS),50,"surge scale, all basins, gauges left out",92,-0.054,0.183,-0.37,0.122,region
+E.Asia (EAS),100,no raise,92,-0.136,0.234,-0.62,0.036,region
+E.Asia (EAS),100,"shift, basin left out",92,-0.068,0.206,-0.559,0.091,region
+E.Asia (EAS),100,"shift, own basin, in sample",92,0.009,0.194,-0.465,0.194,region
+E.Asia (EAS),100,"shift, own basin, gauges left out",92,0.002,0.2,-0.485,0.205,region
+E.Asia (EAS),100,"shift, all basins, gauges left out",92,-0.035,0.203,-0.526,0.158,region
+E.Asia (EAS),100,"surge scale, basin left out",92,-0.103,0.222,-0.602,0.077,region
+E.Asia (EAS),100,"surge scale, own basin, in sample",92,-0,0.228,-0.388,0.318,region
+E.Asia (EAS),100,"surge scale, own basin, gauges left out",92,-0.015,0.239,-0.405,0.34,region
+E.Asia (EAS),100,"surge scale, all basins, gauges left out",92,-0.057,0.223,-0.545,0.154,region
+E.North-America (ENA),2,no raise,65,-0.021,0.089,-0.139,0.096,region
+E.North-America (ENA),2,"shift, basin left out",65,-0.008,0.087,-0.137,0.103,region
+E.North-America (ENA),2,"shift, own basin, in sample",65,-0.017,0.088,-0.139,0.097,region
+E.North-America (ENA),2,"shift, own basin, gauges left out",65,-0.018,0.088,-0.138,0.097,region
+E.North-America (ENA),2,"shift, all basins, gauges left out",65,-0.008,0.087,-0.137,0.099,region
+E.North-America (ENA),2,"surge scale, basin left out",65,-0.015,0.088,-0.138,0.1,region
+E.North-America (ENA),2,"surge scale, own basin, in sample",65,-0.02,0.089,-0.139,0.097,region
+E.North-America (ENA),2,"surge scale, own basin, gauges left out",65,-0.02,0.089,-0.139,0.097,region
+E.North-America (ENA),2,"surge scale, all basins, gauges left out",65,-0.016,0.088,-0.138,0.099,region
+E.North-America (ENA),10,no raise,65,-0.027,0.128,-0.262,0.125,region
+E.North-America (ENA),10,"shift, basin left out",65,-0.017,0.121,-0.218,0.138,region
+E.North-America (ENA),10,"shift, own basin, in sample",65,-0.024,0.127,-0.25,0.127,region
+E.North-America (ENA),10,"shift, own basin, gauges left out",65,-0.023,0.126,-0.255,0.128,region
+E.North-America (ENA),10,"shift, all basins, gauges left out",65,-0.017,0.122,-0.231,0.131,region
+E.North-America (ENA),10,"surge scale, basin left out",65,-0.012,0.122,-0.221,0.138,region
+E.North-America (ENA),10,"surge scale, own basin, in sample",65,-0.025,0.128,-0.256,0.126,region
+E.North-America (ENA),10,"surge scale, own basin, gauges left out",65,-0.025,0.128,-0.258,0.128,region
+E.North-America (ENA),10,"surge scale, all basins, gauges left out",65,-0.015,0.124,-0.238,0.135,region
+E.North-America (ENA),50,no raise,65,-0.033,0.22,-0.41,0.264,region
+E.North-America (ENA),50,"shift, basin left out",65,0.001,0.218,-0.306,0.441,region
+E.North-America (ENA),50,"shift, own basin, in sample",65,-0.019,0.217,-0.377,0.336,region
+E.North-America (ENA),50,"shift, own basin, gauges left out",65,-0.013,0.219,-0.395,0.357,region
+E.North-America (ENA),50,"shift, all basins, gauges left out",65,-0,0.218,-0.321,0.434,region
+E.North-America (ENA),50,"surge scale, basin left out",65,0.073,0.314,-0.198,0.803,region
+E.North-America (ENA),50,"surge scale, own basin, in sample",65,-0.02,0.219,-0.385,0.349,region
+E.North-America (ENA),50,"surge scale, own basin, gauges left out",65,-0.014,0.223,-0.398,0.401,region
+E.North-America (ENA),50,"surge scale, all basins, gauges left out",65,0.04,0.276,-0.278,0.623,region
+E.North-America (ENA),100,no raise,65,-0.02,0.311,-0.559,0.604,region
+E.North-America (ENA),100,"shift, basin left out",65,0.036,0.336,-0.384,0.742,region
+E.North-America (ENA),100,"shift, own basin, in sample",65,0.006,0.315,-0.504,0.636,region
+E.North-America (ENA),100,"shift, own basin, gauges left out",65,0.01,0.324,-0.534,0.719,region
+E.North-America (ENA),100,"shift, all basins, gauges left out",65,0.032,0.335,-0.415,0.738,region
+E.North-America (ENA),100,"surge scale, basin left out",65,0.223,0.571,-0.22,1.469,region
+E.North-America (ENA),100,"surge scale, own basin, in sample",65,0.013,0.322,-0.51,0.647,region
+E.North-America (ENA),100,"surge scale, own basin, gauges left out",65,0.012,0.337,-0.536,0.761,region
+E.North-America (ENA),100,"surge scale, all basins, gauges left out",65,0.128,0.479,-0.315,1.231,region
+N.Pacific-Ocean (NPO),2,no raise,17,0.012,0.026,-0.014,0.057,region
+N.Pacific-Ocean (NPO),2,"shift, basin left out",17,0.023,0.033,0.004,0.067,region
+N.Pacific-Ocean (NPO),2,"shift, own basin, in sample",17,0.046,0.058,0.016,0.096,region
+N.Pacific-Ocean (NPO),2,"shift, own basin, gauges left out",17,0.046,0.058,0.016,0.098,region
+N.Pacific-Ocean (NPO),2,"shift, all basins, gauges left out",17,0.045,0.047,0.01,0.075,region
+N.Pacific-Ocean (NPO),2,"surge scale, basin left out",17,0.012,0.025,-0.014,0.057,region
+N.Pacific-Ocean (NPO),2,"surge scale, own basin, in sample",17,0.013,0.025,-0.012,0.057,region
+N.Pacific-Ocean (NPO),2,"surge scale, own basin, gauges left out",17,0.013,0.025,-0.012,0.057,region
+N.Pacific-Ocean (NPO),2,"surge scale, all basins, gauges left out",17,0.013,0.025,-0.013,0.057,region
+N.Pacific-Ocean (NPO),10,no raise,17,0.008,0.04,-0.067,0.06,region
+N.Pacific-Ocean (NPO),10,"shift, basin left out",17,0.016,0.039,-0.035,0.076,region
+N.Pacific-Ocean (NPO),10,"shift, own basin, in sample",17,0.034,0.059,-0.001,0.155,region
+N.Pacific-Ocean (NPO),10,"shift, own basin, gauges left out",17,0.034,0.059,-0.001,0.156,region
+N.Pacific-Ocean (NPO),10,"shift, all basins, gauges left out",17,0.034,0.047,-0.007,0.119,region
+N.Pacific-Ocean (NPO),10,"surge scale, basin left out",17,0.008,0.039,-0.06,0.06,region
+N.Pacific-Ocean (NPO),10,"surge scale, own basin, in sample",17,0.008,0.037,-0.042,0.06,region
+N.Pacific-Ocean (NPO),10,"surge scale, own basin, gauges left out",17,0.008,0.037,-0.042,0.06,region
+N.Pacific-Ocean (NPO),10,"surge scale, all basins, gauges left out",17,0.008,0.038,-0.047,0.06,region
+N.Pacific-Ocean (NPO),50,no raise,17,-0.004,0.112,-0.139,0.057,region
+N.Pacific-Ocean (NPO),50,"shift, basin left out",17,0.001,0.104,-0.044,0.12,region
+N.Pacific-Ocean (NPO),50,"shift, own basin, in sample",17,0.031,0.134,-0.044,0.205,region
+N.Pacific-Ocean (NPO),50,"shift, own basin, gauges left out",17,0.031,0.135,-0.044,0.206,region
+N.Pacific-Ocean (NPO),50,"shift, all basins, gauges left out",17,0.031,0.125,-0.044,0.172,region
+N.Pacific-Ocean (NPO),50,"surge scale, basin left out",17,-0.003,0.109,-0.09,0.075,region
+N.Pacific-Ocean (NPO),50,"surge scale, own basin, in sample",17,0.03,0.133,-0.054,0.198,region
+N.Pacific-Ocean (NPO),50,"surge scale, own basin, gauges left out",17,0.03,0.135,-0.054,0.208,region
+N.Pacific-Ocean (NPO),50,"surge scale, all basins, gauges left out",17,0.02,0.11,-0.054,0.116,region
+N.Pacific-Ocean (NPO),100,no raise,17,-0.016,0.205,-0.185,0.063,region
+N.Pacific-Ocean (NPO),100,"shift, basin left out",17,-0.001,0.197,-0.12,0.133,region
+N.Pacific-Ocean (NPO),100,"shift, own basin, in sample",17,-0.001,0.217,-0.11,0.228,region
+N.Pacific-Ocean (NPO),100,"shift, own basin, gauges left out",17,-0.001,0.218,-0.11,0.228,region
+N.Pacific-Ocean (NPO),100,"shift, all basins, gauges left out",17,-0.001,0.211,-0.11,0.192,region
+N.Pacific-Ocean (NPO),100,"surge scale, basin left out",17,-0.016,0.201,-0.154,0.087,region
+N.Pacific-Ocean (NPO),100,"surge scale, own basin, in sample",17,0.012,0.231,-0.123,0.251,region
+N.Pacific-Ocean (NPO),100,"surge scale, own basin, gauges left out",17,0.012,0.234,-0.123,0.258,region
+N.Pacific-Ocean (NPO),100,"surge scale, all basins, gauges left out",17,-0.004,0.207,-0.123,0.158,region
+S.E.Asia (SEA),2,no raise,21,0.109,0.141,0.026,0.274,region
+S.E.Asia (SEA),2,"shift, basin left out",21,0.157,0.182,0.033,0.333,region
+S.E.Asia (SEA),2,"shift, own basin, in sample",21,0.172,0.225,0.078,0.45,region
+S.E.Asia (SEA),2,"shift, own basin, gauges left out",21,0.172,0.225,0.076,0.45,region
+S.E.Asia (SEA),2,"shift, all basins, gauges left out",21,0.163,0.211,0.051,0.411,region
+S.E.Asia (SEA),2,"surge scale, basin left out",21,0.109,0.141,0.026,0.274,region
+S.E.Asia (SEA),2,"surge scale, own basin, in sample",21,0.109,0.143,0.027,0.274,region
+S.E.Asia (SEA),2,"surge scale, own basin, gauges left out",21,0.109,0.143,0.027,0.274,region
+S.E.Asia (SEA),2,"surge scale, all basins, gauges left out",21,0.109,0.142,0.026,0.274,region
+S.E.Asia (SEA),10,no raise,21,0.092,0.124,0.03,0.242,region
+S.E.Asia (SEA),10,"shift, basin left out",21,0.115,0.16,0.04,0.274,region
+S.E.Asia (SEA),10,"shift, own basin, in sample",21,0.175,0.204,0.051,0.351,region
+S.E.Asia (SEA),10,"shift, own basin, gauges left out",21,0.178,0.204,0.051,0.351,region
+S.E.Asia (SEA),10,"shift, all basins, gauges left out",21,0.143,0.189,0.046,0.313,region
+S.E.Asia (SEA),10,"surge scale, basin left out",21,0.092,0.124,0.034,0.242,region
+S.E.Asia (SEA),10,"surge scale, own basin, in sample",21,0.092,0.127,0.04,0.242,region
+S.E.Asia (SEA),10,"surge scale, own basin, gauges left out",21,0.092,0.127,0.04,0.242,region
+S.E.Asia (SEA),10,"surge scale, all basins, gauges left out",21,0.092,0.125,0.04,0.242,region
+S.E.Asia (SEA),50,no raise,21,0.053,0.142,-0.131,0.218,region
+S.E.Asia (SEA),50,"shift, basin left out",21,0.149,0.167,-0.068,0.267,region
+S.E.Asia (SEA),50,"shift, own basin, in sample",21,0.18,0.192,-0.006,0.316,region
+S.E.Asia (SEA),50,"shift, own basin, gauges left out",21,0.18,0.192,-0.006,0.32,region
+S.E.Asia (SEA),50,"shift, all basins, gauges left out",21,0.18,0.183,-0.042,0.282,region
+S.E.Asia (SEA),50,"surge scale, basin left out",21,0.058,0.143,-0.124,0.218,region
+S.E.Asia (SEA),50,"surge scale, own basin, in sample",21,0.13,0.157,-0.071,0.263,region
+S.E.Asia (SEA),50,"surge scale, own basin, gauges left out",21,0.122,0.157,-0.071,0.266,region
+S.E.Asia (SEA),50,"surge scale, all basins, gauges left out",21,0.101,0.147,-0.071,0.218,region
+S.E.Asia (SEA),100,no raise,21,0.07,0.2,-0.355,0.212,region
+S.E.Asia (SEA),100,"shift, basin left out",21,0.161,0.227,-0.256,0.284,region
+S.E.Asia (SEA),100,"shift, own basin, in sample",21,0.179,0.247,-0.139,0.401,region
+S.E.Asia (SEA),100,"shift, own basin, gauges left out",21,0.179,0.247,-0.145,0.405,region
+S.E.Asia (SEA),100,"shift, all basins, gauges left out",21,0.179,0.242,-0.182,0.367,region
+S.E.Asia (SEA),100,"surge scale, basin left out",21,0.09,0.202,-0.311,0.212,region
+S.E.Asia (SEA),100,"surge scale, own basin, in sample",21,0.097,0.211,-0.082,0.352,region
+S.E.Asia (SEA),100,"surge scale, own basin, gauges left out",21,0.097,0.211,-0.082,0.355,region
+S.E.Asia (SEA),100,"surge scale, all basins, gauges left out",21,0.094,0.207,-0.123,0.264,region
+other,2,no raise,128,0.026,0.094,-0.113,0.145,region
+other,2,"shift, basin left out",128,0.085,0.138,-0.078,0.232,region
+other,2,"shift, own basin, in sample",128,0.081,0.131,-0.087,0.196,region
+other,2,"shift, own basin, gauges left out",128,0.085,0.137,-0.102,0.206,region
+other,2,"shift, all basins, gauges left out",128,0.086,0.139,-0.079,0.225,region
+other,2,"surge scale, basin left out",128,0.026,0.094,-0.111,0.15,region
+other,2,"surge scale, own basin, in sample",128,0.026,0.094,-0.113,0.148,region
+other,2,"surge scale, own basin, gauges left out",128,0.027,0.094,-0.113,0.148,region
+other,2,"surge scale, all basins, gauges left out",128,0.026,0.094,-0.111,0.149,region
+other,10,no raise,128,0.006,0.112,-0.168,0.137,region
+other,10,"shift, basin left out",128,0.057,0.138,-0.145,0.176,region
+other,10,"shift, own basin, in sample",128,0.04,0.128,-0.152,0.156,region
+other,10,"shift, own basin, gauges left out",128,0.04,0.135,-0.157,0.214,region
+other,10,"shift, all basins, gauges left out",128,0.058,0.137,-0.145,0.162,region
+other,10,"surge scale, basin left out",128,0.014,0.114,-0.146,0.146,region
+other,10,"surge scale, own basin, in sample",128,0.012,0.115,-0.166,0.147,region
+other,10,"surge scale, own basin, gauges left out",128,0.012,0.115,-0.166,0.147,region
+other,10,"surge scale, all basins, gauges left out",128,0.014,0.114,-0.151,0.146,region
+other,50,no raise,128,-0.009,0.177,-0.311,0.157,region
+other,50,"shift, basin left out",128,0.03,0.185,-0.223,0.22,region
+other,50,"shift, own basin, in sample",128,0.024,0.18,-0.244,0.18,region
+other,50,"shift, own basin, gauges left out",128,0.024,0.188,-0.261,0.232,region
+other,50,"shift, all basins, gauges left out",128,0.032,0.185,-0.221,0.22,region
+other,50,"surge scale, basin left out",128,0.012,0.188,-0.188,0.221,region
+other,50,"surge scale, own basin, in sample",128,0.01,0.185,-0.292,0.217,region
+other,50,"surge scale, own basin, gauges left out",128,0.014,0.183,-0.278,0.213,region
+other,50,"surge scale, all basins, gauges left out",128,0.009,0.18,-0.207,0.207,region
+other,100,no raise,128,-0.019,0.245,-0.604,0.188,region
+other,100,"shift, basin left out",128,0.021,0.255,-0.382,0.272,region
+other,100,"shift, own basin, in sample",128,0.015,0.244,-0.469,0.242,region
+other,100,"shift, own basin, gauges left out",128,0.02,0.257,-0.481,0.327,region
+other,100,"shift, all basins, gauges left out",128,0.024,0.254,-0.413,0.272,region
+other,100,"surge scale, basin left out",128,0.006,0.274,-0.281,0.38,region
+other,100,"surge scale, own basin, in sample",128,0.003,0.261,-0.411,0.323,region
+other,100,"surge scale, own basin, gauges left out",128,0.01,0.274,-0.421,0.418,region
+other,100,"surge scale, all basins, gauges left out",128,-0,0.268,-0.311,0.297,region
+"(0, 1]",2,no raise,123,0.01,0.054,-0.085,0.085,spring tidal range (m)
+"(0, 1]",2,"shift, basin left out",123,0.026,0.065,-0.079,0.117,spring tidal range (m)
+"(0, 1]",2,"shift, own basin, in sample",123,0.033,0.07,-0.083,0.123,spring tidal range (m)
+"(0, 1]",2,"shift, own basin, gauges left out",123,0.036,0.074,-0.08,0.139,spring tidal range (m)
+"(0, 1]",2,"shift, all basins, gauges left out",123,0.038,0.068,-0.079,0.124,spring tidal range (m)
+"(0, 1]",2,"surge scale, basin left out",123,0.011,0.054,-0.079,0.087,spring tidal range (m)
+"(0, 1]",2,"surge scale, own basin, in sample",123,0.01,0.054,-0.084,0.087,spring tidal range (m)
+"(0, 1]",2,"surge scale, own basin, gauges left out",123,0.01,0.055,-0.083,0.087,spring tidal range (m)
+"(0, 1]",2,"surge scale, all basins, gauges left out",123,0.011,0.054,-0.08,0.086,spring tidal range (m)
+"(0, 1]",10,no raise,123,-0.008,0.081,-0.16,0.066,spring tidal range (m)
+"(0, 1]",10,"shift, basin left out",123,0.009,0.086,-0.146,0.127,spring tidal range (m)
+"(0, 1]",10,"shift, own basin, in sample",123,0.016,0.089,-0.158,0.108,spring tidal range (m)
+"(0, 1]",10,"shift, own basin, gauges left out",123,0.021,0.093,-0.158,0.122,spring tidal range (m)
+"(0, 1]",10,"shift, all basins, gauges left out",123,0.022,0.088,-0.146,0.129,spring tidal range (m)
+"(0, 1]",10,"surge scale, basin left out",123,-0.002,0.078,-0.146,0.071,spring tidal range (m)
+"(0, 1]",10,"surge scale, own basin, in sample",123,-0.002,0.08,-0.158,0.07,spring tidal range (m)
+"(0, 1]",10,"surge scale, own basin, gauges left out",123,-0.002,0.08,-0.158,0.07,spring tidal range (m)
+"(0, 1]",10,"surge scale, all basins, gauges left out",123,0.001,0.078,-0.147,0.071,spring tidal range (m)
+"(0, 1]",50,no raise,123,-0.027,0.174,-0.343,0.099,spring tidal range (m)
+"(0, 1]",50,"shift, basin left out",123,0.001,0.167,-0.296,0.204,spring tidal range (m)
+"(0, 1]",50,"shift, own basin, in sample",123,0.007,0.178,-0.309,0.157,spring tidal range (m)
+"(0, 1]",50,"shift, own basin, gauges left out",123,0.02,0.187,-0.314,0.193,spring tidal range (m)
+"(0, 1]",50,"shift, all basins, gauges left out",123,0.024,0.174,-0.312,0.18,spring tidal range (m)
+"(0, 1]",50,"surge scale, basin left out",123,-0,0.192,-0.205,0.214,spring tidal range (m)
+"(0, 1]",50,"surge scale, own basin, in sample",123,-0.004,0.176,-0.339,0.137,spring tidal range (m)
+"(0, 1]",50,"surge scale, own basin, gauges left out",123,-0.007,0.18,-0.34,0.158,spring tidal range (m)
+"(0, 1]",50,"surge scale, all basins, gauges left out",123,0.011,0.181,-0.283,0.218,spring tidal range (m)
+"(0, 1]",100,no raise,123,-0.033,0.26,-0.653,0.111,spring tidal range (m)
+"(0, 1]",100,"shift, basin left out",123,0.009,0.259,-0.416,0.255,spring tidal range (m)
+"(0, 1]",100,"shift, own basin, in sample",123,0.022,0.264,-0.537,0.206,spring tidal range (m)
+"(0, 1]",100,"shift, own basin, gauges left out",123,0.022,0.277,-0.581,0.24,spring tidal range (m)
+"(0, 1]",100,"shift, all basins, gauges left out",123,0.029,0.265,-0.448,0.251,spring tidal range (m)
+"(0, 1]",100,"surge scale, basin left out",123,0.003,0.307,-0.302,0.555,spring tidal range (m)
+"(0, 1]",100,"surge scale, own basin, in sample",123,0.012,0.268,-0.574,0.195,spring tidal range (m)
+"(0, 1]",100,"surge scale, own basin, gauges left out",123,0.016,0.277,-0.592,0.222,spring tidal range (m)
+"(0, 1]",100,"surge scale, all basins, gauges left out",123,0.018,0.29,-0.342,0.401,spring tidal range (m)
+"(1, 2]",2,no raise,137,0.014,0.074,-0.094,0.126,spring tidal range (m)
+"(1, 2]",2,"shift, basin left out",137,0.043,0.093,-0.068,0.194,spring tidal range (m)
+"(1, 2]",2,"shift, own basin, in sample",137,0.069,0.108,-0.05,0.196,spring tidal range (m)
+"(1, 2]",2,"shift, own basin, gauges left out",137,0.06,0.109,-0.055,0.198,spring tidal range (m)
+"(1, 2]",2,"shift, all basins, gauges left out",137,0.05,0.1,-0.065,0.194,spring tidal range (m)
+"(1, 2]",2,"surge scale, basin left out",137,0.014,0.074,-0.094,0.127,spring tidal range (m)
+"(1, 2]",2,"surge scale, own basin, in sample",137,0.014,0.074,-0.091,0.13,spring tidal range (m)
+"(1, 2]",2,"surge scale, own basin, gauges left out",137,0.014,0.074,-0.091,0.13,spring tidal range (m)
+"(1, 2]",2,"surge scale, all basins, gauges left out",137,0.014,0.074,-0.093,0.128,spring tidal range (m)
+"(1, 2]",10,no raise,137,-0.022,0.107,-0.195,0.126,spring tidal range (m)
+"(1, 2]",10,"shift, basin left out",137,0.015,0.108,-0.162,0.167,spring tidal range (m)
+"(1, 2]",10,"shift, own basin, in sample",137,0.028,0.111,-0.133,0.174,spring tidal range (m)
+"(1, 2]",10,"shift, own basin, gauges left out",137,0.027,0.115,-0.15,0.179,spring tidal range (m)
+"(1, 2]",10,"shift, all basins, gauges left out",137,0.024,0.111,-0.159,0.162,spring tidal range (m)
+"(1, 2]",10,"surge scale, basin left out",137,-0.014,0.105,-0.174,0.133,spring tidal range (m)
+"(1, 2]",10,"surge scale, own basin, in sample",137,-0.003,0.105,-0.176,0.146,spring tidal range (m)
+"(1, 2]",10,"surge scale, own basin, gauges left out",137,-0.003,0.106,-0.179,0.146,spring tidal range (m)
+"(1, 2]",10,"surge scale, all basins, gauges left out",137,-0.013,0.104,-0.175,0.145,spring tidal range (m)
+"(1, 2]",50,no raise,137,-0.038,0.181,-0.357,0.146,spring tidal range (m)
+"(1, 2]",50,"shift, basin left out",137,-0.01,0.173,-0.299,0.18,spring tidal range (m)
+"(1, 2]",50,"shift, own basin, in sample",137,0.009,0.161,-0.234,0.208,spring tidal range (m)
+"(1, 2]",50,"shift, own basin, gauges left out",137,0.005,0.167,-0.244,0.229,spring tidal range (m)
+"(1, 2]",50,"shift, all basins, gauges left out",137,-0.002,0.169,-0.278,0.188,spring tidal range (m)
+"(1, 2]",50,"surge scale, basin left out",137,-0.013,0.207,-0.307,0.224,spring tidal range (m)
+"(1, 2]",50,"surge scale, own basin, in sample",137,-0.009,0.183,-0.249,0.221,spring tidal range (m)
+"(1, 2]",50,"surge scale, own basin, gauges left out",137,-0.009,0.186,-0.254,0.225,spring tidal range (m)
+"(1, 2]",50,"surge scale, all basins, gauges left out",137,-0.01,0.196,-0.283,0.233,spring tidal range (m)
+"(1, 2]",100,no raise,137,-0.067,0.251,-0.597,0.155,spring tidal range (m)
+"(1, 2]",100,"shift, basin left out",137,-0.021,0.24,-0.503,0.212,spring tidal range (m)
+"(1, 2]",100,"shift, own basin, in sample",137,0.01,0.218,-0.429,0.217,spring tidal range (m)
+"(1, 2]",100,"shift, own basin, gauges left out",137,0.011,0.225,-0.449,0.215,spring tidal range (m)
+"(1, 2]",100,"shift, all basins, gauges left out",137,-0.006,0.233,-0.48,0.214,spring tidal range (m)
+"(1, 2]",100,"surge scale, basin left out",137,-0.023,0.315,-0.5,0.328,spring tidal range (m)
+"(1, 2]",100,"surge scale, own basin, in sample",137,-0.001,0.246,-0.381,0.324,spring tidal range (m)
+"(1, 2]",100,"surge scale, own basin, gauges left out",137,-0.005,0.256,-0.401,0.35,spring tidal range (m)
+"(1, 2]",100,"surge scale, all basins, gauges left out",137,-0.022,0.288,-0.463,0.361,spring tidal range (m)
+"(2, 4]",2,no raise,50,0.034,0.117,-0.071,0.202,spring tidal range (m)
+"(2, 4]",2,"shift, basin left out",50,0.115,0.174,-0.056,0.308,spring tidal range (m)
+"(2, 4]",2,"shift, own basin, in sample",50,0.1,0.181,-0.068,0.322,spring tidal range (m)
+"(2, 4]",2,"shift, own basin, gauges left out",50,0.099,0.178,-0.039,0.322,spring tidal range (m)
+"(2, 4]",2,"shift, all basins, gauges left out",50,0.135,0.185,-0.046,0.315,spring tidal range (m)
+"(2, 4]",2,"surge scale, basin left out",50,0.034,0.117,-0.07,0.204,spring tidal range (m)
+"(2, 4]",2,"surge scale, own basin, in sample",50,0.034,0.118,-0.068,0.209,spring tidal range (m)
+"(2, 4]",2,"surge scale, own basin, gauges left out",50,0.034,0.118,-0.068,0.209,spring tidal range (m)
+"(2, 4]",2,"surge scale, all basins, gauges left out",50,0.034,0.118,-0.069,0.207,spring tidal range (m)
+"(2, 4]",10,no raise,50,0.031,0.135,-0.186,0.199,spring tidal range (m)
+"(2, 4]",10,"shift, basin left out",50,0.09,0.171,-0.166,0.255,spring tidal range (m)
+"(2, 4]",10,"shift, own basin, in sample",50,0.062,0.176,-0.151,0.307,spring tidal range (m)
+"(2, 4]",10,"shift, own basin, gauges left out",50,0.062,0.174,-0.133,0.307,spring tidal range (m)
+"(2, 4]",10,"shift, all basins, gauges left out",50,0.108,0.181,-0.151,0.301,spring tidal range (m)
+"(2, 4]",10,"surge scale, basin left out",50,0.048,0.138,-0.183,0.2,spring tidal range (m)
+"(2, 4]",10,"surge scale, own basin, in sample",50,0.038,0.141,-0.18,0.201,spring tidal range (m)
+"(2, 4]",10,"surge scale, own basin, gauges left out",50,0.037,0.14,-0.181,0.201,spring tidal range (m)
+"(2, 4]",10,"surge scale, all basins, gauges left out",50,0.046,0.139,-0.181,0.2,spring tidal range (m)
+"(2, 4]",50,no raise,50,-0.008,0.169,-0.35,0.222,spring tidal range (m)
+"(2, 4]",50,"shift, basin left out",50,0.055,0.189,-0.29,0.318,spring tidal range (m)
+"(2, 4]",50,"shift, own basin, in sample",50,0.024,0.194,-0.233,0.315,spring tidal range (m)
+"(2, 4]",50,"shift, own basin, gauges left out",50,0.024,0.188,-0.236,0.332,spring tidal range (m)
+"(2, 4]",50,"shift, all basins, gauges left out",50,0.057,0.195,-0.269,0.331,spring tidal range (m)
+"(2, 4]",50,"surge scale, basin left out",50,0.034,0.184,-0.291,0.327,spring tidal range (m)
+"(2, 4]",50,"surge scale, own basin, in sample",50,0.014,0.183,-0.292,0.325,spring tidal range (m)
+"(2, 4]",50,"surge scale, own basin, gauges left out",50,0.017,0.174,-0.192,0.368,spring tidal range (m)
+"(2, 4]",50,"surge scale, all basins, gauges left out",50,0.041,0.179,-0.229,0.237,spring tidal range (m)
+"(2, 4]",100,no raise,50,-0.013,0.204,-0.404,0.221,spring tidal range (m)
+"(2, 4]",100,"shift, basin left out",50,0.057,0.234,-0.326,0.367,spring tidal range (m)
+"(2, 4]",100,"shift, own basin, in sample",50,0.021,0.221,-0.233,0.385,spring tidal range (m)
+"(2, 4]",100,"shift, own basin, gauges left out",50,0.024,0.229,-0.254,0.385,spring tidal range (m)
+"(2, 4]",100,"shift, all basins, gauges left out",50,0.072,0.238,-0.277,0.382,spring tidal range (m)
+"(2, 4]",100,"surge scale, basin left out",50,0.024,0.285,-0.38,0.504,spring tidal range (m)
+"(2, 4]",100,"surge scale, own basin, in sample",50,0.015,0.222,-0.265,0.499,spring tidal range (m)
+"(2, 4]",100,"surge scale, own basin, gauges left out",50,0.019,0.248,-0.269,0.507,spring tidal range (m)
+"(2, 4]",100,"surge scale, all basins, gauges left out",50,0.043,0.268,-0.31,0.504,spring tidal range (m)
+"(4, 20]",2,no raise,13,0.077,0.247,-0.113,0.377,spring tidal range (m)
+"(4, 20]",2,"shift, basin left out",13,0.109,0.307,-0.113,0.578,spring tidal range (m)
+"(4, 20]",2,"shift, own basin, in sample",13,0.081,0.292,-0.113,0.485,spring tidal range (m)
+"(4, 20]",2,"shift, own basin, gauges left out",13,0.081,0.292,-0.113,0.505,spring tidal range (m)
+"(4, 20]",2,"shift, all basins, gauges left out",13,0.103,0.309,-0.113,0.577,spring tidal range (m)
+"(4, 20]",2,"surge scale, basin left out",13,0.078,0.248,-0.113,0.378,spring tidal range (m)
+"(4, 20]",2,"surge scale, own basin, in sample",13,0.08,0.25,-0.113,0.378,spring tidal range (m)
+"(4, 20]",2,"surge scale, own basin, gauges left out",13,0.08,0.249,-0.113,0.378,spring tidal range (m)
+"(4, 20]",2,"surge scale, all basins, gauges left out",13,0.078,0.248,-0.113,0.378,spring tidal range (m)
+"(4, 20]",10,no raise,13,0.064,0.263,-0.092,0.494,spring tidal range (m)
+"(4, 20]",10,"shift, basin left out",13,0.126,0.321,-0.089,0.62,spring tidal range (m)
+"(4, 20]",10,"shift, own basin, in sample",13,0.121,0.307,-0.087,0.539,spring tidal range (m)
+"(4, 20]",10,"shift, own basin, gauges left out",13,0.121,0.308,-0.087,0.559,spring tidal range (m)
+"(4, 20]",10,"shift, all basins, gauges left out",13,0.123,0.323,-0.089,0.619,spring tidal range (m)
+"(4, 20]",10,"surge scale, basin left out",13,0.075,0.28,-0.091,0.511,spring tidal range (m)
+"(4, 20]",10,"surge scale, own basin, in sample",13,0.121,0.286,-0.087,0.511,spring tidal range (m)
+"(4, 20]",10,"surge scale, own basin, gauges left out",13,0.11,0.286,-0.087,0.52,spring tidal range (m)
+"(4, 20]",10,"surge scale, all basins, gauges left out",13,0.095,0.282,-0.091,0.512,spring tidal range (m)
+"(4, 20]",50,no raise,13,0.166,0.306,-0.068,0.66,spring tidal range (m)
+"(4, 20]",50,"shift, basin left out",13,0.166,0.372,-0.063,0.839,spring tidal range (m)
+"(4, 20]",50,"shift, own basin, in sample",13,0.166,0.361,-0.063,0.764,spring tidal range (m)
+"(4, 20]",50,"shift, own basin, gauges left out",13,0.166,0.362,-0.063,0.784,spring tidal range (m)
+"(4, 20]",50,"shift, all basins, gauges left out",13,0.166,0.376,-0.063,0.838,spring tidal range (m)
+"(4, 20]",50,"surge scale, basin left out",13,0.166,0.353,-0.063,0.868,spring tidal range (m)
+"(4, 20]",50,"surge scale, own basin, in sample",13,0.166,0.388,-0.063,0.872,spring tidal range (m)
+"(4, 20]",50,"surge scale, own basin, gauges left out",13,0.166,0.387,-0.063,0.911,spring tidal range (m)
+"(4, 20]",50,"surge scale, all basins, gauges left out",13,0.166,0.365,-0.063,0.87,spring tidal range (m)
+"(4, 20]",100,no raise,13,0.112,0.323,-0.057,0.8,spring tidal range (m)
+"(4, 20]",100,"shift, basin left out",13,0.182,0.393,-0.055,0.98,spring tidal range (m)
+"(4, 20]",100,"shift, own basin, in sample",13,0.182,0.383,-0.055,0.905,spring tidal range (m)
+"(4, 20]",100,"shift, own basin, gauges left out",13,0.182,0.384,-0.055,0.925,spring tidal range (m)
+"(4, 20]",100,"shift, all basins, gauges left out",13,0.182,0.397,-0.055,0.979,spring tidal range (m)
+"(4, 20]",100,"surge scale, basin left out",13,0.182,0.389,-0.055,1.092,spring tidal range (m)
+"(4, 20]",100,"surge scale, own basin, in sample",13,0.263,0.448,-0.055,1.102,spring tidal range (m)
+"(4, 20]",100,"surge scale, own basin, gauges left out",13,0.263,0.446,-0.055,1.153,spring tidal range (m)
+"(4, 20]",100,"surge scale, all basins, gauges left out",13,0.182,0.405,-0.055,1.095,spring tidal range (m)
+EP,2,no raise,18,0.014,0.023,-0.009,0.047,basin
+EP,2,"shift, basin left out",18,0.036,0.036,0.009,0.062,basin
+EP,2,"shift, own basin, in sample",18,0.036,0.036,0.009,0.062,basin
+EP,2,"shift, own basin, gauges left out",18,0.036,0.036,0.009,0.062,basin
+EP,2,"shift, all basins, gauges left out",18,0.036,0.036,0.009,0.062,basin
+EP,2,"surge scale, basin left out",18,0.014,0.023,-0.009,0.047,basin
+EP,2,"surge scale, own basin, in sample",18,0.014,0.023,-0.009,0.047,basin
+EP,2,"surge scale, own basin, gauges left out",18,0.014,0.023,-0.009,0.047,basin
+EP,2,"surge scale, all basins, gauges left out",18,0.014,0.023,-0.009,0.047,basin
+EP,10,no raise,18,0.007,0.027,-0.029,0.059,basin
+EP,10,"shift, basin left out",18,0.009,0.024,-0.018,0.06,basin
+EP,10,"shift, own basin, in sample",18,0.009,0.024,-0.018,0.06,basin
+EP,10,"shift, own basin, gauges left out",18,0.009,0.024,-0.018,0.06,basin
+EP,10,"shift, all basins, gauges left out",18,0.009,0.024,-0.018,0.06,basin
+EP,10,"surge scale, basin left out",18,0.008,0.027,-0.029,0.059,basin
+EP,10,"surge scale, own basin, in sample",18,0.008,0.027,-0.029,0.059,basin
+EP,10,"surge scale, own basin, gauges left out",18,0.008,0.027,-0.029,0.059,basin
+EP,10,"surge scale, all basins, gauges left out",18,0.008,0.027,-0.029,0.059,basin
+EP,50,no raise,18,-0.011,0.031,-0.057,0.031,basin
+EP,50,"shift, basin left out",18,-0.003,0.029,-0.044,0.034,basin
+EP,50,"shift, own basin, in sample",18,-0.003,0.029,-0.044,0.034,basin
+EP,50,"shift, own basin, gauges left out",18,-0.003,0.029,-0.044,0.034,basin
+EP,50,"shift, all basins, gauges left out",18,-0.003,0.029,-0.044,0.034,basin
+EP,50,"surge scale, basin left out",18,-0.01,0.031,-0.057,0.031,basin
+EP,50,"surge scale, own basin, in sample",18,-0.01,0.031,-0.057,0.031,basin
+EP,50,"surge scale, own basin, gauges left out",18,-0.01,0.031,-0.057,0.031,basin
+EP,50,"surge scale, all basins, gauges left out",18,-0.01,0.031,-0.057,0.031,basin
+EP,100,no raise,18,-0.023,0.044,-0.108,0.02,basin
+EP,100,"shift, basin left out",18,-0.018,0.042,-0.098,0.034,basin
+EP,100,"shift, own basin, in sample",18,-0.018,0.042,-0.098,0.034,basin
+EP,100,"shift, own basin, gauges left out",18,-0.018,0.042,-0.098,0.034,basin
+EP,100,"shift, all basins, gauges left out",18,-0.018,0.042,-0.098,0.034,basin
+EP,100,"surge scale, basin left out",18,-0.019,0.043,-0.108,0.021,basin
+EP,100,"surge scale, own basin, in sample",18,-0.019,0.043,-0.108,0.021,basin
+EP,100,"surge scale, own basin, gauges left out",18,-0.019,0.043,-0.108,0.021,basin
+EP,100,"surge scale, all basins, gauges left out",18,-0.019,0.043,-0.108,0.021,basin
+NA,2,no raise,91,-0.005,0.08,-0.123,0.097,basin
+NA,2,"shift, basin left out",91,0.021,0.099,-0.118,0.21,basin
+NA,2,"shift, own basin, in sample",91,0.003,0.085,-0.122,0.12,basin
+NA,2,"shift, own basin, gauges left out",91,0.003,0.085,-0.122,0.12,basin
+NA,2,"shift, all basins, gauges left out",91,0.013,0.095,-0.118,0.194,basin
+NA,2,"surge scale, basin left out",91,-0.002,0.08,-0.121,0.101,basin
+NA,2,"surge scale, own basin, in sample",91,-0.005,0.08,-0.123,0.097,basin
+NA,2,"surge scale, own basin, gauges left out",91,-0.005,0.08,-0.123,0.098,basin
+NA,2,"surge scale, all basins, gauges left out",91,-0.003,0.08,-0.121,0.1,basin
+NA,10,no raise,91,-0.014,0.118,-0.267,0.122,basin
+NA,10,"shift, basin left out",91,0.022,0.126,-0.219,0.178,basin
+NA,10,"shift, own basin, in sample",91,-0.002,0.117,-0.257,0.124,basin
+NA,10,"shift, own basin, gauges left out",91,-0.005,0.117,-0.263,0.123,basin
+NA,10,"shift, all basins, gauges left out",91,0.006,0.124,-0.23,0.154,basin
+NA,10,"surge scale, basin left out",91,-0.01,0.113,-0.221,0.138,basin
+NA,10,"surge scale, own basin, in sample",91,-0.014,0.117,-0.265,0.123,basin
+NA,10,"surge scale, own basin, gauges left out",91,-0.014,0.117,-0.266,0.122,basin
+NA,10,"surge scale, all basins, gauges left out",91,-0.013,0.115,-0.237,0.134,basin
+NA,50,no raise,91,-0.026,0.233,-0.452,0.258,basin
+NA,50,"shift, basin left out",91,0.015,0.236,-0.313,0.436,basin
+NA,50,"shift, own basin, in sample",91,-0.015,0.229,-0.404,0.313,basin
+NA,50,"shift, own basin, gauges left out",91,-0.011,0.232,-0.431,0.345,basin
+NA,50,"shift, all basins, gauges left out",91,0.012,0.235,-0.326,0.423,basin
+NA,50,"surge scale, basin left out",91,0.061,0.319,-0.194,0.928,basin
+NA,50,"surge scale, own basin, in sample",91,-0.02,0.233,-0.412,0.322,basin
+NA,50,"surge scale, own basin, gauges left out",91,-0.014,0.237,-0.433,0.368,basin
+NA,50,"surge scale, all basins, gauges left out",91,0.031,0.281,-0.224,0.684,basin
+NA,100,no raise,91,-0.02,0.353,-0.663,0.57,basin
+NA,100,"shift, basin left out",91,0.052,0.376,-0.422,0.707,basin
+NA,100,"shift, own basin, in sample",91,0.008,0.355,-0.58,0.627,basin
+NA,100,"shift, own basin, gauges left out",91,0.01,0.363,-0.622,0.673,basin
+NA,100,"shift, all basins, gauges left out",91,0.052,0.374,-0.453,0.686,basin
+NA,100,"surge scale, basin left out",91,0.174,0.562,-0.237,1.513,basin
+NA,100,"surge scale, own basin, in sample",91,-0.001,0.362,-0.633,0.627,basin
+NA,100,"surge scale, own basin, gauges left out",91,0.001,0.374,-0.638,0.696,basin
+NA,100,"surge scale, all basins, gauges left out",91,0.074,0.486,-0.326,1.274,basin
+NI,2,no raise,6,-0.013,0.167,-0.378,0.074,basin
+NI,2,"shift, basin left out",6,0.081,0.222,-0.376,0.199,basin
+NI,2,"shift, own basin, in sample",6,-0.012,0.168,-0.377,0.076,basin
+NI,2,"shift, own basin, gauges left out",6,0.015,0.159,-0.376,0.076,basin
+NI,2,"shift, all basins, gauges left out",6,0.079,0.22,-0.376,0.194,basin
+NI,2,"surge scale, basin left out",6,-0.013,0.167,-0.376,0.074,basin
+NI,2,"surge scale, own basin, in sample",6,-0.013,0.167,-0.378,0.074,basin
+NI,2,"surge scale, own basin, gauges left out",6,-0.013,0.167,-0.376,0.074,basin
+NI,2,"surge scale, all basins, gauges left out",6,-0.013,0.167,-0.376,0.074,basin
+NI,10,no raise,6,-0.054,0.218,-0.498,0.061,basin
+NI,10,"shift, basin left out",6,-0.006,0.248,-0.49,0.131,basin
+NI,10,"shift, own basin, in sample",6,-0.053,0.218,-0.497,0.061,basin
+NI,10,"shift, own basin, gauges left out",6,-0.043,0.212,-0.49,0.061,basin
+NI,10,"shift, all basins, gauges left out",6,-0.008,0.245,-0.49,0.127,basin
+NI,10,"surge scale, basin left out",6,-0.051,0.214,-0.489,0.061,basin
+NI,10,"surge scale, own basin, in sample",6,-0.054,0.218,-0.497,0.061,basin
+NI,10,"surge scale, own basin, gauges left out",6,-0.051,0.214,-0.489,0.061,basin
+NI,10,"surge scale, all basins, gauges left out",6,-0.051,0.214,-0.489,0.061,basin
+NI,50,no raise,6,-0.058,0.225,-0.527,0.047,basin
+NI,50,"shift, basin left out",6,0.013,0.187,-0.411,0.096,basin
+NI,50,"shift, own basin, in sample",6,-0.053,0.219,-0.514,0.047,basin
+NI,50,"shift, own basin, gauges left out",6,0.002,0.167,-0.411,0.047,basin
+NI,50,"shift, all basins, gauges left out",6,0.012,0.185,-0.411,0.092,basin
+NI,50,"surge scale, basin left out",6,0.031,0.116,-0.27,0.047,basin
+NI,50,"surge scale, own basin, in sample",6,-0.056,0.22,-0.514,0.047,basin
+NI,50,"surge scale, own basin, gauges left out",6,0.031,0.116,-0.27,0.047,basin
+NI,50,"surge scale, all basins, gauges left out",6,0.031,0.116,-0.27,0.047,basin
+NI,100,no raise,6,0.037,0.149,-0.338,0.073,basin
+NI,100,"shift, basin left out",6,0.081,0.219,-0.27,0.261,basin
+NI,100,"shift, own basin, in sample",6,0.038,0.148,-0.322,0.086,basin
+NI,100,"shift, own basin, gauges left out",6,0.044,0.204,-0.276,0.261,basin
+NI,100,"shift, all basins, gauges left out",6,0.077,0.217,-0.271,0.261,basin
+NI,100,"surge scale, basin left out",6,0.044,0.337,-0.272,0.665,basin
+NI,100,"surge scale, own basin, in sample",6,0.037,0.149,-0.317,0.082,basin
+NI,100,"surge scale, own basin, gauges left out",6,0.044,0.337,-0.272,0.665,basin
+NI,100,"surge scale, all basins, gauges left out",6,0.044,0.337,-0.272,0.665,basin
+SI,2,no raise,24,0.038,0.141,-0.104,0.272,basin
+SI,2,"shift, basin left out",24,0.121,0.208,-0.049,0.475,basin
+SI,2,"shift, own basin, in sample",24,0.072,0.176,-0.075,0.381,basin
+SI,2,"shift, own basin, gauges left out",24,0.11,0.196,-0.09,0.392,basin
+SI,2,"shift, all basins, gauges left out",24,0.121,0.207,-0.051,0.47,basin
+SI,2,"surge scale, basin left out",24,0.039,0.141,-0.104,0.273,basin
+SI,2,"surge scale, own basin, in sample",24,0.039,0.141,-0.104,0.273,basin
+SI,2,"surge scale, own basin, gauges left out",24,0.039,0.141,-0.104,0.273,basin
+SI,2,"surge scale, all basins, gauges left out",24,0.039,0.141,-0.104,0.273,basin
+SI,10,no raise,24,0.029,0.152,-0.13,0.269,basin
+SI,10,"shift, basin left out",24,0.13,0.206,-0.084,0.455,basin
+SI,10,"shift, own basin, in sample",24,0.07,0.178,-0.121,0.372,basin
+SI,10,"shift, own basin, gauges left out",24,0.073,0.198,-0.129,0.387,basin
+SI,10,"shift, all basins, gauges left out",24,0.128,0.205,-0.084,0.45,basin
+SI,10,"surge scale, basin left out",24,0.04,0.161,-0.129,0.311,basin
+SI,10,"surge scale, own basin, in sample",24,0.04,0.161,-0.129,0.311,basin
+SI,10,"surge scale, own basin, gauges left out",24,0.047,0.164,-0.129,0.311,basin
+SI,10,"surge scale, all basins, gauges left out",24,0.04,0.161,-0.129,0.311,basin
+SI,50,no raise,24,0.038,0.201,-0.172,0.263,basin
+SI,50,"shift, basin left out",24,0.101,0.235,-0.133,0.45,basin
+SI,50,"shift, own basin, in sample",24,0.056,0.214,-0.137,0.363,basin
+SI,50,"shift, own basin, gauges left out",24,0.087,0.237,-0.144,0.391,basin
+SI,50,"shift, all basins, gauges left out",24,0.099,0.235,-0.133,0.446,basin
+SI,50,"surge scale, basin left out",24,0.045,0.215,-0.15,0.329,basin
+SI,50,"surge scale, own basin, in sample",24,0.044,0.215,-0.15,0.329,basin
+SI,50,"surge scale, own basin, gauges left out",24,0.076,0.226,-0.157,0.329,basin
+SI,50,"surge scale, all basins, gauges left out",24,0.045,0.215,-0.151,0.329,basin
+SI,100,no raise,24,0.044,0.241,-0.19,0.271,basin
+SI,100,"shift, basin left out",24,0.105,0.267,-0.14,0.449,basin
+SI,100,"shift, own basin, in sample",24,0.044,0.248,-0.169,0.363,basin
+SI,100,"shift, own basin, gauges left out",24,0.1,0.27,-0.169,0.404,basin
+SI,100,"shift, all basins, gauges left out",24,0.101,0.267,-0.143,0.444,basin
+SI,100,"surge scale, basin left out",24,0.059,0.257,-0.166,0.347,basin
+SI,100,"surge scale, own basin, in sample",24,0.059,0.257,-0.166,0.347,basin
+SI,100,"surge scale, own basin, gauges left out",24,0.079,0.272,-0.166,0.36,basin
+SI,100,"surge scale, all basins, gauges left out",24,0.059,0.257,-0.166,0.347,basin
+SP,2,no raise,49,0.047,0.107,-0.128,0.181,basin
+SP,2,"shift, basin left out",49,0.078,0.121,-0.124,0.194,basin
+SP,2,"shift, own basin, in sample",49,0.107,0.142,-0.122,0.213,basin
+SP,2,"shift, own basin, gauges left out",49,0.132,0.149,-0.122,0.213,basin
+SP,2,"shift, all basins, gauges left out",49,0.085,0.126,-0.124,0.196,basin
+SP,2,"surge scale, basin left out",49,0.047,0.107,-0.125,0.181,basin
+SP,2,"surge scale, own basin, in sample",49,0.047,0.108,-0.12,0.182,basin
+SP,2,"surge scale, own basin, gauges left out",49,0.047,0.108,-0.12,0.182,basin
+SP,2,"surge scale, all basins, gauges left out",49,0.047,0.107,-0.125,0.182,basin
+SP,10,no raise,49,0.031,0.123,-0.14,0.162,basin
+SP,10,"shift, basin left out",49,0.057,0.132,-0.128,0.164,basin
+SP,10,"shift, own basin, in sample",49,0.099,0.146,-0.124,0.193,basin
+SP,10,"shift, own basin, gauges left out",49,0.1,0.153,-0.122,0.215,basin
+SP,10,"shift, all basins, gauges left out",49,0.065,0.136,-0.127,0.165,basin
+SP,10,"surge scale, basin left out",49,0.033,0.124,-0.125,0.163,basin
+SP,10,"surge scale, own basin, in sample",49,0.035,0.125,-0.097,0.166,basin
+SP,10,"surge scale, own basin, gauges left out",49,0.035,0.125,-0.096,0.166,basin
+SP,10,"surge scale, all basins, gauges left out",49,0.033,0.124,-0.124,0.163,basin
+SP,50,no raise,49,0.011,0.168,-0.328,0.151,basin
+SP,50,"shift, basin left out",49,0.039,0.17,-0.28,0.17,basin
+SP,50,"shift, own basin, in sample",49,0.054,0.175,-0.24,0.179,basin
+SP,50,"shift, own basin, gauges left out",49,0.062,0.186,-0.254,0.281,basin
+SP,50,"shift, all basins, gauges left out",49,0.043,0.172,-0.273,0.172,basin
+SP,50,"surge scale, basin left out",49,0.028,0.168,-0.32,0.171,basin
+SP,50,"surge scale, own basin, in sample",49,0.039,0.182,-0.3,0.24,basin
+SP,50,"surge scale, own basin, gauges left out",49,0.039,0.183,-0.305,0.24,basin
+SP,50,"surge scale, all basins, gauges left out",49,0.028,0.168,-0.32,0.171,basin
+SP,100,no raise,49,-0.003,0.226,-0.638,0.167,basin
+SP,100,"shift, basin left out",49,0.017,0.224,-0.581,0.197,basin
+SP,100,"shift, own basin, in sample",49,0.025,0.227,-0.55,0.239,basin
+SP,100,"shift, own basin, gauges left out",49,0.035,0.238,-0.553,0.325,basin
+SP,100,"shift, all basins, gauges left out",49,0.017,0.226,-0.573,0.213,basin
+SP,100,"surge scale, basin left out",49,0.016,0.231,-0.58,0.214,basin
+SP,100,"surge scale, own basin, in sample",49,0.026,0.259,-0.382,0.499,basin
+SP,100,"surge scale, own basin, gauges left out",49,0.026,0.262,-0.385,0.499,basin
+SP,100,"surge scale, all basins, gauges left out",49,0.016,0.232,-0.579,0.228,basin
+WP,2,no raise,125,0.013,0.064,-0.063,0.147,basin
+WP,2,"shift, basin left out",125,0.031,0.079,-0.051,0.175,basin
+WP,2,"shift, own basin, in sample",125,0.071,0.111,-0.009,0.228,basin
+WP,2,"shift, own basin, gauges left out",125,0.071,0.11,-0.016,0.212,basin
+WP,2,"shift, all basins, gauges left out",125,0.051,0.094,-0.036,0.177,basin
+WP,2,"surge scale, basin left out",125,0.014,0.064,-0.062,0.148,basin
+WP,2,"surge scale, own basin, in sample",125,0.015,0.064,-0.059,0.149,basin
+WP,2,"surge scale, own basin, gauges left out",125,0.015,0.064,-0.059,0.15,basin
+WP,2,"surge scale, all basins, gauges left out",125,0.014,0.064,-0.06,0.149,basin
+WP,10,no raise,125,-0.022,0.095,-0.172,0.104,basin
+WP,10,"shift, basin left out",125,0.003,0.099,-0.156,0.184,basin
+WP,10,"shift, own basin, in sample",125,0.05,0.114,-0.099,0.218,basin
+WP,10,"shift, own basin, gauges left out",125,0.048,0.116,-0.113,0.21,basin
+WP,10,"shift, all basins, gauges left out",125,0.032,0.108,-0.144,0.184,basin
+WP,10,"surge scale, basin left out",125,-0.022,0.094,-0.171,0.109,basin
+WP,10,"surge scale, own basin, in sample",125,0.004,0.094,-0.163,0.119,basin
+WP,10,"surge scale, own basin, gauges left out",125,0.006,0.095,-0.165,0.115,basin
+WP,10,"surge scale, all basins, gauges left out",125,-0.009,0.093,-0.167,0.115,basin
+WP,50,no raise,125,-0.071,0.173,-0.373,0.122,basin
+WP,50,"shift, basin left out",125,-0.016,0.165,-0.326,0.195,basin
+WP,50,"shift, own basin, in sample",125,0.044,0.169,-0.244,0.275,basin
+WP,50,"shift, own basin, gauges left out",125,0.044,0.173,-0.263,0.278,basin
+WP,50,"shift, all basins, gauges left out",125,0.015,0.17,-0.304,0.24,basin
+WP,50,"surge scale, basin left out",125,-0.057,0.17,-0.364,0.152,basin
+WP,50,"surge scale, own basin, in sample",125,0.016,0.183,-0.258,0.265,basin
+WP,50,"surge scale, own basin, gauges left out",125,0.016,0.187,-0.26,0.267,basin
+WP,50,"surge scale, all basins, gauges left out",125,-0.008,0.174,-0.312,0.216,basin
+WP,100,no raise,125,-0.094,0.232,-0.547,0.119,basin
+WP,100,"shift, basin left out",125,-0.032,0.215,-0.476,0.205,basin
+WP,100,"shift, own basin, in sample",125,0.032,0.212,-0.384,0.27,basin
+WP,100,"shift, own basin, gauges left out",125,0.031,0.217,-0.409,0.271,basin
+WP,100,"shift, all basins, gauges left out",125,0.001,0.217,-0.446,0.232,basin
+WP,100,"surge scale, basin left out",125,-0.066,0.223,-0.526,0.162,basin
+WP,100,"surge scale, own basin, in sample",125,0.034,0.233,-0.365,0.341,basin
+WP,100,"surge scale, own basin, gauges left out",125,0.037,0.242,-0.386,0.37,basin
+WP,100,"surge scale, all basins, gauges left out",125,-0.011,0.226,-0.48,0.243,basin
+none,2,no raise,10,-0.011,0.059,-0.118,0.03,basin
+none,2,"shift, basin left out",10,0.145,0.176,0.066,0.237,basin
+none,2,"shift, own basin, in sample",10,0.145,0.176,0.066,0.237,basin
+none,2,"shift, own basin, gauges left out",10,0.145,0.176,0.066,0.237,basin
+none,2,"shift, all basins, gauges left out",10,0.145,0.176,0.066,0.237,basin
+none,2,"surge scale, basin left out",10,-0.011,0.059,-0.118,0.03,basin
+none,2,"surge scale, own basin, in sample",10,-0.011,0.059,-0.118,0.03,basin
+none,2,"surge scale, own basin, gauges left out",10,-0.011,0.059,-0.118,0.03,basin
+none,2,"surge scale, all basins, gauges left out",10,-0.011,0.059,-0.118,0.03,basin
+none,10,no raise,10,-0.011,0.067,-0.124,0.009,basin
+none,10,"shift, basin left out",10,0.02,0.091,-0.071,0.138,basin
+none,10,"shift, own basin, in sample",10,0.02,0.091,-0.071,0.138,basin
+none,10,"shift, own basin, gauges left out",10,0.02,0.091,-0.071,0.138,basin
+none,10,"shift, all basins, gauges left out",10,0.02,0.091,-0.071,0.138,basin
+none,10,"surge scale, basin left out",10,-0.011,0.067,-0.124,0.009,basin
+none,10,"surge scale, own basin, in sample",10,-0.011,0.067,-0.124,0.009,basin
+none,10,"surge scale, own basin, gauges left out",10,-0.011,0.067,-0.124,0.009,basin
+none,10,"surge scale, all basins, gauges left out",10,-0.011,0.067,-0.124,0.009,basin
+none,50,no raise,10,-0.026,0.083,-0.151,0.007,basin
+none,50,"shift, basin left out",10,-0.012,0.084,-0.137,0.054,basin
+none,50,"shift, own basin, in sample",10,-0.012,0.084,-0.137,0.054,basin
+none,50,"shift, own basin, gauges left out",10,-0.012,0.084,-0.137,0.054,basin
+none,50,"shift, all basins, gauges left out",10,-0.012,0.084,-0.137,0.054,basin
+none,50,"surge scale, basin left out",10,-0.026,0.083,-0.151,0.007,basin
+none,50,"surge scale, own basin, in sample",10,-0.026,0.083,-0.151,0.007,basin
+none,50,"surge scale, own basin, gauges left out",10,-0.026,0.083,-0.151,0.007,basin
+none,50,"surge scale, all basins, gauges left out",10,-0.026,0.083,-0.151,0.007,basin
+none,100,no raise,10,-0.027,0.1,-0.272,0.008,basin
+none,100,"shift, basin left out",10,-0.016,0.096,-0.262,0.024,basin
+none,100,"shift, own basin, in sample",10,-0.016,0.096,-0.262,0.024,basin
+none,100,"shift, own basin, gauges left out",10,-0.016,0.096,-0.262,0.024,basin
+none,100,"shift, all basins, gauges left out",10,-0.016,0.096,-0.262,0.024,basin
+none,100,"surge scale, basin left out",10,-0.027,0.1,-0.272,0.008,basin
+none,100,"surge scale, own basin, in sample",10,-0.027,0.1,-0.272,0.008,basin
+none,100,"surge scale, own basin, gauges left out",10,-0.027,0.1,-0.272,0.008,basin
+none,100,"surge scale, all basins, gauges left out",10,-0.027,0.1,-0.272,0.008,basin

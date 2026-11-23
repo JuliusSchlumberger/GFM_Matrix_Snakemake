@@ -1173,6 +1173,161 @@ convolution of the gauge's own skew surges with its own tide.
   - Half exceed the time-0 level by less than 1.6 cm and 99% by less than 20 cm. The maximum
     is the RP level in every case, which is what SFINCS and correction B use.
 
+### 8.7 Validation of the production levels at the gauges
+
+**Design.** `level_product_gauges.py` scores the production product at the 618 ratio gauges
+(GESLA-4 sites with a ratio and a product station within 25 km; 451 non-TC-dominated, 167
+TC-dominated by the COAST-RP_TC criterion of §8.4). The station nearest each gauge is rebuilt
+from production's own inputs: the 1950-2024 GTSM-ERA5 record on the FES tide, the IBTrACS mask,
+the pooled GPD shape, the COAST-RP_TC shift and the atlas. In-sample, the rebuild reproduces
+`levels.parquet` to 0.00 m. Two inputs are recomputed without the gauge, so that no gauge
+calibrates its own score:
+- the surge ratio r, from the other gauges (IDW within 500 km, else the power law of §8.4);
+- the tide factor, from the tide gauges more than 1 km from the scored site (the site and its
+  duplicate records leave), connected to the station through water as in production.
+
+The COAST-RP_TC shift is one value fitted at all 167 TC-dominated gauges; the scored gauge is one
+of them. Its effect is bounded by the cross-validation below, which leaves out every
+TC-dominated gauge within 300 km. The reference is the gauge's own skew-surge convolution (test
+9): the gauge's skew surges convolved with its own tide, so the score measures the product's
+surge model, r and tide together. Scores are station - gauge in m: median (bias), mean absolute
+error (MAE) and the 10-90% range, at RP2, RP10 and RP100, overall, by gauge class, by IPCC AR6
+region (regions with fewer than 15 gauges pooled as "other") and by the gauge's spring tidal
+range (2 x MHWS: 0-1, 1-2, 2-4, > 4 m).
+
+Figures: `docs/gauge_validation_{regions,tc_raise,tide_neighbours}` (each with its description
+in a `.txt` file); tables: `input_analysis_data/gauge_validation/` (§11).
+
+**Production at the gauges** (station - gauge, median / MAE, m; RP100 10-90% in brackets):
+
+| gauges | RP2 COAST-RP | RP2 product | RP100 COAST-RP | RP100 product |
+|---|---|---|---|---|
+| all (618) | -0.014 / 0.168 | +0.030 / 0.100 | -0.102 / 0.298 | -0.001 / 0.215 (-0.35..+0.25) |
+| non-TC-dominated (451) | +0.030 / 0.167 | +0.030 / 0.105 | -0.068 / 0.244 | -0.001 / 0.163 (-0.23..+0.23) |
+| TC-dominated (167) | -0.096 / 0.168 | +0.030 / 0.089 | -0.247 / 0.443 | -0.001 / 0.354 (-0.66..+0.38) |
+| stations with a TC part (323) | -0.069 / 0.172 | +0.048 / 0.111 | -0.181 / 0.342 | +0.022 / 0.250 (-0.41..+0.30) |
+
+- The product's RP100 MAE is 28% below COAST-RP's over all gauges and 33% below at the
+  non-TC-dominated gauges; its RP100 bias is within 3 cm of zero in every class.
+- With r computed from the gauge itself (in sample) the RP100 MAE is 0.192 m: r's
+  leave-one-out cost is 2.3 cm. Without r and without the TC part it is 0.316 m (bias -0.16 m),
+  which is GTSM-ERA5's surge deficit (test 9).
+- By tidal range the RP100 bias stays within ±2 cm in every class (MAE 0.19-0.26 m), so the
+  convolution of an independent skew surge with the tide holds across tidal regimes.
+- The TC-dominated gauges keep a wide spread at RP100: the ERA5 record holds the cyclones that
+  struck in 75 years and misses the rest. STORM-forced GTSM (test 10) is the route to narrow it.
+
+By region (RP100 MAE, m; COAST-RP in brackets): Mediterranean 0.064 (0.113), New Zealand 0.078
+(0.167), Equatorial Pacific 0.081 (0.144), West & Central Europe 0.139 (0.225), W. North America
+0.161 (0.231), E. Australia 0.170 (0.208), S. Australia 0.173 (0.236), N. Europe 0.181 (0.263),
+E. Asia 0.195 (0.300), S.E. Asia 0.226 (0.253), N. Pacific 0.270 (0.390), N.W. North America
+0.278 (0.375), E. North America 0.353 (0.538), S. Pacific 0.364 (0.425). The product is better
+than COAST-RP in every region. Two regional biases remain: S.E. Asia +0.12 m at RP100 and +0.16
+m at RP2 (without r and the TC part: -0.11 and -0.01 m, so r and the shift together overshoot
+there), and N. Europe -0.04 m.
+
+**Rules tested against alternatives.** Each alternative below is scored with the same design. A
+rule whose value is fitted at the gauges (the TC shift) is also scored with every TC-dominated
+gauge within 300 km of the scored gauge left out of its fit (`review_diagnostics.py
+basin_fit_cv`), because neighbouring gauges see the same storms. Alternatives are adopted only
+where they have a physical reason and score at least as well; none is tuned to the score alone.
+
+| rule | production | alternatives (scored) | outcome |
+|---|---|---|---|
+| COAST-RP_TC raise | one shift over all basins (0.22 m) | no raise; per basin, fitted on the other basins or on its own; a factor on COAST-RP_TC above its RP2 tide floor | per-basin fits gain nothing out of sample; the factor is worse at RP100 |
+| tide-factor neighbours | tide gauges within 25 km reached through water outside the OSM land polygons | all within 25 km; through GEBCO water; FES amplitude within x1.1-1.5 | through OSM water: fjords better, nothing worse |
+| IBTrACS mask | 300 km, ±24 h, 34 kt, all track points | without extratropical points; no mask (§8.6) | keep |
+| surge ratio r | r at RP10 for every RP; power law on S10 where sparse | r at RP2 / RP50; power law with depth, shelf and range; median r; r = 1 | keep |
+| record | 1950-2024 | 1979-2024 | keep |
+| GTSM despike | 2 m, >= 5 jumps (§8.6) | its loss near cyclone tracks | keep |
+| surge-tide independence | skew surge independent of the high water | skew-surge quantiles by high-water tertile | keep |
+| seasonal cycle | none added to the GTSM residual | gauge - GTSM monthly cycle at the annual-maximum months | not added |
+
+- *COAST-RP_TC raise.* Without a raise, the TC-dominated gauges are 0.13 m low at RP100 (MAE
+  0.362 m), since both cyclone sources are too low (§8.1, §8.6). Fitted at RP100 on the
+  TC-dominated gauges, scored with the 300 km neighbourhood left out (bias / MAE, m; the 164
+  TC-dominated gauges with a station, on the 25 km tide factor; figure `gauge_validation_tc_raise`):
+
+  | raise | fit | TC-dominated RP100 | TC-dominated RP2 MAE | E. Asia RP100 bias |
+  |---|---|---|---|---|
+  | none | - | -0.131 / 0.362 | 0.071 | -0.136 |
+  | shift | each basin from the other basins | -0.032 / 0.353 | 0.082 | -0.068 |
+  | shift | each basin from its own gauges | +0.017 / 0.354 | 0.101 | +0.002 |
+  | shift | all basins (production) | -0.005 / 0.353 | 0.088 | -0.035 |
+  | factor above the RP2 floor | each basin from its own gauges | +0.016 / 0.393 | 0.071 | -0.015 |
+  | factor above the RP2 floor | all basins | -0.008 / 0.436 | 0.071 | -0.057 |
+
+  - Fitted on its own gauges, each basin needs a different shift (production's shift-fit
+    gauges: W. Pacific 0.26 m, S. Pacific 0.25, S. Indian 0.13, N. Atlantic 0.05, N. Indian
+    0.03; bootstrap 90% for the N. Atlantic 0-0.37 m, for the W. Pacific 0.20-0.29 m). Scored in sample, these per-basin fits reach an
+    RP100 MAE of 0.336 m. Out of sample they reach 0.354 m, the same as one value: five basin
+    parameters do not predict better than one.
+  - Fitted on the other basins, the two large basins trade values: the W. Pacific takes 0.13 m
+    from the N. Atlantic gauges and the N. Atlantic 0.25 m from the W. Pacific gauges. That
+    leaves E. Asia low (-0.07 m) and the N. Atlantic high.
+  - A factor on COAST-RP_TC above its own RP2 level leaves RP2-RP10 at the tide floor, which
+    removes the shift's RP2 cost (TC-dominated RP2 MAE 0.071 against 0.088 m), but spreads
+    RP50-RP100 (MAE 0.39-0.44 against 0.35 m). Out of its basin it fails badly: the N. Atlantic
+    would take a factor of 1.58 and E. North America's RP100 bias would be +0.22 m.
+  - Production: one shift over all basins. The price is the RP2 cost: stations with a TC part
+    are 5 cm high at RP2 (MAE 0.111 against 0.080 m without the raise; S.E. Asia, E. Asia, the
+    Pacific).
+- *Tide-factor neighbours.* A tide gauge across a peninsula or in the next fjord measures a
+  different tide. Production keeps only the gauges within 25 km that reach the point through
+  water outside the OSM land polygons. Water is rasterised at 25 m and merged to 100 m cells,
+  a cell being water where any of its sub-cells is, so channels down to 25 m stay open. The
+  path is the shortest 8-connected route within 25 km. At the 2,373 usable tide gauges (own
+  site left out):
+
+  | neighbours | tide amplitude MAE | RP100 MAE all / N.W. North America / W. North America / W.&C. Europe (m) |
+  |---|---|---|
+  | all within 25 km | 15.5% | 0.219 / 0.339 / 0.172 / 0.149 |
+  | through GEBCO 15" water (< 0 m) | 16.2% | 0.216 / 0.236 / 0.212 / 0.124 |
+  | through OSM water (production) | 15.5% | 0.216 / 0.277 / 0.158 / 0.139 |
+  | FES amplitude within x1.2 | 15.1% | 0.218 / 0.300 / 0.172 / 0.144 |
+
+  GEBCO's ~460 m cells close narrow inlets: Bamfield (Barkley Sound) loses its neighbours and
+  goes +0.83 m. That is why W. North America gets worse on GEBCO. GEBCO's larger gain in the
+  fjords comes from the same closures. FES-amplitude similarity helps a little overall but costs
+  S. Australia (0.173 -> 0.188 m). With the OSM rule the tide factor changes at 1,232 of 23,226
+  stations, by more than 10% at 252 (fjords of Alaska, British Columbia and Norway, the Gulf of
+  Bothnia, the Amazon mouth, Bangladesh). The last two have no ratio gauge to check them.
+- *IBTrACS mask.* The mask removes 23% of E. Asia's annual maxima (the cyclone part returns
+  them). Extratropical track points (IBTrACS NATURE "ET") account for 0.1% of the masked
+  maxima there and 12% in E. North America. A mask without them changes no MAE by more than
+  1 mm and no median by more than 1 cm, so production keeps all track points. E. Asia's low RP100 under the per-basin shift came
+  from the shift, not from the mask.
+- *Surge ratio r.* r is fitted at RP10 and applied to every RP. At gauges with at least 40
+  years, r at RP50 / r at RP10 has a median of 1.01-1.04, and r at RP2 / r at RP10 0.97-0.99
+  (10-90% 0.92-1.11). Where fewer than 3 gauges lie within 500 km, r is a power law in the
+  station's GTSM RP10 skew surge S10 (Spearman -0.58). Depth at the GTSM point, distance to the
+  200 m shelf edge and tidal range correlate weakly with r (|Spearman| <= 0.15). Scored with
+  each of the 98 isolated gauges left out (MAE of ln r): power law 0.26; power law plus the three
+  covariates 0.24; median r 0.45; r = 1 0.56. The 2% gain does not justify three more fitted
+  terms.
+- *Record.* On 1979-2024 instead of 1950-2024 the RP100 MAE is 0.217 against 0.219 m overall;
+  regions differ by up to 1.6 cm either way (S. Australia 0.157 against 0.173 m, N. Europe 0.171
+  against 0.181 m; N.W. North America 0.348 against 0.339 m). The gauge records mostly cover the
+  later years, which favours the shorter record at the gauges. Production keeps 75 years, which
+  hold more extreme events per station for the GPD tail. The per-RP hydrograph generator's
+  overflow ratios move by at most 0.09 (§8.3).
+- *Despike.* At the 9,232 stations with a TC part, the despike drops no hour within the mask
+  hours (one hour elsewhere): it does not remove cyclone surges.
+- *Surge-tide independence.* At the gauges, the 99.9% skew surge at the top tertile of
+  high-water heights is 0.92-0.96 of that at the bottom tertile (GTSM on FES: 0.80-0.94). Surge
+  is slightly damped at high water, but the level bias by tidal-range class stays within ±2 cm,
+  so the effect does not show at the levels.
+- *Seasonal cycle.* GTSM's barotropic residual lacks the steric seasonal cycle. In the months
+  of the gauges' annual maxima, the gauge's monthly mean residual exceeds GTSM's by a median of
+  2.8 cm (90%: 8 cm; E. Asia and W. North America 7 cm, S.E. Asia 5 cm). FES's Sa+Ssa there is
+  about 0. Not added: the gap is small against the 0.22 m MAE, r absorbs part of it at the
+  gauges, and the regions concerned show no negative RP100 bias (E. Asia -0.02, W. North America
+  -0.01, S.E. Asia +0.12 m).
+
+**Remaining errors.** The largest are cyclone-driven (TC-dominated RP100 MAE 0.354 m against
+0.163 m elsewhere) and lie in the record, not in the rules above. Smaller ones are S.E. Asia's
+positive bias and the macrotidal coasts' RP2 spread (spring range > 4 m: RP2 MAE 0.18 m).
+
 ## 9. Comparison with other global coastal boundary conditions
 
 | | This pipeline (GCFM) | Fathom RFA (Collings et al., 2024; Wing et al., 2024) | Chaudhuri et al. (2027) |
@@ -1251,6 +1406,12 @@ each script's docstring for further arguments):
     `product_durations.py` (`--out-dir` = that directory), `open_guesses.py cap despike tc_mask
     fes_rule peaks` (`--product-dir`, §8.6), then the figure script with `--product-dir` for
     fig12-fig23
+24. §8.7, each with `--product-dir <storm_tide_product_dir> --dest-dir <dir>`:
+    `level_product_gauges.py`; `open_guesses.py ingredients`; `review_diagnostics.py basin_fit_cv
+    tc_raise shift_bootstrap tc_mask_et tide_neighbours gauge_series gauge_analysis
+    despike_tracks` (`gauge_analysis` reads `gauge_series`'s output). For the record comparison
+    of the hydrographs, `generator_validation.py --out-dir .cleanup_baseline/level_sources --tag
+    _1979`, and again with `--record-cache <storm_tide_product cache_dir> --tag _1950`
 
 Inputs on `<data_root>` are read only.
 
