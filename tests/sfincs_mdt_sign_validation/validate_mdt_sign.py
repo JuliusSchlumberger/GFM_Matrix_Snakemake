@@ -20,7 +20,7 @@ from shapely.geometry import Point
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "sfincs_tiles"))
 
-from build_line_forcing import build_line_forcing  # noqa: E402
+from build_line_forcing import attach_hydrographs  # noqa: E402
 from build_elevation import build_combined_elevation  # noqa: E402
 
 
@@ -92,7 +92,7 @@ def test_elevation_mdt_is_added_not_subtracted() -> None:
 
 def test_hydrograph_mdt_offset_recovers_known_boundary_value() -> None:
     """The offset must be added to the series, so its peak equals the boundary value."""
-    print("=== build_line_forcing: mdt_offset correctly recovers the boundary value ===")
+    print("=== attach_hydrographs: mdt_offset correctly recovers the boundary value ===")
     tmpdir = Path(tempfile.mkdtemp(prefix="mdt_sign_hydrograph_test_"))
     try:
         station_lon, station_lat = 10.0, 50.0
@@ -113,16 +113,12 @@ def test_hydrograph_mdt_offset_recovers_known_boundary_value() -> None:
         ds.to_netcdf(coast_hg_path)
 
         known_boundary_val_m = 1.35
-        stations = gpd.GeoDataFrame(
-            {"station": [0], "station_index": [0], "status": ["used"], "rp100_level_m": [known_boundary_val_m],
-             "node_lon": [station_lon + 0.01], "node_lat": [station_lat], "node_shift_km": [0.7]},
-            geometry=[Point(station_lon, station_lat)],
+        point = gpd.GeoDataFrame(
+            {"rp100_level_m": [known_boundary_val_m]},
+            geometry=[Point(station_lon + 0.01, station_lat)],
             crs="EPSG:4326",
         )
-        lines_gpkg = tmpdir / "line.gpkg"
-        stations.to_file(lines_gpkg, layer="stations", driver="GPKG")
-
-        points, hydro = build_line_forcing(lines_gpkg, coast_hg_path)
+        points, hydro = attach_hydrographs(point, coast_hg_path)
 
         assert len(points) == 1, points
         offset = float(points["mdt_offset_m"].iloc[0])

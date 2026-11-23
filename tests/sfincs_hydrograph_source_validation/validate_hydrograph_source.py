@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "sfincs_tiles"))
 
 from boundary_lines_geometry import NODE_LEVEL_SOURCE, TILE_STATIONS_GPKG, _tile_stations  # noqa: E402
-from build_line_forcing import COAST_HG_PEAK_HR, COAST_HG_STEPS, build_line_forcing, read_hydrographs  # noqa: E402
+from build_line_forcing import COAST_HG_PEAK_HR, COAST_HG_STEPS, attach_hydrographs, read_hydrographs  # noqa: E402
 from gfm_config import storm_tide_hydrograph_path, storm_tide_product_levels_path  # noqa: E402
 
 LON, LAT = 10.0, 50.0
@@ -35,12 +35,8 @@ def _product(path: Path, half_window_steps: int = 432) -> np.ndarray:
     return series[0, 1]
 
 
-def _line(path: Path, level_m: float) -> None:
-    gpd.GeoDataFrame(
-        {"station": [0], "station_index": [0], "status": ["used"], "rp100_level_m": [level_m],
-         "node_lon": [LON + 0.01], "node_lat": [LAT], "node_shift_km": [0.7]},
-        geometry=[Point(LON, LAT)], crs="EPSG:4326",
-    ).to_file(path, layer="stations", driver="GPKG")
+def _point(level_m: float) -> gpd.GeoDataFrame:
+    return gpd.GeoDataFrame({"rp100_level_m": [level_m]}, geometry=[Point(LON + 0.01, LAT)], crs="EPSG:4326")
 
 
 def test_product_rp100_lands_on_the_coast_hg_axis_with_its_peak_at_74_5_h() -> None:
@@ -58,10 +54,9 @@ def test_product_rp100_lands_on_the_coast_hg_axis_with_its_peak_at_74_5_h() -> N
 
 def test_product_forcing_peak_equals_the_boundary_level() -> None:
     with tempfile.TemporaryDirectory() as tmp:
-        nc, lines = Path(tmp) / "product.nc", Path(tmp) / "line.gpkg"
+        nc = Path(tmp) / "product.nc"
         _product(nc)
-        _line(lines, 2.35)
-        points, hydro = build_line_forcing(lines, nc)
+        points, hydro = attach_hydrographs(_point(2.35), nc)
         assert np.isclose(hydro[0].max(), 2.35)
         assert np.isclose(float(points.mdt_offset_m.iloc[0]), 2.35 - 1.2, atol=1e-4)
         assert hydro.elapsed_hr.iloc[int(np.argmax(hydro[0].to_numpy()))] == COAST_HG_PEAK_HR

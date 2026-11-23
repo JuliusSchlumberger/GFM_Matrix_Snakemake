@@ -316,7 +316,7 @@ def build_sfincs_tile(
           f"({resolution_m:.0f}m main / {resolution_m / subgrid_nr_pixels:.0f}m subgrid), "
           f"{subgrid_nr_levels} levels, nearest-sourced")
 
-    # COAST-HG hydrographs at the line's station nodes, MDT-corrected by build_line_forcing.py
+    # Forcing points along the line and their hydrographs, peaks at production's seed levels (build_line_forcing.py)
     matched_points = retry_transient_io(gpd.read_file, sfincs_dir / "matched_boundary_points.gpkg")
     hydrographs = retry_transient_io(pd.read_csv, sfincs_dir / "corrected_hydrographs.csv")
 

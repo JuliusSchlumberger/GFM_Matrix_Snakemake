@@ -2,8 +2,8 @@
 
 Without them a lagoon, a bay behind a shortcut or an archipelago the line gave
 up on is forced only from line nodes further out. Each station is snapped to the
-nearest open-water pixel of the native mask; level = its own MDT-corrected
-RP100 level; hydrograph = nearest hydrograph station (COAST-HG or the storm-tide product,
+nearest open-water pixel of the native mask; its level is set by
+build_line_forcing (production's seed level); hydrograph = nearest hydrograph station (COAST-HG or the storm-tide product,
 build_line_forcing.read_hydrographs) in the same 8-connected DeltaDTM ocean body over the
 production station search box.
 build_sfincs_tile.py rings each point's small inactive core with boundary cells.

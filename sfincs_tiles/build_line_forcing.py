@@ -1,9 +1,13 @@
-"""Write a tile's SFINCS boundary forcing points and hydrographs from its station line.
+"""Write a tile's SFINCS boundary forcing points and hydrographs along its boundary line.
 
-Writes sfincs_model/matched_boundary_points.gpkg (EPSG:4326) and
-corrected_hydrographs.csv (elapsed_hr + one column per point). The hydrograph shapes come from
-the config's boundary_conditions.storm_tide_source: COAST-HG (RP100) or the storm-tide product's
-RP100 hydrographs, the latter put on COAST-HG's time axis (peak at COAST_HG_PEAK_HR).
+Points every FORCING_SPACING_M along the line's segments near the tile, plus the interior points
+(connected_forcing.py). Each point's peak is production's eikonal seed level at its nearest
+coastline cell (`production_seed_levels`), so SFINCS and the eikonal models get the same forcing;
+the station line only decides where SFINCS's boundary lies. Writes
+sfincs_model/matched_boundary_points.gpkg (EPSG:4326) and corrected_hydrographs.csv (elapsed_hr +
+one column per point). The hydrograph shapes come from the config's
+boundary_conditions.storm_tide_source: COAST-HG (RP100) or the storm-tide product's RP100
+hydrographs, the latter put on COAST-HG's time axis (peak at COAST_HG_PEAK_HR).
 
 Usage:
     python build_line_forcing.py --tile-id 1122 --base-dir-name calibration_roughness_SFINCS \\
@@ -19,22 +23,36 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import rasterio
 import xarray as xr
+import yaml
+from scipy.spatial import cKDTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from calibration_paths import RETURN_PERIOD, WATERLEVEL_NAME  # noqa: E402
 from gfm_config import read_root, storm_tide_hydrograph_path  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from flood_model import coastline_mask, idw_seed_values_at  # noqa: E402
 
 HYDROGRAPH_VARIABLE = "hydrograph_average_tide_signal"
 PRODUCT_VARIABLE = "storm_tide_hydrograph"
 FORCING_RP = 100
-MAX_MATCH_DIST_DEG = 0.5  # the hydrograph stations are dense along real coastline
+MAX_MATCH_KM = 55.0  # ~0.5 deg of latitude; the hydrograph stations are dense along real coastline
+KM_PER_DEG = 111.2
 # COAST-HG: 894 10-min steps from 2000-01-01, every peak at step 447 (74.5 h). The product's
 # hydrographs (peak at time 0) are cut to the same axis, so build_sfincs_tile's truncation
 # window keeps the same span around the peak for both sources.
 COAST_HG_START = np.datetime64("2000-01-01T00:00")
 COAST_HG_PEAK_HR = 74.5
 COAST_HG_STEPS = 894
+# Finer than the product's coastline nodes (1/30 deg, ~3.7 km), so SFINCS's interpolation between
+# boundary points does not smooth over the seed levels' own spatial variation.
+FORCING_SPACING_M = 2000.0
+# Line samples this far outside the tile polygon still sit next to its boundary cells.
+TILE_MARGIN_M = 5000.0
+OCEAN_CODE = 1
 
 
 def read_hydrographs(nc_path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, pd.DatetimeIndex]:
@@ -57,61 +75,121 @@ def read_hydrographs(nc_path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray,
     return lon, lat, series, times
 
 
-def build_line_forcing(lines_gpkg: Path, hydrograph_nc: Path, tile_dir: Path | None = None,
-                       root: Path | None = None) -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
-    """Build forcing points (EPSG:4326) and matching hydrographs for a boundary line.
+def production_seed_levels(tile_dir: Path, seed_rule: dict) -> tuple[np.ndarray, np.ndarray]:
+    """Return ((n, 2) lon/lat, (n,) level_m) of production's eikonal seeds on the tile's native mask.
 
-    One point per used station at its node (node_lon/node_lat: the station
-    moved ~1 km out to sea onto the line); SFINCS interpolates between points.
-    Hydrograph: the nearest station's RP100 hydrograph in `hydrograph_nc` (`read_hydrographs`),
-    shifted so its peak equals the station's MDT-corrected RP100 level:
-    offset = boundary_value - hydrograph_max. With `tile_dir`/`root`, also adds
-    "interior" points for non-node stations by water that stays active in SFINCS.
+    As flood_model.flood_depth_dense seeds a production tile: coastline_mask cells, each the IDW
+    (k = seed_rule["knn"], weights distance^-seed_rule["idw_power"]) of every row of the tile's
+    boundaries gpkg (stations and coastline nodes) in its own ocean component.
     """
-    st = retry_transient_io(gpd.read_file, lines_gpkg, layer="stations")
-    st = st[st["status"] == "used"].reset_index(drop=True)
+    with retry_transient_io(rasterio.open, tile_dir / "inputs" / "mask.tif") as src:
+        mask, transform = src.read(1), src.transform
+    rows, cols = np.nonzero(coastline_mask(mask, ocean_code=OCEAN_CODE, river_code=int(seed_rule["river_code"])))
+    if not len(rows):
+        raise ValueError(f"{tile_dir}: no coastline cell in inputs/mask.tif - nothing to take the forcing from")
+    stations_gpkg = tile_dir / "inputs" / f"boundaries_{RETURN_PERIOD}_{WATERLEVEL_NAME}.gpkg"
+    st = retry_transient_io(gpd.read_file, stations_gpkg)
     if st.empty:
-        raise ValueError(f"{lines_gpkg}: no used station on the boundary line")
-    hg_lon, hg_lat, hg, times = read_hydrographs(hydrograph_nc)
+        raise ValueError(f"{stations_gpkg}: no station")
+    # cell centres, as rasterio.transform.xy
+    c, r = cols + 0.5, rows + 0.5
+    cells = np.column_stack([transform.c + transform.a * c + transform.b * r,
+                             transform.f + transform.d * c + transform.e * r])
+    # int16 cm -> float32 m as rasters.decode_waterlevel_cm (rasters needs the gfm env's hydromt)
+    station_levels = st[WATERLEVEL_NAME].to_numpy().astype(np.float32) / np.float32(100.0)
+    levels = idw_seed_values_at(cells, rows, cols, np.column_stack([st.geometry.x, st.geometry.y]),
+                                station_levels, int(seed_rule["knn"]), mask, OCEAN_CODE,
+                                float(seed_rule["idw_power"]))
+    return cells, levels
 
-    cols, rows = {}, []
-    for k, r in st.iterrows():
-        # Match on the real station position, not the node.
-        d2 = (hg_lon - r.geometry.x) ** 2 + (hg_lat - r.geometry.y) ** 2
-        j = int(np.argmin(d2))
-        dist_deg = float(np.sqrt(d2[j]))
-        if dist_deg > MAX_MATCH_DIST_DEG:
-            print(f"  station {r['station']}: nearest hydrograph station {dist_deg:.3f} deg away - dropped")
-            continue
-        series = hg[j].astype(np.float64)
-        offset = float(r["rp100_level_m"]) - float(np.nanmax(series))
-        i = len(cols)
-        cols[i] = series + offset
-        rows.append({"station": int(r["station"]), "station_index": int(r["station_index"]),
-                     "rp100_level_m": float(r["rp100_level_m"]), "hydrograph_station": j,
-                     "hydrograph_dist_deg": round(dist_deg, 4), "mdt_offset_m": round(offset, 4),
-                     "node_shift_km": float(r["node_shift_km"]), "kind": "line",
-                     "geometry": gpd.points_from_xy([r["node_lon"]], [r["node_lat"]])[0]})
-        print(f"  station {r['station']:>3} -> hydrograph {j} ({dist_deg:.3f} deg): level {r['rp100_level_m']:.3f} m, "
-              f"offset {offset:+.3f} m, node shifted {r['node_shift_km']:.2f} km")
-    if tile_dir is not None and root is not None:
-        from connected_forcing import interior_points
-        inner = interior_points(lines_gpkg, tile_dir, root, np.column_stack([hg_lon, hg_lat]))
-        for _, r in inner.iterrows():
-            series = hg[int(r["hydrograph_station"])].astype(np.float64)
-            offset = float(r["rp100_level_m"]) - float(np.nanmax(series))
-            cols[len(cols)] = series + offset
-            rows.append({"station": int(r["station"]), "station_index": int(r["station_index"]),
-                         "rp100_level_m": float(r["rp100_level_m"]), "hydrograph_station": int(r["hydrograph_station"]),
-                         "hydrograph_dist_deg": float(r["hydrograph_dist_deg"]), "mdt_offset_m": round(offset, 4),
-                         "node_shift_km": 0.0, "kind": "interior", "geometry": r.geometry})
-            print(f"  station {r['station']:>3} (interior) -> hydrograph {int(r['hydrograph_station'])}: "
-                  f"level {r['rp100_level_m']:.3f} m")
-    points = gpd.GeoDataFrame(rows, crs="EPSG:4326")
-    elapsed_hr = (times - times[0]).total_seconds() / 3600.0
-    hydro = pd.DataFrame(cols, index=times)
-    hydro.insert(0, "elapsed_hr", elapsed_hr)
+
+def level_at_nearest_seed(points_lonlat: np.ndarray, seed_lonlat: np.ndarray,
+                          seed_levels: np.ndarray) -> np.ndarray:
+    """Return the level of each point's nearest seed (longitude scaled by cos(latitude))."""
+    scale = np.array([np.cos(np.radians(np.mean(seed_lonlat[:, 1]))), 1.0])
+    _, j = cKDTree(seed_lonlat * scale).query(points_lonlat * scale)
+    return seed_levels[j]
+
+
+def line_samples(lines_gpkg: Path, tile_geometry_gpkg: Path) -> gpd.GeoDataFrame:
+    """Return points (EPSG:4326) at most FORCING_SPACING_M apart along the line near the tile.
+
+    Each segment part within TILE_MARGIN_M of the tile polygon is sampled at both ends and evenly
+    in between; `segment_kind` keeps the segment's kind (coastline, tile_edge, ...).
+    """
+    seg = retry_transient_io(gpd.read_file, lines_gpkg, layer="segments")
+    tile = retry_transient_io(gpd.read_file, tile_geometry_gpkg).to_crs("EPSG:4326")
+    utm = tile.estimate_utm_crs()
+    near = tile.to_crs(utm).geometry.iloc[0].buffer(TILE_MARGIN_M)
+    pts, kinds = [], []
+    for kind, geom in zip(seg["kind"], seg.to_crs(utm).geometry):
+        clipped = geom.intersection(near)
+        for part in getattr(clipped, "geoms", [clipped]):
+            if part.geom_type != "LineString" or part.length == 0:
+                continue
+            n = int(np.ceil(part.length / FORCING_SPACING_M))
+            pts += [part.interpolate(d) for d in np.linspace(0.0, part.length, n + 1)]
+            kinds += [kind] * (n + 1)
+    out = gpd.GeoDataFrame({"segment_kind": kinds}, geometry=pts, crs=utm)
+    # Segments share their end nodes; a doubled bnd point would weigh twice in SFINCS's interpolation.
+    key = pd.Series(list(zip(out.geometry.x.round(), out.geometry.y.round())))
+    return out[~key.duplicated().to_numpy()].to_crs("EPSG:4326").reset_index(drop=True)
+
+
+def attach_hydrographs(points: gpd.GeoDataFrame, hydrograph_nc: Path) -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
+    """Give each point (EPSG:4326, `rp100_level_m`) a hydrograph peaking at its level.
+
+    Shape: the point's `hydrograph_station` where set, else the nearest hydrograph station within
+    MAX_MATCH_KM (longitude scaled by cos(latitude); points without one are dropped). Shifted,
+    not scaled: offset = rp100_level_m - hydrograph_max, so the peak equals the level.
+    """
+    hg_lon, hg_lat, hg, times = read_hydrographs(hydrograph_nc)
+    points = points.reset_index(drop=True).copy()
+    if "hydrograph_station" not in points.columns:
+        points["hydrograph_station"] = np.nan
+    unmatched = points["hydrograph_station"].isna().to_numpy()
+    far = np.zeros(len(points), dtype=bool)
+    if unmatched.any():
+        xy = np.column_stack([points.geometry.x, points.geometry.y])[unmatched]
+        scale = np.array([np.cos(np.radians(xy[:, 1].mean())), 1.0])
+        d, j = cKDTree(np.column_stack([hg_lon, hg_lat]) * scale).query(xy * scale)
+        points.loc[unmatched, "hydrograph_station"] = j
+        points.loc[unmatched, "hydrograph_dist_km"] = np.round(d * KM_PER_DEG, 1)
+        far[unmatched] = d * KM_PER_DEG > MAX_MATCH_KM
+    if far.any():
+        print(f"  {int(far.sum())} point(s) without a hydrograph station within {MAX_MATCH_KM:.0f} km - dropped")
+        points = points[~far].reset_index(drop=True)
+    if points.empty:
+        raise ValueError("no forcing point has a hydrograph station nearby")
+    points["hydrograph_station"] = points["hydrograph_station"].astype(int)
+    series = hg[points["hydrograph_station"].to_numpy()].astype(np.float64)
+    offset = points["rp100_level_m"].to_numpy(dtype=np.float64) - np.nanmax(series, axis=1)
+    points["mdt_offset_m"] = np.round(offset, 4)
+    hydro = pd.DataFrame(series.T + offset, index=times)
+    hydro.insert(0, "elapsed_hr", (times - times[0]).total_seconds() / 3600.0)
     return points, hydro
+
+
+def build_line_forcing(lines_gpkg: Path, hydrograph_nc: Path, tile_dir: Path, root: Path,
+                       seed_rule: dict) -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
+    """Build forcing points (EPSG:4326) and matching hydrographs for a tile's boundary line.
+
+    `seed_rule`: production's seeding parameters, knn and idw_power (config simulation.flooding)
+    and river_code (tile_generation).
+    """
+    from connected_forcing import interior_points
+    line = line_samples(lines_gpkg, tile_dir / "inputs" / "tile_geometry.gpkg")
+    if line.empty:
+        raise ValueError(f"{lines_gpkg}: no boundary-line segment near the tile")
+    line = line.assign(kind="line", station=-1, station_index=-1)
+    hg_lon, hg_lat, _, _ = read_hydrographs(hydrograph_nc)
+    inner = interior_points(lines_gpkg, tile_dir, root, np.column_stack([hg_lon, hg_lat]))
+    points = gpd.GeoDataFrame(pd.concat([line, inner.assign(segment_kind="")], ignore_index=True),
+                              geometry="geometry", crs="EPSG:4326")
+    seed_lonlat, seed_levels = production_seed_levels(tile_dir, seed_rule)
+    points["rp100_level_m"] = level_at_nearest_seed(
+        np.column_stack([points.geometry.x, points.geometry.y]), seed_lonlat, seed_levels)
+    return attach_hydrographs(points, hydrograph_nc)
 
 
 def main() -> None:
@@ -124,12 +202,17 @@ def main() -> None:
     args = parser.parse_args()
 
     root = read_root(Path(args.config))
+    with open(args.config, encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+    seed_rule = {"knn": config["simulation"]["flooding"]["knn"],
+                 "idw_power": config["simulation"]["flooding"]["idw_power"],
+                 "river_code": config["tile_generation"]["river_code"]}
     hydrograph_nc = storm_tide_hydrograph_path(Path(args.config))
     print(f"hydrographs: {hydrograph_nc}")
     out_dir = root / args.base_dir_name / args.tile_id / "sfincs_model"
     out_dir.mkdir(parents=True, exist_ok=True)
     points, hydro = build_line_forcing(Path(args.lines_gpkg), hydrograph_nc,
-                                       tile_dir=root / args.base_dir_name / args.tile_id, root=root)
+                                       root / args.base_dir_name / args.tile_id, root, seed_rule)
     points.to_file(out_dir / "matched_boundary_points.gpkg", driver="GPKG")
     hydro.to_csv(out_dir / "corrected_hydrographs.csv", index=False)
     print(f"{len(points)} forcing point(s) ({int((points['kind'] == 'interior').sum())} interior); "

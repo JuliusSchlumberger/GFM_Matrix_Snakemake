@@ -24,7 +24,7 @@ from shapely.ops import linemerge, substring, unary_union
 
 OCEAN_CODE = 1
 TILE_STATIONS_GPKG = "inputs/boundaries_RP100_SLR_0.gpkg"
-MAX_HG_MATCH_DEG = 0.5  # same backstop build_line_forcing.py uses
+MAX_HG_MATCH_DEG = 0.5  # a used station counts towards suitability with a hydrograph station this close
 NODE_LEVEL_SOURCE = "coastline_node"  # = storm_tide_product.NODE_LEVEL_SOURCE
 SAME_POSITION_DEG = 1e-6  # tile station files copy the level file's coordinates
 MIN_FORCING_STATIONS = 2  # used stations with a hydrograph a tile needs
