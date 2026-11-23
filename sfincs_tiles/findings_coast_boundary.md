@@ -112,3 +112,55 @@ Outputs: `.cleanup_baseline/coast_boundary/stage0b_coast_hg/`.
 
 Leaning: blend (the per-cell series is then as smooth as the seeds). To decide on the product run:
 the acceptable jump between neighbours.
+
+## Stage 1, partial: C1 built, tile 3758 run locally (2026-11-23)
+
+C1 is rebuilt as `build_sfincs_tile.py --boundary-mode coast` (`build_coast_forcing.py`). Two changes
+from the plan: each boundary cell's series is the seed peak with the IDW-blended shape (as L0 now
+has), and the forcing points are thinned, then densified until SFINCS's two-point interpolation
+reproduces every boundary cell's own series within 5 cm (`choose_points`), instead of one point
+per cell. Both variants built and run locally (SFINCS v2.3.0, 4 threads) from product A levels and
+COAST-HG shapes (product B was being rebuilt); scratch only.
+
+| tile | variant | boundary cells | points | active cells | runtime | flooded land |
+|---|---|---|---|---|---|---|
+| 3758 | L0 | 295 | 22 | 7,460 | 5.2 s | 1.15 km2 |
+| 3758 | C1 | 386 (104 without an active face) | 92 | 5,134 | 1.6 s | 1.75 km2 |
+| 891 | L0 | 3,850 | 337 | 1,635,099 | not run | |
+| 891 | C1 | 22,007 | 5,183 (6 densify rounds) | 1,427,955 | not run | |
+
+- Imposition: every boundary cell with an active face peaks at its forcing (|dz| < 2 cm, both
+  variants). L0's zsmax at C1's boundary cells equals the C1 forcing (median 0.000 m, p5-p95
+  -0.001 to +0.002 m): on this tile the line already delivers the seed levels at the coast.
+- **C1 is not clean next to its boundary.** 237 active cells peak above the highest forcing
+  (2.01 m), up to 13.5 m; 175 of them border a boundary cell. L0: 36 cells, max 2.65 m. C1's extra
+  0.65 km2 of flooded land lies in exactly those cells (C1 zsmax there: median 4.3 m). Likely cause:
+  the weakly reflective boundary flux (velocity cap 4 m/s, stage 0 point 3) imposed in shallow
+  shoreline cells next to steep land, where L0 imposes it offshore in deep water.
+- 891: C1 seeds reach 19.15 m (467 points > 10 m, Cobequid Bay head, -63.8 to -63.6 E, 45.3-45.4 N);
+  L0's line never reaches those cells (max 7.45 m). The eikonal seeds there carry the same values.
+  Logged in TODO.md.
+
+Decides: C1 as specified (boundary on the shoreline cells) is not usable until the overshoot is
+understood.
+
+### Seaward ring (R2, R3), tile 3758
+
+`--coast-offset-cells k`: the boundary is the open-sea cells k cells (chessboard) seaward of the
+coastline, each forced with the level and shape of its nearest seed. The sea in between is active
+and starts at the forcing's start level. Same inputs and run as above.
+
+| variant | boundary cells | points | active cells | runtime | active cells > forcing max + 5 cm (next to boundary) | max zsmax active | wet vs L0 |
+|---|---|---|---|---|---|---|---|
+| L0 | 295 | 22 | 7,460 | 5.2 s | 53 (0) | 2.65 m | |
+| C1 | 386 | 92 | 5,134 | 1.6 s | 239 (145) | 13.51 m | CSI 0.678, +0.66 / -0.11 km2 |
+| R2 (240 m) | 353 | 88 | 5,853 | 3.4 s | 66 (0) | 2.78 m | CSI 0.986, +0.008 / -0.015 km2 |
+| R3 (360 m) | 360 | 88 | 6,213 | 3.7 s | 59 (0) | 2.69 m | CSI 0.995, +0.005 / -0.004 km2 |
+
+- Two cells offshore is enough: the overshoot next to the boundary is gone, and the remaining
+  cells above the forcing max are inland, as in L0.
+- On this tile, R2/R3 and L0 give the same flood (CSI 0.99). Both deliver the seed levels at the
+  coast, so the ring matters only where L0's line does not reach the coast's seeds (fjords,
+  tile 31's arms, 891's bay head).
+
+Not run yet: 891, tile 31, and a lagoon/archipelago tile with R3.

@@ -25,7 +25,7 @@ from rasterio.warp import Resampling, reproject
 from scipy import ndimage
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from gfm_config import read_root  # noqa: E402
+from gfm_config import read_root, storm_tide_hydrograph_path  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
 
 
@@ -199,6 +199,38 @@ def _create_mask(sf: SfincsModel, tile_gdf: gpd.GeoDataFrame, boundary_lines_gpk
             print(f"      {n} new boundary cell(s) on land (native mask) set back to active")
 
 
+def _set_mask(sf: SfincsModel, tile_gdf: gpd.GeoDataFrame, msk: np.ndarray) -> None:
+    # Set directly: create_boundary only takes cells on the active edge, and in a 1-2 cell channel
+    # every ocean cell is coastline.
+    sf.mask.create_active(include_polygon=tile_gdf.to_crs("EPSG:4326"), reset_mask=True)
+    da = sf.grid.data["mask"]
+    if msk.shape != da.shape:
+        raise ValueError(f"coast mask {msk.shape} does not match the SFINCS grid {da.shape}")
+    sf.grid.set(da.copy(data=msk), name="mask")
+
+
+def _create_coast_mask_and_forcing(sf: SfincsModel, tile_gdf: gpd.GeoDataFrame, tile_dir: Path, sfincs_dir: Path,
+                                   seed_rule: dict, hydrograph_nc: Path, factor: int, fine_transform,
+                                   fine_shape: tuple[int, int], window_hr: tuple[float, float],
+                                   offset_cells: int) -> tuple[np.ndarray, np.ndarray]:
+    # Coast mode (build_coast_forcing.py): msk from the native mask's ocean fraction per SFINCS cell.
+    # Writes the forcing points and hydrographs where line mode's build_line_forcing.py writes them;
+    # returns (msk, the start levels of the boundary cells and the open sea inside them, NaN elsewhere).
+    from build_coast_forcing import MSK_ACTIVE, coarsen_mask, coast_forcing, coast_msk, open_sea
+    from subgrid_coast import native_mask_on_grid
+    fine = native_mask_on_grid(tile_dir / "mask.tif", fine_transform, sf.crs, fine_shape)
+    coarse = coarsen_mask(fine, factor)
+    msk = coast_msk(coarse, int(seed_rule["river_code"]), offset_cells)
+    _set_mask(sf, tile_gdf, msk)
+    points, hydro, start, stats = coast_forcing(msk, sf.grid.data["mask"].raster.transform, sf.crs, tile_dir.parent,
+                                                seed_rule, hydrograph_nc, window_hr,
+                                                start_cells=open_sea(coarse) & (msk == MSK_ACTIVE))
+    points.to_file(sfincs_dir / "matched_boundary_points.gpkg", driver="GPKG")
+    hydro.to_csv(sfincs_dir / "corrected_hydrographs.csv", index=False)
+    print("      coast boundary: " + ", ".join(f"{k}={v}" for k, v in stats.items()))
+    return msk, start
+
+
 # Hours on the forcing time axis (build_line_forcing: COAST-HG's, storm peak at t=74.5 h, for
 # either storm_tide_source).
 TRUNCATE_WINDOW_HR_DEFAULT = (40.0, 110.0)
@@ -221,24 +253,38 @@ def build_sfincs_tile(
     subgrid_nrmax: int = SUBGRID_NRMAX_DEFAULT,
     base_dir_name: str = "calibration_roughness_SFINCS",
     rotated: bool = True,
-    boundary_lines_gpkg: Path | None = None,  # required
+    boundary_lines_gpkg: Path | None = None,
+    boundary_mode: str = "line",
+    seed_rule: dict | None = None,
+    hydrograph_nc: Path | None = None,
+    coast_offset_cells: int = 0,
 ) -> Path:
     """Build and write the SFINCS model to `root`/`base_dir_name`/`tile_id`/sfincs_model.
 
     `truncate_window_hr` is (start, end) h on the forcing time axis (peak at 74.5 h); None
     keeps the full ~148.8 h. `tref` defaults to 2026-01-01 (only elapsed time matters).
-    Raises RuntimeError if the boundary line yields no waterlevel-boundary cells.
+    boundary_mode "line": forced along `boundary_lines_gpkg` with build_line_forcing.py's points.
+    "coast": forced at the eikonal's coastline cells, or `coast_offset_cells` cells seaward of
+    them (build_coast_forcing.py; needs `seed_rule` and `hydrograph_nc`), which writes the forcing
+    points itself; zsini is then the start level of the boundary cells and the sea inside them.
+    Raises RuntimeError if the mask has no waterlevel-boundary cells.
     """
-    if boundary_lines_gpkg is None:
-        raise ValueError("build_sfincs_tile needs boundary_lines_gpkg (build_station_boundary_lines.py output)")
+    if boundary_mode == "line" and boundary_lines_gpkg is None:
+        raise ValueError("boundary_mode line needs boundary_lines_gpkg (build_station_boundary_lines.py output)")
+    if boundary_mode == "coast" and (seed_rule is None or hydrograph_nc is None):
+        raise ValueError("boundary_mode coast needs seed_rule and hydrograph_nc")
+    if boundary_mode not in ("line", "coast"):
+        raise ValueError(f"boundary_mode must be line or coast, got {boundary_mode!r}")
     _validate_subgrid_params(resolution_m, subgrid_nr_pixels)
     tile_dir = root / base_dir_name / tile_id / "inputs"
     sfincs_dir = root / base_dir_name / tile_id / "sfincs_model"
     sfincs_dir.mkdir(parents=True, exist_ok=True)
 
     tile_gdf = retry_transient_io(gpd.read_file, tile_dir / "tile_geometry.gpkg")
-    matched_all = retry_transient_io(gpd.read_file, sfincs_dir / "matched_boundary_points.gpkg")
-    interior = matched_all[matched_all["kind"] == "interior"] if "kind" in matched_all.columns else None
+    interior = None
+    if boundary_mode == "line":
+        matched_all = retry_transient_io(gpd.read_file, sfincs_dir / "matched_boundary_points.gpkg")
+        interior = matched_all[matched_all["kind"] == "interior"] if "kind" in matched_all.columns else None
 
     # hydromt create() methods need catalog-keyed sources, not raw DataArrays
     local_catalog_path = sfincs_dir / "data_catalog_local.yml"
@@ -259,25 +305,30 @@ def build_sfincs_tile(
     # Mask before subgrid: subgrid.create() reads grid.mask. all_touched=True in
     # _create_mask: the default centre-point test leaves a broken boundary on a
     # line running diagonally across the rotated grid.
-    _create_mask(sf, tile_gdf, boundary_lines_gpkg, resolution_m, interior, tile_dir / "mask.tif")
+    main_transform = sf.grid.data.raster.transform
+    main_crs = sf.grid.data.raster.crs
+    main_height, main_width = sf.grid.data.sizes["y"], sf.grid.data.sizes["x"]
+    fine_transform = main_transform * main_transform.scale(1.0 / subgrid_nr_pixels)
+    fine_height, fine_width = main_height * subgrid_nr_pixels, main_width * subgrid_nr_pixels
+    coast_msk = coast_start = None
+    if boundary_mode == "line":
+        _create_mask(sf, tile_gdf, boundary_lines_gpkg, resolution_m, interior, tile_dir / "mask.tif")
+    else:
+        coast_msk, coast_start = _create_coast_mask_and_forcing(
+            sf, tile_gdf, tile_dir, sfincs_dir, seed_rule, hydrograph_nc, subgrid_nr_pixels,
+            fine_transform, (fine_height, fine_width), truncate_window_hr or (0.0, np.inf), coast_offset_cells)
     n_active = int((sf.grid.data["mask"] > 0).sum())
     n_bnd = int((sf.grid.data["mask"] == 2).sum())
     print(f"[2/8] mask: {n_active} active cell(s), {n_bnd} waterlevel-boundary cell(s)")
     if n_bnd == 0:
         raise RuntimeError(
-            f"tile {tile_id}: 0 waterlevel-boundary cells after create_boundary - "
-            "the ocean polygon didn't reach any active-domain edge cell on this grid. "
+            f"tile {tile_id}: 0 waterlevel-boundary cells ({boundary_mode} boundary) - "
             "No weir/discharge fallback exists in this pipeline - this tile can't be forced."
         )
 
     # Pre-reproject elevation and Manning's n (nearest) onto the exact subgrid so
     # hydromt's forced bilinear pass is a no-op: bilinear below DeltaDTM's native
     # resolution fabricates depressions; nearest keeps every pixel a real sample.
-    main_transform = sf.grid.data.raster.transform
-    main_crs = sf.grid.data.raster.crs
-    main_height, main_width = sf.grid.data.sizes["y"], sf.grid.data.sizes["x"]
-    fine_transform = main_transform * main_transform.scale(1.0 / subgrid_nr_pixels)
-    fine_height, fine_width = main_height * subgrid_nr_pixels, main_width * subgrid_nr_pixels
 
     # subgrid.create()'s re-read can reintroduce NaN, but only in padding outside the active domain
     subgrid_sources = {}
@@ -300,7 +351,10 @@ def build_sfincs_tile(
     # DataCatalog is parsed once at construction: rebuild sf to pick up the new entries
     sf =SfincsModel(data_libs=[str(local_catalog_path)], root=str(sfincs_dir), mode="w+")
     sf.grid.create_from_region(region={"geom": tile_gdf}, res=resolution_m, crs="utm", rotated=rotated)
-    _create_mask(sf, tile_gdf, boundary_lines_gpkg, resolution_m, interior, tile_dir / "mask.tif")
+    if coast_msk is None:
+        _create_mask(sf, tile_gdf, boundary_lines_gpkg, resolution_m, interior, tile_dir / "mask.tif")
+    else:
+        _set_mask(sf, tile_gdf, coast_msk)
 
     # dep_subgrid.tif is needed by run_sfincs_tile.py's downscale_floodmap()
     sf.subgrid.create(
@@ -369,11 +423,14 @@ def build_sfincs_tile(
           f"{tref} -> {tstop} ({elapsed_hr[-1]:.1f} h), buffer={buffer_m / 1000:.1f} km")
 
     # zsini on the coarse grid (unaffected by subgrid)
-    first_vals = hydrographs[station_cols].iloc[0].to_numpy(dtype=np.float64)
-    zsini_arr = _compute_zsini_array(
-        tile_dir / "mask.tif", station_x, station_y, first_vals,
-        main_transform, main_crs, (main_height, main_width),
-    )
+    if coast_start is not None:
+        zsini_arr = np.where(np.isfinite(coast_start), coast_start, np.float32(-9999.0)).astype(np.float32)
+    else:
+        first_vals = hydrographs[station_cols].iloc[0].to_numpy(dtype=np.float64)
+        zsini_arr = _compute_zsini_array(
+            tile_dir / "mask.tif", station_x, station_y, first_vals,
+            main_transform, main_crs, (main_height, main_width),
+        )
 
     zsini_da = xr.DataArray(zsini_arr, dims=grid_coords.dims, coords=grid_coords.coords)
     zsini_da = zsini_da.rio.write_crs(sf.crs)
@@ -384,7 +441,9 @@ def build_sfincs_tile(
     n_wet = int(is_ocean_wet.sum())
     print(f"[5/8] zsini set - {n_wet} ocean cell(s) initialized "
           f"{float(zsini_arr[is_ocean_wet].min()):.4f} to {float(zsini_arr[is_ocean_wet].max()):.4f} m "
-          f"(interpolated from {len(station_x)} station(s)); land/river/lake left dry (-9999.0, bed-level fallback)"
+          + ("(boundary cells and the sea inside them); everything else dry (-9999.0, bed-level fallback)"
+             if coast_start is not None else
+             f"(interpolated from {len(station_x)} station(s)); land/river/lake left dry (-9999.0, bed-level fallback)")
           if n_wet else "[5/8] zsini set - WARNING: 0 ocean cells found, every cell left dry")
 
     # dtmaxout spans the whole run so zsmax is one whole-run maximum (default 86400 s
@@ -417,10 +476,14 @@ def main() -> None:
     )
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS", help="output root directory name under paths.root (default: calibration_roughness_SFINCS)")
     parser.add_argument(
-        "--boundary-lines-gpkg", required=True,
-        help="build_station_boundary_lines.py output for this tile: the ocean side of its "
+        "--boundary-lines-gpkg", default=None,
+        help="line mode: build_station_boundary_lines.py output for this tile: the ocean side of its "
              "boundary line is masked inactive and the model is forced along the line",
     )
+    parser.add_argument("--boundary-mode", choices=["line", "coast"], default="line",
+                        help="coast: forced at the eikonal's coastline cells (build_coast_forcing.py)")
+    parser.add_argument("--coast-offset-cells", type=int, default=0,
+                        help="coast mode: put the boundary this many cells seaward of the coastline")
     parser.add_argument(
         "--no-rotated", dest="rotated", action="store_false",
         help="use an axis-aligned UTM grid instead of the default rotated grid",
@@ -429,11 +492,21 @@ def main() -> None:
 
     root = read_root(Path(args.config))
     truncate_window_hr = None if args.no_truncate else TRUNCATE_WINDOW_HR_DEFAULT
+    seed_rule = hydrograph_nc = None
+    if args.boundary_mode == "coast":
+        with open(args.config, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        seed_rule = {"knn": config["simulation"]["flooding"]["knn"],
+                     "idw_power": config["simulation"]["flooding"]["idw_power"],
+                     "river_code": config["tile_generation"]["river_code"]}
+        hydrograph_nc = storm_tide_hydrograph_path(Path(args.config))
     build_sfincs_tile(
         args.tile_id, root, resolution_m=args.resolution_m, truncate_window_hr=truncate_window_hr,
         subgrid_nr_pixels=args.subgrid_nr_pixels, subgrid_nr_levels=args.subgrid_nr_levels, subgrid_nrmax=args.subgrid_nrmax,
         base_dir_name=args.base_dir_name, rotated=args.rotated,
-        boundary_lines_gpkg=Path(args.boundary_lines_gpkg),
+        boundary_lines_gpkg=Path(args.boundary_lines_gpkg) if args.boundary_lines_gpkg else None,
+        boundary_mode=args.boundary_mode, seed_rule=seed_rule, hydrograph_nc=hydrograph_nc,
+        coast_offset_cells=args.coast_offset_cells,
     )
 
 

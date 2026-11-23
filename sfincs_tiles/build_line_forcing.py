@@ -136,6 +136,31 @@ def line_samples(lines_gpkg: Path, tile_geometry_gpkg: Path) -> gpd.GeoDataFrame
     return out[~key.duplicated().to_numpy()].to_crs("EPSG:4326").reset_index(drop=True)
 
 
+def peak_relative_shapes(hg: np.ndarray) -> np.ndarray:
+    """Return each hydrograph (n, t) minus its own peak (float64, max 0)."""
+    return hg.astype(np.float64) - np.nanmax(hg, axis=1, keepdims=True)
+
+
+def blended_shapes(lonlat: np.ndarray, hg_lonlat: np.ndarray, shapes: np.ndarray, knn: int,
+                   idw_power: float) -> dict[str, np.ndarray]:
+    """IDW-blend the peak-relative `shapes` of each position's `knn` nearest stations.
+
+    Weights distance^-idw_power over the stations within MAX_MATCH_KM (longitude scaled by
+    cos(latitude)). Returns "shape" (n, t), "nearest" station index, "nearest_km" and "n_used";
+    a position with n_used 0 has an all-zero shape.
+    """
+    scale = np.array([np.cos(np.radians(lonlat[:, 1].mean())), 1.0])
+    k = min(knn, len(hg_lonlat))
+    d, j = cKDTree(hg_lonlat * scale).query(lonlat * scale, k=k)
+    d, j = d.reshape(len(lonlat), k) * KM_PER_DEG, j.reshape(len(lonlat), k)
+    near = d <= MAX_MATCH_KM
+    w = np.where(near, np.maximum(d, 1e-6) ** -idw_power, 0.0)
+    has = near.any(axis=1)
+    w[has] /= w[has].sum(axis=1, keepdims=True)
+    return {"shape": np.einsum("pk,pkt->pt", w, shapes[j]), "nearest": j[:, 0],
+            "nearest_km": np.round(d[:, 0], 1), "n_used": near.sum(axis=1)}
+
+
 def attach_hydrographs(points: gpd.GeoDataFrame, hydrograph_nc: Path, knn: int = 1,
                        idw_power: float = 3.0) -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
     """Give each point (EPSG:4326, `rp100_level_m`) a hydrograph peaking at its level.
@@ -148,7 +173,7 @@ def attach_hydrographs(points: gpd.GeoDataFrame, hydrograph_nc: Path, knn: int =
     jumping where the nearest station changes. The shape is then shifted, not scaled, to the level.
     """
     hg_lon, hg_lat, hg, times = read_hydrographs(hydrograph_nc)
-    shapes = hg.astype(np.float64) - np.nanmax(hg, axis=1, keepdims=True)
+    shapes = peak_relative_shapes(hg)
     points = points.reset_index(drop=True).copy()
     if "hydrograph_station" not in points.columns:
         points["hydrograph_station"] = np.nan
@@ -158,19 +183,12 @@ def attach_hydrographs(points: gpd.GeoDataFrame, hydrograph_nc: Path, knn: int =
     keep = np.ones(len(points), dtype=bool)
     if (~fixed).any():
         xy = np.column_stack([points.geometry.x, points.geometry.y])[~fixed]
-        scale = np.array([np.cos(np.radians(xy[:, 1].mean())), 1.0])
-        k = min(knn, len(hg_lon))
-        d, j = cKDTree(np.column_stack([hg_lon, hg_lat]) * scale).query(xy * scale, k=k)
-        d, j = d.reshape(len(xy), k) * KM_PER_DEG, j.reshape(len(xy), k)
-        near = d <= MAX_MATCH_KM
-        w = np.where(near, np.maximum(d, 1e-6) ** -idw_power, 0.0)
-        has = near.any(axis=1)
-        w[has] /= w[has].sum(axis=1, keepdims=True)
-        blended[~fixed] = np.einsum("pk,pkt->pt", w, shapes[j])
-        points.loc[~fixed, "hydrograph_station"] = j[:, 0]
-        points.loc[~fixed, "hydrograph_dist_km"] = np.round(d[:, 0], 1)
-        points.loc[~fixed, "n_hydrographs"] = near.sum(axis=1)
-        keep[~fixed] = has
+        blend = blended_shapes(xy, np.column_stack([hg_lon, hg_lat]), shapes, knn, idw_power)
+        blended[~fixed] = blend["shape"]
+        points.loc[~fixed, "hydrograph_station"] = blend["nearest"]
+        points.loc[~fixed, "hydrograph_dist_km"] = blend["nearest_km"]
+        points.loc[~fixed, "n_hydrographs"] = blend["n_used"]
+        keep[~fixed] = blend["n_used"] > 0
     if not keep.all():
         print(f"  {int((~keep).sum())} point(s) without a hydrograph station within {MAX_MATCH_KM:.0f} km - dropped")
     points, blended = points[keep].reset_index(drop=True), blended[keep]
