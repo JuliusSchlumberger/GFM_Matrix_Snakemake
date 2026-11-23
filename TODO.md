@@ -463,9 +463,8 @@ Open:
        Rescored (`.cleanup_baseline/phase3_build_b`): RP100 MAE 0.219 -> 0.215 m, TC-dominated bias
        -0.044 -> -0.001, EAS RP100 bias -0.082 -> -0.020, NWN 0.339 -> 0.278; RP2 at TC-part
        stations +0.040 -> +0.048 (EAS RP2 MAE 0.060 -> 0.075, SEA 0.170 -> 0.199). Written up in
-       INPUT_ANALYSIS.md §8.7. Still open for the appendix: figures for §8.7 (gauge scores by
-       region A/COAST-RP, the TC raise CV, the tide-neighbour map) and a durable home for the
-       §8.7 tables (now only in the gitignored .cleanup_baseline).
+       INPUT_ANALYSIS.md §8.7, tables in input_analysis_data/gauge_validation/, figures
+       docs/gauge_validation_*.
      - Seasonal gap: not in B (a few cm against RP100 MAE 0.22 m; r absorbs part of it at gauges);
        revisit if B leaves negative RP100 bias in EAS/WNA/SEA.
      - No change indicated: ET in the mask, r rule and fallback, despike, surge-tide independence.

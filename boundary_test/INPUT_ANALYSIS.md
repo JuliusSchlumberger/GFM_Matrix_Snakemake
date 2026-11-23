@@ -1289,9 +1289,10 @@ where they have a physical reason and score at least as well; none is tuned to t
   GEBCO's ~460 m cells close narrow inlets: Bamfield (Barkley Sound) loses its neighbours and
   goes +0.83 m. That is why W. North America gets worse on GEBCO. GEBCO's larger gain in the
   fjords comes from the same closures. FES-amplitude similarity helps a little overall but costs
-  S. Australia (0.173 -> 0.188 m). With the OSM rule the tide factor changes at 1,232 of 23,226
-  stations, by more than 10% at 252 (fjords of Alaska, British Columbia and Norway, the Gulf of
-  Bothnia, the Amazon mouth, Bangladesh). The last two have no ratio gauge to check them.
+  S. Australia (0.173 -> 0.188 m). With the OSM rule the tide factor changes at 1,231 of 23,226
+  stations, by more than 10% at 251 (fjords of Alaska, British Columbia and Norway, the Gulf of
+  Bothnia, the Amazon mouth, Bangladesh; figure `gauge_validation_tide_neighbours`). The last
+  two have no ratio gauge to check them.
 - *IBTrACS mask.* The mask removes 23% of E. Asia's annual maxima (the cyclone part returns
   them). Extratropical track points (IBTrACS NATURE "ET") account for 0.1% of the masked
   maxima there and 12% in E. North America. A mask without them changes no MAE by more than
@@ -1411,7 +1412,12 @@ each script's docstring for further arguments):
     tc_raise shift_bootstrap tc_mask_et tide_neighbours gauge_series gauge_analysis
     despike_tracks` (`gauge_analysis` reads `gauge_series`'s output). For the record comparison
     of the hydrographs, `generator_validation.py --out-dir .cleanup_baseline/level_sources --tag
-    _1979`, and again with `--record-cache <storm_tide_product cache_dir> --tag _1950`
+    _1979`, and again with `--record-cache <storm_tide_product cache_dir> --tag _1950`. The
+    ingredients and the rule tests (`basin_fit_cv` to `despike_tracks`) ran on the product built
+    with the 25 km tide rule and the basin-left-out shift; `level_product_gauges.py` and
+    `shift_bootstrap` on production. Then `export_gauge_validation.py` (the five directories
+    above and `--product-dir`) and `docs/figure_scripts/plot_gauge_validation.py`, which reads
+    only the exported tables
 
 Inputs on `<data_root>` are read only.
 
@@ -1435,6 +1441,30 @@ quality site (698), keyed by the GESLA file name; levels are in m above local MS
   above MSL, `rmse_vs_gesla`, `range_class`, `station_class`.
 - **`tables.md`**: the regional summary, the stratified sample and the FES-miss table above, as
   generated.
+
+`boundary_test/input_analysis_data/gauge_validation/`, written by `export_gauge_validation.py`:
+the tables of §8.7. Read them with `keep_default_na=False` ("NA" is the North Atlantic basin).
+Levels in m above local MSL; score tables have one row per group, RP and variant (`level`) with
+n, median, MAE, p10 and p90 of station - gauge.
+- **`levels_by_gauge.csv`**, **`levels_summary.csv`**, **`levels_breakdown.csv`**: production at
+  the 618 ratio gauges, per gauge (reference, COAST-RP and product levels at RP2-RP100) and as
+  scores by class, region and tidal range.
+- **`ingredients_scores.csv`**: production with one ingredient taken out at a time.
+- **`tc_raise_cv_scores.csv`**, **`tc_raise_cv_fits.csv`**: the COAST-RP_TC raise forms and
+  fits, scored with the 300 km neighbourhood left out, and the fitted values per basin.
+- **`tc_shift_bootstrap.csv`**, **`tc_shifts_production.csv`**: the shift per basin with its
+  bootstrap 5-95%, and the values the production build fitted.
+- **`tc_mask_et_scores.csv`**, **`tc_mask_et_maxima.csv`**: the mask with and without
+  extratropical track points, and the annual maxima it masks per region.
+- **`tide_neighbours_amplitude_scores.csv`**, **`tide_neighbours_level_scores.csv`**,
+  **`tide_factor_stations.csv`**: the tide-factor neighbour rules at the tide gauges and the
+  ratio gauges, and per product station the factor through water (production) and within 25 km.
+- **`r_by_rp.csv`**, **`r_fallback_scores.csv`**: r at RP2, RP10 and RP50 per gauge, and the
+  fallback options scored gauge left out (MAE of ln r).
+- **`surge_tide_dependence.csv`**, **`seasonal_gap.csv`**: skew-surge quantiles by high-water
+  tertile, and the gauge - GTSM monthly cycle at the annual-maximum months, per gauge.
+- **`despike_near_tracks.csv`**: GTSM hours the despike drops near cyclone tracks and away from
+  them, per station with a TC part.
 
 ## 12. References
 
