@@ -1,7 +1,9 @@
 """Write the SFINCS calibration's HPC chain (calibration_roughness_SFINCS); entry point `run()`.
 
-stage1: candidate shards + per-shard screen/boundary-line/pre-flight jobs and a bridge job
-(afterany) that selects tiles and runs `stage2 --submit`.
+stage1: candidate shards + per-shard screen jobs (line mode: + boundary line and pre-flight) and a
+bridge job (afterany) that selects tiles and runs `stage2 --submit`.
+--boundary-mode (coast | line) is the SFINCS boundary of run_final_tile.sh; it also sets which
+tiles are eligible (coast: every screened tile; line: a suitable line and a passed pre-flight).
 stage2: spreads unfinished tiles over jobs, longest processing time first, plus a post job
 (afterany) that writes variant_selection.json, the dedup and both analyses.
 post: the post job of a phase alone.
@@ -89,24 +91,28 @@ def cmd_stage1(args) -> str:
     chain = _chain(linux_config, base / "hpc_jobs_stage1", f"{lb}/hpc_jobs_stage1")
     # No -e: a job's later steps still run after an earlier one partly failed (the pre-flight
     # after tiles errored in the line build). Steps the rest cannot do without end in `|| exit 1`.
+    line = args.boundary_mode == "line"
+    mode = f"--boundary-mode {args.boundary_mode}"
     for k in range(args.n_jobs):
         shard, screened = f"{lb}/candidates/shard_{k:03d}.txt", f"{lb}/candidates/screened_{k:03d}.txt"
         n = len((base / "candidates" / f"shard_{k:03d}.txt").read_text().split())
+        lines = [f'"$GFM_PY" build_station_boundary_lines.py {common} --tiles-dir-name model_outputs '
+                 f"--tile-ids-file {screened} --skip-existing --plot all",
+                 f'"$SFINCS_PY" preflight_sfincs_mask.py {common} --tiles-dir-name model_outputs '
+                 f"--tile-ids-file {screened} --skip-existing"] if line else []
         chain.add(f"cal_stage1_{k:03d}", "sfincs_stage1", [
             f'cd "{code}" || exit 1',
-            f"# {n} candidate tile(s): screen -> boundary lines -> SFINCS mask pre-flight",
+            f"# {n} candidate tile(s): screen" + (" -> boundary lines -> SFINCS mask pre-flight" if line else ""),
             f'"$GFM_PY" select_calibration_tiles.py screen {common} --tile-ids-file {shard} --out-ids {screened} || exit 1',
-            f'"$GFM_PY" build_station_boundary_lines.py {common} --tiles-dir-name model_outputs '
-            f"--tile-ids-file {screened} --skip-existing --plot all",
-            f'"$SFINCS_PY" preflight_sfincs_mask.py {common} --tiles-dir-name model_outputs '
-            f"--tile-ids-file {screened} --skip-existing",
+            *lines,
         ], filename=f"stage1_{k:03d}.sbatch", resources={"time": _slurm_hours(args.stage1_hours)}, errexit=False)
     chain.add("cal_bridge", "sfincs_bridge", [
         f'cd "{code}" || exit 1',
-        "# after every stage-1 job: line summary -> tile selection + maps -> stage-2 jobs (submitted)",
-        f'"$GFM_PY" build_station_boundary_lines.py {common} --summarize',
-        f'"$GFM_PY" select_calibration_tiles.py select {common} --n-tiles {args.n_tiles} || exit 1',
-        f'"$GFM_PY" generate_calibration_jobs.py stage2 {common} --n-jobs {args.stage2_jobs} --submit',
+        "# after every stage-1 job: " + ("line summary -> " if line else "")
+        + "tile selection + maps -> stage-2 jobs (submitted)",
+        *([f'"$GFM_PY" build_station_boundary_lines.py {common} --summarize'] if line else []),
+        f'"$GFM_PY" select_calibration_tiles.py select {common} {mode} --n-tiles {args.n_tiles} || exit 1',
+        f'"$GFM_PY" generate_calibration_jobs.py stage2 {common} {mode} --n-jobs {args.stage2_jobs} --submit',
     ], after=chain.names(), filename="bridge.sbatch", resources={"time": _slurm_hours(2)}, errexit=False)
     submit = chain.write_submit("submit_chain.sh")
     print(f"stage 1: {args.n_jobs} job(s) + bridge -> {base / 'hpc_jobs_stage1'}")
@@ -181,7 +187,7 @@ def cmd_stage2(args) -> str | None:
             f"# {len(tids)} tile(s), estimated {load / 60:.1f} h (generate_calibration_jobs.py stage2)",
             "while read -r TILE; do",
             '  [ -n "$TILE" ] || continue',
-            f"  BASE_DIR_NAME={args.base_dir_name} CAL_PHASE={args.phase} "
+            f"  BASE_DIR_NAME={args.base_dir_name} CAL_PHASE={args.phase} SFINCS_BOUNDARY_MODE={args.boundary_mode} "
             f'bash {linux_config["paths"]["code_root"]}/sfincs_tiles/run_final_tile.sh "$TILE" </dev/null',
             f"done < {lout}/tiles_{j:03d}.txt",
         ], filename=f"final_{j:03d}.sbatch", resources={"time": _slurm_hours(hours)}, errexit=False,
@@ -301,6 +307,9 @@ def add_arguments(parser: argparse.ArgumentParser, command: str) -> None:
 
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
     parser.add_argument("--submit", action="store_true", help="run the written submit script")
+    parser.add_argument("--boundary-mode", choices=["coast", "line"], default="coast",
+                        help="SFINCS boundary: coast = 3 cells seaward of the eikonal coastline, no station "
+                             "line needed; line = along the station boundary line")
     add_profile_set_argument(parser)
     if command == "stage1":
         parser.add_argument("--n-jobs", type=int, default=10)

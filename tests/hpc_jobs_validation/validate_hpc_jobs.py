@@ -135,7 +135,7 @@ def test_exposure_standalone(tmp_path) -> None:
 def test_sfincs_stage2_lpt_and_post(tmp_path) -> None:
     cfg = fx.make_fixture(tmp_path)
     base = fx.add_sfincs_stage2(tmp_path)
-    args = Namespace(config=str(cfg), base_dir_name=base.name, dedup_dir_name=f"{base.name}_dedup", n_jobs=2,
+    args = Namespace(config=str(cfg), base_dir_name=base.name, dedup_dir_name=f"{base.name}_dedup", n_jobs=2, boundary_mode="coast",
                      phase="sweep", overhead_min=35.0, sfincs_min_per_mcell=12.5, eikonal_min_per_mcell=10.0,
                      time_margin=1.5, post=True, submit=False, profile_set=["sfincs_post.mem=120G"])
     jobs = _chain(tmp_path, sfincs.cmd_stage2(args))

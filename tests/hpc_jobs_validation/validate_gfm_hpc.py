@@ -173,6 +173,31 @@ def test_rerun_sfincs_part_with_reset_runs_redoes_the_model_runs_too(tmp_path, s
     sfincs.run("rerun", _rerun_args(cfg, base, part="sfincs", reset_runs=True, no_post=True))
     assert not (base / "3" / "sfincs_model" / "sfincs.inp").exists()
     assert sorted(p.name for p in (base / "2" / "outputs").iterdir()) == []
+    assert "SFINCS_BOUNDARY_MODE=coast" in (base / "hpc_jobs_stage2" / "final_000.sbatch").read_text()
+
+
+@pytest.mark.parametrize("mode", ["coast", "line"])
+def test_stage1_coast_mode_screens_only_and_selects_for_its_boundary(tmp_path, monkeypatch, submitted, mode) -> None:
+    cfg = fx.make_fixture(tmp_path)
+    base_name = "cal_stage1"
+
+    def fake_pool(cmd, check):  # select_calibration_tiles.py pool needs the global tile grid
+        shards = sfincs.read_root(cfg) / base_name / "candidates"
+        shards.mkdir(parents=True, exist_ok=True)
+        (shards / "shard_000.txt").write_text("1\n2\n")
+
+    monkeypatch.setattr(sfincs.subprocess, "run", fake_pool)
+    parser = gfm_hpc.build_parser()
+    args = parser.parse_args(["sfincs", "stage1", "--config", str(cfg), "--base-dir-name", base_name, "--n-jobs", "1",
+                              "--boundary-mode", mode])
+    sfincs.run("stage1", args)
+    jobs = sfincs.read_root(cfg) / base_name / "hpc_jobs_stage1"
+    stage1, bridge = (jobs / "stage1_000.sbatch").read_text(), (jobs / "bridge.sbatch").read_text()
+    assert "select_calibration_tiles.py screen" in stage1
+    assert ("build_station_boundary_lines.py" in stage1) == (mode == "line")
+    assert ("preflight_sfincs_mask.py" in stage1) == (mode == "line")
+    assert "select_calibration_tiles.py select --config" in bridge
+    assert bridge.count(f"--boundary-mode {mode}") == 2  # select and the stage-2 call
 
 
 def test_rerun_dry_run_and_guards(tmp_path, submitted, capsys) -> None:
