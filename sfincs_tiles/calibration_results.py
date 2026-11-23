@@ -20,9 +20,13 @@ RESULT_NAME = "calibration_result.json"
 DISPLAY_LABEL = {
     "bathtub": "Bathtub",
     "bathtub_connected": "Connected bathtub",
+    "bathtub_connected_cap": "Connected bathtub + volume cap",
     "straight_line": "Straight-line attenuation",
+    "straight_line_cap": "Straight-line attenuation + volume cap",
     "eikonal_uniform": "Eikonal, uniform rate",
     "eikonal_landcover": "Eikonal, land-cover rate",
+    "eikonal_uniform_cap": "Eikonal, uniform rate + volume cap",
+    "eikonal_landcover_cap": "Eikonal, land-cover rate + volume cap",
     "eikonal_uniform_duration": "Eikonal, uniform rate + duration",
     "eikonal_landcover_duration": "Eikonal, land-cover rate + duration",
 }

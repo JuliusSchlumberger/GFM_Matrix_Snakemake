@@ -9,7 +9,7 @@ from affine import Affine
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from flood_model import flood_depth_dense, seed_level_idw, straight_line_level  # noqa: E402
-from flood_variants import VARIANTS, parameter_key, run_key, variant_flooding  # noqa: E402
+from flood_variants import VARIANTS, base_variant, parameter_key, run_key, variant_flooding  # noqa: E402
 
 TRANSFORM = Affine(30.0, 0, 0, 0, -30.0, 0)
 
@@ -94,7 +94,8 @@ def test_level_models_refuse_the_duration_correction() -> None:
 
 def test_variant_flooding_sets_model_parameter_and_duration() -> None:
     flooding = {"model": "eikonal", "friction_source": "landcover", "friction_scale_factor": 0.25,
-                "uniform_attenuation_m_per_km": 0.2, "duration_correction": {"enabled": True, "alpha": 1.0}}
+                "uniform_attenuation_m_per_km": 0.2, "duration_correction": {"enabled": True, "alpha": 1.0},
+                "volume_cap": {"enabled": False}}
     v = variant_flooding(flooding, "eikonal_uniform_duration", 0.15, 0.5)
     assert (v["model"], v["friction_source"], v["uniform_attenuation_m_per_km"]) == ("eikonal", "uniform", 0.15)
     assert v["duration_correction"] == {"enabled": True, "alpha": 0.5}
@@ -104,7 +105,10 @@ def test_variant_flooding_sets_model_parameter_and_duration() -> None:
     assert parameter_key("eikonal_landcover") == "friction_scale_factor" and parameter_key("bathtub") is None
     assert run_key("eikonal_landcover_duration", 0.25, 1.0) == "eikonal_landcover_duration_fsf0.25_a1"
     assert run_key("straight_line", 0.2) == "straight_line_rate0.2"
-    assert len(VARIANTS) == 7
+    assert len(VARIANTS) == 11
+    for name, spec in VARIANTS.items():  # a capped variant differs from its base only in the cap
+        assert {**VARIANTS[base_variant(name)], "cap": spec["cap"]} == spec
+    assert variant_flooding(flooding, "bathtub_connected_cap")["volume_cap"]["enabled"]
 
 
 def test_variant_config_moves_outputs_and_keeps_inputs() -> None:
@@ -113,7 +117,8 @@ def test_variant_config_moves_outputs_and_keeps_inputs() -> None:
     config = {"simulation": {"model_outputs": "{root}/x/model_outputs", "preprocessing_inputs_dir": None,
                              "flooding": {"model": "eikonal", "friction_source": "landcover",
                                           "friction_scale_factor": 0.25, "uniform_attenuation_m_per_km": 0.2,
-                                          "duration_correction": {"enabled": True, "alpha": 1.0}}},
+                                          "duration_correction": {"enabled": True, "alpha": 1.0},
+                                          "volume_cap": {"enabled": False}}},
               "postprocessing": {"merged_outputs": "{root}/x/merged"},
               "visualization": {"output_dir": "{root}/x/figures"},
               "validation": {"output_dir": "{root}/x/validation", "flood_totals_dir": "{root}/global/flood_totals"},

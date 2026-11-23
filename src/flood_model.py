@@ -16,7 +16,7 @@ from scipy.spatial import cKDTree
 from sklearn.neighbors import BallTree
 
 from eikonal import solve_eikonal_dense
-from event_volume import DurationCorrection
+from event_volume import DurationCorrection, VolumeCap
 
 
 LAND_CODE = 0
@@ -297,6 +297,29 @@ def _idw_nearest_k(
     return (values * weights).sum(axis=1) / weights.sum(axis=1)
 
 
+def apply_volume_cap(
+    depth: np.ndarray, dem: np.ndarray, mask: np.ndarray, source_rows: np.ndarray, source_cols: np.ndarray,
+    source_levels: np.ndarray, volume_cap: VolumeCap, transform: Affine, resolution: float, model: str,
+) -> tuple[np.ndarray, dict]:
+    """Apply correction C to a finished `model` depth (m), as `flood_depth_dense` does last.
+
+    `dem` is the real ground (m) the depth was solved on, before `effective_dem`; the sources
+    are the seed cells and their levels (m). Returns the capped depth and its diagnostics.
+    """
+    if model == "bathtub":
+        raise ValueError("apply_volume_cap: the volume cap needs coast-connected patches, not 'bathtub'")
+    sources = np.zeros(dem.shape, dtype=bool)
+    sources[source_rows, source_cols] = True
+    seed_level = np.full(dem.shape, -np.inf)
+    np.maximum.at(seed_level, (source_rows, source_cols), np.asarray(source_levels, dtype=np.float64))
+    level = effective_dem(dem, mask.astype(np.int8)) + depth
+    depth, patches = volume_cap.apply(depth, level, dem, sources, seed_level, transform, resolution,
+                                      fill_order="distance" if model == "bathtub_connected" else "level")
+    capped = [p for p in patches if p["capped"]]
+    return depth, {"n_volume_capped_patches": len(capped),
+                   "volume_cap_removed_m3": float(sum(p["model_m3"] - p["kept_m3"] for p in capped))}
+
+
 def flood_depth_dense(
     dem: np.ndarray,
     mask: np.ndarray,
@@ -321,6 +344,7 @@ def flood_depth_dense(
     waterlevel_epsilon_m: float = WATERLEVEL_EPSILON_M,
     static_level: np.ndarray | None = None,
     duration_correction: DurationCorrection | None = None,
+    volume_cap: VolumeCap | None = None,
     model: str = "eikonal",
     attenuation_m_per_m: float | None = None,
     trace: SolveTrace | None = None,
@@ -355,12 +379,17 @@ def flood_depth_dense(
     first solve's water stands above the spill level during the storm-tide peak (up where
     briefly, down where long), and solves again with that friction.
 
+    `volume_cap` (event_volume.VolumeCap) then keeps, in each coast-connected patch holding more
+    water above the real ground (`dem` before `effective_dem`) than can cross into it during the
+    storm-tide hydrograph, only the cells that volume reaches first: highest level first, or for
+    "bathtub_connected" (flat level) fewest steps from the coast.
+
     `model` (FLOOD_MODELS) other than "eikonal" replaces the solve by a level field from the same
     seeds (static seeds included): "bathtub" and "bathtub_connected" take `seed_level_idw`
     (k, idw_power), the latter kept where connected to the coastline; "straight_line" takes
     `straight_line_level` at `attenuation_m_per_m` with `resolution` as the cell size, connected.
     `friction`, obstacle coupling and the sweep settings are unused there; duration correction
-    needs a solve and is refused.
+    needs a solve and is refused, as is the volume cap for the unconnected "bathtub".
 
     `trace` (SolveTrace) observes every eikonal solve: its sweeps and outer iterations.
     """
@@ -368,6 +397,8 @@ def flood_depth_dense(
         raise ValueError(f"flood_depth_dense: model {model!r} not in {FLOOD_MODELS}")
     if model != "eikonal" and duration_correction is not None:
         raise ValueError(f"flood_depth_dense: duration correction needs the eikonal solve, not {model!r}")
+    if model == "bathtub" and volume_cap is not None:
+        raise ValueError("flood_depth_dense: the volume cap needs coast-connected patches, not 'bathtub'")
     if model == "straight_line" and attenuation_m_per_m is None:
         raise ValueError("flood_depth_dense: straight_line needs attenuation_m_per_m")
     using_seeds = seed_rows is not None or seed_cols is not None or seed_values is not None
@@ -384,6 +415,7 @@ def flood_depth_dense(
         raise ValueError("flood_depth_dense: obstacle_coupling needs max_outer_iterations")
 
     mask = mask.astype(np.int8)
+    ground = dem
     dem = effective_dem(dem, mask)
     friction = np.where(friction > 0, friction, friction.dtype.type(0.001))
 
@@ -421,6 +453,12 @@ def flood_depth_dense(
             initial = np.concatenate([np.asarray(initial, dtype=np.float64), s_values])
             station_values = np.concatenate([np.asarray(station_values, dtype=np.float64), s_values])
 
+    def capped(depth: np.ndarray, diagnostics: dict) -> np.ndarray:
+        depth, cap_diagnostics = apply_volume_cap(depth, ground, mask, coastline_rows, coastline_cols, initial,
+                                                  volume_cap, transform, resolution, model)
+        diagnostics.update(cap_diagnostics)
+        return depth
+
     if model != "eikonal":
         rows, cols = np.asarray(coastline_rows), np.asarray(coastline_cols)
         if model == "straight_line":
@@ -436,6 +474,8 @@ def flood_depth_dense(
         diagnostics = {"model": model}
         if static_wet is not None:
             diagnostics["n_static_wet_cells"] = int(static_wet.sum())
+        if volume_cap is not None:
+            depth = capped(depth, diagnostics)
         return depth, diagnostics
 
     on_sweep = trace.sweep if trace is not None else None
@@ -527,4 +567,7 @@ def flood_depth_dense(
     if static_wet is not None:
         diagnostics["n_static_wet_cells"] = int(static_wet.sum())
 
-    return depth_from(waterlevel), diagnostics
+    depth = depth_from(waterlevel)
+    if volume_cap is not None:
+        depth = capped(depth, diagnostics)
+    return depth, diagnostics

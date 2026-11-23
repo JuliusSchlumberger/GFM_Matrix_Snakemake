@@ -1,27 +1,36 @@
 """Named flood-model variants compared against SFINCS and the local hazard maps.
 
 Each variant is an override of `simulation.flooding`; `variant_flooding` applies one with its
-parameter and duration exponent. Stdlib only, so both conda envs import it.
+parameter and duration exponent, and sets corrections B and C. Stdlib only, so both conda envs import it.
 """
 
 from __future__ import annotations
 
 import copy
 
-# model (flood_model.FLOOD_MODELS), friction source of the attenuation, correction B on/off.
+# model (flood_model.FLOOD_MODELS), friction source of the attenuation, correction B and C on/off.
 VARIANTS = {
-    "bathtub": {"model": "bathtub", "friction_source": None, "duration": False},
-    "bathtub_connected": {"model": "bathtub_connected", "friction_source": None, "duration": False},
-    "straight_line": {"model": "straight_line", "friction_source": "uniform", "duration": False},
-    "eikonal_uniform": {"model": "eikonal", "friction_source": "uniform", "duration": False},
-    "eikonal_landcover": {"model": "eikonal", "friction_source": "landcover", "duration": False},
-    "eikonal_uniform_duration": {"model": "eikonal", "friction_source": "uniform", "duration": True},
-    "eikonal_landcover_duration": {"model": "eikonal", "friction_source": "landcover", "duration": True},
+    "bathtub": {"model": "bathtub", "friction_source": None, "duration": False, "cap": False},
+    "bathtub_connected": {"model": "bathtub_connected", "friction_source": None, "duration": False, "cap": False},
+    "bathtub_connected_cap": {"model": "bathtub_connected", "friction_source": None, "duration": False, "cap": True},
+    "straight_line": {"model": "straight_line", "friction_source": "uniform", "duration": False, "cap": False},
+    "straight_line_cap": {"model": "straight_line", "friction_source": "uniform", "duration": False, "cap": True},
+    "eikonal_uniform": {"model": "eikonal", "friction_source": "uniform", "duration": False, "cap": False},
+    "eikonal_landcover": {"model": "eikonal", "friction_source": "landcover", "duration": False, "cap": False},
+    "eikonal_uniform_cap": {"model": "eikonal", "friction_source": "uniform", "duration": False, "cap": True},
+    "eikonal_landcover_cap": {"model": "eikonal", "friction_source": "landcover", "duration": False, "cap": True},
+    "eikonal_uniform_duration": {"model": "eikonal", "friction_source": "uniform", "duration": True, "cap": False},
+    "eikonal_landcover_duration": {"model": "eikonal", "friction_source": "landcover", "duration": True, "cap": False},
 }
 
 # The config key a variant's calibrated parameter sets, by friction source.
 PARAMETER_KEY = {"landcover": "friction_scale_factor", "uniform": "uniform_attenuation_m_per_km"}
 PARAMETER_TAG = {"landcover": "fsf", "uniform": "rate"}
+
+
+def base_variant(name: str) -> str:
+    """Return the uncapped variant whose solve `name` caps (`name` itself when uncapped)."""
+    return name.removesuffix("_cap") if VARIANTS[name]["cap"] else name
 
 
 def parameter_key(name: str) -> str | None:
@@ -51,6 +60,7 @@ def variant_flooding(flooding: dict, name: str, parameter: float | None = None,
         if parameter is not None:
             out[PARAMETER_KEY[spec["friction_source"]]] = float(parameter)
     out["duration_correction"]["enabled"] = spec["duration"]
+    out["volume_cap"]["enabled"] = spec["cap"]
     if spec["duration"] and alpha is not None:
         out["duration_correction"]["alpha"] = float(alpha)
     return out

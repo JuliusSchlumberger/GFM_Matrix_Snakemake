@@ -283,6 +283,17 @@ simulation: # Used by: preprocessing rules
       max_multiplier: 10.0
       coast_hg_path: "{root}/inputs/COAST_HG/COAST-HG_RP100.nc"
 
+    # Correction C (event_volume.VolumeCap), after B; every model but the unconnected bathtub.
+    # Each coast-connected flood patch holds at most what crosses into it during the storm-tide
+    # hydrograph (B's hydrographs, peak at the nearest seed level) at a constant velocity:
+    # q = velocity * head per cell width, head over the real ground of land, lake and river
+    # cells. Taken as the smallest total over rings 1..n_rings cells inland of the seeds. A
+    # patch holding more keeps only the cells that volume reaches first.
+    volume_cap:
+      enabled: false
+      velocity_m_s: 1.0
+      n_rings: 6
+
   # Peak-memory estimate for run_eikonal's `resources: mem_mb` (eikonal_runner.estimate_eikonal_mem_mb).
   # Calibrated on 7 tiles, deliberately generous; retune from production telemetry.
   eikonal_mem_estimate:

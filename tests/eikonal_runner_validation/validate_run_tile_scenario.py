@@ -35,7 +35,8 @@ FLOODING = {"resolution": 30.0, "knn": 5, "idw_power": 2.0, "max_rounds": {"land
             "friction_scale_factor": 1.0, "model": "eikonal", "friction_source": "landcover",
             "uniform_attenuation_m_per_km": 0.2,
             "obstacle_coupling": {"enabled": False, "max_outer_iterations": 3, "outer_convergence_pct": 0.01},
-            "slr_propagation": "attenuated", "duration_correction": {"enabled": False}}
+            "slr_propagation": "attenuated", "duration_correction": {"enabled": False},
+            "volume_cap": {"enabled": False}}
 
 
 def _write_tile(root: Path, tid: int, x0: float, dem_m, mask, stations) -> box:

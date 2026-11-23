@@ -25,7 +25,7 @@ from boundaries import (
     storm_tide_hydrograph_path,
 )
 from config_utils import path_ready, retry_transient_io, tile_pixel_size_m
-from event_volume import DurationCorrection, load_coast_hg
+from event_volume import DurationCorrection, VolumeCap, load_coast_hg
 from flood_model import FLOOD_MODELS, WATERLEVEL_EPSILON_M, SolveTrace, flood_depth_dense, static_level_grid
 from flood_variants import max_rounds
 from rasters import (
@@ -59,6 +59,7 @@ def flooding_solve_settings(flooding_config: dict[str, Any]) -> dict[str, Any]:
         "waterlevel_epsilon_m": flooding_config["waterlevel_epsilon_m"],
         "friction_scale_factor": flooding_config["friction_scale_factor"],
         "duration_config": flooding_config["duration_correction"],
+        "volume_cap_config": flooding_config["volume_cap"],
         "model": flooding_config["model"], "friction_source": flooding_config["friction_source"],
         "uniform_attenuation_m_per_km": flooding_config["uniform_attenuation_m_per_km"],
     }
@@ -118,6 +119,7 @@ def solve_tile(
     pixel_size_m: float | None = None,
     static_stations: tuple[np.ndarray, np.ndarray] | None = None,
     duration_config: dict[str, Any] | None = None,
+    volume_cap_config: dict[str, Any] | None = None,
     return_period: int | None = None,
     hydrograph_path: str | Path | None = None,
     model: str = "eikonal",
@@ -138,7 +140,8 @@ def solve_tile(
     static level.
     `static_stations` = (lonlat, level) from `boundaries.static_station_levels`
     switches on two-component SLR propagation; `duration_config`
-    (`simulation.flooding.duration_correction`) with `enabled` switches on correction B (eikonal only);
+    (`simulation.flooding.duration_correction`) with `enabled` switches on correction B (eikonal only),
+    `volume_cap_config` (`simulation.flooding.volume_cap`) correction C (not "bathtub"; B's hydrographs);
     `return_period` (years) picks its hydrograph when the file holds one per RP;
     `hydrograph_path` (`boundaries.storm_tide_hydrograph_path`) replaces `coast_hg_path`.
     `model` is a `flood_model.FLOOD_MODELS` entry. `friction_source` "uniform" replaces the
@@ -177,6 +180,10 @@ def solve_tile(
     if model == "eikonal" and duration_config is not None and duration_config["enabled"]:
         duration_correction = build_duration_correction(duration_config, dem.shape, transform, crs, return_period,
                                                         hydrograph_path)
+    volume_cap = None
+    if model != "bathtub" and volume_cap_config is not None and volume_cap_config["enabled"]:
+        volume_cap = build_volume_cap(volume_cap_config, duration_config["coast_hg_path"], dem.shape, transform, crs,
+                                      return_period, hydrograph_path)
 
     waterdepth, diagnostics = flood_depth_dense(
         dem, mask, friction, transform,
@@ -191,11 +198,39 @@ def solve_tile(
         waterlevel_epsilon_m=waterlevel_epsilon_m,
         static_level=static_level,
         duration_correction=duration_correction,
+        volume_cap=volume_cap,
         model=model,
         attenuation_m_per_m=uniform_m_per_m,
         trace=trace,
     )
     return waterdepth, diagnostics
+
+
+def _tile_hydrographs(path: str | Path, shape: tuple[int, int], transform, crs, return_period: int | None):
+    # (station lonlat, series, dt_s, grid crs or None for EPSG:4326) of the stations near the tile.
+    xs, ys = rasterio.transform.xy(transform, [0, 0, shape[0] - 1, shape[0] - 1], [0, shape[1] - 1, 0, shape[1] - 1])
+    xs, ys = np.asarray(xs, dtype=np.float64), np.asarray(ys, dtype=np.float64)
+    grid_crs = None if crs is None or rasterio.crs.CRS.from_user_input(crs).to_epsg() == 4326 else crs
+    if grid_crs is not None:
+        xs, ys = rasterio.warp.transform(grid_crs, "EPSG:4326", xs, ys)
+    lonlat, series, dt_s = retry_transient_io(
+        load_coast_hg, path, (min(xs), min(ys), max(xs), max(ys)), return_period=return_period,
+    )
+    return lonlat, series, dt_s, grid_crs
+
+
+def build_volume_cap(
+    volume_cap_config: dict[str, Any], coast_hg_path: str | Path, shape: tuple[int, int], transform, crs=None,
+    return_period: int | None = None, hydrograph_path: str | Path | None = None,
+) -> VolumeCap:
+    """Build correction C for one tile from `simulation.flooding.volume_cap`.
+
+    Hydrographs as correction B's: `hydrograph_path`, else `coast_hg_path`.
+    """
+    lonlat, series, dt_s, grid_crs = _tile_hydrographs(hydrograph_path or coast_hg_path, shape, transform, crs,
+                                                       return_period)
+    return VolumeCap(lonlat, series, dt_s, velocity_m_s=float(volume_cap_config["velocity_m_s"]),
+                     n_rings=int(volume_cap_config["n_rings"]), crs=grid_crs)
 
 
 def build_duration_correction(
@@ -207,15 +242,8 @@ def build_duration_correction(
     Hydrographs from `hydrograph_path`, else `coast_hg_path`; `return_period` (years) selects
     the hydrograph when the file holds one per RP.
     """
-    xs, ys = rasterio.transform.xy(transform, [0, 0, shape[0] - 1, shape[0] - 1], [0, shape[1] - 1, 0, shape[1] - 1])
-    xs, ys = np.asarray(xs, dtype=np.float64), np.asarray(ys, dtype=np.float64)
-    grid_crs = None if crs is None or rasterio.crs.CRS.from_user_input(crs).to_epsg() == 4326 else crs
-    if grid_crs is not None:
-        xs, ys = rasterio.warp.transform(grid_crs, "EPSG:4326", xs, ys)
-    lonlat, series, dt_s = retry_transient_io(
-        load_coast_hg, hydrograph_path or duration_config["coast_hg_path"], (min(xs), min(ys), max(xs), max(ys)),
-        return_period=return_period,
-    )
+    lonlat, series, dt_s, grid_crs = _tile_hydrographs(hydrograph_path or duration_config["coast_hg_path"], shape,
+                                                       transform, crs, return_period)
     return DurationCorrection(
         lonlat, series, dt_s, t_ref_s=duration_config["t_ref_h"] * 3600.0, alpha=duration_config["alpha"],
         max_multiplier=duration_config["max_multiplier"], crs=grid_crs,

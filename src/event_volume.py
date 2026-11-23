@@ -1,9 +1,11 @@
-"""Event-volume corrections to the eikonal flood depth (candidates A and B).
+"""Event-volume corrections to the eikonal flood depth (candidates A, B and C).
 
 A, `basin_volume_cap`: the volume entering each enclosed basin over its sill (broad-crested
 weir, storm-tide hydrograph) caps the basin's fill, as RFSM (Gouldby et al. 2008).
 B, `duration_friction_multiplier`: friction is raised where the water stands above the
 controlling elevation (`spill_level`) only briefly during the hydrograph peak.
+C, `VolumeCap`: the volume that can cross into each coast-connected flood patch at a constant
+velocity during the hydrograph caps the patch; cells are kept in access order.
 """
 
 from __future__ import annotations
@@ -211,6 +213,163 @@ COAST_HG_BUFFER_DEG = 1.0
 HYDROGRAPH_LOOKUP_COARSEN = 32
 
 
+def nearest_station_grid(station_lonlat: np.ndarray, shape: tuple[int, int], transform, crs=None) -> np.ndarray:
+    """Return the nearest station per cell on a HYDROGRAPH_LOOKUP_COARSEN grid (coarse array).
+
+    `crs` is the grid's CRS when it is not EPSG:4326.
+    """
+    k = HYDROGRAPH_LOOKUP_COARSEN
+    rr, cc = np.meshgrid(np.arange(0, shape[0], k) + k // 2, np.arange(0, shape[1], k) + k // 2, indexing="ij")
+    xs, ys = rasterio.transform.xy(transform, rr.ravel(), cc.ravel())
+    xs, ys = np.asarray(xs), np.asarray(ys)
+    if crs is not None:
+        xs, ys = Transformer.from_crs(crs, "EPSG:4326", always_xy=True).transform(xs, ys)
+    tree = BallTree(np.radians(station_lonlat[:, ::-1]), metric="haversine")
+    nearest = tree.query(np.radians(np.column_stack([ys, xs])), k=1)[1][:, 0]
+    return nearest.reshape(rr.shape)
+
+
+def inflow_volume(peak_m: np.ndarray, ground_m: np.ndarray, shape_rel: np.ndarray, dt_s: float, width_m: float,
+                  velocity_m_s: float) -> np.ndarray:
+    """Return the volume (m³) crossing each cell over the hydrograph at a constant velocity.
+
+    Cell i sees the series peak_m[i] + shape_rel (shape_rel: hydrograph minus its peak) over its
+    ground: sum_t velocity * width * max(0, series - ground) * dt.
+    """
+    head = np.clip(peak_m[:, None] + shape_rel - ground_m[:, None], 0.0, None)
+    return velocity_m_s * width_m * head.sum(axis=1) * dt_s
+
+
+@njit(cache=True)
+def _steps_from(region: np.ndarray, starts: np.ndarray) -> np.ndarray:
+    n_rows, n_cols = region.shape
+    steps = np.full(region.shape, -1, dtype=np.int32)
+    queue = np.empty(region.size, dtype=np.int64)
+    head = 0
+    tail = 0
+    for r in range(n_rows):
+        for c in range(n_cols):
+            if starts[r, c] and region[r, c]:
+                steps[r, c] = 0
+                queue[tail] = r * n_cols + c
+                tail += 1
+    while head < tail:
+        idx = queue[head]
+        head += 1
+        r, c = idx // n_cols, idx % n_cols
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                rr, cc = r + dr, c + dc
+                if rr < 0 or cc < 0 or rr >= n_rows or cc >= n_cols:
+                    continue
+                if region[rr, cc] and steps[rr, cc] < 0:
+                    steps[rr, cc] = steps[r, c] + 1
+                    queue[tail] = rr * n_cols + cc
+                    tail += 1
+    return steps
+
+
+FILL_ORDERS = ("level", "distance")
+
+
+@dataclass
+class VolumeCap:
+    """Correction C: cap each coast-connected flood patch at what can enter it in the storm.
+
+    `station_lonlat` (n, 2), `series` (n, t) and `dt_s` are the hydrographs near the tile, as
+    DurationCorrection's (only their shape relative to the peak is used). `crs` is the solver
+    grid's CRS when it is not EPSG:4326.
+    """
+
+    station_lonlat: np.ndarray
+    series: np.ndarray
+    dt_s: float
+    velocity_m_s: float
+    n_rings: int
+    crs: object = None
+
+    def budgets(self, patch: np.ndarray, labels: np.ndarray, n: int, ground: np.ndarray, sources: np.ndarray,
+                seed_level: np.ndarray, transform, cell_size_m: float) -> tuple[np.ndarray, np.ndarray]:
+        """Return each patch's inflow budget (m³) and the ring that sets it (0: no entry cell).
+
+        Ring k holds the patch cells k cells (chessboard) from a source; ring 1 are the entry
+        cells. Each ring cell passes `inflow_volume` under the hydrograph of its nearest station,
+        peaking at its nearest source's level, over its own `ground` (land, lake or river). Water
+        has to cross every ring, so the budget is the smallest ring total.
+        """
+        ring = ndimage.distance_transform_cdt(~sources, metric="chessboard")
+        _, (ir, ic) = ndimage.distance_transform_edt(~sources, return_indices=True)
+        coarse = nearest_station_grid(self.station_lonlat, patch.shape, transform, self.crs)
+        k = HYDROGRAPH_LOOKUP_COARSEN
+        shapes = self.series - self.series.max(axis=1, keepdims=True)
+        v_ring = np.full((self.n_rings, n + 1), np.inf)
+        for j in range(self.n_rings):
+            r, c = np.nonzero(patch & (ring == j + 1))
+            group = coarse[np.minimum(r // k, coarse.shape[0] - 1), np.minimum(c // k, coarse.shape[1] - 1)]
+            v = np.zeros(r.size)
+            for g in np.unique(group):
+                sel = np.flatnonzero(group == g)
+                v[sel] = inflow_volume(seed_level[ir[r[sel], c[sel]], ic[r[sel], c[sel]]], ground[r[sel], c[sel]],
+                                       shapes[g][None, :], self.dt_s, cell_size_m, self.velocity_m_s)
+            present = np.bincount(labels[r, c], minlength=n + 1) > 0
+            v_ring[j, present] = np.bincount(labels[r, c], weights=v, minlength=n + 1)[present]
+        has_entry = np.isfinite(v_ring[0])
+        budget = np.where(has_entry, v_ring.min(axis=0), 0.0)
+        limiting = np.where(has_entry, np.argmin(v_ring, axis=0) + 1, 0)
+        return budget, limiting
+
+    def apply(self, depth: np.ndarray, level: np.ndarray, ground: np.ndarray, sources: np.ndarray,
+              seed_level: np.ndarray, transform, cell_size_m: float,
+              fill_order: str = "level") -> tuple[np.ndarray, list[dict]]:
+        """Return the capped `depth` and one record per patch with entry cells.
+
+        A patch is an 8-connected set of wet non-source cells; `level` is the model's water
+        level and `ground` the real ground (m) of land, lake and river cells. A patch's storm
+        volume is sum(max(0, level - ground)) * cell area. Where it exceeds the budget
+        (`budgets`), cells are kept in fill order until the budget is spent: "level" (highest
+        model level first, i.e. least attenuated) or "distance" (fewest 8-connected steps from an
+        entry cell through the patch, for level fields without attenuation). Kept cells no longer
+        connected to an entry cell dry too.
+        """
+        if fill_order not in FILL_ORDERS:
+            raise ValueError(f"VolumeCap.apply: fill_order {fill_order!r} not in {FILL_ORDERS}")
+        out = depth.copy()
+        cell_area = cell_size_m**2
+        patch = (depth > 0) & ~sources
+        labels, n = ndimage.label(patch, structure=_STRUCTURE_8)
+        if n == 0:
+            return out, []
+        budget, limiting = self.budgets(patch, labels, n, ground, sources, seed_level, transform, cell_size_m)
+        storm = np.where(patch, np.clip(level - ground, 0.0, None), 0.0) * cell_area
+        entry = patch & ndimage.binary_dilation(sources, structure=_STRUCTURE_8)
+        steps = _steps_from(patch, entry) if fill_order == "distance" else None
+        records = []
+        for lab, slc in enumerate(ndimage.find_objects(labels), start=1):
+            if slc is None or limiting[lab] == 0:
+                continue
+            comp = labels[slc] == lab
+            v_model = float(storm[slc][comp].sum())
+            rec = {"patch": lab, "n_cells": int(comp.sum()), "inflow_m3": float(budget[lab]), "model_m3": v_model,
+                   "limiting_ring": int(limiting[lab]), "capped": False, "kept_m3": v_model}
+            if budget[lab] < v_model:
+                idx = np.flatnonzero(comp)
+                lv = level[slc].ravel()[idx]
+                if steps is None:
+                    order = idx[np.argsort(-lv, kind="stable")]
+                else:
+                    order = idx[np.lexsort((-lv, steps[slc].ravel()[idx]))]
+                n_keep = int(np.searchsorted(np.cumsum(storm[slc].ravel()[order]), budget[lab], side="right"))
+                kept = np.zeros(comp.shape, dtype=bool)
+                kept.ravel()[order[:n_keep]] = True
+                kept_labels, _ = ndimage.label(kept, structure=_STRUCTURE_8)
+                connected = np.unique(kept_labels[kept & entry[slc]])
+                kept &= np.isin(kept_labels, connected[connected > 0])
+                out[slc][comp & ~kept] = 0.0
+                rec.update(capped=True, kept_m3=float(storm[slc][kept].sum()), n_cells_kept=int(kept.sum()))
+            records.append(rec)
+        return out, records
+
+
 @dataclass
 class DurationCorrection:
     """Correction B: friction x (t_ref / T)^alpha, T from the local storm-tide hydrograph.
@@ -229,15 +388,7 @@ class DurationCorrection:
 
     def station_index(self, shape: tuple[int, int], transform) -> np.ndarray:
         """Return the nearest station per cell on a HYDROGRAPH_LOOKUP_COARSEN grid (coarse array)."""
-        k = HYDROGRAPH_LOOKUP_COARSEN
-        rr, cc = np.meshgrid(np.arange(0, shape[0], k) + k // 2, np.arange(0, shape[1], k) + k // 2, indexing="ij")
-        xs, ys = rasterio.transform.xy(transform, rr.ravel(), cc.ravel())
-        xs, ys = np.asarray(xs), np.asarray(ys)
-        if self.crs is not None:
-            xs, ys = Transformer.from_crs(self.crs, "EPSG:4326", always_xy=True).transform(xs, ys)
-        tree = BallTree(np.radians(self.station_lonlat[:, ::-1]), metric="haversine")
-        nearest = tree.query(np.radians(np.column_stack([ys, xs])), k=1)[1][:, 0]
-        return nearest.reshape(rr.shape)
+        return nearest_station_grid(self.station_lonlat, shape, transform, self.crs)
 
     def multiplier(self, depth: np.ndarray, dem: np.ndarray, sources: np.ndarray, transform) -> np.ndarray:
         """Return the friction multiplier for a first-solve `depth` (`dem` effective, m)."""

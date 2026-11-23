@@ -1,15 +1,16 @@
 """Run the flood-model variants for one calibration tile on SFINCS's 30 m subgrid.
 
-Phases (src/flood_variants.py names the variants; every phase also runs both bathtubs):
+Phases (src/flood_variants.py names the variants; every phase also runs the bathtubs, capped too):
   sweep     calibration tiles: straight_line and eikonal_uniform over UNIFORM_RATES_M_PER_KM,
-            eikonal_landcover over FRICTION_SCALE_FACTORS
+            eikonal_landcover over FRICTION_SCALE_FACTORS; each capped too
   duration  calibration tiles: both duration variants over DURATION_ALPHAS, at the parameter
             variant_selection.json picked for their base variant
   selected  every tile: each variant at its run in variant_selection.json
 A tile's group is calibration_split.split_group. Seeds, coastline and solver settings are
 production's (flood_model, config simulation.flooding); the forcing is the SFINCS run's, the
-duration correction takes its boundary hydrographs. No static (two-component) level: the
-SFINCS runs have no separate SLR part. Existing outputs are skipped.
+duration correction and the volume cap take its boundary hydrographs. No static (two-component) level: the
+SFINCS runs have no separate SLR part. A capped run (correction C) reuses its base run's solve.
+Existing outputs are skipped.
 
 Usage:
     python run_calibration_models.py --config <resolved_config.yml> --tile-id 1122 --phase sweep
@@ -32,9 +33,9 @@ import yaml
 from pyproj import Transformer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from event_volume import DurationCorrection  # noqa: E402
-from flood_model import flood_depth_dense, idw_seed_values_at  # noqa: E402
-from flood_variants import VARIANTS, max_rounds, run_key, variant_flooding  # noqa: E402
+from event_volume import DurationCorrection, VolumeCap  # noqa: E402
+from flood_model import apply_volume_cap, flood_depth_dense, idw_seed_values_at  # noqa: E402
+from flood_variants import VARIANTS, base_variant, max_rounds, run_key, variant_flooding  # noqa: E402
 from rasters import WATERDEPTH_NODATA_INT16, decode_waterlevel_cm, encode_waterdepth_cm  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -138,7 +139,7 @@ def _jsonable(o):
 
 HYDRO_WINDOW_HR = (40.0, 110.0)  # build_sfincs_tile.TRUNCATE_WINDOW_HR_DEFAULT: the simulated window
 PHASES = ("sweep", "duration")
-BATHTUBS = ("bathtub", "bathtub_connected")
+BATHTUBS = ("bathtub", "bathtub_connected", "bathtub_connected_cap")
 
 
 def phase_runs(phase: str, selection: dict | None) -> list[tuple[str, float | None, float | None]]:
@@ -149,8 +150,9 @@ def phase_runs(phase: str, selection: dict | None) -> list[tuple[str, float | No
     """
     runs = [(name, None, None) for name in BATHTUBS]
     if phase == "sweep":
-        runs += [(v, r, None) for v in ("straight_line", "eikonal_uniform") for r in UNIFORM_RATES_M_PER_KM]
-        runs += [("eikonal_landcover", f, None) for f in FRICTION_SCALE_FACTORS]
+        runs += [(v, r, None) for v in ("straight_line", "straight_line_cap", "eikonal_uniform", "eikonal_uniform_cap")
+                 for r in UNIFORM_RATES_M_PER_KM]
+        runs += [(v, f, None) for v in ("eikonal_landcover", "eikonal_landcover_cap") for f in FRICTION_SCALE_FACTORS]
     elif phase == "duration":
         for name in ("eikonal_uniform_duration", "eikonal_landcover_duration"):
             parameter = selection["variants"][name.removesuffix("_duration")]["parameter"]
@@ -167,17 +169,28 @@ def parse_run(spec: str) -> tuple[str, float | None, float | None]:
     return name, values[0], values[1]
 
 
-def sfincs_duration_correction(sfincs_dir: Path, crs, duration_config: dict) -> DurationCorrection:
-    """Build correction B from the SFINCS run's own boundary hydrographs (matched points)."""
+def sfincs_hydrographs(sfincs_dir: Path) -> tuple[np.ndarray, np.ndarray, float]:
+    """Return the SFINCS run's boundary hydrographs: (station lonlat, series m, dt s)."""
     hydro = pd.read_csv(sfincs_dir / "corrected_hydrographs.csv")
     hydro = hydro[(hydro.elapsed_hr >= HYDRO_WINDOW_HR[0]) & (hydro.elapsed_hr <= HYDRO_WINDOW_HR[1])]
     points = gpd.read_file(sfincs_dir / "matched_boundary_points.gpkg").to_crs("EPSG:4326")
     series = np.vstack([hydro[str(i)].to_numpy(dtype=np.float64) for i in range(len(points))])
+    return (np.column_stack([points.geometry.x, points.geometry.y]), series,
+            float(np.median(np.diff(hydro.elapsed_hr))) * 3600.0)
+
+
+def sfincs_duration_correction(sfincs_dir: Path, crs, duration_config: dict) -> DurationCorrection:
+    """Build correction B from the SFINCS run's own boundary hydrographs (matched points)."""
     return DurationCorrection(
-        np.column_stack([points.geometry.x, points.geometry.y]), series,
-        float(np.median(np.diff(hydro.elapsed_hr))) * 3600.0,
+        *sfincs_hydrographs(sfincs_dir),
         t_ref_s=float(duration_config["t_ref_h"]) * 3600.0, alpha=float(duration_config["alpha"]),
         max_multiplier=float(duration_config["max_multiplier"]), crs=crs)
+
+
+def sfincs_volume_cap(sfincs_dir: Path, crs, cap_config: dict) -> VolumeCap:
+    """Build correction C from the SFINCS run's own boundary hydrographs (matched points)."""
+    return VolumeCap(*sfincs_hydrographs(sfincs_dir), velocity_m_s=float(cap_config["velocity_m_s"]),
+                     n_rings=int(cap_config["n_rings"]), crs=crs)
 
 
 def main() -> None:
@@ -238,7 +251,11 @@ def main() -> None:
     solver_dem, solver_mask = solver_inputs(dem, mask)
     runs_path = out_dir / RUNS_NAME
     all_runs = json.loads(runs_path.read_text()) if runs_path.exists() else {}
+    # One solve per base run; its capped twin post-processes the same depth.
+    solves: dict[tuple, list[str]] = {}
     for name, parameter, alpha in todo:
+        solves.setdefault((base_variant(name), parameter, alpha), []).append(name)
+    for (name, parameter, alpha), outputs in solves.items():
         spec = VARIANTS[name]
         v_flooding = variant_flooding(flooding, name, parameter, alpha)
         rate_m_per_m = float(v_flooding["uniform_attenuation_m_per_km"]) / 1000.0
@@ -261,14 +278,24 @@ def main() -> None:
             waterlevel_epsilon_m=float(flooding["waterlevel_epsilon_m"]),
             duration_correction=duration, model=spec["model"], attenuation_m_per_m=rate_m_per_m,
         )
-        key = run_key(name, parameter, alpha)
-        _write_waterdepth(waterdepth, transform, crs, run_path(out_dir, key))
-        runtime = time.monotonic() - t0
-        all_runs[key] = {"variant": name, "parameter": parameter, "alpha": alpha,
-                         "solver": _jsonable(diagnostics), "runtime_s": round(runtime, 1)}
-        runs_path.write_text(json.dumps(all_runs, indent=1))
-        print(f"tile {args.tile_id}: {key} - {int((waterdepth > 0).sum())} flooded cell(s), {runtime:.0f} s",
-              flush=True)
+        solve_s = time.monotonic() - t0
+        for output in outputs:
+            t1 = time.monotonic()
+            depth, diag = waterdepth, diagnostics
+            if VARIANTS[output]["cap"]:
+                cap_config = variant_flooding(flooding, output, parameter, alpha)["volume_cap"]
+                depth, cap_diag = apply_volume_cap(
+                    waterdepth, solver_dem, solver_mask, seed_rows, seed_cols, seed_values,
+                    sfincs_volume_cap(sfincs_dir, crs, cap_config), transform, cell_m, spec["model"])
+                diag = {**diagnostics, **cap_diag, "base_run": run_key(name, parameter, alpha)}
+            key = run_key(output, parameter, alpha)
+            _write_waterdepth(depth, transform, crs, run_path(out_dir, key))
+            runtime = solve_s + time.monotonic() - t1
+            all_runs[key] = {"variant": output, "parameter": parameter, "alpha": alpha,
+                             "solver": _jsonable(diag), "runtime_s": round(runtime, 1)}
+            runs_path.write_text(json.dumps(all_runs, indent=1))
+            print(f"tile {args.tile_id}: {key} - {int((depth > 0).sum())} flooded cell(s), {runtime:.0f} s",
+                  flush=True)
 
 
 if __name__ == "__main__":

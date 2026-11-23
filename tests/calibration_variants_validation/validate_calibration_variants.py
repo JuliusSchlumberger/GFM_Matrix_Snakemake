@@ -37,13 +37,13 @@ def test_balance_table_reports_both_groups() -> None:
 
 def test_phase_runs() -> None:
     sweep = phase_runs("sweep", None)
-    assert len(sweep) == 2 + 2 * len(UNIFORM_RATES_M_PER_KM) + len(FRICTION_SCALE_FACTORS)
+    assert len(sweep) == 3 + 4 * len(UNIFORM_RATES_M_PER_KM) + 2 * len(FRICTION_SCALE_FACTORS)
     selection = {"variants": {"eikonal_uniform": {"parameter": 0.1, "alpha": None},
                               "eikonal_landcover": {"parameter": 0.3, "alpha": None},
                               "bathtub": {"parameter": None, "alpha": None}}}
     duration = phase_runs("duration", selection)
     assert ("eikonal_landcover_duration", 0.3, DURATION_ALPHAS[0]) in duration
-    assert len(duration) == 2 + 2 * len(DURATION_ALPHAS)
+    assert len(duration) == 3 + 2 * len(DURATION_ALPHAS)
     assert parse_run("eikonal_landcover_duration:0.25:0.5") == ("eikonal_landcover_duration", 0.25, 0.5)
     assert parse_run("bathtub") == ("bathtub", None, None)
 
