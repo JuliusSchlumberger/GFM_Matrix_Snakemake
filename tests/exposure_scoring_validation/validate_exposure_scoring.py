@@ -51,6 +51,18 @@ def test_uniform_density_gives_density_times_projected_pixel_area(tmp_path) -> N
     assert people == pytest.approx(np.full(SHAPE, 1000.0 * 0.0025), rel=1e-4)
 
 
+def test_grid_across_the_antimeridian_reads_both_sides_of_a_global_raster(tmp_path) -> None:
+    lat_top = 90.0 - np.arange(180)
+    cell_km2 = np.array([cell_area_km2(t, t - 1.0, 1.0) for t in lat_top])[:, None] * np.ones((1, 360))
+    path = tmp_path / "global_pop.tif"
+    with rasterio.open(path, "w", driver="GTiff", height=180, width=360, count=1, dtype="float32",
+                       crs="EPSG:4326", transform=from_origin(-180.0, 90.0, 1.0, 1.0), nodata=-99999) as dst:
+        dst.write((1000.0 * cell_km2).astype(np.float32), 1)
+    utm60 = from_origin(700_000, 5_700_000, 300, 300)  # 700-760 km easting at ~51 N: 179.9 E to 180.7 E
+    people = population_per_pixel(path, (100, 200), utm60, "EPSG:32660")[0]
+    assert people == pytest.approx(np.full((100, 200), 1000.0 * 0.09), rel=1e-4)
+
+
 def test_exposure_counts_partition_the_weights(people) -> None:
     depth, fraction, domain = _synthetic_maps()
     area_km2 = abs(BNG.a * BNG.e) / 1e6

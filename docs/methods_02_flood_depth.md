@@ -109,11 +109,11 @@ while the hydrograph is near its peak, so the eikonal fill overstates such basin
 solve, each wet cell's head above its spill level (priority flood from the sea,
 Barnes et al. 2014) gives the time $T$ that the local COAST-HG RP100 storm-tide
 hydrograph stays within that head of its peak. The attenuation rate is multiplied
-by $(T_\mathrm{ref}/T)^\alpha$, capped at 10 with no lower bound, with $\alpha = 1$
-and $T_\mathrm{ref} = 12$ h, and the tile is solved again: brief overtopping gets more
-friction, long-standing water less. On 540 synthetic 1-D SFINCS floodplains this
-$T^{-\alpha}$ form fits flood extent best, with $T_\mathrm{ref}$ absorbed into
-`friction_scale_factor` (`boundary_test/duration_refit.py`). COAST-HG has
+by $\min(\max((T_\mathrm{ref}/T)^\alpha, 1), 10)$ with $\alpha = 1$ and
+$T_\mathrm{ref} = 12$ h, and the tile is solved again: brief overtopping gets more
+friction, water standing longer than $T_\mathrm{ref}$ keeps the calibrated rate. The
+$T^{-\alpha}$ dependence is from 540 synthetic 1-D SFINCS floodplains
+(`boundary_test/duration_refit.py`). COAST-HG has
 one shape per station (RP100), used for every return period and SLR level.
 Implementation: `event_volume.DurationCorrection`.
 

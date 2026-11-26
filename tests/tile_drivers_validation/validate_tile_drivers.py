@@ -61,6 +61,17 @@ def test_longer_storm_lowers_storage_to_inflow_ratio() -> None:
     assert np.isclose(tile_drivers(**tile)["storage_to_inflow_ratio"], short / 2)
 
 
+def test_a_surge_plateau_holds_the_peak_longer_than_repeated_high_tides() -> None:
+    tile = _ramp_tile(0.05)
+    t_h = np.arange(0, 72, 600 / 3600)
+    tides = 1.0 + np.cos(2 * np.pi * t_h / 12.42)                          # five high tides near 2 m
+    plateau = 0.5 + 1.5 * np.exp(-(((t_h - 36) / 14) ** 4))               # one long surge at 2 m
+    tile["hydrographs_m"] = np.column_stack([tides] * 3)
+    tidal = tile_drivers(**tile)["peak_hold_h"]
+    tile["hydrographs_m"] = np.column_stack([plateau] * 3)
+    assert tile_drivers(**tile)["peak_hold_h"] > 3 * tidal > 0
+
+
 def test_lake_share_counts_lake_cells() -> None:
     tile = _ramp_tile(0.05)
     tile["mask"][:5, 50:60] = 2
@@ -73,7 +84,8 @@ def _synthetic_runs(n: int = 60) -> tuple[pd.DataFrame, pd.DataFrame]:
                             "reach_km": rng.uniform(0.01, 3, n), "friction_m_per_km": rng.uniform(0.1, 2, n),
                             "surge_range_m": rng.uniform(0.5, 4, n), "peak_level_spread_m": rng.uniform(0, 2, n),
                             "lake_pct": rng.uniform(0, 3, n), "overtop_coast_pct": rng.uniform(0, 100, n),
-                            "storage_to_inflow_ratio": rng.uniform(0.01, 10, n), "abs_lat_deg": rng.uniform(0, 70, n)})
+                            "storage_to_inflow_ratio": rng.uniform(0.01, 10, n), "abs_lat_deg": rng.uniform(0, 70, n),
+                            "peak_hold_h": rng.uniform(1, 20, n)})
     rows = []
     for key, over in (("bathtub_connected", 3.0), ("eikonal_landcover_fsf0.3", 1.0)):
         sfincs = rng.uniform(5, 50, n)

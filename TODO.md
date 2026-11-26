@@ -51,10 +51,26 @@ import renamed modules (pipeline_plots, analysis_figures, exposure_grid, ...) ne
   on UTM (dx = dy) and is unaffected (parity: <= 0.07 % wet cells), so friction_scale_factor and the
   uniform rate stand. Rerun production eikonal tiles (`--forcerun` or the HPC job generators); removing the
   rule's `pixel_size_m` param already marks them outdated under the params rerun trigger.
-- **Calibration latitude signal is not explained:** eikonal_uniform_cap 0.1 vs SFINCS, 241 tiles at
-  60-75 deg want a per-tile rate of 0.055 vs 0.10-0.12 below 60 deg (partial Spearman of |lat| with log2
-  area bias -0.22). Both models run on UTM there, so it is not the square-cell issue; candidates: DeltaDTM
-  quality on high-latitude coasts, permafrost/tundra land cover, SFINCS subgrid behaviour.
+- **High-latitude underprediction = long storm-tide peaks on flat plains:** eikonal_uniform_cap 0.1 vs
+  SFINCS at >= 65 deg: pooled HR 0.82, bias 0.86 (0.94 / 1.09 below 60 deg), carried by Arctic coastal
+  lowlands (Kolyma, Pechora, Mackenzie, Lena, Gyda; reach 1-4.6 km vs 0.13); missed cells are the inland
+  fringe, 7-30 km from the sea, ground 1.6-1.8 m, SFINCS depth 0.3-0.9 m. Forcing stays within 0.5 m of its
+  peak 8.8 h continuously at 65-75 deg vs 3.3-4.5 h elsewhere; among flat tiles (reach > 0.3) every region
+  underpredicts when that exceeds 8 h (landcover fsf0.3: bias 0.90 Arctic, 0.92 elsewhere) and overpredicts
+  under 4 h (1.14). The sweep runs have no duration correction; production has it on (alpha 1,
+  t_ref_h 12). Local test (100 tiles, uniform rate, UTM): the production correction (T = total time
+  within the head of the peak) removes the Arctic underprediction (pooled bias 0.83 -> 1.00, CSI
+  0.77 -> 0.85 at 0.1 m/km) but floods more elsewhere at the same base rate; T as the longest unbroken
+  stretch does not do better. No variant beats no correction on pooled CSI at the tested rates
+  (0.0125-0.2, too coarse to place B's own optimum). The duration phase as written cannot settle it:
+  [run_calibration_models.py:156](sfincs_tiles/run_calibration_models.py#L156) fixes the rate/fsf at the
+  sweep's no-B optimum and varies only alpha (DURATION_ALPHAS); with the clip, B only adds
+  attenuation, so B's own optimum rate/fsf lies at or below the no-B one. Decide whether to keep B at
+  all (short peaks = macrotidal coasts, where the eikonal overpredicts) or to sweep rate/fsf with B.
+  Benched until the SFINCS calibration is final. Open: t_ref 12 h has no physical basis (CSI moves
+  < 0.01 for 6-24 h); alpha 0.5 fits the 1-D refit as well as 1 (much milder: 1.4x at T = 6 h vs 2x);
+  max_multiplier 10 has no justification on record. Planned test: 100 SFINCS tiles, no B vs clipped
+  B at alpha 0.5 and 1, each at its own best rate (0.05-0.125), split by forcing range.
 
 ## Reviewer critiques (branch `review-critiques`)
 
@@ -71,11 +87,9 @@ Decided and implemented:
   RP100 tiles: pooled CSI 0.742 -> 0.763 on 498 random tiles (median tile unchanged; the gain comes
   from a minority of overflooded basins), false alarms down; t_ref 6-24 h changes CSI by < 0.01. The
   weir volume cap (A) changed nothing and stays in `src/event_volume.py` only for the experiments.
-  These numbers are for the clipped form clip((t_ref/T)^alpha, 1, 10). The multiplier is now
-  (t_ref/T)^alpha with no lower clip (1-D refit, INPUT_ANALYSIS.md §6), which changes results:
-  recalibrate friction_scale_factor with B on SFINCS (HPC), confirm on 5-10 real tiles (test 8),
-  then rerun the tile simulations. Snakemake does not see the change (config values unchanged),
-  so existing eikonal outputs must be removed or rerun explicitly.
+  These numbers are for the clipped form clip((t_ref/T)^alpha, 1, 10), which is the form in code
+  (the unclipped variant was tried and reverted: B is a short-peak correction only). Tile
+  simulations run while the clip was off must be rerun (Snakemake does not see the change).
 - **Land-cover friction (critique 2):** kept, described as a land-cover-indexed attenuation rate
   (docs/methods_02 §2.2, code comments; config keys and file names unchanged). Land-cover and
   uniform attenuation are within 0.005 pooled CSI on 498 random tiles, with and without B.
@@ -516,10 +530,9 @@ Open:
   not the shape, sets the reach. On synthetic SFINCS floodplains with fsf refitted per form,
   m proportional to T^-alpha without the lower clip fits best; the production form (t_ref 12 h,
   clip >= 1) is close; "the hydrograph's longest exposure" and "T of the calibration hydrograph
-  at the same head" are worse. A constant t_ref is absorbed into fsf once the clip goes.
-  Decided: lower clip dropped (in code), alpha 1, hydrograph source the per-RP generator (COAST-HG's
-  neighbouring high waters are too low: B's T 5 h vs 15 h observed). Needs the recalibration of
-  fsf on the 498 SFINCS tiles (§0.3-0.4).
+  at the same head" are worse. Decided: one-sided clip kept (B only raises attenuation for short
+  peaks), alpha 1, hydrograph source the per-RP generator (COAST-HG's neighbouring high waters are
+  too low: B's T 5 h vs 15 h observed).
 - **COAST-RP at TC-dominated stations** is 0.2-0.25 m below GESLA GEV even with its TC
   component (Japan/E Asia, US Atlantic+Gulf); GESLA records may also undersample TCs.
   Test 9 answers it: the skew-surge ratio correction halves the RP10 bias there but leaves RP100

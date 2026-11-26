@@ -34,8 +34,9 @@ LAKE_CODE = 2
 DEM_SCALE = 100.0  # dem.tif is int16 cm
 BOUNDARY_LEVEL_COLUMN = "SLR_0"  # boundaries_RP100_SLR_0.gpkg, cm
 WEIR_COEFFICIENT = 1.7  # broad-crested weir, q = C h^1.5 (m2/s per m of crest)
+PEAK_HOLD_FRACTION = 0.8  # of the hydrograph's own range, from its minimum
 DRIVER_COLUMNS = ["coast_km", "bathtub_zone_km2", "reach_km", "friction_m_per_km", "surge_range_m",
-                  "peak_level_spread_m", "lake_pct", "overtop_coast_pct", "storage_to_inflow_ratio", "abs_lat_deg"]
+                  "peak_level_spread_m", "lake_pct", "overtop_coast_pct", "storage_to_inflow_ratio", "abs_lat_deg", "peak_hold_h"]
 _S8 = np.ones((3, 3), dtype=bool)
 
 
@@ -54,6 +55,9 @@ def tile_drivers(dem_m: np.ndarray, mask: np.ndarray, friction_per_m: np.ndarray
     volume a broad-crested weir along the overtoppable coastline (crest at its median ground
     level) passes during the median hydrograph. The weir inflow is an upper bound (whole crest
     at full head), so the ratio ranks tiles; it is not a fill criterion.
+    peak_hold_h: median over boundary points of the longest unbroken time the hydrograph stays
+    above min + PEAK_HOLD_FRACTION x (max - min), i.e. in the top 20 % of its own range (separate
+    high tides do not add up; relative, so a microtidal sea is not near its peak all record long).
     """
     land = mask == LAND_CODE
     sea = open_sea_mask(mask.astype(np.int8), OCEAN_CODE)
@@ -85,7 +89,15 @@ def tile_drivers(dem_m: np.ndarray, mask: np.ndarray, friction_per_m: np.ndarray
         "lake_pct": float(100.0 * (mask == LAKE_CODE).sum() / valid.sum()),
         "overtop_coast_pct": float(100.0 * front.sum() / coast_land.sum()) if coast_land.any() else np.nan,
         "storage_to_inflow_ratio": float(storage_m3 / inflow_m3) if inflow_m3 > 0 else np.nan,
+        "peak_hold_h": float(np.median([_longest_run(h >= np.nanmin(h) + PEAK_HOLD_FRACTION * np.ptp(h[np.isfinite(h)]))
+                                        for h in hydrographs_m.T]) * hydrograph_dt_s / 3600.0),
     }
+
+
+def _longest_run(flags: np.ndarray) -> int:
+    padded = np.concatenate([[0], flags.astype(np.int8), [0]])
+    edges = np.flatnonzero(np.diff(padded))
+    return int((edges[1::2] - edges[::2]).max()) if edges.size else 0
 
 
 def _read_tile(tile_dir: Path) -> tuple[dict, float]:

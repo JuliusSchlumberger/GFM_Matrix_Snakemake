@@ -52,6 +52,7 @@ EIKONAL_DRIVERS = (
     ("friction_m_per_km", "Land-cover attenuation in bathtub zone (m/km)", False, None),
     ("storage_to_inflow_ratio", "Bathtub storage / storm inflow", True, 1e-4),
     ("abs_lat_deg", "Absolute latitude (°)", False, None),
+    ("peak_hold_h", "Unbroken time in top 20 % of storm-tide range (h)", True, 1.0),
 )
 _DRIVER_DEFINITIONS = {
     "river_pct": "river and channel share = tile cells masked as river",
@@ -68,6 +69,9 @@ _DRIVER_DEFINITIONS = {
                                "passes during the median SFINCS forcing hydrograph; the inflow is an upper bound, "
                                "so the ratio ranks tiles rather than predicting whether the storm fills them",
     "abs_lat_deg": "absolute latitude of the tile centre",
+    "peak_hold_h": "unbroken time in top 20 % of storm-tide range = median over boundary points of the longest "
+                   "stretch the SFINCS forcing hydrograph stays above min + 0.8 (max - min) (separate high tides "
+                   "do not add up)",
 }
 METRICS = (("CSI", "CSI"), ("HT", "Hit rate"), ("FAR", "False alarm ratio"))
 
@@ -269,8 +273,8 @@ def main() -> None:
     plot_driver_scatter(best_data, best_table, labels, fig_dir / "disagreement_drivers_eikonal.png",
                         EIKONAL_DRIVERS,
                         "What is left for the calibrated eikonal: it floods more than SFINCS where water enters "
-                        "through few gaps in the coast, along channels and over rough land, and less at high "
-                        "latitudes.")
+                        "through few gaps in the coast, along channels and over rough land, and less where the "
+                        "storm tide holds its peak for long (most Arctic coasts).")
     table = pd.concat([table.assign(driver_set="bathtub"), best_table.assign(driver_set="eikonal")],
                       ignore_index=True)
     table_path = fig_dir / "disagreement_drivers.csv"
