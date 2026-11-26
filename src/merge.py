@@ -4,7 +4,7 @@
 grid with the chunk grid itself (chunk_bounds are always EPSG:4326 -
 build_chunk_grid), so merging is whole-pixel offsetting, no resampling - true of
 every deltadtm-sourced tile. A local-input source in its own projected native CRS
-(e.g. England's EPSG:27700 LIDAR) instead uses `merge_tile_rasters_native`, scored
+(e.g. England's EPSG:27700 LIDAR) instead uses `merge_native_chunk`, scored
 against a national benchmark directly in that native CRS (TODO.md) rather than
 reprojecting the merged raster onto the global grid. EIKONAL_NODATA marks cells
 the eikonal model did not compute; 0.0 means computed, not flooded.
@@ -157,7 +157,7 @@ def merge_tile_rasters_chunk(
     reprojecting a merged flood-depth raster this large onto the global chunk
     grid is expensive and unnecessary when the comparison it feeds (a national
     benchmark, itself a vector) can instead be scored directly in the tiles' own
-    native CRS - see `merge_tile_rasters_native` and TODO.md.
+    native CRS - see `merge_native_chunk` and TODO.md.
     """
     if not tile_rasters:
         raise ValueError("tile_rasters must not be empty")
@@ -170,7 +170,7 @@ def merge_tile_rasters_chunk(
         raise ValueError(
             f"merge_tile_rasters_chunk: tile(s) not natively EPSG:4326 ({native_crss}) - "
             f"this chunk-grid merge assumes every tile already shares one EPSG:4326 pixel "
-            f"grid (build_chunk_grid). Use merge_tile_rasters_native for a local-input "
+            f"grid (build_chunk_grid). Use merge_native_chunk for a local-input "
             f"source in its own projected CRS instead."
         )
 
@@ -180,52 +180,72 @@ def merge_tile_rasters_chunk(
     )
 
 
-def merge_tile_rasters_native(
+def native_tile_bounds(tile_rasters: list[str | Path]) -> dict[Path, tuple[float, float, float, float]]:
+    """Return each tile raster's bounds in its native CRS; raise unless all share one CRS."""
+    if not tile_rasters:
+        raise ValueError("tile_rasters must not be empty")
+    bounds, crss = {}, set()
+    for path in tile_rasters:
+        with retry_transient_io(rasterio.open, path) as src:
+            crss.add(src.crs)
+            bounds[Path(path)] = tuple(src.bounds)
+    if len(crss) > 1:
+        raise ValueError(f"native_tile_bounds: tiles span several native CRSs ({crss}), expected one")
+    return bounds
+
+
+def native_chunk_plan(
+    tile_bounds: dict[Path, tuple[float, float, float, float]], chunk_m: float,
+) -> dict[str, tuple[tuple[float, float, float, float], list[Path]]]:
+    """Group tiles into square chunks of `chunk_m` (native CRS units), aligned to multiples of it.
+
+    Returns {chunk_id: (bounds, tiles)} sorted by chunk_id. A tile goes to every chunk it
+    intersects; a chunk's bounds are its square clipped to the union of its tiles, so chunks
+    never overlap and no empty area is written. Chunk ids are "x<i>_y<j>", the square's
+    lower-left corner in units of `chunk_m`.
+    """
+    if chunk_m <= 0:
+        raise ValueError(f"chunk_m must be positive, got {chunk_m}")
+    members: dict[tuple[int, int], list[Path]] = {}
+    for path in sorted(tile_bounds):
+        minx, miny, maxx, maxy = tile_bounds[path]
+        for i in range(int(np.floor(minx / chunk_m)), int(np.ceil(maxx / chunk_m))):
+            for j in range(int(np.floor(miny / chunk_m)), int(np.ceil(maxy / chunk_m))):
+                members.setdefault((i, j), []).append(path)
+    plan = {}
+    for (i, j), paths in sorted(members.items()):
+        ux0, uy0, ux1, uy1 = _union_bounds_of([tile_bounds[p] for p in paths])
+        bounds = (max(i * chunk_m, ux0), max(j * chunk_m, uy0),
+                  min((i + 1) * chunk_m, ux1), min((j + 1) * chunk_m, uy1))
+        if bounds[0] < bounds[2] and bounds[1] < bounds[3]:
+            plan[f"x{i}_y{j}"] = (bounds, paths)
+    return plan
+
+
+def merge_native_chunk(
     tile_rasters: list[str | Path],
+    chunk_bounds: tuple[float, float, float, float],
     waterdepth_output_path: str | Path,
     provenance_output_path: str | Path,
     block_size: int,
     raster_config: dict[str, Any],
 ) -> None:
-    """Merge per-tile water depths (m) by per-cell maximum, in the tiles' own native CRS.
+    """Merge per-tile water depths (m) by per-cell maximum over one native-CRS chunk.
 
-    For a local-input source whose tiles share one projected CRS (e.g. England's
-    EPSG:27700 LIDAR-derived fine tiles) rather than the global EPSG:4326 chunk
-    grid `merge_tile_rasters_chunk` assumes. Output covers the union of all tile
-    bounds, at the tiles' own full native resolution - never reprojected or
-    resampled onto a different grid. A national benchmark (typically a vector)
-    can be scored directly against this by reprojecting the vector into the same
-    native CRS instead - cheap, versus reprojecting this raster (TODO.md).
+    For local-input tiles sharing one projected CRS (e.g. England's EPSG:27700 LIDAR), at
+    their full native resolution, never reprojected: a national benchmark (a vector) is
+    reprojected into the native CRS for scoring instead, which is far cheaper (TODO.md).
+    `chunk_bounds` come from `native_chunk_plan`.
     """
-    if not tile_rasters:
-        raise ValueError("tile_rasters must not be empty")
-
-    native_crss = set()
-    for path in tile_rasters:
-        with retry_transient_io(rasterio.open, path) as src:
-            native_crss.add(src.crs)
-    if len(native_crss) > 1:
-        raise ValueError(
-            f"merge_tile_rasters_native: tiles span multiple native CRSs ({native_crss}) - "
-            f"not supported, every tile passed in must already share one native CRS"
-        )
-
-    native_bounds = _union_bounds(tile_rasters)
     _merge_tiles_in_native_grid(
-        tile_rasters, native_bounds, waterdepth_output_path, provenance_output_path,
+        tile_rasters, chunk_bounds, waterdepth_output_path, provenance_output_path,
         block_size, raster_config,
     )
 
 
-def _union_bounds(tile_rasters: list[str | Path]) -> tuple[float, float, float, float]:
-    minx = miny = np.inf
-    maxx = maxy = -np.inf
-    for path in tile_rasters:
-        with retry_transient_io(rasterio.open, path) as src:
-            b = src.bounds
-            minx, miny = min(minx, b.left), min(miny, b.bottom)
-            maxx, maxy = max(maxx, b.right), max(maxy, b.top)
-    return minx, miny, maxx, maxy
+def _union_bounds_of(bounds: list[tuple[float, float, float, float]]) -> tuple[float, float, float, float]:
+    return (min(b[0] for b in bounds), min(b[1] for b in bounds),
+            max(b[2] for b in bounds), max(b[3] for b in bounds))
 
 
 def _merge_tiles_in_native_grid(

@@ -1,11 +1,11 @@
-"""Build a small, bounded fine-grained tile cluster for Wales's local-input validation.
+"""Build the fine-grained tile grid of Wales's local-input validation, for one benchmark region.
 
 Wales has no equivalent of England's `coastal_tiles.gpkg` (a natural 5km OS-grid tile
 index baked in by England's own WCS download step, `ea_coastal_dtm.py`) -
 `wales_dtm_32bit_cog.tif` is one pre-built 45GB COG with no tile index at all. This
 script instead tiles a uniform 5km candidate grid directly over one named benchmark
-region (`severn_estuary` or `menai_strait`, `wales_nrw_floodzone_seas`'s own `regions`
-meta), then runs the same per-cell padding/hop-distance/tile-assignment pipeline as
+region (`wales` for the whole country, `severn_estuary` or `menai_strait`:
+`wales_nrw_floodzone_seas`'s own `regions` meta), then runs the same per-cell padding/hop-distance/tile-assignment pipeline as
 `build_england_fine_tiles.py`, reusing `connectivity_tiling.py`'s primitives UNCHANGED.
 
 5km cells (not coarser) matter here: the elevation filter below keys off each
@@ -14,12 +14,12 @@ strip and high never-flooding terrain still has a low MIN and gets kept whole, s
 nothing downstream re-applies the filter to a sub-piece. 5km also keeps results directly
 comparable to England's own 5km-EA-core tile-count/hop characteristics.
 
-Deliberately scoped to ONE named region at a time (TODO.md: validate the local sample
-first, don't commit to a full-country build yet) - there is no "whole Wales" option;
-that needs its own country-wide footprint design as a separate, later step.
+Candidate cells are kept where the COG has valid pixels, so the `wales` box's English and
+sea parts drop out. Every candidate cell is read in full at 1 m (~100 MB each), so the
+`wales` region reads a large part of the 45 GB COG: run it as a job.
 
 Usage:
-    python build_wales_fine_tiles.py --config <config.yml> --region severn_estuary
+    python build_wales_fine_tiles.py --config <config.yml> --region wales
 """
 
 import argparse
@@ -46,9 +46,9 @@ _REGION_BUFFER_M = 5000.0  # margin added around the named region's own bbox bef
 # Severn Estuary's own extreme sea levels (ea_coastal_design_sea_levels, "UK MAINLAND" series)
 # are the SAME stations that set England's own _MAX_WATERLEVEL_M - confirmed this session by
 # directly querying stations within 30km of the severn_estuary bbox (max t250 9.12 m, max
-# c2_t250 9.54 m - identical to build_england_fine_tiles.py's own derivation). Reused directly
-# here, not re-derived. menai_strait has NOT been checked - re-query before using this
-# constant for that region.
+# c2_t250 9.54 m - identical to build_england_fine_tiles.py's own derivation). The Severn's are
+# the highest extreme sea levels of the Welsh coast, so the floor only keeps more cells
+# elsewhere in Wales (a superset, never a dropped floodable cell).
 _MAX_WATERLEVEL_M = 10.0
 
 
@@ -186,8 +186,8 @@ def run(config: dict, region: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default=str(_REPO_ROOT / "snakemake_workflow" / "config" / "config.yml"))
-    parser.add_argument("--region", required=True, choices=["severn_estuary", "menai_strait"],
-                        help="one of wales_nrw_floodzone_seas's named regions - no whole-country option yet")
+    parser.add_argument("--region", required=True, choices=["wales", "severn_estuary", "menai_strait"],
+                        help="one of wales_nrw_floodzone_seas's named regions (wales: the whole country)")
     args = parser.parse_args()
     run(load_config(args.config), args.region)
 

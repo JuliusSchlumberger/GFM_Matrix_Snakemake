@@ -32,7 +32,6 @@ result = run_tile_scenario(
     model_outputs=model_outputs,
     preprocessing_inputs_dir=snakemake.params.preprocessing_inputs_dir,
     tile_grid_path=snakemake.params.tile_grid_path,
-    raster_config=snakemake.params.raster_config,
     flooding_config=snakemake.params.flooding_config,
     ocean_code=snakemake.params.ocean_code, river_code=snakemake.params.river_code,
     static_level_inputs=snakemake.params.static_level_inputs,

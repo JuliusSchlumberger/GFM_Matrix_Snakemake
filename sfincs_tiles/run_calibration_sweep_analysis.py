@@ -2,7 +2,7 @@
 
 Steps (subprocesses): 1 compute_variant_metrics.py (run tables, variant_selection.json) and
 plot_depth_accuracy.py (depth accuracy per run);
-2 the best variant's run by pooled CSI (or --select-by bias); 3 plot_worst_tiles_panel.py; 4
+2 the best variant's run by pooled population-weighted CSI (--select-by); 3 plot_worst_tiles_panel.py; 4
 plot_validation_results.py; 5 compute_tile_drivers.py and plot_tile_plausibility.py (metric
 distributions, drivers of disagreement); 6 plot_sfincs_tile_diagnostics.py forcing figures for
 the worst tiles (or all, --forcing-checks-all) into figures/forcing_checks/.
@@ -22,11 +22,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import shutil
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import pandas as pd
@@ -54,11 +56,12 @@ def main() -> None:
     parser.add_argument("--n-panel-tiles", type=int, default=6, help="worst-tile panel size, forwarded to plot_worst_tiles_panel.py")
     parser.add_argument("--min-union-km2", type=float, default=50.0, help="forwarded to plot_worst_tiles_panel.py")
     parser.add_argument(
-        "--select-by", choices=["CSI", "bias"], default="CSI",
-        help="'CSI': highest pooled CSI (default). 'bias': |bias-1| closest to 0 (least over/under-prediction overall).",
+        "--select-by", choices=["CSI_pop", "CSI", "bias"], default="CSI_pop",
+        help="'CSI_pop': highest pooled population-weighted CSI (default). 'CSI': highest pooled area CSI. "
+             "'bias': |bias-1| closest to 0 (least over/under-prediction overall).",
     )
     parser.add_argument("--forcing-checks-workers", type=int, default=4,
-                        help="step 6: tiles drawn in parallel (one subprocess each)")
+                        help="step 6: tiles drawn in parallel (worker processes)")
     parser.add_argument("--forcing-checks-all", action="store_true",
                         help="step 6 for every scored tile (default: only the tiles of the worst-tile panels, "
                              "worst_tiles_selection_fsf<X>.csv from step 3)")
@@ -81,7 +84,7 @@ def main() -> None:
             shutil.copyfile(root / args.raster_base_dir_name / "tile_selection_metadata.csv", meta)
             print(f"copied tile_selection_metadata.csv from {args.raster_base_dir_name}")
     if args.forcing_checks_only:
-        _forcing_checks(python, args, root, _best_run(root, args))
+        _forcing_checks(args, root, _best_run(root, args))
         return
 
     _run([python, str(_THIS_DIR / "compute_variant_metrics.py"), *common, *subset, "--select-by", args.select_by])
@@ -96,15 +99,16 @@ def main() -> None:
         _run([python, str(_THIS_DIR / "compute_tile_drivers.py"), *common])
     owned = ["--drivers-name", DRIVERS_OWNED_NAME] if args.raster_base_dir_name else []  # dedup scores owned land
     _run([python, str(_THIS_DIR / "plot_tile_plausibility.py"), *common, *raster, *owned])
-    _forcing_checks(python, args, root, best)
+    _forcing_checks(args, root, best)
 
 
 def _best_run(root: Path, args) -> str:
     selection = json.loads((root / args.base_dir_name / SELECTION_NAME).read_text())
     variant = selection["best_variant"]
     e = selection["variants"][variant]
-    print(f"\nBest variant by {selection['select_by']} on the calibration group: {variant}, run {e['run_key']}, "
-          f"CSI={e['calibration']['CSI']:.4f}, bias={e['calibration']['bias']:.4f}")
+    g = e[selection["select_group"]]
+    print(f"\nBest variant by {selection['select_by']} on {selection['select_group']} tiles: {variant}, "
+          f"run {e['run_key']}, CSI={g['CSI']:.4f}, CSI_pop={g['CSI_pop']:.4f}")
     return e["run_key"]
 
 
@@ -116,7 +120,19 @@ def _model_prediction(row) -> str:
     return "agreement"
 
 
-def _forcing_checks(python: str, args, root: Path, key: str) -> None:
+def _draw_forcing_checks(argv: list[str]) -> str | None:
+    # One tile's failure must not stop the others (reported at the end), so any error is returned.
+    import plot_sfincs_tile_diagnostics
+
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            plot_sfincs_tile_diagnostics.main(argv)
+    except (Exception, SystemExit) as exc:
+        return f"{type(exc).__name__}: {exc}"
+    return None
+
+
+def _forcing_checks(args, root: Path, key: str) -> None:
     # A failing tile is reported at the end (exit 1) instead of aborting the rest.
     base = root / args.base_dir_name
     fig_dir = read_figures_root(Path(args.config)) / "sfincs_runs" / args.base_dir_name
@@ -133,22 +149,21 @@ def _forcing_checks(python: str, args, root: Path, key: str) -> None:
     rows = list(rows.itertuples())
     figures = ["coastrp_forcing", "boundary_forcing"]
 
-    def run_one(row) -> tuple[str, bool]:
+    jobs = []
+    for row in rows:
         prefix = f"{_model_prediction(row)}_{int(row.tile_id)}"
-        cmd = [python, str(_THIS_DIR / "plot_sfincs_tile_diagnostics.py"),
-               "--config", args.config, "--tile-id", str(int(row.tile_id)),
-               "--base-dir-name", args.raster_base_dir_name or args.base_dir_name,
-               "--figures", *figures, "--fig-dir", str(out_dir), "--out-prefix", prefix, "--run-key", key]
-        res = subprocess.run(cmd, capture_output=True, text=True)
-        if res.returncode != 0:
-            print(f"  tile {int(row.tile_id)} FAILED: {(res.stderr or '').strip().splitlines()[-1:]}", flush=True)
-        return prefix, res.returncode == 0
+        jobs.append((prefix, ["--config", args.config, "--tile-id", str(int(row.tile_id)),
+                              "--base-dir-name", args.raster_base_dir_name or args.base_dir_name,
+                              "--figures", *figures, "--fig-dir", str(out_dir), "--out-prefix", prefix,
+                              "--run-key", key]))
 
     print(f"\nforcing figures ({', '.join(figures)}) for {len(rows)} tile(s) -> {out_dir}", flush=True)
     failed = []
-    with ThreadPoolExecutor(args.forcing_checks_workers) as ex:
-        for k, (prefix, ok) in enumerate(ex.map(run_one, rows), 1):
-            if not ok:
+    # Worker processes import the plotting stack once, not once per tile.
+    with ProcessPoolExecutor(args.forcing_checks_workers) as ex:
+        for k, ((prefix, _), error) in enumerate(zip(jobs, ex.map(_draw_forcing_checks, [a for _, a in jobs])), 1):
+            if error:
+                print(f"  {prefix} FAILED: {error}", flush=True)
                 failed.append(prefix)
             if k % 25 == 0 or k == len(rows):
                 print(f"  [{k}/{len(rows)}] done, {len(failed)} failed", flush=True)

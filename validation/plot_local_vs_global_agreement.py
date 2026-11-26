@@ -98,7 +98,7 @@ def _category_and_metrics_local(
     region_bbox = spec.regions[region] if bbox is None else bbox
 
     native_dir = Path(cfg["postprocessing"]["merged_outputs"]) / "local_native"
-    raster_path = native_dir / f"waterdepth_{rp}_{slr}.tif"
+    raster_path = native_dir / f"waterdepth_{rp}_{slr}.vrt"
 
     tp = fp = fn = tn = 0.0
     with retry_transient_io(rasterio.open, raster_path) as src:

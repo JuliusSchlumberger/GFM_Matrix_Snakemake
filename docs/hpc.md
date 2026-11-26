@@ -28,6 +28,7 @@ cp snakemake_workflow/config/config_hpc.example.yml snakemake_workflow/config/co
 | `hpc.job_env` | shell lines every job runs after the interpreter exports |
 | `hpc.profiles.<name>` | job resources (`partition`, `time`, `mem`, `cpus_per_task`, `account`), see [Resource profiles](#resource-profiles) |
 | `hpc.wave_tiers` | optional per-hop resources of the simulation waves |
+| `hpc.profiles.simulate_packed` | resources of the simulation jobs of a scenario with `hpc.wave_packing` |
 
 No job activates an env: each starts with
 
@@ -84,11 +85,11 @@ runs the whole pipeline as one self-continuing chain:
 
 1. The submit script builds the shared inputs on the login node (geoid offset raster, the GOCO06s absolute geoid when a local DEM source bridges through it, one station cache per return period and SLR level unless `boundary_conditions.stations_cache_prebuilt`), then queues the preprocessing batches: tiles split evenly, in tile-id order, over `hpc.n_nodes` (`hpc.single_preprocess_job`: one).
 2. A dispatch job (afterany on every batch) checks that every batch target exists and stops the chain with the count and the first missing paths otherwise; it then writes and submits the simulation waves.
-3. A tile with `hop_distance >= 1` is seeded from its lower-hop neighbours' output for the same scenario, so wave `N+1` waits (afterany) until every wave-`N` job has ended. A wave's tiles are split evenly, in tile-grid order, over `hpc.n_nodes` or the matching `hpc.wave_tiers` entry; a tile's return periods and SLR levels stay in one job.
+3. A tile with `hop_distance >= 1` is seeded from its lower-hop neighbours' output for the same scenario, so wave `N+1` waits (afterany) until every wave-`N` job has ended. A wave's tiles are split evenly, in tile-grid order, over `hpc.n_nodes`, the matching `hpc.wave_tiers` entry, or, for a scenario with `hpc.wave_packing`, as many jobs of its profile as the wave's solves need (see [Resource profiles](#resource-profiles)); a tile's return periods and SLR levels stay in one job.
 4. After the last wave, one job writes and submits the postprocessing chain: `merge_chunk` -> `prepare_exposure_grid_chunk` -> `compute_flood_fraction_chunk` (whole chunks per job, longest-first by tile count, when there are at least as many chunks as nodes; otherwise three phases, each waiting for the previous), then the exposure analysis (pass 1 -> shares -> pass 2 -> write) and the flood-totals + plots job.
 
 `afterany` (not `afterok`) lets a failed job fail only what reads its output, which a `--resume` dispatch picks up.
-A scenario with `postprocessing.merge_only` (the local-input validation scenarios) gets the merges only: `merge_chunk`, or, with a `simulation.dem_source_manifest`, one `preparation/merge_england_local_tiles.py` job per return period and SLR level into `<merged_outputs>/local_native/`.
+A scenario with `postprocessing.merge_only` (the local-input validation scenarios) gets the merges only: `merge_chunk`, or, with a `simulation.dem_source_manifest` (tiles in the local DEM's projected CRS, never reprojected), per return period and SLR level `postprocessing.native_merge_jobs` `preparation/merge_england_local_tiles.py` jobs over square `postprocessing.native_chunk_m` chunks in that CRS, then one job writing `<merged_outputs>/local_native/waterdepth_<RP>_<SLR>.vrt` over them, which the local scorers read.
 `--preprocess-only` stops after step 1 (inputs for the SFINCS calibration); `--fuse` (every tile at hop 0) preprocesses and simulates each batch in one job.
 Each Snakemake call inside a job is retried as a whole against transient read errors on the shared mount.
 
@@ -103,6 +104,7 @@ Size `mem` for the processes' resident memory with a margin; SLURM's figure also
 |---|---|
 | `preprocess` | preprocessing batches |
 | `simulate` | simulation waves (`cpus_per_task` = tiles solved at once), overridden per wave by `hpc.wave_tiers` |
+| `simulate_packed` | simulation waves of a scenario with `hpc.wave_packing` |
 | `postprocess`, `exposure`, `flood_totals` | postprocessing chain |
 | `dispatch` | jobs that only write and submit the next chain |
 | `solver_study`, `study_figures` | eikonal solver studies (`--time` computed from a worst-case estimate) and their figures |
@@ -112,6 +114,7 @@ Size `mem` for the processes' resident memory with a margin; SLURM's figure also
 `--profile-set PROFILE.FIELD=VALUE` (repeatable) overrides one value for a run; it is written into the chain's `resolved_config.yml`, so jobs submitted later by the chain keep it.
 One simulation solve peaks at about `base_mb + bytes_per_pixel x DEM pixels` (`simulation.eikonal_mem_estimate`), so give a simulation job at least `cpus_per_task` times that for its largest tile.
 `hpc.wave_tiers` is a list of tiers with `hops`, `n_nodes`, `partition`, `cpus_per_task`, `mem`, `time`; the first tier whose `hops` contains the wave's `hop_distance` wins, `n_nodes: null` means one job per tile, and the last tier must be the catch-all `hops: null`.
+A scenario's `hpc.wave_packing` (`solve_minutes`, `target_hours`, `profile`) replaces the tiers for that scenario: each wave gets ceil(solves x `solve_minutes` / (`cpus_per_task` x `target_hours` x 60)) jobs of `profile`, at most one per tile.
 
 ## Logs, failures and resume
 
@@ -185,9 +188,15 @@ The solver studies run on `calibration_500_tiles`: `studies sweep`, then `studie
 
 A local-input scenario's `validation.runs` holds its validation commands in named groups; `{config}` stands for the scenario's HPC-view config, `{config:NAME}` for scenario NAME's.
 
+`{variant}` is empty in a base config and `__<variant>` in a flood-model variant's (`materialize_configs.py --variants`), so each variant scores its own outputs.
+`check-run` exits non-zero unless every (tile, RP, SLR) waterdepth and every merged output of a run exists and no tile ran out of memory (an out-of-memory solve fails and writes `<model_outputs>/oom_tiles/<tile>.txt`).
+
 ```
-python hpc/gfm_hpc.py validate --scenario wales_local_input [--only scores] [--submit]
+python hpc/gfm_hpc.py check-run --scenario wales_local_input [--variant eikonal_uniform]
+python hpc/gfm_hpc.py validate --scenario wales_local_input [--variant eikonal_uniform] [--only scores] [--submit]
 ```
+
+`hpc/plans/local_validation.yml` runs England, Wales and SF Bay with local and global input, base and three variants, through these checks to the scores and the local-vs-global exposure table.
 
 ## One core budget for several runs
 

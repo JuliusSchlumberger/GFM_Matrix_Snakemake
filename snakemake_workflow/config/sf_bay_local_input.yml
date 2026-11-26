@@ -38,19 +38,26 @@ simulation:
 postprocessing:
   merge_only: true  # validation run: the HPC postprocess chain merges only, no exposure / flood totals
   merged_outputs: "{root}/sf_bay_local_input/merged_results"
+  # 20 km chunks at 10 m are small: one merge job.
+  native_chunk_m: 20000
+  native_merge_jobs: 1
 visualization:
   output_dir: "{root}/sf_bay_local_input/figures"
 validation:
   output_dir: "{root}/sf_bay_local_input/validation"
   # hpc/gfm_hpc.py validate: per group, scripts run in order with {config} = this scenario's
-  # HPC-view config and {config:NAME} = scenario NAME's.
+  # HPC-view config and {config:NAME} = scenario NAME's; {variant} is "" here and "__<variant>" in
+  # a flood-model variant's config (flood_variants.variant_config), after each output root it moves.
   runs:
     scores:
       - ["validation/validate_sf_bay.py", "--config", "{config}", "--bbox", "-122.355", "37.45", "-121.99", "37.91",
          "--benchmark-path",
          "zip://{root}/inputs/validation/California/alameda_flooding_slr000.zip!flooding/v2.1/county_alameda_flddepth_slr000_w100.tif",
          "--benchmark-scale-m", "0.01",
-         "--native-merged-path", "{root}/sf_bay_local_input/merged_results/local_native/waterdepth_RP100_SLR_0.tif",
-         "--out-dir", "{root}/sf_bay_local_input/validation/USA_alameda_sample"]
+         "--native-merged-path", "{root}/sf_bay_local_input/merged_results{variant}/local_native/waterdepth_RP100_SLR_0.vrt",
+         "--out-dir", "{root}/sf_bay_local_input/validation{variant}/USA_alameda_sample"]
 hpc:
   jobs_dir: "{root}/sf_bay_local_input/model_outputs/hpc_jobs"
+  single_preprocess_job: true  # 54 tiles
+  # 10 m tiles (~0.5M cells): seconds per solve in earlier runs.
+  wave_packing: {solve_minutes: 0.5, target_hours: 1.0, profile: simulate_packed}

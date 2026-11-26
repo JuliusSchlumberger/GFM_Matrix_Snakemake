@@ -53,7 +53,6 @@ def main() -> None:
     model_outputs = config["simulation"]["model_outputs"]
     # Group-shared preprocessing inputs for calibration sweeps; see preprocessing.smk.
     preprocessing_inputs_dir = config["simulation"].get("preprocessing_inputs_dir") or model_outputs
-    raster_config = config["raster_format"]
     flooding_config = config["simulation"]["flooding"]
     ocean_code = config["tile_generation"]["ocean_code"]
     river_code = config["tile_generation"]["river_code"]
@@ -81,7 +80,7 @@ def main() -> None:
         dem_path=dem_path, mask_path=mask_path, friction_path=friction_path,
         boundaries_path=boundaries_path, output_path=output_path,
         model_outputs=model_outputs, preprocessing_inputs_dir=preprocessing_inputs_dir,
-        tile_grid_path=tile_grid_path, raster_config=raster_config, flooding_config=flooding_config,
+        tile_grid_path=tile_grid_path, flooding_config=flooding_config,
         ocean_code=ocean_code, river_code=river_code,
         # Staged to node-local scratch: GDAL/OGR's SQLite lock on a gpkg can
         # hang indefinitely on the shared data root from a cluster compute node.

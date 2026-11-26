@@ -150,7 +150,7 @@ def plot_boundary_forcing(mask2d: np.ndarray, transform: rasterio.Affine, crs: s
     b_rows, b_cols = np.nonzero(mask2d == BOUNDARY)
     blons, blats = _cell_centres_lonlat(transform, crs, b_rows, b_cols)
     ax.scatter(blons, blats, s=8, color=BOUNDARY_CELL_COLOR, marker="s", label=f"boundary cells (n={len(blons)})",
-               zorder=4)
+               zorder=4, rasterized=True)
 
     points_path = sfincs_dir / "matched_boundary_points.gpkg"
     if points_path.exists():
@@ -169,7 +169,8 @@ def plot_boundary_forcing(mask2d: np.ndarray, transform: rasterio.Affine, crs: s
     ax.set_ylabel("latitude")
     panel_letters(ax, "a")
     draw_caption_box(ax, "Boundary stations + boundary cell line(s)", loc="lower left")
-    ax.legend(fontsize=8, loc="best")
+    # Below the map: "best" tests every boundary-cell marker and costs ~15 s per figure.
+    ax.legend(fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.08), frameon=False)
 
     ax = axes[1]
     hydro_path = sfincs_dir / "corrected_hydrographs.csv"
@@ -441,7 +442,7 @@ def _plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs, out_path
     ax.scatter(ctx["st_lon"][off], ctx["st_lat"][off], s=90, marker="x", color="black", linewidths=1.8, zorder=6)
     b_rows, b_cols = np.nonzero(mask2d == BOUNDARY)
     blons, blats = _cell_centres_lonlat(transform, crs, b_rows, b_cols)
-    ax.scatter(blons, blats, s=4, color=SFINCS_COLOR, marker="s", zorder=4)
+    ax.scatter(blons, blats, s=4, color=SFINCS_COLOR, marker="s", zorder=4, rasterized=True)
     bnd, bzs = _read_sfincs_bnd_bzs(sfincs_dir)
     if bnd is not None:
         bnd_lons, bnd_lats = warp_transform(crs, "EPSG:4326", bnd[:, 0], bnd[:, 1])
@@ -482,7 +483,7 @@ def _plot_coastrp_forcing(tile_dir, sfincs_dir, mask2d, transform, crs, out_path
     print(f"Wrote {out_path}")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """Draw the requested diagnostic figure(s) for one tile."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tile-id", required=True)
@@ -502,7 +503,7 @@ def main() -> None:
     parser.add_argument("--out-name", default=None,
                         help="file name for the figure, only with exactly one --figures entry "
                              "(default: {tile_id}_{figure}.png)")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.out_name and len(args.figures) != 1:
         parser.error("--out-name needs exactly one --figures entry")
     if args.out_name and args.out_prefix:

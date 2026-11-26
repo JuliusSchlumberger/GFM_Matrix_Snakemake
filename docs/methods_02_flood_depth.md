@@ -72,18 +72,18 @@ cells (§4.4) and the rate needs no grid correction.
 
 `simulation.flooding.friction_scale_factor` multiplies the land-cover rate at
 runtime (`src/eikonal_runner.py`), so it can be calibrated without
-recomputing the land-cover raster. It is fitted against SFINCS (RP100) by
-maximising pooled CSI, with the eikonal solved on SFINCS's 30 m UTM subgrid.
-Without the duration correction (§2.4) the friction-sweep study
-(`calibration_studies/`, `sfincs_tiles/` friction-sweep tooling;
-`<data_root>/calibration_roughness_SFINCS/friction_sweep_pooled_metrics.csv`,
-1000 tiles) gives `friction_scale_factor = 0.4` (CSI 0.743, bias 1.05 vs CSI
-0.732, bias 1.21 at 0.3). The duration correction raises the rate where events
-are short, so the base rate must drop: with it, 498 random tiles give the
-production value **`friction_scale_factor = 0.25`** (CSI 0.763, bias 1.08;
-0.757, bias 0.98 at 0.3; 0.710 at 0.4; review_critiques/calibration_experiments.py
-`--stage representative`). The resulting base attenuation rate is
-`n(x) × 2.5` m/km before the duration multiplier, against the ~0.1-1.2 m/km
+recomputing the land-cover raster. It is fitted against SFINCS (RP100) on 1500
+tiles (443 calibration, 1057 validation; overlaps counted once), with the
+eikonal solved on SFINCS's 30 m UTM subgrid and no duration correction; the
+optima are the same with and without the volume cap
+(`<data_root>/calibration_roughness_SFINCS_dedup/variant_runs_pooled.csv`).
+The value maximises population-weighted CSI pooled over all tiles, since the
+maps feed exposure: **`friction_scale_factor = 0.35`** (population CSI 0.70).
+Area CSI peaks one step lower, at 0.3; flooding that
+area-optimal extent over-reaches into populated land. The same criterion sets
+the uniform rate, `uniform_attenuation_m_per_km = 0.125` (population CSI 0.71;
+area optimum 0.1). The resulting base attenuation rate is
+`n(x) × 3.5` m/km, against the ~0.1-1.2 m/km
 reported for comparable land cover by Vafeidis et al. (2019).
 
 ### 2.3 Two-component sea-level propagation
@@ -105,7 +105,7 @@ station values from `boundaries.static_station_levels`.
 The eikonal level is the peak of a quasi-static fill and ignores how long the
 storm tide lasts. Behind a sill, water stands above the controlling elevation only
 while the hydrograph is near its peak, so the eikonal fill overstates such basins.
-`simulation.flooding.duration_correction` (default on) solves twice. From the first
+`simulation.flooding.duration_correction` (default off) solves twice. From the first
 solve, each wet cell's head above its spill level (priority flood from the sea,
 Barnes et al. 2014) gives the time $T$ that the local COAST-HG RP100 storm-tide
 hydrograph stays within that head of its peak. The attenuation rate is multiplied

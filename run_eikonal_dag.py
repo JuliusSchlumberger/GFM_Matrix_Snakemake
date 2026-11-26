@@ -1,7 +1,6 @@
 """Run Snakemake, splitting out-of-memory tiles into overlapping halves and retrying.
 
-OOM tiles get a marker and nodata placeholders (snakemake still exits 0). After each
-run, marked live tiles are split (up to tile_split.max_depth) and snakemake is rerun,
+An out-of-memory solve marks its tile and fails without output. After each run, marked live tiles are split (up to tile_split.max_depth) and snakemake is rerun,
 up to tile_split.max_retries times.
 
 Usage:
@@ -126,13 +125,11 @@ def main() -> None:
         if exhausted:
             print(
                 f"\n  WARNING: {len(exhausted)} tile(s) still OOM at max split depth "
-                f"({max_depth}); giving up on them (nodata placeholder retained): {exhausted}"
+                f"({max_depth}); giving up on them (no output): {exhausted}"
             )
         if not splittable:
             print("\nNo further tiles can be split — stopping.")
-            # Exhausted OOM tiles alone exit 0 (their nodata placeholders are
-            # valid outputs); an unrelated snakemake failure must still fail.
-            sys.exit(result.returncode)
+            sys.exit(result.returncode or 1)
 
         print(f"\n  Splitting {len(splittable)} OOM'd tile(s) (attempt {attempt}/{max_retries}): {splittable}")
         for tid in splittable:

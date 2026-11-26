@@ -8,7 +8,7 @@ agreement (within 10-50 cm, bias, MAE per SFINCS depth class, area and populatio
 enter the selection.
 
 Usage:
-    python compute_variant_metrics.py --base-dir-name calibration_roughness_SFINCS [--select-by CSI]
+    python compute_variant_metrics.py --base-dir-name calibration_roughness_SFINCS [--select-by CSI_pop]
 """
 
 from __future__ import annotations
@@ -20,9 +20,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from calibration_paths import SELECTION_NAME  # noqa: E402
-from calibration_results import depth_accuracy_table, load_results, run_tables, select_runs  # noqa: E402
+from calibration_results import SELECT_BY, depth_accuracy_table, load_results, run_tables, select_runs  # noqa: E402
 from gfm_config import read_root  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from process_pool import available_cpus  # noqa: E402
 
 
 def main() -> None:
@@ -31,7 +34,9 @@ def main() -> None:
     parser.add_argument("--config", default=str(repo_root / "snakemake_workflow" / "config" / "config.yml"))
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
     parser.add_argument("--tile-ids-file", default=None, help="restrict to these tiles (default: every tile with a result)")
-    parser.add_argument("--select-by", choices=["CSI", "bias"], default="CSI")
+    parser.add_argument("--select-by", choices=SELECT_BY, default=SELECT_BY[0])
+    parser.add_argument("--workers", type=int, default=None, help="processes pooling the depth histograms "
+                        "(default: the cores this job may use)")
     args = parser.parse_args()
 
     base_dir = read_root(Path(args.config)) / args.base_dir_name
@@ -49,7 +54,7 @@ def main() -> None:
         print(f"{r.run_key}: n={r.n_tiles_scored}, CSI={r.CSI:.4f}, bias={r.bias:.4f}, HT={r.HT:.4f}, FAR={r.FAR:.4f}, "
               f"CSI_pop={r.CSI_pop:.4f}, bias_pop={r.bias_pop:.4f}")
 
-    depth = depth_accuracy_table(base_dir, results)
+    depth = depth_accuracy_table(base_dir, results, args.workers or available_cpus())
     if len(depth):
         retry_transient_io(depth.to_csv, base_dir / "variant_runs_depth_accuracy.csv", index=False)
         ref = depth[(depth.group == "calibration") & (depth.cells == "reference_wet") & (depth.sfincs_class_m == "all")]
@@ -64,12 +69,11 @@ def main() -> None:
 
     selection = select_runs(pooled, args.select_by)
     retry_transient_io((base_dir / SELECTION_NAME).write_text, json.dumps(selection, indent=1), encoding="utf-8")
-    print(f"\nSelected by {args.select_by} on the calibration group (validation in brackets):")
+    print(f"\nSelected by {args.select_by} on {selection['select_group']} tiles (calibration / validation):")
     for variant, e in selection["variants"].items():
-        c, v = e["calibration"], e["validation"]
-        val = f"CSI {v['CSI']:.4f}, bias {v['bias']:.4f}, n {v['n_tiles_scored']}" if v else "not run"
-        print(f"  {variant}: {e['run_key']} - CSI {c['CSI']:.4f}, bias {c['bias']:.4f}, n {c['n_tiles_scored']} "
-              f"[{val}]")
+        cells = [f"CSI {g['CSI']:.4f}, CSI_pop {g.get('CSI_pop', float('nan')):.4f}, n {g['n_tiles_scored']}"
+                 if g else "not run" for g in (e["calibration"], e["validation"])]
+        print(f"  {variant}: {e['run_key']} - {' / '.join(cells)}")
     if "best_variant" in selection:
         print(f"best variant: {selection['best_variant']}")
     print(f"\nWrote variant_runs_per_tile.csv, variant_runs_pooled.csv and {SELECTION_NAME} in {base_dir}")

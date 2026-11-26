@@ -1,7 +1,8 @@
 """Plot the plausibility of the SFINCS calibration per tile: metrics, drivers, per-tile optimum.
 
 Writes metric_distributions, disagreement_drivers (bathtub set), disagreement_drivers_eikonal,
-per_tile_optimum_gain and per_tile_optimum_drivers (.png + caption) and their tables. Needs
+variant_contrast_drivers, per_tile_optimum_gain and per_tile_optimum_drivers (.png + caption)
+and their tables. Needs
 variant_runs_per_tile.csv and variant_selection.json (compute_variant_metrics.py) and
 tile_drivers[_owned].csv (compute_tile_drivers.py, in --raster-base-dir-name when given).
 
@@ -85,6 +86,22 @@ TIE_CSI = 0.005  # parameters within this of a tile's best CSI count as equally 
 SAME_CSI = 0.01  # a tile prefers another value only if it gains at least this much CSI
 CLASS_COLORS = {"lower": "#56B4E9", "same": MUTED, "higher": "#D55E00"}
 CLASS_LABELS = {"lower": "Lower value better", "same": "Global value as good", "higher": "Higher value better"}
+# (label, variant compared, baseline variant), each at its selected run
+CONTRASTS = (
+    ("Land cover vs uniform", "eikonal_landcover_cap", "eikonal_uniform_cap"),
+    ("Cap, uniform rate", "eikonal_uniform_cap", "eikonal_uniform"),
+    ("Cap, land-cover rate", "eikonal_landcover_cap", "eikonal_landcover"),
+)
+CONTRAST_ORDER = ("worse", "same", "better")
+CONTRAST_COLORS = {"better": "#0072B2", "same": MUTED, "worse": "#D55E00"}
+CONTRAST_LABELS = {"better": "Compared better", "same": "As good", "worse": "Compared worse"}
+LOG_TICKS = (0.01, 0.03, 0.1, 0.3, 1, 2, 5, 10, 20, 50, 100)
+# three columns leave no room for the long driver labels
+SHORT_DRIVER_LABELS = {
+    "overtop_coast_pct": "Coast below peak (%)", "river_pct": "River share (%)", "lake_pct": "Lake share (%)",
+    "friction_m_per_km": "Land-cover attenuation (m/km)", "surge_range_m": "Forcing range (m)",
+    "enclosed_pct": "Zone behind a sill (%)", "peak_hold_h": "Peak hold (h)",
+}
 
 
 def _run_label(entry: dict, variant: str) -> str:
@@ -122,8 +139,12 @@ def plot_metric_distributions(per_tile: pd.DataFrame, runs: dict[str, str], labe
                            whiskerprops={"linewidth": 0.6}, capprops={"linewidth": 0.6})
             pooled = metrics_from_counts(g["matched_km2"].sum(), g["model_only_km2"].sum(), g["sfincs_only_km2"].sum())
             ax.plot(pooled[metric], y, marker="D", color=MUTED, markersize=4, linestyle="none")
-        ax.set_xlim(0, 1)
-        ax.set_xticks([0, 0.25, 0.5, 0.75, 1])
+        if metric == "HT":  # hit rates sit near 1; the 5 % whiskers stay above 0.5
+            ax.set_xlim(0.5, 1)
+            ax.set_xticks([0.5, 0.6, 0.7, 0.8, 0.9, 1])
+        else:
+            ax.set_xlim(0, 1)
+            ax.set_xticks([0, 0.25, 0.5, 0.75, 1])
         ax.set_xlabel(label)
         panel_letters(ax, letter, fontsize=8)
     axes[0].set_yticks(range(len(order)))
@@ -139,8 +160,8 @@ def plot_metric_distributions(per_tile: pd.DataFrame, runs: dict[str, str], labe
         f"least {min_union_km2:g} km2 (n = {n} for the top row). Grey diamond: value pooled over the same tiles "
         "(area counts summed before scoring).",
         "(a) CSI = matched / (matched + model only + SFINCS only); (b) hit rate = matched / SFINCS flooded; "
-        "(c) false alarm ratio = model only / model flooded. Each run is its variant's best by pooled CSI on "
-        "the calibration tiles.",
+        "(c) false alarm ratio = model only / model flooded. Each run is its variant's selected run "
+        "(variant_selection.json), chosen by population-weighted CSI over all tiles.",
     ])
     print(f"Wrote {out_path}")
 
@@ -363,8 +384,8 @@ def plot_optimum_gain(optimum: pd.DataFrame, summary: pd.DataFrame, per_tile: pd
     write_caption(out_path, [
         "How much a per-tile attenuation value could gain over one global value: the upper bound for any "
         "rule that sets the value from tile characteristics.",
-        f"Global value: the selected run of each variant ({globals_text}; highest pooled CSI on the calibration "
-        f"tiles). A tile's best value: its highest CSI; values within {TIE_CSI} CSI of that maximum count as ties "
+        f"Global value: the selected run of each variant ({globals_text}; variant_selection.json, chosen by "
+        f"population-weighted CSI over all tiles). A tile's best value: its highest CSI; values within {TIE_CSI} CSI of that maximum count as ties "
         "and the one closest to the global value is taken. Tiles where any run or SFINCS floods at least 1 km2.",
         f"(a) Cumulative share of tiles by the CSI gain of their own best value (dotted line: {SAME_CSI}). "
         "(b, c) Share of tiles by their best value; coloured bar: the global value; the end bars include tiles "
@@ -416,6 +437,84 @@ def plot_optimum_drivers(optimum: pd.DataFrame, drivers: pd.DataFrame, out_path:
         f"at least {SAME_CSI} CSI, otherwise 'global value as good'. Box: interquartile range, line: median, "
         "whiskers: 5-95 %. Panel header: Spearman rho between the driver and log2(best value / global value) "
         "over all tiles of the column (negative: a lower value is better as the driver grows).",
+        "Drivers: " + "; ".join(_DRIVER_DEFINITIONS[d[0]] for d in driver_set) + ". Log axes clip zeros to "
+        "their lower limit.",
+    ])
+    print(f"Wrote {out_path}")
+    return pd.DataFrame(rows)
+
+
+def contrast_table(per_tile: pd.DataFrame, runs: dict[str, str], min_union_km2: float) -> pd.DataFrame:
+    """Per tile, the CSI change of each CONTRASTS pair (compared minus baseline) and its class.
+
+    Only tiles where both runs flood at least `min_union_km2` together with SFINCS; a change
+    smaller than SAME_CSI counts as "same".
+    """
+    parts = []
+    for label, compared, baseline in CONTRASTS:
+        if compared not in runs or baseline not in runs:
+            continue
+        a = _scored(per_tile, runs[compared], min_union_km2)[["tile_id", "CSI"]]
+        b = _scored(per_tile, runs[baseline], min_union_km2)[["tile_id", "CSI"]]
+        m = a.merge(b, on="tile_id", suffixes=("_compared", "_baseline")).dropna()
+        d = m["CSI_compared"] - m["CSI_baseline"]
+        cls = np.where(d >= SAME_CSI, "better", np.where(d <= -SAME_CSI, "worse", "same"))
+        parts.append(m.assign(contrast=label, compared=runs[compared], baseline=runs[baseline], d_csi=d, cls=cls))
+    return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+
+
+def plot_contrast_drivers(contrasts: pd.DataFrame, drivers: pd.DataFrame, out_path: Path,
+                          driver_set: tuple = EIKONAL_DRIVERS) -> pd.DataFrame:
+    """Plot the drivers of tiles where each contrast helps, does not matter or hurts; return the rho table."""
+    labels = list(dict.fromkeys(contrasts["contrast"]))
+    fig, axes = plt.subplots(len(driver_set), len(labels), figsize=(FIG_WIDTH_IN, 1.05 * len(driver_set) + 0.5),
+                             sharey=True, squeeze=False, layout="constrained")
+    rows = []
+    for j, label in enumerate(labels):
+        dd = contrasts[contrasts["contrast"] == label].merge(drivers, on="tile_id")
+        for i, (col, xlabel, logx, clip) in enumerate(driver_set):
+            ax = axes[i, j]
+            xlabel = SHORT_DRIVER_LABELS.get(col, xlabel)
+            for y, c in enumerate(CONTRAST_ORDER):
+                vals = dd.loc[dd["cls"] == c, col].replace([np.inf, -np.inf], np.nan).dropna()
+                if logx:
+                    vals = vals.clip(lower=clip)
+                if len(vals):
+                    ax.boxplot(vals, positions=[y], vert=False, widths=0.6, whis=(5, 95), showfliers=False,
+                               patch_artist=True, medianprops={"color": "black", "linewidth": 0.8},
+                               boxprops={"facecolor": CONTRAST_COLORS[c], "linewidth": 0.5},
+                               whiskerprops={"linewidth": 0.5}, capprops={"linewidth": 0.5})
+            if logx:
+                ax.set_xscale("log")
+                lo, hi = ax.get_xlim()
+                ax.set_xticks([t for t in LOG_TICKS if lo <= t <= hi])
+                ax.xaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter("%g"))
+                ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+            ok = dd[[col, "d_csi"]].replace([np.inf, -np.inf], np.nan).dropna()
+            rho = spearmanr(ok[col], ok["d_csi"])[0] if len(ok) > 2 else np.nan
+            rows.append({"contrast": label, "driver": col, "n_tiles": len(ok), "spearman_rho_vs_d_csi": rho})
+            ax.set_xlabel(xlabel, fontsize=7)
+            ax.tick_params(labelsize=7)
+            panel_letters(ax, "abcdefghijklmnopqrstuvwxyz"[i * len(labels) + j], fontsize=7,
+                          label=f"{label}: ρ {rho:+.2f}" if i == 0 else f"ρ {rho:+.2f}")
+        axes[0, j].set_yticks(range(len(CONTRAST_ORDER)), [CONTRAST_LABELS[c] for c in CONTRAST_ORDER], fontsize=7)
+    save_figure(fig, out_path)
+    plt.close(fig)
+    shares = []
+    for label in labels:
+        g = contrasts[contrasts["contrast"] == label]
+        first = g.iloc[0]
+        share = g["cls"].value_counts(normalize=True).reindex(CONTRAST_ORDER, fill_value=0.0) * 100
+        shares.append(f"{label} ({first.compared} vs {first.baseline}, n = {len(g)}): better on {share['better']:.0f} %, "
+                      f"worse on {share['worse']:.0f} % of tiles")
+    write_caption(out_path, [
+        "Where land-cover attenuation beats a uniform rate, and where the volume cap helps or hurts, by tile "
+        "characteristics.",
+        f"Per tile, the CSI of the compared run minus that of its baseline (each variant at its selected run); "
+        f"'compared better' or 'worse' when the change is at least {SAME_CSI} CSI, otherwise 'as good'. Tiles where "
+        "both runs score. Box: interquartile range, line: median, whiskers: 5-95 %. Panel header: Spearman rho "
+        "between the driver and the CSI change (positive: the compared run gains as the driver grows).",
+        "; ".join(shares) + ".",
         "Drivers: " + "; ".join(_DRIVER_DEFINITIONS[d[0]] for d in driver_set) + ". Log axes clip zeros to "
         "their lower limit.",
     ])
@@ -476,6 +575,13 @@ def main() -> None:
     matrix = best_data[best].reindex(columns=cols).corr(method="spearman")
     matrix.to_csv(fig_dir / "driver_correlation_matrix.csv")
     print(f"Wrote {fig_dir / 'driver_correlation_matrix.csv'}")
+
+    contrasts = contrast_table(per_tile, {v: e["run_key"] for v, e in entries.items()}, args.min_union_km2)
+    if not contrasts.empty:
+        contrasts.to_csv(fig_dir / "variant_contrasts.csv", index=False)
+        rho = plot_contrast_drivers(contrasts, drivers, fig_dir / "variant_contrast_drivers.png")
+        rho.to_csv(fig_dir / "variant_contrast_drivers.csv", index=False)
+        print(contrasts.groupby("contrast")["cls"].value_counts(normalize=True).unstack().round(3).to_string())
 
     optimum = pd.concat([per_tile_optimum(per_tile, v, float(entries[v]["parameter"]), args.min_union_km2)
                          for v in OPTIMUM_VARIANTS

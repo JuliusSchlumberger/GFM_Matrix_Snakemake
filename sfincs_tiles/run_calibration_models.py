@@ -145,8 +145,8 @@ BATHTUBS = ("bathtub", "bathtub_connected", "bathtub_connected_cap")
 def phase_runs(phase: str, selection: dict | None) -> list[tuple[str, float | None, float | None]]:
     """Return the (variant, parameter, alpha) runs of `phase`, the same on every tile.
 
-    Both groups run every run, so the validation group gets the same per-run table; only the
-    calibration group's pooled scores pick the runs (calibration_results.select_runs).
+    Both groups run every run, so each group gets the same per-run table; the runs are
+    picked by calibration_results.select_runs.
     """
     runs = [(name, None, None) for name in BATHTUBS]
     if phase == "sweep":

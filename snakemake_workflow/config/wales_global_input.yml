@@ -1,5 +1,5 @@
 # Wales global-input baseline: production (global DeltaDTM DEM, global COAST-RP boundaries) on
-# the production tiles under wales_local_input.yml's fine tiles, closed over hop seeding
+# the production tiles under wales_local_input.yml's fine tiles (all of Wales), closed over hop seeding
 # (select_country_tiles.py --footprint). Tile inputs and results are production's, so the
 # production run keeps these; merges, figures and scores stay here. Scenario override layer on
 # config.yml + config_local.yml (config_utils.materialize_config).
@@ -17,6 +17,9 @@ validation:
   output_dir: "{root}/wales_global_input/validation"
 hpc:
   jobs_dir: "{root}/wales_global_input/hpc_jobs"
+  single_preprocess_job: true  # production tiles; production_preprocess built most inputs
+  # Production tiles (~25M cells): ~0.6 min per solve (config_hpc.example.yml wave_tiers).
+  wave_packing: {solve_minutes: 1.0, target_hours: 2.0, profile: simulate_packed}
 
 boundary_conditions:
   # Only what the benchmarks score: RP100 and RP250 bracket the ~RP200 flood zones

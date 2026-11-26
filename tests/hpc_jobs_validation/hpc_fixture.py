@@ -46,6 +46,7 @@ def site(state_root: str, tiers: bool = False) -> dict:
             "sfincs_post": {**four, "time": "0-12:00:00"},
             "validation": {**four, "time": "2-00:00:00"},
             "study_figures": {**four, "time": "0-04:00:00"},
+            "simulate_packed": {**four, "time": "0-08:00:00"},
         },
     }
     if tiers:
@@ -54,8 +55,11 @@ def site(state_root: str, tiers: bool = False) -> dict:
 
 
 def make_fixture(base: Path, *, n_nodes: int = 2, all_hop0: bool = False, tiers: bool = False,
-                 merge_only: bool = False) -> Path:
-    """Build the fixture under `base`; return its config.yml (siblings: config_local.yml, config_hpc.yml)."""
+                 merge_only: bool = False, overrides: dict | None = None) -> Path:
+    """Build the fixture under `base`; return its config.yml (siblings: config_local.yml, config_hpc.yml).
+
+    `overrides` (section -> values) is merged into config_local.yml.
+    """
     if base.exists():
         shutil.rmtree(base)
     root, cfg_dir = base / "root", base / "config"
@@ -68,6 +72,8 @@ def make_fixture(base: Path, *, n_nodes: int = 2, all_hop0: bool = False, tiers:
         "hpc": {"n_nodes": n_nodes},
         "postprocessing": {"merge_only": merge_only},
     }
+    for section, values in (overrides or {}).items():
+        local[section] = {**local.get(section, {}), **values} if isinstance(values, dict) else values
     (cfg_dir / "config_local.yml").write_text(yaml.safe_dump(local), encoding="utf-8")
     (cfg_dir / "config_hpc.yml").write_text(yaml.safe_dump(site((base / "state").as_posix(), tiers)),
                                             encoding="utf-8")

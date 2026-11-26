@@ -10,8 +10,9 @@ Snakefile. The tile grid is read via the local config; embedded paths use config
 
 `postprocessing.merge_only` (validation scenarios) writes the merges only, no exposure or
 flood totals: merge_chunk, or, with a simulation.dem_source_manifest (tiles in the local
-DEM's projected CRS, which merge_chunk rejects), one merge_england_local_tiles.py job per
-(RP, SLR) into merged_outputs/local_native/.
+DEM's projected CRS, which merge_chunk rejects), per (RP, SLR) postprocessing.native_merge_jobs
+merge_england_local_tiles.py jobs over native-CRS chunks and one VRT job, under
+merged_outputs/local_native/.
 
 Usage:
     python generate_hpc_postprocess_job.py [--config path] [--resume] [--no-flood-totals-and-plots] [--profile-set P.F=V]
@@ -72,21 +73,25 @@ def _raise_open_files_limit_lines() -> list[str]:
 
 
 def _add_native_merge_jobs(chain: JobChain, linux_code_root: str, name_prefix: str, return_periods: list[str],
-                           waterlevel_names: list[str], configfile_path: str) -> list[str]:
-    """Add one merge_england_local_tiles.py job per (RP, SLR); return their names."""
-    names = []
+                           waterlevel_names: list[str], configfile_path: str, n_batches: int) -> list[str]:
+    """Add, per (RP, SLR), `n_batches` native-chunk merge jobs and a VRT job after them; return the VRT jobs."""
+    def job(name: str, args: str, after: list[str] = ()) -> str:
+        chain.add(name, "postprocess", [
+            f'cd "{linux_code_root}"',
+            *_raise_open_files_limit_lines(),
+            f'stage_configfile_locally "{configfile_path}" LOCAL_CONFIGFILE || exit 1',
+            f'"$GFM_PY" preparation/merge_england_local_tiles.py --config "$LOCAL_CONFIGFILE" {args}',
+        ], after=after, resources={"cpus_per_task": 1}, helpers=("stage_config",))
+        return name
+
+    vrt_jobs = []
     for rp in return_periods:
         for slr in waterlevel_names:
-            name = f"{name_prefix}local_native_merge_{rp}_{slr}"
-            chain.add(name, "postprocess", [
-                f'cd "{linux_code_root}"',
-                *_raise_open_files_limit_lines(),
-                f'stage_configfile_locally "{configfile_path}" LOCAL_CONFIGFILE || exit 1',
-                f'"$GFM_PY" preparation/merge_england_local_tiles.py --config "$LOCAL_CONFIGFILE" '
-                f'--return-periods {rp} --waterlevel-name {slr}',
-            ], resources={"cpus_per_task": 1}, helpers=("stage_config",))
-            names.append(name)
-    return names
+            event = f"--return-periods {rp} --waterlevel-name {slr}"
+            merges = [job(f"{name_prefix}local_native_merge_{rp}_{slr}_batch_{k:03d}",
+                          f"{event} --batch {k} --n-batches {n_batches}") for k in range(n_batches)]
+            vrt_jobs.append(job(f"{name_prefix}local_native_vrt_{rp}_{slr}", f"{event} --vrt", after=merges))
+    return vrt_jobs
 
 
 def _add_batches(chain: JobChain, linux_code_root: str, phase_name: str, batches: list[list[str]],
@@ -220,9 +225,12 @@ def generate(config_path: str | Path, *, resume: bool = False, flood_totals: boo
     chain = JobChain(hpc_cfg, local_jobs_dir, linux_jobs_dir)
     last: list[str] = []  # the most recent non-empty phase: the next one waits for all of it
     if native_merge:
-        print(f"Local-native merge: {len(return_periods) * len(waterlevel_names)} job(s), one per (RP, SLR)")
+        n_batches = int(local_config["postprocessing"]["native_merge_jobs"])
+        n_events = len(return_periods) * len(waterlevel_names)
+        print(f"Local-native merge: {n_events} event(s) x {n_batches} chunk batch(es) + one VRT job each "
+              f"(native_chunk_m={local_config['postprocessing']['native_chunk_m']})")
         last = _add_native_merge_jobs(chain, linux_code_root, name_prefix, return_periods, waterlevel_names,
-                                      linux_resolved_config)
+                                      linux_resolved_config, n_batches)
     elif merge_only:
         phase1_targets = [lx for _, lx, _ in phase1_sel]
         print(f"Merge only (merge_chunk): {len(phase1_targets)} target(s)")

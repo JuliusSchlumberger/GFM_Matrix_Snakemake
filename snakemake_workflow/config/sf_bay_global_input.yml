@@ -15,16 +15,20 @@ visualization:
 validation:
   output_dir: "{root}/sf_bay_global_input/validation"
   # hpc/gfm_hpc.py validate: per group, scripts run in order with {config} = this scenario's
-  # HPC-view config and {config:NAME} = scenario NAME's.
+  # HPC-view config and {config:NAME} = scenario NAME's; {variant} is "" here and "__<variant>" in
+  # a flood-model variant's config (flood_variants.variant_config), after each output root it moves.
   runs:
     scores:
       - ["validation/validate_sf_bay.py", "--config", "{config}", "--bbox", "-122.355", "37.45", "-121.99", "37.91",
          "--benchmark-path",
          "zip://{root}/inputs/validation/California/alameda_flooding_slr000.zip!flooding/v2.1/county_alameda_flddepth_slr000_w100.tif",
          "--benchmark-scale-m", "0.01",
-         "--out-dir", "{root}/sf_bay_global_input/validation/USA_alameda_sample"]
+         "--out-dir", "{root}/sf_bay_global_input/validation{variant}/USA_alameda_sample"]
 hpc:
   jobs_dir: "{root}/sf_bay_global_input/hpc_jobs"
+  single_preprocess_job: true  # production tiles; production_preprocess built most inputs
+  # Production tiles (~25M cells): ~0.6 min per solve (config_hpc.example.yml wave_tiers).
+  wave_packing: {solve_minutes: 1.0, target_hours: 2.0, profile: simulate_packed}
 
 boundary_conditions:
   # validate_sf_bay.py scores RP100, SLR000 only (CoSMoS Alameda).

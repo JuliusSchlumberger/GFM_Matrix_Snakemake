@@ -1,19 +1,18 @@
 # Wales local-input validation: real NRW LIDAR DEM + EA design sea levels, both kept in
 # their native ODN datum (native_datum=native, data_catalog_local_input.yml - TODO.md: no
 # GOCO06s bridge needed, same reasoning as England - confirmed via LiDAR_Guidance_2018.pdf),
-# over a small, bounded fine tile cluster covering ONE named benchmark region only
-# (preparation/build_wales_fine_tiles.py --region severn_estuary) - this is a validation
-# sample, NOT a full-Wales build (TODO.md: test the sample, including hop-distance
-# propagation, before committing to the full country). Diffed against wales_global_input.yml,
-# which uses the exact same tile_grid.path (TODO.md D5). Scenario override layer on
-# config.yml + config_local.yml (config_utils.materialize_config).
+# over a fine tile grid of all of Wales (preparation/build_wales_fine_tiles.py --region wales).
+# Outputs sit under all_wales/: the Severn Estuary sample's outputs directly under
+# {root}/wales_local_input/ reuse tile_ids for other tiles. Compared against wales_global_input.yml,
+# the production tiles under this grid. Scenario override layer on config.yml + config_local.yml
+# (config_utils.materialize_config).
 
 # Two-component SLR propagation adds the static level MDT + 2020 offset (boundaries.static_station_levels)
 # in the GOCO06s frame to this ODN scenario's sea; it is kept, so a systematic overestimation here
 # may come from that offset between the two datums (TODO.md).
 
 tile_grid:
-  path: "{processed_inputs_dir}/mask/validation/wales_fine_tiles_severn_estuary.gpkg"
+  path: "{processed_inputs_dir}/mask/validation/wales_fine_tiles_wales.gpkg"
 
 paths:
   hydromt_data_catalog:
@@ -28,7 +27,7 @@ boundary_conditions:
   waterlevel_names: ["SLR_0"]
   # Isolated from the shared global COAST-RP cache - see england_local_input.yml's matching
   # override and its own comment for why sharing the default directory is unsafe.
-  stations_cache_dir: "{root}/wales_local_input/processed_inputs/WL_scenarios_cache"
+  stations_cache_dir: "{root}/wales_local_input/all_wales/processed_inputs/WL_scenarios_cache"
   stations_cache_prebuilt: true  # preparation/cache_local_waterlevel_stations.py
 
 adaptation:
@@ -37,36 +36,45 @@ adaptation:
   slr_intensities: []
 
 simulation:
-  dem_source_manifest: "{processed_inputs_dir}/mask/validation/wales_fine_dem_source_manifest_severn_estuary.csv"
-  model_outputs: "{root}/wales_local_input/model_outputs"
+  dem_source_manifest: "{processed_inputs_dir}/mask/validation/wales_fine_dem_source_manifest_wales.csv"
+  model_outputs: "{root}/wales_local_input/all_wales/model_outputs"
   preprocessing_inputs_dir: null  # own per-tile inputs under model_outputs
 postprocessing:
   merge_only: true  # validation run: the HPC postprocess chain merges only, no exposure / flood totals
-  merged_outputs: "{root}/wales_local_input/merged_results"
+  merged_outputs: "{root}/wales_local_input/all_wales/merged_results"
+  # 20 km chunks at 1 m, packed over 6 one-core jobs per event.
+  native_chunk_m: 20000
+  native_merge_jobs: 6
 visualization:
-  output_dir: "{root}/wales_local_input/figures"
+  output_dir: "{root}/wales_local_input/all_wales/figures"
 validation:
   # Isolated from the shared default - see england_local_input.yml's matching override.
-  output_dir: "{root}/wales_local_input/validation"
+  output_dir: "{root}/wales_local_input/all_wales/validation"
   # hpc/gfm_hpc.py validate: per group, scripts run in order with {config} = this scenario's
-  # HPC-view config and {config:NAME} = scenario NAME's.
-  # Wales global input is scored here too, next to the local-vs-global agreement maps.
+  # HPC-view config and {config:NAME} = scenario NAME's; {variant} is "" here and "__<variant>" in
+  # a flood-model variant's config (flood_variants.variant_config), after each output root it moves.
+  # Wales global input is scored here too. Scores cover all of Wales; the agreement maps zoom on
+  # the Severn Estuary (a 1 m map of the whole country is too large to draw).
   runs:
     scores:
       - ["validation/rescore_floodzone3_local.py", "--config", "{config}",
-         "--benchmark-key", "wales_nrw_floodzone_seas", "--region", "severn_estuary"]
+         "--benchmark-key", "wales_nrw_floodzone_seas", "--region", "wales"]
       - ["validation/rescore_1km_fp_buffer_local.py", "--config", "{config}",
-         "--benchmark-key", "wales_nrw_floodzone_seas", "--region", "severn_estuary"]
-      - ["validation/validate_country.py", "--config", "{config:wales_global_input}", "--country", "GBR",
+         "--benchmark-key", "wales_nrw_floodzone_seas", "--region", "wales"]
+      - ["validation/validate_country.py", "--config", "{config:wales_global_input{variant}}", "--country", "GBR",
          "--rp", "RP100", "--slr", "SLR_0"]
       - ["validation/plot_local_vs_global_agreement.py", "--local-config", "{config}",
-         "--global-config", "{config:wales_global_input}", "--benchmark-key", "wales_nrw_floodzone_seas",
-         "--region", "severn_estuary", "--return-period", "RP100"]
-      - ["validation/validate_country.py", "--config", "{config:wales_global_input}", "--country", "GBR",
+         "--global-config", "{config:wales_global_input{variant}}", "--benchmark-key", "wales_nrw_floodzone_seas",
+         "--region", "severn_estuary", "--return-period", "RP100",
+         "--out", "{root}/wales_local_input/all_wales/validation{variant}/agreement_severn_RP100_SLR_0.png"]
+      - ["validation/validate_country.py", "--config", "{config:wales_global_input{variant}}", "--country", "GBR",
          "--rp", "RP250", "--slr", "SLR_0"]
       - ["validation/plot_local_vs_global_agreement.py", "--local-config", "{config}",
-         "--global-config", "{config:wales_global_input}", "--benchmark-key", "wales_nrw_floodzone_seas",
-         "--region", "severn_estuary", "--return-period", "RP250"]
-      - ["validation/rescore_1km_fp_buffer.py", "--config", "{config:wales_global_input}"]
+         "--global-config", "{config:wales_global_input{variant}}", "--benchmark-key", "wales_nrw_floodzone_seas",
+         "--region", "severn_estuary", "--return-period", "RP250",
+         "--out", "{root}/wales_local_input/all_wales/validation{variant}/agreement_severn_RP250_SLR_0.png"]
+      - ["validation/rescore_1km_fp_buffer.py", "--config", "{config:wales_global_input{variant}}"]
 hpc:
-  jobs_dir: "{root}/wales_local_input/model_outputs/hpc_jobs"
+  jobs_dir: "{root}/wales_local_input/all_wales/model_outputs/hpc_jobs"
+  n_nodes: 12  # preprocess: 12 x 4 cores
+  wave_packing: {solve_minutes: 2.0, target_hours: 2.0, profile: simulate_packed}

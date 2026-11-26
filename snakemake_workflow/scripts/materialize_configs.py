@@ -2,8 +2,8 @@
 
 Each output is config.yml + config_local.yml + the override, deep-merged like load_config. Point GFM_CONFIG_PATH at it. --variants adds, per scenario,
 `<name>__<variant>_materialized.yml`: the scenario running a flood-model variant
-(flood_variants.variant_config) at its run in the SFINCS calibration's variant_selection.json,
-with its own outputs and the scenario's tile inputs.
+(flood_variants.variant_config) at its run in the SFINCS calibration's variant_selection.json
+(--selection), else at config.yml's parameters, with its own outputs and the scenario's tile inputs.
 
 Usage:
     python snakemake_workflow/scripts/materialize_configs.py              # every known scenario
@@ -49,12 +49,11 @@ def main() -> None:
     parser.add_argument("--variants", nargs="+", default=[], choices=["all", *VARIANTS],
                         help="also write each scenario running these flood-model variants")
     parser.add_argument("--selection", default=None,
-                        help="variant_selection.json of the SFINCS calibration (needed with --variants)")
+                        help="variant_selection.json of the SFINCS calibration; without it, --variants run "
+                             "at config.yml's friction_scale_factor / uniform_attenuation_m_per_km and alpha")
     args = parser.parse_args()
     variants = list(VARIANTS) if "all" in args.variants else args.variants
-    if variants and not args.selection:
-        parser.error("--variants needs --selection")
-    selection = json.loads(Path(args.selection).read_text())["variants"] if variants else {}
+    selection = json.loads(Path(args.selection).read_text())["variants"] if args.selection else None
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -66,8 +65,8 @@ def main() -> None:
         merged = materialize_config(_CONFIG_DIR / "config.yml", [override_path], out_path)
         print(f"wrote {out_path}")
         for variant in variants:
-            run = selection.get(variant)
-            if run is None and VARIANTS[variant]["friction_source"] is not None:
+            run = selection.get(variant) if selection is not None else None
+            if run is None and selection is not None and VARIANTS[variant]["friction_source"] is not None:
                 raise SystemExit(f"{args.selection} has no run for {variant}")
             run = run or {"parameter": None, "alpha": None}
             v_path = out_dir / f"{name}__{variant}_materialized.yml"

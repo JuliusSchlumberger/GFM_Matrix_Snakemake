@@ -3,7 +3,9 @@
 A hop_distance>=1 tile is seeded from a lower-hop neighbour's output for the same scenario, so
 wave N+1 (afterany) waits until every wave-N job has ended. Within a wave, whole tiles are split
 evenly in tile-grid order over hpc.n_nodes batches, or over the matching hpc.wave_tiers entry.
-Each batch runs its (tile, RP, SLR) items via run_simulation_batch.py, cpus_per_task at a time.
+A scenario's hpc.wave_packing instead sizes every wave from its own solve count: ceil(solves x
+solve_minutes / (cpus_per_task x target_hours x 60)) jobs of site profile `profile`, at most
+one per tile. Each batch runs its (tile, RP, SLR) items via run_simulation_batch.py, cpus_per_task at a time.
 After the last wave, one job generates and submits the postprocessing chain. Does not check that
 preprocessing is complete: the preprocess chain's dispatch job does that before calling this.
 
@@ -17,6 +19,7 @@ Usage:
 
 import argparse
 import csv
+import math
 import sys
 from pathlib import Path
 
@@ -40,17 +43,36 @@ def _resolve_wave_tier(hop: int, wave_tiers: list[dict]) -> dict:
     raise ValueError(f"no hpc.wave_tiers entry matches hop_distance={hop} - add a catch-all 'hops: null' tier")
 
 
+def packed_batch_count(n_items: int, n_tiles: int, packing: dict, cpus_per_task: int) -> int:
+    """Return how many jobs a wave of `n_items` solves over `n_tiles` tiles gets under hpc.wave_packing."""
+    hours = n_items * float(packing["solve_minutes"]) / 60.0
+    n = math.ceil(hours / (cpus_per_task * float(packing["target_hours"])))
+    return max(1, min(n, n_tiles))
+
+
+def _wave_batches(wave: int, n_items: int, n_tiles: int, hpc_cfg: dict) -> tuple[int | None, str, dict | None]:
+    """Return (batches, job profile, resources) of a wave; batches None means one per tile."""
+    packing = hpc_cfg.get("wave_packing")
+    if packing:
+        profile = packing["profile"]
+        if profile not in hpc_cfg["profiles"]:
+            raise ValueError(f"hpc.wave_packing.profile {profile!r} is not in hpc.profiles (config_hpc.yml)")
+        cpus = int(hpc_cfg["profiles"][profile]["cpus_per_task"])
+        return packed_batch_count(n_items, n_tiles, packing, cpus), profile, None
+    if hpc_cfg.get("wave_tiers"):
+        tier = _resolve_wave_tier(wave, hpc_cfg["wave_tiers"])
+        return tier["n_nodes"], "simulate", {k: tier[k] for k in ("partition", "cpus_per_task", "mem", "time")}
+    return hpc_cfg["n_nodes"], "simulate", None
+
+
 def _fresh_batches(hpc_waves: dict[int, list[str]], hpc_cfg: dict, return_periods: list[str],
                    waterlevel_names: list[str]) -> list[tuple[int, str, list[tuple[str, str, str]]]]:
     """Whole tiles per batch; a tile's full RP x SLR set stays on one node."""
     batches = []
     for wave in sorted(hpc_waves):
         tiles = hpc_waves[wave]
-        n = hpc_cfg["n_nodes"]
-        if hpc_cfg.get("wave_tiers"):
-            tier = _resolve_wave_tier(wave, hpc_cfg["wave_tiers"])
-            n = len(tiles) if tier["n_nodes"] is None else tier["n_nodes"]
-        for i, batch_tiles in enumerate(even_split(tiles, n)):
+        n, _, _ = _wave_batches(wave, len(tiles) * len(return_periods) * len(waterlevel_names), len(tiles), hpc_cfg)
+        for i, batch_tiles in enumerate(even_split(tiles, len(tiles) if n is None else n)):
             items = [(t, rp, slr) for t in batch_tiles for rp in return_periods for slr in waterlevel_names]
             batches.append((wave, f"{i:03d}", items))
     return batches
@@ -73,17 +95,14 @@ def _resume_batches(hpc_waves: dict[int, list[str]], hpc_cfg: dict, model_output
             items += [(tid, rp, slr) for rp, slr in scenarios if f"{rp}_{slr}" not in done]
         if not items:
             continue
-        n = hpc_cfg["n_nodes"]
-        if hpc_cfg.get("wave_tiers"):
-            tier = _resolve_wave_tier(wave, hpc_cfg["wave_tiers"])
-            if tier["n_nodes"] is None:
-                # One node per tile, not per missing item.
-                by_tile: dict[str, list] = {}
-                for item in items:
-                    by_tile.setdefault(item[0], []).append(item)
-                batches += [(wave, f"{i:03d}", v) for i, v in enumerate(by_tile.values())]
-                continue
-            n = tier["n_nodes"]
+        n, _, _ = _wave_batches(wave, len(items), len({t for t, _, _ in items}), hpc_cfg)
+        if n is None:
+            # One node per tile, not per missing item.
+            by_tile: dict[str, list] = {}
+            for item in items:
+                by_tile.setdefault(item[0], []).append(item)
+            batches += [(wave, f"{i:03d}", v) for i, v in enumerate(by_tile.values())]
+            continue
         batches += [(wave, f"{i:03d}", b) for i, b in enumerate(even_split(items, n))]
     print(f"{n_done}/{n_total} scenario-jobs already done, {n_total - n_done} remaining.")
     return batches
@@ -133,10 +152,7 @@ def generate(config_path: str | Path, *, resume: bool = False, profile_sets: lis
         name = f"{prefix}wave{wave}_batch_{batch_id}"
         with open(local_jobs_dir / f"{name}_triples.csv", "w", encoding="utf-8", newline="\n") as f:
             csv.writer(f).writerows(items)
-        resources = None
-        if hpc_cfg.get("wave_tiers"):
-            tier = _resolve_wave_tier(wave, hpc_cfg["wave_tiers"])
-            resources = {k: tier[k] for k in ("partition", "cpus_per_task", "mem", "time")}
+        _, profile, resources = _wave_batches(wave, len(items), 1, hpc_cfg)
         body = [
             f'FAIL_LOG="{linux_jobs_dir}/logs/{name}_failures.txt"',
             ': > "$FAIL_LOG"',
@@ -151,7 +167,7 @@ def generate(config_path: str | Path, *, resume: bool = False, profile_sets: lis
         ]
         # Not -e: one failed (tile, rp, slr) must not abort the rest of this node's batch, so
         # each setup step exits explicitly on failure instead.
-        chain.add(name, "simulate", body, after=prev_wave, resources=resources, errexit=False,
+        chain.add(name, profile, body, after=prev_wave, resources=resources, errexit=False,
                   helpers=("stage_config", "stage_tile_grid"))
         this_wave.append(name)
         print(f"  {name}: {len(items)} item(s), {chain.jobs[-1]['cpus_per_task']}-way concurrent")

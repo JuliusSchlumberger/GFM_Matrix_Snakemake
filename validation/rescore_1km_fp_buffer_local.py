@@ -75,7 +75,7 @@ def _score_one_rp(
     region_bbox = spec.regions[region]
     region_bbox_native = transform_bounds("EPSG:4326", native_crs, *region_bbox)
 
-    raster_path = native_dir / f"waterdepth_{rp}_{slr}.tif"
+    raster_path = native_dir / f"waterdepth_{rp}_{slr}.vrt"
     tp = fp = fp_unbuffered = fn = tn = 0.0
     n_processed = 0
 
@@ -171,7 +171,7 @@ def main() -> None:
     full_sindex = full_gdf.sindex
 
     native_dir = Path(cfg["postprocessing"]["merged_outputs"]) / "local_native"
-    with retry_transient_io(rasterio.open, native_dir / f"waterdepth_{args.rps[0]}_{slr}.tif") as probe:
+    with retry_transient_io(rasterio.open, native_dir / f"waterdepth_{args.rps[0]}_{slr}.vrt") as probe:
         native_crs = probe.crs
 
     rows = []

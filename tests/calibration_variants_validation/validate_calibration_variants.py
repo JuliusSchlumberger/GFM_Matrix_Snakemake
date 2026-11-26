@@ -68,12 +68,14 @@ def test_run_tables_pool_per_group_and_select_the_best_run() -> None:
     assert len(per_tile) == 9
     cal = pooled[(pooled.group == "calibration") & (pooled.run_key == "eikonal_landcover_fsf0.3")].iloc[0]
     assert cal.n_tiles_scored == 2 and np.isclose(cal.CSI, 16 / 22)
-    sel = select_runs(pooled)
+    sel = select_runs(pooled, "CSI")
     lc = sel["variants"]["eikonal_landcover"]
     assert lc["run_key"] == "eikonal_landcover_fsf0.3" and lc["parameter"] == 0.3 and lc["alpha"] is None
     assert lc["validation"]["n_tiles_scored"] == 1
     assert sel["best_variant"] == "eikonal_landcover"
     assert select_runs(pooled, "bias")["variants"]["eikonal_landcover"]["run_key"] == "eikonal_landcover_fsf0.3"
+    pooled["CSI_pop"] = np.where(pooled.run_key == "eikonal_landcover_fsf0.2", 0.9, 0.5)
+    assert select_runs(pooled)["variants"]["eikonal_landcover"]["run_key"] == "eikonal_landcover_fsf0.2"
 
 
 def test_study_overrides() -> None:

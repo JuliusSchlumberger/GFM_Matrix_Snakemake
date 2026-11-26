@@ -5,6 +5,9 @@ Imports only numpy/rasterio (lazily) so gfm and hydromt-sfincs-dev can share it.
 
 from __future__ import annotations
 
+from collections import deque
+from collections.abc import Callable, Iterable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 RETURN_PERIOD = "RP100"
@@ -35,6 +38,21 @@ def shard_marker(out_dir: Path, spec: str) -> Path:
     """Return the file a finished dedup shard "K/N" leaves in `out_dir`."""
     k, n = spec.split("/")
     return out_dir / f"dedup_shard_{k}of{n}.ok"
+
+
+def threaded_map(fn: Callable, items: Iterable, workers: int = 8, window: int = 32) -> Iterator:
+    """Yield fn(item) in input order, `workers` at a time, at most `window` results held.
+
+    For per-tile reads from a network share, where latency, not CPU, sets the pace.
+    """
+    with ThreadPoolExecutor(workers) as ex:
+        pending: deque = deque()
+        for item in items:
+            pending.append(ex.submit(fn, item))
+            if len(pending) >= window:
+                yield pending.popleft().result()
+        while pending:
+            yield pending.popleft().result()
 
 
 def run_path(out_dir: Path, key: str) -> Path:

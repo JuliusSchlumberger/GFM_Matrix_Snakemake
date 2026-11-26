@@ -12,6 +12,7 @@ Usage (on the cluster login node, with the gfm env's python):
     python hpc/gfm_hpc.py validate --scenario NAME [--only GROUP ...] [--submit]
     python hpc/gfm_hpc.py progress preprocess|simulate|postprocess|sfincs --scenario NAME [--watch S]
     python hpc/gfm_hpc.py failures --scenario NAME
+    python hpc/gfm_hpc.py check-run --scenario NAME [--variant V]   # exit 1 unless the run is complete
     python hpc/gfm_hpc.py config NAME [--hpc] [--key dotted.key]
 """
 
@@ -208,9 +209,15 @@ def validation_runs(config: dict, only: list[str] | None) -> list[list[str]]:
 
 
 def expand_run(cmd: list[str], own_config: Path) -> list[str]:
-    """Replace {config} (this scenario) and {config:NAME} with HPC-view config paths."""
+    """Replace {config} (this scenario) and {config:NAME} with HPC-view config paths.
+
+    A {variant} token left in (a base config; flood_variants.variant_config fills it) is dropped.
+    """
+    from flood_variants import VARIANT_TOKEN
+
     out = []
     for arg in cmd:
+        arg = arg.replace(VARIANT_TOKEN, "")
         if arg == "{config}":
             arg = str(hpc_view(own_config))
         elif arg.startswith("{config:") and arg.endswith("}"):
@@ -271,6 +278,51 @@ def cmd_check_targets(args) -> None:
         print(f"{n} of {len(paths)} preprocessing output(s) missing, e.g.:", *first, sep="\n  ", file=sys.stderr)
         raise SystemExit(1)
     print(f"all {len(paths)} preprocessing output(s) present")
+
+
+def run_gaps(config: dict) -> list[str]:
+    """Return what a finished simulate + merge-only run of `config` still lacks (empty: complete).
+
+    Every (tile, RP, SLR) waterdepth, no out-of-memory marker on any of the tiles, and the
+    merged outputs: the local-native VRT per event, or every EPSG:4326 merge chunk.
+    """
+    import geopandas as gpd
+    from config_utils import merged_waterlevel_names, retry_transient_io
+    from hpc_common import missing_paths
+    from tiles import build_chunk_grid
+
+    tiles = retry_transient_io(gpd.read_file, config["tile_grid"]["path"])
+    tile_ids = [str(int(t)) for t in tiles["tile_id"]]
+    events = [f"RP{rp}_{wl}" for rp in config["boundary_conditions"]["return_periods"]
+              for wl in merged_waterlevel_names(config["boundary_conditions"], config["adaptation"])]
+    model_outputs = Path(config["simulation"]["model_outputs"])
+    merged = Path(config["postprocessing"]["merged_outputs"])
+    gaps = []
+    oom = [t for t in tile_ids if (model_outputs / "oom_tiles" / f"{t}.txt").exists()]
+    if oom:
+        gaps.append(f"{len(oom)} tile(s) out of memory ({model_outputs / 'oom_tiles'}), e.g. {oom[:5]}")
+    groups = {"waterdepth": [model_outputs / t / "results" / f"waterdepth_{e}.tif" for t in tile_ids for e in events]}
+    if config["simulation"].get("dem_source_manifest"):
+        groups["local-native VRT"] = [merged / "local_native" / f"waterdepth_{e}.vrt" for e in events]
+    else:
+        chunk_ids = build_chunk_grid(tiles, config["postprocessing"]["chunk_size_deg"])["chunk_id"]
+        groups["merged chunk"] = [merged / "chunks" / f"waterdepth_{c}_{e}.tif" for c in chunk_ids for e in events]
+    for what, paths in groups.items():
+        n, first = missing_paths([str(p) for p in paths])
+        if n:
+            gaps.append(f"{n} of {len(paths)} {what} output(s) missing, e.g. " + ", ".join(first))
+    return gaps
+
+
+def cmd_check_run(args) -> None:
+    from config_utils import load_config
+
+    config_path = _config_from(args)
+    gaps = run_gaps(load_config(config_path))
+    if gaps:
+        print(f"{config_path.name}: run incomplete", *gaps, sep="\n  ", file=sys.stderr)
+        raise SystemExit(1)
+    print(f"{config_path.name}: every waterdepth and merged output present, no out-of-memory tile")
 
 
 # ── command line ──────────────────────────────────────────────────────────────
@@ -345,6 +397,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--hpc", action="store_true", help="the compute nodes' view (config_hpc.yml layered)")
     p.add_argument("--key", default=None, help="dotted key, e.g. hpc.jobs_dir")
 
+    p = sub.add_parser("check-run", help="exit 1 unless a scenario's simulate + merge run is complete")
+    _scenario_args(p)
+
     p = sub.add_parser("check-targets", help="exit 1 unless every path in the target files exists")
     p.add_argument("files", nargs="+")
     return parser
@@ -359,7 +414,7 @@ def main(argv: list[str] | None = None) -> None:
         return
     {"run": cmd_run, "product": cmd_product, "studies": cmd_studies, "sfincs": cmd_sfincs,
      "validate": cmd_validate, "failures": cmd_failures, "config": cmd_config,
-     "check-targets": cmd_check_targets}[args.cmd](args)
+     "check-targets": cmd_check_targets, "check-run": cmd_check_run}[args.cmd](args)
 
 
 if __name__ == "__main__":

@@ -8,10 +8,10 @@ import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "sfincs_tiles"))
-from calibration_paths import shard  # noqa: E402
+from calibration_paths import shard, threaded_map  # noqa: E402
 from compute_tile_drivers import DRIVER_COLUMNS, read_drivers, tile_drivers  # noqa: E402
 from plot_tile_plausibility import (  # noqa: E402
-    BATHTUB_DRIVERS, EIKONAL_DRIVERS, driver_correlations, optimum_summary, per_tile_optimum, plot_driver_scatter,
+    BATHTUB_DRIVERS, EIKONAL_DRIVERS, contrast_table, driver_correlations, plot_contrast_drivers, optimum_summary, per_tile_optimum, plot_driver_scatter,
     plot_metric_distributions, plot_optimum_drivers, plot_optimum_gain,
 )
 
@@ -181,3 +181,30 @@ def test_read_drivers_joins_shard_parts_and_ignores_outdated_files(tmp_path: Pat
     pd.DataFrame([{"tile_id": 3, "coast_km": 1.0}]).to_csv(tmp_path / "tile_drivers.part1of2.csv", index=False)
     assert list(read_drivers(tmp_path)["tile_id"]) == [1, 2]
     assert read_drivers(tmp_path / "missing").empty
+
+
+def test_threaded_map_keeps_input_order_with_a_small_window() -> None:
+    import time
+    items = list(range(50))
+    out = list(threaded_map(lambda i: time.sleep(0.001 * (i % 7)) or i * i, items, workers=4, window=3))
+    assert out == [i * i for i in items]
+
+
+def test_contrast_classes_follow_the_csi_change(tmp_path: Path) -> None:
+    rows = []
+    for i in range(30):
+        base = 0.6
+        gain = (0.1, 0.0, -0.1)[i % 3]  # compared better, as good, worse
+        for variant, key, csi in (("eikonal_uniform", "u", base), ("eikonal_uniform_cap", "uc", base + gain),
+                                  ("eikonal_landcover", "l", base), ("eikonal_landcover_cap", "lc", base + gain)):
+            rows.append({"tile_id": i, "variant": variant, "run_key": key, "CSI": csi,
+                         "matched_km2": 10.0, "model_only_km2": 1.0, "sfincs_only_km2": 1.0})
+    per_tile = pd.DataFrame(rows)
+    runs = {"eikonal_uniform": "u", "eikonal_uniform_cap": "uc", "eikonal_landcover": "l", "eikonal_landcover_cap": "lc"}
+    c = contrast_table(per_tile, runs, 1.0)
+    cap = c[c["contrast"] == "Cap, uniform rate"].sort_values("tile_id")
+    assert list(cap["cls"][:3]) == ["better", "same", "worse"]
+    assert (c.loc[c["contrast"] == "Land cover vs uniform", "cls"] == "same").all()
+    drivers = pd.DataFrame({"tile_id": range(30), **{d[0]: np.linspace(1, 10, 30) for d in EIKONAL_DRIVERS}})
+    rho = plot_contrast_drivers(c, drivers, tmp_path / "contrast.png")
+    assert (tmp_path / "contrast.txt").exists() and len(rho) == 3 * len(EIKONAL_DRIVERS)

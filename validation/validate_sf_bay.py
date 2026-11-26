@@ -37,7 +37,7 @@ Usage:
         --bbox -122.355 37.45 -121.99 37.91 \\
         --benchmark-path "zip://.../alameda_flooding_slr000.zip!flooding/v2.1/county_alameda_flddepth_slr000_w100.tif" \\
         --benchmark-scale-m 0.01 \\
-        --native-merged-path <sf_bay_local_input merged_results/local_native/waterdepth_RP100_SLR_0.tif>
+        --native-merged-path <sf_bay_local_input merged_results/local_native/waterdepth_RP100_SLR_0.vrt>
 """
 
 from __future__ import annotations

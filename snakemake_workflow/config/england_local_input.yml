@@ -49,6 +49,9 @@ simulation:
 postprocessing:
   merge_only: true  # validation run: the HPC postprocess chain merges only, no exposure / flood totals
   merged_outputs: "{root}/england_local_input/all_england/merged_results"
+  # 20 km chunks at 1 m (~25 tiles, 4e8 cells each), packed over 16 one-core jobs per event.
+  native_chunk_m: 20000
+  native_merge_jobs: 16
 visualization:
   output_dir: "{root}/england_local_input/all_england/figures"
 validation:
@@ -58,21 +61,26 @@ validation:
   # does not key by scenario, only by benchmark/RP/SLR).
   output_dir: "{root}/england_local_input/all_england/validation"
   # hpc/gfm_hpc.py validate: per group, scripts run in order with {config} = this scenario's
-  # HPC-view config and {config:NAME} = scenario NAME's.
+  # HPC-view config and {config:NAME} = scenario NAME's; {variant} is "" here and "__<variant>" in
+  # a flood-model variant's config (flood_variants.variant_config), after each output root it moves.
   runs:
     scores:
       - ["validation/rescore_floodzone3_local.py", "--config", "{config}"]
       - ["validation/rescore_1km_fp_buffer_local.py", "--config", "{config}"]
     agreement_map:
       - ["validation/plot_local_vs_global_agreement.py", "--local-config", "{config}",
-         "--global-config", "{config:england_global_input}", "--return-period", "RP100",
+         "--global-config", "{config:england_global_input{variant}}", "--return-period", "RP100",
          "--bbox", "-0.1717", "52.5678", "0.2529", "53.0819",
-         "--out", "{root}/england_local_input/all_england/agreement_wash_RP100.png"]
+         "--out", "{root}/england_local_input/all_england/validation{variant}/agreement_wash_RP100.png"]
     # Local vs global input, area- and population-weighted, England and Wales.
     exposure_table:
-      - ["validation/exposure_validation_report.py", "--out-dir", "{root}/local_vs_global_exposure",
-         "--local-vs-global", "england", "{root}/england_local_input/all_england/validation",
-         "{root}/england_global_input/all_england/validation",
-         "--local-vs-global", "wales", "{root}/wales_local_input/validation", "{root}/wales_global_input/validation"]
+      - ["validation/exposure_validation_report.py", "--out-dir", "{root}/local_vs_global_exposure{variant}",
+         "--local-vs-global", "england", "{root}/england_local_input/all_england/validation{variant}",
+         "{root}/england_global_input/all_england/validation{variant}",
+         "--local-vs-global", "wales", "{root}/wales_local_input/all_wales/validation{variant}",
+         "{root}/wales_global_input/validation{variant}"]
 hpc:
   jobs_dir: "{root}/england_local_input/all_england/model_outputs/hpc_jobs"
+  n_nodes: 32  # preprocess: 32 x 4 cores of the plan's 144
+  # 1 m fine tiles: ~20 s per solve in earlier runs, x6 margin for the solver caps.
+  wave_packing: {solve_minutes: 2.0, target_hours: 2.0, profile: simulate_packed}

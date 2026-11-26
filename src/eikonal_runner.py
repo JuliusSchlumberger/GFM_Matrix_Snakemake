@@ -33,7 +33,6 @@ from rasters import (
     decode_friction_int16,
     decode_waterlevel_cm,
     grid_spacing_m,
-    save_nodata_raster,
     save_waterdepth_raster,
 )
 from tiles import load_tile_grid
@@ -294,15 +293,15 @@ NO_UPSTREAM_FLOODING_REASON = "no non-zero water level found in any available ov
 def write_zero_waterdepth(dem_path: str | Path, output_path: str | Path) -> None:
     """Write an all-zero waterdepth raster for a tile known not to flood.
 
-    Distinct from `rasters.save_nodata_raster` (OOM skips): the merge ignores
-    nodata as "not computed", whereas zero is a real answer.
+    Zero is a real answer; the merge ignores nodata as "not computed".
     """
     with retry_transient_io(rasterio.open, dem_path) as src:
         shape = (src.height, src.width)
     save_waterdepth_raster(dem_path, np.zeros(shape, dtype=np.float32), output_path)
 
 
-OOM_PREMARKED_REASON = "tile too large (out-of-memory on a previous return period/SLR scenario for this tile)"
+class TileOutOfMemoryError(RuntimeError):
+    """A tile too large to solve; it is marked in oom_tiles/ and no output is written."""
 
 
 def _stage_file_locally(src_path: str) -> str:
@@ -328,7 +327,6 @@ def run_tile_scenario(
     model_outputs: str,
     preprocessing_inputs_dir: str,
     tile_grid_path: str,
-    raster_config: dict[str, Any],
     flooding_config: dict[str, Any],
     ocean_code: int,
     river_code: int,
@@ -336,18 +334,18 @@ def run_tile_scenario(
     static_level_inputs: dict[str, str] | None = None,
     hydrograph_path: str | None = None,
 ) -> dict[str, Any]:
-    """Solve, skip or placeholder one (tile, return period, SLR scenario) and write its raster.
+    """Solve or skip one (tile, return period, SLR scenario) and write its raster.
 
-    Pre-marked OOM -> nodata placeholder. Hop-0 tiles use their stations;
+    A tile marked out-of-memory raises TileOutOfMemoryError. Hop-0 tiles use their stations;
     hop>=1 tiles seed from strictly-earlier-wave overlapping tiles. No
     stations, or no wet cell in any neighbour output -> zero raster. A missing
     neighbour dem/mask/waterdepth raises FileNotFoundError and writes nothing.
-    MemoryError -> OOM marker + nodata. `stage_boundaries` copies the
+    MemoryError -> OOM marker + TileOutOfMemoryError, no output. `stage_boundaries` copies the
     GeoPackage to node-local scratch first (HPC). `flooding_config["slr_propagation"]`
     "two_component" builds the static level from `static_level_inputs`
     (`boundaries.static_level_inputs`); "attenuated" ignores them.
     Timing is left to callers.
-    Returns {"outcome": "oom_premarked" | "skip_no_inundation" | "oom" | "solved", ...}.
+    Returns {"outcome": "skip_no_inundation" | "solved", ...}.
     """
     scenario_name = f"{return_period}_{waterlevel_name}"
     slr_propagation = flooding_config["slr_propagation"]
@@ -361,9 +359,8 @@ def run_tile_scenario(
     oom_dir = os.path.join(model_outputs, "oom_tiles")
 
     if tile_marked_oom(oom_dir, tile_id):
-        log_skipped_tile(skipped_dir, tile_id, scenario_name, reason=OOM_PREMARKED_REASON)
-        save_nodata_raster(dem_path, output_path, raster_config)
-        return {"outcome": "oom_premarked"}
+        raise TileOutOfMemoryError(f"tile {tile_id} {scenario_name}: marked out-of-memory in {oom_dir} by an "
+                                   "earlier scenario; split the tile or give the job more memory, then remove the marker")
 
     tile_grid = load_tile_grid(tile_grid_path)
     this_tile = tile_grid[tile_grid["tile_id"] == int(tile_id)]
@@ -437,11 +434,9 @@ def run_tile_scenario(
                 return_period=int(return_period.removeprefix("RP")),
                 hydrograph_path=hydrograph_path,
             )
-        except MemoryError:
-            mark_tile_oom(oom_dir, tile_id, reason="MemoryError in flood_depth_dense - tile too large")
-            log_skipped_tile(skipped_dir, tile_id, scenario_name, reason="MemoryError - tile too large")
-            save_nodata_raster(dem_path, output_path, raster_config)
-            return {"outcome": "oom"}
+        except MemoryError as exc:
+            mark_tile_oom(oom_dir, tile_id, reason=f"MemoryError in flood_depth_dense ({scenario_name})")
+            raise TileOutOfMemoryError(f"tile {tile_id} {scenario_name}: out of memory in the solve") from exc
         return {"outcome": "solved", "diagnostics": diagnostics, "solve_elapsed_s": time.perf_counter() - start}
     finally:
         if local_boundaries_path is not None:

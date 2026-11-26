@@ -24,8 +24,8 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from calibration_paths import DEPTH_ACCURACY_NAME, SELECTION_NAME  # noqa: E402
-from calibration_results import DISPLAY_LABEL, GROUPS, RESULT_NAME  # noqa: E402
+from calibration_paths import DEPTH_ACCURACY_NAME, SELECTION_NAME, threaded_map  # noqa: E402
+from calibration_results import DISPLAY_LABEL, GROUPS, RESULT_NAME, read_hists  # noqa: E402
 from flood_agreement import DIFF_EDGES, SFINCS_CLASS_LABELS, diff_stats  # noqa: E402
 from gfm_config import read_figures_root, read_root  # noqa: E402
 
@@ -128,22 +128,24 @@ def load_tolerance_hists(base_dir: Path, run_keys: dict[str, str]) -> tuple[dict
     """
     pooled: dict = {v: {} for v in run_keys}
     rows = []
-    for path in sorted(base_dir.glob(f"*/outputs/{DEPTH_ACCURACY_NAME}")):
-        if not (path.parent / RESULT_NAME).exists():  # histograms left by an unfinished rerun
-            continue
+    # histograms left by an unfinished rerun have no result file beside them
+    paths = [p for p in sorted(base_dir.glob(f"*/outputs/{DEPTH_ACCURACY_NAME}")) if (p.parent / RESULT_NAME).exists()]
+    wanted = {f"{key}__{weight}" for key in run_keys.values() for weight in ("area", "pop")}
+    for path, hists in zip(paths, threaded_map(lambda p: read_hists(p, wanted.__contains__), paths)):
         tile = path.parent.parent.name
-        with np.load(path) as hists:
-            for variant, key in run_keys.items():
-                for weight in ("area", "pop"):
-                    name = f"{key}__{weight}"
-                    if name not in hists.files:
-                        continue
-                    h = hists[name]
-                    pooled[variant][weight] = pooled[variant].get(weight, 0) + h
-                    if weight == "area":
-                        reference = (h[0] + h[1]).sum(axis=0)
-                        rows.append({"tile_id": int(tile), "variant": variant, "sfincs_wet_km2": float(reference.sum()),
-                                     **{k: v for k, v in diff_stats(reference).items() if k != "n"}})
+        if hists is None:
+            continue
+        for variant, key in run_keys.items():
+            for weight in ("area", "pop"):
+                name = f"{key}__{weight}"
+                if name not in hists:
+                    continue
+                h = hists[name]
+                pooled[variant][weight] = pooled[variant].get(weight, 0) + h
+                if weight == "area":
+                    reference = (h[0] + h[1]).sum(axis=0)
+                    rows.append({"tile_id": int(tile), "variant": variant, "sfincs_wet_km2": float(reference.sum()),
+                                 **{k: v for k, v in diff_stats(reference).items() if k != "n"}})
     return pooled, pd.DataFrame(rows)
 
 

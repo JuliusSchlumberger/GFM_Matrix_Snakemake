@@ -7,12 +7,14 @@ pooled by summing counts across tiles first (flood_agreement.metrics_from_counts
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from calibration_paths import DEPTH_ACCURACY_NAME
+from calibration_paths import DEPTH_ACCURACY_NAME, threaded_map
 from flood_agreement import SFINCS_CLASS_LABELS, depth_error_metrics_from_pooled, diff_stats, metrics_from_counts
 from retry_io import retry_transient_io
 
@@ -35,6 +37,24 @@ COUNTS_POP = ("matched_pop", "model_only_pop", "sfincs_only_pop")  # people; abs
 GROUPS = ("calibration", "validation")
 
 
+def _read_result(path: Path) -> tuple[Path, dict | None]:
+    try:
+        # A missing file is not transient (tile not finished): skip it without retrying.
+        if not path.exists():
+            raise FileNotFoundError(path)
+        return path, json.loads(retry_transient_io(path.read_text))
+    except (OSError, ValueError):
+        return path, None
+
+
+def read_hists(path: Path, keep: Callable[[str], bool] = lambda name: True) -> dict[str, np.ndarray] | None:
+    """Read the arrays of the .npz at `path` whose name passes `keep`, in file order; None if missing."""
+    if not path.exists():
+        return None
+    with np.load(path) as hists:
+        return {n: hists[n] for n in hists.files if keep(n)}
+
+
 def load_results(base_dir: Path, tile_ids: list[str] | None = None) -> dict[int, dict]:
     """Load each tile's calibration_result.json, keyed by tile id.
 
@@ -47,13 +67,8 @@ def load_results(base_dir: Path, tile_ids: list[str] | None = None) -> dict[int,
         paths = [base_dir / str(t) / "outputs" / RESULT_NAME for t in tile_ids]
     out = {}
     skipped = []
-    for p in paths:
-        try:
-            # A missing file is not transient (tile not finished): skip it without retrying.
-            if not p.exists():
-                raise FileNotFoundError(p)
-            d = json.loads(retry_transient_io(p.read_text))
-        except (OSError, ValueError):
+    for p, d in threaded_map(_read_result, paths):
+        if d is None:
             skipped.append(p.parent.parent.name)
             continue
         out[int(d["tile_id"])] = d
@@ -107,30 +122,50 @@ def run_tables(results: dict[int, dict]) -> tuple[pd.DataFrame, pd.DataFrame]:
     return per_tile, pd.DataFrame(pooled)
 
 
-def depth_accuracy_table(base_dir: Path, results: dict[int, dict]) -> pd.DataFrame:
+def _sum_depth_hists(job: tuple[Path, list[tuple[int, str, dict]]]) -> tuple[dict, dict, dict]:
+    # Reading a histogram file is CPU-bound (one header parse per array), so blocks of tiles go to
+    # separate processes; each sums its block in tile order.
+    base_dir, tiles = job
+    acc, n_tiles, meta = {}, {}, {}
+    for tid, group, runs in tiles:
+        hists = read_hists(base_dir / str(tid) / "outputs" / DEPTH_ACCURACY_NAME,
+                           lambda name: name.rsplit("__", 1)[0] in runs)
+        if hists is None:
+            continue
+        for name, h in hists.items():
+            key, weight = name.rsplit("__", 1)
+            meta[key] = runs[key]
+            for g in (group, "all"):
+                acc[g, key, weight] = acc.get((g, key, weight), 0) + h
+                if weight == "area":
+                    n_tiles[g, key] = n_tiles.get((g, key), 0) + 1
+    return acc, n_tiles, meta
+
+
+def depth_accuracy_table(base_dir: Path, results: dict[int, dict], workers: int = 1) -> pd.DataFrame:
     """Pool every run's depth-difference histograms per group; one row per denominator and class.
 
     Denominators: both_wet (cells both flood), reference_wet (every SFINCS-wet cell, a model-dry
     cell at its own sub-threshold depth), either_wet (every cell either floods; class "all"
     only). Weights: area (km2) and pop (people). Tiles without the histogram file are skipped.
+    `workers` > 1 sums contiguous blocks of tiles in parallel and adds the blocks in order.
     """
+    tiles = [(tid, r["group"], {k: (e["variant"], e["parameter"], e["alpha"]) for k, e in r["runs"].items()})
+             for tid, r in results.items()]
+    n_blocks = max(1, min(workers, len(tiles)))
+    jobs = [(base_dir, [tiles[i] for i in idx]) for idx in np.array_split(np.arange(len(tiles)), n_blocks)]
+    if n_blocks == 1:
+        parts = [_sum_depth_hists(jobs[0])]
+    else:
+        with ProcessPoolExecutor(n_blocks) as ex:
+            parts = list(ex.map(_sum_depth_hists, jobs))
     acc, n_tiles, meta = {}, {}, {}
-    for tid, r in results.items():
-        path = base_dir / str(tid) / "outputs" / DEPTH_ACCURACY_NAME
-        if not path.exists():
-            continue
-        with np.load(path) as hists:
-            for name in hists.files:
-                key, weight = name.rsplit("__", 1)
-                e = r["runs"].get(key)
-                if e is None:
-                    continue
-                meta[key] = (e["variant"], e["parameter"], e["alpha"])
-                h = hists[name]
-                for group in (r["group"], "all"):
-                    acc[group, key, weight] = acc.get((group, key, weight), 0) + h
-                    if weight == "area":
-                        n_tiles[group, key] = n_tiles.get((group, key), 0) + 1
+    for part_acc, part_n, part_meta in parts:
+        meta.update(part_meta)
+        for k, h in part_acc.items():
+            acc[k] = acc.get(k, 0) + h
+        for k, n in part_n.items():
+            n_tiles[k] = n_tiles.get(k, 0) + n
     rows = []
     for (group, key, weight), h in sorted(acc.items()):
         both, sfincs_only, model_only = h
@@ -145,33 +180,46 @@ def depth_accuracy_table(base_dir: Path, results: dict[int, dict]) -> pd.DataFra
     return pd.DataFrame(rows)
 
 
-def select_runs(pooled: pd.DataFrame, select_by: str = "CSI") -> dict:
-    """Pick each variant's run on the calibration group; score it on both groups.
+SELECT_BY = ("CSI_pop", "CSI", "bias")
 
-    `select_by` "CSI": highest pooled CSI; "bias": |bias - 1| smallest. The run sharing the
-    calibration tiles of every variant ranks the variants for "best_variant". Runs must cover
-    the same calibration tiles to compare (n_tiles_scored is reported).
+
+def _selection_score(df: pd.DataFrame, select_by: str) -> pd.Series:
+    # Higher is better.
+    if select_by == "bias":
+        return -(df["bias"] - 1.0).abs()
+    return df[select_by]
+
+
+def select_runs(pooled: pd.DataFrame, select_by: str = "CSI_pop", select_group: str = "all") -> dict:
+    """Pick each variant's run on `select_group`; score it on every group.
+
+    `select_by` "CSI_pop": highest pooled population-weighted CSI; "CSI": highest pooled
+    (area) CSI; "bias": |bias - 1| smallest. The same score on `select_group` ranks the
+    variants for "best_variant". Runs must cover the same tiles to compare (n_tiles_scored
+    is reported).
     """
-    cal = pooled[pooled.group == "calibration"]
-    metrics = ("n_tiles_scored", "CSI", "bias", "HT", "FAR")
-    out = {"select_by": select_by, "variants": {}}
+    if select_by not in SELECT_BY:
+        raise ValueError(f"select_by must be one of {SELECT_BY}, got {select_by!r}")
+    cal = pooled[pooled.group == select_group]
+    metrics = ("n_tiles_scored", "CSI", "bias", "HT", "FAR", "CSI_pop", "bias_pop")
+    metrics = tuple(m for m in metrics if m in pooled.columns)
+    out = {"select_by": select_by, "select_group": select_group, "variants": {}}
     for variant, g in cal.groupby("variant"):
-        best = g.loc[g.CSI.idxmax()] if select_by == "CSI" else g.loc[(g.bias - 1.0).abs().idxmin()]
+        score = _selection_score(g, select_by)
+        if score.isna().all():
+            raise ValueError(f"no {select_by} for variant {variant}: cannot select its run")
+        best = g.loc[score.idxmax()]
         entry = {"run_key": best.run_key,
                  "parameter": None if pd.isna(best.parameter) else float(best.parameter),
                  "alpha": None if pd.isna(best.alpha) else float(best.alpha)}
-        for group in GROUPS:
+        for group in (*GROUPS, "all"):
             row = pooled[(pooled.group == group) & (pooled.run_key == best.run_key)]
             entry[group] = ({m: (int(row.iloc[0][m]) if m == "n_tiles_scored" else float(row.iloc[0][m]))
                              for m in metrics} if len(row) else None)
         out["variants"][variant] = entry
     if out["variants"]:
-        if select_by == "CSI":
-            score = {v: e["calibration"]["CSI"] for v, e in out["variants"].items()}
-            out["best_variant"] = max(score, key=score.get)
-        else:
-            score = {v: abs(e["calibration"]["bias"] - 1.0) for v, e in out["variants"].items()}
-            out["best_variant"] = min(score, key=score.get)
+        cal_rows = pd.DataFrame({v: e[select_group] for v, e in out["variants"].items()}).T
+        out["best_variant"] = _selection_score(cal_rows.astype(float), select_by).idxmax()
     return out
 
 

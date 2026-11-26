@@ -271,18 +271,66 @@ def test_hydrax_plan_keeps_its_step_ids() -> None:
     assert [s["id"] for s in plan["steps"]] == [
         "product", "materialize", "production_preprocess", "reset_studies", "studies_preprocess", "sweep_landcover",
         "sweep_uniform", "wet_tiles", "obstacle_coupling", "study_figures", "reset_sfincs", "sfincs_sweep",
-        "sfincs_duration", "choose_parameters", "rematerialize", "reset_production", "reset_local",
-        "local_station_caches", "global_tiles", "local_runs", "global_runs", "validate_england_local",
-        "validate_england_global", "validate_england_map", "validate_wales", "validate_sf_bay",
-        "validate_sf_bay_global", "exposure_table", "local_variants", "approve_production", "production_run"]
+        "sfincs_duration", "choose_parameters", "rematerialize", "approve_production", "production_run"]
     harness.load_plan(fx.REPO / "hpc" / "plans" / "smoke.yml")
 
 
-def test_plan_validation_groups_exist() -> None:
-    plan = (fx.REPO / "hpc" / "plans" / "hydrax_rerun.yml").read_text()
+def test_local_validation_plan_covers_every_case_and_group() -> None:
+    plan = harness.load_plan(fx.REPO / "hpc" / "plans" / "local_validation.yml")
+    steps = {s["id"]: s for s in plan["steps"]}
+    assert {s for s in steps if steps[s].get("destructive")} == {"reset_production", "reset_local"}
+    text = (fx.REPO / "hpc" / "plans" / "local_validation.yml").read_text()
     for name, groups in (("england_local_input", {"scores", "agreement_map", "exposure_table"}),
                          ("england_global_input", {"scores"}), ("wales_local_input", {"scores"}),
                          ("sf_bay_local_input", {"scores"}), ("sf_bay_global_input", {"scores"})):
-        assert f"--scenario {name}" in plan
+        assert name in text
         cfg = yaml.safe_load((fx.REPO / "snakemake_workflow" / "config" / f"{name}.yml").read_text())
         assert set(cfg["validation"]["runs"]) == groups
+    # Wales global reuses England's production tiles, in the base run and per variant.
+    assert "run_england_global" in steps["run_wales_global"]["after"]
+    assert "variants_england_global" in steps["variants_wales_global"]["after"]
+
+
+def test_variant_token_follows_the_variant(tmp_path, monkeypatch) -> None:
+    from flood_variants import variant_config
+
+    runs = {"scores": [["validation/x.py", "--global-config", "{config:other{variant}}",
+                        "--out", "{root}/case/validation{variant}/map.png"]]}
+    base = {"simulation": {"model_outputs": "{root}/case/model_outputs", "flooding": {
+                "model": "eikonal", "friction_source": "landcover", "friction_scale_factor": 0.35,
+                "duration_correction": {"enabled": False}, "volume_cap": {"enabled": False}}},
+            "postprocessing": {"merged_outputs": "{root}/case/merged_results"},
+            "validation": {"output_dir": "{root}/case/validation", "runs": runs}}
+    v = variant_config(base, "eikonal_uniform_cap")
+    assert v["validation"]["runs"]["scores"][0][2:] == [
+        "{config:other__eikonal_uniform_cap}", "--out", "{root}/case/validation__eikonal_uniform_cap/map.png"]
+    assert v["validation"]["output_dir"] == "{root}/case/validation__eikonal_uniform_cap"
+    assert base["validation"]["runs"] is runs and "{variant}" in runs["scores"][0][2]  # base untouched
+    monkeypatch.setattr(gfm_hpc, "scenario_config", lambda name, variant=None: tmp_path / f"{name}.yml")
+    monkeypatch.setattr(gfm_hpc, "hpc_view", lambda path: f"/view/{Path(path).name}")
+    assert gfm_hpc.expand_run(runs["scores"][0], tmp_path / "own.yml")[2:] == [
+        "/view/other.yml", "--out", "{root}/case/validation/map.png"]
+
+
+def test_check_run_needs_every_output_and_no_oom(tmp_path, capsys) -> None:
+    cfg = fx.make_fixture(tmp_path, merge_only=True)
+    fx.add_sim_results(tmp_path)
+    with pytest.raises(SystemExit):
+        gfm_hpc.main(["check-run", "--config", str(cfg)])
+    err = capsys.readouterr().err
+    assert "5 of 10 waterdepth output(s) missing" in err and "merged chunk" in err
+    mo, merged = tmp_path / "root" / "model_outputs", tmp_path / "root" / "merged_results" / "chunks"
+    for tid in (2, 3, 5):
+        for n in ("SLR_0", "SLR_500"):
+            (mo / str(tid) / "results").mkdir(parents=True, exist_ok=True)
+            (mo / str(tid) / "results" / f"waterdepth_RP100_{n}.tif").write_bytes(b"x")
+    merged.mkdir(parents=True)
+    for c in ("N00E000", "N00E005", "N00E010", "N05E000"):
+        for n in ("SLR_0", "SLR_500"):
+            (merged / f"waterdepth_{c}_RP100_{n}.tif").write_bytes(b"x")
+    gfm_hpc.main(["check-run", "--config", str(cfg)])
+    (mo / "oom_tiles").mkdir()
+    (mo / "oom_tiles" / "3.txt").write_text("MemoryError")
+    with pytest.raises(SystemExit):
+        gfm_hpc.main(["check-run", "--config", str(cfg)])
+    assert "1 tile(s) out of memory" in capsys.readouterr().err

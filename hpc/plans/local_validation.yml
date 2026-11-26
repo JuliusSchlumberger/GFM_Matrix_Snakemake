@@ -1,0 +1,222 @@
+# Local-input validation on Hydrax under one 144-core budget: England (all), Wales (all) and
+# SF Bay (Alameda), local input on fine tiles and global input on production tiles, only the
+# scored events (RP100/RP250 SLR_0; SF Bay RP100). Base flood model (config.yml: eikonal, land
+# cover) plus three variants (land cover capped, uniform, uniform capped) at config.yml's
+# parameters. Each run: preprocess -> simulate -> merge (local: native-CRS chunks + VRT; global:
+# EPSG:4326 chunks); a check-run gate (every output present, no out-of-memory tile) precedes the
+# scoring against the regulatory maps and the local-vs-global exposure table.
+#
+# Before: commit and push config.yml, git pull here; add profiles.simulate_packed to
+# config_hpc.yml (config_hpc.example.yml). Pause hydrax_rerun: the two controllers do not share
+# a budget. The global-input runs fill production's model_outputs, which reset_production clears
+# first; the production run (hydrax_rerun) keeps those tiles.
+#   python hpc/harness.py run --plan hpc/plans/local_validation.yml --allow-destructive
+name: local_validation
+max_cores: 144
+partition_cores: {}
+state_dir: /p/11212688-004-global-floodmaps/modelling/hpc_harness/local_validation
+cwd: /u/schlumbe/gfm_code
+requires: [snakemake_workflow/config/config_hpc.yml, snakemake_workflow/config/config_local.yml]
+env:
+  HDF5_USE_FILE_LOCKING: "FALSE"
+preamble: |
+  PY="$GFM_HARNESS_PYTHON"
+  gfm_hpc() { "$PY" hpc/gfm_hpc.py "$@"; }
+  R=$(gfm_hpc config production --hpc --key paths.root)
+  LOCAL="england_local_input wales_local_input sf_bay_local_input"
+  GLOBAL="england_global_input wales_global_input sf_bay_global_input"
+  # The base run is eikonal_landcover (checked in materialize).
+  VARIANTS="eikonal_landcover_cap eikonal_uniform eikonal_uniform_cap"
+  # Simulate (+ merge) every variant of one scenario; their tile inputs are the base run's.
+  run_variants() { for v in $VARIANTS; do gfm_hpc run simulate --scenario "$1" --variant "$v" --submit; done; }
+  # check-run each scenario, then submit the validation job of the first one (extra args: --only ...).
+  validate_after_check() {
+    local v="$1" own="$2"; shift 2
+    local scenarios=() s
+    while [ $# -gt 0 ] && [ "$1" != "--" ]; do scenarios+=("$1"); shift; done
+    [ "${1:-}" = "--" ] && shift
+    for s in "${scenarios[@]}"; do gfm_hpc check-run --scenario "$s" ${v:+--variant "$v"}; done
+    gfm_hpc validate --scenario "$own" ${v:+--variant "$v"} "$@" --submit
+  }
+
+steps:
+  - id: materialize
+    run: |
+      "$PY" snakemake_workflow/scripts/materialize_configs.py $LOCAL $GLOBAL --variants $VARIANTS
+      "$PY" - <<'EOF'
+      import sys, yaml
+      sys.path.insert(0, "src")
+      from flood_variants import variant_flooding
+      flooding = yaml.safe_load(open("snakemake_workflow/config/config.yml", encoding="utf-8"))["simulation"]["flooding"]
+      if variant_flooding(flooding, "eikonal_landcover") != flooding:
+          raise SystemExit("config.yml simulation.flooding is not the eikonal_landcover variant: "
+                           "the base runs would not be the fourth variant")
+      EOF
+
+  # run_eikonal_cli skips an existing output, so production's old results would count as done.
+  # The per-tile inputs stay.
+  - id: reset_production
+    destructive: true
+    run: |
+      MO=$(gfm_hpc config production --hpc --key simulation.model_outputs)
+      MERGED=$(gfm_hpc config production --hpc --key postprocessing.merged_outputs)
+      cd "${MO:?}"
+      rm -rf ./*/results oom_tiles skipped_tiles run_timings hpc_jobs
+      rm -rf "${MERGED:?}"
+
+  # Results, markers, merges, scores and job dirs of every scenario and variant here. Production's
+  # model_outputs (the global base runs') is reset_production's.
+  - id: reset_local
+    after: [materialize]
+    destructive: true
+    run: |
+      PROD_MO=$(gfm_hpc config production --hpc --key simulation.model_outputs)
+      for s in $LOCAL $GLOBAL; do
+        for v in "" $VARIANTS; do
+          key() { gfm_hpc config "$s" ${v:+--variant "$v"} --hpc --key "$1"; }
+          MO=$(key simulation.model_outputs)
+          OWN=("$(key postprocessing.merged_outputs)" "$(key validation.output_dir)" "$(key hpc.jobs_dir)")
+          [ "$MO" != "$PROD_MO" ] && OWN+=("$MO")
+          for p in "${OWN[@]}"; do
+            case "$p" in *"$s"*|*__"${v:-?}"*) ;; *) echo "refusing to clear $p (not $s's own)"; exit 1 ;; esac
+          done
+          if [ "$MO" != "$PROD_MO" ]; then
+            rm -rf "${MO:?}"/*/results "${MO:?}"/oom_tiles "${MO:?}"/skipped_tiles "${MO:?}"/run_timings
+          fi
+          rm -rf "${OWN[0]:?}" "${OWN[1]:?}" "${OWN[2]:?}"
+        done
+      done
+      rm -rf "${R:?}"/local_vs_global_exposure "${R:?}"/local_vs_global_exposure__*
+
+  # The storm-tide product was rebuilt after these caches.
+  - id: local_station_caches
+    after: [materialize]
+    job: {partition: 4vcpu, cpus_per_task: 4, mem: 30G, time: "1-00:00:00"}
+    run: |
+      "$PY" preparation/cache_local_waterlevel_stations.py --config "$(gfm_hpc config england_local_input --hpc)"
+      "$PY" preparation/cache_local_waterlevel_stations.py --config "$(gfm_hpc config wales_local_input --hpc)" \
+        --local-dem-key wales_lidar_dem
+
+  # Every Wales 5 km cell is read at 1 m from the 45 GB COG; single-threaded.
+  - id: wales_tiles
+    after: [materialize]
+    job: {partition: 1vcpu, cpus_per_task: 1, mem: 7G, time: "1-00:00:00"}
+    run: |
+      "$PY" preparation/build_wales_fine_tiles.py --config "$(gfm_hpc config wales_local_input --hpc)" --region wales
+
+  # The production tiles under each local scenario's fine tiles, closed over hop seeding.
+  - id: global_tiles
+    after: [materialize, wales_tiles]
+    run: |
+      for c in england wales sf_bay; do
+        FINE=$(gfm_hpc config ${c}_local_input --hpc --key tile_grid.path)
+        "$PY" preparation/select_country_tiles.py --config "$(gfm_hpc config production --hpc)" \
+          --footprint "$FINE" --name ${c}_global_input --out-dir "$(dirname "$FINE")"
+      done
+
+  # ── base runs: preprocess -> check-targets -> simulate waves -> merge, one chain each ──
+  - id: run_england_local
+    after: [local_station_caches, reset_local]
+    run: gfm_hpc run preprocess --scenario england_local_input --submit
+
+  - id: run_wales_local
+    after: [local_station_caches, reset_local, wales_tiles]
+    run: gfm_hpc run preprocess --scenario wales_local_input --submit
+
+  - id: run_sf_bay_local
+    after: [reset_local]
+    run: gfm_hpc run preprocess --scenario sf_bay_local_input --submit
+
+  # England and Wales share production tiles around the Severn: Wales runs after England and
+  # skips the tiles England solved.
+  - id: run_england_global
+    after: [global_tiles, reset_production, reset_local]
+    run: gfm_hpc run preprocess --scenario england_global_input --submit
+
+  - id: run_wales_global
+    after: [run_england_global]
+    run: gfm_hpc run preprocess --scenario wales_global_input --submit
+
+  - id: run_sf_bay_global
+    after: [global_tiles, reset_production, reset_local]
+    run: gfm_hpc run preprocess --scenario sf_bay_global_input --submit
+
+  # ── variant runs: simulate + merge on the base run's tile inputs ──
+  - id: variants_england_local
+    after: [run_england_local]
+    run: run_variants england_local_input
+
+  - id: variants_wales_local
+    after: [run_wales_local]
+    run: run_variants wales_local_input
+
+  - id: variants_sf_bay_local
+    after: [run_sf_bay_local]
+    run: run_variants sf_bay_local_input
+
+  - id: variants_england_global
+    after: [run_england_global]
+    run: run_variants england_global_input
+
+  - id: variants_wales_global
+    after: [run_wales_global, variants_england_global]
+    run: run_variants wales_global_input
+
+  - id: variants_sf_bay_global
+    after: [run_sf_bay_global]
+    run: run_variants sf_bay_global_input
+
+  # ── scores against the regulatory maps (each scenario's validation.runs), base run ──
+  - id: validate_england_local
+    after: [run_england_local, run_england_global]
+    run: validate_after_check "" england_local_input england_local_input england_global_input -- --only scores agreement_map
+
+  - id: validate_england_global
+    after: [run_england_global]
+    run: validate_after_check "" england_global_input england_global_input
+
+  - id: validate_wales
+    after: [run_wales_local, run_wales_global]
+    run: validate_after_check "" wales_local_input wales_local_input wales_global_input
+
+  - id: validate_sf_bay
+    after: [run_sf_bay_local, run_sf_bay_global]
+    run: |
+      validate_after_check "" sf_bay_local_input sf_bay_local_input
+      validate_after_check "" sf_bay_global_input sf_bay_global_input
+
+  # Local vs global input, area- and population-weighted (England and Wales).
+  - id: exposure_table
+    after: [validate_england_local, validate_england_global, validate_wales]
+    run: gfm_hpc validate --scenario england_local_input --only exposure_table
+
+  # ── the same per variant ──
+  - id: validate_variants_england
+    after: [variants_england_local, variants_england_global]
+    run: |
+      for v in $VARIANTS; do
+        validate_after_check "$v" england_local_input england_local_input england_global_input -- --only scores agreement_map
+        validate_after_check "$v" england_global_input england_global_input
+      done
+
+  - id: validate_variants_wales
+    after: [variants_wales_local, variants_wales_global]
+    run: |
+      for v in $VARIANTS; do
+        validate_after_check "$v" wales_local_input wales_local_input wales_global_input
+      done
+
+  - id: validate_variants_sf_bay
+    after: [variants_sf_bay_local, variants_sf_bay_global]
+    run: |
+      for v in $VARIANTS; do
+        validate_after_check "$v" sf_bay_local_input sf_bay_local_input
+        validate_after_check "$v" sf_bay_global_input sf_bay_global_input
+      done
+
+  - id: exposure_tables_variants
+    after: [validate_variants_england, validate_variants_wales]
+    run: |
+      for v in $VARIANTS; do
+        gfm_hpc validate --scenario england_local_input --variant "$v" --only exposure_table
+      done

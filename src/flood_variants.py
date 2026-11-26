@@ -77,6 +77,8 @@ def run_key(name: str, parameter: float | None = None, alpha: float | None = Non
     return key
 
 
+VARIANT_TOKEN = "{variant}"
+
 # Scenario output locations a variant run gets its own copy of; tile inputs stay shared.
 # validation.flood_totals_dir is derived from a run's merged outputs, so it moves only from
 # under them.
@@ -90,6 +92,8 @@ def variant_config(config: dict, name: str, parameter: float | None = None, alph
 
     Outputs move to "<dir>__<name>" (a path under the scenario's model_outputs or
     merged_outputs moves with it); the per-tile inputs stay where the scenario keeps them.
+    The "{variant}" token in validation.runs becomes "__<name>", so the scored paths and
+    {config:NAME{variant}} follow this variant (hpc/gfm_hpc.py expands it to "" otherwise).
     """
     out = copy.deepcopy(config)
     sim = out["simulation"]
@@ -105,4 +109,7 @@ def variant_config(config: dict, name: str, parameter: float | None = None, alph
             out[section][key] = f"{root}__{name}{value[len(root):]}"
         elif (section, key) in OUTPUT_KEYS:
             out[section][key] = f"{value}__{name}"
+    runs = (out.get("validation") or {}).get("runs") or {}
+    for group, cmds in runs.items():
+        runs[group] = [[str(a).replace(VARIANT_TOKEN, f"__{name}") for a in cmd] for cmd in cmds]
     return out

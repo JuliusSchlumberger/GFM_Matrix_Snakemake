@@ -42,12 +42,14 @@ from _figure_style import (  # noqa: E402
 FIG_WIDTH_IN = DOUBLE_COLUMN_MM / MM_PER_INCH
 
 LAND_CODE = 0
+WATER_CODES = (1, 2, 3)  # ocean, lake, river in inputs/mask.tif
 
 # Repo-wide convention: SFINCS=A_ONLY/blue, EA-bathtub=B_ONLY/red, matched=AGREE/green.
 DRY, MATCHED, EIKONAL_ONLY, SFINCS_ONLY = 0, 1, 2, 3
 CATEGORY_COLORS = [LAND_COLOR, AGREE_COLOR, B_ONLY_COLOR, A_ONLY_COLOR]
 CATEGORY_LABELS = [LAND_LABEL, "Agree (both wet)", "Model only", "SFINCS only"]
-OFF_DOMAIN_COLOR = WATER_COLOR
+NO_DATA_LABEL = "Outside SFINCS domain / no data"
+NO_DATA_HATCH_COLOR = "#9a9a96"
 
 
 def build_classification(tile_dir: Path, run_key: str) -> np.ndarray | None:
@@ -56,6 +58,12 @@ def build_classification(tile_dir: Path, run_key: str) -> np.ndarray | None:
     Masked outside SFINCS-active land; None if an input is missing or shapes differ.
     Rows keep the subgrid's own (south-up) order.
     """
+    out = classify_with_water(tile_dir, run_key)
+    return None if out is None else out[0]
+
+
+def classify_with_water(tile_dir: Path, run_key: str) -> tuple[np.ma.MaskedArray, np.ndarray] | None:
+    """Return build_classification's array and the permanent water (ocean, lake, river) on its grid."""
     hmax_subgrid_path = tile_dir / "sfincs_model" / "hmax_subgrid.tif"
     ek_path = run_path(tile_dir / "outputs", run_key)
     native_mask_path = tile_dir / "inputs" / "mask.tif"
@@ -72,13 +80,7 @@ def build_classification(tile_dir: Path, run_key: str) -> np.ndarray | None:
     if ek_shape != sg_shape:
         return None  # stale/mismatched raster: skip rather than misrepresent
 
-    mog = np.empty(sg_shape, dtype=np.float32)
-    with rasterio.open(native_mask_path) as src:
-        reproject(
-            source=rasterio.band(src, 1), destination=mog,
-            src_transform=src.transform, src_crs=src.crs,
-            dst_transform=sg_transform, dst_crs=sg_crs, resampling=Resampling.nearest,
-        )
+    mog = _mask_on_subgrid(native_mask_path, sg_shape, sg_transform, sg_crs)
     land = (mog == LAND_CODE) & active_on_subgrid(tile_dir / "sfincs_model", sg_shape, sg_transform)
 
     sfincs_wet = land & np.isfinite(sfincs_depth) & (sfincs_depth > WET_THRESHOLD_M)
@@ -89,14 +91,25 @@ def build_classification(tile_dir: Path, run_key: str) -> np.ndarray | None:
     cls[land & eikonal_wet & ~sfincs_wet] = EIKONAL_ONLY
     cls[land & ~eikonal_wet & sfincs_wet] = SFINCS_ONLY
     cls = np.ma.masked_where(~land, cls)
-    return cls
+    return cls, np.isin(mog, WATER_CODES)
 
 
-def _crop_to_disagreement(cls: np.ma.MaskedArray, pad_frac: float = 0.25) -> np.ma.MaskedArray:
+def _mask_on_subgrid(mask_path: Path, shape, transform, crs) -> np.ndarray:
+    mog = np.full(shape, np.nan, dtype=np.float32)
+    with rasterio.open(mask_path) as src:
+        reproject(
+            source=rasterio.band(src, 1), destination=mog,
+            src_transform=src.transform, src_crs=src.crs,
+            dst_transform=transform, dst_crs=crs, resampling=Resampling.nearest,
+        )
+    return mog
+
+
+def _disagreement_window(cls: np.ma.MaskedArray, pad_frac: float = 0.25) -> tuple[slice, slice]:
     # A coastal tile is mostly dry land/ocean; uncropped, disagreement is a few stray pixels.
     wet = np.isin(cls.filled(DRY), [MATCHED, EIKONAL_ONLY, SFINCS_ONLY])
     if not wet.any():
-        return cls
+        return slice(None), slice(None)
     rows, cols = np.nonzero(wet)
     r0, r1 = rows.min(), rows.max()
     c0, c1 = cols.min(), cols.max()
@@ -104,7 +117,7 @@ def _crop_to_disagreement(cls: np.ma.MaskedArray, pad_frac: float = 0.25) -> np.
     pad_c = max(int((c1 - c0) * pad_frac), 5)
     r0, r1 = max(r0 - pad_r, 0), min(r1 + pad_r + 1, cls.shape[0])
     c0, c1 = max(c0 - pad_c, 0), min(c1 + pad_c + 1, cls.shape[1])
-    return cls[r0:r1, c0:c1]
+    return slice(r0, r1), slice(c0, c1)
 
 
 def _caption_corner(cls: np.ma.MaskedArray, box_w: float = 0.5, box_h: float = 0.25) -> str:
@@ -112,7 +125,7 @@ def _caption_corner(cls: np.ma.MaskedArray, box_w: float = 0.5, box_h: float = 0
     rh, rw = max(int(h * box_h), 1), max(int(w * box_w), 1)
     windows = {"upper left": (slice(0, rh), slice(0, rw)), "upper right": (slice(0, rh), slice(w - rw, w)),
                "lower left": (slice(h - rh, h), slice(0, rw)), "lower right": (slice(h - rh, h), slice(w - rw, w))}
-    vals = cls.filled(-1)  # -1 = water / off-domain
+    vals = cls.filled(-1)  # -1 = water / outside the SFINCS domain
 
     def score(win) -> float:
         v = vals[win]
@@ -136,16 +149,22 @@ def _make_panel(worst, base_dir: Path, out_path: Path, run_key: str, panel_title
 
     for letter_idx, (ax, row) in enumerate(zip(axes.flat, worst.itertuples())):
         tile_dir = base_dir / str(row.tile_id)
-        cls = build_classification(tile_dir, run_key)
-        ax.set_facecolor(OFF_DOMAIN_COLOR)
+        classified = classify_with_water(tile_dir, run_key)
         corner = "upper left"
-        if cls is None:
+        if classified is None:
             ax.text(0.5, 0.5, "no subgrid data", ha="center", va="center", transform=ax.transAxes, fontsize=6.5)
         else:
             with rasterio.open(tile_dir / "sfincs_model" / "hmax_subgrid.tif") as src:
-                cls = orient_north_up(cls, src.transform)
-            cls = _crop_to_disagreement(cls)
+                cls, water = (orient_north_up(a, src.transform) for a in classified)
+            window = _disagreement_window(cls)
+            cls, water = cls[window], water[window]
+            ax.imshow(np.ma.masked_where(~water, water), cmap=ListedColormap([WATER_COLOR]), interpolation="nearest")
             ax.imshow(cls, cmap=cmap, vmin=0, vmax=3, interpolation="nearest")
+            no_data = (np.ma.getmaskarray(cls) & ~water).astype(float)
+            if no_data.any():
+                hatch = ax.contourf(no_data, levels=[0.5, 1.5], colors="none", hatches=["////"])
+                hatch.set_edgecolor(NO_DATA_HATCH_COLOR)
+                hatch.set_linewidth(0)
             corner = _caption_corner(cls)
         ax.set_xticks([])
         ax.set_yticks([])
@@ -159,16 +178,18 @@ def _make_panel(worst, base_dir: Path, out_path: Path, run_key: str, panel_title
 
     legend_handles = [Patch(facecolor=c, edgecolor="grey", linewidth=0.5, label=l)
                        for c, l in zip(CATEGORY_COLORS, CATEGORY_LABELS)]
-    legend_handles.append(Patch(facecolor=OFF_DOMAIN_COLOR, edgecolor="grey", linewidth=0.5, label=WATER_LABEL))
-    fig.legend(handles=legend_handles, loc="lower center", ncol=5, fontsize=7, frameon=False,
-               bbox_to_anchor=(0.5, -0.04))
+    legend_handles.append(Patch(facecolor=WATER_COLOR, edgecolor="grey", linewidth=0.5, label=WATER_LABEL))
+    legend_handles.append(Patch(facecolor="white", edgecolor=NO_DATA_HATCH_COLOR, hatch="////", linewidth=0.5,
+                                label=NO_DATA_LABEL))
+    fig.legend(handles=legend_handles, loc="outside lower center", ncol=3, fontsize=7, frameon=False)
 
     save_figure(fig, out_path)
     plt.close(fig)
     write_caption(out_path, [
         f"{panel_title}, run {run_key}: the {len(worst)} worst-CSI tiles (lowest extent agreement "
         "with SFINCS), cropped to the disagreement area, SFINCS native subgrid.",
-        "Colour: land/water agreement category (legend). Each panel's box gives the tile id, CSI "
+        "Colour: agreement category on SFINCS-active land; blue: permanent water (ocean, lake, river) from "
+        "the tile mask; hatched: outside the SFINCS active domain or no data. Each panel's box gives the tile id, CSI "
         "and matched (agreement) area.",
     ])
     print(f"Wrote {out_path}")

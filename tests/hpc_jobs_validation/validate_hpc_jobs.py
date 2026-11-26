@@ -95,6 +95,40 @@ def test_simulation_resume_and_tiers(tmp_path) -> None:
     assert jobs["resume_wave1_batch_000"]["after"] == ["resume_wave0_batch_000", "resume_wave0_batch_001"]
 
 
+def test_wave_packing_sizes_jobs_from_solve_count() -> None:
+    packing = {"solve_minutes": 2.0, "target_hours": 2.0}
+    assert sim.packed_batch_count(1200, 600, packing, 4) == 5  # 40 core-hours / 8 per job
+    assert sim.packed_batch_count(3, 3, packing, 4) == 1
+    assert sim.packed_batch_count(10_000, 4, packing, 4) == 4  # never more jobs than tiles
+
+
+def test_simulation_wave_packing_overrides_tiers(tmp_path) -> None:
+    packing = {"solve_minutes": 120.0, "target_hours": 1.0, "profile": "simulate_packed"}
+    cfg = fx.make_fixture(tmp_path, tiers=True, overrides={"hpc": {"wave_packing": packing}})
+    jobs = _chain(tmp_path, sim.generate(cfg))
+    waves = {n: j for n, j in jobs.items() if n.startswith("wave")}
+    # wave 0: 3 tiles x 2 solves x 2 h / (4 cores x 1 h) -> 3 jobs; wave 1: 2 tiles -> 2 jobs
+    assert sorted(waves) == ["wave0_batch_000", "wave0_batch_001", "wave0_batch_002",
+                             "wave1_batch_000", "wave1_batch_001"]
+    assert {(j["partition"], j["cpus_per_task"], j["mem"], j["time"]) for j in waves.values()} == {
+        ("4vcpu", 4, "30G", "0-08:00:00")}
+
+
+def test_postprocess_native_merge_chunk_batches_then_vrt(tmp_path) -> None:
+    cfg = fx.make_fixture(tmp_path, merge_only=True, overrides={
+        "simulation": {"dem_source_manifest": "{root}/manifest.csv"},
+        "postprocessing": {"native_chunk_m": 20000, "native_merge_jobs": 3}})
+    jobs = _chain(tmp_path, post.generate(cfg))
+    for slr in ("SLR_0", "SLR_500"):
+        merges = [f"postprocess_local_native_merge_RP100_{slr}_batch_{k:03d}" for k in range(3)]
+        assert all(jobs[m]["after"] == [] and jobs[m]["cpus_per_task"] == 1 for m in merges)
+        assert jobs[f"postprocess_local_native_vrt_RP100_{slr}"]["after"] == merges
+    d = tmp_path / "root" / JOBS_DIR
+    assert "--batch 2 --n-batches 3" in (d / "postprocess_local_native_merge_RP100_SLR_0_batch_002.sbatch").read_text()
+    assert "--vrt" in (d / "postprocess_local_native_vrt_RP100_SLR_0.sbatch").read_text()
+    assert len(jobs) == 8
+
+
 def test_postprocess_per_chunk_then_exposure_then_flood_totals(tmp_path) -> None:
     jobs = _chain(tmp_path, post.generate(fx.make_fixture(tmp_path)))
     chunk_jobs = [n for n in jobs if n.startswith("postprocess_postprocess_chunks")]

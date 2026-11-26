@@ -222,18 +222,18 @@ simulation: # Used by: preprocessing rules
     default_friction: 0.002
     # Runtime multiplier on the decoded per-metre attenuation rate, not baked into
     # compute_friction.py; the solver takes the tile's cell size in metres from its grid.
-    # SFINCS-calibrated: 0.25 with duration_correction on (498 tiles: CSI 0.763, bias 1.08 vs
-    # CSI 0.757, bias 0.98 at 0.3); without it the optimum is 0.4. See docs/methods_02_flood_depth.md §2.2.
-    friction_scale_factor: 0.25
+    # SFINCS-calibrated by population-weighted CSI (1500 tiles, overlaps merged, no duration
+    # correction): 0.35; area CSI peaks at 0.3. See docs/methods_02_flood_depth.md §2.2.
+    friction_scale_factor: 0.35
     # Flood model (flood_model.FLOOD_MODELS): eikonal, bathtub, bathtub_connected or straight_line.
     # src/flood_variants.py names the compared combinations of model, friction source and
     # duration correction.
     model: "eikonal"
     # Attenuation rate of the eikonal: landcover (friction.tif x friction_scale_factor) or uniform.
     friction_source: "landcover"
-    # Uniform attenuation (m/km) for friction_source uniform and model straight_line; 0.2 is the
-    # Flow-tub rate (Kasmalkar et al., 2024).
-    uniform_attenuation_m_per_km: 0.2
+    # Uniform attenuation (m/km) for friction_source uniform and model straight_line. SFINCS-calibrated
+    # like friction_scale_factor: 0.125 (area CSI peaks at 0.1); Flow-tub uses 0.2 (Kasmalkar et al., 2024).
+    uniform_attenuation_m_per_km: 0.125
 
     # Max rounds (4 directional sweeps each, early exit on convergence) per solve, also per inner
     # solve under obstacle_coupling, by friction_source: sweep-budget study per source
@@ -272,7 +272,7 @@ simulation: # Used by: preprocessing rules
     # The hydrographs come from boundary_conditions.storm_tide_source: the product's per-RP file,
     # or coast_hg_path (COAST-HG, RP100 only, its shape used for every RP and SLR).
     duration_correction:
-      enabled: true
+      enabled: false
       alpha: 1.0
       t_ref_h: 12.0
       max_multiplier: 10.0
@@ -348,6 +348,10 @@ hpc:
   # `n_nodes: null` = one node per tile; `hops: null` is the catch-all and MUST be last. Each tier
   # sets n_nodes, partition, cpus_per_task, mem and time. Empty: every wave uses n_nodes/simulate.
   wave_tiers: []
+  # Set by a scenario to size its own waves instead of wave_tiers: per wave,
+  # ceil(solves x solve_minutes / (cpus_per_task x target_hours x 60)) jobs of site profile
+  # `profile`, at most one per tile. Keys: solve_minutes, target_hours, profile. Empty: off.
+  wave_packing: {}
 
 # ── POSTPROCESSING ────────────────────────────────────────────────────────────
 # Used by: merge_chunk.py, compute_flood_fraction_chunk.py, build_mosaic_vrt.py,
@@ -361,6 +365,10 @@ postprocessing:
   # HPC postprocess chain (generate_hpc_postprocess_job.py): true writes the merged rasters only,
   # no exposure or flood totals (validation scenarios).
   merge_only: false
+  # Local-input scenarios (simulation.dem_source_manifest): square merge chunks in the tiles' native
+  # CRS units (metres) and the number of merge jobs per (RP, SLR) they are packed into.
+  native_chunk_m: null
+  native_merge_jobs: null
 
   plots:
     enabled: true # to plot merged maps (plot_merged_results)

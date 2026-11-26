@@ -48,7 +48,7 @@ def _solve_scenario(config_path: str, out_dir: str, return_period: str, waterlev
             output_path=str(output_path), model_outputs=out_dir,
             # Neighbour dem/mask come from the scenario's inputs, neighbour depths from out_dir.
             preprocessing_inputs_dir=prep, tile_grid_path=cfg["tile_grid"]["path"],
-            raster_config=cfg["raster_format"], flooding_config=flooding,
+            flooding_config=flooding,
             ocean_code=cfg["tile_generation"]["ocean_code"], river_code=cfg["tile_generation"]["river_code"],
             static_level_inputs=static_level_inputs(cfg),
         )

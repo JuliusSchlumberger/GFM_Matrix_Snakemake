@@ -22,15 +22,14 @@ import eikonal_runner  # noqa: E402
 from eikonal_runner import (  # noqa: E402
     NO_STATIONS_REASON,
     NO_UPSTREAM_FLOODING_REASON,
-    OOM_PREMARKED_REASON,
+    TileOutOfMemoryError,
     mark_tile_oom,
     run_tile_scenario,
 )
-from rasters import WATERDEPTH_NODATA_INT16, encode_dem_cm, encode_friction_int16, encode_waterlevel_cm  # noqa: E402
+from rasters import encode_dem_cm, encode_friction_int16, encode_waterlevel_cm  # noqa: E402
 
 D, M, N = 0.0003, 10, 12
 SCN, SLR = "RP100_SLR_0", "SLR_0"
-RASTER_CONFIG = {"driver": "GTiff", "compression": "deflate", "predictor": 3, "nodata": -9999}
 FLOODING = {"knn": 5, "idw_power": 2.0, "max_rounds": {"landcover": 40, "uniform": 10}, "waterlevel_epsilon_m": 0.03,
             "friction_scale_factor": 1.0, "model": "eikonal", "friction_source": "landcover",
             "uniform_attenuation_m_per_km": 0.2,
@@ -79,7 +78,7 @@ def _run(root: Path, tid: int, **kw) -> tuple[dict, np.ndarray]:
         dem_path=str(d / "dem.tif"), mask_path=str(d / "mask.tif"), friction_path=str(d / "friction.tif"),
         boundaries_path=str(d / f"boundaries_{SCN}.gpkg"), output_path=str(out),
         model_outputs=str(root / "mo"), preprocessing_inputs_dir=str(root / "inputs"),
-        tile_grid_path=str(root / "tile_grid.gpkg"), raster_config=RASTER_CONFIG, flooding_config=FLOODING,
+        tile_grid_path=str(root / "tile_grid.gpkg"), flooding_config=FLOODING,
         ocean_code=1, river_code=3, **kw,
     )
     with rasterio.open(out) as src:
@@ -139,24 +138,33 @@ def test_all_outcomes() -> None:
         print("PASS: hop-1 tile whose neighbour exists but is all dry -> zero raster + skip reason")
 
         mark_tile_oom(root / "mo" / "oom_tiles", "2", reason="test")
-        res, arr = _run(root, 2)
-        assert res == {"outcome": "oom_premarked"}, res
-        assert (arr == WATERDEPTH_NODATA_INT16).all()
-        assert (root / "mo" / "skipped_tiles" / f"2_{SCN}.txt").read_text() == OOM_PREMARKED_REASON
-        print("PASS: OOM-premarked tile -> nodata placeholder + skip reason")
+        out2 = root / "mo" / "2" / "results" / f"waterdepth_{SCN}.tif"
+        out2.unlink(missing_ok=True)
+        try:
+            _run(root, 2)
+        except TileOutOfMemoryError:
+            pass
+        else:
+            raise AssertionError("an OOM-marked tile must raise")
+        assert not out2.exists(), "an OOM-marked tile must not write output"
+        print("PASS: OOM-marked tile raises without writing output")
 
         original = eikonal_runner.run_eikonal_python
         def _oom(*a, **k):
             raise MemoryError
         eikonal_runner.run_eikonal_python = _oom
+        out4 = root / "mo" / "4" / "results" / f"waterdepth_{SCN}.tif"
         try:
-            res, arr = _run(root, 4)
+            _run(root, 4)
+        except TileOutOfMemoryError:
+            pass
+        else:
+            raise AssertionError("a MemoryError in the solve must raise")
         finally:
             eikonal_runner.run_eikonal_python = original
-        assert res == {"outcome": "oom"}, res
-        assert (arr == WATERDEPTH_NODATA_INT16).all()
+        assert not out4.exists(), "an out-of-memory solve must not write output"
         assert (root / "mo" / "oom_tiles" / "4.txt").exists(), "MemoryError must mark the tile OOM"
-        print("PASS: MemoryError during the solve -> tile marked OOM + nodata placeholder")
+        print("PASS: MemoryError during the solve -> tile marked OOM, raises, no output")
 
 
 def main() -> None:

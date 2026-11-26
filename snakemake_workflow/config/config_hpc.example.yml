@@ -51,6 +51,10 @@ hpc:
     flood_totals: {partition: "24vcpu", cpus_per_task: 24, mem: "32G"}
     study_figures: {partition: "4vcpu", cpus_per_task: 4, mem: "30G", time: "0-04:00:00"}
     validation: {partition: "4vcpu", cpus_per_task: 4, mem: "30G", time: "2-00:00:00"}
+    # Simulation jobs of a scenario with hpc.wave_packing (config.yml). 7.5 GB per worker covers a
+    # 1 m fine tile (~49M cells: ~4.9 GB by simulation.eikonal_mem_estimate). The time leaves 3x
+    # over the scenarios' target_hours for a slower-than-estimated solve.
+    simulate_packed: {partition: "4vcpu", cpus_per_task: 4, mem: "30G", time: "0-08:00:00"}
     # Measured at 4 workers: ~5 GB main process + ~3 GB per worker; the rest of SLURM's 70 GB was
     # file cache. 16 workers: ~55 GB resident.
     product: {partition: "16vcpu", cpus_per_task: 16, mem: "120G", time: "2-00:00:00"}
