@@ -98,6 +98,7 @@ def _solve(dem, correction=None):
         dem, mask, np.full(dem.shape, 0.002, dtype=np.float32), TRANSFORM,
         seed_rows=rows, seed_cols=np.zeros_like(rows), seed_values=np.full(rows.size, 1.8),
         obstacle_coupling=True, max_outer_iterations=4, duration_correction=correction,
+        cell_dx_m=1.0, cell_dy_m=1.0,  # friction is per cell
     )
 
 

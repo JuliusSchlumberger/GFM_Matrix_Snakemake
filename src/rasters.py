@@ -13,6 +13,7 @@ import rasterio
 import xarray as xr
 from hydromt.exceptions import NoDataException
 from affine import Affine
+from pyproj import Geod
 from rasterio.features import rasterize
 from rasterio.fill import fillnodata
 from rasterio.warp import Resampling, reproject, transform_bounds
@@ -30,6 +31,30 @@ DEM_NODATA_M = 99.0
 # Friction (the land-cover-indexed attenuation rate, m/m = lookup-table n / 100) spans
 # ~0.0001-0.0012; x1e6 keeps 2 significant digits with ~27x headroom below int16's max.
 FRICTION_SCALE = 1_000_000
+
+_WGS84 = Geod(ellps="WGS84")
+
+
+def grid_spacing_m(transform: Affine, crs, height: int) -> tuple[float, float]:
+    """Return the grid's tile-mean cell size (dx_m, dy_m) along rows and columns.
+
+    Geographic grids: geodesic (WGS84) cell width and height at the tile's centre
+    latitude, so dx shrinks with cos(latitude); across a 1-degree tile it varies by
+    < 2 % below 60 deg. Projected grids: the pixel size, which must be in metres.
+    """
+    if crs is None:
+        raise ValueError("grid_spacing_m: the grid has no CRS")
+    crs = rasterio.crs.CRS.from_user_input(crs)
+    res_x, res_y = abs(transform.a), abs(transform.e)
+    if crs.is_geographic:
+        lat = transform.f + transform.e * height / 2.0
+        lon = transform.c
+        dx_m = _WGS84.inv(lon, lat, lon + res_x, lat)[2]
+        dy_m = _WGS84.inv(lon, lat - res_y / 2.0, lon, lat + res_y / 2.0)[2]
+        return float(dx_m), float(dy_m)
+    if crs.linear_units not in ("metre", "meter", "m"):
+        raise ValueError(f"grid_spacing_m: projected CRS {crs} has units {crs.linear_units!r}, not metres")
+    return res_x, res_y
 
 
 def _encode_int16(values: np.ndarray, scale: float, label: str, valid_hint: str) -> np.ndarray:

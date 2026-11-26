@@ -31,7 +31,7 @@ from rasters import WATERDEPTH_NODATA_INT16, encode_dem_cm, encode_friction_int1
 D, M, N = 0.0003, 10, 12
 SCN, SLR = "RP100_SLR_0", "SLR_0"
 RASTER_CONFIG = {"driver": "GTiff", "compression": "deflate", "predictor": 3, "nodata": -9999}
-FLOODING = {"resolution": 30.0, "knn": 5, "idw_power": 2.0, "max_rounds": {"landcover": 40, "uniform": 10}, "waterlevel_epsilon_m": 0.03,
+FLOODING = {"knn": 5, "idw_power": 2.0, "max_rounds": {"landcover": 40, "uniform": 10}, "waterlevel_epsilon_m": 0.03,
             "friction_scale_factor": 1.0, "model": "eikonal", "friction_source": "landcover",
             "uniform_attenuation_m_per_km": 0.2,
             "obstacle_coupling": {"enabled": False, "max_outer_iterations": 3, "outer_convergence_pct": 0.01},
@@ -168,17 +168,13 @@ if __name__ == "__main__":
     main()
 
 
-def test_tile_pixel_size_comes_from_the_dem_source_manifest(tmp_path) -> None:
-    from config_utils import DELTADTM_PIXEL_SIZE_M, tile_pixel_size_m
+def test_degree_grid_spacing_shrinks_east_west_with_latitude() -> None:
+    from affine import Affine
+    from rasters import grid_spacing_m
 
-    config = {"simulation": {"dem_source_manifest": None}, "paths": {}}
-    assert tile_pixel_size_m(config, 7, tmp_path) == DELTADTM_PIXEL_SIZE_M
-    manifest = tmp_path / "manifest.csv"
-    manifest.write_text("tile_id,dem_source\n7,local_dem\n")
-    catalog = tmp_path / "catalog.yml"
-    catalog.write_text("local_dem:\n  path: '{root}/dem.tif'\n  data_type: RasterDataset\n  driver: raster\n"
-                       "  meta:\n    pixel_size_m: 2\n")
-    config = {"simulation": {"dem_source_manifest": str(manifest)},
-              "paths": {"hydromt_data_catalog": "catalog.yml", "root": str(tmp_path)}}
-    assert tile_pixel_size_m(config, 7, tmp_path) == 2.0
-    assert tile_pixel_size_m(config, 8, tmp_path) == DELTADTM_PIXEL_SIZE_M
+    one_arcsec = 1.0 / 3600.0
+    dx0, dy0 = grid_spacing_m(Affine(one_arcsec, 0, 10.0, 0, -one_arcsec, 0.5), "EPSG:4326", 3600)
+    dx60, dy60 = grid_spacing_m(Affine(one_arcsec, 0, 10.0, 0, -one_arcsec, 60.5), "EPSG:4326", 3600)
+    assert 30.5 < dy0 < 31.0 and abs(dx0 - dy0) / dy0 < 0.01
+    assert np.isclose(dx60 / dy60, np.cos(np.radians(60.0)), rtol=0.01)
+    assert grid_spacing_m(Affine(2.0, 0, 5e5, 0, -2.0, 6e6), "EPSG:32631", 100) == (2.0, 2.0)

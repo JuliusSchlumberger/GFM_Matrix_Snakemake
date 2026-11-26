@@ -112,16 +112,27 @@ def compute_max_inundation(sfincs_dir: Path, land_mask_path: Path) -> tuple[np.n
 
 
 def reproject_to_4326(arr: np.ndarray, transform, crs, out_path: Path, nodata: float = -9999.0) -> None:
-    """Bilinearly reproject a metric-CRS array (NaN = nodata) to an EPSG:4326 GeoTIFF."""
-    dst_crs = "EPSG:4326"
+    """Bilinearly reproject a metric-CRS array (NaN = nodata) to an EPSG:4326 GeoTIFF.
+
+    A footprint crossing the antimeridian is written with longitudes wrapped to 0..360
+    (WGS84 +lon_wrap=180); in -180..180 its raster would span the whole globe.
+    """
     src_bounds = rasterio.transform.array_bounds(arr.shape[0], arr.shape[1], transform)
+    edge = np.linspace(0.0, 1.0, 21)
+    xs = np.concatenate([src_bounds[0] + edge * (src_bounds[2] - src_bounds[0])] * 2
+                        + [np.full(21, src_bounds[0]), np.full(21, src_bounds[2])])
+    ys = np.concatenate([np.full(21, src_bounds[1]), np.full(21, src_bounds[3])]
+                        + [src_bounds[1] + edge * (src_bounds[3] - src_bounds[1])] * 2)
+    lons, _ = warp_transform(crs, "EPSG:4326", xs, ys)
+    crosses_antimeridian = np.ptp(lons) > 180.0
+    dst_crs = "+proj=longlat +datum=WGS84 +lon_wrap=180 +no_defs" if crosses_antimeridian else "EPSG:4326"
 
     # Per-axis degrees at the tile's centre latitude keep cells square in ground distance;
     # calculate_default_transform's own guess is square only at the equator.
     src_res_m = abs(transform.a)
     center_x = (src_bounds[0] + src_bounds[2]) / 2.0
     center_y = (src_bounds[1] + src_bounds[3]) / 2.0
-    _, center_lat = warp_transform(crs, dst_crs, [center_x], [center_y])
+    _, center_lat = warp_transform(crs, "EPSG:4326", [center_x], [center_y])
     res_x_deg = src_res_m / (111320.0 * np.cos(np.radians(center_lat[0])))
     res_y_deg = src_res_m / 110540.0
 

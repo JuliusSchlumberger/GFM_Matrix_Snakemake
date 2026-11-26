@@ -1,9 +1,8 @@
-"""Fast Sweeping Method (Zhao, 2005) for the eikonal equation on a dense grid.
+"""Fast Sweeping Method (Zhao, 2005) for the eikonal equation on a dense rectangular grid.
 
-Port of Aqueduct's Julia core (`core/src/core.jl`, Eikonal.jl `sweep!`); every
-cell (land, ocean, lake) participates. Deviation from Julia: unseeded t=+99,
-not 0. Staggered grid as Eikonal.jl: `t` on vertices, (m+1, n+1) for an (m, n)
-friction grid; each orthant feeds a vertex from one corner cell (0-indexed):
+`solve_eikonal_dense` solves |grad t| = f with f the friction (attenuation, m of water level
+per m) on cells of dx by dy metres. Staggered grid: `t` lives on vertices, (m+1, n+1) for an
+(m, n) friction grid; each orthant feeds a vertex from one corner cell (0-indexed):
 
 | orthant | row range | col range | t-neighbors used      | cell used   |
 |---------|-----------|-----------|-----------------------|-------------|
@@ -12,9 +11,7 @@ friction grid; each orthant feeds a vertex from one corner cell (0-indexed):
 | 3       | [0, m-1]  | [0, n-1]  | (i+1,j), (i,j+1)      | (i,   j)    |
 | 4       | [1, m]    | [0, n-1]  | (i-1,j), (i,j+1)      | (i-1, j)    |
 
-Cell (r, c) reads vertex (r+1, c+1) (Julia `waterlevel = -t[2:end, 2:end]`),
-but seeds write at vertex (r, c): Aqueduct's own asymmetry (`core.jl`
-`solver.t[I] = -initial[I]`).
+Cell (r, c) reads vertex (r+1, c+1), but seeds write at vertex (r, c).
 """
 
 from __future__ import annotations
@@ -24,27 +21,26 @@ from typing import Callable
 import numpy as np
 from numba import njit
 
-# Julia's Gray-code orthant order, in this module's numbering.
+# Gray-code orthant order: consecutive sweeps flip one direction.
 _ORTHANT_ORDER = (1, 4, 3, 2)
 
 UNREACHED_T = 99.0
 
-# Any value is bit-identical; 64 gave 1.2-5.8x over dense sweeps on calibration tiles.
+# Any value gives the same result; 64 gave 1.2-5.8x over dense sweeps on calibration tiles.
 SWEEP_BLOCK_SIZE = 64
 
 
 @njit(cache=True)
-def _update(t_a: float, t_b: float, v: float, neg_two: float, eight: float, four: float) -> float:
-    # Eikonal.jl `update` (N=2), falling back to t + v when the quadratic is
-    # not causal. Constants are pre-cast to t's dtype: Julia's Float32
-    # discriminant is a catastrophic cancellation (O(100) terms, O(1e-5)
-    # difference), so matching it needs the same precision and formula.
-    b = neg_two * (t_a + t_b)
-    c = t_a * t_a + t_b * t_b - v * v
-    disc = b * b - eight * c
-    fallback = min(t_a + v, t_b + v)
+def _update(t_a: float, t_b: float, v: float, r2: float, one_plus_r2: float, inv_r: float) -> float:
+    # Godunov update of (t - t_a)^2 + r^2 (t - t_b)^2 = v^2 with t_a the row (dy) neighbour,
+    # t_b the column (dx) neighbour, v = f dy and r = dy / dx; the one-sided fallback when
+    # the two-sided root is not causal. The discriminant is written as (1 + r^2) v^2 -
+    # r^2 (t_a - t_b)^2 to avoid float32 cancellation between large squares.
+    fallback = min(t_a + v, t_b + v * inv_r)
+    d = t_a - t_b
+    disc = one_plus_r2 * v * v - r2 * d * d
     if disc >= 0:
-        cand = (-b + np.sqrt(disc)) / four
+        cand = (t_a + r2 * t_b + np.sqrt(disc)) / one_plus_r2
         if cand > max(t_a, t_b):
             return min(cand, fallback)
     return fallback
@@ -53,11 +49,9 @@ def _update(t_a: float, t_b: float, v: float, neg_two: float, eight: float, four
 @njit(cache=True)
 def _dense_sweep(
     t: np.ndarray, friction: np.ndarray, orthant: int,
-    neg_two: float, eight: float, four: float,
+    r2: float, one_plus_r2: float, inv_r: float,
 ) -> float:
-    # Reference kernel. Row-outer order (vs Julia's column-outer) is
-    # bit-identical: each vertex reads only its two upwind neighbours, visited
-    # first in both orders. Early-out is exact: _update >= min(t_a, t_b).
+    # Reference kernel for _block_sweep. Early-out is exact: _update >= min(t_a, t_b).
     m, n = friction.shape
     max_change = 0.0
     if orthant == 1:
@@ -68,7 +62,7 @@ def _dense_sweep(
                 t_c = t[i, j]
                 if min(t_a, t_b) >= t_c:
                     continue
-                cand = _update(t_a, t_b, friction[i - 1, j - 1], neg_two, eight, four)
+                cand = _update(t_a, t_b, friction[i - 1, j - 1], r2, one_plus_r2, inv_r)
                 if cand < t_c:
                     d = t_c - cand
                     if d > max_change:
@@ -82,7 +76,7 @@ def _dense_sweep(
                 t_c = t[i, j]
                 if min(t_a, t_b) >= t_c:
                     continue
-                cand = _update(t_a, t_b, friction[i, j - 1], neg_two, eight, four)
+                cand = _update(t_a, t_b, friction[i, j - 1], r2, one_plus_r2, inv_r)
                 if cand < t_c:
                     d = t_c - cand
                     if d > max_change:
@@ -96,7 +90,7 @@ def _dense_sweep(
                 t_c = t[i, j]
                 if min(t_a, t_b) >= t_c:
                     continue
-                cand = _update(t_a, t_b, friction[i, j], neg_two, eight, four)
+                cand = _update(t_a, t_b, friction[i, j], r2, one_plus_r2, inv_r)
                 if cand < t_c:
                     d = t_c - cand
                     if d > max_change:
@@ -110,7 +104,7 @@ def _dense_sweep(
                 t_c = t[i, j]
                 if min(t_a, t_b) >= t_c:
                     continue
-                cand = _update(t_a, t_b, friction[i - 1, j], neg_two, eight, four)
+                cand = _update(t_a, t_b, friction[i - 1, j], r2, one_plus_r2, inv_r)
                 if cand < t_c:
                     d = t_c - cand
                     if d > max_change:
@@ -122,7 +116,7 @@ def _dense_sweep(
 @njit(cache=True)
 def _block_sweep(
     t: np.ndarray, friction: np.ndarray, orthant: int,
-    neg_two: float, eight: float, four: float,
+    r2: float, one_plus_r2: float, inv_r: float,
     block: int, changed_at: np.ndarray, swept_at: np.ndarray, sweep_idx: int,
 ) -> tuple[float, int]:
     # _dense_sweep block by block; bit-identical (tests/eikonal_kernel_validation).
@@ -183,7 +177,7 @@ def _block_sweep(
                     t_c = t[i, j]
                     if min(t_a, t_b) >= t_c:
                         continue
-                    cand = _update(t_a, t_b, friction[i + fi, j + fj], neg_two, eight, four)
+                    cand = _update(t_a, t_b, friction[i + fi, j + fj], r2, one_plus_r2, inv_r)
                     if cand < t_c:
                         d = t_c - cand
                         if d > max_change:
@@ -195,12 +189,21 @@ def _block_sweep(
     return max_change, n_swept
 
 
+def sweep_constants(cell_dx_m: float, cell_dy_m: float, dtype) -> tuple[float, float, float]:
+    """Return the kernel constants (r^2, 1 + r^2, 1/r) for r = dy/dx, in `dtype`."""
+    r = cell_dy_m / cell_dx_m
+    return dtype.type(r * r), dtype.type(1.0 + r * r), dtype.type(1.0 / r)
+
+
 def solve_eikonal_dense(
-    friction: np.ndarray,
+    friction_per_m: np.ndarray,
     seed_rows: np.ndarray,
     seed_cols: np.ndarray,
     seed_values: np.ndarray,
     epsilon: float,
+    *,
+    cell_dx_m: float,
+    cell_dy_m: float,
     max_rounds: int = 10_000,
     sweep_budget: int | None = None,
     verbose: bool = False,
@@ -210,28 +213,24 @@ def solve_eikonal_dense(
     """Solve the eikonal equation on the full dense grid via Fast Sweeping.
 
     Returns `t` with shape (m+1, n+1); cell (r, c) is at vertex (r+1, c+1).
-    seed_values: initial `t` (Aqueduct seeds -waterlevel); seeds are not frozen.
-    epsilon: max per-round change, as `core.jl`'s
-    `minimum(friction) / (resolution * 10)`.
+    friction_per_m: cost per metre of path; cells are cell_dx_m (along a row) by
+    cell_dy_m (along a column). seed_values: initial `t` (-water level); seeds are not
+    frozen. epsilon: max per-round change in `t` (m) at which the solve has converged.
     sweep_budget: run exactly this many sweeps in `_ORTHANT_ORDER`, ignoring
-    epsilon/max_rounds; 3 reproduces Aqueduct's Eikonal.jl runtime behaviour.
+    epsilon/max_rounds.
     return_diagnostics: also return n_rounds_used, max_change, converged (None
     under sweep_budget) and frac_blocks_swept.
     on_sweep: called after every sweep with the live `t` (do not modify) and that sweep's
     max change; the calibration studies trace convergence with it.
     """
-    m, n = friction.shape
-    dtype = friction.dtype
-    # Unseeded t=+99 (waterlevel -99 m), not Julia's t=0: 0 m is MSL, so
-    # unreached cells below 0 m would read as flooded. Mirrors the +99 m dry
-    # sentinel (opposite sign) and fits int16-cm. t only decreases, so any
-    # real seed path overwrites it.
+    m, n = friction_per_m.shape
+    dtype = friction_per_m.dtype
+    # Unseeded t=+99 (water level -99 m), not 0: 0 m is MSL, so unreached cells below
+    # 0 m would read as flooded. t only decreases, so any real seed path overwrites it.
     t = np.full((m + 1, n + 1), UNREACHED_T, dtype=dtype)
     t[seed_rows, seed_cols] = seed_values
-
-    neg_two = dtype.type(-2.0)
-    eight = dtype.type(8.0)
-    four = dtype.type(4.0)
+    friction = (friction_per_m * dtype.type(cell_dy_m)).astype(dtype, copy=False)
+    r2, one_plus_r2, inv_r = sweep_constants(cell_dx_m, cell_dy_m, dtype)
 
     n_block_rows = -(-(m + 1) // SWEEP_BLOCK_SIZE)
     n_block_cols = -(-(n + 1) // SWEEP_BLOCK_SIZE)
@@ -244,7 +243,7 @@ def solve_eikonal_dense(
         nonlocal sweep_count, blocks_swept
         sweep_count += 1
         change, n_swept = _block_sweep(
-            t, friction, orthant, neg_two, eight, four,
+            t, friction, orthant, r2, one_plus_r2, inv_r,
             SWEEP_BLOCK_SIZE, changed_at, swept_at, sweep_count,
         )
         blocks_swept += n_swept

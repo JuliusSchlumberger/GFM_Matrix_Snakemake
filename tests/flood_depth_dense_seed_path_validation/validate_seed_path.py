@@ -31,7 +31,7 @@ def test_seed_propagation_and_pruning() -> None:
     waterdepth, diagnostics = fm.flood_depth_dense(
         dem, mask, friction, transform,
         seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
-        resolution=30.0,
+        cell_dx_m=1.0, cell_dy_m=1.0,
     )
     assert diagnostics == {"obstacle_coupling": False}, diagnostics
 
@@ -73,7 +73,7 @@ def test_mutual_exclusivity_validation() -> None:
     seed_rows, seed_cols, seed_values = np.array([1]), np.array([1]), np.array([2.0])
 
     try:
-        fm.flood_depth_dense(dem, mask, friction, transform)
+        fm.flood_depth_dense(dem, mask, friction, transform, cell_dx_m=1.0, cell_dy_m=1.0)
         raise AssertionError("expected ValueError when neither boundaries nor seeds are given")
     except ValueError:
         print("PASS: neither boundaries nor seeds given -> ValueError")
@@ -82,14 +82,15 @@ def test_mutual_exclusivity_validation() -> None:
         fm.flood_depth_dense(
             dem, mask, friction, transform,
             boundaries=dummy_boundaries,
-            seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
+            seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values, cell_dx_m=1.0, cell_dy_m=1.0,
         )
         raise AssertionError("expected ValueError when both boundaries and seeds are given")
     except ValueError:
         print("PASS: both boundaries and seeds given -> ValueError")
 
     try:
-        fm.flood_depth_dense(dem, mask, friction, transform, seed_rows=seed_rows, seed_cols=seed_cols)
+        fm.flood_depth_dense(dem, mask, friction, transform, seed_rows=seed_rows, seed_cols=seed_cols,
+                             cell_dx_m=1.0, cell_dy_m=1.0)
         raise AssertionError("expected ValueError for a partial seed triple")
     except ValueError:
         print("PASS: partial seed triple (seed_values missing) -> ValueError")
@@ -97,7 +98,7 @@ def test_mutual_exclusivity_validation() -> None:
     waterdepth, diagnostics = fm.flood_depth_dense(
         dem, mask, friction, transform,
         seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
-        obstacle_coupling=True, max_outer_iterations=3,
+        obstacle_coupling=True, max_outer_iterations=3, cell_dx_m=1.0, cell_dy_m=1.0,
     )
     assert diagnostics["obstacle_coupling"] is True
     print("PASS: seeds + obstacle_coupling=True runs without error")
@@ -120,12 +121,12 @@ def test_seed_path_obstacle_coupling() -> None:
     wd_off, diag_off = fm.flood_depth_dense(
         dem, mask, friction, transform,
         seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
-        resolution=30.0, obstacle_coupling=False,
+        cell_dx_m=1.0, cell_dy_m=1.0, obstacle_coupling=False,
     )
     wd_on, diag_on = fm.flood_depth_dense(
         dem, mask, friction, transform,
         seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
-        resolution=30.0, obstacle_coupling=True, max_outer_iterations=3,
+        cell_dx_m=1.0, cell_dy_m=1.0, obstacle_coupling=True, max_outer_iterations=3,
     )
     assert diag_on["obstacle_coupling"] is True
     assert diag_on["outer_converged"] is True, diag_on

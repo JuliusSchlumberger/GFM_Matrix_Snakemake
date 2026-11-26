@@ -36,7 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from event_volume import DurationCorrection, VolumeCap  # noqa: E402
 from flood_model import apply_volume_cap, flood_depth_dense, idw_seed_values_at  # noqa: E402
 from flood_variants import VARIANTS, base_variant, max_rounds, run_key, variant_flooding  # noqa: E402
-from rasters import WATERDEPTH_NODATA_INT16, decode_waterlevel_cm, encode_waterdepth_cm  # noqa: E402
+from rasters import WATERDEPTH_NODATA_INT16, decode_waterlevel_cm, encode_waterdepth_cm, grid_spacing_m  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from calibration_paths import (  # noqa: E402
@@ -239,7 +239,7 @@ def main() -> None:
     dem, mask, base_friction, transform, crs = build_inputs_from_sfincs_subgrid(
         sfincs_dir, tile_dir / "inputs" / "mask.tif", friction_scale_factor=1.0,
         default_friction=float(flooding["default_friction"]))
-    cell_m = float(np.hypot(transform.a, transform.d))
+    cell_dx_m, cell_dy_m = grid_spacing_m(transform, crs, dem.shape[0])
     seeds = production_seeds(mask, transform, crs, boundaries, int(flooding["knn"]), river_code,
                              float(flooding["idw_power"]))
     if seeds is None:
@@ -260,16 +260,16 @@ def main() -> None:
         v_flooding = variant_flooding(flooding, name, parameter, alpha)
         rate_m_per_m = float(v_flooding["uniform_attenuation_m_per_km"]) / 1000.0
         if spec["friction_source"] == "uniform":
-            friction = np.full(dem.shape, rate_m_per_m * cell_m, dtype=np.float32)
+            friction = np.full(dem.shape, rate_m_per_m, dtype=np.float32)
         else:
-            friction = base_friction * np.float32(float(v_flooding["friction_scale_factor"]) * cell_m)
+            friction = base_friction * np.float32(v_flooding["friction_scale_factor"])
         duration = (sfincs_duration_correction(sfincs_dir, crs, v_flooding["duration_correction"])
                     if spec["duration"] else None)
         t0 = time.monotonic()
         waterdepth, diagnostics = flood_depth_dense(
             solver_dem, solver_mask, friction, transform,
             seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
-            resolution=cell_m, k=int(flooding["knn"]), idw_power=float(flooding["idw_power"]),
+            cell_dx_m=cell_dx_m, cell_dy_m=cell_dy_m, k=int(flooding["knn"]), idw_power=float(flooding["idw_power"]),
             ocean_code=OCEAN_CODE, river_code=river_code,
             obstacle_coupling=bool(oc["enabled"]),
             max_outer_iterations=int(oc["max_outer_iterations"]),
@@ -286,7 +286,8 @@ def main() -> None:
                 cap_config = variant_flooding(flooding, output, parameter, alpha)["volume_cap"]
                 depth, cap_diag = apply_volume_cap(
                     waterdepth, solver_dem, solver_mask, seed_rows, seed_cols, seed_values,
-                    sfincs_volume_cap(sfincs_dir, crs, cap_config), transform, cell_m, spec["model"])
+                    sfincs_volume_cap(sfincs_dir, crs, cap_config), transform, cell_dx_m, cell_dy_m,
+                    spec["model"])
                 diag = {**diagnostics, **cap_diag, "base_run": run_key(name, parameter, alpha)}
             key = run_key(output, parameter, alpha)
             _write_waterdepth(depth, transform, crs, run_path(out_dir, key))

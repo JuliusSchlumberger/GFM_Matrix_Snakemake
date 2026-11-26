@@ -73,12 +73,14 @@ def calibration_hydrograph() -> np.ndarray:
 
 
 def eikonal_level(z: np.ndarray, friction: np.ndarray, transform) -> np.ndarray:
+    # `friction` is per DX_M grid step (the FSF values include the step); the solver takes it per metre.
     mask = np.where(z < -1.0, 1, 0).astype(np.int8)
     coast = np.zeros(z.shape, dtype=bool)
     coast[:, de.OCEAN_CELLS - 1] = True
     rows, cols = np.nonzero(coast)
-    depth, _ = flood_depth_dense(z, mask, friction.astype(np.float32), transform, seed_rows=rows, seed_cols=cols,
-                                 seed_values=np.full(rows.size, de.PEAK_M), resolution=de.DX_M, **SOLVER)
+    depth, _ = flood_depth_dense(z, mask, (friction / de.DX_M).astype(np.float32), transform, seed_rows=rows,
+                                 seed_cols=cols, seed_values=np.full(rows.size, de.PEAK_M), cell_dx_m=de.DX_M,
+                                 cell_dy_m=de.DX_M, **SOLVER)
     return np.where(depth > 0, z + depth, np.nan)
 
 

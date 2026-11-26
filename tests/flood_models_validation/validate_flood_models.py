@@ -12,6 +12,7 @@ from flood_model import flood_depth_dense, seed_level_idw, straight_line_level  
 from flood_variants import VARIANTS, base_variant, parameter_key, run_key, variant_flooding  # noqa: E402
 
 TRANSFORM = Affine(30.0, 0, 0, 0, -30.0, 0)
+CELLS = {"cell_dx_m": 30.0, "cell_dy_m": 30.0}
 
 
 def _strip_tile(n_rows: int = 20, n_cols: int = 30):
@@ -31,7 +32,7 @@ def test_straight_line_level_matches_brute_force_within_a_bin() -> None:
     shape = (25, 35)
     rows, cols = rng.integers(0, shape[0], 12), rng.integers(0, shape[1], 12)
     values = rng.uniform(1.0, 2.0, 12)
-    level = straight_line_level(shape, rows, cols, values, 2e-3, 30.0, bin_m=0.01)
+    level = straight_line_level(shape, rows, cols, values, 2e-3, 30.0, 30.0, bin_m=0.01)
     rr, cc = np.indices(shape)
     d = np.hypot(rr[..., None] - rows, cc[..., None] - cols) * 30.0
     exact = (values - 2e-3 * d).max(axis=-1)
@@ -39,14 +40,23 @@ def test_straight_line_level_matches_brute_force_within_a_bin() -> None:
     assert np.all(exact - level < 0.01 + 1e-9)
 
 
+def test_straight_line_distance_uses_the_cell_width_and_height() -> None:
+    level = straight_line_level((21, 21), np.array([10]), np.array([10]), np.array([1.0]), 1e-3, 15.0, 30.0,
+                                bin_m=0.01)
+    assert level[10, 20] == pytest.approx(1.0 - 1e-3 * 10 * 15.0)
+    assert level[20, 10] == pytest.approx(1.0 - 1e-3 * 10 * 30.0)
+
+
 def test_seed_level_idw_is_the_seed_value_on_a_flat_coast() -> None:
-    level = seed_level_idw((40, 40), np.arange(40), np.zeros(40, dtype=int), np.full(40, 1.5), k=5, idw_power=2)
+    level = seed_level_idw((40, 40), np.arange(40), np.zeros(40, dtype=int), np.full(40, 1.5), k=5, idw_power=2,
+                           **CELLS)
     assert np.allclose(level, 1.5)
 
 
 def test_bathtub_floods_the_closed_pit_and_the_connected_one_does_not() -> None:
     dem, mask, rows, cols = _strip_tile()
-    common = dict(seed_rows=rows, seed_cols=cols, seed_values=np.full(len(rows), 1.0), ocean_code=1, idw_power=2.0)
+    common = dict(seed_rows=rows, seed_cols=cols, seed_values=np.full(len(rows), 1.0), ocean_code=1, idw_power=2.0,
+                  **CELLS)
     bath, _ = flood_depth_dense(dem, mask, np.ones_like(dem), TRANSFORM, model="bathtub", **common)
     conn, _ = flood_depth_dense(dem, mask, np.ones_like(dem), TRANSFORM, model="bathtub_connected", **common)
     assert bath[10, 20] == pytest.approx(2.0)
@@ -61,12 +71,12 @@ def test_eikonal_high_seed_does_not_cross_the_sea_to_the_opposite_shore() -> Non
     mask = np.zeros((40, 30), dtype=np.int8)
     mask[15:25, :] = 1
     dem = np.where(mask == 1, 0.0, 2.0).astype(np.float32)
-    friction = np.where(mask == 1, 0.006, 0.036).astype(np.float32)  # water vs land class, per 30 m step
+    friction = np.where(mask == 1, 0.0002, 0.0012).astype(np.float32)  # water vs land class, per m
     cols = np.arange(30)
     rows = np.concatenate([np.full(30, 15), np.full(30, 24)])
     values = np.concatenate([np.full(30, 5.0), np.full(30, 1.0)])
     depth, _ = flood_depth_dense(dem, mask, friction, TRANSFORM, seed_rows=rows, seed_cols=np.tile(cols, 2),
-                                 seed_values=values, ocean_code=1, idw_power=2.0)
+                                 seed_values=values, ocean_code=1, idw_power=2.0, **CELLS)
     assert (depth[:15] > 0).any()          # the north shore floods from its own seeds
     assert (depth[25:] == 0).all()         # 1 m seeds, 2 m ground: the 5 m seeds must not reach it
 
@@ -74,7 +84,7 @@ def test_eikonal_high_seed_does_not_cross_the_sea_to_the_opposite_shore() -> Non
 def test_straight_line_attenuates_with_distance() -> None:
     dem, mask, rows, cols = _strip_tile()
     depth, diag = flood_depth_dense(dem, mask, np.ones_like(dem), TRANSFORM, seed_rows=rows, seed_cols=cols,
-                                    seed_values=np.full(len(rows), 1.0), ocean_code=1, resolution=30.0,
+                                    seed_values=np.full(len(rows), 1.0), ocean_code=1, **CELLS,
                                     model="straight_line", attenuation_m_per_m=1e-3)
     # Level 1.0 - 0.03 m per cell: wet while 1.0 - 0.03 c > 0.1 c, i.e. c < 7.7.
     assert depth[0, 7] > 0 and depth[0, 8] == 0.0
@@ -86,10 +96,10 @@ def test_level_models_refuse_the_duration_correction() -> None:
     dem, mask, rows, cols = _strip_tile()
     with pytest.raises(ValueError):
         flood_depth_dense(dem, mask, np.ones_like(dem), TRANSFORM, seed_rows=rows, seed_cols=cols,
-                          seed_values=np.ones(len(rows)), model="bathtub", duration_correction=object())
+                          seed_values=np.ones(len(rows)), model="bathtub", duration_correction=object(), **CELLS)
     with pytest.raises(ValueError):
         flood_depth_dense(dem, mask, np.ones_like(dem), TRANSFORM, seed_rows=rows, seed_cols=cols,
-                          seed_values=np.ones(len(rows)), model="straight_line")
+                          seed_values=np.ones(len(rows)), model="straight_line", **CELLS)
 
 
 def test_variant_flooding_sets_model_parameter_and_duration() -> None:
@@ -152,11 +162,11 @@ def test_solve_trace_sees_every_sweep_and_outer_iteration_without_changing_the_r
             self.outers.append((outer, inner["n_rounds_used"]))
 
     dem, mask, rows, cols = _strip_tile()
-    kw = dict(seed_rows=rows, seed_cols=cols, seed_values=np.full(len(rows), 2.0), resolution=30.0,
+    kw = dict(seed_rows=rows, seed_cols=cols, seed_values=np.full(len(rows), 2.0), **CELLS,
               obstacle_coupling=True, max_outer_iterations=3, max_rounds=40)
-    plain, _ = flood_depth_dense(dem, mask, np.full_like(dem, 0.01), TRANSFORM, **kw)
+    plain, _ = flood_depth_dense(dem, mask, np.full_like(dem, 0.01 / 30.0), TRANSFORM, **kw)
     rec = Recorder()
-    traced, _ = flood_depth_dense(dem, mask, np.full_like(dem, 0.01), TRANSFORM, trace=rec, **kw)
+    traced, _ = flood_depth_dense(dem, mask, np.full_like(dem, 0.01 / 30.0), TRANSFORM, trace=rec, **kw)
     assert np.array_equal(plain, traced)
     assert rec.starts == [("first", n) for n in range(1, len(rec.outers) + 1)]
     assert rec.sweeps == 4 * sum(r for _, r in rec.outers)

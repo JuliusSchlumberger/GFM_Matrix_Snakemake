@@ -18,7 +18,10 @@ hpc:
     sfincs: "/u/schlumbe/.conda/envs/hydromt-sfincs-dev/bin/python"
   container:
     cmd: apptainer
-    sfincs_image: "docker://deltares/sfincs-cpu:sfincs-v2.4.0-Galibier-Release"
+    # A local SIF, not a docker:// URI: with a URI every run contacts Docker Hub, and a registry or
+    # TLS hiccup fails the tile. Build it once:
+    #   apptainer pull <sif> docker://deltares/sfincs-cpu:sfincs-v2.4.0-Galibier-Release
+    sfincs_image: "/u/schlumbe/containers/sfincs-v2.4.0-Galibier-Release.sif"
   # Harness plan state and gfm_hpc's HPC-view configs.
   state_root: "/p/11212688-004-global-floodmaps/modelling/hpc_harness"
   job_env:

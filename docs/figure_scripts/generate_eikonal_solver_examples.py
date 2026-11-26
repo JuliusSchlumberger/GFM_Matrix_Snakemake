@@ -23,7 +23,10 @@ from matplotlib.colors import BoundaryNorm, ListedColormap
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "analysis"))
-from eikonal import UNREACHED_T, _block_sweep, _dense_sweep, _ORTHANT_ORDER, solve_eikonal_dense  # noqa: E402
+from eikonal import UNREACHED_T, _block_sweep, _dense_sweep, _ORTHANT_ORDER, solve_eikonal_dense, sweep_constants  # noqa: E402
+
+# The illustrations use 1 m square cells, so friction is the cost per cell.
+UNIT_CELLS = sweep_constants(1.0, 1.0, np.dtype(np.float32))
 from flood_model import flood_depth_dense  # noqa: E402
 import _figure_style  # noqa: E402
 
@@ -98,8 +101,7 @@ def _draw_sweep_quadrant_diagram(
     t = np.full((size + 1, size + 1), 99.0, dtype=np.float32)
     # Cell (r, c) reads vertex (r+1, c+1), so the displayed seed is t[cy+1, cx+1].
     t[cy + 1, cx + 1] = 0.0
-    neg_two, eight, four = np.float32(-2.0), np.float32(8.0), np.float32(4.0)
-    _dense_sweep(t, friction, orthant, neg_two, eight, four)
+    _dense_sweep(t, friction, orthant, *UNIT_CELLS)
     reached = t[1:, 1:] < 99.0
 
     ax.imshow(np.ones((size, size)), cmap=ListedColormap([NOT_REACHED_COLOR]), vmin=0, vmax=1)
@@ -143,14 +145,16 @@ def make_figure_1() -> None:
     round_checkpoints = [1, 2, 5, 12]
     snapshots = {}
     for n in round_checkpoints:
-        t = solve_eikonal_dense(friction, seed_rows, seed_cols, seed_values, epsilon=0.0, sweep_budget=4 * n)
+        t = solve_eikonal_dense(friction, seed_rows, seed_cols, seed_values, epsilon=0.0, sweep_budget=4 * n,
+                                cell_dx_m=1.0, cell_dy_m=1.0)
         snapshots[n] = t[1:, 1:]
 
     epsilon = 0.03
     max_change_per_round = []
     prev = None
     for n in range(1, 16):
-        t = solve_eikonal_dense(friction, seed_rows, seed_cols, seed_values, epsilon=0.0, sweep_budget=4 * n)
+        t = solve_eikonal_dense(friction, seed_rows, seed_cols, seed_values, epsilon=0.0, sweep_budget=4 * n,
+                                cell_dx_m=1.0, cell_dy_m=1.0)
         cur = t[1:, 1:]
         if prev is not None:
             max_change_per_round.append(float(np.max(np.abs(cur - prev))))
@@ -293,7 +297,7 @@ def make_figure_3() -> None:
         wd, diag = flood_depth_dense(
             dem, mask, friction, transform,
             seed_rows=coastline_rows, seed_cols=coastline_cols, seed_values=seed_values,
-            obstacle_coupling=coupling, max_rounds=40, max_outer_iterations=3,
+            cell_dx_m=1.0, cell_dy_m=1.0, obstacle_coupling=coupling, max_rounds=40, max_outer_iterations=3,
             waterlevel_epsilon_m=0.03,
         )
         results[coupling] = (wd, diag)
@@ -382,7 +386,6 @@ def _traced_block_solve(friction, seed_rows, seed_cols, seed_values, max_rounds:
     m, n = friction.shape
     t = np.full((m + 1, n + 1), UNREACHED_T, dtype=friction.dtype)
     t[seed_rows, seed_cols] = seed_values
-    neg_two, eight, four = np.float32(-2.0), np.float32(8.0), np.float32(4.0)
     nbr, nbc = -(-(m + 1) // FIG2_BLOCK), -(-(n + 1) // FIG2_BLOCK)
     changed_at = np.full((nbr, nbc), -1, dtype=np.int64)
     swept_at = np.full((4, nbr, nbc), -1, dtype=np.int64)
@@ -393,7 +396,7 @@ def _traced_block_solve(friction, seed_rows, seed_cols, seed_values, max_rounds:
         n_swept, max_change = 0, 0.0
         for orthant in _ORTHANT_ORDER:
             sweep_idx += 1
-            change, swept = _block_sweep(t, friction, orthant, neg_two, eight, four,
+            change, swept = _block_sweep(t, friction, orthant, *UNIT_CELLS,
                                          FIG2_BLOCK, changed_at, swept_at, sweep_idx)
             n_swept += swept
             max_change = max(max_change, change)
@@ -434,13 +437,14 @@ def make_figure_2() -> None:
 
     t_blk, records = _traced_block_solve(friction, seed_rows, seed_cols, seed_values, max_rounds=200)
     # Block skipping must be bit-identical to the production solver and plain sweeps.
-    t_prod = solve_eikonal_dense(friction, seed_rows, seed_cols, seed_values, epsilon=0.0, max_rounds=200)
+    t_prod = solve_eikonal_dense(friction, seed_rows, seed_cols, seed_values, epsilon=0.0, max_rounds=200,
+                                 cell_dx_m=1.0, cell_dy_m=1.0)
     assert np.array_equal(t_blk, t_prod), "illustration block solve differs from production solve_eikonal_dense"
     t_dense = np.full_like(t_blk, UNREACHED_T)
     t_dense[seed_rows, seed_cols] = seed_values
     for _ in range(len(records)):
         for orthant in _ORTHANT_ORDER:
-            _dense_sweep(t_dense, friction, orthant, np.float32(-2.0), np.float32(8.0), np.float32(4.0))
+            _dense_sweep(t_dense, friction, orthant, *UNIT_CELLS)
     assert np.array_equal(t_blk, t_dense), "block solve differs from plain dense sweeps"
 
     n_rounds = len(records)

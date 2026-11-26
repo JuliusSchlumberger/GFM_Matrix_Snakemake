@@ -91,9 +91,11 @@ def load_tile(tile_id: str) -> dict:
 
 
 def solve(t: dict, friction: np.ndarray) -> np.ndarray:
+    # `friction` is per grid step here (fsf includes the step); the solver takes it per metre.
     rows, cols, values = t["seeds"]
-    depth, _ = flood_depth_dense(t["dem"], t["mask"], friction.astype(np.float32), t["transform"],
-                                 seed_rows=rows, seed_cols=cols, seed_values=values, **SOLVER)
+    depth, _ = flood_depth_dense(t["dem"], t["mask"], (friction / t["cell_m"]).astype(np.float32), t["transform"],
+                                 seed_rows=rows, seed_cols=cols, seed_values=values, cell_dx_m=t["cell_m"],
+                                 cell_dy_m=t["cell_m"], **SOLVER)
     return depth
 
 

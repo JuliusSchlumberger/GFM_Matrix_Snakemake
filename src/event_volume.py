@@ -289,14 +289,17 @@ class VolumeCap:
     crs: object = None
 
     def budgets(self, patch: np.ndarray, labels: np.ndarray, n: int, ground: np.ndarray, sources: np.ndarray,
-                seed_level: np.ndarray, transform, cell_size_m: float) -> tuple[np.ndarray, np.ndarray]:
+                seed_level: np.ndarray, transform, cell_dx_m: float, cell_dy_m: float,
+                ) -> tuple[np.ndarray, np.ndarray]:
         """Return each patch's inflow budget (m³) and the ring that sets it (0: no entry cell).
 
         Ring k holds the patch cells k cells (chessboard) from a source; ring 1 are the entry
         cells. Each ring cell passes `inflow_volume` under the hydrograph of its nearest station,
-        peaking at its nearest source's level, over its own `ground` (land, lake or river). Water
-        has to cross every ring, so the budget is the smallest ring total.
+        peaking at its nearest source's level, over its own `ground` (land, lake or river), across
+        a width of sqrt(dx dy) (flow direction unknown). Water has to cross every ring, so the
+        budget is the smallest ring total.
         """
+        width_m = float(np.sqrt(cell_dx_m * cell_dy_m))
         ring = ndimage.distance_transform_cdt(~sources, metric="chessboard")
         _, (ir, ic) = ndimage.distance_transform_edt(~sources, return_indices=True)
         coarse = nearest_station_grid(self.station_lonlat, patch.shape, transform, self.crs)
@@ -310,7 +313,7 @@ class VolumeCap:
             for g in np.unique(group):
                 sel = np.flatnonzero(group == g)
                 v[sel] = inflow_volume(seed_level[ir[r[sel], c[sel]], ic[r[sel], c[sel]]], ground[r[sel], c[sel]],
-                                       shapes[g][None, :], self.dt_s, cell_size_m, self.velocity_m_s)
+                                       shapes[g][None, :], self.dt_s, width_m, self.velocity_m_s)
             present = np.bincount(labels[r, c], minlength=n + 1) > 0
             v_ring[j, present] = np.bincount(labels[r, c], weights=v, minlength=n + 1)[present]
         has_entry = np.isfinite(v_ring[0])
@@ -319,7 +322,7 @@ class VolumeCap:
         return budget, limiting
 
     def apply(self, depth: np.ndarray, level: np.ndarray, ground: np.ndarray, sources: np.ndarray,
-              seed_level: np.ndarray, transform, cell_size_m: float,
+              seed_level: np.ndarray, transform, cell_dx_m: float, cell_dy_m: float,
               fill_order: str = "level") -> tuple[np.ndarray, list[dict]]:
         """Return the capped `depth` and one record per patch with entry cells.
 
@@ -334,12 +337,13 @@ class VolumeCap:
         if fill_order not in FILL_ORDERS:
             raise ValueError(f"VolumeCap.apply: fill_order {fill_order!r} not in {FILL_ORDERS}")
         out = depth.copy()
-        cell_area = cell_size_m**2
+        cell_area = cell_dx_m * cell_dy_m
         patch = (depth > 0) & ~sources
         labels, n = ndimage.label(patch, structure=_STRUCTURE_8)
         if n == 0:
             return out, []
-        budget, limiting = self.budgets(patch, labels, n, ground, sources, seed_level, transform, cell_size_m)
+        budget, limiting = self.budgets(patch, labels, n, ground, sources, seed_level, transform, cell_dx_m,
+                                        cell_dy_m)
         storm = np.where(patch, np.clip(level - ground, 0.0, None), 0.0) * cell_area
         entry = patch & ndimage.binary_dilation(sources, structure=_STRUCTURE_8)
         steps = _steps_from(patch, entry) if fill_order == "distance" else None

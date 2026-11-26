@@ -140,7 +140,7 @@ def run_base_variants(dem: np.ndarray, mask: np.ndarray, friction: np.ndarray) -
     seed_rows, seed_cols, seed_values = _seeds(dem.shape[0])
     common = dict(dem=dem, mask=mask, friction=friction, transform=transform,
                   seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
-                  k=1, idw_power=1.0, resolution=1.0)
+                  k=1, idw_power=1.0, cell_dx_m=1.0, cell_dy_m=1.0)
     results = {}
     for model in ("bathtub", "bathtub_connected"):
         results[model] = flood_depth_dense(**common, model=model)
@@ -224,7 +224,7 @@ def run_duration_correction(dem: np.ndarray, mask: np.ndarray, friction: np.ndar
     eikonal_wd, eikonal_diag = flood_depth_dense(
         dem=dem, mask=mask, friction=modified_friction, transform=transform,
         seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values, k=1, idw_power=1.0,
-        resolution=1.0, model="eikonal", obstacle_coupling=True, max_rounds=60, max_outer_iterations=3,
+        cell_dx_m=1.0, cell_dy_m=1.0, model="eikonal", obstacle_coupling=True, max_rounds=60, max_outer_iterations=3,
         waterlevel_epsilon_m=0.03,
     )
     return {"modified_friction": modified_friction, "eikonal": eikonal_wd, "eikonal_diag": eikonal_diag}

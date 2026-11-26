@@ -41,7 +41,7 @@ def test_round_based_solve_converges_in_more_than_one_round() -> None:
 
     t, diagnostics = solve_eikonal_dense(
         friction, seed_rows, seed_cols, -seed_values, epsilon=0.03,
-        max_rounds=200, return_diagnostics=True,
+        max_rounds=200, return_diagnostics=True, cell_dx_m=1.0, cell_dy_m=1.0,
     )
 
     assert diagnostics["converged"] is True, (

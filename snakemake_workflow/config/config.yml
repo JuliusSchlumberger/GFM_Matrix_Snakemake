@@ -210,7 +210,6 @@ simulation: # Used by: preprocessing rules
     land_fill_value_m: 99
 
   flooding:
-    resolution: 30       # grid step (m) when a tile has no pixel_size_m; outputs follow the DEM grid
     # Station interpolation of every water level onto the tile (coastline seeds and the static
     # level), for either storm_tide_source: inverse-distance weighting over the knn nearest
     # stations, weights distance^-idw_power. Leave-one-out at 22,670 stations, RP100 MAE: k 5 /
@@ -221,13 +220,10 @@ simulation: # Used by: preprocessing rules
     # class values n / 100 from the land-cover roughness table (docs/methods_02 §2.2).
     # Rate for cells with no land use class.
     default_friction: 0.002
-    # Runtime multiplier on the decoded attenuation rate, not baked into compute_friction.py.
-    # Not a free tuning knob: friction is a per-metre rate but src/eikonal.py uses it as the cost
-    # of one grid step, so the tile's own pixel_size_m (grid step in m) is a required unit
-    # correction, applied in eikonal_runner.py as friction_scale_factor x pixel_size_m. This
-    # constant is the bare SFINCS-calibrated factor: 0.25 x 30 (DeltaDTM grid step) = 7.5 with
-    # duration_correction on (498 tiles: CSI 0.763, bias 1.08 vs CSI 0.757, bias 0.98 at 0.3 x 30
-    # = 9.0); without it the optimum is 0.4 x 30 = 12.0. See docs/methods_02_flood_depth.md §2.2.
+    # Runtime multiplier on the decoded per-metre attenuation rate, not baked into
+    # compute_friction.py; the solver takes the tile's cell size in metres from its grid.
+    # SFINCS-calibrated: 0.25 with duration_correction on (498 tiles: CSI 0.763, bias 1.08 vs
+    # CSI 0.757, bias 0.98 at 0.3); without it the optimum is 0.4. See docs/methods_02_flood_depth.md §2.2.
     friction_scale_factor: 0.25
     # Flood model (flood_model.FLOOD_MODELS): eikonal, bathtub, bathtub_connected or straight_line.
     # src/flood_variants.py names the compared combinations of model, friction source and

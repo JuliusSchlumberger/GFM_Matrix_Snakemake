@@ -63,41 +63,28 @@ random SFINCS tiles (RP100), each at its best rate, the two are within 0.005
 pooled CSI, with and without the duration correction (§2.4); the land-cover
 index is kept for its spatial realism.
 
-**`friction_scale_factor` is not a free empirical tuning knob - most of it is
-a required unit correction, and only a small remaining piece is calibration.**
-$v(x) = n(x)/100$ is a *per-metre* attenuation rate (head loss per metre
-travelled). But the Fast Sweeping discretisation (§4.4) has **no separate
-distance term at all** - it uses whatever friction value it's given directly
-as the cost of crossing one grid step, regardless of that step's real size.
-Feeding it the raw per-metre rate therefore silently mis-scales every
-result by the grid's own resolution: DeltaDTM's native grid step is ~30 m,
-so the solver needs `v(x) × 30`, not `v(x)`, to correctly represent "head
-loss per metre" at all. Skipping this (`friction_scale_factor=1`) doesn't
-give a physically meaningful "unscaled" baseline - it gives a result that's
-~30× too weak for no principled reason, not a real alternative friction
-regime.
+**Units.** $v(x) = n(x)/100$ is a per-metre attenuation rate (head loss per
+metre travelled), and the solver works in metres: each tile's cell width and
+height come from its own grid, as tile means (`rasters.grid_spacing_m`). On
+DeltaDTM's 1″ grid a cell is ~30.9 m tall and $30.9\cos\varphi$ m wide at
+latitude $\varphi$ (15 m at 61°), so a degree grid is solved on rectangular
+cells (§4.4) and the rate needs no grid correction.
 
-This grid-resolution correction is applied at runtime as
-`friction_scale_factor × pixel_size_m` (`src/eikonal_runner.py`; the tile's
-own grid step, 30 m for DeltaDTM), not baked into the land-cover-derived
-raster itself, so it follows tiles on a finer local DEM and can be combined
-with further calibration without recomputing the expensive land-cover
-processing. `simulation.flooding.friction_scale_factor` is the remaining
-calibration factor, fitted against SFINCS (RP100) by maximising pooled CSI.
+`simulation.flooding.friction_scale_factor` multiplies the land-cover rate at
+runtime (`src/eikonal_runner.py`), so it can be calibrated without
+recomputing the land-cover raster. It is fitted against SFINCS (RP100) by
+maximising pooled CSI, with the eikonal solved on SFINCS's 30 m UTM subgrid.
 Without the duration correction (§2.4) the friction-sweep study
 (`calibration_studies/`, `sfincs_tiles/` friction-sweep tooling;
 `<data_root>/calibration_roughness_SFINCS/friction_sweep_pooled_metrics.csv`,
-1000 tiles) gives `friction_scale_factor = 0.4` (effective 0.4 × 30 = 12.0; CSI 0.743, bias
-1.05 vs CSI 0.732, bias 1.21 at an effective 9.0). The duration correction raises the rate
-where events are short, so the base rate must drop: with it, 498 random tiles
-give the production value **`friction_scale_factor = 0.25`** (effective 0.25 × 30 = 7.5;
-CSI 0.763, bias 1.08; 0.757, bias 0.98 at an effective 9.0; 0.710 at 12.0;
-review_critiques/calibration_experiments.py `--stage representative`).
-The resulting base attenuation rate is `n(x) × 2.5` m/km before the duration
-multiplier (the uncalibrated ×30 baseline gives `n(x) × 10` m/km, which lands
-in the ~0.1-1.2 m/km range reported for comparable land cover by Vafeidis et
-al. (2019) - a sanity check that the ×30 grid correction is dimensionally
-sound, not the reason it was chosen).
+1000 tiles) gives `friction_scale_factor = 0.4` (CSI 0.743, bias 1.05 vs CSI
+0.732, bias 1.21 at 0.3). The duration correction raises the rate where events
+are short, so the base rate must drop: with it, 498 random tiles give the
+production value **`friction_scale_factor = 0.25`** (CSI 0.763, bias 1.08;
+0.757, bias 0.98 at 0.3; 0.710 at 0.4; review_critiques/calibration_experiments.py
+`--stage representative`). The resulting base attenuation rate is
+`n(x) × 2.5` m/km before the duration multiplier, against the ~0.1-1.2 m/km
+reported for comparable land cover by Vafeidis et al. (2019).
 
 ### 2.3 Two-component sea-level propagation
 
@@ -304,27 +291,31 @@ vertex neighbours.
 
 **Local update.** Write $t := T$ at the vertex currently being updated, and
 $t_a$, $t_b$ for $T$ at its two "upwind" neighbouring vertices (already
-updated earlier in the current sweep, one row-neighbour and one
-column-neighbour - see "Grid staggering" above). With local friction $v$ at
-the one corner cell this update draws on, the first-order upwind
-discretisation of the eikonal equation reduces to the quadratic
+updated earlier in the current sweep): $t_a$ the row-neighbour, a cell height
+$\Delta y$ away, and $t_b$ the column-neighbour, a cell width $\Delta x$ away
+(see "Grid staggering" above). With local friction $f$ (per metre) at the one
+corner cell this update draws on, the first-order upwind discretisation of
+the eikonal equation is
 
 $$
-2t^2 - 2(t_a + t_b)\,t + \left(t_a^2 + t_b^2 - v^2\right) = 0
+\left(\frac{t - t_a}{\Delta y}\right)^2 + \left(\frac{t - t_b}{\Delta x}\right)^2 = f^2 .
 $$
 
-with causal solution
+With $v = f\,\Delta y$ and $r = \Delta y / \Delta x$ its causal solution is
 
 $$
-t = \frac{(t_a + t_b) + \sqrt{2v^2 - (t_a - t_b)^2}}{2}
+t = \frac{t_a + r^2 t_b + \sqrt{(1 + r^2)\,v^2 - r^2 (t_a - t_b)^2}}{1 + r^2},
 $$
 
-accepted only when the discriminant is non-negative and the causality
-condition ($t$ must be $\le$ both $t_a,t_b$ in this sign convention) holds;
-otherwise the scheme falls back to the one-dimensional update
-$t = \min(t_a, t_b) + v$. The vertex value is updated only if the computed
-candidate improves on (is smaller than) its current value — i.e., a
-standard Gauss–Seidel relaxation toward the eikonal solution of §4.3.
+accepted only when the discriminant is non-negative and $t > \max(t_a, t_b)$;
+otherwise the scheme falls back to the one-sided update
+$t = \min(t_a + f\,\Delta y,\; t_b + f\,\Delta x)$. On square cells ($r = 1$)
+this is the familiar $t = \tfrac12\big(t_a + t_b + \sqrt{2v^2 - (t_a - t_b)^2}\big)$.
+The discriminant is written as a difference of two small terms rather than of
+two large squares, which keeps the float32 solve accurate. The vertex value is
+updated only if the computed candidate improves on (is smaller than) its
+current value — i.e., a standard Gauss–Seidel relaxation toward the eikonal
+solution of §4.3.
 
 **Sweep ordering.** Each full iteration visits the grid in all four
 combinations of ascending/descending row and column traversal order ("the
@@ -343,8 +334,7 @@ threshold at which a cell's flooded/dry classification is actually decided
 decision-relevant.
 
 The solve is capped at `max_rounds` if convergence is not reached first. A
-fixed, uniform sweep count (3, matching the original Julia reference
-implementation) was found to under-converge on larger/geometrically complex
+fixed, uniform sweep count (e.g. 3) was found to under-converge on larger/geometrically complex
 tiles, so a round-based, convergence-checked scheme is the production
 default instead, with the original fixed-count mode retained as an optional
 non-default configuration. The round cap itself was set empirically: a
@@ -424,8 +414,7 @@ described above (`tests/eikonal_kernel_validation`).
    vertex reads only its two upwind neighbours, so any traversal order that
    visits both of them first produces exactly the same values. The sweeps
    therefore run row by row, matching the row-major layout of the raster
-   arrays, rather than the column-by-column order inherited from the
-   (column-major) Julia reference implementation. In addition, the local
+   arrays. In addition, the local
    update is skipped whenever $\min(t_a, t_b)$ is already no smaller than the
    vertex's current value: every candidate the update can produce is at
    least $\min(t_a, t_b)$, so no improvement is possible. This avoids the
@@ -596,38 +585,16 @@ features.
 
 ## 5. Implementation and validation **[optional section — include if a reproducibility/provenance statement is wanted]**
 
-The solver described above is implemented independently in Python (this
-pipeline) alongside the original Julia reference implementation, to enable
-deployment on HPC infrastructure where the reference toolchain is
-unavailable. The Python port was validated against the reference
-implementation's actual output on a sample of production tiles spanning a
-wide range of sizes (up to $\sim 1.4\times10^8$ cells) and geographic
-settings, achieving an exact, cell-for-cell match in both flood extent
-(Jaccard index $100.000\%$, zero cells flooded by one implementation and
-not the other) and flood depth (root-mean-square difference, mean
-signed difference, 90th-percentile absolute difference, and maximum
-absolute difference all $0.0\,\mathrm{m}$) across every tile tested. This
-gives high confidence that the Python implementation faithfully reproduces
-the reference model's numerical behaviour rather than merely
-approximating it.
-
-This exact-match validation covers the base solver only (§4.4, fixed
-3-sweep configuration, matching the reference implementation's own
-behaviour exactly). The round-based convergence scheme and the §4.4a
-obstacle-coupling correction are both extensions beyond the original Julia
-reference implementation, which has neither — there is no reference output
-for either to be validated against; their own justification rests on the
-internal convergence/monotonicity arguments given in §4.4/§4.4a and the
-limited real-tile comparisons cited there, not on independent-implementation
-agreement.
-
-The two performance changes described under "Computational implementation"
-in §4.4 (memory-order traversal with skipped no-op updates, and block
-skipping) postdate this validation. Both are exact reorderings or omissions
-of work that provably changes nothing, so they preserve it. Both are covered
-by unit tests that require bit-for-bit agreement with the original sweep
-loop, and on ten real calibration tiles the full flood-depth output was
-bit-for-bit identical to the previous implementation's.
+The solver is covered by unit tests on synthetic grids
+(`tests/eikonal_kernel_validation`): from a point source with uniform
+friction on cells half as wide as tall, the solution equals $f$ times the
+metric distance along both axes and is within the first-order scheme's few
+percent of it off-axis; on square cells the update reduces to the classic
+two-sided formula; the block-skipping solver is bit-for-bit identical to plain
+dense sweeps for square and rectangular cells. The round-based convergence
+scheme and the §4.4a obstacle-coupling correction rest on the
+convergence/monotonicity arguments given in §4.4/§4.4a and the real-tile
+comparisons cited there.
 
 ---
 

@@ -3,7 +3,8 @@
 Steps (subprocesses): 1 compute_variant_metrics.py (run tables, variant_selection.json) and
 plot_depth_accuracy.py (depth accuracy per run);
 2 the best variant's run by pooled CSI (or --select-by bias); 3 plot_worst_tiles_panel.py; 4
-plot_validation_results.py; 5 plot_sfincs_tile_diagnostics.py forcing figures for
+plot_validation_results.py; 5 compute_tile_drivers.py and plot_tile_plausibility.py (metric
+distributions, drivers of disagreement); 6 plot_sfincs_tile_diagnostics.py forcing figures for
 the worst tiles (or all, --forcing-checks-all) into figures/forcing_checks/.
 
 Usage:
@@ -56,16 +57,16 @@ def main() -> None:
         help="'CSI': highest pooled CSI (default). 'bias': |bias-1| closest to 0 (least over/under-prediction overall).",
     )
     parser.add_argument("--forcing-checks-workers", type=int, default=4,
-                        help="step 5: tiles drawn in parallel (one subprocess each)")
+                        help="step 6: tiles drawn in parallel (one subprocess each)")
     parser.add_argument("--forcing-checks-all", action="store_true",
-                        help="step 5 for every scored tile (default: only the tiles of the worst-tile panels, "
+                        help="step 6 for every scored tile (default: only the tiles of the worst-tile panels, "
                              "worst_tiles_selection_fsf<X>.csv from step 3)")
     parser.add_argument("--forcing-checks-only", action="store_true",
-                        help="only step 5 (forcing figures), from the existing pooled + per-tile metrics")
+                        help="only step 6 (forcing figures), from the existing pooled + per-tile metrics")
     parser.add_argument("--raster-base-dir-name", default=None,
                         help="base dir holding the per-tile rasters/inputs when --base-dir-name only holds result "
                              "JSONs (calibration_roughness_SFINCS_dedup -> calibration_roughness_SFINCS): steps 3 "
-                             "and 5 read the maps from there, figures still go to --base-dir-name")
+                             "and 6 read the maps from there, figures still go to --base-dir-name")
     args = parser.parse_args()
 
     python = sys.executable
@@ -90,6 +91,9 @@ def main() -> None:
           "--run-key", best, "--n-panel-tiles", str(args.n_panel_tiles),
           "--min-union-km2", str(args.min_union_km2)])
     _run([python, str(_THIS_DIR / "plot_validation_results.py"), *common, *subset, "--run-key", best])
+    if not args.raster_base_dir_name:  # the dedup analysis reads the drivers of its raster base dir
+        _run([python, str(_THIS_DIR / "compute_tile_drivers.py"), *common])
+    _run([python, str(_THIS_DIR / "plot_tile_plausibility.py"), *common, *raster])
     _forcing_checks(python, args, root, best)
 
 

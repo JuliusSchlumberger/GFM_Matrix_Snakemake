@@ -57,7 +57,7 @@ def test_budget_is_set_by_the_narrowest_ring() -> None:
     patch = (depth > 0) & ~sources
     labels, n = ndimage.label(patch, structure=np.ones((3, 3), bool))
     assert n == 1
-    budget, limiting = _cap(_hydrograph(2.0)).budgets(patch, labels, n, ground, sources, seed_level, TRANSFORM, CELL)
+    budget, limiting = _cap(_hydrograph(2.0)).budgets(patch, labels, n, ground, sources, seed_level, TRANSFORM, CELL, CELL)
     assert limiting[1] == 3  # the gap is three cells inland
     assert budget[1] < 21 * 1.0 * CELL * (1.5 + _hydrograph(2.0) - 2.0).clip(0).sum() * DT / 10
 
@@ -68,12 +68,24 @@ def test_level_order_keeps_the_least_attenuated_cells_within_the_budget() -> Non
     depth[sources] = 0.0
     ground = np.zeros_like(depth)
     out, rec = _cap(_hydrograph(0.5), n_rings=1, velocity_m_s=0.05).apply(depth, ground + depth, ground, sources, seed_level,
-                                                      TRANSFORM, CELL)
+                                                      TRANSFORM, CELL, CELL)
     (patch,) = rec
     kept = out > 0
     assert patch["capped"] and patch["kept_m3"] <= patch["inflow_m3"]
     assert kept[:, 1].all() and not kept[:, -1].any()      # dries from the far, low end
     assert np.array_equal(out[kept], depth[kept])          # kept cells keep their depth
+
+
+def test_storm_volume_and_inflow_width_follow_the_cell_width_and_height() -> None:
+    sources, seed_level = _sea_left((5, 60))
+    depth = np.tile(np.linspace(1.5, 0.2, 60), (5, 1))
+    depth[sources] = 0.0
+    ground = np.zeros_like(depth)
+    cap = _cap(_hydrograph(0.5), n_rings=1, velocity_m_s=0.05)
+    _, (square,) = cap.apply(depth, ground + depth, ground, sources, seed_level, TRANSFORM, CELL, CELL)
+    _, (narrow,) = cap.apply(depth, ground + depth, ground, sources, seed_level, TRANSFORM, CELL / 2, CELL)
+    assert np.isclose(narrow["model_m3"], square["model_m3"] / 2)
+    assert np.isclose(narrow["inflow_m3"], square["inflow_m3"] / np.sqrt(2))
 
 
 def test_distance_order_fills_a_flat_level_from_the_coast_and_drops_disconnected_cells() -> None:
@@ -84,7 +96,7 @@ def test_distance_order_fills_a_flat_level_from_the_coast_and_drops_disconnected
     depth[2, 30] = 1.0                                    # ...joined by a one-cell gap
     ground = 1.5 - np.where(sources, 1.5, depth)
     out, (patch,) = _cap(_hydrograph(0.5), n_rings=1, velocity_m_s=0.05).apply(depth, ground + depth, ground, sources, seed_level,
-                                                           TRANSFORM, CELL, fill_order="distance")
+                                                           TRANSFORM, CELL, CELL, fill_order="distance")
     kept = out > 0
     assert patch["capped"]
     assert kept[:, 1].all() and not kept[:, 31:].any()
@@ -99,9 +111,9 @@ def _inlet_tile() -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
     dem = np.full(mask.shape, 0.0, dtype=np.float32)
     dem[:, 1] = 3.0
     dem[20, 1] = 0.5
-    friction = np.full(mask.shape, 0.0003 * CELL, dtype=np.float32)
+    friction = np.full(mask.shape, 0.0003, dtype=np.float32)
     common = dict(seed_rows=np.arange(41), seed_cols=np.zeros(41, dtype=int), seed_values=np.full(41, 1.5),
-                  resolution=CELL, ocean_code=1, idw_power=2.0, k=5)
+                  cell_dx_m=CELL, cell_dy_m=CELL, ocean_code=1, idw_power=2.0, k=5)
     return dem, mask, friction, common
 
 
@@ -144,6 +156,6 @@ def test_capping_a_finished_run_equals_capping_inside_the_solve(model: str) -> N
     inside, d_inside = flood_depth_dense(dem, mask, friction, TRANSFORM, volume_cap=cap, **kw)
     base, _ = flood_depth_dense(dem, mask, friction, TRANSFORM, **kw)
     after, d_after = apply_volume_cap(base, dem, mask, common["seed_rows"], common["seed_cols"], common["seed_values"],
-                                      cap, TRANSFORM, CELL, model)
+                                      cap, TRANSFORM, CELL, CELL, model)
     assert d_inside["n_volume_capped_patches"] == 1 and np.array_equal(inside, after)
     assert d_after["volume_cap_removed_m3"] == d_inside["volume_cap_removed_m3"]

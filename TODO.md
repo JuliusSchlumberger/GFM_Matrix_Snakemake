@@ -43,6 +43,19 @@ study scripts and `build_tile_subset_by_id.py` are options now (`--out-dir`, `--
 `--fig-dir`, `--tile-ids`, `--tile-ids-file`, `--out`). Notebooks or scripts outside the repo that
 import renamed modules (pipeline_plots, analysis_figures, exposure_grid, ...) need the same update.
 
+## Solver
+
+- **Production eikonal outputs predate the rectangular-cell solver ([src/rasters.py](src/rasters.py) `grid_spacing_m`):**
+  degree-grid tiles were solved as 30 m squares; north of ~55 deg their flood extent changes (tile 2711,
+  66 deg, uniform 0.1 m/km: +9 % area, CSI vs its UTM-grid run 0.845 -> 0.912). The SFINCS calibration ran
+  on UTM (dx = dy) and is unaffected (parity: <= 0.07 % wet cells), so friction_scale_factor and the
+  uniform rate stand. Rerun production eikonal tiles (`--forcerun` or the HPC job generators); removing the
+  rule's `pixel_size_m` param already marks them outdated under the params rerun trigger.
+- **Calibration latitude signal is not explained:** eikonal_uniform_cap 0.1 vs SFINCS, 241 tiles at
+  60-75 deg want a per-tile rate of 0.055 vs 0.10-0.12 below 60 deg (partial Spearman of |lat| with log2
+  area bias -0.22). Both models run on UTM there, so it is not the square-cell issue; candidates: DeltaDTM
+  quality on high-latitude coasts, permafrost/tundra land cover, SFINCS subgrid behaviour.
+
 ## Reviewer critiques (branch `review-critiques`)
 
 Evidence: `review_critiques/` scripts; results, figures and the summary page source in

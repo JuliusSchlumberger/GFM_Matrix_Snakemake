@@ -16,7 +16,8 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from flood_model import flood_depth_dense, static_inundation, static_level_grid  # noqa: E402
 
 N_ROWS, N_COLS = 40, 800
-FRICTION = 0.005
+FRICTION = 0.005  # per 1 m cell (CELLS)
+CELLS = {"cell_dx_m": 1.0, "cell_dy_m": 1.0}
 TRANSFORM = Affine(0.00027, 0.0, 100.0, 0.0, -0.00027, 10.0)
 
 
@@ -35,7 +36,7 @@ def _solve(dem, mask, total_level: float, static: float | None, seed_cols=(0, 1)
     depth, diag = flood_depth_dense(
         dem, mask, friction, TRANSFORM,
         seed_rows=rows, seed_cols=cols, seed_values=np.full(rows.size, total_level),
-        obstacle_coupling=True, max_outer_iterations=4, static_level=static_level,
+        obstacle_coupling=True, max_outer_iterations=4, **CELLS, static_level=static_level,
     )
     return depth, diag
 
@@ -106,7 +107,7 @@ def test_split_tile_seeded_from_neighbour_matches_single_solve() -> None:
     right, _ = flood_depth_dense(
         dem[:, r0:], np.zeros((N_ROWS, N_COLS - r0), dtype=np.int8), friction, TRANSFORM,
         seed_rows=rows, seed_cols=cols, seed_values=level_left[rows, cols + r0].astype(np.float64),
-        obstacle_coupling=True, max_outer_iterations=4,
+        obstacle_coupling=True, max_outer_iterations=4, **CELLS,
         static_level=np.full((N_ROWS, N_COLS - r0), 1.0),
     )
     assert np.allclose(right, full[:, r0:], atol=0.01)
@@ -124,7 +125,7 @@ def test_storm_tide_stays_local_across_the_new_sea() -> None:
     depth, _ = flood_depth_dense(
         dem, mask, np.full(dem.shape, FRICTION, dtype=np.float32), TRANSFORM,
         seed_rows=rows, seed_cols=cols, seed_values=values,
-        obstacle_coupling=True, max_outer_iterations=4, static_level=np.full(dem.shape, 1.0),
+        obstacle_coupling=True, max_outer_iterations=4, **CELLS, static_level=np.full(dem.shape, 1.0),
     )
     level = depth + dem
     assert np.allclose(level[:, 2:20], 2.0, atol=0.1), level[N_ROWS // 2, 2:20].max()

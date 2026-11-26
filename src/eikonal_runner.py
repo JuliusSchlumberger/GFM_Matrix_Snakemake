@@ -24,7 +24,7 @@ from boundaries import (
     static_station_levels,
     storm_tide_hydrograph_path,
 )
-from config_utils import path_ready, retry_transient_io, tile_pixel_size_m
+from config_utils import path_ready, retry_transient_io
 from event_volume import DurationCorrection, VolumeCap, load_coast_hg
 from flood_model import FLOOD_MODELS, WATERLEVEL_EPSILON_M, SolveTrace, flood_depth_dense, static_level_grid
 from flood_variants import max_rounds
@@ -32,6 +32,7 @@ from rasters import (
     decode_dem_cm,
     decode_friction_int16,
     decode_waterlevel_cm,
+    grid_spacing_m,
     save_nodata_raster,
     save_waterdepth_raster,
 )
@@ -52,7 +53,7 @@ def flooding_solve_settings(flooding_config: dict[str, Any]) -> dict[str, Any]:
     # missing key is a broken config, not a reason to default.
     oc = flooding_config["obstacle_coupling"]
     return {
-        "resolution": flooding_config["resolution"], "k": flooding_config["knn"],
+        "k": flooding_config["knn"],
         "idw_power": flooding_config["idw_power"],
         "obstacle_coupling": oc["enabled"], "max_outer_iterations": oc["max_outer_iterations"],
         "max_rounds": max_rounds(flooding_config), "outer_convergence_pct": oc["outer_convergence_pct"],
@@ -70,7 +71,7 @@ def solve_wave0_tile(config: dict[str, Any], tile_id: int | str, return_period: 
                      **overrides) -> tuple[np.ndarray, dict]:
     """Solve a hop-0 tile from its station boundaries as run_tile_scenario does, without writing.
 
-    Same inputs and settings (two-component static level, correction B, the tile's pixel size);
+    Same inputs and settings (two-component static level, correction B);
     `overrides` replace `solve_tile` settings (the calibration studies' max_rounds, coupling,
     friction source). Returns (depth m, diagnostics).
     """
@@ -88,7 +89,7 @@ def solve_wave0_tile(config: dict[str, Any], tile_id: int | str, return_period: 
         **flooding_solve_settings(flooding), "variable": waterlevel_name,
         "boundaries_path": inputs / f"boundaries_{return_period}_{waterlevel_name}.gpkg",
         "ocean_code": config["tile_generation"]["ocean_code"], "river_code": config["tile_generation"]["river_code"],
-        "pixel_size_m": tile_pixel_size_m(config, str(tile_id), code_root), "static_stations": static_stations,
+        "static_stations": static_stations,
         "return_period": int(return_period.removeprefix("RP")),
         "hydrograph_path": str(storm_tide_hydrograph_path(config)), **overrides,
     }
@@ -99,7 +100,6 @@ def solve_tile(
     dem_path: str | Path,
     mask_path: str | Path,
     friction_path: str | Path,
-    resolution: float,
     k: int,
     variable: str,
     *,
@@ -116,7 +116,6 @@ def solve_tile(
     outer_convergence_pct: float = 0.01,
     waterlevel_epsilon_m: float = WATERLEVEL_EPSILON_M,
     friction_scale_factor: float,
-    pixel_size_m: float | None = None,
     static_stations: tuple[np.ndarray, np.ndarray] | None = None,
     duration_config: dict[str, Any] | None = None,
     volume_cap_config: dict[str, Any] | None = None,
@@ -130,12 +129,10 @@ def solve_tile(
     """Run `flood_model.flood_depth_dense` in-process; return (depth m, diagnostics).
 
     Inputs are int16-encoded on disk (DEM and water levels in cm) and decoded
-    to float32 m. `friction_scale_factor` (production 0.25, config.yml) is a
-    bare SFINCS-calibrated per-metre rate, not a tuning knob: the solver
-    treats friction as cost per grid step, so it must be scaled by the
-    tile's own grid step in metres (`pixel_size_m`; None = `resolution`)
-    before use - `0.25 x 30` for a DeltaDTM tile (docs/methods_02). Raises
-    MemoryError on OOM.
+    to float32 m. Friction is per metre of path: the land-cover rate times
+    `friction_scale_factor` (calibrated against SFINCS), or the uniform rate. The solver
+    takes the DEM grid's tile-mean cell size in metres (`rasters.grid_spacing_m`), so a
+    degree grid's cells are cos(latitude) narrower than tall. Raises MemoryError on OOM.
     `k` and `idw_power` set the station interpolation of both the coastline seeds and the
     static level.
     `static_stations` = (lonlat, level) from `boundaries.static_station_levels`
@@ -149,22 +146,19 @@ def solve_tile(
     """
     if friction_source not in FRICTION_SOURCES:
         raise ValueError(f"simulation.flooding.friction_source: {friction_source!r} not in {FRICTION_SOURCES}")
-    cell_m = pixel_size_m if pixel_size_m is not None else resolution
     with retry_transient_io(rasterio.open, dem_path) as src:
         dem = decode_dem_cm(src.read(1))
         transform = src.transform
         crs = src.crs
+    cell_dx_m, cell_dy_m = grid_spacing_m(transform, crs, dem.shape[0])
     with retry_transient_io(rasterio.open, mask_path) as src:
         mask = src.read(1)
     uniform_m_per_m = None if uniform_attenuation_m_per_km is None else uniform_attenuation_m_per_km / 1000.0
     if friction_source == "uniform":
-        friction = np.full(dem.shape, uniform_m_per_m * cell_m, dtype=np.float32)
+        friction = np.full(dem.shape, uniform_m_per_m, dtype=np.float32)
     else:
         with retry_transient_io(rasterio.open, friction_path) as src:
-            friction = decode_friction_int16(src.read(1))
-        effective_friction_scale_factor = friction_scale_factor * cell_m
-        if effective_friction_scale_factor != 1.0:
-            friction = friction * effective_friction_scale_factor
+            friction = decode_friction_int16(src.read(1)) * np.float32(friction_scale_factor)
 
     if boundaries_path is not None:
         boundaries = retry_transient_io(gpd.read_file, boundaries_path)
@@ -189,7 +183,7 @@ def solve_tile(
         dem, mask, friction, transform,
         boundaries=boundaries,
         seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
-        resolution=cell_m, k=k, idw_power=idw_power, variable=variable,
+        cell_dx_m=cell_dx_m, cell_dy_m=cell_dy_m, k=k, idw_power=idw_power, variable=variable,
         ocean_code=ocean_code, river_code=river_code,
         obstacle_coupling=obstacle_coupling,
         max_outer_iterations=max_outer_iterations,
@@ -339,7 +333,6 @@ def run_tile_scenario(
     ocean_code: int,
     river_code: int,
     stage_boundaries: bool = False,
-    pixel_size_m: float | None = None,
     static_level_inputs: dict[str, str] | None = None,
     hydrograph_path: str | None = None,
 ) -> dict[str, Any]:
@@ -352,8 +345,7 @@ def run_tile_scenario(
     MemoryError -> OOM marker + nodata. `stage_boundaries` copies the
     GeoPackage to node-local scratch first (HPC). `flooding_config["slr_propagation"]`
     "two_component" builds the static level from `static_level_inputs`
-    (`boundaries.static_level_inputs`); "attenuated" ignores them. `pixel_size_m` is the
-    tile's real DEM pixel size (a local high-res DEM source); None = flooding `resolution`.
+    (`boundaries.static_level_inputs`); "attenuated" ignores them.
     Timing is left to callers.
     Returns {"outcome": "oom_premarked" | "skip_no_inundation" | "oom" | "solved", ...}.
     """
@@ -441,7 +433,6 @@ def run_tile_scenario(
                 boundaries_path=None if hop_distance >= 1 else read_boundaries_path,
                 seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
                 ocean_code=ocean_code, river_code=river_code,
-                pixel_size_m=pixel_size_m,
                 static_stations=static_stations,
                 return_period=int(return_period.removeprefix("RP")),
                 hydrograph_path=hydrograph_path,

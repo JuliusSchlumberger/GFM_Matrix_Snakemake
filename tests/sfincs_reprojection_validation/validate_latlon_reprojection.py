@@ -85,9 +85,22 @@ def test_reprojected_pixel_near_equator_is_nearly_square() -> None:
     print()
 
 
+def test_footprint_across_antimeridian_stays_tile_sized(tmp_path: Path) -> None:
+    # UTM 60N east of 180 E at ~51 N: 6 km wide around the antimeridian.
+    transform = Affine(30.0, 0, 707000.0, 0, -30.0, 5700000.0)
+    arr = np.ones((200, 200), dtype=np.float32)
+    out_path = tmp_path / "antimeridian.tif"
+    reproject_to_4326(arr, transform, "EPSG:32660", out_path)
+    with rasterio.open(out_path) as src:
+        assert src.width < 1000, src.width
+        assert src.bounds.left < 180.0 < src.bounds.right, src.bounds
+        assert np.isclose(src.read(1, masked=True).mean(), 1.0)
+
+
 def main() -> None:
     test_reprojected_pixel_is_latitude_corrected_not_square()
     test_reprojected_pixel_near_equator_is_nearly_square()
+    test_footprint_across_antimeridian_stays_tile_sized(Path(tempfile.mkdtemp()))
     print("All latitude-corrected reprojection validation checks passed.")
 
 
