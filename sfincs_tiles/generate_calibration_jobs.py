@@ -4,9 +4,10 @@ stage1: candidate shards + per-shard screen jobs (line mode: + boundary line and
 bridge job (afterany) that selects tiles and runs `stage2 --submit`.
 --boundary-mode (coast | line) is the SFINCS boundary of run_final_tile.sh; it also sets which
 tiles are eligible (coast: every screened tile; line: a suitable line and a passed pre-flight).
-stage2: spreads unfinished tiles over jobs, longest processing time first, plus a post job
-(afterany) that writes variant_selection.json, the dedup and both analyses.
-post: the post job of a phase alone.
+stage2: spreads unfinished tiles over jobs, longest processing time first, plus the post jobs
+(afterany): --post-shards jobs for the tile drivers and the dedup, then the raw and the dedup
+analysis (variant_selection.json, figures) as two jobs.
+post: the post jobs of a phase alone (--no-dedup: reuse the existing dedup results).
 rerun: resets a finished calibration's tiles in place (`--part models`: one phase of the flood-model
 runs; `--part sfincs`: forcing, SFINCS model build and run, then the sweep) and writes stage 2.
 
@@ -38,6 +39,7 @@ RUN_LOAD = {"sweep": 1.8, "duration": 2.0}
 DONE_MARKER = "calibration_run.done"
 TILE_MARKERS = ("calibration_run.done", "calibration_run.failed", "calibration_run.step")
 FALLBACK_MCELLS = 2.0  # tile without a pre-flight record
+POST_SHARDS = 4  # post jobs sharing the tile drivers and the dedup (I/O-bound: one node each)
 DEFAULT_CONFIG = _HERE.parent / "snakemake_workflow" / "config" / "config.yml"
 
 
@@ -122,24 +124,45 @@ def cmd_stage1(args) -> str:
 
 
 def _add_post_job(chain, linux_config: dict, base_dir_name: str, dedup_dir_name: str, phase: str,
-                  after: list[str]) -> str:
-    """Add the post job of a phase: analysis (variant_selection.json), dedup, dedup analysis.
+                  after: list[str], dedup: bool = True, n_shards: int = POST_SHARDS) -> list[str]:
+    """Add a phase's post jobs; return their names.
 
-    The progress report and the raw analysis must not stop the rest; they run before the dedup,
-    which ends the job when it fails.
+    n_shards jobs each compute their share of the tile drivers and (with `dedup`) of the dedup
+    results. Then, both after all shards, one job writes the progress report and the raw
+    analysis (variant_selection.json, figures; it merges the driver parts) and one the dedup
+    analysis, which stops when a dedup shard did not finish. `dedup` False reuses the existing
+    dedup results.
     """
-    cfg = f"{linux_config['paths']['root']}/{base_dir_name}/resolved_config.yml"
-    name = f"cal_post_{phase}"
-    chain.add(name, "sfincs_post", [
-        f'cd "{linux_config["paths"]["code_root"]}/sfincs_tiles" || exit 1',
+    root = linux_config["paths"]["root"]
+    cfg = f"{root}/{base_dir_name}/resolved_config.yml"
+    cd = f'cd "{linux_config["paths"]["code_root"]}/sfincs_tiles" || exit 1'
+    shards = []
+    for k in range(n_shards):
+        spec, name = f"{k}/{n_shards}", f"cal_post_{phase}_shard{k}"
+        chain.add(name, "sfincs_post", [
+            cd,
+            f'"$GFM_PY" compute_tile_drivers.py --config {cfg} --base-dir-name {base_dir_name} --shard {spec}',
+            *([f'"$SFINCS_PY" compute_calibration_result_dedup.py --config {cfg} --base-dir-name {base_dir_name} '
+               f"--out-dir-name {dedup_dir_name} --shard {spec} || exit 1"] if dedup else []),
+        ], after=after, filename=f"post_{phase}_shard{k}.sbatch", errexit=False)
+        shards.append(name)
+    raw = f"cal_post_{phase}"
+    chain.add(raw, "sfincs_post", [
+        cd,
         f'"$GFM_PY" check_calibration_progress.py --config {cfg} --base-dir-name {base_dir_name}',
         f'"$GFM_PY" run_calibration_sweep_analysis.py --config {cfg} --base-dir-name {base_dir_name}',
-        f'"$SFINCS_PY" compute_calibration_result_dedup.py --config {cfg} --base-dir-name {base_dir_name} '
-        f"--out-dir-name {dedup_dir_name} || exit 1",
+    ], after=shards, filename=f"post_models_{phase}.sbatch", errexit=False)
+    deduped = f"cal_post_{phase}_dedup"
+    guard = [
+        f'n_ok=$(ls {root}/{dedup_dir_name}/dedup_shard_*of{n_shards}.ok 2>/dev/null | wc -l)',
+        f'[ "$n_ok" -eq {n_shards} ] || {{ echo "dedup incomplete: $n_ok of {n_shards} shard(s) finished"; exit 1; }}',
+    ] if dedup else []
+    chain.add(deduped, "sfincs_post", [
+        cd, *guard,
         f'"$GFM_PY" run_calibration_sweep_analysis.py --config {cfg} --base-dir-name {dedup_dir_name} '
         f"--raster-base-dir-name {base_dir_name}",
-    ], after=after, filename=f"post_models_{phase}.sbatch", errexit=False)
-    return name
+    ], after=shards, filename=f"post_models_{phase}_dedup.sbatch", errexit=False)
+    return [*shards, raw, deduped]
 
 
 def cmd_stage2(args) -> str | None:
@@ -193,7 +216,8 @@ def cmd_stage2(args) -> str | None:
         ], filename=f"final_{j:03d}.sbatch", resources={"time": _slurm_hours(hours)}, errexit=False,
             env="sfincs", exports=exports)
     if args.post:
-        _add_post_job(chain, linux_config, args.base_dir_name, args.dedup_dir_name, args.phase, chain.names())
+        _add_post_job(chain, linux_config, args.base_dir_name, args.dedup_dir_name, args.phase, chain.names(),
+                      n_shards=args.post_shards)
     submit = chain.write_submit("submit_all.sh")
     loads.sort()
     print(f"{len(est)} tile(s) to run ({n_done} already done) over {len(loads)} job(s), phase {args.phase}")
@@ -210,7 +234,8 @@ def cmd_post(args) -> str:
     base = read_root(Path(args.config)) / args.base_dir_name
     lout = f"{linux_config['paths']['root']}/{args.base_dir_name}/hpc_jobs_stage2"
     chain = _chain(linux_config, base / "hpc_jobs_stage2", lout)
-    _add_post_job(chain, linux_config, args.base_dir_name, args.dedup_dir_name, args.phase, [])
+    _add_post_job(chain, linux_config, args.base_dir_name, args.dedup_dir_name, args.phase, [], dedup=args.dedup,
+                  n_shards=args.post_shards)
     submit = chain.write_submit(f"submit_post_{args.phase}.sh")
     if args.submit:
         _submit(submit)
@@ -320,7 +345,11 @@ def add_arguments(parser: argparse.ArgumentParser, command: str) -> None:
     parser.add_argument("--phase", choices=["sweep", "duration"], default="sweep",
                         help="run_calibration_models.py phase (CAL_PHASE of run_final_tile.sh)")
     parser.add_argument("--dedup-dir-name", default=None, help="post job: default <base-dir-name>_dedup")
+    parser.add_argument("--post-shards", type=int, default=POST_SHARDS,
+                        help="post jobs splitting the tile drivers and the dedup (each a sfincs_post job)")
     if command == "post":
+        parser.add_argument("--no-dedup", dest="dedup", action="store_false",
+                            help="rerun both analyses on the existing dedup results, without recomputing them")
         return
     parser.add_argument("--n-jobs", type=int, default=20)
     parser.add_argument("--overhead-min", type=float, default=35.0)  # inputs, model build + subgrid, postprocessing

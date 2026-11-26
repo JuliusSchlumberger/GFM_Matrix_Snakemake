@@ -137,17 +137,36 @@ def test_sfincs_stage2_lpt_and_post(tmp_path) -> None:
     base = fx.add_sfincs_stage2(tmp_path)
     args = Namespace(config=str(cfg), base_dir_name=base.name, dedup_dir_name=f"{base.name}_dedup", n_jobs=2, boundary_mode="coast",
                      phase="sweep", overhead_min=35.0, sfincs_min_per_mcell=12.5, eikonal_min_per_mcell=10.0,
-                     time_margin=1.5, post=True, submit=False, profile_set=["sfincs_post.mem=120G"])
+                     time_margin=1.5, post=True, submit=False, profile_set=["sfincs_post.mem=120G"], post_shards=4)
     jobs = _chain(tmp_path, sfincs.cmd_stage2(args))
-    assert list(jobs) == ["cal_final_000", "cal_final_001", "cal_post_sweep"]
+    shards = [f"cal_post_sweep_shard{k}" for k in range(4)]
+    assert list(jobs) == ["cal_final_000", "cal_final_001", *shards, "cal_post_sweep", "cal_post_sweep_dedup"]
     out = base / "hpc_jobs_stage2"
     assert [(out / f"tiles_00{j}.txt").read_text().split() for j in (0, 1)] == [["3"], ["1", "2"]]
-    assert jobs["cal_post_sweep"]["after"] == ["cal_final_000", "cal_final_001"]
+    assert all(jobs[s]["after"] == ["cal_final_000", "cal_final_001"] for s in shards)
+    assert jobs["cal_post_sweep"]["after"] == shards and jobs["cal_post_sweep_dedup"]["after"] == shards
     assert jobs["cal_post_sweep"]["mem"] == "120G"
+    shard2 = (out / "post_sweep_shard2.sbatch").read_text()
+    assert "compute_tile_drivers.py" in shard2 and "--shard 2/4" in shard2 and "compute_calibration_result_dedup.py" in shard2
+    dedup = (out / "post_models_sweep_dedup.sbatch").read_text()
+    assert "dedup_shard_*of4.ok" in dedup and dedup.index("dedup_shard_") < dedup.index("run_calibration_sweep_analysis")
     final = (out / "final_000.sbatch").read_text()
     assert "SFINCS_THREADS" not in final and THREAD_ENV in final  # run_final_tile.sh: the job's cores
     for var in ("GFM_DATA_ROOT", "GFM_CODE_ROOT", "CONTAINER_CMD", "SFINCS_IMAGE", "SFINCS_TIMEOUT_S"):
         assert f"export {var}=" in final
+
+
+def test_sfincs_post_without_dedup_reruns_both_analyses_only(tmp_path) -> None:
+    cfg = fx.make_fixture(tmp_path)
+    base = fx.add_sfincs_stage2(tmp_path)
+    args = Namespace(config=str(cfg), base_dir_name=base.name, dedup_dir_name=f"{base.name}_dedup", phase="sweep",
+                     submit=False, profile_set=[], dedup=False, post_shards=2)
+    jobs = _chain(tmp_path, sfincs.cmd_post(args))
+    out = base / "hpc_jobs_stage2"
+    scripts = "".join(f.read_text() for f in out.glob("post_*.sbatch"))
+    assert list(jobs) == ["cal_post_sweep_shard0", "cal_post_sweep_shard1", "cal_post_sweep", "cal_post_sweep_dedup"]
+    assert "compute_calibration_result_dedup.py" not in scripts and "dedup_shard_" not in scripts
+    assert f"--raster-base-dir-name {base.name}" in (out / "post_models_sweep_dedup.sbatch").read_text()
 
 
 def test_solver_study_lpt_by_pixels(tmp_path) -> None:

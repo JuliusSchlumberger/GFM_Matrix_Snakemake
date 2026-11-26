@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from calibration_paths import SELECTION_NAME  # noqa: E402
 from calibration_results import GROUPS, load_results, metrics_overview, pooled_depth_joint, run_label, tile_table  # noqa: E402
 from flood_agreement import (  # noqa: E402
-    DEPTH_CATEGORY_EDGES, DEPTH_CORR_FINE_EDGES, depth_error_metrics_from_pooled, metrics_from_counts,
+    DEPTH_CATEGORY_EDGES, metrics_from_counts,
 )
 from gfm_config import read_figures_root, read_root  # noqa: E402
 
@@ -53,53 +53,6 @@ def _category_bin_labels(edges: np.ndarray) -> list[str]:
     labels += [f"{lo:.1f}-{hi:.1f}" for lo, hi in zip(edges[:-1], edges[1:])]
     labels.append(f">{edges[-1]:.1f}")
     return labels
-
-
-def plot_depth_correlation(pooled: dict, out_path: Path) -> None:
-    """Plot pooled cell-level depth density heatmaps (0.1 m bins) for each model vs SFINCS."""
-    lo, hi = float(DEPTH_CORR_FINE_EDGES[0]), float(DEPTH_CORR_FINE_EDGES[-1])
-    fig, axes = plt.subplots(1, 2, figsize=(FIG_WIDTH_IN, FIG_WIDTH_IN / 2 + 0.3), layout="constrained")
-    cores = {}
-    for model in ("ref", "model"):
-        joint = pooled[model]
-        if joint["hist_fine"] is not None and joint["n"] > 0:
-            cores[model] = np.log1p(joint["hist_fine"][1:-1, 1:-1])  # drop <0m/>3m catch-all rows/cols
-    vmax = max((c.max() for c in cores.values()), default=1.0)
-    im = None
-    metric_lines = []
-    for letter, ax, model, label in [("a", axes[0], "ref", LABEL["ref"]), ("b", axes[1], "model", LABEL["model"])]:
-        joint = pooled[model]
-        if model not in cores:
-            ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=ax.transAxes, fontsize=7)
-            ax.axis("off")
-            panel_letters(ax, letter, fontsize=8, label=f"{label}: no data")
-            continue
-        m = depth_error_metrics_from_pooled(joint)
-        im = ax.imshow(cores[model].T, origin="lower", extent=[lo, hi, lo, hi],
-                        cmap=SEQUENTIAL_CMAP, vmin=0, vmax=vmax)
-        ax.set_box_aspect(1)
-        ax.plot([lo, hi], [lo, hi], color="white", linestyle=":", linewidth=1)
-        ax.set_xlabel("SFINCS depth (m)", fontsize=7)
-        ax.set_ylabel(f"{label} depth (m)", fontsize=7)
-        ax.tick_params(labelsize=7)
-        panel_letters(ax, letter, fontsize=8, label=f"{label}, n={int(joint['n']):,}, r={m['r']:.3f}")
-        metric_lines.append(f"({letter}) {label}: bias={m['bias_m']:+.2f} m, RMSE={m['rmse_m']:.2f} m.")
-        band_key = [k for k in m if k.startswith("pct_within_")][0]
-        print(f"  {label} depth agreement: n={int(joint['n']):,} r={m['r']:.3f} bias={m['bias_m']:+.3f}m "
-              f"RMSE={m['rmse_m']:.3f}m median_error={m['median_error_m']:+.3f}m {band_key}={m[band_key]:.1f}%")
-
-    if im is not None:
-        fig.colorbar(im, ax=axes, fraction=0.046, pad=0.03, label="log(1 + cell count)")
-    save_figure(fig, out_path)
-    plt.close(fig)
-    write_caption(out_path, [
-        "Cell-level depth agreement against SFINCS, pooled across all tiles - every "
-        "mutually-flooded cell, 0.1 m bins; dotted line is 1:1.",
-        "(a) reference run (connected bathtub) vs SFINCS. (b) model run vs SFINCS. Colour: log(1 + "
-        "cell count), one shared scale across both panels.",
-        *metric_lines,
-    ])
-    print(f"Wrote {out_path}")
 
 
 def plot_depth_category_alignment(pooled: dict, out_path: Path) -> None:
@@ -383,7 +336,6 @@ def main() -> None:
     plot_agreement_vs_tile_size(df, fig_dir / f"agreement_vs_tile_size{sfx}.png")
 
     pooled_depth = {"ref": pooled_depth_joint(results, ref_key), "model": pooled_depth_joint(results, key)}
-    plot_depth_correlation(pooled_depth, fig_dir / f"depth_correlation{sfx}.png")
     plot_depth_category_alignment(pooled_depth, fig_dir / f"depth_category_alignment{sfx}.png")
 
     keys = [e["run_key"] for e in selection["variants"].values()]

@@ -21,6 +21,22 @@ DEPTH_ACCURACY_NAME = "calibration_depth_accuracy.npz"
 _RUN_SUFFIX = f"_waterdepth_{RETURN_PERIOD}_{WATERLEVEL_NAME}.tif"
 
 
+def shard(items: list, spec: str | None) -> list:
+    """Return shard "K/N" of `items` (every N-th item from the K-th, K = 0..N-1); all for None."""
+    if spec is None:
+        return list(items)
+    k, n = (int(v) for v in spec.split("/"))
+    if not 0 <= k < n:
+        raise ValueError(f"shard {spec!r}: need 0 <= K < N")
+    return list(items)[k::n]
+
+
+def shard_marker(out_dir: Path, spec: str) -> Path:
+    """Return the file a finished dedup shard "K/N" leaves in `out_dir`."""
+    k, n = spec.split("/")
+    return out_dir / f"dedup_shard_{k}of{n}.ok"
+
+
 def run_path(out_dir: Path, key: str) -> Path:
     """Return the waterdepth raster path of run `key` (flood_variants.run_key)."""
     return out_dir / f"{key}{_RUN_SUFFIX}"

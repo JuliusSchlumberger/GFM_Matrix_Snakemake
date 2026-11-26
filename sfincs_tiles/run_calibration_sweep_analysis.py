@@ -36,6 +36,7 @@ _REPO_ROOT = _THIS_DIR.parent
 
 sys.path.insert(0, str(_THIS_DIR))
 from calibration_paths import SELECTION_NAME  # noqa: E402
+from compute_tile_drivers import DRIVERS_OWNED_NAME  # noqa: E402
 from gfm_config import read_figures_root, read_root  # noqa: E402
 
 
@@ -93,7 +94,8 @@ def main() -> None:
     _run([python, str(_THIS_DIR / "plot_validation_results.py"), *common, *subset, "--run-key", best])
     if not args.raster_base_dir_name:  # the dedup analysis reads the drivers of its raster base dir
         _run([python, str(_THIS_DIR / "compute_tile_drivers.py"), *common])
-    _run([python, str(_THIS_DIR / "plot_tile_plausibility.py"), *common, *raster])
+    owned = ["--drivers-name", DRIVERS_OWNED_NAME] if args.raster_base_dir_name else []  # dedup scores owned land
+    _run([python, str(_THIS_DIR / "plot_tile_plausibility.py"), *common, *raster, *owned])
     _forcing_checks(python, args, root, best)
 
 

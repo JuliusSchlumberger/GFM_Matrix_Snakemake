@@ -8,9 +8,11 @@ import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "sfincs_tiles"))
-from compute_tile_drivers import tile_drivers  # noqa: E402
+from calibration_paths import shard  # noqa: E402
+from compute_tile_drivers import DRIVER_COLUMNS, read_drivers, tile_drivers  # noqa: E402
 from plot_tile_plausibility import (  # noqa: E402
-    BATHTUB_DRIVERS, EIKONAL_DRIVERS, driver_correlations, plot_driver_scatter, plot_metric_distributions,
+    BATHTUB_DRIVERS, EIKONAL_DRIVERS, driver_correlations, optimum_summary, per_tile_optimum, plot_driver_scatter,
+    plot_metric_distributions, plot_optimum_drivers, plot_optimum_gain,
 )
 
 
@@ -44,21 +46,22 @@ def test_land_behind_a_ridge_is_not_in_the_bathtub_zone() -> None:
     assert tile_drivers(**tile)["bathtub_zone_km2"] < 0.05 * open_zone
 
 
-def test_coast_above_the_peak_level_does_not_overtop_and_halves_the_inflow() -> None:
+def test_coast_above_the_peak_level_does_not_overtop() -> None:
     tile = _ramp_tile(0.05)
     full = tile_drivers(**tile)
     tile["dem_m"][:25, 10] = 5.0
     half = tile_drivers(**tile)
     assert np.isclose(full["overtop_coast_pct"], 100.0)
     assert np.isclose(half["overtop_coast_pct"], 50.0, atol=2.0)
-    assert half["storage_to_inflow_ratio"] > 1.5 * full["storage_to_inflow_ratio"]
 
 
-def test_longer_storm_lowers_storage_to_inflow_ratio() -> None:
-    tile = _ramp_tile(0.05)
-    short = tile_drivers(**tile)["storage_to_inflow_ratio"]
-    tile["hydrograph_dt_s"] = 1200.0
-    assert np.isclose(tile_drivers(**tile)["storage_to_inflow_ratio"], short / 2)
+def test_low_land_behind_an_overtopped_sill_counts_as_enclosed() -> None:
+    tile = _ramp_tile(0.0)
+    tile["dem_m"][:, 10:] = 0.5
+    assert tile_drivers(**tile)["enclosed_pct"] == 0.0
+    tile["dem_m"][:, 15] = 1.5  # sill below the 2 m peak: the land behind it is still in the bathtub zone
+    enclosed = tile_drivers(**tile)["enclosed_pct"]
+    assert np.isclose(enclosed, 100 * 84 / 90, atol=1.0)
 
 
 def test_a_surge_plateau_holds_the_peak_longer_than_repeated_high_tides() -> None:
@@ -70,6 +73,22 @@ def test_a_surge_plateau_holds_the_peak_longer_than_repeated_high_tides() -> Non
     tidal = tile_drivers(**tile)["peak_hold_h"]
     tile["hydrographs_m"] = np.column_stack([plateau] * 3)
     assert tile_drivers(**tile)["peak_hold_h"] > 3 * tidal > 0
+
+
+def test_owned_area_counts_only_owned_cells_but_keeps_connectivity() -> None:
+    tile = _ramp_tile(0.05)
+    tile["mask"][:, 60:62] = 3  # a river across the north and south halves
+    whole = tile_drivers(**tile)
+    owned = np.zeros(tile["mask"].shape, dtype=bool)
+    owned[:25] = True  # the tile owns the northern half only
+    half = tile_drivers(**tile, owned=owned)
+    assert np.isclose(half["coast_km"], whole["coast_km"] / 2)
+    assert np.isclose(half["bathtub_zone_km2"], whole["bathtub_zone_km2"] / 2)
+    assert np.isclose(half["river_pct"], whole["river_pct"]) and whole["river_pct"] > 0
+    assert half["surge_range_m"] == whole["surge_range_m"]
+    tile["dem_m"][25:, 10:] = 0.5
+    tile["dem_m"][25:, 15] = 1.5  # a sill in the unowned half does not change the owned half
+    assert tile_drivers(**tile, owned=owned)["enclosed_pct"] == half["enclosed_pct"] == 0.0
 
 
 def test_lake_share_counts_lake_cells() -> None:
@@ -84,8 +103,7 @@ def _synthetic_runs(n: int = 60) -> tuple[pd.DataFrame, pd.DataFrame]:
                             "reach_km": rng.uniform(0.01, 3, n), "friction_m_per_km": rng.uniform(0.1, 2, n),
                             "surge_range_m": rng.uniform(0.5, 4, n), "peak_level_spread_m": rng.uniform(0, 2, n),
                             "lake_pct": rng.uniform(0, 3, n), "overtop_coast_pct": rng.uniform(0, 100, n),
-                            "storage_to_inflow_ratio": rng.uniform(0.01, 10, n), "abs_lat_deg": rng.uniform(0, 70, n),
-                            "peak_hold_h": rng.uniform(1, 20, n)})
+                            "enclosed_pct": rng.uniform(0, 60, n), "peak_hold_h": rng.uniform(1, 20, n)})
     rows = []
     for key, over in (("bathtub_connected", 3.0), ("eikonal_landcover_fsf0.3", 1.0)):
         sfincs = rng.uniform(5, 50, n)
@@ -116,3 +134,50 @@ def test_plausibility_figures_render_and_rank_the_planted_driver_first(tmp_path:
     for t in (table, eik):
         top = t.loc[t.groupby("variant").partial_spearman_rho.idxmax(), "driver"]
         assert set(top) == {"river_pct"}
+
+
+def _sweep(n: int = 40) -> pd.DataFrame:
+    # Tile i is best at grid value i % 3 (0.05, 0.1, 0.2); the global value 0.1 is best overall.
+    rows = []
+    for i in range(n):
+        best = [0.05, 0.1, 0.2][i % 3]
+        for p in (0.05, 0.1, 0.2):
+            csi = 0.8 - 0.3 * abs(np.log2(p / best))
+            matched = 100 * csi
+            rows.append({"tile_id": i, "group": "calibration" if i % 2 else "validation",
+                         "variant": "eikonal_uniform_cap", "parameter": p, "matched_km2": matched,
+                         "model_only_km2": (100 - matched) / 2, "sfincs_only_km2": (100 - matched) / 2, "CSI": csi})
+    return pd.DataFrame(rows)
+
+
+def test_per_tile_optimum_finds_each_tiles_best_value_and_its_gain(tmp_path: Path) -> None:
+    sweep = _sweep()
+    opt = per_tile_optimum(sweep, "eikonal_uniform_cap", 0.1, 1.0)
+    expect = np.array([[0.05, 0.1, 0.2][i % 3] for i in opt["tile_id"]])
+    assert np.array_equal(opt["best_value"].to_numpy(), expect)
+    assert (opt.loc[opt["best_value"] == 0.1, "cls"] == "same").all()
+    assert set(opt.loc[opt["best_value"] == 0.05, "cls"]) == {"lower"}
+    assert np.allclose(opt.loc[opt["best_value"] != 0.1, "gain"], 0.3)
+    summary = optimum_summary(sweep, opt)
+    assert (summary["CSI_per_tile_best"] > summary["CSI_global"]).all()
+    plot_optimum_gain(opt, summary, sweep, tmp_path / "gain.png")
+    drivers = pd.DataFrame({"tile_id": opt["tile_id"], **{d[0]: np.linspace(0.1, 10, len(opt)) for d in EIKONAL_DRIVERS}})
+    rho = plot_optimum_drivers(opt, drivers, tmp_path / "opt_drivers.png")
+    assert (tmp_path / "gain.png").exists() and (tmp_path / "opt_drivers.txt").exists()
+    assert len(rho) == len(EIKONAL_DRIVERS)
+
+
+def test_shards_split_the_tiles_without_overlap_or_gap() -> None:
+    tiles = list(range(10))
+    parts = [shard(tiles, f"{k}/4") for k in range(4)]
+    assert sorted(sum(parts, [])) == tiles and parts[1] == [1, 5, 9]
+    assert shard(tiles, None) == tiles
+
+
+def test_read_drivers_joins_shard_parts_and_ignores_outdated_files(tmp_path: Path) -> None:
+    row = {c: 1.0 for c in DRIVER_COLUMNS}
+    pd.DataFrame([{"tile_id": 1, **row}]).to_csv(tmp_path / "tile_drivers.csv", index=False)
+    pd.DataFrame([{"tile_id": 2, **row}]).to_csv(tmp_path / "tile_drivers.part0of2.csv", index=False)
+    pd.DataFrame([{"tile_id": 3, "coast_km": 1.0}]).to_csv(tmp_path / "tile_drivers.part1of2.csv", index=False)
+    assert list(read_drivers(tmp_path)["tile_id"]) == [1, 2]
+    assert read_drivers(tmp_path / "missing").empty

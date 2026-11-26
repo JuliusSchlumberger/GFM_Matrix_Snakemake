@@ -9,7 +9,9 @@ Usage:
     python compute_calibration_result_dedup.py --config <config.yml> \\
         --base-dir-name calibration_roughness_SFINCS \\
         --out-dir-name calibration_roughness_SFINCS_dedup \\
-        [--tile-id 1122] [--workers 8]
+        [--tile-id 1122] [--workers 8] [--shard 0/4]
+A shard "K/N" processes every N-th tile from the K-th and, when none fails, leaves
+dedup_shard_KofN.ok in the out dir (the post job's analysis waits for all N).
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ import rasterio
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from calibration_paths import shard, shard_marker  # noqa: E402
 from compute_calibration_result import DEFAULT_CATALOG, compute_result, population_path, write_result  # noqa: E402
 from sfincs_grid import core_mask, load_footprints  # noqa: E402
 from gfm_config import read_root  # noqa: E402
@@ -62,6 +65,7 @@ def main() -> None:
     parser.add_argument("--tile-id", default=None, help="single tile only (default: every tile in tile_ids.txt)")
     parser.add_argument("--workers", type=int, default=None, help="default: every core this process may use (the job's allocation)")
     parser.add_argument("--catalog", default=str(DEFAULT_CATALOG), help="data catalog holding the population raster")
+    parser.add_argument("--shard", default=None, metavar="K/N", help="every N-th tile from the K-th (K = 0..N-1)")
     args = parser.parse_args()
     args.workers = args.workers or available_cpus()
 
@@ -78,7 +82,9 @@ def main() -> None:
     if args.tile_id:
         tile_list = [args.tile_id]
     else:
-        tile_list = (base_dir / "tile_ids.txt").read_text().split()
+        tile_list = shard(sorted((base_dir / "tile_ids.txt").read_text().split(), key=int), args.shard)
+    if args.shard:
+        shard_marker(out_base_dir, args.shard).unlink(missing_ok=True)
     print(f"{len(tile_list)} tile(s) to process -> {out_base_dir}", flush=True)
 
     flooding = config["simulation"]["flooding"]
@@ -113,6 +119,8 @@ def main() -> None:
     if failed:
         print("Failed tiles:", ", ".join(t for t, _ in failed[:40]) + (" ..." if len(failed) > 40 else ""))
         sys.exit(1)
+    if args.shard:
+        shard_marker(out_base_dir, args.shard).write_text(time.strftime("%Y-%m-%d %H:%M:%S\n"))
 
 
 if __name__ == "__main__":

@@ -147,7 +147,8 @@ def test_rerun_models_keeps_runs_and_clears_stale_job_files(tmp_path, submitted)
     assert not (jobs / "final_007.sbatch").exists() and not (jobs / "tiles_007.txt").exists()
     assert submitted == [submit]
     names = list(fx.jobs(jobs / "submit_all.sh"))
-    assert names == ["cal_final_000", "cal_final_001", "cal_post_sweep"]
+    assert names == ["cal_final_000", "cal_final_001", *(f"cal_post_sweep_shard{k}" for k in range(sfincs.POST_SHARDS)),
+                     "cal_post_sweep", "cal_post_sweep_dedup"]
 
 
 def test_rerun_models_reset_runs(tmp_path, submitted) -> None:

@@ -1,9 +1,9 @@
-"""Plot depth accuracy and extent agreement vs SFINCS across each swept variant's runs (report only).
+"""Plot depth accuracy vs SFINCS: per swept run, and for the selected runs as tolerances by depth class.
 
-Reads {base}/variant_runs_depth_accuracy.csv and variant_runs_pooled.csv (compute_variant_metrics.py)
-and writes {base}/figures/depth_accuracy_by_run[_<group>].png: per variant with more than one run,
-against its friction value (alpha for the duration variants), the share of SFINCS-wet cells within
-10/20/50 cm, the bias per SFINCS depth class on both-wet cells, and CSI. The selected run is marked.
+depth_accuracy_by_run[_<group>].png (variant_runs_depth_accuracy.csv, variant_runs_pooled.csv): per
+variant with more than one run, against its parameter, the share of SFINCS-wet cells within 10/20/50 cm,
+the bias per SFINCS depth class and CSI. depth_tolerance.png (the tiles' depth-difference histograms):
+for the selected runs, which depth tolerance the model meets, by SFINCS depth class and per tile.
 
 Usage:
     python plot_depth_accuracy.py --base-dir-name calibration_roughness_SFINCS [--group calibration]
@@ -20,28 +20,41 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from calibration_paths import SELECTION_NAME  # noqa: E402
-from calibration_results import DISPLAY_LABEL, GROUPS  # noqa: E402
+from calibration_paths import DEPTH_ACCURACY_NAME, SELECTION_NAME  # noqa: E402
+from calibration_results import DISPLAY_LABEL, GROUPS, RESULT_NAME  # noqa: E402
+from flood_agreement import DIFF_EDGES, SFINCS_CLASS_LABELS, diff_stats  # noqa: E402
 from gfm_config import read_figures_root, read_root  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analysis"))
-from _figure_style import DOUBLE_COLUMN_MM, MM_PER_INCH, apply_style, panel_letters, save_figure, write_caption  # noqa: E402
+from _figure_style import DOUBLE_COLUMN_MM, MM_PER_INCH, MUTED, apply_style, panel_letters, save_figure, write_caption  # noqa: E402
 
 TAU_COLORS = {0.1: "#9ecae1", 0.2: "#4292c6", 0.5: "#08306b"}
 BIAS_CLASSES = {"0.1-0.3": "#fdae6b", "0.5-1": "#e6550d", "2-3": "#7f2704"}
 WEIGHT_STYLE = {"area": "-", "pop": "--"}
+SHORT_LABEL = {"straight_line": "Straight line", "straight_line_cap": "Straight line + cap",
+               "eikonal_uniform": "Eik. uniform", "eikonal_landcover": "Eik. land-cover",
+               "eikonal_uniform_cap": "Eik. uniform + cap", "eikonal_landcover_cap": "Eik. land-cover + cap",
+               "eikonal_uniform_duration": "Eik. uniform + dur.", "eikonal_landcover_duration": "Eik. land-cover + dur.",
+               "bathtub_connected": "Connected bathtub"}
+TOLERANCE_VARIANTS = ("eikonal_uniform_cap", "eikonal_landcover_cap", "bathtub_connected")
+TOLERANCE_STYLE = {"eikonal_uniform_cap": ("#0072B2", "-"), "eikonal_landcover_cap": ("#CC79A7", "--"),
+                   "bathtub_connected": ("#E69F00", ":")}
+TOLERANCE_GRID_M = np.round(np.arange(0.0, 1.0001, 0.01), 2)
+REFERENCE_TOLERANCES_M = (0.1, 0.2, 0.5)
+MIN_SFINCS_WET_KM2 = 1.0  # tiles in the per-tile panel
 
 
 def swept_axis(variant: str) -> tuple[str, str]:
     if variant.endswith("_duration"):
-        return "alpha", "duration exponent alpha"
+        return "alpha", "Duration exponent"
     if "landcover" in variant:
-        return "parameter", "friction scale factor (per m)"
-    return "parameter", "attenuation rate (m/km)"
+        return "parameter", "fsf"
+    return "parameter", "Rate (m/km)"
 
 
 def plot(depth: pd.DataFrame, pooled: pd.DataFrame, selection: dict, group: str, out: Path) -> None:
@@ -75,7 +88,7 @@ def plot(depth: pd.DataFrame, pooled: pd.DataFrame, selection: dict, group: str,
                 ax.axvline(chosen[col], color="#bdbdbd", lw=1.0, zorder=0)
         for row, ax in enumerate(axes[:, j]):
             letter = "abcdefghijklmnopqrstuvwxyz"[row * len(variants) + j]
-            panel_letters(ax, letter, fontsize=8, label=DISPLAY_LABEL[variant] if row == 0 else None)
+            panel_letters(ax, letter, fontsize=6.5, label=SHORT_LABEL.get(variant, variant) if row == 0 else None)
         axes[2, j].set_xlabel(xlabel, fontsize=7)
     axes[0, 0].set(ylabel="share of SFINCS-wet cells within", ylim=(0, 1))
     axes[1, 0].set_ylabel("bias, eikonal - SFINCS (m)\nboth-wet cells, by SFINCS depth")
@@ -100,6 +113,136 @@ def plot(depth: pd.DataFrame, pooled: pd.DataFrame, selection: dict, group: str,
     print(f"wrote {out}")
 
 
+def tolerance_label(variant: str, entry: dict) -> str:
+    """Return the legend label of a selected run, e.g. "Eik. uniform + cap (rate 0.1)"."""
+    if entry.get("parameter") is None:
+        return SHORT_LABEL[variant]
+    return f"{SHORT_LABEL[variant]} ({'fsf' if 'landcover' in variant else 'rate'} {entry['parameter']:g})"
+
+
+def load_tolerance_hists(base_dir: Path, run_keys: dict[str, str]) -> tuple[dict, pd.DataFrame]:
+    """Pool the selected runs' depth-difference histograms over tiles; also each tile's own stats.
+
+    Returns ({variant: {weight: (CELL_KINDS, classes, bins) histogram}}, per-tile frame with the
+    SFINCS-wet area and the 80 % tolerance of every run over the tile's SFINCS-wet cells).
+    """
+    pooled: dict = {v: {} for v in run_keys}
+    rows = []
+    for path in sorted(base_dir.glob(f"*/outputs/{DEPTH_ACCURACY_NAME}")):
+        if not (path.parent / RESULT_NAME).exists():  # histograms left by an unfinished rerun
+            continue
+        tile = path.parent.parent.name
+        with np.load(path) as hists:
+            for variant, key in run_keys.items():
+                for weight in ("area", "pop"):
+                    name = f"{key}__{weight}"
+                    if name not in hists.files:
+                        continue
+                    h = hists[name]
+                    pooled[variant][weight] = pooled[variant].get(weight, 0) + h
+                    if weight == "area":
+                        reference = (h[0] + h[1]).sum(axis=0)
+                        rows.append({"tile_id": int(tile), "variant": variant, "sfincs_wet_km2": float(reference.sum()),
+                                     **{k: v for k, v in diff_stats(reference).items() if k != "n"}})
+    return pooled, pd.DataFrame(rows)
+
+
+def _hist_quantiles(hist: np.ndarray, qs: tuple[float, ...]) -> np.ndarray:
+    # 1 cm bins of DIFF_EDGES plus catch-alls, placed just beyond -3 / +3 m.
+    centres = np.concatenate([[DIFF_EDGES[0] - 0.005], (DIFF_EDGES[:-1] + DIFF_EDGES[1:]) / 2, [DIFF_EDGES[-1] + 0.005]])
+    cum = np.cumsum(hist) / hist.sum()
+    return np.array([centres[min(np.searchsorted(cum, q), len(centres) - 1)] for q in qs])
+
+
+def _share_within(hist: np.ndarray, taus: np.ndarray) -> np.ndarray:
+    inner = hist[1:-1]
+    reach = np.maximum(np.abs(DIFF_EDGES[:-1]), np.abs(DIFF_EDGES[1:]))
+    return np.array([inner[reach <= tau + 1e-9].sum() for tau in taus]) / hist.sum()
+
+
+def tolerance_table(pooled: dict) -> pd.DataFrame:
+    """Return diff_stats per selected run, weight and SFINCS depth class over all SFINCS-wet cells."""
+    rows = []
+    for variant, by_weight in pooled.items():
+        for weight, h in by_weight.items():
+            reference = h[0] + h[1]
+            for label, hc in [*zip(SFINCS_CLASS_LABELS, reference), ("all", reference.sum(axis=0))]:
+                rows.append({"variant": variant, "weight": weight, "sfincs_class_m": label, **diff_stats(hc)})
+    return pd.DataFrame(rows)
+
+
+def plot_depth_tolerance(pooled: dict, per_tile: pd.DataFrame, labels: dict[str, str], out: Path) -> None:
+    """Plot which depth tolerance the selected runs meet against SFINCS, by depth class and per tile."""
+    variants = [v for v in TOLERANCE_VARIANTS if pooled.get(v)]
+    fig, axes = plt.subplots(2, 2, figsize=(DOUBLE_COLUMN_MM / MM_PER_INCH, 5.2), layout="constrained")
+    ax = axes[0, 0]
+    width = 0.8 / len(variants)
+    lo, hi = 0.0, 0.0
+    for k, v in enumerate(variants):
+        color, _ = TOLERANCE_STYLE[v]
+        reference = pooled[v]["area"][0] + pooled[v]["area"][1]
+        for c, hc in enumerate(reference):
+            if hc.sum() <= 0:
+                continue
+            q5, q25, q50, q75, q95 = _hist_quantiles(hc, (0.05, 0.25, 0.5, 0.75, 0.95))
+            lo, hi = min(lo, q5), max(hi, q95)
+            x = c - 0.4 + width * (k + 0.5)
+            ax.plot([x, x], [q5, q95], color=color, linewidth=0.7)
+            ax.add_patch(plt.Rectangle((x - width * 0.4, q25), width * 0.8, q75 - q25, facecolor=color, alpha=0.6,
+                                       edgecolor=color, linewidth=0.5))
+            ax.plot([x - width * 0.4, x + width * 0.4], [q50, q50], color="black", linewidth=0.8)
+    ax.axhline(0, color=MUTED, linewidth=0.6)
+    ax.set_xticks(range(len(SFINCS_CLASS_LABELS)), SFINCS_CLASS_LABELS, fontsize=7)
+    ax.set_xlim(-0.6, len(SFINCS_CLASS_LABELS) - 0.4)
+    ax.set_ylim(max(lo - 0.1, -3.1), min(hi + 0.1, 3.1))
+    ax.set(xlabel="SFINCS depth (m)", ylabel="Depth error, model - SFINCS (m)")
+    panel_letters(ax, "a", fontsize=8)
+    for ax, weight, letter, ylabel in ((axes[0, 1], "area", "b", "Share of SFINCS-flooded area"),
+                                       (axes[1, 0], "pop", "c", "Share of people in SFINCS-flooded cells")):
+        for v in variants:
+            if weight not in pooled[v]:
+                continue
+            color, ls = TOLERANCE_STYLE[v]
+            h = (pooled[v][weight][0] + pooled[v][weight][1]).sum(axis=0)
+            ax.plot(TOLERANCE_GRID_M, _share_within(h, TOLERANCE_GRID_M), color=color, linestyle=ls, linewidth=1.2,
+                    label=labels[v])
+        for tau in REFERENCE_TOLERANCES_M:
+            ax.axvline(tau, color=MUTED, linewidth=0.5, linestyle=":")
+        ax.axhline(0.8, color=MUTED, linewidth=0.5, linestyle=":")
+        ax.set(xlim=(0, 1), ylim=(0, 1), xlabel="Depth tolerance (m)", ylabel=ylabel)
+        panel_letters(ax, letter, fontsize=8)
+    axes[0, 1].legend(frameon=False, fontsize=7, loc="lower right")
+    ax = axes[1, 1]
+    for v in variants:
+        color, ls = TOLERANCE_STYLE[v]
+        tau80 = np.sort(per_tile.loc[(per_tile["variant"] == v) & (per_tile["sfincs_wet_km2"] >= MIN_SFINCS_WET_KM2),
+                                     "tau80_abs_m"].dropna().to_numpy())
+        ax.plot(tau80, np.arange(1, tau80.size + 1) / max(tau80.size, 1), color=color, linestyle=ls, linewidth=1.2)
+    for tau in REFERENCE_TOLERANCES_M:
+        ax.axvline(tau, color=MUTED, linewidth=0.5, linestyle=":")
+    ax.set(xlim=(0, 1.5), ylim=(0, 1), xlabel="Tolerance met by 80 % of the tile's flooded area (m)",
+           ylabel="Share of tiles")
+    panel_letters(ax, "d", fontsize=8)
+    save_figure(fig, out)
+    plt.close(fig)
+    n_tiles = per_tile.loc[per_tile["sfincs_wet_km2"] >= MIN_SFINCS_WET_KM2, "tile_id"].nunique()
+    write_caption(out, [
+        "Depth agreement with SFINCS sets the depth classes a depth-damage curve can use: read off the tolerance "
+        "that 80 % of the flooded area (or people) meets.",
+        "All cells SFINCS floods (> 0.10 m) on SFINCS-active land, pooled over tiles; a cell the model leaves dry "
+        "counts with its own sub-threshold depth, so missed flooding is an error of about minus the SFINCS depth. "
+        "Runs: " + "; ".join(labels[v] for v in variants) + " (colour and line style as in the legend of b).",
+        "(a) Depth error by SFINCS depth class, area-weighted: box = interquartile range, line = median, "
+        "whiskers = 5-95 %. (b, c) Share of SFINCS-flooded area (b) and of the people living in it (c, WorldPop) "
+        "whose depth error is at most the tolerance on the x axis; dotted: 10, 20 and 50 cm and 80 %. "
+        f"(d) Per tile (n = {n_tiles} with at least {MIN_SFINCS_WET_KM2:g} km2 SFINCS-flooded), the tolerance "
+        "met by 80 % of its flooded area: the spread between places.",
+        "Agreement is relative to SFINCS on the same DEM and forcing (RP100); DEM error against reality adds to "
+        "it. Per-class numbers: depth_tolerance.csv.",
+    ])
+    print(f"wrote {out}")
+
+
 def main() -> None:
     repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -119,6 +262,18 @@ def main() -> None:
     sfx = "" if args.group == "calibration" else f"_{args.group}"
     plot(depth[depth.group == args.group], pooled[pooled.group == args.group], selection, args.group,
          fig_dir / f"depth_accuracy_by_run{sfx}.png")
+
+    entries = selection.get("variants") or {}
+    run_keys = {v: entries[v]["run_key"] for v in TOLERANCE_VARIANTS if v in entries}
+    if not run_keys:
+        print("no selected run of the tolerance variants: no depth_tolerance figure")
+        return
+    hists, per_tile = load_tolerance_hists(base_dir, run_keys)
+    labels = {v: tolerance_label(v, entries[v]) for v in run_keys}
+    table = tolerance_table(hists)
+    table.to_csv(fig_dir / "depth_tolerance.csv", index=False)
+    per_tile.to_csv(fig_dir / "depth_tolerance_per_tile.csv", index=False)
+    plot_depth_tolerance(hists, per_tile, labels, fig_dir / "depth_tolerance.png")
 
 
 if __name__ == "__main__":
