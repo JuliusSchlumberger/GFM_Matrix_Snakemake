@@ -39,7 +39,8 @@ from rasterio.warp import Resampling, reproject, transform_bounds
 from shapely.geometry import box
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
+from config_utils import get_data_catalog, load_config  # noqa: E402
+from merge import open_depth  # noqa: E402
 import validation as v  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -101,7 +102,7 @@ def _category_and_metrics_local(
     raster_path = native_dir / f"waterdepth_{rp}_{slr}.vrt"
 
     tp = fp = fn = tn = 0.0
-    with retry_transient_io(rasterio.open, raster_path) as src:
+    with open_depth(raster_path) as src:
         native_crs = src.crs
         pixel_area_km2 = abs(src.transform.a * src.transform.e) / 1e6
         region_bbox_native = transform_bounds("EPSG:4326", native_crs, *region_bbox)
@@ -184,7 +185,7 @@ def _category_and_metrics_global(
     pieces = []  # (category_block, transform) - mosaicked below
     tp = fp = fn = tn = 0.0
     for chunk_path in chunk_paths:
-        with retry_transient_io(rasterio.open, chunk_path) as src:
+        with open_depth(chunk_path) as src:
             window = rasterio.windows.from_bounds(*region_bbox, transform=src.transform)
             window = window.intersection(rasterio.windows.Window(0, 0, src.width, src.height))
             window = window.round_offsets().round_lengths()

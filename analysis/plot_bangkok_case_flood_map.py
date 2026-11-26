@@ -26,6 +26,7 @@ from rasterio.windows import from_bounds
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import get_data_catalog, load_config, merged_waterlevel_names, retry_transient_io  # noqa: E402
+from merge import open_depth  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _BUFFER_DEG = 0.15
@@ -100,7 +101,7 @@ def main() -> None:
         if not vrt_path.exists():
             ax.set_title(f"{slr}\n(missing)")
             continue
-        with retry_transient_io(rasterio.open, vrt_path) as src:
+        with open_depth(vrt_path) as src:
             window = from_bounds(*bounds, transform=src.transform)
             data = src.read(1, window=window, boundless=True, fill_value=src.nodata or 0.0)
             nodata = src.nodata

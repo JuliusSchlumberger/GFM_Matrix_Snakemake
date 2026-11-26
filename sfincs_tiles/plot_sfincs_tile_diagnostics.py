@@ -60,7 +60,7 @@ MASK_LABELS = ["inactive", "active", "waterlevel boundary"]
 FIGURES = ["mask", "boundary_forcing", "biggest_disagreement", "coastrp_forcing"]
 # Profile panels. COAST-RP stations sit up to ~6 km off the DeltaDTM coastline on mudflat coasts.
 NEAREST_MAX_KM = 10.0  # max station -> nearest coastline cell (the comparison point)
-SAME_POINT_MAX_KM = 1.5  # max comparison point -> wet SFINCS cell; 0.5 km missed mangrove/river-mouth cells
+SAME_POINT_MAX_KM = 1.5  # SFINCS cells within this of the comparison point; 0.5 km missed mangrove/river-mouth cells
 STATION_OCEAN_TOL_M = 2000.0  # same as build_station_boundary_lines.py
 PREFIXED_FIGURE_NAMES = {"coastrp_forcing": "forcing_comparison"}  # --out-prefix file names
 
@@ -327,7 +327,13 @@ def _zsmax_lonlat(sfincs_dir: Path, crs: str):
     import xarray as xr
     with xr.open_dataset(map_path) as ds:
         z = ds["zsmax"].values.reshape(ds["zsmax"].shape[-2:])
+        msk = ds["msk"].values
         cx, cy = ds["corner_x"].values, ds["corner_y"].values
+    # A boundary cell that touches active cells only diagonally exchanges no water: SFINCS never
+    # updates it, and its zsmax is the start level.
+    active = np.pad(msk == ACTIVE, 1)
+    face = active[:-2, 1:-1] | active[2:, 1:-1] | active[1:-1, :-2] | active[1:-1, 2:]
+    z = np.where((msk == ACTIVE) | ((msk == BOUNDARY) & face), z, np.nan)
     cx = 0.25 * (cx[:-1, :-1] + cx[1:, :-1] + cx[:-1, 1:] + cx[1:, 1:])
     cy = 0.25 * (cy[:-1, :-1] + cy[1:, :-1] + cy[:-1, 1:] + cy[1:, 1:])
     ok = np.isfinite(z)
@@ -349,9 +355,10 @@ def _land_sea_background(ax, ctx: dict) -> None:
 
 
 def _profile_panel(ax, ctx: dict, zsmax_lonlat, bzs, letter: str, title: str | None = None) -> None:
-    # Eikonal seed and SFINCS zsmax are both read at one comparison point per station
-    # (its nearest coastline cell); the 120 m SFINCS grid does not line up with the 1"
-    # cells. A missing SFINCS value means SFINCS never got wet there.
+    # Eikonal seed and SFINCS zsmax are both read at one comparison point per station (its
+    # nearest coastline cell). SFINCS: the highest zsmax within SAME_POINT_MAX_KM, so a land
+    # or intertidal cell beside the coast does not stand in for the sea level; missing: no
+    # wet SFINCS cell that close.
     idx, dist_km, st_lon, st_lat = ctx["idx"], ctx["dist_km"], ctx["st_lon"], ctx["st_lat"]
     if len(idx) == 0:
         ax.text(0.5, 0.5, "no COAST-RP station inside the tile", ha="center", va="center", transform=ax.transAxes)
@@ -374,10 +381,10 @@ def _profile_panel(ax, ctx: dict, zsmax_lonlat, bzs, letter: str, title: str | N
             label=f"eikonal coastline seed (IDW k={ctx['knn']}) at the comparison point")
     zlon, zlat, zs = zsmax_lonlat
     if zs is not None:
-        d_z, j_z = cKDTree(km(zlon, zlat)).query(point_xy)
-        zs_at = np.where(has_point & (d_z <= SAME_POINT_MAX_KM), zs[j_z], np.nan)
+        near = cKDTree(km(zlon, zlat)).query_ball_point(point_xy, SAME_POINT_MAX_KM)
+        zs_at = np.array([zs[j].max() if ok and j else np.nan for j, ok in zip(near, has_point)])
         ax.plot(dist_km, zs_at, "^-", color=SFINCS_COLOR, linewidth=2,
-                label="SFINCS peak water level zsmax at the same point")
+                label=f"SFINCS peak water level zsmax, highest within {SAME_POINT_MAX_KM:g} km of the point")
     if bzs is not None:
         for k in range(bzs.shape[1] - 1):
             ax.axhline(bzs[:, k + 1].max(), color=SFINCS_COLOR, linestyle=":", linewidth=1,

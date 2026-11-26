@@ -20,6 +20,9 @@ friction against the hydrodynamic model SFINCS.
 | Adaptation pathways, tipping points, figures | country / continent / global | `<data_root>/figures/` |
 | Validation scores (HR, FAR, CSI, bias) | per benchmark region | `<data_root>/validation/` |
 
+Flood depth rasters store int16 centimetres (nodata 32767, band scale 0.01, so GIS shows metres);
+in code, read them in metres with `merge.open_depth`.
+
 Scenarios: return periods 2, 5, 10, 25, 50, 100, 250, 500 and 1000 years; sea-level-rise levels
 0, 0.5, 1.0, 1.5 and 2.0 m on top of present-day storm tide (`boundary_conditions.storm_tide_source`:
 the gauge-corrected GTSM-ERA5 + FES product, or COAST-RP), with spatial fingerprints

@@ -7,7 +7,8 @@ every deltadtm-sourced tile. A local-input source in its own projected native CR
 (e.g. England's EPSG:27700 LIDAR) instead uses `merge_native_chunk`, scored
 against a national benchmark directly in that native CRS (TODO.md) rather than
 reprojecting the merged raster onto the global grid. EIKONAL_NODATA marks cells
-the eikonal model did not compute; 0.0 means computed, not flooded.
+the eikonal model did not compute; 0.0 means computed, not flooded. Merged depth is
+written as int16 centimetres; read it with `open_depth`.
 """
 
 from __future__ import annotations
@@ -42,6 +43,77 @@ def decode_waterdepth_array(raw: np.ndarray) -> np.ndarray:
     patch = raw.astype(np.float32) / WATERDEPTH_SCALE
     patch[raw == WATERDEPTH_NODATA_INT16] = EIKONAL_NODATA
     return patch
+
+
+# Merged depth is stored like the per-tile rasters (int16 cm, WATERDEPTH_NODATA_INT16), with a
+# 0.01 band scale for GIS. DepthRaster reads it as float32 metres with this nodata, the value
+# float32 merged rasters written before carry, so readers handle both alike.
+MERGED_NODATA_M = -9999.0
+PROVENANCE_DTYPE = "int16"
+
+
+def is_cm_depth(src: rasterio.DatasetReader) -> bool:
+    """Return whether `src` stores water depth as int16 centimetres."""
+    return src.dtypes[0] == "int16" and src.nodata == WATERDEPTH_NODATA_INT16
+
+
+def _cm_to_m(raw: np.ndarray) -> np.ndarray:
+    depth = raw.astype(np.float32) / np.float32(WATERDEPTH_SCALE)
+    depth[raw == WATERDEPTH_NODATA_INT16] = MERGED_NODATA_M
+    return depth
+
+
+class DepthRaster:
+    """A water-depth raster opened read-only; `read` returns float32 metres.
+
+    An int16-centimetre file decodes, its sentinel becoming `MERGED_NODATA_M` (also its
+    `nodata`, `dtypes` and `profile`); any other file passes through unchanged. Average
+    resampling on read is exact either way (a mean of centimetres / 100).
+    """
+
+    def __init__(self, path: str | Path, **kwargs):
+        self._src = rasterio.open(path, **kwargs)
+        self._cm = is_cm_depth(self._src)
+
+    def __getattr__(self, name: str):
+        return getattr(self._src, name)
+
+    def __enter__(self) -> "DepthRaster":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self._src.close()
+
+    def close(self) -> None:
+        self._src.close()
+
+    @property
+    def nodata(self):
+        return MERGED_NODATA_M if self._cm else self._src.nodata
+
+    @property
+    def dtypes(self):
+        return ("float32",) * self._src.count if self._cm else self._src.dtypes
+
+    @property
+    def profile(self):
+        profile = self._src.profile
+        return {**profile, "dtype": "float32", "nodata": MERGED_NODATA_M} if self._cm else profile
+
+    def read(self, *args, **kwargs):
+        if not self._cm:
+            return self._src.read(*args, **kwargs)
+        if kwargs.get("fill_value") == MERGED_NODATA_M:
+            kwargs["fill_value"] = WATERDEPTH_NODATA_INT16
+        raw = self._src.read(*args, **kwargs)
+        if np.ma.isMaskedArray(raw):
+            return np.ma.MaskedArray(_cm_to_m(raw.data), mask=raw.mask)
+        return _cm_to_m(raw)
+
+
+def open_depth(path: str | Path, **kwargs) -> DepthRaster:
+    """Open a water-depth raster for reading in metres (see `DepthRaster`)."""
+    return retry_transient_io(DepthRaster, path, **kwargs)
 
 
 def _read_waterdepth_patch(src: rasterio.DatasetReader, window: Window) -> np.ndarray:
@@ -147,7 +219,7 @@ def merge_tile_rasters_chunk(
     barrier poisons the mosaic; flood_model.py's native-resolution
     ocean-connectivity check is therefore sole authority on boundary assignment.
 
-    Also writes an int32 provenance raster (winning tile_id, PROVENANCE_NODATA
+    Also writes an int16 provenance raster (winning tile_id, PROVENANCE_NODATA
     where uncovered). ``chunk_bounds`` is (minx, miny, maxx, maxy) in EPSG:4326
     (build_chunk_grid's own convention - every chunk_id names a 4326 cell) - every
     tile must already natively share EPSG:4326 (true of every deltadtm-sourced
@@ -261,7 +333,8 @@ def _merge_tiles_in_native_grid(
     `chunk_bounds` must be in the SAME CRS/grid the tiles themselves already share
     (whole-pixel offsets only, no resampling) - the EPSG:4326 chunk grid for every
     deltadtm-sourced tile, or a native-CRS bounding envelope for a foreign-CRS one
-    (merge_tile_rasters_chunk's dispatch). Also writes an int32 provenance raster
+    (merge_tile_rasters_chunk's dispatch). Depth is written as int16 cm (WATERDEPTH_NODATA_INT16
+    where uncovered, band scale 0.01 for GIS), with an int16 provenance raster
     (winning tile_id, PROVENANCE_NODATA where uncovered). Peak memory ~
     block_size**2 x tiles_per_block. Outputs are written to temp files and
     os.replace-d so a killed job cannot leave a truncated file that Snakemake
@@ -286,17 +359,19 @@ def _merge_tiles_in_native_grid(
         "tiled": True,
         "bigtiff": "YES",
     }
+    if max(tile_ids.values(), default=0) > np.iinfo(PROVENANCE_DTYPE).max:
+        raise ValueError(f"tile_id {max(tile_ids.values())} does not fit the {PROVENANCE_DTYPE} provenance raster")
     wd_profile = {
         **common,
-        "dtype": "float32",
-        "nodata": raster_config["nodata"],
-        "predictor": raster_config["predictor"],
+        "dtype": "int16",
+        "nodata": WATERDEPTH_NODATA_INT16,
+        "predictor": 2,
     }
     prov_profile = {
         **common,
-        "dtype": "int32",
+        "dtype": PROVENANCE_DTYPE,
         "nodata": PROVENANCE_NODATA,
-        "predictor": 2,  # integer predictor - tile_ids are arbitrary integers, not a smooth field
+        "predictor": 2,
     }
 
     # Inline temp+rename (not rasters._atomic_raster_write): two files share one block loop.
@@ -305,13 +380,14 @@ def _merge_tiles_in_native_grid(
     try:
         with retry_transient_io(rasterio.open, wd_tmp, "w", **wd_profile) as wd_dst, \
              retry_transient_io(rasterio.open, prov_tmp, "w", **prov_profile) as prov_dst:
+            wd_dst.scales, wd_dst.units = (1.0 / WATERDEPTH_SCALE,), ("m",)
             for row_off in range(0, out_h, block_size):
                 block_h = min(block_size, out_h - row_off)
                 for col_off in range(0, out_w, block_size):
                     block_w = min(block_size, out_w - col_off)
 
                     best_depth = np.full((block_h, block_w), -np.inf, dtype="float64")
-                    best_tile_id = np.full((block_h, block_w), PROVENANCE_NODATA, dtype="int32")
+                    best_tile_id = np.full((block_h, block_w), PROVENANCE_NODATA, dtype=PROVENANCE_DTYPE)
 
                     for tm in tile_metas:
                         out_r0 = max(row_off, tm.row_off)
@@ -343,11 +419,10 @@ def _merge_tiles_in_native_grid(
                         best_tile_id[br0:br1, bc0:bc1] = sub_id
 
                     covered = best_tile_id != PROVENANCE_NODATA
-                    merged = np.where(covered, best_depth, raster_config["nodata"]).astype("float32")
-                    # cm rounding shrinks the compressed file; integer nodata unaffected.
-                    merged = np.round(merged, 2)
+                    # The tiles are int16 cm already, so this rounding only undoes the float decode.
+                    merged = np.where(covered, np.round(best_depth * WATERDEPTH_SCALE), WATERDEPTH_NODATA_INT16)
                     window = Window(col_off, row_off, block_w, block_h)
-                    wd_dst.write(merged, 1, window=window)
+                    wd_dst.write(merged.astype("int16"), 1, window=window)
                     prov_dst.write(best_tile_id, 1, window=window)
         retry_transient_io(os.replace, wd_tmp, waterdepth_output_path)
         retry_transient_io(os.replace, prov_tmp, provenance_output_path)

@@ -23,6 +23,7 @@ from shapely.geometry import box
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io  # noqa: E402
+from merge import open_depth  # noqa: E402
 from pipeline_plots import pixel_area_km2_grid  # noqa: E402
 from population_grid import population_per_pixel  # noqa: E402
 import validation as v  # noqa: E402
@@ -61,7 +62,7 @@ def _score_one_rp(rp, slr, cfg, gfm_catalog, bench_catalog, spec, full_gdf, full
     n_processed = 0
 
     for chunk_path in chunk_paths:
-        with retry_transient_io(rasterio.open, chunk_path) as src:
+        with open_depth(chunk_path) as src:
             chunk_window = rasterio.windows.from_bounds(*region_bbox, transform=src.transform)
             chunk_window = chunk_window.intersection(rasterio.windows.Window(0, 0, src.width, src.height))
             chunk_window = chunk_window.round_offsets().round_lengths()

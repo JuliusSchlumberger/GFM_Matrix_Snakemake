@@ -37,6 +37,7 @@ from shapely.geometry import box
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
+from merge import open_depth  # noqa: E402
 import validation as v  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -79,7 +80,7 @@ def _score_one_rp(
     tp = fp = fp_unbuffered = fn = tn = 0.0
     n_processed = 0
 
-    with retry_transient_io(rasterio.open, raster_path) as src:
+    with open_depth(raster_path) as src:
         pixel_area_km2 = abs(src.transform.a * src.transform.e) / 1e6
         window = rasterio.windows.from_bounds(*region_bbox_native, transform=src.transform)
         window = window.intersection(rasterio.windows.Window(0, 0, src.width, src.height))

@@ -61,6 +61,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
+from merge import open_depth  # noqa: E402
 from pipeline_plots import pixel_area_km2_grid  # noqa: E402
 from population_grid import population_per_pixel  # noqa: E402
 import validation as v  # noqa: E402
@@ -248,7 +249,7 @@ def _score_coarsen_windowed(
 ):
     """Grid A ("coarsen"), windowed over the model's own native-resolution grid."""
     acc = _Accumulator()
-    with rasterio.open(model_path) as model_src:
+    with open_depth(model_path) as model_src:
         model_crs = model_src.crs
         model_nodata = model_src.nodata
         model_transform_native = model_src.window_transform(ds_window)
@@ -326,7 +327,7 @@ def _score_refine_windowed(
     """Grid B ("refine"), windowed over the benchmark's own 2m grid."""
     acc = _Accumulator()
     full_win = rasterio.windows.Window(0, 0, bench_shape_2m[1], bench_shape_2m[0])
-    with rasterio.open(model_path) as model_src:
+    with open_depth(model_path) as model_src:
         model_band = rasterio.band(model_src, 1)
         for win in _iter_subwindows(full_win):
             win_transform = rasterio.windows.transform(win, bench_transform_2m)
@@ -357,7 +358,7 @@ def _score_refine_windowed(
 
 
 def _read_model_window(path: Path, bbox):
-    with rasterio.open(path) as src:
+    with open_depth(path) as src:
         window = rasterio.windows.from_bounds(*bbox, transform=src.transform)
         window = window.round_offsets().round_lengths()
         depth = src.read(1, window=window).astype("float64")

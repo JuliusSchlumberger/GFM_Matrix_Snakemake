@@ -29,6 +29,7 @@ from shapely.geometry import box
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io  # noqa: E402
+from merge import open_depth  # noqa: E402
 from population_grid import population_per_pixel  # noqa: E402
 from pipeline_plots import pixel_area_km2_grid  # noqa: E402
 from tiles import load_tile_grid  # noqa: E402
@@ -282,7 +283,7 @@ def validate_country_national_coverage(
                 chunk_paths = _chunks_overlapping_bbox(region_bbox, pp_chunk_deg, merged_chunks_dir, rp, slr)
                 n_chunks_total += len(chunk_paths)
                 for chunk_path in chunk_paths:
-                    with retry_transient_io(rasterio.open, chunk_path) as src:
+                    with open_depth(chunk_path) as src:
                         # A chunk can hold several regions; window to region_bbox so each
                         # region scores its own data.
                         window = rasterio.windows.from_bounds(*region_bbox, transform=src.transform)

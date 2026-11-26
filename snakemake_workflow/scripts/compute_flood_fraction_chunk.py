@@ -13,6 +13,7 @@ from rasterio.windows import Window
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from config_utils import retry_transient_io  # noqa: E402
+from merge import open_depth  # noqa: E402
 from rasters import average_pool_to_grid  # noqa: E402
 
 _NODATA_FINE = -1.0
@@ -37,7 +38,7 @@ def compute_flood_fraction(
         retry_transient_io(Path(output_path).touch)
         return
 
-    with retry_transient_io(rasterio.open, waterdepth_path) as wd:
+    with open_depth(waterdepth_path) as wd:
         src_transform, src_crs = wd.transform, wd.crs
         exc_arr = np.empty((wd.height, wd.width), dtype="float32")  # binary exceedance, nodata preserved
         dom_arr = np.empty((wd.height, wd.width), dtype="float32")  # domain mask (0/1, no nodata)

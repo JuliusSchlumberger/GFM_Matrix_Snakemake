@@ -12,7 +12,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "preparation"))
 import merge_england_local_tiles as driver  # noqa: E402
-from merge import native_chunk_plan  # noqa: E402
+from merge import native_chunk_plan, open_depth  # noqa: E402
 from rasters import save_waterdepth_raster  # noqa: E402
 
 PX = 10.0  # m
@@ -76,7 +76,9 @@ def test_vrt_over_chunks_is_the_per_cell_maximum_of_the_tiles(tmp_path) -> None:
     assert len(written) == len(set(written)) > 2
     vrt = driver.run(config, ["RP100"], "SLR_0", vrt=True)[0]
 
-    with rasterio.open(vrt) as src:
+    with rasterio.open(vrt) as raw:
+        assert raw.dtypes[0] == "int16" and raw.scales == (0.01,)
+    with open_depth(vrt) as src:
         assert src.crs.to_string() == CRS and src.res == (PX, PX)
         merged = src.read(1, masked=True)
         to_rc = ~src.transform

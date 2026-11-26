@@ -13,6 +13,7 @@ from shapely.geometry import box
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import retry_transient_io  # noqa: E402
+from merge import MERGED_NODATA_M, WATERDEPTH_NODATA_INT16, _cm_to_m, is_cm_depth  # noqa: E402
 from tiles import chunk_id_from_corner  # noqa: E402
 
 
@@ -47,15 +48,20 @@ def _chunks_overlapping_bbox(
 
 
 def _mosaic_read(chunk_paths: list[Path], bbox: list[float]) -> tuple[np.ndarray | None, Affine | None]:
+    """Mosaic depth rasters over `bbox` in metres, nodata MERGED_NODATA_M (int16 cm decoded)."""
     if not chunk_paths:
         return None, None
     srcs = [retry_transient_io(rasterio.open, p) for p in chunk_paths]
     try:
-        mosaic, out_transform = rasterio_merge(srcs, bounds=bbox, nodata=-9999.0)
+        cm = {is_cm_depth(s) for s in srcs}
+        if len(cm) > 1:
+            raise ValueError(f"mixed int16-cm and float depth rasters: {chunk_paths}")
+        nodata = WATERDEPTH_NODATA_INT16 if cm == {True} else MERGED_NODATA_M
+        mosaic, out_transform = rasterio_merge(srcs, bounds=bbox, nodata=nodata)
     finally:
         for s in srcs:
             s.close()
-    return mosaic[0], out_transform
+    return (_cm_to_m(mosaic[0]) if cm == {True} else mosaic[0]), out_transform
 
 
 def _tile_paths_overlapping_bbox(

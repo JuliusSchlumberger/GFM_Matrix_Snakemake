@@ -23,6 +23,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from config_utils import atomic_write, get_data_catalog, load_config, retry_transient_io  # noqa: E402
+from merge import open_depth  # noqa: E402
 from pipeline_plots import pixel_area_km2_grid  # noqa: E402
 import validation as v  # noqa: E402
 
@@ -83,7 +84,7 @@ def main() -> None:
             print(f"  {chunk_id}: missing {_RP_INNER} chunk - skipped.")
             continue
 
-        with retry_transient_io(rasterio.open, outer_path) as src:
+        with open_depth(outer_path) as src:
             window = rasterio.windows.from_bounds(*region_bbox, transform=src.transform)
             window = window.intersection(rasterio.windows.Window(0, 0, src.width, src.height))
             window = window.round_offsets().round_lengths()
@@ -91,7 +92,7 @@ def main() -> None:
                 continue
             depth_outer = src.read(1, window=window)
             out_transform = src.window_transform(window)
-        with retry_transient_io(rasterio.open, inner_path) as src:
+        with open_depth(inner_path) as src:
             depth_inner = src.read(1, window=window)
 
         model_domain = v.model_domain_mask(depth_outer, nodata=-9999.0) & v.model_domain_mask(depth_inner, nodata=-9999.0)

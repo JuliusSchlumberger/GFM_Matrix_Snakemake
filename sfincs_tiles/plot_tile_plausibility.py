@@ -1,7 +1,7 @@
 """Plot the plausibility of the SFINCS calibration per tile: metrics, drivers, per-tile optimum.
 
 Writes metric_distributions, disagreement_drivers (bathtub set), disagreement_drivers_eikonal,
-variant_contrast_drivers, per_tile_optimum_gain and per_tile_optimum_drivers (.png + caption)
+variant_contrasts, per_tile_optimum_gain and per_tile_optimum_drivers (.png + caption)
 and their tables. Needs
 variant_runs_per_tile.csv and variant_selection.json (compute_variant_metrics.py) and
 tile_drivers[_owned].csv (compute_tile_drivers.py, in --raster-base-dir-name when given).
@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 import matplotlib
+import matplotlib.patches
 import matplotlib.ticker
 
 matplotlib.use("Agg")
@@ -88,14 +89,15 @@ CLASS_COLORS = {"lower": "#56B4E9", "same": MUTED, "higher": "#D55E00"}
 CLASS_LABELS = {"lower": "Lower value better", "same": "Global value as good", "higher": "Higher value better"}
 # (label, variant compared, baseline variant), each at its selected run
 CONTRASTS = (
-    ("Land cover vs uniform", "eikonal_landcover_cap", "eikonal_uniform_cap"),
-    ("Cap, uniform rate", "eikonal_uniform_cap", "eikonal_uniform"),
-    ("Cap, land-cover rate", "eikonal_landcover_cap", "eikonal_landcover"),
+    ("Land-cover vs uniform rate, both capped", "eikonal_landcover_cap", "eikonal_uniform_cap"),
+    ("Volume cap vs none, uniform rate", "eikonal_uniform_cap", "eikonal_uniform"),
+    ("Volume cap vs none, land-cover rate", "eikonal_landcover_cap", "eikonal_landcover"),
 )
+CONTRASTS_SHOWN = ("Land-cover vs uniform rate, both capped", "Volume cap vs none, uniform rate")  # the cap behaves the same at the land-cover rate
 CONTRAST_ORDER = ("worse", "same", "better")
+COUNT_COLUMNS = ("matched_km2", "model_only_km2", "sfincs_only_km2")
 CONTRAST_COLORS = {"better": "#0072B2", "same": MUTED, "worse": "#D55E00"}
-CONTRAST_LABELS = {"better": "Compared better", "same": "As good", "worse": "Compared worse"}
-LOG_TICKS = (0.01, 0.03, 0.1, 0.3, 1, 2, 5, 10, 20, 50, 100)
+CONTRAST_LABELS = {"better": "Gains at least 0.01 CSI", "same": "Within 0.01 CSI", "worse": "Loses at least 0.01 CSI"}
 # three columns leave no room for the long driver labels
 SHORT_DRIVER_LABELS = {
     "overtop_coast_pct": "Coast below peak (%)", "river_pct": "River share (%)", "lake_pct": "Lake share (%)",
@@ -448,78 +450,126 @@ def contrast_table(per_tile: pd.DataFrame, runs: dict[str, str], min_union_km2: 
     """Per tile, the CSI change of each CONTRASTS pair (compared minus baseline) and its class.
 
     Only tiles where both runs flood at least `min_union_km2` together with SFINCS; a change
-    smaller than SAME_CSI counts as "same".
+    smaller than SAME_CSI counts as "same". Adds the SFINCS flooded area.
     """
     parts = []
     for label, compared, baseline in CONTRASTS:
         if compared not in runs or baseline not in runs:
             continue
-        a = _scored(per_tile, runs[compared], min_union_km2)[["tile_id", "CSI"]]
-        b = _scored(per_tile, runs[baseline], min_union_km2)[["tile_id", "CSI"]]
-        m = a.merge(b, on="tile_id", suffixes=("_compared", "_baseline")).dropna()
+        a = _scored(per_tile, runs[compared], min_union_km2)
+        b = _scored(per_tile, runs[baseline], min_union_km2)
+        b = b.assign(sfincs_km2=b["matched_km2"] + b["sfincs_only_km2"])
+        m = a[["tile_id", "CSI"]].merge(b[["tile_id", "CSI", "sfincs_km2"]], on="tile_id",
+                                        suffixes=("_compared", "_baseline")).dropna()
         d = m["CSI_compared"] - m["CSI_baseline"]
         cls = np.where(d >= SAME_CSI, "better", np.where(d <= -SAME_CSI, "worse", "same"))
         parts.append(m.assign(contrast=label, compared=runs[compared], baseline=runs[baseline], d_csi=d, cls=cls))
     return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
 
 
-def plot_contrast_drivers(contrasts: pd.DataFrame, drivers: pd.DataFrame, out_path: Path,
-                          driver_set: tuple = EIKONAL_DRIVERS) -> pd.DataFrame:
-    """Plot the drivers of tiles where each contrast helps, does not matter or hurts; return the rho table."""
-    labels = list(dict.fromkeys(contrasts["contrast"]))
-    fig, axes = plt.subplots(len(driver_set), len(labels), figsize=(FIG_WIDTH_IN, 1.05 * len(driver_set) + 0.5),
-                             sharey=True, squeeze=False, layout="constrained")
+def contrast_driver_rhos(contrasts: pd.DataFrame, drivers: pd.DataFrame, driver_set: tuple = EIKONAL_DRIVERS,
+                         n_boot: int = N_BOOTSTRAP) -> pd.DataFrame:
+    """Spearman rho of each driver with each contrast's CSI change; p5/p95 over tile bootstrap resamples."""
+    cols = [d[0] for d in driver_set]
+    rng = np.random.default_rng(BOOTSTRAP_SEED)
     rows = []
+    for label, g in contrasts.groupby("contrast", sort=False):
+        df = g.merge(drivers, on="tile_id").dropna(subset=[*cols, "d_csi"])
+        values = df[[*cols, "d_csi"]].to_numpy(dtype=float)
+        ranks = pd.DataFrame(values).rank().to_numpy()
+        rho = np.array([np.corrcoef(ranks[:, i], ranks[:, -1])[0, 1] for i in range(len(cols))])
+        boot = []
+        for _ in range(n_boot):
+            r = pd.DataFrame(values[rng.integers(0, len(values), len(values))]).rank().to_numpy()
+            boot.append([np.corrcoef(r[:, i], r[:, -1])[0, 1] for i in range(len(cols))])
+        boot = np.array(boot)
+        for i, c in enumerate(cols):
+            rows.append({"contrast": label, "driver": c, "n_tiles": len(df), "spearman_rho_vs_d_csi": rho[i],
+                         "p5": np.nanpercentile(boot[:, i], 5), "p95": np.nanpercentile(boot[:, i], 95)})
+    return pd.DataFrame(rows)
+
+
+def _pooled_csi(per_tile: pd.DataFrame, key: str, tiles) -> float:
+    s = per_tile[(per_tile["run_key"] == key) & per_tile["tile_id"].isin(tiles)][list(COUNT_COLUMNS)].sum()
+    return float(s["matched_km2"] / s.sum()) if s.sum() > 0 else np.nan
+
+
+def plot_variant_contrasts(contrasts: pd.DataFrame, per_tile: pd.DataFrame, rhos: pd.DataFrame, out_path: Path,
+                           shown: tuple[str, ...] = CONTRASTS_SHOWN) -> None:
+    """Plot where land cover beats a uniform rate and where the volume cap helps or hurts."""
+    labels = [c for c in shown if c in set(contrasts["contrast"])]
+    fig, axes = plt.subplots(2, len(labels), figsize=(FIG_WIDTH_IN, 5.0), squeeze=False, layout="constrained",
+                             gridspec_kw={"height_ratios": [1.2, 0.9]})
+    size_edges = (0, 5, 20, 100, 500, np.inf)
+    size_labels = ("< 5", "5-20", "20-100", "100-500", "> 500")
+    lines = []
     for j, label in enumerate(labels):
-        dd = contrasts[contrasts["contrast"] == label].merge(drivers, on="tile_id")
-        for i, (col, xlabel, logx, clip) in enumerate(driver_set):
-            ax = axes[i, j]
-            xlabel = SHORT_DRIVER_LABELS.get(col, xlabel)
-            for y, c in enumerate(CONTRAST_ORDER):
-                vals = dd.loc[dd["cls"] == c, col].replace([np.inf, -np.inf], np.nan).dropna()
-                if logx:
-                    vals = vals.clip(lower=clip)
-                if len(vals):
-                    ax.boxplot(vals, positions=[y], vert=False, widths=0.6, whis=(5, 95), showfliers=False,
-                               patch_artist=True, medianprops={"color": "black", "linewidth": 0.8},
-                               boxprops={"facecolor": CONTRAST_COLORS[c], "linewidth": 0.5},
-                               whiskerprops={"linewidth": 0.5}, capprops={"linewidth": 0.5})
-            if logx:
-                ax.set_xscale("log")
-                lo, hi = ax.get_xlim()
-                ax.set_xticks([t for t in LOG_TICKS if lo <= t <= hi])
-                ax.xaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter("%g"))
-                ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
-            ok = dd[[col, "d_csi"]].replace([np.inf, -np.inf], np.nan).dropna()
-            rho = spearmanr(ok[col], ok["d_csi"])[0] if len(ok) > 2 else np.nan
-            rows.append({"contrast": label, "driver": col, "n_tiles": len(ok), "spearman_rho_vs_d_csi": rho})
-            ax.set_xlabel(xlabel, fontsize=7)
-            ax.tick_params(labelsize=7)
-            panel_letters(ax, "abcdefghijklmnopqrstuvwxyz"[i * len(labels) + j], fontsize=7,
-                          label=f"{label}: ρ {rho:+.2f}" if i == 0 else f"ρ {rho:+.2f}")
-        axes[0, j].set_yticks(range(len(CONTRAST_ORDER)), [CONTRAST_LABELS[c] for c in CONTRAST_ORDER], fontsize=7)
+        g = contrasts[contrasts["contrast"] == label]
+        compared, baseline = g["compared"].iloc[0], g["baseline"].iloc[0]
+
+        ax = axes[1, j]  # where: share of tiles by SFINCS flooded area, pooled change per class
+        size = pd.cut(g["sfincs_km2"], size_edges, labels=size_labels, right=False)
+        for y, sl in enumerate(size_labels):
+            h = g[size == sl]
+            if h.empty:
+                continue
+            left = 0.0
+            for c in CONTRAST_ORDER:
+                w = float(np.mean(h["cls"] == c)) * 100
+                ax.barh(y, w, left=left, color=CONTRAST_COLORS[c], height=0.7)
+                left += w
+            pooled = _pooled_csi(per_tile, compared, h["tile_id"]) - _pooled_csi(per_tile, baseline, h["tile_id"])
+            ax.text(102, y, f"{pooled:+.3f}", va="center", fontsize=6.5)
+        ax.text(102, len(size_labels) - 0.45, "Pooled", fontsize=6.5, va="bottom")
+        ax.set_yticks(range(len(size_labels)), size_labels)
+        ax.set_xlim(0, 100)
+        ax.set_xlabel("Share of tiles (%)")
+        ax.set_ylabel("SFINCS flooded area (km2)" if j == 0 else "")
+
+        ax = axes[0, j]  # which tile properties go with a gain
+        r = rhos[rhos["contrast"] == label].reset_index(drop=True)
+        ys = np.arange(len(r))[::-1]
+        est = r["spearman_rho_vs_d_csi"]
+        ax.errorbar(est, ys, xerr=[est - r["p5"], r["p95"] - est], fmt="o", color="black", markersize=3,
+                    elinewidth=0.8, capsize=0)
+        ax.axvline(0, color=MUTED, linewidth=0.6)
+        ax.set_xlim(-0.5, 0.5)
+        ax.set_yticks(ys, [SHORT_DRIVER_LABELS.get(d, d) for d in r["driver"]] if j == 0 else [])
+        ax.set_xlabel("Spearman rho with CSI change")
+
+        share = g["cls"].value_counts(normalize=True).reindex(CONTRAST_ORDER, fill_value=0.0) * 100
+        area = g.groupby("cls")["sfincs_km2"].sum().reindex(CONTRAST_ORDER, fill_value=0.0) / g["sfincs_km2"].sum() * 100
+        pooled_all = _pooled_csi(per_tile, compared, g["tile_id"]) - _pooled_csi(per_tile, baseline, g["tile_id"])
+        lines.append(f"{label} ({compared} vs {baseline}, n = {len(g)} tiles): better on {share['better']:.0f} % of "
+                     f"tiles ({area['better']:.0f} % of SFINCS flooded area), worse on {share['worse']:.0f} % "
+                     f"({area['worse']:.0f} %); pooled CSI change {pooled_all:+.3f}")
+        for i in range(2):
+            panel_letters(axes[i, j], "abcd"[i * len(labels) + j], fontsize=8, label=label if i == 0 else None)
+    handles = [matplotlib.patches.Patch(color=CONTRAST_COLORS[c], label=CONTRAST_LABELS[c])
+               for c in reversed(CONTRAST_ORDER)]
+    fig.legend(handles=handles, loc="outside lower center", ncol=3, frameon=False, fontsize=7)
     save_figure(fig, out_path)
     plt.close(fig)
-    shares = []
-    for label in labels:
-        g = contrasts[contrasts["contrast"] == label]
-        first = g.iloc[0]
-        share = g["cls"].value_counts(normalize=True).reindex(CONTRAST_ORDER, fill_value=0.0) * 100
-        shares.append(f"{label} ({first.compared} vs {first.baseline}, n = {len(g)}): better on {share['better']:.0f} %, "
-                      f"worse on {share['worse']:.0f} % of tiles")
+    extra = []
+    for label in [c for c in dict.fromkeys(contrasts["contrast"]) if c not in labels]:
+        share = (contrasts.loc[contrasts["contrast"] == label, "cls"].value_counts(normalize=True)
+                 .reindex(CONTRAST_ORDER, fill_value=0.0) * 100)
+        extra.append(f"{label} (not drawn): better on {share['better']:.0f} %, worse on {share['worse']:.0f} % of tiles")
     write_caption(out_path, [
-        "Where land-cover attenuation beats a uniform rate, and where the volume cap helps or hurts, by tile "
-        "characteristics.",
-        f"Per tile, the CSI of the compared run minus that of its baseline (each variant at its selected run); "
-        f"'compared better' or 'worse' when the change is at least {SAME_CSI} CSI, otherwise 'as good'. Tiles where "
-        "both runs score. Box: interquartile range, line: median, whiskers: 5-95 %. Panel header: Spearman rho "
-        "between the driver and the CSI change (positive: the compared run gains as the driver grows).",
-        "; ".join(shares) + ".",
-        "Drivers: " + "; ".join(_DRIVER_DEFINITIONS[d[0]] for d in driver_set) + ". Log axes clip zeros to "
-        "their lower limit.",
+        "The volume cap leaves most of the flooded area unchanged: it corrects the few tiles that flood far too much "
+        "and costs a little on many small tiles that were already unbiased. Land cover instead of a uniform rate "
+        "changes most tiles, with gains and losses that nearly cancel.",
+        f"Per tile, CSI of the first run in the panel header minus CSI of the second (the baseline), each at its "
+        f"selected run. Colour: the first run gains or loses at least {SAME_CSI} CSI (counted 'better' / 'worse' "
+        "below), or stays within it. Tiles where both runs score.",
+        "(a, b) Spearman rho between each tile property and the CSI change; bar: 90 % interval over "
+        f"{N_BOOTSTRAP} tile bootstrap resamples. The properties are correlated with each other, so a rho marks "
+        "which tiles gain, not why. (c, d) Share of tiles per class by SFINCS flooded area; number: CSI change "
+        "pooled over the tiles of the size class (area counts summed before scoring).",
+        "; ".join(lines + extra) + ".",
+        "Tile properties: " + "; ".join(_DRIVER_DEFINITIONS[d[0]] for d in EIKONAL_DRIVERS) + ".",
     ])
     print(f"Wrote {out_path}")
-    return pd.DataFrame(rows)
 
 
 def main() -> None:
@@ -579,8 +629,9 @@ def main() -> None:
     contrasts = contrast_table(per_tile, {v: e["run_key"] for v, e in entries.items()}, args.min_union_km2)
     if not contrasts.empty:
         contrasts.to_csv(fig_dir / "variant_contrasts.csv", index=False)
-        rho = plot_contrast_drivers(contrasts, drivers, fig_dir / "variant_contrast_drivers.png")
+        rho = contrast_driver_rhos(contrasts, drivers)
         rho.to_csv(fig_dir / "variant_contrast_drivers.csv", index=False)
+        plot_variant_contrasts(contrasts, per_tile, rho, fig_dir / "variant_contrasts.png")
         print(contrasts.groupby("contrast")["cls"].value_counts(normalize=True).unstack().round(3).to_string())
 
     optimum = pd.concat([per_tile_optimum(per_tile, v, float(entries[v]["parameter"]), args.min_union_km2)

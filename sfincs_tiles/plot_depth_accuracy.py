@@ -31,7 +31,9 @@ from gfm_config import read_figures_root, read_root  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analysis"))
-from _figure_style import DOUBLE_COLUMN_MM, MM_PER_INCH, MUTED, apply_style, panel_letters, save_figure, write_caption  # noqa: E402
+from _figure_style import (  # noqa: E402
+    DOUBLE_COLUMN_MM, MM_PER_INCH, MUTED, apply_style, panel_letters, save_figure, write_caption,
+)
 
 TAU_COLORS = {0.1: "#9ecae1", 0.2: "#4292c6", 0.5: "#08306b"}
 BIAS_CLASSES = {"0.1-0.3": "#fdae6b", "0.5-1": "#e6550d", "2-3": "#7f2704"}
@@ -47,6 +49,10 @@ TOLERANCE_STYLE = {"eikonal_uniform_cap": ("#0072B2", "-"), "eikonal_landcover_c
 TOLERANCE_GRID_M = np.round(np.arange(0.0, 1.0001, 0.01), 2)
 REFERENCE_TOLERANCES_M = (0.1, 0.2, 0.5)
 MIN_SFINCS_WET_KM2 = 1.0  # tiles in the per-tile panel
+ALIGNMENT_BANDS_M = (0.05, 0.1, 0.25, 0.5)  # half-widths of the bands around the 1:1 line
+TILE_QUANTILES = (0.05, 0.25, 0.5, 0.75, 0.95)
+CLASS_X_M = (0.2, 0.4, 0.75, 1.25, 1.75, 2.5, 3.25)  # SFINCS_CLASS_LABELS on a depth axis; > 3 m at 3.25
+MIN_CLASS_KM2 = 0.1  # a tile counts in a depth class's spread with at least this much SFINCS-flooded area there
 
 
 def swept_axis(variant: str) -> tuple[str, str]:
@@ -120,14 +126,16 @@ def tolerance_label(variant: str, entry: dict) -> str:
     return f"{SHORT_LABEL[variant]} ({'fsf' if 'landcover' in variant else 'rate'} {entry['parameter']:g})"
 
 
-def load_tolerance_hists(base_dir: Path, run_keys: dict[str, str]) -> tuple[dict, pd.DataFrame]:
+def load_tolerance_hists(base_dir: Path, run_keys: dict[str, str]) -> tuple[dict, pd.DataFrame, pd.DataFrame]:
     """Pool the selected runs' depth-difference histograms over tiles; also each tile's own stats.
 
     Returns ({variant: {weight: (CELL_KINDS, classes, bins) histogram}}, per-tile frame with the
-    SFINCS-wet area and the 80 % tolerance of every run over the tile's SFINCS-wet cells).
+    SFINCS-wet area and the 80 % tolerance of every run over the tile's SFINCS-wet cells, and a
+    per-tile, per-SFINCS-depth-class frame with the area share inside each ALIGNMENT_BANDS_M band).
     """
     pooled: dict = {v: {} for v in run_keys}
-    rows = []
+    rows, class_rows = [], []
+    bands = np.array(ALIGNMENT_BANDS_M)
     # histograms left by an unfinished rerun have no result file beside them
     paths = [p for p in sorted(base_dir.glob(f"*/outputs/{DEPTH_ACCURACY_NAME}")) if (p.parent / RESULT_NAME).exists()]
     wanted = {f"{key}__{weight}" for key in run_keys.values() for weight in ("area", "pop")}
@@ -146,7 +154,12 @@ def load_tolerance_hists(base_dir: Path, run_keys: dict[str, str]) -> tuple[dict
                     reference = (h[0] + h[1]).sum(axis=0)
                     rows.append({"tile_id": int(tile), "variant": variant, "sfincs_wet_km2": float(reference.sum()),
                                  **{k: v for k, v in diff_stats(reference).items() if k != "n"}})
-    return pooled, pd.DataFrame(rows)
+                    for label, hc in zip(SFINCS_CLASS_LABELS, h[0] + h[1]):
+                        if hc.sum() > 0:
+                            class_rows.append({"tile_id": int(tile), "variant": variant, "sfincs_class_m": label,
+                                               "sfincs_wet_km2": float(hc.sum()),
+                                               **{f"within_{b:g}m": s for b, s in zip(bands, _share_within(hc, bands))}})
+    return pooled, pd.DataFrame(rows), pd.DataFrame(class_rows)
 
 
 def _hist_quantiles(hist: np.ndarray, qs: tuple[float, ...]) -> np.ndarray:
@@ -245,6 +258,65 @@ def plot_depth_tolerance(pooled: dict, per_tile: pd.DataFrame, labels: dict[str,
     print(f"wrote {out}")
 
 
+def alignment_table(pooled: dict, per_class: pd.DataFrame) -> pd.DataFrame:
+    """Return the area share inside each band per run and SFINCS depth class: pooled, and across tiles."""
+    rows = []
+    bands = np.array(ALIGNMENT_BANDS_M)
+    for variant, by_weight in pooled.items():
+        if "area" not in by_weight:
+            continue
+        reference = by_weight["area"][0] + by_weight["area"][1]
+        for label, hc in zip(SFINCS_CLASS_LABELS, reference):
+            tiles = per_class[(per_class["variant"] == variant) & (per_class["sfincs_class_m"] == label)
+                              & (per_class["sfincs_wet_km2"] >= MIN_CLASS_KM2)]
+            for band, share in zip(bands, _share_within(hc, bands) if hc.sum() > 0 else [np.nan] * len(bands)):
+                col = f"within_{band:g}m"
+                q = tiles[col].quantile(TILE_QUANTILES) if len(tiles) else pd.Series([np.nan] * len(TILE_QUANTILES))
+                rows.append({"variant": variant, "sfincs_class_m": label, "band_m": band,
+                             "sfincs_wet_km2": float(hc.sum()), "pooled_share": share, "n_tiles": len(tiles),
+                             **{f"tile_p{round(qq * 100)}": val for qq, val in zip(TILE_QUANTILES, q)}})
+    return pd.DataFrame(rows)
+
+
+def plot_depth_alignment(table: pd.DataFrame, labels: dict[str, str], out: Path) -> None:
+    """Plot, per depth band around SFINCS, the share of each tile's flooded area the model meets."""
+    variants = [v for v in TOLERANCE_VARIANTS if v in set(table["variant"])]
+    fig, axes = plt.subplots(1, len(ALIGNMENT_BANDS_M), figsize=(DOUBLE_COLUMN_MM / MM_PER_INCH, 2.7), sharey=True,
+                             squeeze=False, layout="constrained")
+    x = np.array(CLASS_X_M)
+    for k, band in enumerate(ALIGNMENT_BANDS_M):
+        ax = axes[0, k]
+        for m, v in enumerate(variants):
+            color, ls = TOLERANCE_STYLE[v]
+            b = table[(table["variant"] == v) & (table["band_m"] == band)].set_index("sfincs_class_m")
+            b = b.reindex(SFINCS_CLASS_LABELS)
+            ax.vlines(x + (m - (len(variants) - 1) / 2) * 0.07, b["tile_p5"], b["tile_p95"], color=color,
+                      linewidth=1.4, alpha=0.45)
+            ax.plot(x, b["tile_p50"], color=color, linestyle=ls, marker="o", markersize=2.5, linewidth=1.1,
+                    label=labels[v])
+        ax.set(xlim=(0, 3.5), ylim=(0, 1), xticks=[0, 1, 2, 3], xlabel="SFINCS depth (m)",
+               ylabel="Share of a tile's flooded area\ninside the band" if k == 0 else "")
+        panel_letters(ax, "abcd"[k], fontsize=7, label=f"±{band * 100:.0f} cm")
+    fig.legend(*axes[0, 0].get_legend_handles_labels(), loc="outside lower center", ncol=len(variants),
+               frameon=False, fontsize=7)
+    save_figure(fig, out)
+    plt.close(fig)
+    n_tiles = table.groupby("variant")["n_tiles"].max()
+    write_caption(out, [
+        "How closely each model's flood depth follows SFINCS in a typical tile: the share of the flooded area "
+        "whose model depth lies within a given band of SFINCS, by how deep SFINCS floods.",
+        "Per tile and SFINCS depth class (0.1-0.3, 0.3-0.5, 0.5-1, 1-1.5, 1.5-2, 2-3 and > 3 m, plotted at "
+        + ", ".join(f"{c:g}" for c in CLASS_X_M) + " m), the share of the area SFINCS floods whose model "
+        "depth is within ± the band of the SFINCS depth. A cell the model leaves dry counts with its own "
+        "sub-threshold depth, so a miss falls outside the narrow bands.",
+        f"Line: median across tiles; bar: 5-95 % range across tiles. A tile counts in a class with at least "
+        f"{MIN_CLASS_KM2:g} km2 of SFINCS-flooded area there (up to {int(n_tiles.max())} tiles per class). Colour "
+        "and line style: model (legend).",
+        "Per-class numbers, including the value pooled over tiles: depth_alignment.csv.",
+    ])
+    print(f"wrote {out}")
+
+
 def main() -> None:
     repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -270,12 +342,16 @@ def main() -> None:
     if not run_keys:
         print("no selected run of the tolerance variants: no depth_tolerance figure")
         return
-    hists, per_tile = load_tolerance_hists(base_dir, run_keys)
+    hists, per_tile, per_class = load_tolerance_hists(base_dir, run_keys)
     labels = {v: tolerance_label(v, entries[v]) for v in run_keys}
     table = tolerance_table(hists)
     table.to_csv(fig_dir / "depth_tolerance.csv", index=False)
     per_tile.to_csv(fig_dir / "depth_tolerance_per_tile.csv", index=False)
     plot_depth_tolerance(hists, per_tile, labels, fig_dir / "depth_tolerance.png")
+
+    alignment = alignment_table(hists, per_class)
+    alignment.to_csv(fig_dir / "depth_alignment.csv", index=False)
+    plot_depth_alignment(alignment, labels, fig_dir / "depth_alignment.png")
 
 
 if __name__ == "__main__":

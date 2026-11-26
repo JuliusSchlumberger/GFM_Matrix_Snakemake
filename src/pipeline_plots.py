@@ -12,6 +12,7 @@ from rasterio.enums import Resampling
 from rasterio.windows import from_bounds
 
 from config_utils import retry_transient_io
+from merge import open_depth
 from process_pool import available_cpus
 
 _KM_PER_DEG = 111.32
@@ -109,7 +110,7 @@ def compute_flood_area_km2(raster_path: str | Path, threshold_m: float) -> float
     import threading
     from concurrent.futures import ThreadPoolExecutor
 
-    with retry_transient_io(rasterio.open, raster_path) as src:
+    with open_depth(raster_path) as src:
         t = src.transform
         nodata = src.nodata
         windows = [window for _, window in src.block_windows(1)]
@@ -121,7 +122,7 @@ def compute_flood_area_km2(raster_path: str | Path, threshold_m: float) -> float
     def window_sum(window) -> float | None:
         ds = getattr(local, "ds", None)
         if ds is None:
-            ds = local.ds = retry_transient_io(rasterio.open, raster_path)
+            ds = local.ds = open_depth(raster_path)
             with handles_lock:
                 handles.append(ds)
         data = ds.read(1, window=window)
@@ -172,7 +173,7 @@ def plot_raster_with_coastlines(
     `oom_tiles` (tiles skipped with OutOfMemoryError) are drawn as a grey overlay;
     `vmax_m` caps the colour scale in metres.
     """
-    with retry_transient_io(rasterio.open, raster_path) as src:
+    with open_depth(raster_path) as src:
         native_deg = src.transform.a
         target_deg = resolution_arcsec / 3600.0
         scale = max(1.0, target_deg / native_deg)

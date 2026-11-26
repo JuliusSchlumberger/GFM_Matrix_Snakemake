@@ -38,7 +38,8 @@ from scipy import ndimage
 from shapely.geometry import box
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from config_utils import get_data_catalog, load_config, retry_transient_io  # noqa: E402
+from config_utils import get_data_catalog, load_config  # noqa: E402
+from merge import open_depth  # noqa: E402
 from pipeline_plots import pixel_area_km2_grid  # noqa: E402
 import validation as v  # noqa: E402
 
@@ -122,7 +123,7 @@ def _score_england_fz3(cfg, gfm_catalog, bench_catalog, val_cfg, slr) -> list[di
         chunk_paths = _chunks_overlapping_bbox(region_bbox, pp_chunk_deg, merged_chunks_dir, rp, slr)
         n_processed = 0
         for chunk_path in chunk_paths:
-            with retry_transient_io(rasterio.open, chunk_path) as src:
+            with open_depth(chunk_path) as src:
                 chunk_window = rasterio.windows.from_bounds(*region_bbox, transform=src.transform)
                 chunk_window = chunk_window.intersection(rasterio.windows.Window(0, 0, src.width, src.height))
                 chunk_window = chunk_window.round_offsets().round_lengths()
@@ -193,7 +194,7 @@ def _score_england_fz2_band(cfg, gfm_catalog, bench_catalog, val_cfg, slr) -> li
         inner_path = merged_chunks_dir / f"waterdepth_{chunk_id}_{rp_inner}_{slr}.tif"
         if not inner_path.exists():
             continue
-        with retry_transient_io(rasterio.open, outer_path) as src:
+        with open_depth(outer_path) as src:
             window = rasterio.windows.from_bounds(*region_bbox, transform=src.transform)
             window = window.intersection(rasterio.windows.Window(0, 0, src.width, src.height))
             window = window.round_offsets().round_lengths()
@@ -201,7 +202,7 @@ def _score_england_fz2_band(cfg, gfm_catalog, bench_catalog, val_cfg, slr) -> li
                 continue
             depth_outer = src.read(1, window=window)
             out_transform = src.window_transform(window)
-        with retry_transient_io(rasterio.open, inner_path) as src:
+        with open_depth(inner_path) as src:
             depth_inner = src.read(1, window=window)
 
         model_domain = v.model_domain_mask(depth_outer, nodata=-9999.0) & v.model_domain_mask(depth_inner, nodata=-9999.0)
@@ -254,7 +255,7 @@ def _score_wales(cfg, gfm_catalog, bench_catalog, val_cfg, slr) -> list[dict]:
             chunk_paths = _chunks_overlapping_bbox(region_bbox, pp_chunk_deg, merged_chunks_dir, rp, slr)
             n_processed = 0
             for chunk_path in chunk_paths:
-                with retry_transient_io(rasterio.open, chunk_path) as src:
+                with open_depth(chunk_path) as src:
                     window = rasterio.windows.from_bounds(*region_bbox, transform=src.transform)
                     window = window.intersection(rasterio.windows.Window(0, 0, src.width, src.height))
                     window = window.round_offsets().round_lengths()

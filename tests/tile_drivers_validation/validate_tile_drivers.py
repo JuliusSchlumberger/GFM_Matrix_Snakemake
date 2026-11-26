@@ -11,8 +11,8 @@ sys.path.insert(0, str(REPO_ROOT / "sfincs_tiles"))
 from calibration_paths import shard, threaded_map  # noqa: E402
 from compute_tile_drivers import DRIVER_COLUMNS, read_drivers, tile_drivers  # noqa: E402
 from plot_tile_plausibility import (  # noqa: E402
-    BATHTUB_DRIVERS, EIKONAL_DRIVERS, contrast_table, driver_correlations, plot_contrast_drivers, optimum_summary, per_tile_optimum, plot_driver_scatter,
-    plot_metric_distributions, plot_optimum_drivers, plot_optimum_gain,
+    BATHTUB_DRIVERS, EIKONAL_DRIVERS, contrast_driver_rhos, contrast_table, driver_correlations, optimum_summary, per_tile_optimum, plot_driver_scatter,
+    plot_metric_distributions, plot_optimum_drivers, plot_optimum_gain, plot_variant_contrasts,
 )
 
 
@@ -202,9 +202,11 @@ def test_contrast_classes_follow_the_csi_change(tmp_path: Path) -> None:
     per_tile = pd.DataFrame(rows)
     runs = {"eikonal_uniform": "u", "eikonal_uniform_cap": "uc", "eikonal_landcover": "l", "eikonal_landcover_cap": "lc"}
     c = contrast_table(per_tile, runs, 1.0)
-    cap = c[c["contrast"] == "Cap, uniform rate"].sort_values("tile_id")
+    cap = c[c["contrast"] == "Volume cap vs none, uniform rate"].sort_values("tile_id")
     assert list(cap["cls"][:3]) == ["better", "same", "worse"]
-    assert (c.loc[c["contrast"] == "Land cover vs uniform", "cls"] == "same").all()
+    assert (c.loc[c["contrast"] == "Land-cover vs uniform rate, both capped", "cls"] == "same").all()
     drivers = pd.DataFrame({"tile_id": range(30), **{d[0]: np.linspace(1, 10, 30) for d in EIKONAL_DRIVERS}})
-    rho = plot_contrast_drivers(c, drivers, tmp_path / "contrast.png")
-    assert (tmp_path / "contrast.txt").exists() and len(rho) == 3 * len(EIKONAL_DRIVERS)
+    rho = contrast_driver_rhos(c, drivers, n_boot=20)
+    assert len(rho) == 3 * len(EIKONAL_DRIVERS)
+    plot_variant_contrasts(c, per_tile, rho, tmp_path / "contrast.png")
+    assert (tmp_path / "contrast.txt").exists()
