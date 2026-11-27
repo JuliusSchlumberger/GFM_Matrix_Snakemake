@@ -41,11 +41,11 @@ caps `max_rounds` at 40 on this basis; the uniform-attenuation study sets 10.
 sweep traces, one CSV per tile) - `calibration_studies/aggregate_wet_tiles.py`
 (combines per-tile results when the calibration run is split across
 parallel HPC jobs) - `calibration_studies/plot_sweep_calibration_bands.py` (single
-4-panel summary figure, `sweep_calibration_bands.png` - (a) ECDF of
+3-panel summary figure, `sweep_calibration_bands.png` - (a) ECDF of
 rounds-to-converge (the direct evidence for the `max_rounds` cutoff, via
 `calibration_studies/plot_sweep_budget_convergence.py`'s `collect()`, kept only as a
-shared tile-convergence detector - it has no plotting of its own), (b)-(d)
-solver-residual, depth-change, and newly-flooded-cell bands vs. round, each
+shared tile-convergence detector - it has no plotting of its own), (b)-(c)
+depth-change and newly-flooded-cell bands vs. round, each
 with a vertical line at production's `max_rounds`; a tile's own trace ends
 once it round-converges, so the sample each band is computed from shrinks
 at higher round numbers - real data throughout, no carried-forward values

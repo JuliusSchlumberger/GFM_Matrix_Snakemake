@@ -1,8 +1,8 @@
-"""Plot the 4-panel sweep-budget calibration figure (docs/methods_03 §2).
+"""Plot the 3-panel sweep-budget calibration figure (docs/methods_03 §2).
 
 (a) ECDF of rounds to round_max_change <= epsilon; per-round bands over wet
-tiles of (b) raw solver residual [m], (c) connectivity-pruned max depth change
-[m], (d) newly flooded cells. Tiles drop out once converged; no carry-forward.
+tiles of (b) connectivity-pruned max depth change [m], (c) newly flooded
+cells. Tiles drop out once converged; no carry-forward.
 Rebuilds wet_tiles_selected.txt first (overwrites it).
 
 Usage:
@@ -36,8 +36,8 @@ from plot_sweep_budget_convergence import (  # noqa: E402
 N_TILES_WANTED_DEFAULT = 500  # matches aggregate_wet_tiles.py's own default
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-FLOOR = 1e-4  # log-scale display floor for panels (b)/(c)
-FLOOR_COUNT = 0.2  # log-scale display floor for panel (d)'s raw cell counts
+FLOOR = 1e-4  # log-scale display floor for panel (b)
+FLOOR_COUNT = 0.2  # log-scale display floor for panel (c)'s raw cell counts
 
 
 def _aggregate_to_rounds(csv_path: Path) -> pd.DataFrame | None:
@@ -90,15 +90,15 @@ def _plot_cdf(ax, cdf_df: pd.DataFrame, max_rounds: int) -> None:
 
 
 def make_figure(long_df: pd.DataFrame, cdf_df: pd.DataFrame, epsilon: float, max_rounds: int, out_path: Path) -> None:
-    """Draw the 4-panel figure to out_path."""
-    fig, axes = plt.subplots(2, 2, figsize=(17, 13))
+    """Draw the 3-panel figure to out_path."""
+    fig, axes = plt.subplots(1, 3, figsize=(17, 5.5))
 
-    ax = axes[0, 0]
+    ax = axes[0]
     _plot_cdf(ax, cdf_df, max_rounds)
     ax.set_title("(a)", loc="left", fontweight="bold", fontsize=13)
 
-    ax = axes[0, 1]
-    plot_band(ax, band_stats(long_df, "round_max_change", "round"), "#d62728", "max_change (raw solver residual)", floor=FLOOR)
+    ax = axes[1]
+    plot_band(ax, band_stats(long_df, "round_max_depth_change_abs", "round"), "#ff7f0e", "max_depth_change_abs (flood extent only)", floor=FLOOR)
     ax.axhline(epsilon, color="grey", linestyle=":", linewidth=1, label=f"epsilon ({epsilon}m)")
     ax.axvline(max_rounds, color="black", linestyle="--", linewidth=1.3, label=f"max_rounds={max_rounds}")
     ax.set_yscale("log")
@@ -108,24 +108,13 @@ def make_figure(long_df: pd.DataFrame, cdf_df: pd.DataFrame, epsilon: float, max
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
-    ax = axes[1, 0]
-    plot_band(ax, band_stats(long_df, "round_max_depth_change_abs", "round"), "#ff7f0e", "max_depth_change_abs (flood extent only)", floor=FLOOR)
-    ax.axhline(epsilon, color="grey", linestyle=":", linewidth=1, label=f"epsilon ({epsilon}m)")
-    ax.axvline(max_rounds, color="black", linestyle="--", linewidth=1.3, label=f"max_rounds={max_rounds}")
-    ax.set_yscale("log")
-    ax.set_xlabel("round")
-    ax.set_ylabel("metres")
-    ax.set_title("(c)", loc="left", fontweight="bold", fontsize=13)
-    ax.legend(fontsize=8)
-    ax.grid(True, alpha=0.3)
-
-    ax = axes[1, 1]
+    ax = axes[2]
     plot_band(ax, band_stats(long_df, "round_n_newly_flooded", "round"), "#1f77b4", "newly flooded cells", floor=FLOOR_COUNT)
     ax.axvline(max_rounds, color="black", linestyle="--", linewidth=1.3, label=f"max_rounds={max_rounds}")
     ax.set_yscale("log")
     ax.set_xlabel("round")
     ax.set_ylabel("newly flooded cells (this round, log)")
-    ax.set_title("(d)", loc="left", fontweight="bold", fontsize=13)
+    ax.set_title("(c)", loc="left", fontweight="bold", fontsize=13)
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
