@@ -352,6 +352,9 @@ hpc:
   # ceil(solves x solve_minutes / (cpus_per_task x target_hours x 60)) jobs of site profile
   # `profile`, at most one per tile. Keys: solve_minutes, target_hours, profile. Empty: off.
   wave_packing: {}
+  # Wall-clock limit of one (tile, RP, SLR) solve in a simulate job; turns a hung shared-mount
+  # read into a logged failure (run_simulation_batch.py). Must exceed the slowest tile's solve.
+  solve_timeout_min: 20
 
 # ── POSTPROCESSING ────────────────────────────────────────────────────────────
 # Used by: merge_chunk.py, compute_flood_fraction_chunk.py, build_mosaic_vrt.py,

@@ -295,7 +295,8 @@ def stage_tile_grid_lines() -> list[str]:
     """Bash fn staging the tile_grid gpkg to node-local disk, validated by byte size.
 
     GDAL/SQLite's advisory lock on a gpkg read directly from the shared data root can hang
-    indefinitely on cluster compute nodes; a plain `cp` never takes that lock.
+    indefinitely on cluster compute nodes; a plain `cp` never takes that lock. The copy keeps
+    the source's mtime: it is a Snakemake input, and a fresh mtime would mark every tile outdated.
     """
     return [
         "stage_tile_grid_locally() {",
@@ -306,7 +307,7 @@ def stage_tile_grid_lines() -> list[str]:
         "  local attempt=1 max_attempts=8 delay=5",
         '  local src_size; src_size=$(stat -c%s -- "$src" 2>/dev/null)',
         '  while [ "$attempt" -le "$max_attempts" ]; do',
-        '    cp -f -- "$src" "$dst" 2>/dev/null',
+        '    cp -f --preserve=timestamps -- "$src" "$dst" 2>/dev/null',
         '    local dst_size; dst_size=$(stat -c%s -- "$dst" 2>/dev/null)',
         '    if [ -n "$dst_size" ] && [ "$dst_size" = "$src_size" ]; then',
         "      printf -v \"$out_var\" '%s' \"$dst\"",

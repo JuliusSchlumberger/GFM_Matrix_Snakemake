@@ -109,6 +109,25 @@ SFINCS_CLASS_EDGES = (0.3, 0.5, 1.0, 1.5, 2.0, 3.0)  # m, from WET_THRESHOLD_M; 
 SFINCS_CLASS_LABELS = ("0.1-0.3", "0.3-0.5", "0.5-1", "1-1.5", "1.5-2", "2-3", ">3")
 CELL_KINDS = ("both_wet", "sfincs_only", "model_only")
 TOLERANCES_M = (0.1, 0.2, 0.3, 0.5)
+# SFINCS depth behind a model depth: classes of model depth (10 cm from WET_THRESHOLD_M, the
+# last > 3 m) and SFINCS depth in 1 cm bins with a catch-all above 5 m.
+MODEL_DEPTH_EDGES = np.round(np.arange(0.2, 3.001, 0.1), 2)
+SFINCS_DEPTH_EDGES = np.round(np.arange(0.0, 5.001, 0.01), 2)
+
+
+def depth_given_model_hists(model: np.ndarray, sfincs: np.ndarray, model_wet: np.ndarray,
+                            weight: np.ndarray) -> np.ndarray:
+    """Weighted histograms of SFINCS depth on the cells the model floods, by model depth class.
+
+    Shape (len(MODEL_DEPTH_EDGES) + 1, len(SFINCS_DEPTH_EDGES) + 1). A cell SFINCS leaves dry
+    counts at its own sub-threshold depth (NaN as 0), so each class holds every cell the model
+    floods at that depth, the false alarms included.
+    """
+    m, s = np.nan_to_num(model, nan=0.0), np.nan_to_num(sfincs, nan=0.0)
+    n_class, n_bin = len(MODEL_DEPTH_EDGES) + 1, len(SFINCS_DEPTH_EDGES) + 1
+    idx = (np.digitize(m[model_wet], MODEL_DEPTH_EDGES) * n_bin
+           + np.searchsorted(SFINCS_DEPTH_EDGES, s[model_wet], side="right"))
+    return np.bincount(idx, weights=weight[model_wet], minlength=n_class * n_bin).reshape(n_class, n_bin)
 
 
 def depth_diff_hists(model: np.ndarray, sfincs: np.ndarray, model_wet: np.ndarray, sfincs_wet: np.ndarray,

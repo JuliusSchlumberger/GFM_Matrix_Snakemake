@@ -84,3 +84,5 @@ hpc:
   n_nodes: 32  # preprocess: 32 x 4 cores of the plan's 144
   # 1 m fine tiles: ~20 s per solve in earlier runs, x6 margin for the solver caps.
   wave_packing: {solve_minutes: 2.0, target_hours: 2.0, profile: simulate_packed}
+  # The largest fine tiles (e.g. England tiles 10, 731) solve in over 20 min.
+  solve_timeout_min: 120

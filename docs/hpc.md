@@ -116,6 +116,8 @@ One simulation solve peaks at about `base_mb + bytes_per_pixel x DEM pixels` (`s
 `hpc.wave_tiers` is a list of tiers with `hops`, `n_nodes`, `partition`, `cpus_per_task`, `mem`, `time`; the first tier whose `hops` contains the wave's `hop_distance` wins, `n_nodes: null` means one job per tile, and the last tier must be the catch-all `hops: null`.
 A scenario's `hpc.wave_packing` (`solve_minutes`, `target_hours`, `profile`) replaces the tiers for that scenario: each wave gets ceil(solves x `solve_minutes` / (`cpus_per_task` x `target_hours` x 60)) jobs of `profile`, at most one per tile.
 
+Each solve in a simulation job is stopped after `hpc.solve_timeout_min` (default 20) and logged as failed, so a hung shared-mount read cannot hold the job; raise it for scenarios whose largest tiles solve slower.
+
 ## Logs, failures and resume
 
 A job named `<name>` logs to `<jobs_dir>/logs/<name>_%j.out` / `.err` (the exposure jobs under `<jobs_dir>/exposure/logs/`).

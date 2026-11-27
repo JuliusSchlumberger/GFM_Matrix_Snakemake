@@ -16,6 +16,10 @@ data_catalog = get_data_catalog(snakemake.params.data_catalog, root=snakemake.pa
 
 gap_fill_cfg = snakemake.params.dem_gap_fill_cfg  # noqa: F821
 dem_source = snakemake.params.dem_source  # noqa: F821
+# The rule's input function returns a list, so this named input is a list (empty when unneeded).
+goco06s_inputs = snakemake.input.goco06s_absolute_raster  # noqa: F821
+if isinstance(goco06s_inputs, str):
+    goco06s_inputs = [goco06s_inputs]
 
 dem = extract_dem(
     data_catalog,
@@ -31,7 +35,7 @@ dem = extract_dem(
     pixel_size_m=snakemake.params.pixel_size_m,  # noqa: F821
     native_datum=snakemake.params.native_datum,  # noqa: F821
     hybrid_grid_raster=snakemake.params.hybrid_grid_raster,  # noqa: F821
-    goco06s_absolute_raster=snakemake.input.goco06s_absolute_raster or None,  # noqa: F821
+    goco06s_absolute_raster=goco06s_inputs[0] if goco06s_inputs else None,
     derive_mask_from_dem=(dem_source != "deltadtm"),
     flat_fill_value=snakemake.params.flat_fill_value,  # noqa: F821
 )

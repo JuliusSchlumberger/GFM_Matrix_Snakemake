@@ -311,8 +311,10 @@ class Controller:
         self.procs: dict[str, subprocess.Popen] = {}
         for s in plan["steps"]:
             st = self.states.setdefault(s["id"], {"status": "pending"})
-            if st["status"] == "running" and s.get("job") is None:
-                st["status"] = "interrupted"  # its launcher died with the controller: retry or mark-done
+            # A command that ended before the restart left only its queued jobs, which this
+            # controller keeps following; one that had not ended died with the controller.
+            if st["status"] == "running" and s.get("job") is None and "command_rc" not in st:
+                st["status"] = "interrupted"  # retry or mark-done
 
     def log(self, msg: str) -> None:
         print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}", flush=True)

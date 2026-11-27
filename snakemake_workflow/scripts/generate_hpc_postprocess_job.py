@@ -21,6 +21,7 @@ Usage:
 
 import argparse
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -94,12 +95,21 @@ def _add_native_merge_jobs(chain: JobChain, linux_code_root: str, name_prefix: s
     return vrt_jobs
 
 
+def postprocessing_rules() -> list[str]:
+    """Return the rule names defined in rules/postprocessing.smk."""
+    smk = Path(__file__).resolve().parents[1] / "rules" / "postprocessing.smk"
+    return re.findall(r"^rule (\w+):", smk.read_text(encoding="utf-8"), flags=re.MULTILINE)
+
+
 def _add_batches(chain: JobChain, linux_code_root: str, phase_name: str, batches: list[list[str]],
                  configfile_path: str, tile_grid_path: str, after: list[str]) -> list[str]:
     """Add one `GFM_CONFIG_PATH=<staged config> snakemake` job per batch; return their names.
 
     The staged resolved_config.yml makes the compute node's Snakefile parse see this dispatch's config.
+    Only postprocessing rules may run: a missing or outdated tile result fails the batch instead of
+    being preprocessed and solved inside it.
     """
+    allowed_rules = " ".join(postprocessing_rules())
     names = []
     for i, batch_targets in enumerate(batches):
         name = f"postprocess_{phase_name}_batch_{i:03d}"
@@ -117,7 +127,8 @@ def _add_batches(chain: JobChain, linux_code_root: str, phase_name: str, batches
             # --rerun-incomplete: redo outputs a killed earlier job left flagged incomplete
             # instead of aborting the batch.
             f'GFM_CONFIG_PATH="$LOCAL_CONFIGFILE" run_snakemake_with_retry {SNAKEMAKE} --cores "$SLURM_CPUS_PER_TASK" --nolock '
-            '--rerun-triggers=mtime --rerun-incomplete "${TARGETS[@]}"',
+            # --allowed-rules takes several values: keep another option between it and the targets.
+            f'--allowed-rules {allowed_rules} --rerun-triggers=mtime --rerun-incomplete "${{TARGETS[@]}}"',
         ], after=after, helpers=("retry", "stage_config", "stage_tile_grid"))
         names.append(name)
         print(f"  {name}: {len(batch_targets)} target(s)")

@@ -21,6 +21,8 @@ RUNS_NAME = "model_runs.json"  # per tile: run key -> variant, parameter, alpha,
 SELECTION_NAME = "variant_selection.json"  # per base dir: the calibrated run of each variant
 # per tile, beside calibration_result.json: "<run key>__<area|pop>" -> flood_agreement.depth_diff_hists
 DEPTH_ACCURACY_NAME = "calibration_depth_accuracy.npz"
+# per tile: "<run key>__<area|pop>" -> flood_agreement.depth_given_model_hists
+DEPTH_GIVEN_MODEL_NAME = "calibration_depth_given_model.npz"
 _RUN_SUFFIX = f"_waterdepth_{RETURN_PERIOD}_{WATERLEVEL_NAME}.tif"
 
 

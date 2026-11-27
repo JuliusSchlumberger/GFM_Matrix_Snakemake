@@ -163,6 +163,7 @@ def generate(config_path: str | Path, *, resume: bool = False, profile_sets: lis
             f'"$GFM_PY" "{code_root}/snakemake_workflow/scripts/run_simulation_batch.py" \\',
             f'  --triples-file "{linux_jobs_dir}/{name}_triples.csv" \\',
             '  --config "$LOCAL_CONFIGFILE" \\',
+            f'  --timeout-min {hpc_cfg["solve_timeout_min"]} \\',
             '  --fail-log "$FAIL_LOG"',
         ]
         # Not -e: one failed (tile, rp, slr) must not abort the rest of this node's batch, so

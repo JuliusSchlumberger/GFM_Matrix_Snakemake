@@ -78,3 +78,5 @@ hpc:
   jobs_dir: "{root}/wales_local_input/all_wales/model_outputs/hpc_jobs"
   n_nodes: 6  # preprocess: 346 tiles, ~58 per 4-core job as England
   wave_packing: {solve_minutes: 2.0, target_hours: 2.0, profile: simulate_packed}
+  # Fine tiles as large as England's largest (tiles 10, 731) solve in over 20 min.
+  solve_timeout_min: 120

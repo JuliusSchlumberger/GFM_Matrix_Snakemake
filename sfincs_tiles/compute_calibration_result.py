@@ -1,7 +1,9 @@
 """Write a tile's calibration_result.json: every flood-model run vs SFINCS on the 30 m subgrid.
 
 Needs hydromt-sfincs-dev (reads sfincs.msk through SfincsModel). Writes the exact depth-difference
-histograms of every run, area- and population-weighted, to calibration_depth_accuracy.npz beside it.
+histograms of every run, area- and population-weighted, to calibration_depth_accuracy.npz beside it,
+and SFINCS depth by model depth to calibration_depth_given_model.npz. Without --tile-id it rescores
+every tile of tile_ids.txt that has a SFINCS result (--shard K/N: every N-th from the K-th).
 
 Usage:
     python compute_calibration_result.py --config <config.yml> --base-dir-name calibration_roughness_SFINCS --tile-id 1122
@@ -13,6 +15,7 @@ import argparse
 import json
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
 from pathlib import Path
 
@@ -26,12 +29,12 @@ from scipy import ndimage
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from calibration_paths import (  # noqa: E402
-    DEPTH_ACCURACY_NAME, RUNS_NAME, decode_waterdepth_cm, run_path,
+    DEPTH_ACCURACY_NAME, DEPTH_GIVEN_MODEL_NAME, RUNS_NAME, decode_waterdepth_cm, run_path, shard,
 )
 from calibration_split import split_group  # noqa: E402
 from flood_agreement import (  # noqa: E402
     DEPTH_CATEGORY_EDGES, DEPTH_CORR_FINE_EDGES, WET_THRESHOLD_M, confusion_counts, depth_corr_sufficient_stats,
-    depth_diff_hists, depth_joint_hist, metrics_from_counts,
+    depth_diff_hists, depth_given_model_hists, depth_joint_hist, metrics_from_counts,
 )
 from gfm_config import read_root, resolve_catalog_path  # noqa: E402
 from retry_io import retry_transient_io  # noqa: E402
@@ -84,7 +87,7 @@ def _compare(depth: np.ndarray, wet: np.ndarray, ref: dict) -> dict:
 
 
 def compute_result(tile_dir: Path, flooding: dict, core_mask: np.ndarray | None = None,
-                   pop_path: Path | None = None) -> tuple[dict, dict[str, np.ndarray]]:
+                   pop_path: Path | None = None) -> tuple[dict, dict[str, np.ndarray], dict[str, np.ndarray]]:
     """Build one tile's calibration_result dict vs SFINCS's hmax_subgrid.tif, and its depth histograms.
 
     Scoring area: real land (mask.tif == LAND_CODE) active in SFINCS
@@ -160,7 +163,7 @@ def compute_result(tile_dir: Path, flooding: dict, core_mask: np.ndarray | None 
 
     if people is not None:
         result["sfincs"]["exposed_pop"] = float(people[ref["sfincs_wet"]].sum())
-    hists = {}
+    hists, given_model = {}, {}
     runs_path = out_dir / RUNS_NAME
     runs = json.loads(runs_path.read_text()) if runs_path.exists() else {}
     for key, meta in runs.items():
@@ -178,14 +181,17 @@ def compute_result(tile_dir: Path, flooding: dict, core_mask: np.ndarray | None 
         for name, w in (("area", ref["weight"]), ("pop", people)):
             if w is not None:
                 hists[f"{key}__{name}"] = depth_diff_hists(depth, sfincs_depth, wet, ref["sfincs_wet"], w)
-    return result, hists
+                given_model[f"{key}__{name}"] = depth_given_model_hists(depth, sfincs_depth, wet, w)
+    return result, hists, given_model
 
 
-def write_result(out_dir: Path, result: dict, hists: dict[str, np.ndarray]) -> None:
-    """Write calibration_result.json and the depth histograms to `out_dir`."""
+def write_result(out_dir: Path, result: dict, hists: dict[str, np.ndarray],
+                 given_model: dict[str, np.ndarray]) -> None:
+    """Write calibration_result.json and both kinds of depth histogram to `out_dir`."""
     retry_transient_io(out_dir.mkdir, parents=True, exist_ok=True)
     retry_transient_io((out_dir / "calibration_result.json").write_text, json.dumps(result, indent=1), encoding="utf-8")
     retry_transient_io(np.savez_compressed, out_dir / DEPTH_ACCURACY_NAME, **hists)
+    retry_transient_io(np.savez_compressed, out_dir / DEPTH_GIVEN_MODEL_NAME, **given_model)
 
 
 def population_path(config_path: Path, catalog_path: Path = DEFAULT_CATALOG) -> Path:
@@ -193,25 +199,62 @@ def population_path(config_path: Path, catalog_path: Path = DEFAULT_CATALOG) -> 
     return resolve_catalog_path(catalog_path, read_root(config_path), "population")
 
 
+def score_tile(tile_dir: Path, flooding: dict, pop_path: Path | None) -> dict:
+    """Score one tile and write its result files; return the result."""
+    result, hists, given_model = compute_result(tile_dir, flooding, pop_path=pop_path)
+    write_result(tile_dir / "outputs", result, hists, given_model)
+    return result
+
+
+def _score_or_error(tile_dir: Path, flooding: dict, pop_path: Path | None) -> str | None:
+    # One tile's failure must not stop the batch; failures are reported at the end (exit 1).
+    try:
+        score_tile(tile_dir, flooding, pop_path)
+    except Exception as exc:
+        return f"{type(exc).__name__}: {exc}"
+    return None
+
+
 def main() -> None:
+    from process_pool import available_cpus
+
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
     parser.add_argument("--base-dir-name", default="calibration_roughness_SFINCS")
-    parser.add_argument("--tile-id", required=True)
+    parser.add_argument("--tile-id", default=None, help="one tile (default: every tile of tile_ids.txt with a result)")
+    parser.add_argument("--shard", default=None, metavar="K/N", help="every N-th tile from the K-th (K = 0..N-1)")
+    parser.add_argument("--workers", type=int, default=None, help="default: every core this process may use")
     parser.add_argument("--catalog", default=str(DEFAULT_CATALOG), help="data catalog holding the population raster")
     args = parser.parse_args()
 
     with open(args.config, encoding="utf-8") as f:
         config = yaml.safe_load(f)
     root = read_root(Path(args.config))
-    tile_dir = root / args.base_dir_name / args.tile_id
-    result, hists = compute_result(tile_dir, config["simulation"]["flooding"],
-                                   pop_path=population_path(Path(args.config), Path(args.catalog)))
-    out = tile_dir / "outputs" / "calibration_result.json"
-    write_result(out.parent, result, hists)
-    csi = ", ".join(f"{k}:{v['vs_sfincs']['CSI']:.3f}" for k, v in result["runs"].items())
-    print(f"tile {args.tile_id} ({result['group']}): sfincs {result['sfincs']['flooded_km2']:.1f} km2 "
-          f"(inactive land {result['domain']['sfincs_inactive_land_km2']:.1f} km2 excluded); CSI {csi} -> {out}")
+    base = root / args.base_dir_name
+    flooding = config["simulation"]["flooding"]
+    pop_path = population_path(Path(args.config), Path(args.catalog))
+    if args.tile_id:
+        result = score_tile(base / args.tile_id, flooding, pop_path)
+        csi = ", ".join(f"{k}:{v['vs_sfincs']['CSI']:.3f}" for k, v in result["runs"].items())
+        print(f"tile {args.tile_id} ({result['group']}): sfincs {result['sfincs']['flooded_km2']:.1f} km2 "
+              f"(inactive land {result['domain']['sfincs_inactive_land_km2']:.1f} km2 excluded); CSI {csi}")
+        return
+
+    ids = shard(sorted((base / "tile_ids.txt").read_text().split(), key=int), args.shard)
+    tiles = [base / t for t in ids if (base / t / "sfincs_model" / "hmax_subgrid.tif").exists()]
+    print(f"{len(tiles)} of {len(ids)} tile(s) have a SFINCS result to score", flush=True)
+    failed, t0 = [], time.time()
+    with ProcessPoolExecutor(args.workers or available_cpus()) as pool:
+        futures = {pool.submit(_score_or_error, t, flooding, pop_path): t.name for t in tiles}
+        for i, fut in enumerate(as_completed(futures), 1):
+            if (err := fut.result()) is not None:
+                failed.append(futures[fut])
+                print(f"  [FAILED] tile {futures[fut]}: {err}", flush=True)
+            if i % 50 == 0 or i == len(tiles):
+                print(f"  {i}/{len(tiles)} scored, {len(failed)} failed - {time.time() - t0:.0f}s", flush=True)
+    if failed:
+        print("Failed tiles:", ", ".join(failed[:40]) + (" ..." if len(failed) > 40 else ""))
+        sys.exit(1)
 
 
 if __name__ == "__main__":

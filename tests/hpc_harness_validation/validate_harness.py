@@ -83,6 +83,23 @@ def test_step_is_done_once_its_command_and_jobs_end(tmp_path, monkeypatch) -> No
     assert ctl.states["s"]["status"] == "done" and tid
 
 
+def test_restart_keeps_following_a_step_whose_command_ended(tmp_path) -> None:
+    plan = {"name": "t", "max_cores": 4, "state_dir": tmp_path / "state",
+            "steps": [{"id": "ended", "run": "true"}, {"id": "cut", "run": "true"}]}
+    plan["state_dir"].mkdir()
+    harness.save_step_states(plan, {"ended": {"status": "running", "command_rc": 0},
+                                    "cut": {"status": "running"}})
+    ctl = Controller(plan, None, False, 0)
+    assert (ctl.states["ended"]["status"], ctl.states["cut"]["status"]) == ("running", "interrupted")
+    tid = enqueue([str(_script(tmp_path, "j.sbatch", "1vcpu"))], ctl.queue_dir, "ended", {})
+    tasks = load_tasks(ctl.queue_dir)
+    ctl.update_steps(tasks)
+    assert ctl.states["ended"]["status"] == "running"  # its job is still queued
+    tasks[0].state = "COMPLETED"
+    ctl.update_steps(tasks)
+    assert ctl.states["ended"]["status"] == "done" and tid
+
+
 def test_controller_starts_a_waiting_step_before_it_stops(tmp_path, monkeypatch) -> None:
     plan = {"name": "t", "max_cores": 2, "state_dir": tmp_path / "state",
             "steps": [{"id": "a", "run": "true"}, {"id": "b", "after": ["a"], "run": "true"}]}

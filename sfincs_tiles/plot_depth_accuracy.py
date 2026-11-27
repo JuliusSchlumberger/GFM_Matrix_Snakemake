@@ -24,9 +24,11 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from calibration_paths import DEPTH_ACCURACY_NAME, SELECTION_NAME, threaded_map  # noqa: E402
+from calibration_paths import DEPTH_ACCURACY_NAME, DEPTH_GIVEN_MODEL_NAME, SELECTION_NAME, threaded_map  # noqa: E402
 from calibration_results import DISPLAY_LABEL, GROUPS, RESULT_NAME, read_hists  # noqa: E402
-from flood_agreement import DIFF_EDGES, SFINCS_CLASS_LABELS, diff_stats  # noqa: E402
+from flood_agreement import (  # noqa: E402
+    DIFF_EDGES, MODEL_DEPTH_EDGES, SFINCS_CLASS_LABELS, SFINCS_DEPTH_EDGES, WET_THRESHOLD_M, diff_stats,
+)
 from gfm_config import read_figures_root, read_root  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -51,6 +53,8 @@ REFERENCE_TOLERANCES_M = (0.1, 0.2, 0.5)
 MIN_SFINCS_WET_KM2 = 1.0  # tiles in the per-tile panel
 ALIGNMENT_BANDS_M = (0.05, 0.1, 0.25, 0.5)  # half-widths of the bands around the 1:1 line
 TILE_QUANTILES = (0.05, 0.25, 0.5, 0.75, 0.95)
+DEPTH_QUANTILES = (0.05, 0.25, 0.5, 0.75, 0.95)
+MIN_MODEL_CLASS_KM2 = 1.0  # model depth classes with less flooded area are left out of the figure
 CLASS_X_M = (0.2, 0.4, 0.75, 1.25, 1.75, 2.5, 3.25)  # SFINCS_CLASS_LABELS on a depth axis; > 3 m at 3.25
 MIN_CLASS_KM2 = 0.1  # a tile counts in a depth class's spread with at least this much SFINCS-flooded area there
 
@@ -317,6 +321,100 @@ def plot_depth_alignment(table: pd.DataFrame, labels: dict[str, str], out: Path)
     print(f"wrote {out}")
 
 
+def load_given_model_hists(base_dir: Path, run_keys: dict[str, str]) -> tuple[dict, int]:
+    """Pool the selected runs' SFINCS-depth-by-model-depth histograms over tiles.
+
+    Returns ({variant: {weight: (model classes, SFINCS depth bins) histogram}}, number of tiles read).
+    """
+    pooled: dict = {v: {} for v in run_keys}
+    paths = [p for p in sorted(base_dir.glob(f"*/outputs/{DEPTH_GIVEN_MODEL_NAME}")) if (p.parent / RESULT_NAME).exists()]
+    wanted = {f"{key}__{weight}" for key in run_keys.values() for weight in ("area", "pop")}
+    n = 0
+    for hists in threaded_map(lambda p: read_hists(p, wanted.__contains__), paths):
+        if hists is None:
+            continue
+        n += 1
+        for variant, key in run_keys.items():
+            for weight in ("area", "pop"):
+                h = hists.get(f"{key}__{weight}")
+                if h is not None:
+                    pooled[variant][weight] = pooled[variant].get(weight, 0) + h
+    return pooled, n
+
+
+def _depth_quantiles(hist: np.ndarray, qs: tuple[float, ...]) -> np.ndarray:
+    # 1 cm bins of SFINCS_DEPTH_EDGES; the catch-all above the last edge sits just beyond it.
+    centres = np.concatenate([[0.0], (SFINCS_DEPTH_EDGES[:-1] + SFINCS_DEPTH_EDGES[1:]) / 2,
+                              [SFINCS_DEPTH_EDGES[-1] + 0.005]])
+    cum = np.cumsum(hist) / hist.sum()
+    return np.array([centres[min(np.searchsorted(cum, q), len(centres) - 1)] for q in qs])
+
+
+def given_model_table(pooled: dict) -> pd.DataFrame:
+    """Return, per run, weight and model depth class, the SFINCS depth quantiles and the share SFINCS leaves dry."""
+    lows = np.concatenate([[WET_THRESHOLD_M], MODEL_DEPTH_EDGES])
+    highs = np.concatenate([MODEL_DEPTH_EDGES, [np.inf]])
+    dry = SFINCS_DEPTH_EDGES[1:] <= WET_THRESHOLD_M + 1e-9  # inner bins entirely below the wet threshold
+    rows = []
+    for variant, by_weight in pooled.items():
+        for weight, h in by_weight.items():
+            for lo, hi, hc in zip(lows, highs, h):
+                total = hc.sum()
+                if total <= 0:
+                    continue
+                q = _depth_quantiles(hc, DEPTH_QUANTILES)
+                rows.append({"variant": variant, "weight": weight, "model_depth_lo_m": lo, "model_depth_hi_m": hi,
+                             "model_flooded": total, "share_sfincs_dry": hc[1:-1][dry].sum() / total,
+                             **{f"sfincs_p{round(qq * 100)}_m": val for qq, val in zip(DEPTH_QUANTILES, q)}})
+    return pd.DataFrame(rows)
+
+
+def plot_depth_given_model(table: pd.DataFrame, labels: dict[str, str], out: Path) -> None:
+    """Plot the range of SFINCS depth behind each model depth, and how often SFINCS stays dry there."""
+    variants = [v for v in TOLERANCE_VARIANTS if v in set(table["variant"])]
+    fig, axes = plt.subplots(2, len(variants), figsize=(DOUBLE_COLUMN_MM / MM_PER_INCH, 4.8), sharex=True,
+                             sharey="row", squeeze=False, layout="constrained", gridspec_kw={"height_ratios": [1.4, 1]})
+    for j, v in enumerate(variants):
+        color, ls = TOLERANCE_STYLE[v]
+        t = table[(table["variant"] == v) & (table["weight"] == "area") & (table["model_flooded"] >= MIN_MODEL_CLASS_KM2)]
+        t = t[np.isfinite(t["model_depth_hi_m"])]  # the open > 3 m class has no midpoint
+        x = 0.5 * (t["model_depth_lo_m"] + t["model_depth_hi_m"])
+        ax = axes[0, j]
+        ax.fill_between(x, t["sfincs_p5_m"], t["sfincs_p95_m"], color=color, alpha=0.18, linewidth=0, label="5-95 %")
+        ax.fill_between(x, t["sfincs_p25_m"], t["sfincs_p75_m"], color=color, alpha=0.4, linewidth=0, label="25-75 %")
+        ax.plot(x, t["sfincs_p50_m"], color=color, linewidth=1.3, label="Median")
+        ax.plot([0, 3], [0, 3], color="black", linewidth=0.7, linestyle=":", label="1:1")
+        ax.set(xlim=(0, 3), ylim=(0, 3.5), ylabel="SFINCS depth (m)" if j == 0 else "")
+        panel_letters(ax, "abc"[j], fontsize=7, label=labels[v])
+        ax = axes[1, j]
+        for weight, wls, wlabel in (("area", "-", "Area"), ("pop", "--", "People")):
+            w = table[(table["variant"] == v) & (table["weight"] == weight) & np.isfinite(table["model_depth_hi_m"])]
+            w = w[w["model_depth_lo_m"].isin(t["model_depth_lo_m"])]
+            ax.plot(0.5 * (w["model_depth_lo_m"] + w["model_depth_hi_m"]), w["share_sfincs_dry"], color=color,
+                    linestyle=wls, linewidth=1.1, label=wlabel)
+        ax.set(xlim=(0, 3), ylim=(0, 1), xticks=[0, 1, 2, 3], xlabel="Model depth (m)",
+               ylabel="Share SFINCS leaves dry" if j == 0 else "")
+        panel_letters(ax, "def"[j], fontsize=7)
+    axes[0, 0].legend(frameon=False, fontsize=6.5, loc="upper left")
+    axes[1, 0].legend(frameon=False, fontsize=6.5, loc="upper right")
+    save_figure(fig, out)
+    plt.close(fig)
+    write_caption(out, [
+        "What a modelled flood depth says about the real one: the range of SFINCS depth behind each model depth, "
+        "and how often SFINCS does not flood the cell at all.",
+        "All cells the model floods (> 0.10 m) on SFINCS-active land, pooled over tiles, by model depth in 10 cm "
+        f"classes (classes with less than {MIN_MODEL_CLASS_KM2:g} km2 left out; > 3 m not drawn). A cell SFINCS "
+        "leaves dry counts at its own sub-threshold depth, so the lower quantiles drop towards 0 where false "
+        "alarms are common.",
+        "(a-c) SFINCS depth, area-weighted: line = median, dark band = 25-75 %, light band = 5-95 % of the cells "
+        "of each model depth class; dotted = 1:1. (d-f) Share of the model's flooded area (solid) and of the "
+        "people living in it (dashed, WorldPop) that SFINCS leaves dry (< 0.10 m).",
+        "Agreement is relative to SFINCS on the same DEM and forcing (RP100). Per-class numbers: "
+        "depth_given_model.csv.",
+    ])
+    print(f"wrote {out}")
+
+
 def main() -> None:
     repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -352,6 +450,14 @@ def main() -> None:
     alignment = alignment_table(hists, per_class)
     alignment.to_csv(fig_dir / "depth_alignment.csv", index=False)
     plot_depth_alignment(alignment, labels, fig_dir / "depth_alignment.png")
+
+    given, n_given = load_given_model_hists(base_dir, run_keys)
+    if n_given == 0:
+        print(f"no {DEPTH_GIVEN_MODEL_NAME} yet (rescore the tiles): no depth_given_model figure")
+        return
+    given_table = given_model_table(given)
+    given_table.to_csv(fig_dir / "depth_given_model.csv", index=False)
+    plot_depth_given_model(given_table, labels, fig_dir / "depth_given_model.png")
 
 
 if __name__ == "__main__":

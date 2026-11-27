@@ -38,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from process_pool import available_cpus  # noqa: E402
 
 def compute_result_dedup(tile_dir: Path, flooding: dict, footprints: gpd.GeoDataFrame,
-                         pop_path: Path | None = None) -> tuple[dict, dict[str, np.ndarray]]:
+                         pop_path: Path | None = None) -> tuple[dict, dict[str, np.ndarray], dict[str, np.ndarray]]:
     """Build one tile's calibration_result dict on the area it owns."""
     with retry_transient_io(rasterio.open, tile_dir / "sfincs_model" / "hmax_subgrid.tif") as src:
         transform, crs, shape = src.transform, src.crs, src.shape
@@ -50,10 +50,10 @@ def _process_one(args_tuple) -> tuple[str, str | None]:
     tile_dir, out_tile_dir, flooding, footprints, pop_path = args_tuple
     tile_id = tile_dir.name
     try:
-        result, hists = compute_result_dedup(tile_dir, flooding, footprints, pop_path)
+        result, hists, given_model = compute_result_dedup(tile_dir, flooding, footprints, pop_path)
     except Exception as exc:
         return tile_id, f"{type(exc).__name__}: {exc}"
-    write_result(out_tile_dir / "outputs", result, hists)
+    write_result(out_tile_dir / "outputs", result, hists, given_model)
     return tile_id, None
 
 

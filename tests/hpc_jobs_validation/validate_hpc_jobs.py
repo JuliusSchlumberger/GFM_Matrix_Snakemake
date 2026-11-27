@@ -1,6 +1,7 @@
 """Generated HPC job chains on a synthetic site: job count, tiles per job, dependencies, job shape."""
 
 import csv
+import shlex
 import sys
 from argparse import Namespace
 from pathlib import Path
@@ -155,6 +156,26 @@ def test_postprocess_three_phases_chain(tmp_path) -> None:
     assert "flood_totals_and_plots" not in jobs
 
 
+def test_postprocess_batches_may_not_rebuild_tile_results(tmp_path) -> None:
+    from snakemake import get_argument_parser
+
+    post.generate(fx.make_fixture(tmp_path, n_nodes=5), flood_totals=False)
+    batch = (tmp_path / "root" / JOBS_DIR / "postprocess_postprocess_merge_batch_000.sbatch").read_text()
+    line = next(x for x in batch.splitlines() if "run_snakemake_with_retry" in x and "-m snakemake" in x)
+    argv = shlex.split(line.split("-m snakemake", 1)[1].replace('"${TARGETS[@]}"', "a.tif b.tif"))
+    args = get_argument_parser().parse_args([a.replace("$SLURM_CPUS_PER_TASK", "1") for a in argv])
+    assert args.target == ["a.tif", "b.tif"]
+    assert "merge_chunk" in args.allowed_rules and set(args.allowed_rules) == set(post.postprocessing_rules())
+    assert not {"run_eikonal", "extract_dem", "extract_tile_geometry"} & set(args.allowed_rules)
+
+
+def test_simulation_solve_timeout_from_config(tmp_path) -> None:
+    sim.generate(fx.make_fixture(tmp_path / "a"))
+    assert "--timeout-min 20 " in (tmp_path / "a" / "root" / JOBS_DIR / "wave0_batch_000.sbatch").read_text()
+    sim.generate(fx.make_fixture(tmp_path / "b", overrides={"hpc": {"solve_timeout_min": 120}}))
+    assert "--timeout-min 120 " in (tmp_path / "b" / "root" / JOBS_DIR / "wave0_batch_000.sbatch").read_text()
+
+
 def test_exposure_standalone(tmp_path) -> None:
     cfg = fx.make_fixture(tmp_path)
     ff = tmp_path / "root" / "merged_results" / "chunks" / "flood_fraction"
@@ -194,13 +215,26 @@ def test_sfincs_post_without_dedup_reruns_both_analyses_only(tmp_path) -> None:
     cfg = fx.make_fixture(tmp_path)
     base = fx.add_sfincs_stage2(tmp_path)
     args = Namespace(config=str(cfg), base_dir_name=base.name, dedup_dir_name=f"{base.name}_dedup", phase="sweep",
-                     submit=False, profile_set=[], dedup=False, post_shards=2)
+                     submit=False, profile_set=[], dedup=False, post_shards=2, rescore=False)
     jobs = _chain(tmp_path, sfincs.cmd_post(args))
     out = base / "hpc_jobs_stage2"
     scripts = "".join(f.read_text() for f in out.glob("post_*.sbatch"))
     assert list(jobs) == ["cal_post_sweep_shard0", "cal_post_sweep_shard1", "cal_post_sweep", "cal_post_sweep_dedup"]
     assert "compute_calibration_result_dedup.py" not in scripts and "dedup_shard_" not in scripts
     assert f"--raster-base-dir-name {base.name}" in (out / "post_models_sweep_dedup.sbatch").read_text()
+    assert "compute_calibration_result.py" not in scripts
+
+
+def test_sfincs_post_rescore_scores_each_shard_before_its_drivers_and_dedup(tmp_path) -> None:
+    cfg = fx.make_fixture(tmp_path)
+    base = fx.add_sfincs_stage2(tmp_path)
+    args = Namespace(config=str(cfg), base_dir_name=base.name, dedup_dir_name=f"{base.name}_dedup", phase="sweep",
+                     submit=False, profile_set=[], dedup=True, post_shards=2, rescore=True)
+    _chain(tmp_path, sfincs.cmd_post(args))
+    shard1 = (base / "hpc_jobs_stage2" / "post_sweep_shard1.sbatch").read_text()
+    rescore = shard1.index("compute_calibration_result.py")
+    assert "--shard 1/2 || exit 1" in shard1[rescore:].splitlines()[0]
+    assert rescore < shard1.index("compute_tile_drivers.py") < shard1.index("compute_calibration_result_dedup.py")
 
 
 def test_solver_study_lpt_by_pixels(tmp_path) -> None:

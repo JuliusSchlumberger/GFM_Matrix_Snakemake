@@ -67,3 +67,30 @@ def test_depth_tolerance_figure_renders(tmp_path) -> None:
     assert len(q) and (q["tile_p5"] <= q["tile_p50"]).all() and (q["tile_p50"] <= q["tile_p95"]).all()
     plot_depth_alignment(table, labels, tmp_path / "depth_alignment.png")
     assert (tmp_path / "depth_alignment.txt").exists()
+
+
+def test_depth_given_model_counts_every_model_wet_cell_and_its_dry_share(tmp_path) -> None:
+    from calibration_paths import DEPTH_GIVEN_MODEL_NAME
+    from flood_agreement import MODEL_DEPTH_EDGES, depth_given_model_hists
+    from plot_depth_accuracy import given_model_table, load_given_model_hists, plot_depth_given_model
+
+    # 10 cells the model floods 1.05 m deep: SFINCS 1.0 m on 6, 0.5 m on 2, dry (NaN) on 2; one model-dry cell.
+    model = np.array([1.05] * 10 + [0.0])
+    sfincs = np.array([1.0] * 6 + [0.5] * 2 + [np.nan] * 2 + [0.8])
+    h = depth_given_model_hists(model, sfincs, model > 0.1, np.full(11, 0.5))
+    assert np.isclose(h.sum(), 5.0)
+    assert h[np.digitize(1.05, MODEL_DEPTH_EDGES)].sum() == h.sum()
+    for tile in (1, 2):
+        out = tmp_path / str(tile) / "outputs"
+        out.mkdir(parents=True)
+        (out / RESULT_NAME).write_text(json.dumps({"tile_id": str(tile)}))
+        np.savez(out / DEPTH_GIVEN_MODEL_NAME, **{f"{RUNS['eikonal_uniform_cap']}__area": h,
+                                                  f"{RUNS['eikonal_uniform_cap']}__pop": h * 10})
+    pooled, n = load_given_model_hists(tmp_path, {"eikonal_uniform_cap": RUNS["eikonal_uniform_cap"]})
+    assert n == 2
+    table = given_model_table(pooled)
+    row = table[table["weight"] == "area"].iloc[0]
+    assert np.isclose(row["share_sfincs_dry"], 0.2) and np.isclose(row["model_flooded"], 10.0)
+    assert row["sfincs_p5_m"] < 0.1 and np.isclose(row["sfincs_p50_m"], 1.005)
+    plot_depth_given_model(table.assign(model_flooded=100.0), {"eikonal_uniform_cap": "Eik."}, tmp_path / "g.png")
+    assert (tmp_path / "g.txt").exists()
