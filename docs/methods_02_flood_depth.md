@@ -117,53 +117,79 @@ $T^{-\alpha}$ dependence is from 540 synthetic 1-D SFINCS floodplains
 one shape per station (RP100), used for every return period and SLR level.
 Implementation: `event_volume.DurationCorrection`.
 
-### 2.5 Illustrative comparison of the four variants
+### 2.5 Illustrative comparison of the flood-model variants
 
 Figure 1 runs every entry of `FLOOD_MODELS` on one synthetic scenario
-(`docs/figure_scripts/generate_flood_variant_examples.py`), arranged as a 3x3 grid of
-panels (one cell unused), styled per the general CLAUDE.md's section 9 via
-`analysis/_figure_style.py`: no titles, each panel numbered (a)-(h) just outside its
-top-left corner (`panel_letters`), a 180 mm final width set once and never rescaled,
-and the full description - what each panel, colour and marker means - lives in the
-companion `flood_variant_comparison.txt` (`write_caption`), not on the image itself.
-Saved as both PNG (300 dpi) and PDF (fonts embedded) via `_figure_style.save_figure`.
-Elevation (a) uses Greens, flood depth (d)-(h) uses Blues, friction (b)/(c) uses
-Oranges - single-hue, colour-blind-safe sequential ramps, one fixed per variable in
-`_figure_style.py` (section 9 allows these alongside viridis/cividis/Crameri/cmocean
-for a single magnitude variable per panel). Land/water context colours
-(not part of either scale) reuse `_figure_style.LAND_COLOR`/`WATER_COLOR`, the same
-convention as the flood-extent agreement maps. `SHOW_COLORBARS` is an explicit,
-documented override (`False` here) of section 9's default of one shared colour bar per
-panel group: depth is read off discrete 0.20 m colour bands plus three annotated sample
-points instead, which already give exact numbers without crowding eight small panels;
-setting it `True` restores the default. Point labels are black text on a white box,
-close to their marker; "near"/"far" sit far enough apart, and their labels offset in
-opposite directions (above/below), that they never collide despite sharing a row.
+(`docs/figure_scripts/generate_flood_variant_examples.py`), plus `eikonal` a second and
+third time at a land-cover-derived rate and at that same rate with the storm-volume cap
+(`event_volume.VolumeCap`, correction C, §2.4). It is arranged as a single column of
+three static-input panels (a)-(c) beside a 3-row-by-2-column grid of six result panels
+(d)-(i), styled per the general CLAUDE.md's section 9 via `analysis/_figure_style.py`:
+no titles, each panel numbered (a)-(i) just outside its top-left corner
+(`panel_letters`), a 180 mm final width set once and never rescaled, and the full
+description - what each panel, colour and marker means - lives in the companion
+`flood_variant_comparison.txt` (`write_caption`), not on the image itself. Saved as both
+PNG (300 dpi) and PDF (fonts embedded) via `_figure_style.save_figure`. Elevation (a)
+uses Greens and flood depth (d)-(i) uses Blues - single-hue, colour-blind-safe
+sequential ramps, one fixed per variable in `_figure_style.py` (section 9 allows these
+alongside viridis/cividis/Crameri/cmocean for a single magnitude variable per panel).
+Land cover (b) instead uses conventional land-use-map colours (`LANDCOVER_COLORS`): tan
+for tidal flat, khaki for grassland/cropland, ochre for shrubland, forest green for
+forest - qualitative, not a scale, and chosen to read like an ordinary land-use map
+rather than this project's abstract categorical palette. Friction (c) recolours those
+same four classes on the Oranges ramp instead, but by rank (`_friction_class_cmap`),
+not by (b)'s land-use colours: evenly spaced light-to-dark samples, so the lightest
+class (tidal flat) to the darkest (forest) reads as a strictly increasing attenuation
+order even though the underlying friction values themselves are unevenly spaced (an
+11x range across 4 classes - mapping them to their own raw fractional position on the
+ramp would instead bunch the two higher classes together at the dark end). Land/water
+context colours (not part of any scale) reuse `_figure_style.LAND_COLOR`/`WATER_COLOR`,
+the same convention as the flood-extent agreement maps. `SHOW_COLORBARS` is an explicit,
+documented override (`False` here) of
+section 9's default of one shared colour bar per panel group: depth is read off
+discrete 0.20 m colour bands plus three annotated sample points instead, which already
+give exact numbers without crowding nine small panels; setting it `True` restores the
+default. Point labels are black text on a white box, close to their marker; "near"/"far"
+sit far enough apart, and their labels offset in opposite directions (above/below),
+that they never collide despite sharing a row.
 
-A filled light-grey panel (no label, no edge) separates the two groups: panels
-(a)-(c), the scenario's static inputs, on the left; panels (d)-(h), every
-flood-depth result on that scenario, on the right - with deliberately more
-horizontal gap between the two groups than between panels within a group. Within
-that, panels (a)-(c) are lettered top to bottom and (d)-(h) left to right, top to
-bottom - the usual reading order. A red line in every panel marks the offshore
+A filled light-grey panel (no label, no edge) separates the two groups: panels (a)-(c),
+the scenario's static inputs, on the left; panels (d)-(i), every flood-depth result on
+that scenario, on the right - with deliberately more horizontal gap between the two
+groups than between panels within a group. Three input panels against six results
+arranged two per row both need exactly three rows, so every cell in both boxes is used.
+Within each box, panels (a)-(c) are lettered top to bottom and (d)-(i) left to right,
+top to bottom - the usual reading order. A red line in every panel marks the offshore
 boundary-forcing column, at elevation 0.
 
-Panels (a) elevation and (b) friction are the scenario's two static inputs: a
-floodplain sloping from 0 m at the coast to 2.3 m at the domain's far inland edge, a
-pond below sea level (-1 m) walled off on three sides by a closed ring at 3 m (above
-the surge peak everywhere around it) and open on the fourth, where the domain's own
-upper edge already closes it - it has no coastline anywhere in the domain, not merely
-none nearby - and a sill, at the same 3 m, blocking every direct route to the far side
-of the domain except around a gap at one end, so the real connected path to a point
-there is longer than the straight-line distance to it; friction is spatially uniform.
-(A sill closer to the surge peak itself, e.g. ~1.2-1.7 m above the sloping background
-rather than safely above it, was tried first and dropped - see
+Panel (a) elevation is the scenario's shared terrain: a floodplain sloping from 0 m at
+the coast to 2.3 m at the domain's far inland edge, a pond below sea level (-1 m) walled
+off on three sides by a closed ring at 3 m (above the surge peak everywhere around it)
+and open on the fourth, where the domain's own upper edge already closes it - it has no
+coastline anywhere in the domain, not merely none nearby - and a sill, at the same 3 m,
+blocking every direct route to the far side of the domain except around a gap at one
+end, so the real connected path to a point there is longer than the straight-line
+distance to it. (A sill closer to the surge peak itself, e.g. ~1.2-1.7 m above the
+sloping background rather than safely above it, was tried first and dropped - see
 `build_variant_scenario`'s docstring for why it didn't reliably force the detour this
 figure needs.)
 
-Panels (d)/(e)/(f)/(g) compare the four variants on that scenario, with no duration
-correction. `straight_line` and `eikonal` share the exact same uniform attenuation
-rate - only the distance metric they attenuate by differs:
+Panels (b)/(c) are the figure's other static inputs: a synthetic four-class land cover
+(`build_landcover`, not real land-cover data, loosely following a real coastal-to-inland
+progression) and the friction it gives each cell. (b) is a tidal-flat fringe immediately
+inland of the coast, grassland/cropland as the open background, and a shrubland and a
+forest patch placed further inland, clear of both the pond and the sill. (c) is each
+class's friction: 0.3x/0.8x/1.8x/3.5x `RATE_M_PER_CELL` (0.003/0.008/0.018/0.035 m/cell)
+for tidal flat/grassland/shrubland/forest respectively - grassland, the dominant
+background class, sits just below the uniform rate every other panel needing a flat
+attenuation uses (`RATE_M_PER_CELL`, 0.01 m/cell, used by (f)/(g) but not itself
+plotted), so land cover is not simply "more friction everywhere" - (h) below floods
+*more* overall than the uniform baseline (g), not less.
+
+Panels (d)/(e)/(f)/(g) compare the four `FLOOD_MODELS` at the uniform rate
+(`RATE_M_PER_CELL`), with no land-cover or volume-cap correction. `straight_line` and
+`eikonal` share the exact same uniform attenuation rate - only the distance metric they
+attenuate by differs:
 
 - `bathtub` (d) checks only (IDW-interpolated) level against elevation, with no
   connectivity check, and floods the walled-off pond anyway (3.50 m);
@@ -174,43 +200,25 @@ rate - only the distance metric they attenuate by differs:
   comes out noticeably drier near the gap (0.14 m) - the real path costs more
   attenuation than the straight-line shortcut gives it credit for.
 
-Panels (c)/(h) are deliberately **not** production's actual duration correction
-(`event_volume.DurationCorrection`, §2.4): that mechanism needs a first eikonal
-pass's own depth to define a head above each cell's spill level, which this panel's
-whole point is to not assume. Instead (`elevation_duration_multiplier`), (c) compares
-the boundary forcing's time series directly against each cell's own elevation - how
-long the forcing alone exceeds it - with no first solve at all. Raised while building
-this figure and logged as an open methods question in `TODO.md`, not asserted as the
-better algorithm: changing production to work this way would affect the calibrated
-`friction_scale_factor`/`duration_refit.py` values (§2.2/§2.4), so it needs a
-deliberate decision, not a silent code change. `straight_line` has no spatial friction
-field to correct, so a duration correction for it would only ever be a scalar
-rescaling of its one `attenuation_m_per_m` - not a meaningful panel, so it is left out
-here (that scalar rescaling is still what `flood_depth_dense` itself falls back to
-when reporting duration correction's effect in aggregate,
-`diagnostics["mean_duration_multiplier"]`, just not reproduced in this figure).
+Panel (h) reruns `eikonal` with (c)'s land-cover-derived rate instead of the uniform
+one, everything else unchanged. Because grassland (the background, 81% of land cells)
+attenuates less than the uniform rate, (h) wets *more* cells overall than (g) (5,010 vs
+4,408) and comes out wetter at the "near" sample point too (0.43 m, up from (g)'s
+0.14 m) - the shrubland and forest patches raise the cost locally, but don't cover
+enough of the domain to outweigh the lower-friction background and tidal fringe.
 
-The reference duration (`DURATION_T_REF_S`) is the longest duration any cell in the
-domain can see - the full storm - not some shorter, arbitrary value. That pins the
-multiplier to exactly 1.0 at the longest-duration (always-wet, coastal) cells and
-above 1.0 everywhere else, so the corrected friction is never below the uncorrected
-baseline anywhere, and corrected depth can therefore only shrink or stay the same
-relative to (g), never exceed it (an earlier version used a fixed 12 h reference,
-which gave coastal cells *less* friction than baseline and let corrected depths
-exceed the uncorrected ones - backwards, and fixed here). The pond's wall and the
-sill (3 m) sit above the 2.5 m surge peak everywhere, so they are never exceeded at
-all - they are hard obstacles for (f)/(g)'s connectivity/detour test, not
-"briefly-overtopped sills"; the short-but-nonzero-exceedance story this correction is
-meant to show instead comes from the open background slope itself (0 m to 2.3 m, all
-within reach of the 2.5 m peak), which gives every background cell a real, finite
-exceedance duration - long near the coast, short near the inland edge - with no
-barrier needed. Because the multiplier is a direct function of elevation alone, (c)'s
-pattern is literally the elevation panel's own contours, rescaled - the pond's wall
-and the sill read as the same raised (never-exceeded, highest-multiplier) shapes in
-both. `eikonal`'s corrected depth (h) (0.00 m near the gap, down from 0.14 m
-uncorrected) runs this modified friction field through a single ordinary solve.
+Panel (i) applies the storm-volume cap on top of (h): the one coast-connected wet patch
+(h) produces holds more water than the synthetic 24 h storm (`build_hydrograph`) can
+actually deliver into it at `VOLUME_CAP_VELOCITY_M_S`, so the cap keeps only the
+highest-level cells until that budget is spent and dries the rest - 2,137 of (h)'s
+5,010 wet cells survive (4,019 of 5,945 m³, a 32% volume reduction - a moderate cap,
+not a near-total one), visibly pulling the flooded area back toward the coast; (i)'s
+depth is never more than (h)'s anywhere. `VOLUME_CAP_VELOCITY_M_S` is tuned for this
+~1 m/cell synthetic domain, not production's default (config.yml's 1.0 m/s, tried first
+and found to swamp this tiny domain's entire storage from a single entry cell, capping
+nothing at any ring count) - see that constant's own comment.
 
-![Four FLOOD_MODELS variants on one scenario, with and without duration correction](flood_variant_comparison.png)
+![Nine flood-model panels on one scenario: static inputs, the four FLOOD_MODELS variants at a uniform rate, and eikonal with land-cover-derived friction and the storm-volume cap](flood_variant_comparison.png)
 
 ## 3. Data inputs
 

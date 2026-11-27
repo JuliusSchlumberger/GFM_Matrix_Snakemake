@@ -1,6 +1,6 @@
 """Plot the plausibility of the SFINCS calibration per tile: metrics, drivers, per-tile optimum.
 
-Writes metric_distributions, disagreement_drivers (bathtub set), disagreement_drivers_eikonal,
+Writes metric_distributions, sweep_{CSI,HT,FAR,bias}, disagreement_drivers (bathtub set), disagreement_drivers_eikonal,
 variant_contrasts, per_tile_optimum_gain and per_tile_optimum_drivers (.png + caption)
 and their tables. Needs
 variant_runs_per_tile.csv and variant_selection.json (compute_variant_metrics.py) and
@@ -36,7 +36,9 @@ from gfm_config import read_figures_root, read_root  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "analysis"))
-from _figure_style import DOUBLE_COLUMN_MM, MM_PER_INCH, MUTED, apply_style, panel_letters, save_figure, write_caption  # noqa: E402
+from _figure_style import (  # noqa: E402
+    DOUBLE_COLUMN_MM, GRID, INK, MM_PER_INCH, MUTED, apply_style, panel_letters, save_figure, write_caption,
+)
 
 FIG_WIDTH_IN = DOUBLE_COLUMN_MM / MM_PER_INCH
 BASE_VARIANTS = ("bathtub", "bathtub_connected", "straight_line", "eikonal_uniform", "eikonal_landcover")
@@ -80,6 +82,22 @@ _DRIVER_DEFINITIONS = {
 METRICS = (("CSI", "CSI"), ("HT", "Hit rate"), ("FAR", "False alarm ratio"))
 N_BOOTSTRAP = 1000
 BOOTSTRAP_SEED = 0
+# (variant without cap, panel header, x label); the "_cap" twin shares the panel
+SWEEP_COLUMNS = (
+    ("straight_line", "Straight line", "Attenuation rate (m/km)"),
+    ("eikonal_uniform", "Eikonal, uniform rate", "Attenuation rate (m/km)"),
+    ("eikonal_landcover", "Eikonal, land-cover rate", "Friction scale factor"),
+)
+SWEEP_METRICS = ("CSI", "HT", "FAR", "bias")
+SWEEP_METRIC_LABELS = {"CSI": "CSI", "HT": "Hit rate", "FAR": "False alarm ratio", "bias": "Bias (log2 axis)"}
+SWEEP_METRIC_DEFINITIONS = {
+    "CSI": "CSI = matched / (matched + model only + SFINCS only).",
+    "HT": "Hit rate = matched / SFINCS flooded.",
+    "FAR": "False alarm ratio = model only / model flooded.",
+    "bias": "Bias = model flooded / SFINCS flooded; dotted line: no bias.",
+}
+SWEEP_STYLE = {False: ("#E69F00", False), True: ("#0072B2", True)}  # cap -> (colour, filled box)
+MIN_UNION_PEOPLE = 100.0  # per-tile exposure metrics swing between 0 and 1 on a handful of people
 OPTIMUM_VARIANTS = ("eikonal_uniform_cap", "eikonal_landcover_cap")
 OPTIMUM_COLORS = {"eikonal_uniform_cap": "#0072B2", "eikonal_landcover_cap": "#CC79A7"}
 OPTIMUM_LINESTYLES = {"eikonal_uniform_cap": "-", "eikonal_landcover_cap": "--"}
@@ -164,6 +182,114 @@ def plot_metric_distributions(per_tile: pd.DataFrame, runs: dict[str, str], labe
         "(a) CSI = matched / (matched + model only + SFINCS only); (b) hit rate = matched / SFINCS flooded; "
         "(c) false alarm ratio = model only / model flooded. Each run is its variant's selected run "
         "(variant_selection.json), chosen by population-weighted CSI over all tiles.",
+    ])
+    print(f"Wrote {out_path}")
+
+
+def _metrics_from_sums(tp: np.ndarray, fp: np.ndarray, fn: np.ndarray) -> dict[str, np.ndarray]:
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return {"CSI": tp / (tp + fp + fn), "HT": tp / (tp + fn), "FAR": fp / (tp + fp), "bias": (tp + fp) / (tp + fn)}
+
+
+def sweep_table(per_tile: pd.DataFrame, min_union_km2: float, n_boot: int = N_BOOTSTRAP) -> pd.DataFrame:
+    """Return per swept run, weight and metric: per-tile quantiles and the pooled value with a 90 % interval.
+
+    Per-tile quantiles over tiles where the run or SFINCS floods at least `min_union_km2`
+    (area) or MIN_UNION_PEOPLE people; per-tile bias only where SFINCS floods. Pooled over all
+    tiles, as the run selection; p5/p95 over `n_boot` tile bootstrap resamples, the same
+    resamples for every run.
+    """
+    swept = per_tile[per_tile["variant"].isin([v for col in SWEEP_COLUMNS for v in (col[0], f"{col[0]}_cap")])]
+    tiles = np.sort(per_tile["tile_id"].unique())
+    rng = np.random.default_rng(BOOTSTRAP_SEED)
+    freq = rng.multinomial(len(tiles), np.full(len(tiles), 1 / len(tiles)), size=n_boot).astype(float)
+    rows = []
+    for (variant, parameter, key), g in swept.groupby(["variant", "parameter", "run_key"]):
+        g = g.set_index("tile_id").reindex(tiles, fill_value=0.0)
+        for weight, unit, threshold in (("area", "km2", min_union_km2), ("pop", "pop", MIN_UNION_PEOPLE)):
+            counts = g[[f"matched_{unit}", f"model_only_{unit}", f"sfincs_only_{unit}"]].to_numpy(dtype=float)
+            per = _metrics_from_sums(*counts.T)
+            pooled = _metrics_from_sums(*counts.sum(axis=0))
+            boot = _metrics_from_sums(*(freq @ counts).T)
+            keep = counts.sum(axis=1) >= threshold
+            for metric in SWEEP_METRICS:
+                vals = per[metric][keep]
+                vals = vals[np.isfinite(vals)]
+                q = np.percentile(vals, [5, 25, 50, 75, 95]) if len(vals) else np.full(5, np.nan)
+                rows.append({"variant": variant, "parameter": parameter, "run_key": key, "weight": weight,
+                             "metric": metric, "n_tiles": len(vals),
+                             **{f"tile_p{p}": v for p, v in zip((5, 25, 50, 75, 95), q)},
+                             "pooled": float(pooled[metric]), "pooled_p5": np.nanpercentile(boot[metric], 5),
+                             "pooled_p95": np.nanpercentile(boot[metric], 95)})
+    return pd.DataFrame(rows)
+
+
+def plot_sweep_metric(table: pd.DataFrame, metric: str, selected: dict[str, float], min_union_km2: float,
+                      out_path: Path) -> None:
+    """Plot one metric over each swept model's parameter values, flood extent and exposure."""
+    fig, axes = plt.subplots(2, len(SWEEP_COLUMNS), figsize=(FIG_WIDTH_IN, 4.4), sharey=True, squeeze=False,
+                             layout="constrained")
+    dodge = 0.2
+    for j, (base, title, xlabel) in enumerate(SWEEP_COLUMNS):
+        params = sorted(table.loc[table["variant"] == base, "parameter"].unique())
+        pos = {p: i for i, p in enumerate(params)}
+        for i, (weight, ylabel) in enumerate((("area", "flooded area"), ("pop", "people"))):
+            ax = axes[i, j]
+            if base in selected and selected[base] in pos:
+                ax.axvspan(pos[selected[base]] - 0.45, pos[selected[base]] + 0.45, color=GRID, linewidth=0, zorder=0)
+            for variant, shift in ((base, -dodge), (f"{base}_cap", dodge)):
+                color, filled = SWEEP_STYLE[variant.endswith("_cap")]
+                t = table[(table["variant"] == variant) & (table["weight"] == weight) & (table["metric"] == metric)]
+                for r in t.itertuples():
+                    x = pos[r.parameter] + shift
+                    ax.bxp([{"med": r.tile_p50, "q1": r.tile_p25, "q3": r.tile_p75, "whislo": r.tile_p5,
+                             "whishi": r.tile_p95, "fliers": []}], positions=[x], widths=0.32, patch_artist=True,
+                           boxprops={"facecolor": color if filled else "white", "edgecolor": color, "linewidth": 0.6,
+                                     "alpha": 0.9},
+                           medianprops={"color": "black" if filled else color, "linewidth": 0.9},
+                           whiskerprops={"color": color, "linewidth": 0.6}, capprops={"color": color, "linewidth": 0.6})
+                    ax.errorbar(x, r.pooled, yerr=[[r.pooled - r.pooled_p5], [r.pooled_p95 - r.pooled]], fmt="D",
+                                color=INK, markersize=2.6, elinewidth=0.8, capsize=0, zorder=4)
+            ax.set_xticks(range(len(params)))
+            ax.set_xticklabels([f"{p:g}" if k % 2 == 0 else "" for k, p in enumerate(params)])
+            ax.set_xlim(-0.6, len(params) - 0.4)
+            if metric == "bias":
+                ax.set_yscale("log", base=2)
+                ax.set_ylim(0.25, 8)
+                ax.set_yticks([0.25, 0.5, 1, 2, 4, 8])
+                ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}"))
+                ax.axhline(1, color=MUTED, linewidth=0.6, linestyle=":", zorder=1)
+            else:
+                ax.set_ylim(0, 1)
+                ax.set_yticks([0, 0.25, 0.5, 0.75, 1])
+            if j == 0:
+                ax.set_ylabel(f"{SWEEP_METRIC_LABELS[metric]}, {ylabel}")
+            if i == 1:
+                ax.set_xlabel(xlabel)
+            panel_letters(ax, "abcdef"[i * len(SWEEP_COLUMNS) + j], fontsize=8, label=title if i == 0 else None)
+    handles = [matplotlib.patches.Patch(facecolor=SWEEP_STYLE[cap][0] if SWEEP_STYLE[cap][1] else "white",
+                                        edgecolor=SWEEP_STYLE[cap][0], label=label)
+               for cap, label in ((False, "No volume cap"), (True, "Volume cap"))]
+    handles.append(plt.Line2D([], [], color=INK, marker="D", markersize=2.6, linewidth=0.8,
+                              label="Pooled over all tiles, 90 % interval"))
+    fig.legend(handles=handles, loc="outside lower center", ncol=3, frameon=False, fontsize=7)
+    save_figure(fig, out_path)
+    plt.close(fig)
+    t = table[table["metric"] == metric]
+    n = {w: (int(t.loc[t["weight"] == w, "n_tiles"].min()), int(t.loc[t["weight"] == w, "n_tiles"].max()))
+         for w in ("area", "pop")}
+    sel = ", ".join(f"{title.lower()} {selected[base]:g}" for base, title, _ in SWEEP_COLUMNS if base in selected)
+    write_caption(out_path, [
+        f"{SWEEP_METRIC_LABELS[metric]} of every swept run against SFINCS, per tile and pooled, for flooded area "
+        "and for the people in it.",
+        "Box: interquartile range, line: median, whiskers: 5-95 % across tiles; open boxes without, filled boxes "
+        f"with the volume cap. Area row: tiles where the run or SFINCS floods at least {min_union_km2:g} "
+        f"km2 (n = {n['area'][0]}-{n['area'][1]} per run); people row: at least {MIN_UNION_PEOPLE:g} people "
+        f"(n = {n['pop'][0]}-{n['pop'][1]})" + ("; bias only where SFINCS floods" if metric == "bias" else "") + ".",
+        "Black diamond: value pooled over all tiles (counts summed before scoring, as for the run selection); "
+        f"bar: 90 % interval over {N_BOOTSTRAP} tile bootstrap resamples. Grey band: the selected value "
+        f"({sel}), chosen by population-weighted CSI over all tiles.",
+        SWEEP_METRIC_DEFINITIONS[metric] + " People: WorldPop counts in the cells.",
     ])
     print(f"Wrote {out_path}")
 
@@ -599,6 +725,13 @@ def main() -> None:
     per_tile = pd.read_csv(base / "variant_runs_per_tile.csv")
 
     plot_metric_distributions(per_tile, runs, labels, args.min_union_km2, fig_dir / "metric_distributions.png")
+    sweep = sweep_table(per_tile, args.min_union_km2)
+    if not sweep.empty:
+        sweep.to_csv(fig_dir / "sweep_metrics.csv", index=False)
+        selected = {base: float(entries[base]["parameter"]) for base, _, _ in SWEEP_COLUMNS
+                    if entries.get(base, {}).get("parameter") is not None}
+        for metric in SWEEP_METRICS:
+            plot_sweep_metric(sweep, metric, selected, args.min_union_km2, fig_dir / f"sweep_{metric}.png")
 
     drivers = read_drivers(root / (args.raster_base_dir_name or args.base_dir_name), args.drivers_name)
     best = selection["best_variant"]

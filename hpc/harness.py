@@ -320,9 +320,9 @@ class Controller:
         print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}", flush=True)
 
     def start_step(self, step: dict) -> None:
-        sid = step["id"]
+        sid, started = step["id"], time.time()
         if "gate" in step:
-            self.states[sid] = {"status": "awaiting_decision", "started": time.time()}
+            self.states[sid] = {"status": "awaiting_decision", "started": started}
             self.log(f"DECISION NEEDED at step {sid}: {step['gate'].strip()}\n"
                      f"    then: python hpc/harness.py mark-done --plan <plan> {sid}")
             return
@@ -331,13 +331,13 @@ class Controller:
         if step.get("job"):
             script = job_script(self.plan, step)
             fake = enqueue([str(script)], self.queue_dir, sid, self.plan.get("partition_cores") or {}, env, cwd)
-            self.states[sid] = {"status": "running", "job_task": fake, "started": time.time()}
+            self.states[sid] = {"status": "running", "job_task": fake, "started": started}
         else:
             log = open(self.plan["state_dir"] / "logs" / f"{sid}.log", "a")
             script = "\n".join(["set -eo pipefail", self.plan.get("preamble", ""), step["run"]])
             self.procs[sid] = subprocess.Popen(["bash", "-c", script], env=env, cwd=cwd,
                                                stdout=log, stderr=subprocess.STDOUT)
-            self.states[sid] = {"status": "running", "started": time.time()}
+            self.states[sid] = {"status": "running", "started": started}
         self.log(f"step {sid} started")
 
     def poll_tasks(self) -> list[Task]:
@@ -392,7 +392,10 @@ class Controller:
             sid, st = s["id"], self.states[s["id"]]
             if st["status"] != "running":
                 continue
-            mine = by_step.get(sid, [])
+            # Jobs of an earlier attempt still hold the step while live, but only this
+            # attempt's decide its outcome.
+            everything = by_step.get(sid, [])
+            mine, _ = split_attempt(st, everything)
             if sid in self.procs:
                 rc = self.procs[sid].poll()
                 if rc is None:
@@ -400,11 +403,11 @@ class Controller:
                 del self.procs[sid]
                 st["command_rc"] = rc
             elif "job_task" in st:
-                job = next((t for t in mine if t.id == st["job_task"]), None)
+                job = next((t for t in everything if t.id == st["job_task"]), None)
                 if job is None or job.state == "QUEUED" or job.state in LIVE:
                     continue
                 st["command_rc"] = 0 if job.state == "COMPLETED" else 1
-            if any(t.state == "QUEUED" or t.state in LIVE for t in mine):
+            if any(t.state == "QUEUED" or t.state in LIVE for t in everything):
                 continue
             failed = [t.id for t in mine if t.state != "COMPLETED"]
             st.update(status="failed" if st["command_rc"] else ("done_with_failed_jobs" if failed else "done"),
@@ -454,6 +457,21 @@ class Controller:
             time.sleep(self.poll_s)
 
 
+def split_attempt(state: dict, tasks: list[Task]) -> tuple[list[Task], list[Task]]:
+    """Split a step's jobs into those of its current attempt and those of earlier ones."""
+    started = state.get("started")
+    if started is None:
+        return [], tasks
+    return [t for t in tasks if t.queued_at >= started], [t for t in tasks if t.queued_at < started]
+
+
+def _state_counts(tasks: list[Task]) -> str:
+    counts: dict[str, int] = {}
+    for t in tasks:
+        counts[t.state] = counts.get(t.state, 0) + 1
+    return ", ".join(f"{k} {v}" for k, v in sorted(counts.items()))
+
+
 def print_status(plan: dict) -> None:
     states = load_step_states(plan)
     tasks = load_tasks(plan["state_dir"] / "queue")
@@ -462,12 +480,12 @@ def print_status(plan: dict) -> None:
           f"job(s) queued")
     for s in plan["steps"]:
         st = states.get(s["id"], {"status": "pending"})
-        mine = [t for t in tasks if t.step == s["id"]]
-        counts: dict[str, int] = {}
-        for t in mine:
-            counts[t.state] = counts.get(t.state, 0) + 1
+        current, previous = split_attempt(st, [t for t in tasks if t.step == s["id"]])
+        jobs = _state_counts(current)
+        if previous:
+            jobs += f"{'  ' if jobs else ''}(previous runs: {_state_counts(previous)})"
         flag = " [destructive]" if s.get("destructive") else ""
-        print(f"  {s['id']:<28} {st['status']:<22} {', '.join(f'{k} {v}' for k, v in sorted(counts.items()))}{flag}")
+        print(f"  {s['id']:<28} {st['status']:<22} {jobs}{flag}")
         if st["status"] == "awaiting_decision":
             print(f"      DECISION NEEDED: {s['gate'].strip()}")
 

@@ -100,6 +100,24 @@ def test_restart_keeps_following_a_step_whose_command_ended(tmp_path) -> None:
     assert ctl.states["ended"]["status"] == "done" and tid
 
 
+def test_a_retried_step_counts_only_its_new_jobs(tmp_path, capsys) -> None:
+    ctl = _controller(tmp_path, 10)
+    script = str(_script(tmp_path, "j.sbatch", "1vcpu"))
+    enqueue([script], ctl.queue_dir, "s", {})
+    old = load_tasks(ctl.queue_dir)[0]
+    old.state = "FAILED"
+    harness.save_task(old, ctl.queue_dir)
+    ctl.states["s"] = {"status": "running", "command_rc": 0, "started": old.queued_at + 1}
+    new = harness.Task(id="new", step="s", argv=[script], cwd=".", env={}, cores=1,
+                       queued_at=old.queued_at + 2, state="COMPLETED")
+    harness.save_task(new, ctl.queue_dir)
+    ctl.update_steps(load_tasks(ctl.queue_dir))
+    assert ctl.states["s"]["status"] == "done"  # the earlier attempt's failure does not count
+    harness.save_step_states(ctl.plan, ctl.states)
+    harness.print_status(ctl.plan)
+    assert "COMPLETED 1  (previous runs: FAILED 1)" in capsys.readouterr().out
+
+
 def test_controller_starts_a_waiting_step_before_it_stops(tmp_path, monkeypatch) -> None:
     plan = {"name": "t", "max_cores": 2, "state_dir": tmp_path / "state",
             "steps": [{"id": "a", "run": "true"}, {"id": "b", "after": ["a"], "run": "true"}]}

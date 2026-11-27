@@ -12,7 +12,8 @@ from calibration_paths import shard, threaded_map  # noqa: E402
 from compute_tile_drivers import DRIVER_COLUMNS, read_drivers, tile_drivers  # noqa: E402
 from plot_tile_plausibility import (  # noqa: E402
     BATHTUB_DRIVERS, EIKONAL_DRIVERS, contrast_driver_rhos, contrast_table, driver_correlations, optimum_summary, per_tile_optimum, plot_driver_scatter,
-    plot_metric_distributions, plot_optimum_drivers, plot_optimum_gain, plot_variant_contrasts,
+    plot_metric_distributions, plot_optimum_drivers, plot_optimum_gain, plot_sweep_metric, plot_variant_contrasts,
+    sweep_table,
 )
 
 
@@ -210,3 +211,28 @@ def test_contrast_classes_follow_the_csi_change(tmp_path: Path) -> None:
     assert len(rho) == 3 * len(EIKONAL_DRIVERS)
     plot_variant_contrasts(c, per_tile, rho, tmp_path / "contrast.png")
     assert (tmp_path / "contrast.txt").exists()
+
+
+def test_sweep_pooled_csi_peaks_at_the_planted_rate_inside_its_interval(tmp_path: Path) -> None:
+    rng = np.random.default_rng(1)
+    n, rates, best = 80, (0.05, 0.1, 0.2), 0.1
+    sfincs = rng.uniform(5, 50, n)
+    rows = []
+    for base in ("straight_line", "eikonal_uniform", "eikonal_landcover"):
+        for variant in (base, f"{base}_cap"):
+            for rate in rates:
+                model = sfincs * (1 + 4 * abs(rate - best)) * rng.uniform(0.9, 1.1, n)
+                matched = np.minimum(sfincs, model) * 0.9
+                rows.append(pd.DataFrame({
+                    "tile_id": np.arange(n), "variant": variant, "parameter": rate, "run_key": f"{variant}_{rate}",
+                    "matched_km2": matched, "model_only_km2": model - matched, "sfincs_only_km2": sfincs - matched,
+                    "matched_pop": 10 * matched, "model_only_pop": 10 * (model - matched),
+                    "sfincs_only_pop": 10 * (sfincs - matched)}))
+    table = sweep_table(pd.concat(rows), 1.0, n_boot=50)
+    csi = table[(table.metric == "CSI") & (table.variant == "eikonal_uniform_cap") & (table.weight == "area")]
+    assert csi.loc[csi.pooled.idxmax(), "parameter"] == best
+    assert ((csi.pooled_p5 <= csi.pooled) & (csi.pooled <= csi.pooled_p95)).all()
+    assert (csi.tile_p5 <= csi.tile_p50).all() and (csi.tile_p50 <= csi.tile_p95).all()
+    for metric in ("CSI", "bias"):
+        plot_sweep_metric(table, metric, {"eikonal_uniform": best}, 1.0, tmp_path / f"sweep_{metric}.png")
+        assert (tmp_path / f"sweep_{metric}.png").exists()

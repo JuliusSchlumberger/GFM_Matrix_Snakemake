@@ -1,21 +1,29 @@
-The four FLOOD_MODELS variants (src/flood_model.py) disagree sharply once a scenario has
-a disconnected basin and a detour around an obstacle, which is the sanity check and the
-explanation this figure exists to give, panel by panel.
+The FLOOD_MODELS variants (src/flood_model.py) disagree sharply once a scenario has a
+disconnected basin, a detour around an obstacle, and a land-cover-driven split in
+propagation cost, which is the sanity check and the explanation this figure exists to
+give, panel by panel.
 
 Scenario: ocean at the left edge, with a surge boundary condition (red line, every panel)
 rising over 24h; a floodplain sloping from 0 m at the coast to 2.3 m at the domain's far
 inland edge; a pond below sea level (-1 m), walled off on three sides at 3 m and open at
 the domain's own upper edge; a 3 m sill blocking a direct route inland except around a
-gap at one end.
+gap at one end. A synthetic four-class land cover (build_landcover, not real land-cover
+data) gives a tidal-flat fringe at the coast, grassland/cropland as the open background,
+and a shrubland and a forest patch further inland, each placed clear of the pond and
+the sill.
 
-Grey boxes: the left box (a-c) is the scenario's static inputs; the right box (d-h) is
+Grey boxes: the left box (a-c) is the scenario's static inputs; the right box (d-i) is
 every flood-depth result on that scenario.
 
-Colours: single-hue, colour-blind-safe sequential ramps, one per variable - elevation
-(a) uses Greens, flood depth (d-h) uses Blues, friction (b, c) uses Oranges (light = low
-in all three). Depth is binned into discrete 0.20 m steps. Grey = dry land; light
-blue-grey = permanent water (including below-sea-level elevation in (a), shown as one
-flat colour, not part of the scale).
+Colours: elevation (a) uses Greens and flood depth (d-i) uses Blues - single-hue,
+colour-blind-safe sequential ramps (light = low). Land cover (b) uses conventional
+land-use-map colours instead (qualitative, not a scale): tan = tidal flat, khaki =
+grassland/cropland (the background), ochre = shrubland, forest green = forest. Friction
+(c) reuses those same four classes but recoloured on the Oranges ramp by rank, lightest
+to darkest in the same tidal-flat/grassland/shrubland/forest order as (b) - i.e. by
+increasing attenuation, not by (b)'s land-use identity. Depth is binned into discrete
+0.20 m steps. Grey = dry land; light blue-grey = permanent water (including below-sea-
+level elevation in (a), shown as one flat colour, not part of the scale).
 
 No colour bars: deliberately overridden here (SHOW_COLORBARS=False in the script) in
 favour of the discrete depth bands plus the annotated sample-point values below, which
@@ -31,12 +39,18 @@ No CRS: the domain is an unprojected synthetic grid, not a geographic map.
 
 Panels:
 (a) elevation (m)
-(b) friction - spatially uniform attenuation rate
-(c) friction x a direct duration multiplier (time the boundary forcing exceeds each
-    cell's own elevation) - NOT production's actual event_volume.DurationCorrection;
-    see TODO.md "Open methods questions" and elevation_duration_multiplier's docstring
+(b) land cover class (synthetic, four classes, build_landcover): a tidal-flat fringe at
+    the coast, grassland/cropland as the open background, and a shrubland and a forest
+    patch further inland - not real land-cover data
+(c) friction derived from (b)'s classes - spatially varying attenuation rate, recoloured
+    by increasing rank (tidal flat < grassland/cropland < shrubland < forest), not (b)'s
+    land-use colours
 (d) bathtub - IDW-interpolated level, no coast-connectivity check
 (e) bathtub_connected - (d) + coast-connectivity filter
-(f) straight_line - uniform rate, attenuated by straight-line distance
+(f) straight_line - uniform rate (RATE_M_PER_CELL), attenuated by straight-line distance
 (g) eikonal - uniform rate, attenuated by the real, connectivity-respecting path
-(h) eikonal, run with the duration-corrected friction field from (c)
+(h) eikonal - land-cover-derived rate (c), attenuated by the real, connectivity-
+    respecting path
+(i) eikonal, land-cover-derived rate (c) + the storm-volume cap (event_volume.VolumeCap):
+    each coast-connected patch is capped at the volume that can cross into it during the
+    storm (build_hydrograph), so depth in (i) is never above (h)'s

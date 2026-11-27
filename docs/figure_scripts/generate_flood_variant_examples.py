@@ -1,16 +1,19 @@
 """Render the flood-variant comparison figure for docs/methods_02_flood_depth.md.
 
-Runs all four FLOOD_MODELS (src/flood_model.py) on one synthetic scenario built to
+Runs the FLOOD_MODELS variants (src/flood_model.py) on one synthetic scenario built to
 isolate what each added mechanism changes: a coast-connectivity check (the walled-off
-pond), path-following vs straight-line attenuation (the sill detour), and a duration-based
-friction correction. The duration correction here is NOT production's actual
-event_volume.DurationCorrection - see elevation_duration_multiplier's docstring and
-TODO.md's "Open methods questions" entry. Panel letters, caption file, colours, sizing
-and save settings all follow analysis/_figure_style.py, per the general CLAUDE.md's
-section 9 - no in-image titles or descriptive text (that lives in the companion .txt
-file instead), single-hue sequential colour maps per variable, 180 mm final width,
-PNG+PDF output. SHOW_COLORBARS is an explicit, documented override of that section's "one
-shared colour bar per group of panels" rule - see its own comment for why.
+pond), path-following vs straight-line attenuation (the sill detour), a land-cover-derived
+(spatially varying) vs uniform attenuation rate, and the storm-volume cap (event_volume.VolumeCap)
+on the land-cover-driven eikonal result. The land cover here is a synthetic four-class
+mosaic (build_landcover), not real land-cover data, coloured with conventional land-use-map
+colours - see that function's docstring and LANDCOVER_COLORS. Panel letters, caption file,
+colours, sizing and save settings all follow analysis/_figure_style.py, per the general
+CLAUDE.md's section 9 - no in-image titles or descriptive text (that lives in the companion
+.txt file instead), single-hue sequential colour maps per variable (plus the land-cover
+palette, and a rank-ordered Oranges recolouring of those same classes for friction -
+_friction_class_cmap), 180 mm final width, PNG+PDF output.
+SHOW_COLORBARS is an explicit, documented override of that section's "one shared colour
+bar per group of panels" rule - see its own comment for why.
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ from matplotlib.patches import FancyBboxPatch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "analysis"))
 import _figure_style  # noqa: E402
+from event_volume import VolumeCap  # noqa: E402
 from flood_model import flood_depth_dense  # noqa: E402
 
 OUT_DIR = Path(__file__).resolve().parents[1]
@@ -53,9 +57,9 @@ N_ROWS, N_COLS = 60, 160
 MIN_ELEVATION_M = 0.0  # background at the coast - sea level; only the pond's interior and the
 # berm/sill (below/above this) leave it, so the below-0 colour stays confined to the pond
 MAX_ELEVATION_M = 2.3  # background at the domain's far inland edge - below SEED_LEVEL_M, so every
-# background cell is exceeded by the surge at some point (briefly, near the inland edge) - this
-# is what gives elevation_duration_multiplier a real gradient of exceedance durations to work
-# with; see that function's docstring for why BERM/SILL below are deliberately NOT part of that.
+# background cell is reachable by the surge at some level, leaving room for the land-cover and
+# uniform friction rates (RATE_M_PER_CELL and LANDCOVER_*_FRICTION_M_PER_CELL) to actually
+# differentiate how far inland the water gets, rather than being capped by dry ground everywhere.
 PIT_ROWS, PIT_COLS = (0, 25), (15, 35)  # interior - row 0 = the domain's own upper edge
 BERM_ROWS, BERM_COLS = (0, 27), (13, 37)  # enclosing wall; open at the top, where the domain's own
 # edge already closes it (no separate top wall segment needed) - the pond stretches to row 0
@@ -63,6 +67,40 @@ BERM_ELEVATION_M = 3.0  # above the boundary level everywhere - never floods, no
 PIT_FLOOR_M = -1.0
 RIDGE_ROWS, RIDGE_COLS = (9, N_ROWS), (70, 77)  # the gap is rows 0:9
 SILL_ELEVATION_M = 3.0  # same margin above the boundary level as the pond's berm - see build_variant_scenario
+
+# Four land-cover classes, loosely following a real coastal-to-inland progression (bare tidal
+# fringe, open grass/cropland as the dominant background, patches of shrub and forest further
+# inland) rather than real land-cover data - see build_landcover. Patches are placed clear of
+# the pond (cols 15-37) and the sill (cols 70-77) so the land cover never changes the
+# connectivity/detour story, only how far the water reaches once it does.
+LANDCOVER_TIDAL_FLAT_COLS = (6, 16)  # immediately inland of the ocean (ocean_cols=6), all rows
+LANDCOVER_SHRUBLAND_ROWS, LANDCOVER_SHRUBLAND_COLS = (30, 55), (45, 65)
+LANDCOVER_FOREST_ROWS, LANDCOVER_FOREST_COLS = (10, 35), (95, 125)
+
+# Friction (m/cell): tidal flat < grassland/cropland (the open background, close to the old
+# uniform rate) < shrubland < forest, so the four classes actually differentiate inland reach.
+LANDCOVER_TIDAL_FLAT_FRICTION_M_PER_CELL = RATE_M_PER_CELL * 0.3
+LANDCOVER_GRASSLAND_FRICTION_M_PER_CELL = RATE_M_PER_CELL * 0.8
+LANDCOVER_SHRUBLAND_FRICTION_M_PER_CELL = RATE_M_PER_CELL * 1.8
+LANDCOVER_FOREST_FRICTION_M_PER_CELL = RATE_M_PER_CELL * 3.5
+
+# Class order matches LANDCOVER_*_FRICTION_M_PER_CELL above (tidal flat, grassland/cropland,
+# shrubland, forest). Conventional land-use-map colours (tan bare ground, khaki/olive
+# grassland-cropland, ochre scrub, forest green), not this project's abstract qualitative
+# palette, since land cover (b) is meant to read like an ordinary land-use map at a glance.
+# Panel (c) (friction) does NOT reuse these - it is coloured by rank on the Oranges ramp
+# instead (_friction_class_cmap), so the two panels encode different things (land-use identity
+# vs attenuation order) and are free to use unrelated colours.
+LANDCOVER_COLORS = ("#D9C9A3", "#CDCB6E", "#C8963E", "#2E7D32")
+
+# event_volume.VolumeCap parameters. VOLUME_CAP_N_RINGS matches config.yml's
+# simulation.flooding.volume_cap default; VOLUME_CAP_VELOCITY_M_S does NOT (that default,
+# 1.0 m/s, swamps this tiny 1 m/cell domain's whole storage in a single entry cell's inflow -
+# tried and found to cap nothing at all, at any n_rings). Tuned down here, for this domain only,
+# for a visible but moderate cap - most of the flooded patch survives, only its outermost,
+# highest-attenuated cells are trimmed - see build_volume_cap.
+VOLUME_CAP_VELOCITY_M_S = 0.0007
+VOLUME_CAP_N_RINGS = 6
 
 SAMPLE_POINTS = {
     "pit": ((PIT_ROWS[0] + PIT_ROWS[1]) // 2, (PIT_COLS[0] + PIT_COLS[1]) // 2),
@@ -123,6 +161,31 @@ def build_variant_scenario(n_rows: int = N_ROWS, n_cols: int = N_COLS) -> tuple[
     return dem, mask, friction
 
 
+def build_landcover(n_rows: int, n_cols: int) -> tuple[np.ndarray, np.ndarray]:
+    """Synthetic four-class land cover (class 0-3, friction m/cell): grassland/cropland
+    background, a tidal-flat fringe at the coast, and a shrubland and a forest patch inland.
+
+    Not real land-cover data: a simple geometric mosaic (LANDCOVER_*_COLS/ROWS) stands in for
+    src/flood_model.py's friction_source="landcover" path to have a spatially varying field to
+    run against, without pulling in the real land-cover raster or compute_friction.py's
+    classification.
+    """
+    landcover_class = np.ones((n_rows, n_cols), dtype=np.int8)  # 1 = grassland/cropland, the background
+    tidal = slice(*LANDCOVER_TIDAL_FLAT_COLS)
+    landcover_class[:, tidal] = 0
+    landcover_class[LANDCOVER_SHRUBLAND_ROWS[0]:LANDCOVER_SHRUBLAND_ROWS[1],
+                    LANDCOVER_SHRUBLAND_COLS[0]:LANDCOVER_SHRUBLAND_COLS[1]] = 2
+    landcover_class[LANDCOVER_FOREST_ROWS[0]:LANDCOVER_FOREST_ROWS[1],
+                    LANDCOVER_FOREST_COLS[0]:LANDCOVER_FOREST_COLS[1]] = 3
+
+    friction_by_class = np.array([
+        LANDCOVER_TIDAL_FLAT_FRICTION_M_PER_CELL, LANDCOVER_GRASSLAND_FRICTION_M_PER_CELL,
+        LANDCOVER_SHRUBLAND_FRICTION_M_PER_CELL, LANDCOVER_FOREST_FRICTION_M_PER_CELL,
+    ], dtype=np.float32)
+    friction_landcover = friction_by_class[landcover_class]
+    return landcover_class, friction_landcover
+
+
 OFFSHORE_BOUNDARY_COL = 5  # column the surge level is imposed at - within the ocean mask, at
 # elevation 0; marked by a plain red line on the elevation panel (no text - see _figure_style)
 
@@ -134,100 +197,60 @@ def _seeds(n_rows: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return rows, cols, values
 
 
-def run_base_variants(dem: np.ndarray, mask: np.ndarray, friction: np.ndarray) -> dict[str, tuple[np.ndarray, dict]]:
-    """Run the four FLOOD_MODELS, no duration correction."""
-    transform = Affine.identity()
-    seed_rows, seed_cols, seed_values = _seeds(dem.shape[0])
-    common = dict(dem=dem, mask=mask, friction=friction, transform=transform,
-                  seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
-                  k=1, idw_power=1.0, cell_dx_m=1.0, cell_dy_m=1.0)
-    results = {}
-    for model in ("bathtub", "bathtub_connected"):
-        results[model] = flood_depth_dense(**common, model=model)
-    results["straight_line"] = flood_depth_dense(**common, model="straight_line", attenuation_m_per_m=RATE_M_PER_CELL)
-    results["eikonal"] = flood_depth_dense(
-        **common, model="eikonal", obstacle_coupling=True, max_rounds=60, max_outer_iterations=3,
-        waterlevel_epsilon_m=0.03,
-    )
-    return results
-
-
-DURATION_ALPHA = 1.0
-DURATION_MAX_MULTIPLIER = 10.0
-DURATION_DT_S = 1800.0
-DURATION_N_STEPS = 48  # 24h at 30-min steps
-DURATION_T_REF_S = DURATION_N_STEPS * DURATION_DT_S  # the longest duration any cell can see here
-# (the full storm) - see elevation_duration_multiplier's docstring for why the reference must be
-# the longest, not some arbitrary shorter value
+HYDROGRAPH_DT_S = 1800.0
+HYDROGRAPH_N_STEPS = 48  # 24h at 30-min steps
 
 
 def build_hydrograph() -> np.ndarray:
-    """A synthetic single-peak 24h storm tide (m), peaking at SEED_LEVEL_M."""
-    t = np.arange(DURATION_N_STEPS)
-    peak = DURATION_N_STEPS // 2
-    return SEED_LEVEL_M * 0.5 * (1.0 + np.cos(2 * np.pi * (t - peak) / DURATION_N_STEPS))
+    """A synthetic single-peak 24h storm tide (m), peaking at SEED_LEVEL_M.
 
-
-def elevation_duration_multiplier(dem: np.ndarray, hydrograph: np.ndarray) -> np.ndarray:
-    """Friction multiplier (T_ref/T)^alpha, T = how long the boundary forcing alone exceeds a
-    cell's own elevation - directly, with no first solve (cf. event_volume.DurationCorrection,
-    production's actual mechanism, which instead needs a first eikonal pass's depth to define a
-    head above each cell's spill level; see TODO.md "Open methods questions" for why this figure
-    uses the direct comparison instead).
-
-    T_ref = DURATION_T_REF_S = the longest duration any cell in the domain can see (the full
-    storm) - not an arbitrary shorter reference. That pins the multiplier to exactly 1.0 at the
-    longest-duration (always-wet, coastal) cells and >1.0 everywhere else, so the corrected
-    friction is never below the uncorrected baseline anywhere. A shorter T_ref (an earlier version
-    of this used a fixed 12h) gives multiplier<1 - i.e. LESS friction than baseline - at every
-    cell exceeded for longer than T_ref, which is exactly backwards: duration correction is meant
-    to account for a short exceedance holding less water behind a barrier, never to make a
-    long-exceedance cell more permeable than the uncorrected case. That bug was visible as
-    duration-corrected depths exceeding the uncorrected depths at some points, which cannot happen
-    once multiplier >= 1 everywhere (both straight_line's attenuation_m_per_m and eikonal's cost
-    only ever increase with friction, so flood depth can only shrink or stay the same).
-
-    Cells the forcing never reaches at all (duration 0, floored to one timestep) get the highest
-    multiplier (capped at DURATION_MAX_MULTIPLIER). BERM_ELEVATION_M/SILL_ELEVATION_M (3.0 m) are
-    both in this never-exceeded bucket - the 2.5 m surge peak never reaches them, so they are hard
-    obstacles for Box B's connectivity/detour test, not "briefly-overtopped sills" for this
-    correction. The short-but-nonzero-duration story this function is meant to show instead comes
-    from the open background slope (MIN_ELEVATION_M..MAX_ELEVATION_M spans up to just under the
-    surge peak), which gives a real gradient of exceedance durations with no barrier needed.
+    Feeds event_volume.VolumeCap's storm-volume budget (run_base_variants); only its shape
+    relative to the peak matters there, as event_volume.DurationCorrection's hydrographs.
     """
-    exceeds = hydrograph[:, np.newaxis, np.newaxis] > dem[np.newaxis, :, :]
-    duration_s = np.maximum(exceeds.sum(axis=0) * DURATION_DT_S, DURATION_DT_S)
-    return np.minimum((DURATION_T_REF_S / duration_s) ** DURATION_ALPHA, DURATION_MAX_MULTIPLIER).astype(np.float32)
+    t = np.arange(HYDROGRAPH_N_STEPS)
+    peak = HYDROGRAPH_N_STEPS // 2
+    return SEED_LEVEL_M * 0.5 * (1.0 + np.cos(2 * np.pi * (t - peak) / HYDROGRAPH_N_STEPS))
 
 
-def run_duration_correction(dem: np.ndarray, mask: np.ndarray, friction: np.ndarray) -> dict:
-    """The duration-modified friction field, and the eikonal depth it gives.
+def build_volume_cap() -> VolumeCap:
+    """A VolumeCap for this synthetic, CRS-less domain: one arbitrary station.
 
-    The multiplier is elevation_duration_multiplier's direct, single-pass function of elevation
-    alone, so its spatial pattern is exactly the elevation panel's own contours, rescaled - not an
-    independently-shaped one, and not production's actual (first-pass/head-based) mechanism; see
-    that function's docstring.
-
-    `straight_line` is skipped here: it has no spatial friction field to correct, so a "duration
-    correction" for it would only ever be a scalar rescaling of its one attenuation_m_per_m - not
-    a meaningful comparison to show beside eikonal's actually spatial correction. (That scalar
-    rescaling is still what flood_depth_dense itself falls back to when it reports duration
-    correction's effect in aggregate, diagnostics["mean_duration_multiplier"] - just not
-    reproduced in this figure.)
+    With a single station, VolumeCap.budgets' nearest-station lookup is trivial (always that
+    one station) regardless of its lon/lat value, so an arbitrary placement is fine here - same
+    reasoning as `_seeds` imposing one constant level with no real geography. VOLUME_CAP_VELOCITY_M_S
+    is tuned for this domain's scale, not production's - see its own comment.
     """
+    return VolumeCap(
+        station_lonlat=np.array([[0.0, 0.0]]), series=build_hydrograph()[np.newaxis, :],
+        dt_s=HYDROGRAPH_DT_S, velocity_m_s=VOLUME_CAP_VELOCITY_M_S, n_rings=VOLUME_CAP_N_RINGS, crs=None,
+    )
+
+
+def run_base_variants(
+    dem: np.ndarray, mask: np.ndarray, friction: np.ndarray, friction_landcover: np.ndarray,
+) -> dict[str, tuple[np.ndarray, dict]]:
+    """Run bathtub, bathtub_connected, straight_line, and eikonal at the uniform rate, the
+    land-cover-derived rate, and the land-cover-derived rate with the volume cap."""
     transform = Affine.identity()
     seed_rows, seed_cols, seed_values = _seeds(dem.shape[0])
-    hydrograph = build_hydrograph()
-    multiplier = elevation_duration_multiplier(dem, hydrograph)
-    modified_friction = friction * multiplier
-
-    eikonal_wd, eikonal_diag = flood_depth_dense(
-        dem=dem, mask=mask, friction=modified_friction, transform=transform,
-        seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values, k=1, idw_power=1.0,
-        cell_dx_m=1.0, cell_dy_m=1.0, model="eikonal", obstacle_coupling=True, max_rounds=60, max_outer_iterations=3,
-        waterlevel_epsilon_m=0.03,
+    common = dict(dem=dem, mask=mask, transform=transform,
+                  seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
+                  k=1, idw_power=1.0, cell_dx_m=1.0, cell_dy_m=1.0)
+    eikonal_kwargs = dict(obstacle_coupling=True, max_rounds=60, max_outer_iterations=3, waterlevel_epsilon_m=0.03)
+    results = {}
+    for model in ("bathtub", "bathtub_connected"):
+        results[model] = flood_depth_dense(**common, friction=friction, model=model)
+    results["straight_line"] = flood_depth_dense(
+        **common, friction=friction, model="straight_line", attenuation_m_per_m=RATE_M_PER_CELL,
     )
-    return {"modified_friction": modified_friction, "eikonal": eikonal_wd, "eikonal_diag": eikonal_diag}
+    results["eikonal_uniform"] = flood_depth_dense(**common, friction=friction, model="eikonal", **eikonal_kwargs)
+    results["eikonal_landcover"] = flood_depth_dense(
+        **common, friction=friction_landcover, model="eikonal", **eikonal_kwargs,
+    )
+    results["eikonal_landcover_cap"] = flood_depth_dense(
+        **common, friction=friction_landcover, model="eikonal", volume_cap=build_volume_cap(), **eikonal_kwargs,
+    )
+    return results
 
 
 def _elevation_cmap_norm(vmax: float = ELEVATION_VMAX_M) -> tuple[ListedColormap, Normalize]:
@@ -248,6 +271,19 @@ def _depth_cmap_norm(vmax: float) -> tuple[ListedColormap, BoundaryNorm]:
     bounds = np.arange(0, (n_bins + 1) * DEPTH_BIN_M, DEPTH_BIN_M)
     cmap = ListedColormap(plt.get_cmap(_figure_style.SEQUENTIAL_CMAP_DEPTH)(np.linspace(0.15, 0.95, n_bins)))
     return cmap, BoundaryNorm(bounds, cmap.N)
+
+
+def _friction_class_cmap(n_classes: int) -> ListedColormap:
+    """Oranges, sampled at `n_classes` evenly spaced points - lightest = lowest-friction class.
+
+    Classes (LANDCOVER_*_FRICTION_M_PER_CELL) are coloured by rank, not by their actual
+    friction value: with only 4 classes spanning an 11x range, sampling Oranges at the
+    classes' own (very unevenly spaced) fractional positions would under-use the light end of
+    the ramp and bunch the darker classes together. Evenly spacing the 4 samples instead gives
+    an unambiguous, strictly increasing light-to-dark reading, at the cost of not being a
+    literal magnitude scale (it is ordinal, like the land-cover classes it's derived from).
+    """
+    return ListedColormap(plt.get_cmap(_figure_style.SEQUENTIAL_CMAP_FRICTION)(np.linspace(0.2, 0.95, n_classes)))
 
 
 def _mark_offshore_boundary(ax) -> None:
@@ -286,6 +322,16 @@ def _draw_depth(ax, mask: np.ndarray, wd: np.ndarray, cmap, norm):
     return im
 
 
+def _draw_landcover(ax, mask: np.ndarray, landcover_class: np.ndarray) -> None:
+    """Qualitative land-cover panel - LANDCOVER_COLORS, one per class, ocean masked out."""
+    cmap = ListedColormap(LANDCOVER_COLORS)
+    cmap.set_bad(_figure_style.WATER_COLOR)
+    classes = np.where(mask == 1, np.nan, landcover_class)
+    ax.imshow(classes, cmap=cmap, vmin=0, vmax=len(LANDCOVER_COLORS) - 1)
+    _mark_offshore_boundary(ax)
+    _hide_axes_frame(ax)
+
+
 def _group_bbox(axes_list, pad: float = 0.012, pad_top: float = 0.0) -> tuple[float, float, float, float]:
     positions = [ax.get_position() for ax in axes_list]
     x0 = min(p.x0 for p in positions) - pad
@@ -311,24 +357,32 @@ def _draw_group_box(fig, axes_list, pad_top: float) -> None:
 
 def _write_figure_caption() -> None:
     _figure_style.write_caption(OUT_PATH, [
-        "The four FLOOD_MODELS variants (src/flood_model.py) disagree sharply once a scenario has",
-        "a disconnected basin and a detour around an obstacle, which is the sanity check and the",
-        "explanation this figure exists to give, panel by panel.",
+        "The FLOOD_MODELS variants (src/flood_model.py) disagree sharply once a scenario has a",
+        "disconnected basin, a detour around an obstacle, and a land-cover-driven split in",
+        "propagation cost, which is the sanity check and the explanation this figure exists to",
+        "give, panel by panel.",
         "",
         "Scenario: ocean at the left edge, with a surge boundary condition (red line, every panel)",
         "rising over 24h; a floodplain sloping from 0 m at the coast to 2.3 m at the domain's far",
         "inland edge; a pond below sea level (-1 m), walled off on three sides at 3 m and open at",
         "the domain's own upper edge; a 3 m sill blocking a direct route inland except around a",
-        "gap at one end.",
+        "gap at one end. A synthetic four-class land cover (build_landcover, not real land-cover",
+        "data) gives a tidal-flat fringe at the coast, grassland/cropland as the open background,",
+        "and a shrubland and a forest patch further inland, each placed clear of the pond and",
+        "the sill.",
         "",
-        "Grey boxes: the left box (a-c) is the scenario's static inputs; the right box (d-h) is",
+        "Grey boxes: the left box (a-c) is the scenario's static inputs; the right box (d-i) is",
         "every flood-depth result on that scenario.",
         "",
-        "Colours: single-hue, colour-blind-safe sequential ramps, one per variable - elevation",
-        "(a) uses Greens, flood depth (d-h) uses Blues, friction (b, c) uses Oranges (light = low",
-        "in all three). Depth is binned into discrete 0.20 m steps. Grey = dry land; light",
-        "blue-grey = permanent water (including below-sea-level elevation in (a), shown as one",
-        "flat colour, not part of the scale).",
+        "Colours: elevation (a) uses Greens and flood depth (d-i) uses Blues - single-hue,",
+        "colour-blind-safe sequential ramps (light = low). Land cover (b) uses conventional",
+        "land-use-map colours instead (qualitative, not a scale): tan = tidal flat, khaki =",
+        "grassland/cropland (the background), ochre = shrubland, forest green = forest. Friction",
+        "(c) reuses those same four classes but recoloured on the Oranges ramp by rank, lightest",
+        "to darkest in the same tidal-flat/grassland/shrubland/forest order as (b) - i.e. by",
+        "increasing attenuation, not by (b)'s land-use identity. Depth is binned into discrete",
+        "0.20 m steps. Grey = dry land; light blue-grey = permanent water (including below-sea-",
+        "level elevation in (a), shown as one flat colour, not part of the scale).",
         "",
         "No colour bars: deliberately overridden here (SHOW_COLORBARS=False in the script) in",
         "favour of the discrete depth bands plus the annotated sample-point values below, which",
@@ -344,42 +398,41 @@ def _write_figure_caption() -> None:
         "",
         "Panels:",
         "(a) elevation (m)",
-        "(b) friction - spatially uniform attenuation rate",
-        "(c) friction x a direct duration multiplier (time the boundary forcing exceeds each",
-        "    cell's own elevation) - NOT production's actual event_volume.DurationCorrection;",
-        "    see TODO.md \"Open methods questions\" and elevation_duration_multiplier's docstring",
+        "(b) land cover class (synthetic, four classes, build_landcover): a tidal-flat fringe at",
+        "    the coast, grassland/cropland as the open background, and a shrubland and a forest",
+        "    patch further inland - not real land-cover data",
+        "(c) friction derived from (b)'s classes - spatially varying attenuation rate, recoloured",
+        "    by increasing rank (tidal flat < grassland/cropland < shrubland < forest), not (b)'s",
+        "    land-use colours",
         "(d) bathtub - IDW-interpolated level, no coast-connectivity check",
         "(e) bathtub_connected - (d) + coast-connectivity filter",
-        "(f) straight_line - uniform rate, attenuated by straight-line distance",
+        "(f) straight_line - uniform rate (RATE_M_PER_CELL), attenuated by straight-line distance",
         "(g) eikonal - uniform rate, attenuated by the real, connectivity-respecting path",
-        "(h) eikonal, run with the duration-corrected friction field from (c)",
+        "(h) eikonal - land-cover-derived rate (c), attenuated by the real, connectivity-",
+        "    respecting path",
+        "(i) eikonal, land-cover-derived rate (c) + the storm-volume cap (event_volume.VolumeCap):",
+        "    each coast-connected patch is capped at the volume that can cross into it during the",
+        "    storm (build_hydrograph), so depth in (i) is never above (h)'s",
     ])
 
 
 def make_figure() -> None:
     _figure_style.apply_style()
     dem, mask, friction = build_variant_scenario()
-    base = run_base_variants(dem, mask, friction)
-    dur = run_duration_correction(dem, mask, friction)
+    landcover_class, friction_landcover = build_landcover(N_ROWS, N_COLS)
+    base = run_base_variants(dem, mask, friction, friction_landcover)
 
-    print("=== base variants (no duration correction) ===")
+    print("=== variants ===")
     for name, (wd, diag) in base.items():
         pts = {label: float(wd[r, c]) for label, (r, c) in SAMPLE_POINTS.items()}
-        print(f"  {name:18s} points={pts}  diag={diag}")
+        print(f"  {name:22s} points={pts}  diag={diag}")
 
-    print("=== duration correction (eikonal only) ===")
-    pts = {label: float(dur["eikonal"][r, c]) for label, (r, c) in SAMPLE_POINTS.items()}
-    print(f"  updated eikonal points={pts}")
-    print(f"  updated eikonal diag={dur['eikonal_diag']}")
-
-    vmax_depth = max(
-        max(float(np.nanmax(wd)) for wd, _ in base.values()),
-        float(np.nanmax(dur["eikonal"])),
-    )
+    vmax_depth = max(float(np.nanmax(wd)) for wd, _ in base.values())
     depth_cmap, depth_norm = _depth_cmap_norm(vmax_depth)
-    vmax_friction = float(dur["modified_friction"].max())
-    friction_cmap = plt.get_cmap(_figure_style.SEQUENTIAL_CMAP_FRICTION)
-    friction_norm = Normalize(vmin=0, vmax=vmax_friction)
+    # friction (uniform) isn't plotted (only used to run straight_line/eikonal_uniform); (c)
+    # colours the 4 land-cover classes by friction rank, not by their raw value - see
+    # _friction_class_cmap.
+    friction_class_cmap = _friction_class_cmap(len(LANDCOVER_COLORS))
 
     # Axes are placed by hand (fig.add_axes), not GridSpec: GridSpec's wspace/hspace are a
     # single relative knob per figure, which can't give column 0 - column 1 a bigger gap than
@@ -392,16 +445,17 @@ def make_figure() -> None:
     col_gap_tight = 0.03  # column 1 to column 2
     row_gap = 0.055  # between every row - enough that a row's panel letters (just above its
     # own axes) never reach into the row above
+    n_rows_grid = 3  # column 0 (elevation, land cover, land-cover friction) and the 2-column
+    # results grid (6 results) both need exactly 3 rows - every cell is used, none left empty
 
     col_width = (1 - margin_left - margin_right - col_gap_wide - col_gap_tight) / 3
-    row_height = (1 - margin_top - margin_bottom - 2 * row_gap) / 3
+    row_height = (1 - margin_top - margin_bottom - (n_rows_grid - 1) * row_gap) / n_rows_grid
     col_x0 = [
         margin_left,
         margin_left + col_width + col_gap_wide,
         margin_left + 2 * col_width + col_gap_wide + col_gap_tight,
     ]
-    row_y0 = [1 - margin_top - row_height, 1 - margin_top - 2 * row_height - row_gap,
-              1 - margin_top - 3 * row_height - 2 * row_gap]
+    row_y0 = [1 - margin_top - (row + 1) * row_height - row * row_gap for row in range(n_rows_grid)]
 
     # figsize's aspect ratio matches each panel's (N_ROWS/N_COLS) so imshow's equal-aspect
     # scaling doesn't shrink panels inside their allotted axes box. Width is this figure's
@@ -414,13 +468,14 @@ def make_figure() -> None:
         return fig.add_axes((col_x0[col], row_y0[row], col_width, row_height))
 
     ax_dem = _axes(0, 0)
+    ax_landcover = _axes(1, 0)
+    ax_landcover_fric = _axes(2, 0)
     ax_bt = _axes(0, 1)
     ax_btc = _axes(0, 2)
-    ax_fric = _axes(1, 0)
     ax_sl = _axes(1, 1)
     ax_eik = _axes(1, 2)
-    ax_fric_mod = _axes(2, 0)
-    ax_eik_dc = _axes(2, 1)  # shifted left from column 2 - no bare gap beside it
+    ax_eik_lc = _axes(2, 1)
+    ax_eik_lc_cap = _axes(2, 2)
 
     elev_cmap, elev_norm = _elevation_cmap_norm()
     elev_cmap.set_bad(_figure_style.WATER_COLOR)  # ocean cells sit at dem==0, same as the pond's
@@ -429,30 +484,33 @@ def make_figure() -> None:
     _mark_offshore_boundary(ax_dem)
     _hide_axes_frame(ax_dem)
 
-    ax_fric.imshow(np.where(mask == 1, np.nan, friction), cmap=friction_cmap, norm=friction_norm)
-    _mark_offshore_boundary(ax_fric)
-    _hide_axes_frame(ax_fric)
+    _draw_landcover(ax_landcover, mask, landcover_class)
 
-    for ax, name in zip((ax_bt, ax_btc, ax_sl, ax_eik), ("bathtub", "bathtub_connected", "straight_line", "eikonal")):
+    friction_class_cmap.set_bad(_figure_style.WATER_COLOR)
+    ax_landcover_fric.imshow(np.where(mask == 1, np.nan, landcover_class), cmap=friction_class_cmap,
+                             vmin=0, vmax=len(LANDCOVER_COLORS) - 1)
+    _mark_offshore_boundary(ax_landcover_fric)
+    _hide_axes_frame(ax_landcover_fric)
+
+    for ax, name in zip(
+        (ax_bt, ax_btc, ax_sl, ax_eik, ax_eik_lc, ax_eik_lc_cap),
+        ("bathtub", "bathtub_connected", "straight_line", "eikonal_uniform", "eikonal_landcover",
+         "eikonal_landcover_cap"),
+    ):
         wd, _ = base[name]
         _draw_depth(ax, mask, wd, depth_cmap, depth_norm)
 
-    ax_fric_mod.imshow(np.where(mask == 1, np.nan, dur["modified_friction"]), cmap=friction_cmap, norm=friction_norm)
-    _mark_offshore_boundary(ax_fric_mod)
-    _hide_axes_frame(ax_fric_mod)
-
-    _draw_depth(ax_eik_dc, mask, dur["eikonal"], depth_cmap, depth_norm)
-
     if SHOW_COLORBARS:
-        # section 9's default: one shared colour bar per group of panels on the same scale
+        # section 9's default: one shared colour bar per group of panels on the same scale.
+        # (c) gets none even here: it is coloured by class rank (_friction_class_cmap), not a
+        # literal magnitude, so a colour bar would misstate it as one - same reason (b) (also
+        # qualitative) never gets one either.
         from matplotlib.cm import ScalarMappable
 
         fig.colorbar(ScalarMappable(norm=elev_norm, cmap=elev_cmap), ax=ax_dem, fraction=0.08,
                      pad=0.02, label="Elevation (m)")
-        fig.colorbar(ScalarMappable(norm=friction_norm, cmap=friction_cmap), ax=[ax_fric, ax_fric_mod],
-                     fraction=0.08, pad=0.02, label="Friction (m/cell)")
         fig.colorbar(ScalarMappable(norm=depth_norm, cmap=depth_cmap),
-                     ax=[ax_bt, ax_btc, ax_sl, ax_eik, ax_eik_dc], fraction=0.04, pad=0.02,
+                     ax=[ax_bt, ax_btc, ax_sl, ax_eik, ax_eik_lc, ax_eik_lc_cap], fraction=0.04, pad=0.02,
                      label="Flood depth (m)", extend="max")
 
     # drawn before the panel letters, and padded enough to clear them, so the letters sit
@@ -463,14 +521,14 @@ def make_figure() -> None:
     # track a final print size this much smaller.
     letter_height_fig_frac = (LETTER_FONTSIZE / 72.0) / fig_height
     letter_clearance = 1.02 * row_height - row_height + letter_height_fig_frac * 1.6
-    _draw_group_box(fig, [ax_dem, ax_fric, ax_fric_mod], pad_top=letter_clearance)
-    _draw_group_box(fig, [ax_bt, ax_btc, ax_sl, ax_eik, ax_eik_dc], pad_top=letter_clearance)
+    _draw_group_box(fig, [ax_dem, ax_landcover, ax_landcover_fric], pad_top=letter_clearance)
+    _draw_group_box(fig, [ax_bt, ax_btc, ax_sl, ax_eik, ax_eik_lc, ax_eik_lc_cap], pad_top=letter_clearance)
 
     # column 0 (the static inputs) gets (a)-(c) top to bottom; everything else is lettered
     # left to right, top to bottom, the usual reading order
     for ax, letter in zip(
-        (ax_dem, ax_fric, ax_fric_mod, ax_bt, ax_btc, ax_sl, ax_eik, ax_eik_dc),
-        "abcdefgh",
+        (ax_dem, ax_landcover, ax_landcover_fric, ax_bt, ax_btc, ax_sl, ax_eik, ax_eik_lc, ax_eik_lc_cap),
+        "abcdefghi",
     ):
         _figure_style.panel_letters(ax, letter, fontsize=LETTER_FONTSIZE)
 
