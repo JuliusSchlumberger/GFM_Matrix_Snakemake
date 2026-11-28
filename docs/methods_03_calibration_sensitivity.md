@@ -21,7 +21,7 @@ lines; the caps are chosen from where the tiles converge.
 
 ## 2. Sweep-round calibration (`max_rounds`)
 
-**Population**: 537 wet tiles out of 571 candidates stratified by size and
+**Population**: 556 wet tiles out of 571 candidates stratified by size and
 geography from the ~15% of the global domain's wave-0 (hop_distance == 0)
 tiles sampled for this study, RP100/SLR_0 scenario.
 
@@ -31,11 +31,13 @@ per-sweep metrics (max change, flooded-cell count, depth stats). Every 4th
 sweep (one full round) is checked against `waterlevel_epsilon_m = 0.03` -
 and the tile stops early once a round's max change falls at or below it.
 
-**Result**: 58.5% of the 537 wet tiles strictly converge (max per-cell
-change ≤ ε) within 40 rounds. Of the remaining 41.5%, 97.8% already have a
-frozen flood extent by round 40 - the residual change is confined to depth
-still settling in already-wet cells, not the wet/dry boundary. Production
-caps `max_rounds` at 40 on this basis; the uniform-attenuation study sets 10.
+**Result**: with land-cover friction all 556 wet tiles strictly converge
+(max per-cell change ≤ ε) within 80 rounds: median 5, 90th percentile 19,
+555 within 40. With uniform attenuation all converge within 10 (median 2,
+90th percentile 3). These solves run without obstacle coupling; coupled
+solves need more rounds (on the SFINCS calibration's 1,500 tiles only
+52-70% of the uniform runs' last inner solves converged within 10), so
+production caps `max_rounds` at 80 for both friction sources.
 
 **Supporting scripts**: `calibration_studies/run_sweep_budget_study.py` (per-tile
 sweep traces, one CSV per tile) - `calibration_studies/aggregate_wet_tiles.py`
@@ -72,17 +74,18 @@ unblocked solve, no elevation-aware correction at all), then runs
 production's real obstacle-coupling algorithm - static elevation
 pre-filter, then iterative dynamic re-blocking with the blocked-cell set
 accumulated as a running union across outer iterations - up to 15 outer
-iterations, each iteration's inner solve capped at 40 rounds (the §2
-result) with the same ε = 0.03. A tile is counted as converged once an
+iterations, each iteration's inner solve capped at 40 rounds (all but one
+§2 tile converge within 40) with the same ε = 0.03. A tile is counted as converged once an
 outer iteration's own newly-blocked-cell count drops below
 `outer_convergence_pct` of the tile's cells.
 
-**Result**: 370 tiles (74.0%) converge after the earliest mathematically
-possible number of outer iterations (2 - the stopping check needs a
-previous iteration's blocking state to compare against, so it cannot fire
-any earlier); 123 more (24.6%) need 3; the remaining 7 tiles (1.4%) need 4.
-No tile in this study needs more than 4 - exactly matching production's
-current `max_outer_iterations` cap. When a tile's delta since the previous
+**Result** (500 tiles per friction source): with land-cover friction 254
+tiles (50.8%) converge after the earliest mathematically possible number of
+outer iterations (2 - the stopping check needs a previous iteration's
+blocking state to compare against, so it cannot fire any earlier); 182 more
+(36.4%) need 3, 60 (12.0%) need 4 and 4 (0.8%) need 5. With uniform friction
+the counts are 250 / 192 / 56 / 2. No tile in either study needs more than
+5; production's `max_outer_iterations` cap of 10 keeps twice that headroom. When a tile's delta since the previous
 iteration is small enough to stop, that iteration's own `blocked` set is
 discarded - never applied, never re-solved - and the returned flood map is
 the *previous* iteration's output. A tile that "needs k iterations"

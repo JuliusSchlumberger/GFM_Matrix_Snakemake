@@ -239,9 +239,13 @@ simulation: # Used by: preprocessing rules
     # solve under obstacle_coupling, by friction_source: sweep-budget study per source
     # (docs/methods_03_calibration_sensitivity.md §2, figures_root/500_tiles/<source>).
     # The fixed 3-sweep mode stays available via flood_depth_dense's `sweep_budget`.
+    # 556 wet tiles, uncoupled: land cover converges in median 5 / p90 19 rounds, all within 80 (one
+    # needs more than 40); uniform median 2 / p90 3, all within 10. Coupled solves on the SFINCS
+    # calibration's subgrid need more: at a 10-round cap only 52-70 % of the uniform runs' last
+    # inner solves converged, so uniform gets land cover's cap.
     max_rounds:
-      landcover: 40
-      uniform: 10
+      landcover: 80
+      uniform: 80
 
     # Early-exit threshold (m) on a round's max per-cell waterlevel change; well below the 0.1 m
     # flood/no-flood threshold (see flood_model.WATERLEVEL_EPSILON_M).
@@ -252,10 +256,11 @@ simulation: # Used by: preprocessing rules
     # outer loop; algorithm in flood_model.flood_depth_dense.
     obstacle_coupling:
       enabled: true
-      # 4: obstacle-coupling study (docs/methods_03_calibration_sensitivity.md §3), with blocked cells
-      # accumulated across iterations: 500/500 tiles converge within 4 (370 at 2, 123 at 3, 7 at 4).
+      # Obstacle-coupling study (docs/methods_03_calibration_sensitivity.md §3), with blocked cells
+      # accumulated across iterations: 500/500 tiles converge within 5 for both friction sources
+      # (land cover 254 at 2, 182 at 3, 60 at 4, 4 at 5; uniform 250 / 192 / 56 / 2); 10 is headroom.
       # Counts inner solves; a tile stopping at solve k has k-1 blocking rounds in its output.
-      max_outer_iterations: 4
+      max_outer_iterations: 10
       outer_convergence_pct: 0.01  # stop early once < this % of the tile's cells are newly blocked in an outer iteration
 
     # SLR propagation (flood_model.flood_depth_dense). two_component: the static level MDT + SLR

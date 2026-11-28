@@ -520,6 +520,7 @@ def flood_depth_dense(
         inner_diag: dict = {}
         n_outer = 0
         outer_converged = False
+        rounds_per_outer, converged_per_outer, newly_blocked_per_outer = [], [], []
         for outer in range(max_outer_iterations):
             n_outer = outer + 1
             if trace is not None:
@@ -539,6 +540,9 @@ def flood_depth_dense(
 
             n_newly = int(blocked.sum()) if prev_blocked is None else int((blocked & ~prev_blocked).sum())
             pct_newly = 100.0 * n_newly / n_cells
+            rounds_per_outer.append(inner_diag["n_rounds_used"])
+            converged_per_outer.append(bool(inner_diag["converged"]))
+            newly_blocked_per_outer.append(n_newly)
             if trace is not None:
                 trace.outer_done(n_outer, waterlevel_b, blocked, pct_newly, inner_diag)
             if prev_blocked is not None and pct_newly < outer_convergence_pct:
@@ -553,6 +557,12 @@ def flood_depth_dense(
             "inner_rounds_used": inner_diag.get("n_rounds_used"),
             "inner_converged": inner_diag.get("converged"),
             "final_max_change": inner_diag.get("max_change"),
+            # Per outer iteration: the inner solve's rounds (= max_rounds when not converged), and
+            # the cells it newly blocked (the first entry counts the static pre-filter too).
+            "inner_rounds_per_outer": rounds_per_outer,
+            "inner_converged_per_outer": converged_per_outer,
+            "newly_blocked_per_outer": newly_blocked_per_outer,
+            "last_blocking_outer": max((k for k, n in enumerate(newly_blocked_per_outer, 1) if n), default=0),
         }
 
     def depth_from(waterlevel: np.ndarray) -> np.ndarray:

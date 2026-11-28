@@ -138,10 +138,27 @@ def test_seed_path_obstacle_coupling() -> None:
     print()
 
 
+def test_coupled_diagnostics_have_one_entry_per_outer_iteration() -> None:
+    dem = np.zeros((5, 15), dtype=np.float64)
+    dem[:, 5:7] = 100.0
+    _, diag = fm.flood_depth_dense(
+        dem, np.zeros(dem.shape, dtype=np.int64), np.full(dem.shape, 0.001), Affine.identity(),
+        seed_rows=np.array([2]), seed_cols=np.array([0]), seed_values=np.array([5.0]),
+        cell_dx_m=1.0, cell_dy_m=1.0, obstacle_coupling=True, max_outer_iterations=3,
+    )
+    n = diag["outer_iterations_used"]
+    for key in ("inner_rounds_per_outer", "inner_converged_per_outer", "newly_blocked_per_outer"):
+        assert len(diag[key]) == n, (key, diag)
+    assert diag["inner_rounds_per_outer"][-1] == diag["inner_rounds_used"]
+    assert diag["newly_blocked_per_outer"][0] > 0  # the ridge is blocked by the static pre-filter
+    assert 1 <= diag["last_blocking_outer"] <= n
+
+
 def main() -> None:
     test_seed_propagation_and_pruning()
     test_mutual_exclusivity_validation()
     test_seed_path_obstacle_coupling()
+    test_coupled_diagnostics_have_one_entry_per_outer_iteration()
     print("All flood_depth_dense explicit-seed-path validation checks passed.")
 
 

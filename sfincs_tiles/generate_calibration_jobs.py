@@ -53,6 +53,15 @@ def _hpc_view(config: str | Path, profile_sets: list[str] | None) -> dict:
     return linux_config
 
 
+def _write_resolved_config(config: Path, base: Path, profile_sets: list[str] | None) -> dict:
+    """Write {base}/resolved_config.yml (Linux path view of `config`), which every job reads."""
+    import yaml
+
+    linux_config = _hpc_view(config, profile_sets)
+    (base / "resolved_config.yml").write_text(yaml.safe_dump(linux_config), encoding="utf-8", newline="\n")
+    return linux_config
+
+
 def _slurm_hours(hours: int) -> str:
     return f"{hours // 24}-{hours % 24:02d}:00:00"
 
@@ -76,13 +85,10 @@ def cmd_stage1(args) -> str:
     Side effects: writes {base}/resolved_config.yml (Linux path view) and runs
     ``select_calibration_tiles.py pool``.
     """
-    import yaml
-
     config_path = Path(args.config)
-    linux_config = _hpc_view(config_path, args.profile_set)
     base = read_root(config_path) / args.base_dir_name
     base.mkdir(parents=True, exist_ok=True)
-    (base / "resolved_config.yml").write_text(yaml.safe_dump(linux_config), encoding="utf-8", newline="\n")
+    linux_config = _write_resolved_config(config_path, base, args.profile_set)
 
     subprocess.run([sys.executable, str(_HERE / "select_calibration_tiles.py"), "pool",
                     "--config", str(config_path), "--base-dir-name", args.base_dir_name,
@@ -279,8 +285,10 @@ def reset_tiles(base: Path, part: str, reset_runs: bool, dry_run: bool) -> dict[
 def cmd_rerun(args) -> str | None:
     """Rerun part of a finished calibration in place: reset tiles, then write (and submit) stage 2.
 
-    Guards: tile_ids.txt exists; the checkout has the code the part needs; a non-sweep phase needs
-    the sweep's variant_selection.json. `--dry-run` only reports what would be reset.
+    The rerun takes its settings (solver caps, rates) from `--config` as it stands now: it rewrites
+    the calibration's resolved_config.yml. Guards: tile_ids.txt exists; the checkout has the code
+    the part needs; a non-sweep phase needs the sweep's variant_selection.json. `--dry-run` only
+    reports what would be reset.
     """
     root = read_root(Path(args.config))
     base = root / args.base_dir_name
@@ -301,6 +309,8 @@ def cmd_rerun(args) -> str | None:
             raise SystemExit("--part sfincs reruns the sweep phase; run --part models for other phases")
 
     counts = reset_tiles(base, args.part, args.reset_runs, args.dry_run)
+    if not args.dry_run:
+        _write_resolved_config(Path(args.config), base, args.profile_set)
     what = f"{counts['tiles']} tile(s) for phase {args.phase}"
     if args.reset_runs:
         what += f", {counts['rasters']} model raster(s)"
@@ -315,7 +325,6 @@ def cmd_rerun(args) -> str | None:
         for p in jobs.glob(pattern):
             p.unlink()
     stage2 = argparse.Namespace(**vars(args))
-    stage2.config = str(base / "resolved_config.yml")
     if args.part == "models":
         # SFINCS outputs exist, so run_final_tile.sh skips SFINCS: estimate only the model runs.
         stage2.sfincs_min_per_mcell, stage2.overhead_min = 0.0, 5.0

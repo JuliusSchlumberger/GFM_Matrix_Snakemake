@@ -160,6 +160,16 @@ def test_rerun_models_reset_runs(tmp_path, submitted) -> None:
     assert list(fx.jobs(base / "hpc_jobs_stage2" / "submit_all.sh")) == ["cal_final_000", "cal_final_001"]
 
 
+def test_rerun_takes_the_current_solver_settings(tmp_path, submitted) -> None:
+    cfg, base = _rerun_site(tmp_path)
+    stale = yaml.safe_load((base / "resolved_config.yml").read_text())
+    stale["simulation"]["flooding"]["obstacle_coupling"]["max_outer_iterations"] = 1
+    (base / "resolved_config.yml").write_text(yaml.safe_dump(stale))
+    sfincs.run("rerun", _rerun_args(cfg, base, part="models", no_post=True))
+    resolved = yaml.safe_load((base / "resolved_config.yml").read_text())
+    assert resolved["simulation"]["flooding"] == hpc_common_load(cfg)["simulation"]["flooding"]
+
+
 def test_rerun_sfincs_part(tmp_path, submitted) -> None:
     cfg, base = _rerun_site(tmp_path)
     sfincs.run("rerun", _rerun_args(cfg, base, part="sfincs"))

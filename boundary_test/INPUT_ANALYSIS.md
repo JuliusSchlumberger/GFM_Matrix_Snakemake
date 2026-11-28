@@ -1331,22 +1331,22 @@ positive bias and the macrotidal coasts' RP2 spread (spring range > 4 m: RP2 MAE
 
 ## 9. Comparison with other global coastal boundary conditions
 
-| | This pipeline (GCFM) | Fathom RFA (Collings et al., 2024; Wing et al., 2024) | Chaudhuri et al. (2027) |
+| | GFM storm-tide product (§8.4-8.7) | Fathom RFA (Collings et al., 2024; Wing et al., 2024) | Chaudhuri et al. (2027) |
 |---|---|---|---|
-| Still-water extremes | COAST-RP: GTSM-ERA5 surge (ETC) + STORM synthetic TCs, empirical RPs after a probabilistic surge-tide combination | RFA after Sweet et al. (2020, 2022): GPD on pooled, normalised daily maxima; gauges where >= 3 within 400 km (851 of 5,975 1° cells), otherwise GTSM-ERA5 (4,555 cells) or single-site GTSM-ERA5 (569 cells); shape capped at 0.35 | skew-surge return levels from a global SSJPM on GTSM-ERA5, bias-corrected at gauges (Alexandre and Chaudhuri, 2025) |
-| Tide | GTSM tide inside COAST-RP (7-8% high); FES2022 proposed | FES2014: MHHW/MLLW scale the index flood; GTSM surge laid on FES2014 tide | HAT from FES2022b added to the skew-surge RP level |
-| Vertical reference | model MSL + CNES-CLS22 MDT (GOCO06s) + 2020 offset | 2011 epoch MSL + CNES-CLS18 MDT to EGM2008; RP1 bias-corrected to single-site fits (mean 8 cm) | none: EGM2008 taken as MSL |
+| Still-water extremes | GTSM-ERA5 skew surge (1950-2024) x gauge ratio r, GPD with the shape pooled over 300 km, convolved with the tide; ERA5 cyclones masked, COAST-RP_TC (STORM) + one 0.22 m shift added as a rate | RFA after Sweet et al. (2020, 2022): GPD on pooled, normalised daily maxima; gauges where >= 3 within 400 km (851 of 5,975 1° cells), otherwise GTSM-ERA5 (4,555 cells) or single-site GTSM-ERA5 (569 cells); shape capped at 0.35 | skew-surge return levels from a global SSJPM on GTSM-ERA5, bias-corrected at gauges (Alexandre and Chaudhuri, 2025) |
+| Tide | FES2022 (FES2014 where the version rule fires), scaled by the GESLA gauges within 25 km reached through water | FES2014: MHHW/MLLW scale the index flood; GTSM surge laid on FES2014 tide | HAT from FES2022b added to the skew-surge RP level |
+| Vertical reference | local MSL + CNES-CLS22 MDT (GOCO06s) + 2020 offset | 2011 epoch MSL + CNES-CLS18 MDT to EGM2008; RP1 bias-corrected to single-site fits (mean 8 cm) | none: EGM2008 taken as MSL |
 | Waves | none | 20% ERA5 Hs on exposed coasts (50 km fetch test) | none in the published description |
-| Time dimension | hydrograph → T → friction multiplier (eikonal); full hydrograph (SFINCS) | none for return-period maps | none (static friction attenuation on DeltaDTM) |
-| Resolution | COAST-RP stations (23,226) | ~1 km coastline points (3.4 million) | 0.1° ESL points joined to FES vertices within 20 km |
-| Validation reported | this note: COAST-RP -0.06 m median at RP10/RP100 vs gauge GEV (698 sites) | +2 cm (RP2) to +21 cm (RP100) mean bias vs single-site gauge GPD; RP10 5-95% -8..+27 cm | not in the excerpt reviewed |
+| Time dimension | per-RP hydrograph per station → T → friction multiplier (eikonal); RP100 hydrograph (SFINCS) | none for return-period maps | none (static friction attenuation on DeltaDTM) |
+| Resolution | 23,226 COAST-RP stations + 455,337 coastline nodes (one per FES2022 cell of DeltaDTM coastline) | ~1 km coastline points (3.4 million) | 0.1° ESL points joined to FES vertices within 20 km |
+| Validation reported | §8.7: RP100 bias -0.001 m, MAE 0.215 m (COAST-RP -0.102 / 0.298 m) at 618 gauges, r and tide factor left out | +2 cm (RP2) to +21 cm (RP100) mean bias vs single-site gauge GPD; RP10 5-95% -8..+27 cm | not in the excerpt reviewed |
 | Access | open inputs | output on request, academic non-commercial only | seed database and outputs proprietary (Geosapiens) |
 
 **What the Fathom RFA does better.** It uses gauges directly where they are dense, so it has no
 model tide bias there; pooling stabilises the tail and spreads rare TC events along a coast (the
 Cyclone Yasi example); it carries wave setup; and it is delivered at 1 km. **What it does not
-fix.** 85% of its coastal cells rest on GTSM-ERA5, with the same ERA5 surge deficit found here
-and without synthetic TCs, so its TC tails are limited by the reanalysis (the authors name the Bay
+fix.** 85% of its coastal cells rest on GTSM-ERA5, with the same ERA5 surge deficit that r
+corrects here (§8.1, test 9), and without synthetic TCs, so its TC tails are limited by the reanalysis (the authors name the Bay
 of Bengal and NW India as under-represented); the index flood scaled by tidal range is a weak
 model for surge-dominated microtidal coasts; a fixed shape-parameter cap of 0.35 was applied to
 34 cells, mostly Gulf of Mexico and Japan; and the RFA inflates levels against single-site fits

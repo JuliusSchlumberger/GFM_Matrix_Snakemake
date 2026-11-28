@@ -1,7 +1,8 @@
 """Run the SFINCS calibration analysis on whatever tiles have a calibration_result.json.
 
-Steps (subprocesses): 1 compute_variant_metrics.py (run tables, variant_selection.json) and
-plot_depth_accuracy.py (depth accuracy per run);
+Steps (subprocesses): 1 compute_variant_metrics.py (run tables, variant_selection.json),
+plot_depth_accuracy.py (depth accuracy per run) and, for the raw results,
+collect_solver_diagnostics.py (sweep rounds, outer iterations and solve time per run);
 2 the best variant's run by pooled population-weighted CSI (--select-by); 3 plot_worst_tiles_panel.py; 4
 plot_validation_results.py; 5 compute_tile_drivers.py and plot_tile_plausibility.py (metric
 distributions, drivers of disagreement); 6 plot_sfincs_tile_diagnostics.py forcing figures for
@@ -90,6 +91,8 @@ def main() -> None:
     _run([python, str(_THIS_DIR / "compute_variant_metrics.py"), *common, *subset, "--select-by", args.select_by])
     if (root / args.base_dir_name / "variant_runs_depth_accuracy.csv").exists():
         _run([python, str(_THIS_DIR / "plot_depth_accuracy.py"), *common])
+    if not args.raster_base_dir_name:  # the dedup base dir holds no model_runs.json
+        _run([python, str(_THIS_DIR / "collect_solver_diagnostics.py"), *common])
     best = _best_run(root, args)
     _run([python, str(_THIS_DIR / "plot_worst_tiles_panel.py"), *common, *raster,
           "--run-key", best, "--n-panel-tiles", str(args.n_panel_tiles),

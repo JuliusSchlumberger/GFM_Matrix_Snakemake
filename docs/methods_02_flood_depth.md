@@ -346,14 +346,15 @@ fixed, uniform sweep count (e.g. 3) was found to under-converge on larger/geomet
 tiles, so a round-based, convergence-checked scheme is the production
 default instead, with the original fixed-count mode retained as an optional
 non-default configuration. The round cap itself was set empirically: a
-calibration exercise across a representative sample of 537 wet real coastal
-domains found that 58.5% of domains fully converge (every cell's potential
-change drops to/below $\varepsilon$) within 40 rounds, and of the remaining
-domains that have not strictly converged by round 40, 97.8% already have a
-stable flood extent by then - the residual change is confined to depth
-still settling in already-flooded cells, not the flooded/dry boundary
-itself. Production therefore caps the solve at `max_rounds = 40` with land-cover friction
-(10 with uniform attenuation, from the same study per friction source). See
+calibration exercise across a representative sample of 556 wet real coastal
+domains found that with land-cover friction every domain fully converges
+(every cell's potential change drops to/below $\varepsilon$) within 80
+rounds - median 5, 90th percentile 19, one domain beyond 40 - and with
+uniform attenuation within 10 (median 2, 90th percentile 3). With obstacle
+coupling the solves need more rounds: on the SFINCS calibration's 1,500
+tiles only 52-70% of the uniform runs' last inner solves converged within
+10 rounds. Production therefore caps the solve at `max_rounds = 80` for
+both friction sources. See
 `methods_03_calibration_sensitivity.md` §2 for the full calibration
 methodology.
 
@@ -533,13 +534,14 @@ allowed.
 
 With the accumulation in place, every one of the 500 calibration domains
 converges, the large majority within a handful of outer iterations: the
-single largest group (370, 74.0%) reaches convergence at the earliest
-mathematically possible outer iteration (iteration 2 - the stopping check
-needs a previous iteration to compare against, so it cannot fire any
-earlier), almost all of the remainder (123, 24.6%) at iteration 3, and a
-small number (7, 1.4%) at iteration 4 - no domain in this
-calibration needed more than that. Production caps the outer loop at
-`max_outer_iterations = 4`, covering every domain in the calibration.
+single largest group (land cover 254, 50.8%; uniform 250, 50.0%) reaches
+convergence at the earliest mathematically possible outer iteration
+(iteration 2 - the stopping check needs a previous iteration to compare
+against, so it cannot fire any earlier), most of the remainder at
+iteration 3 (182 and 192), fewer at iteration 4 (60 and 56) and a handful
+at iteration 5 (4 and 2) - no domain in this calibration needed more than
+that. Production caps the outer loop at `max_outer_iterations = 10` for both
+friction sources, twice what any domain in the calibration needed.
 See
 `methods_03_calibration_sensitivity.md` §3 for the full calibration
 methodology and exact per-tile breakdown.

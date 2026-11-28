@@ -293,7 +293,7 @@ def main() -> None:
             _write_waterdepth(depth, transform, crs, run_path(out_dir, key))
             runtime = solve_s + time.monotonic() - t1
             all_runs[key] = {"variant": output, "parameter": parameter, "alpha": alpha,
-                             "solver": _jsonable(diag), "runtime_s": round(runtime, 1)}
+                             "solver": _jsonable(diag), "solve_s": round(solve_s, 1), "runtime_s": round(runtime, 1)}
             runs_path.write_text(json.dumps(all_runs, indent=1))
             print(f"tile {args.tile_id}: {key} - {int((depth > 0).sum())} flooded cell(s), {runtime:.0f} s",
                   flush=True)
