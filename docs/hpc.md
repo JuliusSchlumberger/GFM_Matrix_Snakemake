@@ -181,7 +181,7 @@ python hpc/gfm_hpc.py studies sweep --source landcover uniform --submit
 Results land in `<data_root>/calibration_roughness_SFINCS/` (`--base-dir-name`).
 `rerun` reruns part of a finished calibration in place: `--part models` one phase of the flood-model runs (`--reset-runs` deletes every model raster first; the post job, unless `--no-post`, writes `variant_selection.json` for the next phase, which a non-sweep phase requires), `--part sfincs` the forcing, SFINCS model build and run, then the sweep phase with its post job.
 Both delete the tile markers that make `run_final_tile.sh` skip a tile and the stage-2 job files of the previous run, and rewrite the calibration's `resolved_config.yml` from the current config, so the rerun uses today's solver settings; `--dry-run` only reports what would be reset.
-The raw analysis also writes `variant_runs_solver.csv` (per tile and run: inner sweep rounds and newly blocked cells per outer iteration, the last outer iteration that still blocked cells, solve seconds) and its per-variant summary `variant_runs_solver_summary.csv`.
+The raw analysis also writes `variant_runs_solver.csv` (per tile and run: inner sweep rounds and newly blocked cells per outer iteration, the last outer iteration that still blocked cells, solve seconds, and the tile's SFINCS run time and mean time step from its `sfincs.log`) and its per-variant summary `variant_runs_solver_summary.csv`, with SFINCS as one more row.
 The phases and the calibration/validation split are in [methods_04a](methods_04a_SFINCSvalidation.md#flood-model-variants).
 `run_final_tile.sh` takes the roots, interpreters, container and `hpc.sfincs_timeout_s` from the exports of its job header.
 

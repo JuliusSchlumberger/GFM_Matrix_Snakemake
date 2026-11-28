@@ -3,7 +3,10 @@
 Reads each tile's model_runs.json and writes <base>/variant_runs_solver.csv plus a per-variant
 summary, variant_runs_solver_summary.csv. Bathtub and straight-line runs have no sweeps: their
 round and outer columns stay empty. solve_s is the solve alone (a capped run shares its base
-run's solve); runtime_s adds writing and the volume cap.
+run's solve); runtime_s adds writing and the volume cap. For context every row also carries
+its tile's SFINCS run time and mean time step, from the "Total time" and "Average time step"
+lines of sfincs_model/sfincs.log (run_final_tile.sh: SFINCS_THREADS threads); the summary
+lists the SFINCS runs as variant "sfincs".
 
 Usage:
     python collect_solver_diagnostics.py --config <resolved_config.yml> --base-dir-name calibration_roughness_SFINCS
@@ -31,6 +34,22 @@ def _join(values) -> str | None:
     return None if values is None else " ".join(str(v) for v in values)
 
 
+SFINCS_LOG_FIELDS = {"Total time": "sfincs_s", "Average time step (s)": "sfincs_mean_dt_s"}
+
+
+def sfincs_timing(log_path: Path) -> dict[str, float | None]:
+    """Return the SFINCS run time and mean time step (s) from its log; None where missing."""
+    out = dict.fromkeys(SFINCS_LOG_FIELDS.values())
+    if not log_path.exists():
+        return out
+    for line in log_path.read_text(errors="replace").splitlines():
+        label, sep, value = line.partition(":")
+        column = SFINCS_LOG_FIELDS.get(label.strip())
+        if sep and column:
+            out[column] = float(value.split()[0])
+    return out
+
+
 def solver_rows(tile_id: str, runs: dict) -> list[dict]:
     """Return one row per run of a tile's model_runs.json."""
     rows = []
@@ -54,7 +73,10 @@ def solver_rows(tile_id: str, runs: dict) -> list[dict]:
 
 
 def summarize(table: pd.DataFrame) -> pd.DataFrame:
-    """Per variant: runs, rounds and outer-iteration distribution, solve time."""
+    """Per variant: runs, rounds and outer-iteration distribution, solve time; SFINCS as one row."""
+    tiles = table.drop_duplicates("tile_id").dropna(subset=["sfincs_s"])
+    sfincs = tiles.assign(variant="sfincs", solve_s=tiles["sfincs_s"], runtime_s=tiles["sfincs_s"],
+                          max_inner_rounds=float("nan"))
     def one(variant: str, g: pd.DataFrame) -> dict:
         eik = g.dropna(subset=["max_inner_rounds"])
         return {
@@ -70,7 +92,10 @@ def summarize(table: pd.DataFrame) -> pd.DataFrame:
             "solve_s_p90": g["solve_s"].quantile(0.9),
             "solve_s_max": g["solve_s"].max(),
         }
-    return pd.DataFrame([one(v, g) for v, g in table.groupby("variant", sort=True)])
+    summary = [one(v, g) for v, g in table.groupby("variant", sort=True)]
+    if len(sfincs):
+        summary.append(one("sfincs", sfincs))
+    return pd.DataFrame(summary)
 
 
 def main() -> None:
@@ -82,7 +107,9 @@ def main() -> None:
     base = read_root(Path(args.config)) / args.base_dir_name
     rows = []
     for runs_path in sorted(base.glob(f"*/outputs/{RUNS_NAME}")):
-        rows += solver_rows(runs_path.parent.parent.name, json.loads(runs_path.read_text()))
+        tile_dir = runs_path.parent.parent
+        timing = sfincs_timing(tile_dir / "sfincs_model" / "sfincs.log")
+        rows += [{**r, **timing} for r in solver_rows(tile_dir.name, json.loads(runs_path.read_text()))]
     if not rows:
         raise SystemExit(f"no {RUNS_NAME} under {base}")
     table = pd.DataFrame(rows)
