@@ -32,9 +32,17 @@ def _single_blas_thread() -> None:
     _blas_limits = threadpool_limits(1)
 
 
-def process_pool(workers: int | None = None) -> ProcessPoolExecutor:
+def _init_worker(initializer, initargs: tuple) -> None:
+    _single_blas_thread()
+    if initializer is not None:
+        initializer(*initargs)
+
+
+def process_pool(workers: int | None = None, initializer=None, initargs: tuple = ()) -> ProcessPoolExecutor:
     """Return a pool of `workers` processes (default: `available_cpus()`), one BLAS thread each.
 
     One BLAS thread per worker keeps N workers on N cores rather than N workers times N threads.
+    `initializer(*initargs)` then runs once per worker, e.g. to hand it large shared inputs.
     """
-    return ProcessPoolExecutor(workers or available_cpus(), initializer=_single_blas_thread)
+    return ProcessPoolExecutor(workers or available_cpus(), initializer=_init_worker,
+                               initargs=(initializer, initargs))

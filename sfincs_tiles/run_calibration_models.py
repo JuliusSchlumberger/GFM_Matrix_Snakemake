@@ -10,7 +10,7 @@ A tile's group is calibration_split.split_group. Seeds, coastline and solver set
 production's (flood_model, config simulation.flooding); the forcing is the SFINCS run's, the
 duration correction and the volume cap take its boundary hydrographs. No static (two-component) level: the
 SFINCS runs have no separate SLR part. A capped run (correction C) reuses its base run's solve.
-Existing outputs are skipped.
+The solves run in parallel, one per core of the job. Existing outputs are skipped.
 
 Usage:
     python run_calibration_models.py --config <resolved_config.yml> --tile-id 1122 --phase sweep
@@ -23,6 +23,7 @@ import argparse
 import json
 import sys
 import time
+from concurrent.futures import as_completed
 from pathlib import Path
 
 import geopandas as gpd
@@ -36,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from event_volume import DurationCorrection, VolumeCap  # noqa: E402
 from flood_model import apply_volume_cap, flood_depth_dense, idw_seed_values_at  # noqa: E402
 from flood_variants import VARIANTS, base_variant, max_rounds, run_key, variant_flooding  # noqa: E402
+from process_pool import available_cpus, process_pool  # noqa: E402
 from rasters import WATERDEPTH_NODATA_INT16, decode_waterlevel_cm, encode_waterdepth_cm, grid_spacing_m  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -211,7 +213,6 @@ def main() -> None:
         config = yaml.safe_load(f)
     root = read_root(Path(args.config))
     flooding = config["simulation"]["flooding"]
-    oc = flooding["obstacle_coupling"]
     river_code = int(config["tile_generation"]["river_code"])
     base_dir = root / args.base_dir_name
     tile_dir = base_dir / args.tile_id
@@ -255,48 +256,74 @@ def main() -> None:
     solves: dict[tuple, list[str]] = {}
     for name, parameter, alpha in todo:
         solves.setdefault((base_variant(name), parameter, alpha), []).append(name)
-    for (name, parameter, alpha), outputs in solves.items():
-        spec = VARIANTS[name]
-        v_flooding = variant_flooding(flooding, name, parameter, alpha)
-        rate_m_per_m = float(v_flooding["uniform_attenuation_m_per_km"]) / 1000.0
-        if spec["friction_source"] == "uniform":
-            friction = np.full(dem.shape, rate_m_per_m, dtype=np.float32)
-        else:
-            friction = base_friction * np.float32(v_flooding["friction_scale_factor"])
-        duration = (sfincs_duration_correction(sfincs_dir, crs, v_flooding["duration_correction"])
-                    if spec["duration"] else None)
-        t0 = time.monotonic()
-        waterdepth, diagnostics = flood_depth_dense(
-            solver_dem, solver_mask, friction, transform,
-            seed_rows=seed_rows, seed_cols=seed_cols, seed_values=seed_values,
-            cell_dx_m=cell_dx_m, cell_dy_m=cell_dy_m, k=int(flooding["knn"]), idw_power=float(flooding["idw_power"]),
-            ocean_code=OCEAN_CODE, river_code=river_code,
-            obstacle_coupling=bool(oc["enabled"]),
-            max_outer_iterations=int(oc["max_outer_iterations"]),
-            outer_convergence_pct=float(oc["outer_convergence_pct"]),
-            max_rounds=max_rounds(v_flooding),
-            waterlevel_epsilon_m=float(flooding["waterlevel_epsilon_m"]),
-            duration_correction=duration, model=spec["model"], attenuation_m_per_m=rate_m_per_m,
-        )
-        solve_s = time.monotonic() - t0
-        for output in outputs:
-            t1 = time.monotonic()
-            depth, diag = waterdepth, diagnostics
-            if VARIANTS[output]["cap"]:
-                cap_config = variant_flooding(flooding, output, parameter, alpha)["volume_cap"]
-                depth, cap_diag = apply_volume_cap(
-                    waterdepth, solver_dem, solver_mask, seed_rows, seed_cols, seed_values,
-                    sfincs_volume_cap(sfincs_dir, crs, cap_config), transform, cell_dx_m, cell_dy_m,
-                    spec["model"])
-                diag = {**diagnostics, **cap_diag, "base_run": run_key(name, parameter, alpha)}
-            key = run_key(output, parameter, alpha)
-            _write_waterdepth(depth, transform, crs, run_path(out_dir, key))
-            runtime = solve_s + time.monotonic() - t1
-            all_runs[key] = {"variant": output, "parameter": parameter, "alpha": alpha,
-                             "solver": _jsonable(diag), "solve_s": round(solve_s, 1), "runtime_s": round(runtime, 1)}
-            runs_path.write_text(json.dumps(all_runs, indent=1))
-            print(f"tile {args.tile_id}: {key} - {int((depth > 0).sum())} flooded cell(s), {runtime:.0f} s",
-                  flush=True)
+    tile = {"dem": solver_dem, "mask": solver_mask, "base_friction": base_friction, "transform": transform,
+            "crs": crs, "seed_rows": seed_rows, "seed_cols": seed_cols, "seed_values": seed_values,
+            "cell_dx_m": cell_dx_m, "cell_dy_m": cell_dy_m, "flooding": flooding, "river_code": river_code,
+            "sfincs_dir": sfincs_dir, "out_dir": out_dir}
+    # The solves are independent: one per core of the job, each writing its own rasters.
+    with process_pool(min(available_cpus(), len(solves)), initializer=_set_tile, initargs=(tile,)) as pool:
+        futures = [pool.submit(_solve, *run, outputs) for run, outputs in solves.items()]
+        for future in as_completed(futures):
+            for key, record, n_flooded in future.result():
+                all_runs[key] = record
+                runs_path.write_text(json.dumps(dict(sorted(all_runs.items())), indent=1))
+                print(f"tile {args.tile_id}: {key} - {n_flooded} flooded cell(s), {record['runtime_s']:.0f} s",
+                      flush=True)
+
+
+_TILE: dict = {}
+
+
+def _set_tile(tile: dict) -> None:
+    _TILE.update(tile)
+
+
+def _solve(name: str, parameter: float | None, alpha: float | None,
+           outputs: list[str]) -> list[tuple[str, dict, int]]:
+    """Solve one base run on the worker's tile, write it and its capped twin; return their records."""
+    t = _TILE
+    flooding, oc = t["flooding"], t["flooding"]["obstacle_coupling"]
+    spec = VARIANTS[name]
+    v_flooding = variant_flooding(flooding, name, parameter, alpha)
+    rate_m_per_m = float(v_flooding["uniform_attenuation_m_per_km"]) / 1000.0
+    if spec["friction_source"] == "uniform":
+        friction = np.full(t["dem"].shape, rate_m_per_m, dtype=np.float32)
+    else:
+        friction = t["base_friction"] * np.float32(v_flooding["friction_scale_factor"])
+    duration = (sfincs_duration_correction(t["sfincs_dir"], t["crs"], v_flooding["duration_correction"])
+                if spec["duration"] else None)
+    t0 = time.monotonic()
+    waterdepth, diagnostics = flood_depth_dense(
+        t["dem"], t["mask"], friction, t["transform"],
+        seed_rows=t["seed_rows"], seed_cols=t["seed_cols"], seed_values=t["seed_values"],
+        cell_dx_m=t["cell_dx_m"], cell_dy_m=t["cell_dy_m"], k=int(flooding["knn"]),
+        idw_power=float(flooding["idw_power"]), ocean_code=OCEAN_CODE, river_code=t["river_code"],
+        obstacle_coupling=bool(oc["enabled"]),
+        max_outer_iterations=int(oc["max_outer_iterations"]),
+        outer_convergence_pct=float(oc["outer_convergence_pct"]),
+        max_rounds=max_rounds(v_flooding),
+        waterlevel_epsilon_m=float(flooding["waterlevel_epsilon_m"]),
+        duration_correction=duration, model=spec["model"], attenuation_m_per_m=rate_m_per_m,
+    )
+    solve_s = time.monotonic() - t0
+    records = []
+    for output in outputs:
+        t1 = time.monotonic()
+        depth, diag = waterdepth, diagnostics
+        if VARIANTS[output]["cap"]:
+            cap_config = variant_flooding(flooding, output, parameter, alpha)["volume_cap"]
+            depth, cap_diag = apply_volume_cap(
+                waterdepth, t["dem"], t["mask"], t["seed_rows"], t["seed_cols"], t["seed_values"],
+                sfincs_volume_cap(t["sfincs_dir"], t["crs"], cap_config), t["transform"],
+                t["cell_dx_m"], t["cell_dy_m"], spec["model"])
+            diag = {**diagnostics, **cap_diag, "base_run": run_key(name, parameter, alpha)}
+        key = run_key(output, parameter, alpha)
+        _write_waterdepth(depth, t["transform"], t["crs"], run_path(t["out_dir"], key))
+        runtime = solve_s + time.monotonic() - t1
+        records.append((key, {"variant": output, "parameter": parameter, "alpha": alpha,
+                              "solver": _jsonable(diag), "solve_s": round(solve_s, 1),
+                              "runtime_s": round(runtime, 1)}, int((depth > 0).sum())))
+    return records
 
 
 if __name__ == "__main__":
